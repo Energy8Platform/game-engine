@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.js
+*.cjs
+*.mjs
+!rollup.config.ts
+.DS_Store
+package-lock.json
