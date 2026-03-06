@@ -51,6 +51,9 @@ npm init -y
 # Install dependencies
 npm install pixi.js @energy8platform/game-sdk @energy8platform/game-engine
 
+# Install UI layout dependencies (optional — needed for Layout, Panel, Toast, ScrollContainer)
+npm install @pixi/ui @pixi/layout yoga-layout
+
 # (Optional) install spine and audio support
 npm install @pixi/sound @esotericsoftware/spine-pixi-v8
 ```
@@ -120,6 +123,9 @@ bootstrap();
 | --- | --- | --- |
 | `pixi.js` | `^8.16.0` | Yes |
 | `@energy8platform/game-sdk` | `^2.6.0` | Yes |
+| `@pixi/ui` | `^2.3.0` | Optional — for Button, ScrollContainer, ProgressBar |
+| `@pixi/layout` | `^3.2.0` | Optional — for Layout, Panel, Toast (Yoga flexbox) |
+| `yoga-layout` | `^3.0.0` | Optional — peer dep of `@pixi/layout` |
 | `@pixi/sound` | `^6.0.0` | Optional — for audio |
 | `@esotericsoftware/spine-pixi-v8` | `~4.2.0` | Optional — for Spine animations |
 
@@ -132,7 +138,7 @@ import { GameApplication } from '@energy8platform/game-engine';        // full b
 import { Scene, SceneManager } from '@energy8platform/game-engine/core';
 import { AssetManager } from '@energy8platform/game-engine/assets';
 import { AudioManager } from '@energy8platform/game-engine/audio';
-import { Button, Label, Modal, Layout, ScrollContainer } from '@energy8platform/game-engine/ui';
+import { Button, Label, Modal, Layout, ScrollContainer, Panel, Toast } from '@energy8platform/game-engine/ui';
 import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-engine/animation';
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
 import { defineGameConfig } from '@energy8platform/game-engine/vite';
@@ -696,9 +702,15 @@ console.log(SpineHelper.getAnimationNames(spine));
 
 ## UI Components
 
+> UI components are built on top of [`@pixi/ui`](https://github.com/pixijs/ui) and [`@pixi/layout`](https://github.com/pixijs/layout) (Yoga flexbox). Install them as peer dependencies:
+>
+> ```bash
+> npm install @pixi/ui @pixi/layout yoga-layout
+> ```
+
 ### Layout
 
-Responsive layout container that automatically arranges children. Supports horizontal, vertical, grid, and wrap modes with alignment, padding, gap, anchor positioning, and viewport breakpoints.
+Responsive layout container powered by `@pixi/layout` (Yoga flexbox engine). Supports horizontal, vertical, grid, and wrap modes with alignment, padding, gap, anchor positioning, and viewport breakpoints.
 
 ```typescript
 import { Layout } from '@energy8platform/game-engine';
@@ -764,9 +776,11 @@ const tags = new Layout({
 
 **Anchor values:** `top-left`, `top-center`, `top-right`, `center-left`, `center`, `center-right`, `bottom-left`, `bottom-center`, `bottom-right`
 
+> **Under the hood**: Layout maps `direction` → Yoga `flexDirection`/`flexWrap`, `alignment` → `alignItems`, and uses `@pixi/layout`'s `container.layout = { ... }` mixin. Grid mode assigns percentage widths to children.
+
 ### ScrollContainer
 
-Scrollable container with touch/drag, mouse wheel, inertia deceleration, elastic overscroll bounce, snap-to-item, and auto-hiding scrollbars. Ideal for paytables, settings, bet history, and any content that doesn't fit on screen.
+Scrollable container powered by `@pixi/ui` ScrollBox. Provides touch/drag scrolling, mouse wheel support, inertia, and dynamic rendering optimization for off-screen items.
 
 ```typescript
 import { ScrollContainer } from '@energy8platform/game-engine';
@@ -775,37 +789,30 @@ const scroll = new ScrollContainer({
   width: 600,
   height: 400,
   direction: 'vertical',
-  showScrollbar: true,
-  elasticity: 0.3,
-  inertia: 0.92,
+  elementsMargin: 8,
   borderRadius: 12,
   backgroundColor: 0x1a1a2e,
-  backgroundAlpha: 0.8,
 });
 
-// Build scrollable content
-const list = new Container();
+// Add items directly
 for (let i = 0; i < 50; i++) {
-  const row = createRow(i);
-  row.y = i * 40;
-  list.addChild(row);
+  scroll.addItem(createRow(i));
 }
-scroll.setContent(list);
 
 scene.container.addChild(scroll);
 ```
 
 ```typescript
-// Programmatic scrolling
-scroll.scrollTo(0, 200);            // scroll to y=200 with animation
-scroll.scrollTo(0, 200, false);     // instant jump
-scroll.scrollToItem(5);             // snap to item index (when snapSize is set)
+// Or set content from a Container
+const list = new Container();
+items.forEach((item) => list.addChild(item));
+scroll.setContent(list);
+
+// Scroll to a specific item index
+scroll.scrollToItem(5);
 
 // Current position
 const { x, y } = scroll.scrollPosition;
-
-// Resize viewport
-scroll.resize(newWidth, newHeight);
 ```
 
 #### ScrollContainerConfig
@@ -815,18 +822,19 @@ scroll.resize(newWidth, newHeight);
 | `width` | `number` | — | Visible viewport width |
 | `height` | `number` | — | Visible viewport height |
 | `direction` | `'vertical' \| 'horizontal' \| 'both'` | `'vertical'` | Scroll direction |
-| `showScrollbar` | `boolean` | `true` | Show scrollbar(s) |
-| `scrollbarWidth` | `number` | `6` | Scrollbar width (px) |
-| `scrollbarColor` | `number` | `0xffffff` | Scrollbar color |
-| `scrollbarAlpha` | `number` | `0.4` | Scrollbar opacity |
-| `elasticity` | `number` | `0.3` | Overscroll bounce (0 = none) |
-| `inertia` | `number` | `0.92` | Deceleration factor (0 = instant stop) |
-| `snapSize` | `number` | `0` | Snap to fixed increments (0 = disabled) |
-| `backgroundColor` | `number` | — | Background color (transparent if omitted) |
-| `backgroundAlpha` | `number` | `1` | Background opacity |
+| `backgroundColor` | `ColorSource` | — | Background color (transparent if omitted) |
 | `borderRadius` | `number` | `0` | Mask border radius |
+| `elementsMargin` | `number` | `0` | Gap between items |
+| `padding` | `number` | `0` | Content padding |
+| `disableDynamicRendering` | `boolean` | `false` | Render all items even when off-screen |
+| `disableEasing` | `boolean` | `false` | Disable scroll inertia/easing |
+| `globalScroll` | `boolean` | `true` | Scroll even when mouse is not over the component |
+
+> **Note:** ScrollContainer extends `@pixi/ui` `ScrollBox`. All `ScrollBox` methods and options are available.
 
 ### Button
+
+Powered by `@pixi/ui` `FancyButton`. Supports both texture-based and Graphics-based rendering with per-state views, press animation, and built-in text.
 
 ```typescript
 import { Button } from '@energy8platform/game-engine';
@@ -836,23 +844,25 @@ const spinBtn = new Button({
   height: 60,
   borderRadius: 12,
   colors: {
-    normal: 0xffd700,
+    default: 0xffd700,
     hover: 0xffe44d,
     pressed: 0xccac00,
     disabled: 0x666666,
   },
   pressScale: 0.95,
   animationDuration: 100,
+  text: 'SPIN',
 });
 
-spinBtn.onTap = () => {
+// Connect press event (Signal-based)
+spinBtn.onPress.connect(() => {
   console.log('Spin!');
-};
+});
 
 // Or use texture-based states
 const btn = new Button({
   textures: {
-    normal: 'btn-normal',
+    default: 'btn-default',
     hover: 'btn-hover',
     pressed: 'btn-pressed',
     disabled: 'btn-disabled',
@@ -862,6 +872,8 @@ const btn = new Button({
 btn.enable();
 btn.disable();
 ```
+
+> **Breaking change:** Button states renamed from `normal` to `default`. The `onTap` callback is replaced by `onPress.connect()` (typed-signals Signal).
 
 ### Label
 
@@ -908,6 +920,8 @@ winDisplay.hide();
 
 ### ProgressBar
 
+Horizontal progress bar powered by `@pixi/ui` ProgressBar. Supports animated smooth fill.
+
 ```typescript
 import { ProgressBar } from '@energy8platform/game-engine';
 
@@ -917,24 +931,40 @@ const bar = new ProgressBar({
   fillColor: 0x00ff00,
   trackColor: 0x333333,
   borderRadius: 10,
+  animated: true,
 });
 
 bar.progress = 0.75; // 75%
+
+// Call each frame for smooth animation
+bar.update(dt);
 ```
 
 ### Panel
 
-Container with a background:
+Background panel powered by `@pixi/layout` `LayoutContainer`. Supports both Graphics-based (color + border) and 9-slice sprite backgrounds. Children added to `content` participate in flexbox layout.
 
 ```typescript
 import { Panel } from '@energy8platform/game-engine';
 
+// Simple colored panel
 const panel = new Panel({
   width: 600,
   height: 400,
   backgroundColor: 0x1a1a2e,
   borderRadius: 16,
   backgroundAlpha: 0.9,
+  padding: 16,
+});
+
+panel.content.addChild(myText);
+
+// 9-slice panel (texture-based)
+const nineSlicePanel = new Panel({
+  nineSliceTexture: 'panel-bg',
+  nineSliceBorders: [20, 20, 20, 20],
+  width: 400,
+  height: 300,
 });
 ```
 
@@ -958,17 +988,24 @@ await modal.hide();
 
 ### Toast
 
-Brief notification messages:
+Brief notification messages. Uses `@pixi/layout` `LayoutContainer` for auto-sized background.
 
 ```typescript
 import { Toast } from '@energy8platform/game-engine';
 
 const toast = new Toast({
   duration: 2000,
+  bottomOffset: 60,
 });
 
-await toast.show('Free spins activated!', 'success');
+// Show with type and viewport size
+await toast.show('Free spins activated!', 'success', viewWidth, viewHeight);
+
+// Dismiss manually
+await toast.dismiss();
 ```
+
+**Toast types:** `info`, `success`, `warning`, `error` — each with a distinct color.
 
 ---
 
@@ -1046,12 +1083,13 @@ export default defineGameConfig({
 
 ### What `defineGameConfig` Provides
 
-- **Build target: ES2020+** — modern output for all supported casino platforms
+- **Build target: ESNext** — required for `yoga-layout` WASM (uses top-level `await`)
 - **Asset inlining** — files under 8KB are auto-inlined
 - **PixiJS chunk splitting** — `pixi.js` is extracted into a separate chunk for caching
 - **DevBridge injection** — automatically available in dev mode via virtual module
 - **Dev server** — port 3000, auto-open browser
-- **Dependency optimization** — `pixi.js` pre-bundled for faster dev starts
+- **Dependency deduplication** — `resolve.dedupe` ensures a single copy of `pixi.js`, `@pixi/layout`, `@pixi/ui`, and `yoga-layout` across all packages (prevents registration issues when used as a linked dependency)
+- **Dependency optimization** — `pixi.js`, `@pixi/layout`, `@pixi/layout/components`, `@pixi/ui`, and `yoga-layout/load` are pre-bundled for faster dev starts; `yoga-layout` main entry is excluded from pre-bundling because it contains a top-level `await` incompatible with esbuild's default target
 
 ### Custom DevBridge Configuration
 
@@ -1341,6 +1379,8 @@ class InputManager extends EventEmitter<InputEvents> {
 
 ### Layout
 
+> Powered by `@pixi/layout` (Yoga flexbox). Uses the `@pixi/layout` mixin on a standard `Container`.
+
 ```typescript
 class Layout extends Container {
   get items(): readonly Container[];
@@ -1350,23 +1390,78 @@ class Layout extends Container {
   removeItem(child: Container): this;
   clearItems(): this;
   updateViewport(width: number, height: number): void;
-  layout(): void;
 }
 ```
 
 ### ScrollContainer
 
+> Extends `@pixi/ui` ScrollBox — inherits touch/drag scrolling, mouse wheel, inertia, and dynamic rendering.
+
 ```typescript
-class ScrollContainer extends Container {
-  get content(): Container | null;
+class ScrollContainer extends ScrollBox {
   get scrollPosition(): { x: number; y: number };
 
   constructor(config: ScrollContainerConfig);
   setContent(content: Container): void;
-  scrollTo(x: number, y: number, animate?: boolean): void;
+  addItem(...items: Container[]): Container;
   scrollToItem(index: number): void;
-  resize(width: number, height: number): void;
-  destroy(): void;
+}
+```
+
+### Button
+
+> Extends `@pixi/ui` FancyButton — per-state views, press animation, and text.
+
+```typescript
+class Button extends FancyButton {
+  get disabled(): boolean;
+
+  constructor(config?: ButtonConfig);
+  enable(): void;
+  disable(): void;
+
+  // Inherited from FancyButton
+  onPress: Signal;   // btn.onPress.connect(() => { … })
+  enabled: boolean;
+}
+```
+
+### Panel
+
+> Extends `@pixi/layout/components` LayoutContainer — flex-layout background panel with optional 9-slice texture.
+
+```typescript
+class Panel extends LayoutContainer {
+  get content(): Container;  // children added here participate in flexbox layout
+
+  constructor(config?: PanelConfig);
+  setSize(width: number, height: number): void;
+}
+```
+
+### ProgressBar
+
+> Wraps `@pixi/ui` ProgressBar — optional smooth animated fill via per-frame `update()`.
+
+```typescript
+class ProgressBar extends Container {
+  get progress(): number;
+  set progress(value: number);    // 0..1
+
+  constructor(config?: ProgressBarConfig);
+  update(dt: number): void;       // call each frame when animated: true
+}
+```
+
+### Toast
+
+> Uses `@pixi/layout` LayoutContainer for auto-sized background. Supports info / success / warning / error types.
+
+```typescript
+class Toast extends Container {
+  constructor(config?: ToastConfig);
+  async show(message: string, type?: ToastType, viewWidth?: number, viewHeight?: number): Promise<void>;
+  async dismiss(): Promise<void>;
 }
 ```
 

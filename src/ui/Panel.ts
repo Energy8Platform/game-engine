@@ -1,4 +1,6 @@
-import { Container, Graphics, NineSliceSprite, Texture } from 'pixi.js';
+import { Container, NineSliceSprite, Texture } from 'pixi.js';
+import { LayoutContainer } from '@pixi/layout/components';
+import type { LayoutStyles } from '@pixi/layout';
 
 export interface PanelConfig {
   /** Width */
@@ -24,7 +26,10 @@ export interface PanelConfig {
 }
 
 /**
- * Background panel that can use either Graphics or 9-slice sprite.
+ * Background panel powered by `@pixi/layout` LayoutContainer.
+ *
+ * Supports both Graphics-based (color + border) and 9-slice sprite backgrounds.
+ * Children added to `content` participate in flexbox layout automatically.
  *
  * @example
  * ```ts
@@ -39,87 +44,79 @@ export interface PanelConfig {
  * });
  * ```
  */
-export class Panel extends Container {
-  private _bg: Graphics | NineSliceSprite;
-  private _content: Container;
-  private _config: Required<
+export class Panel extends LayoutContainer {
+  private _panelConfig: Required<
     Pick<PanelConfig, 'width' | 'height' | 'padding' | 'backgroundAlpha'>
   > & PanelConfig;
 
   constructor(config: PanelConfig = {}) {
-    super();
-
-    this._config = {
-      width: 400,
-      height: 300,
-      padding: 16,
-      backgroundAlpha: 1,
+    const resolvedConfig = {
+      width: config.width ?? 400,
+      height: config.height ?? 300,
+      padding: config.padding ?? 16,
+      backgroundAlpha: config.backgroundAlpha ?? 1,
       ...config,
     };
 
-    // Create background
+    // If using a 9-slice texture, pass it as a custom background
+    let customBackground: Container | undefined;
     if (config.nineSliceTexture) {
       const texture =
         typeof config.nineSliceTexture === 'string'
           ? Texture.from(config.nineSliceTexture)
           : config.nineSliceTexture;
-
       const [left, top, right, bottom] = config.nineSliceBorders ?? [10, 10, 10, 10];
-
-      this._bg = new NineSliceSprite({
+      const nineSlice = new NineSliceSprite({
         texture,
         leftWidth: left,
         topHeight: top,
         rightWidth: right,
         bottomHeight: bottom,
       });
-      (this._bg as NineSliceSprite).width = this._config.width;
-      (this._bg as NineSliceSprite).height = this._config.height;
-    } else {
-      this._bg = new Graphics();
-      this.drawGraphicsBg();
+      nineSlice.width = resolvedConfig.width;
+      nineSlice.height = resolvedConfig.height;
+      nineSlice.alpha = resolvedConfig.backgroundAlpha;
+      customBackground = nineSlice;
     }
 
-    this._bg.alpha = this._config.backgroundAlpha;
-    this.addChild(this._bg);
+    super(customBackground ? { background: customBackground } : undefined);
 
-    // Content container with padding
-    this._content = new Container();
-    this._content.x = this._config.padding;
-    this._content.y = this._config.padding;
-    this.addChild(this._content);
+    this._panelConfig = resolvedConfig;
+
+    // Apply layout styles
+    const layoutStyles: LayoutStyles = {
+      width: resolvedConfig.width,
+      height: resolvedConfig.height,
+      padding: resolvedConfig.padding,
+      flexDirection: 'column',
+    };
+
+    // Graphics-based background via layout styles
+    if (!config.nineSliceTexture) {
+      layoutStyles.backgroundColor = config.backgroundColor ?? 0x1a1a2e;
+      layoutStyles.borderRadius = config.borderRadius ?? 0;
+      if (config.borderColor !== undefined && config.borderWidth) {
+        layoutStyles.borderColor = config.borderColor;
+        layoutStyles.borderWidth = config.borderWidth;
+      }
+    }
+
+    this.layout = layoutStyles;
+
+    if (!config.nineSliceTexture) {
+      this.background.alpha = resolvedConfig.backgroundAlpha;
+    }
   }
 
-  /** Content container — add children here */
+  /** Access the content container (children added here participate in layout) */
   get content(): Container {
-    return this._content;
+    return this.overflowContainer;
   }
 
   /** Resize the panel */
   setSize(width: number, height: number): void {
-    this._config.width = width;
-    this._config.height = height;
-
-    if (this._bg instanceof Graphics) {
-      this.drawGraphicsBg();
-    } else {
-      this._bg.width = width;
-      this._bg.height = height;
-    }
-  }
-
-  private drawGraphicsBg(): void {
-    const bg = this._bg as Graphics;
-    const {
-      width, height, backgroundColor, borderRadius, borderColor, borderWidth,
-    } = this._config;
-
-    bg.clear();
-    bg.roundRect(0, 0, width!, height!, borderRadius ?? 0).fill(backgroundColor ?? 0x1a1a2e);
-
-    if (borderColor !== undefined && borderWidth) {
-      bg.roundRect(0, 0, width!, height!, borderRadius ?? 0)
-        .stroke({ color: borderColor, width: borderWidth });
-    }
+    this._panelConfig.width = width;
+    this._panelConfig.height = height;
+    this._layout?.setStyle({ width, height });
   }
 }

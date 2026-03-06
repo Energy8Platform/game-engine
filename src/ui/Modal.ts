@@ -17,6 +17,8 @@ export interface ModalConfig {
  * Modal overlay component.
  * Shows content on top of a dark overlay with enter/exit animations.
  *
+ * The content container uses `@pixi/layout` for automatic centering.
+ *
  * @example
  * ```ts
  * const modal = new Modal({ closeOnOverlay: true });
@@ -38,11 +40,10 @@ export class Modal extends Container {
     super();
 
     this._config = {
-      overlayColor: 0x000000,
-      overlayAlpha: 0.7,
-      closeOnOverlay: true,
-      animationDuration: 300,
-      ...config,
+      overlayColor: config.overlayColor ?? 0x000000,
+      overlayAlpha: config.overlayAlpha ?? 0.7,
+      closeOnOverlay: config.closeOnOverlay ?? true,
+      animationDuration: config.animationDuration ?? 300,
     };
 
     // Overlay

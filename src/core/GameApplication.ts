@@ -212,6 +212,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     this.app = new Application();
 
     const pixiOpts = {
+      preference: 'webgl' as const,
       background: typeof this.config.loading?.backgroundColor === 'number'
         ? this.config.loading.backgroundColor
         : 0x000000,

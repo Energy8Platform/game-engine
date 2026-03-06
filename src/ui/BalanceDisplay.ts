@@ -1,6 +1,5 @@
 import { Container } from 'pixi.js';
 import { Label } from './Label';
-import { Tween } from '../animation/Tween';
 import { Easing } from '../animation/Easing';
 
 export interface BalanceDisplayConfig {
@@ -113,7 +112,6 @@ export class BalanceDisplay extends Container {
   }
 
   private async animateValue(from: number, to: number): Promise<void> {
-    // Cancel any ongoing animation
     if (this._animating) {
       this._animationCancelled = true;
     }
@@ -125,7 +123,6 @@ export class BalanceDisplay extends Container {
 
     return new Promise<void>((resolve) => {
       const tick = () => {
-        // If cancelled by a newer animation, stop immediately
         if (this._animationCancelled) {
           this._animating = false;
           resolve();

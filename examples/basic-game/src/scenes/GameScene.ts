@@ -1,4 +1,4 @@
-import { Graphics, Text } from 'pixi.js';
+import { Graphics } from 'pixi.js';
 import {
   Scene,
   Button,
@@ -8,7 +8,6 @@ import {
   Toast,
   StateMachine,
   Tween,
-  Easing,
 } from '@energy8platform/game-engine';
 
 /**
@@ -111,7 +110,6 @@ export class GameScene extends Scene {
       animated: true,
       animationDuration: 400,
     });
-    ///this.balance.setValue(5000);
     this.balance.label = 'balance';
     this.container.addChild(this.balance);
 
@@ -134,38 +132,24 @@ export class GameScene extends Scene {
     this.winDisplay.label = 'winDisplay';
     this.container.addChild(this.winDisplay);
 
-    // Spin button
+    // Spin button — text is built-in via FancyButton
     this.spinButton = new Button({
       width: 180,
       height: 60,
       borderRadius: 30,
       colors: {
-        normal: 0x22aa44,
+        default: 0x22aa44,
         hover: 0x33cc55,
         pressed: 0x1a8833,
         disabled: 0x444444,
       },
       pressScale: 0.92,
+      text: 'SPIN',
     });
     this.spinButton.label = 'spinButton';
 
-    // Button label
-    const spinText = new Text({
-      text: 'SPIN',
-      style: {
-        fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-        fontSize: 24,
-        fontWeight: 'bold',
-        fill: 0xffffff,
-        letterSpacing: 3,
-      },
-    });
-    spinText.anchor.set(0.5);
-    spinText.x = 90; // center of 180px button
-    spinText.y = 30; // center of 60px button
-    this.spinButton.addChild(spinText);
-
-    this.spinButton.onTap = () => this.onSpinTap();
+    // Connect press event (replaces onTap callback)
+    this.spinButton.onPress.connect(() => this.onSpinTap());
     this.container.addChild(this.spinButton);
 
     // Toast (for notifications)
@@ -251,7 +235,7 @@ export class GameScene extends Scene {
 
     // IDLE — waiting for player input
     this.fsm.addState('idle', {
-      enter: (ctx) => {
+      enter: (_ctx) => {
         this.spinButton.enable();
         this.winDisplay.hide();
       },
@@ -276,7 +260,6 @@ export class GameScene extends Scene {
         this.balance.setValue(ctx.balance);
 
         if (ctx.lastWin > 0) {
-          // setTimeout so _transitioning resets in finally{} before next transition
           setTimeout(() => this.fsm.transition('presenting'), 0);
         } else {
           await this.toast.show('No win — try again!', 'warning', 1920, 1080);

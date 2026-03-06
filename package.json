@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/game-engine",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Universal casino game engine built on PixiJS v8 and @energy8platform/game-sdk",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -64,7 +64,10 @@
   },
   "peerDependencies": {
     "pixi.js": "^8.16.0",
-    "@energy8platform/game-sdk": "^2.6.1"
+    "@energy8platform/game-sdk": "^2.6.1",
+    "@pixi/ui": "^2.3.0",
+    "@pixi/layout": "^3.2.0",
+    "yoga-layout": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "@esotericsoftware/spine-pixi-v8": {
@@ -72,12 +75,24 @@
     },
     "@pixi/sound": {
       "optional": true
+    },
+    "@pixi/ui": {
+      "optional": true
+    },
+    "@pixi/layout": {
+      "optional": true
+    },
+    "yoga-layout": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@energy8platform/game-sdk": "^2.6.1",
     "@esotericsoftware/spine-pixi-v8": "~4.2.0",
     "@pixi/sound": "^6.0.0",
+    "@pixi/ui": "^2.3.0",
+    "@pixi/layout": "^3.2.0",
+    "yoga-layout": "^3.0.0",
     "@rollup/plugin-typescript": "^12.1.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",

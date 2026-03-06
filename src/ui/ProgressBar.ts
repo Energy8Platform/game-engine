@@ -1,4 +1,6 @@
 import { Container, Graphics } from 'pixi.js';
+import { ProgressBar as PixiProgressBar } from '@pixi/ui';
+import type { ProgressBarOptions } from '@pixi/ui';
 
 export interface ProgressBarConfig {
   width?: number;
@@ -14,8 +16,16 @@ export interface ProgressBarConfig {
   animationSpeed?: number;
 }
 
+function makeBarGraphics(
+  w: number, h: number, radius: number, color: number,
+): Graphics {
+  return new Graphics().roundRect(0, 0, w, h, radius).fill(color);
+}
+
 /**
- * Horizontal progress bar with optional smooth fill animation.
+ * Horizontal progress bar powered by `@pixi/ui` ProgressBar.
+ *
+ * Provides optional smooth animated fill via per-frame `update()`.
  *
  * @example
  * ```ts
@@ -25,9 +35,8 @@ export interface ProgressBarConfig {
  * ```
  */
 export class ProgressBar extends Container {
-  private _track: Graphics;
-  private _fill: Graphics;
-  private _border: Graphics;
+  private _bar: PixiProgressBar;
+  private _borderGfx: Graphics;
   private _config: Required<ProgressBarConfig>;
   private _progress = 0;
   private _displayedProgress = 0;
@@ -36,26 +45,45 @@ export class ProgressBar extends Container {
     super();
 
     this._config = {
-      width: 300,
-      height: 16,
-      borderRadius: 8,
-      fillColor: 0xffd700,
-      trackColor: 0x333333,
-      borderColor: 0x555555,
-      borderWidth: 1,
-      animated: true,
-      animationSpeed: 0.1,
-      ...config,
+      width: config.width ?? 300,
+      height: config.height ?? 16,
+      borderRadius: config.borderRadius ?? 8,
+      fillColor: config.fillColor ?? 0xffd700,
+      trackColor: config.trackColor ?? 0x333333,
+      borderColor: config.borderColor ?? 0x555555,
+      borderWidth: config.borderWidth ?? 1,
+      animated: config.animated ?? true,
+      animationSpeed: config.animationSpeed ?? 0.1,
     };
 
-    this._track = new Graphics();
-    this._fill = new Graphics();
-    this._border = new Graphics();
+    const { width, height, borderRadius, fillColor, trackColor, borderColor, borderWidth } = this._config;
 
-    this.addChild(this._track, this._fill, this._border);
-    this.drawTrack();
-    this.drawBorder();
-    this.drawFill(0);
+    const bgGraphics = makeBarGraphics(width, height, borderRadius, trackColor);
+    const fillGraphics = makeBarGraphics(width - borderWidth * 2, height - borderWidth * 2, Math.max(0, borderRadius - 1), fillColor);
+
+    const options: ProgressBarOptions = {
+      bg: bgGraphics,
+      fill: fillGraphics,
+      fillPaddings: {
+        top: borderWidth,
+        right: borderWidth,
+        bottom: borderWidth,
+        left: borderWidth,
+      },
+      progress: 0,
+    };
+
+    this._bar = new PixiProgressBar(options);
+    this.addChild(this._bar);
+
+    // Border overlay
+    this._borderGfx = new Graphics();
+    if (borderColor !== undefined && borderWidth > 0) {
+      this._borderGfx
+        .roundRect(0, 0, width, height, borderRadius)
+        .stroke({ color: borderColor, width: borderWidth });
+    }
+    this.addChild(this._borderGfx);
   }
 
   /** Get/set progress (0..1) */
@@ -67,14 +95,14 @@ export class ProgressBar extends Container {
     this._progress = Math.max(0, Math.min(1, value));
     if (!this._config.animated) {
       this._displayedProgress = this._progress;
-      this.drawFill(this._displayedProgress);
+      this._bar.progress = this._displayedProgress * 100;
     }
   }
 
   /**
    * Call each frame if animated is true.
    */
-  update(dt: number): void {
+  update(_dt: number): void {
     if (!this._config.animated) return;
     if (Math.abs(this._displayedProgress - this._progress) < 0.001) {
       this._displayedProgress = this._progress;
@@ -83,39 +111,6 @@ export class ProgressBar extends Container {
 
     this._displayedProgress +=
       (this._progress - this._displayedProgress) * this._config.animationSpeed;
-    this.drawFill(this._displayedProgress);
-  }
-
-  private drawTrack(): void {
-    const { width, height, borderRadius, trackColor } = this._config;
-    this._track.clear();
-    this._track.roundRect(0, 0, width, height, borderRadius).fill(trackColor);
-  }
-
-  private drawBorder(): void {
-    const { width, height, borderRadius, borderColor, borderWidth } = this._config;
-    this._border.clear();
-    this._border
-      .roundRect(0, 0, width, height, borderRadius)
-      .stroke({ color: borderColor, width: borderWidth });
-  }
-
-  private drawFill(progress: number): void {
-    const { width, height, borderRadius, fillColor, borderWidth } = this._config;
-    const innerWidth = width - borderWidth * 2;
-    const innerHeight = height - borderWidth * 2;
-    const fillWidth = Math.max(0, innerWidth * progress);
-
-    this._fill.clear();
-    if (fillWidth > 0) {
-      this._fill.x = borderWidth;
-      this._fill.y = borderWidth;
-      this._fill.roundRect(0, 0, fillWidth, innerHeight, borderRadius - 1).fill(fillColor);
-
-      // Highlight
-      this._fill
-        .roundRect(0, 0, fillWidth, innerHeight * 0.4, borderRadius - 1)
-        .fill({ color: 0xffffff, alpha: 0.15 });
-    }
+    this._bar.progress = this._displayedProgress * 100;
   }
 }

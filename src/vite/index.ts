@@ -87,7 +87,7 @@ await import('${entrySrc}');
  * Define a Vite configuration tailored for Energy8 casino games.
  *
  * Merges sensible defaults for iGaming projects:
- * - Build target: ES2020+
+ * - Build target: ESNext (required for yoga-layout WASM top-level await)
  * - Asset inlining threshold: 8KB
  * - Source maps for dev, none for prod
  * - Optional DevBridge auto-injection in dev mode
@@ -122,7 +122,7 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     ],
 
     build: {
-      target: 'es2020',
+      target: 'esnext',
       assetsInlineLimit: 8192,
       sourcemap: false,
       rollupOptions: {
@@ -142,11 +142,31 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     },
 
     resolve: {
+      dedupe: [
+        'pixi.js',
+        '@pixi/layout',
+        '@pixi/layout/components',
+        '@pixi/ui',
+        'yoga-layout',
+        'yoga-layout/load',
+      ],
       ...userVite.resolve,
     },
 
     optimizeDeps: {
-      include: ['pixi.js'],
+      include: [
+        'pixi.js',
+        '@pixi/layout',
+        '@pixi/layout/components',
+        '@pixi/ui',
+        'yoga-layout/load',
+      ],
+      exclude: [
+        'yoga-layout',
+      ],
+      esbuildOptions: {
+        target: 'esnext',
+      },
       ...userVite.optimizeDeps,
     },
   };
