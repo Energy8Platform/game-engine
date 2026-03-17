@@ -23,11 +23,11 @@ export type { LayoutConfig, LayoutDirection, LayoutAlignment, LayoutAnchor } fro
 export { ScrollContainer } from './ScrollContainer';
 export type { ScrollContainerConfig, ScrollDirection } from './ScrollContainer';
 
-// ─── Re-exports from @pixi/ui for direct use ─────────────
-export { FancyButton, ScrollBox, ButtonContainer } from '@pixi/ui';
-export type { ButtonOptions, ScrollBoxOptions, ProgressBarOptions } from '@pixi/ui';
-
-// ─── Re-exports from @pixi/layout for direct use ─────────
-export { LayoutContainer } from '@pixi/layout/components';
-export { Layout as PixiLayout } from '@pixi/layout';
-export type { LayoutStyles, LayoutOptions } from '@pixi/layout';
+// ─── Direct access to @pixi/ui and @pixi/layout ──────────
+// These packages are optional peer dependencies.
+// For any classes or types not wrapped by the engine (e.g. Slider, CheckBox,
+// Input, Select, RadioGroup, List, etc.), import directly:
+//
+//   import { Slider, CheckBox } from '@pixi/ui';
+//   import { LayoutContainer } from '@pixi/layout/components';
+//

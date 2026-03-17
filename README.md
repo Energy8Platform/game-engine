@@ -36,6 +36,8 @@ A universal casino game engine built on [PixiJS v8](https://pixijs.com/) and [@e
 - [Vite Configuration](#vite-configuration)
 - [DevBridge](#devbridge)
 - [Debug](#debug)
+- [Flexbox-First Layout](#flexbox-first-layout)
+- [Using with React (`@pixi/react`)](#using-with-react-pixireact)
 - [API Reference](#api-reference)
 - [License](#license)
 
@@ -51,8 +53,11 @@ npm init -y
 # Install dependencies
 npm install pixi.js @energy8platform/game-sdk @energy8platform/game-engine
 
-# Install UI layout dependencies (optional — needed for Layout, Panel, Toast, ScrollContainer)
+# Install UI layout dependencies (optional — needed for Layout, Panel, ScrollContainer)
 npm install @pixi/ui @pixi/layout yoga-layout
+
+# (Optional) React integration
+npm install @pixi/react react react-dom
 
 # (Optional) install spine and audio support
 npm install @pixi/sound @esotericsoftware/spine-pixi-v8
@@ -124,10 +129,11 @@ bootstrap();
 | `pixi.js` | `^8.16.0` | Yes |
 | `@energy8platform/game-sdk` | `^2.6.0` | Yes |
 | `@pixi/ui` | `^2.3.0` | Optional — for Button, ScrollContainer, ProgressBar |
-| `@pixi/layout` | `^3.2.0` | Optional — for Layout, Panel, Toast (Yoga flexbox) |
+| `@pixi/layout` | `^3.2.0` | Optional — for Layout, Panel (Yoga flexbox) |
 | `yoga-layout` | `^3.0.0` | Optional — peer dep of `@pixi/layout` |
 | `@pixi/sound` | `^6.0.0` | Optional — for audio |
 | `@esotericsoftware/spine-pixi-v8` | `~4.2.0` | Optional — for Spine animations |
+| `@pixi/react` | `^8.0.0` | Optional — for React integration (see [Using with React](#using-with-react-pixireact)) |
 
 ### Sub-path Exports
 
@@ -707,6 +713,22 @@ console.log(SpineHelper.getAnimationNames(spine));
 > ```bash
 > npm install @pixi/ui @pixi/layout yoga-layout
 > ```
+>
+> **Important:** These packages are optional peer dependencies. Import UI components from the `@energy8platform/game-engine/ui` sub-path to ensure tree-shaking works correctly. The root `@energy8platform/game-engine` barrel re-exports UI components but does **not** activate the `@pixi/layout` mixin — that only happens when importing from `/ui`.
+>
+> **Direct access:** The engine wraps only the most common UI components. For anything else from `@pixi/ui` (e.g. `Slider`, `CheckBox`, `Input`, `Select`, `RadioGroup`, `List`, `DoubleSlider`, `Switcher`) or `@pixi/layout` (e.g. `LayoutContainer`, `LayoutView`, `Trackpad`, layout-aware sprites), import directly from the source package:
+>
+> ```typescript
+> // Engine-wrapped components
+> import { Button, Panel, Layout, ScrollContainer } from '@energy8platform/game-engine/ui';
+>
+> // Raw @pixi/ui components (not wrapped by the engine)
+> import { Slider, CheckBox, Input, Select, RadioGroup } from '@pixi/ui';
+>
+> // Raw @pixi/layout components
+> import { LayoutContainer, LayoutView } from '@pixi/layout/components';
+> import type { LayoutStyles } from '@pixi/layout';
+> ```
 
 ### Layout
 
@@ -776,7 +798,7 @@ const tags = new Layout({
 
 **Anchor values:** `top-left`, `top-center`, `top-right`, `center-left`, `center`, `center-right`, `bottom-left`, `bottom-center`, `bottom-right`
 
-> **Under the hood**: Layout maps `direction` → Yoga `flexDirection`/`flexWrap`, `alignment` → `alignItems`, and uses `@pixi/layout`'s `container.layout = { ... }` mixin. Grid mode assigns percentage widths to children.
+> **Under the hood**: Layout maps `direction` → Yoga `flexDirection`/`flexWrap`, `alignment` → `alignItems`, and uses `@pixi/layout`'s `container.layout = { ... }` mixin. Grid mode uses `flexGrow`/`flexBasis` when `gap > 0` to correctly distribute space, and percentage widths when `gap === 0`.
 
 ### ScrollContainer
 
@@ -988,7 +1010,7 @@ await modal.hide();
 
 ### Toast
 
-Brief notification messages. Uses `@pixi/layout` `LayoutContainer` for auto-sized background.
+Brief notification messages with animated appearance/dismissal.
 
 ```typescript
 import { Toast } from '@energy8platform/game-engine';
@@ -1006,6 +1028,262 @@ await toast.dismiss();
 ```
 
 **Toast types:** `info`, `success`, `warning`, `error` — each with a distinct color.
+
+---
+
+### Using Raw `@pixi/ui` and `@pixi/layout` Components
+
+The engine wraps the most common components, but both libraries offer much more. Here are examples of using raw components alongside the engine:
+
+```typescript
+import { Slider, CheckBox, Input, Select } from '@pixi/ui';
+import { LayoutContainer } from '@pixi/layout/components';
+import type { LayoutStyles } from '@pixi/layout';
+
+// Slider (not wrapped by the engine)
+const volumeSlider = new Slider({
+  bg: bgSprite,
+  fill: fillSprite,
+  slider: handleSprite,
+  min: 0,
+  max: 100,
+  value: 50,
+});
+
+// CheckBox
+const muteCheck = new CheckBox({
+  style: {
+    unchecked: uncheckedView,
+    checked: checkedView,
+  },
+});
+
+// LayoutContainer with flexbox styles
+const row = new LayoutContainer();
+row.layout = {
+  flexDirection: 'row',
+  gap: 12,
+  alignItems: 'center',
+  padding: 16,
+} satisfies LayoutStyles;
+row.addChild(volumeSlider, muteCheck);
+```
+
+> **Tip:** Any container created after importing `@energy8platform/game-engine/ui` can use the `container.layout = { ... }` mixin — the `@pixi/layout` side-effect is automatically activated.
+
+---
+
+## Flexbox-First Layout
+
+> **Best practice:** Use `@pixi/layout` flexbox instead of manual pixel positioning. Flexbox adapts to screen sizes, handles RTL, and eliminates fragile `x = width / 2 - 100` math.
+
+### ❌ Avoid: Manual Pixel Positioning
+
+```typescript
+// Fragile — breaks when screen size, text length, or element sizes change
+onResize(width: number, height: number) {
+  this.title.x = width / 2;
+  this.title.y = 80;
+  this.balance.x = width / 2;
+  this.balance.y = 220;
+  this.spinButton.x = width / 2;
+  this.spinButton.y = height - 120;
+}
+```
+
+### ✅ Prefer: Flexbox Layout
+
+```typescript
+import { Layout } from '@energy8platform/game-engine/ui';
+import { LayoutContainer } from '@pixi/layout/components';
+import type { LayoutStyles } from '@pixi/layout';
+
+// Root layout — fills the screen, stacks children vertically
+const root = new LayoutContainer();
+root.layout = {
+  width: '100%',
+  height: '100%',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: 40,
+} satisfies LayoutStyles;
+
+// Header area
+const header = new LayoutContainer();
+header.layout = {
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 12,
+};
+header.addChild(title, subtitle, balance);
+
+// Center area — expands to fill available space
+const center = new LayoutContainer();
+center.layout = {
+  flexGrow: 1,
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+center.addChild(winDisplay);
+
+// Footer toolbar
+const footer = new Layout({
+  direction: 'horizontal',
+  gap: 20,
+  alignment: 'center',
+});
+footer.addItem(betLabel);
+footer.addItem(spinButton);
+
+root.addChild(header, center, footer);
+scene.container.addChild(root);
+```
+
+### When to Use Each Approach
+
+| Approach | Use When |
+|---|---|
+| Engine `Layout` | Toolbar-style rows/columns with anchor positioning and breakpoints |
+| `LayoutContainer` (raw) | Full flexbox control — `flexGrow`, `justifyContent`, percentage sizes |
+| `container.layout = { ... }` (mixin) | Adding flex styles to any existing PixiJS container |
+| Manual pixel positioning | Exact artistic placement (e.g. particle emitters, spine anchors) |
+
+### Nested Flexbox Example
+
+```typescript
+// settings-panel.ts — responsive settings UI
+import { LayoutContainer } from '@pixi/layout/components';
+import { Slider, CheckBox } from '@pixi/ui';
+import { Panel, Label } from '@energy8platform/game-engine/ui';
+
+const panel = new Panel({
+  width: 500,
+  height: 400,
+  backgroundColor: 0x1a1a2e,
+  borderRadius: 16,
+  padding: 24,
+});
+
+// Each row: label on left, control on right
+function settingsRow(labelText: string, control: Container): LayoutContainer {
+  const row = new LayoutContainer();
+  row.layout = {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    height: 48,
+  };
+  row.addChild(new Label({ text: labelText }), control);
+  return row;
+}
+
+panel.content.addChild(
+  settingsRow('Music Volume', musicSlider),
+  settingsRow('SFX Volume', sfxSlider),
+  settingsRow('Mute', muteCheckbox),
+);
+```
+
+---
+
+## Using with React (`@pixi/react`)
+
+For React-based projects, [`@pixi/react`](https://github.com/pixijs/pixi-react) provides declarative JSX components for PixiJS. The engine is framework-agnostic — `@pixi/react` is **not** a dependency, but works seamlessly alongside it.
+
+### Installation
+
+```bash
+npm install @pixi/react react react-dom
+```
+
+### Wrapping the Engine in React
+
+```tsx
+import { Application, extend } from '@pixi/react';
+import { Container, Graphics, Text } from 'pixi.js';
+import { GameApplication, Scene } from '@energy8platform/game-engine';
+
+// Register PixiJS components for JSX
+extend({ Container, Graphics, Text });
+
+function GameWrapper() {
+  return (
+    <Application
+      width={1920}
+      height={1080}
+      background={0x0f0f23}
+    >
+      <GameContent />
+    </Application>
+  );
+}
+```
+
+### Using Engine Components in JSX
+
+Engine components (`Button`, `Panel`, `Layout`, etc.) are PixiJS `Container` subclasses — use them with `@pixi/react`'s `extend`:
+
+```tsx
+import { extend, useTick } from '@pixi/react';
+import { Button, Label, Panel, ProgressBar } from '@energy8platform/game-engine/ui';
+
+// Register engine components for JSX
+extend({ Button, Label, Panel, ProgressBar });
+
+function GameHUD({ balance, bet }: { balance: number; bet: number }) {
+  return (
+    <container>
+      <panel
+        width={400}
+        height={80}
+        backgroundColor={0x1a1a2e}
+        borderRadius={12}
+        padding={16}
+      >
+        <label text={`Balance: $${balance.toFixed(2)}`} />
+        <label text={`Bet: $${bet.toFixed(2)}`} />
+      </panel>
+    </container>
+  );
+}
+```
+
+### Combining Flexbox with React
+
+```tsx
+import { extend } from '@pixi/react';
+import { LayoutContainer } from '@pixi/layout/components';
+
+extend({ LayoutContainer });
+
+function FlexRow({ children }: { children: React.ReactNode }) {
+  return (
+    <layoutContainer
+      layout={{
+        flexDirection: 'row',
+        gap: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {children}
+    </layoutContainer>
+  );
+}
+
+function Toolbar() {
+  return (
+    <FlexRow>
+      <button text="SPIN" width={180} height={60} />
+      <label text="BET: $1.00" />
+    </FlexRow>
+  );
+}
+```
+
+> **Note:** `@pixi/react` is entirely optional. The engine works without React. Choose whichever approach fits your team and project.
 
 ---
 
@@ -1455,7 +1733,7 @@ class ProgressBar extends Container {
 
 ### Toast
 
-> Uses `@pixi/layout` LayoutContainer for auto-sized background. Supports info / success / warning / error types.
+> Lightweight toast using `Graphics` for the background. Supports info / success / warning / error types.
 
 ```typescript
 class Toast extends Container {

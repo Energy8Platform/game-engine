@@ -1,5 +1,4 @@
-import { Container, Text } from 'pixi.js';
-import { LayoutContainer } from '@pixi/layout/components';
+import { Container, Graphics, Text } from 'pixi.js';
 import { Tween } from '../animation/Tween';
 import { Easing } from '../animation/Easing';
 
@@ -22,8 +21,6 @@ const TOAST_COLORS: Record<ToastType, number> = {
 /**
  * Toast notification component for displaying transient messages.
  *
- * Uses `@pixi/layout` LayoutContainer for auto-sized background.
- *
  * @example
  * ```ts
  * const toast = new Toast();
@@ -32,7 +29,7 @@ const TOAST_COLORS: Record<ToastType, number> = {
  * ```
  */
 export class Toast extends Container {
-  private _bg: LayoutContainer;
+  private _bg: Graphics;
   private _text: Text;
   private _config: Required<ToastConfig>;
   private _dismissTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -45,7 +42,7 @@ export class Toast extends Container {
       bottomOffset: config.bottomOffset ?? 60,
     };
 
-    this._bg = new LayoutContainer();
+    this._bg = new Graphics();
     this.addChild(this._bg);
 
     this._text = new Text({
@@ -82,17 +79,10 @@ export class Toast extends Container {
     const height = 44;
     const radius = 8;
 
-    // Style the background
-    this._bg.layout = {
-      width,
-      height,
-      borderRadius: radius,
-      backgroundColor: TOAST_COLORS[type],
-    };
-
-    // Center the bg around origin
-    this._bg.x = -width / 2;
-    this._bg.y = -height / 2;
+    // Draw the background
+    this._bg.clear();
+    this._bg.roundRect(-width / 2, -height / 2, width, height, radius);
+    this._bg.fill(TOAST_COLORS[type]);
 
     // Position
     if (viewWidth && viewHeight) {

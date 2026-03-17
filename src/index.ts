@@ -55,9 +55,9 @@ export type { SpriteAnimationConfig } from './animation/SpriteAnimation';
 export { InputManager } from './input/InputManager';
 
 // ─── UI ──────────────────────────────────────────────────
-// Activate @pixi/layout mixin (must be imported before creating containers)
-import '@pixi/layout';
-
+// NOTE: @pixi/ui and @pixi/layout are optional peer dependencies.
+// Import UI components from '@energy8platform/game-engine/ui' sub-path
+// to avoid pulling in these deps when they aren't installed.
 export { Button } from './ui/Button';
 export type { ButtonConfig, ButtonState } from './ui/Button';
 export { ProgressBar } from './ui/ProgressBar';
@@ -78,11 +78,6 @@ export { Layout } from './ui/Layout';
 export type { LayoutConfig, LayoutDirection, LayoutAlignment, LayoutAnchor } from './ui/Layout';
 export { ScrollContainer } from './ui/ScrollContainer';
 export type { ScrollContainerConfig, ScrollDirection } from './ui/ScrollContainer';
-
-// Re-exports from @pixi/ui and @pixi/layout for direct use
-export { FancyButton, ScrollBox, ButtonContainer } from '@pixi/ui';
-export { LayoutContainer } from '@pixi/layout/components';
-export type { LayoutStyles } from '@pixi/layout';
 
 // ─── Loading ─────────────────────────────────────────────
 export { LoadingScene } from './loading/LoadingScene';

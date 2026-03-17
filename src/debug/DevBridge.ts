@@ -188,6 +188,8 @@ export class DevBridge {
       nextActions: customResult.nextActions ?? ['spin'],
       session: customResult.session ?? null,
       creditPending: false,
+      currency: 'USD',
+      gameId: this._config.gameConfig?.id ?? 'dev-game',
     };
 
     this.delayedSend('PLAY_RESULT', result, id);

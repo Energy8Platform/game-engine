@@ -1,8 +1,11 @@
 import { Graphics } from 'pixi.js';
+import '@pixi/layout'; // global type augmentation (adds .layout to Container)
+import { LayoutContainer } from '@pixi/layout/components';
 import {
   Scene,
   Button,
   Label,
+  Layout,
   BalanceDisplay,
   WinDisplay,
   Toast,
@@ -12,7 +15,7 @@ import {
 
 /**
  * Main game scene — demonstrates the engine's core capabilities:
- * - Gradient background
+ * - Flexbox layout via @pixi/layout (no manual pixel positioning)
  * - Balance display (reacts to SDK balance updates)
  * - Spin button with state management
  * - Win presentation with countup
@@ -26,6 +29,7 @@ export class GameScene extends Scene {
   private betLabel!: Label;
   private toast!: Toast;
   private fsm!: StateMachine<GameContext>;
+  private _root!: LayoutContainer;
 
   private _engine: any = null;
   private _currentBetIndex = 2; // default bet index
@@ -75,10 +79,29 @@ export class GameScene extends Scene {
     this.container.addChild(bg);
   }
 
-  // ─── UI ────────────────────────────────────────────────
+  // ─── UI (flexbox layout) ────────────────────────────────
 
   private createUI(): void {
-    // Title
+    // ── Root layout: full-screen vertical flex ──
+    this._root = new LayoutContainer();
+    this._root.layout = {
+      width: '100%',
+      height: '100%',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: 40,
+    };
+    this.container.addChild(this._root);
+
+    // ── Header: title + subtitle + balance ──
+    const header = new LayoutContainer();
+    header.layout = {
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 12,
+    };
+
     const title = new Label({
       text: 'BASIC GAME DEMO',
       style: {
@@ -88,10 +111,7 @@ export class GameScene extends Scene {
         letterSpacing: 4,
       },
     });
-    title.label = 'title';
-    this.container.addChild(title);
 
-    // Subtitle
     const subtitle = new Label({
       text: '@energy8platform/game-engine',
       style: {
@@ -100,20 +120,14 @@ export class GameScene extends Scene {
         letterSpacing: 2,
       },
     });
-    subtitle.label = 'subtitle';
-    this.container.addChild(subtitle);
 
-    // Balance display
     this.balance = new BalanceDisplay({
       prefix: 'BALANCE',
       currency: 'USD',
       animated: true,
       animationDuration: 400,
     });
-    this.balance.label = 'balance';
-    this.container.addChild(this.balance);
 
-    // Bet label
     this.betLabel = new Label({
       text: 'BET: $1.00',
       style: {
@@ -121,18 +135,35 @@ export class GameScene extends Scene {
         fill: 0xcccccc,
       },
     });
-    this.betLabel.label = 'betLabel';
-    this.container.addChild(this.betLabel);
 
-    // Win display
+    header.addChild(title, subtitle, this.balance, this.betLabel);
+    this._root.addChild(header);
+
+    // ── Center: win display (expands to fill available space) ──
+    const center = new LayoutContainer();
+    center.layout = {
+      flexGrow: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+    };
+
     this.winDisplay = new WinDisplay({
       currency: 'USD',
       countupDuration: 1200,
     });
-    this.winDisplay.label = 'winDisplay';
-    this.container.addChild(this.winDisplay);
 
-    // Spin button — text is built-in via FancyButton
+    center.addChild(this.winDisplay);
+    this._root.addChild(center);
+
+    // ── Footer: spin button + info text ──
+    const footer = new LayoutContainer();
+    footer.layout = {
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 16,
+    };
+
     this.spinButton = new Button({
       width: 180,
       height: 60,
@@ -146,18 +177,8 @@ export class GameScene extends Scene {
       pressScale: 0.92,
       text: 'SPIN',
     });
-    this.spinButton.label = 'spinButton';
-
-    // Connect press event (replaces onTap callback)
     this.spinButton.onPress.connect(() => this.onSpinTap());
-    this.container.addChild(this.spinButton);
 
-    // Toast (for notifications)
-    this.toast = new Toast({ duration: 2500 });
-    this.toast.label = 'toast';
-    this.container.addChild(this.toast);
-
-    // Info text
     const info = new Label({
       text: 'Press SPIN or SPACEBAR to play. DevBridge provides mock server responses.',
       style: {
@@ -165,54 +186,31 @@ export class GameScene extends Scene {
         fill: 0x666666,
       },
     });
-    info.label = 'info';
-    this.container.addChild(info);
+
+    footer.addChild(this.spinButton, info);
+    this._root.addChild(footer);
+
+    // Toast sits outside the flex layout (absolute overlay)
+    this.toast = new Toast({ duration: 2500 });
+    this.container.addChild(this.toast);
   }
 
   private layoutUI(width: number, height: number): void {
-    const cx = width / 2;
-
-    // Background gradient (drawn as blocks)
+    // Background (drawn manually — artistic element, not UI)
     const bg = this.container.getChildByLabel('background') as Graphics;
     if (bg) {
+      const cx = width / 2;
       bg.clear();
       bg.rect(0, 0, width, height).fill(0x0f0f23);
-      // Decorative circle
       bg.circle(cx, height * 0.4, 300).fill({ color: 0x1a1a4a, alpha: 0.4 });
       bg.circle(cx, height * 0.4, 200).fill({ color: 0x1a1a5a, alpha: 0.3 });
     }
 
-    // Title
-    const title = this.container.getChildByLabel('title');
-    if (title) { title.x = cx; title.y = 80; }
-
-    // Subtitle
-    const subtitle = this.container.getChildByLabel('subtitle');
-    if (subtitle) { subtitle.x = cx; subtitle.y = 130; }
-
-    // Balance
-    this.balance.x = cx;
-    this.balance.y = 220;
-
-    // Bet
-    this.betLabel.x = cx;
-    this.betLabel.y = 300;
-
-    // Win display
-    this.winDisplay.x = cx;
-    this.winDisplay.y = height * 0.45;
-
-    // Spin button
-    this.spinButton.x = cx;
-    this.spinButton.y = height - 120;
-
-    // Toast
-    this.toast.x = cx;
-    this.toast.y = height - 200;
-
-    // Info
-    const info = this.container.getChildByLabel('info');
-    if (info) { info.x = cx; info.y = height - 40; }
+    // Root flexbox fills the viewport — layout engine handles the rest
+    this._root.layout = {
+      width,
+      height,
+    };
   }
 
   // ─── Game Flow ─────────────────────────────────────────

@@ -1,5 +1,4 @@
 import { Container } from 'pixi.js';
-import '@pixi/layout';
 import type { LayoutStyles } from '@pixi/layout';
 
 // ─── Types ───────────────────────────────────────────────
@@ -229,12 +228,19 @@ export class Layout extends Container {
   private applyGridChildWidth(child: Container): void {
     const effective = this.resolveConfig();
     const columns = effective.columns ?? this._layoutConfig.columns;
+    const gap = effective.gap ?? this._layoutConfig.gap;
 
-    const pct = `${(100 / columns).toFixed(2)}%` as `${number}%`;
+    // Account for gaps between columns: total gap space = gap * (columns - 1)
+    // Each column gets: (100% - total_gap) / columns
+    // We use flexBasis + flexGrow to let Yoga handle the math when gap > 0
+    const styles: Record<string, unknown> = gap > 0
+      ? { flexBasis: 0, flexGrow: 1, flexShrink: 1, maxWidth: `${(100 / columns).toFixed(2)}%` }
+      : { width: `${(100 / columns).toFixed(2)}%` };
+
     if (child._layout) {
-      child._layout.setStyle({ width: pct });
+      child._layout.setStyle(styles);
     } else {
-      child.layout = { width: pct };
+      child.layout = styles;
     }
   }
 
