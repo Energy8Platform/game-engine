@@ -250,6 +250,10 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     this.sdk.on('error', (err: Error) => {
       this.emit('error', err);
     });
+
+    this.sdk.on('balanceUpdate', (data) => {
+      this.emit('balanceUpdate', data);
+    });
   }
 
   private applySDKConfig(): void {

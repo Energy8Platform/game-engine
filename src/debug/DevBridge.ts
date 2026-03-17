@@ -5,6 +5,7 @@ import {
   type GameConfigData,
   type PlayResultData,
   type SessionData,
+  type PlayResultAckPayload,
 } from '@energy8platform/game-sdk';
 
 export interface DevBridgeConfig {
@@ -104,7 +105,7 @@ export class DevBridge {
       this.handlePlayRequest(payload, id);
     });
 
-    this._bridge.on('PLAY_RESULT_ACK', (payload: unknown) => {
+    this._bridge.on('PLAY_RESULT_ACK', (payload: PlayResultAckPayload) => {
       this.handlePlayAck(payload);
     });
 
@@ -188,14 +189,15 @@ export class DevBridge {
       nextActions: customResult.nextActions ?? ['spin'],
       session: customResult.session ?? null,
       creditPending: false,
-      currency: 'USD',
+      bonusFreeSpin: customResult.bonusFreeSpin ?? null,
+      currency: this._config.currency,
       gameId: this._config.gameConfig?.id ?? 'dev-game',
     };
 
     this.delayedSend('PLAY_RESULT', result, id);
   }
 
-  private handlePlayAck(_payload: unknown): void {
+  private handlePlayAck(_payload: PlayResultAckPayload): void {
     if (this._config.debug) {
       console.log('[DevBridge] Play acknowledged');
     }
@@ -206,7 +208,7 @@ export class DevBridge {
   }
 
   private handleGetState(id?: string): void {
-    this.delayedSend('STATE_RESPONSE', this._config.session, id);
+    this.delayedSend('STATE_RESPONSE', { session: this._config.session ?? null }, id);
   }
 
   private handleOpenDeposit(): void {

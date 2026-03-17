@@ -127,7 +127,7 @@ bootstrap();
 | Package | Version | Required |
 | --- | --- | --- |
 | `pixi.js` | `^8.16.0` | Yes |
-| `@energy8platform/game-sdk` | `^2.6.0` | Yes |
+| `@energy8platform/game-sdk` | `^2.7.0` | Yes |
 | `@pixi/ui` | `^2.3.0` | Optional — for Button, ScrollContainer, ProgressBar |
 | `@pixi/layout` | `^3.2.0` | Optional — for Layout, Panel (Yoga flexbox) |
 | `yoga-layout` | `^3.0.0` | Optional — peer dep of `@pixi/layout` |
@@ -285,6 +285,8 @@ export class GameScene extends Scene {
 }
 ```
 
+> **Tip:** After processing a play result, call `sdk.playAck(result)` to signal the host that animations are finished and the player can interact again.
+
 ### Scene Navigation
 
 ```typescript
@@ -339,6 +341,7 @@ await scenes.push('bonus', { data: 42 }, {
 | `resize` | `{ width, height }` | Viewport resized |
 | `orientationChange` | `Orientation` | Device orientation changed |
 | `sceneChange` | `{ from, to }` | Scene transition completed |
+| `balanceUpdate` | `{ balance }` | Player balance changed (forwarded from SDK) |
 | `error` | `Error` | An error occurred |
 | `destroyed` | `void` | Engine destroyed |
 
@@ -349,6 +352,11 @@ game.on('resize', ({ width, height }) => {
 
 game.once('started', () => {
   // Runs once after the first scene starts
+});
+
+game.on('balanceUpdate', ({ balance }) => {
+  // SDK balance changed (after play action or host-pushed update)
+  console.log(`New balance: ${balance}`);
 });
 ```
 
@@ -1397,7 +1405,7 @@ This file is auto-imported by the Vite plugin when `devBridge: true`. The plugin
 
 `DevBridge` simulates a casino host for local development. It uses the SDK's `Bridge` class in `devMode`, communicating with `CasinoGameSDK` through a shared in-memory `MemoryChannel` — no `postMessage` or iframe required.
 
-> **Requires `@energy8platform/game-sdk` >= 2.6.0**
+> **Requires `@energy8platform/game-sdk` >= 2.7.0**
 
 ```typescript
 import { DevBridge } from '@energy8platform/game-engine/debug';

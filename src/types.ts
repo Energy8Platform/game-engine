@@ -5,6 +5,11 @@ import type {
   SessionData,
   PlayParams,
   PlayResultData,
+  BalanceData,
+  SymbolData,
+  PaylineData,
+  WinLineData,
+  AnywhereWinData,
 } from '@energy8platform/game-sdk';
 
 // ─── Scale Modes ───────────────────────────────────────────
@@ -191,6 +196,8 @@ export interface GameEngineEvents {
   orientationChange: Orientation;
   /** Fired on scene change */
   sceneChange: { from: string | null; to: string };
+  /** Fired when player balance changes (forwarded from SDK) */
+  balanceUpdate: { balance: number };
   /** Fired on error */
   error: Error;
   /** Fired when engine is destroyed */
@@ -219,4 +226,9 @@ export type {
   SessionData,
   PlayParams,
   PlayResultData,
+  BalanceData,
+  SymbolData,
+  PaylineData,
+  WinLineData,
+  AnywhereWinData,
 };

@@ -29,6 +29,11 @@ export type {
   SessionData,
   PlayParams,
   PlayResultData,
+  BalanceData,
+  SymbolData,
+  PaylineData,
+  WinLineData,
+  AnywhereWinData,
 } from './types';
 
 // ─── Assets ──────────────────────────────────────────────
@@ -36,6 +41,14 @@ export { AssetManager } from './assets/AssetManager';
 
 // ─── Audio ───────────────────────────────────────────────
 export { AudioManager } from './audio/AudioManager';
+
+// ─── SDK Error Classes ───────────────────────────────────
+export {
+  SDKError,
+  TimeoutError,
+  BridgeNotReadyError,
+  BridgeDestroyedError,
+} from '@energy8platform/game-sdk';
 
 // ─── Viewport ────────────────────────────────────────────
 export { ViewportManager } from './viewport/ViewportManager';
