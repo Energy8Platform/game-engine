@@ -58,10 +58,12 @@ interface StateMachineEvents {
  * ```
  */
 export class StateMachine<TContext = Record<string, unknown>> extends EventEmitter<StateMachineEvents> {
+  private static MAX_TRANSITION_DEPTH = 10;
+
   private _states = new Map<string, StateConfig<TContext>>();
   private _guards = new Map<string, (ctx: TContext) => boolean>();
   private _current: string | null = null;
-  private _transitioning = false;
+  private _transitionDepth = 0;
   private _context: TContext;
 
   constructor(context: TContext) {
@@ -76,7 +78,7 @@ export class StateMachine<TContext = Record<string, unknown>> extends EventEmitt
 
   /** Whether a transition is in progress */
   get isTransitioning(): boolean {
-    return this._transitioning;
+    return this._transitionDepth > 0;
   }
 
   /** State machine context (shared data) */
@@ -131,9 +133,10 @@ export class StateMachine<TContext = Record<string, unknown>> extends EventEmitt
    * @returns true if the transition succeeded, false if blocked by a guard
    */
   async transition(to: string, data?: unknown): Promise<boolean> {
-    if (this._transitioning) {
-      console.warn('[StateMachine] Transition already in progress');
-      return false;
+    if (this._transitionDepth >= StateMachine.MAX_TRANSITION_DEPTH) {
+      throw new Error(
+        '[StateMachine] Max transition depth exceeded — possible infinite loop',
+      );
     }
 
     const from = this._current;
@@ -152,7 +155,7 @@ export class StateMachine<TContext = Record<string, unknown>> extends EventEmitt
       throw new Error(`[StateMachine] State "${to}" not registered.`);
     }
 
-    this._transitioning = true;
+    this._transitionDepth++;
 
     try {
       // Exit current state
@@ -170,7 +173,7 @@ export class StateMachine<TContext = Record<string, unknown>> extends EventEmitt
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       throw err;
     } finally {
-      this._transitioning = false;
+      this._transitionDepth--;
     }
 
     return true;
@@ -213,7 +216,7 @@ export class StateMachine<TContext = Record<string, unknown>> extends EventEmitt
       await state?.exit?.(this._context);
     }
     this._current = null;
-    this._transitioning = false;
+    this._transitionDepth = 0;
   }
 
   /**

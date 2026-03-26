@@ -150,6 +150,9 @@ export interface IScene {
   /** Root display container for this scene */
   readonly container: Container;
 
+  /** @internal GameApplication reference — set by SceneManager */
+  __engineApp?: any;
+
   /** Called when the scene is entered */
   onEnter?(data?: unknown): Promise<void> | void;
 

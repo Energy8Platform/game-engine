@@ -25,16 +25,21 @@ interface SceneManagerEvents {
  * ```
  */
 export class SceneManager extends EventEmitter<SceneManagerEvents> {
+  private static MAX_TRANSITION_DEPTH = 10;
+
   /** Root container that scenes are added to */
   public root!: Container;
 
   private registry = new Map<string, SceneConstructor>();
   private stack: SceneEntry[] = [];
-  private _transitioning = false;
+  private _transitionDepth = 0;
 
   /** Current viewport dimensions — set by ViewportManager */
   private _width = 0;
   private _height = 0;
+
+  /** @internal GameApplication reference — passed to scenes */
+  private _app: any;
 
   constructor(root?: Container) {
     super();
@@ -44,6 +49,11 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
   /** @internal Set the root container (called by GameApplication after PixiJS init) */
   setRoot(root: Container): void {
     this.root = root;
+  }
+
+  /** @internal Set the app reference (called by GameApplication) */
+  setApp(app: any): void {
+    this._app = app;
   }
 
   /** Register a scene class by key */
@@ -64,7 +74,7 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
 
   /** Whether a scene transition is in progress */
   get isTransitioning(): boolean {
-    return this._transitioning;
+    return this._transitionDepth > 0;
   }
 
   /**
@@ -75,6 +85,9 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     data?: unknown,
     transition?: TransitionConfig,
   ): Promise<void> {
+    if (this._transitionDepth >= SceneManager.MAX_TRANSITION_DEPTH) {
+      throw new Error('[SceneManager] Max transition depth exceeded — possible infinite loop');
+    }
     const prevKey = this.currentKey;
 
     // Exit all current scenes
@@ -96,6 +109,9 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     data?: unknown,
     transition?: TransitionConfig,
   ): Promise<void> {
+    if (this._transitionDepth >= SceneManager.MAX_TRANSITION_DEPTH) {
+      throw new Error('[SceneManager] Max transition depth exceeded — possible infinite loop');
+    }
     const prevKey = this.currentKey;
     await this.pushInternal(key, data, transition);
     this.emit('change', { from: prevKey, to: key });
@@ -108,6 +124,9 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     if (this.stack.length <= 1) {
       console.warn('[SceneManager] Cannot pop the last scene');
       return;
+    }
+    if (this._transitionDepth >= SceneManager.MAX_TRANSITION_DEPTH) {
+      throw new Error('[SceneManager] Max transition depth exceeded — possible infinite loop');
     }
     const prevKey = this.currentKey;
     await this.popInternal(true, transition);
@@ -122,6 +141,9 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     data?: unknown,
     transition?: TransitionConfig,
   ): Promise<void> {
+    if (this._transitionDepth >= SceneManager.MAX_TRANSITION_DEPTH) {
+      throw new Error('[SceneManager] Max transition depth exceeded — possible infinite loop');
+    }
     const prevKey = this.currentKey;
     await this.popInternal(false);
     await this.pushInternal(key, data, transition);
@@ -169,7 +191,11 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     if (!Ctor) {
       throw new Error(`[SceneManager] Scene "${key}" is not registered`);
     }
-    return new Ctor();
+    const scene = new Ctor();
+    if (this._app) {
+      scene.__engineApp = this._app;
+    }
+    return scene;
   }
 
   private async pushInternal(
@@ -177,7 +203,7 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     data?: unknown,
     transition?: TransitionConfig,
   ): Promise<void> {
-    this._transitioning = true;
+    this._transitionDepth++;
 
     const scene = this.createScene(key);
     this.root.addChild(scene.container);
@@ -195,7 +221,7 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
 
     await scene.onEnter?.(data);
 
-    this._transitioning = false;
+    this._transitionDepth--;
   }
 
   private async popInternal(
@@ -205,7 +231,7 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     const entry = this.stack.pop();
     if (!entry) return;
 
-    this._transitioning = true;
+    this._transitionDepth++;
 
     await entry.scene.onExit?.();
 
@@ -216,7 +242,7 @@ export class SceneManager extends EventEmitter<SceneManagerEvents> {
     entry.scene.onDestroy?.();
     entry.scene.container.destroy({ children: true });
 
-    this._transitioning = false;
+    this._transitionDepth--;
   }
 
   private async transitionIn(

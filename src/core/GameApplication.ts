@@ -290,6 +290,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
     // Wire SceneManager to the PixiJS stage
     this.scenes.setRoot(this.app.stage);
+    this.scenes.setApp(this);
 
     // Wire viewport resize → scene manager + input manager
     this.viewport.on('resize', ({ width, height, scale }) => {

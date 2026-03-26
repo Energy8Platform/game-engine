@@ -219,4 +219,107 @@ describe('StateMachine', () => {
       expect(fsm.isTransitioning).toBe(false);
     });
   });
+
+  describe('nested transitions', () => {
+    it('allows transition from within an enter hook', async () => {
+      fsm.addState('a', {
+        enter: async () => {
+          await fsm.transition('b');
+        },
+      });
+      fsm.addState('b', {});
+
+      await fsm.start('a');
+      expect(fsm.current).toBe('b');
+    });
+
+    it('supports chained transitions A → B → C via enter hooks', async () => {
+      const events: string[] = [];
+      fsm.on('transition', ({ from, to }) => {
+        events.push(`${from}->${to}`);
+      });
+
+      fsm.addState('a', {
+        enter: async () => {
+          await fsm.transition('b');
+        },
+      });
+      fsm.addState('b', {
+        enter: async () => {
+          await fsm.transition('c');
+        },
+      });
+      fsm.addState('c', {});
+
+      await fsm.start('a');
+      expect(fsm.current).toBe('c');
+      // Inner transitions emit first (depth-first)
+      expect(events).toEqual([
+        'b->c',
+        'a->b',
+        'null->a',
+      ]);
+    });
+
+    it('runs exit hooks correctly during nested transitions', async () => {
+      const order: string[] = [];
+      fsm.addState('a', {
+        enter: async () => {
+          await fsm.transition('b');
+        },
+        exit: () => { order.push('exit-a'); },
+      });
+      fsm.addState('b', {
+        enter: () => { order.push('enter-b'); },
+      });
+
+      await fsm.start('a');
+      expect(order).toEqual(['exit-a', 'enter-b']);
+      expect(fsm.current).toBe('b');
+    });
+
+    it('isTransitioning is false after nested transitions complete', async () => {
+      fsm.addState('a', {
+        enter: async () => {
+          await fsm.transition('b');
+        },
+      });
+      fsm.addState('b', {});
+
+      await fsm.start('a');
+      expect(fsm.isTransitioning).toBe(false);
+    });
+
+    it('throws on max transition depth (infinite loop protection)', async () => {
+      fsm.addState('ping', {
+        enter: async () => {
+          await fsm.transition('pong');
+        },
+      });
+      fsm.addState('pong', {
+        enter: async () => {
+          await fsm.transition('ping');
+        },
+      });
+
+      fsm.on('error', () => {}); // Prevent unhandled error
+      await expect(fsm.start('ping')).rejects.toThrow(
+        'Max transition depth exceeded',
+      );
+    });
+
+    it('guards still work during nested transitions', async () => {
+      fsm.addState('a', {
+        enter: async () => {
+          const result = await fsm.transition('b');
+          expect(result).toBe(false);
+        },
+      });
+      fsm.addState('b', {});
+      fsm.addGuard('a', 'b', () => false);
+
+      await fsm.start('a');
+      expect(fsm.current).toBe('a');
+    });
+  });
 });

@@ -6,6 +6,7 @@ import {
   type PlayResultData,
   type SessionData,
   type PlayResultAckPayload,
+  type PlayParams,
 } from '@energy8platform/game-sdk';
 
 export interface DevBridgeConfig {
@@ -20,7 +21,7 @@ export interface DevBridgeConfig {
   /** Active session to resume (null = no active session) */
   session?: SessionData | null;
   /** Custom play result handler — return mock result data */
-  onPlay?: (params: { action: string; bet: number; roundId?: string }) => Partial<PlayResultData>;
+  onPlay?: (params: PlayParams) => Partial<PlayResultData>;
   /** Simulated network delay in ms */
   networkDelay?: number;
   /** Enable debug logging */
@@ -101,7 +102,7 @@ export class DevBridge {
       this.handleGameReady(id);
     });
 
-    this._bridge.on('PLAY_REQUEST', (payload: { action: string; bet: number; roundId?: string }, id?: string) => {
+    this._bridge.on('PLAY_REQUEST', (payload: PlayParams, id?: string) => {
       this.handlePlayRequest(payload, id);
     });
 
@@ -164,17 +165,17 @@ export class DevBridge {
   }
 
   private handlePlayRequest(
-    payload: { action: string; bet: number; roundId?: string },
+    payload: PlayParams,
     id?: string,
   ): void {
-    const { action, bet, roundId } = payload;
+    const { action, bet, roundId, params } = payload;
 
     // Deduct bet
     this._balance -= bet;
     this._roundCounter++;
 
     // Generate result
-    const customResult = this._config.onPlay({ action, bet, roundId });
+    const customResult = this._config.onPlay({ action, bet, roundId, params });
     const totalWin = customResult.totalWin ?? (Math.random() > 0.6 ? bet * (1 + Math.random() * 10) : 0);
 
     // Credit win

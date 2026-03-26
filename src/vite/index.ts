@@ -149,6 +149,9 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
         '@pixi/ui',
         'yoga-layout',
         'yoga-layout/load',
+        'react',
+        'react-dom',
+        'react-reconciler',
       ],
       ...userVite.resolve,
     },
@@ -160,6 +163,8 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
         '@pixi/layout/components',
         '@pixi/ui',
         'yoga-layout/load',
+        'react',
+        'react-dom',
       ],
       exclude: [
         'yoga-layout',

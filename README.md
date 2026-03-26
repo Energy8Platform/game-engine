@@ -37,7 +37,10 @@ A universal casino game engine built on [PixiJS v8](https://pixijs.com/) and [@e
 - [DevBridge](#devbridge)
 - [Debug](#debug)
 - [Flexbox-First Layout](#flexbox-first-layout)
-- [Using with React (`@pixi/react`)](#using-with-react-pixireact)
+- [React Integration](#react-integration)
+  - [ReactScene](#reactscene)
+  - [Hooks](#hooks)
+  - [Standalone createPixiRoot](#standalone-createpixiroot)
 - [API Reference](#api-reference)
 - [License](#license)
 
@@ -57,7 +60,7 @@ npm install pixi.js @energy8platform/game-sdk @energy8platform/game-engine
 npm install @pixi/ui @pixi/layout yoga-layout
 
 # (Optional) React integration
-npm install @pixi/react react react-dom
+npm install react react-dom react-reconciler
 
 # (Optional) install spine and audio support
 npm install @pixi/sound @esotericsoftware/spine-pixi-v8
@@ -133,7 +136,9 @@ bootstrap();
 | `yoga-layout` | `^3.0.0` | Optional — peer dep of `@pixi/layout` |
 | `@pixi/sound` | `^6.0.0` | Optional — for audio |
 | `@esotericsoftware/spine-pixi-v8` | `~4.2.0` | Optional — for Spine animations |
-| `@pixi/react` | `^8.0.0` | Optional — for React integration (see [Using with React](#using-with-react-pixireact)) |
+| `react` | `>=18.0.0` | Optional — for ReactScene (see [React Integration](#react-integration)) |
+| `react-dom` | `>=18.0.0` | Optional — peer of `react` |
+| `react-reconciler` | `>=0.29.0` | Optional — for ReactScene (custom PixiJS reconciler) |
 
 ### Sub-path Exports
 
@@ -147,6 +152,7 @@ import { AudioManager } from '@energy8platform/game-engine/audio';
 import { Button, Label, Modal, Layout, ScrollContainer, Panel, Toast } from '@energy8platform/game-engine/ui';
 import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-engine/animation';
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
+import { ReactScene, createPixiRoot, useSDK, useViewport } from '@energy8platform/game-engine/react';
 import { defineGameConfig } from '@energy8platform/game-engine/vite';
 ```
 
@@ -1196,102 +1202,160 @@ panel.content.addChild(
 
 ---
 
-## Using with React (`@pixi/react`)
+## React Integration
 
-For React-based projects, [`@pixi/react`](https://github.com/pixijs/pixi-react) provides declarative JSX components for PixiJS. The engine is framework-agnostic — `@pixi/react` is **not** a dependency, but works seamlessly alongside it.
+The engine has a built-in React integration with its own PixiJS reconciler. No need for `@pixi/react` — the engine renders React component trees directly into PixiJS Containers while providing access to all engine sub-systems through hooks.
 
 ### Installation
 
 ```bash
-npm install @pixi/react react react-dom
+npm install react react-dom react-reconciler
 ```
 
-### Wrapping the Engine in React
+### ReactScene
+
+`ReactScene` is an abstract `Scene` subclass that automatically mounts a React tree into the scene's PixiJS container. Implement the `render()` method to return your JSX:
 
 ```tsx
-import { Application, extend } from '@pixi/react';
-import { Container, Graphics, Text } from 'pixi.js';
-import { GameApplication, Scene } from '@energy8platform/game-engine';
+// scenes/GameScene.tsx
+import { ReactScene, extendPixiElements, useSDK, useViewport, useBalance } from '@energy8platform/game-engine/react';
 
-// Register PixiJS components for JSX
-extend({ Container, Graphics, Text });
+// Register PixiJS components for JSX (call once at startup)
+extendPixiElements();
 
-function GameWrapper() {
-  return (
-    <Application
-      width={1920}
-      height={1080}
-      background={0x0f0f23}
-    >
-      <GameContent />
-    </Application>
-  );
+export class GameScene extends ReactScene {
+  render() {
+    return <GameRoot />;
+  }
+
+  // You can mix imperative code with React
+  async onEnter(data?: unknown) {
+    await super.onEnter(data);
+    // Add imperative elements on top of the React tree
+    // this.container.addChild(someParticleEmitter);
+  }
 }
 ```
 
-### Using Engine Components in JSX
-
-Engine components (`Button`, `Panel`, `Layout`, etc.) are PixiJS `Container` subclasses — use them with `@pixi/react`'s `extend`:
-
 ```tsx
-import { extend, useTick } from '@pixi/react';
-import { Button, Label, Panel, ProgressBar } from '@energy8platform/game-engine/ui';
+// components/GameRoot.tsx
+import { useSDK, useViewport, useBalance } from '@energy8platform/game-engine/react';
 
-// Register engine components for JSX
-extend({ Button, Label, Panel, ProgressBar });
+export function GameRoot() {
+  const { width, height, isPortrait } = useViewport();
+  const balance = useBalance();
+  const sdk = useSDK();
 
-function GameHUD({ balance, bet }: { balance: number; bet: number }) {
   return (
     <container>
-      <panel
-        width={400}
-        height={80}
-        backgroundColor={0x1a1a2e}
-        borderRadius={12}
-        padding={16}
-      >
-        <label text={`Balance: $${balance.toFixed(2)}`} />
-        <label text={`Bet: $${bet.toFixed(2)}`} />
-      </panel>
+      <text text={`Balance: $${balance.toFixed(2)}`} style={{ fontSize: 32, fill: 0xffffff }} />
+      <container position-y={height - 100}>
+        <text
+          text="SPIN"
+          style={{ fontSize: 48, fill: 0xffd700 }}
+          eventMode="static"
+          cursor="pointer"
+          onClick={async () => {
+            const result = await sdk?.play({ action: 'spin', bet: 1 });
+            // ... animate result
+            sdk?.playAck(result!);
+          }}
+        />
+      </container>
     </container>
   );
 }
 ```
 
-### Combining Flexbox with React
+**Lifecycle:** `onEnter` mounts the React tree, `onResize` re-renders with updated viewport context, `onExit` and `onDestroy` unmount.
+
+### Hooks
+
+All hooks must be used inside a `ReactScene`:
+
+| Hook | Returns | Description |
+| --- | --- | --- |
+| `useEngine()` | `EngineContextValue` | Full engine context (app, sdk, audio, input, viewport, etc.) |
+| `useSDK()` | `CasinoGameSDK \| null` | SDK instance for `play()`, `playAck()`, etc. |
+| `useAudio()` | `AudioManager` | Audio manager for sound playback |
+| `useInput()` | `InputManager` | Input manager for pointer/keyboard |
+| `useViewport()` | `{ width, height, scale, isPortrait }` | Current viewport dimensions (updates on resize) |
+| `useBalance()` | `number` | Reactive balance (auto-updates on `balanceUpdate` events) |
+| `useSession()` | `SessionData \| null` | Current session data |
+| `useGameConfig<T>()` | `T \| null` | Game configuration from SDK |
+
+### Element Registration
+
+Before rendering JSX, register PixiJS classes so the reconciler can create instances:
+
+```typescript
+import { extendPixiElements, extendLayoutElements, extend } from '@energy8platform/game-engine/react';
+
+// Register standard PixiJS elements (Container, Sprite, Text, Graphics, etc.)
+extendPixiElements();
+
+// Register @pixi/layout components (if installed)
+const layout = await import('@pixi/layout/components');
+extendLayoutElements(layout);
+
+// Register custom classes
+import { Button, Panel } from '@energy8platform/game-engine/ui';
+extend({ Button, Panel });
+```
+
+After registration, use elements as lowercase JSX tags: `<container>`, `<sprite>`, `<text>`, `<graphics>`, `<button>`, etc.
+
+### Using `@pixi/layout` with React
 
 ```tsx
-import { extend } from '@pixi/react';
-import { LayoutContainer } from '@pixi/layout/components';
+import '@pixi/layout'; // side-effect: activates layout mixin
 
-extend({ LayoutContainer });
-
-function FlexRow({ children }: { children: React.ReactNode }) {
+function FlexColumn() {
   return (
-    <layoutContainer
-      layout={{
-        flexDirection: 'row',
-        gap: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {children}
-    </layoutContainer>
-  );
-}
-
-function Toolbar() {
-  return (
-    <FlexRow>
-      <button text="SPIN" width={180} height={60} />
-      <label text="BET: $1.00" />
-    </FlexRow>
+    <container layout={{
+      width: '100%',
+      height: '100%',
+      flexDirection: 'column',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 40,
+    }}>
+      <text text="HEADER" style={{ fontSize: 36, fill: 0xffffff }} />
+      <text text="CENTER" style={{ fontSize: 48, fill: 0xffd700 }} />
+      <text text="FOOTER" style={{ fontSize: 36, fill: 0xffffff }} />
+    </container>
   );
 }
 ```
 
-> **Note:** `@pixi/react` is entirely optional. The engine works without React. Choose whichever approach fits your team and project.
+### Props
+
+- **Regular props** are set directly on the PixiJS instance: `alpha`, `visible`, `position`, `scale`, `rotation`, etc.
+- **Nested props** use dash notation: `position-x`, `scale-y`, `anchor-x`
+- **Event props** map React-style names to PixiJS: `onClick` → `onclick`, `onPointerDown` → `onpointerdown`, etc.
+- **`draw` prop** (Graphics): pass a function that receives the Graphics instance for imperative drawing.
+
+### Standalone `createPixiRoot`
+
+For advanced use cases where you don't need `ReactScene`, render a React tree into any PixiJS Container:
+
+```typescript
+import { createPixiRoot, extend } from '@energy8platform/game-engine/react';
+import { Container, Text } from 'pixi.js';
+import { createElement } from 'react';
+
+extend({ Container, Text });
+
+const container = new Container();
+const root = createPixiRoot(container);
+
+root.render(createElement('text', { text: 'Hello', style: { fill: 0xffffff } }));
+
+// Later:
+root.unmount();
+```
+
+> **Note:** React is entirely optional. The engine works without it. Imperative scenes (`Scene`) and React scenes (`ReactScene`) can coexist in the same game.
 
 ---
 
@@ -1374,8 +1438,8 @@ export default defineGameConfig({
 - **PixiJS chunk splitting** — `pixi.js` is extracted into a separate chunk for caching
 - **DevBridge injection** — automatically available in dev mode via virtual module
 - **Dev server** — port 3000, auto-open browser
-- **Dependency deduplication** — `resolve.dedupe` ensures a single copy of `pixi.js`, `@pixi/layout`, `@pixi/ui`, and `yoga-layout` across all packages (prevents registration issues when used as a linked dependency)
-- **Dependency optimization** — `pixi.js`, `@pixi/layout`, `@pixi/layout/components`, `@pixi/ui`, and `yoga-layout/load` are pre-bundled for faster dev starts; `yoga-layout` main entry is excluded from pre-bundling because it contains a top-level `await` incompatible with esbuild's default target
+- **Dependency deduplication** — `resolve.dedupe` ensures a single copy of `pixi.js`, `@pixi/layout`, `@pixi/ui`, `yoga-layout`, `react`, `react-dom`, and `react-reconciler` across all packages (prevents registration issues when used as a linked dependency)
+- **Dependency optimization** — `pixi.js`, `@pixi/layout`, `@pixi/layout/components`, `@pixi/ui`, `yoga-layout/load`, `react`, and `react-dom` are pre-bundled for faster dev starts; `yoga-layout` main entry is excluded from pre-bundling because it contains a top-level `await` incompatible with esbuild's default target
 
 ### Custom DevBridge Configuration
 
@@ -1517,6 +1581,7 @@ class SceneManager extends EventEmitter<{ change: { from: string | null; to: str
   get isTransitioning(): boolean;
 
   setRoot(root: Container): void;
+  setApp(app: any): void;  // @internal — called by GameApplication
   register(key: string, ctor: SceneConstructor): this;
   async goto(key: string, data?: unknown, transition?: TransitionConfig): Promise<void>;
   async push(key: string, data?: unknown, transition?: TransitionConfig): Promise<void>;
@@ -1692,6 +1757,51 @@ class ScrollContainer extends ScrollBox {
   addItem(...items: Container[]): Container;
   scrollToItem(index: number): void;
 }
+```
+
+### ReactScene
+
+> Requires `react`, `react-dom`, `react-reconciler` as peer dependencies.
+
+```typescript
+abstract class ReactScene extends Scene {
+  abstract render(): ReactElement;
+  protected getApp(): GameApplication;
+
+  // Lifecycle (auto-managed):
+  override async onEnter(data?: unknown): Promise<void>;  // mounts React tree
+  override async onExit(): Promise<void>;                  // unmounts React tree
+  override onResize(width: number, height: number): void;  // re-renders with updated context
+  override onDestroy(): void;                               // cleanup
+}
+```
+
+### createPixiRoot
+
+```typescript
+interface PixiRoot {
+  render(element: ReactElement): void;
+  unmount(): void;
+}
+
+function createPixiRoot(container: Container): PixiRoot;
+```
+
+### React Hooks
+
+```typescript
+function useEngine(): EngineContextValue;
+function useSDK(): CasinoGameSDK | null;
+function useAudio(): AudioManager;
+function useInput(): InputManager;
+function useViewport(): { width: number; height: number; scale: number; isPortrait: boolean };
+function useBalance(): number;
+function useSession(): SessionData | null;
+function useGameConfig<T = GameConfigData>(): T | null;
+
+function extend(components: Record<string, any>): void;
+function extendPixiElements(): void;
+function extendLayoutElements(layoutModule: Record<string, any>): void;
 ```
 
 ### Button
