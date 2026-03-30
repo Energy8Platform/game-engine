@@ -27,6 +27,7 @@ const VIRTUAL_ID = '/@dev-bridge-entry.js';
 
 function devBridgePlugin(configPath: string): Plugin {
   let entrySrc = '';
+  let viteRoot = '';
   let resolvedConfigPath = configPath;
 
   return {
@@ -35,6 +36,7 @@ function devBridgePlugin(configPath: string): Plugin {
     enforce: 'pre',
 
     configResolved(config) {
+      viteRoot = config.root;
       // Resolve relative config path against Vite root so the virtual
       // module can import it with an absolute path.
       if (configPath.startsWith('.')) {
@@ -76,6 +78,11 @@ await import('${entrySrc}');
       }
 
       entrySrc = match[1];
+      if (entrySrc.startsWith('.')) {
+        entrySrc = viteRoot + '/' + entrySrc.replace(/^\.\//, '');
+      } else if (entrySrc.startsWith('/')) {
+        entrySrc = viteRoot + entrySrc;
+      }
       return html.replace(match[0], `<script type="module" src="${VIRTUAL_ID}"></script>`);
     },
   };
