@@ -91,4 +91,42 @@ export interface LuaPlayResult {
   creditDeferred: boolean;
 }
 
+// ─── Simulation ─────────────────────────────────────────
+
+export interface SimulationConfig {
+  /** Lua script source code */
+  script: string;
+  /** Platform game definition */
+  gameDefinition: GameDefinition;
+  /** Number of iterations to run */
+  iterations: number;
+  /** Bet amount per spin */
+  bet: number;
+  /** RNG seed for deterministic results */
+  seed?: number;
+  /** Which action to simulate (default: 'spin') */
+  action?: string;
+  /** Params for the action (buy_bonus mode, ante_bet, etc.) */
+  params?: Record<string, unknown>;
+  /** Report progress every N iterations (default: 100_000) */
+  progressInterval?: number;
+  /** Progress callback */
+  onProgress?: (completed: number, total: number) => void;
+}
+
+export interface SimulationResult {
+  gameId: string;
+  action: string;
+  iterations: number;
+  durationMs: number;
+  totalRtp: number;
+  baseGameRtp: number;
+  bonusRtp: number;
+  hitFrequency: number;
+  maxWin: number;
+  maxWinHits: number;
+  bonusTriggered: number;
+  bonusSpinsPlayed: number;
+}
+
 export type { SessionData, PlayParams };
