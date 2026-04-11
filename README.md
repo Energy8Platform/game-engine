@@ -34,6 +34,7 @@ A universal casino game engine built on [PixiJS v8](https://pixijs.com/) and [@e
   - [Toast](#toast)
 - [Input](#input)
 - [Vite Configuration](#vite-configuration)
+- [Lua Engine](#lua-engine)
 - [DevBridge](#devbridge)
 - [Debug](#debug)
 - [Flexbox-First Layout](#flexbox-first-layout)
@@ -139,6 +140,7 @@ bootstrap();
 | `react` | `>=18.0.0` | Optional — for ReactScene (see [React Integration](#react-integration)) |
 | `react-dom` | `>=18.0.0` | Optional — peer of `react` |
 | `react-reconciler` | `>=0.29.0` | Optional — for ReactScene (custom PixiJS reconciler) |
+| `fengari` | `^0.1.4` | Optional — for Lua engine (see [Lua Engine](#lua-engine)) |
 
 ### Sub-path Exports
 
@@ -154,6 +156,7 @@ import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
 import { ReactScene, createPixiRoot, useSDK, useViewport } from '@energy8platform/game-engine/react';
 import { defineGameConfig } from '@energy8platform/game-engine/vite';
+import { LuaEngine, ActionRouter } from '@energy8platform/game-engine/lua';
 ```
 
 ---
@@ -1465,6 +1468,107 @@ This file is auto-imported by the Vite plugin when `devBridge: true`. The plugin
 
 ---
 
+## Lua Engine
+
+The Lua module runs platform Lua game scripts locally in the browser via `fengari` (Lua 5.3, pure JavaScript). This replicates the server-side execution for development and simulation — no backend required.
+
+> **Requires `fengari` >= 0.1.4** (optional peer dependency)
+
+### Standalone Usage
+
+```typescript
+import { LuaEngine } from '@energy8platform/game-engine/lua';
+import type { GameDefinition } from '@energy8platform/game-engine/lua';
+
+const gameDefinition: GameDefinition = {
+  id: 'my-slot',
+  type: 'SLOT',
+  actions: {
+    spin: {
+      stage: 'base_game',
+      debit: 'bet',
+      credit: 'win',
+      transitions: [
+        {
+          condition: 'free_spins_awarded > 0',
+          creates_session: true,
+          credit_override: 'defer',
+          next_actions: ['free_spin'],
+          session_config: { total_spins_var: 'free_spins_awarded' },
+        },
+        { condition: 'always', next_actions: ['spin'] },
+      ],
+    },
+    free_spin: {
+      stage: 'free_spins',
+      debit: 'none',
+      requires_session: true,
+      transitions: [{ condition: 'always', next_actions: ['free_spin'] }],
+    },
+  },
+  bet_levels: [0.2, 0.5, 1, 2, 5],
+  max_win: { multiplier: 10000 },
+};
+
+const engine = new LuaEngine({
+  script: luaSourceCode,
+  gameDefinition,
+  seed: 42, // optional: deterministic RNG for simulation
+});
+
+const result = engine.execute({ action: 'spin', bet: 1.0 });
+// result.totalWin      — win amount
+// result.data          — payload from Lua (matrix, win_lines, etc.)
+// result.nextActions   — available actions after this spin
+// result.session       — session state (if free spins triggered)
+
+engine.destroy();
+```
+
+### DevBridge Integration
+
+The simplest way to use Lua scripts is via DevBridge — just pass `luaScript` and `gameDefinition`:
+
+```typescript
+// dev.config.ts
+import luaScript from './game.lua?raw';
+
+export default {
+  balance: 5000,
+  currency: 'USD',
+  gameConfig: { id: 'my-slot', type: 'slot', betLevels: [0.2, 0.5, 1, 2, 5] },
+  luaScript,
+  gameDefinition: { /* same as above */ },
+};
+```
+
+When `luaScript` is set, DevBridge automatically creates a `LuaEngine` and uses it instead of the `onPlay` callback.
+
+### Platform API
+
+The engine injects a global `engine` table into the Lua sandbox, matching the platform's server-side API:
+
+| Function | Description |
+| --- | --- |
+| `engine.random(min, max)` | Random integer `[min, max]` |
+| `engine.random_float()` | Random float `[0.0, 1.0)` |
+| `engine.random_weighted(weights)` | 1-based index from weight table `{w1, w2, ...}` |
+| `engine.shuffle(arr)` | Fisher-Yates shuffle, returns copy |
+| `engine.log(level, msg)` | Log message (`"debug"`, `"info"`, `"warn"`, `"error"`) |
+| `engine.get_config()` | Returns `{id, type, bet_levels}` from game definition |
+
+### Features
+
+- **Action routing** — dispatches play requests to the correct stage via `ActionRouter`
+- **Transition evaluation** — evaluates conditions (`>`, `>=`, `==`, `!=`, `<`, `<=`, `&&`, `||`, `"always"`)
+- **Session management** — free spins, retriggers, unlimited sessions (table games), `_persist_` data roundtrip
+- **Cross-spin persistent state** — `persistent_state.vars` and `_persist_game_*` convention
+- **Max win cap** — enforced after each `execute()`, matching platform behavior
+- **Buy bonus** — scatter distribution selection, `forced_scatter_count` injection
+- **Deterministic RNG** — seeded xoshiro128** PRNG for simulation and replay
+
+---
+
 ## DevBridge
 
 `DevBridge` simulates a casino host for local development. It uses the SDK's `Bridge` class in `devMode`, communicating with `CasinoGameSDK` through a shared in-memory `MemoryChannel` — no `postMessage` or iframe required.
@@ -1491,6 +1595,11 @@ const bridge = new DevBridge({
     const win = Math.random() < 0.4 ? bet * 5 : 0;
     return { win };
   },
+
+  // OR use a Lua script instead of onPlay (requires fengari):
+  // luaScript: luaSourceCode,
+  // gameDefinition: { ... },
+  // luaSeed: 42,
 });
 
 bridge.start(); // Creates SDK Bridge({ devMode: true }) + registers handlers

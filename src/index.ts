@@ -99,3 +99,20 @@ export { LoadingScene } from './loading/LoadingScene';
 export { DevBridge } from './debug/DevBridge';
 export type { DevBridgeConfig } from './debug/DevBridge';
 export { FPSOverlay } from './debug/FPSOverlay';
+
+// ─── Lua ────────────────────────────────────────────────
+// NOTE: fengari is an optional peer dependency.
+// Import Lua components from '@energy8platform/game-engine/lua' sub-path
+// to avoid pulling in fengari when it isn't installed.
+export { LuaEngine } from './lua/LuaEngine';
+export { LuaEngineAPI, createSeededRng } from './lua/LuaEngineAPI';
+export { ActionRouter, evaluateCondition } from './lua/ActionRouter';
+export { SessionManager } from './lua/SessionManager';
+export { PersistentState } from './lua/PersistentState';
+export type {
+  GameDefinition,
+  ActionDefinition,
+  TransitionRule,
+  LuaEngineConfig,
+  LuaPlayResult,
+} from './lua/types';

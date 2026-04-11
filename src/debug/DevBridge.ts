@@ -8,6 +8,8 @@ import {
   type PlayResultAckPayload,
   type PlayParams,
 } from '@energy8platform/game-sdk';
+import type { GameDefinition } from '../lua/types';
+import { LuaEngine } from '../lua/LuaEngine';
 
 export interface DevBridgeConfig {
   /** Mock initial balance */
@@ -26,9 +28,15 @@ export interface DevBridgeConfig {
   networkDelay?: number;
   /** Enable debug logging */
   debug?: boolean;
+  /** Lua script source code. When set, overrides onPlay with LuaEngine. */
+  luaScript?: string;
+  /** Game definition for Lua engine (actions, transitions, etc.) */
+  gameDefinition?: GameDefinition;
+  /** RNG seed for deterministic Lua execution */
+  luaSeed?: number;
 }
 
-const DEFAULT_CONFIG: Required<DevBridgeConfig> = {
+const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinition' | 'luaSeed'> = {
   balance: 10000,
   currency: 'USD',
   gameConfig: {
@@ -75,14 +83,16 @@ const DEFAULT_CONFIG: Required<DevBridgeConfig> = {
  * ```
  */
 export class DevBridge {
-  private _config: Required<DevBridgeConfig>;
+  private _config: Required<Pick<DevBridgeConfig, 'balance' | 'currency' | 'gameConfig' | 'assetsUrl' | 'session' | 'onPlay' | 'networkDelay' | 'debug'>> & Pick<DevBridgeConfig, 'luaScript' | 'gameDefinition' | 'luaSeed'>;
   private _balance: number;
   private _roundCounter = 0;
   private _bridge: Bridge | null = null;
+  private _luaEngine: LuaEngine | null = null;
 
   constructor(config: DevBridgeConfig = {}) {
     this._config = { ...DEFAULT_CONFIG, ...config };
     this._balance = this._config.balance;
+    this.initLuaEngine();
   }
 
   /** Current mock balance */
@@ -148,6 +158,24 @@ export class DevBridge {
   /** Destroy the dev bridge */
   destroy(): void {
     this.stop();
+    if (this._luaEngine) {
+      this._luaEngine.destroy();
+      this._luaEngine = null;
+    }
+  }
+
+  private initLuaEngine(): void {
+    if (!this._config.luaScript || !this._config.gameDefinition) return;
+
+    this._luaEngine = new LuaEngine({
+      script: this._config.luaScript,
+      gameDefinition: this._config.gameDefinition,
+      seed: this._config.luaSeed,
+    });
+
+    if (this._config.debug) {
+      console.log('[DevBridge] LuaEngine initialized');
+    }
   }
 
   // ─── Message Handling ──────────────────────────────────
@@ -174,26 +202,49 @@ export class DevBridge {
     this._balance -= bet;
     this._roundCounter++;
 
-    // Generate result
-    const customResult = this._config.onPlay({ action, bet, roundId, params });
-    const totalWin = customResult.totalWin ?? (Math.random() > 0.6 ? bet * (1 + Math.random() * 10) : 0);
+    let result: PlayResultData;
 
-    // Credit win
-    this._balance += totalWin;
+    if (this._luaEngine) {
+      // Use LuaEngine for real Lua execution
+      const luaResult = this._luaEngine.execute({ action, bet, roundId, params });
+      const totalWin = luaResult.creditDeferred ? 0 : luaResult.totalWin;
 
-    const result: PlayResultData = {
-      roundId: roundId ?? `dev-round-${this._roundCounter}`,
-      action,
-      balanceAfter: this._balance,
-      totalWin: Math.round(totalWin * 100) / 100,
-      data: customResult.data ?? {},
-      nextActions: customResult.nextActions ?? ['spin'],
-      session: customResult.session ?? null,
-      creditPending: false,
-      bonusFreeSpin: customResult.bonusFreeSpin ?? null,
-      currency: this._config.currency,
-      gameId: this._config.gameConfig?.id ?? 'dev-game',
-    };
+      this._balance += totalWin;
+
+      result = {
+        roundId: roundId ?? `dev-round-${this._roundCounter}`,
+        action,
+        balanceAfter: this._balance,
+        totalWin: Math.round(luaResult.totalWin * 100) / 100,
+        data: luaResult.data,
+        nextActions: luaResult.nextActions,
+        session: luaResult.session,
+        creditPending: luaResult.creditDeferred,
+        bonusFreeSpin: null,
+        currency: this._config.currency,
+        gameId: this._config.gameConfig?.id ?? 'dev-game',
+      };
+    } else {
+      // Fallback to onPlay callback
+      const customResult = this._config.onPlay({ action, bet, roundId, params });
+      const totalWin = customResult.totalWin ?? (Math.random() > 0.6 ? bet * (1 + Math.random() * 10) : 0);
+
+      this._balance += totalWin;
+
+      result = {
+        roundId: roundId ?? `dev-round-${this._roundCounter}`,
+        action,
+        balanceAfter: this._balance,
+        totalWin: Math.round(totalWin * 100) / 100,
+        data: customResult.data ?? {},
+        nextActions: customResult.nextActions ?? ['spin'],
+        session: customResult.session ?? null,
+        creditPending: false,
+        bonusFreeSpin: customResult.bonusFreeSpin ?? null,
+        currency: this._config.currency,
+        gameId: this._config.gameConfig?.id ?? 'dev-game',
+      };
+    }
 
     this.delayedSend('PLAY_RESULT', result, id);
   }

@@ -88,6 +88,35 @@ await import('${entrySrc}');
   };
 }
 
+// ─── Lua Plugin ─────────────────────────────────────────
+
+/**
+ * Vite plugin that enables importing `.lua` files as raw strings
+ * and triggers a full page reload on `.lua` file changes.
+ */
+function luaPlugin(): Plugin {
+  return {
+    name: 'game-engine:lua',
+    apply: 'serve',
+
+    transform(code: string, id: string) {
+      if (id.endsWith('.lua')) {
+        return {
+          code: `export default ${JSON.stringify(code)};`,
+          map: null,
+        };
+      }
+    },
+
+    handleHotUpdate({ file, server }: { file: string; server: any }) {
+      if (file.endsWith('.lua')) {
+        server.ws.send({ type: 'full-reload' });
+        return [];
+      }
+    },
+  };
+}
+
 // ─── defineGameConfig ────────────────────────────────────
 
 /**
@@ -116,6 +145,7 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
   if (config.devBridge) {
     const configPath = config.devBridgeConfig ?? './dev.config';
     plugins.push(devBridgePlugin(configPath));
+    plugins.push(luaPlugin());
   }
 
   const userVite = config.vite ?? {};

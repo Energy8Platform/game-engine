@@ -35,17 +35,32 @@ Tween/Timeline system (`src/animation/`) is promise-based and runs on the PixiJS
 
 ### Module Boundaries & Exports
 
-The engine uses **sub-path exports** for tree-shaking — 8 entry points each produce separate ESM/CJS bundles via Rollup:
+The engine uses **sub-path exports** for tree-shaking — 10 entry points each produce separate ESM/CJS bundles via Rollup:
 - `@energy8platform/game-engine/core` — GameApplication, Scene, SceneManager
 - `@energy8platform/game-engine/animation` — Tween, Timeline, Easing
 - `@energy8platform/game-engine/ui` — Button, Label, Panel, Modal, etc. (requires `@pixi/ui` + `@pixi/layout`)
-- `@energy8platform/game-engine/assets`, `/audio`, `/debug`, `/vite`
+- `@energy8platform/game-engine/lua` — LuaEngine, ActionRouter, SessionManager, PersistentState (requires `fengari`)
+- `@energy8platform/game-engine/assets`, `/audio`, `/debug`, `/vite`, `/react`
 
-Core is kept slim via **optional peer dependencies**: `@pixi/ui`, `@pixi/layout`, `@pixi/sound`, and `@esotericsoftware/spine-pixi-v8` are all optional.
+Core is kept slim via **optional peer dependencies**: `@pixi/ui`, `@pixi/layout`, `@pixi/sound`, `fengari`, and `@esotericsoftware/spine-pixi-v8` are all optional.
+
+### Lua Engine
+
+The `src/lua/` module runs platform Lua game scripts locally in the browser via `fengari` (Lua 5.3 pure JS). This replicates the server-side execution for development and simulation.
+
+**LuaEngine** (`src/lua/LuaEngine.ts`) is the main class. It loads a Lua script, injects the platform's `engine.*` API (random, shuffle, random_weighted, etc.), and executes `execute(state)` on each play request. The full action/transition/session lifecycle is replicated locally via **ActionRouter**, **SessionManager**, and **PersistentState**.
+
+**ActionRouter** (`src/lua/ActionRouter.ts`) dispatches play requests to action definitions and evaluates transition conditions (supports comparisons, `&&`, `||`, `"always"`).
+
+**SessionManager** (`src/lua/SessionManager.ts`) tracks session lifecycle: creation, spin counting, retrigger, `_persist_` data roundtrip, and completion. Supports both slot sessions (fixed spins) and table game unlimited sessions.
+
+**PersistentState** (`src/lua/PersistentState.ts`) manages cross-spin persistent state (`persistent_state.vars` and `_persist_game_*` convention).
+
+**DevBridge integration**: When `DevBridgeConfig.luaScript` and `gameDefinition` are set, DevBridge automatically creates a LuaEngine and uses it instead of the `onPlay` callback. The Vite plugin auto-imports `.lua` files as raw strings with HMR reload.
 
 ### SDK Integration
 
-In development, **DevBridge** (`src/debug/DevBridge.ts`) emulates the game-sdk for offline testing without a real casino backend.
+In development, **DevBridge** (`src/debug/DevBridge.ts`) emulates the game-sdk for offline testing without a real casino backend. It supports both JS `onPlay` callbacks and Lua script execution via LuaEngine.
 
 ## Types
 
