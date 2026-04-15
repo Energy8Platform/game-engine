@@ -100,6 +100,24 @@ const hostConfig: Reconciler.HostConfig<
       instance._flexConfig = { ...instance._flexConfig, ...flexItemConfig };
     }
 
+    // Auto-set layoutWidth/layoutHeight from explicit width/height props for UI components.
+    // This ensures parent FlexContainers measure children correctly without relying on
+    // getLocalBounds() which may return wrong values before the first render pass
+    // (e.g. Text with unloaded fonts, Graphics with pending geometry).
+    if (typeof Ctor.prototype.updateConfig === 'function' && !(instance instanceof FlexContainer)) {
+      const w = typeof props.width === 'number' ? props.width : undefined;
+      const h = typeof props.height === 'number' ? props.height : undefined;
+      if (w !== undefined || h !== undefined) {
+        if (!instance._flexConfig) instance._flexConfig = {};
+        if (w !== undefined && instance._flexConfig.layoutWidth === undefined) {
+          instance._flexConfig.layoutWidth = w;
+        }
+        if (h !== undefined && instance._flexConfig.layoutHeight === undefined) {
+          instance._flexConfig.layoutHeight = h;
+        }
+      }
+    }
+
     return instance;
   },
 
@@ -192,7 +210,22 @@ const hostConfig: Reconciler.HostConfig<
     const oldFlexConfig = extractFlexItemConfig(oldProps);
     if (newFlexConfig || oldFlexConfig) {
       instance._flexConfig = { ...instance._flexConfig, ...newFlexConfig };
-      // Trigger parent relayout
+    }
+
+    // Keep auto layoutWidth/layoutHeight in sync with width/height for UI components
+    if (typeof instance.updateConfig === 'function' && !(instance instanceof FlexContainer)) {
+      if (instance._flexConfig) {
+        if (typeof newProps.width === 'number' && instance._flexConfig.layoutWidth !== undefined) {
+          instance._flexConfig.layoutWidth = newProps.width;
+        }
+        if (typeof newProps.height === 'number' && instance._flexConfig.layoutHeight !== undefined) {
+          instance._flexConfig.layoutHeight = newProps.height;
+        }
+      }
+    }
+
+    // Trigger parent relayout if flex config or dimensions changed
+    if (newFlexConfig || oldFlexConfig || newProps.width !== oldProps.width || newProps.height !== oldProps.height) {
       if (instance.parent instanceof FlexContainer) {
         instance.parent.updateLayout();
       }
