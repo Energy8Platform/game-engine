@@ -9,7 +9,6 @@ import {
   type PlayParams,
 } from '@energy8platform/game-sdk';
 import type { GameDefinition } from '../lua/types';
-import { LuaEngine } from '../lua/LuaEngine';
 
 export interface DevBridgeConfig {
   /** Mock initial balance */
@@ -28,7 +27,7 @@ export interface DevBridgeConfig {
   networkDelay?: number;
   /** Enable debug logging */
   debug?: boolean;
-  /** Lua script source code. When set, overrides onPlay with LuaEngine. */
+  /** Lua script source code. When set, play requests are routed to the Vite dev server's LuaEngine. */
   luaScript?: string;
   /** Game definition for Lua engine (actions, transitions, etc.) */
   gameDefinition?: GameDefinition;
@@ -60,11 +59,11 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
  * `CasinoGameSDK` via a shared in-memory `MemoryChannel`, removing
  * the need for postMessage and iframes.
  *
- * This allows games to be developed and tested without a real backend.
+ * When `luaScript` is set, play requests are sent to the Vite dev server
+ * which runs LuaEngine in Node.js — no fengari in the browser.
  *
  * @example
  * ```ts
- * // In your dev entry point or vite plugin
  * import { DevBridge } from '@energy8platform/game-engine/debug';
  *
  * const devBridge = new DevBridge({
@@ -73,10 +72,7 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
  *   gameConfig: { id: 'my-slot', type: 'slot', betLevels: [0.2, 0.5, 1, 2] },
  *   onPlay: ({ action, bet }) => ({
  *     totalWin: Math.random() > 0.5 ? bet * (Math.random() * 20) : 0,
- *     data: {
- *       matrix: generateRandomMatrix(5, 3, 10),
- *       win_lines: [],
- *     },
+ *     data: { matrix: [[1,2,3],[4,5,6],[7,8,9]] },
  *   }),
  * });
  * devBridge.start();
@@ -87,12 +83,12 @@ export class DevBridge {
   private _balance: number;
   private _roundCounter = 0;
   private _bridge: Bridge | null = null;
-  private _luaEngine: LuaEngine | null = null;
+  private _useLuaServer: boolean;
 
   constructor(config: DevBridgeConfig = {}) {
     this._config = { ...DEFAULT_CONFIG, ...config };
     this._balance = this._config.balance;
-    this.initLuaEngine();
+    this._useLuaServer = !!(this._config.luaScript && this._config.gameDefinition);
   }
 
   /** Current mock balance */
@@ -133,7 +129,8 @@ export class DevBridge {
     });
 
     if (this._config.debug) {
-      console.log('[DevBridge] Started — listening via Bridge (devMode)');
+      const mode = this._useLuaServer ? 'Lua (server-side)' : 'onPlay callback';
+      console.log(`[DevBridge] Started — mode: ${mode}`);
     }
   }
 
@@ -158,24 +155,6 @@ export class DevBridge {
   /** Destroy the dev bridge */
   destroy(): void {
     this.stop();
-    if (this._luaEngine) {
-      this._luaEngine.destroy();
-      this._luaEngine = null;
-    }
-  }
-
-  private initLuaEngine(): void {
-    if (!this._config.luaScript || !this._config.gameDefinition) return;
-
-    this._luaEngine = new LuaEngine({
-      script: this._config.luaScript,
-      gameDefinition: this._config.gameDefinition,
-      seed: this._config.luaSeed,
-    });
-
-    if (this._config.debug) {
-      console.log('[DevBridge] LuaEngine initialized');
-    }
   }
 
   // ─── Message Handling ──────────────────────────────────
@@ -197,33 +176,22 @@ export class DevBridge {
     id?: string,
   ): void {
     const { action, bet, roundId, params } = payload;
-
-    // Deduct bet
-    this._balance -= bet;
     this._roundCounter++;
 
-    let result: PlayResultData;
+    if (this._useLuaServer) {
+      // Debit bet (server deducts before Lua execution)
+      // For session actions (free spins), debit is 0 — LuaEngine handles bet from session
+      this._balance -= bet;
 
-    if (this._luaEngine) {
-      // Use LuaEngine for real Lua execution
-      const luaResult = this._luaEngine.execute({ action, bet, roundId, params });
-      const totalWin = luaResult.creditDeferred ? 0 : luaResult.totalWin;
-
-      this._balance += totalWin;
-
-      result = {
-        roundId: roundId ?? `dev-round-${this._roundCounter}`,
-        action,
-        balanceAfter: this._balance,
-        totalWin: Math.round(luaResult.totalWin * 100) / 100,
-        data: luaResult.data,
-        nextActions: luaResult.nextActions,
-        session: luaResult.session,
-        creditPending: luaResult.creditDeferred,
-        bonusFreeSpin: null,
-        currency: this._config.currency,
-        gameId: this._config.gameConfig?.id ?? 'dev-game',
-      };
+      this.executeLuaOnServer({ action, bet, roundId, params })
+        .then((result) => {
+          this._bridge?.send('PLAY_RESULT', result, id);
+        })
+        .catch((err) => {
+          console.error('[DevBridge] Lua server error:', err);
+          this._balance += bet;
+          this._bridge?.send('PLAY_RESULT', this.buildFallbackResult(action, bet, roundId), id);
+        });
     } else {
       // Fallback to onPlay callback
       const customResult = this._config.onPlay({ action, bet, roundId, params });
@@ -231,7 +199,7 @@ export class DevBridge {
 
       this._balance += totalWin;
 
-      result = {
+      const result: PlayResultData = {
         roundId: roundId ?? `dev-round-${this._roundCounter}`,
         action,
         balanceAfter: this._balance,
@@ -244,9 +212,62 @@ export class DevBridge {
         currency: this._config.currency,
         gameId: this._config.gameConfig?.id ?? 'dev-game',
       };
+
+      this.delayedSend('PLAY_RESULT', result, id);
+    }
+  }
+
+  private async executeLuaOnServer(params: PlayParams): Promise<PlayResultData> {
+    const response = await fetch('/__lua-play', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(err.error ?? `HTTP ${response.status}`);
     }
 
-    this.delayedSend('PLAY_RESULT', result, id);
+    const luaResult = await response.json();
+
+    // Server credit logic:
+    // shouldCredit = (no session) OR (session.completed)
+    // creditAmount = result.totalWin
+    const shouldCredit = !luaResult.session || luaResult.session.completed;
+    if (shouldCredit && luaResult.totalWin > 0) {
+      this._balance += luaResult.totalWin;
+    }
+
+    return {
+      roundId: params.roundId ?? `dev-round-${this._roundCounter}`,
+      action: params.action,
+      balanceAfter: this._balance,
+      totalWin: Math.round(luaResult.totalWin * 100) / 100,
+      data: luaResult.data,
+      nextActions: luaResult.nextActions,
+      session: luaResult.session,
+      creditPending: !shouldCredit,
+      bonusFreeSpin: null,
+      currency: this._config.currency,
+      gameId: this._config.gameConfig?.id ?? 'dev-game',
+    };
+  }
+
+  private buildFallbackResult(action: string, bet: number, roundId?: string): PlayResultData {
+    return {
+      roundId: roundId ?? `dev-round-${this._roundCounter}`,
+      action,
+      balanceAfter: this._balance,
+      totalWin: 0,
+      data: { error: 'Lua execution failed' },
+      nextActions: ['spin'],
+      session: null,
+      creditPending: false,
+      bonusFreeSpin: null,
+      currency: this._config.currency,
+      gameId: this._config.gameConfig?.id ?? 'dev-game',
+    };
   }
 
   private handlePlayAck(_payload: PlayResultAckPayload): void {
@@ -265,7 +286,7 @@ export class DevBridge {
 
   private handleOpenDeposit(): void {
     if (this._config.debug) {
-      console.log('[DevBridge] 💰 Open deposit requested (mock: adding 1000)');
+      console.log('[DevBridge] Open deposit requested (mock: adding 1000)');
     }
     this._balance += 1000;
     this._bridge?.send('BALANCE_UPDATE', { balance: this._balance });

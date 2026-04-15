@@ -179,19 +179,22 @@ describe('LuaEngine', () => {
     expect(baseResult.session!.spinsRemaining).toBe(3);
     expect(baseResult.creditDeferred).toBe(true);
 
-    // Play free spins
+    // Play free spins (initial spin already counted as spinsPlayed=1)
     const fs1 = engine.execute({ action: 'free_spin', bet: 1.0 });
     expect(fs1.session).toBeDefined();
     expect(fs1.session!.spinsRemaining).toBe(2);
-    expect(fs1.session!.spinsPlayed).toBe(1);
+    expect(fs1.session!.spinsPlayed).toBe(2); // initial + this one
 
     const fs2 = engine.execute({ action: 'free_spin', bet: 1.0 });
     expect(fs2.session!.spinsRemaining).toBe(1);
+    expect(fs2.session!.spinsPlayed).toBe(3);
 
     // Last free spin — session completes
     const fs3 = engine.execute({ action: 'free_spin', bet: 1.0 });
     expect(fs3.session!.completed).toBe(true);
     expect(fs3.session!.spinsRemaining).toBe(0);
+    // totalWin should be cumulative session win, not just last spin
+    expect(fs3.totalWin).toBeGreaterThan(0);
   });
 
   it('should apply max win cap', () => {

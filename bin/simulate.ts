@@ -1,5 +1,7 @@
 #!/usr/bin/env npx tsx
 import { SimulationRunner, formatSimulationResult } from '../src/lua/SimulationRunner';
+import { ParallelSimulationRunner } from '../src/lua/ParallelSimulationRunner';
+import { cpus } from 'os';
 import { resolve } from 'path';
 
 // ─── Argument Parsing ───────────────────────────────────
@@ -25,6 +27,7 @@ async function main() {
   const seed = args.seed ? parseInt(args.seed, 10) : undefined;
   const action = args.action ?? 'spin';
   const params = args.params ? JSON.parse(args.params) : undefined;
+  const workers = args.workers ? parseInt(args.workers, 10) : cpus().length;
 
   // Load dev config
   let config: any;
@@ -49,23 +52,43 @@ async function main() {
   }
 
   const gameId = config.gameDefinition.id ?? 'unknown';
-  console.log(`Starting simulation for ${gameId} (${iterations.toLocaleString()} iterations, action: ${action})...`);
+  const useParallel = workers > 1;
+  console.log(`Starting simulation for ${gameId} (${iterations.toLocaleString()} iterations, action: ${action}, workers: ${useParallel ? workers : 1})...`);
 
-  const runner = new SimulationRunner({
-    script: config.luaScript,
-    gameDefinition: config.gameDefinition,
-    iterations,
-    bet,
-    seed,
-    action,
-    params,
-    onProgress: (completed, total) => {
-      const pct = Math.round((completed / total) * 100);
-      console.log(`Progress: ${completed.toLocaleString()}/${total.toLocaleString()} (${pct}%)`);
-    },
-  });
+  const onProgress = (completed: number, total: number) => {
+    const pct = Math.round((completed / total) * 100);
+    console.log(`Progress: ${completed.toLocaleString()}/${total.toLocaleString()} (${pct}%)`);
+  };
 
-  const result = runner.run();
+  let result;
+
+  if (useParallel) {
+    const runner = new ParallelSimulationRunner({
+      script: config.luaScript,
+      gameDefinition: config.gameDefinition,
+      iterations,
+      bet,
+      seed,
+      action,
+      params,
+      workerCount: workers,
+      onProgress,
+    });
+    result = await runner.run();
+  } else {
+    const runner = new SimulationRunner({
+      script: config.luaScript,
+      gameDefinition: config.gameDefinition,
+      iterations,
+      bet,
+      seed,
+      action,
+      params,
+      onProgress,
+    });
+    result = runner.run();
+  }
+
   console.log(formatSimulationResult(result));
 }
 

@@ -14,6 +14,10 @@ import {
   HTMLText,
 } from 'pixi.js';
 import { extend } from './catalogue';
+import {
+  Button, Label, Panel, FlexContainer, ProgressBar,
+  ScrollContainer, Modal, Toast, BalanceDisplay, WinDisplay, Layout,
+} from '../ui';
 
 /**
  * Register all standard PixiJS display objects for JSX use.
@@ -38,14 +42,31 @@ export function extendPixiElements(): void {
 }
 
 /**
- * Register @pixi/layout components for JSX use.
- * Pass the dynamically imported module:
+ * Register all engine UI components for JSX use.
+ * Call once at app startup before rendering React scenes that use UI components.
  *
+ * @example
  * ```ts
- * const layout = await import('@pixi/layout/components');
- * extendLayoutElements(layout);
+ * extendPixiElements();
+ * extendUIElements();
+ *
+ * // Now you can use:
+ * // <button text="SPIN" onPress={handler} />
+ * // <flexContainer direction="row" gap={16}>...</flexContainer>
+ * // <label text="Hello" style-fontSize={24} />
  * ```
  */
-export function extendLayoutElements(layoutModule: Record<string, any>): void {
-  extend(layoutModule);
+export function extendUIElements(): void {
+  extend({
+    Button, Label, Panel, FlexContainer, ProgressBar,
+    ScrollContainer, Modal, Toast, BalanceDisplay, WinDisplay, Layout,
+  });
+}
+
+/**
+ * Register additional custom components for JSX use.
+ * Pass an object mapping component names to their constructors.
+ */
+export function extendCustomElements(components: Record<string, any>): void {
+  extend(components);
 }

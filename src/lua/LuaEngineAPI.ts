@@ -1,13 +1,22 @@
 import type { GameDefinition } from './types';
+import fengari from 'fengari';
 
-// fengari is a CJS module — use dynamic import workaround for ESM compatibility
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-declare const require: (module: string) => any;
-const fengari = require('fengari');
 const { lua, lauxlib } = fengari;
 const { to_luastring, to_jsstring } = fengari;
 
 export type RngFunction = () => number;
+
+/** Cache for to_luastring() results — avoids re-encoding the same keys every iteration */
+const luaStringCache = new Map<string, Uint8Array>();
+
+export function cachedToLuastring(s: string): Uint8Array {
+  let cached = luaStringCache.get(s);
+  if (!cached) {
+    cached = to_luastring(s);
+    luaStringCache.set(s, cached);
+  }
+  return cached;
+}
 
 /**
  * Seeded xoshiro128** PRNG for deterministic simulation/replay.
@@ -275,7 +284,7 @@ export function pushJSValue(L: any, value: unknown): void {
       lua.lua_pushnumber(L, value);
     }
   } else if (typeof value === 'string') {
-    lua.lua_pushstring(L, to_luastring(value));
+    lua.lua_pushstring(L, cachedToLuastring(value));
   } else if (Array.isArray(value)) {
     pushJSArray(L, value);
   } else if (typeof value === 'object') {
@@ -300,6 +309,6 @@ function pushJSObject(L: any, obj: Record<string, unknown>): void {
   lua.lua_createtable(L, 0, keys.length);
   for (const key of keys) {
     pushJSValue(L, obj[key]);
-    lua.lua_setfield(L, -2, to_luastring(key));
+    lua.lua_setfield(L, -2, cachedToLuastring(key));
   }
 }

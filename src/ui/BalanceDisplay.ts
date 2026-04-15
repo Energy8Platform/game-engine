@@ -1,5 +1,6 @@
 import { Container } from 'pixi.js';
 import { Label } from './Label';
+import { Tween } from '../animation/Tween';
 import { Easing } from '../animation/Easing';
 
 export interface BalanceDisplayConfig {
@@ -23,7 +24,7 @@ export interface BalanceDisplayConfig {
  * Reactive balance display component.
  *
  * Automatically formats currency and can animate value changes
- * with a smooth countup/countdown effect.
+ * with a smooth countup/countdown effect using engine Tween.
  *
  * @example
  * ```ts
@@ -35,13 +36,15 @@ export interface BalanceDisplayConfig {
  * ```
  */
 export class BalanceDisplay extends Container {
+  readonly __uiComponent = true as const;
+
   private _prefixLabel: Label | null = null;
   private _valueLabel: Label;
   private _config: Required<Pick<BalanceDisplayConfig, 'currency' | 'locale' | 'animated' | 'animationDuration'>>;
   private _currentValue = 0;
   private _displayedValue = 0;
-  private _animating = false;
-  private _animationCancelled = false;
+  /** Internal target for Tween animation */
+  private _tweenTarget = { value: 0 };
 
   constructor(config: BalanceDisplayConfig = {}) {
     super();
@@ -111,42 +114,21 @@ export class BalanceDisplay extends Container {
     this.updateDisplay();
   }
 
-  private async animateValue(from: number, to: number): Promise<void> {
-    if (this._animating) {
-      this._animationCancelled = true;
-    }
+  private animateValue(from: number, to: number): void {
+    // Cancel any running animation
+    Tween.killTweensOf(this._tweenTarget);
 
-    this._animating = true;
-    this._animationCancelled = false;
-    const duration = this._config.animationDuration;
-    const startTime = Date.now();
-
-    return new Promise<void>((resolve) => {
-      const tick = () => {
-        if (this._animationCancelled) {
-          this._animating = false;
-          resolve();
-          return;
-        }
-
-        const elapsed = Date.now() - startTime;
-        const t = Math.min(elapsed / duration, 1);
-        const eased = Easing.easeOutCubic(t);
-
-        this._displayedValue = from + (to - from) * eased;
+    this._tweenTarget.value = from;
+    Tween.to(
+      this._tweenTarget,
+      { value: to },
+      this._config.animationDuration,
+      Easing.easeOutCubic,
+      () => {
+        this._displayedValue = this._tweenTarget.value;
         this.updateDisplay();
-
-        if (t < 1) {
-          requestAnimationFrame(tick);
-        } else {
-          this._displayedValue = to;
-          this.updateDisplay();
-          this._animating = false;
-          resolve();
-        }
-      };
-      requestAnimationFrame(tick);
-    });
+      },
+    );
   }
 
   private updateDisplay(): void {
@@ -162,5 +144,16 @@ export class BalanceDisplay extends Container {
       this._prefixLabel.y = -14;
       this._valueLabel.y = 14;
     }
+  }
+
+  /** React reconciler update hook */
+  updateConfig(changed: Record<string, any>): void {
+    if ('value' in changed) this.setValue(changed.value);
+    if ('currency' in changed) this.setCurrency(changed.currency);
+  }
+
+  override destroy(options?: boolean | { children?: boolean; texture?: boolean; textureSource?: boolean }): void {
+    Tween.killTweensOf(this._tweenTarget);
+    super.destroy(options);
   }
 }

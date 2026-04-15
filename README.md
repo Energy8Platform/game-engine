@@ -35,7 +35,6 @@ A casino game engine built on [PixiJS v8](https://pixijs.com/) and [@energy8plat
 npm install pixi.js @energy8platform/game-sdk @energy8platform/game-engine
 
 # Optional peer dependencies
-npm install @pixi/ui @pixi/layout yoga-layout    # UI components (Layout, Panel, ScrollContainer)
 npm install @pixi/sound                           # Audio
 npm install @esotericsoftware/spine-pixi-v8       # Spine animations
 npm install react react-dom react-reconciler      # React integration
@@ -88,9 +87,6 @@ bootstrap();
 | --- | --- | --- |
 | `pixi.js` | `^8.16.0` | Yes |
 | `@energy8platform/game-sdk` | `^2.7.0` | Yes |
-| `@pixi/ui` | `^2.3.0` | Optional — Button, ScrollContainer, ProgressBar |
-| `@pixi/layout` | `^3.2.0` | Optional — Layout, Panel (Yoga flexbox) |
-| `yoga-layout` | `^3.0.0` | Optional — peer dep of `@pixi/layout` |
 | `@pixi/sound` | `^6.0.0` | Optional — audio |
 | `@esotericsoftware/spine-pixi-v8` | `~4.2.0` | Optional — Spine animations |
 | `react`, `react-dom` | `>=18.0.0` | Optional — ReactScene |
@@ -104,10 +100,10 @@ import { GameApplication } from '@energy8platform/game-engine';             // f
 import { Scene, SceneManager } from '@energy8platform/game-engine/core';
 import { AssetManager } from '@energy8platform/game-engine/assets';
 import { AudioManager } from '@energy8platform/game-engine/audio';
-import { Button, Label, Modal, Layout, ScrollContainer, Panel, Toast } from '@energy8platform/game-engine/ui';
+import { FlexContainer, Button, Label, Panel, Modal, Layout, ScrollContainer, Toast, ProgressBar, BalanceDisplay, WinDisplay, resolveView } from '@energy8platform/game-engine/ui';
 import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-engine/animation';
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
-import { ReactScene, createPixiRoot, useSDK, useViewport } from '@energy8platform/game-engine/react';
+import { ReactScene, extendPixiElements, extendUIElements, useSDK, useViewport } from '@energy8platform/game-engine/react';
 import { defineGameConfig } from '@energy8platform/game-engine/vite';
 import { LuaEngine, ActionRouter } from '@energy8platform/game-engine/lua';
 ```
@@ -396,17 +392,45 @@ SpineHelper.setSkin(spine, 'warrior');
 
 ## UI Components
 
-> Requires `@pixi/ui` and `@pixi/layout` + `yoga-layout` as peer dependencies. Import from `@energy8platform/game-engine/ui`.
->
-> For components not wrapped by the engine (`Slider`, `CheckBox`, `Input`, `Select`, etc.), import directly from `@pixi/ui`.
+> Built-in UI system with zero external dependencies. No `@pixi/ui`, `@pixi/layout`, or `yoga-layout` required. Import from `@energy8platform/game-engine/ui`.
+
+### Asset Skinning (`ViewInput`)
+
+Every visual component supports custom artwork via the `ViewInput` type:
+
+```typescript
+type ViewInput = string | Texture | Container;
+```
+
+- `string` — texture name, resolved via `Sprite.from()` from the asset manager
+- `Texture` — wrapped in a `Sprite`
+- `Container` — used as-is (NineSliceSprite, AnimatedSprite, custom artwork, etc.)
+
+If no custom view is provided, components fall back to Graphics-based rendering (colors, rounded rects). This means you can prototype with Graphics and later swap to production art with no API changes.
+
+### FlexContainer
+
+Lightweight flexbox-like layout container. Children added via `addChild()` automatically participate in flex layout.
+
+```typescript
+const toolbar = new FlexContainer({
+  direction: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 16,
+  padding: 12,
+});
+toolbar.addChild(button1);                       // auto flex layout
+toolbar.addChild(button2);
+toolbar.addFlexChild(spacer, { flexGrow: 1 });   // with flex config
+toolbar.resize(800, 60);
+```
 
 ### Layout
 
-Responsive flexbox container powered by `@pixi/layout`. Supports `horizontal`, `vertical`, `grid`, `wrap` modes with alignment, padding, gap, anchoring, and viewport breakpoints.
+Higher-level layout with direction presets (`horizontal`/`vertical`/`grid`/`wrap`), viewport anchoring, and responsive breakpoints. Wraps FlexContainer.
 
 ```typescript
-import { Layout } from '@energy8platform/game-engine/ui';
-
 const toolbar = new Layout({
   direction: 'horizontal',
   gap: 20,
@@ -422,9 +446,57 @@ toolbar.updateViewport(width, height);
 
 **Anchors:** `top-left`, `top-center`, `top-right`, `center-left`, `center`, `center-right`, `bottom-left`, `bottom-center`, `bottom-right`
 
+### Button
+
+Per-state views with Tween animations. Each state accepts a `ViewInput` for full asset control:
+
+```typescript
+// Graphics-based (prototyping)
+const btn = new Button({
+  width: 200, height: 60, borderRadius: 12,
+  colors: { default: 0xffd700, hover: 0xffe44d, pressed: 0xccac00, disabled: 0x666666 },
+  text: 'SPIN',
+  onPress: () => spin(),
+});
+
+// Asset-based (production)
+const btn = new Button({
+  defaultView: 'btn-idle',       // texture name
+  hoverView: 'btn-hover',
+  pressedView: 'btn-pressed',
+  disabledView: 'btn-disabled',
+  text: 'SPIN',
+  onPress: () => spin(),
+});
+
+// NineSlice button
+const btn = new Button({
+  defaultView: new NineSliceSprite({ texture: Texture.from('btn-9s'), leftWidth: 20, topHeight: 20, rightWidth: 20, bottomHeight: 20 }),
+  text: 'BET MAX',
+});
+```
+
+### ProgressBar
+
+Animated fill bar with optional custom track/fill views:
+
+```typescript
+// Graphics-based
+const bar = new ProgressBar({ width: 400, height: 20, fillColor: 0x00ff00, animated: true });
+bar.progress = 0.75;
+bar.update(dt);
+
+// Asset-based
+const bar = new ProgressBar({
+  width: 400, height: 20,
+  trackView: 'bar-track',                       // texture name
+  fillView: new NineSliceSprite({ ... }),        // or any Container
+});
+```
+
 ### ScrollContainer
 
-Touch/drag scrollable container with mouse wheel, inertia, and dynamic rendering. Extends `@pixi/ui` ScrollBox.
+Touch/drag scrolling with mouse wheel, inertia, and optional visual scrollbar:
 
 ```typescript
 const scroll = new ScrollContainer({
@@ -432,66 +504,60 @@ const scroll = new ScrollContainer({
   direction: 'vertical',
   elementsMargin: 8,
   backgroundColor: 0x1a1a2e,
+  scrollbar: true,                    // show scrollbar indicator
+  scrollbarColor: 0xaaaaaa,           // or provide custom view:
+  // thumbView: 'scrollbar-thumb',    // texture name, Texture, or Container
 });
 for (let i = 0; i < 50; i++) scroll.addItem(createRow(i));
 ```
 
-### Button
+### Panel
 
-Extends `@pixi/ui` FancyButton. Supports Graphics-based and texture-based states, press animation, and text.
+Background panel with FlexContainer content layout. Supports Graphics or 9-slice backgrounds:
 
 ```typescript
-const spinBtn = new Button({
-  width: 200, height: 60,
-  borderRadius: 12,
-  colors: { default: 0xffd700, hover: 0xffe44d, pressed: 0xccac00, disabled: 0x666666 },
-  pressScale: 0.95,
-  text: 'SPIN',
+// Graphics background
+const panel = new Panel({ width: 600, height: 400, backgroundColor: 0x1a1a2e, borderRadius: 16, padding: 16 });
+panel.addContent(myLabel);
+
+// 9-slice texture background
+const panel = new Panel({
+  nineSliceTexture: 'panel-bg',
+  nineSliceBorders: [20, 20, 20, 20],
+  width: 600, height: 400, padding: 16,
 });
-spinBtn.onPress.connect(() => console.log('Spin!'));
-spinBtn.disable();
-spinBtn.enable();
 ```
 
 ### Other UI Components
 
-**Label** — styled text wrapper:
+**Label** — styled text with auto-fit and currency formatting:
 ```typescript
-new Label({ text: 'TOTAL WIN', style: { fontSize: 36, fill: 0xffffff } });
+const label = new Label({ text: 'TOTAL WIN', style: { fontSize: 36, fill: 0xffffff }, maxWidth: 300, autoFit: true });
+label.setCurrency(1500, 'USD'); // → "$1,500.00"
 ```
 
-**BalanceDisplay** — animated currency display:
+**BalanceDisplay** — animated currency countup/countdown:
 ```typescript
-const balance = new BalanceDisplay({ currency: 'USD', animated: true });
-balance.setValue(9500);
+const balance = new BalanceDisplay({ prefix: 'BALANCE', currency: 'USD', animated: true });
+balance.setValue(9500); // smooth countup
 ```
 
-**WinDisplay** — countup win animation:
+**WinDisplay** — dramatic countup with scale pop:
 ```typescript
-await winDisplay.showWin(5000); // countup over 2 seconds
+await winDisplay.showWin(5000);
+winDisplay.hide();
 ```
 
-**ProgressBar** — animated fill bar (wraps `@pixi/ui`):
-```typescript
-const bar = new ProgressBar({ width: 400, height: 20, fillColor: 0x00ff00, animated: true });
-bar.progress = 0.75;
-bar.update(dt); // call each frame for animation
-```
-
-**Panel** — background panel with flex layout (Graphics or 9-slice):
-```typescript
-const panel = new Panel({ width: 600, height: 400, backgroundColor: 0x1a1a2e, borderRadius: 16, padding: 16 });
-panel.content.addChild(myText); // children participate in flexbox
-```
-
-**Modal** — full-screen overlay dialog:
+**Modal** — full-screen overlay with enter/exit animations:
 ```typescript
 const modal = new Modal({ overlayAlpha: 0.7, closeOnOverlay: true, animationDuration: 300 });
+modal.content.addChild(settingsPanel);
 await modal.show(viewWidth, viewHeight);
 ```
 
-**Toast** — notification messages (`info`, `success`, `warning`, `error`):
+**Toast** — transient notifications with optional custom background:
 ```typescript
+const toast = new Toast({ duration: 3000, backgroundView: 'toast-bg' });
 await toast.show('Free spins activated!', 'success', viewWidth, viewHeight);
 ```
 
@@ -533,7 +599,7 @@ export default defineGameConfig({
 });
 ```
 
-**What `defineGameConfig` provides:** ESNext build target (for yoga-layout WASM), asset inlining (<8KB), PixiJS chunk splitting, DevBridge auto-injection in dev mode, dependency deduplication (`pixi.js`, `@pixi/layout`, `react`, etc.), and pre-bundling optimization.
+**What `defineGameConfig` provides:** ESNext build target, asset inlining (<8KB), PixiJS chunk splitting, DevBridge auto-injection in dev mode, dependency deduplication (`pixi.js`, `react`, etc.), and pre-bundling optimization.
 
 ---
 
@@ -686,42 +752,87 @@ bridge.destroy();
 
 ## React Integration
 
-Built-in React reconciler for PixiJS. No `@pixi/react` needed — renders React trees directly into PixiJS Containers.
+Built-in React reconciler for PixiJS. No `@pixi/react` needed — renders React trees directly into PixiJS Containers. All engine UI components work declaratively in JSX with full TypeScript autocompletion.
+
+### Setup
+
+```typescript
+import { extendPixiElements, extendUIElements } from '@energy8platform/game-engine/react';
+
+extendPixiElements();  // Container, Sprite, Text, Graphics, etc.
+extendUIElements();    // Button, Label, FlexContainer, Panel, etc.
+```
+
+### ReactScene
 
 ```tsx
-import { ReactScene, extendPixiElements, useSDK, useViewport, useBalance } from '@energy8platform/game-engine/react';
+import { ReactScene, useEngine, useBalance } from '@energy8platform/game-engine/react';
+import { useState } from 'react';
 
-extendPixiElements(); // register PixiJS elements for JSX (call once)
-
-export class GameScene extends ReactScene {
-  render() { return <GameRoot />; }
+export class SlotScene extends ReactScene {
+  render() { return <SlotUI />; }
 }
 
-function GameRoot() {
-  const { width, height } = useViewport();
+function SlotUI() {
+  const { screen } = useEngine();
   const balance = useBalance();
-  const sdk = useSDK();
+  const [bet, setBet] = useState(1);
 
   return (
-    <container>
-      <text text={`Balance: $${balance.toFixed(2)}`} style={{ fontSize: 32, fill: 0xffffff }} />
-      <text text="SPIN" style={{ fontSize: 48, fill: 0xffd700 }}
-        eventMode="static" cursor="pointer"
-        onClick={async () => {
-          const result = await sdk?.play({ action: 'spin', bet: 1 });
-          sdk?.playAck(result!);
-        }}
-      />
-    </container>
+    <flexContainer direction="column" width={screen.width} height={screen.height} padding={20}>
+      {/* Top bar */}
+      <flexContainer direction="row" justifyContent="space-between" alignItems="center">
+        <balanceDisplay currency="USD" animated value={balance} />
+        <label text={`BET: $${bet.toFixed(2)}`} style-fontSize={18} style-fill={0xcccccc} />
+      </flexContainer>
+
+      {/* Controls */}
+      <flexContainer direction="row" justifyContent="center" gap={12} alignItems="center">
+        <button width={50} height={50} borderRadius={25} text="-"
+                colors-default={0x444444}
+                onPress={() => setBet(b => Math.max(0.2, b - 0.5))} />
+        <button width={140} height={60} borderRadius={30} text="SPIN"
+                colors-default={0x22aa44} colors-hover={0x33cc55}
+                onPress={() => { /* spin */ }} />
+        <button width={50} height={50} borderRadius={25} text="+"
+                colors-default={0x444444}
+                onPress={() => setBet(b => b + 0.5)} />
+      </flexContainer>
+    </flexContainer>
   );
 }
 ```
+
+### Declarative UI Components
+
+All engine UI components are config-based: the reconciler passes JSX props as a config object to the constructor, and calls `updateConfig()` on prop changes. Children of `<flexContainer>`, `<panel>`, and `<scrollContainer>` automatically participate in their layout system.
+
+```tsx
+{/* Asset-skinned button */}
+<button defaultView="btn-idle" hoverView="btn-hover" text="SPIN" onPress={handler} />
+
+{/* Panel with 9-slice background */}
+<panel nineSliceTexture="panel-bg" nineSliceBorders={[20,20,20,20]} width={400} height={300}>
+  <label text="Settings" style-fontSize={24} />
+</panel>
+
+{/* Progress bar with custom track/fill */}
+<progressBar trackView="bar-track" fillView="bar-fill" progress={0.75} width={300} height={20} />
+
+{/* Scrollable list */}
+<scrollContainer width={500} height={400} direction="vertical" scrollbar elementsMargin={8}>
+  <label text="Item 1" />
+  <label text="Item 2" />
+</scrollContainer>
+```
+
+**Dash-notation** for nested config: `colors-default={0xff0000}` → `{ colors: { default: 0xff0000 } }`, `style-fontSize={24}` → `{ style: { fontSize: 24 } }`.
 
 ### Hooks
 
 | Hook | Returns | Description |
 | --- | --- | --- |
-| `useEngine()` | `EngineContextValue` | Full engine context |
+| `useEngine()` | `EngineContextValue` | Full engine context (app, sdk, audio, screen, etc.) |
 | `useSDK()` | `CasinoGameSDK \| null` | SDK instance |
 | `useAudio()` | `AudioManager` | Audio manager |
 | `useInput()` | `InputManager` | Input manager |
@@ -733,18 +844,18 @@ function GameRoot() {
 ### Element Registration
 
 ```typescript
-import { extendPixiElements, extendLayoutElements, extend } from '@energy8platform/game-engine/react';
+import { extendPixiElements, extendUIElements, extendCustomElements } from '@energy8platform/game-engine/react';
 
-extendPixiElements();                              // Container, Sprite, Text, Graphics, etc.
-extendLayoutElements(await import('@pixi/layout/components')); // @pixi/layout (if installed)
-extend({ Button, Panel });                         // custom classes
+extendPixiElements();                // Container, Sprite, Text, Graphics, AnimatedSprite, etc.
+extendUIElements();                  // Button, Label, FlexContainer, Panel, ProgressBar, etc.
+extendCustomElements({ MyWidget });  // your own classes
 ```
 
-After registration, use as lowercase JSX: `<container>`, `<sprite>`, `<text>`, `<graphics>`, `<button>`.
+After registration, use as lowercase JSX: `<container>`, `<sprite>`, `<text>`, `<graphics>`, `<button>`, `<flexContainer>`, `<panel>`, etc.
 
-**Props:** Regular props set directly (`alpha`, `visible`, `scale`). Nested via dash: `position-x`, `scale-y`. Events: `onClick` → `onclick`, `onPointerDown` → `onpointerdown`.
+**Props:** Regular props set directly (`alpha`, `visible`, `scale`). Nested via dash: `position-x`, `scale-y`, `colors-default`. Events: `onClick`, `onPointerDown`, `onPress` (Button).
 
-> React is entirely optional. Imperative (`Scene`) and React (`ReactScene`) scenes can coexist.
+> React is entirely optional. Imperative (`Scene`) and React (`ReactScene`) scenes can coexist in the same game.
 
 ---
 

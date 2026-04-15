@@ -1,7 +1,10 @@
-// ─── @pixi/layout setup (must be imported before creating containers) ────
-import '@pixi/layout';
+// ─── View helpers ─────────────────────────────────────────
+export { resolveView } from './view';
+export type { ViewInput } from './view';
 
 // ─── Engine UI Components ─────────────────────────────────
+export { FlexContainer } from './FlexContainer';
+export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, FlexItemConfig } from './FlexContainer';
 export { Button } from './Button';
 export type { ButtonConfig, ButtonState } from './Button';
 export { ProgressBar } from './ProgressBar';
@@ -22,12 +25,3 @@ export { Layout } from './Layout';
 export type { LayoutConfig, LayoutDirection, LayoutAlignment, LayoutAnchor } from './Layout';
 export { ScrollContainer } from './ScrollContainer';
 export type { ScrollContainerConfig, ScrollDirection } from './ScrollContainer';
-
-// ─── Direct access to @pixi/ui and @pixi/layout ──────────
-// These packages are optional peer dependencies.
-// For any classes or types not wrapped by the engine (e.g. Slider, CheckBox,
-// Input, Select, RadioGroup, List, etc.), import directly:
-//
-//   import { Slider, CheckBox } from '@pixi/ui';
-//   import { LayoutContainer } from '@pixi/layout/components';
-//

@@ -1,5 +1,91 @@
 const RESERVED = new Set(['children', 'key', 'ref']);
 
+// ─── UI Component helpers ────────────────────────────────
+
+/**
+ * Extract a config object from React props.
+ * - Strips reserved keys (children, key, ref) and event props
+ * - Unfolds dash-notation into nested objects: `colors-default` → `{ colors: { default: ... } }`
+ */
+export function extractConfig(props: Record<string, any>): Record<string, any> {
+  const config: Record<string, any> = {};
+
+  for (const key in props) {
+    if (RESERVED.has(key) || isEventProp(key)) continue;
+
+    if (key.includes('-')) {
+      const parts = key.split('-');
+      const root = parts[0];
+      const nested = parts.slice(1).join('-');
+      if (!config[root] || typeof config[root] !== 'object') {
+        config[root] = {};
+      }
+      config[root][nested] = props[key];
+    } else {
+      config[key] = props[key];
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Diff two prop sets and return a config object with only changed values.
+ * Uses extractConfig format (dash-notation unfolded).
+ */
+export function diffConfig(
+  newProps: Record<string, any>,
+  oldProps: Record<string, any>,
+): Record<string, any> {
+  const changed: Record<string, any> = {};
+
+  // New or changed props
+  for (const key in newProps) {
+    if (RESERVED.has(key) || isEventProp(key)) continue;
+    if (newProps[key] !== oldProps[key]) {
+      if (key.includes('-')) {
+        const parts = key.split('-');
+        const root = parts[0];
+        const nested = parts.slice(1).join('-');
+        if (!changed[root] || typeof changed[root] !== 'object') {
+          changed[root] = {};
+        }
+        changed[root][nested] = newProps[key];
+      } else {
+        changed[key] = newProps[key];
+      }
+    }
+  }
+
+  return changed;
+}
+
+/**
+ * Apply only event props from React props to a PixiJS instance.
+ */
+export function applyEventProps(
+  instance: any,
+  newProps: Record<string, any>,
+  oldProps: Record<string, any> = {},
+): void {
+  // Remove old event handlers
+  for (const key in oldProps) {
+    if (!isEventProp(key) || key in newProps) continue;
+    instance[REACT_TO_PIXI_EVENTS[key]] = null;
+  }
+  // Apply new/changed event handlers + onPress (component-level callback)
+  for (const key in newProps) {
+    if (key === 'onPress') {
+      instance.onPress = newProps[key];
+      continue;
+    }
+    if (!isEventProp(key)) continue;
+    if (newProps[key] !== oldProps[key]) {
+      instance[REACT_TO_PIXI_EVENTS[key]] = newProps[key];
+    }
+  }
+}
+
 const REACT_TO_PIXI_EVENTS: Record<string, string> = {
   onClick: 'onclick',
   onPointerDown: 'onpointerdown',

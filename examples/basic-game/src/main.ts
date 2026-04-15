@@ -3,6 +3,7 @@ import {
   ScaleMode,
 } from '@energy8platform/game-engine';
 import { GameScene } from './scenes/GameScene';
+import { ReactSlotScene } from './scenes/ReactSlotScene';
 
 /**
  * Basic game example demonstrating the engine's core features:
@@ -56,8 +57,9 @@ async function bootstrap() {
     debug: true,
   });
 
-  // Register scenes
+  // Register scenes — switch between imperative and React versions
   game.scenes.register('game', GameScene);
+  game.scenes.register('react-game', ReactSlotScene);
 
   // Listen for events
   game.on('initialized', () => console.log('✅ Engine initialized'));

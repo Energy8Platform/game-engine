@@ -44,7 +44,8 @@ export class SimulationRunner {
       script,
       gameDefinition,
       seed,
-      logger: () => {}, // suppress Lua logs during simulation
+      logger: () => {},
+      simulationMode: true,
     });
 
     const spinCost = this.calculateSpinCost(startAction, bet, gameDefinition, params);
@@ -65,44 +66,39 @@ export class SimulationRunner {
       for (let i = 0; i < iterations; i++) {
         totalWagered += spinCost;
         let roundWin = 0;
+        let roundBonusWin = 0;
 
         // Execute the starting action
-        const result = engine.execute({
+        let result = engine.execute({
           action: startAction,
           bet,
           params,
         });
 
         const baseWin = result.totalWin;
-        roundWin += baseWin;
 
-        // If a bonus session was created, play through it
+        // If a session was created, play through it using nextActions from the engine
         if (result.session && !result.session.completed) {
           bonusTriggered++;
 
-          // Find the bonus action from nextActions (different from startAction)
-          const bonusAction = result.nextActions.find(a => a !== startAction)
-            ?? result.nextActions[0];
-
-          // Play bonus spins until session completes
-          let bonusSessionWin = 0;
           let safetyLimit = 10_000;
-          let lastResult = result;
-
-          while (lastResult.session && !lastResult.session.completed && safetyLimit-- > 0) {
-            lastResult = engine.execute({
-              action: bonusAction,
-              bet,
-            });
-            bonusSessionWin += lastResult.totalWin;
+          while (result.session && !result.session.completed && safetyLimit-- > 0) {
+            const nextAction = result.nextActions[0];
+            result = engine.execute({ action: nextAction, bet });
             bonusSpinsPlayed++;
           }
 
-          bonusWin += bonusSessionWin;
-          roundWin += bonusSessionWin;
+          // Session completion returns cumulative totalWin (includes trigger spin).
+          // Use it as the full round win — don't add baseWin separately.
+          roundWin = result.totalWin;
+          roundBonusWin = roundWin - baseWin;
+        } else {
+          // No session — just base game win
+          roundWin = baseWin;
         }
 
         baseGameWin += baseWin;
+        bonusWin += roundBonusWin;
         totalWon += roundWin;
 
         if (roundWin > 0) hits++;
@@ -140,6 +136,7 @@ export class SimulationRunner {
       maxWinHits,
       bonusTriggered,
       bonusSpinsPlayed,
+      _raw: { totalWagered, totalWon, baseGameWin, bonusWin, hits },
     };
   }
 

@@ -2,7 +2,7 @@ import Reconciler from 'react-reconciler';
 import { DefaultEventPriority } from 'react-reconciler/constants';
 import { Container } from 'pixi.js';
 import { catalogue } from './catalogue';
-import { applyProps, hasEventProps } from './applyProps';
+import { applyProps, hasEventProps, extractConfig, diffConfig, applyEventProps } from './applyProps';
 
 function toPascalCase(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -37,10 +37,19 @@ const hostConfig: Reconciler.HostConfig<
         `Call extend({ ${name} }) before rendering.`,
       );
     }
-    const instance = new Ctor();
-    applyProps(instance, props);
 
-    // Enable interactivity if any event prop is present
+    let instance;
+    if (Ctor.prototype.__uiComponent) {
+      // Config-based UI component: pass props as constructor config
+      const config = extractConfig(props);
+      instance = new Ctor(config);
+      applyEventProps(instance, props);
+    } else {
+      // Standard PixiJS element
+      instance = new Ctor();
+      applyProps(instance, props);
+    }
+
     if (hasEventProps(props) && instance.eventMode === 'auto') {
       instance.eventMode = 'static';
     }
@@ -97,7 +106,15 @@ const hostConfig: Reconciler.HostConfig<
   },
 
   commitUpdate(instance, _updatePayload, _type, oldProps, newProps) {
-    applyProps(instance, newProps, oldProps);
+    if (instance.__uiComponent && typeof instance.updateConfig === 'function') {
+      const changed = diffConfig(newProps, oldProps);
+      if (Object.keys(changed).length > 0) {
+        instance.updateConfig(changed);
+      }
+      applyEventProps(instance, newProps, oldProps);
+    } else {
+      applyProps(instance, newProps, oldProps);
+    }
 
     if (hasEventProps(newProps) && instance.eventMode === 'auto') {
       instance.eventMode = 'static';

@@ -1,6 +1,8 @@
 import { Container, Graphics, Text } from 'pixi.js';
 import { Tween } from '../animation/Tween';
 import { Easing } from '../animation/Easing';
+import { resolveView } from './view';
+import type { ViewInput } from './view';
 
 export type ToastType = 'info' | 'success' | 'warning' | 'error';
 
@@ -9,6 +11,8 @@ export interface ToastConfig {
   duration?: number;
   /** Toast position from bottom */
   bottomOffset?: number;
+  /** Custom background view (string texture name, Texture, or Container). Sized to fit text. */
+  backgroundView?: ViewInput;
 }
 
 const TOAST_COLORS: Record<ToastType, number> = {
@@ -29,10 +33,13 @@ const TOAST_COLORS: Record<ToastType, number> = {
  * ```
  */
 export class Toast extends Container {
-  private _bg: Graphics;
+  readonly __uiComponent = true as const;
+
+  private _bg: Container;
+  private _customBg: boolean;
   private _text: Text;
-  private _config: Required<ToastConfig>;
-  private _dismissTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _config: Required<Pick<ToastConfig, 'duration' | 'bottomOffset'>>;
+  private _dismissPending = false;
 
   constructor(config: ToastConfig = {}) {
     super();
@@ -42,7 +49,9 @@ export class Toast extends Container {
       bottomOffset: config.bottomOffset ?? 60,
     };
 
-    this._bg = new Graphics();
+    const customBg = resolveView(config.backgroundView);
+    this._customBg = !!customBg;
+    this._bg = customBg ?? new Graphics();
     this.addChild(this._bg);
 
     this._text = new Text({
@@ -68,9 +77,9 @@ export class Toast extends Container {
     viewWidth?: number,
     viewHeight?: number,
   ): Promise<void> {
-    if (this._dismissTimeout) {
-      clearTimeout(this._dismissTimeout);
-    }
+    // Cancel any pending dismiss
+    Tween.killTweensOf(this);
+    this._dismissPending = false;
 
     this._text.text = message;
 
@@ -80,9 +89,17 @@ export class Toast extends Container {
     const radius = 8;
 
     // Draw the background
-    this._bg.clear();
-    this._bg.roundRect(-width / 2, -height / 2, width, height, radius);
-    this._bg.fill(TOAST_COLORS[type]);
+    if (this._customBg) {
+      this._bg.width = width;
+      this._bg.height = height;
+      this._bg.x = -width / 2;
+      this._bg.y = -height / 2;
+    } else {
+      const g = this._bg as Graphics;
+      g.clear();
+      g.roundRect(-width / 2, -height / 2, width, height, radius);
+      g.fill(TOAST_COLORS[type]);
+    }
 
     // Position
     if (viewWidth && viewHeight) {
@@ -97,9 +114,12 @@ export class Toast extends Container {
     await Tween.to(this, { alpha: 1, y: this.y - 20 }, 300, Easing.easeOutCubic);
 
     if (this._config.duration > 0) {
-      this._dismissTimeout = setTimeout(() => {
-        this.dismiss();
-      }, this._config.duration);
+      this._dismissPending = true;
+      await Tween.delay(this._config.duration);
+      if (this._dismissPending) {
+        this._dismissPending = false;
+        await this.dismiss();
+      }
     }
   }
 
@@ -109,12 +129,22 @@ export class Toast extends Container {
   async dismiss(): Promise<void> {
     if (!this.visible) return;
 
-    if (this._dismissTimeout) {
-      clearTimeout(this._dismissTimeout);
-      this._dismissTimeout = null;
-    }
+    this._dismissPending = false;
+    Tween.killTweensOf(this);
 
     await Tween.to(this, { alpha: 0, y: this.y + 20 }, 200, Easing.easeInCubic);
     this.visible = false;
+  }
+
+  /** React reconciler update hook */
+  updateConfig(changed: Record<string, any>): void {
+    if ('duration' in changed) this._config.duration = changed.duration;
+    if ('bottomOffset' in changed) this._config.bottomOffset = changed.bottomOffset;
+  }
+
+  override destroy(options?: boolean | { children?: boolean; texture?: boolean; textureSource?: boolean }): void {
+    this._dismissPending = false;
+    Tween.killTweensOf(this);
+    super.destroy(options);
   }
 }

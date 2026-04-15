@@ -68,9 +68,9 @@ export type { SpriteAnimationConfig } from './animation/SpriteAnimation';
 export { InputManager } from './input/InputManager';
 
 // ─── UI ──────────────────────────────────────────────────
-// NOTE: @pixi/ui and @pixi/layout are optional peer dependencies.
-// Import UI components from '@energy8platform/game-engine/ui' sub-path
-// to avoid pulling in these deps when they aren't installed.
+// UI components are available from '@energy8platform/game-engine/ui' sub-path.
+export { FlexContainer } from './ui/FlexContainer';
+export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, FlexItemConfig } from './ui/FlexContainer';
 export { Button } from './ui/Button';
 export type { ButtonConfig, ButtonState } from './ui/Button';
 export { ProgressBar } from './ui/ProgressBar';
@@ -101,14 +101,9 @@ export type { DevBridgeConfig } from './debug/DevBridge';
 export { FPSOverlay } from './debug/FPSOverlay';
 
 // ─── Lua ────────────────────────────────────────────────
-// NOTE: fengari is an optional peer dependency.
-// Import Lua components from '@energy8platform/game-engine/lua' sub-path
-// to avoid pulling in fengari when it isn't installed.
-export { LuaEngine } from './lua/LuaEngine';
-export { LuaEngineAPI, createSeededRng } from './lua/LuaEngineAPI';
-export { ActionRouter, evaluateCondition } from './lua/ActionRouter';
-export { SessionManager } from './lua/SessionManager';
-export { PersistentState } from './lua/PersistentState';
+// Lua module is Node.js only (fengari). Use the sub-path import:
+//   import { LuaEngine } from '@energy8platform/game-engine/lua'
+// Re-export only types (zero runtime cost, no fengari in browser bundle).
 export type {
   GameDefinition,
   ActionDefinition,

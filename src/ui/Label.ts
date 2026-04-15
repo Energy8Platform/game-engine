@@ -23,6 +23,8 @@ export interface LabelConfig {
  * ```
  */
 export class Label extends Container {
+  readonly __uiComponent = true as const;
+
   private _text: Text;
   private _maxWidth: number;
   private _autoFit: boolean;
@@ -97,6 +99,17 @@ export class Label extends Container {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     }).format(value);
+  }
+
+  /** React reconciler update hook */
+  updateConfig(changed: Record<string, any>): void {
+    if ('text' in changed) this.text = changed.text;
+    if ('maxWidth' in changed) this.maxWidth = changed.maxWidth;
+    if ('autoFit' in changed) { this._autoFit = changed.autoFit; this.fitText(); }
+    if ('style' in changed && typeof changed.style === 'object') {
+      Object.assign(this._text.style, changed.style);
+      this.fitText();
+    }
   }
 
   private fitText(): void {

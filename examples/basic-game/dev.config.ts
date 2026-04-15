@@ -1,4 +1,39 @@
 import type { DevBridgeConfig } from '@energy8platform/game-engine/debug';
+import luaScript from './game.lua?raw';
+
+const gameDefinition = {
+  id: 'basic-demo',
+  type: 'SLOT',
+  actions: {
+    spin: {
+      stage: 'base_game',
+      debit: 'bet',
+      credit: 'win',
+      transitions: [
+        {
+          condition: 'free_spins_awarded > 0',
+          creates_session: true,
+          credit_override: 'defer',
+          next_actions: ['free_spin'],
+          session_config: {
+            total_spins_var: 'free_spins_awarded',
+          },
+        },
+        { condition: 'always', next_actions: ['spin'] },
+      ],
+    },
+    free_spin: {
+      stage: 'free_spins',
+      debit: 'none',
+      requires_session: true,
+      transitions: [
+        { condition: 'always', next_actions: ['free_spin'] },
+      ],
+    },
+  },
+  bet_levels: [0.2, 0.5, 1, 2, 5, 10, 20],
+  max_win: { multiplier: 5000 },
+};
 
 const config: DevBridgeConfig = {
   balance: 5000,
@@ -11,28 +46,10 @@ const config: DevBridgeConfig = {
     betLevels: [0.2, 0.5, 1, 2, 5, 10, 20],
   },
   assetsUrl: '/assets/',
-  networkDelay: 300,
+  networkDelay: 100,
   debug: true,
-  onPlay: ({ action, bet }) => {
-    // Generate random result
-    const isWin = Math.random() > 0.4;
-    const multiplier = isWin ? 1 + Math.random() * 15 : 0;
-    const totalWin = Math.round(bet * multiplier * 100) / 100;
-
-    return {
-      totalWin,
-      data: {
-        // Example slot result
-        matrix: [
-          [1, 3, 5, 2, 4],
-          [2, 1, 3, 5, 1],
-          [4, 5, 1, 3, 2],
-        ],
-        multiplier: isWin ? multiplier : 0,
-      },
-      nextActions: ['spin'],
-    };
-  },
+  luaScript,
+  gameDefinition: gameDefinition as any,
 };
 
 export default config;

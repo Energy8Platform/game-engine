@@ -1,5 +1,6 @@
 import { Container } from 'pixi.js';
 import { Label } from './Label';
+import { Tween } from '../animation/Tween';
 import { Easing } from '../animation/Easing';
 
 export interface WinDisplayConfig {
@@ -19,7 +20,7 @@ export interface WinDisplayConfig {
  * Win amount display with countup animation.
  *
  * Shows a dramatic countup from 0 to the win amount, with optional
- * scale pop effect — typical of slot games.
+ * scale pop effect — typical of slot games. Uses engine Tween system.
  *
  * @example
  * ```ts
@@ -30,9 +31,12 @@ export interface WinDisplayConfig {
  * ```
  */
 export class WinDisplay extends Container {
+  readonly __uiComponent = true as const;
+
   private _label: Label;
   private _config: Required<Pick<WinDisplayConfig, 'currency' | 'locale' | 'countupDuration' | 'popScale'>>;
-  private _cancelCountup = false;
+  /** Internal target for Tween countup */
+  private _tweenTarget = { value: 0 };
 
   constructor(config: WinDisplayConfig = {}) {
     super();
@@ -67,54 +71,48 @@ export class WinDisplay extends Container {
    */
   async showWin(amount: number): Promise<void> {
     this.visible = true;
-    this._cancelCountup = false;
     this.alpha = 1;
 
-    const duration = this._config.countupDuration;
-    const startTime = Date.now();
+    // Cancel any running animation
+    Tween.killTweensOf(this._tweenTarget);
+    Tween.killTweensOf(this);
 
-    // Scale pop
+    // Setup countup
+    this._tweenTarget.value = 0;
     this.scale.set(0.5);
 
-    return new Promise<void>((resolve) => {
-      const tick = () => {
-        if (this._cancelCountup) {
-          this.displayAmount(amount);
-          resolve();
-          return;
-        }
+    // Scale pop animation
+    const scalePromise = Tween.to(
+      this,
+      { 'scale.x': 1, 'scale.y': 1 },
+      300,
+      Easing.easeOutBack,
+    );
 
-        const elapsed = Date.now() - startTime;
-        const t = Math.min(elapsed / duration, 1);
-        const eased = Easing.easeOutCubic(t);
+    // Countup animation
+    const countupPromise = Tween.to(
+      this._tweenTarget,
+      { value: amount },
+      this._config.countupDuration,
+      Easing.easeOutCubic,
+      () => {
+        this.displayAmount(this._tweenTarget.value);
+      },
+    );
 
-        // Countup
-        const current = amount * eased;
-        this.displayAmount(current);
+    await Promise.all([scalePromise, countupPromise]);
 
-        // Scale animation
-        const scaleT = Math.min(elapsed / 300, 1);
-        const scaleEased = Easing.easeOutBack(scaleT);
-        const targetScale = 1;
-        this.scale.set(0.5 + (targetScale - 0.5) * scaleEased);
-
-        if (t < 1) {
-          requestAnimationFrame(tick);
-        } else {
-          this.displayAmount(amount);
-          this.scale.set(1);
-          resolve();
-        }
-      };
-      requestAnimationFrame(tick);
-    });
+    // Ensure final value is exact
+    this.displayAmount(amount);
+    this.scale.set(1);
   }
 
   /**
    * Skip the countup animation and show the final amount immediately.
    */
   skipCountup(amount: number): void {
-    this._cancelCountup = true;
+    Tween.killTweensOf(this._tweenTarget);
+    Tween.killTweensOf(this);
     this.displayAmount(amount);
     this.scale.set(1);
   }
@@ -123,11 +121,25 @@ export class WinDisplay extends Container {
    * Hide the win display.
    */
   hide(): void {
+    Tween.killTweensOf(this._tweenTarget);
+    Tween.killTweensOf(this);
     this.visible = false;
     this._label.text = '';
   }
 
   private displayAmount(amount: number): void {
     this._label.setCurrency(amount, this._config.currency, this._config.locale);
+  }
+
+  /** React reconciler update hook */
+  updateConfig(changed: Record<string, any>): void {
+    if ('currency' in changed) this._config.currency = changed.currency;
+    if ('locale' in changed) this._config.locale = changed.locale;
+  }
+
+  override destroy(options?: boolean | { children?: boolean; texture?: boolean; textureSource?: boolean }): void {
+    Tween.killTweensOf(this._tweenTarget);
+    Tween.killTweensOf(this);
+    super.destroy(options);
   }
 }

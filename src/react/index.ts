@@ -4,7 +4,7 @@ export type { PixiRoot } from './createPixiRoot';
 
 // Catalogue
 export { extend } from './catalogue';
-export { extendPixiElements, extendLayoutElements } from './extendAll';
+export { extendPixiElements, extendUIElements, extendCustomElements } from './extendAll';
 
 // Scene
 export { ReactScene } from './ReactScene';

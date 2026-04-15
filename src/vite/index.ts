@@ -91,13 +91,98 @@ await import('${entrySrc}');
 // ─── Lua Plugin ─────────────────────────────────────────
 
 /**
- * Vite plugin that enables importing `.lua` files as raw strings
- * and triggers a full page reload on `.lua` file changes.
+ * Vite plugin that:
+ * 1. Enables importing `.lua` files as raw strings with HMR
+ * 2. Runs a LuaEngine on the Vite dev server (Node.js) via `POST /__lua-play`
+ *
+ * fengari runs server-side only — no browser shims needed.
  */
-function luaPlugin(): Plugin {
+function luaPlugin(configPath: string): Plugin {
+  let luaEngine: any = null;
+  let viteServer: any = null;
+
+  async function initEngine() {
+    if (!viteServer) return;
+
+    try {
+      // Invalidate cached modules so HMR picks up changes
+      const root = viteServer.config.root;
+      const fullConfigPath = configPath.startsWith('.')
+        ? root + '/' + configPath.replace(/^\.\//, '')
+        : configPath;
+
+      // Invalidate the config module and its dependencies
+      const configMod = viteServer.moduleGraph.getModuleById(fullConfigPath);
+      if (configMod) viteServer.moduleGraph.invalidateModule(configMod);
+
+      // ssrLoadModule handles TS transpilation and resolves all imports
+      const mod = await viteServer.ssrLoadModule(fullConfigPath);
+      const config = mod.default ?? mod.config ?? mod;
+
+      if (!config.luaScript || !config.gameDefinition) {
+        console.log('[LuaPlugin] No luaScript/gameDefinition in config — Lua server disabled');
+        luaEngine = null;
+        return;
+      }
+
+      // Load LuaEngine via SSR (fengari runs natively in Node.js)
+      const luaMod = await viteServer.ssrLoadModule('@energy8platform/game-engine/lua');
+      const { LuaEngine } = luaMod;
+
+      if (luaEngine) luaEngine.destroy();
+      luaEngine = new LuaEngine({
+        script: config.luaScript,
+        gameDefinition: config.gameDefinition,
+        seed: config.luaSeed,
+      });
+      console.log('[LuaPlugin] LuaEngine initialized (server-side)');
+    } catch (e: any) {
+      console.warn('[LuaPlugin] Failed to initialize LuaEngine:', e.message);
+      luaEngine = null;
+    }
+  }
+
   return {
     name: 'game-engine:lua',
     apply: 'serve',
+
+    async configureServer(server) {
+      viteServer = server;
+      await initEngine();
+
+      // POST /__lua-play — execute Lua on the server
+      server.middlewares.use('/__lua-play', (req: any, res: any) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('Method Not Allowed');
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk: string) => { body += chunk; });
+        req.on('end', () => {
+          try {
+            if (!luaEngine) {
+              res.statusCode = 503;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'LuaEngine not initialized' }));
+              return;
+            }
+
+            const params = JSON.parse(body);
+            const result = luaEngine.execute(params);
+
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(result));
+          } catch (e: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: e.message }));
+          }
+        });
+      });
+    },
 
     transform(code: string, id: string) {
       if (id.endsWith('.lua')) {
@@ -108,8 +193,14 @@ function luaPlugin(): Plugin {
       }
     },
 
-    handleHotUpdate({ file, server }: { file: string; server: any }) {
-      if (file.endsWith('.lua')) {
+    async handleHotUpdate({ file, server }: { file: string; server: any }) {
+      if (file.endsWith('.lua') || file.includes('dev.config')) {
+        console.log('[LuaPlugin] Reloading LuaEngine...');
+
+        // Invalidate all SSR modules so ssrLoadModule picks up fresh code
+        server.moduleGraph.invalidateAll();
+
+        await initEngine();
         server.ws.send({ type: 'full-reload' });
         return [];
       }
@@ -123,7 +214,7 @@ function luaPlugin(): Plugin {
  * Define a Vite configuration tailored for Energy8 casino games.
  *
  * Merges sensible defaults for iGaming projects:
- * - Build target: ESNext (required for yoga-layout WASM top-level await)
+ * - Build target: ESNext
  * - Asset inlining threshold: 8KB
  * - Source maps for dev, none for prod
  * - Optional DevBridge auto-injection in dev mode
@@ -145,7 +236,7 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
   if (config.devBridge) {
     const configPath = config.devBridgeConfig ?? './dev.config';
     plugins.push(devBridgePlugin(configPath));
-    plugins.push(luaPlugin());
+    plugins.push(luaPlugin(configPath));
   }
 
   const userVite = config.vite ?? {};
@@ -181,11 +272,6 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     resolve: {
       dedupe: [
         'pixi.js',
-        '@pixi/layout',
-        '@pixi/layout/components',
-        '@pixi/ui',
-        'yoga-layout',
-        'yoga-layout/load',
         'react',
         'react-dom',
         'react-reconciler',
@@ -196,15 +282,11 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     optimizeDeps: {
       include: [
         'pixi.js',
-        '@pixi/layout',
-        '@pixi/layout/components',
-        '@pixi/ui',
-        'yoga-layout/load',
         'react',
         'react-dom',
       ],
       exclude: [
-        'yoga-layout',
+        'fengari',
       ],
       esbuildOptions: {
         target: 'esnext',

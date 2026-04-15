@@ -80,6 +80,8 @@ export interface LuaEngineConfig {
   seed?: number;
   /** Custom logger function */
   logger?: (level: string, msg: string) => void;
+  /** Skip marshalling data fields (matrix, wins, etc.) for faster simulation */
+  simulationMode?: boolean;
 }
 
 export interface LuaPlayResult {
@@ -112,6 +114,8 @@ export interface SimulationConfig {
   progressInterval?: number;
   /** Progress callback */
   onProgress?: (completed: number, total: number) => void;
+  /** Number of worker threads for parallel simulation (default: os.cpus().length) */
+  workerCount?: number;
 }
 
 export interface SimulationResult {
@@ -127,6 +131,16 @@ export interface SimulationResult {
   maxWinHits: number;
   bonusTriggered: number;
   bonusSpinsPlayed: number;
+  /** Raw accumulators for aggregation across workers */
+  _raw?: SimulationRawAccumulators;
+}
+
+export interface SimulationRawAccumulators {
+  totalWagered: number;
+  totalWon: number;
+  baseGameWin: number;
+  bonusWin: number;
+  hits: number;
 }
 
 export type { SessionData, PlayParams };

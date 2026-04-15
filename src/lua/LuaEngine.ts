@@ -1,33 +1,31 @@
 import type { PlayParams, SessionData } from '@energy8platform/game-sdk';
 import type { LuaEngineConfig, LuaPlayResult, GameDefinition } from './types';
-import { LuaEngineAPI, createSeededRng, luaToJS, pushJSValue } from './LuaEngineAPI';
+import { LuaEngineAPI, createSeededRng, luaToJS, pushJSValue, cachedToLuastring } from './LuaEngineAPI';
 import { ActionRouter } from './ActionRouter';
 import { SessionManager } from './SessionManager';
 import { PersistentState } from './PersistentState';
 
 // fengari — Lua 5.3 in pure JavaScript
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-declare const require: (module: string) => any;
-const fengari = require('fengari');
+import fengari from 'fengari';
+
 const { lua, lauxlib, lualib } = fengari;
 const { to_luastring, to_jsstring } = fengari;
+
+/** Default engine variables matching the server's NewGameState() */
+const DEFAULT_VARIABLES: Record<string, number> = {
+  multiplier: 1,
+  total_multiplier: 1,
+  global_multiplier: 1,
+  last_win_amount: 0,
+  free_spins_awarded: 0,
+};
 
 /**
  * Runs Lua game scripts locally, replicating the platform's server-side execution.
  *
- * Implements the full lifecycle: action routing → state assembly → Lua execute() →
- * result extraction → transition evaluation → session management.
- *
- * @example
- * ```ts
- * const engine = new LuaEngine({
- *   script: luaSource,
- *   gameDefinition: { id: 'my-slot', type: 'SLOT', actions: { ... } },
- * });
- *
- * const result = engine.execute({ action: 'spin', bet: 1.0 });
- * // result.data.matrix, result.totalWin, result.nextActions, etc.
- * ```
+ * Implements the full lifecycle matching `casino_platform/internal/usecase/game_usecase.go`:
+ * action routing → state assembly → Lua execute() → result extraction →
+ * transition evaluation → session management.
  */
 export class LuaEngine {
   private L: any;
@@ -37,62 +35,89 @@ export class LuaEngine {
   private persistentState: PersistentState;
   private gameDefinition: GameDefinition;
   private variables: Record<string, number> = {};
+  private simulationMode: boolean;
+  /** Reusable state objects to avoid per-iteration allocation */
+  private _stateVars: Record<string, number> = {};
+  private _stateParams: Record<string, unknown> = {};
 
   constructor(config: LuaEngineConfig) {
     this.gameDefinition = config.gameDefinition;
+    this.simulationMode = config.simulationMode ?? false;
 
-    // Set up RNG
     const rng = config.seed !== undefined
       ? createSeededRng(config.seed)
       : undefined;
 
-    // Initialize sub-managers
     this.api = new LuaEngineAPI(config.gameDefinition, rng, config.logger);
     this.actionRouter = new ActionRouter(config.gameDefinition);
     this.sessionManager = new SessionManager();
     this.persistentState = new PersistentState(config.gameDefinition.persistent_state);
 
-    // Create Lua state and load standard libraries
     this.L = lauxlib.luaL_newstate();
     lualib.luaL_openlibs(this.L);
 
-    // Register engine.* API
-    this.api.register(this.L);
+    // Polyfill Lua 5.1/5.2 functions removed in 5.3
+    lauxlib.luaL_dostring(this.L, to_luastring(`
+      math.pow = function(a, b) return a ^ b end
+      math.atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+      math.log10 = math.log10 or function(x) return math.log(x, 10) end
+      math.cosh = math.cosh or function(x) return (math.exp(x) + math.exp(-x)) / 2 end
+      math.sinh = math.sinh or function(x) return (math.exp(x) - math.exp(-x)) / 2 end
+      math.tanh = math.tanh or function(x) return math.sinh(x) / math.cosh(x) end
+      math.frexp = math.frexp or function(x)
+        if x == 0 then return 0, 0 end
+        local e = math.floor(math.log(math.abs(x), 2)) + 1
+        return x / (2 ^ e), e
+      end
+      math.ldexp = math.ldexp or function(m, e) return m * (2 ^ e) end
+      unpack = unpack or table.unpack
+      loadstring = loadstring or load
+      table.getn = table.getn or function(t) return #t end
+    `));
 
-    // Load and compile the script
+    this.api.register(this.L);
     this.loadScript(config.script);
   }
 
-  /** Current session data (if any) */
   get session(): SessionData | null {
     return this.sessionManager.current;
   }
 
-  /** Current persistent state values */
   get persistentVars(): Record<string, number> {
     return { ...this.variables };
   }
 
   /**
-   * Execute a play action — the main entry point.
-   * This is what DevBridge calls on each PLAY_REQUEST.
+   * Execute a play action — replicates server's Play() function.
    */
   execute(params: PlayParams): LuaPlayResult {
-    const { action: actionName, bet, params: clientParams } = params;
+    const { action: actionName, params: clientParams } = params;
 
-    // 1. Resolve the action definition
+    // 1. Resolve action
     const action = this.actionRouter.resolveAction(
       actionName,
       this.sessionManager.isActive,
     );
 
-    // 2. Build state.variables
-    const stateVars: Record<string, number> = { ...this.variables, bet };
+    // 2. Determine bet — server uses session bet for session actions
+    let bet = params.bet;
+    if (this.sessionManager.isActive && this.sessionManager.sessionBet !== undefined) {
+      bet = this.sessionManager.sessionBet;
+    }
+
+    // 3. Build state.variables (matching server's NewGameState + restore)
+    // Reuse pooled object to avoid per-iteration allocation
+    const stateVars = this._stateVars;
+    // Clear previous keys
+    for (const key in stateVars) delete stateVars[key];
+    // Apply defaults, then engine vars, then bet
+    Object.assign(stateVars, DEFAULT_VARIABLES, this.variables);
+    stateVars.bet = bet;
 
     // Load cross-spin persistent state
     this.persistentState.loadIntoVariables(stateVars);
 
-    // Load session persistent vars
+    // Load session persistent vars + restore spinsRemaining
     if (this.sessionManager.isActive) {
       const sessionParams = this.sessionManager.getPersistentParams();
       for (const [k, v] of Object.entries(sessionParams)) {
@@ -100,10 +125,18 @@ export class LuaEngine {
           stateVars[k] = v;
         }
       }
+      // Restore spinsRemaining into the variable the script reads
+      if (this.sessionManager.spinsVarName) {
+        stateVars[this.sessionManager.spinsVarName] = this.sessionManager.spinsRemaining;
+      }
+      // Also set free_spins_remaining for convenience
+      stateVars.free_spins_remaining = this.sessionManager.spinsRemaining;
     }
 
-    // 3. Build state.params
-    const stateParams: Record<string, unknown> = { ...clientParams };
+    // 4. Build state.params (reuse pooled object)
+    const stateParams = this._stateParams;
+    for (const key in stateParams) delete stateParams[key];
+    if (clientParams) Object.assign(stateParams, clientParams);
     stateParams._action = actionName;
 
     // Inject session _ps_* persistent data
@@ -135,18 +168,20 @@ export class LuaEngine {
       stateParams.ante_bet = true;
     }
 
-    // 4. Build the state table and call Lua execute()
-    const luaResult = this.callLuaExecute(action.stage, stateParams, stateVars);
+    // 5. Execute Lua (server: executor.Execute(stage, state))
+    const luaResult = this.callLuaExecute(action.stage, actionName, stateParams, stateVars);
 
-    // 5. Extract special fields from Lua result
+    // 6. Process result (server: ApplyLuaResult)
     const totalWinMultiplier = typeof luaResult.total_win === 'number' ? luaResult.total_win : 0;
     const resultVariables = (luaResult.variables ?? {}) as Record<string, number>;
-    const totalWin = Math.round(totalWinMultiplier * bet * 100) / 100;
+    const spinWin = Math.round(totalWinMultiplier * bet * 100) / 100;
 
-    // Merge result variables into engine variables
+    // Merge ONLY Lua return variables into engine state (not the whole stateVars).
+    // On the server, state.Variables is a temporary object rebuilt each call.
+    // Only the Lua result's `variables` table persists between calls.
+    Object.assign(this.variables, resultVariables);
+    // Also update stateVars for transition evaluation below
     Object.assign(stateVars, resultVariables);
-    this.variables = { ...stateVars };
-    delete this.variables.bet; // bet is per-spin, not persistent
 
     // Build client data (everything except special keys)
     const data: Record<string, unknown> = {};
@@ -156,24 +191,12 @@ export class LuaEngine {
       }
     }
 
-    // 6. Apply max win cap
-    let cappedWin = totalWin;
-    if (this.gameDefinition.max_win) {
-      const cap = this.calculateMaxWinCap(bet);
-      if (cap !== undefined && totalWin > cap) {
-        cappedWin = cap;
-        this.variables.max_win_reached = 1;
-        data.max_win_reached = true;
-        this.sessionManager.markMaxWinReached();
-      }
-    }
-
     // 7. Handle _persist_* and _persist_game_* keys
     this.sessionManager.storePersistData(data);
     this.persistentState.storeGameData(data);
 
-    // Save cross-spin persistent state
-    this.persistentState.saveFromVariables(this.variables);
+    // Save cross-spin persistent state (from stateVars which has Lua result merged)
+    this.persistentState.saveFromVariables(stateVars);
 
     // Add exposed persistent vars to client data
     const exposedVars = this.persistentState.getExposedVars();
@@ -188,46 +211,78 @@ export class LuaEngine {
       }
     }
 
-    // 8. Evaluate transitions
-    const { rule, nextActions } = this.actionRouter.evaluateTransitions(action, this.variables);
+    // 8. Evaluate transitions (server uses state.Variables which is stateVars)
+    const { rule, nextActions } = this.actionRouter.evaluateTransitions(action, stateVars);
+
+    // 9. Determine credit behavior (server: creditNow logic)
     let creditDeferred = action.credit === 'defer' || rule.credit_override === 'defer';
+
+    // 10. Session lifecycle (server: create/update/complete session)
     let session = this.sessionManager.current;
+    let resultTotalWin = spinWin;
+    let sessionCompleted = false;
 
-    // Handle session creation
+    // Calculate max win cap for session
+    const maxWinCap = this.calculateMaxWinCap(bet);
+
     if (rule.creates_session && !this.sessionManager.isActive) {
-      session = this.sessionManager.createSession(rule, this.variables, bet);
+      // CREATE SESSION — initial spin counted (server: createSession includes spinWin)
+      session = this.sessionManager.createSession(rule, stateVars, bet, spinWin, maxWinCap);
       creditDeferred = true;
-    }
-    // Handle session update
-    else if (this.sessionManager.isActive) {
-      session = this.sessionManager.updateSession(rule, this.variables, cappedWin);
+      resultTotalWin = spinWin;
 
-      // Handle session completion
-      if (rule.complete_session || session?.completed) {
+      // Clear the trigger variable — it was consumed to set spinsRemaining
+      if (rule.session_config?.total_spins_var) {
+        delete this.variables[rule.session_config.total_spins_var];
+      }
+    } else if (this.sessionManager.isActive) {
+      // UPDATE SESSION — accumulate win, check completion
+      session = this.sessionManager.updateSession(rule, stateVars, spinWin);
+
+      if (session?.completed) {
+        // SESSION COMPLETED — server returns session.TotalWin as result.TotalWin
         const completed = this.sessionManager.completeSession();
         session = completed.session;
+        resultTotalWin = completed.totalWin;
+        sessionCompleted = true;
         creditDeferred = false;
+
+        // Clean up session-scoped variables
+        for (const varName of completed.sessionVarNames) {
+          delete this.variables[varName];
+        }
+      } else {
+        // Mid-session: totalWin = spinWin, credit deferred
+        resultTotalWin = spinWin;
+        creditDeferred = true;
       }
+    }
+    // No session: resultTotalWin = spinWin (already set)
+
+    // Apply max win cap for non-session spins
+    if (!this.sessionManager.isActive && !sessionCompleted && maxWinCap !== undefined && resultTotalWin > maxWinCap) {
+      resultTotalWin = maxWinCap;
+      this.variables.max_win_reached = 1;
+      data.max_win_reached = true;
     }
 
     return {
-      totalWin: cappedWin,
+      totalWin: Math.round(resultTotalWin * 100) / 100,
       data,
       nextActions,
       session,
-      variables: { ...this.variables },
+      // In simulation mode, return reference directly (caller only reads, never mutates)
+      variables: this.simulationMode ? this.variables : { ...this.variables },
       creditDeferred,
     };
   }
 
-  /** Reset all state (sessions, persistent vars, variables) */
   reset(): void {
     this.variables = {};
     this.sessionManager.reset();
     this.persistentState.reset();
   }
 
-  /** Destroy the Lua VM */
   destroy(): void {
     if (this.L) {
       lua.lua_close(this.L);
@@ -245,8 +300,7 @@ export class LuaEngine {
       throw new Error(`Failed to load Lua script: ${err}`);
     }
 
-    // Verify that execute() function exists
-    lua.lua_getglobal(this.L, to_luastring('execute'));
+    lua.lua_getglobal(this.L, cachedToLuastring('execute'));
     if (lua.lua_type(this.L, -1) !== lua.LUA_TFUNCTION) {
       lua.lua_pop(this.L, 1);
       throw new Error('Lua script must define a global `execute(state)` function');
@@ -256,28 +310,31 @@ export class LuaEngine {
 
   private callLuaExecute(
     stage: string,
+    action: string,
     params: Record<string, unknown>,
     variables: Record<string, number>,
   ): Record<string, unknown> {
-    // Push the execute function
-    lua.lua_getglobal(this.L, to_luastring('execute'));
+    lua.lua_getglobal(this.L, cachedToLuastring('execute'));
 
-    // Build and push the state table
-    lua.lua_createtable(this.L, 0, 3);
+    // Build state table: {stage, action, params, variables}
+    lua.lua_createtable(this.L, 0, 4);
 
     // state.stage
-    lua.lua_pushstring(this.L, to_luastring(stage));
-    lua.lua_setfield(this.L, -2, to_luastring('stage'));
+    lua.lua_pushstring(this.L, cachedToLuastring(stage));
+    lua.lua_setfield(this.L, -2, cachedToLuastring('stage'));
+
+    // state.action (server sets this at top level)
+    lua.lua_pushstring(this.L, cachedToLuastring(action));
+    lua.lua_setfield(this.L, -2, cachedToLuastring('action'));
 
     // state.params
     pushJSValue(this.L, params);
-    lua.lua_setfield(this.L, -2, to_luastring('params'));
+    lua.lua_setfield(this.L, -2, cachedToLuastring('params'));
 
     // state.variables
     pushJSValue(this.L, variables);
-    lua.lua_setfield(this.L, -2, to_luastring('variables'));
+    lua.lua_setfield(this.L, -2, cachedToLuastring('variables'));
 
-    // Call execute(state) → 1 result
     const status = lua.lua_pcall(this.L, 1, 1, 0);
     if (status !== lua.LUA_OK) {
       const err = to_jsstring(lua.lua_tostring(this.L, -1));
@@ -285,7 +342,38 @@ export class LuaEngine {
       throw new Error(`Lua execute() failed: ${err}`);
     }
 
-    // Marshal result table to JS
+    if (this.simulationMode) {
+      // Fast path: extract only total_win, variables, _persist_* keys
+      const result: Record<string, unknown> = {};
+
+      lua.lua_getfield(this.L, -1, cachedToLuastring('total_win'));
+      result.total_win = lua.lua_type(this.L, -1) === lua.LUA_TNUMBER
+        ? lua.lua_tonumber(this.L, -1) : 0;
+      lua.lua_pop(this.L, 1);
+
+      lua.lua_getfield(this.L, -1, cachedToLuastring('variables'));
+      if (lua.lua_type(this.L, -1) === lua.LUA_TTABLE) {
+        result.variables = luaToJS(this.L, -1);
+      }
+      lua.lua_pop(this.L, 1);
+
+      // Scan for _persist_* keys (different stages may or may not have them)
+      lua.lua_pushnil(this.L);
+      while (lua.lua_next(this.L, -2) !== 0) {
+        if (lua.lua_type(this.L, -2) === lua.LUA_TSTRING) {
+          const key = to_jsstring(lua.lua_tostring(this.L, -2));
+          if (key.startsWith('_persist_')) {
+            result[key] = luaToJS(this.L, -1);
+          }
+        }
+        lua.lua_pop(this.L, 1);
+      }
+
+      lua.lua_pop(this.L, 1);
+      return result;
+    }
+
+    // Full path
     const result = luaToJS(this.L, -1);
     lua.lua_pop(this.L, 1);
 

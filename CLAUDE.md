@@ -33,16 +33,43 @@ This is `@energy8platform/game-engine` — a PixiJS v8-based casino game engine 
 
 Tween/Timeline system (`src/animation/`) is promise-based and runs on the PixiJS Ticker. No external animation library (no GSAP). `Tween.to()`, `Tween.from()`, `Tween.fromTo()` all return Promises for easy composition.
 
+### UI System
+
+The engine has a **built-in UI system** (`src/ui/`) with zero external UI dependencies. No `@pixi/ui`, `@pixi/layout`, or `yoga-layout` — everything is implemented from scratch.
+
+**FlexContainer** (`src/ui/FlexContainer.ts`) is the core layout primitive — a lightweight flexbox-like container:
+- `direction`: `'row' | 'column'`
+- `justifyContent`: `'start' | 'center' | 'end' | 'space-between' | 'space-around'`
+- `alignItems`: `'start' | 'center' | 'end' | 'stretch'`
+- `gap`, `padding`, `flexWrap`, `maxWidth`/`maxHeight`
+- Children added via `addFlexChild(child, flexConfig?)`, supports `flexGrow` for proportional sizing
+- Call `updateLayout()` after adding children, or `resize(w, h)` to set explicit container size
+
+**Layout** (`src/ui/Layout.ts`) wraps FlexContainer with a higher-level API: direction presets (`horizontal`/`vertical`/`grid`/`wrap`), viewport anchor positioning (9-point), responsive breakpoints by viewport width. Items added via `addItem()`, positioned via `updateViewport(w, h)`.
+
+**Components** — all extend PixiJS Container directly:
+- **Button** — state management (default/hover/pressed/disabled), pointer events, Tween animations, `onPress` callback
+- **Panel** — FlexContainer-based with Graphics or NineSliceSprite background
+- **Label** — auto-fit text scaling, currency/number formatting
+- **BalanceDisplay** — animated countup/countdown via Tween
+- **WinDisplay** — dramatic countup with scale pop via Tween
+- **ProgressBar** — track + fill with mask-based progress, optional animated interpolation
+- **ScrollContainer** — touch/drag, mouse wheel, inertia via Ticker, mask viewport
+- **Modal** — overlay with content centering, enter/exit Tween animations
+- **Toast** — transient notifications with slide-in animation, auto-dismiss via Tween.delay
+
+All components implement proper `destroy()` cleanup (kill tweens, remove listeners, clear references).
+
 ### Module Boundaries & Exports
 
 The engine uses **sub-path exports** for tree-shaking — 10 entry points each produce separate ESM/CJS bundles via Rollup:
 - `@energy8platform/game-engine/core` — GameApplication, Scene, SceneManager
 - `@energy8platform/game-engine/animation` — Tween, Timeline, Easing
-- `@energy8platform/game-engine/ui` — Button, Label, Panel, Modal, etc. (requires `@pixi/ui` + `@pixi/layout`)
+- `@energy8platform/game-engine/ui` — FlexContainer, Button, Label, Panel, Modal, etc.
 - `@energy8platform/game-engine/lua` — LuaEngine, ActionRouter, SessionManager, PersistentState (requires `fengari`)
 - `@energy8platform/game-engine/assets`, `/audio`, `/debug`, `/vite`, `/react`
 
-Core is kept slim via **optional peer dependencies**: `@pixi/ui`, `@pixi/layout`, `@pixi/sound`, `fengari`, and `@esotericsoftware/spine-pixi-v8` are all optional.
+Core is kept slim via **optional peer dependencies**: `@pixi/sound`, `fengari`, and `@esotericsoftware/spine-pixi-v8` are all optional.
 
 ### Lua Engine
 

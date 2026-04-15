@@ -17,7 +17,7 @@ export interface ModalConfig {
  * Modal overlay component.
  * Shows content on top of a dark overlay with enter/exit animations.
  *
- * The content container uses `@pixi/layout` for automatic centering.
+ * Content is automatically centered via position calculations.
  *
  * @example
  * ```ts
@@ -28,6 +28,8 @@ export interface ModalConfig {
  * ```
  */
 export class Modal extends Container {
+  readonly __uiComponent = true as const;
+
   private _overlay: Graphics;
   private _contentContainer: Container;
   private _config: Required<ModalConfig>;
@@ -131,5 +133,13 @@ export class Modal extends Container {
     this.visible = false;
     this._showing = false;
     this.onClose?.();
+  }
+
+  /** React reconciler update hook */
+  updateConfig(changed: Record<string, any>): void {
+    if ('overlayAlpha' in changed) this._config.overlayAlpha = changed.overlayAlpha;
+    if ('closeOnOverlay' in changed) this._config.closeOnOverlay = changed.closeOnOverlay;
+    if ('animationDuration' in changed) this._config.animationDuration = changed.animationDuration;
+    if ('onClose' in changed) this.onClose = changed.onClose;
   }
 }

@@ -4,6 +4,7 @@ export { ActionRouter, evaluateCondition } from './ActionRouter';
 export { SessionManager } from './SessionManager';
 export { PersistentState } from './PersistentState';
 export { SimulationRunner, formatSimulationResult } from './SimulationRunner';
+export { ParallelSimulationRunner } from './ParallelSimulationRunner';
 export type {
   GameDefinition,
   ActionDefinition,
@@ -19,4 +20,5 @@ export type {
   BetLevelsConfig,
   SimulationConfig,
   SimulationResult,
+  SimulationRawAccumulators,
 } from './types';
