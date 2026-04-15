@@ -121,6 +121,16 @@ export class Panel extends Container {
     return this._content;
   }
 
+  /** Suspend content layout recalculation. Call resumeLayout() to flush. */
+  suspendLayout(): void {
+    this._content.suspendLayout();
+  }
+
+  /** Resume content layout and flush if dirty. */
+  resumeLayout(): void {
+    this._content.resumeLayout();
+  }
+
   /** Convenience: add a child to the content layout */
   addContent(child: Container): this {
     this._content.addFlexChild(child);

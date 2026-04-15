@@ -1,6 +1,6 @@
 const RESERVED = new Set(['children', 'key', 'ref']);
 /** Props handled by the reconciler as flex item config, not forwarded to components */
-const FLEX_ITEM_PROPS = new Set(['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude']);
+const FLEX_ITEM_PROPS = new Set(['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left']);
 
 // ─── UI Component helpers ────────────────────────────────
 

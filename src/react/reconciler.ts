@@ -9,8 +9,18 @@ import type { FlexItemConfig } from '../ui/FlexContainer';
 /** Flex item prop names that should be forwarded to _flexConfig on the child */
 const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left'] as const;
 
-/** FlexContainers that need layout flush after commit phase */
-const pendingLayoutFlush = new Set<FlexContainer>();
+/** Any component with suspendLayout/resumeLayout (FlexContainer, Panel, etc.) */
+interface Suspendable {
+  suspendLayout(): void;
+  resumeLayout(): void;
+}
+
+function isSuspendable(obj: any): obj is Suspendable {
+  return typeof obj?.suspendLayout === 'function' && typeof obj?.resumeLayout === 'function';
+}
+
+/** Layout containers that need flush after commit phase */
+const pendingLayoutFlush = new Set<Suspendable>();
 
 /** Extract FlexItemConfig from props if any flex item props are present */
 function extractFlexItemConfig(props: Record<string, any>): FlexItemConfig | undefined {
@@ -101,8 +111,8 @@ const hostConfig: Reconciler.HostConfig<
 
   appendInitialChild(parent, child) {
     if (child instanceof Container) {
+      if (isSuspendable(parent)) parent.suspendLayout();
       if (parent instanceof FlexContainer) {
-        parent.suspendLayout();
         addChildToFlex(parent, child);
       } else {
         parent.addChild(child);
@@ -112,9 +122,11 @@ const hostConfig: Reconciler.HostConfig<
 
   appendChild(parent, child) {
     if (child instanceof Container) {
-      if (parent instanceof FlexContainer) {
+      if (isSuspendable(parent)) {
         parent.suspendLayout();
         pendingLayoutFlush.add(parent);
+      }
+      if (parent instanceof FlexContainer) {
         addChildToFlex(parent, child);
       } else {
         parent.addChild(child);
@@ -128,7 +140,7 @@ const hostConfig: Reconciler.HostConfig<
 
   removeChild(parent, child) {
     if (child instanceof Container) {
-      if (parent instanceof FlexContainer) {
+      if (isSuspendable(parent)) {
         parent.suspendLayout();
         pendingLayoutFlush.add(parent);
       }
@@ -147,7 +159,7 @@ const hostConfig: Reconciler.HostConfig<
   insertBefore(parent, child, beforeChild) {
     if (child instanceof Container && beforeChild instanceof Container) {
       if (child.parent) child.parent.removeChild(child);
-      if (parent instanceof FlexContainer) {
+      if (isSuspendable(parent)) {
         parent.suspendLayout();
         pendingLayoutFlush.add(parent);
       }
@@ -193,7 +205,7 @@ const hostConfig: Reconciler.HostConfig<
 
   finalizeInitialChildren(instance) {
     // Resume layout after all initial children have been appended
-    if (instance instanceof FlexContainer) {
+    if (isSuspendable(instance)) {
       instance.resumeLayout();
     }
     return false;

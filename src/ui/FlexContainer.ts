@@ -464,7 +464,7 @@ export class FlexContainer extends Container {
     this._explicitWidth = width;
     this._explicitHeight = height;
     this._layoutDirty = true;
-    this.updateLayout();
+    if (!this._layoutSuspended) this.updateLayout();
   }
 
   /** Update layout direction */
@@ -503,6 +503,10 @@ export class FlexContainer extends Container {
    * adding/removing children without resize.
    */
   updateLayout(): void {
+    if (this._layoutSuspended) {
+      this._layoutDirty = true;
+      return;
+    }
     this._layoutDirty = false;
     const { direction, justifyContent, alignItems, gap, flexWrap, alignContent } = this._config;
     const [pt, pr, pb, pl] = this._padding;
@@ -719,11 +723,11 @@ export class FlexContainer extends Container {
         this._explicitWidth = typeof w === 'number' ? w : 0;
         this._explicitHeight = typeof h === 'number' ? h : 0;
         this._layoutDirty = true;
-        this.updateLayout();
+        if (!this._layoutSuspended) this.updateLayout();
       }
       return;
     }
-    if (this._layoutDirty) this.updateLayout();
+    if (this._layoutDirty && !this._layoutSuspended) this.updateLayout();
   }
 
   override destroy(options?: boolean | { children?: boolean; texture?: boolean; textureSource?: boolean }): void {

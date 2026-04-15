@@ -691,5 +691,47 @@ describe('FlexContainer', () => {
       expect(a.x).toBe(0);
       expect(fc._computedWidth).toBe(200);
     });
+
+    it('updateLayout() bails when suspended', () => {
+      const fc = new FlexContainer({ direction: 'row', gap: 10 });
+      fc.resize(400, 100);
+
+      const a = makeChild(50, 30);
+      fc.addFlexChild(a);
+      fc.updateLayout(); // initial layout
+      expect(a.x).toBe(0);
+
+      fc.suspendLayout();
+
+      const b = makeChild(60, 30);
+      fc.addFlexChild(b);
+      // Explicit updateLayout should bail — layout stays stale
+      fc.updateLayout();
+      // b should NOT be positioned yet (layout didn't run)
+      expect(b.x).toBe(0); // default, not laid out
+
+      fc.resumeLayout();
+      // Now both positioned correctly
+      expect(a.x).toBe(0);
+      expect(b.x).toBe(60); // 50 + 10
+    });
+
+    it('resize() defers when suspended', () => {
+      const fc = new FlexContainer({ direction: 'row', justifyContent: 'center', gap: 0 });
+      fc.resize(200, 50);
+
+      const a = makeChild(50, 30);
+      fc.addFlexChild(a);
+      fc.updateLayout();
+      expect(a.x).toBe(75); // centered: (200-50)/2
+
+      fc.suspendLayout();
+      fc.resize(400, 50); // should defer
+      // Layout hasn't re-run yet
+      expect(a.x).toBe(75); // still old position
+
+      fc.resumeLayout();
+      expect(a.x).toBe(175); // centered: (400-50)/2
+    });
   });
 });
