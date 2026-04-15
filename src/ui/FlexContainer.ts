@@ -347,6 +347,7 @@ export class FlexContainer extends Container {
   /** @internal */ _rawHeight: number | string;
   private _layoutChildren: (Container & { _flexConfig?: FlexItemConfig })[] = [];
   private _layoutDirty = true;
+  private _layoutSuspended = false;
 
   constructor(config: FlexContainerConfig = {}) {
     super();
@@ -415,7 +416,19 @@ export class FlexContainer extends Container {
       }
     }
     const result = super.addChild(...children);
-    if (this._layoutDirty) this.updateLayout();
+    if (this._layoutDirty && !this._layoutSuspended) this.updateLayout();
+    return result;
+  }
+
+  override addChildAt<T extends Container>(child: T, index: number): T {
+    if (!this._layoutChildren.includes(child as any)) {
+      // Insert into layout children at matching position
+      const layoutIndex = Math.min(index, this._layoutChildren.length);
+      this._layoutChildren.splice(layoutIndex, 0, child as any);
+      this._layoutDirty = true;
+    }
+    const result = super.addChildAt(child, index);
+    if (this._layoutDirty && !this._layoutSuspended) this.updateLayout();
     return result;
   }
 
@@ -433,6 +446,17 @@ export class FlexContainer extends Container {
   /** Get all flex layout children (read-only) */
   get flexChildren(): readonly Container[] {
     return this._layoutChildren;
+  }
+
+  /** Suspend automatic layout recalculation. Call resumeLayout() to flush. */
+  suspendLayout(): void {
+    this._layoutSuspended = true;
+  }
+
+  /** Resume automatic layout and flush if dirty. */
+  resumeLayout(): void {
+    this._layoutSuspended = false;
+    if (this._layoutDirty) this.updateLayout();
   }
 
   /** Update the container size and recalculate layout */

@@ -9,6 +9,9 @@ import type { FlexItemConfig } from '../ui/FlexContainer';
 /** Flex item prop names that should be forwarded to _flexConfig on the child */
 const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left'] as const;
 
+/** FlexContainers that need layout flush after commit phase */
+const pendingLayoutFlush = new Set<FlexContainer>();
+
 /** Extract FlexItemConfig from props if any flex item props are present */
 function extractFlexItemConfig(props: Record<string, any>): FlexItemConfig | undefined {
   let config: FlexItemConfig | undefined;
@@ -99,6 +102,7 @@ const hostConfig: Reconciler.HostConfig<
   appendInitialChild(parent, child) {
     if (child instanceof Container) {
       if (parent instanceof FlexContainer) {
+        parent.suspendLayout();
         addChildToFlex(parent, child);
       } else {
         parent.addChild(child);
@@ -109,6 +113,8 @@ const hostConfig: Reconciler.HostConfig<
   appendChild(parent, child) {
     if (child instanceof Container) {
       if (parent instanceof FlexContainer) {
+        parent.suspendLayout();
+        pendingLayoutFlush.add(parent);
         addChildToFlex(parent, child);
       } else {
         parent.addChild(child);
@@ -122,6 +128,10 @@ const hostConfig: Reconciler.HostConfig<
 
   removeChild(parent, child) {
     if (child instanceof Container) {
+      if (parent instanceof FlexContainer) {
+        parent.suspendLayout();
+        pendingLayoutFlush.add(parent);
+      }
       parent.removeChild(child);
       child.destroy({ children: true });
     }
@@ -137,6 +147,10 @@ const hostConfig: Reconciler.HostConfig<
   insertBefore(parent, child, beforeChild) {
     if (child instanceof Container && beforeChild instanceof Container) {
       if (child.parent) child.parent.removeChild(child);
+      if (parent instanceof FlexContainer) {
+        parent.suspendLayout();
+        pendingLayoutFlush.add(parent);
+      }
       const index = parent.getChildIndex(beforeChild);
       parent.addChildAt(child, index);
     }
@@ -177,7 +191,11 @@ const hostConfig: Reconciler.HostConfig<
     }
   },
 
-  finalizeInitialChildren() {
+  finalizeInitialChildren(instance) {
+    // Resume layout after all initial children have been appended
+    if (instance instanceof FlexContainer) {
+      instance.resumeLayout();
+    }
     return false;
   },
 
@@ -205,7 +223,13 @@ const hostConfig: Reconciler.HostConfig<
     return null;
   },
 
-  resetAfterCommit() {},
+  resetAfterCommit() {
+    // Flush deferred layout for all FlexContainers modified during this commit
+    for (const fc of pendingLayoutFlush) {
+      fc.resumeLayout();
+    }
+    pendingLayoutFlush.clear();
+  },
 
   preparePortalMount() {},
 

@@ -631,4 +631,65 @@ describe('FlexContainer', () => {
       expect(fc._computedHeight).toBe(200);
     });
   });
+
+  describe('suspendLayout / resumeLayout', () => {
+    it('suspends layout during batch add, flushes on resume', () => {
+      const fc = new FlexContainer({ direction: 'row', gap: 10 });
+      fc.resize(400, 100);
+
+      fc.suspendLayout();
+
+      const a = makeChild(50, 30);
+      const b = makeChild(60, 40);
+      const c = makeChild(70, 20);
+      // addChild would normally trigger updateLayout each time
+      fc.addChild(a);
+      fc.addChild(b);
+      fc.addChild(c);
+
+      // Layout not yet applied — positions should still be default
+      // (addChild adds to _layoutChildren but skips updateLayout)
+      // Note: positions may be 0 since layout hasn't run
+
+      fc.resumeLayout();
+
+      // Now all children should be correctly positioned
+      expect(a.x).toBe(0);
+      expect(b.x).toBe(60); // 50 + 10
+      expect(c.x).toBe(130); // 50 + 10 + 60 + 10
+    });
+
+    it('addChildAt respects suspend', () => {
+      const fc = new FlexContainer({ direction: 'row', gap: 0 });
+      fc.resize(400, 100);
+
+      fc.suspendLayout();
+
+      const a = makeChild(50, 30);
+      const b = makeChild(60, 30);
+      fc.addChild(a);
+      fc.addChildAt(b, 0); // insert before a
+
+      fc.resumeLayout();
+
+      // b first, then a
+      expect(b.x).toBe(0);
+      expect(a.x).toBe(60);
+    });
+
+    it('multiple suspend calls are safe, single resume flushes', () => {
+      const fc = new FlexContainer({ direction: 'row', gap: 0 });
+      fc.resize(200, 50);
+
+      fc.suspendLayout();
+      fc.suspendLayout(); // double suspend
+
+      const a = makeChild(50, 30);
+      fc.addChild(a);
+
+      fc.resumeLayout(); // single resume should flush
+      expect(a.x).toBe(0);
+      expect(fc._computedWidth).toBe(200);
+    });
+  });
 });
