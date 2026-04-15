@@ -52,11 +52,10 @@ export class Modal extends Container {
     // Overlay
     this._overlay = new Graphics();
     this._overlay.eventMode = 'static';
+    this._overlay.on('pointertap', () => {
+      if (this._config.closeOnOverlay) this.hide();
+    });
     this.addChild(this._overlay);
-
-    if (this._config.closeOnOverlay) {
-      this._overlay.on('pointertap', () => this.hide());
-    }
 
     // Content container
     this._contentContainer = new Container();
