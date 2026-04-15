@@ -30,10 +30,11 @@ export interface ModalConfig {
 export class Modal extends Container {
   readonly __uiComponent = true as const;
 
-  private _overlay: Graphics;
-  private _contentContainer: Container;
-  private _config: Required<ModalConfig>;
+  private _overlay!: Graphics;
+  private _contentContainer!: Container;
+  private _config!: Required<ModalConfig>;
   private _showing = false;
+  private _internalSetup = true;
 
   /** Called when the modal is closed */
   public onClose?: () => void;
@@ -62,11 +63,36 @@ export class Modal extends Container {
     this.addChild(this._contentContainer);
 
     this.visible = false;
+    this._internalSetup = false;
   }
 
   /** Content container — add your UI here */
   get content(): Container {
     return this._contentContainer;
+  }
+
+  /**
+   * Override addChild so external children are routed to _contentContainer.
+   * Enables `<modal><flexContainer>...</flexContainer></modal>` in React JSX.
+   */
+  override addChild<T extends Container>(...children: T[]): T {
+    if (this._internalSetup) {
+      return super.addChild(...children);
+    }
+    for (const child of children) {
+      this._contentContainer.addChild(child);
+    }
+    return children[0];
+  }
+
+  override removeChild<T extends Container>(...children: T[]): T {
+    if (this._internalSetup) {
+      return super.removeChild(...children);
+    }
+    for (const child of children) {
+      this._contentContainer.removeChild(child);
+    }
+    return children[0];
   }
 
   /** Whether the modal is currently showing */
