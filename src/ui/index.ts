@@ -4,7 +4,7 @@ export type { ViewInput } from './view';
 
 // ─── Engine UI Components ─────────────────────────────────
 export { FlexContainer } from './FlexContainer';
-export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, FlexItemConfig } from './FlexContainer';
+export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, AlignSelf, FlexItemConfig } from './FlexContainer';
 export { Button } from './Button';
 export type { ButtonConfig, ButtonState } from './Button';
 export { ProgressBar } from './ProgressBar';
@@ -25,3 +25,7 @@ export { Layout } from './Layout';
 export type { LayoutConfig, LayoutDirection, LayoutAlignment, LayoutAnchor } from './Layout';
 export { ScrollContainer } from './ScrollContainer';
 export type { ScrollContainerConfig, ScrollDirection } from './ScrollContainer';
+export { Slider } from './Slider';
+export type { SliderConfig } from './Slider';
+export { Toggle } from './Toggle';
+export type { ToggleConfig } from './Toggle';

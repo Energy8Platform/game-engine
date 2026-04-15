@@ -14,7 +14,7 @@ import type { ViewInput } from '../ui/view';
 import type { ButtonConfig, ButtonState } from '../ui/Button';
 import type { LabelConfig } from '../ui/Label';
 import type { PanelConfig } from '../ui/Panel';
-import type { FlexContainerConfig } from '../ui/FlexContainer';
+import type { FlexContainerConfig, FlexItemConfig, AlignSelf } from '../ui/FlexContainer';
 import type { ProgressBarConfig } from '../ui/ProgressBar';
 import type { ScrollContainerConfig } from '../ui/ScrollContainer';
 import type { ModalConfig } from '../ui/Modal';
@@ -22,6 +22,8 @@ import type { ToastConfig } from '../ui/Toast';
 import type { BalanceDisplayConfig } from '../ui/BalanceDisplay';
 import type { WinDisplayConfig } from '../ui/WinDisplay';
 import type { LayoutConfig } from '../ui/Layout';
+import type { SliderConfig } from '../ui/Slider';
+import type { ToggleConfig } from '../ui/Toggle';
 
 // ─── Event props ─────────────────────────────────────────
 
@@ -80,6 +82,14 @@ interface BaseProps extends PixiEventProps {
 
   // Allow scale as number (uniform)
   scale?: number | { x: number; y: number };
+
+  // Flex item props (used when child of <flexContainer>)
+  flexGrow?: number;
+  flexShrink?: number;
+  layoutWidth?: number;
+  layoutHeight?: number;
+  alignSelf?: AlignSelf;
+  flexExclude?: boolean;
 }
 
 // ─── PixiJS primitive elements ───────────────────────────
@@ -189,6 +199,21 @@ interface WinDisplayComponentProps extends BaseProps, WinDisplayConfig {}
 
 interface LayoutComponentProps extends BaseProps, LayoutConfig {}
 
+interface SliderComponentProps extends BaseProps, Omit<SliderConfig, 'width' | 'height'> {
+  width?: number;
+  height?: number;
+  onUpdate?: (value: number) => void;
+  onChange?: (value: number) => void;
+}
+
+interface ToggleComponentProps extends BaseProps, Omit<ToggleConfig, 'width' | 'height'> {
+  width?: number;
+  height?: number;
+  onView?: ViewInput;
+  offView?: ViewInput;
+  onChange?: (value: boolean) => void;
+}
+
 // ─── JSX IntrinsicElements ───────────────────────────────
 
 declare global {
@@ -215,6 +240,8 @@ declare global {
       balanceDisplay: BalanceDisplayComponentProps;
       winDisplay: WinDisplayComponentProps;
       layout: LayoutComponentProps;
+      slider: SliderComponentProps;
+      toggle: ToggleComponentProps;
     }
   }
 }

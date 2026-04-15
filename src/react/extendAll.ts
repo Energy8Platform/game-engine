@@ -17,6 +17,7 @@ import { extend } from './catalogue';
 import {
   Button, Label, Panel, FlexContainer, ProgressBar,
   ScrollContainer, Modal, Toast, BalanceDisplay, WinDisplay, Layout,
+  Slider, Toggle,
 } from '../ui';
 
 /**
@@ -60,6 +61,7 @@ export function extendUIElements(): void {
   extend({
     Button, Label, Panel, FlexContainer, ProgressBar,
     ScrollContainer, Modal, Toast, BalanceDisplay, WinDisplay, Layout,
+    Slider, Toggle,
   });
 }
 

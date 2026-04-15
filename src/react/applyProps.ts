@@ -1,4 +1,6 @@
 const RESERVED = new Set(['children', 'key', 'ref']);
+/** Props handled by the reconciler as flex item config, not forwarded to components */
+const FLEX_ITEM_PROPS = new Set(['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude']);
 
 // ─── UI Component helpers ────────────────────────────────
 
@@ -11,7 +13,7 @@ export function extractConfig(props: Record<string, any>): Record<string, any> {
   const config: Record<string, any> = {};
 
   for (const key in props) {
-    if (RESERVED.has(key) || isEventProp(key)) continue;
+    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || isEventProp(key)) continue;
 
     if (key.includes('-')) {
       const parts = key.split('-');
@@ -41,7 +43,7 @@ export function diffConfig(
 
   // New or changed props
   for (const key in newProps) {
-    if (RESERVED.has(key) || isEventProp(key)) continue;
+    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || isEventProp(key)) continue;
     if (newProps[key] !== oldProps[key]) {
       if (key.includes('-')) {
         const parts = key.split('-');
@@ -149,7 +151,7 @@ export function applyProps(
 ): void {
   // Remove old props not in newProps
   for (const key in oldProps) {
-    if (RESERVED.has(key) || key in newProps) continue;
+    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || key in newProps) continue;
 
     const pixiEvent = REACT_TO_PIXI_EVENTS[key];
     if (pixiEvent) {
@@ -169,7 +171,7 @@ export function applyProps(
 
   // Apply new props
   for (const key in newProps) {
-    if (RESERVED.has(key)) continue;
+    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key)) continue;
 
     const value = newProps[key];
     const pixiEvent = REACT_TO_PIXI_EVENTS[key];

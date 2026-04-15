@@ -6,13 +6,21 @@ export type FlexDirection = 'row' | 'column';
 export type JustifyContent = 'start' | 'center' | 'end' | 'space-between' | 'space-around';
 export type AlignItems = 'start' | 'center' | 'end' | 'stretch';
 
+export type AlignSelf = 'auto' | 'start' | 'center' | 'end' | 'stretch';
+
 export interface FlexItemConfig {
   /** Flex grow factor (0 = fixed size) */
   flexGrow?: number;
+  /** Flex shrink factor (0 = don't shrink, default: 1) */
+  flexShrink?: number;
   /** Explicit width override for layout calculations */
   layoutWidth?: number;
   /** Explicit height override for layout calculations */
   layoutHeight?: number;
+  /** Override parent's alignItems for this child */
+  alignSelf?: AlignSelf;
+  /** Exclude from flex layout (acts like position: absolute) */
+  flexExclude?: boolean;
 }
 
 export interface FlexContainerConfig {
@@ -123,6 +131,37 @@ function layoutLine(
     }
   }
 
+  // Shrink: if content overflows and mainSize is finite, shrink eligible items
+  if (totalGrow === 0 && mainSize > 0) {
+    const overflow = totalFixed + totalGap - mainSize;
+    if (overflow > 0) {
+      let totalShrinkable = 0;
+      for (const item of items) {
+        const shrink = item.child._flexConfig?.flexShrink ?? 1;
+        if (shrink > 0) {
+          totalShrinkable += isRow ? item.w : item.h;
+        }
+      }
+      if (totalShrinkable > 0) {
+        for (const item of items) {
+          const shrink = item.child._flexConfig?.flexShrink ?? 1;
+          if (shrink > 0) {
+            const itemMain = isRow ? item.w : item.h;
+            const reduction = overflow * (itemMain / totalShrinkable);
+            const newSize = Math.max(0, itemMain - reduction);
+            if (isRow) {
+              item.w = newSize;
+              item.child.width = newSize;
+            } else {
+              item.h = newSize;
+              item.child.height = newSize;
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Calculate total main size after flex
   let totalMain = totalGap;
   for (const item of items) {
@@ -163,9 +202,12 @@ function layoutLine(
     const mainDim = isRow ? item.w : item.h;
     const crossDim = isRow ? item.h : item.w;
 
-    // Cross-axis alignment
+    // Cross-axis alignment (alignSelf overrides align)
+    const effectiveAlign = (item.child._flexConfig?.alignSelf && item.child._flexConfig.alignSelf !== 'auto')
+      ? item.child._flexConfig.alignSelf
+      : align;
     let crossPos = crossOffset;
-    switch (align) {
+    switch (effectiveAlign) {
       case 'start':
         break;
       case 'center':
@@ -369,11 +411,13 @@ export class FlexContainer extends Container {
     const mainLimit = isRow ? contentW : contentH;
     const crossLimit = isRow ? contentH : contentW;
 
-    // Measure children
-    const measured: LineItem[] = this._layoutChildren.map((child) => {
+    // Measure children (skip flexExclude — they position themselves)
+    const measured: LineItem[] = [];
+    for (const child of this._layoutChildren) {
+      if (child._flexConfig?.flexExclude) continue;
       const { w, h, ox, oy } = measureChild(child);
-      return { child, w, h, ox, oy };
-    });
+      measured.push({ child, w, h, ox, oy });
+    }
 
     // Split into lines (if wrapping)
     const lines: LineItem[][] = [];
@@ -419,6 +463,12 @@ export class FlexContainer extends Container {
       // Offset items by padding
       const tempItems = line.map((item) => ({ ...item }));
 
+      // For single-line layouts, use the full available cross space for alignment;
+      // for multi-line (wrapping), each line gets its own measured cross size.
+      const effectiveCross = lines.length === 1 && crossLimit < Infinity
+        ? crossLimit
+        : (crossLimit < Infinity ? Math.min(lineCross, crossLimit) : lineCross);
+
       layoutLine(
         tempItems,
         isRow,
@@ -427,7 +477,7 @@ export class FlexContainer extends Container {
         alignItems,
         gap,
         crossOffset,
-        crossLimit < Infinity ? Math.min(lineCross, crossLimit) : lineCross,
+        effectiveCross,
       );
 
       // Apply main-axis padding offset

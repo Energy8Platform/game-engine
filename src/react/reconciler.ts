@@ -3,6 +3,33 @@ import { DefaultEventPriority } from 'react-reconciler/constants';
 import { Container } from 'pixi.js';
 import { catalogue } from './catalogue';
 import { applyProps, hasEventProps, extractConfig, diffConfig, applyEventProps } from './applyProps';
+import { FlexContainer } from '../ui/FlexContainer';
+import type { FlexItemConfig } from '../ui/FlexContainer';
+
+/** Flex item prop names that should be forwarded to _flexConfig on the child */
+const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude'] as const;
+
+/** Extract FlexItemConfig from props if any flex item props are present */
+function extractFlexItemConfig(props: Record<string, any>): FlexItemConfig | undefined {
+  let config: FlexItemConfig | undefined;
+  for (const key of FLEX_ITEM_PROPS) {
+    if (key in props) {
+      if (!config) config = {};
+      (config as any)[key] = props[key];
+    }
+  }
+  return config;
+}
+
+/** Apply flex item config to a child being added to a FlexContainer */
+function addChildToFlex(parent: FlexContainer, child: Container & { _flexConfig?: FlexItemConfig }): void {
+  const flexConfig = child._flexConfig;
+  if (flexConfig && Object.keys(flexConfig).length > 0) {
+    parent.addFlexChild(child, flexConfig);
+  } else {
+    parent.addChild(child);
+  }
+}
 
 function toPascalCase(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -54,6 +81,12 @@ const hostConfig: Reconciler.HostConfig<
       instance.eventMode = 'static';
     }
 
+    // Store flex item config for when this child is added to a FlexContainer parent
+    const flexItemConfig = extractFlexItemConfig(props);
+    if (flexItemConfig) {
+      instance._flexConfig = { ...instance._flexConfig, ...flexItemConfig };
+    }
+
     return instance;
   },
 
@@ -64,11 +97,23 @@ const hostConfig: Reconciler.HostConfig<
   },
 
   appendInitialChild(parent, child) {
-    if (child instanceof Container) parent.addChild(child);
+    if (child instanceof Container) {
+      if (parent instanceof FlexContainer) {
+        addChildToFlex(parent, child);
+      } else {
+        parent.addChild(child);
+      }
+    }
   },
 
   appendChild(parent, child) {
-    if (child instanceof Container) parent.addChild(child);
+    if (child instanceof Container) {
+      if (parent instanceof FlexContainer) {
+        addChildToFlex(parent, child);
+      } else {
+        parent.addChild(child);
+      }
+    }
   },
 
   appendChildToContainer(container, child) {
@@ -114,6 +159,17 @@ const hostConfig: Reconciler.HostConfig<
       applyEventProps(instance, newProps, oldProps);
     } else {
       applyProps(instance, newProps, oldProps);
+    }
+
+    // Update flex item config if parent is FlexContainer
+    const newFlexConfig = extractFlexItemConfig(newProps);
+    const oldFlexConfig = extractFlexItemConfig(oldProps);
+    if (newFlexConfig || oldFlexConfig) {
+      instance._flexConfig = { ...instance._flexConfig, ...newFlexConfig };
+      // Trigger parent relayout
+      if (instance.parent instanceof FlexContainer) {
+        instance.parent.updateLayout();
+      }
     }
 
     if (hasEventProps(newProps) && instance.eventMode === 'auto') {

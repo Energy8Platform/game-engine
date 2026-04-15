@@ -100,7 +100,7 @@ import { GameApplication } from '@energy8platform/game-engine';             // f
 import { Scene, SceneManager } from '@energy8platform/game-engine/core';
 import { AssetManager } from '@energy8platform/game-engine/assets';
 import { AudioManager } from '@energy8platform/game-engine/audio';
-import { FlexContainer, Button, Label, Panel, Modal, Layout, ScrollContainer, Toast, ProgressBar, BalanceDisplay, WinDisplay, resolveView } from '@energy8platform/game-engine/ui';
+import { FlexContainer, Button, Label, Panel, Modal, Layout, ScrollContainer, Toast, ProgressBar, BalanceDisplay, WinDisplay, Slider, Toggle, resolveView } from '@energy8platform/game-engine/ui';
 import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-engine/animation';
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
 import { ReactScene, extendPixiElements, extendUIElements, useSDK, useViewport } from '@energy8platform/game-engine/react';
@@ -426,6 +426,26 @@ toolbar.addFlexChild(spacer, { flexGrow: 1 });   // with flex config
 toolbar.resize(800, 60);
 ```
 
+**FlexItemConfig** — per-child options passed via `addFlexChild(child, config)` or JSX props:
+
+| Property | Type | Default | Description |
+| --- | --- | --- | --- |
+| `flexGrow` | `number` | `0` | Flex grow factor |
+| `flexShrink` | `number` | `1` | Flex shrink factor (`0` = don't shrink when content overflows) |
+| `alignSelf` | `'auto' \| 'start' \| 'center' \| 'end' \| 'stretch'` | `'auto'` | Override parent's `alignItems` for this child |
+| `flexExclude` | `boolean` | `false` | Exclude from flex layout (like `position: absolute`) |
+| `layoutWidth` | `number` | — | Explicit width override for layout calculations |
+| `layoutHeight` | `number` | — | Explicit height override for layout calculations |
+
+```typescript
+// Fixed item that won't shrink + centered override
+toolbar.addFlexChild(logo, { flexShrink: 0 });
+toolbar.addFlexChild(badge, { alignSelf: 'center' });
+
+// Background excluded from layout flow
+toolbar.addFlexChild(background, { flexExclude: true });
+```
+
 ### Layout
 
 Higher-level layout with direction presets (`horizontal`/`vertical`/`grid`/`wrap`), viewport anchoring, and responsive breakpoints. Wraps FlexContainer.
@@ -492,6 +512,58 @@ const bar = new ProgressBar({
   trackView: 'bar-track',                       // texture name
   fillView: new NineSliceSprite({ ... }),        // or any Container
 });
+```
+
+### Slider
+
+Draggable slider with customizable track, fill, and handle views:
+
+```typescript
+// Graphics-based
+const volume = new Slider({
+  min: 0, max: 1, value: 0.5, step: 0.1,
+  width: 200, height: 8,
+  fillColor: 0xffd700,
+  onUpdate: (v) => audio.setVolume('music', v),
+  onChange: (v) => console.log('Final:', v),
+});
+
+// Asset-based
+const volume = new Slider({
+  min: 0, max: 1, value: 0.5,
+  width: 200, height: 8,
+  trackView: 'slider-track',
+  fillView: 'slider-fill',
+  handleView: 'slider-handle',
+  onUpdate: (v) => audio.setVolume('music', v),
+});
+```
+
+`onUpdate` fires continuously during drag, `onChange` fires once when drag ends.
+
+### Toggle
+
+Two-state toggle switch with animation:
+
+```typescript
+// Graphics-based
+const mute = new Toggle({
+  value: false,
+  width: 52, height: 28,
+  onColor: 0x22cc22, offColor: 0x666666,
+  onChange: (on) => audio.muteAll(!on),
+});
+
+// Asset-based (custom ON/OFF views with crossfade)
+const ante = new Toggle({
+  value: false,
+  onView: 'toggle-on',
+  offView: 'toggle-off',
+  onChange: (on) => setAnteBet(on),
+});
+
+// Programmatic control
+mute.forceSwitch(true);
 ```
 
 ### ScrollContainer
@@ -824,6 +896,21 @@ All engine UI components are config-based: the reconciler passes JSX props as a 
   <label text="Item 1" />
   <label text="Item 2" />
 </scrollContainer>
+
+{/* Slider */}
+<slider min={0} max={1} value={volume} width={200} height={8}
+        fillColor={0xffd700} onUpdate={setVolume} />
+
+{/* Toggle */}
+<toggle value={isMuted} onColor={0x22cc22} onChange={setIsMuted} />
+
+{/* Flex item props — work on any element inside <flexContainer> */}
+<flexContainer direction="row" width={800} height={60}>
+  <graphics draw={drawBg} flexExclude />       {/* excluded from flow */}
+  <label text="Logo" flexShrink={0} />          {/* won't shrink */}
+  <container flexGrow={1} />                     {/* fills remaining space */}
+  <button text="Menu" alignSelf="center" />      {/* centered on cross-axis */}
+</flexContainer>
 ```
 
 **Dash-notation** for nested config: `colors-default={0xff0000}` → `{ colors: { default: 0xff0000 } }`, `style-fontSize={24}` → `{ style: { fontSize: 24 } }`.
