@@ -5,6 +5,13 @@ export { SessionManager } from './SessionManager';
 export { PersistentState } from './PersistentState';
 export { SimulationRunner, formatSimulationResult } from './SimulationRunner';
 export { ParallelSimulationRunner } from './ParallelSimulationRunner';
+export { NativeSimulationRunner, findNativeBinary, formatNativeResult } from './NativeSimulationRunner';
+export type {
+  NativeSimulationConfig,
+  NativeSimulationResult,
+  StageStats,
+  DistributionBucket,
+} from './NativeSimulationRunner';
 export type {
   GameDefinition,
   ActionDefinition,

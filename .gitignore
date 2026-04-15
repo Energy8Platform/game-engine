@@ -4,5 +4,10 @@ dist/
 *.cjs
 *.mjs
 !rollup.config.ts
+!scripts/*.mjs
 .DS_Store
 package-lock.json
+
+# Native simulation binaries (downloaded by postinstall or built from Go)
+bin/simulate-*
+bin/simulation-*
