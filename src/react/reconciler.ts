@@ -66,7 +66,7 @@ const hostConfig: Reconciler.HostConfig<
     }
 
     let instance;
-    if (Ctor.prototype.__uiComponent) {
+    if (typeof Ctor.prototype.updateConfig === 'function') {
       // Config-based UI component: pass props as constructor config
       const config = extractConfig(props);
       instance = new Ctor(config);
@@ -151,7 +151,7 @@ const hostConfig: Reconciler.HostConfig<
   },
 
   commitUpdate(instance, _updatePayload, _type, oldProps, newProps) {
-    if (instance.__uiComponent && typeof instance.updateConfig === 'function') {
+    if (typeof instance.updateConfig === 'function') {
       const changed = diffConfig(newProps, oldProps);
       if (Object.keys(changed).length > 0) {
         instance.updateConfig(changed);
