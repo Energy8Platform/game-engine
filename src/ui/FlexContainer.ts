@@ -5,6 +5,7 @@ import { Container } from 'pixi.js';
 export type FlexDirection = 'row' | 'column';
 export type JustifyContent = 'start' | 'center' | 'end' | 'space-between' | 'space-around';
 export type AlignItems = 'start' | 'center' | 'end' | 'stretch';
+export type AlignContent = 'start' | 'center' | 'end' | 'space-between' | 'stretch';
 
 export type AlignSelf = 'auto' | 'start' | 'center' | 'end' | 'stretch';
 
@@ -14,13 +15,21 @@ export interface FlexItemConfig {
   /** Flex shrink factor (0 = don't shrink, default: 1) */
   flexShrink?: number;
   /** Explicit width override for layout calculations */
-  layoutWidth?: number;
+  layoutWidth?: number | string;
   /** Explicit height override for layout calculations */
-  layoutHeight?: number;
+  layoutHeight?: number | string;
   /** Override parent's alignItems for this child */
   alignSelf?: AlignSelf;
   /** Exclude from flex layout (acts like position: absolute) */
   flexExclude?: boolean;
+  /** Absolute positioning for flexExclude children (distance from top edge) */
+  top?: number;
+  /** Absolute positioning for flexExclude children (distance from right edge) */
+  right?: number;
+  /** Absolute positioning for flexExclude children (distance from bottom edge) */
+  bottom?: number;
+  /** Absolute positioning for flexExclude children (distance from left edge) */
+  left?: number;
 }
 
 export interface FlexContainerConfig {
@@ -34,16 +43,23 @@ export interface FlexContainerConfig {
   gap?: number;
   /** Padding [top, right, bottom, left] or single number (default: 0) */
   padding?: number | [number, number, number, number];
+  /** Individual padding overrides (take priority over `padding`) */
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
   /** Enable wrapping to next line (default: false) */
   flexWrap?: boolean;
+  /** Distribution of lines along the cross axis when wrapping (default: 'start') */
+  alignContent?: AlignContent;
   /** Maximum width before wrapping (only with flexWrap) */
   maxWidth?: number;
   /** Maximum height before wrapping (only with flexWrap + column) */
   maxHeight?: number;
-  /** Explicit container width (used for cross-axis alignment/stretch) */
-  width?: number;
-  /** Explicit container height (used for cross-axis alignment/stretch) */
-  height?: number;
+  /** Explicit container width — number in pixels, or string percentage (e.g. "50%") resolved against parent */
+  width?: number | string;
+  /** Explicit container height — number in pixels, or string percentage (e.g. "50%") resolved against parent */
+  height?: number | string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -52,26 +68,56 @@ function normalizePadding(p: number | [number, number, number, number]): [number
   return typeof p === 'number' ? [p, p, p, p] : p;
 }
 
+/** Resolve padding from config: individual props override the base `padding` value */
+function resolvePadding(config: FlexContainerConfig): [number, number, number, number] {
+  const base = normalizePadding(config.padding ?? 0);
+  return [
+    config.paddingTop ?? base[0],
+    config.paddingRight ?? base[1],
+    config.paddingBottom ?? base[2],
+    config.paddingLeft ?? base[3],
+  ];
+}
+
+/** Resolve a dimension value — number passes through, "50%" resolves against reference */
+function resolveDimension(value: number | string | undefined, reference: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string' && value.endsWith('%')) {
+    const pct = parseFloat(value);
+    if (!isNaN(pct) && reference > 0 && isFinite(reference)) return (pct / 100) * reference;
+  }
+  return undefined;
+}
+
 /** Measure a child's size and bounds offset for layout purposes */
-function measureChild(child: Container & { _flexConfig?: FlexItemConfig }): { w: number; h: number; ox: number; oy: number } {
+function measureChild(
+  child: Container & { _flexConfig?: FlexItemConfig },
+  parentContentW = 0,
+  parentContentH = 0,
+): { w: number; h: number; ox: number; oy: number } {
   const cfg = child._flexConfig;
-  if (cfg?.layoutWidth !== undefined && cfg?.layoutHeight !== undefined) {
-    return { w: cfg.layoutWidth, h: cfg.layoutHeight, ox: 0, oy: 0 };
+  const resolvedLW = resolveDimension(cfg?.layoutWidth, parentContentW);
+  const resolvedLH = resolveDimension(cfg?.layoutHeight, parentContentH);
+  if (resolvedLW !== undefined && resolvedLH !== undefined) {
+    return { w: resolvedLW, h: resolvedLH, ox: 0, oy: 0 };
   }
 
-  // For FlexContainers, use their explicit size if set
+  // For FlexContainers, use their explicit or computed size
   if (child instanceof FlexContainer) {
     const fc = child;
-    if (fc._explicitWidth > 0 && fc._explicitHeight > 0) {
-      return { w: fc._explicitWidth, h: fc._explicitHeight, ox: 0, oy: 0 };
+    const w = fc._explicitWidth > 0 ? fc._explicitWidth : (fc._computedWidth > 0 ? fc._computedWidth : undefined);
+    const h = fc._explicitHeight > 0 ? fc._explicitHeight : (fc._computedHeight > 0 ? fc._computedHeight : undefined);
+    if (w !== undefined && h !== undefined) {
+      return { w, h, ox: 0, oy: 0 };
     }
   }
 
   // Use localBounds to get the true visual extent and origin offset.
   // This handles children with non-zero anchors (e.g. Button, Label with centered text).
   const bounds = child.getLocalBounds();
-  const w = cfg?.layoutWidth ?? bounds.width;
-  const h = cfg?.layoutHeight ?? bounds.height;
+  const w = resolvedLW ?? bounds.width;
+  const h = resolvedLH ?? bounds.height;
   return { w, h, ox: bounds.x, oy: bounds.y };
 }
 
@@ -85,6 +131,45 @@ interface LineItem {
   ox: number;
   /** Local bounds origin offset (y) */
   oy: number;
+}
+
+/**
+ * Set a child's main or cross dimension.
+ * For FlexContainer children, calls resize() to trigger internal relayout
+ * instead of the PixiJS scale setter.
+ */
+function setChildMainSize(child: Container, isRow: boolean, mainSize: number, item: LineItem): void {
+  if (child instanceof FlexContainer) {
+    const fc = child;
+    fc.resize(
+      isRow ? mainSize : fc._explicitWidth || fc._computedWidth,
+      isRow ? fc._explicitHeight || fc._computedHeight : mainSize,
+    );
+  } else {
+    if (isRow) {
+      child.width = mainSize;
+    } else {
+      child.height = mainSize;
+    }
+  }
+  if (isRow) item.w = mainSize;
+  else item.h = mainSize;
+}
+
+function setChildCrossSize(child: Container, isRow: boolean, crossSize: number): void {
+  if (child instanceof FlexContainer) {
+    const fc = child;
+    fc.resize(
+      isRow ? fc._explicitWidth || fc._computedWidth : crossSize,
+      isRow ? crossSize : fc._explicitHeight || fc._computedHeight,
+    );
+  } else {
+    if (isRow) {
+      child.height = crossSize;
+    } else {
+      child.width = crossSize;
+    }
+  }
 }
 
 function layoutLine(
@@ -120,13 +205,7 @@ function layoutLine(
       const grow = item.child._flexConfig?.flexGrow ?? 0;
       if (grow > 0) {
         const flexSize = (grow / totalGrow) * availableForFlex;
-        if (isRow) {
-          item.w = flexSize;
-          item.child.width = flexSize;
-        } else {
-          item.h = flexSize;
-          item.child.height = flexSize;
-        }
+        setChildMainSize(item.child, isRow, flexSize, item);
       }
     }
   }
@@ -149,13 +228,7 @@ function layoutLine(
             const itemMain = isRow ? item.w : item.h;
             const reduction = overflow * (itemMain / totalShrinkable);
             const newSize = Math.max(0, itemMain - reduction);
-            if (isRow) {
-              item.w = newSize;
-              item.child.width = newSize;
-            } else {
-              item.h = newSize;
-              item.child.height = newSize;
-            }
+            setChildMainSize(item.child, isRow, newSize, item);
           }
         }
       }
@@ -217,11 +290,7 @@ function layoutLine(
         crossPos += crossSize - crossDim;
         break;
       case 'stretch':
-        if (isRow) {
-          item.child.height = crossSize;
-        } else {
-          item.child.width = crossSize;
-        }
+        setChildCrossSize(item.child, isRow, crossSize);
         break;
     }
 
@@ -264,12 +333,18 @@ function layoutLine(
 export class FlexContainer extends Container {
   readonly __uiComponent = true as const;
 
-  private _config: Required<Pick<FlexContainerConfig, 'direction' | 'justifyContent' | 'alignItems' | 'gap' | 'flexWrap'>>;
+  private _config: Required<Pick<FlexContainerConfig, 'direction' | 'justifyContent' | 'alignItems' | 'gap' | 'flexWrap' | 'alignContent'>>;
   private _padding: [number, number, number, number];
   private _maxWidth: number;
   private _maxHeight: number;
   /** @internal */ _explicitWidth: number;
   /** @internal */ _explicitHeight: number;
+  /** @internal */ _computedWidth = 0;
+  /** @internal */ _computedHeight = 0;
+  /** @internal */ _availableWidth = 0;
+  /** @internal */ _availableHeight = 0;
+  /** @internal */ _rawWidth: number | string;
+  /** @internal */ _rawHeight: number | string;
   private _layoutChildren: (Container & { _flexConfig?: FlexItemConfig })[] = [];
   private _layoutDirty = true;
 
@@ -282,13 +357,16 @@ export class FlexContainer extends Container {
       alignItems: config.alignItems ?? 'start',
       gap: config.gap ?? 0,
       flexWrap: config.flexWrap ?? false,
+      alignContent: config.alignContent ?? 'start',
     };
 
-    this._padding = normalizePadding(config.padding ?? 0);
+    this._padding = resolvePadding(config);
     this._maxWidth = config.maxWidth ?? Infinity;
     this._maxHeight = config.maxHeight ?? Infinity;
-    this._explicitWidth = config.width ?? 0;
-    this._explicitHeight = config.height ?? 0;
+    this._rawWidth = config.width ?? 0;
+    this._rawHeight = config.height ?? 0;
+    this._explicitWidth = typeof this._rawWidth === 'number' ? this._rawWidth : 0;
+    this._explicitHeight = typeof this._rawHeight === 'number' ? this._rawHeight : 0;
   }
 
   // ─── Public API ──────────────────────────────────────
@@ -402,20 +480,45 @@ export class FlexContainer extends Container {
    */
   updateLayout(): void {
     this._layoutDirty = false;
-    const { direction, justifyContent, alignItems, gap, flexWrap } = this._config;
+    const { direction, justifyContent, alignItems, gap, flexWrap, alignContent } = this._config;
     const [pt, pr, pb, pl] = this._padding;
     const isRow = direction === 'row';
+
+    // Resolve percentage width/height against parent's available space
+    if (typeof this._rawWidth === 'string') {
+      this._explicitWidth = resolveDimension(this._rawWidth, this._availableWidth) ?? 0;
+    }
+    if (typeof this._rawHeight === 'string') {
+      this._explicitHeight = resolveDimension(this._rawHeight, this._availableHeight) ?? 0;
+    }
 
     const contentW = this._explicitWidth > 0 ? this._explicitWidth - pl - pr : Infinity;
     const contentH = this._explicitHeight > 0 ? this._explicitHeight - pt - pb : Infinity;
     const mainLimit = isRow ? contentW : contentH;
     const crossLimit = isRow ? contentH : contentW;
 
+    // Pass content area to measureChild for percentage resolution
+    const pctRefW = contentW < Infinity ? contentW : 0;
+    const pctRefH = contentH < Infinity ? contentH : 0;
+
+    // Propagate available size to child FlexContainers and resolve their percentages
+    for (const child of this._layoutChildren) {
+      if (child instanceof FlexContainer) {
+        const fc = child;
+        fc._availableWidth = pctRefW;
+        fc._availableHeight = pctRefH;
+        // If child has percentage dimensions, trigger its layout to resolve them
+        if (typeof fc._rawWidth === 'string' || typeof fc._rawHeight === 'string') {
+          fc.updateLayout();
+        }
+      }
+    }
+
     // Measure children (skip flexExclude — they position themselves)
     const measured: LineItem[] = [];
     for (const child of this._layoutChildren) {
       if (child._flexConfig?.flexExclude) continue;
-      const { w, h, ox, oy } = measureChild(child);
+      const { w, h, ox, oy } = measureChild(child, pctRefW, pctRefH);
       measured.push({ child, w, h, ox, oy });
     }
 
@@ -453,8 +556,54 @@ export class FlexContainer extends Container {
       return maxCross;
     });
 
+    // Compute natural main size (for auto-sizing when no explicit size given)
+    let naturalMainSize = 0;
+    if (mainLimit === Infinity) {
+      for (const line of lines) {
+        let lineMain = 0;
+        for (const item of line) {
+          lineMain += isRow ? item.w : item.h;
+        }
+        lineMain += gap * Math.max(0, line.length - 1);
+        naturalMainSize = Math.max(naturalMainSize, lineMain);
+      }
+    }
+
+    // Effective main size: explicit if set, otherwise natural content size
+    const effectiveMainSize = mainLimit < Infinity ? mainLimit : naturalMainSize;
+
+    // Compute alignContent offsets for multi-line layouts
+    const totalLinesCross = lineCrossSizes.reduce((s, v) => s + v, 0) + gap * Math.max(0, lines.length - 1);
+    let acOffset = 0;
+    let acExtraGap = 0;
+    if (lines.length > 1 && crossLimit < Infinity) {
+      const freeSpace = Math.max(0, crossLimit - totalLinesCross);
+      switch (alignContent) {
+        case 'center':
+          acOffset = freeSpace / 2;
+          break;
+        case 'end':
+          acOffset = freeSpace;
+          break;
+        case 'space-between':
+          if (lines.length > 1) {
+            acExtraGap = freeSpace / (lines.length - 1);
+          }
+          break;
+        case 'stretch':
+          if (lines.length > 0) {
+            const extra = freeSpace / lines.length;
+            for (let i = 0; i < lineCrossSizes.length; i++) {
+              lineCrossSizes[i] += extra;
+            }
+          }
+          break;
+        // 'start' — no adjustment
+      }
+    }
+
     // Layout each line
-    let crossOffset = isRow ? pt : pl;
+    let crossOffset = (isRow ? pt : pl) + acOffset;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const lineCross = lineCrossSizes[i];
@@ -463,16 +612,13 @@ export class FlexContainer extends Container {
       // Offset items by padding
       const tempItems = line.map((item) => ({ ...item }));
 
-      // For single-line layouts, use the full available cross space for alignment;
-      // for multi-line (wrapping), each line gets its own measured cross size.
-      const effectiveCross = lines.length === 1 && crossLimit < Infinity
-        ? crossLimit
-        : (crossLimit < Infinity ? Math.min(lineCross, crossLimit) : lineCross);
+      // Cross size for alignment: use container cross size for single-line, line cross for multi-line
+      const effectiveCross = lines.length === 1 && crossLimit < Infinity ? crossLimit : lineCross;
 
       layoutLine(
         tempItems,
         isRow,
-        mainLimit < Infinity ? mainLimit : 0,
+        effectiveMainSize,
         mainLimit < Infinity ? justifyContent : 'start',
         alignItems,
         gap,
@@ -487,24 +633,42 @@ export class FlexContainer extends Container {
         origChild.child.y = item.child.y + (isRow ? 0 : mainStart);
       }
 
-      crossOffset += lineCross + gap;
+      crossOffset += lineCross + gap + acExtraGap;
+    }
+
+    // Compute and store actual dimensions for measureChild() and getContentSize()
+    let totalCrossNatural = 0;
+    for (let i = 0; i < lineCrossSizes.length; i++) {
+      totalCrossNatural += lineCrossSizes[i];
+      if (i < lineCrossSizes.length - 1) totalCrossNatural += gap;
+    }
+
+    if (isRow) {
+      this._computedWidth = this._explicitWidth > 0 ? this._explicitWidth : (pl + naturalMainSize + pr);
+      this._computedHeight = this._explicitHeight > 0 ? this._explicitHeight : (pt + totalCrossNatural + pb);
+    } else {
+      this._computedWidth = this._explicitWidth > 0 ? this._explicitWidth : (pl + totalCrossNatural + pr);
+      this._computedHeight = this._explicitHeight > 0 ? this._explicitHeight : (pt + naturalMainSize + pb);
+    }
+
+    // Position flexExclude children (absolute positioning)
+    for (const child of this._layoutChildren) {
+      if (!child._flexConfig?.flexExclude) continue;
+      const cfg = child._flexConfig;
+      const { w, h } = measureChild(child, pctRefW, pctRefH);
+      const cw = this._computedWidth;
+      const ch = this._computedHeight;
+      if (cfg.left !== undefined) child.x = cfg.left;
+      else if (cfg.right !== undefined) child.x = cw - w - cfg.right;
+      if (cfg.top !== undefined) child.y = cfg.top;
+      else if (cfg.bottom !== undefined) child.y = ch - h - cfg.bottom;
     }
   }
 
   /** Computed content size (after layout) */
   getContentSize(): { width: number; height: number } {
     if (this._layoutDirty) this.updateLayout();
-
-    let maxX = 0;
-    let maxY = 0;
-    for (const child of this._layoutChildren) {
-      const { w, h } = measureChild(child);
-      maxX = Math.max(maxX, child.x + w);
-      maxY = Math.max(maxY, child.y + h);
-    }
-
-    const [, pr, pb] = this._padding;
-    return { width: maxX + pr, height: maxY + pb };
+    return { width: this._computedWidth, height: this._computedHeight };
   }
 
   /** React reconciler update hook — applies changed config props */
@@ -513,11 +677,27 @@ export class FlexContainer extends Container {
     if ('justifyContent' in changed) this.setJustifyContent(changed.justifyContent);
     if ('alignItems' in changed) this.setAlignItems(changed.alignItems);
     if ('gap' in changed) this.setGap(changed.gap);
-    if ('padding' in changed) this.setPadding(changed.padding);
+    if ('padding' in changed || 'paddingTop' in changed || 'paddingRight' in changed || 'paddingBottom' in changed || 'paddingLeft' in changed) {
+      this._padding = resolvePadding(changed as FlexContainerConfig);
+      this._layoutDirty = true;
+    }
     if ('flexWrap' in changed) { this._config.flexWrap = changed.flexWrap; this._layoutDirty = true; }
+    if ('alignContent' in changed) { this._config.alignContent = changed.alignContent; this._layoutDirty = true; }
     if ('width' in changed || 'height' in changed) {
-      this.resize(changed.width ?? this._explicitWidth, changed.height ?? this._explicitHeight);
-      return; // resize calls updateLayout
+      const w = changed.width ?? this._rawWidth;
+      const h = changed.height ?? this._rawHeight;
+      this._rawWidth = w;
+      this._rawHeight = h;
+      if (typeof w === 'number' && typeof h === 'number') {
+        this.resize(w, h);
+      } else {
+        // Percentage — will resolve in updateLayout
+        this._explicitWidth = typeof w === 'number' ? w : 0;
+        this._explicitHeight = typeof h === 'number' ? h : 0;
+        this._layoutDirty = true;
+        this.updateLayout();
+      }
+      return;
     }
     if (this._layoutDirty) this.updateLayout();
   }

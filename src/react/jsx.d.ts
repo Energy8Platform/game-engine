@@ -14,7 +14,7 @@ import type { ViewInput } from '../ui/view';
 import type { ButtonConfig, ButtonState } from '../ui/Button';
 import type { LabelConfig } from '../ui/Label';
 import type { PanelConfig } from '../ui/Panel';
-import type { FlexContainerConfig, FlexItemConfig, AlignSelf } from '../ui/FlexContainer';
+import type { FlexContainerConfig, FlexItemConfig, AlignSelf, AlignContent } from '../ui/FlexContainer';
 import type { ProgressBarConfig } from '../ui/ProgressBar';
 import type { ScrollContainerConfig } from '../ui/ScrollContainer';
 import type { ModalConfig } from '../ui/Modal';
@@ -86,10 +86,15 @@ interface BaseProps extends PixiEventProps {
   // Flex item props (used when child of <flexContainer>)
   flexGrow?: number;
   flexShrink?: number;
-  layoutWidth?: number;
-  layoutHeight?: number;
+  layoutWidth?: number | string;
+  layoutHeight?: number | string;
   alignSelf?: AlignSelf;
   flexExclude?: boolean;
+  // Absolute positioning for flexExclude children
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
 }
 
 // ─── PixiJS primitive elements ───────────────────────────
@@ -158,6 +163,13 @@ interface PanelComponentProps extends BaseProps, Omit<PanelConfig, 'layout'> {
 
 interface FlexContainerComponentProps extends BaseProps, FlexContainerConfig {
   padding?: number | [number, number, number, number];
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  alignContent?: AlignContent;
+  width?: number | string;
+  height?: number | string;
 }
 
 interface ProgressBarComponentProps extends BaseProps, ProgressBarConfig {

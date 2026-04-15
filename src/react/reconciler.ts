@@ -7,7 +7,7 @@ import { FlexContainer } from '../ui/FlexContainer';
 import type { FlexItemConfig } from '../ui/FlexContainer';
 
 /** Flex item prop names that should be forwarded to _flexConfig on the child */
-const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude'] as const;
+const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left'] as const;
 
 /** Extract FlexItemConfig from props if any flex item props are present */
 function extractFlexItemConfig(props: Record<string, any>): FlexItemConfig | undefined {

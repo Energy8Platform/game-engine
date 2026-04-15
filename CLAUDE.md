@@ -41,8 +41,14 @@ The engine has a **built-in UI system** (`src/ui/`) with zero external UI depend
 - `direction`: `'row' | 'column'`
 - `justifyContent`: `'start' | 'center' | 'end' | 'space-between' | 'space-around'`
 - `alignItems`: `'start' | 'center' | 'end' | 'stretch'`
-- `gap`, `padding`, `flexWrap`, `maxWidth`/`maxHeight`
-- Children added via `addFlexChild(child, flexConfig?)`, supports `flexGrow` for proportional sizing
+- `alignContent`: `'start' | 'center' | 'end' | 'space-between' | 'stretch'` (multi-line distribution with `flexWrap`)
+- `gap`, `padding` (or `paddingTop`/`paddingRight`/`paddingBottom`/`paddingLeft`), `flexWrap`, `maxWidth`/`maxHeight`
+- `width`/`height` accept `number | string` — string percentages (e.g. `"50%"`) resolve against parent content area
+- **Auto-sizing**: without explicit `width`/`height`, container computes size from content (`_computedWidth`/`_computedHeight`)
+- Children added via `addFlexChild(child, flexConfig?)`, supports `flexGrow`, `flexShrink`, `alignSelf`
+- `flexExclude` children support absolute positioning via `top`/`right`/`bottom`/`left`
+- `layoutWidth`/`layoutHeight` accept percentages: `{ layoutWidth: '50%' }`
+- FlexContainer children are resized via `resize()` (not PixiJS scale setter) for correct internal relayout
 - Call `updateLayout()` after adding children, or `resize(w, h)` to set explicit container size
 
 **Layout** (`src/ui/Layout.ts`) wraps FlexContainer with a higher-level API: direction presets (`horizontal`/`vertical`/`grid`/`wrap`), viewport anchor positioning (9-point), responsive breakpoints by viewport width. Items added via `addItem()`, positioned via `updateViewport(w, h)`.

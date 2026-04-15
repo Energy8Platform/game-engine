@@ -410,7 +410,7 @@ If no custom view is provided, components fall back to Graphics-based rendering 
 
 ### FlexContainer
 
-Lightweight flexbox-like layout container. Children added via `addChild()` automatically participate in flex layout.
+Lightweight flexbox-like layout container. Children added via `addChild()` automatically participate in flex layout. Supports auto-sizing (no explicit `width`/`height` required), percentage dimensions, absolute positioning for excluded children, and multi-line alignment.
 
 ```typescript
 const toolbar = new FlexContainer({
@@ -426,6 +426,32 @@ toolbar.addFlexChild(spacer, { flexGrow: 1 });   // with flex config
 toolbar.resize(800, 60);
 ```
 
+**FlexContainerConfig:**
+
+| Property | Type | Default | Description |
+| --- | --- | --- | --- |
+| `direction` | `'row' \| 'column'` | `'row'` | Layout direction |
+| `justifyContent` | `'start' \| 'center' \| 'end' \| 'space-between' \| 'space-around'` | `'start'` | Main-axis distribution |
+| `alignItems` | `'start' \| 'center' \| 'end' \| 'stretch'` | `'start'` | Cross-axis alignment |
+| `alignContent` | `'start' \| 'center' \| 'end' \| 'space-between' \| 'stretch'` | `'start'` | Multi-line cross-axis distribution (with `flexWrap`) |
+| `gap` | `number` | `0` | Gap between children |
+| `padding` | `number \| [top, right, bottom, left]` | `0` | Padding (shorthand) |
+| `paddingTop/Right/Bottom/Left` | `number` | — | Individual padding overrides (take priority over `padding`) |
+| `flexWrap` | `boolean` | `false` | Enable wrapping to next line |
+| `width` | `number \| string` | — | Container width — pixels or `"50%"` relative to parent |
+| `height` | `number \| string` | — | Container height — pixels or `"50%"` relative to parent |
+
+**Auto-sizing:** When no explicit `width`/`height` is set, the container computes its size from content (`_computedWidth`/`_computedHeight`). Cross-axis `alignItems` works automatically (centers relative to tallest/widest child). Parent FlexContainers correctly measure auto-sized children.
+
+**Percentage dimensions:** String values like `"100%"` or `"50%"` resolve against the parent FlexContainer's content area. Works for both container `width`/`height` and child `layoutWidth`/`layoutHeight`.
+
+```typescript
+// Parent with explicit size, child fills 100% width and 50% height
+const parent = new FlexContainer({ direction: 'column', width: 800, height: 600 });
+const child = new FlexContainer({ width: '100%', height: '50%', direction: 'row' });
+parent.addFlexChild(child); // child resolves to 800×300
+```
+
 **FlexItemConfig** — per-child options passed via `addFlexChild(child, config)` or JSX props:
 
 | Property | Type | Default | Description |
@@ -434,16 +460,21 @@ toolbar.resize(800, 60);
 | `flexShrink` | `number` | `1` | Flex shrink factor (`0` = don't shrink when content overflows) |
 | `alignSelf` | `'auto' \| 'start' \| 'center' \| 'end' \| 'stretch'` | `'auto'` | Override parent's `alignItems` for this child |
 | `flexExclude` | `boolean` | `false` | Exclude from flex layout (like `position: absolute`) |
-| `layoutWidth` | `number` | — | Explicit width override for layout calculations |
-| `layoutHeight` | `number` | — | Explicit height override for layout calculations |
+| `layoutWidth` | `number \| string` | — | Width override — pixels or `"50%"` of parent content area |
+| `layoutHeight` | `number \| string` | — | Height override — pixels or `"50%"` of parent content area |
+| `top` | `number` | — | Absolute positioning (only with `flexExclude`) — distance from top edge |
+| `right` | `number` | — | Absolute positioning — distance from right edge |
+| `bottom` | `number` | — | Absolute positioning — distance from bottom edge |
+| `left` | `number` | — | Absolute positioning — distance from left edge |
 
 ```typescript
 // Fixed item that won't shrink + centered override
 toolbar.addFlexChild(logo, { flexShrink: 0 });
 toolbar.addFlexChild(badge, { alignSelf: 'center' });
 
-// Background excluded from layout flow
-toolbar.addFlexChild(background, { flexExclude: true });
+// Absolute positioning (like CSS position: absolute)
+toolbar.addFlexChild(closeBtn, { flexExclude: true, top: 8, right: 8 });
+toolbar.addFlexChild(background, { flexExclude: true, top: 0, left: 0 });
 ```
 
 ### Layout
@@ -906,10 +937,30 @@ All engine UI components are config-based: the reconciler passes JSX props as a 
 
 {/* Flex item props — work on any element inside <flexContainer> */}
 <flexContainer direction="row" width={800} height={60}>
-  <graphics draw={drawBg} flexExclude />       {/* excluded from flow */}
-  <label text="Logo" flexShrink={0} />          {/* won't shrink */}
-  <container flexGrow={1} />                     {/* fills remaining space */}
-  <button text="Menu" alignSelf="center" />      {/* centered on cross-axis */}
+  <graphics draw={drawBg} flexExclude top={0} left={0} /> {/* absolute positioning */}
+  <label text="Logo" flexShrink={0} />                      {/* won't shrink */}
+  <container flexGrow={1} />                                 {/* fills remaining space */}
+  <button text="Menu" alignSelf="center" />                  {/* centered on cross-axis */}
+  <sprite texture="close" flexExclude top={4} right={4} />  {/* top-right corner */}
+</flexContainer>
+
+{/* Individual padding props */}
+<flexContainer direction="column" paddingTop={20} paddingLeft={16} paddingRight={16}>
+  <label text="Content" />
+</flexContainer>
+
+{/* Percentage dimensions */}
+<flexContainer direction="column" width={screen.width} height={screen.height}>
+  <flexContainer width="100%" height="50%" direction="row" alignItems="center">
+    <label text="Top half" />
+  </flexContainer>
+</flexContainer>
+
+{/* alignContent for wrapped lines */}
+<flexContainer direction="row" flexWrap alignContent="center" width={400} height={400} gap={8}>
+  <button width={180} height={40} text="A" />
+  <button width={180} height={40} text="B" />
+  <button width={180} height={40} text="C" />
 </flexContainer>
 ```
 

@@ -4,7 +4,7 @@ export type { ViewInput } from './view';
 
 // ─── Engine UI Components ─────────────────────────────────
 export { FlexContainer } from './FlexContainer';
-export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, AlignSelf, FlexItemConfig } from './FlexContainer';
+export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, AlignSelf, AlignContent, FlexItemConfig } from './FlexContainer';
 export { Button } from './Button';
 export type { ButtonConfig, ButtonState } from './Button';
 export { ProgressBar } from './ProgressBar';
