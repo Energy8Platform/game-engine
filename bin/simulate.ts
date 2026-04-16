@@ -4,6 +4,7 @@ import { ParallelSimulationRunner } from '../src/lua/ParallelSimulationRunner';
 import { NativeSimulationRunner, findNativeBinary, formatNativeResult } from '../src/lua/NativeSimulationRunner';
 import { cpus } from 'os';
 import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // ─── Argument Parsing ───────────────────────────────────
 
@@ -63,7 +64,7 @@ async function main() {
 
   // ─── Native binary detection ────────────────────────────
   // Search in config dir first, then in the game-engine package root
-  const engineRoot = resolve(__dirname, '..');
+  const engineRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const binaryPath = args.binary ?? (useJs ? null : (findNativeBinary(dirname(configPath)) ?? findNativeBinary(engineRoot)));
 
   if (useNative && !binaryPath) {
