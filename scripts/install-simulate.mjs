@@ -17,6 +17,10 @@ const BIN_DIR = join(__dirname, '..', 'bin');
 // ─── Config ─────────────────────────────────────────────
 
 const REPO = 'energy8platform/game-engine';
+// Binary version — update this when new Go binaries are built and uploaded to GitHub Releases.
+// The binary is backwards-compatible: it runs any Lua script, so it doesn't need to match
+// the engine version exactly. Only bump when the Go simulate CLI itself changes.
+const BINARY_VERSION = '0.13.0';
 
 const PLATFORM_MAP = {
   'darwin-arm64': 'simulate-darwin-arm64',
@@ -44,10 +48,7 @@ async function main() {
     return;
   }
 
-  // Read version from package.json
-  const pkg = await import(join(__dirname, '..', 'package.json'), { with: { type: 'json' } });
-  const version = pkg.default.version;
-  const tag = `v${version}`;
+  const tag = `v${BINARY_VERSION}`;
 
   const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
 
