@@ -30,7 +30,10 @@ export interface BuyBonusConfig {
 
 export interface BuyBonusMode {
   cost_multiplier: number;
-  scatter_distribution: Record<string, number>;
+  /** Distribution of forced scatter counts. Optional — if omitted, Lua script handles bonus setup itself. */
+  scatter_distribution?: Record<string, number>;
+  /** Optional description */
+  description?: string;
 }
 
 export interface AnteBetConfig {

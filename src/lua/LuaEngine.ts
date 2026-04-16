@@ -159,7 +159,9 @@ export class LuaEngine {
       if (mode) {
         stateParams.buy_bonus = true;
         stateParams.buy_bonus_mode = action.buy_bonus_mode;
-        stateParams.forced_scatter_count = this.pickFromDistribution(mode.scatter_distribution);
+        if (mode.scatter_distribution) {
+          stateParams.forced_scatter_count = this.pickFromDistribution(mode.scatter_distribution);
+        }
       }
     }
 
