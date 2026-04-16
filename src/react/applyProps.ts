@@ -1,6 +1,11 @@
 const RESERVED = new Set(['children', 'key', 'ref']);
 /** Props handled by the reconciler as flex item config, not forwarded to components */
 const FLEX_ITEM_PROPS = new Set(['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left']);
+/** Base Container props applied directly to the instance (not via config) */
+const CONTAINER_PROPS = new Set([
+  'x', 'y', 'alpha', 'visible', 'rotation', 'angle', 'zIndex',
+  'label', 'cursor', 'eventMode',
+]);
 
 // ─── UI Component helpers ────────────────────────────────
 
@@ -13,7 +18,7 @@ export function extractConfig(props: Record<string, any>): Record<string, any> {
   const config: Record<string, any> = {};
 
   for (const key in props) {
-    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || isEventProp(key)) continue;
+    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || CONTAINER_PROPS.has(key) || isEventProp(key)) continue;
 
     if (key.includes('-')) {
       const parts = key.split('-');
@@ -43,7 +48,7 @@ export function diffConfig(
 
   // New or changed props
   for (const key in newProps) {
-    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || isEventProp(key)) continue;
+    if (RESERVED.has(key) || FLEX_ITEM_PROPS.has(key) || CONTAINER_PROPS.has(key) || isEventProp(key)) continue;
     if (newProps[key] !== oldProps[key]) {
       if (key.includes('-')) {
         const parts = key.split('-');
@@ -142,6 +147,46 @@ function setNestedValue(target: any, path: string[], value: any): void {
     if (obj == null) return;
   }
   obj[path[path.length - 1]] = value;
+}
+
+/**
+ * Apply base Container props (x, y, alpha, visible, etc.) directly to the instance.
+ * Called for ALL elements — both UI components and standard PixiJS elements.
+ * Also handles scale, pivot, position, anchor via dash-notation.
+ */
+export function applyContainerProps(
+  instance: any,
+  newProps: Record<string, any>,
+  oldProps: Record<string, any> = {},
+): void {
+  for (const key of CONTAINER_PROPS) {
+    if (key in newProps && newProps[key] !== oldProps[key]) {
+      try { instance[key] = newProps[key]; } catch { /* read-only */ }
+    } else if (key in oldProps && !(key in newProps)) {
+      // Prop removed — reset to undefined (PixiJS defaults)
+      try { instance[key] = undefined; } catch { /* read-only */ }
+    }
+  }
+  // Handle scale as uniform number or {x,y} object
+  if ('scale' in newProps && newProps.scale !== oldProps.scale) {
+    const s = newProps.scale;
+    if (typeof s === 'number') {
+      instance.scale?.set?.(s, s);
+    } else if (s && typeof s === 'object') {
+      instance.scale?.set?.(s.x ?? 1, s.y ?? 1);
+    }
+  }
+  // Handle dash-notation container props: scale-x, scale-y, pivot-x, pivot-y, position-x, position-y, anchor-x, anchor-y
+  for (const key in newProps) {
+    if (!key.includes('-')) continue;
+    const parts = key.split('-');
+    const root = parts[0];
+    if (root === 'scale' || root === 'pivot' || root === 'position' || root === 'anchor') {
+      if (newProps[key] !== oldProps[key]) {
+        setNestedValue(instance, parts, newProps[key]);
+      }
+    }
+  }
 }
 
 export function applyProps(

@@ -2,7 +2,7 @@ import Reconciler from 'react-reconciler';
 import { DefaultEventPriority } from 'react-reconciler/constants';
 import { Container } from 'pixi.js';
 import { catalogue } from './catalogue';
-import { applyProps, hasEventProps, extractConfig, diffConfig, applyEventProps } from './applyProps';
+import { applyProps, applyContainerProps, hasEventProps, extractConfig, diffConfig, applyEventProps } from './applyProps';
 import { FlexContainer } from '../ui/FlexContainer';
 import type { FlexItemConfig } from '../ui/FlexContainer';
 
@@ -83,6 +83,7 @@ const hostConfig: Reconciler.HostConfig<
       // Config-based UI component: pass props as constructor config
       const config = extractConfig(props);
       instance = new Ctor(config);
+      applyContainerProps(instance, props);
       applyEventProps(instance, props);
     } else {
       // Standard PixiJS element
@@ -200,6 +201,7 @@ const hostConfig: Reconciler.HostConfig<
       if (Object.keys(changed).length > 0) {
         instance.updateConfig(changed);
       }
+      applyContainerProps(instance, newProps, oldProps);
       applyEventProps(instance, newProps, oldProps);
     } else {
       applyProps(instance, newProps, oldProps);
