@@ -22,6 +22,18 @@ function isSuspendable(obj: any): obj is Suspendable {
 /** Layout containers that need flush after commit phase */
 const pendingLayoutFlush = new Set<Suspendable>();
 
+/** Suspend a layout container and all its suspendable ancestors, add them to pending flush */
+function suspendWithAncestors(instance: any): void {
+  let current = instance;
+  while (current) {
+    if (isSuspendable(current)) {
+      current.suspendLayout();
+      pendingLayoutFlush.add(current);
+    }
+    current = current.parent;
+  }
+}
+
 /** Extract FlexItemConfig from props if any flex item props are present */
 function extractFlexItemConfig(props: Record<string, any>): FlexItemConfig | undefined {
   let config: FlexItemConfig | undefined;
@@ -196,6 +208,13 @@ const hostConfig: Reconciler.HostConfig<
   },
 
   commitUpdate(instance, _updatePayload, _type, oldProps, newProps) {
+    // Suspend this instance and ancestors before applying changes —
+    // prevents intermediate relayouts with partially-updated tree
+    const dimensionsChanged = newProps.width !== oldProps.width || newProps.height !== oldProps.height;
+    if (isSuspendable(instance) || dimensionsChanged) {
+      suspendWithAncestors(instance);
+    }
+
     if (typeof instance.updateConfig === 'function') {
       const changed = diffConfig(newProps, oldProps);
       if (Object.keys(changed).length > 0) {
@@ -226,11 +245,9 @@ const hostConfig: Reconciler.HostConfig<
       }
     }
 
-    // Trigger parent relayout if flex config or dimensions changed
-    if (newFlexConfig || oldFlexConfig || newProps.width !== oldProps.width || newProps.height !== oldProps.height) {
-      if (instance.parent instanceof FlexContainer) {
-        instance.parent.updateLayout();
-      }
+    // Mark ancestors dirty if flex config or dimensions changed
+    if (newFlexConfig || oldFlexConfig || dimensionsChanged) {
+      suspendWithAncestors(instance);
     }
 
     if (hasEventProps(newProps) && instance.eventMode === 'auto') {
@@ -271,8 +288,16 @@ const hostConfig: Reconciler.HostConfig<
   },
 
   resetAfterCommit() {
-    // Flush deferred layout for all FlexContainers modified during this commit
-    for (const fc of pendingLayoutFlush) {
+    if (pendingLayoutFlush.size === 0) return;
+
+    // Sort by depth (deepest first) so children compute sizes before parents lay out
+    const sorted = [...pendingLayoutFlush].sort((a, b) => {
+      let da = 0; let n: any = a; while (n.parent) { da++; n = n.parent; }
+      let db = 0; n = b; while (n.parent) { db++; n = n.parent; }
+      return db - da; // deepest first
+    });
+
+    for (const fc of sorted) {
       fc.resumeLayout();
     }
     pendingLayoutFlush.clear();
