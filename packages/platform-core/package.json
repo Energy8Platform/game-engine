@@ -1,0 +1,76 @@
+{
+  "name": "@energy8platform/platform-core",
+  "version": "0.15.2",
+  "description": "Energy8 platform core: Lua engine, DevBridge, RTP simulation, and SDK session orchestration. Renderer-agnostic — pair with any game framework (Pixi, Phaser, Three.js, custom).",
+  "type": "module",
+  "main": "./dist/index.cjs.js",
+  "module": "./dist/index.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./lua": {
+      "import": "./dist/lua.esm.js",
+      "require": "./dist/lua.cjs.js",
+      "types": "./dist/lua.d.ts"
+    },
+    "./dev-bridge": {
+      "import": "./dist/dev-bridge.esm.js",
+      "require": "./dist/dev-bridge.cjs.js",
+      "types": "./dist/dev-bridge.d.ts"
+    },
+    "./vite": {
+      "import": "./dist/vite.esm.js",
+      "require": "./dist/vite.cjs.js",
+      "types": "./dist/vite.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rollup -c rollup.config.mjs",
+    "dev": "rollup -c rollup.config.mjs -w",
+    "lint": "eslint src/ --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@energy8platform/game-sdk": "^2.7.0",
+    "fengari": "^0.1.4"
+  },
+  "devDependencies": {
+    "@energy8platform/game-sdk": "^2.7.0",
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "fengari": "^0.1.5",
+    "fengari-web": "^0.1.4",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "keywords": [
+    "casino",
+    "energy8",
+    "lua",
+    "rtp-simulation",
+    "igaming"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/energy8platform/game-engine.git",
+    "directory": "packages/platform-core"
+  }
+}
