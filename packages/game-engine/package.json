@@ -6,9 +6,6 @@
   "main": "./dist/index.cjs.js",
   "module": "./dist/index.esm.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "game-engine-simulate": "./bin/simulate.ts"
-  },
   "exports": {
     ".": {
       "import": "./dist/index.esm.js",
@@ -68,12 +65,9 @@
   },
   "files": [
     "dist",
-    "src",
-    "bin/simulate.ts",
-    "scripts"
+    "src"
   ],
   "scripts": {
-    "simulate": "tsx bin/simulate.ts",
     "build": "rollup -c rollup.config.mjs",
     "dev": "rollup -c rollup.config.mjs -w",
     "lint": "eslint src/ --ext .ts",
@@ -81,7 +75,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "node scripts/install-simulate.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -89,7 +82,6 @@
   },
   "peerDependencies": {
     "@energy8platform/game-sdk": "^2.7.0",
-    "fengari": "^0.1.4",
     "pixi.js": "^8.16.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
@@ -110,9 +102,6 @@
     },
     "react-reconciler": {
       "optional": true
-    },
-    "fengari": {
-      "optional": true
     }
   },
   "devDependencies": {
@@ -126,8 +115,6 @@
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
-    "fengari": "^0.1.5",
-    "fengari-web": "^0.1.4",
     "pixi.js": "^8.16.0",
     "prettier": "^3.4.0",
     "react": "^19.0.0",
@@ -136,7 +123,6 @@
     "rollup": "^4.24.0",
     "rollup-plugin-dts": "^6.1.0",
     "tslib": "^2.8.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.6.0",
     "vite": "^6.0.0",
     "vitest": "^2.0.0"
