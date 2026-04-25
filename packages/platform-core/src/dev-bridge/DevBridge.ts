@@ -64,7 +64,7 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
  *
  * @example
  * ```ts
- * import { DevBridge } from '@energy8platform/game-engine/debug';
+ * import { DevBridge } from '@energy8platform/platform-core/dev-bridge';
  *
  * const devBridge = new DevBridge({
  *   balance: 5000,
