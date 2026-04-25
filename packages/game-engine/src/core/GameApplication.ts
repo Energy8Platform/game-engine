@@ -1,6 +1,7 @@
 import { Application, Assets, Ticker } from 'pixi.js';
-import { CasinoGameSDK } from '@energy8platform/game-sdk';
+import type { CasinoGameSDK } from '@energy8platform/game-sdk';
 import type { InitData, GameConfigData, SessionData } from '@energy8platform/game-sdk';
+import { createPlatformSession, type PlatformSession } from '@energy8platform/platform-core';
 import type { GameApplicationConfig, GameEngineEvents, AssetManifest } from '../types';
 import { ScaleMode, Orientation, TransitionType } from '../types';
 import { EventEmitter } from './EventEmitter';
@@ -73,6 +74,9 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
   /** Data received from SDK initialization */
   public initData: InitData | null = null;
+
+  /** Platform session (SDK + optional DevBridge). null until start() runs. */
+  public session: PlatformSession | null = null;
 
   /** Configuration */
   public readonly config: GameApplicationConfig;
@@ -190,7 +194,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     this.input?.destroy();
     this.audio?.destroy();
     this.viewport?.destroy();
-    this.sdk?.destroy();
+    this.session?.destroy();
     this.app?.destroy(true, { children: true, texture: true });
 
     this.emit('destroyed');
@@ -234,24 +238,16 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   }
 
   private async initSDK(): Promise<void> {
-    if (this.config.sdk === false) {
-      // Offline / development mode — no SDK
-      this.initData = null;
-      return;
-    }
+    // Delegate the SDK handshake (and any optional in-process DevBridge
+    // wiring) to platform-core. The session forwards SDK events upward.
+    this.session = await createPlatformSession({ sdk: this.config.sdk });
+    this.sdk = this.session.sdk;
+    this.initData = this.session.initData;
 
-    const sdkOpts = typeof this.config.sdk === 'object' ? this.config.sdk : {};
-    this.sdk = new CasinoGameSDK(sdkOpts);
-
-    // Perform the handshake
-    this.initData = await this.sdk.ready();
-
-    // Forward SDK events
-    this.sdk.on('error', (err: Error) => {
+    this.session.on('error', (err) => {
       this.emit('error', err);
     });
-
-    this.sdk.on('balanceUpdate', (data) => {
+    this.session.on('balanceUpdate', (data) => {
       this.emit('balanceUpdate', data);
     });
   }
