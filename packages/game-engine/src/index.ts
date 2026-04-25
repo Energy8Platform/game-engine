@@ -110,4 +110,4 @@ export type {
   TransitionRule,
   LuaEngineConfig,
   LuaPlayResult,
-} from './lua/types';
+} from '@energy8platform/platform-core/lua';

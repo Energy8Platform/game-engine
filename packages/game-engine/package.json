@@ -84,6 +84,9 @@
     "postinstall": "node scripts/install-simulate.mjs",
     "prepublishOnly": "npm run build"
   },
+  "dependencies": {
+    "@energy8platform/platform-core": "*"
+  },
   "peerDependencies": {
     "@energy8platform/game-sdk": "^2.7.0",
     "fengari": "^0.1.4",

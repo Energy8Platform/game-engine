@@ -8,7 +8,7 @@ import {
   type PlayResultAckPayload,
   type PlayParams,
 } from '@energy8platform/game-sdk';
-import type { GameDefinition } from '../lua/types';
+import type { GameDefinition } from '@energy8platform/platform-core/lua';
 
 export interface DevBridgeConfig {
   /** Mock initial balance */
