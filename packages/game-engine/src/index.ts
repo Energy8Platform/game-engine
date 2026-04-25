@@ -96,8 +96,8 @@ export type { ScrollContainerConfig, ScrollDirection } from './ui/ScrollContaine
 export { LoadingScene } from './loading/LoadingScene';
 
 // ─── Debug ───────────────────────────────────────────────
-export { DevBridge } from './debug/DevBridge';
-export type { DevBridgeConfig } from './debug/DevBridge';
+export { DevBridge } from '@energy8platform/platform-core/dev-bridge';
+export type { DevBridgeConfig } from '@energy8platform/platform-core/dev-bridge';
 export { FPSOverlay } from './debug/FPSOverlay';
 
 // ─── Lua ────────────────────────────────────────────────
