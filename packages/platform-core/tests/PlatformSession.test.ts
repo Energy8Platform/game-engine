@@ -14,7 +14,12 @@ import {
   PlatformSession,
   LuaEngine,
   DevBridge,
+  createCSSPreloader,
+  removeCSSPreloader,
+  buildLogoSVG,
   type GameDefinition,
+  type AssetManifest,
+  type LoadingScreenConfig,
 } from '../src/index';
 
 // MemoryChannel (used by DevBridge in devMode) keys its singleton off
@@ -75,6 +80,26 @@ describe('platform-core smoke test (no pixi)', () => {
     expect(typeof PlatformSession).toBe('function');
     expect(typeof LuaEngine).toBe('function');
     expect(typeof DevBridge).toBe('function');
+    // Branded loading screen primitives — work in any renderer.
+    expect(typeof createCSSPreloader).toBe('function');
+    expect(typeof removeCSSPreloader).toBe('function');
+    expect(typeof buildLogoSVG).toBe('function');
+  });
+
+  it('buildLogoSVG produces an Energy8 SVG markup string', () => {
+    const svg = buildLogoSVG({ idPrefix: 'test' });
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('clipPath');
+  });
+
+  it('asset manifest and loading config types are exported and assignable', () => {
+    // Pure TS-shape check: the test passes if the file compiles.
+    const manifest: AssetManifest = {
+      bundles: [{ name: 'preload', assets: [{ alias: 'logo', src: 'logo.png' }] }],
+    };
+    const cfg: LoadingScreenConfig = { backgroundColor: '#000', tapToStart: true };
+    expect(manifest.bundles[0].name).toBe('preload');
+    expect(cfg.tapToStart).toBe(true);
   });
 
   it('creates a session with the dev bridge + lua + sdk handshake', async () => {

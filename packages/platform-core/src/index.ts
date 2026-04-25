@@ -42,6 +42,17 @@ export {
 export { DevBridge } from './dev-bridge';
 export type { DevBridgeConfig } from './dev-bridge';
 
+// ─── Branded loading screen ─────────────────────────────
+// Renderer-agnostic CSS preloader showing the Energy8 platform logo.
+// Use this in any host (Pixi, Phaser, Three.js, custom) to keep the
+// brand consistent across games on the platform.
+export {
+  createCSSPreloader,
+  removeCSSPreloader,
+  buildLogoSVG,
+  LOADER_BAR_MAX_WIDTH,
+} from './loading';
+
 // ─── Utility ────────────────────────────────────────────
 export { EventEmitter } from './EventEmitter';
 
@@ -74,6 +85,11 @@ export type {
   SimulationConfig,
   SimulationResult,
   SimulationRawAccumulators,
+  // Asset / loading types
+  AssetManifest,
+  AssetBundle,
+  AssetEntry,
+  LoadingScreenConfig,
 } from './types';
 
 // ─── Native simulation types ────────────────────────────

@@ -28,10 +28,11 @@ Renderer-agnostic. Contains everything platform-specific to Energy8 (Lua engine,
 Peer deps: `@energy8platform/game-sdk`, `fengari`, optional `vite`. **No pixi/react/DOM.**
 
 Sub-paths:
-- `@energy8platform/platform-core` — `createPlatformSession`, `LuaEngine`, `DevBridge`, types
+- `@energy8platform/platform-core` — `createPlatformSession`, `LuaEngine`, `DevBridge`, branded `createCSSPreloader`, types
 - `@energy8platform/platform-core/lua` — Lua-specific exports
 - `@energy8platform/platform-core/dev-bridge` — DevBridge isolated
 - `@energy8platform/platform-core/vite` — `devBridgePlugin`, `luaPlugin`
+- `@energy8platform/platform-core/loading` — `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG` (the Energy8 brand frame, renderer-agnostic)
 
 ### `@energy8platform/game-engine`
 

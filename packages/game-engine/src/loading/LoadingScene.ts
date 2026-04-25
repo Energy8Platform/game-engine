@@ -3,7 +3,7 @@ import { Scene } from '../core/Scene';
 import { Tween } from '../animation/Tween';
 import { Easing } from '../animation/Easing';
 import type { LoadingScreenConfig } from '../types';
-import { buildLogoSVG, LOADER_BAR_MAX_WIDTH } from './logo';
+import { buildLogoSVG, LOADER_BAR_MAX_WIDTH } from '@energy8platform/platform-core/loading';
 
 /**
  * Build the loading scene variant of the logo SVG.

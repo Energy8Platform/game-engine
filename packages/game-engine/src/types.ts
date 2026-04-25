@@ -31,48 +31,15 @@ export enum Orientation {
   ANY = 'any',
 }
 
-// ─── Loading Screen Config ─────────────────────────────────
-
-export interface LoadingScreenConfig {
-  /** Background color (hex number or CSS string) */
-  backgroundColor?: number | string;
-  /** Background gradient (CSS string applied to the CSS preloader) */
-  backgroundGradient?: string;
-  /** Logo texture alias (must be in 'preload' bundle) */
-  logoAsset?: string;
-  /** Logo scale (default: 1) */
-  logoScale?: number;
-  /** Show percentage text below the loader bar */
-  showPercentage?: boolean;
-  /** Custom progress text formatter */
-  progressTextFormatter?: (progress: number) => string;
-  /** Show "Tap to start" after loading (needed for mobile audio unlock) */
-  tapToStart?: boolean;
-  /** "Tap to start" label text */
-  tapToStartText?: string;
-  /** Minimum display time in ms (so the user sees the brand, even if loading is fast) */
-  minDisplayTime?: number;
-  /** CSS preloader custom HTML (shown before PixiJS is ready) */
-  cssPreloaderHTML?: string;
-}
-
-// ─── Asset Manifest ────────────────────────────────────────
-
-export interface AssetEntry {
-  alias: string;
-  src: string | string[];
-  /** Optional data to pass to the loader */
-  data?: Record<string, unknown>;
-}
-
-export interface AssetBundle {
-  name: string;
-  assets: AssetEntry[];
-}
-
-export interface AssetManifest {
-  bundles: AssetBundle[];
-}
+// ─── Loading Screen Config + Asset Manifest ───────────────
+// Both are renderer-agnostic and moved to @energy8platform/platform-core.
+// Re-exported here so existing game-engine consumers keep their imports.
+export type {
+  LoadingScreenConfig,
+  AssetManifest,
+  AssetBundle,
+  AssetEntry,
+} from '@energy8platform/platform-core';
 
 // ─── Audio Config ──────────────────────────────────────────
 

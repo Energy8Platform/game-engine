@@ -11,7 +11,7 @@ import { AudioManager } from '../audio/AudioManager';
 import { InputManager } from '../input/InputManager';
 import { ViewportManager } from '../viewport/ViewportManager';
 import { LoadingScene } from '../loading/LoadingScene';
-import { createCSSPreloader, removeCSSPreloader } from '../loading/CSSPreloader';
+import { createCSSPreloader, removeCSSPreloader } from '@energy8platform/platform-core/loading';
 import { FPSOverlay } from '../debug/FPSOverlay';
 
 /**
@@ -76,7 +76,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   public initData: InitData | null = null;
 
   /** Platform session (SDK + optional DevBridge). null until start() runs. */
-  public session: PlatformSession | null = null;
+  public platformSession: PlatformSession | null = null;
 
   /** Configuration */
   public readonly config: GameApplicationConfig;
@@ -194,7 +194,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     this.input?.destroy();
     this.audio?.destroy();
     this.viewport?.destroy();
-    this.session?.destroy();
+    this.platformSession?.destroy();
     this.app?.destroy(true, { children: true, texture: true });
 
     this.emit('destroyed');
@@ -240,14 +240,14 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   private async initSDK(): Promise<void> {
     // Delegate the SDK handshake (and any optional in-process DevBridge
     // wiring) to platform-core. The session forwards SDK events upward.
-    this.session = await createPlatformSession({ sdk: this.config.sdk });
-    this.sdk = this.session.sdk;
-    this.initData = this.session.initData;
+    this.platformSession = await createPlatformSession({ sdk: this.config.sdk });
+    this.sdk = this.platformSession.sdk;
+    this.initData = this.platformSession.initData;
 
-    this.session.on('error', (err) => {
+    this.platformSession.on('error', (err) => {
       this.emit('error', err);
     });
-    this.session.on('balanceUpdate', (data) => {
+    this.platformSession.on('balanceUpdate', (data) => {
       this.emit('balanceUpdate', data);
     });
   }

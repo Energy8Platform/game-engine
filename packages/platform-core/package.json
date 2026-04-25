@@ -29,6 +29,11 @@
       "import": "./dist/vite.esm.js",
       "require": "./dist/vite.cjs.js",
       "types": "./dist/vite.d.ts"
+    },
+    "./loading": {
+      "import": "./dist/loading.esm.js",
+      "require": "./dist/loading.cjs.js",
+      "types": "./dist/loading.d.ts"
     }
   },
   "files": [
