@@ -5,9 +5,12 @@ dist/
 *.mjs
 !rollup.config.ts
 !scripts/*.mjs
+!packages/*/scripts/*.mjs
 .DS_Store
 package-lock.json
 
 # Native simulation binaries (downloaded by postinstall or built from Go)
 bin/simulate-*
 bin/simulation-*
+packages/*/bin/simulate-*
+packages/*/bin/simulation-*

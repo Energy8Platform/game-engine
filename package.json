@@ -1,150 +1,24 @@
 {
-  "name": "@energy8platform/game-engine",
-  "version": "0.15.2",
-  "description": "Universal casino game engine built on PixiJS v8 and @energy8platform/game-sdk",
+  "name": "@energy8platform/game-engine-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for @energy8platform/platform-core and @energy8platform/game-engine",
   "type": "module",
-  "main": "./dist/index.cjs.js",
-  "module": "./dist/index.esm.js",
-  "types": "./dist/index.d.ts",
-  "bin": {
-    "game-engine-simulate": "./bin/simulate.ts"
-  },
-  "exports": {
-    ".": {
-      "import": "./dist/index.esm.js",
-      "require": "./dist/index.cjs.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./core": {
-      "import": "./dist/core.esm.js",
-      "require": "./dist/core.cjs.js",
-      "types": "./dist/core.d.ts"
-    },
-    "./assets": {
-      "import": "./dist/assets.esm.js",
-      "require": "./dist/assets.cjs.js",
-      "types": "./dist/assets.d.ts"
-    },
-    "./audio": {
-      "import": "./dist/audio.esm.js",
-      "require": "./dist/audio.cjs.js",
-      "types": "./dist/audio.d.ts"
-    },
-    "./ui": {
-      "import": "./dist/ui.esm.js",
-      "require": "./dist/ui.cjs.js",
-      "types": "./dist/ui.d.ts"
-    },
-    "./animation": {
-      "import": "./dist/animation.esm.js",
-      "require": "./dist/animation.cjs.js",
-      "types": "./dist/animation.d.ts"
-    },
-    "./debug": {
-      "import": "./dist/debug.esm.js",
-      "require": "./dist/debug.cjs.js",
-      "types": "./dist/debug.d.ts"
-    },
-    "./vite": {
-      "import": "./dist/vite.esm.js",
-      "require": "./dist/vite.cjs.js",
-      "types": "./dist/vite.d.ts"
-    },
-    "./react": {
-      "import": "./dist/react.esm.js",
-      "require": "./dist/react.cjs.js",
-      "types": "./dist/react.d.ts"
-    },
-    "./react-jsx": {
-      "import": "./dist/react-jsx.esm.js",
-      "require": "./dist/react-jsx.cjs.js",
-      "types": "./dist/react-jsx.d.ts"
-    },
-    "./lua": {
-      "import": "./dist/lua.esm.js",
-      "require": "./dist/lua.cjs.js",
-      "types": "./dist/lua.d.ts"
-    }
-  },
-  "files": [
-    "dist",
-    "src",
-    "bin/simulate.ts",
-    "scripts"
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "simulate": "tsx bin/simulate.ts",
-    "build": "rollup -c rollup.config.mjs",
-    "dev": "rollup -c rollup.config.mjs -w",
-    "lint": "eslint src/ --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "postinstall": "node scripts/install-simulate.mjs",
-    "prepublishOnly": "npm run build"
-  },
-  "peerDependencies": {
-    "@energy8platform/game-sdk": "^2.7.0",
-    "fengari": "^0.1.4",
-    "pixi.js": "^8.16.0",
-    "react": ">=18.0.0",
-    "react-dom": ">=18.0.0",
-    "react-reconciler": ">=0.29.0"
-  },
-  "peerDependenciesMeta": {
-    "@esotericsoftware/spine-pixi-v8": {
-      "optional": true
-    },
-    "@pixi/sound": {
-      "optional": true
-    },
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    },
-    "react-reconciler": {
-      "optional": true
-    },
-    "fengari": {
-      "optional": true
-    }
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace @energy8platform/game-engine",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write \"packages/*/src/**/*.ts\"",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:watch": "npm run test:watch --workspace @energy8platform/game-engine"
   },
   "devDependencies": {
-    "@energy8platform/game-sdk": "^2.7.0",
-    "@esotericsoftware/spine-pixi-v8": "~4.2.0",
-    "@pixi/sound": "^6.0.0",
-    "@rollup/plugin-typescript": "^12.1.0",
-    "@types/node": "^25.6.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^9.0.0",
-    "fengari": "^0.1.5",
-    "fengari-web": "^0.1.4",
-    "pixi.js": "^8.16.0",
-    "prettier": "^3.4.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-reconciler": "^0.31.0",
-    "rollup": "^4.24.0",
-    "rollup-plugin-dts": "^6.1.0",
-    "tslib": "^2.8.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.6.0",
-    "vite": "^6.0.0",
-    "vitest": "^2.0.0"
+    "prettier": "^3.4.0"
   },
-  "keywords": [
-    "casino",
-    "game-engine",
-    "pixijs",
-    "slot",
-    "igaming"
-  ],
   "license": "MIT",
   "repository": {
     "type": "git",
