@@ -20,16 +20,35 @@ export interface FlexItemConfig {
   layoutHeight?: number | string;
   /** Override parent's alignItems for this child */
   alignSelf?: AlignSelf;
-  /** Exclude from flex layout (acts like position: absolute) */
+  /**
+   * Exclude from flex layout (acts like position: absolute).
+   *
+   * Positioning props (`top`/`right`/`bottom`/`left`/`centerX`/`centerY`) describe
+   * the **visual bounding rectangle**, so children with a centered internal
+   * origin (Button, Label — `anchor = 0.5`) are positioned intuitively.
+   * `left: 100` places the visible left edge at 100px, regardless of origin.
+   */
   flexExclude?: boolean;
-  /** Absolute positioning for flexExclude children (distance from top edge) */
+  /** Distance from top edge of parent content area to the child's visual top */
   top?: number;
-  /** Absolute positioning for flexExclude children (distance from right edge) */
+  /** Distance from right edge of parent content area to the child's visual right */
   right?: number;
-  /** Absolute positioning for flexExclude children (distance from bottom edge) */
+  /** Distance from bottom edge of parent content area to the child's visual bottom */
   bottom?: number;
-  /** Absolute positioning for flexExclude children (distance from left edge) */
+  /** Distance from left edge of parent content area to the child's visual left */
   left?: number;
+  /**
+   * X coordinate of the child's visual center within parent content area.
+   * Accepts pixels (`200`) or a percentage of parent content width (`'50%'`).
+   * Takes precedence over `left`/`right`.
+   */
+  centerX?: number | string;
+  /**
+   * Y coordinate of the child's visual center within parent content area.
+   * Accepts pixels or a percentage of parent content height (`'50%'`).
+   * Takes precedence over `top`/`bottom`.
+   */
+  centerY?: number | string;
 }
 
 export interface FlexContainerConfig {
@@ -99,26 +118,31 @@ function measureChild(
   const cfg = child._flexConfig;
   const resolvedLW = resolveDimension(cfg?.layoutWidth, parentContentW);
   const resolvedLH = resolveDimension(cfg?.layoutHeight, parentContentH);
-  if (resolvedLW !== undefined && resolvedLH !== undefined) {
-    return { w: resolvedLW, h: resolvedLH, ox: 0, oy: 0 };
-  }
 
-  // For FlexContainers, use their explicit or computed size
+  // FlexContainer children are top-left origin by construction, so `ox/oy = 0`
+  // is correct and we can skip the `getLocalBounds()` call entirely.
   if (child instanceof FlexContainer) {
     const fc = child;
     const w = fc._explicitWidth > 0 ? fc._explicitWidth : (fc._computedWidth > 0 ? fc._computedWidth : undefined);
     const h = fc._explicitHeight > 0 ? fc._explicitHeight : (fc._computedHeight > 0 ? fc._computedHeight : undefined);
     if (w !== undefined && h !== undefined) {
-      return { w, h, ox: 0, oy: 0 };
+      return { w: resolvedLW ?? w, h: resolvedLH ?? h, ox: 0, oy: 0 };
     }
   }
 
-  // Use localBounds to get the true visual extent and origin offset.
-  // This handles children with non-zero anchors (e.g. Button, Label with centered text).
+  // Use localBounds to get the true visual origin offset.
+  // We take `ox/oy` from bounds unconditionally — a user-supplied `layoutWidth/Height`
+  // overrides the SIZE used by flex (protection against pre-paint bounds of 0), but
+  // it must NOT erase the center-anchor compensation: Button/Label views are drawn at
+  // `(-w/2..w/2)` and their bounds.x = -w/2 is what lets `layoutLine` place the
+  // visible rectangle where the layout intends.
   const bounds = child.getLocalBounds();
-  const w = resolvedLW ?? bounds.width;
-  const h = resolvedLH ?? bounds.height;
-  return { w, h, ox: bounds.x, oy: bounds.y };
+  return {
+    w: resolvedLW ?? bounds.width,
+    h: resolvedLH ?? bounds.height,
+    ox: bounds.x,
+    oy: bounds.y,
+  };
 }
 
 // ─── Layout items within a single line ───────────────────
@@ -679,17 +703,31 @@ export class FlexContainer extends Container {
       this._computedHeight = this._explicitHeight > 0 ? this._explicitHeight : (pt + naturalMainSize + pb);
     }
 
-    // Position flexExclude children (absolute positioning)
+    // Position flexExclude children (absolute positioning).
+    // All position props describe the visual (bounds) rectangle. We derive the
+    // visual rectangle directly from `getLocalBounds()` rather than the
+    // layout-config `w`/`h` returned by measureChild — those may differ from
+    // actual bounds when the user pins `layoutWidth`/`layoutHeight` to a value
+    // that doesn't match the child's real visual extent (e.g. a Button whose
+    // text overflows its configured `width`). Mixing layout size with real
+    // bounds-origin would shift the visual center off the requested point.
+    // `centerX/centerY` take precedence over `left/right` / `top/bottom` on each axis.
     for (const child of this._layoutChildren) {
       if (!child._flexConfig?.flexExclude) continue;
       const cfg = child._flexConfig;
-      const { w, h } = measureChild(child, pctRefW, pctRefH);
+      const bounds = child.getLocalBounds();
       const cw = this._computedWidth;
       const ch = this._computedHeight;
-      if (cfg.left !== undefined) child.x = cfg.left;
-      else if (cfg.right !== undefined) child.x = cw - w - cfg.right;
-      if (cfg.top !== undefined) child.y = cfg.top;
-      else if (cfg.bottom !== undefined) child.y = ch - h - cfg.bottom;
+
+      const centerX = resolveDimension(cfg.centerX, pctRefW);
+      if (centerX !== undefined) child.x = centerX - bounds.x - bounds.width / 2;
+      else if (cfg.left !== undefined) child.x = cfg.left - bounds.x;
+      else if (cfg.right !== undefined) child.x = cw - cfg.right - bounds.x - bounds.width;
+
+      const centerY = resolveDimension(cfg.centerY, pctRefH);
+      if (centerY !== undefined) child.y = centerY - bounds.y - bounds.height / 2;
+      else if (cfg.top !== undefined) child.y = cfg.top - bounds.y;
+      else if (cfg.bottom !== undefined) child.y = ch - cfg.bottom - bounds.y - bounds.height;
     }
   }
 

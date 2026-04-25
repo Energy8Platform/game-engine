@@ -15,7 +15,7 @@ import {
 } from 'pixi.js';
 import { extend } from './catalogue';
 import {
-  Button, Label, Panel, FlexContainer, ProgressBar,
+  Button, Label, LabelValue, Panel, FlexContainer, ProgressBar,
   ScrollContainer, Modal, Toast, BalanceDisplay, WinDisplay, Layout,
   Slider, Toggle,
 } from '../ui';
@@ -59,7 +59,7 @@ export function extendPixiElements(): void {
  */
 export function extendUIElements(): void {
   extend({
-    Button, Label, Panel, FlexContainer, ProgressBar,
+    Button, Label, LabelValue, Panel, FlexContainer, ProgressBar,
     ScrollContainer, Modal, Toast, BalanceDisplay, WinDisplay, Layout,
     Slider, Toggle,
   });

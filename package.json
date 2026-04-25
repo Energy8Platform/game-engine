@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/game-engine",
-  "version": "0.13.0",
+  "version": "0.15.2",
   "description": "Universal casino game engine built on PixiJS v8 and @energy8platform/game-sdk",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -54,6 +54,11 @@
       "import": "./dist/react.esm.js",
       "require": "./dist/react.cjs.js",
       "types": "./dist/react.d.ts"
+    },
+    "./react-jsx": {
+      "import": "./dist/react-jsx.esm.js",
+      "require": "./dist/react-jsx.cjs.js",
+      "types": "./dist/react-jsx.d.ts"
     },
     "./lua": {
       "import": "./dist/lua.esm.js",

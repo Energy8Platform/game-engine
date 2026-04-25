@@ -7,7 +7,7 @@ import { FlexContainer } from '../ui/FlexContainer';
 import type { FlexItemConfig } from '../ui/FlexContainer';
 
 /** Flex item prop names that should be forwarded to _flexConfig on the child */
-const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left'] as const;
+const FLEX_ITEM_PROPS = ['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left', 'centerX', 'centerY'] as const;
 
 /** Any component with suspendLayout/resumeLayout (FlexContainer, Panel, etc.) */
 interface Suspendable {

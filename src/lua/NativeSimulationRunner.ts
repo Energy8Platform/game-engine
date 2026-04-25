@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { writeFile, unlink } from 'fs/promises';
+import { accessSync, constants as fsConstants } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
@@ -285,8 +286,7 @@ export function findNativeBinary(baseDir?: string): string | null {
 
 function isExecutable(path: string): boolean {
   try {
-    const { accessSync, constants } = require('fs');
-    accessSync(path, constants.X_OK);
+    accessSync(path, fsConstants.X_OK);
     return true;
   } catch {
     return false;

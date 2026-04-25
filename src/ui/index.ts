@@ -11,6 +11,8 @@ export { ProgressBar } from './ProgressBar';
 export type { ProgressBarConfig } from './ProgressBar';
 export { Label } from './Label';
 export type { LabelConfig } from './Label';
+export { LabelValue } from './LabelValue';
+export type { LabelValueConfig, LabelValueAlign } from './LabelValue';
 export { Panel } from './Panel';
 export type { PanelConfig } from './Panel';
 export { BalanceDisplay } from './BalanceDisplay';

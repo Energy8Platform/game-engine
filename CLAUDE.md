@@ -57,6 +57,7 @@ The engine has a **built-in UI system** (`src/ui/`) with zero external UI depend
 - **Button** — state management (default/hover/pressed/disabled), pointer events, Tween animations, `onPress` callback
 - **Panel** — FlexContainer-based with Graphics or NineSliceSprite background
 - **Label** — auto-fit text scaling, currency/number formatting
+- **LabelValue** — two-row "caption / value" cell (BALANCE/€500, BET/€1 pattern). FlexContainer column subclass with `label`, `value`, `labelStyle`, `valueStyle`, `gap`, `align`, optional `maxWidth` for autoFit on the value
 - **BalanceDisplay** — animated countup/countdown via Tween
 - **WinDisplay** — dramatic countup with scale pop via Tween
 - **ProgressBar** — track + fill with mask-based progress, optional animated interpolation
@@ -74,6 +75,7 @@ The engine uses **sub-path exports** for tree-shaking — 10 entry points each p
 - `@energy8platform/game-engine/ui` — FlexContainer, Button, Label, Panel, Modal, etc.
 - `@energy8platform/game-engine/lua` — LuaEngine, ActionRouter, SessionManager, PersistentState (requires `fengari`)
 - `@energy8platform/game-engine/assets`, `/audio`, `/debug`, `/vite`, `/react`
+- `@energy8platform/game-engine/react-jsx` — JSX prop types. The engine **auto-augments** `react`'s `JSX.IntrinsicElements` via `declare module 'react'`, so any import from `/react` (e.g. `createPixiRoot`) activates fully-typed `<flexContainer>`, `<button>`, `<label>`, `<labelValue>`, etc. No user shim required. For apps that never import from `/react`, a one-line side-effect import (`import '@energy8platform/game-engine/react-jsx'`) is enough. Module augmentation of the `react` module (not global JSX) reliably overrides `@types/react`'s HTML defaults for names like `<button>`/`<label>`
 
 Core is kept slim via **optional peer dependencies**: `@pixi/sound`, `fengari`, and `@esotericsoftware/spine-pixi-v8` are all optional.
 

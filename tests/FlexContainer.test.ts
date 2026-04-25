@@ -81,7 +81,48 @@ function makeChild(w: number, h: number): Container & { _flexConfig?: FlexItemCo
   return c as any;
 }
 
+/** Make a child whose visual origin is its center (like Button/Label with anchor 0.5). */
+function makeCenteredChild(w: number, h: number): Container & { _flexConfig?: FlexItemConfig } {
+  const c = new Container();
+  (c as any)._width = w;
+  (c as any)._height = h;
+  (c as any).getLocalBounds = () => ({ x: -w / 2, y: -h / 2, width: w, height: h });
+  return c as any;
+}
+
 describe('FlexContainer', () => {
+  describe('measureChild — center-anchor compensation (regression guard)', () => {
+    it('preserves ox/oy from bounds even when layoutWidth/layoutHeight pin the size', () => {
+      // Reconciler auto-propagates `width={44}` to `_flexConfig.layoutWidth = 44`.
+      // Prior to the fix, measureChild early-returned {ox: 0, oy: 0} whenever both
+      // dimensions were pinned, erasing the center-anchor compensation for Button/Label.
+      // Layout then placed those elements at the wrong y in rows with alignItems=center.
+      const btn = new Container() as Container & { _flexConfig?: any };
+      btn._flexConfig = { layoutWidth: 44, layoutHeight: 44 };
+      (btn as any).getLocalBounds = () => ({ x: -22, y: -22, width: 44, height: 44 });
+
+      const row = new FlexContainer({ direction: 'row', alignItems: 'center' });
+      row.resize(200, 82);
+
+      // A tall FlexContainer sibling so the row cross-axis is actually 82px.
+      const col = new FlexContainer({ direction: 'column' });
+      col.resize(100, 82);
+
+      row.addFlexChild(btn);
+      row.addFlexChild(col);
+      row.updateLayout();
+
+      // alignItems=center: child.y should be `(82 - 44)/2 - ox = 19 - (-22) = 41`,
+      // so the visual center (y + bounds.y + bounds.height/2 = 41 + (-22) + 22 = 41)
+      // coincides with the row's vertical center (82/2 = 41). col starts at y=0 and
+      // spans 82, so its visual center is also 41 → both align.
+      const btnVisualCenter = btn.y + (-22) + 22;
+      const colVisualCenter = col.y + 82 / 2;
+      expect(btnVisualCenter).toBe(colVisualCenter);
+      expect(btnVisualCenter).toBe(41);
+    });
+  });
+
   describe('flexExclude', () => {
     it('excludes children with flexExclude from layout', () => {
       const fc = new FlexContainer({ direction: 'row', gap: 10 });
@@ -428,6 +469,214 @@ describe('FlexContainer', () => {
       // a and b laid out as if abs doesn't exist
       expect(a.x).toBe(0);
       expect(b.x).toBe(60); // 50 + 10
+    });
+
+    it('compensates for center-anchor origin when positioning via left/top', () => {
+      // Children with centered visual origin (e.g. Button, Label) should behave
+      // consistently with normal flex children: `left`/`top` describe the visual
+      // top-left corner, not the child's internal (0,0) point.
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 300);
+
+      const centered = makeCenteredChild(80, 40);
+      fc.addFlexChild(centered, { flexExclude: true, top: 50, left: 100 });
+      fc.updateLayout();
+
+      // Visual rect must be (100, 50) → (180, 90). With a centered origin,
+      // child.x/y must be shifted by +w/2, +h/2 so rendering lines up.
+      expect(centered.x).toBe(140); // 100 - (-40)
+      expect(centered.y).toBe(70);  // 50  - (-20)
+    });
+
+    it('centerX/centerY position the visual center (normal child)', () => {
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 300);
+
+      const el = makeChild(80, 40);
+      fc.addFlexChild(el, { flexExclude: true, centerX: 200, centerY: 150 });
+      fc.updateLayout();
+
+      // Visual center at (200, 150) → top-left at (160, 130). ox/oy = 0 for normal child.
+      expect(el.x).toBe(160);
+      expect(el.y).toBe(130);
+    });
+
+    it('centerX/centerY position the visual center (centered-anchor child)', () => {
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 300);
+
+      const el = makeCenteredChild(80, 40);
+      fc.addFlexChild(el, { flexExclude: true, centerX: 200, centerY: 150 });
+      fc.updateLayout();
+
+      // Visual center at (200, 150). For a centered-origin child, child.x/y IS the center
+      // — so child.x = centerX - w/2 - ox = 200 - 40 - (-40) = 200.
+      expect(el.x).toBe(200);
+      expect(el.y).toBe(150);
+    });
+
+    it('centerX accepts percentage strings', () => {
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 300);
+
+      const el = makeChild(100, 50);
+      fc.addFlexChild(el, { flexExclude: true, centerX: '50%', centerY: '50%' });
+      fc.updateLayout();
+
+      // 50% of 400 = 200, 50% of 300 = 150. Visual rect centered → top-left (150, 125).
+      expect(el.x).toBe(150);
+      expect(el.y).toBe(125);
+    });
+
+    it('Button and Graphics with the same centerX/centerY align visually', () => {
+      // Button-like: 4 view-children all at (-w/2..w/2), plus a centered-anchor Text.
+      // We simulate the worst-case Pixi behavior where getLocalBounds unions ALL children
+      // (including invisible ones). Since every child has symmetric bounds around (0,0),
+      // the union is also symmetric → ox = -w/2, oy = -h/2.
+      const button = new Container();
+      const BTN_W = 128, BTN_H = 128;
+      (button as any).getLocalBounds = () => ({
+        x: -BTN_W / 2,
+        y: -BTN_H / 2,
+        width: BTN_W,
+        height: BTN_H,
+      });
+
+      // Graphics-like: a circle at (0, 0) with radius 64 → bounds (-64, -64, 128, 128).
+      const graphics = new Container();
+      const GFX_W = 148, GFX_H = 148;
+      (graphics as any).getLocalBounds = () => ({
+        x: -GFX_W / 2,
+        y: -GFX_H / 2,
+        width: GFX_W,
+        height: GFX_H,
+      });
+
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(800, 600);
+
+      const CENTER_X = 400;
+      const CENTER_Y = 520;
+      fc.addFlexChild(button as any,   { flexExclude: true, centerX: CENTER_X, centerY: CENTER_Y });
+      fc.addFlexChild(graphics as any, { flexExclude: true, centerX: CENTER_X, centerY: CENTER_Y });
+      fc.updateLayout();
+
+      // For a symmetric-origin child, pixi.x should equal centerX (the visual center sits at pixi.x/y).
+      expect(button.x).toBe(CENTER_X);
+      expect(button.y).toBe(CENTER_Y);
+      expect(graphics.x).toBe(CENTER_X);
+      expect(graphics.y).toBe(CENTER_Y);
+
+      // Visual centers computed from pixi.x/y + local bounds center — must coincide.
+      const buttonCenter = {
+        x: button.x + (button as any).getLocalBounds().x + (button as any).getLocalBounds().width / 2,
+        y: button.y + (button as any).getLocalBounds().y + (button as any).getLocalBounds().height / 2,
+      };
+      const graphicsCenter = {
+        x: graphics.x + (graphics as any).getLocalBounds().x + (graphics as any).getLocalBounds().width / 2,
+        y: graphics.y + (graphics as any).getLocalBounds().y + (graphics as any).getLocalBounds().height / 2,
+      };
+      expect(buttonCenter).toEqual(graphicsCenter);
+      expect(buttonCenter).toEqual({ x: CENTER_X, y: CENTER_Y });
+    });
+
+    it('asymmetric local bounds (Pixi Text font-metrics case) still land visual center at centerX/Y', () => {
+      // Real-world failure mode: Pixi Text with anchor 0.5 can return asymmetric local
+      // bounds because font ascender/descender differ. If a Button's composite bounds
+      // inherit this asymmetry, ox ≠ -w/2 and the visual center is offset from pixi.x.
+      // This test verifies our ox/oy formula handles non-symmetric origins correctly —
+      // we position the BOUNDS CENTER at centerX/Y regardless of where (0,0) falls
+      // inside the bounds.
+      const btn = new Container();
+      // e.g. text descender pushes bottom edge further down: bounds = (-64, -60, 128, 128)
+      const boundsX = -64, boundsY = -60, w = 128, h = 128;
+      (btn as any).getLocalBounds = () => ({ x: boundsX, y: boundsY, width: w, height: h });
+
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 400);
+      fc.addFlexChild(btn as any, { flexExclude: true, centerX: 200, centerY: 200 });
+      fc.updateLayout();
+
+      const visualCenter = {
+        x: btn.x + boundsX + w / 2,
+        y: btn.y + boundsY + h / 2,
+      };
+      expect(visualCenter).toEqual({ x: 200, y: 200 });
+    });
+
+    it('centerX honors real bounds when layoutWidth disagrees with getLocalBounds()', () => {
+      // Real-world failure mode caught in the field: reconciler auto-propagates
+      // `width={128}` to `layoutWidth=128` on a Button, but the Button's actual
+      // getLocalBounds() reports 130×130 because text/stroke bleed slightly.
+      // If positioning math uses `layoutWidth` for the size-subtraction but
+      // `bounds.x` for the origin, the visual center drifts by (bounds.width - w)/2.
+      // We position by REAL bounds to keep the visual center on centerX.
+      const btn = new Container();
+      (btn as any)._flexConfig = { layoutWidth: 128, layoutHeight: 128 };
+      const bx = -65, by = -65, bw = 130, bh = 130; // real bounds slightly larger
+      (btn as any).getLocalBounds = () => ({ x: bx, y: by, width: bw, height: bh });
+
+      const circle = new Container();
+      const cx = -74, cy = -74, cw = 148, ch = 148;
+      (circle as any).getLocalBounds = () => ({ x: cx, y: cy, width: cw, height: ch });
+
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(800, 600);
+      fc.addFlexChild(btn as any,    { flexExclude: true, centerX: 400, centerY: 520 });
+      fc.addFlexChild(circle as any, { flexExclude: true, centerX: 400, centerY: 520 });
+      fc.updateLayout();
+
+      // Both visual centers MUST land on (400, 520) regardless of bounds shape.
+      const btnCenter    = { x: btn.x    + bx + bw / 2, y: btn.y    + by + bh / 2 };
+      const circleCenter = { x: circle.x + cx + cw / 2, y: circle.y + cy + ch / 2 };
+      expect(btnCenter).toEqual({ x: 400, y: 520 });
+      expect(circleCenter).toEqual({ x: 400, y: 520 });
+      expect(btnCenter).toEqual(circleCenter);
+    });
+
+    it('left/right/top/bottom honor real bounds when layoutWidth disagrees', () => {
+      // Same consistency for edge anchoring: visual edges should hit the requested
+      // offsets, computed from the real bounding box rather than layout config.
+      const el = new Container();
+      (el as any)._flexConfig = { layoutWidth: 100, layoutHeight: 100 };
+      const bx = -52, by = -52, bw = 104, bh = 104;
+      (el as any).getLocalBounds = () => ({ x: bx, y: by, width: bw, height: bh });
+
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 400);
+      fc.addFlexChild(el as any, { flexExclude: true, right: 20, bottom: 10 });
+      fc.updateLayout();
+
+      // Visual right edge = el.x + bx + bw  should equal  400 - 20 = 380
+      // Visual bottom edge = el.y + by + bh should equal  400 - 10 = 390
+      expect(el.x + bx + bw).toBe(380);
+      expect(el.y + by + bh).toBe(390);
+    });
+
+    it('centerX takes precedence over left/right', () => {
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 300);
+
+      const el = makeChild(80, 40);
+      fc.addFlexChild(el, { flexExclude: true, centerX: 200, left: 999, right: 999 });
+      fc.updateLayout();
+
+      expect(el.x).toBe(160);
+    });
+
+    it('compensates for center-anchor origin when positioning via right/bottom', () => {
+      const fc = new FlexContainer({ direction: 'row' });
+      fc.resize(400, 300);
+
+      const centered = makeCenteredChild(80, 40);
+      fc.addFlexChild(centered, { flexExclude: true, bottom: 10, right: 20 });
+      fc.updateLayout();
+
+      // Visual rect must be (300, 250) → (380, 290).
+      // x = 400 - 80 - 20 = 300 (visual left), so child.x = 300 - (-40) = 340
+      // y = 300 - 40 - 10 = 250 (visual top),  so child.y = 250 - (-20) = 270
+      expect(centered.x).toBe(340);
+      expect(centered.y).toBe(270);
     });
   });
 

@@ -1,6 +1,6 @@
 const RESERVED = new Set(['children', 'key', 'ref']);
 /** Props handled by the reconciler as flex item config, not forwarded to components */
-const FLEX_ITEM_PROPS = new Set(['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left']);
+const FLEX_ITEM_PROPS = new Set(['flexGrow', 'flexShrink', 'layoutWidth', 'layoutHeight', 'alignSelf', 'flexExclude', 'top', 'right', 'bottom', 'left', 'centerX', 'centerY']);
 /** Base Container props applied directly to the instance (not via config) */
 const CONTAINER_PROPS = new Set([
   'x', 'y', 'alpha', 'visible', 'rotation', 'angle', 'zIndex',
@@ -140,6 +140,33 @@ export function hasEventProps(props: Record<string, any>): boolean {
   return false;
 }
 
+/**
+ * Graphics does not have an intrinsic size — its bounds come from the `draw` callback.
+ * PixiJS's `Container.width` setter applies a scale transform to match the requested
+ * value, which silently makes the rendered size diverge from `getLocalBounds()` and
+ * breaks downstream flex layout. For Graphics we treat `width`/`height` as layout
+ * hints instead, storing them on `_flexConfig.layoutWidth`/`layoutHeight` so parent
+ * FlexContainers measure correctly without touching the child's scale.
+ */
+function isGraphicsLike(instance: any): boolean {
+  return typeof instance?.clear === 'function'
+    && typeof instance?.fill === 'function'
+    && typeof instance?.rect === 'function';
+}
+
+/** Redirect a width/height write on a Graphics into its flex layout hint. Returns true if handled. */
+function applyGraphicsDimension(instance: any, key: string, value: unknown): boolean {
+  if ((key !== 'width' && key !== 'height') || !isGraphicsLike(instance)) return false;
+  const target = key === 'width' ? 'layoutWidth' : 'layoutHeight';
+  if (value === undefined) {
+    if (instance._flexConfig) delete instance._flexConfig[target];
+    return true;
+  }
+  if (!instance._flexConfig) instance._flexConfig = {};
+  instance._flexConfig[target] = value;
+  return true;
+}
+
 function setNestedValue(target: any, path: string[], value: any): void {
   let obj = target;
   for (let i = 0; i < path.length - 1; i++) {
@@ -205,6 +232,8 @@ export function applyProps(
       // no-op: can't un-draw
     } else if (key.includes('-')) {
       // Nested property reset not trivially possible, skip
+    } else if (applyGraphicsDimension(instance, key, undefined)) {
+      // handled
     } else {
       try {
         instance[key] = undefined;
@@ -229,6 +258,8 @@ export function applyProps(
     } else if (key.includes('-')) {
       const parts = key.split('-');
       setNestedValue(instance, parts, value);
+    } else if (applyGraphicsDimension(instance, key, value)) {
+      // handled
     } else {
       try {
         instance[key] = value;

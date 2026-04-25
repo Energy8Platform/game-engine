@@ -77,6 +77,9 @@ export class AudioManager {
       this._soundModule = await import('@pixi/sound');
       this._initialized = true;
       this.applyVolumes();
+      if (this._globalMuted) {
+        this._soundModule.sound.muteAll();
+      }
       this.setupMobileUnlock();
     } catch {
       console.warn(
@@ -345,7 +348,9 @@ export class AudioManager {
   private applyVolumes(): void {
     if (!this._soundModule) return;
     const { sound } = this._soundModule;
-    sound.volumeAll = this._globalMuted ? 0 : 1;
+    // Global mute is owned by sound.muteAll()/unmuteAll() (context.muted),
+    // not by volumeAll — mixing both leaves mute un-undoable after reload.
+    sound.volumeAll = 1;
   }
 
   private setupMobileUnlock(): void {
