@@ -248,7 +248,7 @@ That's the entire contract: `state.variables.bet` in, a `total_win` and arbitrar
 
 The mini-example above covers a base-game spin only. For everything else — free spins via `creates_session` + `next_actions`, retrigger logic, persistent meters across spins (`_persist_*`), buy-bonus and ante-bet configuration, table-game session models, the full `engine.*` Lua API, JSON-Schema input/output validation, deployment and S3 layout — see the comprehensive guide:
 
-- **[Game Development Guide](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md)** (1100+ lines, in Russian)
+- **[Game Development Guide](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md)** (1100+ lines)
 
 Key sections to start with: §2 (`GameDefinition` shape), §7 (Lua script), §8 (`engine.*` API), §15 (table games), §16 (persistent state).
 

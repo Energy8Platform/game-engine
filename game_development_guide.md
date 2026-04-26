@@ -1,106 +1,106 @@
-# Руководство по разработке игр
+# Game Development Guide
 
-Данный документ описывает всё, что необходимо для создания собственной игры на платформе Casino Platform. Он рассчитан на сторонних разработчиков и не требует знания внутренней архитектуры платформы.
+This document describes everything required to build your own game on the Casino Platform. It targets third-party developers and assumes no knowledge of the platform's internal architecture.
 
 ---
 
-## Содержание
+## Contents
 
-1. [Обзор платформы](#1-обзор-платформы)
-2. [Структура конфигурации игры (JSON)](#2-структура-конфигурации-игры-json)
+1. [Platform Overview](#1-platform-overview)
+2. [Game Configuration Structure (JSON)](#2-game-configuration-structure-json)
 3. [Max Win Cap](#3-max-win-cap)
-4. [Buy Bonus и Ante Bet](#4-buy-bonus-и-ante-bet)
-5. [Actions — определение действий](#5-actions--определение-действий)
-6. [GameState: состояние спина](#6-gamestate-состояние-спина)
-7. [Lua-скрипт: игровая логика](#7-lua-скрипт-игровая-логика)
+4. [Buy Bonus and Ante Bet](#4-buy-bonus-and-ante-bet)
+5. [Actions — defining game actions](#5-actions--defining-game-actions)
+6. [GameState: spin state](#6-gamestate-spin-state)
+7. [Lua Script: game logic](#7-lua-script-game-logic)
 8. [Lua API Reference](#8-lua-api-reference)
-9. [Валидация входа и выхода (JSON Schema)](#9-валидация-входа-и-выхода-json-schema)
-10. [Клиентская интеграция (SDK)](#10-клиентская-интеграция-sdk)
-11. [Деплой игры](#11-деплой-игры)
-12. [Симуляция и проверка RTP](#12-симуляция-и-проверка-rtp)
-13. [Соглашения и лучшие практики](#13-соглашения-и-лучшие-практики)
-14. [Миграция конфигов и скриптов (v3 → v4)](#14-миграция-конфигов-и-скриптов-v3--v4)
-15. [Настольные игры (Table Games)](#15-настольные-игры-table-games)
-    - 15.1. [Модель сессии для настольных игр](#151-модель-сессии-для-настольных-игр)
-    - 15.2. [Персистентное состояние (`_persist_` конвенция)](#152-персистентное-состояние-_persist_-конвенция)
-    - 15.3. [Пример: Blackjack](#153-пример-blackjack)
-16. [Cross-Spin Persistent State (метры и накопители)](#16-cross-spin-persistent-state-метры-и-накопители)
+9. [Input/Output Validation (JSON Schema)](#9-inputoutput-validation-json-schema)
+10. [Client Integration (SDK)](#10-client-integration-sdk)
+11. [Deploying a Game](#11-deploying-a-game)
+12. [Simulation and RTP Verification](#12-simulation-and-rtp-verification)
+13. [Conventions and Best Practices](#13-conventions-and-best-practices)
+14. [Migrating Configs and Scripts (v3 → v4)](#14-migrating-configs-and-scripts-v3--v4)
+15. [Table Games](#15-table-games)
+    - 15.1. [Session Model for Table Games](#151-session-model-for-table-games)
+    - 15.2. [Persistent State (`_persist_` convention)](#152-persistent-state-_persist_-convention)
+    - 15.3. [Example: Blackjack](#153-example-blackjack)
+16. [Cross-Spin Persistent State (meters and accumulators)](#16-cross-spin-persistent-state-meters-and-accumulators)
 
 ---
 
-## 1. Обзор платформы
+## 1. Platform Overview
 
-Игровой движок платформы работает на серверной стороне. Каждая игра состоит из двух частей:
+The platform's game engine runs server-side. Each game consists of two parts:
 
-1. **JSON-конфигурация** (`GameDefinition`) — минимальный набор платформенных полей: идентификатор, тип, ставки, лимиты, actions (переходы), buy bonus / ante bet.
-2. **Lua-скрипт** — вся игровая логика: символы, барабаны/сетка, пэйлайны, выплаты, каскады, фриспины, множители и любая другая математика.
+1. **JSON configuration** (`GameDefinition`) — a minimal set of platform fields: identifier, type, bet levels, limits, actions (transitions), buy bonus / ante bet.
+2. **Lua script** — all game logic: symbols, reels/grid, paylines, payouts, cascades, free spins, multipliers, and any other math.
 
-Бэкенд оперирует **только математикой** — вся графика, анимация и звуки остаются на стороне клиента.
+The backend handles **math only** — graphics, animation, and sound stay on the client.
 
-### Архитектура: Lua-only
+### Architecture: Lua-only
 
-Все игры используют **единый Lua-движок**. JSON-конфигурация не содержит игровой логики — только платформенные метаданные и правила переходов (actions/transitions). Lua-скрипт экспортирует единую функцию `execute(state)`, которая получает `state.action` и `state.stage` и реализует всю математику игры.
+All games use a **single Lua engine**. The JSON configuration contains no game logic — only platform metadata and transition rules (actions/transitions). The Lua script exports a single `execute(state)` function that receives `state.action` and `state.stage` and implements all game math.
 
-> **Примечание**: JSON Flow Executor (поле `engine_mode: "json"`, блоки `logic`/`steps`, встроенные действия `spin_reels`, `evaluate_lines` и т.д.) **удалён**. Поле `engine_mode` больше не используется.
+> **Note**: The JSON Flow Executor (the `engine_mode: "json"` field, the `logic`/`steps` blocks, the built-in actions `spin_reels`, `evaluate_lines`, etc.) has been **removed**. The `engine_mode` field is no longer used.
 
-### Два типа игр
+### Two game types
 
-| Тип | Поле `type` | Описание |
-|-----|-------------|----------|
-| **SLOT** | `"SLOT"` | Слоты — классические и видео. Сетка символов, барабаны, пэйлайны, каскады, фриспины. Вся логика в Lua-скрипте. |
-| **TABLE** | `"TABLE"` | Настольные игры — блэкджек, рулетка, баккара и др. Мультишаговые раунды с произвольной логикой решений. → см. §15 |
+| Type | `type` field | Description |
+|------|--------------|-------------|
+| **SLOT** | `"SLOT"` | Slots — classic and video. Symbol grid, reels, paylines, cascades, free spins. All logic in the Lua script. |
+| **TABLE** | `"TABLE"` | Table games — blackjack, roulette, baccarat, etc. Multi-step rounds with arbitrary decision logic. → see §15 |
 
-### Модель безопасности
+### Security model
 
-Игра загружается в iframe. Клиентский SDK взаимодействует с хостом через `postMessage`. JWT-токен **никогда не передаётся** в iframe — все API-вызовы проксируются через хост-страницу.
+The game loads inside an iframe. The client SDK communicates with the host via `postMessage`. The JWT token is **never** passed into the iframe — all API calls are proxied through the host page.
 
 ---
 
-## 2. Структура конфигурации игры (JSON)
+## 2. Game Configuration Structure (JSON)
 
-Конфигурация — это JSON-файл, содержащий **только платформенные поля**. Вся игровая логика (символы, барабаны, пэйлайны, выплаты, каскады и т.д.) определяется в Lua-скрипте.
+The configuration is a JSON file containing **only platform fields**. All game logic (symbols, reels, paylines, payouts, cascades, etc.) is defined in the Lua script.
 
 ```
 GameDefinition
-├── id                          string        (обязательно) Уникальный идентификатор игры
-├── type                        string        (обязательно) Категория: "SLOT" | "TABLE"
-├── script_path                 string        (обязательно) S3-ключ Lua-скрипта (напр. "games/my-game/script.lua")
+├── id                          string        (required) Unique game identifier
+├── type                        string        (required) Category: "SLOT" | "TABLE"
+├── script_path                 string        (required) S3 key for the Lua script (e.g. "games/my-game/script.lua")
 │
-├── actions                     map           (обязательно) → см. §5 (ActionDefinition)
+├── actions                     map           (required) → see §5 (ActionDefinition)
 │
-├── bet_levels                  BetLevelsConfig  Доступные ставки
-│   │   — массив: [0.20, 0.50, 1.00]            → только список levels
-│   │   — объект: {"min": 0.20, "max": 100}       → диапазон
-│   │   — объект: {"levels": [...], "max": 100}  → список + лимит
-│   ├── levels                  float64[]     Конкретный список допустимых ставок
-│   ├── min                     float64?      Минимальная ставка (опционально)
-│   └── max                     float64?      Максимальная ставка (опционально)
+├── bet_levels                  BetLevelsConfig  Allowed bets
+│   │   — array: [0.20, 0.50, 1.00]              → list of levels only
+│   │   — object: {"min": 0.20, "max": 100}      → range
+│   │   — object: {"levels": [...], "max": 100}  → list + cap
+│   ├── levels                  float64[]     Explicit list of allowed bet amounts
+│   ├── min                     float64?      Minimum bet (optional)
+│   └── max                     float64?      Maximum bet (optional)
 │
-├── max_win                     object        → см. §3 (Max Win Cap)
-│   ├── multiplier              float64       Макс. выигрыш как множитель ставки (напр. 10000)
-│   └── fixed                   float64       Абсолютный лимит в валюте (напр. 500000)
+├── max_win                     object        → see §3 (Max Win Cap)
+│   ├── multiplier              float64       Max win as a multiplier of bet (e.g. 10000)
+│   └── fixed                   float64       Absolute cap in currency (e.g. 500000)
 │
-├── session_ttl                 string        TTL сессии (напр. "30m", "1h"). По умолчанию определяется платформой.
+├── session_ttl                 string        Session TTL (e.g. "30m", "1h"). Defaults to a platform-defined value.
 │
-├── buy_bonus                   object        → см. §4
-│   └── modes                   map           Режимы покупки бонуса
-│       └── [mode_name]         object        Один режим (напр. "default", "super")
-│           ├── cost_multiplier float64       Множитель стоимости от ставки
-│           └── scatter_distribution map      Распределение скаттеров
-├── ante_bet                    object        → см. §4
-│   └── cost_multiplier         float64       Множитель стоимости спина (1.25 = +25%)
+├── buy_bonus                   object        → see §4
+│   └── modes                   map           Buy-bonus modes
+│       └── [mode_name]         object        One mode (e.g. "default", "super")
+│           ├── cost_multiplier float64       Cost as a multiplier of bet
+│           └── scatter_distribution map      Scatter count distribution
+├── ante_bet                    object        → see §4
+│   └── cost_multiplier         float64       Spin cost multiplier (1.25 = +25%)
 │
-├── persistent_state            object        → см. §16 (Cross-Spin Persistent State)
-│   ├── vars                    string[]      Имена числовых переменных, сохраняемых между спинами
-│   └── exposed_vars            string[]      Имена переменных, отдаваемых клиенту в data.persistent_state
+├── persistent_state            object        → see §16 (Cross-Spin Persistent State)
+│   ├── vars                    string[]      Names of numeric variables persisted across spins
+│   └── exposed_vars            string[]      Names of variables exposed to the client in data.persistent_state
 │
-├── input_schema                object        → см. §9
-└── output_schema               object        → см. §9
+├── input_schema                object        → see §9
+└── output_schema               object        → see §9
 ```
 
-> **Удалено из JSON-конфигурации (v4)**: `version`, `rtp`, `viewport`, `symbols`, `reel_strips`, `symbol_weights`, `paylines`, `stages`, `logic`, `engine_mode`, `evaluation_mode`, `min_match_count`, `anywhere_payouts`, `scatter_payouts`, `free_spins_trigger`, `free_spins_retrigger`, `free_spins_config`, `round_type_weights`, `symbol_chances`, `multiplier_value_weights`, `ante_bet.scatter_chance_multiplier`. Все эти параметры теперь определяются непосредственно в Lua-скрипте.
+> **Removed from JSON config (v4)**: `version`, `rtp`, `viewport`, `symbols`, `reel_strips`, `symbol_weights`, `paylines`, `stages`, `logic`, `engine_mode`, `evaluation_mode`, `min_match_count`, `anywhere_payouts`, `scatter_payouts`, `free_spins_trigger`, `free_spins_retrigger`, `free_spins_config`, `round_type_weights`, `symbol_chances`, `multiplier_value_weights`, `ante_bet.scatter_chance_multiplier`. All of these are now defined directly inside the Lua script.
 
-### Минимальный пример конфигурации
+### Minimal config example
 
 ```json
 {
@@ -126,7 +126,7 @@ GameDefinition
 
 ## 3. Max Win Cap
 
-Поле `max_win` ограничивает максимальный выигрыш одного раунда (base game + все фриспины).
+The `max_win` field caps the maximum win of a single round (base game + all free spins).
 
 ```json
 "max_win": {
@@ -135,26 +135,26 @@ GameDefinition
 }
 ```
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `multiplier` | float64 | Max win как множитель от ставки. `10000` = максимум 10 000× bet. |
-| `fixed` | float64 | Абсолютный лимит в валюте. `500000` = максимум 500 000. |
+| Field | Type | Description |
+|-------|------|-------------|
+| `multiplier` | float64 | Max win as a multiplier of bet. `10000` = up to 10,000× bet. |
+| `fixed` | float64 | Absolute cap in currency. `500000` = at most 500,000. |
 
-Если оба указаны, используется меньшее: `min(bet × multiplier, fixed)`.
+If both are set, the smaller is used: `min(bet × multiplier, fixed)`.
 
-При достижении лимита:
-1. `TotalWin` обрезается до эффективного капа.
-2. Переменная `max_win_reached` устанавливается в `1`.
-3. Клиенту возвращается `"max_win_reached": true` в `data`.
-4. Если идёт бонус-раунд (фриспины), сессия завершается досрочно.
+When the cap is reached:
+1. `TotalWin` is clipped to the effective cap.
+2. The variable `max_win_reached` is set to `1`.
+3. The client receives `"max_win_reached": true` in `data`.
+4. If a bonus round (free spins) is in progress, the session ends early.
 
 ---
 
-## 4. Buy Bonus и Ante Bet
+## 4. Buy Bonus and Ante Bet
 
 ### Buy Bonus
 
-Позволяет игроку купить вход в бонусный раунд напрямую. Стоимость — фиксированный множитель от ставки. При покупке платформа разыгрывает количество скаттеров из `scatter_distribution` и передаёт его Lua-скрипту через `state.params.forced_scatter_count`.
+Lets the player purchase entry into the bonus round directly. The cost is a fixed multiplier of bet. On purchase, the platform draws a scatter count from `scatter_distribution` and passes it to the Lua script via `state.params.forced_scatter_count`.
 
 ```json
 "buy_bonus": {
@@ -171,12 +171,12 @@ GameDefinition
 }
 ```
 
-| Поле | Описание |
-|------|----------|
-| `cost_multiplier` | Стоимость как множитель от ставки. При ставке 1.00 и множителе 100 → списывается 100.00. |
-| `scatter_distribution` | Взвешенное распределение количества скаттеров. Ключ — количество, значение — вес. |
+| Field | Description |
+|-------|-------------|
+| `cost_multiplier` | Cost as a multiplier of bet. With bet 1.00 and multiplier 100 → 100.00 is debited. |
+| `scatter_distribution` | Weighted distribution of scatter counts. Key — the count, value — its weight. |
 
-Для каждого режима создаётся отдельный action с `debit: "buy_bonus_cost"` и `buy_bonus_mode`:
+For each mode, declare a separate action with `debit: "buy_bonus_cost"` and `buy_bonus_mode`:
 
 ```json
 "buy_bonus": {
@@ -198,16 +198,16 @@ GameDefinition
 }
 ```
 
-**Что получает Lua-скрипт при buy bonus:**
+**What the Lua script gets on buy bonus:**
 - `state.params.buy_bonus = true`
-- `state.params.buy_bonus_mode = "default"` (или `"super"`)
-- `state.params.forced_scatter_count = 5` (разыгранное платформой количество)
+- `state.params.buy_bonus_mode = "default"` (or `"super"`)
+- `state.params.forced_scatter_count = 5` (drawn by the platform)
 
-Скрипт должен использовать `forced_scatter_count` для размещения скаттеров на сетке.
+The script must use `forced_scatter_count` to place scatters on the grid.
 
 ### Ante Bet
 
-Увеличенная ставка. В JSON-конфиге хранится только `cost_multiplier`:
+A higher-cost bet. The JSON config only stores `cost_multiplier`:
 
 ```json
 "ante_bet": {
@@ -215,13 +215,13 @@ GameDefinition
 }
 ```
 
-При `ante_bet: true` в params клиента, платформа списывает `bet × 1.25`. Повышение шанса скаттера реализуется в Lua-скрипте (скрипт читает `state.params.ante_bet`).
+When `ante_bet: true` is in the client params, the platform debits `bet × 1.25`. The increased scatter chance is implemented inside the Lua script (the script reads `state.params.ante_bet`).
 
 ---
 
-## 5. Actions — определение действий
+## 5. Actions — defining game actions
 
-Единый эндпоинт `POST /api/games/{id}/play` маршрутизирует запросы через поле `actions` в конфиге.
+The single endpoint `POST /api/games/{id}/play` routes requests through the `actions` field in the config.
 
 ### ActionDefinition
 
@@ -248,73 +248,73 @@ GameDefinition
 }
 ```
 
-| Поле | Описание |
-|------|----------|
-| `stage` | Имя стейджа, передаваемое в `state.stage` при вызове `execute(state)` |
-| `debit` | Тип списания: `"bet"`, `"buy_bonus_cost"`, `"ante_bet_cost"`, `"none"` |
-| `credit` | Когда зачислять выигрыш: `"win"` (сразу), `"none"`, `"defer"` |
-| `requires_session` | Требует активной сессии (round_id) |
-| `buy_bonus_mode` | Ключ режима в `buy_bonus.modes` |
-| `transitions` | Условные переходы после исполнения стейджа |
-| `input_schema` | Per-action JSON Schema для валидации params |
+| Field | Description |
+|-------|-------------|
+| `stage` | Stage name passed as `state.stage` when calling `execute(state)` |
+| `debit` | Debit type: `"bet"`, `"buy_bonus_cost"`, `"ante_bet_cost"`, `"none"` |
+| `credit` | When to credit the win: `"win"` (immediately), `"none"`, `"defer"` |
+| `requires_session` | Requires an active session (round_id) |
+| `buy_bonus_mode` | Key into `buy_bonus.modes` |
+| `transitions` | Conditional transitions after the stage runs |
+| `input_schema` | Per-action JSON Schema for params validation |
 
 ### Transitions
 
-После выполнения стейджа transitions оцениваются по порядку — первый совпавший определяет поведение:
+After a stage runs, transitions are evaluated in order — the first match defines behavior:
 
-| Поле | Описание |
-|------|----------|
-| `condition` | govaluate-выражение против `state.Variables` или `"always"` |
-| `creates_session` | Создать сессию (фриспины, пик-бонус) |
-| `complete_session` | Завершить сессию, зачислить суммарный выигрыш |
-| `credit_override` | `"defer"` — отложить зачисление |
-| `next_actions` | Доступные клиенту действия |
-| `session_config.total_spins_var` | Переменная → `session.SpinsRemaining` |
-| `session_config.persistent_vars` | Переменные, сохраняемые в Redis между спинами |
-| `add_spins_var` | Ретриггер: добавить спины из переменной |
+| Field | Description |
+|-------|-------------|
+| `condition` | govaluate expression against `state.Variables`, or `"always"` |
+| `creates_session` | Create a session (free spins, pick bonus) |
+| `complete_session` | End the session and credit the accumulated win |
+| `credit_override` | `"defer"` — defer crediting |
+| `next_actions` | Actions made available to the client |
+| `session_config.total_spins_var` | Variable → `session.SpinsRemaining` |
+| `session_config.persistent_vars` | Variables persisted in Redis between spins |
+| `add_spins_var` | Retrigger: add spins from a variable |
 
-### Жизненный цикл сессии
+### Session lifecycle
 
 ```
 spin (base_game) → free_spins_awarded > 0 → creates_session, credit_override: "defer"
-  → free_spin (free_spins) × N → complete_session → зачисление суммарного выигрыша
+  → free_spin (free_spins) × N → complete_session → credit accumulated win
 ```
 
-Персистентные переменные (например `global_multiplier`) сохраняются в Redis между спинами.
+Persistent variables (e.g. `global_multiplier`) are stored in Redis between spins.
 
 ---
 
-## 6. GameState: состояние спина
+## 6. GameState: spin state
 
 ```go
 type GameState struct {
     Variables map[string]float64 // "multiplier", "free_spins_awarded", "max_win_reached"
     TotalWin  float64
-    Params    map[string]any     // Валидированные параметры клиента
-    Data      map[string]any     // Выходные данные из Lua-скрипта
+    Params    map[string]any     // Validated client parameters
+    Data      map[string]any     // Output data from the Lua script
 }
 ```
 
-Lua-скрипт получает `state.variables` и `state.params`, возвращает таблицу которая попадает в `Data`. Ключ `total_win` в возвращаемой таблице устанавливает `TotalWin`, ключ `variables` мержится в `Variables`.
+The Lua script receives `state.variables` and `state.params` and returns a table that lands in `Data`. The `total_win` key in the returned table sets `TotalWin`; the `variables` key is merged into `Variables`.
 
-Стандартные переменные движка:
+Standard engine variables:
 
-| Переменная | Описание |
-|-----------|----------|
-| `bet` | Размер ставки |
-| `multiplier` | Каскадный множитель (по умолчанию 1) |
-| `global_multiplier` | Множитель, накапливаемый через сессию |
-| `free_spins_awarded` | Количество триггернутых фриспинов |
-| `free_spins_remaining` | Оставшиеся фриспины |
-| `max_win_reached` | 1 если достигнут лимит выигрыша |
+| Variable | Description |
+|----------|-------------|
+| `bet` | Bet amount |
+| `multiplier` | Cascade multiplier (defaults to 1) |
+| `global_multiplier` | Multiplier accumulated across the session |
+| `free_spins_awarded` | Number of free spins triggered |
+| `free_spins_remaining` | Free spins remaining |
+| `max_win_reached` | 1 if the win cap has been hit |
 
 ---
 
-## 7. Lua-скрипт: игровая логика
+## 7. Lua Script: game logic
 
-### Точка входа
+### Entry point
 
-Скрипт экспортирует функцию `execute(state)`:
+The script exports an `execute(state)` function:
 
 ```lua
 function execute(state)
@@ -326,91 +326,91 @@ function execute(state)
 end
 ```
 
-### Структура state
+### `state` shape
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `state.stage` | string | Имя стейджа из ActionDefinition |
-| `state.params` | table | Параметры клиента + buy_bonus, forced_scatter_count |
-| `state.variables` | table | Переменные движка (bet, multiplier, free_spins_remaining) |
+| Field | Type | Description |
+|-------|------|-------------|
+| `state.stage` | string | Stage name from the ActionDefinition |
+| `state.params` | table | Client parameters + buy_bonus, forced_scatter_count |
+| `state.variables` | table | Engine variables (bet, multiplier, free_spins_remaining) |
 
-### Возвращаемая таблица
+### Returned table
 
 ```lua
 return {
-    total_win = 15.5,           -- обязательно: выигрыш как множитель ставки
-    variables = {               -- опционально: обновить переменные
+    total_win = 15.5,           -- required: win as a multiplier of bet
+    variables = {               -- optional: update variables
         free_spins_awarded = 10,
         global_multiplier = 3,
     },
-    -- остальное → state.Data (отправляется клиенту)
+    -- everything else → state.Data (sent to the client)
     matrix = {{1,2,3},{4,5,6}},
     win_lines = {...},
     scatter_count = 3,
 }
 ```
 
-### Что определяется внутри скрипта
+### What the script defines
 
-Вся игровая логика описывается в Lua-скрипте:
+All game logic is described inside the Lua script:
 
-- **Символы**: таблица ID, флаги wild/scatter/multiplier
-- **Размер сетки** (viewport): `local COLS = 6; local ROWS = 5`
-- **Барабаны / веса символов**: reel strips или weight tables
-- **Пэйлайны / Anywhere Pays**: линии и таблицы выплат
-- **Скаттеры и фриспины**: правила триггера и ретриггера
-- **Каскады / Tumble**: удаление, сдвиг, заполнение
-- **Множители**: логика сбора и применения
-- **Buy bonus**: размещение forced scatters на сетке
+- **Symbols**: ID table, wild/scatter/multiplier flags
+- **Grid size** (viewport): `local COLS = 6; local ROWS = 5`
+- **Reels / symbol weights**: reel strips or weight tables
+- **Paylines / Anywhere Pays**: lines and payout tables
+- **Scatters and free spins**: trigger and retrigger rules
+- **Cascades / Tumble**: remove, shift, refill
+- **Multipliers**: collection and application logic
+- **Buy bonus**: forced-scatter placement on the grid
 
-### Песочница (Sandbox)
+### Sandbox
 
-- Безопасные библиотеки: `base`, `table`, `string`, `math`
-- Нет доступа к `os`, `io`, `debug`, `loadfile`, `dofile`
-- Таймаут: 5 секунд
-- Пул VM (`sync.Pool`) для конкурентной обработки
+- Allowed libraries: `base`, `table`, `string`, `math`
+- No access to `os`, `io`, `debug`, `loadfile`, `dofile`
+- Timeout: 5 seconds
+- VM pool (`sync.Pool`) for concurrent execution
 
 ---
 
 ## 8. Lua API Reference
 
-Модуль `engine` доступен глобально:
+The `engine` module is available globally:
 
-| Функция | Описание |
-|---------|----------|
-| `engine.random(min, max)` | Криптографически безопасное случайное целое [min, max] |
-| `engine.random_float()` | Случайное число [0.0, 1.0) |
-| `engine.random_weighted(weights)` | 1-based индекс по таблице весов `{w1, w2, ...}` |
-| `engine.shuffle(arr)` | Перемешивание (Fisher-Yates, crypto RNG), возвращает копию |
-| `engine.log(level, msg)` | Серверный лог: `"debug"`, `"info"`, `"warn"`, `"error"` |
-| `engine.get_config()` | Таблица: `{id, type, bet_levels}` из JSON-конфига |
+| Function | Description |
+|----------|-------------|
+| `engine.random(min, max)` | Cryptographically secure random integer [min, max] |
+| `engine.random_float()` | Random number [0.0, 1.0) |
+| `engine.random_weighted(weights)` | 1-based index from a weights table `{w1, w2, ...}` |
+| `engine.shuffle(arr)` | Shuffle (Fisher-Yates, crypto RNG); returns a copy |
+| `engine.log(level, msg)` | Server log: `"debug"`, `"info"`, `"warn"`, `"error"` |
+| `engine.get_config()` | Table: `{id, type, bet_levels}` from the JSON config |
 
-> `engine.get_symbol()` удалён. Символы определяются непосредственно в Lua-скрипте.
+> `engine.get_symbol()` has been removed. Symbols are defined directly inside the Lua script.
 
-### Пример использования
+### Usage examples
 
 ```lua
--- Взвешенный выбор символа
+-- Weighted symbol pick
 local SYMBOL_WEIGHTS = {5, 7, 9, 11, 14, 17, 20, 23, 26}
 local idx = engine.random_weighted(SYMBOL_WEIGHTS)  -- 1-based index
 
--- Случайная позиция
+-- Random position
 local pos = engine.random(1, 30)
 
--- Перемешивание колоды
+-- Shuffle a deck
 local deck = engine.shuffle({1, 2, 3, ..., 52})
 ```
 
 ---
 
 
-## 9. Валидация входа и выхода (JSON Schema)
+## 9. Input/Output Validation (JSON Schema)
 
-Конфигурация поддерживает опциональные JSON Schema (draft 2020-12) для валидации параметров спина и описания выходных данных.
+The configuration supports optional JSON Schemas (draft 2020-12) for validating spin parameters and describing output data.
 
 ### input_schema
 
-Валидирует `PlayRequest.Params` — параметры, которые клиент передаёт при игровом действии:
+Validates `PlayRequest.Params` — the parameters the client passes on a play action:
 
 ```json
 "input_schema": {
@@ -432,11 +432,11 @@ local deck = engine.shuffle({1, 2, 3, ..., 52})
 }
 ```
 
-Если параметры не проходят валидацию — спин отклоняется с ошибкой.
+If the parameters fail validation, the spin is rejected with an error.
 
 ### output_schema
 
-Описывает структуру `PlayResult.data` (информационный, не валидационный):
+Describes the structure of `PlayResult.data` (informational, not used for validation):
 
 ```json
 "output_schema": {
@@ -458,64 +458,64 @@ local deck = engine.shuffle({1, 2, 3, ..., 52})
 
 ---
 
-## 10. Клиентская интеграция (SDK)
+## 10. Client Integration (SDK)
 
-Для клиентской части используется `@energy8platform/game-sdk`. Полная документация — в [game_sdk_reference.md](game_sdk_reference.md).
+The client side uses `@energy8platform/game-sdk`. Full reference — see [game_sdk_reference.md](game_sdk_reference.md).
 
-### Краткий обзор
+### Quick overview
 
 ```typescript
 import { CasinoGameSDK } from '@energy8platform/game-sdk';
 
 const sdk = new CasinoGameSDK();
 
-// 1. Инициализация — получение конфига и баланса
+// 1. Initialize — fetch config and balance
 const initData = await sdk.ready();
-// initData.config   — конфигурация игры (GameDefinition)
-// initData.balance  — текущий баланс
-// initData.currency — валюта
-// initData.assetsUrl — базовый URL для ассетов
+// initData.config    — game configuration (GameDefinition)
+// initData.balance   — current balance
+// initData.currency  — currency
+// initData.assetsUrl — base URL for assets
 
-// 2. Спин (универсальный метод play)
+// 2. Spin (universal play method)
 const result = await sdk.play({ action: 'spin', bet: 1.00, params: { lines: 20 } });
-// result.roundId      — ID раунда
-// result.action       — выполненное действие ("spin")
-// result.totalWin     — выигрыш
-// result.balanceAfter — баланс после спина
-// result.data         — payload из GameState.Data (матрица, линии, множители...)
-// result.nextActions  — доступные действия далее (["spin"], ["free_spin"], ["pick"])
-// result.session      — состояние сессии (если фриспины триггернулись)
-// result.creditPending — true если зачисление отложено
+// result.roundId       — round ID
+// result.action        — executed action ("spin")
+// result.totalWin      — win amount
+// result.balanceAfter  — balance after the spin
+// result.data          — payload from GameState.Data (matrix, lines, multipliers...)
+// result.nextActions   — next available actions (["spin"], ["free_spin"], ["pick"])
+// result.session       — session state (if free spins triggered)
+// result.creditPending — true when crediting is deferred
 
-// 3. Фриспин (если nextActions содержит "free_spin")
+// 3. Free spin (when nextActions includes "free_spin")
 if (result.nextActions.includes('free_spin')) {
     const fs = await sdk.play({ action: 'free_spin', bet: 0, roundId: result.roundId });
-    // fs.session.spinsRemaining — оставшиеся фриспины
-    // fs.session.completed      — true когда бонус завершён
-    // fs.session.maxWinReached  — true если достигнут max win cap
+    // fs.session.spinsRemaining — free spins remaining
+    // fs.session.completed      — true when the bonus is over
+    // fs.session.maxWinReached  — true if the max-win cap was hit
 }
 
-// 4. Баланс
+// 4. Balance
 const balance = await sdk.getBalance();
 
-// 5. Очистка
+// 5. Cleanup
 sdk.destroy();
 ```
 
-### Что возвращается в `result.data`
+### What `result.data` contains
 
-Содержимое `result.data` — это `GameState.Data`, собранный движком:
+`result.data` is `GameState.Data` assembled by the engine:
 
-- Для JSON-движка: автоматически маппится из `Matrix`, `WinLines`, `AnywhereWins` и т.д. через `MapState()`.
-- Для Lua-движка: всё, что скрипт вернул в return-таблице (кроме специальных ключей `total_win`, `free_spins`, `variables`).
+- For the JSON engine: auto-mapped from `Matrix`, `WinLines`, `AnywhereWins`, etc. via `MapState()`.
+- For the Lua engine: everything the script returned in its result table (except the special keys `total_win`, `free_spins`, `variables`).
 
-Используйте `output_schema` в конфиге для документирования структуры `data` вашей игры.
+Use `output_schema` in the config to document the `data` structure of your game.
 
 ---
 
-## 11. Деплой игры
+## 11. Deploying a Game
 
-### Шаг 1: Создание записи игры
+### Step 1: Create the game record
 
 ```bash
 POST /api/v1/admin/games
@@ -528,21 +528,21 @@ Content-Type: application/json
   "version": "1.0.0",
   "engine_mode": "json",
   "rtp": "96.5",
-  "description": "Описание игры"
+  "description": "Game description"
 }
 ```
 
-Игра создаётся в неактивном состоянии (`is_active = false`). Путь к конфигу по умолчанию: `games/{id}/config.json`.
+The game is created inactive (`is_active = false`). The default config path is `games/{id}/config.json`.
 
-### Шаг 2: Загрузка конфигурации в S3
+### Step 2: Upload the configuration to S3
 
-Получите presigned URL:
+Get a presigned URL:
 
 ```bash
 POST /api/v1/admin/games/upload-url?game_id=my_new_slot&asset_type=config
 ```
 
-Загрузите конфиг по полученному URL:
+Upload the config to that URL:
 
 ```bash
 PUT {presigned_url}
@@ -551,13 +551,13 @@ Content-Type: application/json
 < my_new_slot_config.json
 ```
 
-### Шаг 3: Загрузка ассетов
+### Step 3: Upload assets
 
-Аналогично — получите URL для каждого типа ассета (`ICON`, `BACKGROUND`, `SOUND_BUNDLE`) и загрузите файлы.
+Same flow — get a URL for each asset type (`ICON`, `BACKGROUND`, `SOUND_BUNDLE`) and upload the files.
 
-### Шаг 4: Lua-скрипт (если `engine_mode: "lua"` или гибридный)
+### Step 4: Lua script (when `engine_mode: "lua"` or hybrid)
 
-Lua-скрипты хранятся в S3 рядом с конфигурацией. Получите presigned URL с `type="script"`:
+Lua scripts live in S3 alongside the configuration. Get a presigned URL with `type="script"`:
 
 ```bash
 POST /api/v1/admin/games/{id}/upload-url
@@ -569,7 +569,7 @@ Content-Type: application/json
 }
 ```
 
-Загрузите `.lua` файл по полученному URL:
+Upload the `.lua` file to the URL:
 
 ```bash
 PUT {presigned_url}
@@ -578,7 +578,7 @@ Content-Type: application/octet-stream
 < my_game_script.lua
 ```
 
-Скрипт будет сохранён в S3 по пути `games/{gameID}/script.lua`. В конфигурации укажите `script_path` соответствующий S3-ключу:
+The script is stored in S3 at `games/{gameID}/script.lua`. In the configuration, set `script_path` to the matching S3 key:
 
 ```json
 {
@@ -587,27 +587,27 @@ Content-Type: application/octet-stream
 }
 ```
 
-> **Примечание**: если `script_path` это просто имя файла (например `"script.lua"`), платформа автоматически резолвит его в `games/{gameID}/script.lua`. В dev-режиме (файловый конфиг-репозиторий) скрипты по-прежнему читаются из локальной директории `scripts/`.
+> **Note**: if `script_path` is just a file name (e.g. `"script.lua"`), the platform automatically resolves it to `games/{gameID}/script.lua`. In dev mode (file-based config repo) scripts are still read from the local `scripts/` directory.
 
-### Шаг 5: Активация
+### Step 5: Activation
 
-Обновите статус игры для отображения в клиентском лобби.
+Update the game's status to expose it in the client lobby.
 
 ---
 
-## 12. Симуляция и проверка RTP
+## 12. Simulation and RTP Verification
 
-Перед деплоем используйте CLI-инструмент симуляции для проверки математической модели.
+Before deploying, use the simulation CLI to verify the math model.
 
-### Запуск
+### Running
 
 ```bash
 go run cmd/simulation/main.go
 ```
 
-> По умолчанию в `cmd/simulation/main.go` указаны `configPath` и `iterations`. Измените их под вашу игру.
+> By default `cmd/simulation/main.go` hard-codes `configPath` and `iterations`. Adjust them for your game.
 
-### Пример вывода
+### Sample output
 
 ```
 Starting simulation for piggy_gates (1000000 iterations)...
@@ -626,119 +626,119 @@ Free Spins Triggered: 4521 (1 in 221 spins)
 Free Spins Played: 52847
 ```
 
-### Метрики
+### Metrics
 
-| Метрика | Описание |
-|---------|----------|
-| `Total RTP` | Общий Return to Player (должен соответствовать целевому `rtp` в конфиге). |
-| `Base Game RTP` | Доля RTP от основной игры. |
-| `Free Spins RTP` | Доля RTP от бонусных раундов. |
-| `Hit Frequency` | Процент спинов с выигрышем. |
-| `Max Win` | Максимальный разовый выигрыш (в множителях от ставки). |
-| `Max Win Hits` | Количество раундов, где выигрыш был ограничен лимитом `max_win`. |
+| Metric | Description |
+|--------|-------------|
+| `Total RTP` | Overall Return to Player (should match the target `rtp` in the config). |
+| `Base Game RTP` | RTP contribution of the base game. |
+| `Free Spins RTP` | RTP contribution of bonus rounds. |
+| `Hit Frequency` | Fraction of spins with a non-zero win. |
+| `Max Win` | Largest single-round win (in bet multiples). |
+| `Max Win Hits` | Number of rounds where the win was clipped by `max_win`. |
 
-Рекомендуется запускать не менее **1 000 000** итераций для стабильных результатов.
-
----
-
-## 13. Соглашения и лучшие практики
-
-1. **Symbol ID — целые числа**. Строковые имена (ключи в `symbols`) служат только для читаемости конфига. Внутри движка и в `reel_strips`, `paylines`, `anywhere_payouts` — только `id`.
-
-2. **Все выплаты — множители от ставки**. `TotalWin = 50` при ставке 2.00 = реальный выигрыш 100.00. Не используйте абсолютные суммы.
-
-3. **Используйте `symbol_weights` вместо `reel_strips`** для новых игр. Формат `name→weight` проще для понимания, настройки RTP и поддержки per-reel конфигурации. `reel_strips` поддерживается для обратной совместимости.
-
-4. **Формат ключей выплат**: `"symbolID:count"` для paylines (e.g., `"1:3"`), строковые пороги для anywhere (`"8"`, `"10"`), строковые количества для scatter (`"3"`, `"4"`).
-
-5. **Используйте `input_schema`** для валидации клиентских параметров (`PlayRequest.Params`) — это защита от невалидных запросов.
-
-6. **Именование стейджей и actions**: стейджи именуются произвольно (`"base_game"`, `"free_spins"`, `"bonus_pick"` и др.). В Lua-режиме скрипт экспортирует единую функцию `execute(state)` и сам диспатчит по `state.stage`. Блок `actions` в конфиге — **обязательный** (см. §10.1).
-
-7. **Глобальный множитель (`global_multiplier`)** сохраняется между фриспинами в Redis-сессии. Используйте его для накопительного эффекта.
-
-8. **Каскады реализуются через `loop`**: условие `"last_win_amount > 0"`, тело — `remove_winning_symbols` → `shift_and_fill` → оценка → `payout`.
-
-9. **Не полагайтесь на глобальные Lua-переменные** между вызовами — VM переиспользуются из пула.
-
-10. **Тестируйте через симуляцию** до деплоя. Целевой RTP должен совпадать с заявленным в конфиге ±0.5%.
-
-11. **Всегда задавайте `max_win`** для production-игр. Без лимита теоретически возможны аномально большие выигрыши в каскадных играх. Стандартный диапазон: 5 000×–20 000× ставки.
-
-12. **`free_spins_config.persistent_state`** — перечислите все переменные, которые должны накапливаться между фриспинами. Если не указан, по умолчанию сохраняется только `global_multiplier`.
-
-13. **Для настольных игр (TABLE) используйте `_persist_` конвенцию** — храните сложные структуры (колоду карт, руки игроков) в `state.Data` с ключами `_persist_<name>`. Платформа автоматически сохраняет их в Redis между действиями (→ §21.2).
-
-14. **Настольные игры — только Lua-режим**. JSON-движок ориентирован на слоты; логика карточных/настольных игр значительно сложнее и требует полного контроля через `execute(state)`.
+Run at least **1,000,000** iterations for stable results.
 
 ---
 
-## 14. Миграция конфигов и скриптов (v3 → v4)
+## 13. Conventions and Best Practices
 
+1. **Symbol IDs are integers**. String names (keys in `symbols`) are for config readability only. Inside the engine and in `reel_strips`, `paylines`, `anywhere_payouts` — use IDs only.
 
-В v4 удалён JSON Flow Executor. Все игры теперь используют Lua-скрипты.
+2. **All payouts are bet multipliers**. `TotalWin = 50` at bet 2.00 = 100.00 of real currency. Don't use absolute amounts.
 
-| Было (v3) | Стало (v4) |
-|-----------|-----------|
-| `engine_mode: "json"` + блок `logic` | Удалено. Все игры = Lua. |
-| `symbols`, `viewport`, `reel_strips`, `paylines` в JSON | Удалено из JSON. Определяется в Lua-скрипте. |
-| `anywhere_payouts`, `scatter_payouts`, `free_spins_trigger` в JSON | Удалено из JSON. Определяется в Lua-скрипте. |
-| `symbol_weights`, `symbol_chances`, `round_type_weights` в JSON | Удалено из JSON. Определяется в Lua-скрипте. |
-| `ante_bet.scatter_chance_multiplier` в JSON | Удалено. Реализуется в Lua (скрипт читает `state.params.ante_bet`). |
-| `engine.get_symbol(id)` в Lua | Удалено. Символы определяются в скрипте. |
-| `engine.get_config().viewport` | Удалено. Viewport определяется в скрипте. |
-| `state.Matrix`, `state.WinLines`, `state.AnywhereWins` в Go | Удалено. Всё через `state.Data`. |
+3. **Prefer `symbol_weights` over `reel_strips`** for new games. The `name→weight` format is easier to reason about, RTP-tune, and supports per-reel configuration. `reel_strips` is kept for backwards compatibility.
 
-**Шаги миграции:**
-1. Перенесите `symbols`, `viewport`, `reel_strips`/`symbol_weights`, `paylines`/`anywhere_payouts`, `scatter_payouts`, `free_spins_trigger` из JSON в Lua-скрипт
-2. Удалите эти поля из JSON-конфига
-3. Замените `engine.get_symbol(id)` на локальную таблицу символов
-4. Замените `engine.get_config().viewport` на локальные константы
-5. Убедитесь что `script_path` указан в JSON-конфиге
+4. **Payout-key formats**: `"symbolID:count"` for paylines (e.g. `"1:3"`), string thresholds for anywhere (`"8"`, `"10"`), string counts for scatter (`"3"`, `"4"`).
+
+5. **Use `input_schema`** to validate client params (`PlayRequest.Params`) — guards against malformed requests.
+
+6. **Stage and action naming**: stages can be named freely (`"base_game"`, `"free_spins"`, `"bonus_pick"`, etc.). In Lua mode the script exports a single `execute(state)` and dispatches on `state.stage`. The `actions` block is **required** in the config (see §10.1).
+
+7. **The global multiplier (`global_multiplier`)** is preserved across free spins via the Redis session. Use it for accumulating effects.
+
+8. **Cascades implement via a loop**: condition `"last_win_amount > 0"`, body — `remove_winning_symbols` → `shift_and_fill` → evaluate → `payout`.
+
+9. **Don't rely on Lua globals** between calls — VMs are reused from a pool.
+
+10. **Test via simulation** before deploying. Achieved RTP must match the declared `rtp` within ±0.5%.
+
+11. **Always set `max_win`** for production games. Without a cap, cascade-style games can theoretically deliver anomalously large wins. Standard range: 5,000×–20,000× bet.
+
+12. **`free_spins_config.persistent_state`** — list every variable that should accumulate across free spins. If unset, only `global_multiplier` is preserved by default.
+
+13. **For table games (TABLE) use the `_persist_` convention** — store complex structures (deck, player hands) in `state.Data` under `_persist_<name>` keys. The platform automatically saves them in Redis between actions (→ §21.2).
+
+14. **Table games are Lua-only**. The JSON engine targets slots; card/table-game logic is significantly more complex and requires full control via `execute(state)`.
 
 ---
 
-## 15. Настольные игры (Table Games)
+## 14. Migrating Configs and Scripts (v3 → v4)
 
-Платформа поддерживает **настольные игры** — блэкджек, рулетку, баккару и другие. Настольные игры используют `type: "TABLE"` и Lua-скрипт для всей логики.
 
-### Ключевые отличия от слотов
+v4 removes the JSON Flow Executor. All games now use Lua scripts.
 
-| Аспект | Слоты (`SLOT`) | Настольные игры (`TABLE`) |
-|--------|---------------|---------------------------|
-| Режим движка | JSON или Lua | Только Lua |
-| Модель раунда | 1 action = 1 раунд (или фиксированное кол-во в бонусе) | Мультишаговый раунд: deal → hit/stand/double → resolve |
-| Сессия | Счётчик `SpinsRemaining` | Unlimited (`SpinsRemaining = -1`), завершается по `complete_session` |
-| Persistent state | `map[string]float64` (числовые переменные) | `map[string]any` (произвольные структуры: массивы карт, руки, колода) |
-| Viewport | Сетка символов `width × height` | Не используется (`0 × 0`) |
-| Symbols / Paylines | Определяют математику | Пустые (вся логика в Lua) |
+| Was (v3) | Now (v4) |
+|----------|----------|
+| `engine_mode: "json"` + `logic` block | Removed. All games = Lua. |
+| `symbols`, `viewport`, `reel_strips`, `paylines` in JSON | Removed from JSON. Defined inside the Lua script. |
+| `anywhere_payouts`, `scatter_payouts`, `free_spins_trigger` in JSON | Removed from JSON. Defined inside the Lua script. |
+| `symbol_weights`, `symbol_chances`, `round_type_weights` in JSON | Removed from JSON. Defined inside the Lua script. |
+| `ante_bet.scatter_chance_multiplier` in JSON | Removed. Implemented in Lua (script reads `state.params.ante_bet`). |
+| `engine.get_symbol(id)` in Lua | Removed. Symbols are defined in the script. |
+| `engine.get_config().viewport` | Removed. Viewport is defined in the script. |
+| `state.Matrix`, `state.WinLines`, `state.AnywhereWins` in Go | Removed. Everything goes through `state.Data`. |
 
-### 15.1. Модель сессии для настольных игр
+**Migration steps:**
+1. Move `symbols`, `viewport`, `reel_strips`/`symbol_weights`, `paylines`/`anywhere_payouts`, `scatter_payouts`, `free_spins_trigger` from JSON into the Lua script.
+2. Remove those fields from the JSON config.
+3. Replace `engine.get_symbol(id)` with a local symbol table.
+4. Replace `engine.get_config().viewport` with local constants.
+5. Make sure `script_path` is set in the JSON config.
 
-Для настольных игр сессия создаётся при `deal` и завершается при `complete_session: true`. Между действиями (hit, stand, double, split) количество шагов неопределено.
+---
+
+## 15. Table Games
+
+The platform supports **table games** — blackjack, roulette, baccarat, and others. Table games use `type: "TABLE"` and a Lua script for all logic.
+
+### Key differences from slots
+
+| Aspect | Slots (`SLOT`) | Table games (`TABLE`) |
+|--------|---------------|------------------------|
+| Engine mode | JSON or Lua | Lua only |
+| Round model | 1 action = 1 round (or fixed count in a bonus) | Multi-step round: deal → hit/stand/double → resolve |
+| Session | `SpinsRemaining` counter | Unlimited (`SpinsRemaining = -1`), ended by `complete_session` |
+| Persistent state | `map[string]float64` (numeric variables) | `map[string]any` (arbitrary structures: card arrays, hands, deck) |
+| Viewport | Symbol grid `width × height` | Unused (`0 × 0`) |
+| Symbols / Paylines | Drive math | Empty (all logic in Lua) |
+
+### 15.1. Session Model for Table Games
+
+For table games the session is created on `deal` and ends on `complete_session: true`. Between actions (hit, stand, double, split) the number of steps is unbounded.
 
 #### Unlimited sessions
 
-В `session_config.total_spins_var` указывается имя переменной (например, `"_table_unlimited"`), а Lua-скрипт устанавливает её в `-1`:
+`session_config.total_spins_var` names a variable (e.g. `"_table_unlimited"`), and the Lua script sets it to `-1`:
 
 ```lua
 variables._table_unlimited = -1
 ```
 
-Это даёт `SpinsRemaining = -1`, что означает:
-- Сессия не завершается по счётчику (нет декремента)
-- Сессия проходит валидацию (`SpinsRemaining < 0` считается "unlimited")
-- Завершение **только** через `complete_session: true` в transition
+This yields `SpinsRemaining = -1`, which means:
+- The session does not end via the counter (no decrement)
+- The session passes validation (`SpinsRemaining < 0` is treated as "unlimited")
+- The session ends **only** through `complete_session: true` in a transition
 
-#### Завершение раунда
+#### Round completion
 
-Lua-скрипт сигнализирует о завершении раунда через переменную:
+The Lua script signals round completion via a variable:
 
 ```lua
 variables.round_complete = 1
 ```
 
-Это активирует transition:
+Which fires this transition:
 
 ```json
 {
@@ -748,55 +748,55 @@ variables.round_complete = 1
 }
 ```
 
-### 15.2. Персистентное состояние (`_persist_` конвенция)
+### 15.2. Persistent State (`_persist_` convention)
 
-Настольные игры хранят между действиями сложное состояние: колоду карт, руки игрока/дилера, фазу раунда и т.д. Поскольку `state.Variables` поддерживает только `float64`, используется конвенция `_persist_`:
+Table games keep complex state between actions: the deck, player and dealer hands, round phase, etc. Since `state.Variables` only carries `float64`, a `_persist_` convention is used:
 
-#### Сохранение (Lua → Redis)
+#### Saving (Lua → Redis)
 
-Lua-скрипт кладёт данные в `state.Data` с prefix `_persist_`:
+The Lua script writes data into `state.Data` under the `_persist_` prefix:
 
 ```lua
--- Сохранить колоду, руки и фазу раунда
-data._persist_shoe = gs.shoe              -- массив из 312 карт
-data._persist_shoe_pos = gs.shoe_pos      -- число
-data._persist_player_hands = gs.player_hands  -- массив объектов
-data._persist_dealer_cards = gs.dealer_cards  -- массив
-data._persist_phase = gs.phase            -- строка
+-- Save deck, hands, and round phase
+data._persist_shoe = gs.shoe              -- 312-card array
+data._persist_shoe_pos = gs.shoe_pos      -- number
+data._persist_player_hands = gs.player_hands  -- array of objects
+data._persist_dealer_cards = gs.dealer_cards  -- array
+data._persist_phase = gs.phase            -- string
 ```
 
-Платформа автоматически:
-1. Извлекает все ключи с префиксом `_persist_` из `state.Data`
-2. Сохраняет их в `session.PersistentState` (без префикса): `shoe`, `shoe_pos`, `player_hands`, ...
-3. Данные сериализуются в JSON и хранятся в Redis
+The platform automatically:
+1. Extracts every `_persist_`-prefixed key from `state.Data`.
+2. Saves them to `session.PersistentState` (without the prefix): `shoe`, `shoe_pos`, `player_hands`, …
+3. The data is JSON-serialized and stored in Redis.
 
-#### Восстановление (Redis → Lua)
+#### Restoring (Redis → Lua)
 
-При следующем action данные доступны в `state.params` с prefix `_ps_`:
+On the next action, the data is exposed in `state.params` under the `_ps_` prefix:
 
 ```lua
 local gs = {}
-gs.shoe         = state.params._ps_shoe           -- массив карт
-gs.shoe_pos     = state.params._ps_shoe_pos        -- число (может быть float → floor)
-gs.player_hands = state.params._ps_player_hands    -- массив объектов
-gs.dealer_cards = state.params._ps_dealer_cards    -- массив
-gs.phase        = state.params._ps_phase           -- строка
+gs.shoe         = state.params._ps_shoe           -- card array
+gs.shoe_pos     = state.params._ps_shoe_pos        -- number (may be a float → floor it)
+gs.player_hands = state.params._ps_player_hands    -- array of objects
+gs.dealer_cards = state.params._ps_dealer_cards    -- array
+gs.phase        = state.params._ps_phase           -- string
 ```
 
-> **Важно**: числовые значения могут вернуться как `float64` после JSON round-trip (Redis → Go → Lua). Используйте `math.floor()` для целых значений:
+> **Important**: numeric values may come back as `float64` after a JSON round-trip (Redis → Go → Lua). Use `math.floor()` for integer values:
 > ```lua
 > gs.shoe_pos = math.floor(state.params._ps_shoe_pos or 1)
 > ```
 
-#### Обратная совместимость
+#### Backwards compatibility
 
-Для слотов `PersistentState` по-прежнему хранит `float64` значения в `session_config.persistent_vars`. Конвенция `_persist_` — дополнительный механизм, они не конфликтуют.
+For slots, `PersistentState` still stores `float64` values listed in `session_config.persistent_vars`. The `_persist_` convention is an additional mechanism — they don't conflict.
 
-### 15.3. Пример: Blackjack
+### 15.3. Example: Blackjack
 
-Полный пример реализации блэкджека с крупье (6-deck shoe, dealer stands on soft 17).
+A complete dealer-blackjack implementation (6-deck shoe, dealer stands on soft 17).
 
-#### Конфигурация
+#### Configuration
 
 ```json
 {
@@ -836,10 +836,10 @@ gs.phase        = state.params._ps_phase           -- строка
 }
 ```
 
-#### Lua-скрипт (структура)
+#### Lua script (structure)
 
 ```lua
--- Единая точка входа
+-- Single entry point
 function execute(state)
     if state.stage == "deal" then
         return do_deal(state)
@@ -849,17 +849,17 @@ function execute(state)
 end
 
 function do_deal(state)
-    -- 1. Создать и перемешать shoe (6 колод = 312 карт)
+    -- 1. Build and shuffle the shoe (6 decks = 312 cards)
     local shoe = engine.shuffle(create_deck())
 
-    -- 2. Раздать: player, dealer, player, dealer
+    -- 2. Deal: player, dealer, player, dealer
     local p1, p2 = shoe[1], shoe[3]
     local d1, d2 = shoe[2], shoe[4]
 
-    -- 3. Проверить натуральный блэкджек → round_complete = 1
-    -- 4. Иначе → сохранить состояние, вернуть частичную руку дилера
+    -- 3. Check for natural blackjack → round_complete = 1
+    -- 4. Otherwise → save state, return a partial dealer hand
 
-    -- Сохранить persistent state
+    -- Save persistent state
     data._persist_shoe = shoe
     data._persist_shoe_pos = 5
     data._persist_player_hands = { {cards = {p1, p2}, bet_mult = 1} }
@@ -868,34 +868,34 @@ function do_deal(state)
     return {
         total_win = 0,
         variables = { round_complete = 0, _table_unlimited = -1 },
-        player_hands = {...},      -- видимые руки
-        dealer_hand = {...},       -- только первая карта
+        player_hands = {...},      -- visible hands
+        dealer_hand = {...},       -- first card only
         phase = "player_turn",
     }
 end
 
 function do_player_action(state)
-    -- Восстановить состояние из persistent
+    -- Restore state from persistent
     local gs = {
         shoe = state.params._ps_shoe,
         player_hands = state.params._ps_player_hands,
         dealer_cards = state.params._ps_dealer_cards,
     }
 
-    -- Определить действие из имени action
+    -- Determine action from the action name
     local action = state.params._action  -- "hit", "stand", "double", "split"
 
     if action == "hit" then
-        -- Добавить карту, проверить bust
+        -- Add a card, check for bust
     elseif action == "stand" then
-        -- Отметить руку как стоящую
+        -- Mark hand as standing
     elseif action == "double" then
-        -- Удвоить ставку, взять одну карту, stand
+        -- Double the bet, take one card, stand
     elseif action == "split" then
-        -- Разделить на две руки
+        -- Split into two hands
     end
 
-    -- Проверить: все руки done? → dealer draws → resolve
+    -- Are all hands done? → dealer draws → resolve
     if all_hands_done then
         play_dealer(gs)  -- Dealer hits until 17+
         local results, total_payout = resolve_hands(gs)
@@ -909,7 +909,7 @@ function do_player_action(state)
         }
     end
 
-    -- Ещё есть ходы → сохранить и вернуть
+    -- Still actions left → save and return
     save_game_state(gs, data)
     return {
         total_win = 0,
@@ -922,7 +922,7 @@ function do_player_action(state)
 end
 ```
 
-#### Игровой цикл (client ↔ server)
+#### Round flow (client ↔ server)
 
 ```
 Client                             Server
@@ -936,7 +936,7 @@ Client                             Server
   │                                  │
   │ POST /play {action:"hit"}        │
   │ ──────────────────────────────▶  │ 5. Restore state from Redis
-  │                                  │ 6. Deal card to player
+  │                                  │ 6. Deal a card to the player
   │ ◀──────────────────────────────  │ 7. Save state, return updated hand
   │ {next_actions: [hit,stand]}      │
   │                                  │
@@ -949,47 +949,47 @@ Client                             Server
   │ {next_actions: [deal]}           │
 ```
 
-#### Правила выплат
+#### Payout rules
 
-| Результат | Множитель | Выплата при ставке 10 |
-|-----------|-----------|----------------------|
-| Blackjack (натуральный 21) | 2.5× | 25 (profit: 15) |
+| Result | Multiplier | Payout at bet 10 |
+|--------|------------|------------------|
+| Blackjack (natural 21) | 2.5× | 25 (profit: 15) |
 | Win | 2.0× | 20 (profit: 10) |
 | Push | 1.0× | 10 (profit: 0) |
 | Lose | 0.0× | 0 (loss: 10) |
-| Insurance win (dealer BJ) | 1.5× от половины ставки | +7.50 |
+| Insurance win (dealer BJ) | 1.5× of half the bet | +7.50 |
 
-> **TotalWin** — это **profit multiplier** (выплата минус ставка). Например, blackjack = `1.5` (получил 2.5× bet, минус 1× bet = 1.5× profit). Платформа вычисляет: `profit × bet = реальный выигрыш`.
+> **TotalWin** is the **profit multiplier** (payout minus bet). For example, blackjack = `1.5` (received 2.5× bet, minus 1× bet = 1.5× profit). The platform computes `profit × bet = real win`.
 
-### Чеклист для новой настольной игры
+### Checklist for a new table game
 
-- [ ] `type: "TABLE"` в конфиге
+- [ ] `type: "TABLE"` in the config
 - [ ] `engine_mode: "lua"`
-- [ ] `viewport: { width: 0, height: 0 }` (сетка не нужна)
-- [ ] `symbols`, `reel_strips`, `paylines`, `logic` — пустые
-- [ ] Каждое действие игрока — отдельный action с `requires_session: true`
-- [ ] Первый action (`deal`) — `debit: "bet"`, `creates_session: true`
-- [ ] `session_config.total_spins_var` указывает на переменную с `-1`
-- [ ] Lua-скрипт использует `_persist_` конвенцию для сложного persistent state
-- [ ] Lua-скрипт устанавливает `round_complete = 1` для завершения раунда
-- [ ] `complete_session: true` в transition по условию `round_complete == 1`
-- [ ] Действия с доплатой (`double`, `split`) имеют `debit: "bet"`
-- [ ] `state.params._action` используется для определения типа действия в Lua
+- [ ] `viewport: { width: 0, height: 0 }` (no grid needed)
+- [ ] `symbols`, `reel_strips`, `paylines`, `logic` — all empty
+- [ ] Each player action is a separate action with `requires_session: true`
+- [ ] The first action (`deal`) — `debit: "bet"`, `creates_session: true`
+- [ ] `session_config.total_spins_var` points at a variable holding `-1`
+- [ ] The Lua script uses the `_persist_` convention for complex persistent state
+- [ ] The Lua script sets `round_complete = 1` to end the round
+- [ ] `complete_session: true` in a transition guarded by `round_complete == 1`
+- [ ] Actions with extra cost (`double`, `split`) declare `debit: "bet"`
+- [ ] `state.params._action` is used to identify the action type in Lua
 
 ---
 
-## 16. Cross-Spin Persistent State (метры и накопители)
+## 16. Cross-Spin Persistent State (meters and accumulators)
 
-Некоторые механики требуют сохранения состояния **между базовыми спинами** — например, накопление зарядов, прогрессивные множители или счётчики до бонуса. В отличие от сессионного `_persist_` (§15.2), который работает только внутри бонусного раунда, Cross-Spin Persistent State живёт **независимо от сессий** и не имеет TTL.
+Some mechanics need state preserved **between base spins** — accumulating charges, progressive multipliers, counters toward a bonus. Unlike session-scoped `_persist_` (§15.2), which only lives inside a bonus round, Cross-Spin Persistent State lives **independently of sessions** and has no TTL.
 
-### Как это работает
+### How it works
 
-1. В JSON-конфиге игры объявляется блок `persistent_state`
-2. Перед каждым спином платформа загружает сохранённые значения из Redis в `state.variables`
-3. После спина платформа извлекает объявленные переменные из `state.variables` и сохраняет обратно
-4. Клиент получает текущие значения в `data.persistent_state`
+1. The JSON config declares a `persistent_state` block.
+2. Before each spin, the platform loads stored values from Redis into `state.variables`.
+3. After the spin, the platform reads the declared variables from `state.variables` and writes them back.
+4. The client receives the current values in `data.persistent_state`.
 
-### Конфигурация
+### Configuration
 
 ```json
 {
@@ -1014,48 +1014,48 @@ Client                             Server
 }
 ```
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `vars` | `string[]` | Имена числовых переменных (`state.variables.*`), сохраняемых между спинами. |
-| `exposed_vars` | `string[]` | Подмножество `vars`, которое отдаётся клиенту в `data.persistent_state`. |
+| Field | Type | Description |
+|-------|------|-------------|
+| `vars` | `string[]` | Names of numeric variables (`state.variables.*`) persisted across spins. |
+| `exposed_vars` | `string[]` | Subset of `vars` exposed to the client in `data.persistent_state`. |
 
-### Lua-скрипт
+### Lua script
 
-Скрипт работает с persistent state через стандартные `state.variables` — никаких специальных API:
+The script consumes persistent state through the standard `state.variables` — no special API:
 
 ```lua
 function execute(state)
-    -- Заряды загружены платформой из Redis → state.variables
+    -- Charges loaded by the platform from Redis → state.variables
     local charges = state.variables.charge_meter or 0
     local bonus_level = state.variables.bonus_level or 0
 
-    -- ... основная логика спина ...
-    -- Допустим, каждый спецсимвол на барабанах добавляет заряд
+    -- ... main spin logic ...
+    -- Suppose every special symbol on the reels adds a charge
     charges = charges + special_symbol_count
 
     local bonus_triggered = false
     if charges >= 50 then
         bonus_triggered = true
-        charges = 0        -- сброс после триггера
+        charges = 0        -- reset after trigger
         bonus_level = bonus_level + 1
     end
 
     return {
         total_win = win,
         variables = {
-            charge_meter = charges,       -- платформа сохранит обратно в Redis
+            charge_meter = charges,       -- platform writes back to Redis
             bonus_level = bonus_level,
         },
-        -- клиентские данные
+        -- client data
         matrix = matrix,
         charge_meter_triggered = bonus_triggered,
     }
 end
 ```
 
-### Что получает клиент
+### What the client sees
 
-В `result.data` появляется поле `persistent_state` с текущими значениями объявленных `exposed_vars`:
+`result.data` gains a `persistent_state` field with the current values of the declared `exposed_vars`:
 
 ```json
 {
@@ -1070,9 +1070,9 @@ end
 }
 ```
 
-### Сложные данные (`_persist_game_` конвенция)
+### Complex data (`_persist_game_` convention)
 
-Для нечисловых данных (массивы, таблицы) используйте префикс `_persist_game_` в return-таблице Lua. Это аналог `_persist_` для сессий (§15.2), но сохраняется между спинами:
+For non-numeric data (arrays, tables) use the `_persist_game_` prefix in the Lua return table. It mirrors the session-scoped `_persist_` (§15.2) but persists across spins:
 
 ```lua
 return {
@@ -1082,44 +1082,44 @@ return {
 }
 ```
 
-На следующем спине данные будут доступны через `state.params._ps_collected_symbols`.
+On the next spin the data is exposed via `state.params._ps_collected_symbols`.
 
-> **Важно**: `_persist_game_*` ключи автоматически исключаются из истории и не попадают к клиенту.
+> **Important**: `_persist_game_*` keys are excluded from history and never reach the client.
 
-### Порядок загрузки
+### Load order
 
-1. Сначала загружается cross-spin persistent state → `state.variables`
-2. Затем загружается сессионный state (если есть активная сессия) → **перезаписывает** совпадающие ключи
+1. Cross-spin persistent state is loaded first → `state.variables`.
+2. Then session state (if there's an active session) is loaded → **overwrites** matching keys.
 
-Это значит, что во время фриспинов сессионные переменные имеют приоритет, но накопительные метры базовой игры всё равно доступны (если не перезаписаны сессией).
+This means that during free spins, session variables take precedence, but base-game accumulating meters are still available (unless the session overrides them).
 
-### Сброс состояния
+### Resetting state
 
-Администратор может сбросить persistent state через API:
+An admin can reset persistent state through the API:
 
 ```
 DELETE /api/v1/admin/users/{userId}/games/{gameId}/persistent-state
 ```
 
-Lua-скрипт также может сбросить значения самостоятельно (например, обнулить `charge_meter` после триггера бонуса).
+The Lua script can also reset values itself (e.g. zero the `charge_meter` after triggering a bonus).
 
-### Отличия от сессионного `_persist_`
+### Differences from session-scoped `_persist_`
 
-| | Сессионный `_persist_` (§15.2) | Cross-Spin `persistent_state` (§16) |
+| | Session-scoped `_persist_` (§15.2) | Cross-Spin `persistent_state` (§16) |
 |---|---|---|
-| Область жизни | Внутри одной сессии (фриспины, настольный раунд) | Между всеми базовыми спинами пользователя |
-| TTL | Наследует TTL сессии | Без TTL (живёт вечно) |
-| Хранение | В объекте `GameSession` | Отдельный ключ в Redis |
-| Конфигурация | `session_config.persistent_vars` в transition | `persistent_state.vars` в корне конфига |
-| Lua-префикс (сложные данные) | `_persist_*` | `_persist_game_*` |
-| Восстановление в Lua | `state.params._ps_*` | `state.variables.*` (числа) / `state.params._ps_*` (сложные) |
+| Lifetime | Within a single session (free spins, table round) | Across all base spins of a user |
+| TTL | Inherits the session TTL | None (lives forever) |
+| Storage | Inside the `GameSession` object | A dedicated Redis key |
+| Configuration | `session_config.persistent_vars` in a transition | `persistent_state.vars` at config root |
+| Lua prefix (complex data) | `_persist_*` | `_persist_game_*` |
+| Restoration in Lua | `state.params._ps_*` | `state.variables.*` (numbers) / `state.params._ps_*` (complex) |
 
 ---
 
-## Связанная документация
+## Related documentation
 
-- [game_engine_design.md](game_engine_design.md) — дизайн движка (техническая архитектура)
-- [game_sdk_reference.md](game_sdk_reference.md) — полная документация клиентского SDK
-- [game_bridge_protocol.md](game_bridge_protocol.md) — протокол postMessage
-- [api_protocol.md](api_protocol.md) — REST API эндпоинты
-- [architecture.md](architecture.md) — архитектура платформы
+- [game_engine_design.md](game_engine_design.md) — engine design (technical architecture)
+- [game_sdk_reference.md](game_sdk_reference.md) — full client SDK reference
+- [game_bridge_protocol.md](game_bridge_protocol.md) — postMessage protocol
+- [api_protocol.md](api_protocol.md) — REST API endpoints
+- [architecture.md](architecture.md) — platform architecture
