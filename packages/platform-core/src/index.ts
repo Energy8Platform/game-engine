@@ -21,21 +21,17 @@ export type {
   SDKOptions,
 } from './PlatformSession';
 
-// ─── Lua (browser-safe) ─────────────────────────────────
-// Node-only runners (Native, Parallel) live in the /simulation sub-path
-// so they don't pull worker_threads / child_process / fs into browser
-// bundles when consumers just import from the main entry.
-export {
-  LuaEngine,
-  LuaEngineAPI,
-  createSeededRng,
-  ActionRouter,
-  evaluateCondition,
-  SessionManager,
-  PersistentState,
-  SimulationRunner,
-  formatSimulationResult,
-} from './lua';
+// ─── Lua ────────────────────────────────────────────────
+// LuaEngine and friends are available only via the /lua sub-path. We
+// don't re-export them as runtime values from the main entry because
+// `fengari` (the underlying Lua VM) is a CommonJS module — pulling it
+// in unconditionally breaks Vite dev-mode ESM resolution for any
+// consumer that doesn't actually use Lua in the browser. Use:
+//
+//   import { LuaEngine } from '@energy8platform/platform-core/lua';
+//
+// For Node-only RTP simulation (Go binary, worker_threads), import from
+// '@energy8platform/platform-core/simulation' instead.
 
 // ─── DevBridge ──────────────────────────────────────────
 export { DevBridge } from './dev-bridge';

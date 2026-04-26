@@ -59,7 +59,7 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
   const userVite = config.vite ?? {};
 
   return {
-    base: config.base ?? '/',
+    base: config.base ?? './',
 
     plugins: [
       ...plugins,

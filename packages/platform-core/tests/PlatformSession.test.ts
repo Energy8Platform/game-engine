@@ -12,7 +12,6 @@ import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import {
   createPlatformSession,
   PlatformSession,
-  LuaEngine,
   DevBridge,
   createCSSPreloader,
   removeCSSPreloader,
@@ -21,6 +20,9 @@ import {
   type AssetManifest,
   type LoadingScreenConfig,
 } from '../src/index';
+// LuaEngine is intentionally absent from the main entry (fengari is CJS
+// and would break browser ESM consumers). It lives in the /lua sub-path.
+import { LuaEngine } from '../src/lua';
 
 // MemoryChannel (used by DevBridge in devMode) keys its singleton off
 // `window`. This test runs under vitest's node environment; install a
