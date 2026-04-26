@@ -13,6 +13,7 @@ If you want the full PixiJS engine on top of this, install [`@energy8platform/ga
 - [Quick Start](#quick-start)
 - [Public API](#public-api)
 - [PlatformSession](#platformsession)
+- [Writing your game (config + Lua)](#writing-your-game-config--lua)
 - [Lua Engine](#lua-engine)
 - [DevBridge (mock casino host)](#devbridge-mock-casino-host)
 - [RTP Simulation CLI](#rtp-simulation-cli)
@@ -162,6 +163,94 @@ session.destroy();
 ```
 
 Inside `game-engine`, `GameApplication` wraps this. For non-pixi consumers, this is the layer you talk to directly.
+
+---
+
+## Writing your game (config + Lua)
+
+Each game on the Energy8 platform consists of two artefacts:
+
+1. A **`GameDefinition`** (JSON-shaped) — platform metadata: id, type, bet levels, max-win cap, action map with stage transitions, optional buy-bonus / ante-bet config. **No game math here.**
+2. A **Lua script** — exports a single `execute(state)` function that owns *all* game math (reels, paylines, payouts, cascades, free spins, multipliers).
+
+The same pair runs server-side in production and locally in dev / RTP simulations.
+
+### Minimal slot — `dev.config.ts`
+
+```typescript
+import luaScript from './script.lua?raw';
+import type { GameDefinition } from '@energy8platform/platform-core';
+
+const gameDefinition: GameDefinition = {
+  id: 'my-slot',
+  type: 'SLOT',
+  script_path: 'games/my-slot/script.lua',          // S3 key in production
+  bet_levels: [0.20, 0.50, 1.00, 2.00, 5.00],
+  max_win: { multiplier: 10000 },                    // cap = bet × 10000
+
+  actions: {
+    spin: {
+      stage: 'base_game',
+      debit: 'bet',                                  // deducts the bet
+      credit: 'win',                                 // credits total_win
+      transitions: [
+        // Could branch into a free-spins session here. See full guide.
+        { condition: 'always', next_actions: ['spin'] },
+      ],
+    },
+  },
+};
+
+export default {
+  balance: 10_000,
+  currency: 'EUR',
+  networkDelay: 200,
+  luaScript,
+  gameDefinition,
+};
+```
+
+### Minimal slot — `script.lua`
+
+```lua
+local SYMBOLS = { 'A', 'K', 'Q', 'J', '10', '9' }
+local PAYOUT  = { A = 50, K = 30, Q = 20, J = 10, ['10'] = 5, ['9'] = 2 }  -- × bet
+
+function execute(state)
+    local bet = state.variables.bet
+
+    -- 3 columns × 3 rows of random symbols
+    local matrix = {}
+    for col = 1, 3 do
+        matrix[col] = {}
+        for row = 1, 3 do
+            matrix[col][row] = SYMBOLS[engine.random(1, #SYMBOLS)]
+        end
+    end
+
+    -- Pay out if all 3 symbols on the middle row match
+    local center = { matrix[1][2], matrix[2][2], matrix[3][2] }
+    local total_win = 0
+    if center[1] == center[2] and center[2] == center[3] then
+        total_win = bet * PAYOUT[center[1]]
+    end
+
+    return {
+        total_win = total_win,
+        data = { matrix = matrix, win_lines = total_win > 0 and { 2 } or {} },
+    }
+end
+```
+
+That's the entire contract: `state.variables.bet` in, a `total_win` and arbitrary `data` payload out. The platform handles the rest (debit/credit, balance updates, session lifecycle, cap enforcement).
+
+### Full reference
+
+The mini-example above covers a base-game spin only. For everything else — free spins via `creates_session` + `next_actions`, retrigger logic, persistent meters across spins (`_persist_*`), buy-bonus and ante-bet configuration, table-game session models, the full `engine.*` Lua API, JSON-Schema input/output validation, deployment and S3 layout — see the comprehensive guide:
+
+- **[Game Development Guide](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md)** (1100+ lines, in Russian)
+
+Key sections to start with: §2 (`GameDefinition` shape), §7 (Lua script), §8 (`engine.*` API), §15 (table games), §16 (persistent state).
 
 ---
 
