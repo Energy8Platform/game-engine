@@ -222,11 +222,11 @@ export default {
 
 ```lua
 local SYMBOLS = { 'A', 'K', 'Q', 'J', '10', '9' }
-local PAYOUT  = { A = 50, K = 30, Q = 20, J = 10, ['10'] = 5, ['9'] = 2 }  -- × bet
+-- Payouts are *bet multipliers*. The platform scales by the player's
+-- actual bet on the way out — never multiply by bet inside the script.
+local PAYOUT  = { A = 50, K = 30, Q = 20, J = 10, ['10'] = 5, ['9'] = 2 }
 
 function execute(state)
-    local bet = state.variables.bet
-
     -- 3 columns × 3 rows of random symbols
     local matrix = {}
     for col = 1, 3 do
@@ -240,7 +240,7 @@ function execute(state)
     local center = { matrix[1][2], matrix[2][2], matrix[3][2] }
     local total_win = 0
     if center[1] == center[2] and center[2] == center[3] then
-        total_win = bet * PAYOUT[center[1]]
+        total_win = PAYOUT[center[1]]
     end
 
     return {
@@ -250,7 +250,7 @@ function execute(state)
 end
 ```
 
-That's the entire contract: `state.variables.bet` in, a `total_win` and arbitrary `data` payload out. The platform handles the rest (debit/credit, balance updates, session lifecycle, cap enforcement).
+That's the entire contract: a stage to dispatch on (here just `base_game`) plus a `total_win` (a **bet multiplier**, not absolute currency) and an arbitrary `data` payload. The platform handles the rest — debit/credit (`real_win = bet × total_win`), balance updates, session lifecycle, cap enforcement. See [Game Development Guide §13.2](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full convention.
 
 ### Full reference
 
