@@ -164,13 +164,13 @@ session.destroy();
 
 Inside `game-engine`, `GameApplication` wraps this. For non-pixi consumers, this is the layer you talk to directly.
 
-**Session continuations: send `bet: 0`.** When the previous result returns `nextActions: ['free_spin']` (or any other in-session action with `debit: 'none'`), the next call must use `bet: 0`:
+**Session continuations: pass the triggering bet, not zero.** When the previous result returns `nextActions: ['free_spin']` (or any other in-session action with `debit: 'none'`), pass the same bet that triggered the session:
 
 ```typescript
-const fs = await session.play({ action: 'free_spin', bet: 0, roundId: result.roundId });
+const fs = await session.play({ action: 'free_spin', bet: triggeringBet, roundId: result.roundId });
 ```
 
-The active session's bet is preserved server-side; passing the original bet again would cause the platform (and DevBridge in dev mode) to debit twice and skew win calculations. See [Game Development Guide §13.16](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full conventions list.
+The platform validates `bet` against `bet_levels` and rejects `bet: 0`. No double debit happens — the action's `debit: 'none'` keeps the wallet still, and LuaEngine reads the actual session bet from server-side session state regardless of what the client sends. See [Game Development Guide §13.16](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full conventions list.
 
 ---
 

@@ -153,9 +153,13 @@ describe('DevBridge.computeDebit', () => {
     expect(bridge.balance).toBe(10000 - 500);
   });
 
-  it('debit: "none" → no balance movement (free spin continuation)', async () => {
+  it('debit: "none" → no balance movement even when client passes a non-zero bet', async () => {
+    // The platform contract is: client sends the triggering bet (bet=0 is
+    // rejected by bet_levels validation upstream); the action's debit:'none'
+    // is what keeps the wallet still. Mirror that here — a free_spin with
+    // bet=1 must NOT decrement the balance.
     const bridge = makeBridge();
-    await play(bridge, 'free_spin', 0);
+    await play(bridge, 'free_spin', 1);
     expect(bridge.balance).toBe(10000);
   });
 

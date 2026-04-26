@@ -490,8 +490,12 @@ const result = await sdk.play({ action: 'spin', bet: 1.00, params: { lines: 20 }
 // result.creditPending — true when crediting is deferred
 
 // 3. Free spin (when nextActions includes "free_spin")
+//    Pass the same bet that triggered the session — the platform
+//    validates `bet` against bet_levels and rejects bet: 0. The action
+//    definition's debit: 'none' prevents any wallet movement.
+const sessionBet = result.bet ?? 1.00; // remember the triggering bet
 if (result.nextActions.includes('free_spin')) {
-    const fs = await sdk.play({ action: 'free_spin', bet: 0, roundId: result.roundId });
+    const fs = await sdk.play({ action: 'free_spin', bet: sessionBet, roundId: result.roundId });
     // fs.session.spinsRemaining — free spins remaining
     // fs.session.completed      — true when the bonus is over
     // fs.session.maxWinReached  — true if the max-win cap was hit
@@ -675,7 +679,7 @@ Run at least **1,000,000** iterations for stable results.
 
 15. **Use `engine.*` RNG only — never `math.random`**. All randomness must come from `engine.random`, `engine.random_float`, `engine.random_weighted`, `engine.shuffle`. They are seeded by the platform (and by simulation runners) so that DevBridge plays, RTP simulations, and production all replay identically. `math.random` defeats determinism and can desync simulation results from production.
 
-16. **Send `bet: 0` for session continuations**. Inside an active session (free spins, feature spins, table follow-up actions), the client must pass `bet: 0` to `sdk.play({ action: 'free_spin', bet: 0, roundId })`. The active session bet is preserved server-side; LuaEngine reads it from session state. Sending the original bet again would cause the platform (and DevBridge) to debit twice and skew win calculation. Action definitions for session continuations carry `debit: 'none'` to enforce zero wallet movement, but the client still has to send `bet: 0` — the SDK does not zero it for you.
+16. **Send the triggering bet for session continuations — not zero**. Inside an active session (free spins, feature spins, table follow-up actions), the client passes the **same bet that triggered the session** to `sdk.play({ action: 'free_spin', bet: triggeringBet, roundId })`. The platform validates `bet` against `bet_levels` and rejects requests with `bet: 0` or any value outside the allowed set. No double debit happens because the action definition carries `debit: 'none'` — the wallet doesn't move. LuaEngine reads the actual session bet from server-side session state regardless of what the client sends, so the value is mostly a formality, but it must be a valid bet level.
 
 17. **Transition conditions are deliberately simple**. The condition language supports numeric comparisons against `state.variables` (`free_spins_awarded > 0`, `bonus_tier == 2`), boolean combinators (`&&`, `||`), and the literal `"always"`. **All routing variables must be plain numbers**: `bonus_tier`, `spins_after`, `feature_spins_after`, `retrigger_spins`, `round_complete`. Don't try to gate transitions on nested data structures, strings, or `state.params` keys — return whatever you need from the script as a top-level numeric variable instead.
 
