@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import type { GameDefinition, SimulationResult } from './types';
+import type { GameDefinition, SimulationResult } from '../lua/types';
 
 // ─── Types ──────────────────────────────────────────────
 

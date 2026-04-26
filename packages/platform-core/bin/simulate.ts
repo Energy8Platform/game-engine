@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 import { SimulationRunner, formatSimulationResult } from '../src/lua/SimulationRunner';
-import { ParallelSimulationRunner } from '../src/lua/ParallelSimulationRunner';
-import { NativeSimulationRunner, findNativeBinary, formatNativeResult } from '../src/lua/NativeSimulationRunner';
+import { ParallelSimulationRunner } from '../src/simulation/ParallelSimulationRunner';
+import { NativeSimulationRunner, findNativeBinary, formatNativeResult } from '../src/simulation/NativeSimulationRunner';
 import { cpus } from 'os';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';

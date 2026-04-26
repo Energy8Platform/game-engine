@@ -3,7 +3,7 @@ import { Worker } from 'worker_threads';
 import { cpus } from 'os';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import type { SimulationConfig, SimulationResult, SimulationRawAccumulators } from './types';
+import type { SimulationConfig, SimulationResult, SimulationRawAccumulators } from '../lua/types';
 import type { WorkerMessage, WorkerConfig } from './SimulationWorker';
 
 const SEED_STRIDE = 1 << 20; // 2^20 — gap between worker seeds to avoid overlap

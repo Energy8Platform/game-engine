@@ -21,7 +21,10 @@ export type {
   SDKOptions,
 } from './PlatformSession';
 
-// ─── Lua ────────────────────────────────────────────────
+// ─── Lua (browser-safe) ─────────────────────────────────
+// Node-only runners (Native, Parallel) live in the /simulation sub-path
+// so they don't pull worker_threads / child_process / fs into browser
+// bundles when consumers just import from the main entry.
 export {
   LuaEngine,
   LuaEngineAPI,
@@ -32,10 +35,6 @@ export {
   PersistentState,
   SimulationRunner,
   formatSimulationResult,
-  ParallelSimulationRunner,
-  NativeSimulationRunner,
-  findNativeBinary,
-  formatNativeResult,
 } from './lua';
 
 // ─── DevBridge ──────────────────────────────────────────
@@ -93,9 +92,11 @@ export type {
 } from './types';
 
 // ─── Native simulation types ────────────────────────────
+// Re-exported from /simulation. Importing them from the main entry is
+// fine for type-only usage; runtime classes still come from /simulation.
 export type {
   NativeSimulationConfig,
   NativeSimulationResult,
   StageStats,
   DistributionBucket,
-} from './lua';
+} from './simulation';

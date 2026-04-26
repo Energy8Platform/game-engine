@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { parentPort, workerData } from 'worker_threads';
-import { SimulationRunner } from './SimulationRunner';
-import type { SimulationConfig, SimulationResult } from './types';
+import { SimulationRunner } from '../lua/SimulationRunner';
+import type { SimulationConfig, SimulationResult } from '../lua/types';
 
 export interface WorkerMessage {
   type: 'progress' | 'result' | 'error';

@@ -5,7 +5,8 @@
   "description": "Monorepo for @energy8platform/platform-core and @energy8platform/game-engine",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "examples/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

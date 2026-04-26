@@ -20,6 +20,11 @@
       "require": "./dist/lua.cjs.js",
       "types": "./dist/lua.d.ts"
     },
+    "./simulation": {
+      "import": "./dist/simulation.esm.js",
+      "require": "./dist/simulation.cjs.js",
+      "types": "./dist/simulation.d.ts"
+    },
     "./dev-bridge": {
       "import": "./dist/dev-bridge.esm.js",
       "require": "./dist/dev-bridge.cjs.js",

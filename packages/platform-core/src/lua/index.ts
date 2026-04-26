@@ -1,17 +1,14 @@
+// Browser-safe Lua engine surface. Only depends on `fengari`, no Node built-ins.
+//
+// For the Node-only runners (NativeSimulationRunner backed by a Go binary,
+// ParallelSimulationRunner backed by worker_threads), import from
+// `@energy8platform/platform-core/simulation` instead.
 export { LuaEngine } from './LuaEngine';
 export { LuaEngineAPI, createSeededRng } from './LuaEngineAPI';
 export { ActionRouter, evaluateCondition } from './ActionRouter';
 export { SessionManager } from './SessionManager';
 export { PersistentState } from './PersistentState';
 export { SimulationRunner, formatSimulationResult } from './SimulationRunner';
-export { ParallelSimulationRunner } from './ParallelSimulationRunner';
-export { NativeSimulationRunner, findNativeBinary, formatNativeResult } from './NativeSimulationRunner';
-export type {
-  NativeSimulationConfig,
-  NativeSimulationResult,
-  StageStats,
-  DistributionBucket,
-} from './NativeSimulationRunner';
 export type {
   GameDefinition,
   ActionDefinition,

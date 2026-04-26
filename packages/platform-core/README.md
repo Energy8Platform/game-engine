@@ -467,7 +467,8 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 | Path | What's there |
 | --- | --- |
 | `@energy8platform/platform-core` | Everything — re-exports from all sub-paths |
-| `@energy8platform/platform-core/lua` | LuaEngine, ActionRouter, SessionManager, PersistentState, SimulationRunner family, types |
+| `@energy8platform/platform-core/lua` | Browser-safe Lua engine surface: LuaEngine, ActionRouter, SessionManager, PersistentState, JS `SimulationRunner`, types |
+| `@energy8platform/platform-core/simulation` | **Node-only.** `NativeSimulationRunner` (Go binary) and `ParallelSimulationRunner` (worker_threads). Don't import from a browser bundle — the main entry and `/lua` deliberately exclude these so they can't be tree-shake-leaked. |
 | `@energy8platform/platform-core/dev-bridge` | `DevBridge`, `DevBridgeConfig` |
 | `@energy8platform/platform-core/vite` | `devBridgePlugin`, `luaPlugin` |
 | `@energy8platform/platform-core/loading` | `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG`, `LOADER_BAR_MAX_WIDTH` |
