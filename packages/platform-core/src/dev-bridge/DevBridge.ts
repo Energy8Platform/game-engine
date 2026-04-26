@@ -179,9 +179,11 @@ export class DevBridge {
     this._roundCounter++;
 
     if (this._useLuaServer) {
-      // Debit bet (server deducts before Lua execution)
-      // For session actions (free spins), debit is 0 — LuaEngine handles bet from session
-      this._balance -= bet;
+      // Compute the debit amount for this action — mirrors the platform's
+      // server-side rules so Buy Bonus / Ante Bet actions debit the right
+      // multiple of bet instead of just the base bet.
+      const debit = this.computeDebit(action, bet, params);
+      this._balance -= debit;
 
       this.executeLuaOnServer({ action, bet, roundId, params })
         .then((result) => {
@@ -189,7 +191,7 @@ export class DevBridge {
         })
         .catch((err) => {
           console.error('[DevBridge] Lua server error:', err);
-          this._balance += bet;
+          this._balance += debit;
           this._bridge?.send('PLAY_RESULT', this.buildFallbackResult(action, bet, roundId), id);
         });
     } else {
@@ -214,6 +216,79 @@ export class DevBridge {
       };
 
       this.delayedSend('PLAY_RESULT', result, id);
+    }
+  }
+
+  /**
+   * Compute the wallet debit for a play request, mirroring the platform's
+   * server-side rules:
+   *   - debit: 'bet'             → bet
+   *   - debit: 'buy_bonus_cost'  → bet × buy_bonus.modes[mode].cost_multiplier
+   *   - debit: 'ante_bet_cost'   → bet × ante_bet.cost_multiplier
+   *   - debit: 'none'            → 0  (session continuations, e.g. free spins)
+   *
+   * Without a gameDefinition (or when the action is unknown), falls back to
+   * `bet` and warns. This is the dev-mode behavior the previous
+   * implementation always used for every action — kept here as a safe
+   * default so existing setups don't silently change semantics.
+   *
+   * Note: in the platform protocol the client sends the *base* bet only
+   * (`PlayParams.bet`); the cost multiplier lives in the GameDefinition.
+   * Session continuations (free_spin, feature_spin) must be invoked with
+   * `bet: 0` — LuaEngine pulls the active session's bet from the persisted
+   * session state.
+   */
+  private computeDebit(
+    action: string,
+    bet: number,
+    params: Record<string, unknown> | undefined,
+  ): number {
+    const def = this._config.gameDefinition;
+    const actionDef = def?.actions?.[action];
+
+    if (!def || !actionDef) {
+      if (this._config.debug) {
+        console.warn(`[DevBridge] Unknown action "${action}" — debiting base bet as fallback.`);
+      }
+      return bet;
+    }
+
+    switch (actionDef.debit) {
+      case 'none':
+        return 0;
+      case 'buy_bonus_cost': {
+        const modeName = actionDef.buy_bonus_mode;
+        const mode = modeName ? def.buy_bonus?.modes?.[modeName] : undefined;
+        if (!mode) {
+          console.warn(
+            `[DevBridge] Action "${action}" has debit: "buy_bonus_cost" but no matching buy_bonus mode (${modeName ?? '<unset>'}). Falling back to base bet.`,
+          );
+          return bet;
+        }
+        return bet * mode.cost_multiplier;
+      }
+      case 'ante_bet_cost': {
+        const multiplier = def.ante_bet?.cost_multiplier;
+        if (typeof multiplier !== 'number') {
+          console.warn(
+            `[DevBridge] Action "${action}" has debit: "ante_bet_cost" but no ante_bet.cost_multiplier defined. Falling back to base bet.`,
+          );
+          return bet;
+        }
+        return bet * multiplier;
+      }
+      case 'bet':
+      default: {
+        // The platform also debits ante_bet pricing on regular `bet` actions
+        // when the client signals it via params.ante_bet. Mirror that here.
+        if (params && (params as Record<string, unknown>)['ante_bet'] === true) {
+          const multiplier = def.ante_bet?.cost_multiplier;
+          if (typeof multiplier === 'number') {
+            return bet * multiplier;
+          }
+        }
+        return bet;
+      }
     }
   }
 

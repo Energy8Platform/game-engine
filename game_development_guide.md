@@ -205,6 +205,8 @@ For each mode, declare a separate action with `debit: "buy_bonus_cost"` and `buy
 
 The script must use `forced_scatter_count` to place scatters on the grid.
 
+**Wallet debit on buy bonus.** The client always sends the **base bet** in `PlayParams.bet` (e.g. `sdk.play({ action: 'buy_bonus', bet: 1 })`). The platform — and DevBridge in dev mode — multiplies it by the action's `buy_bonus_mode.cost_multiplier` to compute the wallet debit. Don't pre-multiply the bet on the client, and don't try to encode the cost as a separate field; the platform's contract is "client sends base bet, server resolves the cost from `GameDefinition`."
+
 ### Ante Bet
 
 A higher-cost bet. The JSON config only stores `cost_multiplier`:
@@ -670,6 +672,35 @@ Run at least **1,000,000** iterations for stable results.
 13. **For table games (TABLE) use the `_persist_` convention** — store complex structures (deck, player hands) in `state.Data` under `_persist_<name>` keys. The platform automatically saves them in Redis between actions (→ §21.2).
 
 14. **Table games are Lua-only**. The JSON engine targets slots; card/table-game logic is significantly more complex and requires full control via `execute(state)`.
+
+15. **Use `engine.*` RNG only — never `math.random`**. All randomness must come from `engine.random`, `engine.random_float`, `engine.random_weighted`, `engine.shuffle`. They are seeded by the platform (and by simulation runners) so that DevBridge plays, RTP simulations, and production all replay identically. `math.random` defeats determinism and can desync simulation results from production.
+
+16. **Send `bet: 0` for session continuations**. Inside an active session (free spins, feature spins, table follow-up actions), the client must pass `bet: 0` to `sdk.play({ action: 'free_spin', bet: 0, roundId })`. The active session bet is preserved server-side; LuaEngine reads it from session state. Sending the original bet again would cause the platform (and DevBridge) to debit twice and skew win calculation. Action definitions for session continuations carry `debit: 'none'` to enforce zero wallet movement, but the client still has to send `bet: 0` — the SDK does not zero it for you.
+
+17. **Transition conditions are deliberately simple**. The condition language supports numeric comparisons against `state.variables` (`free_spins_awarded > 0`, `bonus_tier == 2`), boolean combinators (`&&`, `||`), and the literal `"always"`. **All routing variables must be plain numbers**: `bonus_tier`, `spins_after`, `feature_spins_after`, `retrigger_spins`, `round_complete`. Don't try to gate transitions on nested data structures, strings, or `state.params` keys — return whatever you need from the script as a top-level numeric variable instead.
+
+18. **Treat the Lua return shape as a public renderer contract**. Whatever your script puts in the result table (matrix, win_lines, expansions, multipliers, scatter_count, …) becomes the protocol the client reads from `result.data`. Keep that shape in a TypeScript type or a JSON Schema right next to the Lua script, and assert it in unit tests so a math change doesn't silently break the renderer. Stable keys, stable units (bet multipliers throughout, never absolute amounts).
+
+19. **`GameDefinition` is platform metadata, not renderer config**. Keep the JSON config focused on `id`, `type`, `bet_levels`, `max_win`, `actions`, `buy_bonus`, `ante_bet`, `persistent_state`, `session_ttl`. **Do not add asset manifests, UI element names, animation keys, sound IDs, or visual tuning numbers there** — those are the renderer's concern and live in renderer-specific files (e.g. for Pixi, the engine's `AssetManifest`). Mixing them in `GameDefinition` couples the server-side platform to a specific renderer.
+
+20. **Lua entry point: dispatch only, math elsewhere**. Keep `execute(state)` short — branch on `state.stage` and delegate to focused functions:
+
+    ```lua
+    function execute(state)
+        if state.stage == "base_game" then
+            if state.params.buy_bonus then
+                return buy_free_spins(state)
+            end
+            return play_round(state)
+        elseif state.stage == "free_spins" then
+            return play_free_spin(state)
+        elseif state.stage == "feature_pick" then
+            return resolve_pick(state)
+        end
+    end
+    ```
+
+    Internal helpers like `spin_grid`, `evaluate_grid`, `apply_multipliers`, `place_forced_scatters` keep individual responsibilities testable. The return table always has the same top-level keys: `total_win` (bet multiplier), `variables` (platform routing — numbers only), and visual payload (`matrix`, `win_lines`, etc.) as separate top-level fields.
 
 ---
 

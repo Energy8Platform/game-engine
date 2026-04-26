@@ -164,6 +164,14 @@ session.destroy();
 
 Inside `game-engine`, `GameApplication` wraps this. For non-pixi consumers, this is the layer you talk to directly.
 
+**Session continuations: send `bet: 0`.** When the previous result returns `nextActions: ['free_spin']` (or any other in-session action with `debit: 'none'`), the next call must use `bet: 0`:
+
+```typescript
+const fs = await session.play({ action: 'free_spin', bet: 0, roundId: result.roundId });
+```
+
+The active session's bet is preserved server-side; passing the original bet again would cause the platform (and DevBridge in dev mode) to debit twice and skew win calculations. See [Game Development Guide §13.16](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full conventions list.
+
 ---
 
 ## Writing your game (config + Lua)
