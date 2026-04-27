@@ -32,14 +32,22 @@ export enum Orientation {
 }
 
 // ─── Loading Screen Config + Asset Manifest ───────────────
-// Both are renderer-agnostic and moved to @energy8platform/platform-core.
-// Re-exported here so existing game-engine consumers keep their imports.
-export type {
+// Both are renderer-agnostic and live in @energy8platform/platform-core.
+// Imported for local use inside GameApplicationConfig and re-exported so
+// existing game-engine consumers keep their imports.
+import type {
   LoadingScreenConfig,
   AssetManifest,
   AssetBundle,
   AssetEntry,
 } from '@energy8platform/platform-core';
+
+export type {
+  LoadingScreenConfig,
+  AssetManifest,
+  AssetBundle,
+  AssetEntry,
+};
 
 // ─── Audio Config ──────────────────────────────────────────
 
