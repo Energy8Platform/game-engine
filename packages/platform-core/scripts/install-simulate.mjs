@@ -20,7 +20,7 @@ const REPO = 'energy8platform/game-engine';
 // Binary version — update this when new Go binaries are built and uploaded to GitHub Releases.
 // The binary is backwards-compatible: it runs any Lua script, so it doesn't need to match
 // the engine version exactly. Only bump when the Go simulate CLI itself changes.
-const BINARY_VERSION = '0.13.0';
+const BINARY_VERSION = '0.17.0';
 
 const PLATFORM_MAP = {
   'darwin-arm64': 'simulate-darwin-arm64',
