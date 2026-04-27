@@ -140,27 +140,25 @@ export class SimulationRunner {
     };
   }
 
-  /** Calculate the real cost of one spin (accounting for buy bonus / ante bet) */
+  /**
+   * Calculate the real cost of one spin — mirrors v5
+   * ActionDefinition.DebitAmount: bet × (cost_multiplier || 1) when
+   * debit==='bet', otherwise 0. Returns `bet` as a fallback for unknown
+   * actions so RTP math still progresses (we count those as wagered).
+   */
   private calculateSpinCost(
     action: string,
     bet: number,
     gameDefinition: GameDefinition,
-    params?: Record<string, unknown>,
+    _params?: Record<string, unknown>,
   ): number {
-    // Check if this is a buy bonus action
     const actionDef = gameDefinition.actions[action];
-    if (actionDef?.buy_bonus_mode && gameDefinition.buy_bonus) {
-      const mode = gameDefinition.buy_bonus.modes[actionDef.buy_bonus_mode];
-      if (mode) {
-        return bet * mode.cost_multiplier;
-      }
+    if (!actionDef) return bet;
+    if (actionDef.debit !== 'bet') return 0;
+    const mult = actionDef.cost_multiplier;
+    if (typeof mult === 'number' && mult > 0 && mult !== 1) {
+      return bet * mult;
     }
-
-    // Check ante bet
-    if (params?.ante_bet && gameDefinition.ante_bet) {
-      return bet * gameDefinition.ante_bet.cost_multiplier;
-    }
-
     return bet;
   }
 }

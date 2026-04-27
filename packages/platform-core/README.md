@@ -352,11 +352,11 @@ Other contract details DevBridge enforces:
 # 1M spins (default)
 npx platform-core-simulate
 
-# Buy-bonus stage
+# Buy-bonus action (v5: just simulate the action by name)
 npx platform-core-simulate --action buy_bonus
 
-# Ante bet
-npx platform-core-simulate --params '{"ante_bet":true}'
+# Ante bet — also a regular action in v5
+npx platform-core-simulate --action ante_spin
 
 # Custom: 5M iterations, fixed seed, custom config path
 npx platform-core-simulate --iterations 5000000 --bet 1 --seed 42 --config ./dev.config.ts

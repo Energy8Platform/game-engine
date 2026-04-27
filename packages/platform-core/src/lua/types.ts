@@ -8,8 +8,6 @@ export interface GameDefinition {
   actions: Record<string, ActionDefinition>;
   bet_levels?: number[] | BetLevelsConfig;
   max_win?: MaxWinConfig;
-  buy_bonus?: BuyBonusConfig;
-  ante_bet?: AnteBetConfig;
   persistent_state?: PersistentStateConfig;
   /**
    * Session expiry duration as a Go-style duration string ("24h", "2h", "5ms").
@@ -30,22 +28,6 @@ export interface MaxWinConfig {
   fixed?: number;
 }
 
-export interface BuyBonusConfig {
-  modes: Record<string, BuyBonusMode>;
-}
-
-export interface BuyBonusMode {
-  cost_multiplier: number;
-  /** Distribution of forced scatter counts. Optional — if omitted, Lua script handles bonus setup itself. */
-  scatter_distribution?: Record<string, number>;
-  /** Optional description */
-  description?: string;
-}
-
-export interface AnteBetConfig {
-  cost_multiplier: number;
-}
-
 export interface PersistentStateConfig {
   vars: string[];
   exposed_vars: string[];
@@ -53,12 +35,27 @@ export interface PersistentStateConfig {
 
 // ─── Actions & Transitions ──────────────────────────────
 
+/**
+ * v5 action contract — cost_multiplier and feature_data live on the action
+ * itself. Removed in v5: top-level `buy_bonus`/`ante_bet` blocks, debit modes
+ * `'buy_bonus_cost'`/`'ante_bet_cost'`, action.buy_bonus_mode, params.ante_bet/
+ * params.buy_bonus flags. Lua reads action context via `state.action` and
+ * `state.action_config = { cost_multiplier, feature_data }`.
+ */
 export interface ActionDefinition {
   stage: string;
-  debit: 'bet' | 'buy_bonus_cost' | 'ante_bet_cost' | 'none';
+  /** Either 'bet' (debit = bet × cost_multiplier) or 'none'/empty (no debit). */
+  debit: 'bet' | 'none';
+  /** Multiplier on `bet` when debit==='bet'. Defaults to 1.0. */
+  cost_multiplier?: number;
+  /**
+   * Opaque action-specific configuration exposed to Lua as
+   * `state.action_config.feature_data`. Common keys: `scatter_distribution`
+   * for buy-bonus actions, forced symbol counts, etc.
+   */
+  feature_data?: Record<string, unknown>;
   credit?: 'win' | 'none' | 'defer';
   requires_session?: boolean;
-  buy_bonus_mode?: string;
   transitions: TransitionRule[];
   input_schema?: Record<string, unknown>;
 }

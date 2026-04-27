@@ -409,6 +409,133 @@ describe('LuaEngine MapState parity (auto-injected variable-derived data fields)
   });
 });
 
+describe('LuaEngine v5 action_config + feature_data (state.action_config parity)', () => {
+  let engine: LuaEngine;
+
+  afterEach(() => {
+    engine?.destroy();
+  });
+
+  it('exposes state.action_config.cost_multiplier (defaults to 1 when unset)', () => {
+    // Server's lua_runtime.go puts cost_multiplier into state.action_config
+    // and substitutes 1.0 when the action doesn't set it. Lua scripts read
+    // it via state.action_config.cost_multiplier — no parallel `params` flag.
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          cost = state.action_config and state.action_config.cost_multiplier or -1,
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: SIMPLE_GAME_DEF });
+    const r = engine.execute({ action: 'spin', bet: 1.0 });
+    expect(r.data.cost).toBe(1);
+  });
+
+  it('exposes state.action_config.cost_multiplier when set on the action', () => {
+    const def: GameDefinition = {
+      id: 'cost-mult',
+      type: 'SLOT',
+      bet_levels: [1],
+      actions: {
+        buy_bonus: {
+          stage: 'base_game',
+          debit: 'bet',
+          cost_multiplier: 100,
+          transitions: [{ condition: 'always', next_actions: ['spin'] }],
+        },
+      },
+    };
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          cost = state.action_config.cost_multiplier,
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: def });
+    const r = engine.execute({ action: 'buy_bonus', bet: 1.0 });
+    expect(r.data.cost).toBe(100);
+  });
+
+  it('exposes state.action_config.feature_data verbatim', () => {
+    const def: GameDefinition = {
+      id: 'feature-data',
+      type: 'SLOT',
+      bet_levels: [1],
+      actions: {
+        buy_bonus: {
+          stage: 'base_game',
+          debit: 'bet',
+          cost_multiplier: 100,
+          feature_data: { scatter_distribution: { '4': 60, '5': 40 } },
+          transitions: [{ condition: 'always', next_actions: ['spin'] }],
+        },
+      },
+    };
+    const lua = `
+      function execute(state)
+        local fd = state.action_config.feature_data
+        return {
+          total_win = 0,
+          dist_4 = fd.scatter_distribution["4"],
+          dist_5 = fd.scatter_distribution["5"],
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: def });
+    const r = engine.execute({ action: 'buy_bonus', bet: 1.0 });
+    expect(r.data.dist_4).toBe(60);
+    expect(r.data.dist_5).toBe(40);
+  });
+
+  it('rolls forced_scatter_count from feature_data.scatter_distribution and puts it in state.params', () => {
+    // Server: when actionDef.feature_data.scatter_distribution is present,
+    // platform rolls a count via the weighted distribution and exposes it
+    // as state.params.forced_scatter_count. The roll itself stays in
+    // params (random output), not in the static action_config.
+    const def: GameDefinition = {
+      id: 'forced-scatter',
+      type: 'SLOT',
+      bet_levels: [1],
+      actions: {
+        buy_bonus: {
+          stage: 'base_game',
+          debit: 'bet',
+          cost_multiplier: 100,
+          // Single-bucket distribution → roll is deterministic.
+          feature_data: { scatter_distribution: { '5': 100 } },
+          transitions: [{ condition: 'always', next_actions: ['spin'] }],
+        },
+      },
+    };
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          forced = state.params.forced_scatter_count,
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: def });
+    const r = engine.execute({ action: 'buy_bonus', bet: 1.0 });
+    expect(r.data.forced).toBe(5);
+  });
+
+  it('exposes state.action with the invoked action name', () => {
+    const lua = `
+      function execute(state)
+        return { total_win = 0, action_name = state.action }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: SIMPLE_GAME_DEF });
+    const r = engine.execute({ action: 'spin', bet: 1.0 });
+    expect(r.data.action_name).toBe('spin');
+  });
+});
+
 describe('LuaEngine completion next_actions (findCompletionNextActions parity)', () => {
   let engine: LuaEngine;
 

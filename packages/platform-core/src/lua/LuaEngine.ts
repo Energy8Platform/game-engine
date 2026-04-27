@@ -153,25 +153,16 @@ export class LuaEngine {
     const gameDataParams = this.persistentState.getGameDataParams();
     Object.assign(stateParams, gameDataParams);
 
-    // Handle buy bonus
-    if (action.buy_bonus_mode && this.gameDefinition.buy_bonus) {
-      const mode = this.gameDefinition.buy_bonus.modes[action.buy_bonus_mode];
-      if (mode) {
-        stateParams.buy_bonus = true;
-        stateParams.buy_bonus_mode = action.buy_bonus_mode;
-        if (mode.scatter_distribution) {
-          stateParams.forced_scatter_count = this.pickFromDistribution(mode.scatter_distribution);
-        }
-      }
-    }
-
-    // Handle ante bet
-    if (clientParams?.ante_bet && this.gameDefinition.ante_bet) {
-      stateParams.ante_bet = true;
+    // v5: forced scatter rolls come from the action's own feature_data.
+    // Output of the roll stays in state.params (it's random per-call), while
+    // the static config flows through state.action_config.feature_data.
+    const scatterDist = readScatterDistribution(action.feature_data);
+    if (scatterDist) {
+      stateParams.forced_scatter_count = this.pickFromDistribution(scatterDist);
     }
 
     // 5. Execute Lua (server: executor.Execute(stage, state))
-    const luaResult = this.callLuaExecute(action.stage, actionName, stateParams, stateVars);
+    const luaResult = this.callLuaExecute(action.stage, actionName, stateParams, stateVars, action);
 
     // 6. Process result (server: ApplyLuaResult)
     const totalWinMultiplier = typeof luaResult.total_win === 'number' ? luaResult.total_win : 0;
@@ -335,11 +326,12 @@ export class LuaEngine {
     action: string,
     params: Record<string, unknown>,
     variables: Record<string, number>,
+    actionDef: ActionDefinition,
   ): Record<string, unknown> {
     lua.lua_getglobal(this.L, cachedToLuastring('execute'));
 
-    // Build state table: {stage, action, params, variables}
-    lua.lua_createtable(this.L, 0, 4);
+    // Build state table: {stage, action, action_config, params, variables}
+    lua.lua_createtable(this.L, 0, 5);
 
     // state.stage
     lua.lua_pushstring(this.L, cachedToLuastring(stage));
@@ -348,6 +340,18 @@ export class LuaEngine {
     // state.action (server sets this at top level)
     lua.lua_pushstring(this.L, cachedToLuastring(action));
     lua.lua_setfield(this.L, -2, cachedToLuastring('action'));
+
+    // state.action_config — v5: { cost_multiplier, feature_data }.
+    // Server's lua_runtime.go substitutes 1.0 when cost_multiplier is unset
+    // so scripts never see 0; mirror that default.
+    const mult = typeof actionDef.cost_multiplier === 'number' && actionDef.cost_multiplier > 0
+      ? actionDef.cost_multiplier
+      : 1;
+    pushJSValue(this.L, {
+      cost_multiplier: mult,
+      feature_data: actionDef.feature_data ?? {},
+    });
+    lua.lua_setfield(this.L, -2, cachedToLuastring('action_config'));
 
     // state.params
     pushJSValue(this.L, params);
@@ -461,6 +465,24 @@ export class LuaEngine {
 }
 
 // ─── Module helpers ─────────────────────────────────────
+
+/**
+ * Pull a `scatter_distribution` map out of an action's feature_data, if any.
+ * Returns null when missing or wrong-shaped — caller falls through with no
+ * forced_scatter_count injection (matches server behavior).
+ */
+function readScatterDistribution(
+  featureData: Record<string, unknown> | undefined,
+): Record<string, number> | null {
+  if (!featureData) return null;
+  const dist = featureData['scatter_distribution'];
+  if (!dist || typeof dist !== 'object') return null;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(dist as Record<string, unknown>)) {
+    if (typeof v === 'number') out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 /**
  * Strip _persist_* and _persist_game_* keys from a data map — matches

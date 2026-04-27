@@ -376,72 +376,31 @@ export class DevBridge {
 
   /**
    * Compute the wallet debit for a play request, mirroring the platform's
-   * server-side ActionDefinition.DebitAmount:
-   *   - debit: 'bet'             → bet (× ante_bet.cost_multiplier when params.ante_bet=true)
-   *   - debit: 'buy_bonus_cost'  → bet × buy_bonus.modes[mode].cost_multiplier
-   *   - debit: 'ante_bet_cost'   → bet × ante_bet.cost_multiplier
-   *   - anything else (incl. 'none', '', missing action)  →  0
+   * v5 ActionDefinition.DebitAmount:
+   *   - debit: 'bet'           → bet × (cost_multiplier || 1)
+   *   - debit: 'none'/missing  → 0
+   *   - any other value        → 0 (legacy v4 modes like 'buy_bonus_cost'
+   *                                are no longer recognized; surfacing as 0
+   *                                forces config breakage to the surface)
    *
-   * The empty/missing default returns 0 to match the server's
-   * `decimal.Zero` fallback — important for table-game continuations
-   * (e.g. blackjack `hit`/`stand`) where the action exists with no debit.
-   *
-   * Note: in the platform protocol the client sends the *base* bet only
-   * (`PlayParams.bet`); the cost multiplier lives in the GameDefinition.
-   * Session continuations must be invoked with the triggering bet — LuaEngine
-   * pulls the active session's bet from the persisted session state.
+   * The action carries its own cost (cost_multiplier + opaque feature_data).
+   * No top-level buy_bonus/ante_bet blocks. No params.ante_bet flag — ante
+   * is just a separate action with its own cost_multiplier.
    */
   private computeDebit(
     action: string,
     bet: number,
-    params: Record<string, unknown> | undefined,
+    _params: Record<string, unknown> | undefined,
   ): number {
-    const def = this._config.gameDefinition;
-    const actionDef = def?.actions?.[action];
-
-    if (!def || !actionDef) {
-      // Server short-circuits unknown actions before computing debit;
-      // returning 0 here keeps semantics aligned if the guard is ever bypassed.
+    const actionDef = this._config.gameDefinition?.actions?.[action];
+    if (!actionDef || actionDef.debit !== 'bet') {
       return 0;
     }
-
-    switch (actionDef.debit) {
-      case 'buy_bonus_cost': {
-        const modeName = actionDef.buy_bonus_mode;
-        const mode = modeName ? def.buy_bonus?.modes?.[modeName] : undefined;
-        if (!mode) {
-          console.warn(
-            `[DevBridge] Action "${action}" has debit: "buy_bonus_cost" but no matching buy_bonus mode (${modeName ?? '<unset>'}). Falling back to base bet.`,
-          );
-          return bet;
-        }
-        return bet * mode.cost_multiplier;
-      }
-      case 'ante_bet_cost': {
-        const multiplier = def.ante_bet?.cost_multiplier;
-        if (typeof multiplier !== 'number') {
-          console.warn(
-            `[DevBridge] Action "${action}" has debit: "ante_bet_cost" but no ante_bet.cost_multiplier defined. Falling back to base bet.`,
-          );
-          return bet;
-        }
-        return bet * multiplier;
-      }
-      case 'bet': {
-        // The platform also debits ante_bet pricing on regular `bet` actions
-        // when the client signals it via params.ante_bet. Mirror that here.
-        if (params && (params as Record<string, unknown>)['ante_bet'] === true) {
-          const multiplier = def.ante_bet?.cost_multiplier;
-          if (typeof multiplier === 'number') {
-            return bet * multiplier;
-          }
-        }
-        return bet;
-      }
-      default:
-        // 'none', '', or any unrecognized debit mode → 0 (server default).
-        return 0;
+    const mult = actionDef.cost_multiplier;
+    if (typeof mult === 'number' && mult > 0 && mult !== 1) {
+      return bet * mult;
     }
+    return bet;
   }
 
   private async executeLuaOnServer(params: PlayParams): Promise<PlayResultData> {

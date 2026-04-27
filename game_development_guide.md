@@ -82,14 +82,6 @@ GameDefinition
 │
 ├── session_ttl                 string        Session TTL (e.g. "30m", "1h"). Defaults to a platform-defined value.
 │
-├── buy_bonus                   object        → see §4
-│   └── modes                   map           Buy-bonus modes
-│       └── [mode_name]         object        One mode (e.g. "default", "super")
-│           ├── cost_multiplier float64       Cost as a multiplier of bet
-│           └── scatter_distribution map      Scatter count distribution
-├── ante_bet                    object        → see §4
-│   └── cost_multiplier         float64       Spin cost multiplier (1.25 = +25%)
-│
 ├── persistent_state            object        → see §16 (Cross-Spin Persistent State)
 │   ├── vars                    string[]      Names of numeric variables persisted across spins
 │   └── exposed_vars            string[]      Names of variables exposed to the client in data.persistent_state
@@ -99,6 +91,8 @@ GameDefinition
 ```
 
 > **Removed from JSON config (v4)**: `version`, `rtp`, `viewport`, `symbols`, `reel_strips`, `symbol_weights`, `paylines`, `stages`, `logic`, `engine_mode`, `evaluation_mode`, `min_match_count`, `anywhere_payouts`, `scatter_payouts`, `free_spins_trigger`, `free_spins_retrigger`, `free_spins_config`, `round_type_weights`, `symbol_chances`, `multiplier_value_weights`, `ante_bet.scatter_chance_multiplier`. All of these are now defined directly inside the Lua script.
+>
+> **Removed from JSON config (v5)**: top-level `buy_bonus` and `ante_bet` blocks, debit modes `"buy_bonus_cost"` / `"ante_bet_cost"`, `action.buy_bonus_mode`. Cost and feature config now live on each action via `cost_multiplier` and `feature_data` — see §4 and §14.1.
 
 ### Minimal config example
 
@@ -150,74 +144,91 @@ When the cap is reached:
 
 ---
 
-## 4. Buy Bonus and Ante Bet
+## 4. Action-Driven Cost: Buy Bonus and Ante Bet (v5)
 
-### Buy Bonus
+Cost and feature data live **on the action itself** — there are no top-level `buy_bonus` / `ante_bet` blocks. Each "expensive spin" variant is just another action with its own `cost_multiplier` and (optionally) opaque `feature_data` exposed to the Lua script as `state.action_config.feature_data`.
 
-Lets the player purchase entry into the bonus round directly. The cost is a fixed multiplier of bet. On purchase, the platform draws a scatter count from `scatter_distribution` and passes it to the Lua script via `state.params.forced_scatter_count`.
+For the v4 → v5 migration table see [§14.1](#141-migration-v4--v5-action-driven-cost-apr-2026).
+
+### Buy Bonus (v5)
 
 ```json
-"buy_bonus": {
-  "modes": {
-    "default": {
-      "cost_multiplier": 100,
-      "scatter_distribution": { "4": 60, "5": 30, "6": 10 }
-    },
-    "super": {
-      "cost_multiplier": 200,
-      "scatter_distribution": { "5": 70, "6": 30 }
-    }
+"actions": {
+  "buy_bonus": {
+    "stage": "base_game",
+    "debit": "bet",
+    "cost_multiplier": 100,
+    "feature_data": { "scatter_distribution": { "4": 60, "5": 30, "6": 10 } },
+    "transitions": [
+      {
+        "condition": "always",
+        "creates_session": true,
+        "credit_override": "defer",
+        "next_actions": ["free_spin"],
+        "session_config": {
+          "total_spins_var": "free_spins_awarded",
+          "persistent_vars": ["global_multiplier"]
+        }
+      }
+    ]
+  },
+  "buy_bonus_super": {
+    "stage": "base_game",
+    "debit": "bet",
+    "cost_multiplier": 200,
+    "feature_data": { "scatter_distribution": { "5": 70, "6": 30 } },
+    "transitions": [...]
   }
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `cost_multiplier` | Cost as a multiplier of bet. With bet 1.00 and multiplier 100 → 100.00 is debited. |
-| `scatter_distribution` | Weighted distribution of scatter counts. Key — the count, value — its weight. |
+| `debit: "bet"` | Always `"bet"` in v5. The cost is the multiplier on the action. |
+| `cost_multiplier` | Wallet debit = `bet × cost_multiplier`. With bet 1.00 and multiplier 100 → 100.00 is debited. Defaults to 1.0 when omitted. |
+| `feature_data` | Opaque action-specific config exposed to Lua as `state.action_config.feature_data`. The platform reads `feature_data.scatter_distribution` to roll `state.params.forced_scatter_count` automatically. |
 
-For each mode, declare a separate action with `debit: "buy_bonus_cost"` and `buy_bonus_mode`:
+**What the Lua script gets on a buy bonus call:**
+- `state.action == "buy_bonus"` (or `"buy_bonus_super"` etc. — dispatch on the name, not on a parallel boolean flag)
+- `state.action_config.cost_multiplier == 100`
+- `state.action_config.feature_data == { scatter_distribution = ... }`
+- `state.params.forced_scatter_count == 5` — drawn by the platform from `feature_data.scatter_distribution`
+
+The script must use `forced_scatter_count` to place scatters on the grid.
+
+**Wallet debit.** The client always sends the **base bet** in `PlayParams.bet` (e.g. `sdk.play({ action: 'buy_bonus', bet: 1 })`). The platform — and DevBridge in dev mode — multiplies it by `action.cost_multiplier`. Don't pre-multiply the bet on the client; the contract is "client sends base bet + action name, server resolves cost from the action."
+
+### Ante Bet (v5)
+
+A higher-cost bet is a regular action — no special block, no `params.ante_bet` flag:
 
 ```json
-"buy_bonus": {
+"ante_spin": {
   "stage": "base_game",
-  "debit": "buy_bonus_cost",
-  "buy_bonus_mode": "default",
+  "debit": "bet",
+  "cost_multiplier": 1.25,
+  "credit": "win",
   "transitions": [
-    {
-      "condition": "always",
-      "creates_session": true,
-      "credit_override": "defer",
-      "next_actions": ["free_spin"],
-      "session_config": {
-        "total_spins_var": "free_spins_awarded",
-        "persistent_vars": ["global_multiplier"]
-      }
-    }
+    { "condition": "always", "next_actions": ["spin"] }
   ]
 }
 ```
 
-**What the Lua script gets on buy bonus:**
-- `state.params.buy_bonus = true`
-- `state.params.buy_bonus_mode = "default"` (or `"super"`)
-- `state.params.forced_scatter_count = 5` (drawn by the platform)
+With `bet: 1.00` the wallet is debited 1.25. The script reads `state.action == "ante_spin"` to apply increased scatter chance or other ante-specific math.
 
-The script must use `forced_scatter_count` to place scatters on the grid.
+### Adding more cost tiers
 
-**Wallet debit on buy bonus.** The client always sends the **base bet** in `PlayParams.bet` (e.g. `sdk.play({ action: 'buy_bonus', bet: 1 })`). The platform — and DevBridge in dev mode — multiplies it by the action's `buy_bonus_mode.cost_multiplier` to compute the wallet debit. Don't pre-multiply the bet on the client, and don't try to encode the cost as a separate field; the platform's contract is "client sends base bet, server resolves the cost from `GameDefinition`."
-
-### Ante Bet
-
-A higher-cost bet. The JSON config only stores `cost_multiplier`:
+Need a `mega_bonus` at 1000× bet? It's just another action — no platform changes:
 
 ```json
-"ante_bet": {
-  "cost_multiplier": 1.25
+"mega_bonus": {
+  "stage": "base_game",
+  "debit": "bet",
+  "cost_multiplier": 1000,
+  "feature_data": { "scatter_distribution": { "6": 100 } },
+  "transitions": [...]
 }
 ```
-
-When `ante_bet: true` is in the client params, the platform debits `bet × 1.25`. The increased scatter chance is implemented inside the Lua script (the script reads `state.params.ante_bet`).
 
 ---
 
@@ -253,10 +264,11 @@ The single endpoint `POST /api/games/{id}/play` routes requests through the `act
 | Field | Description |
 |-------|-------------|
 | `stage` | Stage name passed as `state.stage` when calling `execute(state)` |
-| `debit` | Debit type: `"bet"`, `"buy_bonus_cost"`, `"ante_bet_cost"`, `"none"` |
+| `debit` | Debit mode: `"bet"` (debit = `bet × cost_multiplier`) or `"none"`/empty (no debit) |
+| `cost_multiplier` | Multiplier on `bet` when `debit: "bet"`. Defaults to 1.0. Use 100 for buy-bonus, 1.25 for ante, etc. |
+| `feature_data` | Opaque action-specific config (e.g. `scatter_distribution`). Exposed to Lua as `state.action_config.feature_data`. |
 | `credit` | When to credit the win: `"win"` (immediately), `"none"`, `"defer"` |
 | `requires_session` | Requires an active session (round_id) |
-| `buy_bonus_mode` | Key into `buy_bonus.modes` |
 | `transitions` | Conditional transitions after the stage runs |
 | `input_schema` | Per-action JSON Schema for params validation |
 
@@ -333,7 +345,9 @@ end
 | Field | Type | Description |
 |-------|------|-------------|
 | `state.stage` | string | Stage name from the ActionDefinition |
-| `state.params` | table | Client parameters + buy_bonus, forced_scatter_count |
+| `state.action` | string | Action name the client invoked (e.g. `"spin"`, `"buy_bonus"`, `"ante_spin"`). Use this to dispatch in v5 instead of parallel boolean params. |
+| `state.action_config` | table | Resolved action config: `{ cost_multiplier, feature_data }`. `cost_multiplier` defaults to 1; `feature_data` is the opaque map you put on the action (`scatter_distribution`, etc.). |
+| `state.params` | table | Validated client parameters plus platform-injected runtime values (e.g. `forced_scatter_count` rolled from `feature_data.scatter_distribution`). |
 | `state.variables` | table | Engine variables (bet, multiplier, free_spins_remaining) |
 
 ### Returned table
@@ -422,12 +436,6 @@ Validates `PlayRequest.Params` — the parameters the client passes on a play ac
       "type": "integer",
       "minimum": 1,
       "maximum": 20
-    },
-    "ante_bet": {
-      "type": "boolean"
-    },
-    "buy_bonus": {
-      "type": "boolean"
     }
   },
   "additionalProperties": false
@@ -703,15 +711,19 @@ Run at least **1,000,000** iterations for stable results.
 
 18. **Treat the Lua return shape as a public renderer contract**. Whatever your script puts in the result table (matrix, win_lines, expansions, multipliers, scatter_count, …) becomes the protocol the client reads from `result.data`. Keep that shape in a TypeScript type or a JSON Schema right next to the Lua script, and assert it in unit tests so a math change doesn't silently break the renderer. Stable keys, stable units (bet multipliers throughout, never absolute amounts).
 
-19. **`GameDefinition` is platform metadata, not renderer config**. Keep the JSON config focused on `id`, `type`, `bet_levels`, `max_win`, `actions`, `buy_bonus`, `ante_bet`, `persistent_state`, `session_ttl`. **Do not add asset manifests, UI element names, animation keys, sound IDs, or visual tuning numbers there** — those are the renderer's concern and live in renderer-specific files (e.g. for Pixi, the engine's `AssetManifest`). Mixing them in `GameDefinition` couples the server-side platform to a specific renderer.
+19. **`GameDefinition` is platform metadata, not renderer config**. Keep the JSON config focused on `id`, `type`, `bet_levels`, `max_win`, `actions` (with their `cost_multiplier` and `feature_data`), `persistent_state`, `session_ttl`. **Do not add asset manifests, UI element names, animation keys, sound IDs, or visual tuning numbers there** — those are the renderer's concern and live in renderer-specific files (e.g. for Pixi, the engine's `AssetManifest`). Mixing them in `GameDefinition` couples the server-side platform to a specific renderer.
 
 20. **Lua entry point: dispatch only, math elsewhere**. Keep `execute(state)` short — branch on `state.stage` and delegate to focused functions:
 
     ```lua
     function execute(state)
         if state.stage == "base_game" then
-            if state.params.buy_bonus then
+            -- v5: dispatch on action name, not on parallel boolean params.
+            if state.action == "buy_bonus" or state.action == "buy_bonus_super" then
                 return buy_free_spins(state)
+            end
+            if state.action == "ante_spin" then
+                return play_round(state, { ante = true })
             end
             return play_round(state)
         elseif state.stage == "free_spins" then
@@ -748,6 +760,106 @@ v4 removes the JSON Flow Executor. All games now use Lua scripts.
 3. Replace `engine.get_symbol(id)` with a local symbol table.
 4. Replace `engine.get_config().viewport` with local constants.
 5. Make sure `script_path` is set in the JSON config.
+
+## 14.1. Migration v4 → v5: action-driven cost (apr 2026)
+
+In v5 the top-level `buy_bonus` / `ante_bet` blocks and the debit modes `"buy_bonus_cost"` / `"ante_bet_cost"` are removed. Cost and feature data live on the action itself.
+
+### What changed
+
+| Was (v4) | Now (v5) |
+|----------|----------|
+| `buy_bonus.modes.X.cost_multiplier` in JSON | `actions.X.cost_multiplier` |
+| `buy_bonus.modes.X.scatter_distribution` | `actions.X.feature_data.scatter_distribution` |
+| `ante_bet.cost_multiplier` | `actions.ante_spin.cost_multiplier` |
+| `action.debit: "buy_bonus_cost"` + `action.buy_bonus_mode` | `action.debit: "bet"` + `action.cost_multiplier` |
+| `action.debit: "ante_bet_cost"` | `action.debit: "bet"` + `action.cost_multiplier: 1.25` |
+| `params.ante_bet: true` (client flag) | Separate action `"ante_spin"` |
+| `params.buy_bonus: true`, `params.buy_bonus_mode` | Separate actions `"buy_bonus"`, `"buy_bonus_super"` |
+| Lua: `state.params.ante_bet` / `state.params.buy_bonus` | Lua: `state.action == "ante_spin"` / `state.action == "buy_bonus"` |
+| Lua: read modes via `def.BuyBonus.Modes[...]` | Lua: `state.action_config.feature_data` |
+
+### Before / after
+
+**Before (v4):**
+```json
+"buy_bonus": {
+  "modes": {
+    "default": { "cost_multiplier": 100, "scatter_distribution": { "4": 60 } },
+    "super":   { "cost_multiplier": 200, "scatter_distribution": { "5": 70, "6": 30 } }
+  }
+},
+"ante_bet": { "cost_multiplier": 1.25 },
+"actions": {
+  "spin":            { "stage": "base_game", "debit": "bet" },
+  "ante_spin":       { "stage": "base_game", "debit": "ante_bet_cost" },
+  "buy_bonus":       { "stage": "base_game", "debit": "buy_bonus_cost", "buy_bonus_mode": "default" },
+  "buy_bonus_super": { "stage": "base_game", "debit": "buy_bonus_cost", "buy_bonus_mode": "super" }
+}
+```
+
+**After (v5):**
+```json
+"actions": {
+  "spin":      { "stage": "base_game", "debit": "bet" },
+  "ante_spin": { "stage": "base_game", "debit": "bet", "cost_multiplier": 1.25 },
+  "buy_bonus": {
+    "stage": "base_game",
+    "debit": "bet",
+    "cost_multiplier": 100,
+    "feature_data": { "scatter_distribution": { "4": 60 } }
+  },
+  "buy_bonus_super": {
+    "stage": "base_game",
+    "debit": "bet",
+    "cost_multiplier": 200,
+    "feature_data": { "scatter_distribution": { "5": 70, "6": 30 } }
+  }
+}
+```
+
+### Migration steps
+
+1. **JSON config**:
+   - Delete top-level `buy_bonus` and `ante_bet` blocks.
+   - For each buy bonus / ante action:
+     - Change `"debit": "buy_bonus_cost"` / `"ante_bet_cost"` → `"debit": "bet"`.
+     - Move `cost_multiplier` from `buy_bonus.modes.X.cost_multiplier` onto the action.
+     - Move `scatter_distribution` into the action's `feature_data.scatter_distribution`.
+     - Drop `buy_bonus_mode` from the action.
+   - If you used `params.ante_bet` from the client, declare a separate `"ante_spin"` action with `cost_multiplier`.
+   - Drop `ante_bet` / `buy_bonus` / `buy_bonus_mode` from any per-action `input_schema`.
+   - Make sure `next_actions` lists the new action names (`"ante_spin"`, `"buy_bonus"`, `"buy_bonus_super"`).
+
+2. **Lua script**:
+   - Replace `state.params.ante_bet` with `state.action == "ante_spin"`.
+   - Replace `state.params.buy_bonus` with `state.action == "buy_bonus" or state.action == "buy_bonus_super"`.
+   - Replace any `state.params.buy_bonus_mode` / `params.mode` switching with action-name checks (`state.action == "buy_bonus_super"` etc.).
+   - If the script read `feature_data` (e.g. `scatter_distribution`) from the global config, switch to `state.action_config.feature_data`.
+   - `state.params.forced_scatter_count` stays — the platform still rolls it from `feature_data.scatter_distribution`.
+
+3. **Client (frontend / SDK)**:
+   - Stop sending `params.ante_bet` / `params.buy_bonus` / `params.buy_bonus_mode`.
+   - Call the right action instead: `action: "ante_spin"`, `action: "buy_bonus"`, `action: "buy_bonus_super"`.
+   - The list of available actions arrives in `next_actions` on the previous play response.
+
+4. **Simulation**:
+   - Replace `--params '{"ante_bet": true}'` with `--action ante_spin`.
+   - Buy bonus simulates via `--action buy_bonus` / `--action buy_bonus_super`.
+
+### Adding more cost tiers
+
+Need a `mega_bonus` for 1000× bet? Just declare another action — no platform changes:
+
+```json
+"mega_bonus": {
+  "stage": "base_game",
+  "debit": "bet",
+  "cost_multiplier": 1000,
+  "feature_data": { "scatter_distribution": { "6": 100 } },
+  "transitions": [...]
+}
+```
 
 ---
 

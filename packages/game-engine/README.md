@@ -780,8 +780,8 @@ npx platform-core-simulate
 # Buy bonus simulation
 npx platform-core-simulate --action buy_bonus
 
-# Ante bet
-npx platform-core-simulate --params '{"ante_bet":true}'
+# Ante bet (v5: regular action, not a params flag)
+npx platform-core-simulate --action ante_spin
 
 # Custom parameters
 npx platform-core-simulate --iterations 5000000 --bet 1 --seed 42 --config ./dev.config.ts

@@ -1,13 +1,12 @@
 /**
- * DevBridge debit-computation tests.
+ * DevBridge debit-computation tests (v5 action-driven cost contract).
  *
- * Targets the contract that the platform's server enforces:
- *   - debit: 'bet'             → bet
- *   - debit: 'buy_bonus_cost'  → bet × buy_bonus.modes[mode].cost_multiplier
- *   - debit: 'ante_bet_cost'   → bet × ante_bet.cost_multiplier
- *   - debit: 'none'            → 0
- *   - regular bet with params.ante_bet=true → bet × ante_bet.cost_multiplier
- *   - unknown action / missing config → falls back to bet (with a warning)
+ * Mirrors the server's ActionDefinition.DebitAmount:
+ *   - debit: 'bet'             → bet × (cost_multiplier || 1)
+ *   - debit: 'none'/missing    → 0
+ *
+ * v4 fields (top-level buy_bonus/ante_bet, debit: 'buy_bonus_cost'/'ante_bet_cost',
+ * action.buy_bonus_mode, params.ante_bet/buy_bonus) are removed in v5.
  *
  * We test computeDebit indirectly by observing balance transitions.
  * The browser-style MemoryChannel needs `window`, so install a globalThis
@@ -28,13 +27,6 @@ const GAME_DEF: GameDefinition = {
   type: 'SLOT',
   bet_levels: [0.2, 0.5, 1, 2, 5, 10],
   max_win: { multiplier: 5000 },
-  buy_bonus: {
-    modes: {
-      default: { cost_multiplier: 100 },
-      super: { cost_multiplier: 200 },
-    },
-  },
-  ante_bet: { cost_multiplier: 1.25 },
   actions: {
     spin: {
       stage: 'base_game',
@@ -42,16 +34,20 @@ const GAME_DEF: GameDefinition = {
       credit: 'win',
       transitions: [{ condition: 'always', next_actions: ['spin'] }],
     },
+    // v5: cost lives on the action itself; opaque feature_data is exposed
+    // to Lua via state.action_config.feature_data. No top-level buy_bonus block.
     buy_bonus: {
       stage: 'base_game',
-      debit: 'buy_bonus_cost',
-      buy_bonus_mode: 'default',
+      debit: 'bet',
+      cost_multiplier: 100,
+      feature_data: { scatter_distribution: { '4': 60, '5': 30, '6': 10 } },
       transitions: [{ condition: 'always', next_actions: ['free_spin'] }],
     },
     buy_super: {
       stage: 'base_game',
-      debit: 'buy_bonus_cost',
-      buy_bonus_mode: 'super',
+      debit: 'bet',
+      cost_multiplier: 200,
+      feature_data: { scatter_distribution: { '5': 70, '6': 30 } },
       transitions: [{ condition: 'always', next_actions: ['free_spin'] }],
     },
     free_spin: {
@@ -60,9 +56,12 @@ const GAME_DEF: GameDefinition = {
       requires_session: true,
       transitions: [{ condition: 'always', next_actions: ['free_spin'] }],
     },
+    // v5: ante is a separate action with its own cost_multiplier — no more
+    // top-level ante_bet block, no more params.ante_bet flag.
     ante_spin: {
       stage: 'base_game',
-      debit: 'ante_bet_cost',
+      debit: 'bet',
+      cost_multiplier: 1.25,
       credit: 'win',
       transitions: [{ condition: 'always', next_actions: ['ante_spin'] }],
     },
@@ -74,6 +73,15 @@ const GAME_DEF: GameDefinition = {
       // debit deliberately omitted — exercises the default branch
       transitions: [{ condition: 'always', next_actions: ['spin'] }],
     } as GameDefinition['actions'][string],
+    // Action whose debit field carries a (now-removed) v4 mode — must be
+    // treated as default → 0, since v5 ignores anything other than 'bet'.
+    legacy_buy_bonus_cost: {
+      stage: 'base_game',
+      // @ts-expect-error — intentionally invalid v5 debit mode
+      debit: 'buy_bonus_cost',
+      cost_multiplier: 50,
+      transitions: [{ condition: 'always', next_actions: ['free_spin'] }],
+    },
   },
 };
 
@@ -159,7 +167,7 @@ async function callGetState(bridge: DevBridge, id?: string) {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-describe('DevBridge.computeDebit', () => {
+describe('DevBridge.computeDebit (v5 action-driven cost)', () => {
   beforeEach(() => {
     mockLuaFetch();
   });
@@ -168,31 +176,32 @@ describe('DevBridge.computeDebit', () => {
     vi.unstubAllGlobals();
   });
 
-  it('debit: "bet" → debits exactly the base bet', async () => {
+  it('debit: "bet" with no cost_multiplier → debits exactly the base bet', async () => {
     const bridge = makeBridge();
     await play(bridge, 'spin', 1);
     expect(bridge.balance).toBe(10000 - 1);
   });
 
-  it('debit: "buy_bonus_cost" with default mode → debits bet × cost_multiplier', async () => {
+  it('debit: "bet" with cost_multiplier 100 → debits bet × 100', async () => {
+    // v5: buy bonus is just an action with `debit: 'bet'` + `cost_multiplier: 100`.
+    // No top-level buy_bonus block, no buy_bonus_mode field on the action.
     const bridge = makeBridge();
     await play(bridge, 'buy_bonus', 1);
-    // default mode cost_multiplier = 100 → debit 100
     expect(bridge.balance).toBe(10000 - 100);
   });
 
-  it('debit: "buy_bonus_cost" with super mode → uses the matching multiplier', async () => {
+  it('different actions carry their own cost_multiplier', async () => {
+    // `buy_super` action has `cost_multiplier: 200`. v5 doesn't need a
+    // shared modes map — each action is self-contained.
     const bridge = makeBridge();
     await play(bridge, 'buy_super', 1);
-    // super mode cost_multiplier = 200 → debit 200
     expect(bridge.balance).toBe(10000 - 200);
   });
 
-  it('debit: "buy_bonus_cost" scales linearly with bet amount', async () => {
+  it('cost_multiplier scales linearly with bet amount', async () => {
     const bridge = makeBridge();
     await play(bridge, 'buy_bonus', 5);
-    // 5 × 100 = 500 — guarding against the previous bug where DevBridge
-    // would have only debited 5.
+    // 5 × 100 = 500
     expect(bridge.balance).toBe(10000 - 500);
   });
 
@@ -206,26 +215,30 @@ describe('DevBridge.computeDebit', () => {
     expect(bridge.balance).toBe(10000);
   });
 
-  it('debit: "ante_bet_cost" → debits bet × ante_bet.cost_multiplier', async () => {
+  it('ante action with cost_multiplier 1.25 → debits bet × 1.25', async () => {
+    // v5: ante is a regular action (`ante_spin`) with its own cost_multiplier.
+    // No params.ante_bet flag, no top-level ante_bet block.
     const bridge = makeBridge();
     await play(bridge, 'ante_spin', 1);
-    // 1 × 1.25 = 1.25
-    expect(bridge.balance).toBeCloseTo(10000 - 1.25, 5);
-  });
-
-  it('debit: "bet" with params.ante_bet=true → applies ante multiplier', async () => {
-    const bridge = makeBridge();
-    await play(bridge, 'spin', 1, { ante_bet: true });
     expect(bridge.balance).toBeCloseTo(10000 - 1.25, 5);
   });
 
   it('debit: missing/empty → no balance movement (matches server default)', async () => {
     // Server's ActionDefinition.DebitAmount returns decimal.Zero for any
-    // debit other than "bet"/"buy_bonus_cost"/"ante_bet_cost". DevBridge
-    // must mirror that so table-game continuations (e.g. blackjack hit/stand)
-    // don't get a phantom bet debit on every action.
+    // debit other than "bet". DevBridge must mirror that so table-game
+    // continuations (e.g. blackjack hit/stand) don't get a phantom bet debit.
     const bridge = makeBridge();
     await play(bridge, 'no_debit', 1);
+    expect(bridge.balance).toBe(10000);
+  });
+
+  it('legacy v4 debit mode "buy_bonus_cost" → no balance movement (v5 only knows "bet")', async () => {
+    // v5 collapses all cost logic into `cost_multiplier` on the action.
+    // Old configs that still carry `debit: "buy_bonus_cost"` no longer
+    // resolve and must be treated as default → 0, surfacing the config
+    // breakage instead of silently debiting bet.
+    const bridge = makeBridge();
+    await play(bridge, 'legacy_buy_bonus_cost', 1);
     expect(bridge.balance).toBe(10000);
   });
 
