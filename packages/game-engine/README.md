@@ -854,9 +854,12 @@ bridge.setBalance(5000);
 bridge.destroy();
 ```
 
-**Handled messages:** `GAME_READY`, `PLAY_REQUEST`, `PLAY_RESULT_ACK`, `GET_BALANCE`, `GET_STATE`, `OPEN_DEPOSIT`.
+**Handled (in):** `GAME_READY`, `PLAY_REQUEST`, `PLAY_RESULT_ACK`, `GET_BALANCE`, `GET_STATE`, `OPEN_DEPOSIT`.
+**Emitted (out):** `INIT`, `PLAY_RESULT`, `PLAY_ERROR`, `BALANCE_UPDATE`, `STATE_RESPONSE`.
 
 > With the Vite plugin (`devBridge: true`), DevBridge is injected automatically before your app entry point.
+
+> **Error codes & session contract.** In Lua mode, DevBridge emits the same `PLAY_ERROR` codes the platform does (`INVALID_AMOUNT`, `INSUFFICIENT_FUNDS`, `ACTIVE_SESSION_EXISTS`, `NO_ACTIVE_SESSION`, `SESSION_EXPIRED`, `ENGINE_ERROR`, …) — see the [platform-core DevBridge section](../platform-core/README.md#platform-parity-behavior-lua-mode) for the full table and the contract details (server-generated round IDs, `session.history`, `STATE_RESPONSE` shape, `creditPending` semantics).
 
 ---
 

@@ -479,15 +479,33 @@ const initData = await sdk.ready();
 // initData.assetsUrl — base URL for assets
 
 // 2. Spin (universal play method)
-const result = await sdk.play({ action: 'spin', bet: 1.00, params: { lines: 20 } });
-// result.roundId       — round ID
+let result;
+try {
+    result = await sdk.play({ action: 'spin', bet: 1.00, params: { lines: 20 } });
+} catch (e) {
+    // SDKError(code, message). The same codes are emitted by the real
+    // platform and by DevBridge in dev — error-handling code written
+    // against dev runs unchanged in prod. Common codes:
+    //   INVALID_INPUT          unknown action
+    //   INVALID_AMOUNT         bet not in bet_levels
+    //   INSUFFICIENT_FUNDS     debit > balance
+    //   ACTIVE_SESSION_EXISTS  non-session action while session is in progress
+    //   NO_ACTIVE_SESSION      session-required action without an active session
+    //   SESSION_EXPIRED        session past session_ttl
+    //   ENGINE_ERROR           game engine failed (debit is rolled back)
+    //   TIMEOUT                no response within transport timeout
+}
+// result.roundId       — round ID (server-generated; client value is ignored)
 // result.action        — executed action ("spin")
 // result.totalWin      — win amount
 // result.balanceAfter  — balance after the spin
 // result.data          — payload from GameState.Data (matrix, lines, multipliers...)
 // result.nextActions   — next available actions (["spin"], ["free_spin"], ["pick"])
-// result.session       — session state (if free spins triggered)
-// result.creditPending — true when crediting is deferred
+// result.session       — session state (if free spins triggered); includes
+//                        `history: [{spinIndex, win, data}]` for resume on reload
+// result.creditPending — true only if the wallet credit failed and was
+//                        queued for background retry. NOT set on mid-session
+//                        rounds (those just don't credit until completion).
 
 // 3. Free spin (when nextActions includes "free_spin")
 //    Pass the same bet that triggered the session — the platform

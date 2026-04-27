@@ -320,6 +320,28 @@ bridge.destroy();
 
 Most of the time you don't construct DevBridge yourself — `createPlatformSession({ dev: { … } })` does it for you.
 
+### Platform-parity behavior (Lua mode)
+
+In Lua mode (`luaScript` + `gameDefinition`), DevBridge mirrors the server's `PlayRound` contract so error-handling code written against dev runs unchanged in prod. Invalid requests come back as `PLAY_ERROR` and the SDK's `play()` rejects with `SDKError(code, message)`:
+
+| code                    | when                                                     |
+|-------------------------|----------------------------------------------------------|
+| `INVALID_INPUT`         | unknown action                                           |
+| `INVALID_AMOUNT`        | `bet` not in `bet_levels` (list or `{min, max}` range)   |
+| `INSUFFICIENT_FUNDS`    | computed debit > balance (no wallet movement, no fetch)  |
+| `ACTIVE_SESSION_EXISTS` | non-session action while a session is in progress        |
+| `NO_ACTIVE_SESSION`     | session-required action without an active session        |
+| `SESSION_EXPIRED`       | session past `gameDefinition.session_ttl` (default 24h)  |
+| `ENGINE_ERROR`          | Lua execution failed (debit is rolled back)              |
+
+Other contract details DevBridge enforces:
+
+- **Round IDs are server-generated** (`crypto.randomUUID`). The client value in `PlayParams.roundId` is ignored for non-session actions and replaced with the active session's id for session-based ones — matches the platform's `playRound` UUID rules.
+- **`STATE_RESPONSE`** returns the last `PlayResultData` (with `session.history` populated) while a session is active and not yet completed, mirroring `GET /api/games/{id}/session`.
+- **`creditPending`** is `false` in the normal path. The wire flag means "wallet credit failed, queued for retry" — never "credit deferred until session completes".
+- **`session.history`** is appended on every session round (`{spinIndex, win, data}`), so the client can rebuild the screen after reload.
+- **`MapState` parity** — `multiplier`, `global_multiplier`, `free_spins_total`, `max_win_reached` are auto-injected into `result.data` from engine variables when the Lua script doesn't set them explicitly.
+
 ---
 
 ## RTP Simulation CLI

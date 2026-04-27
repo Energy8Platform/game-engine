@@ -11,6 +11,12 @@ export interface GameDefinition {
   buy_bonus?: BuyBonusConfig;
   ante_bet?: AnteBetConfig;
   persistent_state?: PersistentStateConfig;
+  /**
+   * Session expiry duration as a Go-style duration string ("24h", "2h", "5ms").
+   * Mirrors the platform's GameDefinition.SessionTTL — defaults to 24h on
+   * the server when absent. Used by DevBridge to surface SESSION_EXPIRED.
+   */
+  session_ttl?: string;
 }
 
 export interface BetLevelsConfig {

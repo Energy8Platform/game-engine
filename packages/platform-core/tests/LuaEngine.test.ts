@@ -280,3 +280,209 @@ end
     expect(engine.session).toBeNull();
   });
 });
+
+// ─── Stage 2: server-parity contract checks ────────────────────────────
+
+describe('LuaEngine session.history (server SessionInfo.History parity)', () => {
+  let engine: LuaEngine;
+
+  afterEach(() => {
+    engine?.destroy();
+  });
+
+  it('createSession seeds history with the trigger spin', () => {
+    engine = new LuaEngine({
+      script: LUA_WITH_FREE_SPINS,
+      gameDefinition: SIMPLE_GAME_DEF,
+    });
+
+    const baseResult = engine.execute({ action: 'spin', bet: 1.0 });
+
+    // Server's createSession appends an initial round with spin_index=0,
+    // win=state.TotalWin, data=MapStateForHistory(state). DevBridge's
+    // GET_STATE relays SessionInfo.History so the client can rebuild the
+    // screen on reload — without it, the history field is just missing.
+    expect(baseResult.session?.history).toBeDefined();
+    expect(baseResult.session?.history).toHaveLength(1);
+    expect(baseResult.session?.history?.[0]).toMatchObject({
+      spinIndex: 0,
+      data: expect.objectContaining({ matrix: expect.any(Array) }),
+    });
+  });
+
+  it('updateSession appends a round per session play', () => {
+    engine = new LuaEngine({
+      script: LUA_WITH_FREE_SPINS,
+      gameDefinition: SIMPLE_GAME_DEF,
+    });
+
+    engine.execute({ action: 'spin', bet: 1.0 }); // creates session, history len=1
+    const fs1 = engine.execute({ action: 'free_spin', bet: 1.0 });
+    expect(fs1.session?.history).toHaveLength(2);
+    expect(fs1.session?.history?.[1].spinIndex).toBe(1);
+
+    const fs2 = engine.execute({ action: 'free_spin', bet: 1.0 });
+    expect(fs2.session?.history).toHaveLength(3);
+
+    const fs3 = engine.execute({ action: 'free_spin', bet: 1.0 });
+    // Final completed session also carries history.
+    expect(fs3.session?.completed).toBe(true);
+    expect(fs3.session?.history).toHaveLength(4);
+    expect(fs3.session?.history?.[3].spinIndex).toBe(3);
+  });
+});
+
+describe('LuaEngine MapState parity (auto-injected variable-derived data fields)', () => {
+  let engine: LuaEngine;
+
+  afterEach(() => {
+    engine?.destroy();
+  });
+
+  it('exposes multiplier from variables when > 1 (Lua-return key not required)', () => {
+    // Server's MapState injects data["multiplier"] when state.Variables[multiplier] > 1,
+    // even if the Lua script didn't put it into the return table.
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          variables = { multiplier = 3 },
+          matrix = {{1}},
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: SIMPLE_GAME_DEF });
+
+    const r = engine.execute({ action: 'spin', bet: 1.0 });
+    expect(r.data.multiplier).toBe(3);
+  });
+
+  it('does NOT expose multiplier when value is <= 1 (server omits it)', () => {
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          variables = { multiplier = 1 },
+          matrix = {{1}},
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: SIMPLE_GAME_DEF });
+
+    const r = engine.execute({ action: 'spin', bet: 1.0 });
+    expect(r.data.multiplier).toBeUndefined();
+  });
+
+  it('exposes global_multiplier from variables when > 1', () => {
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          variables = { global_multiplier = 5 },
+          matrix = {{1}},
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: SIMPLE_GAME_DEF });
+
+    const r = engine.execute({ action: 'spin', bet: 1.0 });
+    expect(r.data.global_multiplier).toBe(5);
+  });
+
+  it('exposes free_spins_total from free_spins_remaining when > 0', () => {
+    // Server's MapState: data["free_spins_total"] = int(VarFreeSpinsRemaining)
+    // when free_spins_remaining > 0. A trigger spin that sets
+    // free_spins_remaining must surface that count in data.
+    const lua = `
+      function execute(state)
+        return {
+          total_win = 0,
+          variables = { free_spins_remaining = 8 },
+          matrix = {{1}},
+        }
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: SIMPLE_GAME_DEF });
+
+    const r = engine.execute({ action: 'spin', bet: 1.0 });
+    expect(r.data.free_spins_total).toBe(8);
+  });
+});
+
+describe('LuaEngine completion next_actions (findCompletionNextActions parity)', () => {
+  let engine: LuaEngine;
+
+  afterEach(() => {
+    engine?.destroy();
+  });
+
+  it('returns the complete_session transition next_actions on natural completion', () => {
+    // Real-world free-spin layout: continue while remaining > 0; on the
+    // last spin the matched rule is still the "continue" rule, but session
+    // completes via decrement. Server's findCompletionNextActions pulls
+    // next_actions from the explicit complete_session transition, not from
+    // the matched continue rule.
+    const gameDef: GameDefinition = {
+      id: 'completion-test',
+      type: 'SLOT',
+      bet_levels: [1],
+      actions: {
+        spin: {
+          stage: 'base_game',
+          debit: 'bet',
+          credit: 'win',
+          transitions: [
+            {
+              condition: 'free_spins_awarded > 0',
+              creates_session: true,
+              credit_override: 'defer',
+              next_actions: ['free_spin'],
+              session_config: { total_spins_var: 'free_spins_awarded' },
+            },
+            { condition: 'always', next_actions: ['spin'] },
+          ],
+        },
+        free_spin: {
+          stage: 'free_spins',
+          debit: 'none',
+          requires_session: true,
+          transitions: [
+            // Continue rule — matches every free spin including the last one.
+            { condition: 'free_spins_remaining > 0', next_actions: ['free_spin'] },
+            // Completion rule — server's findCompletionNextActions picks
+            // *this* transition's next_actions on the spin where the session
+            // ends. Without the fix, LuaEngine returns ['free_spin'] from
+            // the matched continue rule.
+            { condition: 'always', complete_session: true, next_actions: ['spin'] },
+          ],
+        },
+      },
+    };
+
+    const lua = `
+      function execute(state)
+        if state.stage == "base_game" then
+          return {
+            total_win = 0,
+            variables = { free_spins_awarded = 2 },
+            matrix = {{1}},
+          }
+        else
+          return { total_win = 0, matrix = {{2}} }
+        end
+      end
+    `;
+    engine = new LuaEngine({ script: lua, gameDefinition: gameDef });
+
+    engine.execute({ action: 'spin', bet: 1.0 }); // triggers session, 2 free spins
+    const fs1 = engine.execute({ action: 'free_spin', bet: 1.0 });
+    expect(fs1.session?.completed).toBe(false);
+    expect(fs1.nextActions).toEqual(['free_spin']);
+
+    const fs2 = engine.execute({ action: 'free_spin', bet: 1.0 });
+    expect(fs2.session?.completed).toBe(true);
+    // BUG fix: must come from the complete_session transition, not the
+    // matched 'continue' rule.
+    expect(fs2.nextActions).toEqual(['spin']);
+  });
+});

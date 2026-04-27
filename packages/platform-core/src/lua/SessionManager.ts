@@ -1,6 +1,13 @@
 import type { SessionData } from '@energy8platform/game-sdk';
 import type { TransitionRule } from './types';
 
+/** Per-round history entry — wire shape mirrors server SessionInfo.History. */
+export interface SessionRound {
+  spinIndex: number;
+  win: number;
+  data: Record<string, unknown>;
+}
+
 interface SessionState {
   spinsRemaining: number;
   spinsPlayed: number;
@@ -13,6 +20,7 @@ interface SessionState {
   persistentVarNames: string[];
   persistentVars: Record<string, number>;
   persistentData: Record<string, unknown>;
+  history: SessionRound[];
 }
 
 const MAX_SESSION_SPINS = 200;
@@ -56,7 +64,8 @@ export class SessionManager {
 
   /**
    * Create a new session from a transition rule.
-   * Server behavior: initial spin is already counted (spinsPlayed=1, totalWin includes spinWin).
+   * Server behavior: initial spin is already counted (spinsPlayed=1, totalWin includes spinWin),
+   * and history[0] holds the trigger spin's data.
    */
   createSession(
     rule: TransitionRule,
@@ -64,6 +73,7 @@ export class SessionManager {
     bet: number,
     spinWin: number,
     maxWinCap: number | undefined,
+    triggerData: Record<string, unknown>,
   ): SessionData {
     let spinsRemaining = -1;
     let spinsVarName: string | undefined;
@@ -90,6 +100,7 @@ export class SessionManager {
       persistentVarNames,
       persistentVars,
       persistentData: {},
+      history: [{ spinIndex: 0, win: spinWin, data: triggerData }],
     };
 
     return this.toSessionData();
@@ -104,8 +115,17 @@ export class SessionManager {
     rule: TransitionRule,
     variables: Record<string, number>,
     spinWin: number,
+    roundData: Record<string, unknown>,
   ): SessionData {
     if (!this.session) throw new Error('No active session');
+
+    // Append history with PRE-increment spin index (matches server's
+    // updateSession: append round, THEN increment SpinsPlayed).
+    this.session.history.push({
+      spinIndex: this.session.spinsPlayed,
+      win: spinWin,
+      data: roundData,
+    });
 
     // Accumulate win and count spin
     this.session.totalWin += spinWin;
@@ -222,6 +242,8 @@ export class SessionManager {
       completed: this.session.completed,
       maxWinReached: this.session.maxWinReached,
       betAmount: this.session.bet,
+      // Snapshot the array so downstream mutation can't corrupt internal state.
+      history: [...this.session.history],
     };
   }
 }

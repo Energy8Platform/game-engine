@@ -1,5 +1,5 @@
 import type { PlayParams, SessionData } from '@energy8platform/game-sdk';
-import type { LuaEngineConfig, LuaPlayResult, GameDefinition } from './types';
+import type { LuaEngineConfig, LuaPlayResult, GameDefinition, ActionDefinition } from './types';
 import { LuaEngineAPI, createSeededRng, luaToJS, pushJSValue, cachedToLuastring } from './LuaEngineAPI';
 import { ActionRouter } from './ActionRouter';
 import { SessionManager } from './SessionManager';
@@ -193,6 +193,12 @@ export class LuaEngine {
       }
     }
 
+    // Apply MapState parity — server's state_mapper.go injects these
+    // variable-derived keys into the client data so scripts don't have to
+    // surface them manually. Lua-provided values take precedence (server
+    // also overwrites variable-derived keys with state.Data on merge).
+    this.applyMapStateInjection(stateVars, data);
+
     // 7. Handle _persist_* and _persist_game_* keys
     this.sessionManager.storePersistData(data);
     this.persistentState.storeGameData(data);
@@ -214,7 +220,8 @@ export class LuaEngine {
     }
 
     // 8. Evaluate transitions (server uses state.Variables which is stateVars)
-    const { rule, nextActions } = this.actionRouter.evaluateTransitions(action, stateVars);
+    const { rule } = this.actionRouter.evaluateTransitions(action, stateVars);
+    let nextActions = rule.next_actions;
 
     // 9. Determine credit behavior (server: creditNow logic)
     let creditDeferred = action.credit === 'defer' || rule.credit_override === 'defer';
@@ -227,9 +234,15 @@ export class LuaEngine {
     // Calculate max win cap for session
     const maxWinCap = this.calculateMaxWinCap(bet);
 
+    // Snapshot the round data for history (matches server's MapStateForHistory:
+    // strip _persist_* keys, but those are already removed below before
+    // returning — at this point in the flow they may still be in `data`,
+    // so we filter inline).
+    const roundData = stripPersistKeys(data);
+
     if (rule.creates_session && !this.sessionManager.isActive) {
       // CREATE SESSION — initial spin counted (server: createSession includes spinWin)
-      session = this.sessionManager.createSession(rule, stateVars, bet, spinWin, maxWinCap);
+      session = this.sessionManager.createSession(rule, stateVars, bet, spinWin, maxWinCap, roundData);
       creditDeferred = true;
       resultTotalWin = spinWin;
 
@@ -239,15 +252,22 @@ export class LuaEngine {
       }
     } else if (this.sessionManager.isActive) {
       // UPDATE SESSION — accumulate win, check completion
-      session = this.sessionManager.updateSession(rule, stateVars, spinWin);
+      session = this.sessionManager.updateSession(rule, stateVars, spinWin, roundData);
 
       if (session?.completed) {
-        // SESSION COMPLETED — server returns session.TotalWin as result.TotalWin
+        // SESSION COMPLETED — server returns session.TotalWin as result.TotalWin,
+        // and pulls next_actions from the explicit completion transition
+        // (findCompletionNextActions) rather than the matched 'continue' rule.
         const completed = this.sessionManager.completeSession();
         session = completed.session;
         resultTotalWin = completed.totalWin;
         sessionCompleted = true;
         creditDeferred = false;
+
+        const completionNext = findCompletionNextActions(action);
+        if (completionNext) {
+          nextActions = completionNext;
+        }
 
         // Clean up session-scoped variables
         for (const varName of completed.sessionVarNames) {
@@ -386,6 +406,35 @@ export class LuaEngine {
     return result as Record<string, unknown>;
   }
 
+  /**
+   * Mirror server's state_mapper.go MapState — surface variable-derived
+   * fields so scripts that don't manually echo them in the result table
+   * still produce a server-shaped data map. Lua keys win on conflict.
+   */
+  private applyMapStateInjection(
+    vars: Record<string, number>,
+    data: Record<string, unknown>,
+  ): void {
+    const m = vars.multiplier;
+    if (typeof m === 'number' && m > 1 && data.multiplier === undefined) {
+      data.multiplier = m;
+    }
+
+    const gm = vars.global_multiplier;
+    if (typeof gm === 'number' && gm > 1 && data.global_multiplier === undefined) {
+      data.global_multiplier = gm;
+    }
+
+    const fs = vars.free_spins_remaining;
+    if (typeof fs === 'number' && fs > 0 && data.free_spins_total === undefined) {
+      data.free_spins_total = Math.trunc(fs);
+    }
+
+    if (vars.max_win_reached === 1 && data.max_win_reached === undefined) {
+      data.max_win_reached = true;
+    }
+  }
+
   private calculateMaxWinCap(bet: number): number | undefined {
     const mw = this.gameDefinition.max_win;
     if (!mw) return undefined;
@@ -409,4 +458,38 @@ export class LuaEngine {
 
     return parseInt(entries[entries.length - 1][0], 10);
   }
+}
+
+// ─── Module helpers ─────────────────────────────────────
+
+/**
+ * Strip _persist_* and _persist_game_* keys from a data map — matches
+ * server's MapStateForHistory used when recording session round history.
+ */
+function stripPersistKeys(data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(data)) {
+    if (k.startsWith('_persist_') || k.startsWith('_persist_game_')) continue;
+    out[k] = data[k];
+  }
+  return out;
+}
+
+/**
+ * Mirror server's findCompletionNextActions: when a session naturally
+ * completes, the matched 'continue' rule's next_actions are NOT what
+ * the client should see — the explicit complete_session transition wins,
+ * with a fallback to the 'always' transition.
+ */
+function findCompletionNextActions(action: ActionDefinition): string[] | null {
+  let alwaysFallback: string[] | null = null;
+  for (const t of action.transitions) {
+    if (t.complete_session && t.next_actions && t.next_actions.length > 0) {
+      return t.next_actions;
+    }
+    if (t.condition.trim() === 'always' && t.next_actions && t.next_actions.length > 0 && alwaysFallback === null) {
+      alwaysFallback = t.next_actions;
+    }
+  }
+  return alwaysFallback;
 }

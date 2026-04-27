@@ -66,6 +66,14 @@ const GAME_DEF: GameDefinition = {
       credit: 'win',
       transitions: [{ condition: 'always', next_actions: ['ante_spin'] }],
     },
+    // Table-game style continuation: action exists but has no debit
+    // (server returns decimal.Zero for empty/missing debit). Used to assert
+    // computeDebit's default branch matches the server contract.
+    no_debit: {
+      stage: 'base_game',
+      // debit deliberately omitted — exercises the default branch
+      transitions: [{ condition: 'always', next_actions: ['spin'] }],
+    } as GameDefinition['actions'][string],
   },
 };
 
@@ -113,6 +121,41 @@ async function play(bridge: DevBridge, action: string, bet: number, params?: Rec
   }).handlePlayRequest({ action, bet, params });
   // Allow the mocked fetch promise + balance update to settle.
   await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+interface CapturedSend {
+  type: string;
+  payload: unknown;
+  id?: string;
+}
+
+/**
+ * Start the bridge and replace its inner Bridge.send with a recorder so we
+ * can assert the wire shape (PLAY_RESULT payload, PLAY_ERROR payload,
+ * STATE_RESPONSE shape, etc.) without going through the SDK round-trip.
+ */
+function startWithCapture(bridge: DevBridge): CapturedSend[] {
+  bridge.start();
+  const sends: CapturedSend[] = [];
+  const inner = (bridge as unknown as { _bridge: { send: (t: string, p: unknown, i?: string) => void } })._bridge;
+  inner.send = (type, payload, id) => {
+    sends.push({ type, payload, id });
+  };
+  return sends;
+}
+
+async function callPlay(bridge: DevBridge, action: string, bet: number, opts: { id?: string; params?: Record<string, unknown>; roundId?: string } = {}) {
+  (bridge as unknown as {
+    handlePlayRequest: (p: { action: string; bet: number; roundId?: string; params?: unknown }, id?: string) => void;
+  }).handlePlayRequest({ action, bet, roundId: opts.roundId, params: opts.params }, opts.id);
+  // Two microtask flushes cover both fetch resolution and the inner await chain.
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+async function callGetState(bridge: DevBridge, id?: string) {
+  (bridge as unknown as { handleGetState: (id?: string) => void }).handleGetState(id);
   await new Promise((r) => setTimeout(r, 0));
 }
 
@@ -176,9 +219,413 @@ describe('DevBridge.computeDebit', () => {
     expect(bridge.balance).toBeCloseTo(10000 - 1.25, 5);
   });
 
-  it('unknown action → falls back to base bet', async () => {
+  it('debit: missing/empty → no balance movement (matches server default)', async () => {
+    // Server's ActionDefinition.DebitAmount returns decimal.Zero for any
+    // debit other than "bet"/"buy_bonus_cost"/"ante_bet_cost". DevBridge
+    // must mirror that so table-game continuations (e.g. blackjack hit/stand)
+    // don't get a phantom bet debit on every action.
+    const bridge = makeBridge();
+    await play(bridge, 'no_debit', 1);
+    expect(bridge.balance).toBe(10000);
+  });
+
+  it('unknown action → balance unchanged (rejected before debit, see PLAY_ERROR contract)', async () => {
+    // The platform returns 400 INVALID_INPUT for unknown actions before
+    // the wallet is touched. DevBridge must not silently debit anything.
     const bridge = makeBridge();
     await play(bridge, 'mystery_action', 7);
-    expect(bridge.balance).toBe(10000 - 7);
+    expect(bridge.balance).toBe(10000);
+  });
+});
+
+describe('DevBridge.PLAY_ERROR contract', () => {
+  beforeEach(() => {
+    mockLuaFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('unknown action → emits PLAY_ERROR with INVALID_INPUT and no PLAY_RESULT', async () => {
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'mystery_action', 1, { id: 'req-1' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    const results = sends.filter((s) => s.type === 'PLAY_RESULT');
+
+    expect(errors).toHaveLength(1);
+    expect(results).toHaveLength(0);
+    expect(errors[0].id).toBe('req-1');
+    expect(errors[0].payload).toMatchObject({
+      code: 'INVALID_INPUT',
+      message: expect.stringMatching(/unknown action/i),
+    });
+    expect(bridge.balance).toBe(10000);
+
+    bridge.destroy();
+  });
+
+  it('insufficient funds → PLAY_ERROR INSUFFICIENT_FUNDS, balance unchanged, no fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bridge = makeBridge({ balance: 50 });
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'buy_bonus', 1, { id: 'req-2' }); // 1 × 100 = 100, exceeds 50
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].id).toBe('req-2');
+    expect(errors[0].payload).toMatchObject({ code: 'INSUFFICIENT_FUNDS' });
+    expect(bridge.balance).toBe(50);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    bridge.destroy();
+  });
+
+  it('lua execution failure → rolls back debit, emits PLAY_ERROR ENGINE_ERROR (not PLAY_RESULT)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'lua boom' }),
+      })),
+    );
+
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'req-3' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    const results = sends.filter((s) => s.type === 'PLAY_RESULT');
+
+    expect(errors).toHaveLength(1);
+    expect(results).toHaveLength(0);
+    expect(errors[0].id).toBe('req-3');
+    expect(errors[0].payload).toMatchObject({ code: 'ENGINE_ERROR' });
+    // Debit must be rolled back on lua failure.
+    expect(bridge.balance).toBe(10000);
+
+    bridge.destroy();
+  });
+});
+
+describe('DevBridge.creditPending semantics', () => {
+  beforeEach(() => {
+    mockLuaFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('mid-session play → creditPending=false (only true on real credit failure)', async () => {
+    // Server-side credit_pending=true means "wallet credit failed, queued
+    // for retry". A normal session round (where credit is naturally deferred
+    // until the session completes) MUST NOT set creditPending=true — that
+    // would make the client show a "wins still being credited" state forever.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          totalWin: 0,
+          data: {},
+          nextActions: ['free_spin'],
+          // Active, not-yet-completed session.
+          session: { spinsRemaining: 3, spinsPlayed: 1, totalWin: 0, completed: false, betAmount: 1 },
+        }),
+      })),
+    );
+
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'mid' });
+
+    const results = sends.filter((s) => s.type === 'PLAY_RESULT');
+    expect(results).toHaveLength(1);
+    const payload = results[0].payload as { creditPending?: boolean; session: unknown };
+    expect(payload.creditPending).toBe(false);
+    expect(payload.session).not.toBeNull();
+
+    bridge.destroy();
+  });
+
+  it('non-session play → creditPending=false', async () => {
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'plain' });
+
+    const payload = sends.find((s) => s.type === 'PLAY_RESULT')?.payload as { creditPending?: boolean };
+    expect(payload?.creditPending).toBe(false);
+
+    bridge.destroy();
+  });
+});
+
+describe('DevBridge.bet validation (server bet_levels parity)', () => {
+  beforeEach(() => {
+    mockLuaFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('explicit bet_levels list: rejects bet not in the list with INVALID_AMOUNT', async () => {
+    const bridge = makeBridge(); // bet_levels: [0.2, 0.5, 1, 2, 5, 10]
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 0.3, { id: 'bv-1' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].payload).toMatchObject({ code: 'INVALID_AMOUNT' });
+    expect(bridge.balance).toBe(10000);
+
+    bridge.destroy();
+  });
+
+  it('explicit bet_levels list: accepts allowed bet', async () => {
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'bv-2' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    const results = sends.filter((s) => s.type === 'PLAY_RESULT');
+    expect(errors).toHaveLength(0);
+    expect(results).toHaveLength(1);
+
+    bridge.destroy();
+  });
+
+  it('bet_levels range: rejects bet outside min/max', async () => {
+    const def: GameDefinition = {
+      ...GAME_DEF,
+      bet_levels: { min: 0.5, max: 10 },
+    };
+    const bridge = makeBridge({ gameDefinition: def });
+    const sends = startWithCapture(bridge);
+
+    await callPlay(bridge, 'spin', 0.4, { id: 'low' });
+    await callPlay(bridge, 'spin', 11, { id: 'high' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(2);
+    expect(errors[0].payload).toMatchObject({ code: 'INVALID_AMOUNT' });
+    expect(errors[1].payload).toMatchObject({ code: 'INVALID_AMOUNT' });
+    expect(bridge.balance).toBe(10000);
+
+    bridge.destroy();
+  });
+});
+
+describe('DevBridge.roundId (server-generated, client value ignored)', () => {
+  beforeEach(() => {
+    mockLuaFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('non-session play: emitted roundId is a fresh UUID, not the client value', async () => {
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'p1', roundId: 'CLIENT-ATTEMPT' });
+
+    const result = sends.find((s) => s.type === 'PLAY_RESULT');
+    expect(result).toBeDefined();
+    const payload = result!.payload as { roundId: string };
+    expect(payload.roundId).not.toBe('CLIENT-ATTEMPT');
+    // UUID v4-ish: 8-4-4-4-12 hex
+    expect(payload.roundId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+    bridge.destroy();
+  });
+
+  it('session-based play: roundId stays the same as the session-creating play', async () => {
+    // First play creates a session and gets a roundId. Subsequent session
+    // plays must echo that same roundId — server keeps the round_id pinned
+    // to the session for BET/WIN transaction correlation.
+    let callIndex = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        callIndex++;
+        return {
+          ok: true,
+          json: async () => ({
+            totalWin: 0,
+            data: {},
+            nextActions: callIndex < 2 ? ['free_spin'] : ['spin'],
+            session: callIndex < 2
+              ? { spinsRemaining: 1, spinsPlayed: 1, totalWin: 0, completed: false, betAmount: 1, history: [] }
+              : { spinsRemaining: 0, spinsPlayed: 2, totalWin: 0, completed: true, betAmount: 1, history: [] },
+          }),
+        };
+      }),
+    );
+
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'p1' });
+    await callPlay(bridge, 'free_spin', 1, { id: 'p2' });
+
+    const results = sends.filter((s) => s.type === 'PLAY_RESULT');
+    expect(results).toHaveLength(2);
+    const r1 = results[0].payload as { roundId: string };
+    const r2 = results[1].payload as { roundId: string };
+    expect(r2.roundId).toBe(r1.roundId);
+
+    bridge.destroy();
+  });
+});
+
+describe('DevBridge.session conflict + expiry (matches server 409/410 paths)', () => {
+  beforeEach(() => {
+    // Default fetch: session-creating spin that opens a 5-spin free spin session.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          totalWin: 0,
+          data: {},
+          nextActions: ['free_spin'],
+          session: { spinsRemaining: 5, spinsPlayed: 1, totalWin: 0, completed: false, betAmount: 1, history: [] },
+        }),
+      })),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('non-session action while session is active → ACTIVE_SESSION_EXISTS', async () => {
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+
+    await callPlay(bridge, 'spin', 1, { id: 's1' }); // creates session
+    await callPlay(bridge, 'spin', 1, { id: 's2' }); // non-session over active session
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].id).toBe('s2');
+    expect(errors[0].payload).toMatchObject({ code: 'ACTIVE_SESSION_EXISTS' });
+
+    bridge.destroy();
+  });
+
+  it('session-required action with no active session → NO_ACTIVE_SESSION', async () => {
+    // Use a non-session-creating fetch so no session exists.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          totalWin: 0,
+          data: {},
+          nextActions: ['spin'],
+          session: null,
+        }),
+      })),
+    );
+
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'free_spin', 1, { id: 'fs-orphan' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].payload).toMatchObject({ code: 'NO_ACTIVE_SESSION' });
+
+    bridge.destroy();
+  });
+
+  it('session-required action after TTL expiry → SESSION_EXPIRED', async () => {
+    // Tiny TTL so we can advance Date.now past it without fake timers.
+    const def: GameDefinition = { ...GAME_DEF, session_ttl: '5ms' };
+    const bridge = makeBridge({ gameDefinition: def });
+    const sends = startWithCapture(bridge);
+
+    await callPlay(bridge, 'spin', 1, { id: 'open' }); // creates session
+    // Advance real wall-clock past the TTL.
+    await new Promise((r) => setTimeout(r, 20));
+
+    await callPlay(bridge, 'free_spin', 1, { id: 'late' });
+
+    const errors = sends.filter((s) => s.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].id).toBe('late');
+    expect(errors[0].payload).toMatchObject({ code: 'SESSION_EXPIRED' });
+
+    bridge.destroy();
+  });
+});
+
+describe('DevBridge.STATE_RESPONSE shape', () => {
+  beforeEach(() => {
+    mockLuaFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('with no session → STATE_RESPONSE { session: null }', async () => {
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callGetState(bridge, 'state-1');
+
+    const resp = sends.find((s) => s.type === 'STATE_RESPONSE');
+    expect(resp?.id).toBe('state-1');
+    expect(resp?.payload).toEqual({ session: null });
+
+    bridge.destroy();
+  });
+
+  it('after a session-creating play → STATE_RESPONSE.session is shaped like PlayResultData', async () => {
+    // Server's GET /games/{id}/session returns the same PlayResult shape
+    // (round_id/action/total_win/data/next_actions/session.history). The SDK's
+    // getState() reads payload.session.session and payload.session.balanceAfter,
+    // so the inner PlayResultData fields are required.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          totalWin: 0,
+          data: { matrix: [[1, 2, 3]] },
+          nextActions: ['free_spin'],
+          session: { spinsRemaining: 3, spinsPlayed: 1, totalWin: 0, completed: false, betAmount: 1 },
+        }),
+      })),
+    );
+
+    const bridge = makeBridge();
+    const sends = startWithCapture(bridge);
+    await callPlay(bridge, 'spin', 1, { id: 'p1' });
+    await callGetState(bridge, 'state-2');
+
+    const resp = sends.find((s) => s.type === 'STATE_RESPONSE');
+    expect(resp).toBeDefined();
+    const payload = resp!.payload as { session: Record<string, unknown> | null };
+    expect(payload.session).not.toBeNull();
+    // Required PlayResultData fields the SDK reads from payload.session.
+    expect(payload.session).toMatchObject({
+      roundId: expect.any(String),
+      action: 'spin',
+      balanceAfter: expect.any(Number),
+      totalWin: expect.any(Number),
+      data: expect.any(Object),
+      nextActions: ['free_spin'],
+      session: expect.objectContaining({ spinsRemaining: 3, spinsPlayed: 1 }),
+    });
+
+    bridge.destroy();
   });
 });
