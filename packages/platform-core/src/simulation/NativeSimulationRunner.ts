@@ -10,6 +10,19 @@ import type { GameDefinition, SimulationResult } from '../lua/types';
 
 // ─── Types ──────────────────────────────────────────────
 
+export type NativeRNGKind = 'provably-fair' | 'fast';
+
+/**
+ * Replay mode parameters. Forces single-worker deterministic execution over a
+ * specific (server_seed, client_seed, nonce-start) triple — used to reproduce a
+ * production round captured in `provably_fair_rounds`.
+ */
+export interface NativeReplayParams {
+  serverSeed: string;
+  clientSeed: string;
+  nonceStart: number;
+}
+
 export interface NativeSimulationConfig {
   /** Path to native simulation binary */
   binaryPath: string;
@@ -25,6 +38,20 @@ export interface NativeSimulationConfig {
   action?: string;
   /** Action params (buy_bonus, ante_bet, etc.) */
   params?: Record<string, unknown>;
+  /**
+   * Hex-encoded master seed for reproducible runs. The binary derives per-worker
+   * server_seeds via sha256(seed || ":" || worker_idx). When omitted, the binary
+   * generates one and returns it on the result so the run can be reproduced via
+   * `seed: result.masterSeed`. Ignored when `rng === 'fast'`.
+   */
+  seed?: string;
+  /**
+   * RNG backend: `'provably-fair'` (default, matches production) or `'fast'`
+   * (math/rand PCG — local iteration only, do NOT publish those RTP numbers).
+   */
+  rng?: NativeRNGKind;
+  /** Replay mode: requires `rng: 'provably-fair'` (or default). */
+  replay?: NativeReplayParams;
   /** Progress callback */
   onProgress?: (completed: number, total: number) => void;
 }
@@ -55,6 +82,18 @@ export interface NativeSimulationResult extends SimulationResult {
   perStage?: Record<string, StageStats>;
   /** Win distribution histogram */
   winDistribution?: DistributionBucket[];
+  /** RNG backend that produced these numbers. */
+  rngKind?: NativeRNGKind;
+  /**
+   * Hex master seed that drove worker-seed derivation. Always set for
+   * `provably-fair` runs (supplied or auto-generated). Pass back via `seed`
+   * to reproduce the run bit-for-bit.
+   */
+  masterSeed?: string;
+  /** Per-worker server_seed sequence (lets support reproduce any individual spin). */
+  workerSeeds?: string[];
+  /** Echo of replay params when the run was in replay mode. */
+  replay?: NativeReplayParams;
 }
 
 // ─── Go JSON output shape (snake_case) ──────────────────
@@ -88,6 +127,14 @@ interface GoSimulationOutput {
     count: number;
     pct: number;
   }>;
+  rng_kind?: NativeRNGKind;
+  master_seed?: string;
+  worker_seeds?: string[];
+  replay?: {
+    server_seed: string;
+    client_seed: string;
+    nonce_start: number;
+  };
 }
 
 // ─── Runner ─────────────────────────────────────────────
@@ -100,7 +147,12 @@ export class NativeSimulationRunner {
   }
 
   async run(): Promise<NativeSimulationResult> {
-    const { binaryPath, script, gameDefinition, iterations, bet, action, params } = this.config;
+    const { binaryPath, script, gameDefinition, iterations, bet, action, params, seed, rng, replay } = this.config;
+
+    if (replay && rng && rng !== 'provably-fair') {
+      throw new Error(`Replay mode requires rng="provably-fair" (got rng="${rng}")`);
+    }
+
     const id = randomBytes(8).toString('hex');
     const tmpDir = tmpdir();
     const luaPath = join(tmpDir, `sim-${id}.lua`);
@@ -125,6 +177,19 @@ export class NativeSimulationRunner {
       }
       if (params && Object.keys(params).length > 0) {
         args.push('-params', JSON.stringify(params));
+      }
+      if (rng) {
+        args.push('-rng', rng);
+      }
+      if (seed) {
+        args.push('-seed', seed);
+      }
+      if (replay) {
+        args.push(
+          '-replay-server-seed', replay.serverSeed,
+          '-replay-client-seed', replay.clientSeed,
+          '-replay-nonce-start', String(replay.nonceStart),
+        );
       }
 
       // Execute binary
@@ -211,6 +276,16 @@ function mapGoResult(json: GoSimulationOutput): NativeSimulationResult {
     workersUsed: json.workers_used,
     perStage,
     winDistribution: json.win_distribution,
+    rngKind: json.rng_kind,
+    masterSeed: json.master_seed,
+    workerSeeds: json.worker_seeds,
+    replay: json.replay
+      ? {
+          serverSeed: json.replay.server_seed,
+          clientSeed: json.replay.client_seed,
+          nonceStart: json.replay.nonce_start,
+        }
+      : undefined,
     _raw: {
       totalWagered: json.total_bet,
       totalWon: json.total_win,
@@ -310,6 +385,17 @@ export function formatNativeResult(result: NativeSimulationResult): string {
   }
   if (result.workersUsed) {
     lines.push(`Workers: ${result.workersUsed}`);
+  }
+  if (result.rngKind) {
+    lines.push(`RNG: ${result.rngKind}`);
+  }
+  if (result.masterSeed) {
+    lines.push(`Master seed: ${result.masterSeed}  (pass --seed=${result.masterSeed} to reproduce)`);
+  }
+  if (result.replay) {
+    lines.push(
+      `Replay: server_seed=${result.replay.serverSeed} client_seed=${result.replay.clientSeed} nonce_start=${result.replay.nonceStart}`,
+    );
   }
 
   lines.push(

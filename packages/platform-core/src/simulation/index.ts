@@ -14,6 +14,8 @@ export {
 export type {
   NativeSimulationConfig,
   NativeSimulationResult,
+  NativeRNGKind,
+  NativeReplayParams,
   StageStats,
   DistributionBucket,
 } from './NativeSimulationRunner';

@@ -358,12 +358,37 @@ npx platform-core-simulate --action buy_bonus
 # Ante bet — also a regular action in v5
 npx platform-core-simulate --action ante_spin
 
-# Custom: 5M iterations, fixed seed, custom config path
-npx platform-core-simulate --iterations 5000000 --bet 1 --seed 42 --config ./dev.config.ts
+# Custom: 5M iterations, custom config path
+npx platform-core-simulate --iterations 5000000 --bet 1 --config ./dev.config.ts
 
 # Force the JS runner (skip native binary)
 npx platform-core-simulate --js
 ```
+
+### Reproducibility: seeds, RNG backend, and replay
+
+The native binary supports the same provably-fair seeding contract as the casino platform's `cmd/simulation` tool. Pass `--seed=<hex>` to reproduce a previous run bit-for-bit; if you omit it, the binary generates one and reports it in the output (`Master seed: …`) so you can rerun the exact distribution later.
+
+```bash
+# Reproducible run — supply the master seed yourself
+npx platform-core-simulate \
+  --iterations 1000000 \
+  --seed 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+
+# Fast PCG RNG — ~50× faster but diverges from production. Local iteration only;
+# do NOT publish RTP numbers from --rng=fast.
+npx platform-core-simulate --rng fast
+
+# Replay a single round captured in `provably_fair_rounds`. Forces single-worker
+# deterministic execution. All three flags are required and require provably-fair RNG.
+npx platform-core-simulate \
+  --iterations 1 \
+  --replay-server-seed <hex> \
+  --replay-client-seed <client_seed> \
+  --replay-nonce-start 42
+```
+
+The result echoes `masterSeed`, `rngKind`, `workerSeeds[]` (per-worker server_seed sequence), and `replay` when in replay mode — all also surface on `NativeSimulationResult` for programmatic use. Hex seeds only apply to the native binary; the JS fallback uses an integer RNG seed (decimal `--seed=42`) and ignores hex strings with a warning.
 
 Output matches the platform's server-side simulation format. A native Go binary is downloaded for your OS via postinstall (`packages/platform-core/bin/simulate-*`) for high-throughput runs; if it isn't available, the JS / worker-thread runner is used as a fallback.
 
@@ -379,6 +404,17 @@ const runner = new ParallelSimulationRunner({
 });
 const result = await runner.run();
 console.log(formatSimulationResult(result));
+
+// Native runner with the full provably-fair contract:
+const native = new NativeSimulationRunner({
+  binaryPath, script, gameDefinition,
+  iterations: 1_000_000, bet: 1,
+  rng: 'provably-fair',                // default; use 'fast' for local iteration only
+  seed: '00112233...eeff',             // hex master seed; omit to auto-generate
+  // replay: { serverSeed, clientSeed, nonceStart },  // single-round reproduction
+});
+const r = await native.run();
+console.log(`Reproduce with seed=${r.masterSeed}, RTP=${r.totalRtp.toFixed(4)}%`);
 ```
 
 ---

@@ -25,18 +25,61 @@ function parseArgs(argv: string[]): Record<string, string> {
   return args;
 }
 
+type Rng = 'provably-fair' | 'fast';
+
+function parseRng(value: string | undefined): Rng | undefined {
+  if (!value) return undefined;
+  if (value === 'provably-fair' || value === 'fast') return value;
+  console.error(`Invalid --rng value: "${value}". Expected "provably-fair" or "fast".`);
+  process.exit(1);
+}
+
+/**
+ * The native binary takes a hex string seed; the JS RNG (fengari) takes a
+ * 32-bit integer. Accept the same `--seed` flag for both: pass plain decimal
+ * integers to the JS path, otherwise warn that the JS path doesn't honor hex
+ * seeds and fall back to a non-deterministic run.
+ */
+function parseJsSeed(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return parseInt(value, 10);
+  console.warn(`--seed=${value} is a hex/string seed; only the native binary honors hex seeds. JS run will be non-deterministic.`);
+  return undefined;
+}
+
 async function main() {
   const args = parseArgs(process.argv);
 
   const configPath = resolve(process.cwd(), args.config ?? './dev.config.ts');
   const iterations = parseInt(args.iterations ?? '1000000', 10);
   const bet = parseFloat(args.bet ?? '1');
-  const seed = args.seed ? parseInt(args.seed, 10) : undefined;
+  const seed = args.seed; // hex string for native; the JS path also accepts numeric
   const action = args.action ?? 'spin';
   const params = args.params ? JSON.parse(args.params) : undefined;
   const workers = args.workers ? parseInt(args.workers, 10) : cpus().length;
   const useNative = args.native === 'true';
   const useJs = args.js === 'true';
+  const rng = parseRng(args.rng);
+
+  const replayServerSeed = args['replay-server-seed'];
+  const replayClientSeed = args['replay-client-seed'];
+  const replayNonceStart = args['replay-nonce-start'];
+  const replayFieldCount = [replayServerSeed, replayClientSeed, replayNonceStart].filter(Boolean).length;
+  if (replayFieldCount !== 0 && replayFieldCount !== 3) {
+    console.error('Replay mode requires all three flags: --replay-server-seed, --replay-client-seed, --replay-nonce-start');
+    process.exit(1);
+  }
+  const replay = replayFieldCount === 3
+    ? {
+        serverSeed: replayServerSeed!,
+        clientSeed: replayClientSeed!,
+        nonceStart: parseInt(replayNonceStart!, 10),
+      }
+    : undefined;
+  if (replay && rng && rng !== 'provably-fair') {
+    console.error('Replay mode requires --rng=provably-fair');
+    process.exit(1);
+  }
 
   // Load dev config
   let config: any;
@@ -91,6 +134,9 @@ async function main() {
       bet,
       action,
       params,
+      seed,
+      rng,
+      replay,
     });
     const result = await runner.run();
     console.log(formatNativeResult(result));
@@ -98,6 +144,10 @@ async function main() {
   }
 
   // ─── JS simulation path ─────────────────────────────────
+  if (rng || replay) {
+    console.warn('--rng / --replay flags are only honored by the native binary; ignored in JS mode.');
+  }
+  const jsSeed = parseJsSeed(seed);
   const useParallel = workers > 1;
   console.log(`Starting simulation for ${gameId} (${iterations.toLocaleString()} iterations, action: ${action}, workers: ${useParallel ? workers : 1})...`);
 
@@ -109,7 +159,7 @@ async function main() {
       gameDefinition: config.gameDefinition,
       iterations,
       bet,
-      seed,
+      seed: jsSeed,
       action,
       params,
       workerCount: workers,
@@ -122,7 +172,7 @@ async function main() {
       gameDefinition: config.gameDefinition,
       iterations,
       bet,
-      seed,
+      seed: jsSeed,
       action,
       params,
       onProgress,
