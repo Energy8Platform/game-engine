@@ -77,6 +77,7 @@
     "eslint": "^9.0.0",
     "fengari": "^0.1.5",
     "fengari-web": "^0.1.4",
+    "jsdom": "^25.0.1",
     "rollup": "^4.24.0",
     "rollup-plugin-dts": "^6.1.0",
     "tslib": "^2.8.0",
