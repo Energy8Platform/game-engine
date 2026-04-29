@@ -211,10 +211,27 @@ export function waitCSSPreloaderTap(): Promise<void> {
   if (!state.tapToStart) return Promise.resolve();
   if (state.tapPromise) return state.tapPromise;
 
-  // Active path is implemented in Task 5. Until then, fall through to a
-  // resolved Promise so the package stays usable; Task 5's failing
-  // tests will drive the real listener wiring.
-  return Promise.resolve();
+  if (state.textEl) {
+    state.textEl.textContent = state.tapToStartText;
+    state.textEl.classList.add('ge-svg-pulse');
+  }
+  state.overlay.style.cursor = 'pointer';
+
+  state.tapState = 'waiting';
+  state.tapPromise = new Promise<void>((resolve) => {
+    state!.tapResolve = resolve;
+    const handler = (_e: Event) => {
+      if (!state) return;
+      state.overlay.removeEventListener('pointerdown', handler);
+      state.tapHandler = null;
+      state.tapState = 'resolved';
+      resolve();
+    };
+    state!.tapHandler = handler;
+    state!.overlay.addEventListener('pointerdown', handler);
+  });
+
+  return state.tapPromise;
 }
 
 export function removeCSSPreloader(container: HTMLElement): void {

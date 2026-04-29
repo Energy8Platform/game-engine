@@ -132,3 +132,65 @@ describe('waitCSSPreloaderTap (skip path)', () => {
     await expect(waitCSSPreloaderTap()).resolves.toBeUndefined();
   });
 });
+
+describe('waitCSSPreloaderTap (active path)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    await removeCSSPreloader(container);
+    container.remove();
+  });
+
+  it('swaps text to default "TAP TO START" while waiting', () => {
+    createCSSPreloader(container);
+    void waitCSSPreloaderTap();
+    const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
+    expect(text.textContent).toBe('TAP TO START');
+    expect(text.classList.contains('ge-svg-pulse')).toBe(true);
+  });
+
+  it('honors a custom tapToStartText', () => {
+    createCSSPreloader(container, { tapToStartText: 'PLAY' });
+    void waitCSSPreloaderTap();
+    const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
+    expect(text.textContent).toBe('PLAY');
+  });
+
+  it('sets cursor: pointer on the overlay while waiting', () => {
+    createCSSPreloader(container);
+    void waitCSSPreloaderTap();
+    const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
+    expect(overlay.style.cursor).toBe('pointer');
+  });
+
+  it('resolves when a pointerdown is dispatched on the overlay', async () => {
+    createCSSPreloader(container);
+    const tap = waitCSSPreloaderTap();
+
+    const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
+    overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+    await expect(tap).resolves.toBeUndefined();
+  });
+
+  it('returns the same Promise on subsequent calls (memoized)', () => {
+    createCSSPreloader(container);
+    const a = waitCSSPreloaderTap();
+    const b = waitCSSPreloaderTap();
+    expect(a).toBe(b);
+  });
+
+  it('ignores setCSSPreloaderProgress while waiting (text stays as tap label)', () => {
+    createCSSPreloader(container, { showPercentage: true });
+    setCSSPreloaderProgress(0.3);
+    void waitCSSPreloaderTap();
+    setCSSPreloaderProgress(0.9);
+    const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
+    expect(text.textContent).toBe('TAP TO START');
+  });
+});
