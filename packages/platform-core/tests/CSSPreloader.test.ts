@@ -206,3 +206,52 @@ describe('waitCSSPreloaderTap (active path)', () => {
     expect(text.textContent).toBe('TAP TO START');
   });
 });
+
+describe('removeCSSPreloader', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it('returns a Promise that resolves after the overlay is removed', async () => {
+    createCSSPreloader(container);
+    const result = removeCSSPreloader(container);
+    expect(result).toBeInstanceOf(Promise);
+
+    // jsdom does not fire transitionend automatically — use the
+    // safety-timeout path. The Promise must still resolve.
+    await result;
+
+    expect(document.getElementById('__ge-css-preloader__')).toBeNull();
+  });
+
+  it('is idempotent — second call resolves without throwing', async () => {
+    createCSSPreloader(container);
+    await removeCSSPreloader(container);
+    await expect(removeCSSPreloader(container)).resolves.toBeUndefined();
+  });
+
+  it('resolves a pending waitCSSPreloaderTap before fading', async () => {
+    createCSSPreloader(container);
+    const tap = waitCSSPreloaderTap();
+    const removed = removeCSSPreloader(container);
+
+    // The tap Promise resolves first (synchronously inside removeCSSPreloader),
+    // then the fade-out completes and removed resolves.
+    await expect(tap).resolves.toBeUndefined();
+    await expect(removed).resolves.toBeUndefined();
+    expect(document.getElementById('__ge-css-preloader__')).toBeNull();
+  });
+
+  it('setCSSPreloaderProgress after remove is a silent no-op', async () => {
+    createCSSPreloader(container);
+    await removeCSSPreloader(container);
+    expect(() => setCSSPreloaderProgress(0.5)).not.toThrow();
+  });
+});

@@ -4,6 +4,7 @@ import { buildLogoSVG, LOADER_BAR_MAX_WIDTH } from './logo';
 const PRELOADER_ID = '__ge-css-preloader__';
 const RECT_ID = 'ge-pl-loader-rect';
 const TEXT_ID = 'ge-pl-loader-text';
+const REMOVE_FADE_TIMEOUT_MS = 600;
 
 const LOGO_SVG = buildLogoSVG({
   idPrefix: 'pl',
@@ -234,23 +235,36 @@ export function waitCSSPreloaderTap(): Promise<void> {
   return state.tapPromise;
 }
 
-export function removeCSSPreloader(container: HTMLElement): void {
-  const el = document.getElementById(PRELOADER_ID);
-  if (!el) {
-    state = null;
-    return;
+export function removeCSSPreloader(_container: HTMLElement): Promise<void> {
+  if (!state || state.removed) return Promise.resolve();
+
+  // Detach the pending pointer listener (if any) and resolve a pending tap.
+  if (state.tapHandler) {
+    state.overlay.removeEventListener('pointerdown', state.tapHandler);
+    state.tapHandler = null;
+  }
+  if (state.tapState === 'waiting' && state.tapResolve) {
+    state.tapState = 'resolved';
+    state.tapResolve();
+    state.tapResolve = null;
   }
 
-  el.classList.add('ge-preloader-hidden');
+  state.removed = true;
+  const { overlay, styleEl } = state;
+  overlay.classList.add('ge-preloader-hidden');
 
-  el.addEventListener('transitionend', () => {
-    el.remove();
-    const styles = container.querySelectorAll('style');
-    for (const style of styles) {
-      if (style.textContent?.includes(PRELOADER_ID)) {
-        style.remove();
-      }
-    }
-    state = null;
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      overlay.remove();
+      styleEl.remove();
+      state = null;
+      resolve();
+    };
+
+    overlay.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, REMOVE_FADE_TIMEOUT_MS);
   });
 }
