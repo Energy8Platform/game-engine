@@ -226,6 +226,7 @@ export function waitCSSPreloaderTap(): Promise<void> {
       state.overlay.removeEventListener('pointerdown', handler);
       state.tapHandler = null;
       state.tapState = 'resolved';
+      state.tapResolve = null;
       resolve();
     };
     state!.tapHandler = handler;
