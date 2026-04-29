@@ -193,4 +193,16 @@ describe('waitCSSPreloaderTap (active path)', () => {
     const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
     expect(text.textContent).toBe('TAP TO START');
   });
+
+  it('ignores setCSSPreloaderProgress after tap resolved (text stays as tap label)', async () => {
+    createCSSPreloader(container, { showPercentage: true });
+    const tap = waitCSSPreloaderTap();
+    const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
+    overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await tap;
+
+    setCSSPreloaderProgress(0.9);
+    const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
+    expect(text.textContent).toBe('TAP TO START');
+  });
 });
