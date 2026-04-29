@@ -4,6 +4,8 @@
 export { LoadingScene } from './LoadingScene';
 export {
   createCSSPreloader,
+  setCSSPreloaderProgress,
+  waitCSSPreloaderTap,
   removeCSSPreloader,
   buildLogoSVG,
   LOADER_BAR_MAX_WIDTH,

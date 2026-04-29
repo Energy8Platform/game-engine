@@ -55,9 +55,15 @@ export interface LoadingScreenConfig {
   showPercentage?: boolean;
   /** Custom progress text formatter */
   progressTextFormatter?: (progress: number) => string;
-  /** Show "Tap to start" after loading (needed for mobile audio unlock) */
+  /**
+   * If true (default), `waitCSSPreloaderTap()` blocks until the user
+   * clicks the preloader. Set to `false` to make `waitCSSPreloaderTap()`
+   * resolve immediately (skip-flag for games that don't want a manual
+   * gate). Useful for mobile audio unlock — the click satisfies the
+   * browser's user-gesture requirement.
+   */
   tapToStart?: boolean;
-  /** "Tap to start" label text */
+  /** Label shown in the SVG text element while waiting for tap. Default: 'TAP TO START'. */
   tapToStartText?: string;
   /** Minimum display time in ms (so the user sees the brand, even if loading is fast) */
   minDisplayTime?: number;

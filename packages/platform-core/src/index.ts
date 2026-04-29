@@ -43,6 +43,8 @@ export type { DevBridgeConfig } from './dev-bridge';
 // brand consistent across games on the platform.
 export {
   createCSSPreloader,
+  setCSSPreloaderProgress,
+  waitCSSPreloaderTap,
   removeCSSPreloader,
   buildLogoSVG,
   LOADER_BAR_MAX_WIDTH,
