@@ -11,7 +11,9 @@ const LOGO_SVG = buildLogoSVG({
   idPrefix: 'pl',
   svgClass: 'ge-logo-svg',
   clipRectClass: 'ge-clip-rect',
+  clipRectId: 'ge-pl-loader-rect',
   textClass: 'ge-preloader-svg-text',
+  textId: 'ge-pl-loader-text',
 });
 
 /**
@@ -98,6 +100,22 @@ export function createCSSPreloader(
     @keyframes ge-pulse {
       0%, 100% { opacity: 0.4; }
       50% { opacity: 1; }
+    }
+
+    /* Stop shimmer once JS-driven progress takes over. */
+    .ge-clip-rect.driven {
+      animation: none;
+    }
+
+    /* Tap-to-start CTA pulse. Compound selector outweighs the ambient
+       .ge-preloader-svg-text rule, swapping the animation cleanly. */
+    .ge-preloader-svg-text.ge-svg-pulse {
+      animation: ge-tap-pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes ge-tap-pulse {
+      0%, 100% { opacity: 0.5; }
+      50%      { opacity: 1; }
     }
   `;
 
