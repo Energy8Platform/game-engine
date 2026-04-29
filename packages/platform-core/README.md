@@ -110,8 +110,9 @@ import {
   // DevBridge mock host
   DevBridge, type DevBridgeConfig,
 
-  // Branded loading frame
-  createCSSPreloader, removeCSSPreloader, buildLogoSVG, LOADER_BAR_MAX_WIDTH,
+  // Branded loading frame (lifecycle API)
+  createCSSPreloader, setCSSPreloaderProgress, waitCSSPreloaderTap, removeCSSPreloader,
+  buildLogoSVG, LOADER_BAR_MAX_WIDTH,
 
   // Internal utility
   EventEmitter,
@@ -424,19 +425,47 @@ console.log(`Reproduce with seed=${r.masterSeed}, RTP=${r.totalRtp.toFixed(4)}%`
 Every Energy8 game shows the same brand frame while it boots. The CSS-only preloader lives here so any renderer hosts the same frame without needing to render anything itself.
 
 ```typescript
-import { createCSSPreloader, removeCSSPreloader } from '@energy8platform/platform-core/loading';
+import {
+  createCSSPreloader,
+  setCSSPreloaderProgress,
+  waitCSSPreloaderTap,
+  removeCSSPreloader,
+} from '@energy8platform/platform-core/loading';
 
 createCSSPreloader(document.getElementById('app')!, {
   backgroundColor: 0x0a0a1a,
   backgroundGradient: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 100%)',
-  cssPreloaderHTML: '<custom HTML to override the default frame>',
+  showPercentage: true,        // SVG text becomes "42%" once you push progress
+  tapToStart: true,             // default — set false to skip the tap gate
+  tapToStartText: 'PLAY',       // default 'TAP TO START'
 });
 
-// later, when your renderer has mounted and assets are loaded:
-removeCSSPreloader(container);
+// Drive progress while assets load — the bar switches from CSS-shimmer to
+// JS-driven on the first call.
+for await (const p of myAssetLoader.load()) {
+  setCSSPreloaderProgress(p);  // p ∈ [0, 1] — clamped, NaN treated as 0
+}
+
+// Optional tap-to-start gate (useful for mobile audio unlock —
+// the click satisfies the browser's user-gesture requirement).
+await waitCSSPreloaderTap();   // resolves immediately if tapToStart: false
+
+// Fade out and clean up. Returns a Promise that resolves after the
+// 0.4s CSS fade completes (or after a 600ms safety timeout if
+// `transitionend` doesn't fire — e.g. in jsdom).
+await removeCSSPreloader(container);
 ```
 
-The animated loader bar inside the SVG is purely CSS keyframes, so it works in offline / first-paint conditions before any JS module finishes parsing.
+### Lifecycle contract (one preloader per page)
+
+- **`createCSSPreloader(container, config?)`** — mounts the overlay. Idempotent: a second call while a preloader exists is a no-op.
+- **`setCSSPreloaderProgress(p)`** — silent no-op if called before `create` or after `remove`. Clamps `p` to `[0, 1]`; `NaN`/`±Infinity` become `0`. The first call switches the loader bar from CSS shimmer to JS-driven width. If `showPercentage: true`, the SVG text updates to `${Math.round(p * 100)}%`. Calls during `waitCSSPreloaderTap` are ignored — the text reads `'TAP TO START'` and we don't flash percentages over it.
+- **`waitCSSPreloaderTap()`** — returns `Promise<void>`. Throws if called before `createCSSPreloader` (programmer error). Resolves immediately if `tapToStart: false`. Otherwise: swaps the SVG text to `tapToStartText`, adds a CSS pulse class, sets `cursor: pointer`, attaches a `pointerdown` listener, and resolves on first tap. Subsequent calls return the same memoized Promise.
+- **`removeCSSPreloader(container)`** — returns `Promise<void>`. Idempotent. If a `waitCSSPreloaderTap` Promise is still pending, it resolves first; then the overlay fades out and the Promise resolves. Was `void` in earlier versions; the wider return type is backwards-compatible (callers who don't `await` keep working).
+
+The animated shimmer inside the SVG is pure CSS keyframes, so it appears in offline / first-paint conditions before any JS module finishes parsing. Once you start reporting real progress, JS takes over.
+
+> Mobile audio unlock: pair `waitCSSPreloaderTap()` with your audio system's resume/unlock call inside the same await chain. The user's tap is a valid gesture that satisfies iOS Safari and Chrome on Android.
 
 ---
 
@@ -496,12 +525,14 @@ A typical Phaser / Three / custom-engine bootstrap looks like:
 import {
   createPlatformSession,
   createCSSPreloader,
+  setCSSPreloaderProgress,
+  waitCSSPreloaderTap,
   removeCSSPreloader,
   type AssetManifest,
 } from '@energy8platform/platform-core';
 
 const container = document.getElementById('app')!;
-createCSSPreloader(container);
+createCSSPreloader(container, { showPercentage: true, tapToStart: true });
 
 const session = await createPlatformSession({
   dev: { luaScript, gameDefinition, balance: 10000, currency: 'EUR' },
@@ -513,13 +544,18 @@ const { assetsUrl } = session.initData ?? { assetsUrl: '/assets/' };
 
 // 2. Boot YOUR renderer however it likes:
 const game = new Phaser.Game({ /* … */ });
-// 3. Load assets through Phaser's loader, treating `manifest` as
-//    the source of truth for what's needed.
-await loadBundles(game.loader, manifest, assetsUrl);
 
-removeCSSPreloader(container);
+// 3. Load assets through your renderer's loader, treating `manifest`
+//    as the source of truth, and pipe progress into the preloader.
+await loadBundles(game.loader, manifest, assetsUrl, (p) => {
+  setCSSPreloaderProgress(p);
+});
 
-// 4. Wire SDK events / play requests
+// 4. Wait for the user's tap (resolves immediately if tapToStart: false)
+await waitCSSPreloaderTap();
+await removeCSSPreloader(container);
+
+// 5. Wire SDK events / play requests
 session.on('balanceUpdate', ({ balance }) => game.events.emit('balance', balance));
 const result = await session.play({ action: 'spin', bet: 1 });
 ```
@@ -537,7 +573,7 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 | `@energy8platform/platform-core/simulation` | **Node-only.** `NativeSimulationRunner` (Go binary) and `ParallelSimulationRunner` (worker_threads). Don't import from a browser bundle — the main entry and `/lua` deliberately exclude these so they can't be tree-shake-leaked. |
 | `@energy8platform/platform-core/dev-bridge` | `DevBridge`, `DevBridgeConfig` |
 | `@energy8platform/platform-core/vite` | `devBridgePlugin`, `luaPlugin` |
-| `@energy8platform/platform-core/loading` | `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG`, `LOADER_BAR_MAX_WIDTH` |
+| `@energy8platform/platform-core/loading` | `createCSSPreloader`, `setCSSPreloaderProgress`, `waitCSSPreloaderTap`, `removeCSSPreloader`, `buildLogoSVG`, `LOADER_BAR_MAX_WIDTH` |
 
 The sub-paths exist for tree-shaking — pulling only `/lua` doesn't drag in DevBridge or vite types. The main entry is convenient for app-level code where size hardly matters.
 
