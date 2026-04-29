@@ -201,6 +201,22 @@ export function setCSSPreloaderProgress(progress: number): void {
   }
 }
 
+export function waitCSSPreloaderTap(): Promise<void> {
+  if (!state) {
+    throw new Error(
+      'CSS preloader not initialized — call createCSSPreloader first',
+    );
+  }
+  if (state.removed) return Promise.resolve();
+  if (!state.tapToStart) return Promise.resolve();
+  if (state.tapPromise) return state.tapPromise;
+
+  // Active path is implemented in Task 5. Until then, fall through to a
+  // resolved Promise so the package stays usable; Task 5's failing
+  // tests will drive the real listener wiring.
+  return Promise.resolve();
+}
+
 export function removeCSSPreloader(container: HTMLElement): void {
   const el = document.getElementById(PRELOADER_ID);
   if (!el) {

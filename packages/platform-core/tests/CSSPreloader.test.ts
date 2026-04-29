@@ -5,6 +5,7 @@ import {
   createCSSPreloader,
   removeCSSPreloader,
   setCSSPreloaderProgress,
+  waitCSSPreloaderTap,
 } from '../src/loading';
 
 // This describe block MUST come first in the file so that module-scoped `state`
@@ -12,6 +13,14 @@ import {
 describe('setCSSPreloaderProgress — no-op pre-create', () => {
   it('is a silent no-op when called before createCSSPreloader', () => {
     expect(() => setCSSPreloaderProgress(0.5)).not.toThrow();
+  });
+});
+
+describe('waitCSSPreloaderTap (no-op pre-create)', () => {
+  it('throws when called before createCSSPreloader', () => {
+    expect(() => waitCSSPreloaderTap()).toThrow(
+      /CSS preloader not initialized/,
+    );
   });
 });
 
@@ -102,5 +111,24 @@ describe('setCSSPreloaderProgress', () => {
     setCSSPreloaderProgress(Number.NaN);
     const rect = container.querySelector('#ge-pl-loader-rect') as SVGRectElement;
     expect(rect.getAttribute('width')).toBe('0');
+  });
+});
+
+describe('waitCSSPreloaderTap (skip path)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    await removeCSSPreloader(container);
+    container.remove();
+  });
+
+  it('resolves immediately when config.tapToStart === false', async () => {
+    createCSSPreloader(container, { tapToStart: false });
+    await expect(waitCSSPreloaderTap()).resolves.toBeUndefined();
   });
 });
