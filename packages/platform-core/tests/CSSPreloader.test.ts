@@ -7,6 +7,14 @@ import {
   setCSSPreloaderProgress,
 } from '../src/loading';
 
+// This describe block MUST come first in the file so that module-scoped `state`
+// is genuinely null — no prior test has called createCSSPreloader yet.
+describe('setCSSPreloaderProgress — no-op pre-create', () => {
+  it('is a silent no-op when called before createCSSPreloader', () => {
+    expect(() => setCSSPreloaderProgress(0.5)).not.toThrow();
+  });
+});
+
 describe('CSSPreloader smoke', () => {
   let container: HTMLElement;
 
@@ -94,9 +102,5 @@ describe('setCSSPreloaderProgress', () => {
     setCSSPreloaderProgress(Number.NaN);
     const rect = container.querySelector('#ge-pl-loader-rect') as SVGRectElement;
     expect(rect.getAttribute('width')).toBe('0');
-  });
-
-  it('is a silent no-op when called before createCSSPreloader', () => {
-    expect(() => setCSSPreloaderProgress(0.5)).not.toThrow();
   });
 });

@@ -184,7 +184,7 @@ export function createCSSPreloader(
 
 export function setCSSPreloaderProgress(progress: number): void {
   if (!state || state.removed) return;
-  if (state.tapState === 'waiting' || state.tapState === 'resolved') return;
+  if (state.tapState === 'waiting') return;
   if (!state.rectEl) return;
 
   const p = clampProgress(progress);
