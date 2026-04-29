@@ -1,27 +1,43 @@
 import type { LoadingScreenConfig } from '../types';
-import { buildLogoSVG } from './logo';
+import { buildLogoSVG, LOADER_BAR_MAX_WIDTH } from './logo';
 
 const PRELOADER_ID = '__ge-css-preloader__';
+const RECT_ID = 'ge-pl-loader-rect';
+const TEXT_ID = 'ge-pl-loader-text';
 
-/**
- * Inline SVG logo with animated loader bar.
- * The `#loader` path acts as the progress fill — animated via clipPath.
- */
 const LOGO_SVG = buildLogoSVG({
   idPrefix: 'pl',
   svgClass: 'ge-logo-svg',
   clipRectClass: 'ge-clip-rect',
-  clipRectId: 'ge-pl-loader-rect',
+  clipRectId: RECT_ID,
   textClass: 'ge-preloader-svg-text',
-  textId: 'ge-pl-loader-text',
+  textId: TEXT_ID,
 });
 
-/**
- * Creates a lightweight CSS-only preloader that appears instantly,
- * BEFORE PixiJS/WebGL is initialized.
- *
- * Displays the Energy8 logo SVG with an animated loader bar.
- */
+interface PreloaderState {
+  container: HTMLElement;
+  overlay: HTMLDivElement;
+  styleEl: HTMLStyleElement;
+  rectEl: SVGRectElement;
+  textEl: SVGTextElement;
+  showPercentage: boolean;
+  tapToStart: boolean;
+  tapToStartText: string;
+  driven: boolean;
+  tapState: 'idle' | 'waiting' | 'resolved';
+  tapPromise: Promise<void> | null;
+  tapResolve: (() => void) | null;
+  tapHandler: ((e: Event) => void) | null;
+  removed: boolean;
+}
+
+let state: PreloaderState | null = null;
+
+function clampProgress(p: number): number {
+  if (!Number.isFinite(p)) return 0;
+  return Math.max(0, Math.min(1, p));
+}
+
 export function createCSSPreloader(
   container: HTMLElement,
   config?: LoadingScreenConfig,
@@ -35,20 +51,21 @@ export function createCSSPreloader(
         ? `#${config.backgroundColor.toString(16).padStart(6, '0')}`
         : '#0a0a1a';
 
-  const bgGradient = config?.backgroundGradient ?? `linear-gradient(135deg, ${bgColor} 0%, #1a1a3e 100%)`;
+  const bgGradient =
+    config?.backgroundGradient ?? `linear-gradient(135deg, ${bgColor} 0%, #1a1a3e 100%)`;
 
   const customHTML = config?.cssPreloaderHTML ?? '';
 
-  const el = document.createElement('div');
-  el.id = PRELOADER_ID;
-  el.innerHTML = customHTML || `
+  const overlay = document.createElement('div');
+  overlay.id = PRELOADER_ID;
+  overlay.innerHTML = customHTML || `
     <div class="ge-preloader-content">
       ${LOGO_SVG}
     </div>
   `;
 
-  const style = document.createElement('style');
-  style.textContent = `
+  const styleEl = document.createElement('style');
+  styleEl.textContent = `
     #${PRELOADER_ID} {
       position: absolute;
       top: 0; left: 0;
@@ -120,28 +137,87 @@ export function createCSSPreloader(
   `;
 
   container.style.position = container.style.position || 'relative';
-  container.appendChild(style);
-  container.appendChild(el);
+  container.appendChild(styleEl);
+  container.appendChild(overlay);
+
+  const rectEl = overlay.querySelector(`#${RECT_ID}`) as SVGRectElement | null;
+  const textEl = overlay.querySelector(`#${TEXT_ID}`) as SVGTextElement | null;
+  if (!rectEl || !textEl) {
+    // Custom HTML mode — no logo SVG, lifecycle API becomes mostly inert.
+    // We still record state so removeCSSPreloader works.
+    state = {
+      container,
+      overlay,
+      styleEl,
+      rectEl: null as unknown as SVGRectElement,
+      textEl: null as unknown as SVGTextElement,
+      showPercentage: false,
+      tapToStart: config?.tapToStart !== false,
+      tapToStartText: config?.tapToStartText ?? 'TAP TO START',
+      driven: false,
+      tapState: 'idle',
+      tapPromise: null,
+      tapResolve: null,
+      tapHandler: null,
+      removed: false,
+    };
+    return;
+  }
+
+  state = {
+    container,
+    overlay,
+    styleEl,
+    rectEl,
+    textEl,
+    showPercentage: config?.showPercentage === true,
+    tapToStart: config?.tapToStart !== false,
+    tapToStartText: config?.tapToStartText ?? 'TAP TO START',
+    driven: false,
+    tapState: 'idle',
+    tapPromise: null,
+    tapResolve: null,
+    tapHandler: null,
+    removed: false,
+  };
 }
 
-/**
- * Remove the CSS preloader with a smooth fade-out transition.
- */
+export function setCSSPreloaderProgress(progress: number): void {
+  if (!state || state.removed) return;
+  if (state.tapState === 'waiting' || state.tapState === 'resolved') return;
+  if (!state.rectEl) return;
+
+  const p = clampProgress(progress);
+
+  if (!state.driven) {
+    state.rectEl.classList.add('driven');
+    state.driven = true;
+  }
+
+  state.rectEl.setAttribute('width', String(p * LOADER_BAR_MAX_WIDTH));
+
+  if (state.showPercentage && state.textEl) {
+    state.textEl.textContent = `${Math.round(p * 100)}%`;
+  }
+}
+
 export function removeCSSPreloader(container: HTMLElement): void {
   const el = document.getElementById(PRELOADER_ID);
-  if (!el) return;
+  if (!el) {
+    state = null;
+    return;
+  }
 
   el.classList.add('ge-preloader-hidden');
 
-  // Remove after transition
   el.addEventListener('transitionend', () => {
     el.remove();
-    // Also remove the style element
     const styles = container.querySelectorAll('style');
     for (const style of styles) {
       if (style.textContent?.includes(PRELOADER_ID)) {
         style.remove();
       }
     }
+    state = null;
   });
 }
