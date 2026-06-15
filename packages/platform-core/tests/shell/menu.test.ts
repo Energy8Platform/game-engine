@@ -63,4 +63,25 @@ describe('Menu + Settings', () => {
     q(mount, '[data-ge="setting-quickspin"]')!.click();
     expect(spy).toHaveBeenCalledWith({ key: 'quickSpin', value: true });
   });
+
+  it('menu has a sound toggle that emits settingChange', () => {
+    const shell = createGameShell(cfg(mount));
+    const spy = vi.fn();
+    shell.on('settingChange', spy);
+    q(mount, '[data-ge="menu"]')!.click();
+    const sound = q(mount, '[data-ge="menu-sound"]') as HTMLButtonElement;
+    expect(sound).toBeTruthy();
+    sound.click();
+    // sound starts enabled (true) → first click mutes (false)
+    expect(spy).toHaveBeenCalledWith({ key: 'sound', value: false });
+  });
+
+  it('menu has a fullscreen entry that is clickable without throwing', () => {
+    const shell = createGameShell(cfg(mount));
+    q(mount, '[data-ge="menu"]')!.click();
+    const fs = q(mount, '[data-ge="menu-fullscreen"]') as HTMLButtonElement;
+    expect(fs).toBeTruthy();
+    // jsdom has no Fullscreen API; the handler must guard and not throw
+    expect(() => fs.click()).not.toThrow();
+  });
 });
