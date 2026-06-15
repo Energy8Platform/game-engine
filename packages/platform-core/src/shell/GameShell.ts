@@ -11,10 +11,10 @@ import { createInitialState } from './state';
 import { buildThemeVars } from './theme';
 import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
 import { renderBottomBar } from './components/BottomBar';
-import { openMenuModal } from './components/Menu';
 import { openSettingsModal } from './components/Settings';
 import { openGameInfoModal } from './components/GameInfo';
 import { openBuyBonusOverlay } from './components/BuyBonus';
+import { prefersReducedMotion } from './motion';
 
 const REMOVE_FADE_MS = 300;
 
@@ -26,6 +26,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private barHost = document.createElement('div');
   private modalHost = document.createElement('div');
   private destroyed = false;
+  layout: 'wide' | 'narrow' = 'wide';
+  private ro: ResizeObserver | null = null;
+  private prevBalance = 0;
+  private prevWin = 0;
 
   constructor(config: ShellConfig) {
     super();
@@ -44,13 +48,42 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.root.appendChild(this.barHost);
     this.modalHost.className = 'ge-shell-modalhost';
     this.root.appendChild(this.modalHost);
+    this.prevBalance = this.state.balance;
+    this.prevWin = this.state.win;
+    this.observeLayout();
     this.render();
   }
 
   render(): void {
     if (this.destroyed) return;
+    this.root.classList.toggle('ge-narrow', this.layout === 'narrow');
     this.barHost.innerHTML = '';
     this.barHost.appendChild(renderBottomBar(this));
+    this.animateMoney();
+  }
+
+  setLayout(layout: 'wide' | 'narrow'): void {
+    if (layout === this.layout) return;
+    this.layout = layout;
+    this.root.classList.toggle('ge-narrow', layout === 'narrow');
+    this.render();
+  }
+
+  private observeLayout(): void {
+    const RO = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (typeof RO !== 'function') return; // jsdom: stays 'wide'
+    this.ro = new RO((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      this.setLayout(w > 0 && w < 720 ? 'narrow' : 'wide');
+    });
+    this.ro.observe(this.root);
+  }
+
+  /** Post-render hook: tracks previous money values (count-up wired in a later task). */
+  private animateMoney(): void {
+    void prefersReducedMotion; // imported now; count-up animation wired later
+    this.prevBalance = this.state.balance;
+    this.prevWin = this.state.win;
   }
 
   setBalance(n: number): void { this.state.balance = n; this.render(); }
@@ -68,7 +101,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.modalHost.appendChild(el);
   }
 
-  openMenu(): void { this.emit('menuOpen'); this.showModal(openMenuModal(this)); }
+  openMenu(): void { this.emit('menuOpen'); this.openSettings(); }
   openSettings(): void { this.emit('settingsOpen'); this.showModal(openSettingsModal(this)); }
   openInfo(): void { this.emit('infoOpen'); this.showModal(openGameInfoModal(this)); }
   openBuyBonus(): void {
@@ -79,6 +112,8 @@ export class GameShell extends EventEmitter<ShellEvents> {
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
+    this.ro?.disconnect();
+    this.ro = null;
     this.removeAllListeners();
     this.root.classList.add('ge-shell-hidden');
     return new Promise<void>((resolve) => {
