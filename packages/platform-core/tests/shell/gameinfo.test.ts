@@ -50,4 +50,13 @@ describe('GameInfo', () => {
     expect(q(mount, '[data-ge="info-symbols"]')).toBeNull();
     expect(q(mount, '[data-ge="info-rtp"]')).toBeTruthy();
   });
+
+  it('has a back control that returns to Settings', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.openInfo();
+    const back = q(mount, '[data-ge="info-back"]')!;
+    expect(back).toBeTruthy();
+    back.click();
+    expect(q(mount, '[data-ge="settings-modal"]')).toBeTruthy();
+  });
 });

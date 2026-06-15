@@ -1,57 +1,37 @@
 import type { GameShell } from '../GameShell';
-import { createModal } from './primitives';
+import { createOverlay } from './primitives';
 
 export function openGameInfoModal(shell: GameShell): HTMLElement {
   const info = shell.config.gameInfo;
-  const { root, body } = createModal({ onClose: () => root.remove() });
+  const { root, body } = createOverlay({
+    title: 'Game info',
+    onClose: () => root.remove(),
+    onBack: () => { root.remove(); shell.openSettings(); },
+  });
   root.dataset.ge = 'info-modal';
 
   const section = (ge: string, title: string): HTMLElement => {
     const sec = document.createElement('section');
-    sec.dataset.ge = ge;
-    const h = document.createElement('h3');
-    h.textContent = title;
-    sec.appendChild(h);
+    sec.dataset.ge = ge; sec.className = 'ge-gi-sec';
+    const h = document.createElement('h3'); h.textContent = title; sec.appendChild(h);
     return sec;
   };
 
   if (typeof info.rtp === 'number') {
-    const rtp = section('info-rtp', 'RTP');
-    const p = document.createElement('p');
-    p.textContent = `${info.rtp}%`;
-    rtp.appendChild(p);
-    body.appendChild(rtp);
+    const s = section('info-rtp', 'RTP'); const p = document.createElement('p'); p.textContent = `${info.rtp}%`; s.appendChild(p); body.appendChild(s);
   }
-
   if (info.rules) {
-    const rules = section('info-rules', 'Rules');
-    const p = document.createElement('p');
-    p.textContent = info.rules;
-    rules.appendChild(p);
-    body.appendChild(rules);
+    const s = section('info-rules', 'Rules'); const p = document.createElement('p'); p.textContent = info.rules; s.appendChild(p); body.appendChild(s);
   }
-
   if (info.symbols?.length) {
-    const sym = section('info-symbols', 'Paytable');
-    for (const s of info.symbols) {
-      const row = document.createElement('div');
-      row.className = 'ge-shell-sym-row';
-      row.textContent = s.payouts ? `${s.name} — ${s.payouts}` : s.name;
-      sym.appendChild(row);
-    }
-    body.appendChild(sym);
+    const s = section('info-symbols', 'Paytable');
+    for (const sym of info.symbols) { const r = document.createElement('div'); r.className = 'ge-shell-sym-row'; r.textContent = sym.payouts ? `${sym.name} — ${sym.payouts}` : sym.name; s.appendChild(r); }
+    body.appendChild(s);
   }
-
   if (info.features?.length) {
-    const feat = section('info-features', 'Features');
-    for (const f of info.features) {
-      const row = document.createElement('div');
-      row.className = 'ge-shell-feat-row';
-      row.textContent = `${f.name}: ${f.description}`;
-      feat.appendChild(row);
-    }
-    body.appendChild(feat);
+    const s = section('info-features', 'Features');
+    for (const f of info.features) { const r = document.createElement('div'); r.className = 'ge-shell-feat-row'; r.textContent = `${f.name}: ${f.description}`; s.appendChild(r); }
+    body.appendChild(s);
   }
-
   return root;
 }
