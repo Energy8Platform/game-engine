@@ -1,11 +1,20 @@
 export type * from './types';
+import { GameShell } from './GameShell';
+import type { ShellConfig } from './types';
 
-// Real implementations land in later tasks. Stubs keep the public surface
-// importable and let the build/test wiring be verified first.
-export function createGameShell(): never {
-  throw new Error('createGameShell not implemented yet');
+let active: GameShell | null = null;
+
+export function createGameShell(config: ShellConfig): GameShell {
+  if (active) return active;
+  active = new GameShell(config);
+  return active;
 }
 
 export function removeGameShell(): Promise<void> {
-  return Promise.resolve();
+  if (!active) return Promise.resolve();
+  const shell = active;
+  active = null;
+  return shell.destroy();
 }
+
+export { GameShell };
