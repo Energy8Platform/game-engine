@@ -10,6 +10,64 @@ import {
 } from '@energy8platform/game-sdk';
 import type { GameDefinition, BetLevelsConfig } from '../lua/types';
 
+/**
+ * A detected replay launch — the host wants to re-play a historical round
+ * instead of placing live bets. `mode`/`roundId` are forwarded verbatim to
+ * {@link ReplayConfig.resolve}.
+ */
+export interface ReplayLaunch {
+  /** Game mode the round was recorded in (e.g. "BASE", "BONUS"). */
+  mode?: string;
+  /** Identifier of the recorded round to replay. */
+  roundId?: string;
+}
+
+/**
+ * Opt-in replay support for the DevBridge mock host.
+ *
+ * In production the casino backend serves a recorded round; in dev the
+ * DevBridge IS the host. Provide a `resolve` callback that returns the
+ * recorded rounds — DevBridge stays agnostic about where they come from
+ * (fetch, static fixtures, localStorage, …). When a replay launch is
+ * detected, the bridge flips `config.replayMode = true` and feeds the
+ * recorded `PlayResultData[]` back on each play request, without touching
+ * the wallet.
+ */
+export interface ReplayConfig {
+  /**
+   * Resolve the recorded rounds for a replay launch. Receives the `mode`
+   * and `roundId` from {@link detect}. May be async (e.g. a fetch).
+   */
+  resolve: (
+    mode: string | undefined,
+    roundId: string | undefined,
+  ) => PlayResultData[] | Promise<PlayResultData[]>;
+
+  /**
+   * Decide whether this launch is a replay and extract its params.
+   * Defaults to reading `?replay=1&mode=…&event=…` from the browser URL.
+   * Return `null` for a normal (non-replay) launch.
+   */
+  detect?: () => ReplayLaunch | null;
+}
+
+/**
+ * Default replay detector — reads `?replay=…&mode=…&event=…` from the
+ * browser URL. Returns `null` outside the browser or when `replay` is absent
+ * or falsy, so the bridge falls back to normal (live) play.
+ */
+function defaultReplayDetect(): ReplayLaunch | null {
+  const loc = (globalThis as { location?: { search?: string } }).location;
+  if (!loc?.search) return null;
+  const params = new URLSearchParams(loc.search);
+  const replay = params.get('replay');
+  if (!replay || replay === '0' || replay === 'false') return null;
+  return {
+    mode: params.get('mode') ?? undefined,
+    roundId: params.get('event') ?? params.get('roundId') ?? undefined,
+  };
+}
+
 /** Default session TTL when GameDefinition.session_ttl is omitted (24h). */
 const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -82,9 +140,15 @@ export interface DevBridgeConfig {
   gameDefinition?: GameDefinition;
   /** RNG seed for deterministic Lua execution */
   luaSeed?: number;
+  /**
+   * Opt-in historical-round replay. When the detector reports a replay
+   * launch, the bridge serves recorded rounds instead of running Lua/onPlay.
+   * See {@link ReplayConfig}.
+   */
+  replay?: ReplayConfig;
 }
 
-const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinition' | 'luaSeed'> = {
+const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinition' | 'luaSeed' | 'replay'> = {
   balance: 10000,
   currency: 'USD',
   gameConfig: {
@@ -128,7 +192,7 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
  * ```
  */
 export class DevBridge {
-  private _config: Required<Pick<DevBridgeConfig, 'balance' | 'currency' | 'gameConfig' | 'assetsUrl' | 'session' | 'onPlay' | 'networkDelay' | 'debug'>> & Pick<DevBridgeConfig, 'luaScript' | 'gameDefinition' | 'luaSeed'>;
+  private _config: Required<Pick<DevBridgeConfig, 'balance' | 'currency' | 'gameConfig' | 'assetsUrl' | 'session' | 'onPlay' | 'networkDelay' | 'debug'>> & Pick<DevBridgeConfig, 'luaScript' | 'gameDefinition' | 'luaSeed' | 'replay'>;
   private _balance: number;
   private _roundCounter = 0;
   private _bridge: Bridge | null = null;
@@ -141,12 +205,27 @@ export class DevBridge {
   private _sessionExpiresAt: number | null = null;
   /** Pre-parsed session TTL from gameDefinition.session_ttl. */
   private _sessionTtlMs: number;
+  /** Detected replay launch, or null when not replaying. */
+  private _replayLaunch: ReplayLaunch | null = null;
+  /** Recorded rounds for the active replay (resolved lazily once). */
+  private _replayResults: Promise<PlayResultData[]> | null = null;
+  /** Cursor into the recorded rounds; wraps to 0 on "Play Again". */
+  private _replayCursor = 0;
 
   constructor(config: DevBridgeConfig = {}) {
     this._config = { ...DEFAULT_CONFIG, ...config };
     this._balance = this._config.balance;
     this._useLuaServer = !!(this._config.luaScript && this._config.gameDefinition);
     this._sessionTtlMs = parseSessionTtl(this._config.gameDefinition?.session_ttl);
+    if (this._config.replay) {
+      const detect = this._config.replay.detect ?? defaultReplayDetect;
+      this._replayLaunch = detect();
+    }
+  }
+
+  /** True when this bridge was launched as a historical-round replay. */
+  get isReplay(): boolean {
+    return this._replayLaunch !== null;
   }
 
   /** Current mock balance */
@@ -218,6 +297,11 @@ export class DevBridge {
   // ─── Message Handling ──────────────────────────────────
 
   private handleGameReady(id?: string): void {
+    if (this._replayLaunch) {
+      this.handleReplayGameReady(id);
+      return;
+    }
+
     const initData: InitData = {
       balance: this._balance,
       currency: this._config.currency,
@@ -229,10 +313,84 @@ export class DevBridge {
     this.delayedSend('INIT', initData, id);
   }
 
+  /**
+   * Replay INIT: flip `config.replayMode = true` and take balance/currency
+   * from the recorded results (the wallet is never touched in replay).
+   */
+  private handleReplayGameReady(id?: string): void {
+    this.resolveReplayResults()
+      .then((results) => {
+        const first = results[0];
+        if (first) {
+          this._balance = first.balanceAfter;
+        }
+        const initData: InitData = {
+          balance: this._balance,
+          currency: first?.currency ?? this._config.currency,
+          config: {
+            ...this._config.gameConfig,
+            replayMode: true,
+          } as GameConfigData,
+          session: null,
+          assetsUrl: this._config.assetsUrl,
+        };
+        this.delayedSend('INIT', initData, id);
+      })
+      .catch((err) => {
+        console.error('[DevBridge] Replay resolve failed:', err);
+        this.sendError(id, 'ENGINE_ERROR', err?.message ?? 'replay resolve failed');
+      });
+  }
+
+  /** Resolve (and cache) the recorded rounds for the active replay launch. */
+  private resolveReplayResults(): Promise<PlayResultData[]> {
+    if (!this._replayResults) {
+      const { mode, roundId } = this._replayLaunch ?? {};
+      this._replayResults = Promise.resolve(
+        this._config.replay!.resolve(mode, roundId),
+      );
+    }
+    return this._replayResults;
+  }
+
+  /**
+   * Replay PLAY_REQUEST: serve the recorded round at the cursor and advance.
+   * No wallet movement, no bet/session validation. The first spin past the
+   * end resets the cursor to 0 ("Play Again"). An empty record list behaves
+   * like an exhausted live session.
+   */
+  private handleReplayPlay(id?: string): void {
+    this.resolveReplayResults()
+      .then((results) => {
+        if (!results || results.length === 0) {
+          this.sendError(id, 'NO_ACTIVE_SESSION', 'replay has no recorded rounds');
+          return;
+        }
+        // Play Again: a spin past the end wraps back to the first round.
+        if (this._replayCursor >= results.length) {
+          this._replayCursor = 0;
+        }
+        const next = results[this._replayCursor++];
+        this._lastPlayResult = next;
+        // Mirror the recorded balance so GET_BALANCE / HUD stay consistent.
+        this._balance = next.balanceAfter;
+        this.delayedSend('PLAY_RESULT', next, id);
+      })
+      .catch((err) => {
+        console.error('[DevBridge] Replay resolve failed:', err);
+        this.sendError(id, 'ENGINE_ERROR', err?.message ?? 'replay resolve failed');
+      });
+  }
+
   private handlePlayRequest(
     payload: PlayParams,
     id?: string,
   ): void {
+    if (this._replayLaunch) {
+      this.handleReplayPlay(id);
+      return;
+    }
+
     const { action, bet, params } = payload;
     this._roundCounter++;
 

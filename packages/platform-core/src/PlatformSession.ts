@@ -94,6 +94,16 @@ export class PlatformSession extends EventEmitter<PlatformSessionEvents> {
   }
 
   /**
+   * `true` when launched as a historical-round replay (the host set
+   * `config.replayMode`). Games read this to hide balance/bet/autoplay UI
+   * and surface a "Play / Play Again" CTA only. Falls back to the handshake
+   * config when no SDK is present.
+   */
+  get isReplay(): boolean {
+    return this.sdk?.isReplay ?? this.initData?.config?.replayMode ?? false;
+  }
+
+  /**
    * Send a play request through the SDK and resolve with the host result.
    * Throws if the session was constructed with `sdk: false`.
    */

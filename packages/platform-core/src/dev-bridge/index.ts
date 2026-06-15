@@ -1,2 +1,2 @@
 export { DevBridge } from './DevBridge';
-export type { DevBridgeConfig } from './DevBridge';
+export type { DevBridgeConfig, ReplayConfig, ReplayLaunch } from './DevBridge';

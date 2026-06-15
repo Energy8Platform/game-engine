@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Read(//Users/mrphelko/Documents/repo/**)"
+      "Read(//Users/mrphelko/Documents/repo/**)",
+      "Bash(git commit:*)"
     ]
   }
 }

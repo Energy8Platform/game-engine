@@ -35,7 +35,7 @@ export type {
 
 // ─── DevBridge ──────────────────────────────────────────
 export { DevBridge } from './dev-bridge';
-export type { DevBridgeConfig } from './dev-bridge';
+export type { DevBridgeConfig, ReplayConfig, ReplayLaunch } from './dev-bridge';
 
 // ─── Branded loading screen ─────────────────────────────
 // Renderer-agnostic CSS preloader showing the Energy8 platform logo.

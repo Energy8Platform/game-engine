@@ -131,6 +131,52 @@ describe('platform-core smoke test (no pixi)', () => {
     expect(session.currency).toBe('EUR');
   });
 
+  it('isReplay reflects config.replayMode from the handshake', async () => {
+    // No replay launch → isReplay is false.
+    session = await createPlatformSession({
+      dev: {
+        balance: 5000,
+        currency: 'EUR',
+        luaScript: SIMPLE_LUA,
+        gameDefinition: SIMPLE_GAME_DEF,
+        networkDelay: 0,
+        debug: false,
+      },
+      sdk: { devMode: true },
+    });
+    expect(session.isReplay).toBe(false);
+    session.destroy();
+
+    // Replay launch → DevBridge flips replayMode → isReplay is true.
+    session = await createPlatformSession({
+      dev: {
+        balance: 5000,
+        currency: 'EUR',
+        networkDelay: 0,
+        debug: false,
+        replay: {
+          detect: () => ({ mode: 'BASE', roundId: 'r1' }),
+          resolve: () => [
+            {
+              roundId: 'r1',
+              action: 'spin',
+              balanceAfter: 1000,
+              totalWin: 0,
+              currency: 'EUR',
+              gameId: SIMPLE_GAME_DEF.id,
+              data: {},
+              nextActions: ['spin'],
+              session: null,
+              creditPending: false,
+            },
+          ],
+        },
+      },
+      sdk: { devMode: true },
+    });
+    expect(session.isReplay).toBe(true);
+  });
+
   it('throws on play() when constructed with sdk: false', async () => {
     session = await createPlatformSession({ sdk: false });
 

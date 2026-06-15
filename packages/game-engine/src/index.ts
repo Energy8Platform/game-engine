@@ -97,7 +97,7 @@ export { LoadingScene } from './loading/LoadingScene';
 
 // ─── Debug ───────────────────────────────────────────────
 export { DevBridge } from '@energy8platform/platform-core/dev-bridge';
-export type { DevBridgeConfig } from '@energy8platform/platform-core/dev-bridge';
+export type { DevBridgeConfig, ReplayConfig, ReplayLaunch } from '@energy8platform/platform-core/dev-bridge';
 export { FPSOverlay } from './debug/FPSOverlay';
 
 // ─── Lua ────────────────────────────────────────────────

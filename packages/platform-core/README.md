@@ -109,6 +109,7 @@ import {
 
   // DevBridge mock host
   DevBridge, type DevBridgeConfig,
+  type ReplayConfig, type ReplayLaunch,
 
   // Branded loading frame (lifecycle API)
   createCSSPreloader, setCSSPreloaderProgress, waitCSSPreloaderTap, removeCSSPreloader,
@@ -156,6 +157,7 @@ session.initData;     // InitData | null  — first handshake response
 session.devBridge;    // DevBridge | null
 session.balance;      // number   — proxied to SDK
 session.currency;     // string
+session.isReplay;     // boolean  — true on a historical-round replay launch
 session.on('balanceUpdate', ({ balance }) => { /* … */ });
 session.on('error', (err) => { /* … */ });
 
@@ -164,6 +166,18 @@ session.destroy();
 ```
 
 Inside `game-engine`, `GameApplication` wraps this. For non-pixi consumers, this is the layer you talk to directly.
+
+**Historical-round replay.** `session.isReplay` is `true` when the host launched the game to re-watch a recorded round (`config.replayMode`). The same `session.play(...)` flow then returns the recorded results instead of live ones. Each game decides what replay means for its UI:
+
+```typescript
+if (session.isReplay) {
+  hideBalanceUI();
+  hideBetSelector();
+  showPlayAgainButton();   // the only CTA in replay
+}
+```
+
+In dev, set up the recorded rounds via [`DevBridge` replay mode](#replay-mode-historical-rounds).
 
 **Session continuations: pass the triggering bet, not zero.** When the previous result returns `nextActions: ['free_spin']` (or any other in-session action with `debit: 'none'`), pass the same bet that triggered the session:
 
@@ -342,6 +356,35 @@ Other contract details DevBridge enforces:
 - **`creditPending`** is `false` in the normal path. The wire flag means "wallet credit failed, queued for retry" — never "credit deferred until session completes".
 - **`session.history`** is appended on every session round (`{spinIndex, win, data}`), so the client can rebuild the screen after reload.
 - **`MapState` parity** — `multiplier`, `global_multiplier`, `free_spins_total`, `max_win_reached` are auto-injected into `result.data` from engine variables when the Lua script doesn't set them explicitly.
+
+### Replay mode (historical rounds)
+
+A game can be launched to **replay a previously-played round** move-by-move instead of placing live bets — the SDK 2.7.3 historical-round replay. No new protocol: the same `play()` / `PLAY_RESULT` flow is reused, only the data source and one config flag differ.
+
+In production the casino backend is the replay host. In dev, **DevBridge is the host**, so it gains an opt-in `replay` config. You supply a `resolve(mode, roundId)` callback that returns the recorded rounds — DevBridge stays agnostic about where they come from (fetch, static fixtures, `localStorage`, …):
+
+```typescript
+const bridge = new DevBridge({
+  // … balance / gameConfig as usual …
+  replay: {
+    // Called once on a replay launch. May be async.
+    resolve: (mode, roundId) => fetchRecordedRound(mode, roundId),
+    // Optional. Defaults to reading ?replay=1&mode=…&event=… from the URL.
+    // Return null for a normal (live) launch.
+    detect: () => /* … */ null,
+  },
+});
+```
+
+Open the game with `?replay=1&mode=BONUS&event=<roundId>` and DevBridge switches into replay automatically. In replay it:
+
+- flips `config.replayMode = true` in `INIT` (so `sdk.isReplay` / `session.isReplay` is `true`);
+- takes `balance` / `currency` from the recorded results — **the wallet is never touched**;
+- serves `results[cursor]` on each `PLAY_REQUEST`, with no bet/session validation;
+- resets the cursor to `0` on the first spin past the end ("Play Again");
+- returns `PLAY_ERROR NO_ACTIVE_SESSION` when the record list is empty.
+
+The game reacts via a single flag — see [`session.isReplay`](#platformsession). Each game decides what that means (hide balance/bet/autoplay/buy-bonus, show a "Play Again" CTA); the engine never imposes UI.
 
 ---
 
@@ -571,7 +614,7 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 | `@energy8platform/platform-core` | Everything — re-exports from all sub-paths |
 | `@energy8platform/platform-core/lua` | Browser-safe Lua engine surface: LuaEngine, ActionRouter, SessionManager, PersistentState, JS `SimulationRunner`, types |
 | `@energy8platform/platform-core/simulation` | **Node-only.** `NativeSimulationRunner` (Go binary) and `ParallelSimulationRunner` (worker_threads). Don't import from a browser bundle — the main entry and `/lua` deliberately exclude these so they can't be tree-shake-leaked. |
-| `@energy8platform/platform-core/dev-bridge` | `DevBridge`, `DevBridgeConfig` |
+| `@energy8platform/platform-core/dev-bridge` | `DevBridge`, `DevBridgeConfig`, `ReplayConfig`, `ReplayLaunch` |
 | `@energy8platform/platform-core/vite` | `devBridgePlugin`, `luaPlugin` |
 | `@energy8platform/platform-core/loading` | `createCSSPreloader`, `setCSSPreloaderProgress`, `waitCSSPreloaderTap`, `removeCSSPreloader`, `buildLogoSVG`, `LOADER_BAR_MAX_WIDTH` |
 

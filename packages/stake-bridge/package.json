@@ -1,0 +1,58 @@
+{
+  "name": "@energy8platform/stake-bridge",
+  "version": "0.2.1",
+  "description": "Drop-in host-side wrapper that lets a game built against @energy8platform/game-sdk run on Stake Engine",
+  "author": "Energy8 Platform",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/stake-bridge.umd.js",
+  "module": "dist/stake-bridge.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/stake-bridge.esm.js",
+      "require": "./dist/stake-bridge.umd.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
+    "dev": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "peerDependencies": {
+    "@energy8platform/game-sdk": "^2.7.2"
+  },
+  "dependencies": {
+    "@energy8platform/game-sdk": "^2.7.2"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@types/node": "^20.0.0",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^1.6.0"
+  },
+  "keywords": [
+    "casino",
+    "stake-engine",
+    "rgs",
+    "slot",
+    "bridge"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/energy8platform/game-engine.git",
+    "directory": "packages/stake-bridge"
+  }
+}
