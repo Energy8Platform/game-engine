@@ -200,3 +200,21 @@ function renderToolbar(): void {
 applyScreen(currentScreen);
 renderToolbar();
 log('shell mounted');
+
+// ─── Debug/QA params: ?screen=<id>&kiosk=1&open=settings|info|buybonus ──────
+const params = new URLSearchParams(location.search);
+const screenParam = params.get('screen');
+if (screenParam) { const s = SCREENS.find((x) => x.id === screenParam); if (s) applyScreen(s); }
+if (params.get('kiosk')) {
+  document.querySelector('header')?.remove();
+  document.querySelector('.toolbar')?.remove();
+  document.querySelector('.log')?.remove();
+  const stage = document.querySelector('.stage') as HTMLElement | null;
+  if (stage) stage.style.padding = '0';
+  labelEl.style.display = 'none';
+  gameEl.style.width = '100vw'; gameEl.style.height = '100vh'; gameEl.style.borderRadius = '0';
+}
+const open = params.get('open');
+if (open === 'settings') shell.openSettings();
+else if (open === 'info') shell.openInfo();
+else if (open === 'buybonus') shell.openBuyBonus();

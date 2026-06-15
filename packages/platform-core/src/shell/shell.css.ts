@@ -75,7 +75,7 @@ export const SHELL_CSS = `
   transition:background .12s ease; }
 #${SHELL_ROOT_ID} .ge-ov-nav:hover { background:rgba(255,255,255,.1); }
 #${SHELL_ROOT_ID} .ge-ov-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
-#${SHELL_ROOT_ID} .ge-ov-body { max-width:600px; width:100%; margin:0 auto; box-sizing:border-box;
+#${SHELL_ROOT_ID} .ge-ov-body { max-width:600px; margin:0 auto; box-sizing:border-box;
   padding:clamp(6px,2vh,16px) clamp(16px,4vw,24px) clamp(16px,4vh,28px); }
 
 /* full-width overlay rows (neutral) */
