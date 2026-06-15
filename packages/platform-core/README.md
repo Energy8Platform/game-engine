@@ -640,6 +640,13 @@ shell.setFreeSpins({ current: 1, total: 10, totalWin: 0, lastWin: 0 });
 
 The shell is **fully driven by the game** (single source of truth) — it does not subscribe to the SDK/session. Feed state via config + setters; react to player intent via events. This keeps replay and mid-spin restore deterministic.
 
+**Visual system:** transparent neutral chrome that doesn't compete with the game —
+brand colour appears only on the BUY BONUS control and a distinctive duotone icon set.
+The bottom bar adapts by viewport width (spin-right on wide screens, spin-centered on
+narrow), menu stays bottom-left, and Settings / Game info / Buy bonus open as full-screen
+overlays. Motion is minimal (press feedback, balance/win count-up, overlay fades) and
+respects `prefers-reduced-motion`.
+
 Also re-exported from `@energy8platform/game-engine/shell`.
 
 ---

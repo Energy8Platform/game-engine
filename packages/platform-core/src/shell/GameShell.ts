@@ -14,7 +14,8 @@ import { renderBottomBar } from './components/BottomBar';
 import { openSettingsModal } from './components/Settings';
 import { openGameInfoModal } from './components/GameInfo';
 import { openBuyBonusOverlay } from './components/BuyBonus';
-import { prefersReducedMotion } from './motion';
+import { countUp } from './motion';
+import { formatCurrency } from './format';
 
 const REMOVE_FADE_MS = 300;
 
@@ -79,9 +80,12 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.ro.observe(this.root);
   }
 
-  /** Post-render hook: tracks previous money values (count-up wired in a later task). */
   private animateMoney(): void {
-    void prefersReducedMotion; // imported now; count-up animation wired later
+    const fmt = (n: number) => formatCurrency(n, this.config.currency);
+    const bal = this.barHost.querySelector('[data-ge="balance"]') as HTMLElement | null;
+    const win = this.barHost.querySelector('[data-ge="win"]') as HTMLElement | null;
+    if (bal && this.state.balance !== this.prevBalance) animateReadout(bal, this.prevBalance, this.state.balance, fmt);
+    if (win && this.state.win !== this.prevWin) animateReadout(win, this.prevWin, this.state.win, fmt);
     this.prevBalance = this.state.balance;
     this.prevWin = this.state.win;
   }
@@ -124,4 +128,15 @@ export class GameShell extends EventEmitter<ShellEvents> {
       }, REMOVE_FADE_MS);
     });
   }
+}
+
+/** Count-up the trailing text node of a .ge-rd readout (keeps its label span). */
+function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): void {
+  const textNode = el.lastChild;
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) { el.textContent = fmt(to); return; }
+  const proxy = {
+    set textContent(v: string) { (textNode as Text).data = v; },
+    get textContent() { return (textNode as Text).data; },
+  } as unknown as HTMLElement;
+  countUp(proxy, from, to, fmt);
 }
