@@ -14,6 +14,7 @@ import { renderBottomBar } from './components/BottomBar';
 import { openMenuModal } from './components/Menu';
 import { openSettingsModal } from './components/Settings';
 import { openGameInfoModal } from './components/GameInfo';
+import { openBuyBonusOverlay } from './components/BuyBonus';
 
 const REMOVE_FADE_MS = 300;
 
@@ -70,7 +71,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
   openMenu(): void { this.emit('menuOpen'); this.showModal(openMenuModal(this)); }
   openSettings(): void { this.emit('settingsOpen'); this.showModal(openSettingsModal(this)); }
   openInfo(): void { this.emit('infoOpen'); this.showModal(openGameInfoModal(this)); }
-  openBuyBonus(): void { /* overlay in Task 11 */ }
+  openBuyBonus(): void {
+    const overlay = openBuyBonusOverlay(this);
+    if (overlay) this.showModal(overlay);
+  }
 
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
