@@ -607,6 +607,43 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 
 ---
 
+## Branded Game Shell
+
+The shell is a vanilla-DOM UI overlay you layer over the game canvas. It owns the control bar (3 modes: base / freeSpins / replay), menu, settings, game info panel, and a buy-bonus selection overlay.
+
+```typescript
+import { createGameShell } from '@energy8platform/platform-core/shell';
+
+const shell = createGameShell({
+  mount: document.getElementById('game')!,
+  language: 'en',
+  currency: { symbol: '€', position: 'left' },
+  availableBets: [0.2, 0.5, 1, 2], defaultBet: 1, currentBet: null,
+  balance: 1000, win: 0, mode: 'base',
+  gameInfo: { rtp: 96.5, rules: '…' },
+  features: { turbo: 3, autoplay: true, buyBonus: [
+    { id: 'fs', name: 'Buy Free Spins', description: '10 spins', priceMultiplier: 100, volatility: 5 },
+  ] },
+});
+
+shell.on('spin', () => game.spin(shell.state.bet));
+shell.on('betChange', (bet) => game.setBet(bet));
+shell.on('buyBonusSelect', ({ id }) => game.buy(id));
+
+// game → shell
+shell.setBalance(980);
+shell.setWin(20);
+shell.setBusy(true);            // during an active spin
+shell.setMode('freeSpins');
+shell.setFreeSpins({ current: 1, total: 10, totalWin: 0, lastWin: 0 });
+```
+
+The shell is **fully driven by the game** (single source of truth) — it does not subscribe to the SDK/session. Feed state via config + setters; react to player intent via events. This keeps replay and mid-spin restore deterministic.
+
+Also re-exported from `@energy8platform/game-engine/shell`.
+
+---
+
 ## Sub-path exports
 
 | Path | What's there |
@@ -617,6 +654,7 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 | `@energy8platform/platform-core/dev-bridge` | `DevBridge`, `DevBridgeConfig`, `ReplayConfig`, `ReplayLaunch` |
 | `@energy8platform/platform-core/vite` | `devBridgePlugin`, `luaPlugin` |
 | `@energy8platform/platform-core/loading` | `createCSSPreloader`, `setCSSPreloaderProgress`, `waitCSSPreloaderTap`, `removeCSSPreloader`, `buildLogoSVG`, `LOADER_BAR_MAX_WIDTH` |
+| `@energy8platform/platform-core/shell` | `createGameShell`, `removeGameShell` — branded renderer-agnostic DOM game shell (control bar, menu, settings, game info, buy bonus) |
 
 The sub-paths exist for tree-shaking — pulling only `/lua` doesn't drag in DevBridge or vite types. The main entry is convenient for app-level code where size hardly matters.
 
