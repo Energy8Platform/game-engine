@@ -111,6 +111,9 @@ export interface GameApplicationConfig {
 
   /** Enable debug overlay (FPS, draw calls) */
   debug?: boolean;
+
+  /** When set, GameApplication mounts the branded game shell after the SDK handshake. */
+  shell?: import('@energy8platform/platform-core/shell').ShellConfig | false;
 }
 
 // ─── Scene Types ───────────────────────────────────────────

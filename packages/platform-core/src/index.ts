@@ -50,6 +50,22 @@ export {
   LOADER_BAR_MAX_WIDTH,
 } from './loading';
 
+// ─── Branded game shell (renderer-agnostic DOM UI chrome) ─────────────────
+export { createGameShell, removeGameShell, GameShell } from './shell';
+export type {
+  ShellConfig,
+  ShellMode,
+  ShellFeatures,
+  ShellState,
+  ShellEvents,
+  BonusOption,
+  CurrencyConfig,
+  ThemeConfig,
+  GameInfoContent,
+  AutoplayOptions,
+  FreeSpinsState,
+} from './shell';
+
 // ─── Utility ────────────────────────────────────────────
 export { EventEmitter } from './EventEmitter';
 

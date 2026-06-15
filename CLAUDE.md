@@ -33,6 +33,7 @@ Sub-paths:
 - `@energy8platform/platform-core/dev-bridge` — DevBridge isolated
 - `@energy8platform/platform-core/vite` — `devBridgePlugin`, `luaPlugin`
 - `@energy8platform/platform-core/loading` — `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG` (the Energy8 brand frame, renderer-agnostic)
+- `@energy8platform/platform-core/shell` — `createGameShell`, `removeGameShell`, branded renderer-agnostic DOM game shell (control bar, menu, settings, game info, buy bonus)
 
 ### `@energy8platform/game-engine`
 

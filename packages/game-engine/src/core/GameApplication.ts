@@ -78,6 +78,9 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   /** Platform session (SDK + optional DevBridge). null until start() runs. */
   public platformSession: PlatformSession | null = null;
 
+  /** Branded game shell (only when config.shell is set). */
+  public shell?: import('@energy8platform/platform-core/shell').GameShell;
+
   /** Configuration */
   public readonly config: GameApplicationConfig;
 
@@ -156,6 +159,12 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
       // 4. Initialize SDK (if enabled)
       await this.initSDK();
 
+      // 4b. Mount the branded game shell after the SDK handshake (optional)
+      if (this.config.shell) {
+        const { createGameShell } = await import('@energy8platform/platform-core/shell');
+        this.shell = createGameShell(this.config.shell);
+      }
+
       // 5. Merge design dimensions from SDK config
       this.applySDKConfig();
 
@@ -185,10 +194,16 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   /**
    * Destroy the engine and free all resources.
    */
-  destroy(): void {
+  async destroy(): Promise<void> {
     if (this._destroyed) return;
     this._destroyed = true;
     this._running = false;
+
+    if (this.shell) {
+      const { removeGameShell } = await import('@energy8platform/platform-core/shell');
+      await removeGameShell();
+      this.shell = undefined;
+    }
 
     this.scenes?.destroy();
     this.input?.destroy();
