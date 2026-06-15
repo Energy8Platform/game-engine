@@ -5,7 +5,7 @@ import type { ShellConfig } from '@/shell/types';
 
 function cfg(mount: HTMLElement): ShellConfig {
   return {
-    mount, gameInfo: {}, language: 'en',
+    mount, gameInfo: { rtp: 96 }, language: 'en',
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2], defaultBet: 1, currentBet: null,
     balance: 100, win: 0, mode: 'base',
@@ -14,74 +14,53 @@ function cfg(mount: HTMLElement): ShellConfig {
 }
 const q = (m: HTMLElement, s: string) => m.querySelector(s) as HTMLElement | null;
 
-describe('Menu + Settings', () => {
+describe('Settings overlay (opened from menu)', () => {
   let mount: HTMLElement;
-  beforeEach(async () => {
-    document.body.innerHTML = '';
-    mount = document.createElement('div');
-    document.body.appendChild(mount);
-    await removeGameShell();
-  });
+  beforeEach(async () => { document.body.innerHTML = ''; mount = document.createElement('div'); document.body.appendChild(mount); await removeGameShell(); });
 
-  it('opens menu modal and emits menuOpen', () => {
+  it('menu button opens the Settings overlay and emits both events', () => {
     const shell = createGameShell(cfg(mount));
-    const spy = vi.fn();
-    shell.on('menuOpen', spy);
+    const menuSpy = vi.fn(); const setSpy = vi.fn();
+    shell.on('menuOpen', menuSpy); shell.on('settingsOpen', setSpy);
     q(mount, '[data-ge="menu"]')!.click();
-    expect(spy).toHaveBeenCalledOnce();
-    expect(q(mount, '[data-ge="menu-modal"]')).toBeTruthy();
-    expect(q(mount, '[data-ge="menu-settings"]')).toBeTruthy();
-    expect(q(mount, '[data-ge="menu-info"]')).toBeTruthy();
-  });
-
-  it('menu → settings opens settings modal and emits settingsOpen', () => {
-    const shell = createGameShell(cfg(mount));
-    const spy = vi.fn();
-    shell.on('settingsOpen', spy);
-    q(mount, '[data-ge="menu"]')!.click();
-    q(mount, '[data-ge="menu-settings"]')!.click();
-    expect(spy).toHaveBeenCalledOnce();
+    expect(menuSpy).toHaveBeenCalledOnce();
+    expect(setSpy).toHaveBeenCalledOnce();
     expect(q(mount, '[data-ge="settings-modal"]')).toBeTruthy();
   });
 
-  it('settings slider emits settingChange', () => {
+  it('Settings has Sound toggle + master/music/sfx sliders, no quickspin', () => {
     const shell = createGameShell(cfg(mount));
-    const spy = vi.fn();
-    shell.on('settingChange', spy);
     shell.openSettings();
-    const slider = q(mount, '[data-ge="setting-master"]') as HTMLInputElement;
-    slider.value = '0.3';
-    slider.dispatchEvent(new Event('input'));
-    expect(spy).toHaveBeenCalledWith({ key: 'master', value: 0.3 });
+    expect(q(mount, '[data-ge="setting-sound"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="setting-master"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="setting-music"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="setting-sfx"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="setting-quickspin"]')).toBeNull();
   });
 
-  it('quick-spin toggle emits settingChange', () => {
+  it('sound toggle emits settingChange', () => {
     const shell = createGameShell(cfg(mount));
-    const spy = vi.fn();
-    shell.on('settingChange', spy);
+    const spy = vi.fn(); shell.on('settingChange', spy);
     shell.openSettings();
-    q(mount, '[data-ge="setting-quickspin"]')!.click();
-    expect(spy).toHaveBeenCalledWith({ key: 'quickSpin', value: true });
-  });
-
-  it('menu has a sound toggle that emits settingChange', () => {
-    const shell = createGameShell(cfg(mount));
-    const spy = vi.fn();
-    shell.on('settingChange', spy);
-    q(mount, '[data-ge="menu"]')!.click();
-    const sound = q(mount, '[data-ge="menu-sound"]') as HTMLButtonElement;
-    expect(sound).toBeTruthy();
-    sound.click();
-    // sound starts enabled (true) → first click mutes (false)
+    q(mount, '[data-ge="setting-sound"]')!.click();
     expect(spy).toHaveBeenCalledWith({ key: 'sound', value: false });
   });
 
-  it('menu has a fullscreen entry that is clickable without throwing', () => {
+  it('master slider emits settingChange', () => {
     const shell = createGameShell(cfg(mount));
-    q(mount, '[data-ge="menu"]')!.click();
-    const fs = q(mount, '[data-ge="menu-fullscreen"]') as HTMLButtonElement;
-    expect(fs).toBeTruthy();
-    // jsdom has no Fullscreen API; the handler must guard and not throw
-    expect(() => fs.click()).not.toThrow();
+    const spy = vi.fn(); shell.on('settingChange', spy);
+    shell.openSettings();
+    const s = q(mount, '[data-ge="setting-master"]') as HTMLInputElement;
+    s.value = '0.3'; s.dispatchEvent(new Event('input'));
+    expect(spy).toHaveBeenCalledWith({ key: 'master', value: 0.3 });
+  });
+
+  it('Game info button opens the Game info overlay', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.openSettings();
+    const btn = q(mount, '[data-ge="game-info-btn"]')!;
+    expect(btn).toBeTruthy();
+    btn.click();
+    expect(q(mount, '[data-ge="info-modal"]')).toBeTruthy();
   });
 });

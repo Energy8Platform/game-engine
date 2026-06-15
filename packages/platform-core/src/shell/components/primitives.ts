@@ -1,3 +1,5 @@
+import { icon } from './icons';
+
 export interface ButtonOpts {
   label: string;
   className?: string;
@@ -70,5 +72,33 @@ export function createModal(opts: ModalOpts): { root: HTMLDivElement; body: HTML
   root.addEventListener('click', (e) => {
     if (e.target === root) opts.onClose();
   });
+  return { root, body };
+}
+
+export interface OverlayOpts {
+  title: string;
+  onClose: () => void;
+  onBack?: () => void;
+}
+
+/** Full-screen overlay. Returns { root, body }; append content to body. */
+export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: HTMLDivElement } {
+  const root = document.createElement('div');
+  root.className = 'ge-shell-overlay';
+  const head = document.createElement('div');
+  head.className = 'ge-ov-head';
+  if (opts.onBack) {
+    const back = document.createElement('button');
+    back.className = 'ge-ov-nav'; back.dataset.ge = 'info-back'; back.innerHTML = icon('back');
+    back.addEventListener('click', opts.onBack);
+    head.appendChild(back);
+  }
+  const h = document.createElement('h4'); h.textContent = opts.title; head.appendChild(h);
+  const close = document.createElement('button');
+  close.className = 'ge-ov-nav'; close.innerHTML = icon('close');
+  close.addEventListener('click', opts.onClose);
+  head.appendChild(close);
+  const body = document.createElement('div'); body.className = 'ge-ov-body';
+  root.append(head, body);
   return { root, body };
 }
