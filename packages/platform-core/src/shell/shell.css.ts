@@ -61,32 +61,40 @@ export const SHELL_CSS = `
 #${SHELL_ROOT_ID} .ge-fs-hero span { display:block; color:var(--shell-muted); font-size:10px;
   letter-spacing:.14em; text-transform:uppercase; margin-top:6px; }
 
-/* full-screen overlays */
+/* full-screen overlays — header (title left, prominent X/back), scrolling body, vh-clamped for popout/mobile */
 #${SHELL_ROOT_ID} .ge-shell-overlay { position:absolute; inset:0; pointer-events:auto; background:var(--shell-surface);
-  display:flex; flex-direction:column; animation:ge-ov-in .18s ease-out; }
+  display:flex; flex-direction:column; animation:ge-ov-in .16s ease-out; }
 @keyframes ge-ov-in { from { opacity:0; } to { opacity:1; } }
-#${SHELL_ROOT_ID} .ge-ov-head { display:flex; align-items:center; gap:14px; padding:16px 20px;
-  border-bottom:1px solid var(--shell-hairline); }
-#${SHELL_ROOT_ID} .ge-ov-head h4 { flex:1; color:var(--shell-fg); font-size:15px; font-weight:700; margin:0; }
-#${SHELL_ROOT_ID} .ge-ov-nav { background:none; border:none; cursor:pointer; color:var(--shell-icon);
-  width:22px; height:22px; font-size:22px; display:flex; align-items:center; justify-content:center; }
-#${SHELL_ROOT_ID} .ge-ov-body { padding:18px 20px; overflow:auto; }
+#${SHELL_ROOT_ID} .ge-ov-head { flex:0 0 auto; display:flex; align-items:center; gap:12px;
+  padding:clamp(12px,3vh,20px) clamp(14px,4vw,24px); }
+#${SHELL_ROOT_ID} .ge-ov-title { flex:1; margin:0; color:var(--shell-fg); font-weight:800; letter-spacing:.04em;
+  text-transform:uppercase; font-size:clamp(17px,4.4vh,26px); }
+#${SHELL_ROOT_ID} .ge-ov-nav { flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+  width:44px; height:44px; border-radius:12px; cursor:pointer; color:var(--shell-icon);
+  background:rgba(255,255,255,.05); border:1px solid var(--shell-hairline); font-size:22px;
+  transition:background .12s ease; }
+#${SHELL_ROOT_ID} .ge-ov-nav:hover { background:rgba(255,255,255,.1); }
+#${SHELL_ROOT_ID} .ge-ov-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
+#${SHELL_ROOT_ID} .ge-ov-body { max-width:600px; width:100%; margin:0 auto; box-sizing:border-box;
+  padding:clamp(6px,2vh,16px) clamp(16px,4vw,24px) clamp(16px,4vh,28px); }
 
-/* settings rows */
-#${SHELL_ROOT_ID} .ge-set-row { display:flex; align-items:center; max-width:560px; color:var(--shell-fg);
-  font-size:13px; font-weight:600; padding:8px 0; }
-#${SHELL_ROOT_ID} .ge-set-row .ge-grow { flex:1; }
-#${SHELL_ROOT_ID} .ge-slider { width:100%; max-width:560px; accent-color:var(--shell-accent); }
-#${SHELL_ROOT_ID} .ge-toggle { width:38px; height:22px; border-radius:999px; background:rgba(255,255,255,.16);
+/* full-width overlay rows (neutral) */
+#${SHELL_ROOT_ID} .ge-ov-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box;
+  padding:clamp(11px,2.2vh,15px) 16px; margin-bottom:10px; border:1px solid var(--shell-hairline);
+  border-radius:12px; background:rgba(255,255,255,.02); color:var(--shell-fg); font-size:14px; font-weight:600; }
+#${SHELL_ROOT_ID} .ge-ov-row .ge-grow { flex:1; text-align:left; }
+#${SHELL_ROOT_ID} button.ge-ov-row { cursor:pointer; font-family:inherit; transition:background .12s ease; }
+#${SHELL_ROOT_ID} button.ge-ov-row:hover { background:rgba(255,255,255,.06); }
+#${SHELL_ROOT_ID} .ge-ov-row.ge-col { flex-direction:column; align-items:stretch; gap:10px; }
+#${SHELL_ROOT_ID} .ge-ov-row .ge-row-head { display:flex; justify-content:space-between; align-items:center; }
+#${SHELL_ROOT_ID} .ge-ov-row .ge-row-head .ge-val { color:var(--shell-muted); font-variant-numeric:tabular-nums; font-weight:700; }
+#${SHELL_ROOT_ID} .ge-slider { width:100%; accent-color:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-toggle { flex:0 0 auto; width:42px; height:24px; border-radius:999px; background:rgba(255,255,255,.16);
   border:none; cursor:pointer; position:relative; }
 #${SHELL_ROOT_ID} .ge-toggle.ge-on { background:var(--shell-accent); }
-#${SHELL_ROOT_ID} .ge-toggle i { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%;
+#${SHELL_ROOT_ID} .ge-toggle i { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
   background:#fff; transition:left .12s ease; }
-#${SHELL_ROOT_ID} .ge-toggle.ge-on i { left:18px; }
-#${SHELL_ROOT_ID} .ge-navbtn { display:flex; align-items:center; gap:12px; max-width:560px; margin-top:12px;
-  padding:14px 16px; border:1px solid var(--shell-hairline); border-radius:11px; background:none;
-  color:var(--shell-fg); font-size:13px; font-weight:700; cursor:pointer; width:100%; }
-#${SHELL_ROOT_ID} .ge-navbtn .ge-grow { flex:1; text-align:left; }
+#${SHELL_ROOT_ID} .ge-toggle.ge-on i { left:20px; }
 
 /* game info */
 #${SHELL_ROOT_ID} .ge-gi-sec { margin-bottom:16px; }

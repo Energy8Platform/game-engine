@@ -93,12 +93,16 @@ export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: 
     back.addEventListener('click', opts.onBack);
     head.appendChild(back);
   }
-  const h = document.createElement('h4'); h.textContent = opts.title; head.appendChild(h);
+  const h = document.createElement('h4'); h.className = 'ge-ov-title'; h.textContent = opts.title; head.appendChild(h);
   const close = document.createElement('button');
-  close.className = 'ge-ov-nav'; close.innerHTML = icon('close');
+  close.className = 'ge-ov-nav'; close.setAttribute('aria-label', 'Close'); close.innerHTML = icon('close');
   close.addEventListener('click', opts.onClose);
   head.appendChild(close);
+  // Header stays fixed; only this wrapper scrolls — the X never scrolls away,
+  // and vh-clamped padding keeps it usable on small popouts (e.g. 400×225).
+  const scroll = document.createElement('div'); scroll.className = 'ge-ov-scroll';
   const body = document.createElement('div'); body.className = 'ge-ov-body';
-  root.append(head, body);
+  scroll.appendChild(body);
+  root.append(head, scroll);
   return { root, body };
 }
