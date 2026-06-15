@@ -15,3 +15,6 @@ bin/simulate-*
 bin/simulation-*
 packages/*/bin/simulate-*
 packages/*/bin/simulation-*
+
+# Brainstorming visual companion
+.superpowers/
