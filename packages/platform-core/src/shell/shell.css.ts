@@ -2,63 +2,108 @@ export const SHELL_ROOT_ID = '__ge-game-shell__';
 
 export const SHELL_CSS = `
 #${SHELL_ROOT_ID} {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9000;
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 9000;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--shell-fg);
-  container-type: inline-size;
 }
-#${SHELL_ROOT_ID} .ge-shell-bottom {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px 16px;
-  pointer-events: auto;
-  background: linear-gradient(0deg, rgba(15,23,42,0.85), rgba(15,23,42,0));
-}
-#${SHELL_ROOT_ID} .ge-shell-btn {
-  pointer-events: auto;
-  cursor: pointer;
-  border: none;
-  border-radius: var(--shell-radius);
-  background: var(--shell-accent);
-  color: var(--shell-fg);
-  padding: 10px 16px;
-  font-size: 14px;
-}
-#${SHELL_ROOT_ID} .ge-shell-btn[disabled] { opacity: 0.4; cursor: default; }
-#${SHELL_ROOT_ID} .ge-shell-spin { min-width: 96px; min-height: 64px; font-weight: 700; }
-#${SHELL_ROOT_ID} .ge-shell-buybonus { background: var(--shell-buybonus); }
-#${SHELL_ROOT_ID} .ge-shell-modal {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.6);
-  pointer-events: auto;
-}
-#${SHELL_ROOT_ID} .ge-shell-modal-card {
-  background: var(--shell-bg);
-  border-radius: var(--shell-radius);
-  padding: 24px; max-width: 90%; max-height: 80%; overflow: auto;
-}
-#${SHELL_ROOT_ID}.ge-shell-hidden { opacity: 0; pointer-events: none; }
+#${SHELL_ROOT_ID} svg { display:block; }
 
-/* Responsive: the shell root is an inline-size container, so the bottom bar
-   reflows by the game viewport width (not the browser window) — correct for
-   popout/mobile frames where the canvas is small but the window is large. */
-@container (max-width: 560px) {
-  #${SHELL_ROOT_ID} .ge-shell-bottom { justify-content: center; gap: 8px; padding: 8px 10px; }
-  #${SHELL_ROOT_ID} .ge-shell-btn { padding: 8px 12px; font-size: 13px; }
-  #${SHELL_ROOT_ID} .ge-shell-spin { min-width: 80px; min-height: 52px; }
-}
-@container (max-width: 400px) {
-  #${SHELL_ROOT_ID} .ge-shell-bottom { gap: 6px; padding: 6px 8px; }
-  #${SHELL_ROOT_ID} .ge-shell-btn { padding: 6px 9px; font-size: 12px; }
-  #${SHELL_ROOT_ID} .ge-shell-spin { min-width: 64px; min-height: 44px; font-size: 13px; }
-}
+/* floating readouts (no panel) */
+#${SHELL_ROOT_ID} .ge-rd { font-weight:700; font-size:13px; line-height:1; white-space:nowrap;
+  text-shadow:0 1px 3px rgba(0,0,0,.65); font-variant-numeric:tabular-nums; }
+#${SHELL_ROOT_ID} .ge-rd .ge-lbl { display:block; color:var(--shell-muted); font-weight:600;
+  font-size:9px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:4px; text-shadow:none; }
+
+/* icon buttons (borderless) */
+#${SHELL_ROOT_ID} .ge-iconbtn { pointer-events:auto; cursor:pointer; border:none; background:none;
+  padding:0; color:var(--shell-icon); width:40px; height:40px; display:flex; align-items:center;
+  justify-content:center; font-size:24px; position:relative; transition:transform .08s ease; }
+#${SHELL_ROOT_ID} .ge-iconbtn:active { transform:scale(.92); }
+#${SHELL_ROOT_ID} .ge-iconbtn[disabled] { opacity:.35; cursor:default; }
+#${SHELL_ROOT_ID} .ge-iconbtn.ge-active::after { content:''; position:absolute; bottom:2px; left:50%;
+  transform:translateX(-50%); width:5px; height:5px; border-radius:50%; background:var(--shell-accent); }
+
+/* SPIN (solid white disc) */
+#${SHELL_ROOT_ID} .ge-shell-spin { pointer-events:auto; cursor:pointer; border:none; border-radius:50%;
+  width:58px; height:58px; background:var(--shell-spin); color:var(--shell-spin-fg);
+  font-size:30px; display:flex; align-items:center; justify-content:center; transition:transform .08s ease; }
+#${SHELL_ROOT_ID} .ge-shell-spin:active { transform:scale(.94); }
+#${SHELL_ROOT_ID} .ge-shell-spin[disabled] { opacity:.4; cursor:default; }
+
+/* BUY BONUS (the one accent) */
+#${SHELL_ROOT_ID} .ge-shell-buybonus { pointer-events:auto; cursor:pointer; border:none; border-radius:10px;
+  background:var(--shell-buybonus); color:#fff; font-weight:800; letter-spacing:.02em;
+  padding:10px 14px; display:flex; align-items:center; gap:7px; font-size:13px; transition:transform .08s ease; }
+#${SHELL_ROOT_ID} .ge-shell-buybonus:active { transform:scale(.96); }
+#${SHELL_ROOT_ID} .ge-shell-buybonus[disabled] { opacity:.4; cursor:default; }
+#${SHELL_ROOT_ID} .ge-shell-buybonus svg { font-size:17px; }
+
+/* bottom bar: transparent, two zones (wide default) */
+#${SHELL_ROOT_ID} .ge-shell-bottom { position:absolute; left:0; right:0; bottom:0; pointer-events:none;
+  display:flex; align-items:flex-end; justify-content:space-between; padding:14px 18px; gap:14px; }
+#${SHELL_ROOT_ID} .ge-zone { display:flex; align-items:center; gap:14px; pointer-events:none; }
+#${SHELL_ROOT_ID} .ge-zone > * { pointer-events:auto; }
+#${SHELL_ROOT_ID} .ge-betstep { display:flex; flex-direction:column; gap:2px; }
+
+/* narrow arrangement (spin-center) */
+#${SHELL_ROOT_ID}.ge-narrow .ge-shell-bottom { flex-direction:column; align-items:stretch; gap:10px; padding:10px 12px 12px; }
+#${SHELL_ROOT_ID}.ge-narrow .ge-zone-info { justify-content:space-between; }
+#${SHELL_ROOT_ID}.ge-narrow .ge-zone-buy { justify-content:center; }
+#${SHELL_ROOT_ID}.ge-narrow .ge-zone-controls { justify-content:center; gap:12px; }
+#${SHELL_ROOT_ID}.ge-narrow .ge-zone-menu { position:absolute; left:5%; bottom:7%; }
+#${SHELL_ROOT_ID}.ge-narrow .ge-shell-spin { width:62px; height:62px; }
+
+/* freeSpins counter hero */
+#${SHELL_ROOT_ID} .ge-fs-hero { text-align:center; }
+#${SHELL_ROOT_ID} .ge-fs-hero b { display:block; color:#fff; font-weight:800; font-size:28px; line-height:1;
+  font-variant-numeric:tabular-nums; text-shadow:0 1px 4px rgba(0,0,0,.6); }
+#${SHELL_ROOT_ID} .ge-fs-hero span { display:block; color:var(--shell-muted); font-size:10px;
+  letter-spacing:.14em; text-transform:uppercase; margin-top:6px; }
+
+/* full-screen overlays */
+#${SHELL_ROOT_ID} .ge-shell-overlay { position:absolute; inset:0; pointer-events:auto; background:var(--shell-surface);
+  display:flex; flex-direction:column; animation:ge-ov-in .18s ease-out; }
+@keyframes ge-ov-in { from { opacity:0; } to { opacity:1; } }
+#${SHELL_ROOT_ID} .ge-ov-head { display:flex; align-items:center; gap:14px; padding:16px 20px;
+  border-bottom:1px solid var(--shell-hairline); }
+#${SHELL_ROOT_ID} .ge-ov-head h4 { flex:1; color:var(--shell-fg); font-size:15px; font-weight:700; margin:0; }
+#${SHELL_ROOT_ID} .ge-ov-nav { background:none; border:none; cursor:pointer; color:var(--shell-icon);
+  width:22px; height:22px; font-size:22px; display:flex; align-items:center; justify-content:center; }
+#${SHELL_ROOT_ID} .ge-ov-body { padding:18px 20px; overflow:auto; }
+
+/* settings rows */
+#${SHELL_ROOT_ID} .ge-set-row { display:flex; align-items:center; max-width:560px; color:var(--shell-fg);
+  font-size:13px; font-weight:600; padding:8px 0; }
+#${SHELL_ROOT_ID} .ge-set-row .ge-grow { flex:1; }
+#${SHELL_ROOT_ID} .ge-slider { width:100%; max-width:560px; accent-color:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-toggle { width:38px; height:22px; border-radius:999px; background:rgba(255,255,255,.16);
+  border:none; cursor:pointer; position:relative; }
+#${SHELL_ROOT_ID} .ge-toggle.ge-on { background:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-toggle i { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%;
+  background:#fff; transition:left .12s ease; }
+#${SHELL_ROOT_ID} .ge-toggle.ge-on i { left:18px; }
+#${SHELL_ROOT_ID} .ge-navbtn { display:flex; align-items:center; gap:12px; max-width:560px; margin-top:12px;
+  padding:14px 16px; border:1px solid var(--shell-hairline); border-radius:11px; background:none;
+  color:var(--shell-fg); font-size:13px; font-weight:700; cursor:pointer; width:100%; }
+#${SHELL_ROOT_ID} .ge-navbtn .ge-grow { flex:1; text-align:left; }
+
+/* game info */
+#${SHELL_ROOT_ID} .ge-gi-sec { margin-bottom:16px; }
+#${SHELL_ROOT_ID} .ge-gi-sec h3 { color:var(--shell-muted); font-size:10px; letter-spacing:.14em;
+  text-transform:uppercase; margin:0 0 7px; }
+#${SHELL_ROOT_ID} .ge-gi-sec p, #${SHELL_ROOT_ID} .ge-shell-sym-row, #${SHELL_ROOT_ID} .ge-shell-feat-row {
+  color:#dfe4ee; font-size:12px; line-height:1.5; }
+
+/* buy bonus cards */
+#${SHELL_ROOT_ID} .ge-bb-grid { display:flex; flex-wrap:wrap; gap:16px; }
+#${SHELL_ROOT_ID} .ge-shell-bonus-card { flex:1 1 220px; text-align:left; pointer-events:auto; cursor:pointer;
+  border:1px solid var(--shell-hairline); border-radius:14px; padding:18px; background:none; color:var(--shell-fg); }
+#${SHELL_ROOT_ID} .ge-shell-bonus-card[disabled] { opacity:.4; cursor:default; }
+#${SHELL_ROOT_ID} .ge-bonus-name { font-size:16px; font-weight:800; }
+#${SHELL_ROOT_ID} .ge-bonus-vol { letter-spacing:3px; font-size:14px; margin:8px 0; }
+#${SHELL_ROOT_ID} .ge-bonus-desc { color:var(--shell-muted); font-size:12px; margin-bottom:12px; line-height:1.4; }
+#${SHELL_ROOT_ID} .ge-bonus-price { font-weight:800; font-size:18px; font-variant-numeric:tabular-nums; }
+
+#${SHELL_ROOT_ID}.ge-shell-hidden { opacity:0; pointer-events:none; transition:opacity .25s ease; }
 `;

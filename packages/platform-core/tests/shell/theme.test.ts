@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { buildThemeVars } from '@/shell/theme';
 
 describe('buildThemeVars', () => {
-  it('emits brand defaults when no theme supplied', () => {
+  it('emits the neutral token set with brand defaults', () => {
     const vars = buildThemeVars();
-    expect(vars).toContain('--shell-accent:');
-    expect(vars).toContain('--shell-buybonus:');
+    for (const t of ['--shell-fg', '--shell-muted', '--shell-icon', '--shell-icon-bright', '--shell-accent', '--shell-surface', '--shell-spin']) {
+      expect(vars).toContain(t);
+    }
   });
 
-  it('overrides only whitelisted tokens', () => {
+  it('only accent + buyBonus are game-overridable', () => {
     const vars = buildThemeVars({ accent: '#ff0000', buyBonusColor: '#00ff00' });
     expect(vars).toContain('--shell-accent: #ff0000');
     expect(vars).toContain('--shell-buybonus: #00ff00');
