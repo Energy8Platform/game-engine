@@ -6,6 +6,7 @@ dist/
 !rollup.config.ts
 !scripts/*.mjs
 !packages/*/scripts/*.mjs
+!packages/*/rollup.config.mjs
 .DS_Store
 package-lock.json
 
