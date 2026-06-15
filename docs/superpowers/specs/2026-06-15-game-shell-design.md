@@ -64,6 +64,7 @@ const shell = createGameShell({
   mount,                       // контейнер оверлея
   theme,                       // { accent?, buyBonusColor? } — узкий whitelist
   gameInfo,                    // контент paytable/rules/RTP/features от игры
+  language,                    // код локали (напр. 'en', 'ru') — задел под локализацию
 
   // валюта/формат — числа отдаёт игра, форматирует шелл
   currency: {
@@ -76,7 +77,7 @@ const shell = createGameShell({
   // экономическое состояние — единый источник правды = игра
   availableBets: number[],
   defaultBet: number,
-  currentBet: number,          // для восстановления mid-session
+  currentBet: number | null,   // null = взять defaultBet; задан для восстановления mid-session
   balance: number,
   win: number,
 
@@ -95,7 +96,8 @@ type BonusOption = {
   name: string;
   description: string;
   priceMultiplier: number;     // цена = priceMultiplier × currentBet
-  volatility?: 'low' | 'medium' | 'high';
+  volatility?: 1 | 2 | 3 | 4 | 5;  // 5 уровней
+  accentColor?: string;        // акцент карточки бонуса
 };
 ```
 
@@ -169,8 +171,9 @@ kitsune**. Здесь фиксируется состав и поведение.
 - **Game Info** — платформенная структура (Rules / Paytable / RTP / Features) +
   слоты под `gameInfo` от игры (символы, выплаты, описания фич, число RTP).
 - **Buy Bonus** — оверлей с карточками из `features.buyBonus`: `name` /
-  `description` / `volatility` / живая цена `€(priceMultiplier × currentBet)`
-  (пересчитывается на `setBet`). Выбор → `buyBonusSelect`; списание/спин — на игре.
+  `description` / `volatility` (1–5) / `accentColor` / живая цена
+  `€(priceMultiplier × currentBet)` (пересчитывается на `setBet`).
+  Выбор → `buyBonusSelect`; списание/спин — на игре.
 
 ## Тема и lifecycle
 
