@@ -42,6 +42,11 @@
       "require": "./dist/debug.cjs.js",
       "types": "./dist/debug.d.ts"
     },
+    "./shell": {
+      "import": "./dist/shell.esm.js",
+      "require": "./dist/shell.cjs.js",
+      "types": "./dist/shell.d.ts"
+    },
     "./vite": {
       "import": "./dist/vite.esm.js",
       "require": "./dist/vite.cjs.js",
