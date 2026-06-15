@@ -85,4 +85,16 @@ describe('BottomBar base mode', () => {
     expect(q(mount, '[data-ge="balance"]')!.textContent).toContain('€250');
     expect(q(mount, '[data-ge="win"]')!.textContent).toContain('€42');
   });
+
+  it('setBuyBonusEnabled(false) disables the bottom-bar buy bonus button', () => {
+    const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', name: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
+    expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(false);
+    shell.setBuyBonusEnabled(false);
+    expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('buy bonus button stays enabled when buyBonusEnabled is true and not busy', () => {
+    const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', name: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
+    expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(false);
+  });
 });

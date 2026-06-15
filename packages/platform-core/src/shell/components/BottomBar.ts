@@ -121,8 +121,10 @@ function onAutoplay(shell: GameShell): void {
 /** Disable money controls while busy; keep menu usable. */
 function applyBusy(shell: GameShell, bar: HTMLElement): void {
   const busy = shell.state.busy;
-  for (const ge of ['spin', 'bet-up', 'bet-down', 'buybonus', 'autoplay']) {
+  for (const ge of ['spin', 'bet-up', 'bet-down', 'autoplay']) {
     const el = bar.querySelector(`[data-ge="${ge}"]`) as HTMLButtonElement | null;
     if (el) el.disabled = busy;
   }
+  const buy = bar.querySelector('[data-ge="buybonus"]') as HTMLButtonElement | null;
+  if (buy) buy.disabled = busy || !shell.state.buyBonusEnabled;
 }
