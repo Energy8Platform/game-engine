@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Game Shell — Screen Presets Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; min-height: 100%;
+      background: #0a0a14;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+
+    header { padding: 14px 18px; border-bottom: 1px solid #1e293b; }
+    header h1 { font-size: 16px; font-weight: 700; }
+    header p { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 16px;
+      padding: 12px 18px; border-bottom: 1px solid #1e293b;
+      align-items: flex-start;
+    }
+    .group { display: flex; flex-direction: column; gap: 6px; }
+    .group > span { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    .chip {
+      cursor: pointer; border: 1px solid #334155; background: #111827;
+      color: #cbd5e1; border-radius: 8px; padding: 6px 10px; font-size: 12px;
+      line-height: 1.2;
+    }
+    .chip small { display: block; color: #64748b; font-size: 10px; }
+    .chip[aria-pressed="true"] { background: #663BA6; border-color: #7c4dc4; color: #fff; }
+    .chip[aria-pressed="true"] small { color: #d8c8ef; }
+
+    .stage {
+      flex: 1; overflow: auto; padding: 28px;
+      display: flex; align-items: flex-start; justify-content: center;
+    }
+    .device {
+      display: inline-flex; flex-direction: column; gap: 8px;
+    }
+    .device-label { font-size: 12px; color: #94a3b8; text-align: center; }
+    .device-label b { color: #e2e8f0; }
+    /* the game viewport — the shell mounts inside #game and fills it */
+    #game {
+      position: relative;
+      overflow: hidden;
+      border-radius: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.5);
+      background:
+        radial-gradient(120% 120% at 50% 0%, #2a2150 0%, #140f2e 55%, #0b0820 100%);
+    }
+    .faux-canvas {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,.18); font-weight: 700; letter-spacing: .15em;
+      font-size: 13px; text-transform: uppercase;
+      user-select: none;
+    }
+
+    .log {
+      border-top: 1px solid #1e293b; padding: 8px 18px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px; color: #7dd3fc; height: 92px; overflow: auto;
+      background: #060610;
+    }
+    .log div { white-space: pre; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Game Shell — Screen Presets Demo</h1>
+    <p>The branded shell is a renderer-agnostic DOM overlay. Resize the game viewport with the presets below; the bottom bar reflows by viewport width via container queries.</p>
+  </header>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="stage">
+    <div class="device">
+      <div class="device-label" id="device-label"></div>
+      <div id="game"><div class="faux-canvas">game canvas</div></div>
+    </div>
+  </div>
+  <div class="log" id="log"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

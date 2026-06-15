@@ -8,6 +8,7 @@ export const SHELL_CSS = `
   z-index: 9000;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--shell-fg);
+  container-type: inline-size;
 }
 #${SHELL_ROOT_ID} .ge-shell-bottom {
   position: absolute;
@@ -15,6 +16,7 @@ export const SHELL_CSS = `
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px 16px;
   pointer-events: auto;
@@ -45,4 +47,18 @@ export const SHELL_CSS = `
   padding: 24px; max-width: 90%; max-height: 80%; overflow: auto;
 }
 #${SHELL_ROOT_ID}.ge-shell-hidden { opacity: 0; pointer-events: none; }
+
+/* Responsive: the shell root is an inline-size container, so the bottom bar
+   reflows by the game viewport width (not the browser window) — correct for
+   popout/mobile frames where the canvas is small but the window is large. */
+@container (max-width: 560px) {
+  #${SHELL_ROOT_ID} .ge-shell-bottom { justify-content: center; gap: 8px; padding: 8px 10px; }
+  #${SHELL_ROOT_ID} .ge-shell-btn { padding: 8px 12px; font-size: 13px; }
+  #${SHELL_ROOT_ID} .ge-shell-spin { min-width: 80px; min-height: 52px; }
+}
+@container (max-width: 400px) {
+  #${SHELL_ROOT_ID} .ge-shell-bottom { gap: 6px; padding: 6px 8px; }
+  #${SHELL_ROOT_ID} .ge-shell-btn { padding: 6px 9px; font-size: 12px; }
+  #${SHELL_ROOT_ID} .ge-shell-spin { min-width: 64px; min-height: 44px; font-size: 13px; }
+}
 `;
