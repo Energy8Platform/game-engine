@@ -97,4 +97,11 @@ describe('BottomBar base mode', () => {
     const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', name: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
     expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('renders SVG icons for icon controls (not text glyphs)', () => {
+    createGameShell(cfg(mount, { turbo: 2, buyBonus: [{ id: 'b', name: 'B', description: 'd', priceMultiplier: 1 }] }));
+    expect(q(mount, '[data-ge="menu"]')!.querySelector('svg')).toBeTruthy();
+    expect(q(mount, '[data-ge="turbo"]')!.querySelector('svg')).toBeTruthy();
+    expect(q(mount, '[data-ge="spin"]')!.querySelector('svg')).toBeTruthy();
+  });
 });

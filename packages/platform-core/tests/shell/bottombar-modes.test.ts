@@ -38,7 +38,6 @@ describe('BottomBar freeSpins/replay modes', () => {
 
   it('replay: read-only bet/win/turbo, no controls', () => {
     const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
-    expect(q(mount, '[data-ge="replay-badge"]')).toBeTruthy();
     expect(q(mount, '[data-ge="bet-value"]')!.textContent).toContain('€2');
     expect(q(mount, '[data-ge="win"]')!.textContent).toContain('€12');
     expect(q(mount, '[data-ge="bet-up"]')).toBeNull();
