@@ -52,6 +52,34 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
     bar.appendChild(valueEl('div', 'win', fmt(state.win)));
   }
 
+  if (state.mode === 'freeSpins') {
+    bar.appendChild(valueEl('div', 'balance', fmt(state.balance)));
+    bar.appendChild(valueEl('div', 'bet-value', fmt(state.bet))); // read-only
+    const counter = valueEl('div', 'fs-counter', `${state.freeSpins.current} / ${state.freeSpins.total}`);
+    bar.appendChild(counter);
+    bar.appendChild(valueEl('div', 'fs-totalwin', fmt(state.freeSpins.totalWin)));
+    bar.appendChild(valueEl('div', 'fs-lastwin', fmt(state.freeSpins.lastWin)));
+    if (config.features.turbo > 0) {
+      const turbo = createButton({ label: turboLabel(state.turbo), onClick: () => onTurbo(shell) });
+      turbo.dataset.ge = 'turbo';
+      bar.appendChild(turbo);
+    }
+  }
+
+  if (state.mode === 'replay') {
+    bar.appendChild(valueEl('div', 'replay-badge', 'REPLAY'));
+    bar.appendChild(valueEl('div', 'bet-value', fmt(state.bet))); // read-only
+    bar.appendChild(valueEl('div', 'win', fmt(state.win)));
+    if (state.freeSpins.total > 0) {
+      bar.appendChild(valueEl('div', 'fs-counter', `${state.freeSpins.current} / ${state.freeSpins.total}`));
+    }
+    if (config.features.turbo > 0) {
+      const turbo = createButton({ label: turboLabel(state.turbo), onClick: () => onTurbo(shell) });
+      turbo.dataset.ge = 'turbo';
+      bar.appendChild(turbo);
+    }
+  }
+
   // menu is always present
   const menu = createButton({ label: '☰', onClick: () => shell.openMenu() });
   menu.dataset.ge = 'menu';
