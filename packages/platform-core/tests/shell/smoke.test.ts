@@ -13,3 +13,10 @@ describe('shell public API', () => {
     expect(Object.keys(src)).toContain('createGameShell');
   });
 });
+
+describe('main entry re-exports shell factory', () => {
+  it('createGameShell is reachable from the package root', async () => {
+    const root = await import('@/index');
+    expect(typeof (root as Record<string, unknown>).createGameShell).toBe('function');
+  });
+});
