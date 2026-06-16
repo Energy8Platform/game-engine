@@ -19,15 +19,14 @@ describe('buildThemeVars', () => {
     expect(light).toContain('--shell-icon-active: #0b1220');
   });
 
-  it('only accent + buyBonus are game-overridable', () => {
-    const vars = buildThemeVars({ accent: '#ff0000', buyBonusColor: '#00ff00' });
-    expect(vars).toContain('--shell-accent: #ff0000');
-    expect(vars).toContain('--shell-buybonus: #00ff00');
+  it('only the accent is game-overridable (brand purple by default)', () => {
+    expect(buildThemeVars({ accent: '#ff0000' })).toContain('--shell-accent: #ff0000');
+    expect(buildThemeVars()).toContain('--shell-accent: #8b5cf6'); // brand default
   });
 
-  it('buyBonus tint follows accent by default, brand purple when neither is set', () => {
-    expect(buildThemeVars({ accent: '#ff0000' })).toContain('--shell-buybonus: #ff0000'); // inherits accent
-    expect(buildThemeVars()).toContain('--shell-buybonus: #8b5cf6'); // brand default
+  it('has no separate buy-bonus colour — BUY BONUS shares the accent', () => {
+    expect(buildThemeVars({ accent: '#ff0000' })).not.toContain('--shell-buybonus');
+    expect(SHELL_CSS).toContain('background:var(--shell-accent)'); // .ge-shell-buybonus fill
   });
 
   it('SPIN disc binds to the --shell-spin tokens so it follows the scheme (not hardcoded)', () => {

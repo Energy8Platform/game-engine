@@ -54,8 +54,9 @@ export interface BonusCardContext {
 export interface ThemeConfig {
   /** Palette scheme: 'dark' (default) for dark games, 'light' for light backgrounds. */
   scheme?: 'dark' | 'light';
+  /** Brand accent — active states, the SPIN hover glow, and the BUY BONUS button.
+   *  (Per-bonus card accents are set on each `BonusOption.accentColor`.) */
   accent?: string;
-  buyBonusColor?: string;
 }
 
 /** One paytable entry: a symbol (text/image) and its win tiers, rendered "<count> x<multiplier>". */

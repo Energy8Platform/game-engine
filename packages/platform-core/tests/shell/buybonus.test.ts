@@ -208,7 +208,9 @@ describe('Feature activation', () => {
     const betVal = q(mount, '[data-ge="bet-value"]')!;
     expect(betVal.classList.contains('ge-bet-feature')).toBe(true);
     expect(betVal.textContent).toContain('€50');           // 2 × 25
-    expect(betVal.style.color).toBeTruthy();               // tinted
+    expect(betVal.style.color).toBeTruthy();               // value tinted
+    const lblColor = (betVal.querySelector('.ge-lbl') as HTMLElement).style.color;
+    expect(lblColor).toBe(betVal.style.color);             // "BET" label tinted with the same accent
     expect(q(mount, '[data-ge="buybonus"]')!.textContent).toContain('DISABLE');
   });
 

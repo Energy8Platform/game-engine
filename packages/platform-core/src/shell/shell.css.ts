@@ -51,7 +51,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 
 /* BUY BONUS — round accent badge, 2-line label, text pulses + accent glow on hover */
 #${SHELL_ROOT_ID} .ge-shell-buybonus { pointer-events:auto; cursor:pointer; box-sizing:border-box;
-  width:80px; height:80px; border-radius:50%; border:3px solid #000; background:var(--shell-buybonus);
+  width:80px; height:80px; border-radius:50%; border:3px solid #000; background:var(--shell-accent);
   color:#fff; font-weight:800; letter-spacing:.02em; font-size:13px; line-height:1.08; text-align:center;
   display:flex; align-items:center; justify-content:center; transition:transform .08s ease, box-shadow .12s ease; }
 #${SHELL_ROOT_ID} .ge-shell-buybonus span { display:inline-block; will-change:transform; }

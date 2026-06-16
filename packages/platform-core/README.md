@@ -681,7 +681,7 @@ await removeGameShell();
 | Field | Type | Notes |
 | --- | --- | --- |
 | `mount` | `HTMLElement` | Container the shell DOM is appended into. Give it `position: relative`. |
-| `theme` | `ThemeConfig?` | `{ scheme?: 'dark' \| 'light', accent?, buyBonusColor? }`. Defaults to dark. |
+| `theme` | `ThemeConfig?` | `{ scheme?: 'dark' \| 'light', accent? }`. Defaults to dark. `accent` also tints the BUY BONUS button; per-card accents are `BonusOption.accentColor`. |
 | `language` | `string` | Currently `'en'` is the source language. |
 | `isSocial` | `boolean?` | Swap built-in text to social-casino vocabulary (bet → play, win → …). Game-supplied strings are untouched. |
 | `currency` | `CurrencyConfig` | `{ symbol, position: 'left'\|'right', decimals?, minDecimals?, separator? }`. |

@@ -57,7 +57,14 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   const feature = state.activeFeature;
   const betShown = feature ? state.bet * feature.priceMultiplier : state.bet;
   const betValue = readout('bet-value', shell.t('Bet'), fmt(betShown));
-  if (feature) { betValue.classList.add('ge-bet-feature'); betValue.style.color = effectiveAccent(feature); }
+  if (feature) {
+    const accent = effectiveAccent(feature);
+    betValue.classList.add('ge-bet-feature');
+    betValue.style.color = accent;
+    // tint the "BET" label too (its .ge-lbl colour is set in CSS, so override inline)
+    const lbl = betValue.querySelector('.ge-lbl') as HTMLElement | null;
+    if (lbl) lbl.style.color = accent;
+  }
   const turbo = config.features.turbo > 0
     ? iconBtn('turbo', turboIcon(state.turbo), () => onTurbo(shell), state.turbo > 0) : null;
 

@@ -21,7 +21,7 @@ const PALETTE = {
 } as const;
 
 /** CSS custom-property block for the shell root. `scheme` picks the palette;
- *  only accent and buyBonus are additionally game-overridable. */
+ *  only the accent is additionally game-overridable. */
 export function buildThemeVars(theme: ThemeConfig = {}): string {
   const p = PALETTE[theme.scheme === 'light' ? 'light' : 'dark'];
   return [
@@ -50,7 +50,5 @@ export function buildThemeVars(theme: ThemeConfig = {}): string {
     `--shell-plaque-line: rgba(255,255,255,.22)`,
     `--shell-plaque-label: rgba(255,255,255,.6)`,
     `--shell-accent: ${theme.accent ?? DEFAULT_ACCENT}`,
-    // buy-bonus tint follows the accent by default; only overridden when set explicitly
-    `--shell-buybonus: ${theme.buyBonusColor ?? theme.accent ?? DEFAULT_ACCENT}`,
   ].join('; ') + ';';
 }
