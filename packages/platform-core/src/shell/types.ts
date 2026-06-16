@@ -3,29 +3,91 @@ export type ShellMode = 'base' | 'freeSpins' | 'replay';
 export interface CurrencyConfig {
   symbol: string;
   position: 'left' | 'right';
+  /** Maximum fraction digits (default 2). The value is rounded to this precision. */
   decimals?: number;
+  /** Minimum fraction digits (defaults to `decimals`). Trailing zeros are trimmed down to
+   *  this many places, so small wins keep their significant digits (e.g. 0.0673) while round
+   *  amounts stay compact (e.g. 0.30). */
+  minDecimals?: number;
   separator?: { thousands?: string; decimal?: string };
 }
 
 export interface BonusOption {
   id: string;
-  name: string;
+  /** 'bonus' buys into a bonus round, 'feature' toggles a base-game modifier (e.g. Ante).
+   *  Drives the card/button label and accent. Defaults to 'bonus'. */
+  type?: 'feature' | 'bonus';
+  title: string;
   description: string;
-  priceMultiplier: number;
+  /** Transparent art image shown at the top of the card (no background plate). */
+  thumbnail?: string;
   volatility?: 1 | 2 | 3 | 4 | 5;
+  /** Card price = priceMultiplier × current bet, rendered in the shell currency. */
+  priceMultiplier: number;
+  /** Per-option accent override. Falls back to the type default (bonus → purple, feature → gold). */
   accentColor?: string;
 }
 
 export interface ThemeConfig {
+  /** Palette scheme: 'dark' (default) for dark games, 'light' for light backgrounds. */
+  scheme?: 'dark' | 'light';
   accent?: string;
   buyBonusColor?: string;
 }
 
-export interface GameInfoContent {
+/** One paytable entry: a symbol (text/image) and its win tiers, rendered "<count> x<multiplier>". */
+export interface PaytableRow {
+  symbol: { text?: string; image?: string };
+  wins: Array<{ count?: string; multiplier: number }>;
+}
+
+/** One payline over a cols×rows grid: the row index (0 = top) the line takes in each column. */
+export interface PaylineDef {
+  /** length must equal grid.cols; each value in 0..rows-1 */
+  pattern: number[];
+  label?: string;
+}
+
+/** A single grid cell, 0-based, row 0 = top. */
+export type CellRef = [col: number, row: number];
+
+/** How a game pays — drives the GameInfo win-section illustration. One section = one kind.
+ *  `example`/`winExample`/`loseExample` are optional; omit them for an auto-drawn illustration
+ *  sized to `grid`. */
+export type WinSection = {
+  type: 'wins';
+  title?: string;
+  order?: number;
+  grid: { cols: number; rows: number };
+  /** Optional prose shown alongside the illustration. */
+  description?: string;
+} & (
+  | { kind: 'classic'; lines: Array<number[] | PaylineDef> }
+  | { kind: 'cluster'; minCount: number; example?: CellRef[] }
+  | { kind: 'anywhere'; minCount: number; example?: CellRef[] }
+  | { kind: 'ways'; winExample?: CellRef[]; loseExample?: CellRef[] }
+);
+
+/** A playable mode / bonus-buy option, shown for comparison (informational only). */
+export interface GameMode {
+  title: string;
+  price?: string;
   rtp?: number;
-  rules?: string;
-  symbols?: Array<{ name: string; image?: string; payouts?: string }>;
-  features?: Array<{ name: string; description: string }>;
+  maxWin?: string;
+  description?: string;
+}
+
+/** A preset game-info section. `order` overrides placement; by default `modes` comes
+ *  first, `controls` second, and the rest follow in declaration order. */
+export type GameInfoSection =
+  | { type: 'modes'; title?: string; order?: number; modes: GameMode[] }
+  | { type: 'controls'; title?: string; order?: number }
+  | { type: 'paytable'; title?: string; order?: number; rows: PaytableRow[] }
+  | WinSection
+  | { type: 'custom'; title?: string; order?: number; node?: HTMLElement; html?: string };
+
+export interface GameInfoContent {
+  sections?: GameInfoSection[];
 }
 
 export interface ShellFeatures {
@@ -46,11 +108,47 @@ export interface FreeSpinsState {
   lastWin: number;
 }
 
+/** One footer button of a generic modal. Clicking it runs `on` (if any), then closes the modal. */
+export interface ModalAction {
+  title: string;
+  /** Button fill colour (any CSS colour). Omit for a neutral/secondary button. */
+  color?: string;
+  on?: () => void;
+}
+
+/** Options for `shell.openReplay()` — a non-dismissable replay summary modal.
+ *  `bonusId` is matched against `features.buyBonus` to label the mode and read the cost
+ *  multiplier. There is no ✕ and the backdrop never closes it; the only action is START
+ *  REPLAY, which closes the modal, runs `onReplay`, then reopens it. */
+export interface ReplayModalOptions {
+  bonusId: string;
+  /** Base bet the replay was recorded at. */
+  bet: number;
+  payoutMultiplier: number;
+  /** Runs after the modal closes; the modal reopens once it resolves (immediately for sync). */
+  onReplay: () => void | Promise<void>;
+}
+
+/** Options for `shell.openModal()` — a generic, externally-triggered card modal. */
+export interface ModalOptions {
+  /** Show the ✕ in the overlay's top-right corner. */
+  availableClose: boolean;
+  title: string;
+  body: string;
+  /** Footer buttons; each closes the modal (after running its `on`). */
+  actions?: ModalAction[];
+  /** Backdrop blur in px (defaults to the shell's standard blur). */
+  blurLevel?: number;
+}
+
 export interface ShellConfig {
   mount: HTMLElement;
   theme?: ThemeConfig;
   gameInfo: GameInfoContent;
   language: string;
+  /** When true, all built-in shell text is shown in the social-casino vocabulary (derived from
+   *  English via word-swap rules), regardless of `language`. Game-supplied content is untouched. */
+  isSocial?: boolean;
   currency: CurrencyConfig;
   availableBets: number[];
   defaultBet: number;
@@ -72,6 +170,9 @@ export interface ShellState {
   turbo: number;
   buyBonusEnabled: boolean;
   freeSpins: FreeSpinsState;
+  /** The currently activated `feature` option (e.g. Ante), or null. Drives the
+   *  effective-bet readout tint and the BUY BONUS → DISABLE toggle on the bar. */
+  activeFeature: BonusOption | null;
 }
 
 export interface ShellEvents {
@@ -81,6 +182,8 @@ export interface ShellEvents {
   autoplayStop: void;
   turboChange: number;
   buyBonusSelect: { id: string };
+  featureActivate: { id: string };
+  featureDeactivate: { id: string };
   menuOpen: void;
   settingsOpen: void;
   infoOpen: void;

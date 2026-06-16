@@ -1,78 +1,49 @@
 import { icon } from './icons';
 
-export interface ButtonOpts {
-  label: string;
-  className?: string;
-  onClick: () => void;
+/** Render a (possibly socialised) two-word label across two lines — the BUY BONUS badge.
+ *  Shared so the bottom-bar button and the Game-info control legend break identically. */
+export function twoLine(label: string): string {
+  return label.split(/\s+/).join('<br>');
 }
 
-export function createButton(opts: ButtonOpts): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.className = `ge-shell-btn ${opts.className ?? ''}`.trim();
-  btn.textContent = opts.label;
-  btn.addEventListener('click', () => {
-    if (!btn.disabled) opts.onClick();
-  });
-  return btn;
-}
-
-export interface ToggleOpts {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}
-
-export function createToggle(opts: ToggleOpts): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.className = 'ge-shell-btn ge-shell-toggle';
-  let checked = opts.checked;
-  const render = () => (btn.textContent = checked ? 'ON' : 'OFF');
-  render();
-  btn.addEventListener('click', () => {
-    checked = !checked;
-    render();
-    opts.onChange(checked);
-  });
-  return btn;
-}
-
-export interface SliderOpts {
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onInput: (value: number) => void;
-}
-
-export function createSlider(opts: SliderOpts): HTMLInputElement {
-  const input = document.createElement('input');
-  input.type = 'range';
-  input.min = String(opts.min);
-  input.max = String(opts.max);
-  input.step = String(opts.step);
-  input.value = String(opts.value);
-  input.className = 'ge-shell-slider';
-  input.addEventListener('input', () => opts.onInput(Number(input.value)));
-  return input;
-}
-
-export interface ModalOpts {
+export interface CardModalOpts {
+  ge: string;
+  title: string;
+  /** Accent for the title heading + accent footer button (defaults to the shell accent). */
+  accent?: string;
   onClose: () => void;
+  /** Render the ✕ in the overlay's top-right corner (default true). */
+  closable?: boolean;
+  /** Backdrop blur in px; omit to use the stylesheet's default blur. */
+  blur?: number;
 }
 
-/** A full-screen overlay card. Returns { root, body }; append content to body. */
-export function createModal(opts: ModalOpts): { root: HTMLDivElement; body: HTMLDivElement } {
+/** A centred CARD modal — frosted backdrop + opaque card with an accent title heading and an
+ *  overlay ✕ in the top-right. The shared chrome for every centred modal (buy-bonus confirm,
+ *  bet, autoplay, generic openModal). Append content to `body`; append full-bleed footer
+ *  button(s) directly to `card`. Closes only via the ✕ / footer buttons — the backdrop does NOT. */
+export function createCardModal(
+  opts: CardModalOpts,
+): { root: HTMLDivElement; card: HTMLDivElement; body: HTMLDivElement } {
   const root = document.createElement('div');
-  root.className = 'ge-shell-modal';
-  const card = document.createElement('div');
-  card.className = 'ge-shell-modal-card';
-  const close = createButton({ label: '✕', className: 'ge-shell-close', onClick: opts.onClose });
-  const body = document.createElement('div');
-  card.append(close, body);
+  root.className = 'ge-sheet'; root.dataset.ge = opts.ge;
+  if (opts.blur != null) root.style.setProperty('--ge-sheet-blur', `${opts.blur}px`);
+  const card = document.createElement('div'); card.className = 'ge-modal-card';
+  if (opts.accent) card.style.setProperty('--card-acc', opts.accent);
+  const body = document.createElement('div'); body.className = 'ge-modal-body';
+  const h = document.createElement('h4'); h.className = 'ge-modal-title'; h.textContent = opts.title;
+  body.appendChild(h);
+  card.appendChild(body);
   root.appendChild(card);
-  root.addEventListener('click', (e) => {
-    if (e.target === root) opts.onClose();
-  });
-  return { root, body };
+  // ✕ lives on the overlay itself (top-right of the screen), not on the card
+  if (opts.closable !== false) {
+    const close = document.createElement('button');
+    close.className = 'ge-modal-close'; close.dataset.ge = 'modal-close';
+    close.setAttribute('aria-label', 'Close'); close.innerHTML = icon('close');
+    close.addEventListener('click', opts.onClose);
+    root.appendChild(close);
+  }
+  return { root, card, body };
 }
 
 export interface OverlayOpts {
@@ -92,6 +63,11 @@ export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: 
     back.className = 'ge-ov-nav'; back.dataset.ge = 'info-back'; back.innerHTML = icon('back');
     back.addEventListener('click', opts.onBack);
     head.appendChild(back);
+  } else {
+    // reserve a slot equal to the close button so the title stays centred
+    const spacer = document.createElement('div');
+    spacer.className = 'ge-ov-spacer';
+    head.appendChild(spacer);
   }
   const h = document.createElement('h4'); h.className = 'ge-ov-title'; h.textContent = opts.title; head.appendChild(h);
   const close = document.createElement('button');

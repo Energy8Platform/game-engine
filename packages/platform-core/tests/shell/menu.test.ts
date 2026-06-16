@@ -5,7 +5,7 @@ import type { ShellConfig } from '@/shell/types';
 
 function cfg(mount: HTMLElement): ShellConfig {
   return {
-    mount, gameInfo: { rtp: 96 }, language: 'en',
+    mount, gameInfo: {}, language: 'en',
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2], defaultBet: 1, currentBet: null,
     balance: 100, win: 0, mode: 'base',

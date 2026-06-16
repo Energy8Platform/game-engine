@@ -23,17 +23,19 @@ describe('BottomBar freeSpins/replay modes', () => {
     await removeGameShell();
   });
 
-  it('freeSpins: no spin/bet/buy/autoplay, shows counter + turbo', () => {
+  it('freeSpins: no spin/bet/autoplay, spins counter in the centre pill + turbo + balance', () => {
     const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
     shell.setFreeSpins({ current: 3, total: 10, totalWin: 25, lastWin: 4 });
     expect(q(mount, '[data-ge="spin"]')).toBeNull();
     expect(q(mount, '[data-ge="bet-up"]')).toBeNull();
     expect(q(mount, '[data-ge="autoplay"]')).toBeNull();
     expect(q(mount, '[data-ge="turbo"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="balance"]')).toBeTruthy();
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('3');
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('10');
-    expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('€25');
-    expect(q(mount, '[data-ge="fs-lastwin"]')!.textContent).toContain('€4');
+    // accumulated + last win for the round are shown (totalWin 25, lastWin 4)
+    expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('25');
+    expect(q(mount, '[data-ge="fs-lastwin"]')!.textContent).toContain('4');
   });
 
   it('replay: read-only bet/win/turbo, no controls', () => {

@@ -3,21 +3,27 @@ import { createOverlay } from './primitives';
 import { icon } from './icons';
 
 export function openSettingsModal(shell: GameShell): HTMLElement {
-  const { root, body } = createOverlay({ title: 'Settings', onClose: () => root.remove() });
+  const { root, body } = createOverlay({ title: shell.t('Settings'), onClose: () => root.remove() });
   root.dataset.ge = 'settings-modal';
 
-  // Sound toggle (starts on) — full-width row
+  // Sound on/off (starts on) — full-width row with a speaker icon button
   const sound = (() => {
     let on = true;
     const btn = document.createElement('button');
-    btn.className = 'ge-toggle ge-on'; btn.dataset.ge = 'setting-sound';
-    btn.setAttribute('aria-label', 'Sound'); btn.innerHTML = '<i></i>';
+    btn.className = 'ge-snd ge-active'; btn.dataset.ge = 'setting-sound';
+    btn.setAttribute('aria-label', 'Sound');
+    const paint = () => {
+      btn.innerHTML = icon(on ? 'soundOn' : 'soundOff');
+      btn.classList.toggle('ge-active', on);
+      btn.setAttribute('aria-pressed', String(on));
+    };
+    paint();
     btn.addEventListener('click', () => {
-      on = !on; btn.classList.toggle('ge-on', on);
+      on = !on; paint();
       shell.emit('settingChange', { key: 'sound', value: on });
     });
     const row = document.createElement('div'); row.className = 'ge-ov-row';
-    row.innerHTML = '<span class="ge-grow">Sound</span>'; row.appendChild(btn);
+    row.innerHTML = `<span class="ge-grow">${shell.t('Sound')}</span>`; row.appendChild(btn);
     return row;
   })();
   body.appendChild(sound);
@@ -38,15 +44,15 @@ export function openSettingsModal(shell: GameShell): HTMLElement {
     row.append(head, input);
     return row;
   };
-  body.appendChild(slider('master', 'Master volume'));
-  body.appendChild(slider('music', 'Music'));
-  body.appendChild(slider('sfx', 'SFX'));
+  body.appendChild(slider('master', shell.t('Master volume')));
+  body.appendChild(slider('music', shell.t('Music')));
+  body.appendChild(slider('sfx', shell.t('SFX')));
 
   // Game info — full-width row button that opens its own overlay
   const gameInfo = document.createElement('button');
   gameInfo.className = 'ge-ov-row'; gameInfo.dataset.ge = 'game-info-btn';
   gameInfo.style.marginTop = '6px';
-  gameInfo.innerHTML = `<span style="width:22px;font-size:22px">${icon('info')}</span><span class="ge-grow">Game info</span><span style="width:20px;font-size:20px;color:var(--shell-muted)">${icon('chevronRight')}</span>`;
+  gameInfo.innerHTML = `<span style="width:22px;font-size:22px">${icon('info')}</span><span class="ge-grow">${shell.t('Game info')}</span><span style="width:20px;font-size:20px;color:var(--shell-muted)">${icon('chevronRight')}</span>`;
   gameInfo.addEventListener('click', () => { root.remove(); shell.openInfo(); });
   body.appendChild(gameInfo);
 

@@ -21,6 +21,7 @@ If you want the full PixiJS engine on top of this, install [`@energy8platform/ga
 - [Vite Plugins](#vite-plugins)
 - [Asset Manifest type](#asset-manifest-type)
 - [Pairing with another renderer](#pairing-with-another-renderer)
+- [Branded Game Shell](#branded-game-shell)
 - [Sub-path exports](#sub-path-exports)
 - [License](#license)
 
@@ -609,45 +610,193 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 
 ## Branded Game Shell
 
-The shell is a vanilla-DOM UI overlay you layer over the game canvas. It owns the control bar (3 modes: base / freeSpins / replay), menu, settings, game info panel, and a buy-bonus selection overlay.
+`@energy8platform/platform-core/shell` is a **vanilla-DOM UI overlay** you layer over the game
+canvas — no Pixi, no React, no framework. It owns the control bar (3 modes: base / freeSpins /
+replay), the menu, settings, the game-info panel, and a buy-bonus selection overlay, plus generic
+modals and a replay summary. Branded Energy8 chrome, fully renderer-agnostic — pair it with Pixi,
+Phaser, Three.js, or a custom engine.
+
+> Also re-exported from `@energy8platform/game-engine/shell` — same module, no extra install for
+> Pixi consumers.
+
+### Mental model
+
+The shell is **fully driven by the game** (single source of truth). It does **not** subscribe to
+the SDK/session and holds no game logic. You:
+
+1. **Feed state in** — once via the config object, then over time via `set*` methods.
+2. **React to player intent out** — subscribe to typed events (`spin`, `betChange`, …) and run
+   your game logic, then push the resulting state back via setters.
+
+This keeps replay and mid-spin restore deterministic: the shell never decides anything, it only
+renders what you tell it and reports what the player tapped.
+
+### Quick start
 
 ```typescript
-import { createGameShell } from '@energy8platform/platform-core/shell';
+import { createGameShell, removeGameShell } from '@energy8platform/platform-core/shell';
 
 const shell = createGameShell({
-  mount: document.getElementById('game')!,
+  mount: document.getElementById('game')!,   // shell appends its DOM here (position it relative)
   language: 'en',
   currency: { symbol: '€', position: 'left' },
-  availableBets: [0.2, 0.5, 1, 2], defaultBet: 1, currentBet: null,
-  balance: 1000, win: 0, mode: 'base',
-  gameInfo: { rtp: 96.5, rules: '…' },
-  features: { turbo: 3, autoplay: true, buyBonus: [
-    { id: 'fs', name: 'Buy Free Spins', description: '10 spins', priceMultiplier: 100, volatility: 5 },
-  ] },
+  availableBets: [0.2, 0.5, 1, 2, 5],
+  defaultBet: 1,
+  currentBet: null,        // null → start at defaultBet; or restore a saved bet
+  balance: 1000,
+  win: 0,
+  mode: 'base',
+  gameInfo: { sections: [{ type: 'controls' }] },   // see "Game info" below
+  features: {
+    turbo: 3,              // 0 = no turbo button, 1–3 = number of turbo levels
+    autoplay: true,
+    buyBonus: [
+      { id: 'fs', type: 'bonus', title: 'Buy Free Spins', description: '10 free spins',
+        priceMultiplier: 100, volatility: 5 },
+    ],
+  },
 });
 
-shell.on('spin', () => game.spin(shell.state.bet));
-shell.on('betChange', (bet) => game.setBet(bet));
-shell.on('buyBonusSelect', ({ id }) => game.buy(id));
+// ── player intent  (shell → game) ──
+shell.on('spin', () => runSpin(shell.state.bet));
+shell.on('betChange', (bet) => { myState.bet = bet; });
+shell.on('buyBonusSelect', ({ id }) => buyFeature(id));
 
-// game → shell
+// ── game state  (game → shell) ──
+shell.setBusy(true);                 // disable controls during an active spin
 shell.setBalance(980);
-shell.setWin(20);
-shell.setBusy(true);            // during an active spin
-shell.setMode('freeSpins');
-shell.setFreeSpins({ current: 1, total: 10, totalWin: 0, lastWin: 0 });
+shell.setWin(20);                    // both readouts count up automatically
+shell.setBusy(false);
+
+// teardown (single shell per page; fades out, resolves when removed)
+await removeGameShell();
 ```
 
-The shell is **fully driven by the game** (single source of truth) — it does not subscribe to the SDK/session. Feed state via config + setters; react to player intent via events. This keeps replay and mid-spin restore deterministic.
+`createGameShell` is a **singleton** — calling it twice returns the existing shell. Use
+`removeGameShell()` to dispose before creating another.
 
-**Visual system:** transparent neutral chrome that doesn't compete with the game —
-brand colour appears only on the BUY BONUS control and a distinctive duotone icon set.
-The bottom bar adapts by viewport width (spin-right on wide screens, spin-centered on
-narrow), menu stays bottom-left, and Settings / Game info / Buy bonus open as full-screen
-overlays. Motion is minimal (press feedback, balance/win count-up, overlay fades) and
-respects `prefers-reduced-motion`.
+### Config reference (`ShellConfig`)
 
-Also re-exported from `@energy8platform/game-engine/shell`.
+| Field | Type | Notes |
+| --- | --- | --- |
+| `mount` | `HTMLElement` | Container the shell DOM is appended into. Give it `position: relative`. |
+| `theme` | `ThemeConfig?` | `{ scheme?: 'dark' \| 'light', accent?, buyBonusColor? }`. Defaults to dark. |
+| `language` | `string` | Currently `'en'` is the source language. |
+| `isSocial` | `boolean?` | Swap built-in text to social-casino vocabulary (bet → play, win → …). Game-supplied strings are untouched. |
+| `currency` | `CurrencyConfig` | `{ symbol, position: 'left'\|'right', decimals?, minDecimals?, separator? }`. |
+| `availableBets` | `number[]` | Bet ladder shown in the bet picker. |
+| `defaultBet` / `currentBet` | `number` / `number \| null` | `currentBet` restores a saved bet; `null` falls back to `defaultBet`. |
+| `balance` / `win` | `number` | Initial readouts. |
+| `mode` | `'base' \| 'freeSpins' \| 'replay'` | Drives which bottom-bar variant renders. |
+| `gameInfo` | `GameInfoContent` | Sections for the game-info overlay (see below). |
+| `features` | `ShellFeatures` | `{ turbo: 0–3, autoplay, buyBonus: BonusOption[] \| false }`. |
+
+### Events (`shell.on(name, handler)`)
+
+| Event | Payload | When |
+| --- | --- | --- |
+| `spin` | — | Spin disc tapped (or Spacebar in base mode). |
+| `betChange` | `number` | Player confirmed a new bet. |
+| `autoplayStart` / `autoplayStop` | `{ active, remaining }` / — | Autoplay picker confirmed / stopped. |
+| `turboChange` | `number` | Turbo level cycled. |
+| `buyBonusSelect` | `{ id }` | A `type: 'bonus'` card was bought. |
+| `featureActivate` / `featureDeactivate` | `{ id }` | A `type: 'feature'` option (e.g. Ante) toggled. |
+| `menuOpen` / `settingsOpen` / `infoOpen` | — | Overlay opened. |
+| `settingChange` | `{ key, value }` | Settings control changed. Keys: `sound` (bool), `master` / `music` / `sfx` (0–100). |
+
+### State setters (`game → shell`)
+
+Each setter updates `shell.state` and re-renders. `setBalance` / `setWin` animate a count-up from
+the previous value.
+
+```typescript
+shell.setBalance(n); shell.setWin(n); shell.setBet(n);
+shell.setBusy(true);                 // disables controls mid-spin
+shell.setMode('freeSpins');
+shell.setFreeSpins({ current: 1, total: 10, totalWin: 0, lastWin: 0 });   // freeSpins bar readout
+shell.setAutoplay({ active: true, remaining: 25 });
+shell.setTurbo(2);
+shell.setBuyBonusEnabled(false);     // grey out BUY BONUS (e.g. insufficient balance)
+shell.setTheme({ scheme: 'light' }); // recolour at runtime
+shell.setSocial(true);               // swap vocabulary at runtime (reopen overlays to refresh them)
+```
+
+Read current state any time via `shell.state` (`ShellState`: `mode`, `balance`, `win`, `bet`,
+`busy`, `autoplay`, `turbo`, `freeSpins`, `activeFeature`, …).
+
+### Buy bonus & features
+
+`features.buyBonus` is an array of cards. `type: 'bonus'` buys into a round (emits
+`buyBonusSelect`); `type: 'feature'` toggles a base-game modifier like Ante. For features, drive
+the bar readout with:
+
+```typescript
+shell.activateFeature(option);    // bar shows the effective bet, BUY BONUS → DISABLE
+shell.deactivateFeature();        // revert
+```
+
+Each card price renders as `priceMultiplier × current bet` in the shell currency.
+
+### Game info (`gameInfo.sections`)
+
+The game-info overlay is composed from typed sections — declare what your game has and the shell
+draws the rest:
+
+- `{ type: 'modes', modes: GameMode[] }` — comparison table (title / price / rtp / maxWin).
+- `{ type: 'controls' }` — auto-generated control legend.
+- `{ type: 'paytable', rows: PaytableRow[] }` — symbol → win tiers (`"<count> x<multiplier>"`).
+- `{ type: 'wins', kind, grid, … }` — auto-drawn win illustration. `kind` is `'classic'` (paylines),
+  `'cluster'`, `'anywhere'`, or `'ways'`.
+- `{ type: 'custom', title, html | node }` — your own rules markup.
+
+```typescript
+gameInfo: {
+  sections: [
+    { type: 'modes', modes: [{ title: 'Base game', price: '1× bet', rtp: 96.5, maxWin: '5,000×' }] },
+    { type: 'controls' },
+    { type: 'paytable', rows: [
+      { symbol: { text: 'Wild' }, wins: [{ count: '5', multiplier: 250 }, { count: '3', multiplier: 50 }] },
+    ] },
+    { type: 'wins', kind: 'classic', grid: { cols: 5, rows: 3 },
+      lines: [[1,1,1,1,1], [0,0,0,0,0], [2,2,2,2,2]] },
+    { type: 'custom', title: 'Rules', html: '<p>Match left to right on adjacent reels.</p>' },
+  ],
+}
+```
+
+### Opening overlays & modals programmatically
+
+```typescript
+shell.openSettings();  shell.openInfo();  shell.openBuyBonus();
+shell.openBetPicker(); shell.openAutoplayPicker();
+
+// generic card modal
+shell.openModal({
+  availableClose: true,
+  title: 'Connection lost',
+  body: 'Reconnecting…',
+  actions: [{ title: 'Retry', color: '#e11', on: () => reconnect() }],
+});
+
+// non-dismissable replay summary (START REPLAY → onReplay → reopen)
+shell.openReplay({ bonusId: 'fs', bet: shell.state.bet, payoutMultiplier: 87.5,
+  onReplay: () => playRecordedRound() });
+```
+
+### Layout & visual system
+
+Transparent neutral chrome that doesn't compete with the game — brand colour appears only on the
+BUY BONUS control and a duotone icon set. The bottom bar **adapts by viewport** automatically (a
+`ResizeObserver` on the mount): landscape → one row scaled to fit, portrait → stacked mobile
+layout; Settings / Game info / Buy bonus open as full-screen overlays. Motion is minimal (press
+feedback, money count-up, overlay fades) and respects `prefers-reduced-motion`. Spacebar triggers
+a spin in base mode (ignored while busy, in autoplay, or when a modal/input is focused).
+
+### Live demo
+
+[`examples/shell-demo`](../../examples/shell-demo) is a full reference integration: every config
+section, all three bar modes, theme/social toggles, viewport presets, and event wiring. QA params:
+`?screen=<id>&kiosk=1&open=settings|info|buybonus`.
 
 ---
 

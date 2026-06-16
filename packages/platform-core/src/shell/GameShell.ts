@@ -1,11 +1,15 @@
 import { EventEmitter } from '../EventEmitter';
 import type {
   AutoplayOptions,
+  BonusOption,
   FreeSpinsState,
+  ModalOptions,
+  ReplayModalOptions,
   ShellConfig,
   ShellEvents,
   ShellMode,
   ShellState,
+  ThemeConfig,
 } from './types';
 import { createInitialState } from './state';
 import { buildThemeVars } from './theme';
@@ -14,8 +18,12 @@ import { renderBottomBar } from './components/BottomBar';
 import { openSettingsModal } from './components/Settings';
 import { openGameInfoModal } from './components/GameInfo';
 import { openBuyBonusOverlay } from './components/BuyBonus';
+import { openBetModal, openAutoplayModal } from './components/pickers';
+import { buildModal } from './components/Modal';
+import { buildReplayModal } from './components/ReplayModal';
 import { countUp } from './motion';
 import { formatCurrency } from './format';
+import { socialize } from './i18n';
 
 const REMOVE_FADE_MS = 300;
 
@@ -27,10 +35,12 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private barHost = document.createElement('div');
   private modalHost = document.createElement('div');
   private destroyed = false;
-  layout: 'wide' | 'narrow' = 'wide';
+  layout: 'wide' | 'mobile' = 'wide';
   private ro: ResizeObserver | null = null;
   private prevBalance = 0;
   private prevWin = 0;
+  private moneyAnims: Array<() => void> = [];
+  private keysBound = false;
 
   constructor(config: ShellConfig) {
     super();
@@ -52,30 +62,113 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.prevBalance = this.state.balance;
     this.prevWin = this.state.win;
     this.observeLayout();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', this.handleKeyDown);
+      this.keysBound = true;
+    }
     this.render();
+    // re-fit once the bundled webfont swaps in (text metrics change → row width changes)
+    if (typeof document !== 'undefined' && document.fonts) {
+      document.fonts.ready.then(() => { if (!this.destroyed) this.applyFitScale(); });
+    }
   }
 
   render(): void {
     if (this.destroyed) return;
-    this.root.classList.toggle('ge-narrow', this.layout === 'narrow');
+    this.cancelMoneyAnims(); // stop in-flight count-ups before their nodes are torn down below
+    this.root.classList.toggle('ge-mobile', this.layout === 'mobile');
     this.barHost.innerHTML = '';
     this.barHost.appendChild(renderBottomBar(this));
     this.animateMoney();
+    this.applyFitScale();
   }
 
-  setLayout(layout: 'wide' | 'narrow'): void {
+  private cancelMoneyAnims(): void {
+    for (const cancel of this.moneyAnims) cancel();
+    this.moneyAnims = [];
+  }
+
+  /** Keep the WIN pill inline between the groups; float it above when it won't fit. */
+  /**
+   * Landscape bar fills the width when it fits. When it overflows, the WIN pill is
+   * lifted above the bar (unscaled, so it stays readable) and the remaining row is
+   * centred and scaled down to fit — keeping the controls as large as possible.
+   */
+  private applyFitScale(): void {
+    if (this.destroyed) return;
+    const host = this.barHost;
+    const bar = host.querySelector('.ge-shell-bottom') as HTMLElement | null;
+    if (!bar) return;
+    // reset to baseline (idempotent — the pill may have been lifted on a prior pass)
+    const pill = host.querySelector('.ge-winpill') as HTMLElement | null;
+    if (pill && pill.parentElement === host) {                // put a lifted pill back inline
+      const right = bar.querySelector('.ge-zone-right');
+      if (right) bar.insertBefore(pill, right); else bar.appendChild(pill);
+      pill.classList.remove('ge-up');
+    }
+    host.classList.remove('ge-fit');
+    host.style.transform = '';
+    if (this.layout === 'mobile') {
+      // shrink the whole stack to fit narrow phones (mobile-s, or large numbers in a row)
+      let need = 0;
+      for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
+      const avail = bar.clientWidth;
+      if (need > avail + 1 && avail > 0) host.style.transform = `scale(${Math.max(0.7, avail / need).toFixed(4)})`;
+      return;
+    }
+    if (bar.scrollWidth <= bar.clientWidth + 1) return;       // bar fits inline → leave it
+    // overflow: lift the pill onto its own row above the bar (flex column → real 8px gap)
+    if (pill) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
+    if (bar.scrollWidth <= bar.clientWidth + 1) return;       // bar now fits full-width, pill above
+    // still too wide → shrink the whole stack (pill + bar) to fit, anchored bottom-centre
+    host.classList.add('ge-fit');
+    const natural = bar.offsetWidth, avail = this.root.clientWidth - 12;
+    const s = natural > 0 && avail > 0 ? Math.min(1, avail / natural) : 1;
+    host.style.transform = `translateX(-50%) scale(${s.toFixed(4)})`;
+  }
+
+  /** Spacebar starts a spin — same path as the spin disc. Ignored while a spin is running,
+   *  while autoplay is active, outside base mode, when an overlay/modal is open, or when an
+   *  editable element is focused. `repeat` (held key) is ignored so it can't spam. */
+  private handleKeyDown = (e: KeyboardEvent): void => {
+    if (this.destroyed || e.code !== 'Space' || e.repeat) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (this.modalHost.childElementCount > 0) return; // an overlay/modal is open
+    if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
+    e.preventDefault();
+    this.emit('spin');
+  };
+
+  setLayout(layout: 'wide' | 'mobile'): void {
     if (layout === this.layout) return;
     this.layout = layout;
-    this.root.classList.toggle('ge-narrow', layout === 'narrow');
     this.render();
+  }
+
+  /** Resolve a built-in shell string. English is the source; with `isSocial` it is run through
+   *  the social-casino word-swap. Game-supplied strings should NOT be passed through this. */
+  t(text: string): string { return this.config.isSocial ? socialize(text) : text; }
+
+  /** Toggle the social vocabulary at runtime (re-renders the bar; reopen overlays to refresh them). */
+  setSocial(isSocial: boolean): void { this.config.isSocial = isSocial; this.render(); }
+
+  /** Recolour the shell at runtime (e.g. switch dark/light scheme). */
+  setTheme(theme: ThemeConfig): void {
+    this.config.theme = theme;
+    this.root.setAttribute('style', buildThemeVars(theme));
   }
 
   private observeLayout(): void {
     const RO = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
     if (typeof RO !== 'function') return; // jsdom: stays 'wide'
     this.ro = new RO((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      this.setLayout(w > 0 && w < 720 ? 'narrow' : 'wide');
+      const rect = entries[0]?.contentRect;
+      const w = rect?.width ?? 0, h = rect?.height ?? 0;
+      // portrait → stacked mobile; landscape (incl. popouts) → one row, scaled to fit if it overflows
+      this.setLayout(w !== 0 && h > w ? 'mobile' : 'wide');
+      this.applyFitScale();
+      this.fitModals(); // re-scale open card modals when the popout resizes
     });
     this.ro.observe(this.root);
   }
@@ -84,8 +177,8 @@ export class GameShell extends EventEmitter<ShellEvents> {
     const fmt = (n: number) => formatCurrency(n, this.config.currency);
     const bal = this.barHost.querySelector('[data-ge="balance"]') as HTMLElement | null;
     const win = this.barHost.querySelector('[data-ge="win"]') as HTMLElement | null;
-    if (bal && this.state.balance !== this.prevBalance) animateReadout(bal, this.prevBalance, this.state.balance, fmt);
-    if (win && this.state.win !== this.prevWin) animateReadout(win, this.prevWin, this.state.win, fmt);
+    if (bal && this.state.balance !== this.prevBalance) this.moneyAnims.push(animateReadout(bal, this.prevBalance, this.state.balance, fmt));
+    if (win && this.state.win !== this.prevWin) this.moneyAnims.push(animateReadout(win, this.prevWin, this.state.win, fmt));
     this.prevBalance = this.state.balance;
     this.prevWin = this.state.win;
   }
@@ -103,6 +196,49 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private showModal(el: HTMLElement): void {
     this.modalHost.innerHTML = '';
     this.modalHost.appendChild(el);
+    this.fitModals();
+  }
+
+  /** Uniformly scale every open centred card modal (`.ge-sheet`) down so it fits a short/narrow
+   *  popout — the same idea as the bar's fit-scale. Covers the pickers, generic + replay modals,
+   *  AND the buy-bonus confirm (which is hosted inside the overlay, not directly in modalHost).
+   *  Full-screen overlays handle their own responsiveness (scroll + vh-clamp). */
+  fitModals(): void {
+    if (this.destroyed) return;
+    this.modalHost.querySelectorAll('.ge-sheet').forEach((el) => this.fitSheet(el as HTMLElement));
+  }
+
+  /** Fraction of the frame a card modal may occupy; the rest is breathing-room margin. Keeps
+   *  modals from filling a small popout edge-to-edge (so even short pickers scale down there). */
+  private static readonly MODAL_FIT = 0.86;
+
+  private fitSheet(root: HTMLElement): void {
+    const card = root.querySelector('.ge-modal-card') as HTMLElement | null;
+    if (!card) return;
+    card.style.transform = ''; // reset before measuring the natural size
+    const availW = root.clientWidth, availH = root.clientHeight;
+    const w = card.offsetWidth, h = card.offsetHeight;
+    if (w <= 0 || h <= 0 || availW <= 0 || availH <= 0) return;
+    const fit = GameShell.MODAL_FIT;
+    const s = Math.min(1, (availW * fit) / w, (availH * fit) / h);
+    if (s < 0.999) card.style.transform = `scale(${s.toFixed(4)})`;
+  }
+
+  /** Activate a `feature` option (e.g. Ante): the bar shows the effective bet, tinted with
+   *  the feature accent, and BUY BONUS becomes DISABLE. */
+  activateFeature(bonus: BonusOption): void {
+    this.state.activeFeature = bonus;
+    this.emit('featureActivate', { id: bonus.id });
+    this.render();
+  }
+
+  /** Clear the active feature — reverts the bet readout and the BUY BONUS button. */
+  deactivateFeature(): void {
+    const prev = this.state.activeFeature;
+    if (!prev) return;
+    this.state.activeFeature = null;
+    this.emit('featureDeactivate', { id: prev.id });
+    this.render();
   }
 
   openMenu(): void { this.emit('menuOpen'); this.openSettings(); }
@@ -112,12 +248,27 @@ export class GameShell extends EventEmitter<ShellEvents> {
     const overlay = openBuyBonusOverlay(this);
     if (overlay) this.showModal(overlay);
   }
+  /** Open a generic, externally-driven modal (title + body + optional action buttons).
+   *  Each action runs its `on` then closes; the ✕ shows when `availableClose` is true. */
+  openModal(opts: ModalOptions): void { this.showModal(buildModal(opts)); }
+  /** Open the non-dismissable replay summary modal (START REPLAY → onReplay → reopen). */
+  openReplay(opts: ReplayModalOptions): void {
+    if (this.destroyed) return;
+    this.showModal(buildReplayModal(this, opts));
+  }
+
+  /** Bet picker — list of available bets with an accent Confirm. */
+  openBetPicker(): void { this.showModal(openBetModal(this)); }
+  /** Autoplay picker — spin-count list; Confirm starts autoplay. */
+  openAutoplayPicker(): void { this.showModal(openAutoplayModal(this)); }
 
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
     this.ro?.disconnect();
     this.ro = null;
+    if (this.keysBound) { document.removeEventListener('keydown', this.handleKeyDown); this.keysBound = false; }
+    this.cancelMoneyAnims();
     this.removeAllListeners();
     this.root.classList.add('ge-shell-hidden');
     return new Promise<void>((resolve) => {
@@ -130,13 +281,14 @@ export class GameShell extends EventEmitter<ShellEvents> {
   }
 }
 
-/** Count-up the trailing text node of a .ge-rd readout (keeps its label span). */
-function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): void {
+/** Count-up the trailing text node of a .ge-rd readout (keeps its label span).
+ *  Returns the count-up canceler so the shell can stop it before the node is replaced. */
+function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): () => void {
   const textNode = el.lastChild;
-  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) { el.textContent = fmt(to); return; }
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) { el.textContent = fmt(to); return () => {}; }
   const proxy = {
     set textContent(v: string) { (textNode as Text).data = v; },
     get textContent() { return (textNode as Text).data; },
   } as unknown as HTMLElement;
-  countUp(proxy, from, to, fmt);
+  return countUp(proxy, from, to, fmt);
 }

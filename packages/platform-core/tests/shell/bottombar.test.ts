@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameShell, removeGameShell } from '@/shell';
+import { icon } from '@/shell/components/icons';
 import type { ShellConfig, ShellFeatures } from '@/shell/types';
 
 function cfg(mount: HTMLElement, features: Partial<ShellFeatures> = {}): ShellConfig {
@@ -40,7 +41,7 @@ describe('BottomBar base mode', () => {
   });
 
   it('shows turbo + buyBonus when enabled', () => {
-    createGameShell(cfg(mount, { turbo: 3, buyBonus: [{ id: 'b', name: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
+    createGameShell(cfg(mount, { turbo: 3, buyBonus: [{ id: 'b', title: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
     expect(q(mount, '[data-ge="turbo"]')).toBeTruthy();
     expect(q(mount, '[data-ge="buybonus"]')).toBeTruthy();
   });
@@ -70,6 +71,51 @@ describe('BottomBar base mode', () => {
     expect(spy).toHaveBeenCalledWith(1);
   });
 
+  it('turbo icon reflects the level (default turbo1; levels 2/3 add lines; wraps)', () => {
+    createGameShell(cfg(mount, { turbo: 3 }));
+    // normalise both sides through the DOM so attribute serialisation matches
+    const expectIcon = (name: Parameters<typeof icon>[0]) => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = icon(name);
+      expect(q(mount, '[data-ge="turbo"]')!.innerHTML).toBe(tmp.innerHTML);
+    };
+    expectIcon('turbo1'); // level 0 — resting (grey)
+    q(mount, '[data-ge="turbo"]')!.click();
+    expectIcon('turbo1'); // level 1 — engaged (white via .ge-active)
+    q(mount, '[data-ge="turbo"]')!.click();
+    expectIcon('turbo2');
+    q(mount, '[data-ge="turbo"]')!.click();
+    expectIcon('turbo3');
+    q(mount, '[data-ge="turbo"]')!.click(); // wraps back to 0
+    expectIcon('turbo1');
+  });
+
+  it('turbo/autoplay carry ge-active (white) only when engaged', () => {
+    const shell = createGameShell(cfg(mount, { turbo: 3, autoplay: true }));
+    const turbo = () => q(mount, '[data-ge="turbo"]')!;
+    const auto = () => q(mount, '[data-ge="autoplay"]')!;
+    expect(turbo().classList.contains('ge-active')).toBe(false); // resting grey
+    expect(auto().classList.contains('ge-active')).toBe(false);
+    turbo().click();
+    shell.setAutoplay({ active: true, remaining: 10 }); // engaging is now host-driven (via the picker)
+    expect(turbo().classList.contains('ge-active')).toBe(true); // engaged white
+    expect(auto().classList.contains('ge-active')).toBe(true);
+  });
+
+  it('disables the stepper at the bet range boundary', () => {
+    const shell = createGameShell(cfg(mount)); // availableBets [1,2,5], starts at 2 (middle)
+    const up = () => q(mount, '[data-ge="bet-up"]') as HTMLButtonElement;
+    const down = () => q(mount, '[data-ge="bet-down"]') as HTMLButtonElement;
+    expect(up().disabled).toBe(false);
+    expect(down().disabled).toBe(false);
+    shell.setBet(5); // top of range
+    expect(up().disabled).toBe(true);
+    expect(down().disabled).toBe(false);
+    shell.setBet(1); // bottom of range
+    expect(up().disabled).toBe(false);
+    expect(down().disabled).toBe(true);
+  });
+
   it('setBusy disables spin/bet but keeps menu enabled', () => {
     const shell = createGameShell(cfg(mount));
     shell.setBusy(true);
@@ -87,19 +133,19 @@ describe('BottomBar base mode', () => {
   });
 
   it('setBuyBonusEnabled(false) disables the bottom-bar buy bonus button', () => {
-    const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', name: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
+    const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', title: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
     expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(false);
     shell.setBuyBonusEnabled(false);
     expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('buy bonus button stays enabled when buyBonusEnabled is true and not busy', () => {
-    const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', name: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
+    const shell = createGameShell(cfg(mount, { buyBonus: [{ id: 'b', title: 'Bonus', description: 'd', priceMultiplier: 100 }] }));
     expect((q(mount, '[data-ge="buybonus"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('renders SVG icons for icon controls (not text glyphs)', () => {
-    createGameShell(cfg(mount, { turbo: 2, buyBonus: [{ id: 'b', name: 'B', description: 'd', priceMultiplier: 1 }] }));
+    createGameShell(cfg(mount, { turbo: 2, buyBonus: [{ id: 'b', title: 'B', description: 'd', priceMultiplier: 1 }] }));
     expect(q(mount, '[data-ge="menu"]')!.querySelector('svg')).toBeTruthy();
     expect(q(mount, '[data-ge="turbo"]')!.querySelector('svg')).toBeTruthy();
     expect(q(mount, '[data-ge="spin"]')!.querySelector('svg')).toBeTruthy();

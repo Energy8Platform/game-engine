@@ -20,14 +20,14 @@ describe('GameShell layout', () => {
   it('defaults to wide layout (no ResizeObserver dimensions in jsdom)', () => {
     const shell = createGameShell(cfg(mount));
     expect(shell.layout).toBe('wide');
-    expect(mount.querySelector('#__ge-game-shell__')!.classList.contains('ge-narrow')).toBe(false);
+    expect(mount.querySelector('#__ge-game-shell__')!.classList.contains('ge-mobile')).toBe(false);
   });
 
-  it('setLayout("narrow") adds the ge-narrow class and re-renders', () => {
+  it('setLayout("mobile") adds the ge-mobile class and re-renders', () => {
     const shell = createGameShell(cfg(mount));
-    shell.setLayout('narrow');
-    expect(shell.layout).toBe('narrow');
-    expect(mount.querySelector('#__ge-game-shell__')!.classList.contains('ge-narrow')).toBe(true);
+    shell.setLayout('mobile');
+    expect(shell.layout).toBe('mobile');
+    expect(mount.querySelector('#__ge-game-shell__')!.classList.contains('ge-mobile')).toBe(true);
   });
 
   it('opening the menu opens the Settings overlay', () => {

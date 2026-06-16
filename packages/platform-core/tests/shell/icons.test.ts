@@ -10,12 +10,16 @@ describe('icon', () => {
     }
   });
 
-  it('duotone icons reference both tone tokens', () => {
-    expect(icon('menu')).toContain('var(--shell-icon)');
-    expect(icon('menu')).toContain('var(--shell-icon-bright)');
+  it('the whole set is monochrome (no duotone tone tokens)', () => {
+    for (const name of ICON_NAMES) {
+      expect(icon(name)).not.toContain('var(--shell-icon');
+    }
   });
 
-  it('monochrome icons use currentColor', () => {
-    expect(icon('close')).toContain('currentColor');
+  it('control icons use currentColor', () => {
+    for (const name of ['spin', 'turbo', 'turbo1', 'turbo2', 'turbo3', 'autoplay', 'stop',
+      'menu', 'betUp', 'betDown', 'plus', 'minus', 'soundOn', 'soundOff', 'info', 'close'] as const) {
+      expect(icon(name)).toContain('currentColor');
+    }
   });
 });

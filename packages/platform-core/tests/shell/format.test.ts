@@ -31,4 +31,32 @@ describe('formatCurrency', () => {
   it('handles non-finite input as zero', () => {
     expect(formatCurrency(NaN, eur)).toBe('€0,00');
   });
+
+  it('minDecimals defaults to decimals (exactly `decimals` places)', () => {
+    expect(formatCurrency(0.067, { ...eur, decimals: 4 })).toBe('€0,0670');
+    expect(formatCurrency(0.3, { ...eur, decimals: 4 })).toBe('€0,3000');
+  });
+
+  it('keeps significant digits up to `decimals`, trims trailing zeros down to `minDecimals`', () => {
+    const c = { ...eur, decimals: 4, minDecimals: 2 };
+    expect(formatCurrency(0.0673, c)).toBe('€0,0673'); // not rounded to 0,07
+    expect(formatCurrency(0.067, c)).toBe('€0,067');
+    expect(formatCurrency(0.06, c)).toBe('€0,06');
+    expect(formatCurrency(0.0004, c)).toBe('€0,0004');
+    expect(formatCurrency(0.004, c)).toBe('€0,004');
+    expect(formatCurrency(0.3, c)).toBe('€0,30');
+    expect(formatCurrency(0, c)).toBe('€0,00');
+  });
+
+  it('rounds at the max precision (`decimals`) before trimming', () => {
+    const c = { ...eur, decimals: 4, minDecimals: 2 };
+    expect(formatCurrency(0.06734, c)).toBe('€0,0673'); // 5th digit rounded away
+    expect(formatCurrency(1234.5, c)).toBe('€1.234,50'); // grouping + trim to minDecimals
+  });
+
+  it('minDecimals: 0 drops the fraction entirely for whole amounts', () => {
+    const c = { ...eur, decimals: 4, minDecimals: 0 };
+    expect(formatCurrency(0.3, c)).toBe('€0,3');
+    expect(formatCurrency(5, c)).toBe('€5');
+  });
 });
