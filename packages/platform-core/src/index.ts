@@ -59,6 +59,7 @@ export type {
   ShellState,
   ShellEvents,
   BonusOption,
+  BonusCardContext,
   CurrencyConfig,
   ThemeConfig,
   GameInfoContent,

@@ -30,6 +30,7 @@ const RULES: ReadonlyArray<readonly [string, string]> = [
   ['paid', 'won'],
   ['bought', 'instantly triggered'],
   ['purchase', 'play'],
+  ['price', 'play'],
   ['deposit', 'get coins'],
   ['withdraw', 'redeem'],
   ['currency', 'token'],

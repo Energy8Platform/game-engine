@@ -28,7 +28,7 @@ export function openGameInfoModal(shell: GameShell): HTMLElement {
 
 function renderSection(shell: GameShell, s: GameInfoSection): HTMLElement {
   switch (s.type) {
-    case 'modes': return sectionModes(s.modes, sec('info-modes', s.title, shell.t('Modes')));
+    case 'modes': return sectionModes(shell, s.modes, sec('info-modes', s.title, shell.t('Modes')));
     case 'controls': return sectionControls(shell, sec('info-controls', s.title, shell.t('Controls')));
     case 'paytable': return sectionPaytable(s.rows, sec('info-paytable', s.title, shell.t('Paytable')));
     case 'wins': return sectionWins(s, sec('info-wins', s.title, shell.t(winFallbackTitle(s.kind))));
@@ -46,20 +46,20 @@ function sec(ge: string, title: string | undefined, fallback: string): HTMLEleme
 }
 
 // ── modes (rows — varying description lengths read better than fixed cards) ────
-function sectionModes(modes: GameMode[], el: HTMLElement): HTMLElement {
+function sectionModes(shell: GameShell, modes: GameMode[], el: HTMLElement): HTMLElement {
   const list = document.createElement('div'); list.className = 'ge-gi-modes';
-  for (const m of modes) list.appendChild(modeRow(m));
+  for (const m of modes) list.appendChild(modeRow(shell, m));
   el.appendChild(list);
   return el;
 }
-function modeRow(m: GameMode): HTMLElement {
+function modeRow(shell: GameShell, m: GameMode): HTMLElement {
   const row = document.createElement('div'); row.className = 'ge-gi-mode';
   const stat = (label: string, val: string) =>
     `<span class="ge-gi-mode-st"><span>${label}</span><b>${val}</b></span>`;
   let stats = '';
-  if (m.price != null) stats += stat('Price', m.price);
-  if (typeof m.rtp === 'number') stats += stat('RTP', `${m.rtp}%`);
-  if (m.maxWin != null) stats += stat('Max win', m.maxWin);
+  if (m.price != null) stats += stat(shell.t('Price'), m.price);
+  if (typeof m.rtp === 'number') stats += stat(shell.t('RTP'), `${m.rtp}%`);
+  if (m.maxWin != null) stats += stat(shell.t('Max win'), m.maxWin);
   row.innerHTML =
     `<div class="ge-gi-mode-top"><span class="ge-gi-mode-h">${m.title}</span>` +
     (stats ? `<span class="ge-gi-mode-stats">${stats}</span>` : '') + '</div>' +

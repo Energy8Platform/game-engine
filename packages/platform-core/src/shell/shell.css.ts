@@ -7,6 +7,7 @@ export const SHELL_ROOT_ID = '__ge-game-shell__';
 export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} {
   position: absolute; inset: 0;
+  container-type: size;   /* query container → centred modals size in cq units (responsive on every screen) */
   pointer-events: none; z-index: 9000;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--shell-fg);
@@ -225,16 +226,18 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
   scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
 /* the one knob that scales the whole card — cqh measures the overlay (popout frame), not the
    browser window, so cards shrink to fit the real container height. */
-#${SHELL_ROOT_ID} .ge-bb-grid .ge-bonus-card { flex:0 0 18.5em; scroll-snap-align:start;
-  font-size:clamp(7px, 4cqh, 13px); }
+#${SHELL_ROOT_ID} .ge-bb-grid .ge-bonus-card { flex:0 0 18em; scroll-snap-align:start;
+  font-size:clamp(7px, 3.6cqh, 12px); }
 /* mobile: vertical stack at a fixed, readable size — scroll the list, don't shrink the cards */
 #${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid { display:flex; flex-direction:column; gap:14px; overflow:visible; }
-#${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid .ge-bonus-card { flex:0 0 auto; font-size:13px; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid .ge-bonus-card { flex:0 0 auto; font-size:12px; }
 #${SHELL_ROOT_ID} .ge-bonus-card { display:flex; flex-direction:column; border-radius:1.4em; overflow:hidden;
   background:var(--shell-plaque-glass); border:1px solid var(--shell-plaque-line); color:#fff; text-align:center;
   pointer-events:auto; cursor:pointer; transition:box-shadow .12s ease, background .12s ease; }
 #${SHELL_ROOT_ID} .ge-bonus-card:hover:not(.ge-bonus-off) {
   box-shadow:0 0 0 1px var(--card-acc), 0 12px 34px -12px var(--card-acc); }
+/* custom card (BonusOption.custom): keep grid sizing + accent vars, drop the default chrome so the game owns the UI */
+#${SHELL_ROOT_ID} .ge-bonus-card--custom { background:none; border:none; cursor:default; }
 #${SHELL_ROOT_ID} .ge-bonus-body { display:flex; flex-direction:column; align-items:center; flex:1; padding:1.25em 1.1em .9em; }
 #${SHELL_ROOT_ID} .ge-bonus-title { font-size:1.3em; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
   color:var(--card-acc); margin-bottom:.75em; }
@@ -336,40 +339,44 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
   align-items:center; justify-content:center; padding:clamp(10px,4vh,24px); box-sizing:border-box;
   background:rgba(12,17,28,.5); backdrop-filter:blur(var(--ge-sheet-blur,20px)) saturate(120%);
   -webkit-backdrop-filter:blur(var(--ge-sheet-blur,20px)) saturate(120%); animation:ge-ov-in .16s ease-out; }
-/* GameShell.fitModal() scales the whole card down (transform) so it fits short popouts uniformly */
-#${SHELL_ROOT_ID} .ge-modal-card { width:100%; max-width:420px; box-sizing:border-box; overflow:hidden;
-  transform-origin:center center; background:var(--shell-plaque-solid); border-radius:20px; display:flex; flex-direction:column; }
+/* Card sizes in cq units of the shell root → responsive on EVERY screen, not just popouts. The
+   card's font-size is the one knob (clamped for readability); everything inside is em-relative so
+   the whole card scales as a unit. GameShell.fitModal() still transform-scales it down as a
+   backstop for very short popouts. */
+#${SHELL_ROOT_ID} .ge-modal-card { font-size:clamp(11px, 2cqmin, 15px); width:100%; max-width:28em; box-sizing:border-box;
+  overflow:hidden; transform-origin:center center; background:var(--shell-plaque-solid); border-radius:1.3em;
+  display:flex; flex-direction:column; }
 /* ✕ pinned to the overlay corner (the screen), not the card */
 #${SHELL_ROOT_ID} .ge-modal-close { position:absolute; top:12px; right:12px; z-index:2; width:36px; height:36px;
   border:none; border-radius:50%; cursor:pointer; pointer-events:auto; background:var(--shell-plaque-dark); color:#fff;
   display:flex; align-items:center; justify-content:center; font-size:20px; transition:background .12s ease, color .12s ease; }
 #${SHELL_ROOT_ID} .ge-modal-close:hover { background:var(--shell-plaque-glass); color:var(--shell-accent); }
-#${SHELL_ROOT_ID} .ge-modal-body { padding:18px; display:flex; flex-direction:column; gap:16px; }
+#${SHELL_ROOT_ID} .ge-modal-body { padding:1.2em; display:flex; flex-direction:column; gap:1.05em; }
 #${SHELL_ROOT_ID} .ge-modal-title { margin:0; text-align:center; color:var(--card-acc, var(--shell-accent));
-  font-weight:800; letter-spacing:.04em; text-transform:uppercase; font-size:18px; }
-#${SHELL_ROOT_ID} .ge-modal-text { margin:0; text-align:center; color:rgba(255,255,255,.85); font-size:14px; line-height:1.5; }
-#${SHELL_ROOT_ID} .ge-sheet-grid { display:grid; gap:10px; }
+  font-weight:800; letter-spacing:.04em; text-transform:uppercase; font-size:1.2em; }
+#${SHELL_ROOT_ID} .ge-modal-text { margin:0; text-align:center; color:rgba(255,255,255,.85); font-size:.93em; line-height:1.5; }
+#${SHELL_ROOT_ID} .ge-sheet-grid { display:grid; gap:.65em; }
 #${SHELL_ROOT_ID} .ge-chip { pointer-events:auto; cursor:pointer; border:1px solid var(--shell-plaque-line);
-  border-radius:12px; background:rgba(255,255,255,.04); color:#fff; font-size:15px; font-weight:700;
-  font-variant-numeric:tabular-nums; padding:12px 8px; transition:background .12s ease, border-color .12s ease; }
+  border-radius:.8em; background:rgba(255,255,255,.04); color:#fff; font-size:1em; font-weight:700;
+  font-variant-numeric:tabular-nums; padding:.8em .55em; transition:background .12s ease, border-color .12s ease; }
 #${SHELL_ROOT_ID} .ge-chip:hover { background:var(--shell-plaque-glass-hover); }
 #${SHELL_ROOT_ID} .ge-chip.ge-on { border-color:var(--shell-accent); background:var(--shell-accent); color:#fff; }
 /* full-bleed footer button(s), flush to the card's bottom edge (card clips the corners) */
 #${SHELL_ROOT_ID} .ge-modal-actions { display:flex; }
 #${SHELL_ROOT_ID} .ge-modal-actions > * { flex:1; }
-#${SHELL_ROOT_ID} .ge-modal-btn { width:100%; border:none; padding:16px; font-size:15px; font-weight:800;
+#${SHELL_ROOT_ID} .ge-modal-btn { width:100%; border:none; padding:1.05em; font-size:1em; font-weight:800;
   letter-spacing:.04em; text-transform:uppercase; cursor:pointer; pointer-events:auto; transition:filter .12s ease; }
 #${SHELL_ROOT_ID} .ge-modal-btn:hover:not([disabled]) { filter:brightness(1.08); }
 #${SHELL_ROOT_ID} .ge-modal-btn--accent { background:var(--card-acc, var(--shell-accent)); color:#fff; }
 #${SHELL_ROOT_ID} .ge-modal-btn--ghost { background:var(--shell-plaque-glass-hover); color:#fff; }
 /* replay summary — label/value rows, accented total-win row */
 #${SHELL_ROOT_ID} .ge-replay-rows { display:flex; flex-direction:column; }
-#${SHELL_ROOT_ID} .ge-replay-row { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:11px 2px; }
+#${SHELL_ROOT_ID} .ge-replay-row { display:flex; justify-content:space-between; align-items:baseline; gap:1.05em; padding:.73em .13em; }
 #${SHELL_ROOT_ID} .ge-replay-row + .ge-replay-row { border-top:1px solid var(--shell-plaque-line); }
-#${SHELL_ROOT_ID} .ge-replay-row span { color:var(--shell-plaque-label); text-transform:uppercase; letter-spacing:.07em; font-size:11px; font-weight:700; }
-#${SHELL_ROOT_ID} .ge-replay-row b { color:#fff; font-weight:800; font-size:15px; font-variant-numeric:tabular-nums; }
-#${SHELL_ROOT_ID} .ge-replay-total span { color:#fff; font-size:12px; }
-#${SHELL_ROOT_ID} .ge-replay-total b { color:var(--shell-accent); font-size:19px; }
+#${SHELL_ROOT_ID} .ge-replay-row span { color:var(--shell-plaque-label); text-transform:uppercase; letter-spacing:.07em; font-size:.73em; font-weight:700; }
+#${SHELL_ROOT_ID} .ge-replay-row b { color:#fff; font-weight:800; font-size:1em; font-variant-numeric:tabular-nums; }
+#${SHELL_ROOT_ID} .ge-replay-total span { color:#fff; font-size:.8em; }
+#${SHELL_ROOT_ID} .ge-replay-total b { color:var(--shell-accent); font-size:1.27em; }
 
 #${SHELL_ROOT_ID}.ge-shell-hidden { opacity:0; pointer-events:none; transition:opacity .25s ease; }
 `;

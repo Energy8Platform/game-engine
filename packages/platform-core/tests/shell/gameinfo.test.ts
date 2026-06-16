@@ -86,6 +86,16 @@ describe('GameInfo', () => {
     expect(q(controls, '.ge-gi-ctl-ic .ge-shell-buybonus')).toBeTruthy();
   });
 
+  it('socialises modes labels — Price → Play in social mode', () => {
+    const c = cfg(mount, [{ type: 'modes', modes: [{ title: 'Bonus mode', price: '€100', rtp: 96 }] }]);
+    c.isSocial = true;
+    const shell = createGameShell(c);
+    shell.openInfo();
+    const modes = q(mount, '[data-ge="info-modes"]')!;
+    expect(modes.textContent).toContain('Play');   // "Price" label → "Play"
+    expect(modes.textContent).not.toContain('Price');
+  });
+
   it('orders modes first, controls second by default', () => {
     const shell = createGameShell(cfg(mount));
     shell.openInfo();

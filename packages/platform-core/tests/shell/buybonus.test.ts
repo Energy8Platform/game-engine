@@ -129,6 +129,65 @@ describe('BuyBonus overlay', () => {
   });
 });
 
+describe('Buy-bonus customization', () => {
+  let mount: HTMLElement;
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    mount = document.createElement('div');
+    document.body.appendChild(mount);
+    await removeGameShell();
+  });
+
+  const customBonus = (capture: (ctx: any) => void): BonusOption => ({
+    id: 'cust', type: 'bonus', title: 'Custom', description: 'd', priceMultiplier: 100,
+    custom: (ctx) => {
+      capture(ctx);
+      const b = document.createElement('button');
+      b.dataset.ge = 'my-buy'; b.textContent = ctx.priceText; b.disabled = ctx.disabled;
+      b.addEventListener('click', ctx.select);
+      return b;
+    },
+  });
+
+  it('renders the game card UI (no default body/CTA); select() opens the confirm', () => {
+    let ctx: any;
+    const c = cfg(mount); c.features = { ...c.features, buyBonus: [customBonus((x) => { ctx = x; })] };
+    const shell = createGameShell(c);
+    shell.openBuyBonus();
+    expect(q(mount, '[data-ge="my-buy"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="bonus-cta-cust"]')).toBeNull(); // default CTA replaced
+    expect(ctx.priceText).toContain('€200');                   // 100 × bet(2)
+    expect(ctx.disabled).toBe(false);
+    q(mount, '[data-ge="my-buy"]')!.click();                   // wired to ctx.select()
+    expect(q(mount, '[data-ge="bonus-confirm"]')).toBeTruthy();
+  });
+
+  it('ctx.disabled is true when unaffordable and select() is a no-op', () => {
+    let ctx: any;
+    const c = cfg(mount, { balance: 50 }); // 100 × 2 = 200 > 50
+    c.features = { ...c.features, buyBonus: [customBonus((x) => { ctx = x; })] };
+    const shell = createGameShell(c);
+    shell.openBuyBonus();
+    expect(ctx.disabled).toBe(true);
+    q(mount, '[data-ge="my-buy"]')!.click();
+    expect(q(mount, '[data-ge="bonus-confirm"]')).toBeFalsy(); // guarded internally
+  });
+
+  it('onBonusBuy overrides the bar button: handler runs, built-in overlay does not open', () => {
+    const c = cfg(mount); const spy = vi.fn(); c.onBonusBuy = spy;
+    createGameShell(c);
+    q(mount, '[data-ge="buybonus"]')!.click();
+    expect(spy).toHaveBeenCalledOnce();
+    expect(q(mount, '[data-ge="buybonus-overlay"]')).toBeFalsy();
+  });
+
+  it('onBonusBuy shows the BUY BONUS button even without a cards array', () => {
+    const c = cfg(mount); c.features = { ...c.features, buyBonus: false }; c.onBonusBuy = vi.fn();
+    createGameShell(c);
+    expect(q(mount, '[data-ge="buybonus"]')).toBeTruthy();
+  });
+});
+
 describe('Feature activation', () => {
   let mount: HTMLElement;
   beforeEach(async () => {

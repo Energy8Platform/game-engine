@@ -20,6 +20,7 @@ describe('socialize', () => {
     expect(socialize('withdraw')).toBe('redeem');
     expect(socialize('bought')).toBe('instantly triggered');
     expect(socialize('rebet')).toBe('respin');
+    expect(socialize('price')).toBe('play');
   });
 
   it('matches longer phrases before their constituent words', () => {
@@ -46,6 +47,7 @@ describe('socialize', () => {
     expect(socialize('BUY BONUS')).toBe('GET BONUS');
     expect(socialize('Buy bonus')).toBe('Get bonus');
     expect(socialize('Total bet')).toBe('Total play');
+    expect(socialize('Price')).toBe('Play'); // Game-info modes label in social mode
   });
 
   it('only swaps whole words — never inside another word', () => {

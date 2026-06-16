@@ -69,20 +69,40 @@ function buildCard(shell: GameShell, bonus: BonusOption, overlay: HTMLElement): 
   card.className = 'ge-bonus-card'; card.dataset.ge = `bonus-card-${bonus.id}`;
   card.style.setProperty('--card-acc', accent);
   card.style.setProperty('--card-ink', contrastText(accent));
-  card.appendChild(cardBody(shell, bonus));
 
+  const enabled = isAffordable(shell, bonus);
+  // Stack the confirm on top of the overlay grid (cancel returns to the grid). Re-checks
+  // affordability at click time, so it's a safe no-op when the option can't be bought.
+  const select = (): void => {
+    if (!isAffordable(shell, bonus)) return;
+    overlay.appendChild(buildConfirm(shell, bonus, overlay));
+    shell.fitModals();
+  };
+
+  // Game-supplied card UI: the shell keeps the wrapper (grid sizing + accent vars) and runs the
+  // buy flow when the game calls ctx.select(); the game owns everything inside.
+  if (bonus.custom) {
+    card.classList.add('ge-bonus-card--custom');
+    const price = bonus.priceMultiplier * shell.state.bet;
+    card.appendChild(bonus.custom({
+      bonus, bet: shell.state.bet, price,
+      priceText: formatCurrency(price, shell.config.currency),
+      disabled: !enabled, accent, select,
+    }));
+    return card;
+  }
+
+  card.appendChild(cardBody(shell, bonus));
   const cta = document.createElement('button');
   cta.className = 'ge-bonus-cta'; cta.dataset.ge = `bonus-cta-${bonus.id}`;
   cta.textContent = shell.t(actionLabel(bonus));
   card.appendChild(cta);
 
-  const enabled = isAffordable(shell, bonus);
   if (!enabled) {
     card.classList.add('ge-bonus-off');
     cta.disabled = true;
   } else {
-    // Stack the confirm on top of the overlay grid (cancel returns to the grid).
-    card.addEventListener('click', () => { overlay.appendChild(buildConfirm(shell, bonus, overlay)); shell.fitModals(); });
+    card.addEventListener('click', select);
   }
   return card;
 }

@@ -691,6 +691,7 @@ await removeGameShell();
 | `mode` | `'base' \| 'freeSpins' \| 'replay'` | Drives which bottom-bar variant renders. |
 | `gameInfo` | `GameInfoContent` | Sections for the game-info overlay (see below). |
 | `features` | `ShellFeatures` | `{ turbo: 0–3, spacebar?, autoplay, buyBonus }`. `spacebar?: boolean` (default `true`) — `false` disables the Spacebar → spin shortcut. `autoplay: AutoplayConfig \| null` — `null`/omitted disables it; `{}` enables it; `{ maxCount }` caps the picker (drops ∞). `buyBonus: BonusOption[] \| false`. |
+| `onBonusBuy` | `(() => void)?` | Override the BUY BONUS button action — opens your own UI instead of the built-in overlay (also shows the button without a `buyBonus` array). See [Buy bonus](#buy-bonus--features). |
 
 ### Events (`shell.on(name, handler)`)
 
@@ -737,6 +738,26 @@ shell.deactivateFeature();        // revert
 ```
 
 Each card price renders as `priceMultiplier × current bet` in the shell currency.
+
+**Customisation.** Two override hooks let a game replace the built-in UI while keeping the
+shell's buy flow:
+
+```typescript
+// 1) Per-card UI — render your own card; the shell keeps the grid wrapper, accent vars and live
+//    re-pricing, and runs the normal confirm → buy flow when you call ctx.select().
+{ id: 'fs', title: 'Free Spins', description: '…', priceMultiplier: 100,
+  custom: ({ priceText, disabled, accent, select }) => {
+    const el = document.createElement('button');
+    el.textContent = priceText; el.disabled = disabled;
+    el.style.background = accent; el.addEventListener('click', select); // select() = internal flow
+    return el;                                                          // ctx also has { bonus, bet, price }
+  } }
+
+// 2) Bar button action — open your OWN bonus UI instead of the built-in overlay.
+createGameShell({ /* … */, onBonusBuy: () => myGame.openBonusScreen() });
+```
+
+`onBonusBuy` also makes the BUY BONUS button appear without a `features.buyBonus` array.
 
 ### Game info (`gameInfo.sections`)
 

@@ -26,6 +26,29 @@ export interface BonusOption {
   priceMultiplier: number;
   /** Per-option accent override. Falls back to the type default (bonus → purple, feature → gold). */
   accentColor?: string;
+  /** Override the card UI. Return the card's inner content; the shell keeps the grid wrapper,
+   *  accent vars and live re-pricing, and runs the normal buy flow when you call `ctx.select()`. */
+  custom?: (ctx: BonusCardContext) => HTMLElement;
+}
+
+/** Context passed to a `BonusOption.custom` renderer. Render the card however you like and wire
+ *  your own control to `select()` — the buy/confirm flow stays internal to the shell. */
+export interface BonusCardContext {
+  bonus: BonusOption;
+  /** Current bet. */
+  bet: number;
+  /** Card price = `bonus.priceMultiplier × bet`. */
+  price: number;
+  /** `price` formatted in the shell currency. */
+  priceText: string;
+  /** True when the option can't be bought right now (unaffordable / busy / buy-bonus disabled);
+   *  reflect it in your UI. `select()` is a no-op while disabled. */
+  disabled: boolean;
+  /** Card accent (per-option override or the type default); also set as the `--card-acc` CSS var. */
+  accent: string;
+  /** Proceed through the shell's normal flow: opens the confirm modal, then emits `buyBonusSelect`
+   *  / activates the feature. No-op while `disabled`. */
+  select: () => void;
 }
 
 export interface ThemeConfig {
@@ -168,6 +191,10 @@ export interface ShellConfig {
   win: number;
   mode: ShellMode;
   features: ShellFeatures;
+  /** Override the BUY BONUS bar button's action: when set, tapping it calls this instead of
+   *  opening the built-in buy-bonus overlay (e.g. the game shows its own bonus UI). The button
+   *  is shown whenever this OR `features.buyBonus` is set. */
+  onBonusBuy?: () => void;
 }
 
 export interface ShellState {

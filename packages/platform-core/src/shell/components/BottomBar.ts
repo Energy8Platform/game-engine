@@ -71,7 +71,7 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
     betValue.addEventListener('click', () => { if (!betLocked(shell)) shell.openBetPicker(); });
     spin = spinButton(shell);
     auto = config.features.autoplay ? autoButton(shell) : null;
-    buy = config.features.buyBonus !== false ? buyBtn(shell) : null;
+    buy = (config.features.buyBonus !== false || config.onBonusBuy) ? buyBtn(shell) : null;
   }
 
   const winEl = state.win > 0 ? readout('win', shell.t('Win'), fmt(state.win)) : null;
