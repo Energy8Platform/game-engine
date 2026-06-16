@@ -114,7 +114,7 @@ const shell: GameShell = createGameShell({
   },
   features: {
     turbo: 3,
-    autoplay: true,
+    autoplay: {},
     buyBonus: [
       { id: 'ante', type: 'feature', title: 'Ante Bet', description: '+25% to trigger frequency', priceMultiplier: 1.25, volatility: 2 },
       { id: 'boost', type: 'feature', title: 'Reel Boost', description: 'Boosted reels for the next 5 spins', priceMultiplier: 5, volatility: 3 },
@@ -181,7 +181,7 @@ function applyMode(mode: ShellMode): void {
   currentMode = mode;
   shell.setMode(mode);
   if (mode === 'freeSpins') {
-    shell.setFreeSpins({ current: 3, total: 10, totalWin: state.bet * 12, lastWin: state.bet * 4 });
+    shell.setFreeSpins({ current: 3, total: 10, totalWin: state.bet * 12 });
   }
   log(`mode → ${mode}`);
   renderToolbar();

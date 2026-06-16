@@ -14,7 +14,7 @@ function cfg(mount: HTMLElement, over: Partial<ShellConfig> = {}): ShellConfig {
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2], defaultBet: 2, currentBet: null,
     balance: 1000, win: 0, mode: 'base',
-    features: { turbo: 0, autoplay: false, buyBonus: BONUSES },
+    features: { turbo: 0, autoplay: null, buyBonus: BONUSES },
     ...over,
   };
 }

@@ -44,8 +44,8 @@ describe('buildThemeVars', () => {
     for (const t of plaque) {
       expect(dark).toContain(t);
       // always-dark plaque language: identical tone in both schemes
-      expect(dark).toContain('--shell-plaque-dark: rgba(6,9,15,.76)');
-      expect(light).toContain('--shell-plaque-dark: rgba(6,9,15,.76)');
+      expect(dark).toContain('--shell-plaque-dark: rgba(6,9,15,.86)');
+      expect(light).toContain('--shell-plaque-dark: rgba(6,9,15,.86)');
     }
   });
 });

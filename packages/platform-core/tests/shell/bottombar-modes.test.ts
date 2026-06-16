@@ -9,7 +9,7 @@ function cfg(mount: HTMLElement, over: Partial<ShellConfig> = {}): ShellConfig {
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2, 5], defaultBet: 2, currentBet: null,
     balance: 1000, win: 0, mode: 'base',
-    features: { turbo: 2, autoplay: true, buyBonus: false }, ...over,
+    features: { turbo: 2, autoplay: {}, buyBonus: false }, ...over,
   };
 }
 const q = (m: HTMLElement, s: string) => m.querySelector(s) as HTMLElement | null;
@@ -23,9 +23,9 @@ describe('BottomBar freeSpins/replay modes', () => {
     await removeGameShell();
   });
 
-  it('freeSpins: no spin/bet/autoplay, spins counter in the centre pill + turbo + balance', () => {
+  it('freeSpins: Free Spins + Total Win on the left, no controls, no Last win', () => {
     const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
-    shell.setFreeSpins({ current: 3, total: 10, totalWin: 25, lastWin: 4 });
+    shell.setFreeSpins({ current: 3, total: 10, totalWin: 25 });
     expect(q(mount, '[data-ge="spin"]')).toBeNull();
     expect(q(mount, '[data-ge="bet-up"]')).toBeNull();
     expect(q(mount, '[data-ge="autoplay"]')).toBeNull();
@@ -33,18 +33,39 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="balance"]')).toBeTruthy();
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('3');
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('10');
-    // accumulated + last win for the round are shown (totalWin 25, lastWin 4)
     expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('25');
-    expect(q(mount, '[data-ge="fs-lastwin"]')!.textContent).toContain('4');
+    expect(q(mount, '[data-ge="fs-lastwin"]')).toBeNull(); // Last win dropped
   });
 
-  it('replay: read-only bet/win/turbo, no controls', () => {
+  it('freeSpins: Total Win shows even at €0; win uses the base WIN pill', () => {
+    const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
+    shell.setFreeSpins({ current: 0, total: 10, totalWin: 0 });
+    expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('0'); // €0 still shown
+    expect(q(mount, '[data-ge="win"]')).toBeNull();                          // no win yet
+    shell.setWin(7);
+    const win = q(mount, '[data-ge="win"]')!;
+    expect(win.textContent).toContain('€7');
+    expect(win.classList.contains('ge-winpill')).toBe(true);                 // base pattern
+  });
+
+  it('replay: read-only bet + win (base pill) + turbo, no controls', () => {
     const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
     expect(q(mount, '[data-ge="bet-value"]')!.textContent).toContain('€2');
-    expect(q(mount, '[data-ge="win"]')!.textContent).toContain('€12');
+    const win = q(mount, '[data-ge="win"]')!;
+    expect(win.textContent).toContain('€12');
+    expect(win.classList.contains('ge-winpill')).toBe(true);
     expect(q(mount, '[data-ge="bet-up"]')).toBeNull();
     expect(q(mount, '[data-ge="spin"]')).toBeNull();
     expect(q(mount, '[data-ge="buybonus"]')).toBeNull();
     expect(q(mount, '[data-ge="turbo"]')).toBeTruthy();
+  });
+
+  it('replay: Free Spins + Total Win only for a free-spins replay (total > 0)', () => {
+    const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
+    expect(q(mount, '[data-ge="fs-counter"]')).toBeNull();   // plain replay → no FS blocks
+    expect(q(mount, '[data-ge="fs-totalwin"]')).toBeNull();
+    shell.setFreeSpins({ current: 8, total: 8, totalWin: 40 });
+    expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('8');
+    expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('40');
   });
 });

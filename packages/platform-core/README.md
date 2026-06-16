@@ -649,7 +649,8 @@ const shell = createGameShell({
   gameInfo: { sections: [{ type: 'controls' }] },   // see "Game info" below
   features: {
     turbo: 3,              // 0 = no turbo button, 1–3 = number of turbo levels
-    autoplay: true,
+    spacebar: true,        // default true; set false to disable the Spacebar → spin shortcut
+    autoplay: {},          // null / omitted = off; {} = on; { maxCount: 100 } caps the picker
     buyBonus: [
       { id: 'fs', type: 'bonus', title: 'Buy Free Spins', description: '10 free spins',
         priceMultiplier: 100, volatility: 5 },
@@ -689,7 +690,7 @@ await removeGameShell();
 | `balance` / `win` | `number` | Initial readouts. |
 | `mode` | `'base' \| 'freeSpins' \| 'replay'` | Drives which bottom-bar variant renders. |
 | `gameInfo` | `GameInfoContent` | Sections for the game-info overlay (see below). |
-| `features` | `ShellFeatures` | `{ turbo: 0–3, autoplay, buyBonus: BonusOption[] \| false }`. |
+| `features` | `ShellFeatures` | `{ turbo: 0–3, spacebar?, autoplay, buyBonus }`. `spacebar?: boolean` (default `true`) — `false` disables the Spacebar → spin shortcut. `autoplay: AutoplayConfig \| null` — `null`/omitted disables it; `{}` enables it; `{ maxCount }` caps the picker (drops ∞). `buyBonus: BonusOption[] \| false`. |
 
 ### Events (`shell.on(name, handler)`)
 
@@ -713,7 +714,7 @@ the previous value.
 shell.setBalance(n); shell.setWin(n); shell.setBet(n);
 shell.setBusy(true);                 // disables controls mid-spin
 shell.setMode('freeSpins');
-shell.setFreeSpins({ current: 1, total: 10, totalWin: 0, lastWin: 0 });   // freeSpins bar readout
+shell.setFreeSpins({ current: 1, total: 10, totalWin: 0 });   // Free Spins + Total Win bar readout
 shell.setAutoplay({ active: true, remaining: 25 });
 shell.setTurbo(2);
 shell.setBuyBonusEnabled(false);     // grey out BUY BONUS (e.g. insufficient balance)
@@ -790,7 +791,8 @@ BUY BONUS control and a duotone icon set. The bottom bar **adapts by viewport** 
 `ResizeObserver` on the mount): landscape → one row scaled to fit, portrait → stacked mobile
 layout; Settings / Game info / Buy bonus open as full-screen overlays. Motion is minimal (press
 feedback, money count-up, overlay fades) and respects `prefers-reduced-motion`. Spacebar triggers
-a spin in base mode (ignored while busy, in autoplay, or when a modal/input is focused).
+a spin in base mode (ignored while busy, in autoplay, when a modal/input is focused, or when
+`features.spacebar` is `false`).
 
 ### Live demo
 

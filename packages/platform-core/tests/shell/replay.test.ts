@@ -10,7 +10,7 @@ function cfg(mount: HTMLElement): ShellConfig {
     availableBets: [1, 2, 5], defaultBet: 2, currentBet: null,
     balance: 1000, win: 0, mode: 'replay',
     features: {
-      turbo: 0, autoplay: false,
+      turbo: 0, autoplay: null,
       buyBonus: [{ id: 'fs', title: 'Buy Free Spins', description: '10 free spins', priceMultiplier: 100 }],
     },
   };

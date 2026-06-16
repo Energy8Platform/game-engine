@@ -19,7 +19,7 @@ function cfg(mount: HTMLElement, sections?: GameInfoSection[]): ShellConfig {
     currency: { symbol: '€', position: 'left' },
     availableBets: [1], defaultBet: 1, currentBet: null,
     balance: 100, win: 0, mode: 'base',
-    features: { turbo: 2, autoplay: true, buyBonus: false },
+    features: { turbo: 2, autoplay: {}, buyBonus: false },
   };
 }
 const q = (m: HTMLElement, s: string) => m.querySelector(s) as HTMLElement | null;

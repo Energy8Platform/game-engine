@@ -10,7 +10,7 @@ function cfg(mount: HTMLElement, features: Partial<ShellFeatures> = {}): ShellCo
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2, 5], defaultBet: 2, currentBet: null,
     balance: 1000, win: 0, mode: 'base',
-    features: { turbo: 0, autoplay: true, buyBonus: false, ...features },
+    features: { turbo: 0, autoplay: {}, buyBonus: false, ...features },
   };
 }
 const q = (m: HTMLElement, sel: string) => m.querySelector(sel) as HTMLElement | null;
@@ -34,7 +34,7 @@ describe('BottomBar base mode', () => {
   });
 
   it('gates turbo/autoplay/buyBonus on features', () => {
-    createGameShell(cfg(mount, { turbo: 0, autoplay: false, buyBonus: false }));
+    createGameShell(cfg(mount, { turbo: 0, autoplay: null, buyBonus: false }));
     expect(q(mount, '[data-ge="turbo"]')).toBeNull();
     expect(q(mount, '[data-ge="autoplay"]')).toBeNull();
     expect(q(mount, '[data-ge="buybonus"]')).toBeNull();
@@ -91,7 +91,7 @@ describe('BottomBar base mode', () => {
   });
 
   it('turbo/autoplay carry ge-active (white) only when engaged', () => {
-    const shell = createGameShell(cfg(mount, { turbo: 3, autoplay: true }));
+    const shell = createGameShell(cfg(mount, { turbo: 3, autoplay: {} }));
     const turbo = () => q(mount, '[data-ge="turbo"]')!;
     const auto = () => q(mount, '[data-ge="autoplay"]')!;
     expect(turbo().classList.contains('ge-active')).toBe(false); // resting grey

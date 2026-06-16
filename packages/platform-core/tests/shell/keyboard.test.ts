@@ -9,7 +9,7 @@ function cfg(mount: HTMLElement): ShellConfig {
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2, 5], defaultBet: 1, currentBet: null,
     balance: 1000, win: 0, mode: 'base',
-    features: { turbo: 0, autoplay: true, buyBonus: false },
+    features: { turbo: 0, autoplay: {}, buyBonus: false },
   };
 }
 const space = (init: KeyboardEventInit = {}, target: EventTarget = document) =>
@@ -26,6 +26,24 @@ describe('keyboard: Space → spin', () => {
 
   it('emits spin when base, idle and no overlay is open', () => {
     const shell = createGameShell(cfg(mount));
+    const spy = vi.fn();
+    shell.on('spin', spy);
+    space();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('does not emit when features.spacebar is false', () => {
+    const c = cfg(mount); c.features = { ...c.features, spacebar: false };
+    const shell = createGameShell(c);
+    const spy = vi.fn();
+    shell.on('spin', spy);
+    space();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('emits when features.spacebar is explicitly true', () => {
+    const c = cfg(mount); c.features = { ...c.features, spacebar: true };
+    const shell = createGameShell(c);
     const spy = vi.fn();
     shell.on('spin', spy);
     space();

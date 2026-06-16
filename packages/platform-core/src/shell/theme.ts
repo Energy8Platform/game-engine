@@ -41,9 +41,9 @@ export function buildThemeVars(theme: ThemeConfig = {}): string {
     // Plaque tokens — the grouped dark/glass panel language shared by the control bar
     // AND the overlays. Scheme-independent (always dark, white-on-dark) so bar + overlays
     // stay visually identical regardless of the dark/light `scheme`.
-    `--shell-plaque-dark: rgba(6,9,15,.76)`,
-    `--shell-plaque-glass: rgba(30,36,48,.5)`,
-    `--shell-plaque-glass-hover: rgba(40,48,64,.62)`,
+    `--shell-plaque-dark: rgba(6,9,15,.86)`,
+    `--shell-plaque-glass: rgba(30,36,48,.70)`,
+    `--shell-plaque-glass-hover: rgba(40,48,64,.86)`,
     // Opaque surface for centred modals (confirm, bet/autoplay pickers) so they read solid,
     // not see-through, over the frosted backdrop.
     `--shell-plaque-solid: #1a2030`,

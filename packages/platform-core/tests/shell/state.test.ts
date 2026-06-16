@@ -14,7 +14,7 @@ function cfg(overrides: Partial<ShellConfig> = {}): ShellConfig {
     balance: 1000,
     win: 0,
     mode: 'base',
-    features: { turbo: 0, autoplay: true, buyBonus: false },
+    features: { turbo: 0, autoplay: {}, buyBonus: false },
     ...overrides,
   };
 }
@@ -37,7 +37,7 @@ describe('createInitialState', () => {
     expect(s.turbo).toBe(0);
     expect(s.buyBonusEnabled).toBe(true);
     expect(s.autoplay).toEqual({ active: false, remaining: 0 });
-    expect(s.freeSpins).toEqual({ current: 0, total: 0, totalWin: 0, lastWin: 0 });
+    expect(s.freeSpins).toEqual({ current: 0, total: 0, totalWin: 0 });
   });
 });
 

@@ -81,7 +81,7 @@ function sectionControls(shell: GameShell, el: HTMLElement): HTMLElement {
     { vis: slot(icon('spin')), name: 'Spin', desc: 'Start a spin at the current bet.', on: true },
     { vis: slot(icon('plus')), name: 'Raise bet', desc: 'Increase your stake.', on: true },
     { vis: slot(icon('minus')), name: 'Lower bet', desc: 'Decrease your stake.', on: true },
-    { vis: slot(icon('autoplay')), name: 'Autoplay', desc: 'Spin automatically a set number of times.', on: features.autoplay },
+    { vis: slot(icon('autoplay')), name: 'Autoplay', desc: 'Spin automatically a set number of times.', on: features.autoplay != null },
     { vis: slot(icon('turbo1')), name: 'Turbo', desc: 'Speed up spin animations.', on: features.turbo > 0 },
     { vis: buyBadge, name: 'Buy bonus', desc: 'Pay a fixed cost to enter a bonus feature.', on: features.buyBonus !== false },
   ];

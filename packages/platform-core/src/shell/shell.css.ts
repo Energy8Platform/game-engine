@@ -218,8 +218,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 /* the buy-bonus scroll area is a SIZE CONTAINER, so the cards' cqh units measure the overlay
    (the popout frame) and not the browser window — cards fit without any vertical scroll. */
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-scroll { container-type:size; }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-body { padding:clamp(8px,3cqh,16px); }
-#${SHELL_ROOT_ID} .ge-bb-grid { display:flex; gap:14px; overflow-x:auto; overflow-y:hidden; padding-bottom:6px;
+/* buy-bonus uses the FULL overlay width (no 800px centre cap) so the card row isn't cropped at
+   the sides; small horizontal padding keeps the cards off the screen edges. */
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-body { max-width:none; padding:clamp(8px,3cqh,16px) clamp(12px,3vw,28px); }
+#${SHELL_ROOT_ID} .ge-bb-grid { display:flex; gap:14px; justify-content:safe center; overflow-x:auto; overflow-y:hidden; padding-bottom:6px;
   scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
 /* the one knob that scales the whole card — cqh measures the overlay (popout frame), not the
    browser window, so cards shrink to fit the real container height. */
@@ -282,8 +284,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
   border-radius:16px; padding:0 20px; gap:18px; }
 #${SHELL_ROOT_ID} .ge-pl-dark { background:var(--shell-plaque-dark); }
 #${SHELL_ROOT_ID} .ge-pl-glass { background:var(--shell-plaque-glass); }
-/* FS spins-counter plaque (wide) — sits between balance and bet, glass like balance */
-#${SHELL_ROOT_ID} .ge-fscount { justify-content:center; min-width:150px; }
+/* FS/replay left blocks — Free Spins counter (compact) + Total Win, standalone glass plaques
+   sitting just right of the balance pill */
+#${SHELL_ROOT_ID} .ge-pl-fs, #${SHELL_ROOT_ID} .ge-pl-totalwin { margin-left:8px; }
+#${SHELL_ROOT_ID} .ge-pl-fs { padding:0 16px; }
 #${SHELL_ROOT_ID} .ge-pl .ge-rd { color:#fff; text-shadow:none; }
 #${SHELL_ROOT_ID} .ge-pl .ge-rd .ge-lbl { color:var(--shell-plaque-label); }
 #${SHELL_ROOT_ID} .ge-pl .ge-iconbtn { color:#fff; }

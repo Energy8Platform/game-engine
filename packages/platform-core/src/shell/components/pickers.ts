@@ -60,14 +60,27 @@ export function openBetModal(shell: GameShell): HTMLElement {
 
 const AUTOPLAY_COUNTS = [10, 25, 50, 100, 250, 500, 1000, 2000, Infinity];
 
-/** Autoplay picker — spin counts incl. ∞; Confirm starts autoplay. */
+/** The selectable spin counts, honouring an optional jurisdiction max. With a `maxCount`:
+ *  drop ∞, keep presets ≤ max, and append the max itself when it isn't already a preset
+ *  (so the cap is always offered). Without one: the default presets including ∞. */
+function autoplayCounts(maxCount?: number): number[] {
+  if (maxCount == null) return AUTOPLAY_COUNTS;
+  const capped = AUTOPLAY_COUNTS.filter((n) => Number.isFinite(n) && n <= maxCount);
+  if (!capped.includes(maxCount)) capped.push(maxCount);
+  return capped;
+}
+
+/** Autoplay picker — spin counts (incl. ∞ unless a maxCount caps them); Confirm starts autoplay. */
 export function openAutoplayModal(shell: GameShell): HTMLElement {
+  const maxCount = shell.config.features.autoplay?.maxCount;
+  const counts = autoplayCounts(maxCount);
   return buildSheet({
     ge: 'autoplay-modal', title: shell.t('Autoplay'), columns: 3, confirmLabel: shell.t('Start'),
-    choices: AUTOPLAY_COUNTS.map((n) => ({ id: String(n), label: Number.isFinite(n) ? String(n) : '∞' })),
-    selected: String(shell.state.autoplay.remaining || 10),
+    choices: counts.map((n) => ({ id: String(n), label: Number.isFinite(n) ? String(n) : '∞' })),
+    selected: String(shell.state.autoplay.remaining || counts[0]),
     onConfirm: (id) => {
-      const remaining = Number(id); // "Infinity" → Infinity
+      let remaining = Number(id); // "Infinity" → Infinity
+      if (maxCount != null) remaining = Math.min(remaining, maxCount); // defensive cap
       shell.state.autoplay = { active: true, remaining };
       shell.emit('autoplayStart', { active: true, remaining });
       shell.render();

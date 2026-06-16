@@ -15,7 +15,7 @@ function cfg(mount: HTMLElement): ShellConfig {
     balance: 1000,
     win: 0,
     mode: 'base',
-    features: { turbo: 0, autoplay: true, buyBonus: false },
+    features: { turbo: 0, autoplay: {}, buyBonus: false },
   };
 }
 

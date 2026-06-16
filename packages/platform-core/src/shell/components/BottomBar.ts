@@ -43,10 +43,13 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   // menu icon button (always)
   const menu = iconBtn('menu', 'menu', () => shell.openMenu());
 
-  // All three modes share the base plaque layout. FS/replay hide the controls that
-  // don't apply; FS puts the spins counter in the centre pill (where WIN normally is).
+  // All three modes share the base plaque layout. FS/replay hide the controls that don't apply
+  // and add Free Spins + Total Win blocks on the left; the per-spin WIN uses the base pill.
   const isBase = state.mode === 'base';
   const isFS = state.mode === 'freeSpins';
+  // FS always shows the spins counter + accumulated Total Win (even €0); a replay shows them
+  // only when it's a free-spins replay (freeSpins.total > 0).
+  const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
 
   const balance = readout('balance', shell.t('Balance'), fmt(state.balance));
   // With a feature active (e.g. Ante) the BET readout shows the effective stake, tinted with
@@ -72,22 +75,25 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   }
 
   const winEl = state.win > 0 ? readout('win', shell.t('Win'), fmt(state.win)) : null;
-  // FS readouts — the spins counter plus the accumulated/last win for the round.
-  const fsCounter = isFS ? readout('fs-counter', shell.t('Free spins'), `${state.freeSpins.current} / ${state.freeSpins.total}`) : null;
-  const fsTotalWin = isFS ? readout('fs-totalwin', shell.t('Total win'), fmt(state.freeSpins.totalWin)) : null;
-  const fsLastWin = isFS ? readout('fs-lastwin', shell.t('Last win'), fmt(state.freeSpins.lastWin)) : null;
+  // FS/replay left blocks: spins counter + accumulated Total Win (shown even at €0).
+  const fsCounter = showFsBlocks ? readout('fs-counter', shell.t('Free spins'), `${state.freeSpins.current} / ${state.freeSpins.total}`) : null;
+  const fsTotalWin = showFsBlocks ? readout('fs-totalwin', shell.t('Total win'), fmt(state.freeSpins.totalWin)) : null;
 
   if (mobile) {
-    // rows: [balance · win/(FS last+total)] · [menu · auto · (spin | FS counter) · turbo · buy] · [− bet +]
-    bar.appendChild(plaque('ge-m-top ge-pl ge-pl-glass', compact([balance, winEl, fsLastWin, fsTotalWin])));
-    const center = isBase ? spin : fsCounter;
-    bar.appendChild(plaque('ge-m-controls ge-pl-dark', compact([menu, auto, center, turbo, buy])));
+    // rows: [balance · win] · [menu · auto · spin · FS counter · Total Win · turbo · buy] · [− bet +]
+    // FS counter + Total Win live in the controls row (alongside menu/turbo), not the top readouts.
+    bar.appendChild(plaque('ge-m-top ge-pl ge-pl-glass', compact([balance, winEl])));
+    const center = isBase ? spin : null;
+    bar.appendChild(plaque('ge-m-controls ge-pl-dark', compact([menu, auto, center, fsCounter, fsTotalWin, turbo, buy])));
     bar.appendChild(plaque('ge-m-bet ge-pl ge-pl-dark', compact([betDown, betValue, betUp])));
   } else {
-    // LEFT: [menu] ⊐ BUY BONUS coin ⊏ [balance]
+    // LEFT: [menu] ⊐ BUY BONUS coin ⊏ [balance] · [Free Spins] · [Total Win]
+    // (the last two only render in FS / a free-spins replay)
     const menuPlaque = plaque('ge-pl ge-pl-dark ge-pl-menu', [menu]);
     const balPlaque = plaque('ge-pl ge-pl-glass ge-pl-bal', [balance]);
-    const left = zone('ge-zone-left ge-zone-plaques', ...compact([menuPlaque, buy, balPlaque]));
+    const fsPlaque = fsCounter ? plaque('ge-pl ge-pl-glass ge-pl-fs', [fsCounter]) : null;
+    const totalWinPlaque = fsTotalWin ? plaque('ge-pl ge-pl-glass ge-pl-totalwin', [fsTotalWin]) : null;
+    const left = zone('ge-zone-left ge-zone-plaques', ...compact([menuPlaque, buy, balPlaque, fsPlaque, totalWinPlaque]));
 
     // RIGHT: [bet (+ step)] · |divider| · [auto · SPIN · turbo]
     const betKids: HTMLElement[] = [betValue];
@@ -101,10 +107,9 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
     spinWrap.append(...compact([auto, spin, turbo]));
     const right = zone('ge-zone-right ge-zone-plaques', betPlaque, divider, spinWrap);
 
-    // MIDDLE: FS → last win · counter · total win plaque; base/replay → WIN pill (lifts on overflow)
+    // MIDDLE: per-spin WIN pill in every mode — lifts above the bar on overflow.
     let middle: HTMLElement | null = null;
-    if (isFS) middle = plaque('ge-pl ge-pl-glass ge-fscount', compact([fsLastWin, fsCounter, fsTotalWin]));
-    else if (winEl) { winEl.classList.add('ge-winpill'); middle = winEl; }
+    if (winEl) { winEl.classList.add('ge-winpill'); middle = winEl; }
     bar.append(...compact([left, middle, right]));
   }
 

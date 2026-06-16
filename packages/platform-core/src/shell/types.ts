@@ -90,9 +90,21 @@ export interface GameInfoContent {
   sections?: GameInfoSection[];
 }
 
+/** Autoplay limits. Presence of this object (vs `null`) is what enables autoplay. */
+export interface AutoplayConfig {
+  /** Maximum selectable spin count in the autoplay picker. Caps the built-in presets and
+   *  drops the unlimited (∞) choice; if it isn't already a preset it becomes the top choice.
+   *  Omit for the default presets (including ∞). */
+  maxCount?: number;
+}
+
 export interface ShellFeatures {
   turbo: 0 | 1 | 2 | 3;
-  autoplay: boolean;
+  /** Spacebar starts a spin in base mode. Defaults to `true`; set `false` to disable the
+   *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */
+  spacebar?: boolean;
+  /** Autoplay: `null` (or omitted) disables it; an object enables it (optionally with limits). */
+  autoplay?: AutoplayConfig | null;
   buyBonus: BonusOption[] | false;
 }
 
@@ -105,7 +117,6 @@ export interface FreeSpinsState {
   current: number;
   total: number;
   totalWin: number;
-  lastWin: number;
 }
 
 /** One footer button of a generic modal. Clicking it runs `on` (if any), then closes the modal. */

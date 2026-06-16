@@ -127,11 +127,13 @@ export class GameShell extends EventEmitter<ShellEvents> {
     host.style.transform = `translateX(-50%) scale(${s.toFixed(4)})`;
   }
 
-  /** Spacebar starts a spin — same path as the spin disc. Ignored while a spin is running,
-   *  while autoplay is active, outside base mode, when an overlay/modal is open, or when an
-   *  editable element is focused. `repeat` (held key) is ignored so it can't spam. */
+  /** Spacebar starts a spin — same path as the spin disc. Ignored when `features.spacebar` is
+   *  false, while a spin is running, while autoplay is active, outside base mode, when an
+   *  overlay/modal is open, or when an editable element is focused. `repeat` (held key) is
+   *  ignored so it can't spam. */
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (this.destroyed || e.code !== 'Space' || e.repeat) return;
+    if (this.config.features.spacebar === false) return; // shortcut disabled (e.g. jurisdiction)
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     if (this.modalHost.childElementCount > 0) return; // an overlay/modal is open

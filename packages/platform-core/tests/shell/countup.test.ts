@@ -6,7 +6,7 @@ import type { ShellConfig } from '@/shell/types';
 function cfg(mount: HTMLElement): ShellConfig {
   return { mount, gameInfo: {}, language: 'en', currency: { symbol: '€', position: 'left' },
     availableBets: [1], defaultBet: 1, currentBet: null, balance: 100, win: 0, mode: 'base',
-    features: { turbo: 0, autoplay: false, buyBonus: false } };
+    features: { turbo: 0, autoplay: null, buyBonus: false } };
 }
 
 describe('count-up (reduced motion in jsdom → final value immediately)', () => {

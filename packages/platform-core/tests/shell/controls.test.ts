@@ -9,7 +9,7 @@ function cfg(mount: HTMLElement): ShellConfig {
     currency: { symbol: '€', position: 'left' },
     availableBets: [1, 2, 5, 10], defaultBet: 1, currentBet: null,
     balance: 100, win: 0, mode: 'base',
-    features: { turbo: 2, autoplay: true, buyBonus: false },
+    features: { turbo: 2, autoplay: {}, buyBonus: false },
   };
 }
 const q = (m: HTMLElement, s: string) => m.querySelector(s) as HTMLElement | null;
@@ -71,6 +71,40 @@ describe('autoplay', () => {
     chip(modal, 'Infinity').click();
     q(modal, '[data-ge="sheet-confirm"]')!.click();
     expect(q(mount, '[data-ge="spin"] .ge-spin-count')!.textContent).toBe('∞');
+  });
+
+  it('maxCount caps the picker: only values ≤ max, and no ∞', () => {
+    const c = cfg(mount); c.features = { ...c.features, autoplay: { maxCount: 100 } };
+    createGameShell(c);
+    q(mount, '[data-ge="autoplay"]')!.click();
+    const ids = qa(q(mount, '[data-ge="autoplay-modal"]')!, '.ge-chip').map((el) => el.dataset.id);
+    expect(ids).toEqual(['10', '25', '50', '100']); // 250+ and ∞ dropped
+  });
+
+  it('a maxCount that is not a preset is appended as the top choice', () => {
+    const c = cfg(mount); c.features = { ...c.features, autoplay: { maxCount: 75 } };
+    createGameShell(c);
+    q(mount, '[data-ge="autoplay"]')!.click();
+    const ids = qa(q(mount, '[data-ge="autoplay-modal"]')!, '.ge-chip').map((el) => el.dataset.id);
+    expect(ids).toEqual(['10', '25', '50', '75']);
+  });
+
+  it('a maxCount below the smallest preset yields just that value', () => {
+    const c = cfg(mount); c.features = { ...c.features, autoplay: { maxCount: 5 } };
+    const shell = createGameShell(c);
+    const spy = vi.fn(); shell.on('autoplayStart', spy);
+    q(mount, '[data-ge="autoplay"]')!.click();
+    const modal = q(mount, '[data-ge="autoplay-modal"]')!;
+    expect(qa(modal, '.ge-chip').map((el) => el.dataset.id)).toEqual(['5']);
+    chip(modal, '5').click();
+    q(modal, '[data-ge="sheet-confirm"]')!.click();
+    expect(spy).toHaveBeenCalledWith({ active: true, remaining: 5 });
+  });
+
+  it('autoplay: null disables the feature (no autoplay button)', () => {
+    const c = cfg(mount); c.features = { ...c.features, autoplay: null };
+    createGameShell(c);
+    expect(q(mount, '[data-ge="autoplay"]')).toBeNull();
   });
 
   it('clicking the STOP disc stops autoplay', () => {

@@ -9,7 +9,7 @@ function cfg(mount: HTMLElement): ShellConfig {
     currency: { symbol: '€', position: 'left' },
     availableBets: [0.2, 0.5, 1, 2, 5], defaultBet: 1, currentBet: null,
     balance: 1000, win: 0, mode: 'base',
-    features: { turbo: 0, autoplay: true, buyBonus: false },
+    features: { turbo: 0, autoplay: {}, buyBonus: false },
   };
 }
 const q = (m: HTMLElement, s: string) => m.querySelector(s) as HTMLElement | null;

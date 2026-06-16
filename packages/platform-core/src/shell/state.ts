@@ -11,7 +11,7 @@ export function createInitialState(config: ShellConfig): ShellState {
     autoplay: { active: false, remaining: 0 },
     turbo: 0,
     buyBonusEnabled: true,
-    freeSpins: { current: 0, total: 0, totalWin: 0, lastWin: 0 },
+    freeSpins: { current: 0, total: 0, totalWin: 0 },
     activeFeature: null,
   };
 }

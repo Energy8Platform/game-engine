@@ -62,6 +62,7 @@ export type {
   CurrencyConfig,
   ThemeConfig,
   GameInfoContent,
+  AutoplayConfig,
   AutoplayOptions,
   FreeSpinsState,
 } from './shell';

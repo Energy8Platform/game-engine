@@ -16,7 +16,7 @@ function cfg(mount: HTMLElement, isSocial: boolean): ShellConfig {
     availableBets: [1, 2], defaultBet: 1, currentBet: null,
     balance: 1000, win: 0, mode: 'base',
     features: {
-      turbo: 0, autoplay: true,
+      turbo: 0, autoplay: {},
       buyBonus: [{ id: 'b', title: 'Bonus', description: 'd', priceMultiplier: 100 }],
     },
   };
