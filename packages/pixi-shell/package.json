@@ -1,0 +1,63 @@
+{
+  "name": "@energy8platform/pixi-shell",
+  "version": "0.1.0",
+  "description": "PixiJS rendering of the Energy8 branded game shell — a 1:1 port of the renderer-agnostic DOM shell (control bar, menu, settings, game info, buy bonus) drawn entirely in Pixi v8.",
+  "type": "module",
+  "main": "./dist/index.cjs.js",
+  "module": "./dist/index.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rollup -c rollup.config.mjs",
+    "dev": "rollup -c rollup.config.mjs -w",
+    "lint": "eslint src/ --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@energy8platform/platform-core": "*"
+  },
+  "peerDependencies": {
+    "pixi.js": "^8.16.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "jsdom": "^25.0.1",
+    "pixi.js": "^8.16.0",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "keywords": [
+    "casino",
+    "energy8",
+    "pixijs",
+    "game-shell",
+    "igaming"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/energy8platform/game-engine.git",
+    "directory": "packages/pixi-shell"
+  }
+}
