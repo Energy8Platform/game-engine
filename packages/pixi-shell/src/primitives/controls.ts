@@ -137,6 +137,9 @@ export class Slider extends Container implements Sizable {
     this.cursor = 'pointer';
     this.on('pointerdown', this.onDown);
     this.on('globalpointermove', this.onMove);
+    // release over the slider (pointerup) OR anywhere else after a press on it (pointerupoutside)
+    this.on('pointerup', this.endDrag);
+    this.on('pointerupoutside', this.endDrag);
   }
 
   private dragging = false;
@@ -148,8 +151,7 @@ export class Slider extends Container implements Sizable {
     if (!this.dragging) return;
     this.setFromX(this.toLocal(e.global).x);
   };
-  // stop dragging on global up — attached by the host scene via pointerup bubbling
-  endDrag = (): void => {
+  private endDrag = (): void => {
     this.dragging = false;
   };
 

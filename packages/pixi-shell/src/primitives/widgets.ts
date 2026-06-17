@@ -357,8 +357,9 @@ export class SpinDisc extends Container implements Sizable {
     return this._busy;
   }
 
-  destroyDisc(): void {
-    this.stopRotation();
+  destroy(options?: Parameters<Container['destroy']>[0]): void {
+    this.stopRotation(); // remove the rotation ticker callback before the glyph is torn down
+    super.destroy(options);
   }
 
   setLayoutSize(): void {
@@ -483,6 +484,11 @@ export class BuyBonusBadge extends Container implements Sizable {
   }
   measureSize(): { w: number; h: number } {
     return { w: this.size, h: this.size };
+  }
+
+  destroy(options?: Parameters<Container['destroy']>[0]): void {
+    this.stopPulse(); // cancel the hover-pulse tween (ticker) before teardown
+    super.destroy(options);
   }
 }
 
