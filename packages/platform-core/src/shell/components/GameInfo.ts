@@ -1,5 +1,5 @@
 import type { GameShell } from '../GameShell';
-import type { CellRef, GameInfoSection, GameMode, PaytableRow, PaylineDef, WinSection } from '../types';
+import type { CellRef, GameInfoSection, GameMode, PaytableRow, PaylineDef, ShapeDef, WinSection } from '../types';
 import { createOverlay, twoLine } from './primitives';
 import { icon } from './icons';
 
@@ -139,7 +139,7 @@ function paytableCard(r: PaytableRow): HTMLElement {
 
 // ── wins (one section = one pay type; cells filled in the accent colour, no line) ──
 function winFallbackTitle(kind: WinSection['kind']): string {
-  return { classic: 'Paylines', cluster: 'Cluster pays', anywhere: 'Pays anywhere', ways: 'Ways to win' }[kind];
+  return { classic: 'Paylines', cluster: 'Cluster pays', anywhere: 'Pays anywhere', ways: 'Ways to win', shapes: 'Winning shapes' }[kind];
 }
 
 function sectionWins(s: WinSection, el: HTMLElement): HTMLElement {
@@ -158,6 +158,11 @@ function sectionWins(s: WinSection, el: HTMLElement): HTMLElement {
     row.appendChild(gridSvg(s.grid, example));
     if (s.description) row.appendChild(winDesc(s.description));
     el.appendChild(row);
+  } else if (s.kind === 'shapes') {
+    if (s.description) el.appendChild(winDesc(s.description));
+    const list = document.createElement('div'); list.className = 'ge-gi-shapes';
+    for (const sh of s.shapes) list.appendChild(shapeRow(s.grid, sh));
+    el.appendChild(list);
   } else {
     if (s.description) el.appendChild(winDesc(s.description));
     const two = document.createElement('div'); two.className = 'ge-gi-win-two';
@@ -168,6 +173,20 @@ function sectionWins(s: WinSection, el: HTMLElement): HTMLElement {
     el.appendChild(two);
   }
   return el;
+}
+
+/** One named shape: grid illustration (left) + name and optional description (right) — modes-style. */
+function shapeRow(grid: { cols: number; rows: number }, sh: ShapeDef): HTMLElement {
+  const row = document.createElement('div'); row.className = 'ge-gi-shape';
+  const tx = document.createElement('div'); tx.className = 'ge-gi-shape-tx';
+  const h = document.createElement('b'); h.className = 'ge-gi-mode-h'; h.textContent = sh.name;
+  tx.appendChild(h);
+  if (sh.description) {
+    const p = document.createElement('p'); p.className = 'ge-gi-mode-desc'; p.textContent = sh.description;
+    tx.appendChild(p);
+  }
+  row.append(gridSvg(grid, sh.cells), tx);
+  return row;
 }
 
 function winDesc(text: string): HTMLElement {

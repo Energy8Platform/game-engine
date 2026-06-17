@@ -177,10 +177,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
 
   private animateMoney(): void {
     const fmt = (n: number) => formatCurrency(n, this.config.currency);
+    const fmtWin = (n: number) => formatCurrency(n, this.config.currency, true); // win: variable decimals
     const bal = this.barHost.querySelector('[data-ge="balance"]') as HTMLElement | null;
     const win = this.barHost.querySelector('[data-ge="win"]') as HTMLElement | null;
     if (bal && this.state.balance !== this.prevBalance) this.moneyAnims.push(animateReadout(bal, this.prevBalance, this.state.balance, fmt));
-    if (win && this.state.win !== this.prevWin) this.moneyAnims.push(animateReadout(win, this.prevWin, this.state.win, fmt));
+    if (win && this.state.win !== this.prevWin) this.moneyAnims.push(animateReadout(win, this.prevWin, this.state.win, fmtWin));
     this.prevBalance = this.state.balance;
     this.prevWin = this.state.win;
   }
