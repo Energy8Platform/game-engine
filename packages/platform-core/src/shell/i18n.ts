@@ -20,6 +20,9 @@ const RULES: ReadonlyArray<readonly [string, string]> = [
   ['pay out', 'win / won'],
   ['paid out', 'won'],
   ['pays out', 'win'],
+  ['paytable', 'win table'],
+  ['paylines', 'winlines'],
+  ['payline', 'winline'],
   ['bet/s', 'play/s'],
   ['betting', 'playing'],
   ['rebet', 'respin'],
@@ -31,6 +34,7 @@ const RULES: ReadonlyArray<readonly [string, string]> = [
   ['bought', 'instantly triggered'],
   ['purchase', 'play'],
   ['price', 'play'],
+  ['cost', 'play'], // standalone; the "cost of" / "at the cost of" phrases above win first
   ['deposit', 'get coins'],
   ['withdraw', 'redeem'],
   ['currency', 'token'],

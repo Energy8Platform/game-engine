@@ -21,6 +21,14 @@ describe('socialize', () => {
     expect(socialize('bought')).toBe('instantly triggered');
     expect(socialize('rebet')).toBe('respin');
     expect(socialize('price')).toBe('play');
+    expect(socialize('cost')).toBe('play');
+  });
+
+  it('swaps the game-info compound terms', () => {
+    expect(socialize('Paytable')).toBe('Win table'); // game-info section title
+    expect(socialize('Paylines')).toBe('Winlines');
+    expect(socialize('payline')).toBe('winline');
+    expect(socialize('PAYTABLE')).toBe('WIN TABLE');
   });
 
   it('matches longer phrases before their constituent words', () => {

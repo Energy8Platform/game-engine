@@ -807,6 +807,13 @@ shell.openReplay({ bonusId: 'fs', bet: shell.state.bet, payoutMultiplier: 87.5,
   onReplay: () => playRecordedRound() });
 ```
 
+> **⚠️ Keep `features.buyBonus` populated in replay mode.** The replay summary resolves the
+> mode title and **cost multiplier** by matching `bonusId` against `features.buyBonus`. If you set
+> `features.buyBonus: false` (or drop the matching option) while replaying, the modal can't find the
+> bonus and falls back to a `1×` cost and the raw `bonusId` as the title. The BUY BONUS button only
+> renders in `base` mode, so leaving the options populated during replay has no UI downside — it
+> just gives the replay window the data it needs.
+
 ### Layout & visual system
 
 Transparent neutral chrome that doesn't compete with the game — brand colour appears only on the
