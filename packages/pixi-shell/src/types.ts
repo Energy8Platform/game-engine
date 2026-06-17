@@ -16,6 +16,7 @@ export type {
   PaytableRow,
   PaylineDef,
   CellRef,
+  ShapeDef,
   WinSection,
   GameMode,
   GameInfoSection,
