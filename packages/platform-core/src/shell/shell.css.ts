@@ -209,6 +209,12 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-gi-mode-st span { color:var(--shell-plaque-label); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
 #${SHELL_ROOT_ID} .ge-gi-mode-st b { color:#fff; font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; }
 #${SHELL_ROOT_ID} .ge-gi-mode-desc { color:rgba(255,255,255,.78); font-size:14px; line-height:1.5; margin:0; }
+/* shapes — row list (grid illustration left, name + description right), modes-style text */
+#${SHELL_ROOT_ID} .ge-gi-shapes { display:flex; flex-direction:column; }
+#${SHELL_ROOT_ID} .ge-gi-shape { display:flex; align-items:center; gap:16px; padding:12px 0; }
+#${SHELL_ROOT_ID} .ge-gi-shape + .ge-gi-shape { border-top:1px solid var(--shell-plaque-line); }
+#${SHELL_ROOT_ID} .ge-gi-shape .ge-gi-pl-svg { flex:0 0 auto; width:96px; }
+#${SHELL_ROOT_ID} .ge-gi-shape-tx { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
 #${SHELL_ROOT_ID} .ge-gi-custom { color:rgba(255,255,255,.88); font-size:15px; line-height:1.6; }
 
 /* buy bonus cards — art-forward, centred, flat (no gradients); --card-acc/--card-ink per card.

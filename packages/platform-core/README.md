@@ -684,7 +684,7 @@ await removeGameShell();
 | `theme` | `ThemeConfig?` | `{ scheme?: 'dark' \| 'light', accent? }`. Defaults to dark. `accent` also tints the BUY BONUS button; per-card accents are `BonusOption.accentColor`. |
 | `language` | `string` | Currently `'en'` is the source language. |
 | `isSocial` | `boolean?` | Swap built-in text to social-casino vocabulary (bet → play, win → …). Game-supplied strings are untouched. |
-| `currency` | `CurrencyConfig` | `{ symbol, position: 'left'\|'right', decimals?, minDecimals?, separator? }`. |
+| `currency` | `CurrencyConfig` | `{ symbol, position: 'left'\|'right', maxDecimals?, minDecimals?, separator? }`. `maxDecimals` (default 2) / `minDecimals` (default `maxDecimals`): **win & total-win** show up to `maxDecimals`, trimming trailing zeros down to `minDecimals`; **balance / bet / prices** stay fixed at `minDecimals`. |
 | `availableBets` | `number[]` | Bet ladder shown in the bet picker. |
 | `defaultBet` / `currentBet` | `number` / `number \| null` | `currentBet` restores a saved bet; `null` falls back to `defaultBet`. |
 | `balance` / `win` | `number` | Initial readouts. |
@@ -715,7 +715,8 @@ the previous value.
 shell.setBalance(n); shell.setWin(n); shell.setBet(n);
 shell.setBusy(true);                 // disables controls mid-spin
 shell.setMode('freeSpins');
-shell.setFreeSpins({ current: 1, total: 10, totalWin: 0 });   // Free Spins + Total Win bar readout
+shell.setFreeSpins({ current: 1, total: 10, totalWin: 0 });   // counter shows "1 / 10"
+shell.setFreeSpins({ total: 9, totalWin: 0 });                // current omitted/null → single number "9" (decrement it for a countdown)
 shell.setAutoplay({ active: true, remaining: 25 });
 shell.setTurbo(2);
 shell.setBuyBonusEnabled(false);     // grey out BUY BONUS (e.g. insufficient balance)
@@ -768,7 +769,8 @@ draws the rest:
 - `{ type: 'controls' }` — auto-generated control legend.
 - `{ type: 'paytable', rows: PaytableRow[] }` — symbol → win tiers (`"<count> x<multiplier>"`).
 - `{ type: 'wins', kind, grid, … }` — auto-drawn win illustration. `kind` is `'classic'` (paylines),
-  `'cluster'`, `'anywhere'`, or `'ways'`.
+  `'cluster'`, `'anywhere'`, `'ways'`, or `'shapes'` — `{ kind: 'shapes', shapes: ShapeDef[] }` lists
+  named cell patterns (`{ cells: CellRef[], name, description? }`) as a grid-illustration row each.
 - `{ type: 'custom', title, html | node }` — your own rules markup.
 
 ```typescript

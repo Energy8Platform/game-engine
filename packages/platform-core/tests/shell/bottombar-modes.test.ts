@@ -37,6 +37,17 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="fs-lastwin"]')).toBeNull(); // Last win dropped
   });
 
+  it('freeSpins: shows just total (single number) when current is null/omitted', () => {
+    const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
+    shell.setFreeSpins({ total: 8, totalWin: 0 }); // current omitted → single number, no "/"
+    const counter = q(mount, '[data-ge="fs-counter"]')!;
+    expect(counter.textContent).toContain('8');
+    expect(counter.textContent).not.toContain('/');
+    shell.setFreeSpins({ current: null, total: 5, totalWin: 0 }); // explicit null behaves the same
+    expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('5');
+    expect(q(mount, '[data-ge="fs-counter"]')!.textContent).not.toContain('/');
+  });
+
   it('freeSpins: Total Win shows even at €0; win uses the base WIN pill', () => {
     const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
     shell.setFreeSpins({ current: 0, total: 10, totalWin: 0 });

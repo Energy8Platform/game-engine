@@ -3,11 +3,12 @@ export type ShellMode = 'base' | 'freeSpins' | 'replay';
 export interface CurrencyConfig {
   symbol: string;
   position: 'left' | 'right';
-  /** Maximum fraction digits (default 2). The value is rounded to this precision. */
-  decimals?: number;
-  /** Minimum fraction digits (defaults to `decimals`). Trailing zeros are trimmed down to
-   *  this many places, so small wins keep their significant digits (e.g. 0.0673) while round
-   *  amounts stay compact (e.g. 0.30). */
+  /** Maximum fraction digits (default 2). Win / total-win readouts are rounded to this precision;
+   *  balance / bet / prices stay fixed at `minDecimals`. */
+  maxDecimals?: number;
+  /** Minimum fraction digits (defaults to `maxDecimals`). For win / total-win, trailing zeros are
+   *  trimmed down to this many places so small wins keep their significant digits (e.g. 0.0673)
+   *  while round amounts stay compact (e.g. 0.30). Everything else is shown at exactly this many. */
   minDecimals?: number;
   separator?: { thousands?: string; decimal?: string };
 }
@@ -75,6 +76,15 @@ export interface PaylineDef {
 /** A single grid cell, 0-based, row 0 = top. */
 export type CellRef = [col: number, row: number];
 
+/** A named winning shape: an arbitrary set of grid cells (not one-per-column like a payline),
+ *  shown as a grid illustration with its name and optional description. */
+export interface ShapeDef {
+  /** The lit cells, in any pattern. */
+  cells: CellRef[];
+  name: string;
+  description?: string;
+}
+
 /** How a game pays — drives the GameInfo win-section illustration. One section = one kind.
  *  `example`/`winExample`/`loseExample` are optional; omit them for an auto-drawn illustration
  *  sized to `grid`. */
@@ -90,6 +100,7 @@ export type WinSection = {
   | { kind: 'cluster'; minCount: number; example?: CellRef[] }
   | { kind: 'anywhere'; minCount: number; example?: CellRef[] }
   | { kind: 'ways'; winExample?: CellRef[]; loseExample?: CellRef[] }
+  | { kind: 'shapes'; shapes: ShapeDef[] }
 );
 
 /** A playable mode / bonus-buy option, shown for comparison (informational only). */
@@ -138,7 +149,9 @@ export interface AutoplayOptions {
 }
 
 export interface FreeSpinsState {
-  current: number;
+  /** Spin index for the `current / total` counter. Set to `null` (or omit) to instead show just
+   *  `total` as a single number — drive a countdown by decrementing `total` each spin. */
+  current?: number | null;
   total: number;
   totalWin: number;
 }

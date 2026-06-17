@@ -35,6 +35,7 @@ function iconBtn(ge: string, name: IconName, onClick: () => void, active = false
 export function renderBottomBar(shell: GameShell): HTMLElement {
   const { state, config } = shell;
   const fmt = (n: number) => formatCurrency(n, config.currency);
+  const fmtWin = (n: number) => formatCurrency(n, config.currency, true); // win / total-win: variable decimals
   const mobile = shell.layout === 'mobile';
   const bar = document.createElement('div');
   bar.className = 'ge-shell-bottom';
@@ -81,10 +82,13 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
     buy = (config.features.buyBonus !== false || config.onBonusBuy) ? buyBtn(shell) : null;
   }
 
-  const winEl = state.win > 0 ? readout('win', shell.t('Win'), fmt(state.win)) : null;
+  const winEl = state.win > 0 ? readout('win', shell.t('Win'), fmtWin(state.win)) : null;
   // FS/replay left blocks: spins counter + accumulated Total Win (shown even at €0).
-  const fsCounter = showFsBlocks ? readout('fs-counter', shell.t('Free spins'), `${state.freeSpins.current} / ${state.freeSpins.total}`) : null;
-  const fsTotalWin = showFsBlocks ? readout('fs-totalwin', shell.t('Total win'), fmt(state.freeSpins.totalWin)) : null;
+  // current = number → "current / total"; current = null/undefined → just the (game-driven) total.
+  const fs = state.freeSpins;
+  const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
+  const fsCounter = showFsBlocks ? readout('fs-counter', shell.t('Free spins'), fsText) : null;
+  const fsTotalWin = showFsBlocks ? readout('fs-totalwin', shell.t('Total win'), fmtWin(fs.totalWin)) : null;
 
   if (mobile) {
     // rows: [balance · win] · [menu · auto · spin · FS counter · Total Win · turbo · buy] · [− bet +]

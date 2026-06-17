@@ -10,6 +10,7 @@ import { createCardModal } from './primitives';
 export function buildReplayModal(shell: GameShell, opts: ReplayModalOptions): HTMLElement {
   const { bonusId, bet, payoutMultiplier } = opts;
   const fmt = (n: number) => formatCurrency(n, shell.config.currency);
+  const fmtWin = (n: number) => formatCurrency(n, shell.config.currency, true); // total win: variable decimals
   const bonus = Array.isArray(shell.config.features.buyBonus)
     ? shell.config.features.buyBonus.find((b) => b.id === bonusId)
     : undefined;
@@ -35,7 +36,7 @@ export function buildReplayModal(shell: GameShell, opts: ReplayModalOptions): HT
   row('Cost multiplier', `${costMultiplier}×`);
   row('Total cost bet', fmt(bet * costMultiplier));
   row('Payout multiplier', `${payoutMultiplier}×`);
-  row('Total win', fmt(payoutMultiplier * bet), true);
+  row('Total win', fmtWin(payoutMultiplier * bet), true);
   ui.body.appendChild(rows);
 
   const actions = document.createElement('div'); actions.className = 'ge-modal-actions';

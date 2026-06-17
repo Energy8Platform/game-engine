@@ -46,6 +46,22 @@ describe('GameInfo', () => {
     expect(q(modal, '[data-ge="info-custom"]')!.textContent).toContain('Match left to right.');
   });
 
+  it('wins kind "shapes" renders a row per named shape (grid + name + description)', () => {
+    const shell = createGameShell(cfg(mount, [
+      { type: 'wins', kind: 'shapes', grid: { cols: 5, rows: 3 }, shapes: [
+        { cells: [[0, 0], [1, 1], [2, 2]], name: 'Diagonal', description: 'Top-left to bottom-right.' },
+        { cells: [[0, 1], [1, 1], [2, 1], [3, 1], [4, 1]], name: 'Middle row' },
+      ] },
+    ]));
+    shell.openInfo();
+    const wins = q(mount, '[data-ge="info-wins"]')!;
+    expect(qa(wins, '.ge-gi-shape')).toHaveLength(2);          // one row per shape
+    expect(qa(wins, '.ge-gi-shape .ge-gi-pl-svg')).toHaveLength(2); // each row has the grid illustration
+    expect(wins.textContent).toContain('Diagonal');            // name
+    expect(wins.textContent).toContain('Top-left to bottom-right.'); // description
+    expect(wins.textContent).toContain('Middle row');          // description optional
+  });
+
   it('controls section splits into two blocks, with bet as separate raise/lower rows', () => {
     const shell = createGameShell(cfg(mount));
     shell.openInfo();
