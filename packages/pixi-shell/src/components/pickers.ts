@@ -35,7 +35,7 @@ function buildSheet(host: ShellHost, opts: SheetOpts): CardModal {
     for (const c of rowChoices) {
       const chip = new Chip(host, c.id, c.label, c.id === selected, em, (id) => {
         selected = id;
-        for (const x of chips) x.on = x.id === selected;
+        for (const x of chips) x.setSelected(x.id === selected);
       });
       chip.setLayoutSize(colW, undefined);
       chips.push(chip);

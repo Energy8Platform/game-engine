@@ -36,7 +36,5 @@ export function buildModal(host: ShellHost, opts: ModalOptions): ShellLayer {
     modal.setActions(actions);
   }
   modal.build();
-  // approximate per-action ink for explicit colours (accent/ghost handled by CardModal)
-  void contrastText;
   return modal;
 }

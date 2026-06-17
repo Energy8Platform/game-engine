@@ -93,7 +93,7 @@ export class BottomBar extends Container {
     const menu = new IconButton('menu', {
       color: '#ffffff',
       hover: tokens.accent,
-      onTap: () => this.host.openSettings(),
+      onTap: () => this.host.openMenu(),
     });
     const menuPlaque = plaque(this.host, 'dark', {
       corners: [16, 0, 0, 16],
@@ -152,6 +152,10 @@ export class BottomBar extends Container {
     rest: Container[],
   ): void {
     const OVERLAP = 16; // .ge-shell-buybonus margin:0 -16px
+    // measure the plaques (FlexBox.outerWidth is only valid after layout()).
+    menuPlaque.layout();
+    balPlaque.layout();
+    for (const r of rest) (r as FlexBox).layout();
     let x = 0;
     menuPlaque.position.set(x, 0);
     x += menuPlaque.outerWidth;
@@ -381,7 +385,7 @@ export class BottomBar extends Container {
     });
     const ctlItems: Container[] = [];
     ctlItems.push(
-      new IconButton('menu', { color: '#fff', hover: tokens.accent, onTap: () => this.host.openSettings() }),
+      new IconButton('menu', { color: '#fff', hover: tokens.accent, onTap: () => this.host.openMenu() }),
     );
     if (config.features.autoplay) {
       this.autoBtn = new IconButton('autoplay', {

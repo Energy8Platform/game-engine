@@ -57,6 +57,7 @@ export interface ShellHost {
   /** Re-fit every open card modal (short-popout backstop). */
   fitModals(): void;
 
+  openMenu(): void;
   openSettings(): void;
   openInfo(): void;
   openBuyBonus(): void;

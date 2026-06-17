@@ -206,7 +206,7 @@ export class Chip extends Container implements Sizable {
     attachHover(this, () => this.paint(true), () => this.paint(false));
   }
 
-  set on(v: boolean) {
+  setSelected(v: boolean): void {
     this._on = v;
     this.paint(false);
   }
