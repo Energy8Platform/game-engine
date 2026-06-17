@@ -35,4 +35,21 @@ describe('GameShell layout', () => {
     shell.openMenu();
     expect(mount.querySelector('[data-ge="settings-modal"]')).toBeTruthy();
   });
+
+  // Regression: on mobile-s, large balance/win/total-win values must not run off the screen.
+  // jsdom has no layout, so stub the geometry the fit pass reads, then invoke it directly.
+  it('mobile: scales the stack to fully fit oversized numbers (anchored bottom-left, no 0.7 clamp)', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.setLayout('mobile');
+    const host = mount.querySelector('.ge-shell-barhost') as HTMLElement;
+    const bar = host.querySelector('.ge-shell-bottom') as HTMLElement;
+    Object.defineProperty(bar, 'clientWidth', { configurable: true, get: () => 300 });
+    const top = bar.querySelector('.ge-m-top') as HTMLElement; // [balance · win] row
+    Object.defineProperty(top, 'scrollWidth', { configurable: true, get: () => 600 }); // 2× too wide
+    (shell as unknown as { applyFitScale(): void }).applyFitScale();
+    const s = host.style.transform.match(/scale\(([0-9.]+)\)/);
+    expect(s).toBeTruthy();
+    expect(Number(s![1])).toBeCloseTo(0.5, 4);          // 600 → 300 fits at 0.5 (old floor stuck at 0.7)
+    expect(host.style.transformOrigin).toBe('bottom left'); // left-anchored so the right edge fits
+  });
 });

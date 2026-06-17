@@ -108,12 +108,20 @@ export class GameShell extends EventEmitter<ShellEvents> {
     }
     host.classList.remove('ge-fit');
     host.style.transform = '';
+    host.style.transformOrigin = '';
     if (this.layout === 'mobile') {
-      // shrink the whole stack to fit narrow phones (mobile-s, or large numbers in a row)
+      // Shrink the whole stack to fit narrow phones (mobile-s, or big balance/win/total-win
+      // numbers in a row). The rows use space-between, so on overflow their content is
+      // left-anchored and spills off the RIGHT edge — scale from the bottom-left corner so
+      // `avail/need` fits it exactly. (The old centre-origin + 0.7 floor left large numbers
+      // running past the screen edge; the 0.4 floor only guards a degenerate near-zero bar.)
       let need = 0;
       for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
       const avail = bar.clientWidth;
-      if (need > avail + 1 && avail > 0) host.style.transform = `scale(${Math.max(0.7, avail / need).toFixed(4)})`;
+      if (need > avail + 1 && avail > 0) {
+        host.style.transformOrigin = 'bottom left';
+        host.style.transform = `scale(${Math.max(0.4, avail / need).toFixed(4)})`;
+      }
       return;
     }
     if (bar.scrollWidth <= bar.clientWidth + 1) return;       // bar fits inline → leave it
@@ -136,9 +144,13 @@ export class GameShell extends EventEmitter<ShellEvents> {
     if (this.config.features.spacebar === false) return; // shortcut disabled (e.g. jurisdiction)
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    // Space is ours now — swallow the browser default before any no-op bail. Otherwise the
+    // native "Space activates the focused button" still fires and re-clicks whichever shell
+    // <button> (menu/buy/auto) opened the overlay, tearing down + rebuilding the modal: a
+    // visible flicker. (Also stops the page from scrolling on Space.)
+    e.preventDefault();
     if (this.modalHost.childElementCount > 0) return; // an overlay/modal is open
     if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
-    e.preventDefault();
     this.emit('spin');
   };
 
@@ -197,6 +209,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
   setFreeSpins(fs: FreeSpinsState): void { this.state.freeSpins = fs; this.render(); }
 
   private showModal(el: HTMLElement): void {
+    // The control that opened this overlay (menu/buy/auto) keeps DOM focus. Drop it, or a
+    // stray Space/Enter would natively re-activate that <button> and rebuild the modal — a
+    // visible flicker. Only relinquish focus we own (a shell control), never the host page's.
+    const active = document.activeElement as HTMLElement | null;
+    if (active && this.root.contains(active)) active.blur();
     this.modalHost.innerHTML = '';
     this.modalHost.appendChild(el);
     this.fitModals();

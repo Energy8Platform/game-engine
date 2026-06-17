@@ -77,6 +77,34 @@ describe('keyboard: Space → spin', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  // Regression: pressing Space while an overlay is open must swallow the browser default,
+  // otherwise the focused trigger <button> (menu/buy/auto) gets natively re-activated and
+  // the modal is torn down + rebuilt — a visible flicker.
+  it('prevents the browser default while an overlay is open', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.openInfo();
+    const notPrevented = space(); // dispatchEvent → false when preventDefault() was called
+    expect(notPrevented).toBe(false);
+  });
+
+  it('prevents the browser default on the spin path', () => {
+    createGameShell(cfg(mount));
+    expect(space()).toBe(false);
+  });
+
+  it('prevents the browser default while busy', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.setBusy(true);
+    expect(space()).toBe(false);
+  });
+
+  it('does NOT prevent default for Space typed into an input (must remain typeable)', () => {
+    createGameShell(cfg(mount));
+    const input = document.createElement('input');
+    mount.appendChild(input);
+    expect(space({}, input)).toBe(true);
+  });
+
   it('ignores held-key repeats', () => {
     const shell = createGameShell(cfg(mount));
     const spy = vi.fn();
@@ -102,5 +130,38 @@ describe('keyboard: Space → spin', () => {
     await shell.destroy();
     space();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// Enter (and Space) natively re-activate a focused <button> — so the menu/buy/auto control
+// that opened an overlay must lose focus when the overlay opens, otherwise the keypress
+// re-fires its click and the modal is rebuilt (flicker). Dropping focus covers every key,
+// not just Space.
+describe('focus: opening an overlay drops focus from the trigger control', () => {
+  let mount: HTMLElement;
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    mount = document.createElement('div');
+    document.body.appendChild(mount);
+    await removeGameShell();
+  });
+
+  it('blurs the focused shell control when a modal opens', () => {
+    const shell = createGameShell(cfg(mount));
+    const menuBtn = mount.querySelector('[data-ge="menu"]') as HTMLButtonElement;
+    menuBtn.focus();
+    expect(document.activeElement).toBe(menuBtn);
+    shell.openMenu();
+    expect(document.activeElement).not.toBe(menuBtn);
+  });
+
+  it('leaves focus outside the shell untouched (only drops focus it owns)', () => {
+    const shell = createGameShell(cfg(mount));
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+    shell.openInfo();
+    expect(document.activeElement).toBe(outside);
   });
 });
