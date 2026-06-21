@@ -19,6 +19,7 @@
  */
 
 export { StakeBridge } from './bridge';
+export { isStakeLaunch } from './detect';
 export {
   RGSClient,
   RGSError,

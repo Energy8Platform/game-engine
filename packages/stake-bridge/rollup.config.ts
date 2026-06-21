@@ -56,4 +56,35 @@ export default defineConfig([
     },
     plugins: [dts()],
   },
+  // detect ESM
+  {
+    input: 'src/detect.ts',
+    external,
+    output: { file: 'dist/detect.esm.js', format: 'esm', sourcemap: true },
+    plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false })],
+  },
+  // detect UMD
+  {
+    input: 'src/detect.ts',
+    external,
+    output: {
+      file: 'dist/detect.umd.js',
+      format: 'umd',
+      name: 'StakeBridgeDetect',
+      sourcemap: true,
+      exports: 'named',
+      globals: {
+        '@energy8platform/game-sdk': 'CasinoGameSDK',
+        '@energy8platform/game-sdk/protocol': 'CasinoGameSDKProtocol',
+      },
+    },
+    plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false })],
+  },
+  // detect type declarations
+  {
+    input: 'src/detect.ts',
+    external,
+    output: { file: 'dist/detect.d.ts', format: 'esm' },
+    plugins: [dts()],
+  },
 ]);

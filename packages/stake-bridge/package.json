@@ -13,6 +13,11 @@
       "import": "./dist/stake-bridge.esm.js",
       "require": "./dist/stake-bridge.umd.js",
       "types": "./dist/index.d.ts"
+    },
+    "./detect": {
+      "import": "./dist/detect.esm.js",
+      "require": "./dist/detect.umd.js",
+      "types": "./dist/detect.d.ts"
     }
   },
   "files": [
