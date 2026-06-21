@@ -41,7 +41,9 @@ top-level error-modal, защиту от двойного boot. Детект Sta
 
 ## Архитектура
 
-### Кросс-репно: stake-bridge (energy8-platform-game-sdk)
+### stake-bridge (in-repo workspace `packages/stake-bridge`)
+
+> Уточнение по факту: `packages/stake-bridge` — workspace ВНУТРИ этого монорепо (`workspaces: ["packages/*","examples/*"]`), `node_modules/@energy8platform/stake-bridge` симлинкается на него. Кросс-репной координации НЕТ: правка идёт в `packages/stake-bridge`, game-engine линкуется нативно, типы `/detect` доступны после сборки stake-bridge. (Копия в соседнем `energy8-platform-game-sdk` — вне scope, при необходимости синкается отдельно.)
 
 ```
 packages/stake-bridge/
@@ -207,10 +209,10 @@ Pixi не делаем.
 
 ## Риски / открытые вопросы
 
-- **Кросс-репная публикация:** stake-bridge — отдельный пакет/репо; хост статически... нет, **лениво**
-  импортит `/detect`. Для локальной разработки game-engine должен резолвить `@energy8platform/stake-bridge`
-  (как у игр — через установленную версию). План уточнит, как example/тесты резолвят пакет (он не в
-  workspaces game-engine; ставится как dependency).
+- **Build-order:** хост лениво импортит `/detect`, но `tsc` хосту нужны типы `@energy8platform/stake-bridge`
+  и `/detect`. stake-bridge — in-repo workspace, поэтому достаточно собрать его ДО typecheck game-engine
+  (`npm run build` по workspaces). game-engine добавляет stake-bridge в optional peer + devDependency `*`
+  + rollup `external`.
 - **Точная сигнатура `Scene`-конструктора** — сверить с `SceneManager.register` в game-engine на этапе
   плана (как именно регистрируются классы сцен).
 - **rollup multi-entry в stake-bridge** — текущий конфиг собирает один вход; добавление `/detect`
