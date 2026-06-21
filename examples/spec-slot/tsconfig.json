@@ -6,6 +6,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["*.ts"],
-  "exclude": ["dev.config.ts"]
+  "include": ["*.ts"]
 }
