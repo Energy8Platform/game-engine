@@ -40,6 +40,12 @@ describe('toGameDefinition', () => {
     expect(gd.actions.buy_bonus.cost_multiplier).toBe(50);
     expect(gd.actions.buy_bonus.feature_data).toEqual({ spins: 8 });
   });
+  it('appends an always-fallback transition to base and buy actions', () => {
+    const spinTx = gd.actions.spin.transitions;
+    expect(spinTx[spinTx.length - 1]).toEqual({ condition: 'always', next_actions: ['spin'] });
+    const buyTx = gd.actions.buy_bonus.transitions;
+    expect(buyTx[buyTx.length - 1]).toEqual({ condition: 'always', next_actions: ['buy_bonus'] });
+  });
 });
 
 describe('toLuaPrelude', () => {
