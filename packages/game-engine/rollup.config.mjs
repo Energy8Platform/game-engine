@@ -21,6 +21,8 @@ const external = [
   'react-reconciler/constants',
   'react/jsx-runtime',
   'fengari',
+  '@energy8platform/stake-bridge',
+  '@energy8platform/stake-bridge/detect',
 ];
 
 function createBundle(input, outputName) {
@@ -74,4 +76,5 @@ export default defineConfig([
   ...createBundle('src/react/jsx-runtime.ts', 'react-jsx'),
   ...createBundle('src/lua/index.ts', 'lua'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
+  ...createBundle('src/host/index.ts', 'host'),
 ]);
