@@ -10,26 +10,29 @@ function defaultStage(role: ActionRole): string {
   return role === 'free' ? 'free_spins' : 'base_game';
 }
 
-function defaultTransitions(role: ActionRole, freeKey: string | undefined): TransitionRule[] {
+function defaultTransitions(role: ActionRole, freeKey: string | undefined, actionKey: string): TransitionRule[] {
   if (role === 'free') {
     return freeKey
       ? [{ condition: 'retrigger_spins > 0', add_spins_var: 'retrigger_spins', next_actions: [freeKey] }]
       : [];
   }
-  // base | buy
-  return freeKey
-    ? [{
-        condition: 'free_spins_awarded > 0',
-        creates_session: true,
-        next_actions: [freeKey],
-        session_config: { total_spins_var: 'free_spins_awarded' },
-      }]
-    : [];
+  // base | buy — always include an "always" fallback so the engine can route back
+  const transitions: TransitionRule[] = [];
+  if (freeKey) {
+    transitions.push({
+      condition: 'free_spins_awarded > 0',
+      creates_session: true,
+      next_actions: [freeKey],
+      session_config: { total_spins_var: 'free_spins_awarded' },
+    });
+  }
+  transitions.push({ condition: 'always', next_actions: [actionKey] });
+  return transitions;
 }
 
 function toActionDefinition(key: string, action: ActionSpec, freeKey: string | undefined): ActionDefinition {
   const role = action.role ?? 'base';
-  const transitions = action.transitions ?? defaultTransitions(role, freeKey);
+  const transitions = action.transitions ?? defaultTransitions(role, freeKey, key);
   if (role === 'free') {
     return {
       stage: action.stage ?? defaultStage(role),
