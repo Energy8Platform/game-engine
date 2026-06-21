@@ -9,6 +9,8 @@
     "@energy8platform/platform-core": "*"
   },
   "devDependencies": {
+    "@energy8platform/game-engine": "*",
+    "pixi.js": "^8.16.0",
     "tsx": "^4.21.0",
     "typescript": "^5.6.0"
   }
