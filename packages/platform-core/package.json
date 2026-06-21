@@ -44,6 +44,11 @@
       "import": "./dist/shell.esm.js",
       "require": "./dist/shell.cjs.js",
       "types": "./dist/shell.d.ts"
+    },
+    "./game-spec": {
+      "import": "./dist/game-spec.esm.js",
+      "require": "./dist/game-spec.cjs.js",
+      "types": "./dist/game-spec.d.ts"
     }
   },
   "files": [

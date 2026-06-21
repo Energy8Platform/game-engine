@@ -7,6 +7,7 @@ const external = [
   '@energy8platform/game-sdk',
   '@energy8platform/platform-core',
   '@energy8platform/platform-core/lua',
+  '@energy8platform/platform-core/game-spec',
   '@energy8platform/platform-core/dev-bridge',
   '@energy8platform/platform-core/shell',
   '@energy8platform/platform-core/vite',
@@ -72,4 +73,5 @@ export default defineConfig([
   ...createBundle('src/react/index.ts', 'react'),
   ...createBundle('src/react/jsx-runtime.ts', 'react-jsx'),
   ...createBundle('src/lua/index.ts', 'lua'),
+  ...createBundle('src/game-spec/index.ts', 'game-spec'),
 ]);

@@ -66,6 +66,11 @@
       "import": "./dist/lua.esm.js",
       "require": "./dist/lua.cjs.js",
       "types": "./dist/lua.d.ts"
+    },
+    "./game-spec": {
+      "import": "./dist/game-spec.esm.js",
+      "require": "./dist/game-spec.cjs.js",
+      "types": "./dist/game-spec.d.ts"
     }
   },
   "files": [

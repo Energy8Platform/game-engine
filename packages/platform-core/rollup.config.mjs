@@ -63,4 +63,5 @@ export default defineConfig([
   ...createBundle('src/vite/index.ts', 'vite'),
   ...createBundle('src/loading/index.ts', 'loading'),
   ...createBundle('src/shell/index.ts', 'shell'),
+  ...createBundle('src/game-spec/index.ts', 'game-spec'),
 ]);
