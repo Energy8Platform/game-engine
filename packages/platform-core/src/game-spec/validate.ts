@@ -8,8 +8,9 @@ export class GameSpecError extends Error {
 }
 
 export function validateSpec(spec: GameSpec): void {
-  if (!spec.id) throw new GameSpecError('spec.id is required');
+  if (!spec.id || spec.id.trim() === '') throw new GameSpecError('spec.id is required');
   if (spec.maxWin <= 0) throw new GameSpecError('spec.maxWin must be > 0');
+  if (spec.grid.cols <= 0 || spec.grid.rows <= 0) throw new GameSpecError('spec.grid dimensions must be > 0');
 
   if (!spec.betLevels.length) throw new GameSpecError('spec.betLevels must be non-empty');
   for (let i = 1; i < spec.betLevels.length; i++) {

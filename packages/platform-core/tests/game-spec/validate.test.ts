@@ -45,4 +45,12 @@ describe('validateSpec', () => {
     s.actions.spin = { role: 'base', transitions: [{ condition: 'always', next_actions: ['nope'] }] };
     expect(() => validateSpec(s)).toThrow(/next_actions|unknown action/i);
   });
+  it('rejects non-positive grid dimensions', () => {
+    const s = base(); s.grid = { cols: 0, rows: 3 };
+    expect(() => validateSpec(s)).toThrow(/grid/);
+  });
+  it('rejects blank id', () => {
+    const s = base(); s.id = '  ';
+    expect(() => validateSpec(s)).toThrow(/id/);
+  });
 });
