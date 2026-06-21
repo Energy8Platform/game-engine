@@ -12,9 +12,11 @@ function defaultStage(role: ActionRole): string {
 
 function defaultTransitions(role: ActionRole, freeKey: string | undefined, actionKey: string): TransitionRule[] {
   if (role === 'free') {
-    return freeKey
-      ? [{ condition: 'retrigger_spins > 0', add_spins_var: 'retrigger_spins', next_actions: [freeKey] }]
-      : [];
+    if (!freeKey) return [];
+    return [
+      { condition: 'retrigger_spins > 0', add_spins_var: 'retrigger_spins', next_actions: [freeKey] },
+      { condition: 'always', next_actions: [freeKey] },
+    ];
   }
   // base | buy — always include an "always" fallback so the engine can route back
   const transitions: TransitionRule[] = [];
