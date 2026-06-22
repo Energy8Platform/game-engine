@@ -9,3 +9,7 @@ export {
   ensureSocialDictionary,
 } from './social';
 export type { SocialRule } from './social';
+export { createGameAdapter, resumeFromBook } from './adapter';
+export type { ResumeOptions } from './adapter';
+export type { SegmentCore, SegmentContext, StakeGameConfig } from './types';
+export type { BookAdapter, BookSegment, RoundContext, ModeMap } from '@energy8platform/stake-bridge';
