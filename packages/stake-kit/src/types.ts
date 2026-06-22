@@ -8,7 +8,9 @@ export interface SegmentCore<TData = Record<string, unknown>> {
   action: string;
   /** ×bet multiplier; the adapter computes winThisSegment = roundMoney(winX * betAmount). */
   winX: number;
-  session?: Partial<SessionData> | null;
+  /** Session override merged onto the bridge's synthSession. `roundId` is the
+   *  documented extra the bridge spreads for mid-round resume (not on SessionData). */
+  session?: (Partial<SessionData> & { roundId?: string }) | null;
   bonusFreeSpin?: { grantId: number; remainingSpins: number };
   /** Optional data override; defaults to the coerced+validated payload. */
   data?: TData;
