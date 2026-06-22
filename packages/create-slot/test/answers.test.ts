@@ -6,6 +6,11 @@ describe('parseFlags', () => {
     const a = parseFlags(['--id', 'moon-spice', '--mechanic', 'cascade', '--grid', '6x6', '--no-stake']);
     expect(a).toEqual({ id: 'moon-spice', mechanic: 'cascade', grid: { cols: 6, rows: 6 }, stake: false });
   });
+  it('parses the --flag=value equals form too', () => {
+    expect(parseFlags(['--id=moon-spice', '--grid=7x7', '--mechanic=lines'])).toEqual({
+      id: 'moon-spice', grid: { cols: 7, rows: 7 }, mechanic: 'lines',
+    });
+  });
 });
 
 describe('applyDefaults', () => {

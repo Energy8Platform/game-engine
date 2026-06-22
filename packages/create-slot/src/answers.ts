@@ -18,13 +18,24 @@ function titleCase(id: string): string {
 }
 
 export function parseFlags(argv: string[]): Partial<Answers> {
+  // normalize --flag=value → --flag value
+  const args: string[] = [];
+  for (const tok of argv) {
+    if (tok.startsWith('--') && tok.includes('=')) {
+      const i = tok.indexOf('=');
+      args.push(tok.slice(0, i), tok.slice(i + 1));
+    } else {
+      args.push(tok);
+    }
+  }
+
   const out: Partial<Answers> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--id') out.id = argv[++i];
-    else if (a === '--title') out.title = argv[++i];
-    else if (a === '--mechanic') out.mechanic = argv[++i] as Mechanic;
-    else if (a === '--grid') { const [c, r] = argv[++i].split('x').map(Number); out.grid = { cols: c, rows: r }; }
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--id') out.id = args[++i];
+    else if (a === '--title') out.title = args[++i];
+    else if (a === '--mechanic') out.mechanic = args[++i] as Mechanic;
+    else if (a === '--grid') { const [c, r] = args[++i].split('x').map(Number); out.grid = { cols: c, rows: r }; }
     else if (a === '--stake') out.stake = true;
     else if (a === '--no-stake') out.stake = false;
   }
