@@ -42,3 +42,19 @@ describe('CountUpDisplay', () => {
     expect(d.text).toBe('$42');
   });
 });
+
+import { BigWinOverlay } from '../../src/slot/overlay/BigWinOverlay';
+
+describe('BigWinOverlay', () => {
+  const cfg = { tiers, formatMoney: (v: number) => `$${Math.round(v)}`, width: 1920, height: 1080 };
+  it('constructs and exposes the chosen tier title for a win', () => {
+    const o = new BigWinOverlay(cfg);
+    expect(o.tierTitleFor(50, 1)).toBe('MEGA WIN');
+    expect(o.tierTitleFor(5, 1)).toBeNull();
+  });
+  it('hide() makes it invisible', () => {
+    const o = new BigWinOverlay(cfg);
+    o.hide();
+    expect(o.visible).toBe(false);
+  });
+});

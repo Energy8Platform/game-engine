@@ -13,3 +13,5 @@ export { pickTier, tierIndexAtValue } from './overlay/tiers';
 export type { WinTier } from './overlay/tiers';
 export { valueAt, CountUpDisplay } from './overlay/CountUpDisplay';
 export type { CountUpConfig } from './overlay/CountUpDisplay';
+export { BigWinOverlay } from './overlay/BigWinOverlay';
+export type { BigWinOverlayConfig } from './overlay/BigWinOverlay';
