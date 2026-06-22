@@ -16,7 +16,7 @@ createSlotGame({
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
 ${stakeOpt}  shell: {
-    currency: { code: model.spec.currency ?? 'EUR' } as any,
+    currency: { symbol: '€', position: 'left' }, // EUR default — set symbol/position for your currency
     gameInfo: { sections: [] } as any,
     buyBonus: [{ id: 'buy_bonus', title: 'BUY BONUS', description: 'Buy the feature', priceMultiplier: 100 }],
   },
