@@ -89,6 +89,14 @@ export class CascadeController {
     );
   }
 
-  skip(): void { Tween.killAll(); }
-  kill(): void { this._killed = true; Tween.killAll(); }
+  private _killOwnTweens(): void {
+    for (let c = 0; c < this._grid.cols; c++) {
+      for (let r = 0; r < this._grid.rows; r++) {
+        Tween.killTweensOf(this._grid.getCell(c, r));
+      }
+    }
+  }
+
+  skip(): void { this._killOwnTweens(); }
+  kill(): void { this._killed = true; this._killOwnTweens(); }
 }
