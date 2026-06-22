@@ -58,3 +58,43 @@ export function validate(a: Answers): void {
   if (!['cascade', 'lines', 'ways'].includes(a.mechanic)) throw new Error(`invalid mechanic: "${a.mechanic}"`);
   if (a.grid.cols <= 0 || a.grid.rows <= 0) throw new Error('grid dimensions must be > 0');
 }
+
+/** Flags that consume the next token as their value — used to skip those tokens during positional scan. */
+const VALUE_FLAGS = new Set(['--id', '--title', '--mechanic', '--grid']);
+
+/**
+ * Build an answers seed from argv: flags, plus a lone positional used as
+ * the id when --id is absent. Correctly skips tokens that are values of
+ * known value-taking flags (e.g. `--mechanic cascade` — `cascade` is NOT
+ * treated as a positional even when no --id is supplied).
+ */
+export function seedFromArgv(argv: string[]): Partial<Answers> {
+  // Normalize --flag=value to ['--flag', 'value'] for uniform processing
+  const args: string[] = [];
+  for (const tok of argv) {
+    if (tok.startsWith('--') && tok.includes('=')) {
+      const i = tok.indexOf('=');
+      args.push(tok.slice(0, i), tok.slice(i + 1));
+    } else {
+      args.push(tok);
+    }
+  }
+
+  // Collect indices that are consumed as flag values so we don't
+  // accidentally treat them as positionals.
+  const valueIndices = new Set<number>();
+  for (let i = 0; i < args.length; i++) {
+    if (VALUE_FLAGS.has(args[i]) && i + 1 < args.length) {
+      valueIndices.add(i + 1);
+    }
+  }
+
+  const flags = parseFlags(argv);
+
+  if (!flags.id) {
+    const positional = args.find((a, idx) => !a.startsWith('--') && !valueIndices.has(idx));
+    if (positional) flags.id = positional;
+  }
+
+  return flags;
+}

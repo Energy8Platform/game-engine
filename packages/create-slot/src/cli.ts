@@ -1,6 +1,6 @@
 import { argv, exit } from 'node:process';
 import { resolve } from 'node:path';
-import { parseFlags, applyDefaults } from './answers';
+import { seedFromArgv, applyDefaults } from './answers';
 import { prompt } from './prompts';
 import { generate } from './generate';
 
@@ -9,11 +9,10 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
 };
 
 async function main(): Promise<void> {
-  const flags = parseFlags(argv.slice(2));
-  const target = argv.slice(2).find((a) => !a.startsWith('--') && a !== flags.id);
+  const seed = seedFromArgv(argv.slice(2));
   const yes = argv.includes('--yes');
-  const answers = yes || flags.id ? applyDefaults(flags) : await prompt(flags);
-  const dir = resolve(process.cwd(), target ?? answers.id);
+  const answers = yes || seed.id ? applyDefaults(seed) : await prompt(seed);
+  const dir = resolve(process.cwd(), answers.id);
   await generate(answers, dir, PUBLISHED);
   console.log(`\n✓ Created ${answers.id} at ${dir}\n  cd ${answers.id} && npm install && npm run dev\n`);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFlags, applyDefaults, validate } from '../src/answers';
+import { parseFlags, applyDefaults, validate, seedFromArgv } from '../src/answers';
 
 describe('parseFlags', () => {
   it('parses id/mechanic/grid + --no-stake', () => {
@@ -31,5 +31,27 @@ describe('validate', () => {
   });
   it('rejects a bad mechanic', () => {
     expect(() => validate({ ...applyDefaults({ id: 'g' }), mechanic: 'plinko' as any })).toThrow(/mechanic/);
+  });
+});
+
+describe('seedFromArgv', () => {
+  it('(a) bare positional becomes the id', () => {
+    expect(seedFromArgv(['my-game'])).toMatchObject({ id: 'my-game' });
+  });
+
+  it('(b) explicit --id wins over a positional', () => {
+    const seed = seedFromArgv(['--id', 'x', 'y']);
+    expect(seed.id).toBe('x');
+  });
+
+  it('(c) flag value must NOT become the id (--mechanic cascade → no id)', () => {
+    const seed = seedFromArgv(['--mechanic', 'cascade']);
+    expect(seed.id).toBeUndefined();
+    expect(seed.mechanic).toBe('cascade');
+  });
+
+  it('(d) positional + another flag co-exist correctly', () => {
+    const seed = seedFromArgv(['my-game', '--mechanic', 'lines']);
+    expect(seed).toMatchObject({ id: 'my-game', mechanic: 'lines' });
   });
 });
