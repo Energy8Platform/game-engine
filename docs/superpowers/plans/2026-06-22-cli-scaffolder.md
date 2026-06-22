@@ -49,7 +49,7 @@ examples/spec-slot/
 
 ## Phase A — host shell integration
 
-### Task A1: `SlotShellOptions` + `buildShellConfig` (pure)
+### Task 1: `SlotShellOptions` + `buildShellConfig` (pure)
 
 **Files:**
 - Create: `packages/game-engine/src/host/shellConfig.ts`
@@ -170,7 +170,7 @@ git commit -m "feat(game-engine): buildShellConfig (pure ShellConfig assembly)"
 
 ---
 
-### Task A2: `resolveReplayBonusId` (pure) + `SlotSceneController`
+### Task 2: `resolveReplayBonusId` (pure) + `SlotSceneController`
 
 **Files:**
 - Create: `packages/game-engine/src/host/replay.ts`, `packages/game-engine/src/host/sceneController.ts`
@@ -253,7 +253,7 @@ git commit -m "feat(game-engine): resolveReplayBonusId + SlotSceneController con
 
 ---
 
-### Task A3: wire the shell into `createSlotGame` (normal + replay)
+### Task 3: wire the shell into `createSlotGame` (normal + replay)
 
 **Files:**
 - Modify: `packages/game-engine/src/host/types.ts` (`CreateSlotGameOptions.shell?`, `SlotGameHandle.shell`), `packages/game-engine/src/host/createSlotGame.ts`
@@ -333,7 +333,7 @@ git commit -m "feat(game-engine): createSlotGame mounts shell + Stake-replay loo
 
 ---
 
-### Task A4: prove Phase A in spec-slot
+### Task 4: prove Phase A in spec-slot
 
 **Files:**
 - Modify: `examples/spec-slot/GameScene.ts` (implement `SlotSceneController`), `examples/spec-slot/main.ts` (pass `shell` config)
@@ -422,7 +422,7 @@ git commit -m "docs(examples): spec-slot wires the shell via SlotSceneController
 
 ## Phase B — `@energy8platform/create-slot`
 
-### Task B1: package scaffold + `answers` + `prompts`/flags
+### Task 5: package scaffold + `answers` + `prompts`/flags
 
 **Files:**
 - Create: `packages/create-slot/package.json`, `rollup.config.ts`, `tsconfig.json`, `vitest.config.ts`
@@ -599,7 +599,7 @@ git commit -m "feat(create-slot): package scaffold + answers + prompts"
 
 ---
 
-### Task B2: codegen `gameSpec` + `packageJson`
+### Task 6: codegen `gameSpec` + `packageJson`
 
 **Files:**
 - Create: `packages/create-slot/src/codegen/gameSpec.ts`, `packages/create-slot/src/codegen/packageJson.ts`
@@ -760,7 +760,7 @@ git commit -m "feat(create-slot): gameSpec + packageJson codegen"
 
 ---
 
-### Task B3: codegen `gameScene` (mechanic→controller) + `luaLogic`
+### Task 7: codegen `gameScene` (mechanic→controller) + `luaLogic`
 
 **Files:**
 - Create: `packages/create-slot/src/codegen/gameScene.ts`, `packages/create-slot/src/codegen/luaLogic.ts`
@@ -925,7 +925,7 @@ git commit -m "feat(create-slot): gameScene + luaLogic codegen (mechanic-driven)
 
 ---
 
-### Task B4: codegen `stakeAdapter` + `mainTs`
+### Task 8: codegen `stakeAdapter` + `mainTs`
 
 **Files:**
 - Create: `packages/create-slot/src/codegen/stakeAdapter.ts`, `packages/create-slot/src/codegen/mainTs.ts`
@@ -1059,7 +1059,7 @@ git commit -m "feat(create-slot): stakeAdapter + mainTs codegen"
 
 ---
 
-### Task B5: `template/` files + `generate()` + `cli.ts`
+### Task 9: `template/` files + `generate()` + `cli.ts`
 
 **Files:**
 - Create: `packages/create-slot/template/` files (vite.config.ts, index.html, tsconfig.json, _gitignore, dev.config.ts, README.md, src/theme.ts, src/slot/symbols.ts, public/assets/{symbols,bg,audio,vfx}/NAMING.md)
@@ -1326,7 +1326,7 @@ git commit -m "feat(create-slot): template files + generate() + cli"
 
 ---
 
-### Task B6: anti-drift scaffold-to-temp smoke
+### Task 10: anti-drift scaffold-to-temp smoke
 
 **Files:**
 - Create: `packages/create-slot/test/scaffold.test.ts`
