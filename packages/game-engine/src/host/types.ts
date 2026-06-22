@@ -2,9 +2,11 @@
 import type { ApplicationOptions } from 'pixi.js';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { AssetManifest, LoadingScreenConfig } from '@energy8platform/platform-core';
+import type { GameShell } from '@energy8platform/platform-core/shell';
 import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../types';
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
 import type { GameApplication } from '../core';
+import type { SlotShellOptions } from './shellConfig';
 
 export interface StakeIntegration {
   /** The game's BookAdapter (or its module). modeMap + gameId come from the model. */
@@ -31,10 +33,12 @@ export interface CreateSlotGameOptions {
   textureDefaults?: boolean;
   dev?: boolean;
   stake?: StakeIntegration;
+  shell?: SlotShellOptions;
   onFatalError?: (message: string) => void;
 }
 
 export interface SlotGameHandle {
   game: GameApplication;
   stakeBridge: StakeBridge | null;
+  shell: GameShell | null;
 }

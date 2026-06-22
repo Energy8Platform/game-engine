@@ -53,5 +53,43 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
     throw err;
   }
 
-  return { game, stakeBridge };
+  let shell: SlotGameHandle['shell'] = null;
+  if (opts.shell) {
+    const { createGameShell } = await import('@energy8platform/platform-core/shell');
+    const { buildShellConfig } = await import('./shellConfig');
+    const { resolveReplayBonusId } = await import('./replay');
+
+    const ps = game.platformSession;
+    // game.initData.balance is number (not an object); guard for null initData
+    const balance = (game.initData?.balance as number | undefined) ?? 0;
+    const isReplay = !!(stakeBridge && (stakeBridge as unknown as { isReplay?: boolean }).isReplay);
+    const mode = isReplay ? 'replay' : 'base';
+    shell = createGameShell(buildShellConfig(opts.shell, opts.model, balance, mode));
+
+    // live balance sync — BalanceData has .balance (not .amount)
+    ps?.on('balanceUpdate', (d: { balance: number }) => shell!.setBalance(d.balance));
+
+    const sceneInst = game.scenes.current?.scene as Partial<import('./sceneController').SlotSceneController> | undefined;
+    let currentBet = opts.model.spec.defaultBet ?? opts.model.spec.betLevels[0];
+
+    if (mode === 'base') {
+      shell.on('spin', () => { void sceneInst?.spin?.(currentBet); });
+      shell.on('betChange', (bet: number) => { currentBet = bet; sceneInst?.setBet?.(bet); });
+      shell.on('buyBonusSelect', ({ id }: { id: string }) => { void sceneInst?.buyBonus?.(id, currentBet); });
+    } else {
+      const stakeMode = (stakeBridge as unknown as { url?: { replay?: { mode?: string } } }).url?.replay?.mode ?? 'BASE';
+      const bonusId = resolveReplayBonusId(opts.model, stakeMode);
+      const openLoop = () => {
+        shell!.openReplay({
+          bonusId,
+          bet: currentBet,
+          payoutMultiplier: 0,
+          onReplay: async () => { await sceneInst?.spin?.(currentBet); openLoop(); },
+        });
+      };
+      openLoop();
+    }
+  }
+
+  return { game, stakeBridge, shell };
 }
