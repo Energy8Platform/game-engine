@@ -13,6 +13,8 @@ import { genMainTs } from './codegen/mainTs';
 const TEMPLATE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '../template');
 
 function substituteTree(dir: string, vars: Record<string, string>): void {
+  // NOTE: template is text-only. If binary placeholders are ever added under template/,
+  // add a file-extension allowlist here — readFileSync(p,'utf8') would corrupt them.
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) { substituteTree(p, vars); continue; }

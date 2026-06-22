@@ -71,6 +71,7 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
 
     const sceneInst = game.scenes.current?.scene as Partial<import('./sceneController').SlotSceneController> | undefined;
     let currentBet = opts.model.spec.defaultBet ?? opts.model.spec.betLevels[0];
+    sceneInst?.setBet?.(currentBet); // host owns the bet; seed the scene on mount (not only on betChange)
 
     if (mode === 'base') {
       shell.on('spin', () => { void sceneInst?.spin?.(currentBet); });
@@ -79,15 +80,15 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
     } else {
       const stakeMode = (stakeBridge as unknown as { url?: { replay?: { mode?: string } } }).url?.replay?.mode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);
-      const openLoop = () => {
-        shell!.openReplay({
-          bonusId,
-          bet: currentBet,
-          payoutMultiplier: 0,
-          onReplay: async () => { await sceneInst?.spin?.(currentBet); openLoop(); },
-        });
-      };
-      openLoop();
+      // The shell reopens the replay modal after onReplay resolves (ReplayModalOptions contract),
+      // so onReplay only spins — it must NOT reopen, or the modal opens twice per click.
+      // payoutMultiplier stays 0: the realized multiplier isn't available at boot; not yet plumbed.
+      shell.openReplay({
+        bonusId,
+        bet: currentBet,
+        payoutMultiplier: 0,
+        onReplay: () => sceneInst?.spin?.(currentBet),
+      });
     }
   }
 

@@ -8,7 +8,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
   const simulate: Record<string, string> = {};
   // one simulate:* script per non-base/free action would be derived from the spec at build;
   // emit the canonical base sim here (author adds buy modes after editing the spec).
-  simulate['simulate'] = 'platform-core-simulate --config ./sim.config.ts --action spin';
+  simulate['simulate'] = 'platform-core-simulate --config ./dev.config.ts --action spin';
 
   const pkg = {
     name: a.id,
