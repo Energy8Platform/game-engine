@@ -3,7 +3,7 @@ import typescript from '@rollup/plugin-typescript';
 
 export default defineConfig([
   {
-    input: 'src/index.ts',
+    input: 'src/cli.ts',
     external: [/^node:/],
     output: {
       file: 'dist/cli.js',
