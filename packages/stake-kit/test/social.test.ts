@@ -13,4 +13,7 @@ describe('applySocialText (no bridge dict loaded)', () => {
   it('merges caller overrides into the PRE pass', () => {
     expect(applySocialText('Spin to win', { pre: [[/\bSpin\b/g, 'Tap']] })).toBe('Tap to win');
   });
+  it('collapses doubled Play from bet+cost rewrites', () => {
+    expect(applySocialText('Total Bet Cost')).toBe('Total Play');
+  });
 });

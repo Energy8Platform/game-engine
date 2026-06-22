@@ -14,7 +14,8 @@ export const DEFAULT_PRE_REPLACEMENTS: SocialRule[] = [
 
 /** Cleanup pass after the bridge dictionary runs. */
 export const DEFAULT_POST_REPLACEMENTS: SocialRule[] = [
-  [/Total Play Cost/gi, 'Total Play'],
+  // PRE rewrites both bet→play and cost→play, so "Bet Cost" doubles to "Play Play"; collapse it.
+  [/\bPlay Play\b/g, 'Play'],
 ];
 
 let cachedFn: ((text: string) => string) | null = null;
