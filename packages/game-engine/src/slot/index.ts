@@ -7,3 +7,5 @@ export { ReelGrid } from './grid/ReelGrid';
 export type { DecorationConfig, ReelGridConfig } from './grid/ReelGrid';
 export { CascadeController } from './anim/CascadeController';
 export type { CascadeStepData, CascadeTimings, CascadeAnim } from './anim/CascadeController';
+export { ReelSpinController } from './anim/ReelSpinController';
+export type { ReelSpinData, ReelSpinTimings, ReelStopPlan } from './anim/ReelSpinController';
