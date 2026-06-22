@@ -112,7 +112,7 @@ export class StakeBridge {
   private adapterLoad: Promise<BookAdapter>;
 
   /** Whether we were launched as a historical replay (`?replay=true&...`). */
-  private readonly isReplay: boolean;
+  private readonly _isReplay: boolean;
   /**
    * Cached replay book — fetched from `/bet/replay/...` on the first
    * play request and re-served on subsequent "Play Again" calls.
@@ -154,7 +154,7 @@ export class StakeBridge {
     });
 
     this.url = parseStakeUrl(options.url ?? window.location.href);
-    this.isReplay = !!this.url.replay;
+    this._isReplay = !!this.url.replay;
     this.rgs = new RGSClient({
       url: this.url,
       protocol: options.protocol ?? 'https',
@@ -182,6 +182,19 @@ export class StakeBridge {
   }
 
   // ─── Public API ──────────────────────────────────────────────────────
+
+  /** True when the bridge was launched as a historical replay (`?replay=true&...`). */
+  get isReplay(): boolean {
+    return this._isReplay;
+  }
+
+  /**
+   * The bet mode of the replay round (`StakeReplayParams.mode`), or
+   * `undefined` when this is not a replay launch / the mode field is absent.
+   */
+  get replayMode(): string | undefined {
+    return this.url.replay?.mode;
+  }
 
   /** Tear down. Cancels the balance poll, removes listeners. */
   destroy(): void {
@@ -256,7 +269,7 @@ export class StakeBridge {
    * so downstream code (validateBet, buildGameConfig) can be agnostic.
    */
   private async boot(): Promise<RGSAuthenticateResponse> {
-    if (this.isReplay) return this.bootReplay();
+    if (this._isReplay) return this.bootReplay();
     return this.authenticate();
   }
 
@@ -376,12 +389,12 @@ export class StakeBridge {
       jurisdiction,
       currency: lookupCurrency(this.currency),
       autoplay: this.deriveAutoplayPolicy(jurisdiction),
-      replayMode: this.isReplay,
+      replayMode: this._isReplay,
       socialMode,
       demo,
       disclaimerLines: buildDisclaimer({
         socialMode,
-        replayMode: this.isReplay,
+        replayMode: this._isReplay,
       }),
       // Stake-specific extras surfaced via index signature
       stake: {
@@ -413,7 +426,7 @@ export class StakeBridge {
   private deriveAutoplayPolicy(
     j: JurisdictionFlagsData | undefined,
   ): AutoplayPolicyData | undefined {
-    if (this.isReplay) return undefined;
+    if (this._isReplay) return undefined;
     if (j?.disabledAutoplay) return undefined;
     return {
       maxCount: 100,
@@ -477,7 +490,7 @@ export class StakeBridge {
     payload: PlayRequestPayload,
     requestId?: string,
   ): Promise<void> {
-    if (this.isReplay) {
+    if (this._isReplay) {
       await this.startReplayRound(payload, requestId);
       return;
     }
@@ -727,7 +740,7 @@ export class StakeBridge {
     const marker = segment?.progressMarker ?? `seg-${round.cursor}`;
     round.lastEventMarker = marker;
     // Replay rounds aren't tracked by RGS — skip /bet/event.
-    if (this.isReplay) return;
+    if (this._isReplay) return;
     // Fire-and-forget. /bet/event failures don't disrupt gameplay.
     this.rgs.event(marker).catch((err) => this.log(`event() failed: ${err}`));
   }
@@ -744,7 +757,7 @@ export class StakeBridge {
   // ─── GET_BALANCE ─────────────────────────────────────────────────────
 
   private async onGetBalance(id?: string): Promise<void> {
-    if (this.isReplay) {
+    if (this._isReplay) {
       // No wallet to read — return the synthetic 0 balance.
       this.bridge.send<BalanceUpdatePayload>(
         'BALANCE_UPDATE',
@@ -861,7 +874,7 @@ export class StakeBridge {
   }
 
   private startBalancePolling(): void {
-    if (this.isReplay) return;
+    if (this._isReplay) return;
     this.stopBalancePolling();
     if (this.balancePollMs <= 0) return;
     this.pollTimer = setInterval(() => {

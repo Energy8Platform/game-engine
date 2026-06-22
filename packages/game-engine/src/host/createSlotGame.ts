@@ -62,7 +62,7 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
     const ps = game.platformSession;
     // game.initData.balance is number (not an object); guard for null initData
     const balance = (game.initData?.balance as number | undefined) ?? 0;
-    const isReplay = !!(stakeBridge && (stakeBridge as unknown as { isReplay?: boolean }).isReplay);
+    const isReplay = !!stakeBridge?.isReplay;
     const mode = isReplay ? 'replay' : 'base';
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, balance, mode));
 
@@ -78,7 +78,7 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
       shell.on('betChange', (bet: number) => { currentBet = bet; sceneInst?.setBet?.(bet); });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => { void sceneInst?.buyBonus?.(id, currentBet); });
     } else {
-      const stakeMode = (stakeBridge as unknown as { url?: { replay?: { mode?: string } } }).url?.replay?.mode ?? 'BASE';
+      const stakeMode = stakeBridge?.replayMode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);
       // The shell reopens the replay modal after onReplay resolves (ReplayModalOptions contract),
       // so onReplay only spins — it must NOT reopen, or the modal opens twice per click.
