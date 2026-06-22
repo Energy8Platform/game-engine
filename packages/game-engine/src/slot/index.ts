@@ -9,3 +9,7 @@ export { CascadeController } from './anim/CascadeController';
 export type { CascadeStepData, CascadeTimings, CascadeAnim } from './anim/CascadeController';
 export { ReelSpinController } from './anim/ReelSpinController';
 export type { ReelSpinData, ReelSpinTimings, ReelStopPlan } from './anim/ReelSpinController';
+export { pickTier, tierIndexAtValue } from './overlay/tiers';
+export type { WinTier } from './overlay/tiers';
+export { valueAt, CountUpDisplay } from './overlay/CountUpDisplay';
+export type { CountUpConfig } from './overlay/CountUpDisplay';
