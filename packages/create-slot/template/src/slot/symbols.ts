@@ -1,6 +1,5 @@
-import { Texture } from 'pixi.js';
-import { AnimatedSymbol, type SymbolResolver } from '@energy8platform/game-engine/slot';
+import { type SymbolResolver } from '@energy8platform/game-engine/slot';
 
-// Placeholder resolver: every symbol is a blank tile. Swap in real textures from public/assets/symbols.
-export const resolveSymbol: SymbolResolver = (id: string) =>
-  new AnimatedSymbol({ textures: { base: id ? Texture.WHITE : Texture.EMPTY }, size: 110 });
+// Placeholder resolver: returns null (blank cell) for every symbol id.
+// Replace with real texture-backed AnimatedSymbol instances from public/assets/symbols.
+export const resolveSymbol: SymbolResolver = (_id: string) => null;
