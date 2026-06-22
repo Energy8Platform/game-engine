@@ -1,67 +1,60 @@
-# Task 5 Report: spec-slot end-to-end via createSlotGame
+# Task 5 Report: package scaffold + answers + prompts
 
-## What was added
+## TDD RED/GREEN Evidence
 
-- `examples/spec-slot/GameScene.ts` (new) — trivial `Scene` subclass extending `@energy8platform/game-engine/core`, empty `onEnter`.
-- `examples/spec-slot/main.ts` (new) — calls `createSlotGame` from `@energy8platform/game-engine/host` with `{ model, scene, manifest, design, fonts, textureDefaults, dev }`.
-- `examples/spec-slot/package.json` (modified) — added `"@energy8platform/game-engine": "*"` and `"pixi.js": "^8.16.0"` to `devDependencies`.
-- `examples/spec-slot/tsconfig.json` (modified) — added `"exclude": ["dev.config.ts"]` (see below).
+### RED
+Ran `npx vitest run packages/create-slot/test/answers.test.ts` before writing `src/answers.ts`.
+Result: `Error: Failed to load url ../src/answers` — 0 tests ran, 1 file failed. Confirmed RED.
 
-## tsc --noEmit result
-
-PASS (exit 0, no output).
-
-## smoke result
-
-PASS — `npm run smoke --workspace spec-slot-example` ended with `SMOKE PASS`.
-
-## import.meta cast needed?
-
-Yes. The tsconfig does not include Vite's `ImportMetaEnv` augmentation (plain `moduleResolution: Bundler` with `"types": ["node"]`), so `import.meta.env` doesn't typecheck as-is. Applied the brief's documented minimal fix: `(import.meta as any).env?.DEV ?? false`.
-
-## dev.config.ts exclusion
-
-A pre-existing TS4082 error was present in `dev.config.ts` (confirmed by stashing our changes and re-running tsc):
-
-```
-dev.config.ts(12,1): error TS4082: Default export of the module has or is using private name 'GameDefinition'.
-```
-
-`GameDefinition` is defined in `platform-core/src/lua/types.ts` and used as a property type on `GameModel` in `game-spec/types.ts`, but is NOT re-exported from `@energy8platform/platform-core/game-spec`. When `dev.config.ts` exports `{ gameDefinition: model.gameDefinition }`, TypeScript sees a private name leak.
-
-`dev.config.ts` is a Node runtime DevBridge config (imports `node:fs`, `node:path`, `node:url`) — not a bundled browser file. Excluding it from tsconfig is the correct scope fix.
-
-Note: this was NOT caused by Task 5 changes.
-
-## Concerns
-
-- `GameDefinition` should ideally be re-exported from `@energy8platform/platform-core/game-spec` so `dev.config.ts` can be typechecked too. Minor platform-core cleanup, not a Task 5 issue.
-- No real type mismatches found between `createSlotGame`'s `CreateSlotGameOptions` and `GameModel`/`SceneConstructor` — integration is clean.
-
-## Commit
-
-`d9ab5b7` — docs(examples): spec-slot boots via createSlotGame host
+### GREEN
+After writing `src/answers.ts`, `src/prompts.ts`, `src/index.ts`:
+Result: `5 tests passed (5)` — all assertions in parseFlags / applyDefaults / validate green.
 
 ---
 
-## Fix note: TS4082 resolved — GameDefinition types re-exported from game-spec
+## Rollup Entry Choice
 
-**Root cause:** `GameDefinition`, `ActionDefinition`, `TransitionRule`, and `MaxWinConfig` were defined in `packages/platform-core/src/lua/types.ts` but not re-exported from the `@energy8platform/platform-core/game-spec` public entry. When `dev.config.ts` default-exports `{ gameDefinition: model.gameDefinition }`, TypeScript's declaration emit sees a private name leak (TS4082).
+**Entry: `src/index.ts`** (re-exports answers + prompts).
 
-**Fix applied:**
+Rationale: `src/cli.ts` doesn't exist yet (Task 9). Pointing rollup at `src/cli.ts` would fail the build. A tiny `src/index.ts` re-export lets the build run cleanly NOW and produces `dist/cli.js` with the `#!/usr/bin/env node` banner. Task 9 will replace the rollup input with `src/cli.ts` when it adds the CLI entry point.
 
-Added to `packages/platform-core/src/game-spec/index.ts`:
-```ts
-export type { GameDefinition, ActionDefinition, TransitionRule, MaxWinConfig } from '../lua/types';
-```
+Output: `dist/cli.js`, format `esm`, banner `#!/usr/bin/env node`, `node:*` externalized.
 
-Removed the `"exclude": ["dev.config.ts"]` workaround from `examples/spec-slot/tsconfig.json` — dev.config.ts is now fully typechecked.
+---
 
-**Types re-exported:** `GameDefinition`, `ActionDefinition`, `TransitionRule`, `MaxWinConfig`
+## npm install Result
 
-**Evidence:**
-- `cd examples/spec-slot && npx tsc --noEmit` → exit 0, no output (dev.config.ts included)
-- `npx vitest run packages/platform-core/tests/game-spec/` → 25 tests passed (5 files)
-- `npm run smoke --workspace spec-slot-example` → SMOKE PASS
+`npm install` from repo root ran cleanly. Symlink confirmed:
+`node_modules/@energy8platform/create-slot -> ../../packages/create-slot`
 
-**Commit:** `fix(platform-core): re-export GameDefinition types from game-spec so dev.config typechecks`
+Note: `package-lock.json` is listed in `.gitignore` — cannot commit it per the brief's Step 7 instruction. The brief says to add it; however it's gitignored. Left it out.
+
+---
+
+## Files Created
+
+- `packages/create-slot/package.json`
+- `packages/create-slot/rollup.config.ts`
+- `packages/create-slot/tsconfig.json`
+- `packages/create-slot/vitest.config.ts`
+- `packages/create-slot/src/answers.ts`
+- `packages/create-slot/src/prompts.ts`
+- `packages/create-slot/src/index.ts` (tiny re-export stub; replaced by cli.ts in Task 9)
+- `packages/create-slot/test/answers.test.ts`
+
+---
+
+## Build / Typecheck / Test Summary
+
+- `npm run typecheck --workspace @energy8platform/create-slot` → clean
+- `npm run build --workspace @energy8platform/create-slot` → `dist/cli.js` created (245ms). One cosmetic warning from `@rollup/plugin-typescript` acting as the rollup config plugin (`Rollup 'sourcemap' option must be set`) — this is a known upstream issue when the plugin is used via `--configPlugin`; the actual bundle output is correct and sourcemapped.
+- `npx vitest run packages/create-slot/test/answers.test.ts` → 5/5 passed
+
+---
+
+## Concerns
+
+1. **package-lock.json is gitignored** — the brief says to commit it; it was left out.
+2. **Cosmetic build warning** — `@rollup/plugin-typescript: Rollup 'sourcemap' option must be set` appears during build. This is a known quirk of using the TypeScript plugin as the `--configPlugin` transpiler; the dist output is correct.
+3. **`dist/` not gitignored** — the dist output (`packages/create-slot/dist/`) is not staged; only source files are committed as expected.
+4. **prompts.ts fix** — one line from the brief used `?? ... ||` without parens (TS5076 strictness). Fixed by splitting into two statements; semantics identical.
