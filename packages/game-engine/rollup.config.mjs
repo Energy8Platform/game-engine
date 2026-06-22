@@ -77,4 +77,5 @@ export default defineConfig([
   ...createBundle('src/lua/index.ts', 'lua'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
   ...createBundle('src/host/index.ts', 'host'),
+  ...createBundle('src/slot/index.ts', 'slot'),
 ]);

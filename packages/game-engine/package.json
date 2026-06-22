@@ -76,6 +76,11 @@
       "import": "./dist/host.esm.js",
       "require": "./dist/host.cjs.js",
       "types": "./dist/host.d.ts"
+    },
+    "./slot": {
+      "import": "./dist/slot.esm.js",
+      "require": "./dist/slot.cjs.js",
+      "types": "./dist/slot.d.ts"
     }
   },
   "files": [
