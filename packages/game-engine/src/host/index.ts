@@ -6,3 +6,5 @@ export type {
   StakeIntegration,
   SceneEntry,
 } from './types';
+export { buildShellConfig } from './shellConfig';
+export type { SlotShellOptions } from './shellConfig';
