@@ -12,6 +12,9 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-}).catch((err) => {
-  console.error('[spec-slot] failed to start', err);
-});
+  shell: {
+    currency: { symbol: '€', position: 'left' },
+    gameInfo: { sections: [] },
+    buyBonus: [{ id: 'buy_bonus', title: 'BUY BONUS', description: 'Buy the feature', priceMultiplier: 50 }],
+  },
+}).catch((err) => { console.error('[spec-slot] failed to start', err); });
