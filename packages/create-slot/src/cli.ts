@@ -10,7 +10,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
 
 async function main(): Promise<void> {
   const flags = parseFlags(argv.slice(2));
-  const target = argv.slice(2).find((a) => !a.startsWith('--') && !/^[a-z0-9.]/i.test(a) === false && a !== flags.id);
+  const target = argv.slice(2).find((a) => !a.startsWith('--') && a !== flags.id);
   const yes = argv.includes('--yes');
   const answers = yes || flags.id ? applyDefaults(flags) : await prompt(flags);
   const dir = resolve(process.cwd(), target ?? answers.id);
