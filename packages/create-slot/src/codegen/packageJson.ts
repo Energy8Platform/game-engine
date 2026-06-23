@@ -24,7 +24,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       '@energy8platform/game-engine': v['game-engine'],
       ...(a.stake ? { '@energy8platform/stake-kit': v['stake-kit'], '@energy8platform/stake-bridge': v['stake-bridge'] } : { '@energy8platform/stake-kit': v['stake-kit'] }),
       'pixi.js': '^8.16.0',
-      ...(a.stake ? { zod: '^3.23.0' } : {}),
+      zod: '^3.23.0',
     },
     devDependencies: {
       '@energy8platform/stake-math-tools': '^0.1.0',

@@ -16,4 +16,14 @@ describe('genNormalize', () => {
     expect(s).toContain('targetGrid');
     expect(s).not.toContain('steps: CascadeStepData[]');
   });
+
+  const s = genNormalize({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
+  it('coerces via the schema array fields and never uses `?? []` on an array', () => {
+    expect(s).toContain("import { deriveArrayFields, coerceLuaArrays } from '@energy8platform/stake-kit'");
+    expect(s).toContain("import { spinSchema, type SpinDataRaw } from './schema'");
+    expect(s).toContain('deriveArrayFields(spinSchema)');
+    expect(s).toContain('coerceLuaArrays(');
+    expect(s).toContain('spinSchema.safeParse(');
+    expect(s).not.toContain('?? []).map');             // the crash idiom must be gone
+  });
 });

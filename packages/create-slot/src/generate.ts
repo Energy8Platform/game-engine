@@ -10,6 +10,7 @@ import { genLuaLogic } from './codegen/luaLogic';
 import { genStakeAdapter } from './codegen/stakeAdapter';
 import { genMainTs } from './codegen/mainTs';
 import { genNormalize } from './codegen/normalize';
+import { genSchema } from './codegen/schema';
 import { genMathConfig } from './codegen/mathConfig';
 
 const TEMPLATE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '../template');
@@ -44,11 +45,11 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   writeFileSync(join(targetDir, 'src/main.ts'), genMainTs(a));
   writeFileSync(join(targetDir, 'src/game/script.logic.lua'), genLuaLogic(a));
   writeFileSync(join(targetDir, 'src/game/normalize.ts'), genNormalize(a));
+  writeFileSync(join(targetDir, 'src/game/schema.ts'), genSchema(a));
   if (a.stake) {
     mkdirSync(join(targetDir, 'src/stake'), { recursive: true });
-    const { adapter, schema } = genStakeAdapter(a);
+    const { adapter } = genStakeAdapter(a);
     writeFileSync(join(targetDir, 'src/stake/adapter.ts'), adapter);
-    writeFileSync(join(targetDir, 'src/stake/schema.ts'), schema);
   } else if (existsSync(join(targetDir, 'src/stake'))) {
     rmSync(join(targetDir, 'src/stake'), { recursive: true, force: true });
   }

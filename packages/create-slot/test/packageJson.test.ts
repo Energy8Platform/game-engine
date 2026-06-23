@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { genPackageJson } from '../src/codegen/packageJson';
+import { genPackageJson, type DepVersions } from '../src/codegen/packageJson';
+
+const V: DepVersions = { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1' };
 
 describe('genPackageJson', () => {
   const json = JSON.parse(genPackageJson(
     { id: 'moon-spice', title: 'Moon Spice', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true },
-    { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1' },
+    V,
   ));
   it('names the package from the id and pins the 4 deps', () => {
     expect(json.name).toBe('moon-spice');
@@ -24,5 +26,9 @@ describe('genPackageJson', () => {
     expect(json2.scripts.pool).toContain('e8-math pool');
     expect(json2.scripts.curate).toContain('e8-math curate');
     expect(json2.devDependencies['@energy8platform/stake-math-tools']).toBeTruthy();
+  });
+  it('includes zod even for non-stake games (general spin schema)', () => {
+    const j = JSON.parse(genPackageJson({ id: 'g', title: 'G', mechanic: 'lines', grid: { cols: 5, rows: 3 }, stake: false, cascades: false }, V));
+    expect(j.dependencies.zod).toBe('^3.23.0');
   });
 });
