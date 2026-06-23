@@ -1,8 +1,22 @@
 import { describe, it, expect } from 'vitest';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { stakeHarnessPlugin } from '../src/harness/plugin';
 import { renderWrapperHtml } from '../src/harness/wrapper';
 import { SCREEN_PRESETS } from '../src/harness/bar';
+
+// ---------------------------------------------------------------------------
+// Minimal fake HarnessMathConfig returned by ssrLoadModule
+// ---------------------------------------------------------------------------
+
+const fakeMathConfig = {
+  model: {
+    spec: { id: 'demo-slot', betLevels: [1, 2, 5] },
+    gameDefinition: {},
+    mathModes: [],
+  },
+  luaScript: '',
+};
 
 // ---------------------------------------------------------------------------
 // Plugin registration
@@ -25,11 +39,83 @@ describe('stakeHarnessPlugin', () => {
           routes.push(typeof routeOrHandler === 'string' ? routeOrHandler : undefined);
         },
       },
+      ssrLoadModule: async () => ({ default: fakeMathConfig }),
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     p.configureServer(fakeServer as any);
     expect(routes).toContain('/__rgs');
     expect(routes).toContain('/');
+  });
+
+  it('serves 200 HTML with bar controls from the root / handler via ssrLoadModule', async () => {
+    const p = stakeHarnessPlugin();
+
+    // Capture registered handlers
+    const handlers: Array<{ route?: string; handler: Function }> = [];
+    const fakeServer = {
+      middlewares: {
+        use(routeOrHandler: unknown, handler?: unknown) {
+          if (typeof routeOrHandler === 'string') {
+            handlers.push({ route: routeOrHandler, handler: handler as Function });
+          } else {
+            handlers.push({ handler: routeOrHandler as Function });
+          }
+        },
+      },
+      ssrLoadModule: async (_url: string) => ({ default: fakeMathConfig }),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    p.configureServer(fakeServer as any);
+
+    // Find the root '/' handler
+    const rootEntry = handlers.find((h) => h.route === '/');
+    expect(rootEntry).toBeDefined();
+    const rootHandler = rootEntry!.handler;
+
+    // Build a fake IncomingMessage for a browser navigation to '/'
+    let responseStatus = 0;
+    const responseHeaders: Record<string, string> = {};
+    let responseBody = '';
+
+    const fakeReq = {
+      url: '/',
+      method: 'GET',
+      headers: { accept: 'text/html,*/*', host: 'localhost:5173' },
+    } as unknown as IncomingMessage;
+
+    const fakeRes = {
+      statusCode: 0,
+      setHeader(name: string, value: string) {
+        responseHeaders[name.toLowerCase()] = value;
+      },
+      end(body: string) {
+        responseStatus = this.statusCode;
+        responseBody = body;
+      },
+    } as unknown as ServerResponse;
+
+    // Call the handler; it is async internally (promise-based) so await settlement
+    await new Promise<void>((resolve) => {
+      const next = () => resolve();
+      rootHandler(fakeReq, fakeRes, next);
+      // The handler fires a void promise — poll until body is set
+      const poll = setInterval(() => {
+        if (responseBody || responseStatus) {
+          clearInterval(poll);
+          resolve();
+        }
+      }, 5);
+    });
+
+    expect(responseStatus).toBe(200);
+    expect(responseHeaders['content-type']).toContain('text/html');
+    // bar controls rendered by renderWrapperHtml
+    expect(responseBody).toContain('id="screen"');
+    expect(responseBody).toContain('id="currency"');
+    expect(responseBody).toContain('id="bet"');
+    expect(responseBody).toContain('<iframe id="game"');
+    // config blob includes the game id from ssrLoadModule
+    expect(responseBody).toContain('demo-slot');
   });
 });
 

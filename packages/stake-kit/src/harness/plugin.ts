@@ -10,7 +10,6 @@
  * Must NOT be pulled into the browser stake-kit entry.
  */
 
-import { pathToFileURL } from 'node:url';
 import { resolve as resolvePath } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -50,7 +49,7 @@ interface HarnessMathConfig {
   luaScript: string;
 }
 
-// Loose vite typings — we only touch `configureServer` + `middlewares.use`.
+// Loose vite typings — we only touch `configureServer` + `middlewares.use` + `ssrLoadModule`.
 interface ViteDevServer {
   middlewares: {
     use(handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void): void;
@@ -59,6 +58,7 @@ interface ViteDevServer {
       handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void,
     ): void;
   };
+  ssrLoadModule(url: string): Promise<Record<string, unknown>>;
 }
 
 interface VitePlugin {
@@ -104,13 +104,17 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
   const booksDir = opts.booksDir ?? 'stake-math';
   const startingBalanceMajor = opts.startingBalance ?? 10_000;
 
+  // Captured vite dev server — set in configureServer, used by loadConfig.
+  let server: ViteDevServer | null = null;
+
   // Lazily-loaded harness config (loaded on first request so a missing config
   // degrades gracefully rather than crashing the dev server at boot).
+  // Uses server.ssrLoadModule so that .ts files are transpiled by vite.
   let cfgPromise: Promise<HarnessMathConfig> | null = null;
   function loadConfig(): Promise<HarnessMathConfig> {
     if (!cfgPromise) {
-      const abs = resolvePath(process.cwd(), configPath);
-      cfgPromise = import(pathToFileURL(abs).href).then(
+      if (!server) throw new Error('stake-harness: loadConfig called before configureServer');
+      cfgPromise = server.ssrLoadModule(configPath).then(
         (m) => (m.default ?? m) as HarnessMathConfig,
       );
     }
@@ -187,9 +191,11 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
   return {
     name: 'stake-harness',
     apply: 'serve',
-    configureServer(server: ViteDevServer): void {
+    configureServer(srv: ViteDevServer): void {
+      server = srv;
+
       // ── dev-RGS at /__rgs/* ──────────────────────────────────────────
-      server.middlewares.use('/__rgs', (req, res) => {
+      srv.middlewares.use('/__rgs', (req, res) => {
         void (async () => {
           try {
             const url = req.url ?? '/';
@@ -215,7 +221,7 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
       });
 
       // ── wrapper page on the root document (no rgs_url query) ──────────
-      server.middlewares.use('/', (req, res, next) => {
+      srv.middlewares.use('/', (req, res, next) => {
         const url = req.url ?? '/';
         const accept = (req.headers.accept ?? '') as string;
         const isDocument = accept.includes('text/html');
