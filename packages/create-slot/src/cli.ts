@@ -11,7 +11,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
 async function main(): Promise<void> {
   const seed = seedFromArgv(argv.slice(2));
   const yes = argv.includes('--yes');
-  const answers = yes || seed.id ? applyDefaults(seed) : await prompt(seed);
+  const answers = yes ? applyDefaults(seed) : await prompt(seed);
   const dir = resolve(process.cwd(), answers.id);
   await generate(answers, dir, PUBLISHED);
   console.log(`\n✓ Created ${answers.id} at ${dir}\n  cd ${answers.id} && npm install && npm run dev\n`);

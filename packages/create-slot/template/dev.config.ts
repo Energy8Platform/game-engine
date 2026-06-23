@@ -1,11 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { buildLuaScript } from '@energy8platform/platform-core/game-spec';
 import { model } from './src/game.spec';
-
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const logic = readFileSync(resolve(__dirname, 'src/game/script.logic.lua'), 'utf8');
+import logic from './src/game/script.logic.lua?raw';
 
 export default {
   balance: 100000,

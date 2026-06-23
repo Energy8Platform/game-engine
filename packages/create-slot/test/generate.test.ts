@@ -23,6 +23,9 @@ describe('generate', () => {
     expect(existsSync(join(dir, 'src/stake/adapter.ts'))).toBe(true);
     expect(existsSync(join(dir, 'src/game/normalize.ts'))).toBe(true);
     expect(readFileSync(join(dir, 'src/main.ts'), 'utf8')).toContain('normalize');
+    const dev = readFileSync(join(dir, 'dev.config.ts'), 'utf8');
+    expect(dev).not.toMatch(/from '\s*node:/);   // no node: imports (would break the browser DevBridge)
+    expect(dev).toContain('?raw');               // lua loaded via Vite ?raw
   });
   it('omits stake/ when stake=false', async () => {
     dir = mkdtempSync(join(tmpdir(), 'cs-'));
