@@ -2,7 +2,7 @@
 import { GameApplication } from '../core';
 import { buildAppConfig } from './buildConfig';
 import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
-import { showFatalError } from './fatalError';
+import { showFatalError, installGlobalErrorHandlers } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
 import type { ShellMode } from '@energy8platform/platform-core/shell';
@@ -24,6 +24,11 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
   const fatal = (message: string) =>
     opts.onFatalError ? opts.onFatalError(message) : showFatalError(opts.container ?? '#game', message);
+
+  // Global safety net: surface ANY uncaught error / unhandled rejection (e.g. an
+  // `Uncaught (in promise) SDKError` on spin) through the same fatal modal so games
+  // don't have to handle errors themselves. Honours the onFatalError override.
+  installGlobalErrorHandlers(opts.container ?? '#game', fatal);
 
   let stakeBridge: SlotGameHandle['stakeBridge'] = null;
   let isStakeNow = false;
@@ -113,11 +118,16 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     const balance = (game.initData?.balance as number | undefined) ?? 0;
     const isReplay = !!stakeBridge?.isReplay;
     const mode: ShellMode = isReplay ? 'replay' : 'base';
+    // initData.config carries the Stake bridge's social/disclaimer surface (GameConfigData);
+    // both are absent in non-stake/dev launches → graceful defaults downstream.
+    const config = (game.initData as { config?: { socialMode?: boolean; disclaimerLines?: string[] } } | null)?.config;
     const runtime = {
       balance,
       currency: game.platformSession?.currency,        // code from the SDK handshake
       language: (game.initData as { language?: string } | null)?.language,
       mode,
+      social: config?.socialMode,
+      disclaimerLines: config?.disclaimerLines,
     };
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
     ps?.on('balanceUpdate', (d: { balance: number }) => shell!.setBalance(d.balance));
