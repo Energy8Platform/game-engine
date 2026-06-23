@@ -23,6 +23,7 @@ describe('generate', () => {
     expect(existsSync(join(dir, 'src/stake/adapter.ts'))).toBe(true);
     expect(existsSync(join(dir, 'src/game/normalize.ts'))).toBe(true);
     expect(readFileSync(join(dir, 'src/main.ts'), 'utf8')).toContain('normalize');
+    expect(existsSync(join(dir, 'math.config.ts'))).toBe(true);
     const dev = readFileSync(join(dir, 'dev.config.ts'), 'utf8');
     expect(dev).not.toMatch(/from '\s*node:/);   // no node: imports (would break the browser DevBridge)
     expect(dev).toContain('?raw');               // lua loaded via Vite ?raw

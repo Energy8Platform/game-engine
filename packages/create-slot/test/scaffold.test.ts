@@ -17,6 +17,7 @@ const LOCAL = {
   'game-engine': 'file:' + join(REPO, 'packages/game-engine'),
   'stake-kit': 'file:' + join(REPO, 'packages/stake-kit'),
   'stake-bridge': 'file:' + join(REPO, 'packages/stake-bridge'),
+  'stake-math-tools': 'file:' + join(REPO, 'packages/stake-math-tools'),
 };
 
 describe('scaffold anti-drift', () => {
@@ -25,6 +26,13 @@ describe('scaffold anti-drift', () => {
     // generate with file: deps so npm install resolves the LOCAL built packages
     // (catches drift between the template/codegen and the real package APIs)
     return generate(applyDefaults({ id: 'drift-check', mechanic: 'cluster' }), dir, LOCAL as any).then(() => {
+      // Patch generated package.json: redirect @energy8platform/stake-math-tools devDep to local
+      // file: path so npm install resolves it from the monorepo (not the npm registry).
+      const pkgPath = join(dir, 'package.json');
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      pkg.devDependencies['@energy8platform/stake-math-tools'] = LOCAL['stake-math-tools'];
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
       // Dedupe pixi.js: patch the generated tsconfig to redirect pixi.js type resolution to the
       // monorepo's own copy so user source and the symlinked game-engine see ONE Texture class.
       // (Matches a real single-pixi.js published install; avoids a file:-symlink two-copies false

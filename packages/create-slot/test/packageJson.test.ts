@@ -17,4 +17,12 @@ describe('genPackageJson', () => {
     expect(json.scripts.build).toContain('vite build');
     expect(json.scripts.typecheck).toBe('tsc --noEmit');
   });
+  it('emits sim/pool/curate/math scripts via e8-math and the stake-math-tools devDep', () => {
+    const json2 = JSON.parse(genPackageJson({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true } as any,
+      { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1' }));
+    expect(json2.scripts.math).toContain('e8-math all');
+    expect(json2.scripts.pool).toContain('e8-math pool');
+    expect(json2.scripts.curate).toContain('e8-math curate');
+    expect(json2.devDependencies['@energy8platform/stake-math-tools']).toBeTruthy();
+  });
 });

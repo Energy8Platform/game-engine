@@ -5,11 +5,6 @@ export interface DepVersions {
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
-  const simulate: Record<string, string> = {};
-  // one simulate:* script per non-base/free action would be derived from the spec at build;
-  // emit the canonical base sim here (author adds buy modes after editing the spec).
-  simulate['simulate'] = 'platform-core-simulate --config ./dev.config.ts --action spin';
-
   const pkg = {
     name: a.id,
     private: true,
@@ -19,7 +14,10 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       build: 'tsc --noEmit && vite build',
       typecheck: 'tsc --noEmit',
       smoke: 'tsx smoke.ts',
-      ...simulate,
+      sim: 'e8-math sim --config ./math.config.ts',
+      pool: 'e8-math pool --config ./math.config.ts',
+      curate: 'e8-math curate --config ./math.config.ts',
+      math: 'e8-math all --config ./math.config.ts',
     },
     dependencies: {
       '@energy8platform/platform-core': v['platform-core'],
@@ -29,6 +27,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       ...(a.stake ? { zod: '^3.23.0' } : {}),
     },
     devDependencies: {
+      '@energy8platform/stake-math-tools': '^0.1.0',
       '@types/node': '^20.0.0',
       tsx: '^4.21.0',
       typescript: '^5.6.0',
