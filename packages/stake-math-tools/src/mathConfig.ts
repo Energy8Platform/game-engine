@@ -2,7 +2,7 @@ import type { OptimizeParams } from './types';
 
 /** A platform-core GameModel — typed loosely here to avoid a hard type import. */
 export interface MathModel {
-  spec: { maxWin: number; [k: string]: unknown };
+  spec: { maxWin: number };
   mathModes: { action: string; mode: string; costMultiplier: number }[];
   gameDefinition: unknown;
 }

@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { buildLuaScript } from '@energy8platform/platform-core/game-spec';
 import { model } from './game.spec';
-import type { MathConfig, MathModel } from '@energy8platform/stake-math-tools';
+import type { MathConfig } from '@energy8platform/stake-math-tools';
 
 const logic = readFileSync(new URL('./script.logic.lua', import.meta.url), 'utf8');
 
 export default {
-  model: model as unknown as MathModel,
+  model,
   luaScript: buildLuaScript(model, logic),
   modes: {
     // action: 'spin' → mode: 'SPIN' (toMathModes uppercases the action key)
