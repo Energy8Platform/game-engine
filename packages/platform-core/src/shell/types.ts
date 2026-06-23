@@ -194,6 +194,9 @@ export interface ShellConfig {
   theme?: ThemeConfig;
   gameInfo: GameInfoContent;
   language: string;
+  /** Game version shown in the game-info footer (e.g. '1.2.0'). Defaults to '1.0.0'. The footer
+   *  stamp is `${version}.${engineVersionWithoutDots}` — e.g. game 1.0.0 on engine 0.24.6 → '1.0.0.0246'. */
+  version?: string;
   /** When true, all built-in shell text is shown in the social-casino vocabulary (derived from
    *  English via word-swap rules), regardless of `language`. Game-supplied content is untouched. */
   isSocial?: boolean;

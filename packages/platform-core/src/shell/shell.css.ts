@@ -148,6 +148,8 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-gi-sec h3 { color:var(--shell-plaque-label); font-size:11px; letter-spacing:.14em;
   text-transform:uppercase; margin:0 0 12px; }
 #${SHELL_ROOT_ID} .ge-gi-sec p { color:rgba(255,255,255,.88); font-size:15px; line-height:1.6; margin:0; }
+#${SHELL_ROOT_ID} .ge-gi-version { text-align:center; color:var(--shell-muted); font-size:11px;
+  letter-spacing:.08em; opacity:.7; margin:4px 0 2px; }
 
 /* controls — two blocks (gameplay / menu & info), icon/name/description per control */
 #${SHELL_ROOT_ID} .ge-gi-ctl-block + .ge-gi-ctl-block { margin-top:16px; padding-top:4px; border-top:1px solid var(--shell-plaque-line); }
