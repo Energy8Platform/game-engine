@@ -59,7 +59,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(win.classList.contains('ge-winpill')).toBe(true);                 // base pattern
   });
 
-  it('replay: read-only bet + win (base pill) + turbo, no controls', () => {
+  it('replay: read-only bet + win (base pill) + turbo, no controls, no balance', () => {
     const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
     expect(q(mount, '[data-ge="bet-value"]')!.textContent).toContain('€2');
     const win = q(mount, '[data-ge="win"]')!;
@@ -69,6 +69,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="spin"]')).toBeNull();
     expect(q(mount, '[data-ge="buybonus"]')).toBeNull();
     expect(q(mount, '[data-ge="turbo"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="balance"]')).toBeNull(); // balance hidden in replay
   });
 
   it('replay: Free Spins + Total Win only for a free-spins replay (total > 0)', () => {
