@@ -23,9 +23,9 @@ export function genGameScene(a: Answers): string {
   return `import { Scene } from '@energy8platform/game-engine/core';
 import { ReelGrid, ${ctrl}, BigWinOverlay, FreeSpinsSession${multiplierImport} } from '@energy8platform/game-engine/slot';
 import type { SlotSceneController, SlotHostApi } from '@energy8platform/game-engine/host';
-import { model } from './game.spec';
-import { resolveSymbol } from './slot/symbols';
-import type { SpinData } from './game/normalize';
+import { model } from '../game.spec';
+import { resolveSymbol } from '../slot/symbols';
+import type { SpinData } from '../game/normalize';
 
 export class GameScene extends Scene implements SlotSceneController<SpinData> {
   private grid!: ReelGrid;

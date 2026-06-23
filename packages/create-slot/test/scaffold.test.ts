@@ -47,7 +47,7 @@ describe('scaffold anti-drift', () => {
       execFileSync('npm', ['install', '--no-audit', '--no-fund'], { cwd: dir, stdio: 'inherit' });
       // typecheck the generated game against the local package .d.ts
       execFileSync('npx', ['tsc', '--noEmit'], { cwd: dir, stdio: 'inherit' });
-      expect(readFileSync(join(dir, 'src/GameScene.ts'), 'utf8')).toContain('CascadeController');
+      expect(readFileSync(join(dir, 'src/scenes/GameScene.ts'), 'utf8')).toContain('CascadeController');
     });
   }, 180_000);
 });

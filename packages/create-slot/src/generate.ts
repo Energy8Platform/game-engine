@@ -39,12 +39,12 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   substituteTree(targetDir, { id: a.id, title: a.title });
   // 3) codegen files
   mkdirSync(join(targetDir, 'src/game'), { recursive: true });
+  mkdirSync(join(targetDir, 'src/scenes'), { recursive: true });
   writeFileSync(join(targetDir, 'src/game.spec.ts'), genGameSpec(a));
   writeFileSync(join(targetDir, 'package.json'), genPackageJson(a, versions));
   writeFileSync(join(targetDir, 'math.config.ts'), genMathConfig(a));
-  writeFileSync(join(targetDir, 'src/GameScene.ts'), genGameScene(a));
+  writeFileSync(join(targetDir, 'src/scenes/GameScene.ts'), genGameScene(a));
   writeFileSync(join(targetDir, 'src/main.ts'), genMainTs(a));
-  mkdirSync(join(targetDir, 'src/scenes'), { recursive: true });
   writeFileSync(join(targetDir, 'src/scenes/IntroScene.ts'), genIntroScene(a));
   writeFileSync(join(targetDir, 'src/game/script.logic.lua'), genLuaLogic(a));
   writeFileSync(join(targetDir, 'src/game/normalize.ts'), genNormalize(a));

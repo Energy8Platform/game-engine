@@ -5,7 +5,7 @@ export function genMainTs(a: Answers): string {
   const stakeOpt = a.stake ? `  stake: { adapter },\n` : '';
   return `import { createSlotGame } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
-import { GameScene } from './GameScene';
+import { GameScene } from './scenes/GameScene';
 import { IntroScene } from './scenes/IntroScene';
 import { normalize } from './game/normalize';
 ${stakeImport}
