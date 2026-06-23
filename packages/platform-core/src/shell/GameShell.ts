@@ -201,7 +201,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
   setBalance(n: number): void { this.state.balance = n; this.render(); }
   setWin(n: number): void { this.state.win = n; this.render(); }
   setBet(n: number): void { this.state.bet = n; this.render(); }
-  setMode(mode: ShellMode): void { this.state.mode = mode; this.render(); }
+  setMode(mode: ShellMode): void {
+    if (mode === 'replay') this.state.replay = true; // sticky: a replay stays a replay across modes
+    this.state.mode = mode;
+    this.render();
+  }
   setBusy(busy: boolean): void { this.state.busy = busy; this.render(); }
   setAutoplay(a: AutoplayOptions): void { this.state.autoplay = a; this.render(); }
   setTurbo(level: number): void { this.state.turbo = level; this.render(); }

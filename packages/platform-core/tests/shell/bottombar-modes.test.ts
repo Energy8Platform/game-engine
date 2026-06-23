@@ -80,4 +80,15 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('8');
     expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('40');
   });
+
+  it('replay: balance stays hidden when FS plays during a replay (mode → freeSpins)', () => {
+    // A replay viewer starts in replay mode, then drives the free-spins phase by switching the
+    // bottom bar to freeSpins mode. It's still a historical round, so balance must stay hidden.
+    const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
+    expect(q(mount, '[data-ge="balance"]')).toBeNull();
+    shell.setMode('freeSpins');
+    shell.setFreeSpins({ current: 2, total: 10, totalWin: 30 });
+    expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('10'); // FS layout active
+    expect(q(mount, '[data-ge="balance"]')).toBeNull();                      // …yet no balance
+  });
 });

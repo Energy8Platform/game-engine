@@ -52,8 +52,9 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   // only when it's a free-spins replay (freeSpins.total > 0).
   const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
 
-  // Replay is a read-only historical round — there's no real balance to show, so hide it.
-  const balance = state.mode === 'replay'
+  // Replay is a read-only historical round — there's no real balance to show, so hide it. Keyed on
+  // the sticky `replay` flag (not `mode`) so it stays hidden through a replay's free-spins phase.
+  const balance = state.replay
     ? null
     : readout('balance', shell.t('Balance'), fmt(state.balance));
   // With a feature active (e.g. Ante) the BET readout shows the effective stake, tinted with
