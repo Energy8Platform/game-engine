@@ -10,6 +10,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": { "e8-math": "bin/e8-math.ts" },
+  "files": ["src", "bin", "README.md"],
+  "dependencies": { "@energy8platform/platform-core": "*" },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
