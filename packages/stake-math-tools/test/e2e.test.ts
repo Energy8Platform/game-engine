@@ -13,8 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findNativeBinary } from '@energy8platform/platform-core/simulation';
-import { defineGame } from '@energy8platform/platform-core/game-spec';
-import { buildLuaScript } from '@energy8platform/platform-core/game-spec';
+import { defineGame, buildLuaScript } from '@energy8platform/platform-core/game-spec';
 import { resolveModes } from '../src/mathConfig';
 import { runSim } from '../src/pipeline/sim';
 import { curateMode } from '../src/pipeline/curate';
@@ -73,17 +72,6 @@ const cfg: MathConfig = {
 };
 
 let tmpDir: string;
-let poolDir: string;
-let outDir: string;
-
-beforeAll(() => {
-  if (!hasBinary) return;
-  tmpDir = mkdtempSync(join(tmpdir(), 'e8-e2e-'));
-  poolDir = join(tmpDir, 'pool');
-  outDir = join(tmpDir, 'out');
-  mkdirSync(poolDir, { recursive: true });
-  mkdirSync(outDir, { recursive: true });
-});
 
 afterAll(() => {
   if (tmpDir) {
@@ -92,16 +80,27 @@ afterAll(() => {
 });
 
 describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', () => {
-  it('runSim writes a raw pool dump with the real RoundDumpRecord shape', async () => {
+  let poolDir: string;
+  let outDir: string;
+  let dump: string;
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'e8-e2e-'));
+    poolDir = join(tmpDir, 'pool');
+    outDir = join(tmpDir, 'out');
+    mkdirSync(poolDir, { recursive: true });
+    mkdirSync(outDir, { recursive: true });
+
     const resolved = resolveModes(cfg);
     const base = resolved.find((m) => m.mode === 'SPIN')!;
-    const dump = join(poolDir, `books_SPIN.jsonl`);
-
+    dump = join(poolDir, `books_SPIN.jsonl`);
     await runSim(cfg, base, { dump });
+  });
 
+  it('pools then curates: sim writes dump + curate produces valid Stake artifacts', async () => {
+    // ── 1. Dump assertions (was the first test) ──────────────────────────────
     expect(existsSync(dump)).toBe(true);
 
-    // Parse the first line and assert the real dump shape.
     const firstLine = readFileSync(dump, 'utf-8').split('\n').find((l) => l.trim());
     expect(firstLine).toBeTruthy();
 
@@ -119,10 +118,8 @@ describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', (
     for (const sp of rec.spins!) {
       expect(typeof sp.win_x).toBe('number');
     }
-  });
 
-  it('curateMode produces lookUpTable CSV, index.json, and a valid OptimizeResult', async () => {
-    // Pool dump was written by the previous test; curate reads it.
+    // ── 2. Curate assertions (was the second test) ────────────────────────────
     const resolved = resolveModes(cfg);
     const base = resolved.find((m) => m.mode === 'SPIN')!;
 
@@ -151,6 +148,8 @@ describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', (
     expect(baseEntry).toBeDefined();
     expect(baseEntry!.events).toBe('books_SPIN.jsonl.zst');
     expect(baseEntry!.weights).toBe('lookUpTable_SPIN_0.csv');
+    // spin action has no explicit cost → costMultiplier defaults to 1
+    expect(baseEntry!.cost).toBe(1);
 
     // OptimizeResult has numeric rtp and non-negative payoutMultMax.
     expect(typeof result.achieved.rtp).toBe('number');
