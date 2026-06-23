@@ -9,13 +9,13 @@ const ctx: RoundContext = {
 describe('spec-slot stake adapter', () => {
   it('produces a base segment from the real model + schema', () => {
     const segs = adapter.splitRound!(
-      [{ stage: 'base_game', data: { total_win: 10, reels: {} } }],
+      [{ stage: 'base_game', data: { total_win: 10, cascades: {} } }],
       ctx,
     );
     expect(segs).toHaveLength(1);
     expect(segs[0].action).toBe('spin');
     expect(segs[0].winThisSegment).toBe(20); // 10 × 2
-    expect((segs[0].data as any).reels).toEqual([]); // {} → [] via schema
+    expect((segs[0].data as any).cascades).toEqual([]); // {} → [] via schema
     expect(segs[0].nextActions).toContain('spin');
     expect(segs[0].nextActions).toContain('buy_bonus');
   });

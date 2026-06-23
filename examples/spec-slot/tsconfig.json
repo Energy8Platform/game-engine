@@ -6,5 +6,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "stake/**/*.ts", "slot/**/*.ts"]
+  "include": ["*.ts", "stake/**/*.ts", "slot/**/*.ts", "scenes/**/*.ts"]
 }

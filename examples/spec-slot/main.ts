@@ -4,6 +4,7 @@ import { createSlotGame } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { GameScene } from './GameScene';
 import { normalize } from './normalize';
+import { IntroScene } from './scenes/IntroScene';
 
 createSlotGame({
   model,
@@ -14,6 +15,6 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-  intro: { title: 'Spec Slot' },
+  intro: { scene: IntroScene },
   shell: {}, // buy/ante cards + currency derive from the spec + initData
 }).catch((err) => { console.error('[spec-slot] failed to start', err); });
