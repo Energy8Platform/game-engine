@@ -16,8 +16,12 @@ export function genGameScene(a: Answers): string {
     if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
   }`;
 
+  const multiplierImport = cascade ? ', MultiplierAccumulator' : '';
+  const multiplierField = cascade
+    ? `  private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });\n` : '';
+
   return `import { Scene } from '@energy8platform/game-engine/core';
-import { ReelGrid, ${ctrl}, BigWinOverlay, FreeSpinsSession, MultiplierAccumulator } from '@energy8platform/game-engine/slot';
+import { ReelGrid, ${ctrl}, BigWinOverlay, FreeSpinsSession${multiplierImport} } from '@energy8platform/game-engine/slot';
 import type { SlotSceneController, SlotHostApi } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { resolveSymbol } from './slot/symbols';
@@ -27,8 +31,7 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
   private grid!: ReelGrid;
   private controller!: ${ctrl};
   private overlay!: BigWinOverlay;
-  private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });
-  private host?: SlotHostApi<SpinData>;
+${multiplierField}  private host?: SlotHostApi<SpinData>;
   private bet = model.spec.defaultBet ?? model.spec.betLevels[0];
 
   bindHost(api: SlotHostApi<SpinData>): void { this.host = api; }

@@ -83,6 +83,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     } else {
       const stakeMode = stakeBridge?.replayMode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);
+      // onReplay only spins — the shell reopens the modal after it resolves; never call openReplay inside onReplay (double-open).
       shell.openReplay({
         bonusId, bet: currentBet, payoutMultiplier: 0,
         onReplay: () => sceneInst?.spin?.(currentBet),

@@ -29,4 +29,20 @@ describe('FreeSpinsSession', () => {
     capped = true;
     expect(s.isComplete).toBe(true);
   });
+
+  it('consume() never drops remaining below zero (extra consume is a no-op)', () => {
+    const s = new FreeSpinsSession({ initialSpins: 1 });
+    s.consume();
+    s.consume(); // already at 0 — must stay 0
+    expect(s.remaining).toBe(0);
+    expect(s.isComplete).toBe(true);
+  });
+
+  it('award(0) and award(negative) are no-ops', () => {
+    const s = new FreeSpinsSession({ initialSpins: 2 });
+    s.award(0);
+    s.award(-3);
+    expect(s.remaining).toBe(2);
+    expect(s.total).toBe(2);
+  });
 });
