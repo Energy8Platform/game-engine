@@ -9,6 +9,7 @@ import { genGameScene } from './codegen/gameScene';
 import { genLuaLogic } from './codegen/luaLogic';
 import { genStakeAdapter } from './codegen/stakeAdapter';
 import { genMainTs } from './codegen/mainTs';
+import { genIntroScene } from './codegen/introScene';
 import { genNormalize } from './codegen/normalize';
 import { genSchema } from './codegen/schema';
 import { genMathConfig } from './codegen/mathConfig';
@@ -43,6 +44,8 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   writeFileSync(join(targetDir, 'math.config.ts'), genMathConfig(a));
   writeFileSync(join(targetDir, 'src/GameScene.ts'), genGameScene(a));
   writeFileSync(join(targetDir, 'src/main.ts'), genMainTs(a));
+  mkdirSync(join(targetDir, 'src/scenes'), { recursive: true });
+  writeFileSync(join(targetDir, 'src/scenes/IntroScene.ts'), genIntroScene(a));
   writeFileSync(join(targetDir, 'src/game/script.logic.lua'), genLuaLogic(a));
   writeFileSync(join(targetDir, 'src/game/normalize.ts'), genNormalize(a));
   writeFileSync(join(targetDir, 'src/game/schema.ts'), genSchema(a));

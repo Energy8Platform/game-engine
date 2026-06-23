@@ -6,6 +6,7 @@ export function genMainTs(a: Answers): string {
   return `import { createSlotGame } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { GameScene } from './GameScene';
+import { IntroScene } from './scenes/IntroScene';
 import { normalize } from './game/normalize';
 ${stakeImport}
 createSlotGame({
@@ -17,7 +18,7 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-  intro: { title: '${a.title}' },
+  intro: { scene: IntroScene },
 ${stakeOpt}  shell: {}, // buy/ante cards + currency derive from the spec + initData
 }).catch((err) => { console.error('[${a.id}] failed to start', err); });
 `;
