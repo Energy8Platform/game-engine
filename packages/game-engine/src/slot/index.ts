@@ -15,3 +15,5 @@ export { valueAt, CountUpDisplay } from './overlay/CountUpDisplay';
 export type { CountUpConfig } from './overlay/CountUpDisplay';
 export { BigWinOverlay } from './overlay/BigWinOverlay';
 export type { BigWinOverlayConfig } from './overlay/BigWinOverlay';
+export { FreeSpinsSession } from './freeSpins/FreeSpinsSession';
+export type { FreeSpinsSessionConfig } from './freeSpins/FreeSpinsSession';
