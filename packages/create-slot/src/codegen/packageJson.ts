@@ -5,20 +5,28 @@ export interface DepVersions {
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
+  const scripts: Record<string, string> = {
+    dev: 'vite',
+    build: 'tsc --noEmit && vite build',
+    postbuild: `rm -f ${a.id}.zip && cd dist && zip -r ../${a.id}.zip .`,
+    typecheck: 'tsc --noEmit',
+    smoke: 'tsx smoke.ts',
+    sim: 'e8-math sim --config ./math.config.ts',
+    pool: 'e8-math pool --config ./math.config.ts',
+    curate: 'e8-math curate --config ./math.config.ts',
+    math: 'e8-math all --config ./math.config.ts',
+  };
+  if (a.stake) {
+    scripts['dev:stake'] = 'BUILD_TARGET=stake vite';
+    scripts['build:stake'] = 'BUILD_TARGET=stake vite build';
+    scripts['stake:bundle'] =
+      `rm -rf dist-stake stake-math ${a.id}-stake.zip stake-math.zip && npm run build:stake && npm run math && cd dist-stake && zip -r ../${a.id}-stake.zip . && cd ../stake-math && zip -r ../stake-math.zip . && cd .. && echo 'Stake artifacts: ${a.id}-stake.zip + stake-math.zip'`;
+  }
   const pkg = {
     name: a.id,
     private: true,
     type: 'module',
-    scripts: {
-      dev: 'vite',
-      build: 'tsc --noEmit && vite build',
-      typecheck: 'tsc --noEmit',
-      smoke: 'tsx smoke.ts',
-      sim: 'e8-math sim --config ./math.config.ts',
-      pool: 'e8-math pool --config ./math.config.ts',
-      curate: 'e8-math curate --config ./math.config.ts',
-      math: 'e8-math all --config ./math.config.ts',
-    },
+    scripts,
     dependencies: {
       '@energy8platform/platform-core': v['platform-core'],
       '@energy8platform/game-engine': v['game-engine'],

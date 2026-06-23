@@ -31,4 +31,16 @@ describe('genPackageJson', () => {
     const j = JSON.parse(genPackageJson({ id: 'g', title: 'G', mechanic: 'lines', grid: { cols: 5, rows: 3 }, stake: false, cascades: false }, V));
     expect(j.dependencies.zod).toBe('^3.23.0');
   });
+  it('adds postbuild zip (all games) and build:stake scripts (stake games)', () => {
+    const stake = JSON.parse(genPackageJson({ id: 'foo-slot', title: 'Foo', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true }, V));
+    expect(stake.scripts.postbuild).toContain('foo-slot.zip');
+    expect(stake.scripts.postbuild).toContain('cd dist && zip -r');
+    expect(stake.scripts['build:stake']).toBe('BUILD_TARGET=stake vite build');
+    expect(stake.scripts['dev:stake']).toBe('BUILD_TARGET=stake vite');
+    expect(stake.scripts['stake:bundle']).toContain('build:stake');
+
+    const plain = JSON.parse(genPackageJson({ id: 'bar', title: 'Bar', mechanic: 'lines', grid: { cols: 5, rows: 3 }, stake: false, cascades: false }, V));
+    expect(plain.scripts.postbuild).toContain('bar.zip');
+    expect(plain.scripts['build:stake']).toBeUndefined();   // stake-only
+  });
 });
