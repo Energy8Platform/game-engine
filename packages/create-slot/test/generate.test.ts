@@ -26,6 +26,12 @@ describe('generate', () => {
     const dev = readFileSync(join(dir, 'dev.config.ts'), 'utf8');
     expect(dev).not.toMatch(/from '\s*node:/);   // no node: imports (would break the browser DevBridge)
     expect(dev).toContain('?raw');               // lua loaded via Vite ?raw
+    // Static browser-import guard: none of the browser-side files may import
+    // from Node built-ins (would crash at runtime in the browser).
+    for (const f of ['dev.config.ts', 'vite.config.ts', 'src/main.ts']) {
+      const text = readFileSync(join(dir, f), 'utf8');
+      expect(text, `${f} must be browser-safe`).not.toMatch(/from '\s*node:/);
+    }
   });
   it('omits stake/ when stake=false', async () => {
     dir = mkdtempSync(join(tmpdir(), 'cs-'));
