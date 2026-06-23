@@ -38,6 +38,8 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   stake?: StakeIntegration;
   shell?: SlotShellOptions;
   onFatalError?: (message: string) => void;
+  /** When set, an IntroScene is shown first and transitions to the game scene on tap. */
+  intro?: { title?: string; logo?: string; tapToStart?: boolean };
 }
 
 export interface SlotGameHandle {

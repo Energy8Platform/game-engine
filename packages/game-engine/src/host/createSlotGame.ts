@@ -50,8 +50,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
   const game = new GameApplication(buildAppConfig(opts, isStakeNow));
   game.scenes.register(opts.scene.key, opts.scene.scene);
+  let firstScene = opts.scene.key;
+  if (opts.intro) {
+    const { IntroScene } = await import('../scenes/IntroScene');
+    game.scenes.register('__intro__', IntroScene);
+    firstScene = '__intro__';
+  }
   try {
-    await game.start(opts.scene.key);
+    await game.start(firstScene, opts.intro ? { ...opts.intro, onStart: () => { void game.scenes.goto(opts.scene.key); } } : undefined);
   } catch (err) {
     fatal('Could not start the game.');
     throw err;
