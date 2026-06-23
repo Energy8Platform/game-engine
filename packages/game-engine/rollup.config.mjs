@@ -25,7 +25,7 @@ const external = [
   '@energy8platform/stake-bridge/detect',
 ];
 
-function createBundle(input, outputName) {
+function createBundle(input, outputName, opts = {}) {
   return [
     {
       input,
@@ -35,11 +35,13 @@ function createBundle(input, outputName) {
           file: `dist/${outputName}.esm.js`,
           format: 'esm',
           sourcemap: true,
+          inlineDynamicImports: opts.inlineDynamicImports ?? false,
         },
         {
           file: `dist/${outputName}.cjs.js`,
           format: 'cjs',
           sourcemap: true,
+          inlineDynamicImports: opts.inlineDynamicImports ?? false,
         },
       ],
       plugins: [
@@ -56,6 +58,7 @@ function createBundle(input, outputName) {
       output: {
         file: `dist/${outputName}.d.ts`,
         format: 'esm',
+        inlineDynamicImports: opts.inlineDynamicImports ?? false,
       },
       plugins: [dts()],
     },
@@ -76,6 +79,6 @@ export default defineConfig([
   ...createBundle('src/react/jsx-runtime.ts', 'react-jsx'),
   ...createBundle('src/lua/index.ts', 'lua'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
-  ...createBundle('src/host/index.ts', 'host'),
+  ...createBundle('src/host/index.ts', 'host', { inlineDynamicImports: true }),
   ...createBundle('src/slot/index.ts', 'slot'),
 ]);

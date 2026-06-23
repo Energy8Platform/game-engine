@@ -9,6 +9,7 @@ import { genGameScene } from './codegen/gameScene';
 import { genLuaLogic } from './codegen/luaLogic';
 import { genStakeAdapter } from './codegen/stakeAdapter';
 import { genMainTs } from './codegen/mainTs';
+import { genNormalize } from './codegen/normalize';
 
 const TEMPLATE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '../template');
 
@@ -40,6 +41,7 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   writeFileSync(join(targetDir, 'src/GameScene.ts'), genGameScene(a));
   writeFileSync(join(targetDir, 'src/main.ts'), genMainTs(a));
   writeFileSync(join(targetDir, 'src/game/script.logic.lua'), genLuaLogic(a));
+  writeFileSync(join(targetDir, 'src/game/normalize.ts'), genNormalize(a));
   if (a.stake) {
     mkdirSync(join(targetDir, 'src/stake'), { recursive: true });
     const { adapter, schema } = genStakeAdapter(a);

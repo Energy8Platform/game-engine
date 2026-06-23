@@ -1,59 +1,38 @@
 import type { Answers } from '../answers';
 
 export function genGameScene(a: Answers): string {
-  const cascade = a.mechanic === 'cascade';
+  const cascade = a.mechanic === 'cascade' || a.mechanic === 'cluster' || a.cascades === true;
   const ctrl = cascade ? 'CascadeController' : 'ReelSpinController';
 
-  // SpinData describes the shape of result.data returned by the Lua play script.
-  // Field names here are the Lua-payload field names that script.logic.lua must produce.
-  const spinDataInterface = cascade
-    ? `/** Expected Lua-payload field names that script.logic.lua must produce for cascade games. */
-interface SpinData {
-  total_win?: number;
-  cascades?: Array<{
-    /** Cells that won this step — maps to CascadeStepData.winningCells */
-    winning?: { col: number; row: number }[];
-    /** Cells cleared this step — maps to CascadeStepData.removedCells */
-    removed?: { col: number; row: number }[];
-    /** New cells dropped in — maps to CascadeStepData.newCells */
-    new?: { col: number; row: number; symbol: string }[];
-    /** Full settled grid after drop — maps to CascadeStepData.settledGrid */
-    grid?: { symbol: string | null; multiplier?: number; bonus?: number; sticky?: { remaining: number } }[][];
-  }>;
-}`
-    : `/** Expected Lua-payload field names that script.logic.lua must produce for lines/ways games. */
-interface SpinData {
-  total_win?: number;
-  /** Result grid by column — maps to ReelSpinData.targetGrid */
-  matrix?: { symbol: string | null; multiplier?: number; bonus?: number; sticky?: { remaining: number } }[][];
-}`;
-
-  const runBlock = cascade
-    ? `    // cascade: animate each step the Lua returned
-    for (const step of (result.data.cascades ?? [])) {
-      await this.controller.run({
-        winningCells: step.winning ?? [],
-        removedCells: step.removed ?? [],
-        newCells: step.new ?? [],
-        settledGrid: step.grid ?? [],
-      });
-    }`
-    : `    // lines/ways: spin the reels onto the result matrix, then present wins
-    await this.controller.run({ targetGrid: result.data.matrix ?? [] });`;
+  const present = cascade
+    ? `  /** Animate one normalized result. Tune MultiplierAccumulator policy/reset() to your mechanic. */
+  private async present(result: SpinData, bet: number): Promise<void> {
+    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
+    for (const step of result.steps) await this.controller.run(step);
+    if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
+  }`
+    : `  private async present(result: SpinData, bet: number): Promise<void> {
+    await this.controller.run({ targetGrid: result.targetGrid });
+    if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
+  }`;
 
   return `import { Scene } from '@energy8platform/game-engine/core';
-import { ReelGrid, ${ctrl}, BigWinOverlay } from '@energy8platform/game-engine/slot';
-import type { SlotSceneController } from '@energy8platform/game-engine/host';
+import { ReelGrid, ${ctrl}, BigWinOverlay, FreeSpinsSession, MultiplierAccumulator } from '@energy8platform/game-engine/slot';
+import type { SlotSceneController, SlotHostApi } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { resolveSymbol } from './slot/symbols';
+import type { SpinData } from './game/normalize';
 
-${spinDataInterface}
-
-export class GameScene extends Scene implements SlotSceneController {
+export class GameScene extends Scene implements SlotSceneController<SpinData> {
   private grid!: ReelGrid;
   private controller!: ${ctrl};
   private overlay!: BigWinOverlay;
+  private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });
+  private host?: SlotHostApi<SpinData>;
   private bet = model.spec.defaultBet ?? model.spec.betLevels[0];
+
+  bindHost(api: SlotHostApi<SpinData>): void { this.host = api; }
+  setBet(bet: number): void { this.bet = bet; }
 
   async onEnter(): Promise<void> {
     const { cols, rows } = model.spec.grid;
@@ -71,15 +50,26 @@ export class GameScene extends Scene implements SlotSceneController {
     this.container.addChild(this.overlay);
   }
 
-  setBet(bet: number): void { this.bet = bet; }
-
   async spin(bet: number): Promise<void> {
-    const ps = (this as unknown as { __engineApp?: { platformSession?: { play(p: unknown): Promise<{ totalWin: number; data: SpinData }> } } }).__engineApp?.platformSession;
-    if (!ps) return;
-    const result = await ps.play({ action: 'spin', bet });
-${runBlock}
-    if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
+    if (!this.host) return;
+    const result = await this.host.play('spin', bet);
+    await this.present(result, bet);
+    if ((result.freeSpins?.awarded ?? 0) > 0) await this.runFreeSpins(result, bet);
   }
+
+  /** Drive the free-spins session: replay 'free_spin' until it completes. */
+  private async runFreeSpins(trigger: SpinData, bet: number): Promise<void> {
+    const fs = new FreeSpinsSession({ initialSpins: trigger.freeSpins?.total ?? trigger.freeSpins?.awarded ?? 0 });
+    while (!fs.isComplete) {
+      const r = await this.host!.play('free_spin', bet);
+      await this.present(r, bet);
+      fs.addWin(r.totalWin);
+      fs.award(r.freeSpins?.awarded ?? 0); // retrigger
+      fs.consume();
+    }
+  }
+
+${present}
 }
 `;
 }

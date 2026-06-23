@@ -6,9 +6,11 @@ export function genMainTs(a: Answers): string {
   return `import { createSlotGame } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { GameScene } from './GameScene';
+import { normalize } from './game/normalize';
 ${stakeImport}
 createSlotGame({
   model,
+  normalize,
   scene: { key: 'game', scene: GameScene },
   manifest: { bundles: [] },
   design: { width: 1920, height: 1080 },

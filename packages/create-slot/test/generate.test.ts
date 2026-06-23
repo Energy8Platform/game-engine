@@ -21,6 +21,8 @@ describe('generate', () => {
     expect(readFileSync(join(dir, 'src/GameScene.ts'), 'utf8')).toContain('CascadeController');
     expect(existsSync(join(dir, '.gitignore'))).toBe(true); // _gitignore renamed
     expect(existsSync(join(dir, 'src/stake/adapter.ts'))).toBe(true);
+    expect(existsSync(join(dir, 'src/game/normalize.ts'))).toBe(true);
+    expect(readFileSync(join(dir, 'src/main.ts'), 'utf8')).toContain('normalize');
   });
   it('omits stake/ when stake=false', async () => {
     dir = mkdtempSync(join(tmpdir(), 'cs-'));
