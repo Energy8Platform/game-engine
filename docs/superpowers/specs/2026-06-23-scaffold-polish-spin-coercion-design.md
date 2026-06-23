@@ -55,45 +55,48 @@ intro?: IntroSceneConfig | { scene: SceneCtor; data?: unknown };
 
 ## Piece 4 — general spin schema + coercion (#4, the spine)
 
-**Shared helper** — in `@energy8platform/stake-kit` (already a universal scaffold dependency and already deps zod):
-```ts
-export const luaArray = <T extends z.ZodTypeAny>(item: T) =>
-  z.preprocess((v) => (Array.isArray(v) ? v : []), z.array(item));
-```
-`luaArray(x)` turns a Lua `{}` (or any non-array) into `[]` before validating, so empty tables coerce structurally.
+**Reuse existing infra — no new helper.** `@energy8platform/stake-kit` already exports the exact schema-driven Lua-array coercion the stake adapter uses: `deriveArrayFields(schema)` (walks a zod schema for array-field names, at any depth — [schema.ts](../../../packages/stake-kit/src/schema.ts)) and `coerceLuaArrays(data, fieldSet)` (recursively replaces `{}`→`[]` for those keys at any depth — [book.ts](../../../packages/stake-kit/src/book.ts)). `createGameAdapter` already does `coerceLuaArrays(payload, deriveArrayFields(schema))` then a lenient `schema.safeParse`. The general fix applies the same two exports to the non-stake `normalize` path — both already shipped and tested; the schema is the single source of the array-field list.
 
-**Generated `src/game/schema.ts`** (for ALL games, not just stake) — the single source of the **raw** Lua spin-result shape, e.g. for a cascade game:
+**Generated `src/game/schema.ts`** (for ALL games, not just stake) — the single source of the **raw** Lua spin-result shape, using plain `z.array(...)` (no special wrapper — `deriveArrayFields` finds them):
 ```ts
 import { z } from 'zod';
-import { luaArray } from '@energy8platform/stake-kit';
 
 export const spinSchema = z.object({
   totalWin: z.number().optional(),
   data: z.object({
-    cascades: luaArray(z.object({}).passthrough()).optional(),
+    cascades: z.array(z.object({}).passthrough()).optional(),
     multiplier: z.number().optional(),
     free_spins: z.object({ awarded: z.number(), total: z.number() }).optional(),
   }).partial().optional(),
 });
 export type RawSpin = z.infer<typeof spinSchema>;
 ```
-(Reel-spin games use a `matrix` field instead of `cascades`; both via `luaArray`.)
+(Reel-spin games use a `matrix: z.array(z.array(z.number()))` field instead of `cascades`.)
 
-**Generated `normalize.ts`** parses the raw result through the schema, then maps to the scene-facing `SpinData`:
+**Generated `normalize.ts`** derives the array-field set ONCE at module load (mirrors `createGameAdapter`), coerces every raw result through it, leniently validates, then maps to the scene-facing `SpinData`:
 ```ts
-const d = spinSchema.parse(raw ?? {});            // {} → [] coercion happens here
-return {
-  totalWin: d.totalWin ?? 0,
-  freeSpins: d.data?.free_spins ? { ... } : undefined,
-  steps: (d.data?.cascades ?? []).map(...),        // now always a real array
-  ...
+import { deriveArrayFields, coerceLuaArrays } from '@energy8platform/stake-kit';
+import { spinSchema, type RawSpin } from './schema';
+
+const arrayFields = deriveArrayFields(spinSchema);   // once
+
+export const normalize: SlotResultNormalizer<SpinData> = (raw) => {
+  const coerced = coerceLuaArrays((raw ?? {}) as Record<string, unknown>, arrayFields);
+  const parsed = spinSchema.safeParse(coerced);
+  const d = (parsed.success ? parsed.data : coerced) as RawSpin;   // lenient — never throws
+  return {
+    totalWin: d.totalWin ?? 0,
+    freeSpins: d.data?.free_spins ? { awarded: d.data.free_spins.awarded, total: d.data.free_spins.total } : undefined,
+    steps: (d.data?.cascades ?? []).map(...),        // cascades is now ALWAYS a real array (was {})
+    ...
+  };
 };
 ```
-The `?? []`/`.map` crash is gone: `cascades` is guaranteed an array post-parse.
+The `?? []`/`.map` crash is gone structurally: `coerceLuaArrays` turned the Lua `{}` at `data.cascades` into `[]` before the `.map`.
 
-**Stake adapter** (when `a.stake`): imports the SAME `spinSchema`/`RawSpin` from `./schema` instead of declaring its own. The `genStakeAdapter` schema half is removed; it consumes the general schema.
+**Stake adapter** (when `a.stake`): imports the SAME `spinSchema`/`RawSpin` from `../game/schema` instead of declaring its own. The `genStakeAdapter` schema half is removed; `createGameAdapter({ schema: spinSchema, ... })` already runs the identical coercion.
 
-**Dependency:** `zod` moves from a stake-only dep to a universal scaffold dependency (`genPackageJson` always includes it).
+**Dependency:** `zod` moves from a stake-only dep to a universal scaffold dependency (`genPackageJson` always includes it). The general schema lives at `src/game/schema.ts` for ALL games; the stake adapter (`src/stake/adapter.ts`) imports `../game/schema`. No more `src/stake/schema.ts`.
 
 **spec-slot** (living proof): adopts a `schema.ts` + schema-based `normalize` (and optionally the intro subclass) so the example demonstrates the new flow and a regression test can lean on it.
 
@@ -101,12 +104,12 @@ The `?? []`/`.map` crash is gone: `cascades` is guaranteed an array post-parse.
 
 | Unit | Package | Change |
 |------|---------|--------|
-| `luaArray` zod helper (+ export) | `stake-kit` | new |
+| spin coercion helpers (`deriveArrayFields` + `coerceLuaArrays`) | `stake-kit` | **none — already exported, reuse** |
 | `intro` accepts `{ scene: SceneCtor; data? }` | `game-engine/host/{types,createSlotGame}.ts` | extend (additive) |
 | `genIntroScene` (owned `Scene` subclass) | `create-slot/src/codegen/introScene.ts` (new) | new |
-| `genSchema` (general zod schema) | `create-slot/src/codegen/schema.ts` (new) | new |
-| `normalize` parses via schema (drop `?? []`) | `create-slot/src/codegen/normalize.ts` | change |
-| `genStakeAdapter` reuses `./schema` (drop own schema) | `create-slot/src/codegen/stakeAdapter.ts` | change |
+| `genSchema` (general zod schema → `src/game/schema.ts`) | `create-slot/src/codegen/schema.ts` (new) | new |
+| `normalize` coerces via schema fields (drop `?? []`) | `create-slot/src/codegen/normalize.ts` | change |
+| `genStakeAdapter` imports `../game/schema` (drop own schema) | `create-slot/src/codegen/stakeAdapter.ts` | change |
 | `postbuild`, `build:stake`/`dev:stake`/`stake:bundle`, universal `zod` | `create-slot/src/codegen/packageJson.ts` | extend |
 | `vite.config` `BUILD_TARGET=stake` branch | `create-slot/template/vite.config.ts` | change |
 | `generate.ts` writes `schema.ts` + `src/scenes/IntroScene.ts`; `main.ts` wires `intro: { scene }` | `create-slot/src/{generate,codegen/mainTs}.ts` | change |
@@ -129,6 +132,6 @@ The `?? []`/`.map` crash is gone: `cascades` is guaranteed an array post-parse.
 ## Risks / open items
 
 - **zod as a universal dep:** every scaffolded game gains zod. Accepted (small, well-established; unifies stake + non-stake; structural coercion). The anti-drift smoke must `file:`-link or resolve zod (it's a published dep, so `npm install` fetches it).
-- **`spinSchema.parse` throwing:** the schema is lenient (optionals + `luaArray`), so common shapes don't throw; if a hard mismatch is plausible, `normalize` may `safeParse` with a fallback — confirm in the plan which (default: `parse`, lenient).
+- **Schema validation throwing:** resolved — `normalize` uses `safeParse` and falls back to the coerced object on failure (mirrors `createGameAdapter`), so it never throws on a shape mismatch; coercion has already fixed the `{}`→`[]` case regardless.
 - **`SceneCtor` type:** must match what `SceneManager.register` accepts; verify the exact constructor signature when wiring the union (no-arg `new () => Scene`).
 - **build:stake output dir vs defineGameConfig:** confirm `defineGameConfig` forwards `vite.build.outDir` (it passes a `vite` block through); if not, set `build.outDir` via the raw vite option it exposes.
