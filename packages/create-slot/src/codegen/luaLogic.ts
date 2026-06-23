@@ -1,7 +1,7 @@
 import type { Answers } from '../answers';
 
 export function genLuaLogic(a: Answers): string {
-  const cascade = a.mechanic === 'cascade';
+  const cascade = a.cascades === true;
   const ret = cascade
     ? `  return {
     total_win = win,          -- bet-multiplier; the platform multiplies by the actual bet

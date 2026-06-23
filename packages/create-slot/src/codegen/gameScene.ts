@@ -1,7 +1,7 @@
 import type { Answers } from '../answers';
 
 export function genGameScene(a: Answers): string {
-  const cascade = a.mechanic === 'cascade' || a.mechanic === 'cluster' || a.cascades === true;
+  const cascade = a.cascades === true;
   const ctrl = cascade ? 'CascadeController' : 'ReelSpinController';
 
   const present = cascade

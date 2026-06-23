@@ -13,7 +13,7 @@ const versions = { 'platform-core': '*', 'game-engine': '*', 'stake-kit': '*', '
 describe('generate', () => {
   it('writes the canonical thin-game tree with substituted + codegen files', async () => {
     dir = mkdtempSync(join(tmpdir(), 'cs-'));
-    await generate(applyDefaults({ id: 'moon-spice', mechanic: 'cascade' }), dir, versions);
+    await generate(applyDefaults({ id: 'moon-spice', mechanic: 'cluster' }), dir, versions);
     expect(existsSync(join(dir, 'game.spec.ts'))).toBe(false); // spec lives under src/
     expect(readFileSync(join(dir, 'src/game.spec.ts'), 'utf8')).toContain("id: 'moon-spice'");
     expect(readFileSync(join(dir, 'index.html'), 'utf8')).toContain('<title>Moon Spice</title>');

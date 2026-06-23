@@ -3,7 +3,7 @@ import { genLuaLogic } from '../src/codegen/luaLogic';
 
 describe('genLuaLogic', () => {
   it('cascade skeleton returns a cascades field', () => {
-    const lua = genLuaLogic({ id: 'g', title: 'G', mechanic: 'cascade', grid: { cols: 6, rows: 6 }, stake: true });
+    const lua = genLuaLogic({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
     expect(lua).toContain('function execute(state)');
     expect(lua).toContain('cascades');
     expect(lua).toContain('total_win');

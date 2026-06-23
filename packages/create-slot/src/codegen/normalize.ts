@@ -2,7 +2,7 @@ import type { Answers } from '../answers';
 
 /** Generate src/game/normalize.ts: the game-declared SpinData + the mandatory normalizer the host calls. */
 export function genNormalize(a: Answers): string {
-  const cascade = a.mechanic === 'cascade' || a.mechanic === 'cluster' || a.cascades === true;
+  const cascade = a.cascades === true;
 
   const dataShape = cascade
     ? `  /** Cascade steps the scene animates via CascadeController. */

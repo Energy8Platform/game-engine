@@ -1,7 +1,7 @@
 import type { Answers } from '../answers';
 
 export function genStakeAdapter(a: Answers): { adapter: string; schema: string } {
-  const cascade = a.mechanic === 'cascade';
+  const cascade = a.cascades === true;
   const schema = `import { z } from 'zod';
 
 export const spinSchema = z.object({

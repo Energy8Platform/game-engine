@@ -24,7 +24,7 @@ describe('scaffold anti-drift', () => {
     dir = mkdtempSync(join(tmpdir(), 'cs-scaffold-'));
     // generate with file: deps so npm install resolves the LOCAL built packages
     // (catches drift between the template/codegen and the real package APIs)
-    return generate(applyDefaults({ id: 'drift-check', mechanic: 'cascade' }), dir, LOCAL as any).then(() => {
+    return generate(applyDefaults({ id: 'drift-check', mechanic: 'cluster' }), dir, LOCAL as any).then(() => {
       // Dedupe pixi.js: patch the generated tsconfig to redirect pixi.js type resolution to the
       // monorepo's own copy so user source and the symlinked game-engine see ONE Texture class.
       // (Matches a real single-pixi.js published install; avoids a file:-symlink two-copies false

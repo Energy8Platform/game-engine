@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { genStakeAdapter } from '../src/codegen/stakeAdapter';
 import { genMainTs } from '../src/codegen/mainTs';
 
-const a = { id: 'g', title: 'G', mechanic: 'cascade', grid: { cols: 6, rows: 6 }, stake: true } as const;
+const a = { id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true } as const;
 
 describe('genStakeAdapter', () => {
   const { adapter, schema } = genStakeAdapter(a);

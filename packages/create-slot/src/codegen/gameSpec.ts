@@ -8,6 +8,7 @@ export function genGameSpec(a: Answers): string {
 export const spec: GameSpec = {
   id: '${a.id}',
   type: 'slot',
+  mechanic: '${a.mechanic}',
   grid: { cols: ${a.grid.cols}, rows: ${a.grid.rows} },
   betLevels: [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100],
   defaultBet: 1,

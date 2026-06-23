@@ -1,4 +1,4 @@
-export type Mechanic = 'cascade' | 'cluster' | 'lines' | 'ways';
+export type Mechanic = 'lines' | 'ways' | 'cluster' | 'anywhere' | 'custom';
 export interface Answers {
   id: string;
   title: string;
@@ -9,10 +9,11 @@ export interface Answers {
 }
 
 const DEFAULT_GRID: Record<Mechanic, { cols: number; rows: number }> = {
-  cascade: { cols: 6, rows: 6 },
-  cluster: { cols: 7, rows: 7 },
   lines: { cols: 5, rows: 3 },
   ways: { cols: 5, rows: 3 },
+  cluster: { cols: 7, rows: 7 },
+  anywhere: { cols: 5, rows: 4 },
+  custom: { cols: 6, rows: 6 },
 };
 
 function titleCase(id: string): string {
@@ -47,20 +48,20 @@ export function parseFlags(argv: string[]): Partial<Answers> {
 }
 
 export function applyDefaults(partial: Partial<Answers>): Answers {
-  const mechanic = partial.mechanic ?? 'cascade';
+  const mechanic = partial.mechanic ?? 'cluster';
   return {
     id: partial.id ?? '',
     title: partial.title ?? titleCase(partial.id ?? ''),
     mechanic,
     grid: partial.grid ?? DEFAULT_GRID[mechanic],
     stake: partial.stake ?? true,
-    cascades: partial.cascades ?? (mechanic === 'cascade' || mechanic === 'cluster'),
+    cascades: partial.cascades ?? (mechanic !== 'lines'),
   };
 }
 
 export function validate(a: Answers): void {
   if (!/^[a-z][a-z0-9-]*$/.test(a.id)) throw new Error(`invalid id (must be kebab-case): "${a.id}"`);
-  if (!['cascade', 'cluster', 'lines', 'ways'].includes(a.mechanic)) throw new Error(`invalid mechanic: "${a.mechanic}"`);
+  if (!['lines', 'ways', 'cluster', 'anywhere', 'custom'].includes(a.mechanic)) throw new Error(`invalid mechanic: "${a.mechanic}"`);
   if (a.grid.cols <= 0 || a.grid.rows <= 0) throw new Error('grid dimensions must be > 0');
 }
 

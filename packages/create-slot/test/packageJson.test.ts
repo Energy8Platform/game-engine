@@ -3,7 +3,7 @@ import { genPackageJson } from '../src/codegen/packageJson';
 
 describe('genPackageJson', () => {
   const json = JSON.parse(genPackageJson(
-    { id: 'moon-spice', title: 'Moon Spice', mechanic: 'cascade', grid: { cols: 6, rows: 6 }, stake: true },
+    { id: 'moon-spice', title: 'Moon Spice', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true },
     { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1' },
   ));
   it('names the package from the id and pins the 4 deps', () => {
