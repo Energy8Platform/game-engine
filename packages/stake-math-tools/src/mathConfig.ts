@@ -17,7 +17,7 @@ export interface ModeSimConfig {
 
 export interface ModeMathConfig {
   sim?: ModeSimConfig;
-  /** Curate params (stake-math-tools OptimizeParams); capMaxWin defaults to spec.maxWin. */
+  /** Curate params (stake-math-tools OptimizeParams); capMaxWin defaults to spec.maxWin × 100 (cents). */
   curate?: Partial<OptimizeParams>;
 }
 
@@ -49,7 +49,8 @@ export function resolveModes(cfg: MathConfig): ResolvedMode[] {
       action: m.action,
       costMultiplier: m.costMultiplier,
       sim: { ...SIM_DEFAULTS, ...over.sim },
-      curate: { capMaxWin: maxWin, costMultiplier: m.costMultiplier, ...over.curate },
+      // capMaxWin is in CENTS: payoutCents is bet-mult × 100, so the cap is maxWin × 100.
+      curate: { capMaxWin: maxWin * 100, costMultiplier: m.costMultiplier, ...over.curate },
     };
   });
 }

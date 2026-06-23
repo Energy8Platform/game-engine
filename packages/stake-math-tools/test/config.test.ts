@@ -19,10 +19,10 @@ describe('resolveModes', () => {
     const base = resolved.find((m) => m.mode === 'BASE')!;
     expect(base.action).toBe('spin');
     expect(base.sim.iterations).toBe(5000);            // override
-    expect(base.curate.capMaxWin).toBe(5000);          // seeded from spec.maxWin
+    expect(base.curate.capMaxWin).toBe(500000);        // spec.maxWin × 100 (cents)
     expect(base.curate.targetRTP).toBe(0.96);          // override
     const buy = resolved.find((m) => m.mode === 'BUY_BONUS')!;
     expect(buy.action).toBe('buy_bonus');              // present even with no modes block
-    expect(buy.curate.capMaxWin).toBe(5000);
+    expect(buy.curate.capMaxWin).toBe(500000);
   });
 });
