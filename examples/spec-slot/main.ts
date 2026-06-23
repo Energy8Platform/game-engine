@@ -14,9 +14,6 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-  shell: {
-    currency: { symbol: '€', position: 'left' },
-    gameInfo: { sections: [] },
-    buyBonus: [{ id: 'buy_bonus', title: 'BUY BONUS', description: 'Buy the feature', priceMultiplier: 50 }],
-  },
+  intro: { title: 'Spec Slot' },
+  shell: {}, // buy/ante cards + currency derive from the spec + initData
 }).catch((err) => { console.error('[spec-slot] failed to start', err); });
