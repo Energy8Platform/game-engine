@@ -6,7 +6,7 @@ Date: 2026-06-23. Branch: `feat/game-spec-define-game` (continuing).
 
 **Decisions (from brainstorming):**
 - **Backend:** a local **dev-RGS** as a vite middleware (`/__rgs/*`) implementing the real RGS HTTP contract the game's `RGSClient` calls; the iframe game runs the genuine Stake path (`rgs_url=/__rgs`). Highest fidelity.
-- **Home:** a reusable primitive in `@energy8platform/stake-bridge` (a new `/harness` sub-path + vite plugin). The scaffold only wires the `npm run stake` script. No per-game duplication.
+- **Home:** a reusable primitive in `@energy8platform/stake-kit` (a new `/harness` sub-path + vite plugin). stake-kit already peer-deps `@energy8platform/stake-bridge`, so the harness imports `RGSClient`/`StakeBridge`/`CURRENCY_META` from stake-bridge (the stake-kit→stake-bridge direction — no cycle). The scaffold only wires the `npm run stake` script. No per-game duplication.
 - **Outcomes:** `play` = weighted pick of a `sim` from `lookUpTable_<MODE>_0.csv`, returning that book's events from `books_<MODE>.jsonl.zst`; `replay` = the book whose id == the chosen round. No `stake-math/` → fall back to `LuaEngine` (the existing `/__lua-play` mechanism) and hide replay.
 - **Reconfigure model:** `screen` = resize the iframe (CSS); `currency`/`social`/`replay` = relaunch the iframe with new query params (a fresh Stake launch).
 - **Stake scope:** stake stays the **default-on** scaffold option (`--no-stake` remains for the rare non-stake game). `npm run stake` + the harness are generated only for stake games.
@@ -33,16 +33,16 @@ Launch URL params (from `parseStakeUrl`): live = `?sessionID&rgs_url&lang&curren
 
 The response shapes (`RGSAuthenticateResponse`/`RGSPlayResponse`/`RGSReplayResponse`/`RGSEndRoundResponse`/`RGSBalance`) are the contract; the dev-RGS returns those exact shapes. Where `StakeBridge` `devMode` already synthesizes these in-process, the dev-RGS reuses that synthesis and swaps the outcome source to the curated books.
 
-## Component 1 — `stakeHarnessPlugin()` (stake-bridge `/harness`, vite plugin)
+## Component 1 — `stakeHarnessPlugin()` (stake-kit `/harness`, vite plugin)
 
 A dev-only (`apply: 'serve'`) vite plugin that:
 - **Serves the wrapper page** (the parent: control bar + iframe). Routing on `/`: a request **without** an `rgs_url` query → the wrapper HTML; a request **with** `rgs_url` (the iframe's own request) → the normal game `index.html` (let vite serve it). One origin; the query discriminates, so the iframe is same-origin (the bar can resize it freely) and the inner game still loads its real entry.
 - **Mounts the dev-RGS middleware** at `/__rgs/*` (the 6 endpoints above), backed by the dev-RGS data layer (Component 3). The iframe's `rgs_url=/__rgs` is same-origin.
 - Resolves the books dir (default `stake-math/`, overridable) and the game's Lua (for the fallback).
 
-Exposed as `@energy8platform/stake-bridge/harness` so the scaffold's harness vite config does `plugins: [stakeHarnessPlugin({ booksDir: 'stake-math', luaConfig: './dev.config' })]`.
+Exposed as `@energy8platform/stake-kit/harness` (a node-only rollup entry — node builtins + `vite` externalized, NOT bundled into the browser `stake-kit.esm.js`) so the scaffold's harness vite config does `plugins: [stakeHarnessPlugin({ booksDir: 'stake-math', luaConfig: './dev.config' })]`.
 
-## Component 2 — dev-RGS data layer (stake-bridge)
+## Component 2 — dev-RGS data layer (stake-kit)
 
 Pure, testable functions (no vite):
 - `loadIndex(booksDir)` → modes from `index.json` (`{ name, cost, events, weights }[]`); `null` if absent.
@@ -82,10 +82,10 @@ Stake remains the default scaffold option (no change to `applyDefaults`). The `s
 
 | Unit | Package | Change |
 |------|---------|--------|
-| dev-RGS data layer (`loadIndex`/`pickWeighted`/`readBook`/`hasBooks`) | stake-bridge | new |
-| dev-RGS handler (the 6 RGS endpoints, books or Lua source) | stake-bridge | new |
-| `stakeHarnessPlugin()` (wrapper page + `/__rgs` mount) | stake-bridge `/harness` (+ vite sub-path) | new |
-| control-bar DOM UI + iframe framing | stake-bridge harness (wrapper page) | new |
+| dev-RGS data layer (`loadIndex`/`pickWeighted`/`readBook`/`hasBooks`) | stake-kit `src/harness/` | new |
+| dev-RGS handler (the 6 RGS endpoints, books or Lua source) | stake-kit `src/harness/` | new |
+| `stakeHarnessPlugin()` (wrapper page + `/__rgs` mount) | stake-kit `/harness` (node rollup sub-path) | new |
+| control-bar DOM UI + iframe framing | stake-kit harness (wrapper page) | new |
 | `stake` script + `vite.config` `stake-harness` branch | create-slot codegen + template | change |
 | spec-slot: run the harness off its e8-math books as proof | examples | change |
 
