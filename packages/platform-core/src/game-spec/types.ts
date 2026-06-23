@@ -1,6 +1,6 @@
 import type { GameDefinition, TransitionRule } from '../lua/types';
 
-export type SymbolKind = 'high' | 'mid' | 'low' | 'wild' | 'scatter' | 'multiplier';
+export type SymbolKind = 'high' | 'mid' | 'low' | 'wild' | 'scatter' | 'multiplier' | 'custom';
 export type ActionRole = 'base' | 'feature' | 'buy' | 'free';
 
 export interface SymbolSpec {
