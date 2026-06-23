@@ -1,6 +1,6 @@
 import type { GameDefinition, TransitionRule } from '../lua/types';
 
-export type SymbolKind = 'high' | 'low' | 'wild' | 'scatter' | 'multiplier';
+export type SymbolKind = 'high' | 'mid' | 'low' | 'wild' | 'scatter' | 'multiplier';
 export type ActionRole = 'base' | 'free' | 'buy';
 
 export interface SymbolSpec {
@@ -8,6 +8,10 @@ export interface SymbolSpec {
   name?: string;
   kind: SymbolKind;
   pay?: Record<number, number>;
+  /** Multiplier-symbol x-value(s) (e.g. 100, or [2,3,5]). */
+  value?: number | number[];
+  /** Arbitrary per-symbol config (tier tables, behavior flags). */
+  meta?: Record<string, unknown>;
 }
 
 export interface ActionSpec {
@@ -29,6 +33,10 @@ export interface GameSpec {
   currency?: string;
   symbols: SymbolSpec[];
   actions: Record<string, ActionSpec>;
+  /** Open hint for codegen/UI: 'cascade' | 'cluster' | 'ways' | 'lines' | … */
+  mechanic?: string;
+  /** Game-level escape hatch. */
+  meta?: Record<string, unknown>;
 }
 
 export interface MathModeSpec {

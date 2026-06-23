@@ -90,6 +90,11 @@ export function toLuaPrelude(spec: GameSpec): string {
     .map((s) => `  ${s.id} = ${luaTable(s.pay as Record<number, number>)}`);
   lines.push(`PAYTABLE = {\n${payEntries.join(',\n')}\n}`);
 
+  const valEntries = spec.symbols
+    .filter((s) => s.value !== undefined)
+    .map((s) => `  ${s.id} = ${Array.isArray(s.value) ? `{${s.value.join(', ')}}` : s.value}`);
+  if (valEntries.length) lines.push(`VALUES = {\n${valEntries.join(',\n')}\n}`);
+
   return lines.join('\n') + '\n';
 }
 
