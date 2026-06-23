@@ -18,7 +18,7 @@ export function buildAppConfig(
     designHeight: opts.design?.height ?? 1080,
     scaleMode: opts.scaleMode ?? ScaleMode.FILL,
     orientation: opts.orientation ?? Orientation.ANY,
-    loading: opts.loading,
+    loading: opts.loading ?? { tapToStart: false, minDisplayTime: 600 },
     manifest: opts.manifest,
     audio: opts.audio,
     pixi: opts.pixi,

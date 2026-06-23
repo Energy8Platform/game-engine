@@ -5,6 +5,7 @@ import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
 import { showFatalError } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
+import type { ShellMode } from '@energy8platform/platform-core/shell';
 
 /**
  * One-call slot bootstrap: preboot → (optional Stake bridge) → GameApplication
@@ -71,8 +72,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     const ps = game.platformSession;
     const balance = (game.initData?.balance as number | undefined) ?? 0;
     const isReplay = !!stakeBridge?.isReplay;
-    const mode = isReplay ? 'replay' : 'base';
-    shell = createGameShell(buildShellConfig(opts.shell, opts.model, balance, mode));
+    const mode: ShellMode = isReplay ? 'replay' : 'base';
+    const runtime = {
+      balance,
+      currency: game.platformSession?.currency,        // code from the SDK handshake
+      language: (game.initData as { language?: string } | null)?.language,
+      mode,
+    };
+    shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
     ps?.on('balanceUpdate', (d: { balance: number }) => shell!.setBalance(d.balance));
     sceneInst?.setBet?.(currentBet);
 
