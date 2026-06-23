@@ -55,3 +55,21 @@ describe('seedFromArgv', () => {
     expect(seed).toMatchObject({ id: 'my-game', mechanic: 'lines' });
   });
 });
+
+describe('cluster mechanic + cascades flag', () => {
+  it('cluster defaults to a 7x7 grid', () => {
+    expect(applyDefaults({ id: 'g', mechanic: 'cluster' }).grid).toEqual({ cols: 7, rows: 7 });
+  });
+  it('cascades defaults true for cascade/cluster, false for ways/lines', () => {
+    expect(applyDefaults({ id: 'g', mechanic: 'cascade' }).cascades).toBe(true);
+    expect(applyDefaults({ id: 'g', mechanic: 'cluster' }).cascades).toBe(true);
+    expect(applyDefaults({ id: 'g', mechanic: 'ways' }).cascades).toBe(false);
+  });
+  it('--cascades / --no-cascades override', () => {
+    expect(parseFlags(['--no-cascades']).cascades).toBe(false);
+    expect(parseFlags(['--cascades']).cascades).toBe(true);
+  });
+  it('validate accepts cluster', () => {
+    expect(() => validate(applyDefaults({ id: 'g', mechanic: 'cluster' }))).not.toThrow();
+  });
+});

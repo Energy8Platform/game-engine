@@ -1,14 +1,16 @@
-export type Mechanic = 'cascade' | 'lines' | 'ways';
+export type Mechanic = 'cascade' | 'cluster' | 'lines' | 'ways';
 export interface Answers {
   id: string;
   title: string;
   mechanic: Mechanic;
   grid: { cols: number; rows: number };
   stake: boolean;
+  cascades?: boolean;
 }
 
 const DEFAULT_GRID: Record<Mechanic, { cols: number; rows: number }> = {
   cascade: { cols: 6, rows: 6 },
+  cluster: { cols: 7, rows: 7 },
   lines: { cols: 5, rows: 3 },
   ways: { cols: 5, rows: 3 },
 };
@@ -36,6 +38,8 @@ export function parseFlags(argv: string[]): Partial<Answers> {
     else if (a === '--title') out.title = args[++i];
     else if (a === '--mechanic') out.mechanic = args[++i] as Mechanic;
     else if (a === '--grid') { const [c, r] = args[++i].split('x').map(Number); out.grid = { cols: c, rows: r }; }
+    else if (a === '--cascades') out.cascades = true;
+    else if (a === '--no-cascades') out.cascades = false;
     else if (a === '--stake') out.stake = true;
     else if (a === '--no-stake') out.stake = false;
   }
@@ -50,12 +54,13 @@ export function applyDefaults(partial: Partial<Answers>): Answers {
     mechanic,
     grid: partial.grid ?? DEFAULT_GRID[mechanic],
     stake: partial.stake ?? true,
+    cascades: partial.cascades ?? (mechanic === 'cascade' || mechanic === 'cluster'),
   };
 }
 
 export function validate(a: Answers): void {
   if (!/^[a-z][a-z0-9-]*$/.test(a.id)) throw new Error(`invalid id (must be kebab-case): "${a.id}"`);
-  if (!['cascade', 'lines', 'ways'].includes(a.mechanic)) throw new Error(`invalid mechanic: "${a.mechanic}"`);
+  if (!['cascade', 'cluster', 'lines', 'ways'].includes(a.mechanic)) throw new Error(`invalid mechanic: "${a.mechanic}"`);
   if (a.grid.cols <= 0 || a.grid.rows <= 0) throw new Error('grid dimensions must be > 0');
 }
 
