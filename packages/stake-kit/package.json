@@ -11,6 +11,10 @@
       "import": "./dist/stake-kit.esm.js",
       "require": "./dist/stake-kit.umd.js",
       "types": "./dist/index.d.ts"
+    },
+    "./harness": {
+      "import": "./dist/harness.esm.js",
+      "types": "./dist/harness.d.ts"
     }
   },
   "scripts": {

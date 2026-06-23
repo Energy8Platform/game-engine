@@ -35,6 +35,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         const { StakeBridge } = await import('@energy8platform/stake-bridge');
         stakeBridge = new StakeBridge({
           devMode: true,
+          // In the dev harness the iframe is served over http and the dev-RGS
+          // lives at the same (http) origin; force the matching scheme so
+          // RGSClient can reach it. Prod (https) is unaffected.
+          protocol: location.protocol === 'http:' ? 'http' : 'https',
           adapter: opts.stake.adapter,
           modeMap: opts.model.modeMap,
           gameId: opts.model.spec.id,
