@@ -37,10 +37,12 @@ describe('genPackageJson', () => {
     expect(stake.scripts.postbuild).toContain('cd dist && zip -r');
     expect(stake.scripts['build:stake']).toBe('BUILD_TARGET=stake vite build');
     expect(stake.scripts['dev:stake']).toBe('BUILD_TARGET=stake vite');
+    expect(stake.scripts['stake']).toBe('BUILD_TARGET=stake-harness vite');
     expect(stake.scripts['stake:bundle']).toContain('build:stake');
 
     const plain = JSON.parse(genPackageJson({ id: 'bar', title: 'Bar', mechanic: 'lines', grid: { cols: 5, rows: 3 }, stake: false, cascades: false }, V));
     expect(plain.scripts.postbuild).toContain('bar.zip');
     expect(plain.scripts['build:stake']).toBeUndefined();   // stake-only
+    expect(plain.scripts['stake']).toBeUndefined();          // stake-only
   });
 });

@@ -19,6 +19,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
   if (a.stake) {
     scripts['dev:stake'] = 'BUILD_TARGET=stake vite';
     scripts['build:stake'] = 'BUILD_TARGET=stake vite build';
+    scripts['stake'] = 'BUILD_TARGET=stake-harness vite';
     scripts['stake:bundle'] =
       `rm -rf dist-stake stake-math ${a.id}-stake.zip stake-math.zip && npm run build:stake && npm run math && cd dist-stake && zip -r ../${a.id}-stake.zip . && cd ../stake-math && zip -r ../stake-math.zip . && cd .. && echo 'Stake artifacts: ${a.id}-stake.zip + stake-math.zip'`;
   }
