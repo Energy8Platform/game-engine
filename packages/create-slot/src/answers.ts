@@ -71,7 +71,7 @@ const VALUE_FLAGS = new Set(['--id', '--title', '--mechanic', '--grid']);
 /**
  * Build an answers seed from argv: flags, plus a lone positional used as
  * the id when --id is absent. Correctly skips tokens that are values of
- * known value-taking flags (e.g. `--mechanic cascade` — `cascade` is NOT
+ * known value-taking flags (e.g. `--mechanic cluster` — `cluster` is NOT
  * treated as a positional even when no --id is supplied).
  */
 export function seedFromArgv(argv: string[]): Partial<Answers> {
