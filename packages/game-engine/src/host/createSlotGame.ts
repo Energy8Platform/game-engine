@@ -4,6 +4,7 @@ import { buildAppConfig } from './buildConfig';
 import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
 import { showFatalError } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
+import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
 
 /**
  * One-call slot bootstrap: preboot → (optional Stake bridge) → GameApplication
@@ -12,7 +13,9 @@ import type { CreateSlotGameOptions, SlotGameHandle } from './types';
  * Not unit-tested: GameApplication.init() drives Pixi, which hangs in headless
  * environments. The pure helpers it sequences are unit-tested individually.
  */
-export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotGameHandle> {
+export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResultBase>(
+  opts: CreateSlotGameOptions<T>,
+): Promise<SlotGameHandle> {
   if (!bootGuard()) throw new Error('createSlotGame() called more than once');
 
   if (opts.textureDefaults) applyTextureDefaults();
@@ -53,6 +56,12 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
     throw err;
   }
 
+  // Resolve the scene controller (duck-typed) up front; it gets a normalized play() regardless of shell.
+  const sceneInst = game.scenes.current?.scene as
+    | Partial<import('./sceneController').SlotSceneController<T>>
+    | undefined;
+  let currentBet = opts.model.spec.defaultBet ?? opts.model.spec.betLevels[0];
+
   let shell: SlotGameHandle['shell'] = null;
   if (opts.shell) {
     const { createGameShell } = await import('@energy8platform/platform-core/shell');
@@ -60,18 +69,12 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
     const { resolveReplayBonusId } = await import('./replay');
 
     const ps = game.platformSession;
-    // game.initData.balance is number (not an object); guard for null initData
     const balance = (game.initData?.balance as number | undefined) ?? 0;
     const isReplay = !!stakeBridge?.isReplay;
     const mode = isReplay ? 'replay' : 'base';
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, balance, mode));
-
-    // live balance sync — BalanceData has .balance (not .amount)
     ps?.on('balanceUpdate', (d: { balance: number }) => shell!.setBalance(d.balance));
-
-    const sceneInst = game.scenes.current?.scene as Partial<import('./sceneController').SlotSceneController> | undefined;
-    let currentBet = opts.model.spec.defaultBet ?? opts.model.spec.betLevels[0];
-    sceneInst?.setBet?.(currentBet); // host owns the bet; seed the scene on mount (not only on betChange)
+    sceneInst?.setBet?.(currentBet);
 
     if (mode === 'base') {
       shell.on('spin', () => { void sceneInst?.spin?.(currentBet); });
@@ -80,17 +83,23 @@ export async function createSlotGame(opts: CreateSlotGameOptions): Promise<SlotG
     } else {
       const stakeMode = stakeBridge?.replayMode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);
-      // The shell reopens the replay modal after onReplay resolves (ReplayModalOptions contract),
-      // so onReplay only spins — it must NOT reopen, or the modal opens twice per click.
-      // payoutMultiplier stays 0: the realized multiplier isn't available at boot; not yet plumbed.
       shell.openReplay({
-        bonusId,
-        bet: currentBet,
-        payoutMultiplier: 0,
+        bonusId, bet: currentBet, payoutMultiplier: 0,
         onReplay: () => sceneInst?.spin?.(currentBet),
       });
     }
+  } else {
+    sceneInst?.setBet?.(currentBet);
   }
+
+  // Always give the scene a normalized play() (host owns play → normalize → shell-win sync).
+  const { createSlotPlay } = await import('./slotPlay');
+  const slotPlay = createSlotPlay<T>({
+    play: (p) => game.platformSession!.play(p),
+    normalize: opts.normalize,
+    onWin: shell ? (w) => shell!.setWin(w) : undefined,
+  });
+  sceneInst?.bindHost?.({ play: slotPlay });
 
   return { game, stakeBridge, shell };
 }

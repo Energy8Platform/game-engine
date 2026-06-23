@@ -7,6 +7,7 @@ import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../t
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
 import type { GameApplication } from '../core';
 import type { SlotShellOptions } from './shellConfig';
+import type { SlotSpinResultBase, SlotResultNormalizer } from '@energy8platform/platform-core/slot-result';
 
 export interface StakeIntegration {
   /** The game's BookAdapter (or its module). modeMap + gameId come from the model. */
@@ -18,8 +19,10 @@ export interface SceneEntry {
   scene: SceneConstructor;
 }
 
-export interface CreateSlotGameOptions {
+export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinResultBase> {
   model: GameModel;
+  /** REQUIRED: maps the raw play result into the game's typed result. The host calls it on every play. */
+  normalize: SlotResultNormalizer<T>;
   scene: SceneEntry;
   manifest: AssetManifest;
   container?: HTMLElement | string;
