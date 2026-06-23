@@ -67,11 +67,6 @@ export interface DevRgsConfig {
   currency: string;
   /** Starting balance in MAJOR units. Default 10_000. */
   startingBalanceMajor?: number;
-  /**
-   * Map an SDK action → Stake mode. The play body carries `mode` directly,
-   * so this is only used as a convenience default. Defaults to identity.
-   */
-  modeOf?: (action: string) => string;
   /** Injectable RNG for the weighted book pick. Defaults to Math.random. */
   rng?: () => number;
 }
@@ -190,6 +185,11 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
     },
 
     async play(p: RGSPlayParams): Promise<RGSPlayResponse> {
+      if (activeRound !== null) {
+        throw new Error(
+          'dev-RGS: play called while a round is still active — call end-round first',
+        );
+      }
       const { mode, amount } = p;
       if (!hasBooksFor(mode)) throw new NoBooksError(mode);
 

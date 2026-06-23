@@ -201,6 +201,29 @@ describe('no books for mode', () => {
 });
 
 // ---------------------------------------------------------------------------
+// open-round guard
+// ---------------------------------------------------------------------------
+
+describe('open-round guard', () => {
+  it('play() while a round is active rejects with the open-round error', async () => {
+    const rgs = makeRgs();
+    await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    await expect(rgs.play({ mode: 'BASE', amount: API_MULTIPLIER })).rejects.toThrow(
+      'dev-RGS: play called while a round is still active — call end-round first',
+    );
+  });
+
+  it('play() → endRound() → play() succeeds (guard clears on end-round)', async () => {
+    const rgs = makeRgs();
+    await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    await rgs.endRound();
+    // Should not throw.
+    const second = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    expect(second.round.active).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // balance
 // ---------------------------------------------------------------------------
 
