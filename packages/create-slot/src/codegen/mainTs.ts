@@ -17,11 +17,8 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-${stakeOpt}  shell: {
-    currency: { symbol: '€', position: 'left' }, // EUR default — set symbol/position for your currency
-    gameInfo: { sections: [] } as any,
-    buyBonus: [{ id: 'buy_bonus', title: 'BUY BONUS', description: 'Buy the feature', priceMultiplier: 100 }],
-  },
+  intro: { title: '${a.title}' },
+${stakeOpt}  shell: {}, // buy/ante cards + currency derive from the spec + initData
 }).catch((err) => { console.error('[${a.id}] failed to start', err); });
 `;
 }

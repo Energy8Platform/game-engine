@@ -28,8 +28,9 @@ export const spec: GameSpec = {
   ],
   actions: {
     spin: { role: 'base' },
+    ante: { role: 'feature', cost: 1.5, title: 'ANTE BET', description: 'Pay more for a boosted chance' },
     free_spin: { role: 'free' },
-    buy_bonus: { role: 'buy', cost: 100, feature: { spins: 10 } },
+    buy_bonus: { role: 'buy', cost: 100, title: 'BUY BONUS', description: 'Buy the feature', feature: { spins: 10 } },
   },
 };
 

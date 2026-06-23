@@ -17,4 +17,11 @@ describe('genGameSpec', () => {
     expect(src).toContain("free_spin: { role: 'free' }");
     expect(src).toContain('export const model = defineGame(spec)');
   });
+  it('emits an ante (feature) action and titles on buy/feature', () => {
+    const src = genGameSpec({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
+    expect(src).toContain("ante: { role: 'feature'");
+    expect(src).toContain("title: 'ANTE BET'");
+    expect(src).toContain("buy_bonus: { role: 'buy'");
+    expect(src).toContain("title: 'BUY BONUS'");
+  });
 });
