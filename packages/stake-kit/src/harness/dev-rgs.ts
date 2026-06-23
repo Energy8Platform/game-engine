@@ -75,6 +75,19 @@ export interface DevRgs {
   authenticate(): Promise<RGSAuthenticateResponse>;
   balance(): Promise<{ balance: RGSBalance }>;
   play(p: RGSPlayParams): Promise<RGSPlayResponse>;
+  /**
+   * Like play(), but the outcome (payoutCents + book state) is supplied by
+   * the caller (used by the harness Lua fallback) instead of being picked
+   * from the books. Applies the same open-round guard, debits amount from the
+   * internal balance, sets activeRound + activePayoutCents exactly as play()
+   * does, and returns the same RGSPlayResponse shape. endRound() then credits
+   * through the SAME balance — no second counter.
+   */
+  playWithOutcome(
+    mode: string,
+    amount: number,
+    outcome: { payoutCents: number; state: unknown },
+  ): Promise<RGSPlayResponse>;
   endRound(): Promise<RGSEndRoundResponse>;
   event(value: string): Promise<RGSEventResponse>;
   replay(p: { mode: string; event: string }): Promise<RGSReplayResponse>;
@@ -213,6 +226,36 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       activePayoutCents = payoutCents;
 
       return { balance: balanceObj(), round };
+    },
+
+    async playWithOutcome(
+      mode: string,
+      amount: number,
+      outcome: { payoutCents: number; state: unknown },
+    ): Promise<RGSPlayResponse> {
+      if (activeRound !== null) {
+        throw new Error(
+          'dev-RGS: play called while a round is still active — call end-round first',
+        );
+      }
+
+      // Debit the bet (minor units).
+      balanceMinor -= amount;
+
+      const round: StakeRound<unknown> = {
+        betID: nextBetId++,
+        payoutMultiplier: outcome.payoutCents / 100,
+        costMultiplier: costOf(modes, mode),
+        active: true,
+        mode,
+        state: outcome.state,
+        amount: amount / API_MULTIPLIER, // bet in MAJOR units
+      };
+
+      activeRound = round as StakeRound<ParsedBook>;
+      activePayoutCents = outcome.payoutCents;
+
+      return { balance: balanceObj(), round: round as StakeRound<ParsedBook> };
     },
 
     async endRound(): Promise<RGSEndRoundResponse> {

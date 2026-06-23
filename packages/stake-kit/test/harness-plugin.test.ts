@@ -79,4 +79,11 @@ describe('renderWrapperHtml', () => {
     const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1 }] });
     expect(html).toContain('data-disabled="false"');
   });
+
+  it('replay launch multiplies the bet select value by 1_000_000 (minor units)', () => {
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1 }] });
+    // The inline driver must contain "* 1_000_000" (or equivalent) for the replay amount.
+    // This ensures the replay URL carries minor units, not major.
+    expect(html).toContain('1_000_000');
+  });
 });

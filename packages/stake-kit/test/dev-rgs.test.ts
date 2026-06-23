@@ -237,3 +237,61 @@ describe('balance', () => {
     expect(after.balance.amount).toBe(1000 * API_MULTIPLIER - API_MULTIPLIER);
   });
 });
+
+// ---------------------------------------------------------------------------
+// playWithOutcome
+// ---------------------------------------------------------------------------
+
+describe('playWithOutcome', () => {
+  it('debits the bet from the shared balance', async () => {
+    const rgs = makeRgs();
+    const bet = 1 * API_MULTIPLIER;
+    const play: RGSPlayResponse = await rgs.playWithOutcome('BASE', bet, {
+      payoutCents: 250,
+      state: { custom: true },
+    });
+    expect(play.balance.amount).toBe(1000 * API_MULTIPLIER - bet);
+  });
+
+  it('round carries the supplied state and payoutMultiplier = payoutCents / 100', async () => {
+    const rgs = makeRgs();
+    const bet = 2 * API_MULTIPLIER;
+    const play: RGSPlayResponse = await rgs.playWithOutcome('BASE', bet, {
+      payoutCents: 350,
+      state: { foo: 'bar' },
+    });
+    expect(play.round.state).toEqual({ foo: 'bar' });
+    expect(play.round.payoutMultiplier).toBe(3.5); // 350 / 100
+    expect(play.round.active).toBe(true);
+    expect(play.round.mode).toBe('BASE');
+    expect(play.round.amount).toBe(2); // bet in major units
+  });
+
+  it('open-round guard fires when a round is already active', async () => {
+    const rgs = makeRgs();
+    await rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 0, state: {} });
+    await expect(
+      rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 0, state: {} }),
+    ).rejects.toThrow('dev-RGS: play called while a round is still active — call end-round first');
+  });
+
+  it('endRound credits the win through the same balance (exact minor balance after play→endRound)', async () => {
+    const rgs = makeRgs();
+    const bet = 1 * API_MULTIPLIER; // 1 major → 1_000_000 minor
+    // payoutCents = 250 → win = 250/100 * 1 major = 2.5 major
+    await rgs.playWithOutcome('BASE', bet, { payoutCents: 250, state: {} });
+    const end: RGSEndRoundResponse = await rgs.endRound();
+    // expected: 1000 major start − 1 major bet + 2.5 major win = 1001.5 major
+    const expectedMinor = 1000 * API_MULTIPLIER - bet + 2.5 * API_MULTIPLIER;
+    expect(end.balance.amount).toBe(expectedMinor);
+    expect(end.balance.amount).toBe(1001.5 * API_MULTIPLIER);
+  });
+
+  it('open-round guard also blocks play() while a playWithOutcome round is active', async () => {
+    const rgs = makeRgs();
+    await rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 100, state: {} });
+    await expect(rgs.play({ mode: 'BASE', amount: API_MULTIPLIER })).rejects.toThrow(
+      'dev-RGS: play called while a round is still active — call end-round first',
+    );
+  });
+});

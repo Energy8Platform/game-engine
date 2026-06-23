@@ -15,7 +15,7 @@ import { resolve as resolvePath } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { API_MULTIPLIER, CURRENCY_META } from '@energy8platform/stake-bridge';
-import type { RGSPlayResponse, StakeRound } from '@energy8platform/stake-bridge';
+import type { RGSPlayResponse } from '@energy8platform/stake-bridge';
 import { LuaEngine } from '@energy8platform/platform-core/lua';
 
 import { loadIndex } from './books';
@@ -121,7 +121,6 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
   let devRgs: DevRgs | null = null;
   let luaEngine: LuaEngine | null = null;
   let resolvedCfg: HarnessMathConfig | null = null;
-  let luaBalanceMinor = startingBalanceMajor * API_MULTIPLIER;
 
   async function ensure(currency: string): Promise<{ devRgs: DevRgs; luaPlay: LuaPlay }> {
     const cfg = await loadConfig();
@@ -149,29 +148,18 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
       }
     }
 
-    // Lua fallback: run the game's Lua for a no-books mode, wrap the raw
-    // result into an RGSPlayResponse with a simple in-memory balance.
+    // Lua fallback: run the game's Lua for a no-books mode, delegate balance
+    // bookkeeping entirely to devRgs.playWithOutcome so that all endpoints
+    // (authenticate/balance/play/end-round) share the SAME internal balance.
     const luaPlay: LuaPlay = async ({ mode, amount }): Promise<RGSPlayResponse> => {
       if (!luaEngine) throw new Error('stake-harness: LuaEngine unavailable for no-books fallback');
       const betMajor = amount / API_MULTIPLIER;
       const action = actionForMode(cfg, mode);
       const result = luaEngine.execute({ action, bet: betMajor });
       const totalWin = typeof result.totalWin === 'number' ? result.totalWin : 0;
-      const payoutMultiplier = betMajor > 0 ? totalWin / betMajor : 0;
-
-      luaBalanceMinor -= amount;
-      luaBalanceMinor += Math.round(totalWin * API_MULTIPLIER);
-
-      const round: StakeRound<Record<string, unknown>> = {
-        betID: Date.now(),
-        payoutMultiplier,
-        costMultiplier: 1,
-        active: true,
-        mode,
-        state: result.data ?? {},
-        amount: betMajor,
-      };
-      return { balance: { amount: luaBalanceMinor, currency }, round };
+      const payoutCents = Math.round(totalWin * 100);
+      const state: unknown = result.data ?? {};
+      return devRgs!.playWithOutcome(mode, amount, { payoutCents, state });
     };
 
     return { devRgs, luaPlay };

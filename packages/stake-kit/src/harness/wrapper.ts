@@ -143,7 +143,7 @@ function launchReplay() {
       version: CFG.version,
       mode: modeSel.value,
       event: Number.isFinite(event) ? event : 0,
-      amount: Number(betSel.value),
+      amount: Number(betSel.value) * 1_000_000,
     },
   });
 }
