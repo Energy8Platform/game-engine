@@ -1,7 +1,7 @@
 import type { GameDefinition, TransitionRule } from '../lua/types';
 
 export type SymbolKind = 'high' | 'mid' | 'low' | 'wild' | 'scatter' | 'multiplier';
-export type ActionRole = 'base' | 'free' | 'buy';
+export type ActionRole = 'base' | 'feature' | 'buy' | 'free';
 
 export interface SymbolSpec {
   id: string;
@@ -20,6 +20,9 @@ export interface ActionSpec {
   cost?: number;
   mode?: string;
   feature?: Record<string, unknown>;
+  /** Shell display for buy/feature actions (SSOT). */
+  title?: string;
+  description?: string;
   transitions?: TransitionRule[];
 }
 
