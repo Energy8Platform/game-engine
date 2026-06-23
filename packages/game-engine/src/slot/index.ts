@@ -17,3 +17,5 @@ export { BigWinOverlay } from './overlay/BigWinOverlay';
 export type { BigWinOverlayConfig } from './overlay/BigWinOverlay';
 export { FreeSpinsSession } from './freeSpins/FreeSpinsSession';
 export type { FreeSpinsSessionConfig } from './freeSpins/FreeSpinsSession';
+export { MultiplierAccumulator } from './multiplier/MultiplierAccumulator';
+export type { CarryPolicy } from './multiplier/MultiplierAccumulator';
