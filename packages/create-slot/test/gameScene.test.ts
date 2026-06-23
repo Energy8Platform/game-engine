@@ -12,6 +12,8 @@ describe('genGameScene', () => {
     expect(s).toContain('CascadeController');
     expect(s).not.toContain('platformSession');         // no direct SDK access
     expect(s).not.toContain('result.data.cascades');    // consumes the normalizer, not raw
+    expect(s).toContain('async buyBonus(');
+    expect(s).toContain('this.host.play(actionId');
   });
   it('ways/lines uses ReelSpinController', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });

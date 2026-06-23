@@ -21,6 +21,7 @@ describe('feature role (ante = paid spin)', () => {
     expect(ante.credit).toBe('win');
     expect(ante.cost_multiplier).toBe(1.5);
     expect(ante.stage).toBe('base_game');
+    expect(ante.requires_session).toBeFalsy();
     // base-like transitions: can award free spins, plus an always-fallback
     expect(ante.transitions.some((t) => t.condition === 'always')).toBe(true);
   });

@@ -37,6 +37,13 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
   bindHost(api: SlotHostApi<SpinData>): void { this.host = api; }
   setBet(bet: number): void { this.bet = bet; }
 
+  async buyBonus(actionId: string, bet: number): Promise<void> {
+    if (!this.host) return;
+    const result = await this.host.play(actionId, bet);
+    await this.present(result, bet);
+    if ((result.freeSpins?.awarded ?? 0) > 0) await this.runFreeSpins(result, bet);
+  }
+
   async onEnter(): Promise<void> {
     const { cols, rows } = model.spec.grid;
     this.grid = new ReelGrid({ cols, rows, cellSize: 110, gap: 6, resolve: resolveSymbol });

@@ -9,7 +9,7 @@ export interface SlotShellOptions {
   mount?: HTMLElement;
   /** Override the derived currency (normally taken from initData). */
   currency?: CurrencyConfig;
-  /** Extra info sections (merged on top of any derived ones). */
+  /** Extra info sections (override — replaces any derived ones). */
   gameInfo?: GameInfoContent;
   /** Override the derived buy/ante options. */
   buyBonus?: BonusOption[];

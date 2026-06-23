@@ -63,13 +63,39 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     throw err;
   }
 
-  // Resolve the scene controller (duck-typed) up front; it gets a normalized play() regardless of shell.
-  const sceneInst = game.scenes.current?.scene as
-    | Partial<import('./sceneController').SlotSceneController<T>>
-    | undefined;
   let currentBet = opts.model.spec.defaultBet ?? opts.model.spec.betLevels[0];
 
+  // Build slotPlay FIRST — bindGameScene() needs it to be in scope.
+  const { createSlotPlay } = await import('./slotPlay');
+
   let shell: SlotGameHandle['shell'] = null;
+
+  /** Always points to the live game scene (only present when it is the current scene). */
+  const gameScene = () =>
+    game.scenes.currentKey === opts.scene.key
+      ? (game.scenes.current?.scene as Partial<import('./sceneController').SlotSceneController<T>> | undefined)
+      : undefined;
+
+  // slotPlay references shell via closure — define it after shell is assigned below.
+  // We use a late-binding wrapper so the closure captures the variable, not null.
+  const slotPlay = createSlotPlay<T>({
+    play: (p) => game.platformSession!.play(p),
+    normalize: opts.normalize,
+    onWin: (w) => shell?.setWin(w),
+  });
+
+  /** Inject host + current bet into the game scene whenever it becomes current. */
+  const bindGameScene = () => {
+    const s = gameScene();
+    s?.bindHost?.({ play: slotPlay });
+    s?.setBet?.(currentBet);
+  };
+
+  // Fire once immediately (covers no-intro path where game scene is already current)
+  // and again on each scene change (covers intro→game transition).
+  game.scenes.on('change', bindGameScene);
+  bindGameScene();
+
   if (opts.shell) {
     const { createGameShell } = await import('@energy8platform/platform-core/shell');
     const { buildShellConfig } = await import('./shellConfig');
@@ -87,33 +113,31 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     };
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
     ps?.on('balanceUpdate', (d: { balance: number }) => shell!.setBalance(d.balance));
-    sceneInst?.setBet?.(currentBet);
 
     if (mode === 'base') {
-      shell.on('spin', () => { void sceneInst?.spin?.(currentBet); });
-      shell.on('betChange', (bet: number) => { currentBet = bet; sceneInst?.setBet?.(bet); });
-      shell.on('buyBonusSelect', ({ id }: { id: string }) => { void sceneInst?.buyBonus?.(id, currentBet); });
+      let activeFeature: string | null = null;
+      shell.on('featureActivate', ({ id }: { id: string }) => { activeFeature = id; });
+      shell.on('featureDeactivate', ({ id: _id }: { id: string }) => { activeFeature = null; });
+      shell.on('spin', () => {
+        const s = gameScene();
+        if (activeFeature) void s?.buyBonus?.(activeFeature, currentBet);
+        else void s?.spin?.(currentBet);
+      });
+      shell.on('betChange', (bet: number) => {
+        currentBet = bet;
+        gameScene()?.setBet?.(bet);
+      });
+      shell.on('buyBonusSelect', ({ id }: { id: string }) => { void gameScene()?.buyBonus?.(id, currentBet); });
     } else {
       const stakeMode = stakeBridge?.replayMode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);
       // onReplay only spins — the shell reopens the modal after it resolves; never call openReplay inside onReplay (double-open).
       shell.openReplay({
         bonusId, bet: currentBet, payoutMultiplier: 0,
-        onReplay: () => sceneInst?.spin?.(currentBet),
+        onReplay: () => gameScene()?.spin?.(currentBet),
       });
     }
-  } else {
-    sceneInst?.setBet?.(currentBet);
   }
-
-  // Always give the scene a normalized play() (host owns play → normalize → shell-win sync).
-  const { createSlotPlay } = await import('./slotPlay');
-  const slotPlay = createSlotPlay<T>({
-    play: (p) => game.platformSession!.play(p),
-    normalize: opts.normalize,
-    onWin: shell ? (w) => shell!.setWin(w) : undefined,
-  });
-  sceneInst?.bindHost?.({ play: slotPlay });
 
   return { game, stakeBridge, shell };
 }
