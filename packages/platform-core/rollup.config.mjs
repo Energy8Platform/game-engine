@@ -64,4 +64,5 @@ export default defineConfig([
   ...createBundle('src/loading/index.ts', 'loading'),
   ...createBundle('src/shell/index.ts', 'shell'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
+  ...createBundle('src/slot-result/index.ts', 'slot-result'),
 ]);

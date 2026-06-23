@@ -49,6 +49,11 @@
       "import": "./dist/game-spec.esm.js",
       "require": "./dist/game-spec.cjs.js",
       "types": "./dist/game-spec.d.ts"
+    },
+    "./slot-result": {
+      "import": "./dist/slot-result.esm.js",
+      "require": "./dist/slot-result.cjs.js",
+      "types": "./dist/slot-result.d.ts"
     }
   },
   "files": [
