@@ -96,6 +96,11 @@ export interface DevRgs {
    * 'replay available' state and the Lua-fallback decision in Task 3.
    */
   hasBooksFor(mode: string): boolean;
+  /**
+   * Override the in-memory balance (minor units) and clear any active round.
+   * Used by the harness control bar to let the developer set a custom balance.
+   */
+  setBalance(balanceMinor: number): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,13 +217,19 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       // Debit the bet (minor units).
       balanceMinor -= amount;
 
+      // Wrap the book as a one-event book so the adapter can split into segments.
+      // The adapter reads `event.data ?? event.spin` — use `data` to carry the
+      // minimal spin payload (total_win is the only field we have at this level).
+      const spinData = { total_win: payoutCents / 100 };
+      const wrappedState = { events: [{ data: spinData }] };
+
       const round: StakeRound<ParsedBook> = {
         betID: nextBetId++,
         payoutMultiplier: payoutCents / 100,
         costMultiplier: costOf(modes, mode),
         active: true,
         mode,
-        state: book,
+        state: wrappedState as unknown as ParsedBook,
         amount: amount / API_MULTIPLIER, // bet in MAJOR units
       };
 
@@ -242,13 +253,25 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       // Debit the bet (minor units).
       balanceMinor -= amount;
 
+      // Wrap outcome.state in a one-event book so the adapter can split into segments.
+      // Inject total_win if the caller's state doesn't carry it.
+      const outcomeData = outcome.state as Record<string, unknown>;
+      const wrappedOutcomeData: Record<string, unknown> =
+        outcomeData !== null && typeof outcomeData === 'object' && !Array.isArray(outcomeData)
+          ? outcomeData
+          : {};
+      if (typeof wrappedOutcomeData.total_win !== 'number') {
+        wrappedOutcomeData.total_win = outcome.payoutCents / 100;
+      }
+      const wrappedState = { events: [{ data: wrappedOutcomeData }] };
+
       const round: StakeRound<unknown> = {
         betID: nextBetId++,
         payoutMultiplier: outcome.payoutCents / 100,
         costMultiplier: costOf(modes, mode),
         active: true,
         mode,
-        state: outcome.state,
+        state: wrappedState,
         amount: amount / API_MULTIPLIER, // bet in MAJOR units
       };
 
@@ -282,8 +305,10 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
 
       const id = Number(event);
       const book = await loadBook(mode, id);
+      // Wrap as a one-event book so the adapter can split into segments.
+      const replayState = { events: [{ data: { total_win: book.payoutMultiplier / 100 } }] };
       return {
-        state: book,
+        state: replayState,
         payoutMultiplier: book.payoutMultiplier / 100,
         mode,
         amount: minBet, // a sensible default bet in minor units
@@ -291,5 +316,12 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
     },
 
     hasBooksFor,
+
+    setBalance(newBalanceMinor: number): void {
+      balanceMinor = newBalanceMinor;
+      // Clear any active round so the session starts fresh with the new balance.
+      activeRound = null;
+      activePayoutCents = 0;
+    },
   };
 }

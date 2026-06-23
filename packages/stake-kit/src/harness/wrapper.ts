@@ -55,6 +55,25 @@ export function renderWrapperHtml(cfg: WrapperConfig): string {
     (p) => `<option value="${esc(p.name)}">${esc(p.name)} (${p.w}×${p.h})</option>`,
   ).join('');
 
+  const BALANCE_LEVELS: { value: number; label: string }[] = [
+    { value: 1, label: '1' },
+    { value: 10, label: '10' },
+    { value: 100, label: '100' },
+    { value: 1_000, label: '1K' },
+    { value: 10_000, label: '10K' },
+    { value: 100_000, label: '100K' },
+    { value: 1_000_000, label: '1M' },
+    { value: 10_000_000, label: '10M' },
+    { value: 100_000_000, label: '100M' },
+    { value: 1_000_000_000, label: '1B' },
+    { value: 10_000_000_000, label: '10B' },
+  ];
+  const DEFAULT_BALANCE = 10_000;
+
+  const balanceOptions = BALANCE_LEVELS.map(
+    (b) => `<option value="${b.value}"${b.value === DEFAULT_BALANCE ? ' selected' : ''}>${esc(b.label)}</option>`,
+  ).join('');
+
   const currencyOptions = cfg.currencies
     .map((c) => `<option value="${esc(c)}">${esc(c)}</option>`)
     .join('');
@@ -110,6 +129,7 @@ function buildLaunchUrl(opts) {
 const iframe = document.getElementById('game');
 const screenSel = document.getElementById('screen');
 const currencySel = document.getElementById('currency');
+const balanceSel = document.getElementById('balance');
 const socialChk = document.getElementById('social');
 const modeSel = document.getElementById('mode');
 const roundInput = document.getElementById('round');
@@ -151,6 +171,13 @@ function launchReplay() {
 screenSel.addEventListener('change', applyScreen);
 currencySel.addEventListener('change', launchNormal);
 socialChk.addEventListener('change', launchNormal);
+if (balanceSel) {
+  balanceSel.addEventListener('change', async () => {
+    const major = Number(balanceSel.value);
+    await fetch('/__rgs/__dev/balance?major=' + major);
+    launchNormal();
+  });
+}
 if (replayBtn) replayBtn.addEventListener('click', launchReplay);
 if (closeBtn) closeBtn.addEventListener('click', launchNormal);
 if (randomBtn) {
@@ -245,6 +272,9 @@ launchNormal();
     </label>
     <label>Currency
       <select id="currency">${currencyOptions}</select>
+    </label>
+    <label>Balance
+      <select id="balance">${balanceOptions}</select>
     </label>
     <label>Social
       <input type="checkbox" id="social" />

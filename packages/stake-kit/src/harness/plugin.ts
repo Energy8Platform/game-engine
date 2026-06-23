@@ -209,6 +209,20 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
             const currency = cfg.model.spec.currency ?? DEFAULT_CURRENCY;
 
             const { devRgs: rgs, luaPlay } = await ensure(currency);
+
+            // ── Dev-only balance setter — must be checked BEFORE handleRgsRequest
+            //    so it does not accidentally match an RGS route.
+            //    GET /__rgs/__dev/balance?major=<n>
+            if (method === 'GET' && url.startsWith('/__dev/balance')) {
+              const qs = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
+              const params = new URLSearchParams(qs);
+              const major = Number(params.get('major') ?? 0);
+              rgs.setBalance(major * API_MULTIPLIER);
+              const { balance } = await rgs.balance();
+              sendJson(res, 200, { ok: true, balance });
+              return;
+            }
+
             const result = await handleRgsRequest(rgs, { method, path: url, body: raw }, luaPlay);
             sendJson(res, result.status, result.json);
           } catch (err) {

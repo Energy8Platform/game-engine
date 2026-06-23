@@ -113,7 +113,6 @@ describe('play + endRound', () => {
     const play: RGSPlayResponse = await rgs.play({ mode: 'BASE', amount: bet });
 
     // Seeded rng (0.5) selects sim=1 → payoutCents 250 → multiplier 2.5x.
-    expect(play.round.state).toMatchObject({ id: 1, payoutMultiplier: 250 });
     expect(play.round.payoutMultiplier).toBe(2.5);
     expect(play.round.active).toBe(true);
     expect(play.round.mode).toBe('BASE');
@@ -129,6 +128,16 @@ describe('play + endRound', () => {
       1000 * API_MULTIPLIER - bet + 2.5 * 1 * API_MULTIPLIER;
     expect(end.balance.amount).toBe(expectedMinor);
     expect(end.balance.amount).toBe(1001.5 * API_MULTIPLIER);
+  });
+
+  it('state has a non-empty events array with [0].data.total_win === payoutCents/100', async () => {
+    const rgs = makeRgs();
+    const play: RGSPlayResponse = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    // Seeded rng → sim=1, payoutCents=250 → total_win = 2.5.
+    const state = play.round.state as { events: { data: { total_win: number } }[] };
+    expect(Array.isArray(state.events)).toBe(true);
+    expect(state.events.length).toBeGreaterThan(0);
+    expect(state.events[0].data.total_win).toBe(2.5); // 250 / 100
   });
 
   it('assigns incrementing betIDs across rounds', async () => {
@@ -158,19 +167,25 @@ describe('event', () => {
 // ---------------------------------------------------------------------------
 
 describe('replay', () => {
-  it('returns the book by id with its payout multiplier', async () => {
+  it('returns a state with a non-empty events array and payout multiplier', async () => {
     const rgs = makeRgs();
     const res: RGSReplayResponse = await rgs.replay({ mode: 'BASE', event: '1' });
-    expect(res.state).toMatchObject({ id: 1, payoutMultiplier: 250 });
+    // payoutMultiplier on the book entry (250) → ×bet multiplier 2.5.
     expect(res.payoutMultiplier).toBe(2.5);
     expect(res.mode).toBe('BASE');
+    // state must be a one-event book.
+    const state = res.state as { events: { data: { total_win: number } }[] };
+    expect(Array.isArray(state.events)).toBe(true);
+    expect(state.events.length).toBeGreaterThan(0);
+    expect(state.events[0].data.total_win).toBe(2.5); // 250 / 100
   });
 
-  it('replays the 50x book (id 2)', async () => {
+  it('replays the 50x book (id 2) with correct events[0].data.total_win', async () => {
     const rgs = makeRgs();
     const res = await rgs.replay({ mode: 'BASE', event: '2' });
-    expect(res.state).toMatchObject({ id: 2, payoutMultiplier: 5000 });
     expect(res.payoutMultiplier).toBe(50);
+    const state = res.state as { events: { data: { total_win: number } }[] };
+    expect(state.events[0].data.total_win).toBe(50); // 5000 / 100
   });
 });
 
@@ -239,6 +254,29 @@ describe('balance', () => {
 });
 
 // ---------------------------------------------------------------------------
+// setBalance
+// ---------------------------------------------------------------------------
+
+describe('setBalance', () => {
+  it('overrides the in-memory balance (minor units)', async () => {
+    const rgs = makeRgs();
+    rgs.setBalance(500 * API_MULTIPLIER);
+    const { balance } = await rgs.balance();
+    expect(balance.amount).toBe(500 * API_MULTIPLIER);
+  });
+
+  it('clears an active round so the next play() proceeds without open-round guard error', async () => {
+    const rgs = makeRgs();
+    await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    // Round is now active — setBalance clears it.
+    rgs.setBalance(200 * API_MULTIPLIER);
+    // Should not throw.
+    const second = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    expect(second.round.active).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // playWithOutcome
 // ---------------------------------------------------------------------------
 
@@ -253,18 +291,36 @@ describe('playWithOutcome', () => {
     expect(play.balance.amount).toBe(1000 * API_MULTIPLIER - bet);
   });
 
-  it('round carries the supplied state and payoutMultiplier = payoutCents / 100', async () => {
+  it('round carries the supplied state (wrapped in events) and payoutMultiplier = payoutCents / 100', async () => {
     const rgs = makeRgs();
     const bet = 2 * API_MULTIPLIER;
     const play: RGSPlayResponse = await rgs.playWithOutcome('BASE', bet, {
       payoutCents: 350,
       state: { foo: 'bar' },
     });
-    expect(play.round.state).toEqual({ foo: 'bar' });
+    // state is wrapped as a one-event book.
+    const state = play.round.state as { events: { data: Record<string, unknown> }[] };
+    expect(Array.isArray(state.events)).toBe(true);
+    expect(state.events.length).toBeGreaterThan(0);
+    expect(state.events[0].data.foo).toBe('bar');
+    // total_win should be injected because the caller-supplied state lacked it.
+    expect(state.events[0].data.total_win).toBe(3.5); // 350 / 100
     expect(play.round.payoutMultiplier).toBe(3.5); // 350 / 100
     expect(play.round.active).toBe(true);
     expect(play.round.mode).toBe('BASE');
     expect(play.round.amount).toBe(2); // bet in major units
+  });
+
+  it('preserves caller-supplied total_win when present in the state', async () => {
+    const rgs = makeRgs();
+    const play: RGSPlayResponse = await rgs.playWithOutcome('BASE', API_MULTIPLIER, {
+      payoutCents: 200,
+      state: { total_win: 5, custom: 42 },
+    });
+    const state = play.round.state as { events: { data: Record<string, unknown> }[] };
+    // Caller supplied total_win: 5 — should NOT be overwritten by payoutCents/100 = 2.
+    expect(state.events[0].data.total_win).toBe(5);
+    expect(state.events[0].data.custom).toBe(42);
   });
 
   it('open-round guard fires when a round is already active', async () => {
