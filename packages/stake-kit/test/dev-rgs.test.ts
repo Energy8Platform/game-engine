@@ -71,6 +71,17 @@ function makeRgs() {
   });
 }
 
+function makeRgsDefaultCurrency() {
+  // No currency supplied → should default to EUR.
+  return createDevRgs({
+    booksDir: dir,
+    gameId: 'g',
+    betLevelsMajor: [1, 2, 5],
+    startingBalanceMajor: 1000,
+    rng: () => 0.5,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // authenticate
 // ---------------------------------------------------------------------------
@@ -349,5 +360,34 @@ describe('playWithOutcome', () => {
     await expect(rgs.play({ mode: 'BASE', amount: API_MULTIPLIER })).rejects.toThrow(
       'dev-RGS: play called while a round is still active — call end-round first',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setCurrency
+// ---------------------------------------------------------------------------
+
+describe('setCurrency', () => {
+  it('default currency is EUR when none is supplied', async () => {
+    const rgs = makeRgsDefaultCurrency();
+    const auth = await rgs.authenticate();
+    expect(auth.balance.currency).toBe('EUR');
+  });
+
+  it('changes the currency returned by authenticate', async () => {
+    const rgs = makeRgs(); // starts as USD
+    const before = await rgs.authenticate();
+    expect(before.balance.currency).toBe('USD');
+
+    rgs.setCurrency('GBP');
+    const after = await rgs.authenticate();
+    expect(after.balance.currency).toBe('GBP');
+  });
+
+  it('changes the currency returned by balance()', async () => {
+    const rgs = makeRgs();
+    rgs.setCurrency('JPY');
+    const { balance } = await rgs.balance();
+    expect(balance.currency).toBe('JPY');
   });
 });

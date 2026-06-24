@@ -117,6 +117,75 @@ describe('stakeHarnessPlugin', () => {
     // config blob includes the game id from ssrLoadModule
     expect(responseBody).toContain('demo-slot');
   });
+
+  it('GET /__rgs/__dev/currency?code=GBP returns { ok: true } and updates authenticate currency', async () => {
+    const p = stakeHarnessPlugin();
+
+    const handlers: Array<{ route?: string; handler: Function }> = [];
+    const fakeServer = {
+      middlewares: {
+        use(routeOrHandler: unknown, handler?: unknown) {
+          if (typeof routeOrHandler === 'string') {
+            handlers.push({ route: routeOrHandler, handler: handler as Function });
+          } else {
+            handlers.push({ handler: routeOrHandler as Function });
+          }
+        },
+      },
+      ssrLoadModule: async (_url: string) => ({ default: fakeMathConfig }),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    p.configureServer(fakeServer as any);
+
+    const rgsEntry = handlers.find((h) => h.route === '/__rgs');
+    expect(rgsEntry).toBeDefined();
+    const rgsHandler = rgsEntry!.handler;
+
+    function callRgs(url: string, method = 'GET'): Promise<{ status: number; body: unknown }> {
+      return new Promise((resolve) => {
+        let responseStatus = 0;
+        let responseBody = '';
+        const fakeReq = {
+          url,
+          method,
+          headers: { 'content-type': 'application/json' },
+          on(event: string, cb: (data?: unknown) => void) {
+            if (event === 'end') cb();
+            return fakeReq;
+          },
+        } as unknown as IncomingMessage;
+        const fakeRes = {
+          statusCode: 0,
+          setHeader() {},
+          end(body: string) {
+            responseStatus = this.statusCode;
+            responseBody = body;
+          },
+        } as unknown as ServerResponse;
+
+        rgsHandler(fakeReq, fakeRes);
+        const poll = setInterval(() => {
+          if (responseBody || responseStatus) {
+            clearInterval(poll);
+            resolve({ status: responseStatus, body: JSON.parse(responseBody) });
+          }
+        }, 5);
+      });
+    }
+
+    // Trigger lazy init by calling authenticate first.
+    await callRgs('/wallet/authenticate', 'POST');
+
+    // Now change currency to GBP.
+    const result = await callRgs('/__dev/currency?code=GBP');
+    expect(result.status).toBe(200);
+    expect((result.body as { ok: boolean }).ok).toBe(true);
+
+    // A subsequent authenticate should now return GBP.
+    const authResult = await callRgs('/wallet/authenticate', 'POST');
+    const authBody = authResult.body as { balance?: { currency: string } };
+    expect(authBody.balance?.currency).toBe('GBP');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -171,5 +240,34 @@ describe('renderWrapperHtml', () => {
     // The inline driver must contain "* 1_000_000" (or equivalent) for the replay amount.
     // This ensures the replay URL carries minor units, not major.
     expect(html).toContain('1_000_000');
+  });
+
+  it('marks EUR as selected by default in the currency select', () => {
+    const html = renderWrapperHtml({ ...base, modes: [] });
+    // EUR option must carry the selected attribute.
+    expect(html).toContain('<option value="EUR" selected>EUR</option>');
+    // USD must NOT carry selected.
+    expect(html).not.toContain('<option value="USD" selected>');
+  });
+
+  it('first currency is selected when EUR is not in the list', () => {
+    const html = renderWrapperHtml({
+      ...base,
+      currencies: ['USD', 'GBP'],
+      modes: [],
+    });
+    // Neither USD nor GBP should get selected (EUR absent → no selection attr applied).
+    expect(html).not.toContain(' selected>USD');
+    expect(html).not.toContain(' selected>GBP');
+  });
+
+  it('#game CSS contains flex: 0 0 auto so the iframe does not shrink', () => {
+    const html = renderWrapperHtml({ ...base, modes: [] });
+    expect(html).toContain('flex: 0 0 auto');
+  });
+
+  it('currency change handler fetches /__rgs/__dev/currency before relaunching', () => {
+    const html = renderWrapperHtml({ ...base, modes: [] });
+    expect(html).toContain('/__rgs/__dev/currency?code=');
   });
 });

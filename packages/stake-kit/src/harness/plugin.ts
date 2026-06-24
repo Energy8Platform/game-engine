@@ -71,7 +71,7 @@ interface VitePlugin {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const DEFAULT_CURRENCY = 'USD';
+const DEFAULT_CURRENCY = 'EUR';
 
 function collectBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -220,6 +220,17 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
               rgs.setBalance(major * API_MULTIPLIER);
               const { balance } = await rgs.balance();
               sendJson(res, 200, { ok: true, balance });
+              return;
+            }
+
+            // ── Dev-only currency setter — must be checked BEFORE handleRgsRequest.
+            //    GET /__rgs/__dev/currency?code=<CODE>
+            if (method === 'GET' && url.startsWith('/__dev/currency')) {
+              const qs = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
+              const params = new URLSearchParams(qs);
+              const code = params.get('code') ?? DEFAULT_CURRENCY;
+              rgs.setCurrency(code);
+              sendJson(res, 200, { ok: true });
               return;
             }
 

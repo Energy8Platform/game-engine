@@ -74,8 +74,12 @@ export function renderWrapperHtml(cfg: WrapperConfig): string {
     (b) => `<option value="${b.value}"${b.value === DEFAULT_BALANCE ? ' selected' : ''}>${esc(b.label)}</option>`,
   ).join('');
 
+  const DEFAULT_CURRENCY = 'EUR';
   const currencyOptions = cfg.currencies
-    .map((c) => `<option value="${esc(c)}">${esc(c)}</option>`)
+    .map(
+      (c) =>
+        `<option value="${esc(c)}"${c === DEFAULT_CURRENCY ? ' selected' : ''}>${esc(c)}</option>`,
+    )
     .join('');
 
   const modeOptions = cfg.modes
@@ -169,7 +173,10 @@ function launchReplay() {
 }
 
 screenSel.addEventListener('change', applyScreen);
-currencySel.addEventListener('change', launchNormal);
+currencySel.addEventListener('change', async () => {
+  await fetch('/__rgs/__dev/currency?code=' + currencySel.value);
+  launchNormal();
+});
 socialChk.addEventListener('change', launchNormal);
 if (balanceSel) {
   balanceSel.addEventListener('change', async () => {
@@ -219,6 +226,7 @@ launchNormal();
     padding: 24px;
   }
   #game {
+    flex: 0 0 auto;
     border: 1px solid #2a2e35;
     border-radius: 8px;
     background: #000;

@@ -63,8 +63,8 @@ export interface DevRgsConfig {
   gameId: string;
   /** Bet levels in MAJOR units (e.g. [0.1, 0.2, 1, 2, 5]). */
   betLevelsMajor: number[];
-  /** Launch currency (ISO 4217), e.g. 'USD'. */
-  currency: string;
+  /** Launch currency (ISO 4217). Defaults to 'EUR'. */
+  currency?: string;
   /** Starting balance in MAJOR units. Default 10_000. */
   startingBalanceMajor?: number;
   /** Injectable RNG for the weighted book pick. Defaults to Math.random. */
@@ -101,6 +101,12 @@ export interface DevRgs {
    * Used by the harness control bar to let the developer set a custom balance.
    */
   setBalance(balanceMinor: number): void;
+  /**
+   * Override the currency returned by authenticate/balance.
+   * Used by the harness control bar currency selector so the game receives
+   * the chosen currency on the next authenticate call.
+   */
+  setCurrency(code: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,12 +143,12 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
     booksDir,
     gameId,
     betLevelsMajor,
-    currency,
     startingBalanceMajor = 10_000,
     rng = Math.random,
   } = ctx;
 
   // ── In-memory session state ──────────────────────────────────────────
+  let currency = ctx.currency ?? 'EUR';
   let balanceMinor = startingBalanceMajor * API_MULTIPLIER;
   let nextBetId = 1;
   // The active round, plus the payoutCents we need to credit on end-round.
@@ -322,6 +328,10 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       // Clear any active round so the session starts fresh with the new balance.
       activeRound = null;
       activePayoutCents = 0;
+    },
+
+    setCurrency(code: string): void {
+      currency = code;
     },
   };
 }
