@@ -7,7 +7,10 @@ describe('genGameScene', () => {
     expect(s).toContain('implements SlotSceneController<SpinData>');
     expect(s).toContain('bindHost(');
     expect(s).toContain("this.host.play('spin', bet)");
-    expect(s).toContain('FreeSpinsSession');
+    // The bonus is one round drained segment-by-segment (roundId), not a separate FreeSpinsSession.
+    expect(s).toContain('drainRound');
+    expect(s).toContain('r.roundId');
+    expect(s).not.toContain('FreeSpinsSession');
     expect(s).toContain('MultiplierAccumulator');
     expect(s).toContain('CascadeController');
     expect(s).not.toContain('platformSession');         // no direct SDK access

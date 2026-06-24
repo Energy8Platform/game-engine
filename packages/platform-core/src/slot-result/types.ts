@@ -3,6 +3,16 @@ export interface SlotSpinResultBase {
   /** Currency win amount for this play (PlatformSession.play() already applied the bet). */
   totalWin: number;
   freeSpins?: { awarded?: number; total?: number; remaining?: number };
+  // ── Round-continuation metadata (Stake segment-drain) ──────────────────
+  // A round may be split into several SEGMENTS (e.g. a base trigger + every free spin of one
+  // bonus). The host fills these from the raw play result so a scene can drain the remaining
+  // segments by replaying the SAME round; the game's normalizer never sets them.
+  /** Round id to pass back to `play(action, bet, roundId)` for the next segment of THIS round. */
+  roundId?: string;
+  /** Actions valid for the next segment; `nextActions[0]` is what to play to advance the round. */
+  nextActions?: string[];
+  /** True once the round has no further segments to drain (single spin, or final bonus spin). */
+  complete?: boolean;
 }
 
 /** A game declares one of these; the host invokes it on every play. Generic over the game's result type. */

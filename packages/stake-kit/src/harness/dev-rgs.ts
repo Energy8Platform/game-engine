@@ -152,6 +152,39 @@ function costOf(modes: BookMode[] | null, mode: string): number {
   return found ? found.cost : 1;
 }
 
+/**
+ * Wrap a parsed book as the round `state` the adapter splits into segments.
+ *
+ * A curated book carries `events[]` (trigger + every free spin of one round) — pass them through
+ * verbatim so each event becomes a segment. Legacy/empty books fall back to a single synthetic
+ * event carrying the LUT payout as `data.total_win` (preserves the old one-segment behaviour).
+ */
+function stateFromBook(book: ParsedBook, payoutCents: number): { events: unknown[] } {
+  const events = (book as { events?: unknown }).events;
+  if (Array.isArray(events) && events.length > 0) return { events };
+  return { events: [{ data: { total_win: payoutCents / 100 } }] };
+}
+
+/**
+ * Wrap a caller-supplied outcome (Lua fallback) as the round `state`.
+ *
+ * Accepts either a multi-event round (`{ events: [...] }` — trigger + all free spins) passed
+ * through verbatim, or a single spin's data object wrapped in a one-event book (injecting
+ * `total_win` when the data omits it).
+ */
+function stateFromOutcome(state: unknown, payoutCents: number): { events: unknown[] } {
+  if (state !== null && typeof state === 'object' && !Array.isArray(state)) {
+    const events = (state as { events?: unknown }).events;
+    if (Array.isArray(events) && events.length > 0) return { events };
+  }
+  const data: Record<string, unknown> =
+    state !== null && typeof state === 'object' && !Array.isArray(state)
+      ? (state as Record<string, unknown>)
+      : {};
+  if (typeof data.total_win !== 'number') data.total_win = payoutCents / 100;
+  return { events: [{ data }] };
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -249,11 +282,12 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       if (stake > balanceMinor) throw new InsufficientBalanceError(stake, balanceMinor);
       balanceMinor -= stake;
 
-      // Wrap the book as a one-event book so the adapter can split into segments.
-      // The adapter reads `event.data ?? event.spin` — use `data` to carry the
-      // minimal spin payload (total_win is the only field we have at this level).
-      const spinData = { total_win: payoutCents / 100 };
-      const wrappedState = { events: [{ data: spinData }] };
+      // A curated book carries the round's full `events` array — the trigger + every free spin of a
+      // bonus, collected into ONE round (e8-math curate). Pass them through so the adapter splits
+      // the round into one segment per event and the bridge streams them (segment-drain). Each event
+      // carries its own per-spin win in `data.total_win` (injected by curate). Legacy books with no
+      // events fall back to a single synthetic event from the LUT payout.
+      const wrappedState = stateFromBook(book, payoutCents);
 
       // A 0-win round is self-closing: the RGS settles it on play(), so no
       // end-round is expected. Mark it `active: false` and DON'T retain it as
@@ -299,17 +333,11 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       if (stake > balanceMinor) throw new InsufficientBalanceError(stake, balanceMinor);
       balanceMinor -= stake;
 
-      // Wrap outcome.state in a one-event book so the adapter can split into segments.
-      // Inject total_win if the caller's state doesn't carry it.
-      const outcomeData = outcome.state as Record<string, unknown>;
-      const wrappedOutcomeData: Record<string, unknown> =
-        outcomeData !== null && typeof outcomeData === 'object' && !Array.isArray(outcomeData)
-          ? outcomeData
-          : {};
-      if (typeof wrappedOutcomeData.total_win !== 'number') {
-        wrappedOutcomeData.total_win = outcome.payoutCents / 100;
-      }
-      const wrappedState = { events: [{ data: wrappedOutcomeData }] };
+      // The caller (harness Lua fallback) may supply a multi-event round — `{ events: [...] }` with
+      // the trigger + every free spin of one bonus — so the adapter splits it into segments and the
+      // bridge streams them (segment-drain). Otherwise treat `outcome.state` as a single spin's data
+      // and wrap it in a one-event book, injecting `total_win` when absent.
+      const wrappedState = stateFromOutcome(outcome.state, outcome.payoutCents);
 
       // A 0-win round is self-closing (no end-round expected); don't retain it
       // as the active round. See play() for the rationale.
@@ -362,8 +390,14 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       // - payoutMultiplier is the book's raw value in CENTS (e.g. 495 = 4.95×); the bridge divides
       //   by 100 to get the ×bet multiplier.
       // - state is the EVENTS ARRAY directly (not wrapped in `{ events }`); the adapter's ensureBook
-      //   accepts a bare array. Each event carries the decimal total_win for the segment.
-      const state = [{ data: { total_win: book.payoutMultiplier / 100 } }];
+      //   accepts a bare array. A curated book carries the round's full events (trigger + free
+      //   spins) so a bonus replays segment-by-segment; legacy books fall back to one synthetic
+      //   event carrying the round payout.
+      const bookEvents = (book as { events?: unknown }).events;
+      const state =
+        Array.isArray(bookEvents) && bookEvents.length > 0
+          ? (bookEvents as unknown[])
+          : [{ data: { total_win: book.payoutMultiplier / 100 } }];
       return {
         payoutMultiplier: book.payoutMultiplier,
         costMultiplier: costOf(modes, mode),

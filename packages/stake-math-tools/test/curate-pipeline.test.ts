@@ -135,12 +135,19 @@ describe('curateMode', () => {
       const { execFileSync } = await import('node:child_process');
       firstLine = execFileSync('zstd', ['-dc', '-q', zstBooks], { encoding: 'utf-8' }).split('\n').find((l) => l.trim())!;
     }
-    const book = JSON.parse(firstLine) as { id: number; payoutMultiplier: number; events: { type: string; data: unknown }[] };
+    const book = JSON.parse(firstLine) as {
+      id: number;
+      payoutMultiplier: number;
+      events: { type: string; win_x: number; data: { total_win: number } }[];
+    };
     expect(typeof book.id).toBe('number');
     expect(typeof book.payoutMultiplier).toBe('number');
     expect(Array.isArray(book.events)).toBe(true);
     expect(book.events.length).toBeGreaterThan(0); // each fixture round has ≥1 spin
     expect(book.events[0].type).toBe('spin'); // base_game stage → 'spin'
+    // The per-segment win is injected into data.total_win from the spin's win_x, so the harness
+    // adapter reads a consistent per-segment win from a book event.
+    expect(book.events[0].data.total_win).toBe(book.events[0].win_x);
   });
 
   it('returns an OptimizeResult with a populated stakeReport and numeric rtp', async () => {

@@ -106,6 +106,78 @@ function costForAction(cfg: HarnessMathConfig, action: string): number {
   return cfg.model.spec.actions?.[action]?.cost ?? 1;
 }
 
+/** Shape of a single LuaEngine.execute() result we read in the session loop. */
+interface LuaExecResult {
+  totalWin?: number;
+  data?: Record<string, unknown>;
+  nextActions?: string[];
+  session?: { completed?: boolean } | null;
+}
+
+/** Minimal LuaEngine surface the session loop needs (keeps runLuaRound unit-testable). */
+interface LuaRunner {
+  execute(state: { action: string; bet: number }): LuaExecResult;
+}
+
+/**
+ * Drive the game's Lua as ONE round and collect every spin into a `events` array (the kitsune
+ * full-event book shape), so a bonus bought/triggered in a no-books game plays out
+ * segment-by-segment in the harness.
+ *
+ * Executes the trigger action, then — if it opened a free-spins session — replays its
+ * `nextActions[0]` until the session completes. Each spin becomes one event carrying its
+ * stage-derived `type`, the per-spin bet-multiplier `win_x`, and the render `data` (with
+ * `total_win` injected as that spin's multiplier so the adapter reads a consistent per-segment win).
+ * `payoutCents` is the round's total bet-multiplier × 100.
+ *
+ * Per-spin win: a mid-session (or non-session) `execute` returns that spin's own win, but the spin
+ * that COMPLETES the session returns the SESSION total — so its own win is `total − alreadyCollected`.
+ */
+export function runLuaRound(
+  engine: LuaRunner,
+  triggerAction: string,
+  betMajor: number,
+): { payoutCents: number; events: Array<Record<string, unknown>> } {
+  const events: Array<Record<string, unknown>> = [];
+  let runningWinX = 0; // accumulated bet-MULTIPLIER across collected spins
+
+  const pushSpin = (action: string, result: LuaExecResult): void => {
+    const completed = !!result.session?.completed;
+    // result.totalWin is a win AMOUNT (multiplier × bet); convert to a multiplier.
+    const callWinX = betMajor > 0 ? (result.totalWin ?? 0) / betMajor : 0;
+    // The completing spin reports the SESSION total; its own win is the remainder.
+    const winX = completed ? callWinX - runningWinX : callWinX;
+    runningWinX += winX;
+    const isFs = action === 'free_spin';
+    const data: Record<string, unknown> = { ...(result.data ?? {}), total_win: winX };
+    events.push({
+      type: isFs ? 'free_spin' : 'spin',
+      stage: isFs ? 'free_spins' : 'base_game',
+      win_x: winX,
+      data,
+    });
+  };
+
+  let result = engine.execute({ action: triggerAction, bet: betMajor });
+  pushSpin(triggerAction, result);
+
+  // Drain the free-spins session, if one was opened. Guard against a runaway script.
+  let guard = 100_000;
+  while (
+    result.session &&
+    !result.session.completed &&
+    result.nextActions &&
+    result.nextActions.length > 0 &&
+    guard-- > 0
+  ) {
+    const nextAction = result.nextActions[0];
+    result = engine.execute({ action: nextAction, bet: betMajor });
+    pushSpin(nextAction, result);
+  }
+
+  return { payoutCents: Math.round(runningWinX * 100), events };
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -172,14 +244,11 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
     const luaPlay: LuaPlay = async ({ mode, amount }): Promise<RGSPlayResponse> => {
       if (!luaEngine) throw new Error('stake-harness: LuaEngine unavailable for no-books fallback');
       const betMajor = amount / API_MULTIPLIER;
-      const action = actionForMode(cfg, mode);
-      const result = luaEngine.execute({ action, bet: betMajor });
-      const totalWin = typeof result.totalWin === 'number' ? result.totalWin : 0;
-      const payoutCents = Math.round(totalWin * 100);
-      const state: unknown = result.data ?? {};
+      const triggerAction = actionForMode(cfg, mode);
       // Debit bet × cost for buy/ante (no index.json cost in the no-books path → use the spec's).
-      const cost = costForAction(cfg, action);
-      return devRgs!.playWithOutcome(mode, amount, { payoutCents, state, cost });
+      const cost = costForAction(cfg, triggerAction);
+      const { payoutCents, events } = runLuaRound(luaEngine, triggerAction, betMajor);
+      return devRgs!.playWithOutcome(mode, amount, { payoutCents, state: { events }, cost });
     };
 
     return { devRgs, luaPlay };

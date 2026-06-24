@@ -1,7 +1,7 @@
 import type { SlotSpinResultBase, SlotResultNormalizer } from '@energy8platform/platform-core/slot-result';
 
 export interface SlotPlayDeps<T extends SlotSpinResultBase> {
-  play(params: { action: string; bet: number }): Promise<unknown>;
+  play(params: { action: string; bet: number; roundId?: string }): Promise<unknown>;
   normalize: SlotResultNormalizer<T>;
   onWin?: (totalWin: number) => void;
   /** Host hook to acknowledge a finished result (PlatformSession.playAck). Called by `ack()`
@@ -13,8 +13,9 @@ export interface SlotPlayDeps<T extends SlotSpinResultBase> {
 
 /** A bound play/ack pair injected into a scene via bindHost. */
 export interface SlotPlay<T extends SlotSpinResultBase> {
-  /** play → normalize → onWin(totalWin) → return T. */
-  play(action: string, bet: number): Promise<T>;
+  /** play → normalize → onWin(totalWin) → return T. Pass `roundId` to advance an in-flight round
+   *  (drain the next segment of a multi-segment bonus) instead of starting a new one. */
+  play(action: string, bet: number, roundId?: string): Promise<T>;
   /** Acknowledge the most recent result (call AFTER its animation). Settles the round on Stake. */
   ack(): void;
 }
@@ -27,10 +28,23 @@ export function createSlotPlay<T extends SlotSpinResultBase>(
 ): SlotPlay<T> {
   let lastRaw: unknown = null;
   return {
-    play: async (action, bet) => {
-      const raw = await deps.play({ action, bet });
+    play: async (action, bet, roundId) => {
+      const raw = await deps.play({ action, bet, roundId });
       lastRaw = raw;
       const result = deps.normalize(raw);
+      // Enrich the normalized result with round-continuation metadata from the raw play result so
+      // the scene can drain the remaining segments of a multi-segment round (e.g. free spins) by
+      // replaying the SAME roundId. The game's normalizer stays focused on render data.
+      const meta = (raw ?? {}) as {
+        roundId?: string;
+        nextActions?: string[];
+        session?: { completed?: boolean } | null;
+      };
+      result.roundId = meta.roundId;
+      result.nextActions = meta.nextActions;
+      // A round is complete when there is no open session, or the session reports completed. The
+      // host sets a session on every segment, so this is `session.completed` in practice.
+      result.complete = !meta.session || meta.session.completed === true;
       deps.onWin?.(result.totalWin);
       return result;
     },

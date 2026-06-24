@@ -21,7 +21,7 @@ export function genGameScene(a: Answers): string {
     ? `  private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });\n` : '';
 
   return `import { Scene } from '@energy8platform/game-engine/core';
-import { ReelGrid, ${ctrl}, BigWinOverlay, FreeSpinsSession${multiplierImport} } from '@energy8platform/game-engine/slot';
+import { ReelGrid, ${ctrl}, BigWinOverlay${multiplierImport} } from '@energy8platform/game-engine/slot';
 import type { SlotSceneController, SlotHostApi } from '@energy8platform/game-engine/host';
 import { model } from '../game.spec';
 import { resolveSymbol } from '../slot/symbols';
@@ -41,8 +41,8 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
     if (!this.host) return;
     const result = await this.host.play(actionId, bet);
     await this.present(result, bet);
-    this.host.ack(); // settle this round (post-animation) before the next play
-    if ((result.freeSpins?.awarded ?? 0) > 0) await this.runFreeSpins(result, bet);
+    this.host.ack(); // settle this segment (post-animation) before the next
+    await this.drainRound(result, bet); // play out the bonus free spins (same round, by roundId)
   }
 
   private _vw = 1920;
@@ -89,8 +89,8 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
     if (!this.host) return;
     const result = await this.host.play('spin', bet);
     await this.present(result, bet);
-    this.host.ack(); // settle this round (post-animation) before the next play
-    if ((result.freeSpins?.awarded ?? 0) > 0) await this.runFreeSpins(result, bet);
+    this.host.ack(); // settle this segment (post-animation) before the next
+    await this.drainRound(result, bet); // play out any free spins (same round, by roundId)
   }
 
   /** Replay a round recovered on reload (host "Continue"). Present only — the host settles it. */
@@ -98,16 +98,18 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
     await this.present(result, this.bet);
   }
 
-  /** Drive the free-spins session: replay 'free_spin' until it completes. */
-  private async runFreeSpins(trigger: SpinData, bet: number): Promise<void> {
-    const fs = new FreeSpinsSession({ initialSpins: trigger.freeSpins?.total ?? trigger.freeSpins?.awarded ?? 0 });
-    while (!fs.isComplete) {
-      const r = await this.host!.play('free_spin', bet);
+  /**
+   * Drain the remaining segments of an in-flight round. A bonus is ONE Stake round whose
+   * \`events\` are the trigger + every free spin; the bridge streams them one segment per play of
+   * the SAME \`roundId\`. We replay \`nextActions[0]\` until the round reports \`complete\`. A plain
+   * spin with no bonus is already \`complete\`, so this is a no-op.
+   */
+  private async drainRound(result: SpinData, bet: number): Promise<void> {
+    let r = result;
+    while (!r.complete && r.nextActions && r.nextActions.length > 0) {
+      r = await this.host!.play(r.nextActions[0], bet, r.roundId);
       await this.present(r, bet);
       this.host!.ack(); // settle each free spin before the next
-      fs.addWin(r.totalWin);
-      fs.award(r.freeSpins?.awarded ?? 0); // retrigger
-      fs.consume();
     }
   }
 

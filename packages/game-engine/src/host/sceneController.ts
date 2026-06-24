@@ -2,7 +2,9 @@ import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-res
 
 /** Host-provided, normalized play() injected into the scene via bindHost. */
 export interface SlotHostApi<T extends SlotSpinResultBase = SlotSpinResultBase> {
-  play(action: string, bet: number): Promise<T>;
+  /** Play an action. Pass `roundId` (from a previous result) to drain the next segment of an
+   *  in-flight round — e.g. each free spin of a bonus — instead of starting a new round. */
+  play(action: string, bet: number, roundId?: string): Promise<T>;
   /** Acknowledge the most recent result — call AFTER the scene has finished animating it. On
    *  Stake this is what settles the round (`/wallet/end-round`, only when the win paid out), so
    *  forgetting to call it leaves the round open and blocks the next spin. */

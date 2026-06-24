@@ -22,13 +22,24 @@ import { createDevRgs, NoBooksError } from '../src/harness/dev-rgs';
 
 let dir: string;
 
-// Books: id 0 = lose, id 1 = 2.5x win (payoutCents 250), id 2 = 50x (5000)
+// Books: id 0 = lose, id 1 = 2.5x win (payoutCents 250), id 2 = 50x (5000).
+// Curated books carry the round's `events[]`, each event's `data.total_win` = that spin's
+// bet-multiplier — dev-RGS passes them through verbatim so the adapter splits them into segments.
 const JSONL_LINES =
   [
     '{"id":0,"payoutMultiplier":0,"events":[]}',
-    '{"id":1,"payoutMultiplier":250,"events":[{"type":"reveal"}]}',
+    '{"id":1,"payoutMultiplier":250,"events":[{"type":"spin","data":{"total_win":2.5}}]}',
     '{"id":2,"payoutMultiplier":5000,"events":[]}',
   ].join('\n') + '\n';
+
+// A BONUS mode whose single book (id 0) is ONE round of 3 events — a trigger + two free spins.
+// dev-RGS must pass these through so the bridge streams them as separate segments.
+const BONUS_JSONL =
+  '{"id":0,"payoutMultiplier":700,"events":[' +
+  '{"type":"spin","stage":"base_game","data":{"total_win":0}},' +
+  '{"type":"free_spin","stage":"free_spins","data":{"total_win":2}},' +
+  '{"type":"free_spin","stage":"free_spins","data":{"total_win":5}}]}\n';
+const BONUS_LUT = '0,1,700\n';
 
 // LUT: sim, weight, payoutCents. Row 1 has overwhelming weight (1000).
 const LUT_CSV = '0,1,0\n1,1000,250\n2,1,5000\n';
@@ -44,6 +55,12 @@ beforeAll(() => {
         events: 'books_BASE.jsonl.zst',
         weights: 'lookUpTable_BASE_0.csv',
       },
+      {
+        name: 'BONUS',
+        cost: 100,
+        events: 'books_BONUS.jsonl.zst',
+        weights: 'lookUpTable_BONUS_0.csv',
+      },
     ],
   };
   writeFileSync(join(dir, 'index.json'), JSON.stringify(index));
@@ -51,6 +68,11 @@ beforeAll(() => {
   writeFileSync(
     join(dir, 'books_BASE.jsonl.zst'),
     zstdCompressSync(Buffer.from(JSONL_LINES)),
+  );
+  writeFileSync(join(dir, 'lookUpTable_BONUS_0.csv'), BONUS_LUT);
+  writeFileSync(
+    join(dir, 'books_BONUS.jsonl.zst'),
+    zstdCompressSync(Buffer.from(BONUS_JSONL)),
   );
 });
 
@@ -169,6 +191,19 @@ describe('play + endRound', () => {
     expect(Array.isArray(state.events)).toBe(true);
     expect(state.events.length).toBeGreaterThan(0);
     expect(state.events[0].data.total_win).toBe(2.5); // 250 / 100
+  });
+
+  it('passes a multi-event bonus book through as the round state (one event per segment)', async () => {
+    const rgs = makeRgs();
+    const play: RGSPlayResponse = await rgs.play({ mode: 'BONUS', amount: API_MULTIPLIER });
+    // The book's 3 events (trigger + 2 free spins) flow through verbatim — the adapter splits
+    // them into segments; the bridge streams them one play at a time.
+    const state = play.round.state as { events: { type: string; data: { total_win: number } }[] };
+    expect(state.events).toHaveLength(3);
+    expect(state.events.map((e) => e.type)).toEqual(['spin', 'free_spin', 'free_spin']);
+    expect(state.events.map((e) => e.data.total_win)).toEqual([0, 2, 5]);
+    // payoutMultiplier is the LUT cents / 100 = 7×.
+    expect(play.round.payoutMultiplier).toBe(7);
   });
 
   it('assigns incrementing betIDs across rounds', async () => {

@@ -107,7 +107,16 @@ async function readPoolRows(poolDir: string, mode: string, capMaxWin: number): P
 function spinToEvent(spin: Record<string, unknown>): Record<string, unknown> {
   const stage = typeof spin.stage === 'string' ? spin.stage : undefined;
   const type = stage === 'free_spins' ? 'free_spin' : 'spin';
-  return { type, ...spin };
+  // The adapter reads the per-segment win from `data.total_win`, but the Lua/Go `data` payload
+  // omits it (it lives in the spin's top-level `win_x`). Inject `win_x` as `data.total_win` so a
+  // book replays each segment's win consistently with the harness Lua-fallback path.
+  const winX = typeof spin.win_x === 'number' ? spin.win_x : 0;
+  const rawData = spin.data;
+  const data: Record<string, unknown> =
+    rawData !== null && typeof rawData === 'object' && !Array.isArray(rawData)
+      ? { ...(rawData as Record<string, unknown>), total_win: winX }
+      : { total_win: winX };
+  return { type, ...spin, data };
 }
 
 /** A line stream over the pool's per-round dump for one mode: prefers the raw `.jsonl`, else
