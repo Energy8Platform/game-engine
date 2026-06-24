@@ -285,17 +285,16 @@ export class SpinDisc extends Container implements Sizable {
     if (active) {
       this.mode = 'stop';
       this.stopRotation();
-      this.glyph.setColor(this.tokens.spinFg);
-      // swap to the STOP glyph (smaller, leaving room for the count below)
+      // STOP glyph at the disc's full size (like SPIN); the count is centred on top of it.
       this.glyph.visible = false;
+      this.stopGlyph();
       if (!this.countText) {
         this.countText = makeText('', { size: 22, weight: '800', color: this.tokens.spinFg, align: 'center' });
-        this.addChild(this.countText);
+        this.addChild(this.countText); // added after the STOP glyph → renders on top of it
       }
-      this.stopGlyph();
       const label = Number.isFinite(remaining) ? String(remaining) : '∞';
       setText(this.countText, label);
-      this.countText.position.set((this.size - this.countText.width) / 2, this.size / 2 + 6);
+      this.countText.position.set((this.size - this.countText.width) / 2, (this.size - this.countText.height) / 2);
     } else {
       this.mode = 'spin';
       this.glyph.visible = true;
@@ -312,9 +311,8 @@ export class SpinDisc extends Container implements Sizable {
   private stopGlyphView?: IconView;
   private stopGlyph(): void {
     if (!this.stopGlyphView) {
-      const gs = Math.round(this.glyphSize * 0.62);
-      this.stopGlyphView = makeIcon('stop', gs, this.tokens.spinFg);
-      this.stopGlyphView.position.set((this.size - gs) / 2, this.size / 2 - gs - 2);
+      this.stopGlyphView = makeIcon('stop', this.glyphSize, this.tokens.spinFg);
+      this.stopGlyphView.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
       this.addChild(this.stopGlyphView);
     }
   }
