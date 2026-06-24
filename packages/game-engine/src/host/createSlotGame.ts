@@ -210,6 +210,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       // the trigger segment (presented before onBonusEnter) doesn't count as a free spin.
       let inBonus = false;
       const fsCounter = createFreeSpinsCounter();
+      shell!.setBusy(true); // block re-spin / spacebar while the round plays out
       void runRound<T>(
         {
           // Suppress the debit paint from play() until this segment's afterPresent (HUD timing).
@@ -236,7 +237,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           },
         },
         action,
-      );
+      ).finally(() => shell!.setBusy(false));
     };
 
     /**
@@ -270,14 +271,19 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         shell!.setWin(r.totalWin);
         ps!.playAck(raw); // settles via /wallet/end-round on the FINAL segment
       };
-      await applySegment();
-      while (!r.complete && r.nextActions && r.nextActions.length > 0) {
-        raw = (await ps.play({ action: r.nextActions[0], bet: ctx.bet, roundId: r.roundId })) as
-          import('@energy8platform/platform-core').PlayResultData;
-        r = enrichRoundMeta(opts.normalize(raw), raw);
+      shell!.setBusy(true); // block input while the recovered round drains
+      try {
         await applySegment();
+        while (!r.complete && r.nextActions && r.nextActions.length > 0) {
+          raw = (await ps.play({ action: r.nextActions[0], bet: ctx.bet, roundId: r.roundId })) as
+            import('@energy8platform/platform-core').PlayResultData;
+          r = enrichRoundMeta(opts.normalize(raw), raw);
+          await applySegment();
+        }
+        if (inBonus) shell!.setMode('base');
+      } finally {
+        shell!.setBusy(false);
       }
-      if (inBonus) shell!.setMode('base');
     };
 
     if (mode === 'base') {
