@@ -1,21 +1,21 @@
 import type { Answers } from '../answers';
 
 /** Generate src/scenes/IntroScene.ts: a real game-owned Scene subclass (edit freely).
- * The host injects onStart via scene start data; call it to advance to the game. */
+ * The host injects goto() via scene start data; call goto('game') to advance. */
 export function genIntroScene(a: Answers): string {
   return `import { Container, Graphics, Text } from 'pixi.js';
 import { Scene } from '@energy8platform/game-engine/core';
 import { Tween } from '@energy8platform/game-engine/animation';
 
-/** Start data the host injects (onStart advances to the game scene). */
-interface IntroData { onStart?: () => void; }
+/** Start data the host injects into every scene (goto navigates between scenes). */
+interface IntroData { goto?: (key: string, data?: unknown) => void; }
 
 /** Full intro scene for ${a.title}. Edit this freely — background, logo, buttons, animation. */
 export class IntroScene extends Scene {
   private layer?: Container;
 
   async onEnter(data?: unknown): Promise<void> {
-    const { onStart } = (data ?? {}) as IntroData;
+    const { goto } = (data ?? {}) as IntroData;
     const layer = new Container();
     this.layer = layer;
     this.container.addChild(layer);
@@ -39,7 +39,7 @@ export class IntroScene extends Scene {
     label.anchor.set(0.5);
     btn.addChild(bgBtn, label);
     btn.eventMode = 'static'; btn.cursor = 'pointer';
-    btn.once('pointerdown', () => onStart?.());
+    btn.once('pointerdown', () => goto?.('game'));
     layer.addChild(btn);
 
     layer.alpha = 0;

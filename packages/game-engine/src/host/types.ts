@@ -14,16 +14,32 @@ export interface StakeIntegration {
   adapter: BookAdapter | AdapterModule;
 }
 
-export interface SceneEntry {
+/** One scene registered with the host: a key + its constructor. */
+export interface SceneRegistration {
   key: string;
   scene: SceneConstructor;
+}
+
+/** @deprecated alias kept for one release — use {@link SceneRegistration}. */
+export type SceneEntry = SceneRegistration;
+
+/** Navigation injected into the start data of EVERY scene the host registers.
+ *  Any scene (intro, game, …) reads it from its `onEnter(data)` to navigate. */
+export interface SceneNavData {
+  /** Switch to another registered scene by key. */
+  goto: (key: string, data?: unknown) => void;
 }
 
 export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinResultBase> {
   model: GameModel;
   /** REQUIRED: maps the raw play result into the game's typed result. The host calls it on every play. */
   normalize: SlotResultNormalizer<T>;
-  scene: SceneEntry;
+  /** ALL scenes the game uses, registered up front. */
+  scenes: SceneRegistration[];
+  /** Key (from `scenes`) of the scene to start first. */
+  startScene: string;
+  /** Start data passed to the start scene's `onEnter` (merged with the injected `goto`). */
+  startData?: unknown;
   manifest: AssetManifest;
   container?: HTMLElement | string;
   design?: { width: number; height: number };
@@ -38,9 +54,6 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   stake?: StakeIntegration;
   shell?: SlotShellOptions;
   onFatalError?: (message: string) => void;
-  /** Intro shown before the game scene. Either a built-in IntroScene config,
-   *  or a custom Scene class the game owns (the scaffold generates one). */
-  intro?: import('../scenes/IntroScene').IntroSceneConfig | { scene: SceneConstructor; data?: unknown };
 }
 
 export interface SlotGameHandle {

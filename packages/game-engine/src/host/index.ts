@@ -4,6 +4,8 @@ export type {
   CreateSlotGameOptions,
   SlotGameHandle,
   StakeIntegration,
+  SceneRegistration,
+  SceneNavData,
   SceneEntry,
 } from './types';
 export { buildShellConfig } from './shellConfig';

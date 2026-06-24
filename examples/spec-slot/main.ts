@@ -9,12 +9,15 @@ import { IntroScene } from './scenes/IntroScene';
 createSlotGame({
   model,
   normalize,
-  scene: { key: 'game', scene: GameScene },
+  scenes: [
+    { key: 'intro', scene: IntroScene },
+    { key: 'game', scene: GameScene },
+  ],
+  startScene: 'intro',
   manifest: { bundles: [] },
   design: { width: 1920, height: 1080 },
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-  intro: { scene: IntroScene },
   shell: {}, // buy/ante cards + currency derive from the spec + initData
 }).catch((err) => { console.error('[spec-slot] failed to start', err); });

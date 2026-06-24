@@ -22,11 +22,11 @@ describe('genStakeAdapter', () => {
 });
 
 describe('genMainTs', () => {
-  it('enables the shell without hardcoding buyBonus/currency, and passes intro', () => {
+  it('enables the shell without hardcoding buyBonus/currency, and registers scenes', () => {
     const m = genMainTs(a);
     expect(m).toContain('createSlotGame');
     expect(m).toContain('shell: {}');
-    expect(m).toContain('intro:');
+    expect(m).toContain("startScene: 'intro'");
     expect(m).not.toContain('buyBonus');     // derived from spec now
     expect(m).not.toContain("symbol: '€'");  // currency from initData now
   });

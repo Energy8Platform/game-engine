@@ -58,19 +58,18 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   }
 
   const game = new GameApplication(buildAppConfig(opts, isStakeNow));
-  game.scenes.register(opts.scene.key, opts.scene.scene);
-  let firstScene = opts.scene.key;
-  const { resolveIntro } = await import('./introOption');
-  const intro = resolveIntro(opts.intro);
-  if (intro) {
-    game.scenes.register('__intro__', intro.ctor);
-    firstScene = '__intro__';
-  }
+
+  // Register EVERY scene up front so any of them can navigate to any other.
+  for (const { key, scene } of opts.scenes) game.scenes.register(key, scene);
+
+  // Navigation injected into the start data of every scene: a scene reads `goto`
+  // from its `onEnter(data)` and calls it to switch scenes (intro → game, etc.).
+  const goto = (key: string, data?: unknown) => {
+    void game.scenes.goto(key, { ...(data as object), goto });
+  };
+
   try {
-    await game.start(
-      firstScene,
-      intro ? { ...(intro.data as object), onStart: () => { void game.scenes.goto(opts.scene.key); } } : undefined,
-    );
+    await game.start(opts.startScene, { ...(opts.startData as object), goto });
   } catch (err) {
     fatal('Could not start the game.');
     throw err;
@@ -83,11 +82,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
   let shell: SlotGameHandle['shell'] = null;
 
-  /** Always points to the live game scene (only present when it is the current scene). */
-  const gameScene = () =>
-    game.scenes.currentKey === opts.scene.key
-      ? (game.scenes.current?.scene as Partial<import('./sceneController').SlotSceneController<T>> | undefined)
-      : undefined;
+  /** The current scene IFF it implements the SlotSceneController contract (duck-typed
+   *  on `bindHost`). Host play/bet bind to whichever scene is current and controllable. */
+  const gameScene = () => {
+    const s = game.scenes.current?.scene as
+      | Partial<import('./sceneController').SlotSceneController<T>>
+      | undefined;
+    return typeof s?.bindHost === 'function' ? s : undefined;
+  };
 
   // slotPlay references shell via closure — define it after shell is assigned below.
   // We use a late-binding wrapper so the closure captures the variable, not null.

@@ -6,16 +6,29 @@ export interface IntroSceneConfig {
   title?: string;
   logo?: string;          // texture alias (optional; title text is the default)
   tapToStart?: boolean;   // default true
-  /** Host wires this to scenes.goto(gameKey). */
-  onStart: () => void;
+  /** Where to navigate on tap. Defaults to the conventional 'game' key. */
+  next?: string;
+  /** Optional explicit start callback. Takes precedence over `goto(next)`. */
+  onStart?: () => void;
 }
 
-/** Reusable splash scene: shows a title (or logo) + "tap to start", then calls onStart. */
+/**
+ * Reusable splash scene: shows a title (or logo) + "tap to start", then advances.
+ *
+ * The host no longer special-cases the intro. Navigation works like every other
+ * scene: the host injects `goto(key)` into this scene's start data. On tap this
+ * scene calls `onStart` if the game supplied one, otherwise `goto(next ?? 'game')`.
+ * (The built-in can't know the game's scene key generically, so it falls back to
+ * the conventional 'game' key — override via `next`. Scaffold-generated intros
+ * skip this primitive and call `goto('game')` directly.)
+ */
 export class IntroScene extends Scene {
   private layer?: Container;
 
   async onEnter(data?: unknown): Promise<void> {
-    const cfg = (data ?? {}) as IntroSceneConfig;
+    const cfg = (data ?? {}) as IntroSceneConfig & { goto?: (key: string, data?: unknown) => void };
+    const start = () =>
+      cfg.onStart ? cfg.onStart() : cfg.goto?.(cfg.next ?? 'game');
     const layer = new Container();
     this.layer = layer;
     this.container.addChild(layer);
@@ -42,7 +55,7 @@ export class IntroScene extends Scene {
     const hit = new Graphics().rect(0, 0, 1920, 1080).fill({ color: 0x000000, alpha: 0.001 });
     hit.eventMode = 'static';
     hit.cursor = 'pointer';
-    hit.once('pointerdown', () => cfg.onStart?.());
+    hit.once('pointerdown', () => start());
     layer.addChild(hit);
   }
 
