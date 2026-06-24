@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Container, Graphics } from 'pixi.js';
 import { FlexBox, type Sizable } from '../src/primitives/flex';
+import { ScrollBox } from '../src/primitives/scroll';
 
 // A measurable mock leaf — a real Pixi Container with a Graphics rect, so getLocalBounds()
 // reports its size (no canvas/GPU needed). This drives the FlexBox engine with known sizes so
@@ -132,5 +133,23 @@ describe('FlexBox engine — positioning & scaling', () => {
     fb.layout();
     expect(fb.outerWidth).toBe(240);
     expect(fb.outerHeight).toBe(56);
+  });
+});
+
+describe('ScrollBox', () => {
+  it('reports scrollable distance for content taller than the viewport', () => {
+    // Regression: getLocalBounds() on the masked content was clipped to the mask, so a tall
+    // overlay (game info) reported maxScroll ≈ 0 and could not scroll.
+    const sb = new ScrollBox();
+    sb.content.addChild(new Graphics().rect(0, 0, 300, 2000).fill(0xffffff));
+    sb.setViewport(300, 500); // calls refresh()
+    expect(sb.maxScrollY).toBeGreaterThan(1400); // ~2000 content − 500 view
+  });
+
+  it('does not scroll when content fits', () => {
+    const sb = new ScrollBox();
+    sb.content.addChild(new Graphics().rect(0, 0, 300, 200).fill(0xffffff));
+    sb.setViewport(300, 500);
+    expect(sb.maxScrollY).toBe(0);
   });
 });

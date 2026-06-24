@@ -49,10 +49,21 @@ export class ScrollBox extends Container {
 
   /** Re-measure content height and clamp the scroll offset. */
   refresh(): void {
+    // getLocalBounds() on a masked container is clipped to the mask (≈ the viewport), which would
+    // report the FULL content as barely taller than the view → no scroll. Measure with the mask
+    // detached so we see the true content height.
+    const mask = this.content.mask;
+    this.content.mask = null;
     const b = this.content.getLocalBounds();
+    this.content.mask = mask;
     const contentH = b.height + b.y; // content laid out from y≈0 downward
     this.maxScroll = Math.max(0, contentH - this.viewH);
     this.setScroll(this.scrollY);
+  }
+
+  /** Max scrollable distance (0 when content fits) — exposed for tests. */
+  get maxScrollY(): number {
+    return this.maxScroll;
   }
 
   private setScroll(y: number): void {
