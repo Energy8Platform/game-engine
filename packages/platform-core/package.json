@@ -64,6 +64,7 @@
   ],
   "scripts": {
     "simulate": "tsx bin/simulate.ts",
+    "prebuild": "node scripts/gen-version.mjs",
     "build": "rollup -c rollup.config.mjs",
     "dev": "rollup -c rollup.config.mjs -w",
     "lint": "eslint src/ --ext .ts",

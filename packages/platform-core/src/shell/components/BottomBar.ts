@@ -52,7 +52,11 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   // only when it's a free-spins replay (freeSpins.total > 0).
   const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
 
-  const balance = readout('balance', shell.t('Balance'), fmt(state.balance));
+  // Replay is a read-only historical round — there's no real balance to show, so hide it. Keyed on
+  // the sticky `replay` flag (not `mode`) so it stays hidden through a replay's free-spins phase.
+  const balance = state.replay
+    ? null
+    : readout('balance', shell.t('Balance'), fmt(state.balance));
   // With a feature active (e.g. Ante) the BET readout shows the effective stake, tinted with
   // the feature accent; the base state.bet is unchanged and returns once the feature is off.
   const feature = state.activeFeature;
@@ -101,7 +105,7 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
     // LEFT: [menu] ⊐ BUY BONUS coin ⊏ [balance] · [Free Spins] · [Total Win]
     // (the last two only render in FS / a free-spins replay)
     const menuPlaque = plaque('ge-pl ge-pl-dark ge-pl-menu', [menu]);
-    const balPlaque = plaque('ge-pl ge-pl-glass ge-pl-bal', [balance]);
+    const balPlaque = balance ? plaque('ge-pl ge-pl-glass ge-pl-bal', [balance]) : null;
     const fsPlaque = fsCounter ? plaque('ge-pl ge-pl-glass ge-pl-fs', [fsCounter]) : null;
     const totalWinPlaque = fsTotalWin ? plaque('ge-pl ge-pl-glass ge-pl-totalwin', [fsTotalWin]) : null;
     const left = zone('ge-zone-left ge-zone-plaques', ...compact([menuPlaque, buy, balPlaque, fsPlaque, totalWinPlaque]));

@@ -59,7 +59,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(win.classList.contains('ge-winpill')).toBe(true);                 // base pattern
   });
 
-  it('replay: read-only bet + win (base pill) + turbo, no controls', () => {
+  it('replay: read-only bet + win (base pill) + turbo, no controls, no balance', () => {
     const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
     expect(q(mount, '[data-ge="bet-value"]')!.textContent).toContain('€2');
     const win = q(mount, '[data-ge="win"]')!;
@@ -69,6 +69,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="spin"]')).toBeNull();
     expect(q(mount, '[data-ge="buybonus"]')).toBeNull();
     expect(q(mount, '[data-ge="turbo"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="balance"]')).toBeNull(); // balance hidden in replay
   });
 
   it('replay: Free Spins + Total Win only for a free-spins replay (total > 0)', () => {
@@ -78,5 +79,16 @@ describe('BottomBar freeSpins/replay modes', () => {
     shell.setFreeSpins({ current: 8, total: 8, totalWin: 40 });
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('8');
     expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('40');
+  });
+
+  it('replay: balance stays hidden when FS plays during a replay (mode → freeSpins)', () => {
+    // A replay viewer starts in replay mode, then drives the free-spins phase by switching the
+    // bottom bar to freeSpins mode. It's still a historical round, so balance must stay hidden.
+    const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
+    expect(q(mount, '[data-ge="balance"]')).toBeNull();
+    shell.setMode('freeSpins');
+    shell.setFreeSpins({ current: 2, total: 10, totalWin: 30 });
+    expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('10'); // FS layout active
+    expect(q(mount, '[data-ge="balance"]')).toBeNull();                      // …yet no balance
   });
 });

@@ -3,6 +3,7 @@ import type { ShellConfig, ShellState } from './types';
 export function createInitialState(config: ShellConfig): ShellState {
   return {
     mode: config.mode,
+    replay: config.replay ?? config.mode === 'replay',
     balance: config.balance,
     win: config.win,
     bet: config.currentBet ?? config.defaultBet,
