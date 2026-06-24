@@ -11,7 +11,7 @@ export interface SlotPlayDeps<T extends SlotSpinResultBase> {
   ack?: (raw: unknown) => void;
 }
 
-/** A bound play/ack pair injected into a scene via bindHost. */
+/** A bound play/ack pair the host uses to drive the play loop (createSlotGame → runRound). */
 export interface SlotPlay<T extends SlotSpinResultBase> {
   /** play → normalize → onWin(totalWin) → return T. Pass `roundId` to advance an in-flight round
    *  (drain the next segment of a multi-segment bonus) instead of starting a new one. */

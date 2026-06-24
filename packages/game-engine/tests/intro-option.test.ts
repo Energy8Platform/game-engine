@@ -44,19 +44,21 @@ describe('built-in IntroScene navigation', () => {
   });
 });
 
-/** Mirrors the host's gameScene() resolver: the current scene IFF it has bindHost. */
+/** Mirrors the host's gameScene() resolver: the current scene IFF it implements present(). */
 function isController(scene: unknown): scene is Partial<SlotSceneController> {
-  return typeof (scene as Partial<SlotSceneController> | undefined)?.bindHost === 'function';
+  return typeof (scene as Partial<SlotSceneController> | undefined)?.present === 'function';
 }
 
 describe('controller duck-type (host binding rule)', () => {
-  it('recognizes a scene that implements bindHost', () => {
-    const controller = { bindHost() {}, spin: async () => {}, setBet() {} };
+  it('recognizes a scene that implements present', () => {
+    const controller = { present: async () => {} };
     expect(isController(controller)).toBe(true);
   });
 
-  it('rejects a scene without bindHost (e.g. an intro scene)', () => {
+  it('rejects a scene without present (e.g. an intro scene)', () => {
     expect(isController({})).toBe(false);
     expect(isController(undefined)).toBe(false);
+    // a scene from the OLD contract (bindHost only, no present) is no longer a controller
+    expect(isController({ bindHost() {} })).toBe(false);
   });
 });
