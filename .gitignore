@@ -21,3 +21,5 @@ packages/*/bin/simulation-*
 
 # Local brainstorm / scratch notes
 idea.md
+/examples/demo-slot
+/.claude
