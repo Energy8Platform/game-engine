@@ -2,21 +2,25 @@ import { describe, it, expect } from 'vitest';
 import { genGameScene } from '../src/codegen/gameScene';
 
 describe('genGameScene', () => {
-  it('cascade/cluster uses CascadeController + the normalizer-driven host play + primitives', () => {
+  it('cascade/cluster: slim render contract (present + bonus hooks), no play/ack/host', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
     expect(s).toContain('implements SlotSceneController<SpinData>');
-    expect(s).toContain('bindHost(');
-    expect(s).toContain("this.host.play('spin', bet)");
-    // The bonus is one round drained segment-by-segment (roundId), not a separate FreeSpinsSession.
-    expect(s).toContain('drainRound');
-    expect(s).toContain('r.roundId');
-    expect(s).not.toContain('FreeSpinsSession');
+    expect(s).toContain('async present(result: SpinData, ctx: RenderContext)');
+    expect(s).toContain('async onBonusEnter(');
+    expect(s).toContain('async onBonusExit(');
+    expect(s).toContain('ctx.formatAmount');
+    expect(s).toContain('ctx.turbo');
     expect(s).toContain('MultiplierAccumulator');
     expect(s).toContain('CascadeController');
-    expect(s).not.toContain('platformSession');         // no direct SDK access
-    expect(s).not.toContain('result.data.cascades');    // consumes the normalizer, not raw
-    expect(s).toContain('async buyBonus(');
-    expect(s).toContain('this.host.play(actionId');
+    // The game no longer touches the play protocol:
+    expect(s).not.toContain('bindHost');
+    expect(s).not.toContain('SlotHostApi');
+    expect(s).not.toContain('this.host');
+    expect(s).not.toContain('drainRound');
+    expect(s).not.toContain('FreeSpinsSession');
+    expect(s).not.toContain('async spin(');
+    expect(s).not.toContain('async buyBonus(');
+    expect(s).not.toContain('platformSession');
   });
   it('ways/lines uses ReelSpinController', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
