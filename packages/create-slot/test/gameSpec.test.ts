@@ -24,4 +24,21 @@ describe('genGameSpec', () => {
     expect(src).toContain("buy_bonus: { role: 'buy'");
     expect(src).toContain("title: 'BUY BONUS'");
   });
+  it('betLevels span the full Stake range: 0.01 (min) and 1000000 (max)', () => {
+    // Extract betLevels array from generated source
+    const match = src.match(/betLevels:\s*\[([^\]]+)\]/);
+    expect(match).not.toBeNull();
+    const levels = match![1].split(',').map((s) => parseFloat(s.trim()));
+    expect(levels[0]).toBe(0.01);
+    expect(levels[levels.length - 1]).toBe(1000000);
+  });
+  it('defaultBet is present in betLevels', () => {
+    const betMatch = src.match(/betLevels:\s*\[([^\]]+)\]/);
+    const defaultMatch = src.match(/defaultBet:\s*([\d.]+)/);
+    expect(betMatch).not.toBeNull();
+    expect(defaultMatch).not.toBeNull();
+    const levels = betMatch![1].split(',').map((s) => parseFloat(s.trim()));
+    const defaultBet = parseFloat(defaultMatch![1]);
+    expect(levels).toContain(defaultBet);
+  });
 });
