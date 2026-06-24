@@ -139,35 +139,30 @@ function winsSection(model: GameModel): GameInfoSection {
   }
 }
 
-/** A free "max win" info line built from the spec's max-win multiplier. */
-function maxWinSection(model: GameModel): GameInfoSection | null {
-  const max = model.spec.maxWin;
-  if (!max || !Number.isFinite(max) || max <= 0) return null;
-  return {
-    type: 'custom',
-    title: 'MAX WIN',
-    html: `<p>Win up to <strong>${max.toLocaleString('en-US')}x</strong> your bet.</p>`,
-  };
-}
+/** Title of the legal disclaimer section — used to build it and to exempt it from socialization. */
+const DISCLAIMER_TITLE = 'DISCLAIMER';
 
 /** A disclaimer section from initData's disclaimer lines; null when none supplied. */
 function disclaimerSection(lines?: string[]): GameInfoSection | null {
   const clean = (lines ?? []).map((l) => l.trim()).filter(Boolean);
   if (!clean.length) return null;
   const html = clean.map((l) => `<p>${l}</p>`).join('');
-  return { type: 'custom', title: 'DISCLAIMER', html };
+  return { type: 'custom', title: DISCLAIMER_TITLE, html };
+}
+
+/** The legal disclaimer must be shown verbatim — this identifies it so socialization skips it. */
+function isDisclaimerSection(s: GameInfoSection): boolean {
+  return s.type === 'custom' && (s as { title?: string }).title === DISCLAIMER_TITLE;
 }
 
 /**
  * Pure: derive a maximal default GameInfoContent from the model + runtime so every game
- * gets a real info panel for free (max win, paytable, win illustration, controls, and the
- * Stake disclaimer when present). Author-supplied `opts.gameInfo` is MERGED over this set by
+ * gets a real info panel for free (paytable, win illustration, controls, and the Stake
+ * disclaimer when present). Author-supplied `opts.gameInfo` is MERGED over this set by
  * section identity (see `mergeGameInfo`), not wholesale-replaced.
  */
 export function defaultGameInfo(model: GameModel, runtime: ShellRuntime): GameInfoContent {
   const sections: GameInfoSection[] = [];
-  const max = maxWinSection(model);
-  if (max) sections.push(max);
   sections.push(winsSection(model));
   const pay = paytableSection(model);
   if (pay) sections.push(pay);
@@ -267,7 +262,13 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
   const t = isSocial ? socialize : (text: string) => text;
   const authored = typeof opts.gameInfo === 'function' ? opts.gameInfo(t) : opts.gameInfo;
   let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime), authored);
-  if (isSocial) gameInfo = { sections: (gameInfo.sections ?? []).map(socializeSection) };
+  // The DISCLAIMER is required legal copy and must be shown VERBATIM — never socialized (its
+  // wording is mandated, and word-swaps like "bet → play" would corrupt the legal text).
+  if (isSocial) {
+    gameInfo = {
+      sections: (gameInfo.sections ?? []).map((s) => (isDisclaimerSection(s) ? s : socializeSection(s))),
+    };
+  }
   // Buy-bonus cards: socialize the FINAL options (author override or spec-derived) in social mode.
   const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model), isSocial);
   return {

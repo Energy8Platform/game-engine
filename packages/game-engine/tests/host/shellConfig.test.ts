@@ -69,7 +69,7 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(buildShellConfig({}, model, { balance: 0, mode: 'base', social: true }).isSocial).toBe(true);
   });
 
-  it('derives a non-empty gameInfo (max win + paytable) and adds a disclaimer section when present', () => {
+  it('derives a non-empty gameInfo (paytable) and adds a disclaimer section when present; NO MAX WIN', () => {
     const c = buildShellConfig({}, model, { balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.', 'RTP over many plays.'] });
     const sections = c.gameInfo.sections ?? [];
     expect(sections.length).toBeGreaterThan(1);
@@ -77,7 +77,8 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(disclaimer).toBeDefined();
     expect((disclaimer as { html?: string }).html).toContain('Malfunction voids all wins.');
     expect(sections.some((s) => s.type === 'paytable')).toBe(true);
-    expect(sections.some((s) => s.type === 'custom' && s.title === 'MAX WIN')).toBe(true);
+    // MAX WIN section is no longer derived by the host.
+    expect(sections.some((s) => s.type === 'custom' && s.title === 'MAX WIN')).toBe(false);
   });
 
   it('omits the disclaimer section gracefully when no lines (non-stake/dev)', () => {
@@ -100,7 +101,6 @@ describe('buildShellConfig (runtime ctx)', () => {
     // the new type (modes) was added
     expect(sections.some((s) => s.type === 'modes' && (s as { title?: string }).title === 'MODES')).toBe(true);
     // other derived sections are KEPT
-    expect(sections.some((s) => s.type === 'custom' && (s as { title?: string }).title === 'MAX WIN')).toBe(true);
     expect(sections.some((s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER')).toBe(true);
     expect(sections.some((s) => s.type === 'controls')).toBe(true);
     expect(sections.some((s) => s.type === 'wins')).toBe(true);
@@ -125,7 +125,7 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(texts).not.toContain('CASH'); // original forbidden word gone
   });
 
-  it('social mode socializes the WHOLE merged set — host-derived AND author content', () => {
+  it('social mode socializes author + host content, but NEVER the legal DISCLAIMER (verbatim)', () => {
     const author: GameInfoContent = { sections: [{ type: 'custom', title: 'Our Paytable Rules', html: '<p>Read the paytable.</p>' }] };
     const c = buildShellConfig({ gameInfo: author }, model, {
       balance: 0, mode: 'base', social: true,
@@ -133,10 +133,10 @@ describe('buildShellConfig (runtime ctx)', () => {
     });
     expect(c.isSocial).toBe(true);
     const sections = c.gameInfo.sections ?? [];
-    // host-derived disclaimer socialized: "bets pay out" → "plays win"
-    const disc = sections.find((s) => s.type === 'custom' && (s as { html?: string }).html?.toLowerCase().includes('listed odds')) as { html?: string } | undefined;
-    expect(disc?.html).not.toContain('pay out');
-    // author 'custom' section (different identity → appended) is NOW socialized too:
+    // The DISCLAIMER is legal copy → left verbatim ("bets pay out" stays, NOT socialized).
+    const disc = sections.find((s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER') as { html?: string } | undefined;
+    expect(disc?.html).toContain('bets pay out at the listed odds');
+    // author 'custom' section (different identity → appended) IS socialized:
     // "Paytable" → "Win table" in both title and html, so forbidden words can't slip through.
     const authorSec = sections.find((s) => s.type === 'custom' && (s as { title?: string }).title?.includes('Rules')) as { title?: string; html?: string } | undefined;
     expect(authorSec).toBeDefined();
