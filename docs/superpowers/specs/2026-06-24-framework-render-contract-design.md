@@ -127,6 +127,19 @@ shell.on('buyBonusSelect', ({ id }) => {
 Resume (Continue/Finish modal): `await scene.present(snap, makeContext(resolveAction(snap)))`
 then `ps.playAck(snap)` — same settle path as today; no `scene.resume`.
 
+### HUD update timing
+
+The shell readouts — **win, totalWin, balance** — update only AFTER `present()` of each segment
+(and the final total carries through to `onBonusExit`), never eagerly when the play result
+arrives. So the numbers change with the animation, not before it.
+
+- The eager `onWin: (w) => shell.setWin(w)` wiring (fired inside `createSlotPlay.play`, before
+  present) is REMOVED.
+- `runRound` calls an injected `afterPresent(result)` after each `present` + `ack`. The host wires
+  it to `shell.setWin(result.totalWin)` + `shell.setBalance(liveBalance)`.
+- Balance from the SDK `balanceUpdate` event is BUFFERED into `liveBalance` (used by the
+  affordability guard immediately) but only PUSHED to the shell readout inside `afterPresent`.
+
 ### Bonus detection
 
 A base spin that *triggers* free spins is indistinguishable from a bought bonus at the loop level:

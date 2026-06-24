@@ -139,7 +139,7 @@ Replace the fat scene contract with `present` + bonus hooks, delete `SlotHostApi
 - Consumes: `GameShell.state.turbo: number`, shell event `turboChange: number`, `model.spec.modeMap: Record<string,string>`, `model.spec.actions[a].role: 'base'|'buy'|'feature'|'free'`.
 - Produces: `RenderContext { bet:number; action:string; mode:string; formatAmount(v:number):string; readonly turbo:number }`.
 - Produces: `SlotSceneController<T> { present(result:T, ctx:RenderContext):Promise<void>; onBonusEnter?(trigger:T, ctx):Promise<void>; onBonusExit?(last:T, ctx):Promise<void> }`.
-- Produces: `runRound<T>(deps: RunRoundDeps<T>, action: string): Promise<void>` where `RunRoundDeps<T> = { play(action,bet,roundId?):Promise<T>; ack():void; scene: Pick<SlotSceneController<T>,'present'|'onBonusEnter'|'onBonusExit'>; context(action:string):RenderContext; roleOf(action:string):string|undefined }`.
+- Produces: `runRound<T>(deps: RunRoundDeps<T>, action: string): Promise<void>` where `RunRoundDeps<T> = { play(action,bet,roundId?):Promise<T>; ack():void; scene: Pick<SlotSceneController<T>,'present'|'onBonusEnter'|'onBonusExit'>; context(action:string):RenderContext; roleOf(action:string):string|undefined; afterPresent?(result:T):void }`. `afterPresent` fires after each `present`+`ack` so the host updates HUD readouts (win/balance) only post-animation.
 - Produces: `GameShell.formatWin(value: number): string`.
 
 - [ ] **Step 1: Add `formatWin` to GameShell**
@@ -176,6 +176,7 @@ function harness(queue: R[], turbo = () => 0) {
   const onBonusEnter = vi.fn(async (_r: R, _c: RenderContext) => {});
   const onBonusExit = vi.fn(async (_r: R, _c: RenderContext) => {});
   const ack = vi.fn();
+  const afterPresent = vi.fn((_r: R) => {});
   const context = (action: string): RenderContext => ({
     bet: 2, action, mode: action === 'buy_bonus' ? 'BONUS' : 'BASE',
     formatAmount: (v) => String(v), get turbo() { return turbo(); },
@@ -186,25 +187,30 @@ function harness(queue: R[], turbo = () => 0) {
     scene: { present, onBonusEnter, onBonusExit },
     context,
     roleOf: (a) => (a === 'free_spin' ? 'free' : a === 'buy_bonus' ? 'buy' : 'base'),
+    afterPresent,
   };
-  return { deps, playLog, present, onBonusEnter, onBonusExit, ack };
+  return { deps, playLog, present, onBonusEnter, onBonusExit, ack, afterPresent };
 }
 
 describe('runRound', () => {
-  it('a plain complete spin: present once, ack once, no bonus hooks, no drain', async () => {
-    const { deps, playLog, present, onBonusEnter, onBonusExit, ack } = harness([
+  it('a plain complete spin: present once, ack once, afterPresent after present, no bonus hooks', async () => {
+    const { deps, playLog, present, onBonusEnter, onBonusExit, ack, afterPresent } = harness([
       { totalWin: 1, roundId: 'r1', nextActions: ['spin'], complete: true },
     ]);
     await runRound(deps, 'spin');
     expect(playLog).toEqual([{ action: 'spin', bet: 2, roundId: undefined }]);
     expect(present).toHaveBeenCalledTimes(1);
     expect(ack).toHaveBeenCalledTimes(1);
+    expect(afterPresent).toHaveBeenCalledTimes(1);
+    expect(afterPresent).toHaveBeenCalledWith({ totalWin: 1, roundId: 'r1', nextActions: ['spin'], complete: true });
+    // HUD update fires AFTER the animation: present's call order precedes afterPresent's.
+    expect(present.mock.invocationCallOrder[0]).toBeLessThan(afterPresent.mock.invocationCallOrder[0]);
     expect(onBonusEnter).not.toHaveBeenCalled();
     expect(onBonusExit).not.toHaveBeenCalled();
   });
 
   it('buy_bonus + 2 free spins: drains by roundId, fires enter before 1st FS and exit after last', async () => {
-    const { deps, playLog, present, onBonusEnter, onBonusExit, ack } = harness([
+    const { deps, playLog, present, onBonusEnter, onBonusExit, ack, afterPresent } = harness([
       { totalWin: 0, roundId: 'r9', nextActions: ['free_spin'], complete: false }, // trigger
       { totalWin: 3, roundId: 'r9', nextActions: ['free_spin'], complete: false }, // fs1
       { totalWin: 7, roundId: 'r9', nextActions: ['spin'], complete: true },        // fs2 (last)
@@ -217,6 +223,7 @@ describe('runRound', () => {
     ]);
     expect(present).toHaveBeenCalledTimes(3);
     expect(ack).toHaveBeenCalledTimes(3);
+    expect(afterPresent).toHaveBeenCalledTimes(3); // one HUD update per presented segment
     expect(onBonusEnter).toHaveBeenCalledTimes(1);
     expect(onBonusExit).toHaveBeenCalledTimes(1);
     // enter fires with the TRIGGER result, exit with the LAST free spin.
@@ -307,6 +314,9 @@ export interface RunRoundDeps<T extends SlotSpinResultBase> {
   context(action: string): RenderContext;
   /** Role of an action from the spec ('base'|'buy'|'feature'|'free'); drives bonus detection. */
   roleOf(action: string): string | undefined;
+  /** Fires after each segment is presented + acked. The host updates HUD readouts (win/balance)
+   *  here so they change WITH the animation, never eagerly when the play result arrives. */
+  afterPresent?(result: T): void;
 }
 
 /**
@@ -326,6 +336,7 @@ export async function runRound<T extends SlotSpinResultBase>(
   let r = await deps.play(action, ctx.bet);
   await deps.scene.present(r, ctx);
   deps.ack();
+  deps.afterPresent?.(r); // HUD readouts update AFTER the animation, not before
 
   let inBonus = false;
   while (!r.complete && r.nextActions && r.nextActions.length > 0) {
@@ -337,6 +348,7 @@ export async function runRound<T extends SlotSpinResultBase>(
     r = await deps.play(next, ctx.bet, r.roundId);
     await deps.scene.present(r, ctx);
     deps.ack();
+    deps.afterPresent?.(r);
   }
   if (inBonus) await deps.scene.onBonusExit?.(r, ctx);
 }
@@ -364,7 +376,7 @@ In `packages/game-engine/src/host/createSlotGame.ts`:
   };
 ```
 
-(b) DELETE the `bindGameScene` block (lines 126-136 — the `bindHost`/`setBet` injection and the two `game.scenes.on('change', bindGameScene)` / `bindGameScene()` calls). `slotPlay` (lines 116-124) stays as-is.
+(b) DELETE the `bindGameScene` block (lines 126-136 — the `bindHost`/`setBet` injection and the two `game.scenes.on('change', bindGameScene)` / `bindGameScene()` calls). In the `createSlotPlay({…})` call (lines 116-124), REMOVE the line `onWin: (w) => shell?.setWin(w),` — the win readout is now updated post-`present` via `afterPresent` (HUD-timing requirement), not eagerly inside `play`. The rest of `slotPlay` stays.
 
 (c) Add the loop import near the other host imports at the top of the function body (after `const { createSlotPlay } = await import('./slotPlay');` on line 103):
 
@@ -372,7 +384,23 @@ In `packages/game-engine/src/host/createSlotGame.ts`:
   const { runRound } = await import('./runRound');
 ```
 
-(d) Inside `if (opts.shell) { … }`, AFTER `shell = createGameShell(...)` (line 190) and the `currentBalance`/`balanceUpdate` lines (192-193), add the live-turbo tracker + context/role helpers:
+(d) Change the balance handler (line 193) to BUFFER the balance rather than push it to the shell immediately — the readout updates post-`present` via `afterPresent`. Replace:
+
+```ts
+    let currentBalance = balance;
+    ps?.on('balanceUpdate', (d: { balance: number }) => { currentBalance = d.balance; shell!.setBalance(d.balance); });
+```
+
+with:
+
+```ts
+    // currentBalance tracks the live wallet for the affordability guard; the DISPLAYED balance is
+    // pushed only after present() (HUD-timing requirement), via afterPresent below.
+    let currentBalance = balance;
+    ps?.on('balanceUpdate', (d: { balance: number }) => { currentBalance = d.balance; });
+```
+
+(e) Inside `if (opts.shell) { … }`, after the balance handler above, add the live-turbo tracker + context/role helpers + the round driver:
 
 ```ts
     // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
@@ -387,18 +415,26 @@ In `packages/game-engine/src/host/createSlotGame.ts`:
       formatAmount: (v) => shell!.formatWin(v),
       get turbo() { return currentTurbo; },
     });
-    /** Drive a full round (trigger + drain) against the current scene. */
+    /** Drive a full round (trigger + drain) against the current scene. HUD readouts (win + balance)
+     *  update only AFTER each present(), per the HUD-timing requirement. */
     const playRound = (action: string) => {
       const scene = gameScene();
       if (!scene) return;
       void runRound<T>(
-        { play: slotPlay.play, ack: slotPlay.ack, scene, context: makeContext, roleOf },
+        {
+          play: slotPlay.play,
+          ack: slotPlay.ack,
+          scene,
+          context: makeContext,
+          roleOf,
+          afterPresent: (r) => { shell!.setWin(r.totalWin); shell!.setBalance(currentBalance); },
+        },
         action,
       );
     };
 ```
 
-(e) Replace the base-mode `spin` + `buyBonusSelect` handlers (lines 213-227) with:
+(f) Replace the base-mode `spin` + `buyBonusSelect` handlers (lines 213-227) with:
 
 ```ts
       shell.on('spin', () => {
@@ -413,7 +449,7 @@ In `packages/game-engine/src/host/createSlotGame.ts`:
       });
 ```
 
-(f) Replace the resume `Continue` handler body (lines 245-248) so it presents via `present` (the scene no longer has `resume`):
+(g) Replace the resume `Continue` handler body (lines 245-248) so it presents via `present` (the scene no longer has `resume`):
 
 ```ts
             { title: shell.t('Continue'), on: () => { void (async () => {
@@ -422,7 +458,7 @@ In `packages/game-engine/src/host/createSlotGame.ts`:
             })(); } },
 ```
 
-(g) Replace the replay branch's `setBet`/`onReplay` (lines 262-269) so replay also uses the unified loop:
+(h) Replace the replay branch's `setBet`/`onReplay` (lines 262-269) so replay also uses the unified loop:
 
 ```ts
       currentBet = replayBet;
@@ -781,7 +817,8 @@ git commit -m "$(printf 'feat(create-slot): regenerate GameScene to the slim ren
 - BigWinOverlay formatter → Task 1. ✓
 - Codegen scene (ways + cascade) + tests → Task 3. ✓
 - stake-kit unchanged → no task (correct; the bridge protocol is untouched). ✓
-- Resume mid-bonus parity (present one snapshot + settle) → Task 2 Step 8(f). ✓
+- Resume mid-bonus parity (present one snapshot + settle) → Task 2 Step 8(g). ✓
+- HUD timing (win/totalWin/balance update only after present, not eagerly): remove eager `onWin` → Task 2 Step 8(b); buffer balance → Step 8(d); `afterPresent` updates win+balance post-present → runRound Step 6 + Step 8(e), tested Step 3. ✓
 
 **2. Placeholder scan:** The only `TODO`s are inside the GENERATED scene body (author hooks `onBonusEnter`/`onBonusExit`), which are intentional scaffold guidance, not plan placeholders. All plan steps carry complete code/commands. ✓
 
