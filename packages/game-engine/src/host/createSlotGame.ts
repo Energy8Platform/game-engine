@@ -116,6 +116,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   const { runRound } = await import('./runRound');
   const { createBalanceGate } = await import('./balanceGate');
   const { createFreeSpinsCounter } = await import('./freeSpinsCounter');
+  const { resolvePlayError } = await import('./playError');
 
   // slotPlay references shell via closure — define it after shell is assigned below.
   // We use a late-binding wrapper so the closure captures the variable, not null.
@@ -202,6 +203,32 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       formatAmount: (v) => shell!.formatWin(v),
       get turbo() { return currentTurbo; },
     });
+    // Play-error + connection handling. A play rejection is classified into a player-facing modal
+    // (ACTIVE_SESSION_EXISTS → Reload, etc.) instead of a misleading reconnect overlay; the reconnect
+    // overlay is suppressed while a play-error modal owns the screen.
+    let playErrorOpen = false;
+    const showPlayError = (err: unknown): void => {
+      const v = resolvePlayError(err);
+      playErrorOpen = true;
+      shell!.openModal({
+        availableClose: !v.reload,
+        title: shell!.t(v.title),
+        body: shell!.t(v.body),
+        actions: v.reload
+          ? [{ title: shell!.t('Reload'), on: () => { try { window.location.reload(); } catch { /* non-browser */ } } }]
+          : [{ title: shell!.t('OK'), on: () => { playErrorOpen = false; } }],
+      });
+    };
+    ps?.on('connectionStateChanged', (s: { status: string }) => {
+      if (s.status === 'restored') { if (!playErrorOpen) shell!.closeModal(); return; }
+      if (playErrorOpen) return; // a play-error modal owns the screen — don't mask it with "reconnecting"
+      shell!.openModal({
+        availableClose: false,
+        title: shell!.t('Reconnecting…'),
+        body: shell!.t('Lost connection to the game server. Trying to reconnect…'),
+      });
+    });
+
     /** Drive a full round (trigger + drain) against the current scene. HUD readouts (win + balance)
      *  update only AFTER each present(), per the HUD-timing requirement. */
     const playRound = (action: string) => {
@@ -245,7 +272,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           },
         },
         action,
-      ).finally(() => shell!.setBusy(false));
+      ).catch(showPlayError).finally(() => shell!.setBusy(false));
     };
 
     /**

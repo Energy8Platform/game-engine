@@ -275,6 +275,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
   /** Open a generic, externally-driven modal (title + body + optional action buttons).
    *  Each action runs its `on` then closes; the ✕ shows when `availableClose` is true. */
   openModal(opts: ModalOptions): void { this.showModal(buildModal(opts)); }
+  /** Programmatically dismiss whatever modal/overlay is currently shown (e.g. auto-close the
+   *  reconnect overlay once the link is restored). No-op when nothing is open. */
+  closeModal(): void { this.modalHost.innerHTML = ''; }
   /** Open the non-dismissable replay summary modal (START REPLAY → onReplay → reopen). */
   openReplay(opts: ReplayModalOptions): void {
     if (this.destroyed) return;
