@@ -149,13 +149,9 @@ export function runLuaRound(
     const winX = completed ? callWinX - runningWinX : callWinX;
     runningWinX += winX;
     const isFs = action === 'free_spin';
-    const data: Record<string, unknown> = { ...(result.data ?? {}), total_win: winX };
-    events.push({
-      type: isFs ? 'free_spin' : 'spin',
-      stage: isFs ? 'free_spins' : 'base_game',
-      win_x: winX,
-      data,
-    });
+    // Canonical Stake book event: { type, spin } only; the per-segment win lives in spin.total_win.
+    const spin: Record<string, unknown> = { ...(result.data ?? {}), total_win: winX };
+    events.push({ type: isFs ? 'free_spin' : 'spin', spin });
   };
 
   let result = engine.execute({ action: triggerAction, bet: betMajor });

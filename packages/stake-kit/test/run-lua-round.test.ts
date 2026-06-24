@@ -26,9 +26,9 @@ describe('runLuaRound', () => {
     const { payoutCents, events } = runLuaRound(engine, 'spin', 1);
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe('spin');
-    expect(events[0].stage).toBe('base_game');
-    expect(events[0].win_x).toBe(4);
-    expect((events[0].data as { total_win: number }).total_win).toBe(4);
+    // Canonical Stake event: { type, spin } only; the win lives in spin.total_win.
+    expect(Object.keys(events[0]).sort()).toEqual(['spin', 'type']);
+    expect((events[0].spin as { total_win: number }).total_win).toBe(4);
     expect(payoutCents).toBe(400); // 4× × 100
   });
 
@@ -47,12 +47,9 @@ describe('runLuaRound', () => {
     // 1 trigger + 3 free spins.
     expect(events).toHaveLength(4);
     expect(events.map((e) => e.type)).toEqual(['spin', 'free_spin', 'free_spin', 'free_spin']);
-    expect(events.map((e) => e.stage)).toEqual(['base_game', 'free_spins', 'free_spins', 'free_spins']);
 
-    // Per-spin wins: trigger 0, fs 2, fs 5, completing spin's OWN win = total(7) − collected(7) = 0.
-    expect(events.map((e) => e.win_x)).toEqual([0, 2, 5, 0]);
-    // Each event's data.total_win mirrors its win_x (so the adapter reads a consistent per-segment win).
-    expect(events.map((e) => (e.data as { total_win: number }).total_win)).toEqual([0, 2, 5, 0]);
+    // Per-spin wins in spin.total_win: trigger 0, fs 2, fs 5, completing spin's OWN win = total(7) − collected(7) = 0.
+    expect(events.map((e) => (e.spin as { total_win: number }).total_win)).toEqual([0, 2, 5, 0]);
 
     // payout = the session total (bet-multiplier) × 100.
     expect(payoutCents).toBe(700);
@@ -61,7 +58,7 @@ describe('runLuaRound', () => {
   it('scales per-spin win by the bet (win_x is a bet-multiplier)', () => {
     const engine = scriptedEngine([{ totalWin: 10, data: {}, session: null }]);
     const { payoutCents, events } = runLuaRound(engine, 'spin', 2); // bet 2 → win 10 ⇒ 5×
-    expect(events[0].win_x).toBe(5);
+    expect((events[0].spin as { total_win: number }).total_win).toBe(5);
     expect(payoutCents).toBe(500);
   });
 });
