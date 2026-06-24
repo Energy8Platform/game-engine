@@ -83,6 +83,9 @@ export function makeText(str: string, opts: TextOpts): Text {
       angle: Math.PI / 2,
     };
   }
+  // Trim to the ink bounds so vertical centring centres the visible glyphs, not the line box
+  // (Pixi Text height includes ascent/descent leading → centred text otherwise sits high).
+  style.trim = true;
   const t = new Text({
     text: opts.upper ? str.toUpperCase() : str,
     style,

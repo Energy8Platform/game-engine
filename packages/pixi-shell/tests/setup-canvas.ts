@@ -39,7 +39,9 @@ function makeCtx(canvas: unknown): unknown {
         return (a: number, b: number, w?: number, h?: number) => {
           const ww = (w ?? a) | 0;
           const hh = (h ?? b) | 0;
-          return { data: new Uint8ClampedArray(Math.max(4, ww * hh * 4)), width: ww, height: hh };
+          // All-opaque so Pixi's TextStyle.trim finds the full bbox → no trimming under jsdom
+          // (real rasterization + trim happen in the browser).
+          return { data: new Uint8ClampedArray(Math.max(4, ww * hh * 4)).fill(255), width: ww, height: hh };
         };
       }
       if (prop === 'createLinearGradient' || prop === 'createRadialGradient' || prop === 'createPattern') {

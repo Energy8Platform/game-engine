@@ -58,6 +58,9 @@ function isSizable(n: unknown): n is Sizable {
   return !!n && typeof (n as Sizable).measureSize === 'function' && typeof (n as Sizable).setLayoutSize === 'function';
 }
 
+/** Zero offset for Sizable widgets, which own a 0,0,w,h box (no getLocalBounds adjustment). */
+const ORIGIN = { x: 0, y: 0 };
+
 /** Local bounds of a node, used when it isn't a Sizable. */
 function rawSize(node: Container): { w: number; h: number } {
   const b = node.getLocalBounds();
@@ -242,8 +245,11 @@ export class FlexBox extends Container implements Sizable {
       let crossPos = padCrossStart;
       if (a === 'center') crossPos += (innerCross - childCross) / 2;
       else if (a === 'end') crossPos += innerCross - childCross;
-      // Offset by the node's local-bounds origin so visible content lands on the slot.
-      const b = e.node.getLocalBounds();
+      // For raw content (Text/Graphics/icon) whose visible bounds don't start at (0,0), offset so
+      // the content lands on the slot. Sizable widgets define their own 0,0,w,h box (their glyph is
+      // already centred inside it), so offsetting by getLocalBounds would double-count and shift
+      // them (icons drifted up). Position those by the box origin instead.
+      const b = isSizable(e.node) ? ORIGIN : e.node.getLocalBounds();
       if (horizontal) {
         e.node.position.set(cursor - b.x, crossPos - b.y);
       } else {

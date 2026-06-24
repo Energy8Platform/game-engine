@@ -11,12 +11,13 @@ export function createPixiShell(config: PixiShellConfig): PixiGameShell {
   return active;
 }
 
-/** Tear down the active Pixi shell (detaches listeners, removes its display objects). */
-export function removePixiShell(): void {
-  if (!active) return;
+/** Tear down the active Pixi shell (fade out, detach listeners, remove its display objects).
+ *  Resolves when removed — mirrors `removeGameShell`. */
+export function removePixiShell(): Promise<void> {
+  if (!active) return Promise.resolve();
   const shell = active;
   active = null;
-  shell.destroy();
+  return shell.destroy();
 }
 
 export { PixiGameShell };

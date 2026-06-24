@@ -49,9 +49,10 @@ function buildBody(host: ShellHost, width: number): Container {
 function versionFooter(host: ShellHost, width: number): FlexBox {
   const gameVersion = host.config.version ?? '1.0.0';
   const stamp = `${gameVersion}.${PACKAGE_VERSION.split('.').join('')}`;
-  const row = new FlexBox({ direction: 'row', justify: 'center', width, padding: { top: 4, bottom: 2 } });
-  const t = makeText(stamp, { size: 11, weight: '400', color: host.tokens.muted, letterSpacing: 0.88 });
-  t.alpha = 0.7;
+  const row = new FlexBox({ direction: 'row', justify: 'center', width, padding: { top: 6, bottom: 4 } });
+  // white-based muted (the overlay is always dark) so it's visible regardless of the dark/light
+  // scheme — the scheme-dependent `muted` is near-invisible on the dark overlay in light mode.
+  const t = makeText(stamp, { size: 11, weight: '600', color: host.tokens.plaqueLabel, letterSpacing: 0.88 });
   row.add(t);
   return row;
 }

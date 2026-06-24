@@ -360,29 +360,32 @@ export class BottomBar extends Container {
     const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
     const W = this.host.screenW - 24; // padding 0 12
 
-    // top: balance · win (glass)
+    // top: balance · win (glass). A replay is read-only → no balance (keyed on the sticky flag).
     const top = plaque(this.host, 'glass', {
       width: W,
       height: 46,
       justify: 'space-between',
       padding: { left: 16, right: 16 },
     });
-    const bal = plaqueReadout(this.host, 'Balance', this.host.fmt(state.balance));
-    this.balanceValue = bal.valueText;
-    top.add(bal);
+    if (!state.replay) {
+      const bal = plaqueReadout(this.host, 'Balance', this.host.fmt(state.balance));
+      this.balanceValue = bal.valueText;
+      top.add(bal);
+    }
     if (state.win > 0) {
       const win = new WinPillInline(this.host, this.host.t('Win'), this.host.fmtWin(state.win));
       this.winValue = win.value;
       top.add(win);
     }
 
-    // controls: menu · auto · spin · fs · totalwin · turbo · buy (dark, white)
+    // controls: menu · auto · spin · fs · totalwin · turbo · buy (dark, white).
+    // No gap — the DOM .ge-m-controls is space-between only; a min-gap would inflate the natural
+    // width and trigger a false fit-scale (excess right padding on narrow phones).
     const controls = plaque(this.host, 'dark', {
       width: W,
       height: 62,
       justify: 'space-between',
       padding: { left: 18, right: 18 },
-      gap: 10,
     });
     const ctlItems: Container[] = [];
     ctlItems.push(

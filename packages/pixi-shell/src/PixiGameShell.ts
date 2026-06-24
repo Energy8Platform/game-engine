@@ -1,4 +1,4 @@
-import { Container, type Application, type Ticker } from 'pixi.js';
+import { BlurFilter, Container, RenderTexture, Sprite, type Application, type Ticker } from 'pixi.js';
 import { EventEmitter } from './EventEmitter';
 import type { ShellHost, ShellLayer, LayerHandle } from './context';
 import type {
@@ -18,7 +18,7 @@ import { resolveTheme, type ShellTokens } from './theme';
 import { formatCurrency } from './format';
 import { socialize } from './i18n';
 import { installShellFont, whenFontReady } from './text';
-import { countUpText } from './motion';
+import { countUpText, tween } from './motion';
 import { BottomBar } from './components/BottomBar';
 import { openSettings } from './components/Settings';
 import { openGameInfo } from './components/GameInfo';
@@ -139,6 +139,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
 
   pushLayer(node: ShellLayer): LayerHandle {
     this.clearLayer();
+    this.makeBackdrop(); // frosted snapshot of the scene behind (the DOM's backdrop-filter:blur)
     this.currentLayer = node;
     this.modalLayer.addChild(node);
     this.fitModals();
@@ -160,6 +161,41 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       this.modalLayer.removeChild(this.currentLayer);
       this.currentLayer.destroy({ children: true });
       this.currentLayer = null;
+    }
+    this.removeBackdrop();
+  }
+
+  private backdrop?: { sprite: Sprite; texture: RenderTexture };
+
+  /** Snapshot the scene behind the modal layer and blur it — the Pixi analogue of the overlay's
+   *  `backdrop-filter: blur(20px)`. Static (captured at open time): the game is paused under a
+   *  modal, so a live re-blur each frame isn't worth the cost. */
+  private makeBackdrop(): void {
+    this.removeBackdrop();
+    const renderer = this.app.renderer;
+    const w = this.screenW;
+    const h = this.screenH;
+    if (w <= 0 || h <= 0) return;
+    try {
+      const texture = RenderTexture.create({ width: w, height: h, resolution: renderer.resolution });
+      this.modalLayer.visible = false; // never capture the (empty) modal layer / a stale backdrop
+      renderer.render({ container: this.app.stage, target: texture, clear: true });
+      this.modalLayer.visible = true;
+      const sprite = new Sprite(texture);
+      sprite.filters = [new BlurFilter({ strength: 18, quality: 4 })];
+      this.modalLayer.addChild(sprite); // below the layer node, which is added next
+      this.backdrop = { sprite, texture };
+    } catch {
+      this.modalLayer.visible = true; // headless / no GL → skip the blur, the veil tint still shows
+    }
+  }
+
+  private removeBackdrop(): void {
+    if (this.backdrop) {
+      this.modalLayer.removeChild(this.backdrop.sprite);
+      this.backdrop.sprite.destroy();
+      this.backdrop.texture.destroy(true);
+      this.backdrop = undefined;
     }
   }
 
@@ -276,11 +312,23 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.render();
   }
 
+  /** Force the bar layout (wide/mobile). Normally derived from the renderer size on resize; this
+   *  is the manual override (mirrors GameShell.setLayout). It is re-derived on the next resize. */
+  setLayout(layout: 'wide' | 'mobile'): void {
+    if (layout === this.layout) return;
+    this.layout = layout;
+    this.render();
+  }
+
   // ── layout / input ────────────────────────────────────────────────────────────
   private onResize = (): void => {
     this.syncLayout();
     this.render();
-    this.currentLayer?.resize?.(this.screenW, this.screenH);
+    if (this.currentLayer) {
+      this.currentLayer.resize?.(this.screenW, this.screenH);
+      this.makeBackdrop(); // re-snapshot at the new size
+      if (this.backdrop) this.modalLayer.setChildIndex(this.backdrop.sprite, 0); // keep it below the layer
+    }
   };
 
   private syncLayout(): void {
@@ -310,8 +358,9 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.emit('spin');
   };
 
-  destroy(): void {
-    if (this.destroyed) return;
+  /** Fade out (≈250ms, like GameShell's REMOVE_FADE_MS) then tear down; resolves when removed. */
+  destroy(): Promise<void> {
+    if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
     this.app.renderer.off('resize', this.onResize);
     if (this.keysBound && typeof document !== 'undefined') {
@@ -322,6 +371,18 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.cancelMoneyAnims();
     this.removeAllListeners();
     this.clearLayer();
-    this.root.destroy({ children: true });
+    this.root.eventMode = 'none';
+    return new Promise<void>((resolve) => {
+      tween(this.ticker, {
+        duration: 250,
+        onUpdate: (p) => {
+          this.root.alpha = 1 - p;
+        },
+        onComplete: () => {
+          this.root.destroy({ children: true });
+          resolve();
+        },
+      });
+    });
   }
 }
