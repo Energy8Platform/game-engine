@@ -780,9 +780,12 @@ export class StakeBridge {
     }
 
     void (async () => {
+      // Set the guard flag BEFORE the first await so a duplicate ACK that
+      // arrives while endRound() is in flight hits the entry guard and
+      // returns without issuing a second /wallet/end-round call.
+      round.endRoundCalled = true;
       try {
         const er = await this.rgs.endRound();
-        round.endRoundCalled = true;
         round.rgsActive = false;
         this.balance = fromMinor(er.balance.amount);
         this.startBalancePolling();
@@ -792,6 +795,9 @@ export class StakeBridge {
           balance: this.balance,
         });
       } catch (err) {
+        // Reset the flag so a genuine retry (next PLAY_RESULT_ACK from the
+        // game) can re-enter settleRound and attempt /wallet/end-round again.
+        round.endRoundCalled = false;
         // Keep the round in place so the game can retry the settlement.
         this.bridge.send<PlayErrorPayload>('PLAY_ERROR', {
           code: this.errCode(err),

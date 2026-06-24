@@ -217,4 +217,112 @@ describe('StakeBridge settlement timing (after-ack + payout>0)', () => {
     expect(rgs.play).toHaveBeenCalledTimes(2);
     expect(rgs.endRound).not.toHaveBeenCalled();
   });
+
+  it('duplicate PLAY_RESULT_ACK for the same winning round calls end-round exactly ONCE', async () => {
+    // Arrange: a winning round where endRound resolves after a delay so the
+    // second ACK arrives while the first endRound() is still in flight.
+    rgs.play.mockResolvedValue({
+      balance: { amount: 99 * MILLION, currency: 'USD' },
+      round: {
+        betID: 3,
+        payoutMultiplier: 5,
+        costMultiplier: 1,
+        active: true,
+        mode: 'BASE',
+        state: { events: ['win'] },
+      },
+    });
+
+    let resolveEndRound!: (v: { balance: { amount: number; currency: string } }) => void;
+    rgs.endRound.mockReturnValue(
+      new Promise<{ balance: { amount: number; currency: string } }>((res) => {
+        resolveEndRound = res;
+      }),
+    );
+
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+
+    const result = received.find((m) => m.type === 'PLAY_RESULT')!
+      .payload as { roundId: string };
+
+    // First ACK — kicks off endRound() but it is still pending.
+    channel.sendToHost('PLAY_RESULT_ACK', {
+      roundId: result.roundId,
+      action: 'spin',
+      totalWin: 5,
+      balanceAfter: 99,
+    });
+    await flush();
+
+    // Second ACK (duplicate / retry) — must be swallowed by the entry guard.
+    channel.sendToHost('PLAY_RESULT_ACK', {
+      roundId: result.roundId,
+      action: 'spin',
+      totalWin: 5,
+      balanceAfter: 99,
+    });
+    await flush();
+
+    // Resolve the pending endRound to let the async path finish.
+    resolveEndRound({ balance: { amount: 104 * MILLION, currency: 'USD' } });
+    await flush();
+
+    // Despite two ACKs, /wallet/end-round must be called exactly once.
+    expect(rgs.endRound).toHaveBeenCalledTimes(1);
+    const balances = received.filter((m) => m.type === 'BALANCE_UPDATE');
+    const last = balances[balances.length - 1].payload as { balance: number };
+    expect(last.balance).toBe(104);
+  });
+
+  it('a failing endRound resets the guard so a later ACK can retry settlement', async () => {
+    rgs.play.mockResolvedValue({
+      balance: { amount: 99 * MILLION, currency: 'USD' },
+      round: {
+        betID: 4,
+        payoutMultiplier: 3,
+        costMultiplier: 1,
+        active: true,
+        mode: 'BASE',
+        state: { events: ['win'] },
+      },
+    });
+
+    // First call rejects; second call succeeds.
+    rgs.endRound
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({ balance: { amount: 102 * MILLION, currency: 'USD' } });
+
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+
+    const result = received.find((m) => m.type === 'PLAY_RESULT')!
+      .payload as { roundId: string };
+
+    // First ACK — endRound fails; bridge emits PLAY_ERROR and resets flag.
+    channel.sendToHost('PLAY_RESULT_ACK', {
+      roundId: result.roundId,
+      action: 'spin',
+      totalWin: 3,
+      balanceAfter: 99,
+    });
+    await flush();
+
+    const errors = received.filter((m) => m.type === 'PLAY_ERROR');
+    expect(errors).toHaveLength(1);
+
+    // Retry ACK — flag was reset, so endRound is called again and succeeds.
+    channel.sendToHost('PLAY_RESULT_ACK', {
+      roundId: result.roundId,
+      action: 'spin',
+      totalWin: 3,
+      balanceAfter: 99,
+    });
+    await flush();
+
+    expect(rgs.endRound).toHaveBeenCalledTimes(2);
+    const balances = received.filter((m) => m.type === 'BALANCE_UPDATE');
+    const last = balances[balances.length - 1].payload as { balance: number };
+    expect(last.balance).toBe(102);
+  });
 });
