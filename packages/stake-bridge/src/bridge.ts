@@ -114,10 +114,14 @@ export class StakeBridge {
   /** Whether we were launched as a historical replay (`?replay=true&...`). */
   private readonly _isReplay: boolean;
   /**
-   * Cached replay book — fetched from `/bet/replay/...` on the first
-   * play request and re-served on subsequent "Play Again" calls.
+   * Cached replay book — fetched from `/bet/replay/...` up front during boot
+   * (per Stake rules) and re-served on every "Play Again" call.
    */
   private replayBook: RGSReplayResponse | null = null;
+  /** Replay round bet in MINOR units (from the fetched round, else the URL amount). */
+  private replayAmountMinor = 0;
+  /** Replay round payout multiplier (×bet), surfaced for the replay modal. */
+  private replayPayout = 0;
 
   /** Resolves once boot (live `Authenticate` or replay synthesis) has completed. */
   private bootPromise: Promise<RGSAuthenticateResponse> | null = null;
@@ -194,6 +198,18 @@ export class StakeBridge {
    */
   get replayMode(): string | undefined {
     return this.url.replay?.mode;
+  }
+
+  /** Replay round bet in MAJOR units (from the fetched round, else the URL amount). 0 if not a
+   *  replay launch. Available after `ready()`. */
+  get replayBet(): number {
+    return this._isReplay ? fromMinor(this.replayAmountMinor) : 0;
+  }
+
+  /** Replay round payout multiplier (×bet) from the fetched round; 0 if not replay / unknown.
+   *  Available after `ready()`. */
+  get replayPayoutMultiplier(): number {
+    return this._isReplay ? this.replayPayout : 0;
   }
 
   /** Tear down. Cancels the balance poll, removes listeners. */
@@ -278,6 +294,29 @@ export class StakeBridge {
     this.balance = 0;
     this.currency = r.currency;
 
+    // Per Stake rules, a replay launch REQUESTS the round up front via
+    // GET /bet/replay/{game}/{version}/{mode}/{event} — not lazily on the first
+    // spin. Cache it so startReplayRound re-serves the same book without a second
+    // fetch, and so config/modal can reflect the round's own bet + payout.
+    try {
+      this.replayBook = await this.rgs.replay({
+        game: r.game,
+        version: r.version,
+        mode: r.mode,
+        event: r.event,
+      });
+    } catch (err) {
+      this.log(`replay round fetch failed during boot: ${err}`);
+      this.replayBook = null;
+    }
+
+    // The fetched round's own amount (minor) wins over the URL amount when present;
+    // payoutMultiplier feeds the replay modal.
+    this.replayAmountMinor =
+      (this.replayBook as { amount?: number } | null)?.amount ?? r.amount;
+    this.replayPayout =
+      (this.replayBook as { payoutMultiplier?: number } | null)?.payoutMultiplier ?? 0;
+
     // Synthesize an authData-shaped object so `buildGameConfig`, the
     // validateBet code path, and any other consumer keep working.
     const synth: RGSAuthenticateResponse = {
@@ -285,18 +324,18 @@ export class StakeBridge {
       round: null,
       config: {
         gameID: this.gameId || r.game,
-        minBet: r.amount,
-        maxBet: r.amount,
-        stepBet: r.amount,
-        defaultBetLevel: r.amount,
-        betLevels: [r.amount],
+        minBet: this.replayAmountMinor,
+        maxBet: this.replayAmountMinor,
+        stepBet: this.replayAmountMinor,
+        defaultBetLevel: this.replayAmountMinor,
+        betLevels: [this.replayAmountMinor],
         betModes: { [r.mode]: {} },
         jurisdiction: undefined,
       },
     };
     this.authData = synth;
     this.log(
-      `replay boot: game=${r.game} version=${r.version} mode=${r.mode} event=${r.event} amount=${r.amount} currency=${r.currency}`,
+      `replay boot: game=${r.game} version=${r.version} mode=${r.mode} event=${r.event} amount=${this.replayAmountMinor} payout=${this.replayPayout} currency=${r.currency}`,
     );
     return synth;
   }
@@ -566,6 +605,7 @@ export class StakeBridge {
   ): Promise<void> {
     const r = this.url.replay!;
 
+    // Normally pre-fetched in bootReplay (per Stake rules). Re-fetch only if that failed.
     if (!this.replayBook) {
       this.replayBook = await this.rgs.replay({
         game: r.game,
@@ -573,21 +613,24 @@ export class StakeBridge {
         mode: r.mode,
         event: r.event,
       });
+      this.replayAmountMinor =
+        (this.replayBook as { amount?: number }).amount ?? r.amount;
+      this.replayPayout =
+        (this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0;
     }
 
     // The replay endpoint may return the book directly, or wrap it in
     // `state` (matching the `/wallet/play` round shape). Accept both.
     const bookData =
       (this.replayBook as { state?: unknown }).state ?? this.replayBook;
-    const payoutMultiplier =
-      (this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0;
+    const payoutMultiplier = this.replayPayout;
     const costMultiplier =
       (this.replayBook as { costMultiplier?: number }).costMultiplier ?? 1;
 
     const ctx: RoundContext = {
       mode: r.mode,
       triggerAction: payload.action,
-      betAmount: fromMinor(r.amount),
+      betAmount: fromMinor(this.replayAmountMinor),
       payoutMultiplier,
       currency: r.currency,
       roundId: r.event,
@@ -603,7 +646,7 @@ export class StakeBridge {
       betID: 0,
       mode: r.mode,
       triggerAction: payload.action,
-      betAmount: fromMinor(r.amount),
+      betAmount: fromMinor(this.replayAmountMinor),
       payoutMultiplier,
       costMultiplier,
       // Replay rounds never need EndRound — they're not real bets.

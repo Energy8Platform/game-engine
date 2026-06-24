@@ -26,7 +26,7 @@ describe('genMainTs', () => {
     const m = genMainTs(a);
     expect(m).toContain('createSlotGame');
     expect(m).toContain('shell: {}');
-    expect(m).toContain("startScene: 'intro'");
+    expect(m).toContain("{ key: 'intro', scene: IntroScene, skipOnReplay: true }");
     expect(m).not.toContain('buyBonus');     // derived from spec now
     expect(m).not.toContain("symbol: '€'");  // currency from initData now
   });

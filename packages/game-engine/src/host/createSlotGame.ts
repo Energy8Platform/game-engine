@@ -85,8 +85,13 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     void game.scenes.goto(key, { ...(data as object), goto });
   };
 
+  // Pick the start scene from the ordered list + launch mode: a replay launch skips any leading
+  // `skipOnReplay` scene (the intro) and starts directly on the game scene.
+  const { resolveStartScene } = await import('./sceneStart');
+  const startScene = resolveStartScene(opts.scenes, !!stakeBridge?.isReplay, opts.startScene);
+
   try {
-    await game.start(opts.startScene, { ...(opts.startData as object), goto });
+    await game.start(startScene, { ...(opts.startData as object), goto });
   } catch (err) {
     fatal('Could not start the game.');
     throw err;
@@ -218,10 +223,17 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     } else {
       const stakeMode = stakeBridge?.replayMode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);
+      // The replayed round's OWN bet + payout (fetched up front per Stake rules), not the spec's
+      // default bet — otherwise the replay modal always shows bet 1.
+      const replayBet = stakeBridge?.replayBet || currentBet;
+      currentBet = replayBet;
+      gameScene()?.setBet?.(replayBet);
       // onReplay only spins — the shell reopens the modal after it resolves; never call openReplay inside onReplay (double-open).
       shell.openReplay({
-        bonusId, bet: currentBet, payoutMultiplier: 0,
-        onReplay: () => gameScene()?.spin?.(currentBet),
+        bonusId,
+        bet: replayBet,
+        payoutMultiplier: stakeBridge?.replayPayoutMultiplier ?? 0,
+        onReplay: () => gameScene()?.spin?.(replayBet),
       });
     }
   }

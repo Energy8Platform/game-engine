@@ -60,7 +60,7 @@ export interface LaunchOpts {
  * Build the iframe query string (with leading '?') the inner game launches with.
  *
  * Normal:  ?rgs_url&sessionID=dev&currency&social&lang&device
- * Replay:  ?replay=true&game&version&mode&event&amount&rgs_url
+ * Replay:  ?replay=true&game&version&mode&event&amount&currency&social&lang&rgs_url
  *
  * Uses `URLSearchParams` for correct percent-encoding.
  */
@@ -68,6 +68,8 @@ export function buildLaunchUrl(opts: LaunchOpts): string {
   const { rgsUrl, currency, social, lang = 'en', device = 'desktop', replay } = opts;
 
   if (replay) {
+    // currency/social/lang are valid replay params and the bridge reads `social` for socialMode —
+    // thread them so a replay honours the harness toggles instead of defaulting.
     const params = new URLSearchParams({
       replay: 'true',
       game: replay.game,
@@ -75,6 +77,9 @@ export function buildLaunchUrl(opts: LaunchOpts): string {
       mode: replay.mode,
       event: String(replay.event),
       amount: String(replay.amount),
+      currency,
+      social: String(social),
+      lang,
       rgs_url: rgsUrl,
     });
     return `?${params.toString()}`;

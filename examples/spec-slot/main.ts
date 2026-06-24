@@ -11,10 +11,9 @@ createSlotGame({
   model,
   normalize,
   scenes: [
-    { key: 'intro', scene: IntroScene },
+    { key: 'intro', scene: IntroScene, skipOnReplay: true },
     { key: 'game', scene: GameScene },
   ],
-  startScene: 'intro',
   manifest: { bundles: [] },
   design: { width: 1920, height: 1080 },
   scaleMode: ScaleMode.FILL,

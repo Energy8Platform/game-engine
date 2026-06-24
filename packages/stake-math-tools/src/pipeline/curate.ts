@@ -59,11 +59,8 @@ export function roundToRow(line: string, sim: number, capMaxWin: number): Lookup
   return { sim, weight: 1, payoutCents };
 }
 
-/** Stream the raw pool dump into a 1-weight LUT. */
+/** Stream the raw pool dump (`books_<MODE>.jsonl`) into a 1-weight LUT. */
 async function readPoolDump(path: string, capMaxWin: number): Promise<LookupRow[]> {
-  if (!existsSync(path)) {
-    throw new Error(`pool dump not found: ${path} — run \`e8-math pool\` (or \`all\`) first`);
-  }
   const rows: LookupRow[] = [];
   let sim = 0;
   const rl = createInterface({ input: createReadStream(path, { encoding: 'utf-8' }) });
@@ -72,6 +69,35 @@ async function readPoolDump(path: string, capMaxWin: number): Promise<LookupRow[
     if (row) { rows.push(row); sim++; }
   }
   return rows;
+}
+
+/** Stream a pre-built pool lookUpTable (`sim,weight,payoutCents`) into LookupRows. Line-at-a-time
+ *  so a multi-million-row CSV never lands in memory as one giant string. */
+async function readPoolLut(path: string): Promise<LookupRow[]> {
+  const rows: LookupRow[] = [];
+  const rl = createInterface({ input: createReadStream(path, { encoding: 'utf-8' }) });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    const [sim, weight, payoutCents] = line.split(',').map(Number);
+    rows.push({ sim, weight, payoutCents });
+  }
+  return rows;
+}
+
+/**
+ * Read the source rows for one mode from the pool. Prefers the pre-built
+ * `lookUpTable_<MODE>_0.csv` (written by `finalizePool` — small + fast, no need
+ * to touch the multi-GB books); falls back to the raw `books_<MODE>.jsonl`
+ * dump when no LUT is present (e.g. a bare `runSim --dump` without finalize).
+ */
+async function readPoolRows(poolDir: string, mode: string, capMaxWin: number): Promise<LookupRow[]> {
+  const lutPath = join(poolDir, `lookUpTable_${mode}_0.csv`);
+  if (existsSync(lutPath)) return readPoolLut(lutPath);
+  const rawPath = join(poolDir, `books_${mode}.jsonl`);
+  if (existsSync(rawPath)) return readPoolDump(rawPath, capMaxWin);
+  throw new Error(
+    `pool not found for ${mode}: expected lookUpTable_${mode}_0.csv or books_${mode}.jsonl in ${poolDir} — run \`e8-math pool\` (or \`all\`) first`,
+  );
 }
 
 /**
@@ -166,8 +192,7 @@ function upsertIndex(outDir: string, mode: string, cost: number): void {
  */
 export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promise<OptimizeResult> {
   mkdirSync(opts.outDir, { recursive: true });
-  const dumpPath = join(opts.poolDir, `books_${mode.mode}.jsonl`);
-  const rawRows = await readPoolDump(dumpPath, mode.curate.capMaxWin);
+  const rawRows = await readPoolRows(opts.poolDir, mode.mode, mode.curate.capMaxWin);
 
   const params = resolveOptimizeParams(mode.curate, rawRows);
   const result = optimizeLookupTable(rawRows, params);

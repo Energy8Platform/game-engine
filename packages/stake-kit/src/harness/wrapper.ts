@@ -108,6 +108,8 @@ function screenPreset(name) {
 function buildLaunchUrl(opts) {
   const { rgsUrl, currency, social, lang = 'en', device = 'desktop', replay } = opts;
   if (replay) {
+    // Thread currency/social/lang into the replay launch too — Stake's replay params accept them
+    // and the bridge reads social for socialMode, so a replay must honour the harness toggle.
     const p = new URLSearchParams({
       replay: 'true',
       game: replay.game,
@@ -115,6 +117,9 @@ function buildLaunchUrl(opts) {
       mode: replay.mode,
       event: String(replay.event),
       amount: String(replay.amount),
+      currency,
+      social: String(social),
+      lang,
       rgs_url: rgsUrl,
     });
     return '?' + p.toString();

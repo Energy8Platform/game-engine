@@ -4,6 +4,7 @@ import { loadMathConfig } from './pipeline/config';
 import { resolveModes } from './mathConfig';
 import { runSim } from './pipeline/sim';
 import { curateMode } from './pipeline/curate';
+import { finalizePool } from './pipeline/pool';
 import { formatGoReport, formatCurateReport } from './pipeline/report';
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -26,7 +27,13 @@ export async function runCli(argv: string[]): Promise<void> {
       const dump = cmd === 'pool' ? resolve(poolDir, `books_${m.mode}.jsonl`) : undefined;
       const out = await runSim(cfg, m, { dump });
       console.log(formatGoReport(m.mode, out));
-      if (dump) console.log(`  → ${dump}`);
+      if (dump) {
+        // Compress the raw dump → books_<MODE>.jsonl.zst (-19) + lookUpTable, so the pool
+        // is a compact Stake-style library instead of an 80–90 GB raw .jsonl.
+        const fin = await finalizePool(m, { poolDir, dumpPath: dump });
+        const books = fin.compressed ? `books_${m.mode}.jsonl.zst` : `books_${m.mode}.jsonl (raw — zstd absent)`;
+        console.log(`  → ${poolDir}/${books} + lookUpTable_${m.mode}_0.csv (${fin.rows} rows)`);
+      }
     }
     return;
   }
@@ -49,6 +56,11 @@ export async function runCli(argv: string[]): Promise<void> {
     const dump = resolve(poolDir, `books_${m.mode}.jsonl`);
     const go = await runSim(cfg, m, { dump });
     console.log(formatGoReport(m.mode, go));
+    // Compress + LUT the pool, then curate reads the LUT (no multi-GB decompress).
+    const fin = await finalizePool(m, { poolDir, dumpPath: dump });
+    if (!fin.compressed) {
+      process.stderr.write(`  [${m.mode}] pool kept raw (zstd absent)\n`);
+    }
     const result = await curateMode(m, { poolDir, outDir });
     console.log(formatCurateReport(m.mode, result));
   }

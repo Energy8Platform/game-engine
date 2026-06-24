@@ -129,6 +129,20 @@ describe('buildLaunchUrl — replay mode', () => {
     expect(params.get('rgs_url')).toBe('localhost:5173/__rgs');
   });
 
+  it('threads currency/social/lang into the replay launch (bridge reads social for socialMode)', () => {
+    const qs = buildLaunchUrl({
+      rgsUrl: 'localhost/__rgs',
+      currency: 'EUR',
+      social: true,
+      lang: 'de',
+      replay: { game: 'g', version: '1', mode: 'BASE', event: 3, amount: 200000 },
+    });
+    const params = new URLSearchParams(qs.slice(1));
+    expect(params.get('currency')).toBe('EUR');
+    expect(params.get('social')).toBe('true');
+    expect(params.get('lang')).toBe('de');
+  });
+
   it('does NOT include sessionID in replay mode', () => {
     const qs = buildLaunchUrl({
       rgsUrl: 'localhost/__rgs',

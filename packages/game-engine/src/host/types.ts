@@ -14,10 +14,15 @@ export interface StakeIntegration {
   adapter: BookAdapter | AdapterModule;
 }
 
-/** One scene registered with the host: a key + its constructor. */
+/** One scene registered with the host: a key + its constructor. The list order matters — the
+ *  first scene that is eligible for the current launch mode is the start scene (unless an explicit
+ *  `startScene` overrides it). */
 export interface SceneRegistration {
   key: string;
   scene: SceneConstructor;
+  /** Skip this scene as a START scene on a replay launch (e.g. an intro). It is still registered
+   *  (other scenes can `goto` it), it just isn't auto-started — the first non-skipped scene is. */
+  skipOnReplay?: boolean;
 }
 
 /** @deprecated alias kept for one release — use {@link SceneRegistration}. */
@@ -34,10 +39,13 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   model: GameModel;
   /** REQUIRED: maps the raw play result into the game's typed result. The host calls it on every play. */
   normalize: SlotResultNormalizer<T>;
-  /** ALL scenes the game uses, registered up front. */
+  /** ALL scenes the game uses, registered up front, in order. The first scene eligible for the
+   *  launch mode is the start scene — so a replay launch skips any leading `skipOnReplay` scene
+   *  (e.g. the intro) and starts directly on the game scene. */
   scenes: SceneRegistration[];
-  /** Key (from `scenes`) of the scene to start first. */
-  startScene: string;
+  /** Optional explicit start scene key. Defaults to the first scene eligible for the launch mode
+   *  (honoured only when that scene is itself eligible; otherwise the first eligible one wins). */
+  startScene?: string;
   /** Start data passed to the start scene's `onEnter` (merged with the injected `goto`). */
   startData?: unknown;
   manifest: AssetManifest;
