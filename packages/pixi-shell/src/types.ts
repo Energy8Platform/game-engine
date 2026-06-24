@@ -62,6 +62,9 @@ export interface PixiShellConfig {
   balance: number;
   win: number;
   mode: ShellMode;
+  /** Mark this shell as a read-only historical-round replay. A replay never shows the player's
+   *  balance. Defaults to `mode === 'replay'`; set explicitly when a replay starts in another mode. */
+  replay?: boolean;
   features: ShellFeatures;
   /** Override the BUY BONUS bar button's action: when set, tapping it calls this instead of
    *  opening the built-in buy-bonus overlay. */

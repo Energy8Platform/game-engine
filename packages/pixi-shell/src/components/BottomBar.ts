@@ -89,26 +89,34 @@ export class BottomBar extends Container {
     const isFS = state.mode === 'freeSpins';
     const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
 
-    // LEFT cluster: [menu] (buy) [balance] [FS] [Total win]
+    // LEFT cluster: [menu] (buy) [balance] [FS] [Total win]. A replay is read-only — there's no
+    // real balance, so it's hidden (keyed on the sticky `replay` flag, not `mode`).
+    const OVERLAP = 16; // .ge-shell-buybonus margin:0 -16px
+    const buy = isBase ? this.buildBuyBadge() : null;
+    const showBalance = !state.replay;
     const menu = new IconButton('menu', {
       color: '#ffffff',
       hover: tokens.accent,
       onTap: () => this.host.openMenu(),
     });
     const menuPlaque = plaque(this.host, 'dark', {
-      corners: [16, 0, 0, 16],
+      // connects to the balance when shown; rounds on both sides when the balance is hidden
+      corners: showBalance ? [16, 0, 0, 16] : [16, 16, 16, 16],
       padding: { left: 20, right: 20 },
     }).add(menu);
 
-    const balance = plaqueReadout(this.host, 'Balance', this.host.fmt(state.balance));
-    this.balanceValue = balance.valueText;
-    const balPlaque = plaque(this.host, 'glass', {
-      corners: [0, 16, 16, 0],
-      padding: { left: 24, right: 20 },
-      width: 240,
-    }).add(balance);
-
-    const leftItems: Container[] = [menuPlaque, balPlaque];
+    const items: { node: FlexBox; gap: number }[] = [];
+    if (showBalance) {
+      const balance = plaqueReadout(this.host, 'Balance', this.host.fmt(state.balance));
+      this.balanceValue = balance.valueText;
+      const balPlaque = plaque(this.host, 'glass', {
+        corners: [0, 16, 16, 0],
+        padding: { left: 24, right: 20 },
+        width: 240,
+      }).add(balance);
+      // the buy badge overlaps the menu↔balance seam, so the balance shifts right by buyW − 2·overlap
+      items.push({ node: balPlaque, gap: buy ? buyBadgeSize(this.host) - 2 * OVERLAP : 0 });
+    }
 
     if (showFsBlocks) {
       const fs = state.freeSpins;
@@ -119,14 +127,11 @@ export class BottomBar extends Container {
       const twPlaque = plaque(this.host, 'glass').add(
         plaqueReadout(this.host, 'Total win', this.host.fmtWin(fs.totalWin)),
       );
-      leftItems.push(fsPlaque, twPlaque);
+      items.push({ node: fsPlaque, gap: 8 }, { node: twPlaque, gap: 8 }); // .ge-pl-fs/totalwin margin-left:8
     }
 
-    // BUY BONUS badge overlaps the menu↔balance seam (z above both).
-    const buy = isBase ? this.buildBuyBadge() : null;
-
     const left = new Container();
-    this.layoutLeftCluster(left, menuPlaque, buy, balPlaque, leftItems.slice(2));
+    this.layoutLeftCluster(left, menuPlaque, buy, items);
     this.leftZone = left;
 
     // RIGHT cluster: [bet | divider | auto SPIN turbo]
@@ -143,32 +148,28 @@ export class BottomBar extends Container {
     this.applyBusy();
   }
 
-  /** Lay out [menu](buy)[balance][fs…] with the buy badge overlapping the menu/balance seam. */
+  /** Lay out [menu](buy)[items…] in flow; each item carries its own left gap. The buy badge (when
+   *  present) overlaps the menu↔first-item seam and renders on top. */
   private layoutLeftCluster(
     host: Container,
     menuPlaque: FlexBox,
     buy: BuyBonusBadge | null,
-    balPlaque: FlexBox,
-    rest: Container[],
+    items: { node: FlexBox; gap: number }[],
   ): void {
     const OVERLAP = 16; // .ge-shell-buybonus margin:0 -16px
     // measure the plaques (FlexBox.outerWidth is only valid after layout()).
     menuPlaque.layout();
-    balPlaque.layout();
-    for (const r of rest) (r as FlexBox).layout();
-    let x = 0;
-    menuPlaque.position.set(x, 0);
-    x += menuPlaque.outerWidth;
-    let balX = x;
-    if (buy) balX = x - OVERLAP + buyBadgeSize(this.host) - OVERLAP;
-    balPlaque.position.set(balX, 0);
-    x = balX + balPlaque.outerWidth;
-    for (const r of rest) {
-      x += 8; // .ge-pl-fs / .ge-pl-totalwin margin-left:8
-      (r as FlexBox).position.set(x, 0);
-      x += (r as FlexBox).outerWidth;
+    for (const it of items) it.node.layout();
+    menuPlaque.position.set(0, 0);
+    let x = menuPlaque.outerWidth;
+    const nodes: Container[] = [menuPlaque];
+    for (const it of items) {
+      x += it.gap;
+      it.node.position.set(x, 0);
+      x += it.node.outerWidth;
+      nodes.push(it.node);
     }
-    host.addChild(menuPlaque, balPlaque, ...rest);
+    host.addChild(...nodes);
     if (buy) {
       buy.position.set(menuPlaque.outerWidth - OVERLAP, (PLAQUE_H - buyBadgeSize(this.host)) / 2);
       host.addChild(buy); // last → renders on top (z-index:3)
@@ -525,38 +526,48 @@ export class BottomBar extends Container {
     const H = this.host.screenH;
     const padX = 18;
     const padBottom = 14;
+    const GAP = 14; // .ge-shell-bottom { gap:14px } between zones
     const centerY = H - padBottom - 86 / 2; // tallest element (SPIN disc) bottom-anchored
+    const winCenterY = centerY - PLAQUE_H / 2;
+    const plaqueTop = centerY - PLAQUE_H / 2;
     this.inner.scale.set(1);
     this.inner.position.set(0, 0);
 
-    // place zones at edges, vertically centred on the plaque row (56) which sits on centerY
-    const plaqueTop = centerY - PLAQUE_H / 2;
-    if (this.leftZone) this.leftZone.position.set(padX, plaqueTop);
-    if (this.rightZone) this.rightZone.position.set(W - padX - this.rightW, plaqueTop);
-
-    const leftRight = padX + this.leftW + this.rightW + padX;
     const winW = this.winPill ? this.winPill.outerWidth : 0;
-    const inlineNeed = leftRight + (winW ? winW + 28 : 0);
+    // The WIN pill stays inline between the zones only while the whole row (incl. the pill) fits;
+    // otherwise it lifts onto its own line above the bar (matching the DOM fit behaviour).
+    const naturalInline = padX + this.leftW + GAP + (winW ? winW + GAP : 0) + this.rightW + padX;
+    const winInline = !!this.winPill && naturalInline <= W;
+    // Row natural width with the pill counted only when it sits inline.
+    const rowNatural = padX + this.leftW + GAP + (winInline ? winW + GAP : 0) + this.rightW + padX;
+    const overflow = rowNatural > W;
 
-    if (this.winPill) {
-      if (inlineNeed <= W) {
-        // inline, centred between the zones
+    if (this.leftZone) this.leftZone.position.set(padX, plaqueTop);
+
+    if (overflow) {
+      // pack zones in flow (left · win? · right), then scale the row to fit, bottom-centre anchored
+      let x = padX + this.leftW + GAP;
+      if (winInline && this.winPill) {
         this.winPill.setLifted(false);
-        this.winPill.position.set((W - this.winPill.outerWidth) / 2, centerY - PLAQUE_H / 2);
-      } else {
-        // lift above the bar
-        this.winPill.setLifted(true);
-        this.winPill.position.set((W - this.winPill.outerWidth) / 2, plaqueTop - this.winPill.outerHeight - 8);
+        this.winPill.position.set(x, winCenterY);
+        x += winW + GAP;
       }
-    }
-
-    // still too wide → scale the whole bar down, anchored bottom-centre
-    if (leftRight > W) {
-      const s = W / leftRight;
+      if (this.rightZone) this.rightZone.position.set(x, plaqueTop);
+      if (this.winPill && !winInline) {
+        this.winPill.setLifted(true);
+        this.winPill.position.set((rowNatural - this.winPill.outerWidth) / 2, plaqueTop - this.winPill.outerHeight - 8);
+      }
+      const s = W / rowNatural;
       this.inner.scale.set(s);
-      this.inner.position.set((W - leftRight * s) / 2 - 0, H - (H - 0) * 0); // keep left origin; shift handled below
-      // re-anchor: scale around bottom-centre
-      this.inner.position.set((W * (1 - s)) / 2, (H - padBottom) * (1 - s));
+      this.inner.position.set((W - rowNatural * s) / 2, (H - padBottom) * (1 - s));
+    } else {
+      // fits → space-between: left flush-left, right flush-right, win centred (inline or lifted)
+      if (this.rightZone) this.rightZone.position.set(W - padX - this.rightW, plaqueTop);
+      if (this.winPill) {
+        this.winPill.setLifted(!winInline);
+        const y = winInline ? winCenterY : plaqueTop - this.winPill.outerHeight - 8;
+        this.winPill.position.set((W - winW) / 2, y);
+      }
     }
   }
 

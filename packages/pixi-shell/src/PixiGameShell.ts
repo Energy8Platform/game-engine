@@ -224,6 +224,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.render();
   }
   setMode(mode: ShellMode): void {
+    if (mode === 'replay') this.state.replay = true; // sticky: a replay stays a replay across modes
     this.state.mode = mode;
     this.render();
   }

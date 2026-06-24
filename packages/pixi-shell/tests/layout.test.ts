@@ -175,6 +175,34 @@ describe('BottomBar — fits the screen across presets', () => {
     expect(narrowScale).toBeGreaterThan(0.2); // but not collapsed
   });
 
+  it('free-spins / replay zones never overlap (left cluster vs right cluster)', () => {
+    // Regression: the FS left cluster (balance + FS counter + total win) collided with the right
+    // cluster because the right zone was pinned to the screen edge instead of packed in flow.
+    for (const [mode, w] of [['freeSpins', 800], ['freeSpins', 560], ['replay', 800]] as const) {
+      const host = makeHost({ screenW: w, screenH: 450 });
+      host.state.mode = mode;
+      if (mode === 'replay') host.state.replay = true;
+      host.state.freeSpins = { current: 3, total: 10, totalWin: 42 };
+      const bar = new BottomBar(host);
+      bar.applyFit();
+      const zones = bar as unknown as { leftZone?: Container; rightZone?: Container };
+      if (zones.leftZone && zones.rightZone) {
+        const l = zones.leftZone.getBounds();
+        const r = zones.rightZone.getBounds();
+        // left cluster's right edge must not cross the right cluster's left edge
+        expect(l.x + l.width, `${mode}@${w}: left/right overlap`).toBeLessThanOrEqual(r.x + 1);
+      }
+    }
+  });
+
+  it('replay hides the balance readout', () => {
+    const host = makeHost({ screenW: 1200, screenH: 675 });
+    host.state.replay = true;
+    const bar = new BottomBar(host);
+    bar.applyFit();
+    expect((bar as unknown as { balanceValue?: unknown }).balanceValue).toBeUndefined();
+  });
+
   it('mobile stack scales to fit a narrow phone', () => {
     const host = makeHost({ screenW: 320, screenH: 568, layout: 'mobile' });
     const bar = new BottomBar(host);
