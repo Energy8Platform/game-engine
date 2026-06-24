@@ -77,11 +77,12 @@ function withDecimals(base: { symbol: string; position: 'left' | 'right' }, deci
 }
 
 export function resolveCurrency(meta?: CurrencyMeta | null, specCurrency?: string): CurrencyConfig {
-  if (meta?.symbol) {
-    return withDecimals({ symbol: meta.symbol, position: meta.symbolAfter ? 'right' : 'left' }, meta.decimals ?? 2);
-  }
-  if (specCurrency) return withDecimals({ symbol: specCurrency, position: 'left' }, 2);
-  return withDecimals({ symbol: '€', position: 'left' }, 2);
+  const hasMeta = !!(meta && meta.symbol);
+  // Single expression, no early-return branches (the bundler was treeshaking the meta branch away).
+  const symbol = hasMeta ? meta!.symbol : (specCurrency || '€');
+  const position: 'left' | 'right' = hasMeta && meta!.symbolAfter ? 'right' : 'left';
+  const decimals = hasMeta && typeof meta!.decimals === 'number' ? meta!.decimals : 2;
+  return withDecimals({ symbol, position }, decimals);
 }
 
 /** Total stake for an action = bet × the action's cost multiplier (1 for a base spin; e.g. 100 for

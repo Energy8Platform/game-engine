@@ -31,6 +31,7 @@ function createBundle(input, outputName, opts = {}) {
     {
       input,
       external,
+      treeshake: opts.treeshake ?? true,
       output: [
         {
           file: `dist/${outputName}.esm.js`,
@@ -81,6 +82,6 @@ export default defineConfig([
   ...createBundle('src/lua/index.ts', 'lua'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
   // host inlines dynamic imports: createSlotGame lazy-imports internal modules (./slotPlay, ./shellConfig, ./replay); without this Rollup splits them into chunks that conflict with output.file. External deps (platform-core/shell, stake-bridge) stay lazy.
-  ...createBundle('src/host/index.ts', 'host', { inlineDynamicImports: true }),
+  ...createBundle('src/host/index.ts', 'host', { inlineDynamicImports: true, treeshake: false }),
   ...createBundle('src/slot/index.ts', 'slot'),
 ]);

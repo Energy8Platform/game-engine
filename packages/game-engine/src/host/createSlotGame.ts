@@ -176,6 +176,17 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       social: config?.socialMode,
       disclaimerLines: config?.disclaimerLines,
     };
+    if (opts.dev) {
+      // Dev-only diagnostic. Logged as PLAIN STRINGS (not collapsed objects) so the values are
+      // readable in the console without expanding. If the shown symbol is a bare code ("EUR")
+      // instead of a glyph ("€"), paste this whole line.
+      const cc = config?.currency as { code?: string; symbol?: string } | undefined;
+      console.info(
+        `[e8] currency → bridge.code=${cc?.code ?? '∅'} bridge.symbol=${cc?.symbol ?? '∅'} ` +
+        `| spec=${opts.model.spec.currency ?? '∅'} ` +
+        `| RESOLVED.symbol=${runtime.currency?.symbol ?? '∅'} pos=${runtime.currency?.position ?? '∅'}`,
+      );
+    }
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
     // Track the live balance so the host can block a play it can't afford.
     let currentBalance = balance;
