@@ -2,7 +2,7 @@
 import { socialize } from '@energy8platform/platform-core/shell';
 import type {
   ShellConfig, ShellMode, CurrencyConfig, GameInfoContent, GameInfoSection, PaytableRow,
-  BonusOption, ShellFeatures,
+  BonusOption, ShellFeatures, GameMode,
 } from '@energy8platform/platform-core/shell';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { WinTier } from '../slot';
@@ -204,10 +204,36 @@ export function defaultGameInfo(model: GameModel, runtime: ShellRuntime): GameIn
   sections.push(winsSection(model));
   const pay = paytableSection(model);
   if (pay) sections.push(pay);
+  const modes = modesSection(model);
+  if (modes) sections.push(modes);
   sections.push({ type: 'controls' });
   const disclaimer = disclaimerSection(runtime.disclaimerLines);
   if (disclaimer) sections.push(disclaimer);
   return { sections };
+}
+
+/** Per-mode info table (BASE / ANTE / each buy tier) derived from the spec's modes — the SAME SSOT
+ *  (`model.mathModes` + `spec.actions`) that drives the buy cards and the math pipeline. Stake
+ *  compliance requires Cost / RTP / Max Win per mode; deriving it here means the author declares a
+ *  mode once (in game.spec) and the info table can't drift. `free` actions are excluded (mathModes
+ *  already drops them — free spins are part of a bonus, not a purchasable mode). */
+function modesSection(model: GameModel): GameInfoSection | null {
+  const modes = model.mathModes ?? [];
+  if (!modes.length) return null;
+  const rows: GameMode[] = modes.map((m) => {
+    const action = model.spec.actions[m.action];
+    const isBase = (action?.role ?? 'base') === 'base' || m.mode === 'BASE';
+    const row: GameMode = {
+      title: action?.title ?? (isBase ? 'Base game' : m.mode.replace(/_/g, ' ')),
+      maxWin: `${m.maxWin.toLocaleString('en-US')}×`,
+    };
+    // Cost is a bet-multiplier; a base spin (1×) reads as no premium, so only show it for buys/features.
+    if (m.costMultiplier && m.costMultiplier !== 1) row.price = `${m.costMultiplier}×`;
+    if (typeof m.rtp === 'number') row.rtp = Math.round(m.rtp * 1000) / 10; // 0.965 → 96.5 (%)
+    if (action?.description) row.description = action.description;
+    return row;
+  });
+  return { type: 'modes', title: 'MODES', modes: rows };
 }
 
 /** Identity key for merge. `wins` is keyed by `kind` (different mechanics coexist). `custom` has
@@ -267,6 +293,13 @@ function socializeSection(s: GameInfoSection): GameInfoSection {
         ? { ...r, symbol: { ...r.symbol, text: socialize(r.symbol.text) } }
         : r,
     );
+  }
+  if (next.type === 'modes' && Array.isArray((next as { modes?: GameMode[] }).modes)) {
+    (next as { modes: GameMode[] }).modes = (next as { modes: GameMode[] }).modes.map((m) => ({
+      ...m,
+      title: socialize(m.title),
+      ...(m.description ? { description: socialize(m.description) } : {}),
+    }));
   }
   return next;
 }

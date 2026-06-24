@@ -29,11 +29,16 @@ export const spec: GameSpec = {
   // All player-facing spec copy is socialized automatically in social mode — symbol names shown
   // in the paytable AND the action title/description below (e.g. 'BUY BONUS' -> 'GET BONUS',
   // 'Pay more...' -> 'Win more...'). Write normal casino wording here; it stays compliant in social.
+  //
+  // Modes are declared ONCE here. \`rtp\` (target RTP, 0..1) and \`maxWin\` (per-mode cap; defaults to
+  // the game-level maxWin) feed the Game Info per-mode table automatically. NOTE: these are the
+  // DECLARED/displayed values — the math pipeline's targets live in math.config.ts and may differ
+  // (e.g. while tuning). Keep the declared values honest against the published math.
   actions: {
-    spin: { role: 'base' },
-    ante: { role: 'feature', cost: 1.5, title: 'ANTE BET', description: 'Pay more for a boosted chance' },
+    spin: { role: 'base', rtp: 0.96 },
+    ante: { role: 'feature', cost: 1.5, rtp: 0.96, title: 'ANTE BET', description: 'Pay more for a boosted chance' },
     free_spin: { role: 'free' },
-    buy_bonus: { role: 'buy', cost: 100, title: 'BUY BONUS', description: 'Buy the feature', feature: { spins: 10 } },
+    buy_bonus: { role: 'buy', cost: 100, rtp: 0.96, maxWin: 5000, title: 'BUY BONUS', description: 'Buy the feature', feature: { spins: 10 } },
   },
 };
 

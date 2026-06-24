@@ -34,6 +34,37 @@ describe('toBonusOptions', () => {
   });
 });
 
+describe('Game Info modes section (derived from the spec — SSOT)', () => {
+  // A model carrying mathModes (what defineGame produces) with per-mode rtp/maxWin.
+  const m = {
+    ...model,
+    mathModes: [
+      { action: 'spin', mode: 'BASE', costMultiplier: 1, rtp: 0.965, maxWin: 5000 },
+      { action: 'ante', mode: 'ANTE', costMultiplier: 1.5, rtp: 0.965, maxWin: 5000 },
+      { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 100, rtp: 0.97, maxWin: 12000 },
+    ],
+  } as unknown as GameModel;
+
+  it('derives a per-mode table (cost/rtp/maxWin) from mathModes + spec titles', () => {
+    const sections = buildShellConfig({}, m, { balance: 0, mode: 'base' }).gameInfo.sections ?? [];
+    const modes = sections.find((s) => s.type === 'modes') as { modes: Array<{ title: string; price?: string; rtp?: number; maxWin?: string; description?: string }> } | undefined;
+    expect(modes).toBeDefined();
+    expect(modes!.modes).toEqual([
+      { title: 'Base game', maxWin: '5,000×', rtp: 96.5 },                                   // base: no price (1×)
+      { title: 'ANTE', maxWin: '5,000×', price: '1.5×', rtp: 96.5, description: 'boost' },
+      { title: 'BUY BONUS', maxWin: '12,000×', price: '100×', rtp: 97, description: 'buy spins' },
+    ]);
+  });
+
+  it('socializes the modes table titles/descriptions in social mode', () => {
+    const sections = buildShellConfig({}, m, { balance: 0, mode: 'base', social: true }).gameInfo.sections ?? [];
+    const modes = sections.find((s) => s.type === 'modes') as { modes: Array<{ title: string }> };
+    // 'BUY BONUS' → 'GET BONUS' (length-sorted phrase swap), as for the buy cards.
+    expect(modes.modes.some((r) => r.title === 'GET BONUS')).toBe(true);
+    expect(modes.modes.some((r) => r.title === 'BUY BONUS')).toBe(false);
+  });
+});
+
 describe('resolveCurrency (single source of truth — initData.config.currency)', () => {
   it('derives symbol + position from the CurrencyMetaData the bridge surfaces', () => {
     // symbolAfter:false → left; minDecimals = currency decimals, maxDecimals = up to 4 for wins.
