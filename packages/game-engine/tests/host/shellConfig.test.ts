@@ -1,8 +1,8 @@
 // packages/game-engine/tests/host/shellConfig.test.ts
 import { describe, it, expect } from 'vitest';
-import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction } from '../../src/host/shellConfig';
+import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction, applyJurisdiction } from '../../src/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
-import type { GameInfoContent, GameInfoSection } from '@energy8platform/platform-core/shell';
+import type { GameInfoContent, GameInfoSection, ShellFeatures } from '@energy8platform/platform-core/shell';
 
 const model = {
   spec: {
@@ -203,5 +203,43 @@ describe('defaultGameInfo', () => {
     const info = defaultGameInfo(model, { balance: 0, mode: 'base' });
     const pay = (info.sections ?? []).find((s) => s.type === 'paytable') as { rows: Array<{ symbol: { text?: string } }> };
     expect(pay.rows.map((r) => r.symbol.text)).toEqual(['CROWN', 'TEN']); // WILD has no pay → dropped
+  });
+});
+
+describe('applyJurisdiction (Stake jurisdiction → shell features)', () => {
+  const base = (): ShellFeatures => ({ turbo: 3, spacebar: true, autoplay: {}, buyBonus: [{ id: 'buy_bonus', type: 'bonus', title: 'BUY', description: '', priceMultiplier: 100 }] });
+
+  it('no jurisdiction → features untouched', () => {
+    const f = base(); applyJurisdiction(f, undefined);
+    expect(f).toEqual(base());
+  });
+
+  it('disabledTurbo forces turbo 0; disabledSuperTurbo caps at 1', () => {
+    const a = base(); applyJurisdiction(a, { disabledTurbo: true }); expect(a.turbo).toBe(0);
+    const b = base(); applyJurisdiction(b, { disabledSuperTurbo: true }); expect(b.turbo).toBe(1);
+    // disabledTurbo wins over disabledSuperTurbo
+    const c = base(); applyJurisdiction(c, { disabledTurbo: true, disabledSuperTurbo: true }); expect(c.turbo).toBe(0);
+    // basic turbo (level 1) is left alone by disabledSuperTurbo
+    const d: ShellFeatures = { ...base(), turbo: 1 }; applyJurisdiction(d, { disabledSuperTurbo: true }); expect(d.turbo).toBe(1);
+  });
+
+  it('disabledSpacebar/Autoplay/BuyFeature turn the controls off', () => {
+    const f = base();
+    applyJurisdiction(f, { disabledSpacebar: true, disabledAutoplay: true, disabledBuyFeature: true });
+    expect(f.spacebar).toBe(false);
+    expect(f.autoplay).toBeNull();
+    expect(f.buyBonus).toBe(false);
+  });
+
+  it('a jurisdiction restriction wins over the author features (via buildShellConfig)', () => {
+    const c = buildShellConfig(
+      { features: { turbo: 3, spacebar: true, autoplay: {}, buyBonus: [] } },
+      model,
+      { balance: 0, mode: 'base', jurisdiction: { disabledTurbo: true, disabledSpacebar: true, disabledAutoplay: true, disabledBuyFeature: true } },
+    );
+    expect(c.features.turbo).toBe(0);
+    expect(c.features.spacebar).toBe(false);
+    expect(c.features.autoplay).toBeNull();
+    expect(c.features.buyBonus).toBe(false);
   });
 });

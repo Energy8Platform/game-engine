@@ -144,6 +144,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         socialMode?: boolean;
         disclaimerLines?: string[];
         currency?: { code: string; symbol: string; decimals: number; symbolAfter?: boolean };
+        jurisdiction?: import('./shellConfig').JurisdictionRestrictions;
       };
       lang?: string;
     } | null;
@@ -168,6 +169,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       mode,
       social: config?.socialMode,
       disclaimerLines: config?.disclaimerLines,
+      jurisdiction: config?.jurisdiction,
     };
     if (opts.dev) {
       // Dev-only diagnostic. Logged as PLAIN STRINGS (not collapsed objects) so the values are

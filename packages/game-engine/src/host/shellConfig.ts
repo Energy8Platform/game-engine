@@ -50,6 +50,36 @@ export interface ShellRuntime {
   /** Stake-required disclaimer lines from initData (`config.disclaimerLines`); when
    *  absent (non-stake/dev) no disclaimer section is rendered. */
   disclaimerLines?: string[];
+  /** Jurisdiction flags from initData (`config.jurisdiction`). Restrict shell features — applied
+   *  OVER the author's features so a jurisdiction restriction always wins. */
+  jurisdiction?: JurisdictionRestrictions;
+}
+
+/** The subset of Stake's jurisdiction flags the shell can enforce via `ShellFeatures`. */
+export interface JurisdictionRestrictions {
+  /** No turbo at all → `features.turbo = 0`. */
+  disabledTurbo?: boolean;
+  /** Basic turbo allowed, but no super-turbo → cap `features.turbo` at 1. */
+  disabledSuperTurbo?: boolean;
+  /** No spacebar quick-spin → `features.spacebar = false`. */
+  disabledSpacebar?: boolean;
+  /** No autoplay → `features.autoplay = null`. */
+  disabledAutoplay?: boolean;
+  /** No buy-feature → `features.buyBonus = false`. */
+  disabledBuyFeature?: boolean;
+}
+
+/**
+ * Apply jurisdiction restrictions over the resolved shell features, in place. A restriction ALWAYS
+ * wins over the author's intent (a forbidden control must stay off even if the game enabled it).
+ */
+export function applyJurisdiction(features: ShellFeatures, j?: JurisdictionRestrictions): void {
+  if (!j) return;
+  if (j.disabledTurbo) features.turbo = 0;
+  else if (j.disabledSuperTurbo && features.turbo > 1) features.turbo = 1;
+  if (j.disabledSpacebar) features.spacebar = false;
+  if (j.disabledAutoplay) features.autoplay = null;
+  if (j.disabledBuyFeature) features.buyBonus = false;
 }
 
 /**
@@ -271,6 +301,15 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
   }
   // Buy-bonus cards: socialize the FINAL options (author override or spec-derived) in social mode.
   const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model), isSocial);
+  // Features: defaults, then author overrides, THEN jurisdiction restrictions (a restriction wins).
+  const features: ShellFeatures = {
+    turbo: 0,
+    spacebar: true,
+    autoplay: {},
+    buyBonus,
+    ...(opts.features ?? {}),
+  } as ShellFeatures;
+  applyJurisdiction(features, runtime.jurisdiction);
   return {
     mount: opts.mount ?? (typeof document !== 'undefined' ? document.body : (undefined as never)),
     language: runtime.language ?? 'en',
@@ -283,12 +322,6 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
     balance: runtime.balance,
     win: 0,
     mode: runtime.mode,
-    features: {
-      turbo: 0,
-      spacebar: true,
-      autoplay: {},
-      buyBonus,
-      ...(opts.features ?? {}),
-    } as ShellFeatures,
+    features,
   };
 }
