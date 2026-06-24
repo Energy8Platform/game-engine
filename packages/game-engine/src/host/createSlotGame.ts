@@ -102,38 +102,29 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   // Build slotPlay FIRST — bindGameScene() needs it to be in scope.
   const { createSlotPlay } = await import('./slotPlay');
 
-  /** The current scene IFF it implements the SlotSceneController contract (duck-typed
-   *  on `bindHost`). Host play/bet bind to whichever scene is current and controllable. */
+  /** The current scene IFF it implements the SlotSceneController contract (duck-typed on
+   *  `present`). The host drives the play loop against whichever scene is current. */
   const gameScene = () => {
     const s = game.scenes.current?.scene as
       | Partial<import('./sceneController').SlotSceneController<T>>
       | undefined;
-    return typeof s?.bindHost === 'function' ? s : undefined;
+    return typeof s?.present === 'function'
+      ? (s as import('./sceneController').SlotSceneController<T>)
+      : undefined;
   };
+
+  const { runRound } = await import('./runRound');
 
   // slotPlay references shell via closure — define it after shell is assigned below.
   // We use a late-binding wrapper so the closure captures the variable, not null.
   const slotPlay = createSlotPlay<T>({
     play: (p) => game.platformSession!.play(p),
     normalize: opts.normalize,
-    onWin: (w) => shell?.setWin(w),
     // ACK the result AFTER the scene animates it (the scene calls host.ack()). On Stake this
     // triggers /wallet/end-round so a winning round settles post-animation instead of staying
     // open and blocking the next spin.
     ack: (raw) => game.platformSession!.playAck(raw as import('@energy8platform/platform-core').PlayResultData),
   });
-
-  /** Inject host + current bet into the game scene whenever it becomes current. */
-  const bindGameScene = () => {
-    const s = gameScene();
-    s?.bindHost?.({ play: slotPlay.play, ack: slotPlay.ack });
-    s?.setBet?.(currentBet);
-  };
-
-  // Fire once immediately (covers no-intro path where game scene is already current)
-  // and again on each scene change (covers intro→game transition).
-  game.scenes.on('change', bindGameScene);
-  bindGameScene();
 
   if (opts.shell) {
     const { createGameShell } = await import('@energy8platform/platform-core/shell');
@@ -188,9 +179,40 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       );
     }
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
-    // Track the live balance so the host can block a play it can't afford.
+    // currentBalance tracks the live wallet for the affordability guard; the DISPLAYED balance is
+    // pushed only after present() (HUD-timing requirement), via afterPresent below.
     let currentBalance = balance;
-    ps?.on('balanceUpdate', (d: { balance: number }) => { currentBalance = d.balance; shell!.setBalance(d.balance); });
+    ps?.on('balanceUpdate', (d: { balance: number }) => { currentBalance = d.balance; });
+
+    // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
+    let currentTurbo = shell.state.turbo;
+    shell.on('turboChange', (level: number) => { currentTurbo = level; });
+
+    const roleOf = (action: string) => opts.model.spec.actions[action]?.role;
+    const makeContext = (action: string): import('./sceneController').RenderContext => ({
+      bet: currentBet,
+      action,
+      mode: opts.model.modeMap[action] ?? action.toUpperCase(),
+      formatAmount: (v) => shell!.formatWin(v),
+      get turbo() { return currentTurbo; },
+    });
+    /** Drive a full round (trigger + drain) against the current scene. HUD readouts (win + balance)
+     *  update only AFTER each present(), per the HUD-timing requirement. */
+    const playRound = (action: string) => {
+      const scene = gameScene();
+      if (!scene) return;
+      void runRound<T>(
+        {
+          play: slotPlay.play,
+          ack: slotPlay.ack,
+          scene,
+          context: makeContext,
+          roleOf,
+          afterPresent: (r) => { shell!.setWin(r.totalWin); shell!.setBalance(currentBalance); },
+        },
+        action,
+      );
+    };
 
     if (mode === 'base') {
       let activeFeature: string | null = null;
@@ -211,19 +233,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       };
 
       shell.on('spin', () => {
-        const s = gameScene();
         const action = activeFeature ?? 'spin';
         if (!ensureAffordable(action)) return;
-        if (activeFeature) void s?.buyBonus?.(activeFeature, currentBet);
-        else void s?.spin?.(currentBet);
+        playRound(action);
       });
-      shell.on('betChange', (bet: number) => {
-        currentBet = bet;
-        gameScene()?.setBet?.(bet);
-      });
+      shell.on('betChange', (bet: number) => { currentBet = bet; });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => {
         if (!ensureAffordable(id)) return;
-        void gameScene()?.buyBonus?.(id, currentBet);
+        playRound(id);
       });
 
       // Resume offer: when the game scene is (or becomes) current on a reload, ask the host whether
@@ -243,7 +260,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           body: shell.t('You have an unfinished round. Continue it or finish it now?'),
           actions: [
             { title: shell.t('Continue'), on: () => { void (async () => {
-              await gameScene()?.resume?.(result);
+              await gameScene()?.present?.(result, makeContext((snap as { action?: string }).action ?? 'spin'));
               ps?.playAck(snap!);
             })(); } },
             { title: shell.t('Finish'), on: () => { ps?.playAck(snap!); } },
@@ -259,13 +276,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       // default bet — otherwise the replay modal always shows bet 1.
       const replayBet = stakeBridge?.replayBet || currentBet;
       currentBet = replayBet;
-      gameScene()?.setBet?.(replayBet);
       // onReplay only spins — the shell reopens the modal after it resolves; never call openReplay inside onReplay (double-open).
       shell.openReplay({
         bonusId,
         bet: replayBet,
         payoutMultiplier: stakeBridge?.replayPayoutMultiplier ?? 0,
-        onReplay: () => gameScene()?.spin?.(replayBet),
+        onReplay: () => playRound(bonusId),
       });
     }
   }

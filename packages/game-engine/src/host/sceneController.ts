@@ -1,25 +1,31 @@
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
 
-/** Host-provided, normalized play() injected into the scene via bindHost. */
-export interface SlotHostApi<T extends SlotSpinResultBase = SlotSpinResultBase> {
-  /** Play an action. Pass `roundId` (from a previous result) to drain the next segment of an
-   *  in-flight round — e.g. each free spin of a bonus — instead of starting a new round. */
-  play(action: string, bet: number, roundId?: string): Promise<T>;
-  /** Acknowledge the most recent result — call AFTER the scene has finished animating it. On
-   *  Stake this is what settles the round (`/wallet/end-round`, only when the win paid out), so
-   *  forgetting to call it leaves the round open and blocks the next spin. */
-  ack(): void;
+/** Everything a scene needs to render one result. The host builds it once per round. */
+export interface RenderContext {
+  /** Bet for this round (major units). Stable for the whole round (a bonus is one round). */
+  bet: number;
+  /** Trigger action in the game's own vocabulary (gameSpec.actions keys): 'spin' | 'ante' |
+   *  'buy_bonus' | … Stable for the whole round. */
+  action: string;
+  /** Stake bet-mode of the round (model.spec.modeMap[action]): 'BASE' | 'ANTE' | 'BONUS' | …
+   *  Canonical per-round identifier of WHICH bonus/feature this is. Stable for the whole round. */
+  mode: string;
+  /** Currency-aware money formatter. win/totalWin get variable decimals (0.0041 stays 0.0041). */
+  formatAmount(value: number): string;
+  /** LIVE turbo level (0 = off, 1..3 = escalating speed), matching the shell's state.turbo. Read at
+   *  the moment of access (getter) so a mid-round toggle is reflected. */
+  readonly turbo: number;
 }
 
-/** Thin contract a slot scene implements; the host calls it on shell events. Duck-typed. */
+/** The contract a slot scene implements. The HOST owns the play→present→ack→drain loop and calls
+ *  these; the scene only renders. The game never sees play/ack/roundId. */
 export interface SlotSceneController<T extends SlotSpinResultBase = SlotSpinResultBase> {
-  spin(bet: number): Promise<void>;
-  setBet(bet: number): void;
-  buyBonus?(actionId: string, bet: number): Promise<void>;
-  /** Present an in-flight round recovered on reload (host calls this on "Continue"). Animate the
-   *  snapshot WITHOUT calling host.ack() — the host settles the resumed round itself. Optional;
-   *  scenes that don't implement it simply can't visually replay a resumed round. */
-  resume?(result: T): Promise<void>;
-  /** Host injects its normalized play() once, on mount. */
-  bindHost?(api: SlotHostApi<T>): void;
+  /** Render ONE segment (a spin, or one free spin). All pacing/pauses/overlays live here
+   *  (await your own animations). The host calls this once per segment. */
+  present(result: T, ctx: RenderContext): Promise<void>;
+  /** Optional. Fires EXACTLY before the first free spin of a bonus (intro; spin counts in
+   *  trigger.freeSpins). */
+  onBonusEnter?(trigger: T, ctx: RenderContext): Promise<void>;
+  /** Optional. Fires after the last free spin of a bonus (summary; last.totalWin = bonus total). */
+  onBonusExit?(last: T, ctx: RenderContext): Promise<void>;
 }

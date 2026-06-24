@@ -205,6 +205,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
   setBusy(busy: boolean): void { this.state.busy = busy; this.render(); }
   setAutoplay(a: AutoplayOptions): void { this.state.autoplay = a; this.render(); }
   setTurbo(level: number): void { this.state.turbo = level; this.render(); }
+  /** Currency-aware money formatter for WIN amounts (variable decimals: 0.0041 stays 0.0041, not
+   *  0.00). The host hands this to a scene so games format money without knowing the currency. */
+  formatWin(value: number): string { return formatCurrency(value, this.config.currency, true); }
   setBuyBonusEnabled(enabled: boolean): void { this.state.buyBonusEnabled = enabled; this.render(); }
   setFreeSpins(fs: FreeSpinsState): void { this.state.freeSpins = fs; this.render(); }
 
