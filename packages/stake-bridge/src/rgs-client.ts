@@ -156,6 +156,36 @@ const DEFAULT_RETRY: Required<RetryPolicy> = {
  * Throws if `rgs_url` is missing, or if neither `sessionID` nor a
  * complete replay set (`game`/`version`/`mode`/`event`) is provided.
  */
+/**
+ * Open-redirect guard for the `rgs_url` launch param. Stake passes it as a BARE hostname
+ * (`rgs_url=rgsd.stake-engine.com`, no scheme — the bridge prepends `https://`), but a tampered
+ * value (`evil.com`, `https://evil.com/x`) would otherwise become the API base and exfiltrate the
+ * session. Accept ONLY `*.stake-engine.com` (the production RGS) and `localhost`/`127.0.0.1` (the
+ * dev harness, which serves the dev-RGS at `/__rgs`). Everything else is rejected.
+ *
+ * Handles both the bare-hostname form (optionally with `:port` and a path) and a scheme-prefixed
+ * URL; in both cases only the HOST is whitelisted.
+ */
+export function isValidRgsUrl(raw: string): boolean {
+  if (!raw) return false;
+  let host: string;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      host = new URL(raw).hostname;
+    } catch {
+      return false;
+    }
+  } else {
+    // Bare form: drop any path/query/fragment, then split off an optional :port.
+    const hostPort = raw.split(/[/?#]/)[0];
+    if (!/^[a-zA-Z0-9.:-]+$/.test(hostPort)) return false; // rejects spaces, slashes, etc.
+    host = hostPort.split(':')[0];
+  }
+  host = host.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1') return true; // dev harness
+  return host === 'stake-engine.com' || host.endsWith('.stake-engine.com');
+}
+
 export function parseStakeUrl(input: string | URL | Location): StakeUrlParams {
   const href =
     typeof input === 'string'
@@ -169,6 +199,13 @@ export function parseStakeUrl(input: string | URL | Location): StakeUrlParams {
   const rgsUrl = params.get('rgs_url');
   if (!rgsUrl) {
     throw new Error('StakeBridge: "rgs_url" missing from URL parameters');
+  }
+  // Open-redirect guard — reject any host that isn't *.stake-engine.com (or localhost in dev).
+  // A throw here propagates out of the StakeBridge constructor into the host's fatal-error path.
+  if (!isValidRgsUrl(rgsUrl)) {
+    throw new Error(
+      `StakeBridge: rejected rgs_url "${rgsUrl}" — must be a *.stake-engine.com host (or localhost in dev)`,
+    );
   }
 
   const device = params.get('device') ?? 'desktop';

@@ -25,6 +25,7 @@ export {
   RGSError,
   API_MULTIPLIER,
   parseStakeUrl,
+  isValidRgsUrl,
   type RGSAuthenticateResponse,
   type RGSPlayResponse,
   type RGSEndRoundResponse,

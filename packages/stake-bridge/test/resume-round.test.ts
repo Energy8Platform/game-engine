@@ -42,7 +42,7 @@ const { StakeBridge } = await import('../src/bridge');
 
 const MILLION = 1_000_000;
 const LIVE_URL =
-  'https://game.example/?rgs_url=https://rgs.example&sessionID=sess-1&currency=USD';
+  'https://game.example/?rgs_url=https://x.stake-engine.com&sessionID=sess-1&currency=USD';
 
 /** A single winning base segment (the whole round is one player-visible spin). */
 function singleWinSegment(): BookSegment {
