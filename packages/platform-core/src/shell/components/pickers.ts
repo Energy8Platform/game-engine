@@ -9,7 +9,10 @@ interface SheetOpts {
   title: string;
   choices: Choice[];
   selected: string;
-  columns: number;
+  /** Chips per row. A single number is fixed across layouts; `{ wide, mobile }` reflows
+   *  with the shell's mobile breakpoint (driven by CSS custom props, so an open modal
+   *  re-columns live on resize/rotate without being rebuilt). */
+  columns: number | { wide: number; mobile: number };
   confirmLabel: string;
   onConfirm: (id: string) => void;
 }
@@ -19,7 +22,9 @@ function buildSheet(opts: SheetOpts): HTMLElement {
   const ui = createCardModal({ ge: opts.ge, title: opts.title, onClose: () => ui.root.remove() });
 
   const grid = document.createElement('div'); grid.className = 'ge-sheet-grid';
-  grid.style.gridTemplateColumns = `repeat(${opts.columns}, 1fr)`;
+  const cols = typeof opts.columns === 'number' ? { wide: opts.columns, mobile: opts.columns } : opts.columns;
+  grid.style.setProperty('--cols', String(cols.wide));
+  grid.style.setProperty('--cols-m', String(cols.mobile));
   let selected = opts.selected;
   const chips: HTMLButtonElement[] = [];
   for (const c of opts.choices) {
@@ -44,10 +49,10 @@ function buildSheet(opts: SheetOpts): HTMLElement {
   return ui.root;
 }
 
-/** Bet picker — all available bets as chips (3 per row), accent Confirm applies it. */
+/** Bet picker — all available bets as chips (6 per row, 3 on mobile), accent Confirm applies it. */
 export function openBetModal(shell: GameShell): HTMLElement {
   return buildSheet({
-    ge: 'bet-modal', title: shell.t('Bet'), columns: 3, confirmLabel: shell.t('Confirm'),
+    ge: 'bet-modal', title: shell.t('Bet'), columns: { wide: 6, mobile: 3 }, confirmLabel: shell.t('Confirm'),
     choices: shell.state.availableBets.map((b) => ({ id: String(b), label: formatCurrency(b, shell.config.currency) })),
     selected: String(shell.state.bet),
     onConfirm: (id) => {

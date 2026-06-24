@@ -28,6 +28,14 @@ describe('bet picker', () => {
     expect(qa(modal!, '.ge-chip')).toHaveLength(4);
   });
 
+  it('lays the bet chips out 6-per-row, compressing to 3 on mobile', () => {
+    createGameShell(cfg(mount));
+    q(mount, '[data-ge="bet-value"]')!.click();
+    const grid = q(q(mount, '[data-ge="bet-modal"]')!, '.ge-sheet-grid')!;
+    expect(grid.style.getPropertyValue('--cols')).toBe('6');
+    expect(grid.style.getPropertyValue('--cols-m')).toBe('3');
+  });
+
   it('selecting a bet + Confirm emits betChange and updates the readout', () => {
     const shell = createGameShell(cfg(mount));
     const spy = vi.fn(); shell.on('betChange', spy);

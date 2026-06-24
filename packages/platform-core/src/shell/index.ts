@@ -18,3 +18,4 @@ export function removeGameShell(): Promise<void> {
 }
 
 export { GameShell };
+export { socialize } from './i18n';

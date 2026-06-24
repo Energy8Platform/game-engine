@@ -194,6 +194,9 @@ export interface ShellConfig {
   theme?: ThemeConfig;
   gameInfo: GameInfoContent;
   language: string;
+  /** Game version shown in the game-info footer (e.g. '1.2.0'). Defaults to '1.0.0'. The footer
+   *  stamp is `${version}.${engineVersionWithoutDots}` — e.g. game 1.0.0 on engine 0.24.6 → '1.0.0.0246'. */
+  version?: string;
   /** When true, all built-in shell text is shown in the social-casino vocabulary (derived from
    *  English via word-swap rules), regardless of `language`. Game-supplied content is untouched. */
   isSocial?: boolean;
@@ -204,6 +207,10 @@ export interface ShellConfig {
   balance: number;
   win: number;
   mode: ShellMode;
+  /** Mark this shell as a read-only historical-round replay. A replay never shows the player's
+   *  balance (there's no live wallet), even while its free-spins phase runs in `freeSpins` mode.
+   *  Defaults to `mode === 'replay'`; set explicitly when a replay starts in another mode. */
+  replay?: boolean;
   features: ShellFeatures;
   /** Override the BUY BONUS bar button's action: when set, tapping it calls this instead of
    *  opening the built-in buy-bonus overlay (e.g. the game shows its own bonus UI). The button
@@ -213,6 +220,10 @@ export interface ShellConfig {
 
 export interface ShellState {
   mode: ShellMode;
+  /** Sticky replay marker — true for a historical-round replay, regardless of the current
+   *  `mode`. Set once (from config or when `mode` becomes 'replay') and never cleared, since a
+   *  shell instance is either a live game or a replay viewer for its whole lifetime. */
+  replay: boolean;
   balance: number;
   win: number;
   bet: number;

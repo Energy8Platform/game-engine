@@ -4,6 +4,7 @@ import type {
   PlayParams,
   PlayResultData,
   BalanceData,
+  ConnectionStatePayload,
 } from '@energy8platform/game-sdk';
 import { DevBridge, type DevBridgeConfig } from './dev-bridge/DevBridge';
 import { EventEmitter } from './EventEmitter';
@@ -44,6 +45,9 @@ export interface PlatformSessionEvents {
   balanceUpdate: BalanceData;
   /** SDK or transport error */
   error: Error;
+  /** Host link state changed (forwarded from the SDK): 'connecting' | 'lost' | 'restored'.
+   *  The host renders a reconnect overlay on lost/connecting and dismisses it on restored. */
+  connectionStateChanged: ConnectionStatePayload;
 }
 
 /**
@@ -114,6 +118,27 @@ export class PlatformSession extends EventEmitter<PlatformSessionEvents> {
     return this.sdk.play(params);
   }
 
+  /**
+   * Acknowledge a finished PLAY_RESULT (call AFTER the game has animated it).
+   *
+   * The host uses this to know the client is ready for the next action and, on
+   * Stake, to settle the round (`/wallet/end-round`) only once the win
+   * animation has played. No-op when constructed with `sdk: false`.
+   */
+  playAck(result: PlayResultData): void {
+    this.sdk?.playAck(result);
+  }
+
+  /**
+   * Query the host for an in-flight round (e.g. after a page reload). Resolves with the last
+   * result snapshot when a round is still open, or `null`. Used to offer a "resume / finish"
+   * choice on boot. Resolves `null` when constructed with `sdk: false`.
+   */
+  async getState(): Promise<PlayResultData | null> {
+    if (!this.sdk) return null;
+    return this.sdk.getState();
+  }
+
   /** Tear down the SDK, DevBridge, and clear listeners. */
   destroy(): void {
     this.sdk?.destroy();
@@ -159,6 +184,9 @@ export async function createPlatformSession(
     });
     sdk.on('balanceUpdate', (data: BalanceData) => {
       session.emit('balanceUpdate', data);
+    });
+    sdk.on('connectionStateChanged', (state: ConnectionStatePayload) => {
+      session.emit('connectionStateChanged', state);
     });
   }
 

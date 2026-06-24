@@ -32,3 +32,5 @@ export type { NNLSOptions } from './nnls.js';
 export { solveQP, projectSimplex } from './qp.js';
 export type { QPOptions } from './qp.js';
 export { quantizeWeights } from './quantize.js';
+export type { MathConfig, ModeMathConfig, ModeSimConfig, ResolvedMode, MathModel } from './mathConfig';
+export { resolveModes } from './mathConfig';

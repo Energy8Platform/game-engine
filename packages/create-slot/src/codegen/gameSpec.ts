@@ -1,0 +1,47 @@
+import type { Answers } from '../answers';
+
+/** Emit a game.spec.ts with a sensible default symbol set + actions; author edits it. */
+export function genGameSpec(a: Answers): string {
+  return `import { defineGame, type GameSpec } from '@energy8platform/platform-core/game-spec';
+
+// Single source of truth. Edit symbols / paytable / bet levels / actions to design your game.
+export const spec: GameSpec = {
+  id: '${a.id}',
+  type: 'slot',
+  mechanic: '${a.mechanic}',
+  grid: { cols: ${a.grid.cols}, rows: ${a.grid.rows} },
+  betLevels: [0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 10000, 100000, 1000000],
+  defaultBet: 1,
+  maxWin: 5000,
+  currency: 'EUR',
+  symbols: [
+    { id: 'H1', name: 'High 1', kind: 'high', pay: { 3: 10, 4: 25, 5: 100 } },
+    { id: 'H2', name: 'High 2', kind: 'high', pay: { 3: 8, 4: 20, 5: 80 } },
+    { id: 'H3', name: 'High 3', kind: 'high', pay: { 3: 6, 4: 15, 5: 60 } },
+    { id: 'H4', name: 'High 4', kind: 'high', pay: { 3: 5, 4: 12, 5: 50 } },
+    { id: 'L1', name: 'Low 1', kind: 'low', pay: { 3: 1, 4: 2, 5: 5 } },
+    { id: 'L2', name: 'Low 2', kind: 'low', pay: { 3: 0.8, 4: 1.5, 5: 4 } },
+    { id: 'L3', name: 'Low 3', kind: 'low', pay: { 3: 0.6, 4: 1.2, 5: 3 } },
+    { id: 'L4', name: 'Low 4', kind: 'low', pay: { 3: 0.5, 4: 1, 5: 2.5 } },
+    { id: 'WILD', name: 'Wild', kind: 'wild' },
+    { id: 'SCATTER', name: 'Scatter', kind: 'scatter' },
+  ],
+  // All player-facing spec copy is socialized automatically in social mode — symbol names shown
+  // in the paytable AND the action title/description below (e.g. 'BUY BONUS' -> 'GET BONUS',
+  // 'Pay more...' -> 'Win more...'). Write normal casino wording here; it stays compliant in social.
+  //
+  // Modes are declared ONCE here. \`rtp\` (target RTP, 0..1) and \`maxWin\` (per-mode cap; defaults to
+  // the game-level maxWin) feed the Game Info per-mode table automatically. NOTE: these are the
+  // DECLARED/displayed values — the math pipeline's targets live in math.config.ts and may differ
+  // (e.g. while tuning). Keep the declared values honest against the published math.
+  actions: {
+    spin: { role: 'base', rtp: 0.96 },
+    ante: { role: 'feature', cost: 1.5, rtp: 0.96, title: 'ANTE BET', description: 'Pay more for a boosted chance' },
+    free_spin: { role: 'free' },
+    buy_bonus: { role: 'buy', cost: 100, rtp: 0.96, maxWin: 5000, title: 'BUY BONUS', description: 'Buy the feature', feature: { spins: 10 } },
+  },
+};
+
+export const model = defineGame(spec);
+`;
+}

@@ -64,6 +64,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.observeLayout();
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', this.handleKeyDown);
+      // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a `document`
+      // keydown never fires and Space scrolls the parent. Pull window focus into the iframe on the
+      // first pointer interaction so the spacebar shortcut works. Harmless on full-page Energy8.
+      document.addEventListener('pointerdown', this.pullFocus, true);
       this.keysBound = true;
     }
     this.render();
@@ -108,12 +112,20 @@ export class GameShell extends EventEmitter<ShellEvents> {
     }
     host.classList.remove('ge-fit');
     host.style.transform = '';
+    host.style.transformOrigin = '';
     if (this.layout === 'mobile') {
-      // shrink the whole stack to fit narrow phones (mobile-s, or large numbers in a row)
+      // Shrink the whole stack to fit narrow phones (mobile-s, or big balance/win/total-win
+      // numbers in a row). The rows use space-between, so on overflow their content is
+      // left-anchored and spills off the RIGHT edge — scale from the bottom-left corner so
+      // `avail/need` fits it exactly. (The old centre-origin + 0.7 floor left large numbers
+      // running past the screen edge; the 0.4 floor only guards a degenerate near-zero bar.)
       let need = 0;
       for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
       const avail = bar.clientWidth;
-      if (need > avail + 1 && avail > 0) host.style.transform = `scale(${Math.max(0.7, avail / need).toFixed(4)})`;
+      if (need > avail + 1 && avail > 0) {
+        host.style.transformOrigin = 'bottom left';
+        host.style.transform = `scale(${Math.max(0.4, avail / need).toFixed(4)})`;
+      }
       return;
     }
     if (bar.scrollWidth <= bar.clientWidth + 1) return;       // bar fits inline → leave it
@@ -131,14 +143,22 @@ export class GameShell extends EventEmitter<ShellEvents> {
    *  false, while a spin is running, while autoplay is active, outside base mode, when an
    *  overlay/modal is open, or when an editable element is focused. `repeat` (held key) is
    *  ignored so it can't spam. */
+  /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the
+   *  spacebar shortcut) fires. No-op / harmless when already focused or full-page. */
+  private pullFocus = (): void => { try { window.focus(); } catch { /* cross-origin / non-browser */ } };
+
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (this.destroyed || e.code !== 'Space' || e.repeat) return;
     if (this.config.features.spacebar === false) return; // shortcut disabled (e.g. jurisdiction)
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    // Space is ours now — swallow the browser default before any no-op bail. Otherwise the
+    // native "Space activates the focused button" still fires and re-clicks whichever shell
+    // <button> (menu/buy/auto) opened the overlay, tearing down + rebuilding the modal: a
+    // visible flicker. (Also stops the page from scrolling on Space.)
+    e.preventDefault();
     if (this.modalHost.childElementCount > 0) return; // an overlay/modal is open
     if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
-    e.preventDefault();
     this.emit('spin');
   };
 
@@ -189,14 +209,26 @@ export class GameShell extends EventEmitter<ShellEvents> {
   setBalance(n: number): void { this.state.balance = n; this.render(); }
   setWin(n: number): void { this.state.win = n; this.render(); }
   setBet(n: number): void { this.state.bet = n; this.render(); }
-  setMode(mode: ShellMode): void { this.state.mode = mode; this.render(); }
+  setMode(mode: ShellMode): void {
+    if (mode === 'replay') this.state.replay = true; // sticky: a replay stays a replay across modes
+    this.state.mode = mode;
+    this.render();
+  }
   setBusy(busy: boolean): void { this.state.busy = busy; this.render(); }
   setAutoplay(a: AutoplayOptions): void { this.state.autoplay = a; this.render(); }
   setTurbo(level: number): void { this.state.turbo = level; this.render(); }
+  /** Currency-aware money formatter for WIN amounts (variable decimals: 0.0041 stays 0.0041, not
+   *  0.00). The host hands this to a scene so games format money without knowing the currency. */
+  formatWin(value: number): string { return formatCurrency(value, this.config.currency, true); }
   setBuyBonusEnabled(enabled: boolean): void { this.state.buyBonusEnabled = enabled; this.render(); }
   setFreeSpins(fs: FreeSpinsState): void { this.state.freeSpins = fs; this.render(); }
 
   private showModal(el: HTMLElement): void {
+    // The control that opened this overlay (menu/buy/auto) keeps DOM focus. Drop it, or a
+    // stray Space/Enter would natively re-activate that <button> and rebuild the modal — a
+    // visible flicker. Only relinquish focus we own (a shell control), never the host page's.
+    const active = document.activeElement as HTMLElement | null;
+    if (active && this.root.contains(active)) active.blur();
     this.modalHost.innerHTML = '';
     this.modalHost.appendChild(el);
     this.fitModals();
@@ -255,6 +287,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
   /** Open a generic, externally-driven modal (title + body + optional action buttons).
    *  Each action runs its `on` then closes; the ✕ shows when `availableClose` is true. */
   openModal(opts: ModalOptions): void { this.showModal(buildModal(opts)); }
+  /** Programmatically dismiss whatever modal/overlay is currently shown (e.g. auto-close the
+   *  reconnect overlay once the link is restored). No-op when nothing is open. */
+  closeModal(): void { this.modalHost.innerHTML = ''; }
   /** Open the non-dismissable replay summary modal (START REPLAY → onReplay → reopen). */
   openReplay(opts: ReplayModalOptions): void {
     if (this.destroyed) return;
@@ -271,7 +306,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.destroyed = true;
     this.ro?.disconnect();
     this.ro = null;
-    if (this.keysBound) { document.removeEventListener('keydown', this.handleKeyDown); this.keysBound = false; }
+    if (this.keysBound) {
+      document.removeEventListener('keydown', this.handleKeyDown);
+      document.removeEventListener('pointerdown', this.pullFocus, true);
+      this.keysBound = false;
+    }
     this.cancelMoneyAnims();
     this.removeAllListeners();
     this.root.classList.add('ge-shell-hidden');

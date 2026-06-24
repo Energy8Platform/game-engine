@@ -2,6 +2,7 @@ import type { GameShell } from '../GameShell';
 import type { CellRef, GameInfoSection, GameMode, PaytableRow, PaylineDef, ShapeDef, WinSection } from '../types';
 import { createOverlay, twoLine } from './primitives';
 import { icon } from './icons';
+import { PACKAGE_VERSION } from '../version';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -23,7 +24,19 @@ export function openGameInfoModal(shell: GameShell): HTMLElement {
     .sort((a, b) => a.k - b.k || a.i - b.i)
     .forEach(({ s }) => body.appendChild(renderSection(shell, s)));
 
+  body.appendChild(versionFooter(shell));
   return root;
+}
+
+/** A muted version stamp pinned to the bottom of the game-info modal:
+ *  `${config.version ?? '1.0.0'}.${engine version without dots}` (e.g. '1.0.0.0246'). */
+function versionFooter(shell: GameShell): HTMLElement {
+  const gameVersion = shell.config.version ?? '1.0.0';
+  const el = document.createElement('div');
+  el.dataset.ge = 'info-version';
+  el.className = 'ge-gi-version';
+  el.textContent = `${gameVersion}.${PACKAGE_VERSION.replaceAll('.', '')}`;
+  return el;
 }
 
 function renderSection(shell: GameShell, s: GameInfoSection): HTMLElement {

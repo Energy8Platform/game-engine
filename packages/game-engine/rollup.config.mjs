@@ -7,8 +7,10 @@ const external = [
   '@energy8platform/game-sdk',
   '@energy8platform/platform-core',
   '@energy8platform/platform-core/lua',
+  '@energy8platform/platform-core/game-spec',
   '@energy8platform/platform-core/dev-bridge',
   '@energy8platform/platform-core/shell',
+  '@energy8platform/platform-core/slot-result',
   '@energy8platform/platform-core/vite',
   '@energy8platform/platform-core/loading',
   '@esotericsoftware/spine-pixi-v8',
@@ -20,23 +22,28 @@ const external = [
   'react-reconciler/constants',
   'react/jsx-runtime',
   'fengari',
+  '@energy8platform/stake-bridge',
+  '@energy8platform/stake-bridge/detect',
 ];
 
-function createBundle(input, outputName) {
+function createBundle(input, outputName, opts = {}) {
   return [
     {
       input,
       external,
+      treeshake: opts.treeshake ?? true,
       output: [
         {
           file: `dist/${outputName}.esm.js`,
           format: 'esm',
           sourcemap: true,
+          inlineDynamicImports: opts.inlineDynamicImports ?? false,
         },
         {
           file: `dist/${outputName}.cjs.js`,
           format: 'cjs',
           sourcemap: true,
+          inlineDynamicImports: opts.inlineDynamicImports ?? false,
         },
       ],
       plugins: [
@@ -53,6 +60,7 @@ function createBundle(input, outputName) {
       output: {
         file: `dist/${outputName}.d.ts`,
         format: 'esm',
+        inlineDynamicImports: opts.inlineDynamicImports ?? false,
       },
       plugins: [dts()],
     },
@@ -72,4 +80,8 @@ export default defineConfig([
   ...createBundle('src/react/index.ts', 'react'),
   ...createBundle('src/react/jsx-runtime.ts', 'react-jsx'),
   ...createBundle('src/lua/index.ts', 'lua'),
+  ...createBundle('src/game-spec/index.ts', 'game-spec'),
+  // host inlines dynamic imports: createSlotGame lazy-imports internal modules (./slotPlay, ./shellConfig, ./replay); without this Rollup splits them into chunks that conflict with output.file. External deps (platform-core/shell, stake-bridge) stay lazy.
+  ...createBundle('src/host/index.ts', 'host', { inlineDynamicImports: true, treeshake: false }),
+  ...createBundle('src/slot/index.ts', 'slot'),
 ]);

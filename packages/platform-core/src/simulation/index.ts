@@ -10,6 +10,8 @@ export {
   NativeSimulationRunner,
   findNativeBinary,
   formatNativeResult,
+  buildNativeArgs,
+  requireNativeBinary,
 } from './NativeSimulationRunner';
 export type {
   NativeSimulationConfig,
@@ -18,6 +20,7 @@ export type {
   NativeReplayParams,
   StageStats,
   DistributionBucket,
+  NativeArgsInput,
 } from './NativeSimulationRunner';
 
 export { ParallelSimulationRunner } from './ParallelSimulationRunner';

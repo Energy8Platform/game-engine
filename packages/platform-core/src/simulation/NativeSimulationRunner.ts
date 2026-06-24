@@ -52,6 +52,12 @@ export interface NativeSimulationConfig {
   rng?: NativeRNGKind;
   /** Replay mode: requires `rng: 'provably-fair'` (or default). */
   replay?: NativeReplayParams;
+  /**
+   * Path to write per-round JSONL book dump. When set, the binary writes one
+   * JSON object per line (one per round) to this file, enabling post-run
+   * analysis of the full round log.
+   */
+  dump?: string;
   /** Progress callback */
   onProgress?: (completed: number, total: number) => void;
 }
@@ -137,6 +143,43 @@ interface GoSimulationOutput {
   };
 }
 
+// ─── Pure arg builder ────────────────────────────────────
+
+export interface NativeArgsInput {
+  configPath: string;
+  iterations: number;
+  bet: number;
+  action?: string;
+  params?: unknown;
+  rng?: string;
+  seed?: string;
+  dump?: string;
+  replay?: { serverSeed: string; clientSeed: string; nonceStart: number };
+}
+
+/**
+ * Build the CLI args array for the native simulation binary.
+ * Pure function — no I/O, easily testable.
+ */
+export function buildNativeArgs(a: NativeArgsInput): string[] {
+  const args = ['-config', a.configPath, '-iterations', String(a.iterations), '-bet', String(a.bet), '-format', 'json'];
+  if (a.action) args.push('-action', a.action);
+  if (a.params !== undefined && a.params !== null && (typeof a.params !== 'object' || Object.keys(a.params as object).length > 0)) {
+    args.push('-params', JSON.stringify(a.params));
+  }
+  if (a.rng) args.push('-rng', a.rng);
+  if (a.seed) args.push('-seed', a.seed);
+  if (a.dump) args.push('-dump', a.dump);
+  if (a.replay) {
+    args.push(
+      '-replay-server-seed', a.replay.serverSeed,
+      '-replay-client-seed', a.replay.clientSeed,
+      '-replay-nonce-start', String(a.replay.nonceStart),
+    );
+  }
+  return args;
+}
+
 // ─── Runner ─────────────────────────────────────────────
 
 export class NativeSimulationRunner {
@@ -147,7 +190,7 @@ export class NativeSimulationRunner {
   }
 
   async run(): Promise<NativeSimulationResult> {
-    const { binaryPath, script, gameDefinition, iterations, bet, action, params, seed, rng, replay } = this.config;
+    const { binaryPath, script, gameDefinition, iterations, bet, action, params, seed, rng, replay, dump } = this.config;
 
     if (replay && rng && rng !== 'provably-fair') {
       throw new Error(`Replay mode requires rng="provably-fair" (got rng="${rng}")`);
@@ -166,31 +209,7 @@ export class NativeSimulationRunner {
       ]);
 
       // Build CLI args
-      const args = [
-        '-config', configPath,
-        '-iterations', String(iterations),
-        '-bet', String(bet),
-        '-format', 'json',
-      ];
-      if (action) {
-        args.push('-action', action);
-      }
-      if (params && Object.keys(params).length > 0) {
-        args.push('-params', JSON.stringify(params));
-      }
-      if (rng) {
-        args.push('-rng', rng);
-      }
-      if (seed) {
-        args.push('-seed', seed);
-      }
-      if (replay) {
-        args.push(
-          '-replay-server-seed', replay.serverSeed,
-          '-replay-client-seed', replay.clientSeed,
-          '-replay-nonce-start', String(replay.nonceStart),
-        );
-      }
+      const args = buildNativeArgs({ configPath, iterations, bet, action, params, rng, seed, dump, replay });
 
       // Execute binary
       const output = await this.exec(binaryPath, args);
@@ -357,6 +376,23 @@ export function findNativeBinary(baseDir?: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Return the native binary path or throw a clear, install-guiding error.
+ * The math pipeline is go-native only — NO JS fallback.
+ *
+ * @param finder - injectable finder for testability; defaults to findNativeBinary.
+ */
+export function requireNativeBinary(finder: () => string | null = findNativeBinary): string {
+  const bin = finder();
+  if (!bin) {
+    throw new Error(
+      'native simulation binary not found — run `npm install` (platform-core fetches it via install-simulate). ' +
+      'The math pipeline is go-native only (no JS fallback).',
+    );
+  }
+  return bin;
 }
 
 function isExecutable(path: string): boolean {

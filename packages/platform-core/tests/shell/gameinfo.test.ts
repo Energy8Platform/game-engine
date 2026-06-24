@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createGameShell, removeGameShell } from '@/shell';
+import { PACKAGE_VERSION } from '@/shell/version';
 import type { ShellConfig, GameInfoSection } from '@/shell/types';
+
+const pkgStamp = PACKAGE_VERSION.replaceAll('.', '');
 
 function cfg(mount: HTMLElement, sections?: GameInfoSection[]): ShellConfig {
   return {
@@ -136,6 +139,24 @@ describe('GameInfo', () => {
     shell.openInfo();
     expect(q(mount, '[data-ge="info-modal"]')).toBeTruthy();
     expect(qa(mount, '[data-ge="info-modal"] .ge-gi-sec')).toHaveLength(0);
+  });
+
+  it('stamps the version footer at the very bottom: {version|1.0.0}.{engine no dots}', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.openInfo();
+    const modal = q(mount, '[data-ge="info-modal"]')!;
+    const ver = q(modal, '[data-ge="info-version"]')!;
+    expect(ver).toBeTruthy();
+    expect(ver.textContent).toContain(`1.0.0.${pkgStamp}`); // default game version 1.0.0
+    expect(q(modal, '.ge-ov-body')!.lastElementChild).toBe(ver); // very bottom of the content
+  });
+
+  it('version footer uses config.version when provided', () => {
+    const c = cfg(mount); c.version = '2.3.1';
+    const shell = createGameShell(c);
+    shell.openInfo();
+    const ver = q(mount, '[data-ge="info-version"]')!;
+    expect(ver.textContent).toContain(`2.3.1.${pkgStamp}`);
   });
 
   it('has a back control that returns to Settings', () => {

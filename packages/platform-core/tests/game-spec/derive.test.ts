@@ -1,0 +1,93 @@
+// packages/platform-core/tests/game-spec/derive.test.ts
+import { describe, it, expect } from 'vitest';
+import {
+  toGameDefinition, toLuaPrelude, toModeMap, toMathModes, toPaytableView,
+} from '../../src/game-spec';
+import type { GameSpec } from '../../src/game-spec';
+
+const spec: GameSpec = {
+  id: 'g', type: 'slot', grid: { cols: 3, rows: 3 },
+  betLevels: [0.1, 0.2, 1], maxWin: 1000, currency: 'EUR',
+  symbols: [
+    { id: 'A', name: 'Ace', kind: 'high', pay: { 3: 5, 4: 20 } },
+    { id: 'WILD', kind: 'wild' },
+  ],
+  actions: {
+    spin: { role: 'base' },
+    free_spin: { role: 'free' },
+    buy_bonus: { role: 'buy', cost: 50, feature: { spins: 8 } },
+  },
+};
+
+describe('toGameDefinition', () => {
+  const gd = toGameDefinition(spec);
+  it('sets SLOT type, bet levels and max win', () => {
+    expect(gd.type).toBe('SLOT');
+    expect(gd.bet_levels).toEqual([0.1, 0.2, 1]);
+    expect(gd.max_win).toEqual({ multiplier: 1000 });
+  });
+  it('maps base action with default FS-trigger transition', () => {
+    expect(gd.actions.spin.debit).toBe('bet');
+    expect(gd.actions.spin.credit).toBe('win');
+    expect(gd.actions.spin.transitions[0].next_actions).toEqual(['free_spin']);
+    expect(gd.actions.spin.transitions[0].creates_session).toBe(true);
+  });
+  it('maps free action as session spin', () => {
+    expect(gd.actions.free_spin.debit).toBe('none');
+    expect(gd.actions.free_spin.requires_session).toBe(true);
+  });
+  it('maps buy action cost_multiplier and feature_data', () => {
+    expect(gd.actions.buy_bonus.cost_multiplier).toBe(50);
+    expect(gd.actions.buy_bonus.feature_data).toEqual({ spins: 8 });
+  });
+  it('appends an always-fallback transition to base and buy actions', () => {
+    const spinTx = gd.actions.spin.transitions;
+    expect(spinTx[spinTx.length - 1]).toEqual({ condition: 'always', next_actions: ['spin'] });
+    const buyTx = gd.actions.buy_bonus.transitions;
+    expect(buyTx[buyTx.length - 1]).toEqual({ condition: 'always', next_actions: ['buy_bonus'] });
+  });
+});
+
+describe('toLuaPrelude', () => {
+  const lua = toLuaPrelude(spec);
+  it('emits SYM index table and PAYTABLE', () => {
+    expect(lua).toMatch(/SYM\s*=\s*\{/);
+    expect(lua).toMatch(/A\s*=\s*1/);
+    expect(lua).toMatch(/PAYTABLE/);
+    expect(lua).toMatch(/\[3\]\s*=\s*5/);
+  });
+});
+
+describe('toModeMap / toMathModes', () => {
+  it('excludes free actions and defaults mode to UPPER(key)', () => {
+    expect(toModeMap(spec)).toEqual({ spin: 'BASE', buy_bonus: 'BUY_BONUS' });
+    // maxWin defaults to the game-level spec.maxWin; rtp omitted when the action doesn't declare it.
+    expect(toMathModes(spec)).toEqual([
+      { action: 'spin', mode: 'BASE', costMultiplier: 1, maxWin: 1000 },
+      { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 50, maxWin: 1000 },
+    ]);
+  });
+
+  it('carries per-action rtp + per-mode maxWin override into mathModes', () => {
+    const s: GameSpec = {
+      ...spec,
+      maxWin: 5000,
+      actions: {
+        spin: { role: 'base', rtp: 0.965 },
+        buy_bonus: { role: 'buy', cost: 100, rtp: 0.97, maxWin: 12000 },
+      },
+    };
+    expect(toMathModes(s)).toEqual([
+      { action: 'spin', mode: 'BASE', costMultiplier: 1, rtp: 0.965, maxWin: 5000 },
+      { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 100, rtp: 0.97, maxWin: 12000 },
+    ]);
+  });
+});
+
+describe('toPaytableView', () => {
+  it('includes only paying symbols', () => {
+    expect(toPaytableView(spec).symbols).toEqual([
+      { id: 'A', name: 'Ace', kind: 'high', pay: { 3: 5, 4: 20 } },
+    ]);
+  });
+});

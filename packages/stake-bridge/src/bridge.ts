@@ -112,12 +112,16 @@ export class StakeBridge {
   private adapterLoad: Promise<BookAdapter>;
 
   /** Whether we were launched as a historical replay (`?replay=true&...`). */
-  private readonly isReplay: boolean;
+  private readonly _isReplay: boolean;
   /**
-   * Cached replay book — fetched from `/bet/replay/...` on the first
-   * play request and re-served on subsequent "Play Again" calls.
+   * Cached replay book — fetched from `/bet/replay/...` up front during boot
+   * (per Stake rules) and re-served on every "Play Again" call.
    */
   private replayBook: RGSReplayResponse | null = null;
+  /** Replay round bet in MINOR units (from the fetched round, else the URL amount). */
+  private replayAmountMinor = 0;
+  /** Replay round payout multiplier (×bet), surfaced for the replay modal. */
+  private replayPayout = 0;
 
   /** Resolves once boot (live `Authenticate` or replay synthesis) has completed. */
   private bootPromise: Promise<RGSAuthenticateResponse> | null = null;
@@ -154,7 +158,7 @@ export class StakeBridge {
     });
 
     this.url = parseStakeUrl(options.url ?? window.location.href);
-    this.isReplay = !!this.url.replay;
+    this._isReplay = !!this.url.replay;
     this.rgs = new RGSClient({
       url: this.url,
       protocol: options.protocol ?? 'https',
@@ -182,6 +186,31 @@ export class StakeBridge {
   }
 
   // ─── Public API ──────────────────────────────────────────────────────
+
+  /** True when the bridge was launched as a historical replay (`?replay=true&...`). */
+  get isReplay(): boolean {
+    return this._isReplay;
+  }
+
+  /**
+   * The bet mode of the replay round (`StakeReplayParams.mode`), or
+   * `undefined` when this is not a replay launch / the mode field is absent.
+   */
+  get replayMode(): string | undefined {
+    return this.url.replay?.mode;
+  }
+
+  /** Replay round bet in MAJOR units (from the fetched round, else the URL amount). 0 if not a
+   *  replay launch. Available after `ready()`. */
+  get replayBet(): number {
+    return this._isReplay ? fromMinor(this.replayAmountMinor) : 0;
+  }
+
+  /** Replay round payout multiplier (×bet) from the fetched round; 0 if not replay / unknown.
+   *  Available after `ready()`. */
+  get replayPayoutMultiplier(): number {
+    return this._isReplay ? this.replayPayout : 0;
+  }
 
   /** Tear down. Cancels the balance poll, removes listeners. */
   destroy(): void {
@@ -256,7 +285,7 @@ export class StakeBridge {
    * so downstream code (validateBet, buildGameConfig) can be agnostic.
    */
   private async boot(): Promise<RGSAuthenticateResponse> {
-    if (this.isReplay) return this.bootReplay();
+    if (this._isReplay) return this.bootReplay();
     return this.authenticate();
   }
 
@@ -265,6 +294,30 @@ export class StakeBridge {
     this.balance = 0;
     this.currency = r.currency;
 
+    // Per Stake rules, a replay launch REQUESTS the round up front via
+    // GET /bet/replay/{game}/{version}/{mode}/{event} — not lazily on the first
+    // spin. Cache it so startReplayRound re-serves the same book without a second
+    // fetch, and so config/modal can reflect the round's own bet + payout.
+    try {
+      this.replayBook = await this.rgs.replay({
+        game: r.game,
+        version: r.version,
+        mode: r.mode,
+        event: r.event,
+      });
+    } catch (err) {
+      this.log(`replay round fetch failed during boot: ${err}`);
+      this.replayBook = null;
+    }
+
+    // The fetched round's own amount (minor) wins over the URL amount when present;
+    // payoutMultiplier feeds the replay modal. Stake's /bet/replay returns payoutMultiplier in
+    // CENTS (e.g. 495), so divide by 100 to get the ×bet multiplier the round/modal use.
+    this.replayAmountMinor =
+      (this.replayBook as { amount?: number } | null)?.amount ?? r.amount;
+    this.replayPayout =
+      ((this.replayBook as { payoutMultiplier?: number } | null)?.payoutMultiplier ?? 0) / 100;
+
     // Synthesize an authData-shaped object so `buildGameConfig`, the
     // validateBet code path, and any other consumer keep working.
     const synth: RGSAuthenticateResponse = {
@@ -272,18 +325,18 @@ export class StakeBridge {
       round: null,
       config: {
         gameID: this.gameId || r.game,
-        minBet: r.amount,
-        maxBet: r.amount,
-        stepBet: r.amount,
-        defaultBetLevel: r.amount,
-        betLevels: [r.amount],
+        minBet: this.replayAmountMinor,
+        maxBet: this.replayAmountMinor,
+        stepBet: this.replayAmountMinor,
+        defaultBetLevel: this.replayAmountMinor,
+        betLevels: [this.replayAmountMinor],
         betModes: { [r.mode]: {} },
         jurisdiction: undefined,
       },
     };
     this.authData = synth;
     this.log(
-      `replay boot: game=${r.game} version=${r.version} mode=${r.mode} event=${r.event} amount=${r.amount} currency=${r.currency}`,
+      `replay boot: game=${r.game} version=${r.version} mode=${r.mode} event=${r.event} amount=${this.replayAmountMinor} payout=${this.replayPayout} currency=${r.currency}`,
     );
     return synth;
   }
@@ -376,12 +429,12 @@ export class StakeBridge {
       jurisdiction,
       currency: lookupCurrency(this.currency),
       autoplay: this.deriveAutoplayPolicy(jurisdiction),
-      replayMode: this.isReplay,
+      replayMode: this._isReplay,
       socialMode,
       demo,
       disclaimerLines: buildDisclaimer({
         socialMode,
-        replayMode: this.isReplay,
+        replayMode: this._isReplay,
       }),
       // Stake-specific extras surfaced via index signature
       stake: {
@@ -413,7 +466,7 @@ export class StakeBridge {
   private deriveAutoplayPolicy(
     j: JurisdictionFlagsData | undefined,
   ): AutoplayPolicyData | undefined {
-    if (this.isReplay) return undefined;
+    if (this._isReplay) return undefined;
     if (j?.disabledAutoplay) return undefined;
     return {
       maxCount: 100,
@@ -446,20 +499,31 @@ export class StakeBridge {
         return;
       }
 
-      // No matching active round — but if there IS an unfinished round,
-      // either the game forgot to drain it or it's a spurious call.
-      // Mirror Stake's own ts-client behaviour: refuse with a clear code.
-      if (this.active && this.active.cursor < this.active.segments.length - 1) {
-        this.bridge.send<PlayErrorPayload>(
-          'PLAY_ERROR',
-          {
-            code: 'ACTIVE_SESSION_EXISTS',
-            message:
-              'An active round is in progress. Resume via getState() or finish remaining segments first.',
-          },
-          id,
-        );
-        return;
+      // No matching active round, but one is still open.
+      if (this.active) {
+        const atFinal = this.active.cursor >= this.active.segments.length - 1;
+        if (!atFinal) {
+          // Genuinely mid-round (segments still undelivered) → refuse, mirroring
+          // Stake's own ts-client behaviour.
+          this.bridge.send<PlayErrorPayload>(
+            'PLAY_ERROR',
+            {
+              code: 'ACTIVE_SESSION_EXISTS',
+              message:
+                'An active round is in progress. Resume via getState() or finish remaining segments first.',
+            },
+            id,
+          );
+          return;
+        }
+        // Fully delivered but not yet settled (e.g. a winning round whose final
+        // ACK never arrived, or arrived too late). Settle it now — awaited — so
+        // the RGS round is closed BEFORE we start the new round and the new
+        // /wallet/play isn't rejected with "a round is still active".
+        if (this.active.rgsActive && !this.active.endRoundCalled) {
+          await this.settleRound(this.active);
+        }
+        this.clearRoundIfActive(this.active);
       }
 
       // Brand-new round.
@@ -477,7 +541,7 @@ export class StakeBridge {
     payload: PlayRequestPayload,
     requestId?: string,
   ): Promise<void> {
-    if (this.isReplay) {
+    if (this._isReplay) {
       await this.startReplayRound(payload, requestId);
       return;
     }
@@ -542,6 +606,7 @@ export class StakeBridge {
   ): Promise<void> {
     const r = this.url.replay!;
 
+    // Normally pre-fetched in bootReplay (per Stake rules). Re-fetch only if that failed.
     if (!this.replayBook) {
       this.replayBook = await this.rgs.replay({
         game: r.game,
@@ -549,21 +614,24 @@ export class StakeBridge {
         mode: r.mode,
         event: r.event,
       });
+      this.replayAmountMinor =
+        (this.replayBook as { amount?: number }).amount ?? r.amount;
+      this.replayPayout =
+        ((this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0) / 100;
     }
 
     // The replay endpoint may return the book directly, or wrap it in
     // `state` (matching the `/wallet/play` round shape). Accept both.
     const bookData =
       (this.replayBook as { state?: unknown }).state ?? this.replayBook;
-    const payoutMultiplier =
-      (this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0;
+    const payoutMultiplier = this.replayPayout;
     const costMultiplier =
       (this.replayBook as { costMultiplier?: number }).costMultiplier ?? 1;
 
     const ctx: RoundContext = {
       mode: r.mode,
       triggerAction: payload.action,
-      betAmount: fromMinor(r.amount),
+      betAmount: fromMinor(this.replayAmountMinor),
       payoutMultiplier,
       currency: r.currency,
       roundId: r.event,
@@ -579,7 +647,7 @@ export class StakeBridge {
       betID: 0,
       mode: r.mode,
       triggerAction: payload.action,
-      betAmount: fromMinor(r.amount),
+      betAmount: fromMinor(this.replayAmountMinor),
       payoutMultiplier,
       costMultiplier,
       // Replay rounds never need EndRound — they're not real bets.
@@ -630,36 +698,21 @@ export class StakeBridge {
   }
 
   /**
-   * Build and send PLAY_RESULT for `index`. Calls `/wallet/end-round`
-   * before the final segment if RGS still considers the round active.
+   * Build and send PLAY_RESULT for `index`.
+   *
+   * Settlement (`/wallet/end-round`) is NOT done here — it fires on the FINAL
+   * segment's ACK (see `onPlayAck` → `settleRound`), i.e. *after* the game has
+   * animated the win. The delivered final segment therefore carries
+   * `creditPending: true` for a live round; the credited balance arrives via a
+   * `BALANCE_UPDATE` once the ACK settles it.
    */
   private async deliverSegment(index: number, requestId?: string): Promise<void> {
     const round = this.active!;
     const segment = round.segments[index];
     const isFinal = index === round.segments.length - 1;
 
-    let creditPending = round.rgsActive;
-    let balanceAfter = this.balance;
-
-    if (isFinal && round.rgsActive && !round.endRoundCalled) {
-      try {
-        const er = await this.rgs.endRound();
-        round.endRoundCalled = true;
-        round.rgsActive = false;
-        this.balance = fromMinor(er.balance.amount);
-        balanceAfter = this.balance;
-        creditPending = false;
-        this.startBalancePolling();
-      } catch (err) {
-        // Surface the error but keep the round in place so the game can retry.
-        this.bridge.send<PlayErrorPayload>(
-          'PLAY_ERROR',
-          { code: this.errCode(err), message: this.errMessage(err) },
-          requestId,
-        );
-        return;
-      }
-    }
+    const creditPending = round.rgsActive && !round.endRoundCalled;
+    const balanceAfter = this.balance;
 
     round.cursor = index;
     round.totalWin = this.sumWinUpTo(round.segments, index);
@@ -690,10 +743,14 @@ export class StakeBridge {
       balance: balanceAfter,
     });
 
-    if (isFinal) {
-      // Round closed — drop the cursor.
-      this.active = null;
-    }
+    // NB: the round is NOT dropped here on the final segment. It must survive
+    // until its ACK so settlement (`/wallet/end-round` for a win, or a local
+    // close for a 0-win round) can run *after* the win animation. `settleRound`
+    // clears `this.active` once it has closed the round. `onPlayRequest`'s
+    // open-round guard only blocks when the cursor is NOT yet at the final
+    // segment, so a fresh play that arrives after the final delivery (and its
+    // ack) is treated as a brand-new round.
+    void isFinal;
   }
 
   private synthSession(
@@ -719,6 +776,18 @@ export class StakeBridge {
 
   // ─── PLAY_RESULT_ACK ─────────────────────────────────────────────────
 
+  /**
+   * The game has finished processing (animating) a delivered segment.
+   *
+   * Two things happen here:
+   *  1. `/bet/event` is reported (progress marker) — best-effort, non-blocking.
+   *  2. If the ACKed segment was the FINAL one of a live round, the round is
+   *     SETTLED now — *after* the win animation. Settlement calls
+   *     `/wallet/end-round` only when `payoutMultiplier > 0`; a 0-win round
+   *     needs no wallet round-trip (the RGS already closed it on `play()`), so
+   *     we just close the round locally. Either way the round lifecycle
+   *     completes cleanly so the next play is never blocked.
+   */
   private onPlayAck(payload: PlayResultAckPayload, id?: string): void {
     void id;
     const round = this.active ?? this.lookupRoundForAck(payload);
@@ -726,10 +795,78 @@ export class StakeBridge {
     const segment = round.segments[round.cursor];
     const marker = segment?.progressMarker ?? `seg-${round.cursor}`;
     round.lastEventMarker = marker;
-    // Replay rounds aren't tracked by RGS — skip /bet/event.
-    if (this.isReplay) return;
-    // Fire-and-forget. /bet/event failures don't disrupt gameplay.
-    this.rgs.event(marker).catch((err) => this.log(`event() failed: ${err}`));
+
+    const isFinal = round.cursor === round.segments.length - 1;
+
+    // Replay rounds aren't tracked by RGS — skip /bet/event and settlement.
+    if (!this._isReplay) {
+      // Fire-and-forget. /bet/event failures don't disrupt gameplay.
+      this.rgs.event(marker).catch((err) => this.log(`event() failed: ${err}`));
+    }
+
+    // Settle the round once the FINAL segment's animation is acknowledged.
+    // Fire-and-forget here — the ACK handler stays synchronous; onPlayRequest's
+    // drain awaits a settleRound() of its own when a new play races this one.
+    if (isFinal && round.rgsActive && !round.endRoundCalled && !this._isReplay) {
+      void this.settleRound(round);
+    }
+  }
+
+  /**
+   * Settle a finished round AFTER its final-segment animation has been ACKed.
+   *
+   * - `payoutMultiplier > 0`: call `/wallet/end-round` to credit the win, then
+   *   push a fresh `BALANCE_UPDATE`.
+   * - `payoutMultiplier === 0`: a losing round needs no settlement — the RGS
+   *   closed it on `play()`. Close it locally so nothing lingers.
+   *
+   * Idempotent via `endRoundCalled`. Returns a promise that resolves once the
+   * round is closed (or rejects-as-handled by emitting PLAY_ERROR and leaving the
+   * round in place for a retry). The ACK path calls it fire-and-forget; the
+   * onPlayRequest drain awaits it so a racing new play can't start before the
+   * RGS round is closed.
+   */
+  private async settleRound(round: ActiveRound): Promise<void> {
+    if (round.endRoundCalled || !round.rgsActive) return;
+
+    // 0-win round: no end-round expected. Close locally so the next play is
+    // not blocked by a lingering open round.
+    if (round.payoutMultiplier <= 0) {
+      round.endRoundCalled = true;
+      round.rgsActive = false;
+      this.clearRoundIfActive(round);
+      return;
+    }
+
+    // Set the guard flag BEFORE the first await so a duplicate ACK that
+    // arrives while endRound() is in flight hits the entry guard and
+    // returns without issuing a second /wallet/end-round call.
+    round.endRoundCalled = true;
+    try {
+      const er = await this.rgs.endRound();
+      round.rgsActive = false;
+      this.balance = fromMinor(er.balance.amount);
+      this.startBalancePolling();
+      this.clearRoundIfActive(round);
+      // Win has now settled — push the credited balance.
+      this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', {
+        balance: this.balance,
+      });
+    } catch (err) {
+      // Reset the flag so a genuine retry (next PLAY_RESULT_ACK from the
+      // game) can re-enter settleRound and attempt /wallet/end-round again.
+      round.endRoundCalled = false;
+      // Keep the round in place so the game can retry the settlement.
+      this.bridge.send<PlayErrorPayload>('PLAY_ERROR', {
+        code: this.errCode(err),
+        message: this.errMessage(err),
+      });
+    }
+  }
+
+  /** Drop `this.active` if it still points at the now-settled round. */
+  private clearRoundIfActive(round: ActiveRound): void {
+    if (this.active === round) this.active = null;
   }
 
   private lookupRoundForAck(payload: PlayResultAckPayload): ActiveRound | null {
@@ -744,7 +881,7 @@ export class StakeBridge {
   // ─── GET_BALANCE ─────────────────────────────────────────────────────
 
   private async onGetBalance(id?: string): Promise<void> {
-    if (this.isReplay) {
+    if (this._isReplay) {
       // No wallet to read — return the synthetic 0 balance.
       this.bridge.send<BalanceUpdatePayload>(
         'BALANCE_UPDATE',
@@ -861,7 +998,7 @@ export class StakeBridge {
   }
 
   private startBalancePolling(): void {
-    if (this.isReplay) return;
+    if (this._isReplay) return;
     this.stopBalancePolling();
     if (this.balancePollMs <= 0) return;
     this.pollTimer = setInterval(() => {

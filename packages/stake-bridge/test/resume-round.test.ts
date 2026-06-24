@@ -42,7 +42,7 @@ const { StakeBridge } = await import('../src/bridge');
 
 const MILLION = 1_000_000;
 const LIVE_URL =
-  'https://game.example/?rgs_url=https://rgs.example&sessionID=sess-1&currency=USD';
+  'https://game.example/?rgs_url=https://x.stake-engine.com&sessionID=sess-1&currency=USD';
 
 /** A single winning base segment (the whole round is one player-visible spin). */
 function singleWinSegment(): BookSegment {
@@ -124,7 +124,7 @@ describe('StakeBridge resume of a 1-segment winning round', () => {
     sb?.destroy();
   });
 
-  it('settles via end-round on the continuation play instead of NO_ACTIVE_SESSION', async () => {
+  it('settles via end-round AFTER the final-segment ACK (not on delivery)', async () => {
     sb = new StakeBridge({
       devMode: true,
       url: LIVE_URL,
@@ -158,16 +158,35 @@ describe('StakeBridge resume of a 1-segment winning round', () => {
     const results = received.filter((m) => m.type === 'PLAY_RESULT');
 
     expect(errors).toHaveLength(0);
-    expect(rgs.endRound).toHaveBeenCalledTimes(1);
     expect(results).toHaveLength(1);
+    // Settlement happens AFTER the win animation → not yet on delivery.
+    expect(rgs.endRound).not.toHaveBeenCalled();
     const result = results[0].payload as {
       creditPending: boolean;
       totalWin: number;
       balanceAfter: number;
     };
-    expect(result.creditPending).toBe(false);
+    // Win not yet credited at delivery; the round is still pending settlement.
+    expect(result.creditPending).toBe(true);
     expect(result.totalWin).toBe(10);
-    expect(result.balanceAfter).toBe(110);
+    expect(result.balanceAfter).toBe(100);
+
+    // Game finishes animating and ACKs the final segment → settle now.
+    channel.sendToHost('PLAY_RESULT_ACK', {
+      roundId: '4242',
+      action: 'spin',
+      totalWin: 10,
+      balanceAfter: 100,
+    });
+    await flush();
+
+    expect(rgs.endRound).toHaveBeenCalledTimes(1);
+    // The credited balance arrives via a post-settlement BALANCE_UPDATE.
+    const balances = received.filter((m) => m.type === 'BALANCE_UPDATE');
+    const lastBalance = balances[balances.length - 1].payload as {
+      balance: number;
+    };
+    expect(lastBalance.balance).toBe(110);
   });
 
   it('unwedges the session: a fresh spin after the resumed round settles starts a new round', async () => {
@@ -200,13 +219,24 @@ describe('StakeBridge resume of a 1-segment winning round', () => {
     channel.sendToHost('GAME_READY', {});
     await flush();
 
-    // Settle the resumed round.
+    // Deliver the resumed round's final segment.
     channel.sendToHost('PLAY_REQUEST', {
       action: 'spin',
       bet: 1,
       roundId: '4242',
     });
     await flush();
+
+    // Game finishes animating and ACKs → resumed round settles via end-round.
+    channel.sendToHost('PLAY_RESULT_ACK', {
+      roundId: '4242',
+      action: 'spin',
+      totalWin: 10,
+      balanceAfter: 100,
+    });
+    await flush();
+
+    expect(rgs.endRound).toHaveBeenCalledTimes(1);
 
     // New spin — no roundId. Previously rejected (NO_ACTIVE_SESSION wedged the
     // round); now it must reach RGS as a brand-new play.

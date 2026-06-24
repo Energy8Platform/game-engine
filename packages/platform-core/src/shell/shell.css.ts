@@ -148,6 +148,8 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-gi-sec h3 { color:var(--shell-plaque-label); font-size:11px; letter-spacing:.14em;
   text-transform:uppercase; margin:0 0 12px; }
 #${SHELL_ROOT_ID} .ge-gi-sec p { color:rgba(255,255,255,.88); font-size:15px; line-height:1.6; margin:0; }
+#${SHELL_ROOT_ID} .ge-gi-version { text-align:center; color:var(--shell-muted); font-size:11px;
+  letter-spacing:.08em; opacity:.7; margin:4px 0 2px; }
 
 /* controls — two blocks (gameplay / menu & info), icon/name/description per control */
 #${SHELL_ROOT_ID} .ge-gi-ctl-block + .ge-gi-ctl-block { margin-top:16px; padding-top:4px; border-top:1px solid var(--shell-plaque-line); }
@@ -361,7 +363,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-modal-title { margin:0; text-align:center; color:var(--card-acc, var(--shell-accent));
   font-weight:800; letter-spacing:.04em; text-transform:uppercase; font-size:1.2em; }
 #${SHELL_ROOT_ID} .ge-modal-text { margin:0; text-align:center; color:rgba(255,255,255,.85); font-size:.93em; line-height:1.5; }
-#${SHELL_ROOT_ID} .ge-sheet-grid { display:grid; gap:.65em; }
+#${SHELL_ROOT_ID} .ge-sheet-grid { display:grid; gap:.65em; grid-template-columns:repeat(var(--cols,3),1fr); }
+#${SHELL_ROOT_ID}.ge-mobile .ge-sheet-grid { grid-template-columns:repeat(var(--cols-m,var(--cols,3)),1fr); }
+/* the bet picker packs 6 chips/row → give its card room (autoplay & co. stay at the 28em default) */
+#${SHELL_ROOT_ID} .ge-sheet[data-ge="bet-modal"] .ge-modal-card { max-width:44em; }
 #${SHELL_ROOT_ID} .ge-chip { pointer-events:auto; cursor:pointer; border:1px solid var(--shell-plaque-line);
   border-radius:.8em; background:rgba(255,255,255,.04); color:#fff; font-size:1em; font-weight:700;
   font-variant-numeric:tabular-nums; padding:.8em .55em; transition:background .12s ease, border-color .12s ease; }

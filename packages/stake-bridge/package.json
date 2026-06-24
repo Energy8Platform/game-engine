@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/stake-bridge",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Drop-in host-side wrapper that lets a game built against @energy8platform/game-sdk run on Stake Engine",
   "author": "Energy8 Platform",
   "license": "MIT",
@@ -13,6 +13,11 @@
       "import": "./dist/stake-bridge.esm.js",
       "require": "./dist/stake-bridge.umd.js",
       "types": "./dist/index.d.ts"
+    },
+    "./detect": {
+      "import": "./dist/detect.esm.js",
+      "require": "./dist/detect.umd.js",
+      "types": "./dist/detect.d.ts"
     }
   },
   "files": [

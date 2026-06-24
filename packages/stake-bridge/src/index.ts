@@ -19,11 +19,13 @@
  */
 
 export { StakeBridge } from './bridge';
+export { isStakeLaunch } from './detect';
 export {
   RGSClient,
   RGSError,
   API_MULTIPLIER,
   parseStakeUrl,
+  isValidRgsUrl,
   type RGSAuthenticateResponse,
   type RGSPlayResponse,
   type RGSEndRoundResponse,
