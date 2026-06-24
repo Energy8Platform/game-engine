@@ -185,6 +185,14 @@ function isDisclaimerSection(s: GameInfoSection): boolean {
   return s.type === 'custom' && (s as { title?: string }).title === DISCLAIMER_TITLE;
 }
 
+/** Move the legal disclaimer to the very END of the section list — it must always render last,
+ *  regardless of where an author merge or an extra section would otherwise place it. */
+function orderDisclaimerLast(sections: GameInfoSection[]): GameInfoSection[] {
+  const disclaimer = sections.filter(isDisclaimerSection);
+  if (!disclaimer.length) return sections;
+  return [...sections.filter((s) => !isDisclaimerSection(s)), ...disclaimer];
+}
+
 /**
  * Pure: derive a maximal default GameInfoContent from the model + runtime so every game
  * gets a real info panel for free (paytable, win illustration, controls, and the Stake
@@ -299,6 +307,8 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
       sections: (gameInfo.sections ?? []).map((s) => (isDisclaimerSection(s) ? s : socializeSection(s))),
     };
   }
+  // The legal DISCLAIMER always renders LAST — author-merged or extra sections never push below it.
+  gameInfo = { sections: orderDisclaimerLast(gameInfo.sections ?? []) };
   // Buy-bonus cards: socialize the FINAL options (author override or spec-derived) in social mode.
   const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model), isSocial);
   // Features: defaults, then author overrides, THEN jurisdiction restrictions (a restriction wins).

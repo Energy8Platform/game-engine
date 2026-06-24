@@ -106,6 +106,20 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(sections.some((s) => s.type === 'wins')).toBe(true);
   });
 
+  it('the DISCLAIMER is always the LAST section, even when authors merge/add sections after it', () => {
+    const author: GameInfoContent = { sections: [
+      { type: 'custom', title: 'How to play', html: '<p>spin</p>' },
+      { type: 'modes', title: 'MODES', modes: [{ title: 'Base' }] },
+    ] };
+    const c = buildShellConfig({ gameInfo: author }, model, { balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.'] });
+    const sections = c.gameInfo.sections ?? [];
+    const last = sections[sections.length - 1] as { type?: string; title?: string };
+    expect(last.type).toBe('custom');
+    expect(last.title).toBe('DISCLAIMER');
+    // exactly one disclaimer, and nothing follows it
+    expect(sections.filter((s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER')).toHaveLength(1);
+  });
+
   it('undefined opts.gameInfo → pure derived set (unchanged)', () => {
     const derived = defaultGameInfo(model, { balance: 0, mode: 'base' });
     const c = buildShellConfig({}, model, { balance: 0, mode: 'base' });
