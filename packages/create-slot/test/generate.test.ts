@@ -8,7 +8,7 @@ import { applyDefaults } from '../src/answers';
 let dir = '';
 afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-const versions = { 'platform-core': '*', 'game-engine': '*', 'stake-kit': '*', 'stake-bridge': '*' };
+const versions = { 'platform-core': '*', 'game-engine': '*', 'stake-kit': '*', 'stake-bridge': '*', 'stake-math-tools': '*' };
 
 describe('generate', () => {
   it('writes the canonical thin-game tree with substituted + codegen files', async () => {

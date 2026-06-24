@@ -2,6 +2,7 @@ import type { Answers } from '../answers';
 
 export interface DepVersions {
   'platform-core': string; 'game-engine': string; 'stake-kit': string; 'stake-bridge': string;
+  'stake-math-tools': string;
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
@@ -36,7 +37,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       zod: '^3.23.0',
     },
     devDependencies: {
-      '@energy8platform/stake-math-tools': '^0.1.0',
+      '@energy8platform/stake-math-tools': v['stake-math-tools'],
       '@types/node': '^20.0.0',
       tsx: '^4.21.0',
       typescript: '^5.6.0',

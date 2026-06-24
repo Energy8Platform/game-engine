@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { genPackageJson, type DepVersions } from '../src/codegen/packageJson';
 
-const V: DepVersions = { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1' };
+const V: DepVersions = { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1', 'stake-math-tools': '^0.8.0' };
 
 describe('genPackageJson', () => {
   const json = JSON.parse(genPackageJson(
@@ -21,7 +21,7 @@ describe('genPackageJson', () => {
   });
   it('emits sim/pool/curate/math scripts via e8-math and the stake-math-tools devDep', () => {
     const json2 = JSON.parse(genPackageJson({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true } as any,
-      { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1' }));
+      { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1', 'stake-math-tools': '^0.8.0' }));
     expect(json2.scripts.math).toContain('e8-math all');
     expect(json2.scripts.pool).toContain('e8-math pool');
     expect(json2.scripts.curate).toContain('e8-math curate');
