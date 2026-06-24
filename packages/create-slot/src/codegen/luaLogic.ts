@@ -7,12 +7,18 @@ export function genLuaLogic(a: Answers): string {
     total_win = win,          -- bet-multiplier; the platform multiplies by the actual bet
     cascades = {},            -- TODO: emit cascade steps { winning, removed, new, grid }
     free_spins = free_spins_result,
+    -- The engine reads these VARIABLES (not the nested free_spins table) to open / retrigger the
+    -- free-spins SESSION. Without them, free_spin would fail "requires an active session".
+    variables = { free_spins_awarded = fs_awarded, retrigger_spins = retrigger_awarded },
   }`
     : `  return {
     total_win = win,          -- bet-multiplier
     matrix = grid,            -- 2D array of SYM.* ids
     wins = {},                -- TODO: emit line/way wins
     free_spins = free_spins_result,
+    -- The engine reads these VARIABLES (not the nested free_spins table) to open / retrigger the
+    -- free-spins SESSION. Without them, free_spin would fail "requires an active session".
+    variables = { free_spins_awarded = fs_awarded, retrigger_spins = retrigger_awarded },
   }`;
   return `-- Game logic. The spec-derived prelude (SPEC/SYMBOLS/SYM/PAYTABLE) is injected above this file.
 -- Reel weights / RTP tuning live here. Implement your mechanic; return a bet-multiplier in total_win.
@@ -31,10 +37,13 @@ function execute(state)
   -- Placeholder random payout (replace with your real mechanic).
   local win = 0
   local free_spins_result = nil
+  local fs_awarded = 0        -- engine VARIABLE: spins this round awards (opens the session)
+  local retrigger_awarded = 0 -- engine VARIABLE: extra spins a free_spin retrigger awards
 
   if action == 'buy_bonus' then
     -- Player bought free spins: always award them, no base win.
-    free_spins_result = { awarded = 10, total = 10 }
+    fs_awarded = 10
+    free_spins_result = { awarded = fs_awarded, total = fs_awarded }
 
   elseif action == 'free_spin' then
     -- Free-spin round: random payout + small retrigger chance (~5%).
@@ -46,10 +55,11 @@ function execute(state)
     elseif roll <= 442 then    -- ~0.2% large win
       win = engine.random(100, 800)
     end
-    -- Retrigger: ~5% chance to award extra spins.
+    -- Retrigger: ~5% chance to award extra spins (read via retrigger_spins).
     local retrigger_roll = engine.random(1, 100)
     if retrigger_roll <= 5 then
-      free_spins_result = { awarded = 5, total = 5 }
+      retrigger_awarded = 5
+      free_spins_result = { awarded = retrigger_awarded, total = retrigger_awarded }
     end
 
   elseif action == 'ante' then
@@ -64,7 +74,8 @@ function execute(state)
     end
     local fs_roll = engine.random(1, 100)
     if fs_roll <= 5 then       -- ~5% free-spins trigger
-      free_spins_result = { awarded = 8, total = 8 }
+      fs_awarded = 8
+      free_spins_result = { awarded = fs_awarded, total = fs_awarded }
     end
 
   else
@@ -79,7 +90,8 @@ function execute(state)
     end
     local fs_roll = engine.random(1, 100)
     if fs_roll <= 2 then       -- ~2% free-spins trigger
-      free_spins_result = { awarded = 8, total = 8 }
+      fs_awarded = 8
+      free_spins_result = { awarded = fs_awarded, total = fs_awarded }
     end
   end
 

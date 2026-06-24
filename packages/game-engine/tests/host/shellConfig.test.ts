@@ -142,6 +142,20 @@ describe('social mode — buy-bonus cards', () => {
     expect((c.features.buyBonus as typeof author)[0].description).not.toContain('buy');
   });
 
+  it('accepts gameInfo as a (t) => content factory; t socializes in social mode, identity otherwise', () => {
+    const factory = (t: (s: string) => string) => ({
+      sections: [{ type: 'custom' as const, title: t('How to Play'), html: `<p>${t('Buy bonus to win')}</p>` }],
+    });
+    // social: t rewrites "Buy bonus" → "Get bonus", "win" stays
+    const social = buildShellConfig({ gameInfo: factory }, model, { balance: 0, mode: 'base', social: true });
+    const sSec = (social.gameInfo.sections ?? []).find((s) => s.type === 'custom' && (s as { html?: string }).html?.includes('onus')) as { html?: string } | undefined;
+    expect(sSec?.html?.toLowerCase()).not.toContain('buy bonus');
+    // non-social: identity t — copy verbatim
+    const plain = buildShellConfig({ gameInfo: factory }, model, { balance: 0, mode: 'base', social: false });
+    const pSec = (plain.gameInfo.sections ?? []).find((s) => s.type === 'custom' && (s as { title?: string }).title === 'How to Play');
+    expect(pSec).toBeDefined();
+  });
+
   it('leaves author buy-bonus copy verbatim when NOT social', () => {
     const author = [{ id: 'x', title: 'BUY BONUS', description: 'buy spins', priceMultiplier: 50 }];
     const c = buildShellConfig({ buyBonus: author }, model, { balance: 0, mode: 'base', social: false });

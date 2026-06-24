@@ -25,7 +25,10 @@ describe('genMainTs', () => {
   it('enables the shell without hardcoding buyBonus/currency, and registers scenes', () => {
     const m = genMainTs(a);
     expect(m).toContain('createSlotGame');
-    expect(m).toContain('shell: {}');
+    expect(m).toContain('shell: {');
+    // Base gameInfo demonstrates the social-aware t() pattern for custom copy.
+    expect(m).toContain('gameInfo: (t) => ({');
+    expect(m).toContain("t('How to Play')");
     expect(m).toContain("{ key: 'intro', scene: IntroScene, skipOnReplay: true }");
     expect(m).not.toContain('buyBonus');     // derived from spec now
     expect(m).not.toContain("symbol: '€'");  // currency from initData now

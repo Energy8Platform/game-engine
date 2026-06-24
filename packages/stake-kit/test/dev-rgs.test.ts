@@ -178,6 +178,19 @@ describe('play + endRound', () => {
     const b = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
     expect(b.round.betID).toBeGreaterThan(a.round.betID);
   });
+
+  it('playWithOutcome debits bet × cost (buy/ante stake), but credits the win on the BASE bet', async () => {
+    const rgs = makeRgs();
+    await rgs.authenticate();
+    const bet = 1 * API_MULTIPLIER;
+    // A buy bonus costing 100×: debit 100, win = payout(2×) × base bet = 2.
+    const play = await rgs.playWithOutcome('BONUS', bet, { payoutCents: 200, state: {}, cost: 100 });
+    expect(play.round.costMultiplier).toBe(100);
+    expect(play.balance.amount).toBe(1000 * API_MULTIPLIER - 100 * bet); // debited 100 × bet
+    const end = await rgs.endRound();
+    // Credit = 2 × base bet (NOT × cost): 1000 - 100 + 2 = 902.
+    expect(end.balance.amount).toBe((1000 - 100 + 2) * API_MULTIPLIER);
+  });
 });
 
 // ---------------------------------------------------------------------------

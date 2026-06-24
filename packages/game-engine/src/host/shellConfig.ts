@@ -11,12 +11,16 @@ export interface SlotShellOptions {
   mount?: HTMLElement;
   /** Override the derived currency (normally taken from initData). */
   currency?: CurrencyConfig;
-  /** Author-supplied info sections. Sections are MERGED over the host-derived set by section
-   *  identity: an author section REPLACES the derived section of the same `type`/`kind`, a new
-   *  `type` is appended, and derived sections without an author override (max win, paytable,
-   *  controls, disclaimer) are kept. In social mode, the merged result (author text included) is
-   *  run through `socialize`, so forbidden words in author copy are rewritten automatically. */
-  gameInfo?: GameInfoContent;
+  /** Author-supplied info sections, MERGED over the host-derived set by section identity (an author
+   *  section REPLACES the derived one of the same `type`/`kind`; a new `type` is appended; derived
+   *  sections without an override are kept).
+   *
+   *  Pass a plain `GameInfoContent`, OR a function `(t) => GameInfoContent` where `t` is the
+   *  social-aware translator (it rewrites restricted gambling words when in social mode, and is the
+   *  identity otherwise) — wrap player-facing copy in `t(...)` so it socializes. Either way the
+   *  merged result is also run through `socialize` in social mode as a safety net, so forbidden
+   *  words never leak even if `t()` was forgotten. */
+  gameInfo?: GameInfoContent | ((t: (text: string) => string) => GameInfoContent);
   /** Override the derived buy/ante options. In social mode the card copy is socialized too. */
   buyBonus?: BonusOption[];
   tiers?: WinTier[];
@@ -223,7 +227,12 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
   // social mode just because the author wrote it in their own info section. (Custom sections built
   // from a raw DOM `node` can't be rewritten automatically — author owns the node and can call the
   // exported `socialize` from '@energy8platform/game-engine/host' on their own strings.)
-  let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime), opts.gameInfo);
+  // Author gameInfo may be a plain object or a `(t) => content` factory. `t` socializes when in
+  // social mode (identity otherwise) so authors can wrap copy explicitly; the full merged set is
+  // still socialized below as a safety net.
+  const t = isSocial ? socialize : (text: string) => text;
+  const authored = typeof opts.gameInfo === 'function' ? opts.gameInfo(t) : opts.gameInfo;
+  let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime), authored);
   if (isSocial) gameInfo = { sections: (gameInfo.sections ?? []).map(socializeSection) };
   // Buy-bonus cards: socialize the FINAL options (author override or spec-derived) in social mode.
   const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model), isSocial);

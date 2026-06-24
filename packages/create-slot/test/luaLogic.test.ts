@@ -33,6 +33,13 @@ describe('genLuaLogic', () => {
     expect(lua).toContain('awarded =');
     expect(lua).toContain('total =');
   });
+  it('returns a variables table with free_spins_awarded/retrigger_spins (opens the session)', () => {
+    const lua = genLuaLogic({ id: 'g', title: 'G', mechanic: 'lines', grid: { cols: 5, rows: 3 }, stake: true });
+    // The engine reads these VARIABLES (not the nested table) to create/retrigger the free-spins
+    // session — without them free_spin fails "requires an active session".
+    expect(lua).toContain('variables = { free_spins_awarded = fs_awarded, retrigger_spins = retrigger_awarded }');
+    expect(lua).toContain('fs_awarded = 10'); // buy_bonus opens a 10-spin session
+  });
   it('same assertions hold for cascade variant', () => {
     const lua = genLuaLogic({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
     expect(lua).toContain('state.action');

@@ -12,7 +12,9 @@
  *   • round.payoutMultiplier (the ×bet multiplier) = payoutCents / 100.
  *   • RGSPlayParams.amount / RGSBalance.amount are MINOR units
  *     (major × API_MULTIPLIER).
- *   • play debits `amount` (minor). end-round credits the win:
+ *   • play debits the TOTAL stake = `amount * costMultiplier` (minor). For BASE cost=1 so this is
+ *     just `amount`; buy/ante modes cost a multiple of the base bet. end-round credits the win
+ *     relative to the BASE bet (NOT × cost):
  *       winMinor = (payoutCents / 100) * betMajor * API_MULTIPLIER
  *                = (payoutCents / 100) * amountMinor
  *   • round.amount = the bet in MAJOR units = amountMinor / API_MULTIPLIER.
@@ -86,7 +88,7 @@ export interface DevRgs {
   playWithOutcome(
     mode: string,
     amount: number,
-    outcome: { payoutCents: number; state: unknown },
+    outcome: { payoutCents: number; state: unknown; cost?: number },
   ): Promise<RGSPlayResponse>;
   endRound(): Promise<RGSEndRoundResponse>;
   event(value: string): Promise<RGSEventResponse>;
@@ -227,8 +229,10 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       const { sim, payoutCents } = await pickWeighted(lutPathFor(booksDir, mode), rng);
       const book = await loadBook(mode, sim);
 
-      // Debit the bet (minor units).
-      balanceMinor -= amount;
+      // Debit the TOTAL stake = bet × cost (minor units). Buy/ante modes cost a multiple of the
+      // base bet (cost from index.json); the win is still payout × base bet (credited at end-round).
+      const cost = costOf(modes, mode);
+      balanceMinor -= amount * cost;
 
       // Wrap the book as a one-event book so the adapter can split into segments.
       // The adapter reads `event.data ?? event.spin` — use `data` to carry the
@@ -246,7 +250,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       const round: StakeRound<ParsedBook> = {
         betID: nextBetId++,
         payoutMultiplier: payoutCents / 100,
-        costMultiplier: costOf(modes, mode),
+        costMultiplier: cost,
         active,
         mode,
         state: wrappedState as unknown as ParsedBook,
@@ -264,7 +268,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
     async playWithOutcome(
       mode: string,
       amount: number,
-      outcome: { payoutCents: number; state: unknown },
+      outcome: { payoutCents: number; state: unknown; cost?: number },
     ): Promise<RGSPlayResponse> {
       if (activeRound !== null) {
         throw new Error(
@@ -272,8 +276,10 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
         );
       }
 
-      // Debit the bet (minor units).
-      balanceMinor -= amount;
+      // Debit the TOTAL stake = bet × cost (minor units). With no books there is no index.json cost,
+      // so the caller (harness Lua fallback) supplies the action's cost from the spec; default 1.
+      const cost = outcome.cost ?? costOf(modes, mode);
+      balanceMinor -= amount * cost;
 
       // Wrap outcome.state in a one-event book so the adapter can split into segments.
       // Inject total_win if the caller's state doesn't carry it.
@@ -294,7 +300,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       const round: StakeRound<unknown> = {
         betID: nextBetId++,
         payoutMultiplier: outcome.payoutCents / 100,
-        costMultiplier: costOf(modes, mode),
+        costMultiplier: cost,
         active,
         mode,
         state: wrappedState,

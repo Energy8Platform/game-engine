@@ -95,4 +95,48 @@ end
     expect(fs3.session!.completed).toBe(true);
     expect(fs3.session!.spinsRemaining).toBe(0);
   });
+
+  it('buy_bonus that returns variables.free_spins_awarded opens the session so free_spin does not throw', () => {
+    // Regression for the scaffold Lua: buy_bonus returned only a nested `free_spins` table, never
+    // the `free_spins_awarded` VARIABLE the buy transition checks — so no session was created and
+    // the next free_spin threw "Action free_spin requires an active session".
+    const buySpec: GameSpec = {
+      id: 'spec-integration-buy', type: 'slot', grid: { cols: 3, rows: 3 },
+      betLevels: [1], maxWin: 1000,
+      symbols: [{ id: 'A', kind: 'high', pay: { 3: 5 } }],
+      actions: {
+        spin: { role: 'base' },
+        buy_bonus: { role: 'buy', cost: 100 },
+        free_spin: { role: 'free' },
+      },
+    };
+    const buyLogic = `
+function execute(state)
+  if state.action == "buy_bonus" then
+    return {
+      total_win = 0,
+      free_spins = { awarded = 10, total = 10 },
+      variables = { free_spins_awarded = 10, retrigger_spins = 0 },
+      matrix = { { SYM.A, SYM.A, SYM.A } },
+    }
+  else
+    return { total_win = 1, matrix = { { SYM.A, SYM.A, SYM.A } }, variables = { retrigger_spins = 0 } }
+  end
+end
+`;
+    const model = defineGame(buySpec);
+    engine = new LuaEngine({
+      script: buildLuaScript(model, buyLogic),
+      gameDefinition: model.gameDefinition,
+      seed: 1,
+    });
+
+    const buy = engine.execute({ action: 'buy_bonus', bet: 1 });
+    expect(buy.nextActions).toEqual(['free_spin']);
+    expect(buy.session).toBeDefined();
+    expect(buy.session!.spinsRemaining).toBe(10);
+
+    // The first free spin must NOT throw "requires an active session".
+    expect(() => engine.execute({ action: 'free_spin', bet: 1 })).not.toThrow();
+  });
 });

@@ -25,7 +25,22 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-${stakeOpt}  shell: {}, // buy/ante cards + currency derive from the spec + initData
+${stakeOpt}  shell: {
+    // buy/ante cards + currency derive from the spec + initData.
+    // Base game-info sections. Wrap player-facing copy in t(...) so restricted gambling words are
+    // rewritten to social-casino vocabulary in social mode (t is the identity otherwise). The
+    // built-in sections (max win, paytable, controls, disclaimer) and the spec's buy/ante card copy
+    // are socialized automatically; t() is how YOUR custom copy joins in.
+    gameInfo: (t) => ({
+      sections: [
+        {
+          type: 'custom',
+          title: t('How to Play'),
+          html: \`<p>\${t('Spin the reels and match symbols to win. Buy the bonus to trigger free spins instantly.')}</p>\`,
+        },
+      ],
+    }),
+  },
 }).catch((err) => { console.error('[${a.id}] failed to start', err); });
 `;
 }

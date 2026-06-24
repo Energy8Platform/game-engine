@@ -41,7 +41,13 @@ export interface StakeHarnessPluginOptions {
  */
 interface HarnessMathConfig {
   model: {
-    spec: { id: string; betLevels: number[]; currency?: string };
+    spec: {
+      id: string;
+      betLevels: number[];
+      currency?: string;
+      /** Action specs carry the bet-cost multiplier for buy/ante modes (e.g. buy_bonus cost 100). */
+      actions?: Record<string, { cost?: number }>;
+    };
     gameDefinition: unknown;
     mathModes?: { action: string; mode: string }[];
     modeMap?: Record<string, string>;
@@ -93,6 +99,11 @@ function sendJson(res: ServerResponse, status: number, json: unknown): void {
 function actionForMode(cfg: HarnessMathConfig, mode: string): string {
   const found = cfg.model.mathModes?.find((m) => m.mode === mode);
   return found?.action ?? mode.toLowerCase();
+}
+
+/** Bet-cost multiplier for an action (buy/ante cost a multiple of the base bet). Default 1. */
+function costForAction(cfg: HarnessMathConfig, action: string): number {
+  return cfg.model.spec.actions?.[action]?.cost ?? 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +174,9 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
       const totalWin = typeof result.totalWin === 'number' ? result.totalWin : 0;
       const payoutCents = Math.round(totalWin * 100);
       const state: unknown = result.data ?? {};
-      return devRgs!.playWithOutcome(mode, amount, { payoutCents, state });
+      // Debit bet × cost for buy/ante (no index.json cost in the no-books path → use the spec's).
+      const cost = costForAction(cfg, action);
+      return devRgs!.playWithOutcome(mode, amount, { payoutCents, state, cost });
     };
 
     return { devRgs, luaPlay };

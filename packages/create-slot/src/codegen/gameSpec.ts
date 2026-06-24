@@ -26,6 +26,9 @@ export const spec: GameSpec = {
     { id: 'WILD', name: 'Wild', kind: 'wild' },
     { id: 'SCATTER', name: 'Scatter', kind: 'scatter' },
   ],
+  // Action titles/descriptions are player-facing: in social mode the shell socializes this copy
+  // automatically (e.g. 'BUY BONUS' → 'GET BONUS', 'Pay more…' → 'Win more…'), so you can write
+  // normal casino wording here and it stays compliant in social builds.
   actions: {
     spin: { role: 'base' },
     ante: { role: 'feature', cost: 1.5, title: 'ANTE BET', description: 'Pay more for a boosted chance' },
