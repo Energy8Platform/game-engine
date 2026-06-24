@@ -211,6 +211,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       // (growing on retriggers) + cumulative win per spin. `inBonus` gates the per-spin counter so
       // the trigger segment (presented before onBonusEnter) doesn't count as a free spin.
       let inBonus = false;
+      let prevWin = 0; // cumulative win up to the previous segment — the WIN readout shows the delta
       const fsCounter = createFreeSpinsCounter();
       shell!.setBusy(true); // block re-spin / spacebar while the round plays out
       // RETURN the promise: the replay modal awaits onReplay() and only reopens once the round's
@@ -224,7 +225,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           context: makeContext,
           roleOf,
           afterPresent: (r) => {
-            shell!.setWin(r.totalWin);
+            // WIN readout = THIS spin's win (cumulative delta); the cumulative total goes to the
+            // free-spins counter (totalWin) below, not the WIN readout.
+            shell!.setWin(r.totalWin - prevWin);
+            prevWin = r.totalWin;
             balanceGate.afterPresent();
             if (inBonus) shell!.setFreeSpins(fsCounter.spin(r.freeSpins?.awarded ?? 0, r.totalWin));
           },
@@ -271,12 +275,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       let raw = firstRaw;
       let r = enrichRoundMeta(opts.normalize(raw), raw);
       let inBonus = false;
+      let prevWin = 0; // cumulative win up to the previous segment — WIN readout shows the delta
       const applySegment = async (): Promise<void> => {
         // A recovered open round with remaining segments is a bonus → show FS mode + counter.
         if (!inBonus && !r.complete) { inBonus = true; shell!.setMode('freeSpins'); }
         if (animate) await scene.present(r, ctx);
         if (inBonus) { const v = fsView(raw, r.totalWin); if (v) shell!.setFreeSpins(v); }
-        shell!.setWin(r.totalWin);
+        shell!.setWin(r.totalWin - prevWin); // THIS spin's win, not the cumulative bonus total
+        prevWin = r.totalWin;
         ps!.playAck(raw); // settles via /wallet/end-round on the FINAL segment
       };
       shell!.setBusy(true); // block input while the recovered round drains
