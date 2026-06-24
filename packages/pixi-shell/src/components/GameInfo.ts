@@ -85,8 +85,9 @@ function sectionModes(host: ShellHost, modes: GameMode[], title: string, width: 
 }
 
 function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
-  const row = new FlexBox({ direction: 'column', align: 'start', gap: 6, padding: { top: 12, bottom: 12 } });
-  const top = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between' });
+  // stretch so the top row spans the section width → title left, stats pushed to the right edge
+  const row = new FlexBox({ direction: 'column', align: 'stretch', gap: 6, padding: { top: 12, bottom: 12 } });
+  const top = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', width: inner });
   top.add(makeText(m.title, { size: 16, weight: '800', color: '#ffffff' }));
   const stats = new FlexBox({ direction: 'row', align: 'center', gap: 14 });
   const stat = (label: string, val: string): void => {
@@ -98,7 +99,6 @@ function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
   if (m.price != null) stat('Price', m.price);
   if (typeof m.rtp === 'number') stat('RTP', `${m.rtp}%`);
   if (m.maxWin != null) stat('Max win', m.maxWin);
-  top.add(new Spacer(), { grow: 1 });
   top.add(stats);
   row.add(top);
   if (m.description) row.add(paragraph(host, m.description, inner, { size: 14, color: 'rgba(255,255,255,.78)' }));
