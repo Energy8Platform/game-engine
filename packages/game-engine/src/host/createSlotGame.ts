@@ -207,7 +207,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // (ACTIVE_SESSION_EXISTS → Reload, etc.) instead of a misleading reconnect overlay; the reconnect
     // overlay is suppressed while a play-error modal owns the screen.
     let playErrorOpen = false;
+    let stopAutoplay: () => void = () => {}; // wired to the autoplay loop once it's created (below)
     const showPlayError = (err: unknown): void => {
+      stopAutoplay(); // a play error halts an autoplay run (the .catch swallows, so stop explicitly)
       const v = resolvePlayError(err);
       playErrorOpen = true;
       shell!.openModal({
@@ -355,6 +357,19 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         if (!ensureAffordable(id)) return;
         void playRound(id);
       });
+
+      // Autoplay: the shell owns the picker/confirm/STOP/counter/lockout (all driven by state.autoplay);
+      // the host just runs the loop and pushes the per-spin remaining back via setAutoplay.
+      const { createAutoplayLoop } = await import('./autoplay');
+      const autoplay = createAutoplayLoop({
+        resolveAction: () => activeFeature ?? 'spin',
+        canAfford: (a) => ensureAffordable(a),
+        playRound: (a) => Promise.resolve(playRound(a)),
+        onState: (s) => shell!.setAutoplay(s),
+      });
+      stopAutoplay = () => autoplay.stop();
+      shell.on('autoplayStart', (o: { remaining?: number }) => autoplay.start(o?.remaining ?? 0));
+      shell.on('autoplayStop', () => autoplay.stop());
 
       // Resume offer: when the game scene is (or becomes) current on a reload, ask the host whether
       // a round is still open. If so, offer Continue (replay its animation, then settle) or Finish
