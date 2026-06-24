@@ -1,47 +1,23 @@
 // examples/spec-slot/GameScene.ts
 import { Scene } from '@energy8platform/game-engine/core';
-import { ReelGrid, CascadeController, BigWinOverlay, FreeSpinsSession, MultiplierAccumulator } from '@energy8platform/game-engine/slot';
-import type { SlotSceneController, SlotHostApi } from '@energy8platform/game-engine/host';
+import { ReelGrid, CascadeController, BigWinOverlay, MultiplierAccumulator } from '@energy8platform/game-engine/slot';
+import type { SlotSceneController, RenderContext } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { resolveSymbol } from './slot/symbols';
 import type { SpinData } from './normalize';
 
+/**
+ * The host owns the play loop (play -> present -> ack -> drain). This scene only RENDERS:
+ *  - present(result, ctx): draw ONE segment (a spin, or one free spin). Put all pacing here.
+ *  - onBonusEnter(trigger, ctx): fires right before the first free spin (bonus intro).
+ *  - onBonusExit(last, ctx): fires after the last free spin (bonus summary).
+ * ctx gives you { bet, action, mode, formatAmount(value), turbo } — turbo is live (0..3).
+ */
 export class GameScene extends Scene implements SlotSceneController<SpinData> {
   private grid!: ReelGrid;
   private controller!: CascadeController;
   private overlay!: BigWinOverlay;
   private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });
-  private host?: SlotHostApi<SpinData>;
-  private bet = model.spec.defaultBet ?? model.spec.betLevels[0];
-
-  bindHost(api: SlotHostApi<SpinData>): void { this.host = api; }
-  setBet(bet: number): void { this.bet = bet; }
-
-  /** Replay a round recovered on reload (host "Continue"). Present only — the host settles it. */
-  async resume(result: SpinData): Promise<void> {
-    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
-    for (const step of result.steps) await this.controller.run(step);
-    if (result.totalWin > 0) await this.overlay.show(result.totalWin, this.bet);
-  }
-
-  async buyBonus(actionId: string, bet: number): Promise<void> {
-    if (!this.host) return;
-    const result = await this.host.play(actionId, bet);
-    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
-    for (const step of result.steps) await this.controller.run(step);
-    if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
-    this.host.ack();
-    if ((result.freeSpins?.awarded ?? 0) > 0) {
-      const fs = new FreeSpinsSession({ initialSpins: result.freeSpins?.total ?? result.freeSpins?.awarded ?? 0 });
-      while (!fs.isComplete) {
-        const r = await this.host.play('free_spin', bet);
-        for (const step of r.steps) await this.controller.run(step);
-        if (r.totalWin > 0) await this.overlay.show(r.totalWin, bet);
-        this.host.ack();
-        fs.addWin(r.totalWin); fs.award(r.freeSpins?.awarded ?? 0); fs.consume();
-      }
-    }
-  }
 
   private _vw = 1920;
   private _vh = 1080;
@@ -58,6 +34,26 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
     });
     this.container.addChild(this.overlay);
     this.layout(this._vw, this._vh);
+  }
+
+  /** Render one normalized result (one spin, or one free spin of a bonus). */
+  async present(result: SpinData, ctx: RenderContext): Promise<void> {
+    const turbo = ctx.turbo > 0;
+    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
+    for (const step of result.steps) await this.controller.run(step, { turbo });
+    if (result.totalWin > 0) await this.overlay.show(result.totalWin, ctx.bet, ctx.formatAmount);
+  }
+
+  /** Bonus starting — show an intro. trigger.freeSpins?.total = how many free spins were awarded. */
+  async onBonusEnter(trigger: SpinData, _ctx: RenderContext): Promise<void> {
+    // TODO: show a bonus intro. Defaults to nothing.
+    void trigger;
+  }
+
+  /** Bonus finished — show a summary. ctx.formatAmount(last.totalWin) = the bonus total win. */
+  async onBonusExit(last: SpinData, ctx: RenderContext): Promise<void> {
+    // TODO: show a bonus summary. Defaults to nothing.
+    void last; void ctx;
   }
 
   onResize(width: number, height: number): void {
@@ -78,24 +74,5 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
     this.grid.x = Math.round((w - gridW * fit) / 2);
     this.grid.y = Math.round((h - gridH * fit) / 2);
     this.overlay?.resize?.(w, h);
-  }
-
-  async spin(bet: number): Promise<void> {
-    if (!this.host) return;
-    const result = await this.host.play('spin', bet);
-    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
-    for (const step of result.steps) await this.controller.run(step);
-    if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
-    this.host.ack();
-    if ((result.freeSpins?.awarded ?? 0) > 0) {
-      const fs = new FreeSpinsSession({ initialSpins: result.freeSpins?.total ?? result.freeSpins?.awarded ?? 0 });
-      while (!fs.isComplete) {
-        const r = await this.host.play('free_spin', bet);
-        for (const step of r.steps) await this.controller.run(step);
-        if (r.totalWin > 0) await this.overlay.show(r.totalWin, bet);
-        this.host.ack();
-        fs.addWin(r.totalWin); fs.award(r.freeSpins?.awarded ?? 0); fs.consume();
-      }
-    }
   }
 }
