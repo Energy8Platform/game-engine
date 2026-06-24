@@ -1,7 +1,8 @@
 // packages/game-engine/tests/host/shellConfig.test.ts
 import { describe, it, expect } from 'vitest';
-import { buildShellConfig, defaultGameInfo, toBonusOptions, currencyConfigFromCode } from '../../src/host/shellConfig';
+import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo } from '../../src/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
+import type { GameInfoContent, GameInfoSection } from '@energy8platform/platform-core/shell';
 
 const model = {
   spec: {
@@ -33,24 +34,29 @@ describe('toBonusOptions', () => {
   });
 });
 
-describe('currencyConfigFromCode', () => {
-  it('maps known codes to a symbol, defaults position left, falls back to the code', () => {
-    expect(currencyConfigFromCode('EUR')).toEqual({ symbol: '€', position: 'left' });
-    expect(currencyConfigFromCode('USD')).toEqual({ symbol: '$', position: 'left' });
-    expect(currencyConfigFromCode('ZZZ')).toEqual({ symbol: 'ZZZ', position: 'left' });
+describe('resolveCurrency (single source of truth — initData.config.currency)', () => {
+  it('derives symbol + position from the CurrencyMetaData the bridge surfaces', () => {
+    // symbolAfter:false → left
+    expect(resolveCurrency({ code: 'EUR', symbol: '€', decimals: 2 })).toEqual({ symbol: '€', position: 'left' });
+    // symbolAfter:true → right (e.g. PLN 'zł')
+    expect(resolveCurrency({ code: 'PLN', symbol: 'zł', decimals: 2, symbolAfter: true })).toEqual({ symbol: 'zł', position: 'right' });
+  });
+  it('falls back to the spec currency code, then neutral euro, when meta is absent (dev/devBridge)', () => {
+    expect(resolveCurrency(null, 'ZZZ')).toEqual({ symbol: 'ZZZ', position: 'left' });
+    expect(resolveCurrency(undefined, undefined)).toEqual({ symbol: '€', position: 'left' });
   });
 });
 
 describe('buildShellConfig (runtime ctx)', () => {
-  it('derives currency from runtime, buyBonus from the model', () => {
-    const c = buildShellConfig({}, model, { balance: 1000, currency: 'USD', language: 'de', mode: 'base' });
+  it('uses the resolved runtime.currency, buyBonus from the model', () => {
+    const c = buildShellConfig({}, model, { balance: 1000, currency: { symbol: '$', position: 'left' }, language: 'de', mode: 'base' });
     expect(c.currency).toEqual({ symbol: '$', position: 'left' });
     expect(c.language).toBe('de');
     expect(c.balance).toBe(1000);
     expect(c.features.buyBonus).toEqual(toBonusOptions(model));
   });
   it('falls back to spec.currency then neutral; opts.currency overrides', () => {
-    expect(buildShellConfig({}, model, { balance: 0, mode: 'base' }).currency).toEqual({ symbol: '€', position: 'left' });
+    expect(buildShellConfig({}, model, { balance: 0, mode: 'base' }).currency).toEqual({ symbol: 'EUR', position: 'left' });
     const o = buildShellConfig({ currency: { symbol: '₿', position: 'right' } }, model, { balance: 0, mode: 'base' });
     expect(o.currency).toEqual({ symbol: '₿', position: 'right' });
   });
@@ -78,10 +84,68 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(sections.length).toBeGreaterThan(0);
   });
 
-  it('opts.gameInfo replaces the derived content (documented override)', () => {
-    const override = { sections: [{ type: 'controls' as const }] };
-    const c = buildShellConfig({ gameInfo: override }, model, { balance: 0, mode: 'base', disclaimerLines: ['x'] });
-    expect(c.gameInfo).toBe(override);
+  it('MERGES opts.gameInfo over the derived set: replaces same-type, adds new types, keeps the rest', () => {
+    const authorPaytable: GameInfoSection = { type: 'paytable', title: 'MY PAYS', rows: [{ symbol: { text: 'A' }, wins: [{ count: '3', multiplier: 9 }] }] };
+    const authorModes: GameInfoSection = { type: 'modes', title: 'MODES', modes: [{ title: 'Base' }] };
+    const override: GameInfoContent = { sections: [authorPaytable, authorModes] };
+    const c = buildShellConfig({ gameInfo: override }, model, { balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.'] });
+    const sections = c.gameInfo.sections ?? [];
+    // the author's paytable replaced the derived one (same type)
+    const pay = sections.filter((s) => s.type === 'paytable');
+    expect(pay).toHaveLength(1);
+    expect((pay[0] as { title?: string }).title).toBe('MY PAYS');
+    // the new type (modes) was added
+    expect(sections.some((s) => s.type === 'modes' && (s as { title?: string }).title === 'MODES')).toBe(true);
+    // other derived sections are KEPT
+    expect(sections.some((s) => s.type === 'custom' && (s as { title?: string }).title === 'MAX WIN')).toBe(true);
+    expect(sections.some((s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER')).toBe(true);
+    expect(sections.some((s) => s.type === 'controls')).toBe(true);
+    expect(sections.some((s) => s.type === 'wins')).toBe(true);
+  });
+
+  it('undefined opts.gameInfo → pure derived set (unchanged)', () => {
+    const derived = defaultGameInfo(model, { balance: 0, mode: 'base' });
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base' });
+    expect(c.gameInfo).toEqual(derived);
+  });
+
+  it('social mode socializes the host-derived section titles/content but leaves author content verbatim', () => {
+    const author: GameInfoContent = { sections: [{ type: 'custom', title: 'Our Paytable Rules', html: '<p>Read the paytable.</p>' }] };
+    const c = buildShellConfig({ gameInfo: author }, model, {
+      balance: 0, mode: 'base', social: true,
+      disclaimerLines: ['These bets pay out at the listed odds.'],
+    });
+    expect(c.isSocial).toBe(true);
+    const sections = c.gameInfo.sections ?? [];
+    // host-derived 'MAX WIN' kept (no "pay"); host-derived disclaimer socialized: "bets pay out" → "plays win"
+    const disc = sections.find((s) => s.type === 'custom' && (s as { html?: string }).html?.toLowerCase().includes('listed odds')) as { html?: string } | undefined;
+    expect(disc?.html).not.toContain('pay out');
+    // author 'custom' section replaced the derived disclaimer? no — different identity? both are 'custom'.
+    // The author 'custom' replaced the derived 'custom' DISCLAIMER (same type 'custom') — verify author wording is verbatim.
+    const authorSec = sections.find((s) => s.type === 'custom' && (s as { title?: string }).title === 'Our Paytable Rules') as { html?: string } | undefined;
+    expect(authorSec).toBeDefined();
+    expect(authorSec?.html).toBe('<p>Read the paytable.</p>'); // untouched (no "win table")
+  });
+});
+
+describe('social mode — buy-bonus cards', () => {
+  it('socializes host-derived buy-bonus titles (BUY BONUS → GET BONUS) but keeps author options verbatim', () => {
+    const social = buildShellConfig({}, model, { balance: 0, mode: 'base', social: true });
+    const derivedBuy = (social.features.buyBonus as Array<{ id: string; title: string }>).find((o) => o.id === 'buy_bonus');
+    expect(derivedBuy?.title).toBe('GET BONUS'); // socialized from spec 'BUY BONUS'
+
+    const author = [{ id: 'x', title: 'BUY BONUS', description: 'buy spins', priceMultiplier: 50 }];
+    const c = buildShellConfig({ buyBonus: author }, model, { balance: 0, mode: 'base', social: true });
+    expect((c.features.buyBonus as typeof author)[0].title).toBe('BUY BONUS'); // author untouched
+  });
+});
+
+describe('mergeGameInfo', () => {
+  it('keys wins sections by kind so different mechanics coexist', () => {
+    const derived: GameInfoContent = { sections: [{ type: 'wins', kind: 'anywhere', minCount: 3, grid: { cols: 5, rows: 3 } } as GameInfoSection] };
+    const override: GameInfoContent = { sections: [{ type: 'wins', kind: 'cluster', minCount: 5, grid: { cols: 5, rows: 3 } } as GameInfoSection] };
+    const out = mergeGameInfo(derived, override).sections ?? [];
+    expect(out).toHaveLength(2); // appended, not replaced
   });
 });
 

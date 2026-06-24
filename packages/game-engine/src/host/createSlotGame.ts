@@ -118,13 +118,25 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     const balance = (game.initData?.balance as number | undefined) ?? 0;
     const isReplay = !!stakeBridge?.isReplay;
     const mode: ShellMode = isReplay ? 'replay' : 'base';
-    // initData.config carries the Stake bridge's social/disclaimer surface (GameConfigData);
-    // both are absent in non-stake/dev launches → graceful defaults downstream.
-    const config = (game.initData as { config?: { socialMode?: boolean; disclaimerLines?: string[] } } | null)?.config;
+    // initData.config carries the Stake bridge's currency/social/disclaimer surface (GameConfigData);
+    // all are absent in non-stake/dev launches → graceful fallbacks downstream.
+    const initData = game.initData as {
+      config?: {
+        socialMode?: boolean;
+        disclaimerLines?: string[];
+        currency?: { code: string; symbol: string; decimals: number; symbolAfter?: boolean };
+      };
+      lang?: string;
+    } | null;
+    const config = initData?.config;
+    const { resolveCurrency } = await import('./shellConfig');
     const runtime = {
       balance,
-      currency: game.platformSession?.currency,        // code from the SDK handshake
-      language: (game.initData as { language?: string } | null)?.language,
+      // SINGLE source of truth: derive the shell CurrencyConfig from the CurrencyMetaData the
+      // Stake bridge builds on initData.config.currency (the SAME table). Fall back to the spec
+      // currency code, then a neutral euro.
+      currency: resolveCurrency(config?.currency, opts.model.spec.currency),
+      language: initData?.lang,
       mode,
       social: config?.socialMode,
       disclaimerLines: config?.disclaimerLines,
