@@ -100,7 +100,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   let currentBet = opts.model.spec.defaultBet ?? opts.model.spec.betLevels[0];
 
   // Build slotPlay FIRST — bindGameScene() needs it to be in scope.
-  const { createSlotPlay } = await import('./slotPlay');
+  const { createSlotPlay, enrichRoundMeta } = await import('./slotPlay');
 
   /** The current scene IFF it implements the SlotSceneController contract (duck-typed on
    *  `present`). The host drives the play loop against whichever scene is current. */
@@ -239,6 +239,47 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       );
     };
 
+    /**
+     * Drain a recovered open round to completion and settle it. Plays EVERY remaining segment from
+     * the bonus start (Continue animates each; Finish fast-forwards without animation), reaching the
+     * final ack so /wallet/end-round credits the win — fixing the old resume that presented one
+     * snapshot and never settled. The original trigger is gone on reload, so the FS counter here uses
+     * the bridge's session counts; FS mode is entered/exited around the drain.
+     */
+    const resumeDrain = async (
+      firstRaw: import('@energy8platform/platform-core').PlayResultData,
+      animate: boolean,
+    ): Promise<void> => {
+      const scene = gameScene();
+      if (!scene || !ps) return;
+      const ctx = makeContext((firstRaw as { action?: string }).action ?? 'spin');
+      const fsView = (raw: unknown, totalWin: number) => {
+        const s = (raw as { session?: { spinsPlayed?: number; spinsRemaining?: number } }).session;
+        if (!s) return null;
+        const current = s.spinsPlayed ?? 0;
+        return { current, total: current + (s.spinsRemaining ?? 0), totalWin };
+      };
+      let raw = firstRaw;
+      let r = enrichRoundMeta(opts.normalize(raw), raw);
+      let inBonus = false;
+      const applySegment = async (): Promise<void> => {
+        // A recovered open round with remaining segments is a bonus → show FS mode + counter.
+        if (!inBonus && !r.complete) { inBonus = true; shell!.setMode('freeSpins'); }
+        if (animate) await scene.present(r, ctx);
+        if (inBonus) { const v = fsView(raw, r.totalWin); if (v) shell!.setFreeSpins(v); }
+        shell!.setWin(r.totalWin);
+        ps!.playAck(raw); // settles via /wallet/end-round on the FINAL segment
+      };
+      await applySegment();
+      while (!r.complete && r.nextActions && r.nextActions.length > 0) {
+        raw = (await ps.play({ action: r.nextActions[0], bet: ctx.bet, roundId: r.roundId })) as
+          import('@energy8platform/platform-core').PlayResultData;
+        r = enrichRoundMeta(opts.normalize(raw), raw);
+        await applySegment();
+      }
+      if (inBonus) shell!.setMode('base');
+    };
+
     if (mode === 'base') {
       let activeFeature: string | null = null;
       shell.on('featureActivate', ({ id }: { id: string }) => { activeFeature = id; });
@@ -278,17 +319,15 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         let snap: import('@energy8platform/platform-core').PlayResultData | null = null;
         try { snap = await ps?.getState() ?? null; } catch { snap = null; }
         if (!snap) return;
-        const result = opts.normalize(snap as unknown);
         shell.openModal({
           availableClose: false,
           title: shell.t('Unfinished round'),
           body: shell.t('You have an unfinished round. Continue it or finish it now?'),
           actions: [
-            { title: shell.t('Continue'), on: () => { void (async () => {
-              await gameScene()?.present?.(result, makeContext((snap as { action?: string }).action ?? 'spin'));
-              ps?.playAck(snap!);
-            })(); } },
-            { title: shell.t('Finish'), on: () => { ps?.playAck(snap!); } },
+            // Continue: replay the round from the start with animation, then settle.
+            { title: shell.t('Continue'), on: () => { void resumeDrain(snap!, true); } },
+            // Finish: fast-forward the remaining segments (no animation) to settle the win now.
+            { title: shell.t('Finish'), on: () => { void resumeDrain(snap!, false); } },
           ],
         });
       };

@@ -1,5 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createSlotPlay } from '../../src/host/slotPlay';
+import { createSlotPlay, enrichRoundMeta } from '../../src/host/slotPlay';
+
+describe('enrichRoundMeta', () => {
+  it('copies roundId/nextActions and derives complete from the session', () => {
+    const mid = enrichRoundMeta({ totalWin: 3 }, { roundId: 'r9', nextActions: ['free_spin'], session: { completed: false } });
+    expect(mid).toEqual({ totalWin: 3, roundId: 'r9', nextActions: ['free_spin'], complete: false });
+    const last = enrichRoundMeta({ totalWin: 7 }, { roundId: 'r9', nextActions: ['spin'], session: { completed: true } });
+    expect(last.complete).toBe(true);
+    // No session → complete (single-segment round).
+    expect(enrichRoundMeta({ totalWin: 1 }, { roundId: 'r1' }).complete).toBe(true);
+  });
+});
 
 describe('createSlotPlay', () => {
   it('plays, normalizes, fires onWin with totalWin, returns the normalized result', async () => {
