@@ -247,6 +247,24 @@ describe('open-round guard', () => {
     const second = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
     expect(second.round.active).toBe(true);
   });
+
+  it('a 0-payout play() is self-closing (active:false) and does NOT block the next play', async () => {
+    // rng 0.9995 forces pickWeighted to the sim=0 / payoutCents=0 LUT row.
+    const rgs = createDevRgs({
+      booksDir: dir,
+      gameId: 'g',
+      betLevelsMajor: [1, 2, 5],
+      currency: 'USD',
+      startingBalanceMajor: 1000,
+      rng: () => 0.9995,
+    });
+    const lose = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    expect(lose.round.payoutMultiplier).toBe(0);
+    expect(lose.round.active).toBe(false);
+    // No lingering active round → next play must not hit the open-round guard.
+    const next = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
+    expect(next.round.active).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -334,12 +352,27 @@ describe('playWithOutcome', () => {
     expect(state.events[0].data.custom).toBe(42);
   });
 
-  it('open-round guard fires when a round is already active', async () => {
+  it('open-round guard fires when a WINNING round is already active', async () => {
     const rgs = makeRgs();
-    await rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 0, state: {} });
+    await rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 250, state: {} });
     await expect(
-      rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 0, state: {} }),
+      rgs.playWithOutcome('BASE', API_MULTIPLIER, { payoutCents: 250, state: {} }),
     ).rejects.toThrow('dev-RGS: play called while a round is still active — call end-round first');
+  });
+
+  it('a 0-payout round is self-closing: active:false and no lingering active round', async () => {
+    const rgs = makeRgs();
+    const lose = await rgs.playWithOutcome('BASE', API_MULTIPLIER, {
+      payoutCents: 0,
+      state: {},
+    });
+    expect(lose.round.active).toBe(false);
+    // No active round retained → a following play must NOT hit the guard.
+    const next = await rgs.playWithOutcome('BASE', API_MULTIPLIER, {
+      payoutCents: 0,
+      state: {},
+    });
+    expect(next.round.active).toBe(false);
   });
 
   it('endRound credits the win through the same balance (exact minor balance after play→endRound)', async () => {

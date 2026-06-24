@@ -643,36 +643,21 @@ export class StakeBridge {
   }
 
   /**
-   * Build and send PLAY_RESULT for `index`. Calls `/wallet/end-round`
-   * before the final segment if RGS still considers the round active.
+   * Build and send PLAY_RESULT for `index`.
+   *
+   * Settlement (`/wallet/end-round`) is NOT done here — it fires on the FINAL
+   * segment's ACK (see `onPlayAck` → `settleRound`), i.e. *after* the game has
+   * animated the win. The delivered final segment therefore carries
+   * `creditPending: true` for a live round; the credited balance arrives via a
+   * `BALANCE_UPDATE` once the ACK settles it.
    */
   private async deliverSegment(index: number, requestId?: string): Promise<void> {
     const round = this.active!;
     const segment = round.segments[index];
     const isFinal = index === round.segments.length - 1;
 
-    let creditPending = round.rgsActive;
-    let balanceAfter = this.balance;
-
-    if (isFinal && round.rgsActive && !round.endRoundCalled) {
-      try {
-        const er = await this.rgs.endRound();
-        round.endRoundCalled = true;
-        round.rgsActive = false;
-        this.balance = fromMinor(er.balance.amount);
-        balanceAfter = this.balance;
-        creditPending = false;
-        this.startBalancePolling();
-      } catch (err) {
-        // Surface the error but keep the round in place so the game can retry.
-        this.bridge.send<PlayErrorPayload>(
-          'PLAY_ERROR',
-          { code: this.errCode(err), message: this.errMessage(err) },
-          requestId,
-        );
-        return;
-      }
-    }
+    const creditPending = round.rgsActive && !round.endRoundCalled;
+    const balanceAfter = this.balance;
 
     round.cursor = index;
     round.totalWin = this.sumWinUpTo(round.segments, index);
@@ -703,10 +688,14 @@ export class StakeBridge {
       balance: balanceAfter,
     });
 
-    if (isFinal) {
-      // Round closed — drop the cursor.
-      this.active = null;
-    }
+    // NB: the round is NOT dropped here on the final segment. It must survive
+    // until its ACK so settlement (`/wallet/end-round` for a win, or a local
+    // close for a 0-win round) can run *after* the win animation. `settleRound`
+    // clears `this.active` once it has closed the round. `onPlayRequest`'s
+    // open-round guard only blocks when the cursor is NOT yet at the final
+    // segment, so a fresh play that arrives after the final delivery (and its
+    // ack) is treated as a brand-new round.
+    void isFinal;
   }
 
   private synthSession(
@@ -732,6 +721,18 @@ export class StakeBridge {
 
   // ─── PLAY_RESULT_ACK ─────────────────────────────────────────────────
 
+  /**
+   * The game has finished processing (animating) a delivered segment.
+   *
+   * Two things happen here:
+   *  1. `/bet/event` is reported (progress marker) — best-effort, non-blocking.
+   *  2. If the ACKed segment was the FINAL one of a live round, the round is
+   *     SETTLED now — *after* the win animation. Settlement calls
+   *     `/wallet/end-round` only when `payoutMultiplier > 0`; a 0-win round
+   *     needs no wallet round-trip (the RGS already closed it on `play()`), so
+   *     we just close the round locally. Either way the round lifecycle
+   *     completes cleanly so the next play is never blocked.
+   */
   private onPlayAck(payload: PlayResultAckPayload, id?: string): void {
     void id;
     const round = this.active ?? this.lookupRoundForAck(payload);
@@ -739,10 +740,70 @@ export class StakeBridge {
     const segment = round.segments[round.cursor];
     const marker = segment?.progressMarker ?? `seg-${round.cursor}`;
     round.lastEventMarker = marker;
-    // Replay rounds aren't tracked by RGS — skip /bet/event.
-    if (this._isReplay) return;
-    // Fire-and-forget. /bet/event failures don't disrupt gameplay.
-    this.rgs.event(marker).catch((err) => this.log(`event() failed: ${err}`));
+
+    const isFinal = round.cursor === round.segments.length - 1;
+
+    // Replay rounds aren't tracked by RGS — skip /bet/event and settlement.
+    if (!this._isReplay) {
+      // Fire-and-forget. /bet/event failures don't disrupt gameplay.
+      this.rgs.event(marker).catch((err) => this.log(`event() failed: ${err}`));
+    }
+
+    // Settle the round once the FINAL segment's animation is acknowledged.
+    if (isFinal && round.rgsActive && !round.endRoundCalled && !this._isReplay) {
+      this.settleRound(round);
+    }
+  }
+
+  /**
+   * Settle a finished round AFTER its final-segment animation has been ACKed.
+   *
+   * - `payoutMultiplier > 0`: call `/wallet/end-round` to credit the win, then
+   *   push a fresh `BALANCE_UPDATE`.
+   * - `payoutMultiplier === 0`: a losing round needs no settlement — the RGS
+   *   closed it on `play()`. Close it locally so nothing lingers.
+   *
+   * Idempotent via `endRoundCalled`. Runs its async work fire-and-forget so the
+   * ACK handler stays synchronous (matching the existing bridge style); errors
+   * surface as PLAY_ERROR but leave the round in place for a retry.
+   */
+  private settleRound(round: ActiveRound): void {
+    if (round.endRoundCalled || !round.rgsActive) return;
+
+    // 0-win round: no end-round expected. Close locally so the next play is
+    // not blocked by a lingering open round.
+    if (round.payoutMultiplier <= 0) {
+      round.endRoundCalled = true;
+      round.rgsActive = false;
+      this.clearRoundIfActive(round);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const er = await this.rgs.endRound();
+        round.endRoundCalled = true;
+        round.rgsActive = false;
+        this.balance = fromMinor(er.balance.amount);
+        this.startBalancePolling();
+        this.clearRoundIfActive(round);
+        // Win has now settled — push the credited balance.
+        this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', {
+          balance: this.balance,
+        });
+      } catch (err) {
+        // Keep the round in place so the game can retry the settlement.
+        this.bridge.send<PlayErrorPayload>('PLAY_ERROR', {
+          code: this.errCode(err),
+          message: this.errMessage(err),
+        });
+      }
+    })();
+  }
+
+  /** Drop `this.active` if it still points at the now-settled round. */
+  private clearRoundIfActive(round: ActiveRound): void {
+    if (this.active === round) this.active = null;
   }
 
   private lookupRoundForAck(payload: PlayResultAckPayload): ActiveRound | null {

@@ -229,18 +229,27 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       const spinData = { total_win: payoutCents / 100 };
       const wrappedState = { events: [{ data: spinData }] };
 
+      // A 0-win round is self-closing: the RGS settles it on play(), so no
+      // end-round is expected. Mark it `active: false` and DON'T retain it as
+      // the internal active round — otherwise the next play would trip the
+      // open-round guard (the bridge skips end-round for 0-win rounds). This
+      // keeps bridge + dev-RGS consistent: end-round happens iff payout > 0.
+      const active = payoutCents > 0;
+
       const round: StakeRound<ParsedBook> = {
         betID: nextBetId++,
         payoutMultiplier: payoutCents / 100,
         costMultiplier: costOf(modes, mode),
-        active: true,
+        active,
         mode,
         state: wrappedState as unknown as ParsedBook,
         amount: amount / API_MULTIPLIER, // bet in MAJOR units
       };
 
-      activeRound = round;
-      activePayoutCents = payoutCents;
+      if (active) {
+        activeRound = round;
+        activePayoutCents = payoutCents;
+      }
 
       return { balance: balanceObj(), round };
     },
@@ -271,18 +280,24 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       }
       const wrappedState = { events: [{ data: wrappedOutcomeData }] };
 
+      // A 0-win round is self-closing (no end-round expected); don't retain it
+      // as the active round. See play() for the rationale.
+      const active = outcome.payoutCents > 0;
+
       const round: StakeRound<unknown> = {
         betID: nextBetId++,
         payoutMultiplier: outcome.payoutCents / 100,
         costMultiplier: costOf(modes, mode),
-        active: true,
+        active,
         mode,
         state: wrappedState,
         amount: amount / API_MULTIPLIER, // bet in MAJOR units
       };
 
-      activeRound = round as StakeRound<ParsedBook>;
-      activePayoutCents = outcome.payoutCents;
+      if (active) {
+        activeRound = round as StakeRound<ParsedBook>;
+        activePayoutCents = outcome.payoutCents;
+      }
 
       return { balance: balanceObj(), round: round as StakeRound<ParsedBook> };
     },
