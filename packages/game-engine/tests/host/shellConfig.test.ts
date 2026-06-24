@@ -112,6 +112,19 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(c.gameInfo).toEqual(derived);
   });
 
+  it('social mode socializes PAYTABLE symbol names (from spec symbols[].name)', () => {
+    // A spec symbol whose name carries a restricted word ('CASH' → 'COINS').
+    const m = {
+      spec: { betLevels: [1], defaultBet: 1, currency: 'EUR', maxWin: 100, grid: { cols: 5, rows: 3 }, mechanic: 'lines', actions: { spin: { role: 'base' } } },
+      paytable: { symbols: [{ id: 'C', name: 'CASH', kind: 'high', pay: { 3: 5 } }] },
+    } as unknown as GameModel;
+    const c = buildShellConfig({}, m, { balance: 0, mode: 'base', social: true });
+    const pay = (c.gameInfo.sections ?? []).find((s) => s.type === 'paytable') as { rows?: { symbol: { text?: string } }[] } | undefined;
+    const texts = (pay?.rows ?? []).map((r) => r.symbol.text);
+    expect(texts).toContain('COINS');   // socialized
+    expect(texts).not.toContain('CASH'); // original forbidden word gone
+  });
+
   it('social mode socializes the WHOLE merged set — host-derived AND author content', () => {
     const author: GameInfoContent = { sections: [{ type: 'custom', title: 'Our Paytable Rules', html: '<p>Read the paytable.</p>' }] };
     const c = buildShellConfig({ gameInfo: author }, model, {

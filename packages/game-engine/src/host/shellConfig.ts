@@ -214,9 +214,11 @@ export function mergeGameInfo(derived: GameInfoContent, override?: GameInfoConte
   return { sections: out };
 }
 
-/** Run a section's text (title + custom HTML) through `socialize`. Applied to the full MERGED set
- *  (host-derived + author) in social mode so author wording is rewritten too. A `node`-based custom
- *  section is returned untouched — its DOM is author-owned and not introspected here. */
+/** Run a section's player-facing text through `socialize`. Applied to the full MERGED set
+ *  (host-derived + author) in social mode. Covers section titles, custom HTML, and PAYTABLE row
+ *  symbol labels — the paytable's symbol text comes straight from the gameSpec's `symbols[].name`,
+ *  so a forbidden word in a spec symbol name is rewritten here too. A `node`-based custom section is
+ *  returned untouched — its DOM is author-owned and not introspected. */
 function socializeSection(s: GameInfoSection): GameInfoSection {
   const next = { ...s } as GameInfoSection;
   if ('title' in next && typeof next.title === 'string') {
@@ -224,6 +226,13 @@ function socializeSection(s: GameInfoSection): GameInfoSection {
   }
   if (next.type === 'custom' && typeof next.html === 'string') {
     (next as { html?: string }).html = socialize(next.html);
+  }
+  if (next.type === 'paytable' && Array.isArray((next as { rows?: PaytableRow[] }).rows)) {
+    (next as { rows: PaytableRow[] }).rows = (next as { rows: PaytableRow[] }).rows.map((r) =>
+      typeof r.symbol?.text === 'string'
+        ? { ...r, symbol: { ...r.symbol, text: socialize(r.symbol.text) } }
+        : r,
+    );
   }
   return next;
 }
