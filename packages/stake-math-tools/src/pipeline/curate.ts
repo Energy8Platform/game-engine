@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createReadStream } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { optimizeLookupTable } from '../optimize-lookup.js';
 import { computeMetrics } from '../metrics.js';
@@ -100,6 +100,60 @@ async function readPoolRows(poolDir: string, mode: string, capMaxWin: number): P
   );
 }
 
+/** One dumped spin → one book event. Carries the stage-derived `type` (so the adapter/harness can
+ *  tell a free spin from the trigger), the per-spin `data` payload (grid/wins/free_spins the game
+ *  renders), and `win_x` (bet-multiplier win). This is what makes a bonus book a SINGLE round with
+ *  the trigger + every free spin collected into one `events` array, matching the kitsune library. */
+function spinToEvent(spin: Record<string, unknown>): Record<string, unknown> {
+  const stage = typeof spin.stage === 'string' ? spin.stage : undefined;
+  const type = stage === 'free_spins' ? 'free_spin' : 'spin';
+  return { type, ...spin };
+}
+
+/** A line stream over the pool's per-round dump for one mode: prefers the raw `.jsonl`, else
+ *  decompresses `.jsonl.zst` via `zstd -dc`. Returns null when neither exists. */
+function poolDumpLineStream(poolDir: string, mode: string): ReturnType<typeof createInterface> | null {
+  const rawPath = join(poolDir, `books_${mode}.jsonl`);
+  if (existsSync(rawPath)) {
+    return createInterface({ input: createReadStream(rawPath, { encoding: 'utf-8' }) });
+  }
+  const zstPath = join(poolDir, `books_${mode}.jsonl.zst`);
+  if (existsSync(zstPath)) {
+    const proc = spawn('zstd', ['-dc', '-q', zstPath], { stdio: ['ignore', 'pipe', 'inherit'] });
+    return createInterface({ input: proc.stdout! });
+  }
+  return null;
+}
+
+/**
+ * Read the per-round EVENTS (the round's `spins[]` mapped to book events) for the selected pool
+ * sims. One pass over the pool dump, picking only the wanted line indices (the canonical sim ids).
+ * Returns sim → events. Empty map when no dump is available (books then carry no events — graceful).
+ */
+async function readEventsForSims(
+  poolDir: string,
+  mode: string,
+  sims: Set<number>,
+): Promise<Map<number, Record<string, unknown>[]>> {
+  const out = new Map<number, Record<string, unknown>[]>();
+  const rl = poolDumpLineStream(poolDir, mode);
+  if (!rl) return out;
+  let sim = 0;
+  for await (const line of rl) {
+    if (line.trim()) {
+      if (sims.has(sim)) {
+        try {
+          const rec = JSON.parse(line) as { spins?: Record<string, unknown>[] };
+          const spins = Array.isArray(rec.spins) ? rec.spins : [];
+          out.set(sim, spins.map(spinToEvent));
+        } catch { /* skip malformed line */ }
+      }
+      sim++;
+    }
+  }
+  return out;
+}
+
 /**
  * Resolve the optimizer params from the mode's curate overrides, defaulting
  * any unspecified target to the source distribution (preserve it) — same
@@ -130,23 +184,31 @@ function writeLut(rows: LookupRow[], path: string): void {
 }
 
 /**
- * Emit one `{"id","payoutMultiplier"}` events line per optimized LUT row
- * (guarantees LUT↔events positional consistency — Stake validates that an
- * event's payoutMultiplier equals its LUT row's payoutCents), then zstd
- * `-9` compress to `books_<MODE>.jsonl.zst` and remove the raw `.jsonl`.
+ * Emit one `{"id","payoutMultiplier","events":[...]}` line per optimized LUT row (guarantees
+ * LUT↔events positional consistency — Stake validates that an event's payoutMultiplier equals its
+ * LUT row's payoutCents), then zstd `-9` compress to `books_<MODE>.jsonl.zst` and remove the raw.
  *
- * `zstd` may not be on PATH. On failure we keep the raw `.jsonl`, log a note,
- * and do NOT fail the run — the binary-gated e2e covers the `.zst`.
+ * `events[i]` are the round's spins (trigger + all free spins) collected into one array — so a
+ * bonus book is a SINGLE round the game can replay spin-by-spin, matching the kitsune library.
+ * When no per-round events were available (no dump), `events` is `[]`.
+ *
+ * `zstd` may not be on PATH. On failure we keep the raw `.jsonl`, log a note, and do NOT fail.
  */
-function writeEvents(rows: LookupRow[], outDir: string, mode: string): void {
+function writeEvents(
+  rows: LookupRow[],
+  eventsPerRow: Record<string, unknown>[][],
+  outDir: string,
+  mode: string,
+): void {
   const rawPath = join(outDir, `books_${mode}.jsonl`);
   const zstPath = join(outDir, `books_${mode}.jsonl.zst`);
   if (existsSync(rawPath)) unlinkSync(rawPath);
   if (existsSync(zstPath)) unlinkSync(zstPath);
 
   const fd = openSync(rawPath, 'w');
-  for (const r of rows) {
-    writeSync(fd, JSON.stringify({ id: r.sim, payoutMultiplier: r.payoutCents }));
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    writeSync(fd, JSON.stringify({ id: r.sim, payoutMultiplier: r.payoutCents, events: eventsPerRow[i] ?? [] }));
     writeSync(fd, '\n');
   }
   closeSync(fd);
@@ -197,6 +259,12 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   const params = resolveOptimizeParams(mode.curate, rawRows);
   const result = optimizeLookupTable(rawRows, params);
 
+  // Pull each selected round's events (trigger + all free spins) from the pool dump BEFORE
+  // renumbering — the optimizer's rows still carry their original pool sim (the dump line index).
+  const originalSims = result.rows.map((r) => r.sim);
+  const eventsBySim = await readEventsForSims(opts.poolDir, mode.mode, new Set(originalSims));
+  const eventsPerRow = originalSims.map((s) => eventsBySim.get(s) ?? []);
+
   // Renumber the curated rows with curate's OWN 0-based contiguous ids (matching the shipped
   // kitsune library: lookUpTable sim column and books `id` both run 0,1,2,…). The optimizer keeps
   // each surviving row's original pool sim, which is sparse after selection — Stake expects the
@@ -204,7 +272,7 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   result.rows.forEach((r, i) => { r.sim = i; });
 
   writeLut(result.rows, join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`));
-  writeEvents(result.rows, opts.outDir, mode.mode);
+  writeEvents(result.rows, eventsPerRow, opts.outDir, mode.mode);
   upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
 
   return result;

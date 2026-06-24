@@ -123,6 +123,26 @@ describe('curateMode', () => {
     expect(base!.weights).toBe('lookUpTable_BASE_0.csv');
   });
 
+  it('writes the raw books_<MODE>.jsonl with an events array per round (collected from the pool spins)', async () => {
+    await curateMode(resolvedMode, { poolDir, outDir });
+    // zstd may compress + remove the raw; read whichever exists.
+    const rawBooks = join(outDir, 'books_BASE.jsonl');
+    const zstBooks = join(outDir, 'books_BASE.jsonl.zst');
+    let firstLine: string;
+    if (existsSync(rawBooks)) {
+      firstLine = readFileSync(rawBooks, 'utf-8').split('\n').find((l) => l.trim())!;
+    } else {
+      const { execFileSync } = await import('node:child_process');
+      firstLine = execFileSync('zstd', ['-dc', '-q', zstBooks], { encoding: 'utf-8' }).split('\n').find((l) => l.trim())!;
+    }
+    const book = JSON.parse(firstLine) as { id: number; payoutMultiplier: number; events: { type: string; data: unknown }[] };
+    expect(typeof book.id).toBe('number');
+    expect(typeof book.payoutMultiplier).toBe('number');
+    expect(Array.isArray(book.events)).toBe(true);
+    expect(book.events.length).toBeGreaterThan(0); // each fixture round has ≥1 spin
+    expect(book.events[0].type).toBe('spin'); // base_game stage → 'spin'
+  });
+
   it('returns an OptimizeResult with a populated stakeReport and numeric rtp', async () => {
     const result = await curateMode(resolvedMode, { poolDir, outDir });
     expect(result.stakeReport.payoutMultMax).toBeGreaterThan(0);
