@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { Answers } from './answers';
 import { validate } from './answers';
 import { genGameSpec } from './codegen/gameSpec';
+import { genClaudeMd } from './codegen/claudeMd';
 import { genPackageJson, type DepVersions } from './codegen/packageJson';
 import { genGameScene } from './codegen/gameScene';
 import { genLuaLogic } from './codegen/luaLogic';
@@ -41,6 +42,7 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   mkdirSync(join(targetDir, 'src/game'), { recursive: true });
   mkdirSync(join(targetDir, 'src/scenes'), { recursive: true });
   writeFileSync(join(targetDir, 'src/game.spec.ts'), genGameSpec(a));
+  writeFileSync(join(targetDir, 'CLAUDE.md'), genClaudeMd(a));
   writeFileSync(join(targetDir, 'package.json'), genPackageJson(a, versions));
   writeFileSync(join(targetDir, 'math.config.ts'), genMathConfig(a));
   writeFileSync(join(targetDir, 'src/scenes/GameScene.ts'), genGameScene(a));
