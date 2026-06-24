@@ -23,7 +23,16 @@ function execute(state)
       grid[c][r] = engine.random(1, #SYMBOLS)
     end
   end
-  local win = 0   -- TODO: evaluate ${cascade ? 'cluster/cascade' : 'line/way'} wins from PAYTABLE
+  -- Placeholder random payout for testing (replace with your real mechanic).
+  local roll = engine.random(1, 1000)
+  local win = 0
+  if roll <= 250 then        -- ~25% small win
+    win = engine.random(1, 5) * 0.2
+  elseif roll <= 270 then    -- ~2% medium
+    win = engine.random(5, 30)
+  elseif roll <= 272 then    -- ~0.2% large
+    win = engine.random(50, 500)
+  end
 ${ret}
 end
 `;

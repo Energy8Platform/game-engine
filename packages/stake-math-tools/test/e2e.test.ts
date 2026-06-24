@@ -48,12 +48,12 @@ const logicLua = `function execute(state)
 end
 `;
 
-// Note: action 'spin' → mode 'SPIN' (toMathModes uppercases the action key).
+// Note: action 'spin' with role 'base' → mode 'BASE' (Stake convention).
 const cfg: MathConfig = {
   model,
   luaScript: buildLuaScript(model, logicLua),
   modes: {
-    SPIN: {
+    BASE: {
       sim: { iterations: 2000, bet: 1, rng: 'fast' },
       curate: {
         capMaxWin: model.spec.maxWin * 100, // cents
@@ -92,8 +92,8 @@ describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', (
     mkdirSync(outDir, { recursive: true });
 
     const resolved = resolveModes(cfg);
-    const base = resolved.find((m) => m.mode === 'SPIN')!;
-    dump = join(poolDir, `books_SPIN.jsonl`);
+    const base = resolved.find((m) => m.mode === 'BASE')!;
+    dump = join(poolDir, `books_BASE.jsonl`);
     await runSim(cfg, base, { dump });
   });
 
@@ -121,12 +121,12 @@ describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', (
 
     // ── 2. Curate assertions (was the second test) ────────────────────────────
     const resolved = resolveModes(cfg);
-    const base = resolved.find((m) => m.mode === 'SPIN')!;
+    const base = resolved.find((m) => m.mode === 'BASE')!;
 
     const result = await curateMode(base, { poolDir, outDir });
 
     // lookUpTable CSV exists with sim,weight,payoutCents lines.
-    const csvPath = join(outDir, 'lookUpTable_SPIN_0.csv');
+    const csvPath = join(outDir, 'lookUpTable_BASE_0.csv');
     expect(existsSync(csvPath)).toBe(true);
     const csv = readFileSync(csvPath, 'utf-8').trim();
     const lines = csv.split('\n').filter((l) => l.trim());
@@ -137,17 +137,17 @@ describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', (
       for (const p of parts) expect(Number.isFinite(Number(p))).toBe(true);
     }
 
-    // index.json has a SPIN entry with name/cost/events/weights.
+    // index.json has a BASE entry with name/cost/events/weights.
     const idxPath = join(outDir, 'index.json');
     expect(existsSync(idxPath)).toBe(true);
     const idx = JSON.parse(readFileSync(idxPath, 'utf-8')) as {
       modes: { name: string; cost: number; events: string; weights: string }[];
     };
     expect(Array.isArray(idx.modes)).toBe(true);
-    const baseEntry = idx.modes.find((m) => m.name === 'SPIN');
+    const baseEntry = idx.modes.find((m) => m.name === 'BASE');
     expect(baseEntry).toBeDefined();
-    expect(baseEntry!.events).toBe('books_SPIN.jsonl.zst');
-    expect(baseEntry!.weights).toBe('lookUpTable_SPIN_0.csv');
+    expect(baseEntry!.events).toBe('books_BASE.jsonl.zst');
+    expect(baseEntry!.weights).toBe('lookUpTable_BASE_0.csv');
     // spin action has no explicit cost → costMultiplier defaults to 1
     expect(baseEntry!.cost).toBe(1);
 

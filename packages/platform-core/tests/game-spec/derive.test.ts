@@ -60,9 +60,9 @@ describe('toLuaPrelude', () => {
 
 describe('toModeMap / toMathModes', () => {
   it('excludes free actions and defaults mode to UPPER(key)', () => {
-    expect(toModeMap(spec)).toEqual({ spin: 'SPIN', buy_bonus: 'BUY_BONUS' });
+    expect(toModeMap(spec)).toEqual({ spin: 'BASE', buy_bonus: 'BUY_BONUS' });
     expect(toMathModes(spec)).toEqual([
-      { action: 'spin', mode: 'SPIN', costMultiplier: 1 },
+      { action: 'spin', mode: 'BASE', costMultiplier: 1 },
       { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 50 },
     ]);
   });

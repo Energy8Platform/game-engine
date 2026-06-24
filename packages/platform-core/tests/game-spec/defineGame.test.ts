@@ -15,8 +15,8 @@ describe('defineGame', () => {
     expect(m.spec).toBe(spec);
     expect(m.gameDefinition.id).toBe('g');
     expect(m.luaPrelude).toMatch(/PAYTABLE/);
-    expect(m.modeMap).toEqual({ spin: 'SPIN' });
-    expect(m.mathModes).toEqual([{ action: 'spin', mode: 'SPIN', costMultiplier: 1 }]);
+    expect(m.modeMap).toEqual({ spin: 'BASE' });
+    expect(m.mathModes).toEqual([{ action: 'spin', mode: 'BASE', costMultiplier: 1 }]);
     expect(m.paytable.symbols.map((s) => s.id)).toEqual(['A']);
     expect(m.symbols).toBe(spec.symbols);
   });

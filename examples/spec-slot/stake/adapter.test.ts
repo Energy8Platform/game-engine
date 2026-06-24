@@ -3,7 +3,7 @@ import type { RoundContext } from '@energy8platform/stake-kit';
 import { adapter } from './adapter';
 
 const ctx: RoundContext = {
-  mode: 'SPIN', triggerAction: 'spin', betAmount: 2, payoutMultiplier: 0, currency: 'EUR', roundId: '1',
+  mode: 'BASE', triggerAction: 'spin', betAmount: 2, payoutMultiplier: 0, currency: 'EUR', roundId: '1',
 };
 
 describe('spec-slot stake adapter', () => {

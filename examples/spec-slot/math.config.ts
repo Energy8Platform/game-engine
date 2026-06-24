@@ -9,8 +9,8 @@ export default {
   model,
   luaScript: buildLuaScript(model, logic),
   modes: {
-    // action: 'spin' → mode: 'SPIN' (toMathModes uppercases the action key)
-    SPIN: {
+    // action: 'spin' with role 'base' → mode: 'BASE' (Stake convention)
+    BASE: {
       sim: { iterations: 50_000, bet: 1, rng: 'fast' },
       curate: {
         capMaxWin: model.spec.maxWin * 100,

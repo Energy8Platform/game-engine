@@ -101,8 +101,10 @@ export function toLuaPrelude(spec: GameSpec): string {
 export function toModeMap(spec: GameSpec): Record<string, string> {
   const map: Record<string, string> = {};
   for (const [key, action] of Object.entries(spec.actions)) {
-    if ((action.role ?? 'base') === 'free') continue;
-    map[key] = action.mode ?? key.toUpperCase();
+    const role = action.role ?? 'base';
+    if (role === 'free') continue;
+    const mode = action.mode ?? (role === 'base' ? 'BASE' : key.toUpperCase());
+    map[key] = mode;
   }
   return map;
 }
@@ -110,8 +112,10 @@ export function toModeMap(spec: GameSpec): Record<string, string> {
 export function toMathModes(spec: GameSpec): MathModeSpec[] {
   const modes: MathModeSpec[] = [];
   for (const [key, action] of Object.entries(spec.actions)) {
-    if ((action.role ?? 'base') === 'free') continue;
-    modes.push({ action: key, mode: action.mode ?? key.toUpperCase(), costMultiplier: action.cost ?? 1 });
+    const role = action.role ?? 'base';
+    if (role === 'free') continue;
+    const mode = action.mode ?? (role === 'base' ? 'BASE' : key.toUpperCase());
+    modes.push({ action: key, mode, costMultiplier: action.cost ?? 1 });
   }
   return modes;
 }

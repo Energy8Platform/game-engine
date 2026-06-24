@@ -29,7 +29,7 @@ describe('feature role (ante = paid spin)', () => {
     expect(toGameDefinition(spec).actions.buy_bonus.credit).toBe('none');
   });
   it('feature + buy both appear in modeMap and mathModes (free excluded)', () => {
-    expect(toModeMap(spec)).toMatchObject({ spin: 'SPIN', ante: 'ANTE', buy_bonus: 'BUY_BONUS' });
+    expect(toModeMap(spec)).toMatchObject({ spin: 'BASE', ante: 'ANTE', buy_bonus: 'BUY_BONUS' });
     expect(toModeMap(spec).free_spin).toBeUndefined();
     const modes = toMathModes(spec).map((m) => m.action);
     expect(modes).toEqual(expect.arrayContaining(['spin', 'ante', 'buy_bonus']));
