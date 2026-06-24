@@ -1,9 +1,15 @@
 /**
- * Stake harness wrapper page (Component 3).
+ * Stake harness wrapper page (Component 3 — redesigned, Stake-style).
  *
  * `renderWrapperHtml(cfg)` returns a full standalone HTML document — vanilla
  * DOM, no framework — that frames the inner game in an `<iframe>` at a chosen
- * Stake screen preset and drives launch/relaunch via a bottom control bar.
+ * Stake screen preset and drives launch/relaunch from a **fixed bottom tab bar**
+ * whose tabs (Settings · Screen · Replay) open popovers over the game, mirroring
+ * Stake's ACP developer harness.
+ *
+ * Only controls our harness actually backs are built. Stake's Versions / Local
+ * Testing / Language / Device Type / Open-in-New-Tab have no backing here and are
+ * intentionally omitted; the game id + version are shown as a static brand chip.
  *
  * The inline `<script>` mirrors a minimal `buildLaunchUrl` + the screen presets
  * from ./bar.ts. bar.ts stays the unit-tested source of truth; the wrapper
@@ -20,6 +26,12 @@ import { SCREEN_PRESETS } from './bar';
 export interface WrapperMode {
   name: string;
   cost: number;
+  /**
+   * Number of curated books (LUT rows) for the mode → valid Event IDs are
+   * `0 … count-1`. Drives the Replay panel's "Event ID (Range: 0 – N)" hint.
+   * 0 when unknown (legacy index) — the panel then shows a plain numeric input.
+   */
+  count: number;
 }
 
 export interface WrapperConfig {
@@ -27,7 +39,7 @@ export interface WrapperConfig {
   gameId: string;
   /** Math version string. Always '1' for the harness. */
   version: string;
-  /** Curated modes from index.json (name + cost), or [] when no books. */
+  /** Curated modes from index.json (name + cost + count), or [] when no books. */
   modes: WrapperMode[];
   /** Bet levels in MAJOR units (e.g. [0.1, 1, 5]). */
   betLevelsMajor: number[];
@@ -51,8 +63,11 @@ export function renderWrapperHtml(cfg: WrapperConfig): string {
   const hasBooks = cfg.modes.length > 0;
   const cfgJson = JSON.stringify(cfg);
 
+  // Screen presets render as a vertical list of option buttons (each carries the
+  // preset name so the "lists every screen preset" contract holds).
   const screenOptions = SCREEN_PRESETS.map(
-    (p) => `<option value="${esc(p.name)}">${esc(p.name)} (${p.w}×${p.h})</option>`,
+    (p) =>
+      `<button class="screen-opt" data-screen="${esc(p.name)}">${esc(p.name)} <small>${p.w}×${p.h}</small></button>`,
   ).join('');
 
   const BALANCE_LEVELS: { value: number; label: string }[] = [
@@ -83,12 +98,11 @@ export function renderWrapperHtml(cfg: WrapperConfig): string {
     .join('');
 
   const modeOptions = cfg.modes
-    .map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
+    .map((m, i) => `<option value="${esc(m.name)}"${i === 0 ? ' selected' : ''}>${esc(m.name)}</option>`)
     .join('');
 
-  const betOptions = cfg.betLevelsMajor
-    .map((b) => `<option value="${b}">${b}</option>`)
-    .join('');
+  // Replay Amount seeds to the smallest bet level (major units).
+  const defaultAmount = cfg.betLevelsMajor.length ? Math.min(...cfg.betLevelsMajor) : 1;
 
   const disabledAttr = hasBooks ? '' : 'disabled';
   const replayTitle = hasBooks
@@ -99,6 +113,7 @@ export function renderWrapperHtml(cfg: WrapperConfig): string {
   const driver = `
 const CFG = JSON.parse(document.getElementById('harness-config').textContent);
 const SCREEN_PRESETS = ${JSON.stringify(SCREEN_PRESETS)};
+const byId = (id) => document.getElementById(id);
 
 function screenPreset(name) {
   return SCREEN_PRESETS.find((p) => p.name === name);
@@ -135,23 +150,120 @@ function buildLaunchUrl(opts) {
   return '?' + p.toString();
 }
 
-const iframe = document.getElementById('game');
-const screenSel = document.getElementById('screen');
-const currencySel = document.getElementById('currency');
-const balanceSel = document.getElementById('balance');
-const socialChk = document.getElementById('social');
-const modeSel = document.getElementById('mode');
-const roundInput = document.getElementById('round');
-const randomBtn = document.getElementById('random');
-const betSel = document.getElementById('bet');
-const replayBtn = document.getElementById('replay');
-const closeBtn = document.getElementById('close');
+const iframe = byId('game');
+const balanceSel = byId('balance');
+const currencySel = byId('currency');
+const socialChk = byId('social');
+const modeSel = byId('mode');
+const roundInput = byId('round');
+const amountInput = byId('amount');
+const rangeHint = byId('range-hint');
+const replayBtn = byId('replay');
+const closeBtn = byId('close');
+
+let currentScreen = 'Desktop';
+let openPanel = null;
 
 function applyScreen() {
-  const p = screenPreset(screenSel.value) || SCREEN_PRESETS[0];
+  const p = screenPreset(currentScreen) || SCREEN_PRESETS[0];
   iframe.style.width = p.w + 'px';
   iframe.style.height = p.h + 'px';
 }
+
+// ── Tab popovers ────────────────────────────────────────────────────────────
+function positionPopover(name) {
+  const tab = document.querySelector('.tab[data-panel="' + name + '"]');
+  const pop = byId('pop-' + name);
+  if (!tab || !pop) return;
+  const r = tab.getBoundingClientRect();
+  const barH = byId('bar').offsetHeight;
+  pop.style.bottom = (barH + 10) + 'px';
+  const popW = pop.offsetWidth;
+  let left = r.left;
+  const maxLeft = window.innerWidth - popW - 12;
+  if (left > maxLeft) left = maxLeft;
+  if (left < 12) left = 12;
+  pop.style.left = left + 'px';
+}
+
+function closePanels() {
+  openPanel = null;
+  document.querySelectorAll('.popover').forEach((p) => (p.hidden = true));
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+}
+
+function togglePanel(name) {
+  if (openPanel === name) { closePanels(); return; }
+  closePanels();
+  const pop = byId('pop-' + name);
+  if (!pop) return;
+  pop.hidden = false; // show before measuring for positioning
+  openPanel = name;
+  const tab = document.querySelector('.tab[data-panel="' + name + '"]');
+  if (tab) tab.classList.add('active');
+  positionPopover(name);
+}
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (tab.disabled) return;
+    togglePanel(tab.dataset.panel);
+  });
+});
+
+// Outside-click / Esc close the open popover (clicks inside it are ignored).
+document.addEventListener('click', (e) => {
+  if (!openPanel) return;
+  const pop = byId('pop-' + openPanel);
+  if (pop && pop.contains(e.target)) return;
+  closePanels();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closePanels();
+});
+window.addEventListener('resize', () => {
+  if (openPanel) positionPopover(openPanel);
+});
+
+// ── Screen ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.screen-opt').forEach((opt) => {
+  opt.addEventListener('click', () => {
+    currentScreen = opt.dataset.screen;
+    applyScreen();
+    document.querySelectorAll('.screen-opt').forEach((o) => o.classList.toggle('active', o === opt));
+    closePanels();
+  });
+});
+
+// ── Settings ────────────────────────────────────────────────────────────────
+currencySel.addEventListener('change', async () => {
+  await fetch('/__rgs/__dev/currency?code=' + currencySel.value);
+  launchNormal();
+});
+if (balanceSel) {
+  balanceSel.addEventListener('change', async () => {
+    const major = Number(balanceSel.value);
+    await fetch('/__rgs/__dev/balance?major=' + major);
+    launchNormal();
+  });
+}
+socialChk.addEventListener('change', launchNormal);
+
+// ── Replay ──────────────────────────────────────────────────────────────────
+function updateRange() {
+  if (!modeSel || !rangeHint) return;
+  const m = (CFG.modes || []).find((x) => x.name === modeSel.value);
+  const n = m && m.count ? m.count : 0;
+  if (n > 0) {
+    rangeHint.textContent = '(Range: 0 – ' + (n - 1) + ')';
+    if (roundInput) roundInput.max = String(n - 1);
+  } else {
+    rangeHint.textContent = '';
+    if (roundInput) roundInput.removeAttribute('max');
+  }
+}
+if (modeSel) modeSel.addEventListener('change', updateRange);
 
 function launchNormal() {
   iframe.src = buildLaunchUrl({
@@ -172,37 +284,21 @@ function launchReplay() {
       version: CFG.version,
       mode: modeSel.value,
       event: Number.isFinite(event) ? event : 0,
-      amount: Number(betSel.value) * 1_000_000,
+      amount: Number(amountInput.value) * 1_000_000,
     },
   });
+  closePanels();
 }
 
-screenSel.addEventListener('change', applyScreen);
-currencySel.addEventListener('change', async () => {
-  await fetch('/__rgs/__dev/currency?code=' + currencySel.value);
-  launchNormal();
-});
-socialChk.addEventListener('change', launchNormal);
-if (balanceSel) {
-  balanceSel.addEventListener('change', async () => {
-    const major = Number(balanceSel.value);
-    await fetch('/__rgs/__dev/balance?major=' + major);
-    launchNormal();
-  });
-}
 if (replayBtn) replayBtn.addEventListener('click', launchReplay);
-if (closeBtn) closeBtn.addEventListener('click', launchNormal);
-if (randomBtn) {
-  randomBtn.addEventListener('click', () => {
-    // A simple random book id placeholder — the dev-RGS resolves real ids.
-    // Without a books listing endpoint we just nudge the numeric input.
-    roundInput.value = String(Math.floor(Math.random() * 1000) + 1);
-  });
-}
+if (closeBtn) closeBtn.addEventListener('click', () => { launchNormal(); closePanels(); });
 
-// Initial: Desktop / first currency / social off → normal launch.
+// Initial: Desktop / EUR / social off → normal launch.
 applyScreen();
+updateRange();
 launchNormal();
+const defScreen = document.querySelector('.screen-opt[data-screen="Desktop"]');
+if (defScreen) defScreen.classList.add('active');
 `;
 
   return `<!doctype html>
@@ -216,14 +312,15 @@ launchNormal();
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
-    background: #0d0f12;
+    background: #0b0d10;
     color: #e6e8eb;
     font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    display: flex;
-    flex-direction: column;
+    -webkit-font-smoothing: antialiased;
   }
+  /* The stage fills the window minus the fixed bar's height, centering the iframe. */
   #stage {
-    flex: 1;
+    position: fixed;
+    inset: 0 0 56px 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -232,74 +329,133 @@ launchNormal();
   }
   #game {
     flex: 0 0 auto;
-    border: 1px solid #2a2e35;
-    border-radius: 8px;
+    border: 1px solid #1e232b;
+    border-radius: 10px;
     background: #000;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    box-shadow: 0 12px 48px rgba(0,0,0,0.55);
   }
+  /* ── bottom tab bar ─────────────────────────────────────────────── */
   #bar {
-    flex: 0 0 auto;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 56px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 12px 18px;
-    background: linear-gradient(180deg, #1b1f26 0%, #14171c 100%);
-    border-top: 1px solid #2f343d;
-    box-shadow: 0 -8px 24px rgba(0,0,0,0.35);
-    font-size: 12px;
-    -webkit-font-smoothing: antialiased;
+    gap: 8px;
+    padding: 0 18px;
+    background: linear-gradient(180deg, #14171c 0%, #0e1115 100%);
+    border-top: 1px solid #232a33;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.4);
+    z-index: 50;
+    font-size: 13px;
   }
-  #brand {
-    display: inline-flex; align-items: center; gap: 7px;
-    font-weight: 700; letter-spacing: 0.04em; color: #f0f2f5; margin-right: 4px;
+  #brand { font-weight: 700; letter-spacing: 0.02em; color: #eef1f5; margin-right: 6px; white-space: nowrap; }
+  #brand small { font-weight: 500; color: #6b7480; letter-spacing: 0; }
+  .tabs { display: flex; align-items: center; gap: 2px; }
+  .tab {
+    background: transparent;
+    border: 0;
+    color: #99a2af;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: color 0.12s, background 0.12s;
   }
-  #brand .dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; box-shadow: 0 0 8px #34d39988; }
-  #brand small { font-weight: 500; color: #6b7280; letter-spacing: 0; }
-  /* Each control is a self-contained pill: caption above its input. */
-  #bar label {
-    display: inline-flex; flex-direction: column; gap: 3px; white-space: nowrap;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8a92a0;
+  .tab:hover { color: #e6e8eb; background: rgba(255,255,255,0.04); }
+  .tab.active { color: #fff; background: rgba(91,141,239,0.16); }
+  .tab:disabled { color: #4b525c; cursor: not-allowed; }
+  /* ── popovers ───────────────────────────────────────────────────── */
+  .popover {
+    position: fixed;
+    z-index: 60;
+    min-width: 248px;
+    max-width: 340px;
+    background: #13161b;
+    border: 1px solid #262b33;
+    border-radius: 12px;
+    box-shadow: 0 14px 44px rgba(0,0,0,0.6);
+    padding: 12px;
   }
-  #bar label.inline { flex-direction: row; align-items: center; gap: 7px; text-transform: none; letter-spacing: 0; font-size: 12px; color: #cdd2da; }
-  #bar select, #bar input[type=number] {
-    background: #232830;
+  .popover[hidden] { display: none; }
+  .cap {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #828b98;
+    margin-bottom: 6px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 6px;
+  }
+  .row + .row { border-top: 1px solid #1d222a; }
+  .row .cap { margin: 0; }
+  select, input[type=number] {
+    background: #1c2128;
     color: #e9ecf1;
     border: 1px solid #3a414c;
-    border-radius: 7px;
-    padding: 6px 9px;
-    font-size: 12px;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 13px;
     font-weight: 600;
+    font-family: inherit;
     transition: border-color 0.12s, background 0.12s;
   }
-  #bar select:hover, #bar input[type=number]:hover { border-color: #4b5563; }
-  #bar select:focus, #bar input[type=number]:focus { outline: none; border-color: #3b82f6; background: #262c35; }
-  #bar input[type=number] { width: 76px; }
-  /* Switch-style social toggle. */
-  #social { width: 16px; height: 16px; accent-color: #34d399; cursor: pointer; }
-  .sep { width: 1px; align-self: stretch; background: #2f343d; margin: 0 6px; }
-  #replay-group {
-    display: inline-flex; align-items: center; gap: 9px;
-    padding: 6px 12px; border: 1px solid #2f343d; border-radius: 10px; background: rgba(255,255,255,0.02);
+  select:hover, input[type=number]:hover { border-color: #4b5563; }
+  select:focus, input[type=number]:focus { outline: none; border-color: #3b82f6; background: #20262f; }
+  /* switch-style Social Mode toggle */
+  .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #2b313a; border-radius: 22px; cursor: pointer; transition: background 0.15s; }
+  .slider::before {
+    content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform 0.15s;
   }
-  #replay-group > span { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; }
-  #replay-group[data-disabled="true"] { opacity: 0.4; }
-  button {
+  .switch input:checked + .slider { background: #3b82f6; }
+  .switch input:checked + .slider::before { transform: translateX(18px); }
+  /* screen preset list */
+  .screen-list { display: flex; flex-direction: column; gap: 2px; }
+  .screen-opt {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: transparent; border: 0; color: #d3d8df;
+    padding: 9px 11px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    text-align: left; cursor: pointer;
+  }
+  .screen-opt small { color: #828b98; font-weight: 500; }
+  .screen-opt:hover { background: #1c2128; }
+  .screen-opt.active { background: #2f6bff; color: #fff; }
+  .screen-opt.active small { color: #d8e2ff; }
+  /* replay panel */
+  .popover.replay { min-width: 288px; }
+  .field { margin-bottom: 12px; }
+  .field .cap em { font-style: normal; color: #5f6772; font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .field select, .field input { width: 100%; }
+  button.primary {
+    width: 100%;
     background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
-    color: #fff;
-    border: 0;
-    border-radius: 7px;
-    padding: 7px 13px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
+    color: #fff; border: 0; border-radius: 9px; padding: 11px;
+    font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer;
     transition: filter 0.12s, transform 0.06s;
   }
-  button:hover { filter: brightness(1.08); }
-  button:active { transform: translateY(1px); }
-  button.ghost { background: #2b313a; }
-  button.ghost:hover { background: #333a45; }
-  button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.primary:active { transform: translateY(1px); }
+  button.primary:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
+  button.link-danger {
+    width: 100%; background: transparent; border: 0; color: #e5616b;
+    padding: 10px; margin-top: 4px;
+    font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+  }
+  button.link-danger:hover { color: #ef7681; }
+  button.link-danger:disabled { color: #6b3a3e; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -308,37 +464,44 @@ launchNormal();
     <iframe id="game" title="game"></iframe>
   </div>
   <div id="bar">
-    <span id="brand"><span class="dot"></span>Stake Harness <small>${esc(cfg.gameId)}</small></span>
-    <div class="sep"></div>
-    <label>Screen
-      <select id="screen">${screenOptions}</select>
-    </label>
-    <label>Currency
-      <select id="currency">${currencyOptions}</select>
-    </label>
-    <label>Balance
-      <select id="balance">${balanceOptions}</select>
-    </label>
-    <label class="inline">
-      <input type="checkbox" id="social" />Social
-    </label>
-    <div class="sep"></div>
-    <div id="replay-group" data-disabled="${!hasBooks}" ${replayTitle}>
-      <span>Replay</span>
-      <label>Mode
-        <select id="mode" ${disabledAttr}>${modeOptions}</select>
-      </label>
-      <label>Round
-        <input type="number" id="round" min="0" value="0" ${disabledAttr} />
-      </label>
-      <button class="ghost" id="random" ${disabledAttr}>🎲</button>
-      <label>Bet
-        <select id="bet" ${disabledAttr}>${betOptions}</select>
-      </label>
-      <button id="replay" ${disabledAttr}>▶ Replay</button>
-      <button class="ghost" id="close" ${disabledAttr}>✕ Close</button>
+    <span id="brand">${esc(cfg.gameId)} <small>· v${esc(cfg.version)}</small></span>
+    <div class="tabs">
+      <button class="tab" data-panel="settings">Settings</button>
+      <button class="tab" data-panel="screen">Screen</button>
+      <button class="tab" data-panel="replay" data-disabled="${!hasBooks}" ${disabledAttr} ${replayTitle}>Replay</button>
     </div>
   </div>
+
+  <div class="popover" id="pop-settings" hidden>
+    <div class="row"><span class="cap">Balance</span><select id="balance">${balanceOptions}</select></div>
+    <div class="row"><span class="cap">Currency</span><select id="currency">${currencyOptions}</select></div>
+    <div class="row">
+      <span class="cap">Social Mode</span>
+      <label class="switch"><input type="checkbox" id="social" /><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <div class="popover" id="pop-screen" hidden>
+    <div class="screen-list">${screenOptions}</div>
+  </div>
+
+  <div class="popover replay" id="pop-replay" hidden>
+    <div class="field">
+      <span class="cap">Game Mode</span>
+      <select id="mode" ${disabledAttr}>${modeOptions}</select>
+    </div>
+    <div class="field">
+      <span class="cap">Event ID <em id="range-hint"></em></span>
+      <input type="number" id="round" min="0" value="0" ${disabledAttr} />
+    </div>
+    <div class="field">
+      <span class="cap">Amount</span>
+      <input type="number" id="amount" min="0" step="any" value="${defaultAmount}" ${disabledAttr} />
+    </div>
+    <button class="primary" id="replay" ${disabledAttr}>Play Event</button>
+    <button class="link-danger" id="close" ${disabledAttr}>Close Replay</button>
+  </div>
+
   <script type="module">${driver}</script>
 </body>
 </html>`;

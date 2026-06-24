@@ -17,7 +17,7 @@ import { API_MULTIPLIER, CURRENCY_META } from '@energy8platform/stake-bridge';
 import type { RGSPlayResponse } from '@energy8platform/stake-bridge';
 import { LuaEngine } from '@energy8platform/platform-core/lua';
 
-import { loadIndex } from './books';
+import { countLutRows, loadIndex } from './books';
 import { createDevRgs, type DevRgs } from './dev-rgs';
 import { handleRgsRequest, type LuaPlay } from './rgs-http';
 import { renderWrapperHtml, type WrapperMode } from './wrapper';
@@ -257,10 +257,13 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
   // The wrapper page's config blob (built once the config is loaded).
   function wrapperHtmlFor(host: string): Promise<string> {
     return loadConfig().then((cfg) => {
-      const modes = loadIndex(resolvePath(process.cwd(), booksDir));
+      const booksAbs = resolvePath(process.cwd(), booksDir);
+      const modes = loadIndex(booksAbs);
       const wrapperModes: WrapperMode[] = (modes ?? []).map((m) => ({
         name: m.name,
         cost: m.cost,
+        // LUT row count → Replay "Event ID (Range: 0 – N)".
+        count: countLutRows(booksAbs, m.name),
       }));
       return renderWrapperHtml({
         gameId: cfg.model.spec.id,

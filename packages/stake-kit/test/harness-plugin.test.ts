@@ -109,10 +109,10 @@ describe('stakeHarnessPlugin', () => {
 
     expect(responseStatus).toBe(200);
     expect(responseHeaders['content-type']).toContain('text/html');
-    // bar controls rendered by renderWrapperHtml
-    expect(responseBody).toContain('id="screen"');
+    // tabbed bar + controls rendered by renderWrapperHtml
+    expect(responseBody).toContain('data-panel="screen"');
     expect(responseBody).toContain('id="currency"');
-    expect(responseBody).toContain('id="bet"');
+    expect(responseBody).toContain('id="amount"');
     expect(responseBody).toContain('<iframe id="game"');
     // config blob includes the game id from ssrLoadModule
     expect(responseBody).toContain('demo-slot');
@@ -202,43 +202,65 @@ describe('renderWrapperHtml', () => {
   };
 
   it('embeds the config blob and the bar controls', () => {
-    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1 }] });
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 100 }] });
     expect(html).toContain('id="harness-config"');
     expect(html).toContain('demo-slot');
-    // bar controls
-    expect(html).toContain('id="screen"');
+    // controls live inside the tab popovers
     expect(html).toContain('id="currency"');
+    expect(html).toContain('id="balance"');
     expect(html).toContain('id="social"');
     expect(html).toContain('id="mode"');
     expect(html).toContain('id="round"');
-    expect(html).toContain('id="bet"');
+    expect(html).toContain('id="amount"');
     expect(html).toContain('id="replay"');
     expect(html).toContain('id="close"');
     expect(html).toContain('<iframe id="game"');
   });
 
+  it('renders the three bottom-bar tabs (Settings/Screen/Replay)', () => {
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 100 }] });
+    expect(html).toContain('data-panel="settings"');
+    expect(html).toContain('data-panel="screen"');
+    expect(html).toContain('data-panel="replay"');
+    // and a static brand chip with the game id + version (replaces a Versions tab)
+    expect(html).toContain('id="brand"');
+    expect(html).toContain('· v1');
+  });
+
+  it('does NOT render the removed dice / random control', () => {
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 100 }] });
+    expect(html).not.toContain('id="random"');
+    expect(html).not.toContain('🎲');
+  });
+
+  it('embeds per-mode book count for the Event ID range', () => {
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 4242 }] });
+    // count rides in the JSON config blob; the driver derives "Range: 0 – N" from it.
+    expect(html).toContain('"count":4242');
+  });
+
   it('lists every screen preset', () => {
-    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1 }] });
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 100 }] });
     for (const p of SCREEN_PRESETS) {
       expect(html).toContain(p.name);
     }
   });
 
-  it('disables the replay group when there are no books', () => {
+  it('disables the replay tab + controls when there are no books', () => {
     const html = renderWrapperHtml({ ...base, modes: [] });
     expect(html).toContain('data-disabled="true"');
     expect(html).toContain('disabled');
   });
 
-  it('enables the replay group when books exist', () => {
-    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1 }] });
+  it('enables the replay tab when books exist', () => {
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 100 }] });
     expect(html).toContain('data-disabled="false"');
   });
 
-  it('replay launch multiplies the bet select value by 1_000_000 (minor units)', () => {
-    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1 }] });
-    // The inline driver must contain "* 1_000_000" (or equivalent) for the replay amount.
-    // This ensures the replay URL carries minor units, not major.
+  it('replay launch multiplies the amount value by 1_000_000 (minor units)', () => {
+    const html = renderWrapperHtml({ ...base, modes: [{ name: 'BASE', cost: 1, count: 100 }] });
+    // The inline driver must contain "* 1_000_000" for the replay amount,
+    // ensuring the replay URL carries minor units, not major.
     expect(html).toContain('1_000_000');
   });
 

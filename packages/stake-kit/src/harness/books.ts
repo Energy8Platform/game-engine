@@ -56,6 +56,33 @@ export function hasBooks(booksDir: string, mode: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// countLutRows
+// ---------------------------------------------------------------------------
+
+/**
+ * Count the data rows in lookUpTable_<MODE>_0.csv — i.e. the number of curated
+ * books for the mode. Each row is one selectable round, so the valid Event IDs
+ * are `0 … count-1`; the harness Replay panel renders this as
+ * "Event ID (Range: 0 – N)". Returns 0 when the LUT is missing or empty.
+ *
+ * The LUT files are small integer CSVs (already read whole by `pickWeighted`),
+ * so a synchronous read + line count is cheap.
+ */
+export function countLutRows(booksDir: string, mode: string): number {
+  const lutPath = join(booksDir, `lookUpTable_${mode}_0.csv`);
+  try {
+    const raw = readFileSync(lutPath, 'utf8');
+    let n = 0;
+    for (const line of raw.split('\n')) {
+      if (line.trim()) n++;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // pickWeighted
 // ---------------------------------------------------------------------------
 

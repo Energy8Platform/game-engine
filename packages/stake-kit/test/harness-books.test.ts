@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zstdCompressSync } from 'node:zlib';
 
-import { loadIndex, hasBooks, pickWeighted, readBook } from '../src/harness/books';
+import { loadIndex, hasBooks, pickWeighted, readBook, countLutRows } from '../src/harness/books';
 
 // ---------------------------------------------------------------------------
 // Fixture setup
@@ -99,6 +99,25 @@ describe('hasBooks', () => {
     } finally {
       rmSync(half, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// countLutRows
+// ---------------------------------------------------------------------------
+
+describe('countLutRows', () => {
+  it('counts the data rows of the LUT (the number of curated books)', () => {
+    // LUT_CSV has 3 rows → Event IDs 0..2.
+    expect(countLutRows(dir, 'BASE')).toBe(3);
+  });
+
+  it('returns 0 for a mode with no LUT', () => {
+    expect(countLutRows(dir, 'NOPE')).toBe(0);
+  });
+
+  it('returns 0 for a nonexistent directory', () => {
+    expect(countLutRows('/nonexistent/__no_such_dir__', 'BASE')).toBe(0);
   });
 });
 
