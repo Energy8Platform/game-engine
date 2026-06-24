@@ -213,7 +213,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       let inBonus = false;
       const fsCounter = createFreeSpinsCounter();
       shell!.setBusy(true); // block re-spin / spacebar while the round plays out
-      void runRound<T>(
+      // RETURN the promise: the replay modal awaits onReplay() and only reopens once the round's
+      // animation has finished — returning void would reopen it instantly, over a running animation.
+      return runRound<T>(
         {
           // Suppress the debit paint from play() until this segment's afterPresent (HUD timing).
           play: (a, b, rid) => { balanceGate.beginPlay(); return slotPlay.play(a, b, rid); },
@@ -259,8 +261,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       const fsView = (raw: unknown, totalWin: number) => {
         const s = (raw as { session?: { spinsPlayed?: number; spinsRemaining?: number } }).session;
         if (!s) return null;
-        const current = s.spinsPlayed ?? 0;
-        return { current, total: current + (s.spinsRemaining ?? 0), totalWin };
+        // The bridge session counts ALL segments incl. the trigger (segment 0); the free-spins
+        // counter is over FREE spins only, so drop the one trigger segment → 1/10, not 2/11.
+        const played = s.spinsPlayed ?? 0;
+        const current = Math.max(0, played - 1);
+        const total = Math.max(0, played + (s.spinsRemaining ?? 0) - 1);
+        return { current, total, totalWin };
       };
       let raw = firstRaw;
       let r = enrichRoundMeta(opts.normalize(raw), raw);
@@ -309,12 +315,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       shell.on('spin', () => {
         const action = activeFeature ?? 'spin';
         if (!ensureAffordable(action)) return;
-        playRound(action);
+        void playRound(action);
       });
       shell.on('betChange', (bet: number) => { currentBet = bet; });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => {
         if (!ensureAffordable(id)) return;
-        playRound(id);
+        void playRound(id);
       });
 
       // Resume offer: when the game scene is (or becomes) current on a reload, ask the host whether
