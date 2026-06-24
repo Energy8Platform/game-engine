@@ -177,12 +177,18 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     const h = this.screenH;
     if (w <= 0 || h <= 0) return;
     try {
-      const texture = RenderTexture.create({ width: w, height: h, resolution: renderer.resolution });
+      // Downsample the snapshot (½ res) then blur moderately, and let the sprite upscale it back:
+      // the downscale + upscale already softens heavily, and a moderate strength stays within the
+      // blur kernel (a huge strength under-samples → a thin, weak blur). Net: a strong frosted
+      // backdrop that hides the shell well, far cheaper than a full-res large-radius blur.
+      const texture = RenderTexture.create({ width: w, height: h, resolution: 0.5 });
       this.modalLayer.visible = false; // never capture the (empty) modal layer / a stale backdrop
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
-      sprite.filters = [new BlurFilter({ strength: 18, quality: 4 })];
+      const blur = new BlurFilter({ strength: 10, quality: 5 });
+      blur.repeatEdgePixels = true; // no transparent edge halo
+      sprite.filters = [blur];
       this.modalLayer.addChild(sprite); // below the layer node, which is added next
       this.backdrop = { sprite, texture };
     } catch {
