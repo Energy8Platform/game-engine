@@ -157,6 +157,9 @@ export function stakeHarnessPlugin(opts: StakeHarnessPluginOptions = {}): VitePl
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           gameDefinition: cfg.model.gameDefinition as any,
           script: cfg.luaScript,
+          // The harness replays each action as an isolated round; a books-path bonus buy never
+          // creates an engine session, so a follow-up free_spin (Lua fallback) must run sessionless.
+          allowSessionlessActions: true,
         });
       } catch {
         luaEngine = null;

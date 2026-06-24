@@ -139,4 +139,33 @@ end
     // The first free spin must NOT throw "requires an active session".
     expect(() => engine.execute({ action: 'free_spin', bet: 1 })).not.toThrow();
   });
+
+  it('allowSessionlessActions lets a standalone free_spin run without a session (harness mixed path)', () => {
+    // In the harness a books-path buy_bonus never creates an engine session, yet the scaffold
+    // replays free_spin (no books) via the Lua fallback. The flag must let it run.
+    const freeSpec: GameSpec = {
+      id: 'spec-sessionless', type: 'slot', grid: { cols: 3, rows: 3 },
+      betLevels: [1], maxWin: 1000,
+      symbols: [{ id: 'A', kind: 'high', pay: { 3: 5 } }],
+      actions: { spin: { role: 'base' }, free_spin: { role: 'free' } },
+    };
+    const freeLogic = `
+function execute(state)
+  return { total_win = 2, matrix = { { SYM.A, SYM.A, SYM.A } }, variables = { retrigger_spins = 0 } }
+end
+`;
+    const model = defineGame(freeSpec);
+    // Default (enforced) → free_spin with no session throws.
+    const strict = new LuaEngine({ script: buildLuaScript(model, freeLogic), gameDefinition: model.gameDefinition, seed: 1 });
+    expect(() => strict.execute({ action: 'free_spin', bet: 1 })).toThrow(/requires an active session/);
+    strict.destroy();
+
+    // Harness mode → it runs.
+    engine = new LuaEngine({
+      script: buildLuaScript(model, freeLogic), gameDefinition: model.gameDefinition, seed: 1,
+      allowSessionlessActions: true,
+    });
+    const fs = engine.execute({ action: 'free_spin', bet: 1 });
+    expect(fs.totalWin).toBe(2);
+  });
 });

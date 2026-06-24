@@ -36,6 +36,7 @@ export class LuaEngine {
   private gameDefinition: GameDefinition;
   private variables: Record<string, number> = {};
   private simulationMode: boolean;
+  private allowSessionlessActions: boolean;
   /** Reusable state objects to avoid per-iteration allocation */
   private _stateVars: Record<string, number> = {};
   private _stateParams: Record<string, unknown> = {};
@@ -43,6 +44,7 @@ export class LuaEngine {
   constructor(config: LuaEngineConfig) {
     this.gameDefinition = config.gameDefinition;
     this.simulationMode = config.simulationMode ?? false;
+    this.allowSessionlessActions = config.allowSessionlessActions ?? false;
 
     const rng = config.seed !== undefined
       ? createSeededRng(config.seed)
@@ -93,10 +95,11 @@ export class LuaEngine {
   execute(params: PlayParams): LuaPlayResult {
     const { action: actionName, params: clientParams } = params;
 
-    // 1. Resolve action
+    // 1. Resolve action. In the harness, `allowSessionlessActions` lets a standalone free_spin
+    //    (replayed after a books-path bonus buy that never created an engine session) run anyway.
     const action = this.actionRouter.resolveAction(
       actionName,
-      this.sessionManager.isActive,
+      this.sessionManager.isActive || this.allowSessionlessActions,
     );
 
     // 2. Determine bet — server uses session bet for session actions

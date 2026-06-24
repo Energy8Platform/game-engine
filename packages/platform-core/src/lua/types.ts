@@ -88,6 +88,14 @@ export interface LuaEngineConfig {
   logger?: (level: string, msg: string) => void;
   /** Skip marshalling data fields (matrix, wins, etc.) for faster simulation */
   simulationMode?: boolean;
+  /**
+   * Allow `requires_session` actions (e.g. `free_spin`) to run even with no active session.
+   * Default false (server-faithful). The dev harness sets this true: when a bonus is bought
+   * through the BOOKS path the LuaEngine never created a session, yet the scaffold then replays
+   * `free_spin` (which has no books) via the Lua fallback — without this it would throw
+   * "Action free_spin requires an active session".
+   */
+  allowSessionlessActions?: boolean;
 }
 
 export interface LuaPlayResult {
