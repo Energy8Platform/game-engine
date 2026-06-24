@@ -115,7 +115,13 @@ export function toMathModes(spec: GameSpec): MathModeSpec[] {
     const role = action.role ?? 'base';
     if (role === 'free') continue;
     const mode = action.mode ?? (role === 'base' ? 'BASE' : key.toUpperCase());
-    modes.push({ action: key, mode, costMultiplier: action.cost ?? 1 });
+    modes.push({
+      action: key,
+      mode,
+      costMultiplier: action.cost ?? 1,
+      ...(typeof action.rtp === 'number' ? { rtp: action.rtp } : {}),
+      maxWin: action.maxWin ?? spec.maxWin,
+    });
   }
   return modes;
 }

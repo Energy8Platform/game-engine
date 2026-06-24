@@ -61,9 +61,25 @@ describe('toLuaPrelude', () => {
 describe('toModeMap / toMathModes', () => {
   it('excludes free actions and defaults mode to UPPER(key)', () => {
     expect(toModeMap(spec)).toEqual({ spin: 'BASE', buy_bonus: 'BUY_BONUS' });
+    // maxWin defaults to the game-level spec.maxWin; rtp omitted when the action doesn't declare it.
     expect(toMathModes(spec)).toEqual([
-      { action: 'spin', mode: 'BASE', costMultiplier: 1 },
-      { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 50 },
+      { action: 'spin', mode: 'BASE', costMultiplier: 1, maxWin: 1000 },
+      { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 50, maxWin: 1000 },
+    ]);
+  });
+
+  it('carries per-action rtp + per-mode maxWin override into mathModes', () => {
+    const s: GameSpec = {
+      ...spec,
+      maxWin: 5000,
+      actions: {
+        spin: { role: 'base', rtp: 0.965 },
+        buy_bonus: { role: 'buy', cost: 100, rtp: 0.97, maxWin: 12000 },
+      },
+    };
+    expect(toMathModes(s)).toEqual([
+      { action: 'spin', mode: 'BASE', costMultiplier: 1, rtp: 0.965, maxWin: 5000 },
+      { action: 'buy_bonus', mode: 'BUY_BONUS', costMultiplier: 100, rtp: 0.97, maxWin: 12000 },
     ]);
   });
 });

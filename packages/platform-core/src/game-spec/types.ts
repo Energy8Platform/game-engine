@@ -23,6 +23,13 @@ export interface ActionSpec {
   /** Shell display for buy/feature actions (SSOT). */
   title?: string;
   description?: string;
+  /** Target RTP for THIS mode (0..1), e.g. 0.96. Single source of truth: seeds the math
+   *  pipeline's `targetRTP` AND the Game Info per-mode table. `math.config` keeps only optimizer
+   *  tuning (CV / hit-rate / nRowsOut / tolerances), never the RTP. */
+  rtp?: number;
+  /** Max win for THIS mode as a bet-multiplier; defaults to the game-level `spec.maxWin`. Seeds the
+   *  curate cap (`capMaxWin`) for the mode AND the Game Info per-mode "Max Win" cell. */
+  maxWin?: number;
   transitions?: TransitionRule[];
 }
 
@@ -46,6 +53,10 @@ export interface MathModeSpec {
   action: string;
   mode: string;
   costMultiplier: number;
+  /** Target RTP for the mode (from `ActionSpec.rtp`), if declared — seeds the math pipeline. */
+  rtp?: number;
+  /** Max win (bet-multiplier) for the mode: `ActionSpec.maxWin` ?? game-level `spec.maxWin`. */
+  maxWin: number;
 }
 
 export interface PaytableEntry {
