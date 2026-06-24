@@ -114,6 +114,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   };
 
   const { runRound } = await import('./runRound');
+  const { createBalanceGate } = await import('./balanceGate');
 
   // slotPlay references shell via closure — define it after shell is assigned below.
   // We use a late-binding wrapper so the closure captures the variable, not null.
@@ -179,10 +180,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       );
     }
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
-    // currentBalance tracks the live wallet for the affordability guard; the DISPLAYED balance is
-    // pushed only after present() (HUD-timing requirement), via afterPresent below.
-    let currentBalance = balance;
-    ps?.on('balanceUpdate', (d: { balance: number }) => { currentBalance = d.balance; });
+    // The gate tracks the live wallet (for the affordability guard) but only PAINTS the balance per
+    // the HUD-timing rule: the debit is buffered during play→present and shown at afterPresent; the
+    // async win credit (/wallet/end-round, after the final ack) paints when it lands. `balanceGate`
+    // is the single source for both the displayed balance and `ensureAffordable`.
+    const balanceGate = createBalanceGate((b) => shell!.setBalance(b), balance);
+    ps?.on('balanceUpdate', (d: { balance: number }) => { balanceGate.onBalance(d.balance); });
 
     // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
     let currentTurbo = shell.state.turbo;
@@ -203,12 +206,13 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       if (!scene) return;
       void runRound<T>(
         {
-          play: slotPlay.play,
+          // Suppress the debit paint from play() until this segment's afterPresent (HUD timing).
+          play: (a, b, rid) => { balanceGate.beginPlay(); return slotPlay.play(a, b, rid); },
           ack: slotPlay.ack,
           scene,
           context: makeContext,
           roleOf,
-          afterPresent: (r) => { shell!.setWin(r.totalWin); shell!.setBalance(currentBalance); },
+          afterPresent: (r) => { shell!.setWin(r.totalWin); balanceGate.afterPresent(); },
         },
         action,
       );
@@ -222,7 +226,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       const { stakeForAction } = await import('./shellConfig');
       // Guard a play: if the stake exceeds the balance, show a shell modal and DON'T play.
       const ensureAffordable = (action: string): boolean => {
-        if (stakeForAction(opts.model, action, currentBet) <= currentBalance + 1e-9) return true;
+        if (stakeForAction(opts.model, action, currentBet) <= balanceGate.balance + 1e-9) return true;
         shell!.openModal({
           availableClose: true,
           title: shell!.t('Insufficient balance'),
