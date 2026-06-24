@@ -115,6 +115,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
   const { runRound } = await import('./runRound');
   const { createBalanceGate } = await import('./balanceGate');
+  const { createFreeSpinsCounter } = await import('./freeSpinsCounter');
 
   // slotPlay references shell via closure — define it after shell is assigned below.
   // We use a late-binding wrapper so the closure captures the variable, not null.
@@ -204,6 +205,11 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     const playRound = (action: string) => {
       const scene = gameScene();
       if (!scene) return;
+      // Per-round free-spins state: the shell enters FS mode on bonus-enter and shows current/total
+      // (growing on retriggers) + cumulative win per spin. `inBonus` gates the per-spin counter so
+      // the trigger segment (presented before onBonusEnter) doesn't count as a free spin.
+      let inBonus = false;
+      const fsCounter = createFreeSpinsCounter();
       void runRound<T>(
         {
           // Suppress the debit paint from play() until this segment's afterPresent (HUD timing).
@@ -212,7 +218,22 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           scene,
           context: makeContext,
           roleOf,
-          afterPresent: (r) => { shell!.setWin(r.totalWin); balanceGate.afterPresent(); },
+          afterPresent: (r) => {
+            shell!.setWin(r.totalWin);
+            balanceGate.afterPresent();
+            if (inBonus) shell!.setFreeSpins(fsCounter.spin(r.freeSpins?.awarded ?? 0, r.totalWin));
+          },
+          onBonusEnter: async (trigger, ctx) => {
+            inBonus = true;
+            shell!.setMode('freeSpins');
+            shell!.setFreeSpins(fsCounter.enter(trigger.freeSpins?.awarded ?? trigger.freeSpins?.total ?? 0));
+            await scene.onBonusEnter?.(trigger, ctx);
+          },
+          onBonusExit: async (last, ctx) => {
+            inBonus = false;
+            await scene.onBonusExit?.(last, ctx);
+            shell!.setMode('base');
+          },
         },
         action,
       );

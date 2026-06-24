@@ -20,10 +20,12 @@ function harness(queue: R[], turbo = () => 0) {
   const deps: RunRoundDeps<R> = {
     play: async (action, bet, roundId) => { playLog.push({ action, bet, roundId }); return queue[i++]!; },
     ack,
-    scene: { present, onBonusEnter, onBonusExit },
+    scene: { present },
     context,
     roleOf: (a) => (a === 'free_spin' ? 'free' : a === 'buy_bonus' ? 'buy' : 'base'),
     afterPresent,
+    onBonusEnter,
+    onBonusExit,
   };
   return { deps, playLog, present, onBonusEnter, onBonusExit, ack, afterPresent };
 }
