@@ -22,8 +22,25 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   if (opts.textureDefaults) applyTextureDefaults();
   await loadFonts(opts.fonts);
 
-  const fatal = (message: string) =>
-    opts.onFatalError ? opts.onFatalError(message) : showFatalError(opts.container ?? '#game', message);
+  // Declared up front so `fatal` can route errors through the shell's own modal once it exists.
+  let shell: SlotGameHandle['shell'] = null;
+
+  const fatal = (message: string) => {
+    if (opts.onFatalError) return opts.onFatalError(message);
+    // Once the shell is up, use ITS branded modal (consistent chrome, social vocabulary, fit
+    // scaling) rather than the bare DOM fallback. Errors thrown before the shell boots (asset
+    // load, SDK handshake) still get the standalone overlay.
+    if (shell) {
+      shell.openModal({
+        availableClose: false,
+        title: shell.t('Something went wrong'),
+        body: shell.t(message),
+        actions: [{ title: shell.t('Reload'), on: () => { try { location.reload(); } catch { /* non-browser */ } } }],
+      });
+      return;
+    }
+    showFatalError(opts.container ?? '#game', message);
+  };
 
   // Global safety net: surface ANY uncaught error / unhandled rejection (e.g. an
   // `Uncaught (in promise) SDKError` on spin) through the same fatal modal so games
@@ -80,8 +97,6 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   // Build slotPlay FIRST — bindGameScene() needs it to be in scope.
   const { createSlotPlay } = await import('./slotPlay');
 
-  let shell: SlotGameHandle['shell'] = null;
-
   /** The current scene IFF it implements the SlotSceneController contract (duck-typed
    *  on `bindHost`). Host play/bet bind to whichever scene is current and controllable. */
   const gameScene = () => {
@@ -97,12 +112,16 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     play: (p) => game.platformSession!.play(p),
     normalize: opts.normalize,
     onWin: (w) => shell?.setWin(w),
+    // ACK the result AFTER the scene animates it (the scene calls host.ack()). On Stake this
+    // triggers /wallet/end-round so a winning round settles post-animation instead of staying
+    // open and blocking the next spin.
+    ack: (raw) => game.platformSession!.playAck(raw as import('@energy8platform/platform-core').PlayResultData),
   });
 
   /** Inject host + current bet into the game scene whenever it becomes current. */
   const bindGameScene = () => {
     const s = gameScene();
-    s?.bindHost?.({ play: slotPlay });
+    s?.bindHost?.({ play: slotPlay.play, ack: slotPlay.ack });
     s?.setBet?.(currentBet);
   };
 
@@ -132,12 +151,21 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     } | null;
     const config = initData?.config;
     const { resolveCurrency } = await import('./shellConfig');
+    // SINGLE source of truth for the symbol: the Stake bridge already puts a full CurrencyMetaData
+    // (symbol + placement) on initData.config.currency. In the non-stake/devBridge path that meta
+    // is absent and we only have the spec's currency CODE — resolve it through the SAME table
+    // (stake-bridge's lookupCurrency) so e.g. 'EUR' renders as '€', not the literal text "EUR".
+    // stake-bridge ships with every scaffold; if it's somehow absent we degrade to the code.
+    let currencyMeta = config?.currency;
+    if (!currencyMeta?.symbol && opts.model.spec.currency) {
+      try {
+        const { lookupCurrency } = await import('@energy8platform/stake-bridge');
+        currencyMeta = lookupCurrency(opts.model.spec.currency);
+      } catch { /* stake-bridge not installed — resolveCurrency falls back to the code */ }
+    }
     const runtime = {
       balance,
-      // SINGLE source of truth: derive the shell CurrencyConfig from the CurrencyMetaData the
-      // Stake bridge builds on initData.config.currency (the SAME table). Fall back to the spec
-      // currency code, then a neutral euro.
-      currency: resolveCurrency(config?.currency, opts.model.spec.currency),
+      currency: resolveCurrency(currencyMeta, opts.model.spec.currency),
       language: initData?.lang,
       mode,
       social: config?.socialMode,
@@ -160,6 +188,33 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         gameScene()?.setBet?.(bet);
       });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => { void gameScene()?.buyBonus?.(id, currentBet); });
+
+      // Resume offer: when the game scene is (or becomes) current on a reload, ask the host whether
+      // a round is still open. If so, offer Continue (replay its animation, then settle) or Finish
+      // (settle now). Settlement is the same playAck path a normal spin uses. Runs at most once.
+      let resumeOffered = false;
+      const offerResume = async () => {
+        if (resumeOffered || !shell || !gameScene()) return;
+        resumeOffered = true;
+        let snap: import('@energy8platform/platform-core').PlayResultData | null = null;
+        try { snap = await ps?.getState() ?? null; } catch { snap = null; }
+        if (!snap) return;
+        const result = opts.normalize(snap as unknown);
+        shell.openModal({
+          availableClose: false,
+          title: shell.t('Unfinished round'),
+          body: shell.t('You have an unfinished round. Continue it or finish it now?'),
+          actions: [
+            { title: shell.t('Continue'), on: () => { void (async () => {
+              await gameScene()?.resume?.(result);
+              ps?.playAck(snap!);
+            })(); } },
+            { title: shell.t('Finish'), on: () => { ps?.playAck(snap!); } },
+          ],
+        });
+      };
+      game.scenes.on('change', () => { void offerResume(); });
+      void offerResume();
     } else {
       const stakeMode = stakeBridge?.replayMode ?? 'BASE';
       const bonusId = resolveReplayBonusId(opts.model, stakeMode);

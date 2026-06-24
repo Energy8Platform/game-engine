@@ -189,9 +189,16 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       for (const m of modes ?? []) {
         betModes[m.name] = { cost: m.cost };
       }
+      // Surface a lingering (un-settled) round so a page reload can resume or finish it instead of
+      // silently dropping it. We retain only winning rounds (active:true). The bridge's resume path
+      // reads round.amount as MINOR units (see StakeRound.amount), while we store it MAJOR internally
+      // (matching play()'s return) — convert at this boundary so the resumed bet shows correctly.
+      const round: StakeRound<ParsedBook> | null = activeRound
+        ? { ...activeRound, amount: (activeRound.amount ?? 0) * API_MULTIPLIER }
+        : null;
       return {
         balance: balanceObj(),
-        round: null,
+        round,
         config: {
           gameID: gameId,
           minBet,

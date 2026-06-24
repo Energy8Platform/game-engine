@@ -109,7 +109,7 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(c.gameInfo).toEqual(derived);
   });
 
-  it('social mode socializes the host-derived section titles/content but leaves author content verbatim', () => {
+  it('social mode socializes the WHOLE merged set — host-derived AND author content', () => {
     const author: GameInfoContent = { sections: [{ type: 'custom', title: 'Our Paytable Rules', html: '<p>Read the paytable.</p>' }] };
     const c = buildShellConfig({ gameInfo: author }, model, {
       balance: 0, mode: 'base', social: true,
@@ -117,26 +117,35 @@ describe('buildShellConfig (runtime ctx)', () => {
     });
     expect(c.isSocial).toBe(true);
     const sections = c.gameInfo.sections ?? [];
-    // host-derived 'MAX WIN' kept (no "pay"); host-derived disclaimer socialized: "bets pay out" → "plays win"
+    // host-derived disclaimer socialized: "bets pay out" → "plays win"
     const disc = sections.find((s) => s.type === 'custom' && (s as { html?: string }).html?.toLowerCase().includes('listed odds')) as { html?: string } | undefined;
     expect(disc?.html).not.toContain('pay out');
-    // author 'custom' section replaced the derived disclaimer? no — different identity? both are 'custom'.
-    // The author 'custom' replaced the derived 'custom' DISCLAIMER (same type 'custom') — verify author wording is verbatim.
-    const authorSec = sections.find((s) => s.type === 'custom' && (s as { title?: string }).title === 'Our Paytable Rules') as { html?: string } | undefined;
+    // author 'custom' section (different identity → appended) is NOW socialized too:
+    // "Paytable" → "Win table" in both title and html, so forbidden words can't slip through.
+    const authorSec = sections.find((s) => s.type === 'custom' && (s as { title?: string }).title?.includes('Rules')) as { title?: string; html?: string } | undefined;
     expect(authorSec).toBeDefined();
-    expect(authorSec?.html).toBe('<p>Read the paytable.</p>'); // untouched (no "win table")
+    expect(authorSec?.title?.toLowerCase()).not.toContain('paytable');
+    expect(authorSec?.html?.toLowerCase()).not.toContain('paytable');
+    expect(authorSec?.html?.toLowerCase()).toContain('win table');
   });
 });
 
 describe('social mode — buy-bonus cards', () => {
-  it('socializes host-derived buy-bonus titles (BUY BONUS → GET BONUS) but keeps author options verbatim', () => {
+  it('socializes host-derived AND author buy-bonus card copy (BUY BONUS → GET BONUS)', () => {
     const social = buildShellConfig({}, model, { balance: 0, mode: 'base', social: true });
     const derivedBuy = (social.features.buyBonus as Array<{ id: string; title: string }>).find((o) => o.id === 'buy_bonus');
     expect(derivedBuy?.title).toBe('GET BONUS'); // socialized from spec 'BUY BONUS'
 
     const author = [{ id: 'x', title: 'BUY BONUS', description: 'buy spins', priceMultiplier: 50 }];
     const c = buildShellConfig({ buyBonus: author }, model, { balance: 0, mode: 'base', social: true });
-    expect((c.features.buyBonus as typeof author)[0].title).toBe('BUY BONUS'); // author untouched
+    expect((c.features.buyBonus as typeof author)[0].title).toBe('GET BONUS'); // author socialized too
+    expect((c.features.buyBonus as typeof author)[0].description).not.toContain('buy');
+  });
+
+  it('leaves author buy-bonus copy verbatim when NOT social', () => {
+    const author = [{ id: 'x', title: 'BUY BONUS', description: 'buy spins', priceMultiplier: 50 }];
+    const c = buildShellConfig({ buyBonus: author }, model, { balance: 0, mode: 'base', social: false });
+    expect((c.features.buyBonus as typeof author)[0].title).toBe('BUY BONUS');
   });
 });
 

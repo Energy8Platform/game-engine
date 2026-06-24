@@ -69,7 +69,7 @@ function harness(options: BonusOption[]) {
     normalize: () => ({ totalWin: 0 }),
   });
   const scene = makeScene();
-  scene.bindHost!({ play: slotPlay });
+  scene.bindHost!({ play: slotPlay.play, ack: slotPlay.ack });
   const shell = createGameShell(cfg(options));
   wireBaseMode(shell, () => scene, () => 1);
   return { shell, plays };

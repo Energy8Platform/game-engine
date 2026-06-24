@@ -218,6 +218,53 @@ describe('StakeBridge settlement timing (after-ack + payout>0)', () => {
     expect(rgs.endRound).not.toHaveBeenCalled();
   });
 
+  it('a new play after an UN-ACKed winning round settles it first, then starts the new round', async () => {
+    // Winning round whose final-segment ACK never arrives (e.g. the game crashed
+    // mid-animation or a reload dropped it). The next play must NOT be rejected
+    // with "a round is still active" — the bridge drains the lingering round via
+    // /wallet/end-round, then plays the new one.
+    rgs.play.mockResolvedValueOnce({
+      balance: { amount: 99 * MILLION, currency: 'USD' },
+      round: {
+        betID: 7,
+        payoutMultiplier: 8,
+        costMultiplier: 1,
+        active: true,
+        mode: 'BASE',
+        state: { events: ['win'] },
+      },
+    });
+    rgs.endRound.mockResolvedValue({
+      balance: { amount: 107 * MILLION, currency: 'USD' },
+    });
+
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+    // No ACK is sent — the round stays open on the bridge.
+    expect(rgs.endRound).not.toHaveBeenCalled();
+
+    // A brand-new spin arrives.
+    rgs.play.mockResolvedValueOnce({
+      balance: { amount: 106 * MILLION, currency: 'USD' },
+      round: {
+        betID: 8,
+        payoutMultiplier: 0,
+        costMultiplier: 1,
+        active: true,
+        mode: 'BASE',
+        state: { events: ['lose'] },
+      },
+    });
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+
+    // The lingering winning round was settled, the new round played, no error.
+    expect(rgs.endRound).toHaveBeenCalledTimes(1);
+    expect(rgs.play).toHaveBeenCalledTimes(2);
+    expect(received.filter((m) => m.type === 'PLAY_ERROR')).toHaveLength(0);
+    expect(received.filter((m) => m.type === 'PLAY_RESULT')).toHaveLength(2);
+  });
+
   it('duplicate PLAY_RESULT_ACK for the same winning round calls end-round exactly ONCE', async () => {
     // Arrange: a winning round where endRound resolves after a delay so the
     // second ACK arrives while the first endRound() is still in flight.

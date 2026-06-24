@@ -14,9 +14,10 @@ export interface SlotShellOptions {
   /** Author-supplied info sections. Sections are MERGED over the host-derived set by section
    *  identity: an author section REPLACES the derived section of the same `type`/`kind`, a new
    *  `type` is appended, and derived sections without an author override (max win, paytable,
-   *  controls, disclaimer) are kept. */
+   *  controls, disclaimer) are kept. In social mode, the merged result (author text included) is
+   *  run through `socialize`, so forbidden words in author copy are rewritten automatically. */
   gameInfo?: GameInfoContent;
-  /** Override the derived buy/ante options. */
+  /** Override the derived buy/ante options. In social mode the card copy is socialized too. */
   buyBonus?: BonusOption[];
   tiers?: WinTier[];
   features?: Partial<ShellFeatures>;
@@ -185,9 +186,9 @@ export function mergeGameInfo(derived: GameInfoContent, override?: GameInfoConte
   return { sections: out };
 }
 
-/** Recursively run a section's host-derived text (titles + custom HTML/text) through `socialize`.
- *  Only the maximal default sections this module generates are socialized; author content is
- *  left as-is (the merge replaces, so author sections keep their own wording). */
+/** Run a section's text (title + custom HTML) through `socialize`. Applied to the full MERGED set
+ *  (host-derived + author) in social mode so author wording is rewritten too. A `node`-based custom
+ *  section is returned untouched — its DOM is author-owned and not introspected here. */
 function socializeSection(s: GameInfoSection): GameInfoSection {
   const next = { ...s } as GameInfoSection;
   if ('title' in next && typeof next.title === 'string') {
@@ -199,8 +200,9 @@ function socializeSection(s: GameInfoSection): GameInfoSection {
   return next;
 }
 
-/** Socialize host-derived buy-bonus card copy (title/description) when in social mode; a no-op
- *  otherwise. Used only for the spec-derived options, never for author-supplied `opts.buyBonus`. */
+/** Socialize buy-bonus card copy (title/description) when in social mode; a no-op otherwise.
+ *  Applied to the final option set (author override or spec-derived) so forbidden words in author
+ *  card copy are rewritten too. */
 function socializeBonusOptions(options: BonusOption[], isSocial: boolean): BonusOption[] {
   if (!isSocial) return options;
   return options.map((o) => ({ ...o, title: socialize(o.title), description: socialize(o.description) }));
@@ -215,14 +217,16 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
   const currency =
     opts.currency ?? runtime.currency ?? resolveCurrency(null, model.spec.currency);
   const isSocial = runtime.social ?? false;
-  // Socialize the HOST-derived text first (titles + custom HTML), THEN merge author sections over
-  // it — so the built-in info copy gets the social vocabulary while author content stays verbatim.
-  let derived = defaultGameInfo(model, runtime);
-  if (isSocial) derived = { sections: (derived.sections ?? []).map(socializeSection) };
-  const gameInfo = mergeGameInfo(derived, opts.gameInfo);
-  // Buy-bonus cards: socialize ONLY the host-derived options (from the spec); author-supplied
-  // `opts.buyBonus` stays verbatim, like other author content.
-  const buyBonus = opts.buyBonus ?? socializeBonusOptions(toBonusOptions(model), isSocial);
+  // Merge author sections over the host-derived defaults, THEN socialize the WHOLE merged set in
+  // social mode — so restricted gambling vocabulary is rewritten in BOTH the built-in copy AND any
+  // author-supplied text (title + custom HTML). A game can no longer surface a forbidden word in
+  // social mode just because the author wrote it in their own info section. (Custom sections built
+  // from a raw DOM `node` can't be rewritten automatically — author owns the node and can call the
+  // exported `socialize` from '@energy8platform/game-engine/host' on their own strings.)
+  let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime), opts.gameInfo);
+  if (isSocial) gameInfo = { sections: (gameInfo.sections ?? []).map(socializeSection) };
+  // Buy-bonus cards: socialize the FINAL options (author override or spec-derived) in social mode.
+  const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model), isSocial);
   return {
     mount: opts.mount ?? (typeof document !== 'undefined' ? document.body : (undefined as never)),
     language: runtime.language ?? 'en',

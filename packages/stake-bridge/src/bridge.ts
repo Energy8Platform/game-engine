@@ -459,20 +459,31 @@ export class StakeBridge {
         return;
       }
 
-      // No matching active round — but if there IS an unfinished round,
-      // either the game forgot to drain it or it's a spurious call.
-      // Mirror Stake's own ts-client behaviour: refuse with a clear code.
-      if (this.active && this.active.cursor < this.active.segments.length - 1) {
-        this.bridge.send<PlayErrorPayload>(
-          'PLAY_ERROR',
-          {
-            code: 'ACTIVE_SESSION_EXISTS',
-            message:
-              'An active round is in progress. Resume via getState() or finish remaining segments first.',
-          },
-          id,
-        );
-        return;
+      // No matching active round, but one is still open.
+      if (this.active) {
+        const atFinal = this.active.cursor >= this.active.segments.length - 1;
+        if (!atFinal) {
+          // Genuinely mid-round (segments still undelivered) → refuse, mirroring
+          // Stake's own ts-client behaviour.
+          this.bridge.send<PlayErrorPayload>(
+            'PLAY_ERROR',
+            {
+              code: 'ACTIVE_SESSION_EXISTS',
+              message:
+                'An active round is in progress. Resume via getState() or finish remaining segments first.',
+            },
+            id,
+          );
+          return;
+        }
+        // Fully delivered but not yet settled (e.g. a winning round whose final
+        // ACK never arrived, or arrived too late). Settle it now — awaited — so
+        // the RGS round is closed BEFORE we start the new round and the new
+        // /wallet/play isn't rejected with "a round is still active".
+        if (this.active.rgsActive && !this.active.endRoundCalled) {
+          await this.settleRound(this.active);
+        }
+        this.clearRoundIfActive(this.active);
       }
 
       // Brand-new round.
@@ -750,8 +761,10 @@ export class StakeBridge {
     }
 
     // Settle the round once the FINAL segment's animation is acknowledged.
+    // Fire-and-forget here — the ACK handler stays synchronous; onPlayRequest's
+    // drain awaits a settleRound() of its own when a new play races this one.
     if (isFinal && round.rgsActive && !round.endRoundCalled && !this._isReplay) {
-      this.settleRound(round);
+      void this.settleRound(round);
     }
   }
 
@@ -763,11 +776,13 @@ export class StakeBridge {
    * - `payoutMultiplier === 0`: a losing round needs no settlement — the RGS
    *   closed it on `play()`. Close it locally so nothing lingers.
    *
-   * Idempotent via `endRoundCalled`. Runs its async work fire-and-forget so the
-   * ACK handler stays synchronous (matching the existing bridge style); errors
-   * surface as PLAY_ERROR but leave the round in place for a retry.
+   * Idempotent via `endRoundCalled`. Returns a promise that resolves once the
+   * round is closed (or rejects-as-handled by emitting PLAY_ERROR and leaving the
+   * round in place for a retry). The ACK path calls it fire-and-forget; the
+   * onPlayRequest drain awaits it so a racing new play can't start before the
+   * RGS round is closed.
    */
-  private settleRound(round: ActiveRound): void {
+  private async settleRound(round: ActiveRound): Promise<void> {
     if (round.endRoundCalled || !round.rgsActive) return;
 
     // 0-win round: no end-round expected. Close locally so the next play is
@@ -779,32 +794,30 @@ export class StakeBridge {
       return;
     }
 
-    void (async () => {
-      // Set the guard flag BEFORE the first await so a duplicate ACK that
-      // arrives while endRound() is in flight hits the entry guard and
-      // returns without issuing a second /wallet/end-round call.
-      round.endRoundCalled = true;
-      try {
-        const er = await this.rgs.endRound();
-        round.rgsActive = false;
-        this.balance = fromMinor(er.balance.amount);
-        this.startBalancePolling();
-        this.clearRoundIfActive(round);
-        // Win has now settled — push the credited balance.
-        this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', {
-          balance: this.balance,
-        });
-      } catch (err) {
-        // Reset the flag so a genuine retry (next PLAY_RESULT_ACK from the
-        // game) can re-enter settleRound and attempt /wallet/end-round again.
-        round.endRoundCalled = false;
-        // Keep the round in place so the game can retry the settlement.
-        this.bridge.send<PlayErrorPayload>('PLAY_ERROR', {
-          code: this.errCode(err),
-          message: this.errMessage(err),
-        });
-      }
-    })();
+    // Set the guard flag BEFORE the first await so a duplicate ACK that
+    // arrives while endRound() is in flight hits the entry guard and
+    // returns without issuing a second /wallet/end-round call.
+    round.endRoundCalled = true;
+    try {
+      const er = await this.rgs.endRound();
+      round.rgsActive = false;
+      this.balance = fromMinor(er.balance.amount);
+      this.startBalancePolling();
+      this.clearRoundIfActive(round);
+      // Win has now settled — push the credited balance.
+      this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', {
+        balance: this.balance,
+      });
+    } catch (err) {
+      // Reset the flag so a genuine retry (next PLAY_RESULT_ACK from the
+      // game) can re-enter settleRound and attempt /wallet/end-round again.
+      round.endRoundCalled = false;
+      // Keep the round in place so the game can retry the settlement.
+      this.bridge.send<PlayErrorPayload>('PLAY_ERROR', {
+        code: this.errCode(err),
+        message: this.errMessage(err),
+      });
+    }
   }
 
   /** Drop `this.active` if it still points at the now-settled round. */

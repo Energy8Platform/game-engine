@@ -41,6 +41,7 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
     if (!this.host) return;
     const result = await this.host.play(actionId, bet);
     await this.present(result, bet);
+    this.host.ack(); // settle this round (post-animation) before the next play
     if ((result.freeSpins?.awarded ?? 0) > 0) await this.runFreeSpins(result, bet);
   }
 
@@ -88,7 +89,13 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
     if (!this.host) return;
     const result = await this.host.play('spin', bet);
     await this.present(result, bet);
+    this.host.ack(); // settle this round (post-animation) before the next play
     if ((result.freeSpins?.awarded ?? 0) > 0) await this.runFreeSpins(result, bet);
+  }
+
+  /** Replay a round recovered on reload (host "Continue"). Present only — the host settles it. */
+  async resume(result: SpinData): Promise<void> {
+    await this.present(result, this.bet);
   }
 
   /** Drive the free-spins session: replay 'free_spin' until it completes. */
@@ -97,6 +104,7 @@ ${multiplierField}  private host?: SlotHostApi<SpinData>;
     while (!fs.isComplete) {
       const r = await this.host!.play('free_spin', bet);
       await this.present(r, bet);
+      this.host!.ack(); // settle each free spin before the next
       fs.addWin(r.totalWin);
       fs.award(r.freeSpins?.awarded ?? 0); // retrigger
       fs.consume();

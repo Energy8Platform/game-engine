@@ -17,18 +17,27 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
   bindHost(api: SlotHostApi<SpinData>): void { this.host = api; }
   setBet(bet: number): void { this.bet = bet; }
 
+  /** Replay a round recovered on reload (host "Continue"). Present only — the host settles it. */
+  async resume(result: SpinData): Promise<void> {
+    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
+    for (const step of result.steps) await this.controller.run(step);
+    if (result.totalWin > 0) await this.overlay.show(result.totalWin, this.bet);
+  }
+
   async buyBonus(actionId: string, bet: number): Promise<void> {
     if (!this.host) return;
     const result = await this.host.play(actionId, bet);
     if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
     for (const step of result.steps) await this.controller.run(step);
     if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
+    this.host.ack();
     if ((result.freeSpins?.awarded ?? 0) > 0) {
       const fs = new FreeSpinsSession({ initialSpins: result.freeSpins?.total ?? result.freeSpins?.awarded ?? 0 });
       while (!fs.isComplete) {
         const r = await this.host.play('free_spin', bet);
         for (const step of r.steps) await this.controller.run(step);
         if (r.totalWin > 0) await this.overlay.show(r.totalWin, bet);
+        this.host.ack();
         fs.addWin(r.totalWin); fs.award(r.freeSpins?.awarded ?? 0); fs.consume();
       }
     }
@@ -77,12 +86,14 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
     if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
     for (const step of result.steps) await this.controller.run(step);
     if (result.totalWin > 0) await this.overlay.show(result.totalWin, bet);
+    this.host.ack();
     if ((result.freeSpins?.awarded ?? 0) > 0) {
       const fs = new FreeSpinsSession({ initialSpins: result.freeSpins?.total ?? result.freeSpins?.awarded ?? 0 });
       while (!fs.isComplete) {
         const r = await this.host.play('free_spin', bet);
         for (const step of r.steps) await this.controller.run(step);
         if (r.totalWin > 0) await this.overlay.show(r.totalWin, bet);
+        this.host.ack();
         fs.addWin(r.totalWin); fs.award(r.freeSpins?.awarded ?? 0); fs.consume();
       }
     }

@@ -109,6 +109,26 @@ describe('authenticate', () => {
     expect(res.config.betModes).toBeDefined();
     expect(res.config.betModes!.BASE).toBeDefined();
   });
+
+  it('surfaces a lingering (un-settled) winning round so a reload can resume it', async () => {
+    const rgs = makeRgs();
+    await rgs.authenticate();
+
+    // A winning play that is NOT followed by end-round leaves the round open.
+    const bet = 1 * API_MULTIPLIER;
+    await rgs.play({ mode: 'BASE', amount: bet });
+
+    const res = await rgs.authenticate();
+    expect(res.round).not.toBeNull();
+    expect(res.round!.active).toBe(true);
+    expect(res.round!.payoutMultiplier).toBe(2.5);
+    // amount surfaced in MINOR units (converted from the MAJOR value stored internally).
+    expect(res.round!.amount).toBe(1 * API_MULTIPLIER);
+
+    // Once settled, authenticate reports no open round again.
+    await rgs.endRound();
+    expect((await rgs.authenticate()).round).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
