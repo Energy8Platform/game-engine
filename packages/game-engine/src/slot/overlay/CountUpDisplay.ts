@@ -36,6 +36,12 @@ export class CountUpDisplay extends Container {
     this._text.text = this._format(v);
   }
 
+  /** Swap the value formatter and immediately re-render the current value. */
+  setFormat(format: (v: number) => string): void {
+    this._format = format;
+    this._text.text = this._format(this._value);
+  }
+
   /** Animate the value to target over duration; fires onTier on each tier-index increase. */
   async countTo(target: number, duration: number, onTier?: (idx: number) => void): Promise<void> {
     const holder = { v: 0 };

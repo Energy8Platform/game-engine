@@ -54,9 +54,10 @@ export class BigWinOverlay extends Container {
     this._count.position.set(width / 2, height * 0.56);
   }
 
-  async show(win: number, bet: number): Promise<void> {
+  async show(win: number, bet: number, format?: (v: number) => string): Promise<void> {
     const tier = pickTier(this._cfg.tiers, win, bet);
     if (!tier) return;
+    if (format) this._count.setFormat(format);
     this.visible = true;
     this.alpha = 0;
     this._title.text = tier.title;
