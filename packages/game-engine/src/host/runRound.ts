@@ -44,9 +44,10 @@ export async function runRound<T extends SlotSpinResultBase>(
       inBonus = true;
       await deps.scene.onBonusEnter?.(r, ctx);
     }
-    // Build a fresh ctx for each drain segment — ctx.turbo is evaluated at segment start so a
-    // mid-round turbo toggle is reflected on the NEXT segment (not mid-animation).
-    const segCtx = { ...deps.context(next) } as RenderContext;
+    // Snapshot the TRIGGER context per segment: { ... } freezes the live `turbo` getter into a data
+    // property (so a mid-round toggle is reflected on the NEXT segment), while action/mode/bet stay
+    // the round's (the trigger's) identity — a scene must see the same bonus identity all round.
+    const segCtx = { ...deps.context(action) } as RenderContext;
     r = await deps.play(next, ctx.bet, r.roundId);
     await deps.scene.present(r, segCtx);
     deps.ack();

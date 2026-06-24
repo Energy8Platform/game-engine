@@ -82,4 +82,19 @@ describe('runRound', () => {
     const ctxSecond = present.mock.calls[1][1] as RenderContext;
     expect(ctxSecond.turbo).toBe(1);
   });
+
+  it('drain segments keep the TRIGGER action/mode in ctx (round identity stays the bonus)', async () => {
+    const { deps, present } = harness([
+      { totalWin: 0, roundId: 'r9', nextActions: ['free_spin'], complete: false }, // buy_bonus trigger
+      { totalWin: 5, roundId: 'r9', nextActions: ['spin'], complete: true },        // free spin (drain)
+    ]);
+    await runRound(deps, 'buy_bonus');
+    const triggerCtx = present.mock.calls[0][1] as RenderContext;
+    const drainCtx = present.mock.calls[1][1] as RenderContext;
+    // The drain (free-spin) segment must still carry the buy_bonus round identity, not 'free_spin'/'BASE'.
+    expect(triggerCtx.action).toBe('buy_bonus');
+    expect(triggerCtx.mode).toBe('BONUS');
+    expect(drainCtx.action).toBe('buy_bonus');
+    expect(drainCtx.mode).toBe('BONUS');
+  });
 });
