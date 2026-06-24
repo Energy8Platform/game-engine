@@ -1,6 +1,7 @@
 // Demonstrates: one game.spec.ts → createSlotGame host boot.
 // Not run headless (Pixi init hangs); verified via `tsc --noEmit`.
 import { createSlotGame } from '@energy8platform/game-engine/host';
+import { ScaleMode } from '@energy8platform/game-engine';
 import { model } from './game.spec';
 import { GameScene } from './GameScene';
 import { normalize } from './normalize';
@@ -16,6 +17,7 @@ createSlotGame({
   startScene: 'intro',
   manifest: { bundles: [] },
   design: { width: 1920, height: 1080 },
+  scaleMode: ScaleMode.FILL,
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,

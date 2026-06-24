@@ -58,14 +58,17 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
   }
 
   private layout(w: number, h: number): void {
+    this._vw = w; this._vh = h;
     if (!this.grid) return;
-    const { cols, rows } = model.spec.grid;
-    const cellSize = 96;
-    const gap = 6;
+    const cols = model.spec.grid.cols, rows = model.spec.grid.rows;
+    const cellSize = 96, gap = 6;            // must match the ReelGrid constructor above
     const gridW = cols * cellSize + (cols - 1) * gap;
     const gridH = rows * cellSize + (rows - 1) * gap;
-    this.grid.x = Math.round((w - gridW) / 2);
-    this.grid.y = Math.round((h - gridH) / 2);
+    const fit = Math.min((w * 0.92) / gridW, (h * 0.78) / gridH);
+    this.grid.scale.set(fit);
+    this.grid.x = Math.round((w - gridW * fit) / 2);
+    this.grid.y = Math.round((h - gridH * fit) / 2);
+    this.overlay?.resize?.(w, h);
   }
 
   async spin(bet: number): Promise<void> {

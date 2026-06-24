@@ -11,4 +11,9 @@ describe('genMainTs', () => {
     expect(s).not.toContain('intro:');
     expect(s).not.toContain('scene: { key:');
   });
+  it('imports ScaleMode and passes ScaleMode.FILL to createSlotGame', () => {
+    const s = genMainTs({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: false, cascades: false });
+    expect(s).toContain("import { ScaleMode } from '@energy8platform/game-engine'");
+    expect(s).toContain('scaleMode: ScaleMode.FILL');
+  });
 });
