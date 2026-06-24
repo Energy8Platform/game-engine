@@ -13,24 +13,30 @@ interface SheetOpts {
   title: string;
   choices: Choice[];
   selected: string;
-  columns: number;
+  /** Chips per row — a fixed number, or `{ wide, mobile }` that reflows with the layout. */
+  columns: number | { wide: number; mobile: number };
+  /** Max card width in em (the 6-wide bet picker needs 44em vs the 28em default). */
+  maxEm?: number;
   confirmLabel: string;
   onConfirm: (id: string) => void;
 }
 
 /** A centred picker (chips grid + accent Confirm) on the shared card modal. */
 function buildSheet(host: ShellHost, opts: SheetOpts): CardModal {
-  const modal = new CardModal(host, { tag: opts.tag, title: opts.title, onClose: () => host.closeLayer() });
+  const modal = new CardModal(host, { tag: opts.tag, title: opts.title, maxEm: opts.maxEm, onClose: () => host.closeLayer() });
   const em = modal.emSize;
   const gap = 0.65 * em;
   const innerW = modal.cardWidth - 2.4 * em;
-  const colW = (innerW - gap * (opts.columns - 1)) / opts.columns;
+  const columns = typeof opts.columns === 'number'
+    ? opts.columns
+    : host.layout === 'mobile' ? opts.columns.mobile : opts.columns.wide;
+  const colW = (innerW - gap * (columns - 1)) / columns;
 
   let selected = opts.selected;
   const chips: Chip[] = [];
   const grid = new FlexBox({ direction: 'column', align: 'start', gap });
-  for (let i = 0; i < opts.choices.length; i += opts.columns) {
-    const rowChoices = opts.choices.slice(i, i + opts.columns);
+  for (let i = 0; i < opts.choices.length; i += columns) {
+    const rowChoices = opts.choices.slice(i, i + columns);
     const row = new FlexBox({ direction: 'row', align: 'center', gap });
     for (const c of rowChoices) {
       const chip = new Chip(host, c.id, c.label, c.id === selected, em, (id) => {
@@ -60,12 +66,13 @@ function buildSheet(host: ShellHost, opts: SheetOpts): CardModal {
   return modal;
 }
 
-/** Bet picker — all available bets as chips (3 per row), accent Confirm applies it. */
+/** Bet picker — all available bets as chips (6 per row, 3 on mobile), accent Confirm applies it. */
 export function openBetPicker(host: ShellHost): ShellLayer {
   return buildSheet(host, {
     tag: 'bet-modal',
     title: host.t('Bet'),
-    columns: 3,
+    columns: { wide: 6, mobile: 3 },
+    maxEm: 44, // wider card to fit 6 chips/row
     confirmLabel: host.t('Confirm'),
     choices: host.state.availableBets.map((b) => ({ id: String(b), label: host.fmt(b) })),
     selected: String(host.state.bet),

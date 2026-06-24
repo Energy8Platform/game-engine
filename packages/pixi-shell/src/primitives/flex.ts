@@ -153,6 +153,12 @@ export class FlexBox extends Container implements Sizable {
   get outerHeight(): number {
     return this.outH;
   }
+  /** The width this box would take from its content alone (ignoring a fixed width) — used to
+   *  detect overflow inside a fixed-width plaque (the mobile bar's fit-scale). */
+  get naturalWidth(): number {
+    return this.natW;
+  }
+  private natW = 0;
 
   /** Measure + position children. Idempotent. */
   layout(): void {
@@ -169,6 +175,10 @@ export class FlexBox extends Container implements Sizable {
     const contentMain = sizes.reduce((s, m) => s + (horizontal ? m.w : m.h), 0)
       + this.gap * Math.max(0, this.entries.length - 1);
     const contentCross = sizes.reduce((mx, m) => Math.max(mx, horizontal ? m.h : m.w), 0);
+    // natural width = content + horizontal padding, regardless of any imposed fixed width
+    this.natW = horizontal
+      ? contentMain + padMainStart + padMainEnd
+      : contentCross + padCrossStart + padCrossEnd;
 
     const fixedMain = horizontal ? this.fixedW : this.fixedH;
     const fixedCross = horizontal ? this.fixedH : this.fixedW;

@@ -574,14 +574,20 @@ export class BottomBar extends Container {
   private applyFitMobile(): void {
     const W = this.host.screenW;
     const H = this.host.screenH;
+    // Measure each row's NATURAL content width (the fixed-width plaque clamps it, so getLocalBounds
+    // would always read W-24 and hide overflow). Big balance/win numbers overflow → scale the stack.
     let need = 0;
-    for (const r of this.inner.children) need = Math.max(need, (r as Container).getLocalBounds().width);
+    for (const r of this.inner.children) {
+      const nat = r instanceof FlexBox ? r.naturalWidth : (r as Container).getLocalBounds().width;
+      need = Math.max(need, nat);
+    }
     const avail = W - 24;
-    const s = need > avail + 1 && avail > 0 ? Math.max(0.7, avail / need) : 1;
-    // total stack height
+    // Rows use space-between, so on overflow content is left-anchored and spills off the RIGHT;
+    // scale from the bottom-left corner so avail/need fits it exactly (matches the DOM).
+    const s = need > avail + 1 && avail > 0 ? Math.max(0.4, avail / need) : 1;
     const stackH = this.inner.getLocalBounds().height;
     this.inner.scale.set(s);
-    this.inner.position.set((W - W * s) / 2 + 12 * s, H - stackH * s - 8);
+    this.inner.position.set(12, H - stackH * s - 8);
   }
 }
 

@@ -15,6 +15,7 @@ import { makeIcon } from '../pixi-icon';
 import { FlexBox } from '../primitives/flex';
 import { section, paragraph, Spacer } from '../primitives/controls';
 import { BuyBonusBadge } from '../primitives/widgets';
+import { PACKAGE_VERSION } from '../version';
 
 /** Game info overlay — modes, controls, paytable, win illustrations, custom sections. */
 export function openGameInfo(host: ShellHost): ShellLayer {
@@ -39,7 +40,20 @@ function buildBody(host: ShellHost, width: number): Container {
     .map((s, i) => ({ s, i, k: base(s, i) }))
     .sort((a, b) => a.k - b.k || a.i - b.i)
     .forEach(({ s }) => col.add(renderSection(host, s, width)));
+  col.add(versionFooter(host, width));
   return col;
+}
+
+/** A muted version stamp pinned to the bottom of the game-info overlay:
+ *  `${config.version ?? '1.0.0'}.${engine version without dots}` (e.g. '1.0.0.010'). */
+function versionFooter(host: ShellHost, width: number): FlexBox {
+  const gameVersion = host.config.version ?? '1.0.0';
+  const stamp = `${gameVersion}.${PACKAGE_VERSION.split('.').join('')}`;
+  const row = new FlexBox({ direction: 'row', justify: 'center', width, padding: { top: 4, bottom: 2 } });
+  const t = makeText(stamp, { size: 11, weight: '400', color: host.tokens.muted, letterSpacing: 0.88 });
+  t.alpha = 0.7;
+  row.add(t);
+  return row;
 }
 
 function renderSection(host: ShellHost, s: GameInfoSection, width: number): FlexBox {

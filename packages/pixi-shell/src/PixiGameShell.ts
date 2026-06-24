@@ -72,6 +72,10 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
 
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', this.onKeyDown);
+      // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a
+      // `document` keydown never fires and Space scrolls the parent. Pull focus into the frame on
+      // the first pointer interaction so the spacebar shortcut works. Harmless full-page.
+      document.addEventListener('pointerdown', this.pullFocus, true);
       this.keysBound = true;
     }
 
@@ -192,6 +196,16 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   openModal(opts: ModalOptions): void {
     this.pushLayer(buildModal(this, opts));
   }
+  /** Programmatically dismiss whatever overlay/modal is open (e.g. auto-close a reconnect
+   *  overlay once the link is restored). No-op when nothing is open. */
+  closeModal(): void {
+    this.closeLayer();
+  }
+  /** Currency-aware money formatter for WIN amounts (variable decimals) — handed to scenes so
+   *  games format money without knowing the currency. */
+  formatWin(value: number): string {
+    return this.fmtWin(value);
+  }
   openReplay(opts: ReplayModalOptions): void {
     if (this.destroyed) return;
     this.pushLayer(buildReplayModal(this, opts));
@@ -275,14 +289,24 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.layout = w !== 0 && h > w ? 'mobile' : 'wide';
   }
 
+  /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the
+   *  spacebar shortcut) fires. Harmless when already focused / full-page. */
+  private pullFocus = (): void => {
+    try {
+      window.focus();
+    } catch {
+      /* cross-origin / non-browser */
+    }
+  };
+
   private onKeyDown = (e: KeyboardEvent): void => {
     if (this.destroyed || e.code !== 'Space' || e.repeat) return;
     if (this.config.features.spacebar === false) return;
     const target = e.target as HTMLElement | null;
     if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    e.preventDefault(); // Space is ours — swallow the page scroll even when we then bail below
     if (this.currentLayer) return; // an overlay/modal is open
     if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
-    e.preventDefault();
     this.emit('spin');
   };
 
@@ -292,6 +316,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.app.renderer.off('resize', this.onResize);
     if (this.keysBound && typeof document !== 'undefined') {
       document.removeEventListener('keydown', this.onKeyDown);
+      document.removeEventListener('pointerdown', this.pullFocus, true);
       this.keysBound = false;
     }
     this.cancelMoneyAnims();

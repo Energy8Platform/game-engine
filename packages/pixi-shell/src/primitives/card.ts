@@ -27,6 +27,8 @@ export interface CardOpts {
   blur?: number;
   onClose?: () => void;
   tag?: string;
+  /** Max card width in em (default 28). The bet picker uses 44em to fit 6 chips/row. */
+  maxEm?: number;
 }
 
 /** A centred card on a frosted backdrop: accent title heading, vertical body, full-bleed footer
@@ -56,7 +58,7 @@ export class CardModal extends Container implements ShellLayer {
     this.tag = opts.tag;
     this.accent = opts.accent ?? host.tokens.accent;
     this.em = clampEm(host.screenW, host.screenH);
-    this.cardW = Math.min(28 * this.em, host.screenW * 0.86);
+    this.cardW = Math.min((opts.maxEm ?? 28) * this.em, host.screenW * 0.86);
 
     this.body = new FlexBox({
       direction: 'column',
