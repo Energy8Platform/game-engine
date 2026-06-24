@@ -146,6 +146,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         disclaimerLines?: string[];
         currency?: { code: string; symbol: string; decimals: number; symbolAfter?: boolean };
         jurisdiction?: import('./shellConfig').JurisdictionRestrictions;
+        betLevels?: number[];
+        defaultBet?: number;
+        stake?: { defaultBetLevel?: number };
       };
       lang?: string;
     } | null;
@@ -171,6 +174,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       social: config?.socialMode,
       disclaimerLines: config?.disclaimerLines,
       jurisdiction: config?.jurisdiction,
+      // Currency-specific ladder + per-currency default from /wallet/authenticate (Stake);
+      // absent on dev/devBridge → buildShellConfig falls back to the spec.
+      betLevels: config?.betLevels,
+      defaultBet: config?.stake?.defaultBetLevel ?? config?.defaultBet,
     };
     if (opts.dev) {
       // Dev-only diagnostic. Logged as PLAIN STRINGS (not collapsed objects) so the values are

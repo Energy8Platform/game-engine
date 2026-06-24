@@ -34,6 +34,20 @@ describe('toBonusOptions', () => {
   });
 });
 
+describe('bet ladder + default bet from /wallet/authenticate', () => {
+  it('runtime betLevels + defaultBet override the spec (currency-specific Stake ladder)', () => {
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base', betLevels: [0.2, 1, 2, 4], defaultBet: 2 });
+    expect(c.availableBets).toEqual([0.2, 1, 2, 4]); // NOT the spec's [0.1, 1, 5]
+    expect(c.defaultBet).toBe(2);
+    expect(c.currentBet).toBe(2);
+  });
+  it('falls back to the spec ladder/default when authenticate provides none (dev/devBridge)', () => {
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base' });
+    expect(c.availableBets).toEqual([0.1, 1, 5]); // spec.betLevels
+    expect(c.defaultBet).toBe(1);                  // spec.defaultBet
+  });
+});
+
 describe('Game Info modes section (derived from the spec — SSOT)', () => {
   // A model carrying mathModes (what defineGame produces) with per-mode rtp/maxWin.
   const m = {

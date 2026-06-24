@@ -53,6 +53,13 @@ export interface ShellRuntime {
   /** Jurisdiction flags from initData (`config.jurisdiction`). Restrict shell features — applied
    *  OVER the author's features so a jurisdiction restriction always wins. */
   jurisdiction?: JurisdictionRestrictions;
+  /** Bet ladder from `/wallet/authenticate` (`initData.config.betLevels`, major units). Stake ladders
+   *  are CURRENCY-SPECIFIC (us_/non_us_/social_), so this overrides the spec's static `betLevels` on a
+   *  Stake launch; falls back to the spec on dev/devBridge. */
+  betLevels?: number[];
+  /** Per-currency default bet from `/wallet/authenticate` (the bridge surfaces it as
+   *  `config.stake.defaultBetLevel`). Stake requires the selector to start here on every entry. */
+  defaultBet?: number;
 }
 
 /** The subset of Stake's jurisdiction flags the shell can enforce via `ShellFeatures`. */
@@ -314,8 +321,10 @@ function socializeBonusOptions(options: BonusOption[], isSocial: boolean): Bonus
 
 /** Pure: assemble a ShellConfig from the model + runtime context (currency/balance/language/mode). */
 export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runtime: ShellRuntime): ShellConfig {
-  const betLevels = model.spec.betLevels;
-  const defaultBet = model.spec.defaultBet ?? betLevels[0];
+  // Prefer the currency-specific ladder from /wallet/authenticate; fall back to the spec (dev/devBridge).
+  const betLevels = runtime.betLevels?.length ? runtime.betLevels : model.spec.betLevels;
+  // Stake requires the default to come from authenticate on every entry; spec default is the dev fallback.
+  const defaultBet = runtime.defaultBet ?? model.spec.defaultBet ?? betLevels[0];
   // runtime.currency is the resolved CurrencyConfig (derived from initData.config.currency by the
   // host); opts.currency still wins. Fall back to the spec code, then a neutral euro.
   const currency =
