@@ -10,7 +10,8 @@ export const adapter = createGameAdapter<SpinDataRaw>({
   model,
   schema: spinSchema,
   segmentOf: ({ event, payload, round }) => {
-    const isFs = (event as { stage?: string }).stage === 'free_spins';
+    // Canonical Stake book events are { type, spin }; a free spin is type 'free_spin'.
+    const isFs = (event as { type?: string }).type === 'free_spin';
     const core: SegmentCore<SpinDataRaw> = {
       action: isFs ? 'free_spin' : round.triggerAction,
       winX: payload.total_win ?? 0,

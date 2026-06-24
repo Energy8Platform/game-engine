@@ -162,7 +162,8 @@ function costOf(modes: BookMode[] | null, mode: string): number {
 function stateFromBook(book: ParsedBook, payoutCents: number): { events: unknown[] } {
   const events = (book as { events?: unknown }).events;
   if (Array.isArray(events) && events.length > 0) return { events };
-  return { events: [{ data: { total_win: payoutCents / 100 } }] };
+  // Legacy/empty book → one synthetic canonical event ({ type, spin }, win in spin.total_win).
+  return { events: [{ type: 'spin', spin: { total_win: payoutCents / 100 } }] };
 }
 
 /**
@@ -177,12 +178,12 @@ function stateFromOutcome(state: unknown, payoutCents: number): { events: unknow
     const events = (state as { events?: unknown }).events;
     if (Array.isArray(events) && events.length > 0) return { events };
   }
-  const data: Record<string, unknown> =
+  const spin: Record<string, unknown> =
     state !== null && typeof state === 'object' && !Array.isArray(state)
       ? (state as Record<string, unknown>)
       : {};
-  if (typeof data.total_win !== 'number') data.total_win = payoutCents / 100;
-  return { events: [{ data }] };
+  if (typeof spin.total_win !== 'number') spin.total_win = payoutCents / 100;
+  return { events: [{ type: 'spin', spin }] };
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +398,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       const state =
         Array.isArray(bookEvents) && bookEvents.length > 0
           ? (bookEvents as unknown[])
-          : [{ data: { total_win: book.payoutMultiplier / 100 } }];
+          : [{ type: 'spin', spin: { total_win: book.payoutMultiplier / 100 } }];
       return {
         payoutMultiplier: book.payoutMultiplier,
         costMultiplier: costOf(modes, mode),

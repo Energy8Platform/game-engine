@@ -36,7 +36,9 @@ export function createGameAdapter<TData extends Record<string, unknown>>(
   const fallback = config.fallbackTrigger ?? Object.keys(config.model.modeMap)[0] ?? 'spin';
   const readPayload = config.readPayload ??
     ((ev: unknown) => (ev as { data?: unknown; spin?: unknown })?.data ?? (ev as { spin?: unknown })?.spin ?? {});
-  const sessionStages = config.sessionStages ?? ['free_spins'];
+  // `readStage` is `event.stage ?? event.type`; canonical Stake books carry only `type` ('free_spin'),
+  // so the default session-stage set covers both the legacy stage ('free_spins') and the canon type.
+  const sessionStages = config.sessionStages ?? ['free_spins', 'free_spin'];
 
   return {
     splitRound(rawBook: unknown, round: RoundContext): BookSegment[] {

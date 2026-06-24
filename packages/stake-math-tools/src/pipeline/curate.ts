@@ -100,23 +100,35 @@ async function readPoolRows(poolDir: string, mode: string, capMaxWin: number): P
   );
 }
 
-/** One dumped spin → one book event. Carries the stage-derived `type` (so the adapter/harness can
- *  tell a free spin from the trigger), the per-spin `data` payload (grid/wins/free_spins the game
- *  renders), and `win_x` (bet-multiplier win). This is what makes a bonus book a SINGLE round with
- *  the trigger + every free spin collected into one `events` array, matching the kitsune library. */
+/** One dumped spin → one canonical Stake book event: `{ type, spin }` and NOTHING else. Stake's
+ *  book validator rejects extra event-level fields (`index`/`win`/`winX`/`data`/`stage`/`spinIdx`),
+ *  so the per-spin payload (grid/wins/free_spins the game renders) is renamed `data` → `spin`. The
+ *  per-segment win lives in `spin.total_win` (injected from the dump's top-level `win_x`, which the
+ *  raw Lua/Go payload omits) — the adapter reads it from there. `type` is stage-derived so the game
+ *  can tell a free spin from the trigger; a bonus book is the trigger + every free spin in one
+ *  `events` array (the kitsune shape). */
 function spinToEvent(spin: Record<string, unknown>): Record<string, unknown> {
   const stage = typeof spin.stage === 'string' ? spin.stage : undefined;
   const type = stage === 'free_spins' ? 'free_spin' : 'spin';
-  // The adapter reads the per-segment win from `data.total_win`, but the Lua/Go `data` payload
-  // omits it (it lives in the spin's top-level `win_x`). Inject `win_x` as `data.total_win` so a
-  // book replays each segment's win consistently with the harness Lua-fallback path.
   const winX = typeof spin.win_x === 'number' ? spin.win_x : 0;
   const rawData = spin.data;
-  const data: Record<string, unknown> =
+  const payload: Record<string, unknown> =
     rawData !== null && typeof rawData === 'object' && !Array.isArray(rawData)
       ? { ...(rawData as Record<string, unknown>), total_win: winX }
       : { total_win: winX };
-  return { type, ...spin, data };
+  return { type, spin: payload };
+}
+
+/** Stake stratification label for a round (`criteria` enum): `"0"` (no win), `"freegame"` (ran a
+ *  feature), `"wincap"` (reached the declared cap), else `"basegame"`. */
+function deriveCriteria(
+  payoutCents: number,
+  events: Record<string, unknown>[],
+  capCents: number,
+): string {
+  if (payoutCents <= 0) return '0';
+  if (capCents > 0 && payoutCents >= capCents) return 'wincap';
+  return events.some((e) => e.type === 'free_spin') ? 'freegame' : 'basegame';
 }
 
 /** A line stream over the pool's per-round dump for one mode: prefers the raw `.jsonl`, else
@@ -208,6 +220,7 @@ function writeEvents(
   eventsPerRow: Record<string, unknown>[][],
   outDir: string,
   mode: string,
+  capCents: number,
 ): void {
   const rawPath = join(outDir, `books_${mode}.jsonl`);
   const zstPath = join(outDir, `books_${mode}.jsonl.zst`);
@@ -217,7 +230,14 @@ function writeEvents(
   const fd = openSync(rawPath, 'w');
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    writeSync(fd, JSON.stringify({ id: r.sim, payoutMultiplier: r.payoutCents, events: eventsPerRow[i] ?? [] }));
+    const events = eventsPerRow[i] ?? [];
+    // Canonical Stake book row: {id, payoutMultiplier (integer cents = CSV col3), events:[{type,spin}], criteria}.
+    writeSync(fd, JSON.stringify({
+      id: r.sim,
+      payoutMultiplier: r.payoutCents,
+      events,
+      criteria: deriveCriteria(r.payoutCents, events, capCents),
+    }));
     writeSync(fd, '\n');
   }
   closeSync(fd);
@@ -281,7 +301,7 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   result.rows.forEach((r, i) => { r.sim = i; });
 
   writeLut(result.rows, join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`));
-  writeEvents(result.rows, eventsPerRow, opts.outDir, mode.mode);
+  writeEvents(result.rows, eventsPerRow, opts.outDir, mode.mode, mode.curate.capMaxWin);
   upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
 
   return result;

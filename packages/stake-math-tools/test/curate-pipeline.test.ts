@@ -138,16 +138,20 @@ describe('curateMode', () => {
     const book = JSON.parse(firstLine) as {
       id: number;
       payoutMultiplier: number;
-      events: { type: string; win_x: number; data: { total_win: number } }[];
+      criteria: string;
+      events: { type: string; spin: { total_win: number } }[];
     };
     expect(typeof book.id).toBe('number');
     expect(typeof book.payoutMultiplier).toBe('number');
     expect(Array.isArray(book.events)).toBe(true);
     expect(book.events.length).toBeGreaterThan(0); // each fixture round has ≥1 spin
+    // Canonical Stake event shape: { type, spin } ONLY — no data/win_x/stage/index at the top level.
+    expect(Object.keys(book.events[0]).sort()).toEqual(['spin', 'type']);
     expect(book.events[0].type).toBe('spin'); // base_game stage → 'spin'
-    // The per-segment win is injected into data.total_win from the spin's win_x, so the harness
-    // adapter reads a consistent per-segment win from a book event.
-    expect(book.events[0].data.total_win).toBe(book.events[0].win_x);
+    // The per-segment win is injected into spin.total_win (from the dump's win_x).
+    expect(typeof book.events[0].spin.total_win).toBe('number');
+    // criteria is the Stake enum; the fixture's first round is a 0-win loser.
+    expect(['0', 'basegame', 'freegame', 'wincap']).toContain(book.criteria);
   });
 
   it('returns an OptimizeResult with a populated stakeReport and numeric rtp', async () => {
