@@ -29,8 +29,10 @@ export default {
         nRowsOut: 50_000, // keep nRowsOut < iterations
       },
     },
-    // Uncomment and tune BUY_BONUS / ANTE blocks to override their defaults:
-    // BUY_BONUS: { sim: { iterations: 100_000 }, curate: { targetRTP: 0.96 } },
+    // Feature modes. Only sim.iterations is set by default — the remaining sim params and all
+    // curate targets fall back to seeded defaults (capMaxWin from spec.maxWin); tune as needed.
+    BUY_BONUS: { sim: { iterations: 100_000 } },
+    ANTE: { sim: { iterations: 100_000 } },
   },
 } satisfies MathConfig;
 `;

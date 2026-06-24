@@ -19,6 +19,13 @@ describe('genMathConfig', () => {
     expect(s).toContain('50_000');
   });
 
+  it('ships active ANTE + BUY_BONUS feature modes defaulting to sim.iterations 100_000', () => {
+    expect(s).toContain('BUY_BONUS: { sim: { iterations: 100_000 } }');
+    expect(s).toContain('ANTE: { sim: { iterations: 100_000 } }');
+    // not left commented-out anymore
+    expect(s).not.toContain('// BUY_BONUS:');
+  });
+
   it('imports MathConfig type from stake-math-tools', () => {
     expect(s).toContain("from '@energy8platform/stake-math-tools'");
     expect(s).toContain('MathConfig');

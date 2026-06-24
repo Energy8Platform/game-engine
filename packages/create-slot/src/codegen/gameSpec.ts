@@ -26,9 +26,9 @@ export const spec: GameSpec = {
     { id: 'WILD', name: 'Wild', kind: 'wild' },
     { id: 'SCATTER', name: 'Scatter', kind: 'scatter' },
   ],
-  // All player-facing spec copy is socialized automatically in social mode — symbol `name`s shown
-  // in the paytable AND the action title/description below (e.g. 'BUY BONUS' → 'GET BONUS',
-  // 'Pay more…' → 'Win more…'). Write normal casino wording here; it stays compliant in social builds.
+  // All player-facing spec copy is socialized automatically in social mode — symbol names shown
+  // in the paytable AND the action title/description below (e.g. 'BUY BONUS' -> 'GET BONUS',
+  // 'Pay more...' -> 'Win more...'). Write normal casino wording here; it stays compliant in social.
   actions: {
     spin: { role: 'base' },
     ante: { role: 'feature', cost: 1.5, title: 'ANTE BET', description: 'Pay more for a boosted chance' },
