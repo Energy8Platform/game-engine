@@ -64,6 +64,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.observeLayout();
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', this.handleKeyDown);
+      // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a `document`
+      // keydown never fires and Space scrolls the parent. Pull window focus into the iframe on the
+      // first pointer interaction so the spacebar shortcut works. Harmless on full-page Energy8.
+      document.addEventListener('pointerdown', this.pullFocus, true);
       this.keysBound = true;
     }
     this.render();
@@ -139,6 +143,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
    *  false, while a spin is running, while autoplay is active, outside base mode, when an
    *  overlay/modal is open, or when an editable element is focused. `repeat` (held key) is
    *  ignored so it can't spam. */
+  /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the
+   *  spacebar shortcut) fires. No-op / harmless when already focused or full-page. */
+  private pullFocus = (): void => { try { window.focus(); } catch { /* cross-origin / non-browser */ } };
+
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (this.destroyed || e.code !== 'Space' || e.repeat) return;
     if (this.config.features.spacebar === false) return; // shortcut disabled (e.g. jurisdiction)
@@ -294,7 +302,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.destroyed = true;
     this.ro?.disconnect();
     this.ro = null;
-    if (this.keysBound) { document.removeEventListener('keydown', this.handleKeyDown); this.keysBound = false; }
+    if (this.keysBound) {
+      document.removeEventListener('keydown', this.handleKeyDown);
+      document.removeEventListener('pointerdown', this.pullFocus, true);
+      this.keysBound = false;
+    }
     this.cancelMoneyAnims();
     this.removeAllListeners();
     this.root.classList.add('ge-shell-hidden');
