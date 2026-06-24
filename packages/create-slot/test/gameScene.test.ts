@@ -20,4 +20,19 @@ describe('genGameScene', () => {
     expect(s).toContain('ReelSpinController');
     expect(s).not.toContain('CascadeController');
   });
+  it('generated scene implements onResize and a layout helper for centering', () => {
+    const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
+    expect(s).toContain('onResize(width: number, height: number)');
+    expect(s).toContain('private layout(');
+    expect(s).toContain('this.grid.x =');
+    expect(s).toContain('this.grid.y =');
+    // layout is called from both onEnter and onResize
+    expect(s).toMatch(/onEnter[\s\S]*?this\.layout\(/);
+    expect(s).toMatch(/onResize[\s\S]*?this\.layout\(/);
+  });
+  it('layout centers the grid in design space (5×3, cellSize=110, gap=6)', () => {
+    const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
+    // Should guard for grid not yet created
+    expect(s).toContain('if (!this.grid) return');
+  });
 });

@@ -34,6 +34,9 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
     }
   }
 
+  private _vw = 1920;
+  private _vh = 1080;
+
   async onEnter(): Promise<void> {
     const { cols, rows } = model.spec.grid;
     this.grid = new ReelGrid({ cols, rows, cellSize: 96, gap: 6, resolve: resolveSymbol });
@@ -45,6 +48,24 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
       width: 1920, height: 1080,
     });
     this.container.addChild(this.overlay);
+    this.layout(this._vw, this._vh);
+  }
+
+  onResize(width: number, height: number): void {
+    this._vw = width;
+    this._vh = height;
+    this.layout(width, height);
+  }
+
+  private layout(w: number, h: number): void {
+    if (!this.grid) return;
+    const { cols, rows } = model.spec.grid;
+    const cellSize = 96;
+    const gap = 6;
+    const gridW = cols * cellSize + (cols - 1) * gap;
+    const gridH = rows * cellSize + (rows - 1) * gap;
+    this.grid.x = Math.round((w - gridW) / 2);
+    this.grid.y = Math.round((h - gridH) / 2);
   }
 
   async spin(bet: number): Promise<void> {
