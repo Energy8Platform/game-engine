@@ -11,7 +11,7 @@
 
 import type { RGSPlayResponse } from '@energy8platform/stake-bridge';
 import type { DevRgs } from './dev-rgs';
-import { NoBooksError } from './dev-rgs';
+import { NoBooksError, InsufficientBalanceError } from './dev-rgs';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -127,20 +127,31 @@ export async function handleRgsRequest(
     const mode = typeof body.mode === 'string' ? body.mode : '';
     const amount = typeof body.amount === 'number' ? body.amount : Number(body.amount ?? 0);
     try {
-      const json = await devRgs.play({ mode, amount });
-      return { status: 200, json };
-    } catch (err) {
-      if (err instanceof NoBooksError) {
-        if (luaPlay) {
-          const json = await luaPlay({ mode, amount });
-          return { status: 200, json };
+      try {
+        const json = await devRgs.play({ mode, amount });
+        return { status: 200, json };
+      } catch (err) {
+        if (err instanceof NoBooksError) {
+          if (luaPlay) {
+            const json = await luaPlay({ mode, amount });
+            return { status: 200, json };
+          }
+          return {
+            status: 503,
+            json: {
+              error: 'ERR_NO_BOOKS',
+              message: (err as NoBooksError).message,
+            },
+          };
         }
+        throw err;
+      }
+    } catch (err) {
+      // From devRgs.play OR the luaPlay fallback — surface as a 402 the bridge turns into PLAY_ERROR.
+      if (err instanceof InsufficientBalanceError) {
         return {
-          status: 503,
-          json: {
-            error: 'ERR_NO_BOOKS',
-            message: (err as NoBooksError).message,
-          },
+          status: 402,
+          json: { error: 'ERR_INSUFFICIENT_BALANCE', message: err.message },
         };
       }
       throw err;

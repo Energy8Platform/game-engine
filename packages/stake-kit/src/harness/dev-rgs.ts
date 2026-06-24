@@ -17,7 +17,8 @@
  *     relative to the BASE bet (NOT × cost):
  *       winMinor = (payoutCents / 100) * betMajor * API_MULTIPLIER
  *                = (payoutCents / 100) * amountMinor
- *   • round.amount = the bet in MAJOR units = amountMinor / API_MULTIPLIER.
+ *   • round.amount = the bet in MINOR units (Stake style — same integer the client sent),
+ *     i.e. the `amount` from RGSPlayParams, NOT divided back to major.
  */
 
 import { join } from 'node:path';
@@ -51,6 +52,21 @@ export class NoBooksError extends Error {
     this.name = 'NoBooksError';
     this.mode = mode;
     Object.setPrototypeOf(this, NoBooksError.prototype);
+  }
+}
+
+/**
+ * Thrown by `play` / `playWithOutcome` when the stake (bet × cost) exceeds the current balance.
+ * The HTTP layer maps it to a 402 with code `ERR_INSUFFICIENT_BALANCE`; the bridge surfaces it as
+ * a PLAY_ERROR. The balance is never debited into the negative.
+ */
+export class InsufficientBalanceError extends Error {
+  constructor(stakeMinor: number, balanceMinor: number) {
+    super(
+      `dev-rgs: insufficient balance — stake ${stakeMinor} exceeds balance ${balanceMinor}`,
+    );
+    this.name = 'InsufficientBalanceError';
+    Object.setPrototypeOf(this, InsufficientBalanceError.prototype);
   }
 }
 
@@ -192,15 +208,11 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
         betModes[m.name] = { cost: m.cost };
       }
       // Surface a lingering (un-settled) round so a page reload can resume or finish it instead of
-      // silently dropping it. We retain only winning rounds (active:true). The bridge's resume path
-      // reads round.amount as MINOR units (see StakeRound.amount), while we store it MAJOR internally
-      // (matching play()'s return) — convert at this boundary so the resumed bet shows correctly.
-      const round: StakeRound<ParsedBook> | null = activeRound
-        ? { ...activeRound, amount: (activeRound.amount ?? 0) * API_MULTIPLIER }
-        : null;
+      // silently dropping it. We retain only winning rounds (active:true). round.amount is already
+      // in MINOR units (Stake style), matching what the bridge's resume path expects.
       return {
         balance: balanceObj(),
-        round,
+        round: activeRound,
         config: {
           gameID: gameId,
           minBet,
@@ -231,8 +243,11 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
 
       // Debit the TOTAL stake = bet × cost (minor units). Buy/ante modes cost a multiple of the
       // base bet (cost from index.json); the win is still payout × base bet (credited at end-round).
+      // Reject (never go negative) when the stake exceeds the balance.
       const cost = costOf(modes, mode);
-      balanceMinor -= amount * cost;
+      const stake = amount * cost;
+      if (stake > balanceMinor) throw new InsufficientBalanceError(stake, balanceMinor);
+      balanceMinor -= stake;
 
       // Wrap the book as a one-event book so the adapter can split into segments.
       // The adapter reads `event.data ?? event.spin` — use `data` to carry the
@@ -254,7 +269,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
         active,
         mode,
         state: wrappedState as unknown as ParsedBook,
-        amount: amount / API_MULTIPLIER, // bet in MAJOR units
+        amount, // bet in MINOR units (Stake style — the integer the client sent)
       };
 
       if (active) {
@@ -278,8 +293,11 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
 
       // Debit the TOTAL stake = bet × cost (minor units). With no books there is no index.json cost,
       // so the caller (harness Lua fallback) supplies the action's cost from the spec; default 1.
+      // Reject (never go negative) when the stake exceeds the balance.
       const cost = outcome.cost ?? costOf(modes, mode);
-      balanceMinor -= amount * cost;
+      const stake = amount * cost;
+      if (stake > balanceMinor) throw new InsufficientBalanceError(stake, balanceMinor);
+      balanceMinor -= stake;
 
       // Wrap outcome.state in a one-event book so the adapter can split into segments.
       // Inject total_win if the caller's state doesn't carry it.
@@ -304,7 +322,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
         active,
         mode,
         state: wrappedState,
-        amount: amount / API_MULTIPLIER, // bet in MAJOR units
+        amount, // bet in MINOR units (Stake style — the integer the client sent)
       };
 
       if (active) {
@@ -317,7 +335,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
 
     async endRound(): Promise<RGSEndRoundResponse> {
       if (activeRound) {
-        const betMinor = (activeRound.amount ?? 0) * API_MULTIPLIER;
+        const betMinor = activeRound.amount ?? 0; // already MINOR
         // winMinor = (payoutCents / 100) * betMinor — exact, integer payoutCents.
         const winMinor = (activePayoutCents / 100) * betMinor;
         balanceMinor += winMinor;
@@ -339,13 +357,17 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
 
       const id = Number(event);
       const book = await loadBook(mode, id);
-      // Wrap as a one-event book so the adapter can split into segments.
-      const replayState = { events: [{ data: { total_win: book.payoutMultiplier / 100 } }] };
+      // Mirror Stake's /bet/replay shape exactly:
+      //   { payoutMultiplier: <cents>, costMultiplier: <×>, state: [ ...events... ] }
+      // - payoutMultiplier is the book's raw value in CENTS (e.g. 495 = 4.95×); the bridge divides
+      //   by 100 to get the ×bet multiplier.
+      // - state is the EVENTS ARRAY directly (not wrapped in `{ events }`); the adapter's ensureBook
+      //   accepts a bare array. Each event carries the decimal total_win for the segment.
+      const state = [{ data: { total_win: book.payoutMultiplier / 100 } }];
       return {
-        state: replayState,
-        payoutMultiplier: book.payoutMultiplier / 100,
-        mode,
-        amount: minBet, // a sensible default bet in minor units
+        payoutMultiplier: book.payoutMultiplier,
+        costMultiplier: costOf(modes, mode),
+        state,
       };
     },
 

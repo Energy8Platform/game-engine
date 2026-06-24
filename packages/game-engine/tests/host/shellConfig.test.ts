@@ -1,6 +1,6 @@
 // packages/game-engine/tests/host/shellConfig.test.ts
 import { describe, it, expect } from 'vitest';
-import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo } from '../../src/host/shellConfig';
+import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction } from '../../src/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { GameInfoContent, GameInfoSection } from '@energy8platform/platform-core/shell';
 
@@ -36,14 +36,17 @@ describe('toBonusOptions', () => {
 
 describe('resolveCurrency (single source of truth — initData.config.currency)', () => {
   it('derives symbol + position from the CurrencyMetaData the bridge surfaces', () => {
-    // symbolAfter:false → left
-    expect(resolveCurrency({ code: 'EUR', symbol: '€', decimals: 2 })).toEqual({ symbol: '€', position: 'left' });
+    // symbolAfter:false → left; minDecimals = currency decimals, maxDecimals = up to 4 for wins.
+    expect(resolveCurrency({ code: 'EUR', symbol: '€', decimals: 2 })).toEqual({ symbol: '€', position: 'left', minDecimals: 2, maxDecimals: 4 });
     // symbolAfter:true → right (e.g. PLN 'zł')
-    expect(resolveCurrency({ code: 'PLN', symbol: 'zł', decimals: 2, symbolAfter: true })).toEqual({ symbol: 'zł', position: 'right' });
+    expect(resolveCurrency({ code: 'PLN', symbol: 'zł', decimals: 2, symbolAfter: true })).toEqual({ symbol: 'zł', position: 'right', minDecimals: 2, maxDecimals: 4 });
+  });
+  it('a 0-decimal currency (e.g. JPY) keeps wins integer — maxDecimals 0', () => {
+    expect(resolveCurrency({ code: 'JPY', symbol: '¥', decimals: 0 })).toEqual({ symbol: '¥', position: 'left', minDecimals: 0, maxDecimals: 0 });
   });
   it('falls back to the spec currency code, then neutral euro, when meta is absent (dev/devBridge)', () => {
-    expect(resolveCurrency(null, 'ZZZ')).toEqual({ symbol: 'ZZZ', position: 'left' });
-    expect(resolveCurrency(undefined, undefined)).toEqual({ symbol: '€', position: 'left' });
+    expect(resolveCurrency(null, 'ZZZ')).toEqual({ symbol: 'ZZZ', position: 'left', minDecimals: 2, maxDecimals: 4 });
+    expect(resolveCurrency(undefined, undefined)).toEqual({ symbol: '€', position: 'left', minDecimals: 2, maxDecimals: 4 });
   });
 });
 
@@ -56,7 +59,7 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(c.features.buyBonus).toEqual(toBonusOptions(model));
   });
   it('falls back to spec.currency then neutral; opts.currency overrides', () => {
-    expect(buildShellConfig({}, model, { balance: 0, mode: 'base' }).currency).toEqual({ symbol: 'EUR', position: 'left' });
+    expect(buildShellConfig({}, model, { balance: 0, mode: 'base' }).currency).toEqual({ symbol: 'EUR', position: 'left', minDecimals: 2, maxDecimals: 4 });
     const o = buildShellConfig({ currency: { symbol: '₿', position: 'right' } }, model, { balance: 0, mode: 'base' });
     expect(o.currency).toEqual({ symbol: '₿', position: 'right' });
   });
@@ -160,6 +163,16 @@ describe('social mode — buy-bonus cards', () => {
     const author = [{ id: 'x', title: 'BUY BONUS', description: 'buy spins', priceMultiplier: 50 }];
     const c = buildShellConfig({ buyBonus: author }, model, { balance: 0, mode: 'base', social: false });
     expect((c.features.buyBonus as typeof author)[0].title).toBe('BUY BONUS');
+  });
+});
+
+describe('stakeForAction (host affordability guard)', () => {
+  it('multiplies bet by the action cost (1 for base, the cost for buy/ante)', () => {
+    expect(stakeForAction(model, 'spin', 2)).toBe(2);      // base: cost 1
+    expect(stakeForAction(model, 'buy_bonus', 2)).toBe(200); // buy: cost 100
+  });
+  it('defaults to bet when the action has no explicit cost', () => {
+    expect(stakeForAction(model, 'unknown_action', 5)).toBe(5);
   });
 });
 

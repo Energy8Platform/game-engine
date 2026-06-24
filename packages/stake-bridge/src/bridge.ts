@@ -311,11 +311,12 @@ export class StakeBridge {
     }
 
     // The fetched round's own amount (minor) wins over the URL amount when present;
-    // payoutMultiplier feeds the replay modal.
+    // payoutMultiplier feeds the replay modal. Stake's /bet/replay returns payoutMultiplier in
+    // CENTS (e.g. 495), so divide by 100 to get the ×bet multiplier the round/modal use.
     this.replayAmountMinor =
       (this.replayBook as { amount?: number } | null)?.amount ?? r.amount;
     this.replayPayout =
-      (this.replayBook as { payoutMultiplier?: number } | null)?.payoutMultiplier ?? 0;
+      ((this.replayBook as { payoutMultiplier?: number } | null)?.payoutMultiplier ?? 0) / 100;
 
     // Synthesize an authData-shaped object so `buildGameConfig`, the
     // validateBet code path, and any other consumer keep working.
@@ -616,7 +617,7 @@ export class StakeBridge {
       this.replayAmountMinor =
         (this.replayBook as { amount?: number }).amount ?? r.amount;
       this.replayPayout =
-        (this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0;
+        ((this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0) / 100;
     }
 
     // The replay endpoint may return the book directly, or wrap it in

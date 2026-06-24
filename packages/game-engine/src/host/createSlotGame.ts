@@ -177,14 +177,32 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       disclaimerLines: config?.disclaimerLines,
     };
     shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
-    ps?.on('balanceUpdate', (d: { balance: number }) => shell!.setBalance(d.balance));
+    // Track the live balance so the host can block a play it can't afford.
+    let currentBalance = balance;
+    ps?.on('balanceUpdate', (d: { balance: number }) => { currentBalance = d.balance; shell!.setBalance(d.balance); });
 
     if (mode === 'base') {
       let activeFeature: string | null = null;
       shell.on('featureActivate', ({ id }: { id: string }) => { activeFeature = id; });
       shell.on('featureDeactivate', ({ id: _id }: { id: string }) => { activeFeature = null; });
+
+      const { stakeForAction } = await import('./shellConfig');
+      // Guard a play: if the stake exceeds the balance, show a shell modal and DON'T play.
+      const ensureAffordable = (action: string): boolean => {
+        if (stakeForAction(opts.model, action, currentBet) <= currentBalance + 1e-9) return true;
+        shell!.openModal({
+          availableClose: true,
+          title: shell!.t('Insufficient balance'),
+          body: shell!.t('You don’t have enough balance for this bet. Lower your bet or top up.'),
+          actions: [{ title: shell!.t('OK') }],
+        });
+        return false;
+      };
+
       shell.on('spin', () => {
         const s = gameScene();
+        const action = activeFeature ?? 'spin';
+        if (!ensureAffordable(action)) return;
         if (activeFeature) void s?.buyBonus?.(activeFeature, currentBet);
         else void s?.spin?.(currentBet);
       });
@@ -192,7 +210,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         currentBet = bet;
         gameScene()?.setBet?.(bet);
       });
-      shell.on('buyBonusSelect', ({ id }: { id: string }) => { void gameScene()?.buyBonus?.(id, currentBet); });
+      shell.on('buyBonusSelect', ({ id }: { id: string }) => {
+        if (!ensureAffordable(id)) return;
+        void gameScene()?.buyBonus?.(id, currentBet);
+      });
 
       // Resume offer: when the game scene is (or becomes) current on a reload, ask the host whether
       // a round is still open. If so, offer Continue (replay its animation, then settle) or Finish

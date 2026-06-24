@@ -197,6 +197,12 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   const params = resolveOptimizeParams(mode.curate, rawRows);
   const result = optimizeLookupTable(rawRows, params);
 
+  // Renumber the curated rows with curate's OWN 0-based contiguous ids (matching the shipped
+  // kitsune library: lookUpTable sim column and books `id` both run 0,1,2,…). The optimizer keeps
+  // each surviving row's original pool sim, which is sparse after selection — Stake expects the
+  // published set to be contiguous and the LUT sim ↔ book id to line up positionally.
+  result.rows.forEach((r, i) => { r.sim = i; });
+
   writeLut(result.rows, join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`));
   writeEvents(result.rows, opts.outDir, mode.mode);
   upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);

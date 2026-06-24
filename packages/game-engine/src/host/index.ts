@@ -8,7 +8,7 @@ export type {
   SceneNavData,
   SceneEntry,
 } from './types';
-export { buildShellConfig } from './shellConfig';
+export { buildShellConfig, stakeForAction } from './shellConfig';
 export type { SlotShellOptions } from './shellConfig';
 export { resolveReplayBonusId } from './replay';
 export { resolveStartScene } from './sceneStart';

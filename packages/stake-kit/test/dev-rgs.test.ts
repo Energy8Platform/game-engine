@@ -147,7 +147,7 @@ describe('play + endRound', () => {
     expect(play.round.payoutMultiplier).toBe(2.5);
     expect(play.round.active).toBe(true);
     expect(play.round.mode).toBe('BASE');
-    expect(play.round.amount).toBe(1); // bet in major units
+    expect(play.round.amount).toBe(1 * API_MULTIPLIER); // bet in MINOR units (Stake style)
     expect(play.round.costMultiplier).toBe(1); // BASE cost from index.json
 
     // Balance debited by the bet.
@@ -177,6 +177,19 @@ describe('play + endRound', () => {
     await rgs.endRound();
     const b = await rgs.play({ mode: 'BASE', amount: API_MULTIPLIER });
     expect(b.round.betID).toBeGreaterThan(a.round.betID);
+  });
+
+  it('rejects a play whose stake exceeds the balance — never goes negative', async () => {
+    const { InsufficientBalanceError } = await import('../src/harness/dev-rgs');
+    const rgs = makeRgs(); // starting balance 1000 major
+    await rgs.authenticate();
+    const before = (await rgs.balance()).balance.amount;
+    // Buy bonus 100× on a 50-major bet = 5000 stake > 1000 balance → reject.
+    await expect(
+      rgs.playWithOutcome('BONUS', 50 * API_MULTIPLIER, { payoutCents: 0, state: {}, cost: 100 }),
+    ).rejects.toBeInstanceOf(InsufficientBalanceError);
+    // Balance untouched.
+    expect((await rgs.balance()).balance.amount).toBe(before);
   });
 
   it('playWithOutcome debits bet × cost (buy/ante stake), but credits the win on the BASE bet', async () => {
@@ -211,25 +224,25 @@ describe('event', () => {
 // ---------------------------------------------------------------------------
 
 describe('replay', () => {
-  it('returns a state with a non-empty events array and payout multiplier', async () => {
+  it('returns the Stake replay shape: payoutMultiplier (cents), costMultiplier, state array', async () => {
     const rgs = makeRgs();
     const res: RGSReplayResponse = await rgs.replay({ mode: 'BASE', event: '1' });
-    // payoutMultiplier on the book entry (250) → ×bet multiplier 2.5.
-    expect(res.payoutMultiplier).toBe(2.5);
-    expect(res.mode).toBe('BASE');
-    // state must be a one-event book.
-    const state = res.state as { events: { data: { total_win: number } }[] };
-    expect(Array.isArray(state.events)).toBe(true);
-    expect(state.events.length).toBeGreaterThan(0);
-    expect(state.events[0].data.total_win).toBe(2.5); // 250 / 100
+    // Stake returns payoutMultiplier in CENTS (250), plus the mode's costMultiplier.
+    expect(res.payoutMultiplier).toBe(250);
+    expect(res.costMultiplier).toBe(1); // BASE cost from index.json
+    // state is the EVENTS ARRAY directly (not wrapped in { events }).
+    const state = res.state as { data: { total_win: number } }[];
+    expect(Array.isArray(state)).toBe(true);
+    expect(state.length).toBeGreaterThan(0);
+    expect(state[0].data.total_win).toBe(2.5); // 250 / 100, decimal in the event
   });
 
-  it('replays the 50x book (id 2) with correct events[0].data.total_win', async () => {
+  it('replays the 50x book (id 2) — payoutMultiplier 5000 cents, event total_win 50', async () => {
     const rgs = makeRgs();
     const res = await rgs.replay({ mode: 'BASE', event: '2' });
-    expect(res.payoutMultiplier).toBe(50);
-    const state = res.state as { events: { data: { total_win: number } }[] };
-    expect(state.events[0].data.total_win).toBe(50); // 5000 / 100
+    expect(res.payoutMultiplier).toBe(5000);
+    const state = res.state as { data: { total_win: number } }[];
+    expect(state[0].data.total_win).toBe(50); // 5000 / 100
   });
 });
 
@@ -370,7 +383,7 @@ describe('playWithOutcome', () => {
     expect(play.round.payoutMultiplier).toBe(3.5); // 350 / 100
     expect(play.round.active).toBe(true);
     expect(play.round.mode).toBe('BASE');
-    expect(play.round.amount).toBe(2); // bet in major units
+    expect(play.round.amount).toBe(2 * API_MULTIPLIER); // bet in MINOR units (Stake style)
   });
 
   it('preserves caller-supplied total_win when present in the state', async () => {

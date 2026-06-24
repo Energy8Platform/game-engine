@@ -61,10 +61,34 @@ export interface ShellRuntime {
  * → the spec's currency `code` (neutral `{ symbol: code, position: 'left' }`)
  * → `{ symbol: '€', position: 'left' }`.
  */
+/** Extra precision for WIN / TOTAL-WIN readouts so small-bet wins (e.g. 0.0041 on a 0.01 bet) are
+ *  not rounded away to 0.00. Balance / bet stay at the currency's own decimals (`minDecimals`). */
+const WIN_MAX_DECIMALS = 4;
+
+/** Attach decimals: `minDecimals` (balance/bet/prices, fixed) = the currency's decimals; `maxDecimals`
+ *  (win/total-win, variable, trailing zeros trimmed) = up to WIN_MAX_DECIMALS — but only when the
+ *  currency actually has fraction digits (a 0-decimal currency like JPY keeps wins integer). */
+function withDecimals(base: { symbol: string; position: 'left' | 'right' }, decimals: number): CurrencyConfig {
+  return {
+    ...base,
+    minDecimals: decimals,
+    maxDecimals: decimals > 0 ? Math.max(decimals, WIN_MAX_DECIMALS) : 0,
+  };
+}
+
 export function resolveCurrency(meta?: CurrencyMeta | null, specCurrency?: string): CurrencyConfig {
-  if (meta?.symbol) return { symbol: meta.symbol, position: meta.symbolAfter ? 'right' : 'left' };
-  if (specCurrency) return { symbol: specCurrency, position: 'left' };
-  return { symbol: '€', position: 'left' };
+  if (meta?.symbol) {
+    return withDecimals({ symbol: meta.symbol, position: meta.symbolAfter ? 'right' : 'left' }, meta.decimals ?? 2);
+  }
+  if (specCurrency) return withDecimals({ symbol: specCurrency, position: 'left' }, 2);
+  return withDecimals({ symbol: '€', position: 'left' }, 2);
+}
+
+/** Total stake for an action = bet × the action's cost multiplier (1 for a base spin; e.g. 100 for
+ *  a buy bonus). The host uses this to block a play the balance can't cover. */
+export function stakeForAction(model: GameModel, action: string, bet: number): number {
+  const cost = (model.spec.actions?.[action]?.cost ?? 1) as number;
+  return cost * bet;
 }
 
 /** Derive shell buy cards + ante toggles from the spec's buy/feature actions (SSOT). */

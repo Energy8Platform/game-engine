@@ -101,6 +101,10 @@ describe('curateMode', () => {
     }
     // CSV row count equals the optimized LUT row count.
     expect(lines.length).toBe(result.rows.length);
+    // curate renumbers with its OWN 0-based contiguous sim ids (kitsune-style), not the sparse
+    // pool sims the optimizer selected.
+    const sims = lines.map((l) => Number(l.split(',')[0]));
+    expect(sims).toEqual(sims.map((_, i) => i));
   });
 
   it('writes index.json with a rich BASE mode entry (name/cost/events/weights)', async () => {
