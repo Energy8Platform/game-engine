@@ -370,6 +370,7 @@ export class BottomBar extends Container {
       height: 46,
       justify: 'space-between',
       padding: { left: 16, right: 16 },
+      gap: 0, // .ge-m-top is space-between only (no gap) — keep the natural width honest for the fit
     });
     if (!state.replay) {
       const bal = plaqueReadout(this.host, 'Balance', this.host.fmt(state.balance));
@@ -390,6 +391,8 @@ export class BottomBar extends Container {
       height: 62,
       justify: 'space-between',
       padding: { left: 18, right: 18 },
+      gap: 0, // space-between only — plaque()'s default gap (18) inflated the natural width by 4×18,
+      //         falsely tripping the fit-scale on narrow phones (over-shrunk → big side padding).
     });
     const ctlItems: Container[] = [];
     ctlItems.push(
@@ -533,7 +536,7 @@ export class BottomBar extends Container {
     const W = this.host.screenW;
     const H = this.host.screenH;
     const padX = 18;
-    const padBottom = 8; // sits the bar lower toward the frame edge (was 14)
+    const padBottom = 4; // sits the bar lower toward the frame edge (was 14)
     const GAP = 14; // .ge-shell-bottom { gap:14px } between zones
     const centerY = H - padBottom - 86 / 2; // tallest element (SPIN disc) bottom-anchored
     const winCenterY = centerY - PLAQUE_H / 2;

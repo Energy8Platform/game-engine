@@ -86,24 +86,63 @@ function sectionModes(host: ShellHost, modes: GameMode[], title: string, width: 
 }
 
 function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
-  // stretch so the top row spans the section width → title left, stats pushed to the right edge
   const row = new FlexBox({ direction: 'column', align: 'stretch', gap: 6, padding: { top: 12, bottom: 12 } });
-  const top = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', width: inner });
-  top.add(makeText(m.title, { size: 16, weight: '800', color: '#ffffff' }));
-  const stats = new FlexBox({ direction: 'row', align: 'center', gap: 14 });
+  const title = makeText(m.title, { size: 16, weight: '800', color: '#ffffff' });
+
+  const cells: FlexBox[] = [];
   const stat = (label: string, val: string): void => {
     const cell = new FlexBox({ direction: 'row', align: 'end', gap: 5 });
     cell.add(makeText(host.t(label), { size: 10, weight: '600', color: host.tokens.plaqueLabel, letterSpacing: 1, upper: true }));
     cell.add(makeText(val, { size: 14, weight: '800', color: '#ffffff' }));
-    stats.add(cell);
+    cells.push(cell);
   };
   if (m.price != null) stat('Price', m.price);
   if (typeof m.rtp === 'number') stat('RTP', `${m.rtp}%`);
   if (m.maxWin != null) stat('Max win', m.maxWin);
-  top.add(stats);
-  row.add(top);
+
+  const GAP = 14;
+  const cellW = cells.map((c) => c.measureSize().w);
+  const statsW = cellW.reduce((a, b) => a + b, 0) + GAP * Math.max(0, cells.length - 1);
+
+  // DOM `.ge-gi-mode-top { flex-wrap:wrap; justify-content:space-between }`: title and stats share a
+  // line when they fit (title left, stats right); otherwise the stats wrap onto their own line(s),
+  // which a plain row would instead overlap onto the title at narrow (mobile) widths.
+  if (cells.length === 0 || title.width + 16 + statsW <= inner) {
+    const top = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', width: inner });
+    top.add(title);
+    if (cells.length) {
+      const stats = new FlexBox({ direction: 'row', align: 'end', gap: GAP });
+      cells.forEach((c) => stats.add(c));
+      top.add(stats);
+    }
+    row.add(top);
+  } else {
+    row.add(title);
+    row.add(wrapFlow(cells, cellW, inner, GAP, 8));
+  }
+
   if (m.description) row.add(paragraph(host, m.description, inner, { size: 14, color: 'rgba(255,255,255,.78)' }));
   return row;
+}
+
+/** Pack cells left-to-right into lines no wider than maxW (a minimal flex-wrap), stacked in a
+ *  column — used to wrap the mode stats below the title on narrow widths. */
+function wrapFlow(cells: FlexBox[], widths: number[], maxW: number, gapX: number, gapY: number): FlexBox {
+  const col = new FlexBox({ direction: 'column', align: 'start', gap: gapY });
+  let line = new FlexBox({ direction: 'row', align: 'end', gap: gapX });
+  let lineW = 0;
+  cells.forEach((cell, i) => {
+    const w = widths[i];
+    if (lineW > 0 && lineW + gapX + w > maxW) {
+      col.add(line);
+      line = new FlexBox({ direction: 'row', align: 'end', gap: gapX });
+      lineW = 0;
+    }
+    line.add(cell);
+    lineW += (lineW > 0 ? gapX : 0) + w;
+  });
+  col.add(line);
+  return col;
 }
 
 // ── controls ─────────────────────────────────────────────────────────────────
@@ -167,7 +206,11 @@ function sectionControls(host: ShellHost, title: string, width: number): FlexBox
 function ctlBlock(host: ShellHost, label: string, rows: CtlRow[], inner: number, topBorder: boolean): FlexBox {
   const block = new FlexBox({ direction: 'column', align: 'stretch', gap: 0, padding: { top: topBorder ? 16 : 0 } });
   if (topBorder) block.add(hairline(host, inner));
-  block.add(makeText(host.t(label), { size: 11, weight: '700', color: host.tokens.plaqueLabel, letterSpacing: 1.3, upper: true }));
+  // Heading off the divider above and the first row below — the DOM gives it margin:8px 0 2px plus
+  // the block's 4px padding under the border; with gap:0 the pixi heading sat flush on the hairline.
+  const head = new FlexBox({ direction: 'column', align: 'start', padding: { top: topBorder ? 12 : 0, bottom: 4 } });
+  head.add(makeText(host.t(label), { size: 11, weight: '700', color: host.tokens.plaqueLabel, letterSpacing: 1.3, upper: true }));
+  block.add(head);
   const visible = rows.filter((r) => r.on);
   visible.forEach((r, i) => {
     if (i > 0) block.add(hairline(host, inner));

@@ -155,8 +155,13 @@ export class Slider extends Container implements Sizable {
     this.dragging = false;
   };
 
+  // Thumb radius — the thumb travels within [R, w−R] so it never overhangs the track ends (like a
+  // native range input), giving even left/right padding instead of poking past the right edge.
+  private static R = 9;
+
   private setFromX(x: number): void {
-    const v = Math.max(0, Math.min(1, this.w > 0 ? x / this.w : 0));
+    const usable = this.w - 2 * Slider.R;
+    const v = Math.max(0, Math.min(1, usable > 0 ? (x - Slider.R) / usable : 0));
     this._value = v;
     this.draw();
     this.onInput(v);
@@ -165,12 +170,15 @@ export class Slider extends Container implements Sizable {
   private draw(): void {
     const h = 24;
     const cy = h / 2;
+    const tr = 6; // track thickness (thicker, closer to the DOM accent-color range)
+    const r = Slider.R;
+    const cx = r + this._value * Math.max(0, this.w - 2 * r); // thumb centre, kept within the track
     this.track.clear();
-    this.track.roundRect(0, cy - 2, this.w, 4, 2).fill(this.host.tokens.track);
+    this.track.roundRect(0, cy - tr / 2, this.w, tr, tr / 2).fill(this.host.tokens.track);
     this.fill.clear();
-    this.fill.roundRect(0, cy - 2, this.w * this._value, 4, 2).fill(this.host.tokens.accent);
+    this.fill.roundRect(0, cy - tr / 2, cx, tr, tr / 2).fill(this.host.tokens.accent);
     this.thumb.clear();
-    this.thumb.circle(this.w * this._value, cy, 8).fill('#ffffff');
+    this.thumb.circle(cx, cy, r).fill('#ffffff');
     this.hitArea = new Rectangle(0, 0, this.w, h);
   }
 
