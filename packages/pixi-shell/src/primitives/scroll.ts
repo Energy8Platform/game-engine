@@ -20,8 +20,8 @@ export class ScrollBox extends Container {
     super();
     this.canvas = canvas;
     this.addChild(this.content);
-    this.addChild(this.maskG);
-    this.content.mask = this.maskG;
+    // maskG is added to the scene only while scrolling (see refresh) — a leftover unused mask
+    // graphic renders as a white rect, and a masked container blocks pointer events to its children.
     this.eventMode = 'static';
     this.on('pointerdown', this.onDown);
     this.on('globalpointermove', this.onMove);
@@ -43,21 +43,29 @@ export class ScrollBox extends Container {
     this.maskG.clear();
     this.maskG.rect(0, 0, w, h);
     this.maskG.fill(0xffffff);
-    this.hitArea = new Rectangle(0, 0, w, h);
     this.refresh();
   }
 
-  /** Re-measure content height and clamp the scroll offset. */
+  /** Re-measure content height, clamp the scroll, and clip only when it overflows. */
   refresh(): void {
-    // getLocalBounds() on a masked container is clipped to the mask (≈ the viewport), which would
-    // report the FULL content as barely taller than the view → no scroll. Measure with the mask
-    // detached so we see the true content height.
-    const mask = this.content.mask;
-    this.content.mask = null;
+    this.content.mask = null; // measure unmasked (a mask clips getLocalBounds to the viewport)
+    if (this.maskG.parent) this.removeChild(this.maskG);
     const b = this.content.getLocalBounds();
-    this.content.mask = mask;
     const contentH = b.height + b.y; // content laid out from y≈0 downward
     this.maxScroll = Math.max(0, contentH - this.viewH);
+    // Only clip + grab pointer/drag when the content actually overflows: a masked container blocks
+    // pointer events to its children in Pixi v8, so when it fits we leave it unmasked and passive →
+    // interactive controls (settings sliders/buttons) work. Tall scrolling content (game info) that
+    // does get masked has no interactive children, so nothing is lost there.
+    const scrollable = this.maxScroll > 0;
+    if (scrollable) {
+      this.addChild(this.maskG);
+      this.content.mask = this.maskG;
+      this.hitArea = new Rectangle(0, 0, this.viewW, this.viewH);
+    } else {
+      this.hitArea = null;
+    }
+    this.eventMode = scrollable ? 'static' : 'passive';
     this.setScroll(this.scrollY);
   }
 
