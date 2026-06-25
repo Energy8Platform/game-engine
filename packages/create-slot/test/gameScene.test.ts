@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { genGameScene } from '../src/codegen/gameScene';
 
 describe('genGameScene', () => {
-  it('cascade/cluster: slim render contract (present + bonus hooks), no play/ack/host', () => {
+  it('cascade/cluster: slim render contract (onSpin + mode hooks), no play/ack/host', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
     expect(s).toContain('implements SlotSceneController<SpinData>');
-    expect(s).toContain('async present(result: SpinData, ctx: RenderContext)');
-    expect(s).toContain('async onBonusEnter(');
-    expect(s).toContain('async onBonusExit(');
+    expect(s).toContain('async onSpin(result: SpinData, ctx: RenderContext)');
+    expect(s).toContain('async onEnterMode(');
+    expect(s).toContain('async onExitMode(');
     expect(s).toContain('ctx.formatAmount');
     expect(s).toContain('ctx.turbo');
     expect(s).toContain('MultiplierAccumulator');

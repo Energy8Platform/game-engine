@@ -9,8 +9,8 @@ describe('genClaudeMd', () => {
     expect(md.startsWith('# CLAUDE.md')).toBe(true);
     expect(md).toContain('moon-spice');
     expect(md).toContain('src/game.spec.ts');
-    expect(md).toContain('present(result, ctx)');
-    expect(md).toContain('onBonusEnter');
+    expect(md).toContain('onSpin(result, ctx)');
+    expect(md).toContain('onEnterMode');
   });
 
   it('documents the key commands (dev / stake harness / build:stake / math)', () => {

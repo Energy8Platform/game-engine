@@ -6,14 +6,14 @@ export function genGameScene(a: Answers): string {
 
   const present = cascade
     ? `  /** Render one normalized result. Tune MultiplierAccumulator policy/reset() to your mechanic. */
-  async present(result: SpinData, ctx: RenderContext): Promise<void> {
+  async onSpin(result: SpinData, ctx: RenderContext): Promise<void> {
     const turbo = ctx.turbo > 0;
     if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
     for (const step of result.steps) await this.controller.run(step, { turbo });
     if (result.totalWin > 0) await this.overlay.show(result.totalWin, ctx.bet, ctx.formatAmount);
   }`
     : `  /** Render one normalized result (one spin, or one free spin of a bonus). */
-  async present(result: SpinData, ctx: RenderContext): Promise<void> {
+  async onSpin(result: SpinData, ctx: RenderContext): Promise<void> {
     const turbo = ctx.turbo > 0;
     await this.controller.run({ targetGrid: result.targetGrid }, { turbo });
     if (result.totalWin > 0) await this.overlay.show(result.totalWin, ctx.bet, ctx.formatAmount);
@@ -31,10 +31,10 @@ import { resolveSymbol } from '../slot/symbols';
 import type { SpinData } from '../game/normalize';
 
 /**
- * The host owns the play loop (play -> present -> ack -> drain). This scene only RENDERS:
- *  - present(result, ctx): draw ONE segment (a spin, or one free spin). Put all pacing here.
- *  - onBonusEnter(trigger, ctx): fires right before the first free spin (bonus intro).
- *  - onBonusExit(last, ctx): fires after the last free spin (bonus summary).
+ * The host owns the play loop (play -> onSpin -> ack -> drain). This scene only RENDERS:
+ *  - onSpin(result, ctx): draw ONE segment (a spin, or one free spin). Put all pacing here.
+ *  - onEnterMode(trigger, ctx): fires right before the first free spin (bonus intro).
+ *  - onExitMode(last, ctx): fires after the last free spin (bonus summary).
  * ctx gives you { bet, action, mode, formatAmount(value), turbo } — turbo is live (0..3).
  */
 export class GameScene extends Scene implements SlotSceneController<SpinData> {
@@ -65,13 +65,13 @@ ${multiplierField}
 ${present}
 
   /** Bonus starting — show an intro. trigger.freeSpins?.total = how many free spins were awarded. */
-  async onBonusEnter(trigger: SpinData, _ctx: RenderContext): Promise<void> {
+  async onEnterMode(trigger: SpinData, _ctx: RenderContext): Promise<void> {
     // TODO: show a bonus intro (e.g. "10 FREE SPINS"). Defaults to nothing.
     void trigger;
   }
 
   /** Bonus finished — show a summary. ctx.formatAmount(last.totalWin) = the bonus total win. */
-  async onBonusExit(last: SpinData, ctx: RenderContext): Promise<void> {
+  async onExitMode(last: SpinData, ctx: RenderContext): Promise<void> {
     // TODO: show a bonus summary. Defaults to nothing.
     void last; void ctx;
   }

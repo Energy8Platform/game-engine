@@ -26,13 +26,13 @@ TARGETS live in \`math.config.ts\` and may legitimately differ while tuning.
 
 ## The scene contract (\`src/scenes/GameScene.ts\`)
 
-The host owns the entire play loop (play → present → ack → drain). The scene only RENDERS:
-- \`present(result, ctx)\` — draw ONE segment (a spin, or one free spin). All pacing lives here.
-- \`onBonusEnter(trigger, ctx)\` / \`onBonusExit(last, ctx)\` — optional bonus intro / summary.
+The host owns the entire play loop (play → onSpin → ack → drain). The scene only RENDERS:
+- \`onSpin(result, ctx)\` — draw ONE segment (a spin, or one free spin). All pacing lives here.
+- \`onEnterMode(trigger, ctx)\` / \`onExitMode(last, ctx)\` — optional bonus intro / summary.
 
 \`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo }\`. The scene NEVER calls play/ack/roundId,
-never touches the balance/win readouts (the host does, post-present), and never runs the FS loop —
-a bonus is one round the host drains segment-by-segment.${cascade ? '\n\nThis game uses a CASCADE mechanic: `present` runs `result.steps` through the CascadeController and reflects `result.multiplier`.' : ''}
+never touches the balance/win readouts (the host does, post-onSpin), and never runs the FS loop —
+a bonus is one round the host drains segment-by-segment.${cascade ? '\n\nThis game uses a CASCADE mechanic: `onSpin` runs `result.steps` through the CascadeController and reflects `result.multiplier`.' : ''}
 
 ## Commands
 

@@ -349,7 +349,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       if (!scene) return;
       // Per-round free-spins state: the shell enters FS mode on bonus-enter and shows current/total
       // (growing on retriggers) + cumulative win per spin. `inBonus` gates the per-spin counter so
-      // the trigger segment (presented before onBonusEnter) doesn't count as a free spin.
+      // the trigger segment (rendered by onSpin before onEnterMode) doesn't count as a free spin.
       let inBonus = false;
       let prevWin = 0; // cumulative win up to the previous segment — the WIN readout shows the delta
       const fsCounter = createFreeSpinsCounter();
