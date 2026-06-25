@@ -34,6 +34,8 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       '@energy8platform/game-engine': v['game-engine'],
       ...(a.stake ? { '@energy8platform/stake-kit': v['stake-kit'], '@energy8platform/stake-bridge': v['stake-bridge'] } : { '@energy8platform/stake-kit': v['stake-kit'] }),
       'pixi.js': '^8.16.0',
+      '@pixi/sound': '^6.0.0',
+      '@esotericsoftware/spine-pixi-v8': '~4.2.0',
       zod: '^3.23.0',
     },
     devDependencies: {

@@ -45,4 +45,12 @@ describe('genPackageJson', () => {
     expect(plain.scripts['build:stake']).toBeUndefined();   // stake-only
     expect(plain.scripts['stake']).toBeUndefined();          // stake-only
   });
+  it('always includes @pixi/sound and spine-pixi-v8', () => {
+    const pkg = JSON.parse(genPackageJson(
+      { id: 'demo', title: 'Demo', mechanic: 'cluster' as const, grid: { cols: 7, rows: 7 }, stake: true },
+      { 'platform-core': '^0.25.0', 'game-engine': '^0.18.0', 'stake-kit': '^0.2.0', 'stake-bridge': '^0.3.0', 'stake-math-tools': '^0.8.0' },
+    ));
+    expect(pkg.dependencies['@pixi/sound']).toBe('^6.0.0');
+    expect(pkg.dependencies['@esotericsoftware/spine-pixi-v8']).toBe('~4.2.0');
+  });
 });
