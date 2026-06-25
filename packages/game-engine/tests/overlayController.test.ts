@@ -40,4 +40,13 @@ describe('OverlayController', () => {
     await p1;
     warn.mockRestore();
   });
+
+  it('resize while a dim overlay is open keeps the backdrop (no throw, layer intact)', () => {
+    const { parent, ctl } = setup();
+    const p = ctl.overlay.show({ build: () => {}, dim: 0.5, closeOn: false });
+    ctl.resize(1024, 768);
+    expect(parent.children.length).toBe(1);
+    ctl.overlay.close();
+    return p;
+  });
 });

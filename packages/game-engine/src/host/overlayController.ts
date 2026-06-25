@@ -12,6 +12,7 @@ interface ActiveOverlay {
   layer: Container;
   resolve(): void;
   timer: ReturnType<typeof setTimeout> | null;
+  dim: number;
 }
 
 export function createOverlayController(deps: OverlayDeps): {
@@ -56,7 +57,8 @@ export function createOverlayController(deps: OverlayDeps): {
       deps.parent.addChild(layer);
 
       return new Promise<void>((resolve) => {
-        current = { layer, resolve, timer: null };
+        const dimValue = opts.dim ?? 0.0001;
+        current = { layer, resolve, timer: null, dim: dimValue };
         const closeOn = opts.closeOn ?? 'tap';
         if (closeOn === 'tap') hit.on('pointertap', teardown);
         if (typeof opts.autoCloseMs === 'number') {
@@ -72,7 +74,7 @@ export function createOverlayController(deps: OverlayDeps): {
     resize(w: number, h: number): void {
       if (!current) return;
       const hit = current.layer.getChildAt(0) as Graphics;
-      hit.clear().rect(0, 0, w, h).fill({ color: 0x000000, alpha: hit.alpha });
+      hit.clear().rect(0, 0, w, h).fill({ color: 0x000000, alpha: current.dim });
     },
     destroy(): void { teardown(); },
   };
