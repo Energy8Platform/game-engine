@@ -1,4 +1,4 @@
-import { BlurFilter, Container, RenderTexture, Sprite, type Application, type Ticker } from 'pixi.js';
+import { BlurFilter, ColorMatrixFilter, Container, RenderTexture, Sprite, type Application, type Ticker } from 'pixi.js';
 import { EventEmitter } from './EventEmitter';
 import type { ShellHost, ShellLayer, LayerHandle } from './context';
 import type {
@@ -201,9 +201,15 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
-      const blur = new BlurFilter({ strength: 12, quality: 6 });
+      // Match the DOM shell's `backdrop-filter: blur(20px) saturate(120%)` over its rgba(12,17,28,.5)
+      // veil (the same token the overlay paints on top): a clean ~20px Gaussian (strength 10 at ½ res),
+      // a high pass count so it reads as a smooth frost (not a streaky/blocky smear), and a +20%
+      // saturation lift so the blurred game stays colourful rather than washing out grey.
+      const blur = new BlurFilter({ strength: 10, quality: 8 });
       blur.repeatEdgePixels = true; // no transparent edge halo
-      sprite.filters = [blur];
+      const saturate = new ColorMatrixFilter();
+      saturate.saturate(0.3, false); // x = amount*2/3 + 1 ≈ 1.2 → saturate(120%)
+      sprite.filters = [blur, saturate];
       this.modalLayer.addChild(sprite); // below the layer node, which is added next
       this.backdrop = { sprite, texture };
     } catch {
