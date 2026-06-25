@@ -1,4 +1,4 @@
-import type { Application } from 'pixi.js';
+import type { Application, Container } from 'pixi.js';
 import { EventEmitter } from '../core/EventEmitter';
 import { ScaleMode, Orientation } from '../types';
 
@@ -45,6 +45,7 @@ export class ViewportManager extends EventEmitter<ViewportEvents> {
   private _app: Application;
   private _container: HTMLElement;
   private _config: ViewportConfig;
+  private _target: Container;
   private _resizeObserver: ResizeObserver | null = null;
   private _currentOrientation: Orientation = Orientation.LANDSCAPE;
   private _currentWidth = 0;
@@ -53,11 +54,20 @@ export class ViewportManager extends EventEmitter<ViewportEvents> {
   private _destroyed = false;
   private _resizeTimeout: number | null = null;
 
-  constructor(app: Application, container: HTMLElement, config: ViewportConfig) {
+  constructor(
+    app: Application,
+    container: HTMLElement,
+    config: ViewportConfig,
+    target?: Container,
+  ) {
     super();
     this._app = app;
     this._container = container;
     this._config = config;
+    // The container this manager scales/offsets. Defaults to app.stage for backward
+    // compatibility; the engine passes a dedicated scaled world root so app.stage stays
+    // identity (screen space) for unscaled UI layers.
+    this._target = target ?? app.stage;
 
     this.setupObserver();
   }
@@ -164,18 +174,18 @@ export class ViewportManager extends EventEmitter<ViewportEvents> {
       ? Math.min(containerWidth / designWidth, containerHeight / designHeight)
       : scale;
 
-    this._app.stage.scale.set(stageScale);
+    this._target.scale.set(stageScale);
 
     // Center the stage for FIT mode
     if (scaleMode === ScaleMode.FIT) {
-      this._app.stage.x = Math.round((containerWidth - designWidth * stageScale) / 2);
-      this._app.stage.y = Math.round((containerHeight - designHeight * stageScale) / 2);
+      this._target.x = Math.round((containerWidth - designWidth * stageScale) / 2);
+      this._target.y = Math.round((containerHeight - designHeight * stageScale) / 2);
     } else if (scaleMode === ScaleMode.FILL) {
-      this._app.stage.x = Math.round((containerWidth - gameWidth * stageScale) / 2);
-      this._app.stage.y = Math.round((containerHeight - gameHeight * stageScale) / 2);
+      this._target.x = Math.round((containerWidth - gameWidth * stageScale) / 2);
+      this._target.y = Math.round((containerHeight - gameHeight * stageScale) / 2);
     } else {
-      this._app.stage.x = 0;
-      this._app.stage.y = 0;
+      this._target.x = 0;
+      this._target.y = 0;
     }
 
     this._currentWidth = gameWidth;

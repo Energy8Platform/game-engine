@@ -1,11 +1,13 @@
 // packages/game-engine/src/host/createSlotGame.ts
+import { Container } from 'pixi.js';
 import { GameApplication } from '../core';
 import { buildAppConfig } from './buildConfig';
 import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
 import { showFatalError, installGlobalErrorHandlers } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
-import type { ShellMode } from '@energy8platform/platform-core/shell';
+import type { ShellMode } from '@energy8platform/pixi-shell';
+import type { SceneApi, SlotSceneController } from './sceneController';
 
 /**
  * One-call slot bootstrap: preboot → (optional Stake bridge) → GameApplication
@@ -102,15 +104,26 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   // Build slotPlay FIRST — bindGameScene() needs it to be in scope.
   const { createSlotPlay, enrichRoundMeta } = await import('./slotPlay');
 
+  // Injected once per controller scene the first time it becomes current (see `ensureCreated`).
+  // `sceneApi` is assembled inside the shell block; until then injection is a no-op (a shell-less
+  // launch never builds the api, so a controller scene simply never receives onCreate).
+  let sceneApi: SceneApi | null = null;
+  const createdScenes = new WeakSet<object>();
+  const ensureCreated = (s: SlotSceneController<T>) => {
+    if (!sceneApi || createdScenes.has(s)) return;
+    createdScenes.add(s);
+    s.onCreate?.(sceneApi);
+  };
+
   /** The current scene IFF it implements the SlotSceneController contract (duck-typed on
-   *  `present`). The host drives the play loop against whichever scene is current. */
+   *  `onSpin`). The host drives the play loop against whichever scene is current. Injects the
+   *  SceneApi via onCreate the first time a controller scene is seen. */
   const gameScene = () => {
-    const s = game.scenes.current?.scene as
-      | Partial<import('./sceneController').SlotSceneController<T>>
-      | undefined;
-    return typeof s?.present === 'function'
-      ? (s as import('./sceneController').SlotSceneController<T>)
-      : undefined;
+    const s = game.scenes.current?.scene as Partial<SlotSceneController<T>> | undefined;
+    if (typeof s?.onSpin !== 'function') return undefined;
+    const scene = s as SlotSceneController<T>;
+    ensureCreated(scene);
+    return scene;
   };
 
   const { runRound } = await import('./runRound');
@@ -130,7 +143,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   });
 
   if (opts.shell) {
-    const { createGameShell } = await import('@energy8platform/platform-core/shell');
+    const { createPixiShell } = await import('@energy8platform/pixi-shell');
     const { buildShellConfig } = await import('./shellConfig');
     const { resolveReplayBonusId } = await import('./replay');
 
@@ -190,7 +203,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         `| RESOLVED.symbol=${runtime.currency?.symbol ?? '∅'} pos=${runtime.currency?.position ?? '∅'}`,
       );
     }
-    shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
+    // pixi-shell mounts its root onto the engine's unscaled, screen-space UI layer (above the
+    // scaled world/scene root) so the control bar fills the real screen, not the letterboxed game.
+    // The host adds the mount target (`app`) + parent; buildShellConfig produces everything else.
+    shell = createPixiShell({ ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app, parent: game.uiLayer });
+    // Scope the bar to the slot scene: show only when a SlotSceneController scene is current
+    // (hidden over the intro / non-slot scenes). Applies in BOTH base and replay modes.
+    shell.setVisible(!!gameScene());
+    game.scenes.on('change', () => shell!.setVisible(!!gameScene()));
     // The gate tracks the live wallet (for the affordability guard) but only PAINTS the balance per
     // the HUD-timing rule: the debit is buffered during play→present and shown at afterPresent; the
     // async win credit (/wallet/end-round, after the final ack) paints when it lands. `balanceGate`
@@ -200,10 +220,53 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
     // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
     let currentTurbo = shell.state.turbo;
-    shell.on('turboChange', (level: number) => { currentTurbo = level; });
+    shell.on('turboChange', (level: number) => { currentTurbo = level; gameScene()?.onTurboChanged?.(level); });
+    // Double-tap-to-skip is a game-level option (default on), set once via createSlotGame({ skipGesture }).
+    const skipEnabled = opts.skipGesture ?? true;
+
+    // Shell settings → engine state. Sound/volume map onto the AudioManager.
+    shell.on('settingChange', ({ key, value }: { key: string; value: unknown }) => {
+      switch (key) {
+        case 'sound': value ? game.audio.unmuteAll() : game.audio.muteAll(); break;
+        case 'master': game.audio.setMasterVolume(Number(value)); break;
+        case 'music': game.audio.setVolume('music', Number(value)); break;
+        case 'sfx': game.audio.setVolume('sfx', Number(value)); break;
+      }
+    });
+
+    // Overlay layer sits ABOVE the shell (the shell already mounted its root onto the uiLayer;
+    // adding ours afterwards keeps it on top). It eats pointer events while open so shell controls
+    // are unreachable. Mounted on the same unscaled UI layer; tracks viewport via game's 'resize'.
+    const { createSceneAudio } = await import('./sceneAudio');
+    const { createOverlayController } = await import('./overlayController');
+    const overlayLayer = new Container();
+    overlayLayer.label = 'overlay';
+    game.uiLayer.addChild(overlayLayer);
+    const overlayCtl = createOverlayController({
+      parent: overlayLayer,
+      size: () => ({ width: game.app.screen.width, height: game.app.screen.height }),
+    });
+    game.on('resize', ({ width, height }: { width: number; height: number }) =>
+      overlayCtl.resize(width, height),
+    );
+
+    // Capabilities injected once per controller scene via onCreate (see `gameScene`/`ensureCreated`).
+    sceneApi = {
+      audio: createSceneAudio(game.audio),
+      overlay: overlayCtl.overlay,
+      shell: { get safeArea() { return shell!.safeArea; } },
+      formatAmount: (v) => shell!.formatWin(v),
+      get bet() { return currentBet; },
+      get mode() { return opts.model.modeMap['spin'] ?? 'BASE'; },
+      get turbo() { return currentTurbo; },
+    };
 
     const roleOf = (action: string) => opts.model.spec.actions[action]?.role;
-    const makeContext = (action: string): import('./sceneController').RenderContext => ({
+    // The signal-less context. runRound injects a per-segment `signal` (for skip); resumeDrain
+    // attaches its own. So makeContext returns everything BUT `signal`.
+    const makeContext = (
+      action: string,
+    ): Omit<import('./sceneController').RenderContext, 'signal'> => ({
       bet: currentBet,
       action,
       mode: opts.model.modeMap[action] ?? action.toUpperCase(),
@@ -238,18 +301,63 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       });
     });
 
+    // Skip state: `currentSegmentAbort` is the controller for the segment presently animating;
+    // `presenting` is true for the whole play→drain window (gates the double-tap detector so taps
+    // only skip while a round is animating).
+    let currentSegmentAbort: AbortController | null = null;
+    let presenting = false;
+
+    // Double-tap skip: a double-tap on the play area aborts the current segment (the scene collapses
+    // to its final visual via ctx.signal) and notifies the scene's onSkip. Gated by the shell's
+    // skip-gesture setting (`skipEnabled`) and only active while a round is presenting.
+    const { createDoubleTapSkip } = await import('./skipGesture');
+    const skip = createDoubleTapSkip({
+      enabled: () => skipEnabled,
+      active: () => presenting,
+      onSkip: () => { currentSegmentAbort?.abort(); gameScene()?.onSkip?.(); },
+    });
+    // Listen for taps on the scene root (game.worldRoot — the scaled scene container). The shell
+    // lives on the sibling uiLayer, so its bar taps never reach worldRoot — taps here are the play area.
+    game.scenes.root.eventMode = 'static';
+    game.scenes.root.on('pointertap', () => skip.tap(performance.now()));
+
+    // Full auto-pause: on tab blur, freeze the ticker (stops tweens/onUpdate/in-flight onSpin),
+    // duck music to silence, hold autoplay, and notify the scene. On focus, reverse it all.
+    // `stopAutoplay` is reassigned in the base-mode block below — the closure reads it live.
+    const { createPauseController } = await import('./pauseController');
+    createPauseController({
+      isHidden: () => typeof document !== 'undefined' && document.hidden,
+      subscribe: (cb) => {
+        if (typeof document === 'undefined') return () => {};
+        document.addEventListener('visibilitychange', cb);
+        return () => document.removeEventListener('visibilitychange', cb);
+      },
+      onHidden: () => {
+        game.app.ticker.stop();    // freezes tweens, onUpdate, in-flight onSpin animation
+        game.audio.duckMusic(0);   // silence music (ducked to 0; restored on resume)
+        stopAutoplay();            // hold autoplay — don't start the next auto-round
+        gameScene()?.onPause?.();
+      },
+      onVisible: () => {
+        game.app.ticker.start();
+        game.audio.unduckMusic();
+        gameScene()?.onResume?.();
+      },
+    });
+
     /** Drive a full round (trigger + drain) against the current scene. HUD readouts (win + balance)
-     *  update only AFTER each present(), per the HUD-timing requirement. */
+     *  update only AFTER each onSpin(), per the HUD-timing requirement. */
     const playRound = (action: string) => {
       const scene = gameScene();
       if (!scene) return;
       // Per-round free-spins state: the shell enters FS mode on bonus-enter and shows current/total
       // (growing on retriggers) + cumulative win per spin. `inBonus` gates the per-spin counter so
-      // the trigger segment (presented before onBonusEnter) doesn't count as a free spin.
+      // the trigger segment (rendered by onSpin before onEnterMode) doesn't count as a free spin.
       let inBonus = false;
       let prevWin = 0; // cumulative win up to the previous segment — the WIN readout shows the delta
       const fsCounter = createFreeSpinsCounter();
       shell!.setBusy(true); // block re-spin / spacebar while the round plays out
+      presenting = true; // open the skip window for the whole play→drain
       // RETURN the promise: the replay modal awaits onReplay() and only reopens once the round's
       // animation has finished — returning void would reopen it instantly, over a running animation.
       return runRound<T>(
@@ -260,6 +368,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           scene,
           context: makeContext,
           roleOf,
+          // Hand the host the per-segment AbortController so a double-tap can skip the live segment.
+          beforeSegment: (ac) => { currentSegmentAbort = ac; },
+          onSpinStart: () => scene.onSpinStart?.(),
+          onSpinEnd: (last, ctx) => scene.onSpinEnd?.(last, ctx),
           afterPresent: (r) => {
             // WIN readout = THIS spin's win (cumulative delta); the cumulative total goes to the
             // free-spins counter (totalWin) below, not the WIN readout.
@@ -268,20 +380,20 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
             balanceGate.afterPresent();
             if (inBonus) shell!.setFreeSpins(fsCounter.spin(r.freeSpins?.awarded ?? 0, r.totalWin));
           },
-          onBonusEnter: async (trigger, ctx) => {
+          onEnterMode: async (trigger, ctx) => {
             inBonus = true;
             shell!.setMode('freeSpins');
             shell!.setFreeSpins(fsCounter.enter(trigger.freeSpins?.awarded ?? trigger.freeSpins?.total ?? 0));
-            await scene.onBonusEnter?.(trigger, ctx);
+            await scene.onEnterMode?.(trigger, ctx);
           },
-          onBonusExit: async (last, ctx) => {
+          onExitMode: async (last, ctx) => {
             inBonus = false;
-            await scene.onBonusExit?.(last, ctx);
+            await scene.onExitMode?.(last, ctx);
             shell!.setMode('base');
           },
         },
         action,
-      ).catch(showPlayError).finally(() => shell!.setBusy(false));
+      ).catch(showPlayError).finally(() => { presenting = false; shell!.setBusy(false); });
     };
 
     /**
@@ -297,7 +409,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     ): Promise<void> => {
       const scene = gameScene();
       if (!scene || !ps) return;
-      const ctx = makeContext((firstRaw as { action?: string }).action ?? 'spin');
+      // A recovered drain isn't skippable (no live skip gesture wired to it), so it gets a stable,
+      // never-aborted signal to satisfy onSpin's RenderContext.
+      const ctx: import('./sceneController').RenderContext = {
+        ...makeContext((firstRaw as { action?: string }).action ?? 'spin'),
+        signal: new AbortController().signal,
+      };
       const fsView = (raw: unknown, totalWin: number) => {
         const s = (raw as { session?: { spinsPlayed?: number; spinsRemaining?: number } }).session;
         if (!s) return null;
@@ -315,7 +432,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       const applySegment = async (): Promise<void> => {
         // A recovered open round with remaining segments is a bonus → show FS mode + counter.
         if (!inBonus && !r.complete) { inBonus = true; shell!.setMode('freeSpins'); }
-        if (animate) await scene.present(r, ctx);
+        if (animate) await scene.onSpin(r, ctx);
         if (inBonus) { const v = fsView(raw, r.totalWin); if (v) shell!.setFreeSpins(v); }
         shell!.setWin(r.totalWin - prevWin); // THIS spin's win, not the cumulative bonus total
         prevWin = r.totalWin;
@@ -359,7 +476,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         if (!ensureAffordable(action)) return;
         void playRound(action);
       });
-      shell.on('betChange', (bet: number) => { currentBet = bet; });
+      shell.on('betChange', (bet: number) => { currentBet = bet; gameScene()?.onBetChanged?.(bet); });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => {
         if (!ensureAffordable(id)) return;
         void playRound(id);
@@ -372,7 +489,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         resolveAction: () => activeFeature ?? 'spin',
         canAfford: (a) => ensureAffordable(a),
         playRound: (a) => Promise.resolve(playRound(a)),
-        onState: (s) => shell!.setAutoplay(s),
+        onState: (s) => {
+          shell!.setAutoplay(s);
+          gameScene()?.onAutoplayChanged?.({ running: s.active, remaining: s.remaining });
+        },
       });
       stopAutoplay = () => autoplay.stop();
       shell.on('autoplayStart', (o: { remaining?: number }) => autoplay.start(o?.remaining ?? 0));

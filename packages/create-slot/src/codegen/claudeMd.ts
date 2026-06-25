@@ -26,13 +26,22 @@ TARGETS live in \`math.config.ts\` and may legitimately differ while tuning.
 
 ## The scene contract (\`src/scenes/GameScene.ts\`)
 
-The host owns the entire play loop (play → present → ack → drain). The scene only RENDERS:
-- \`present(result, ctx)\` — draw ONE segment (a spin, or one free spin). All pacing lives here.
-- \`onBonusEnter(trigger, ctx)\` / \`onBonusExit(last, ctx)\` — optional bonus intro / summary.
+The host owns the entire play loop (play → onSpin → ack → drain). The scene only RENDERS + reacts.
+The core lifecycle hooks are REQUIRED (empty bodies are fine where there's nothing to do):
+- \`onCreate(api)\` — injected ONCE before the first round. Capabilities live on \`api\`: \`api.audio\`
+  (play sfx, switch bgm), \`api.overlay.show({ build, autoCloseMs?, closeOn?, dim? })\` (a host layer
+  ABOVE the bar — use it for big-win), \`api.shell.safeArea\` (bottom-bar inset; read it in onResize),
+  \`api.formatAmount\`, and live \`api.bet\` / \`api.mode\` / \`api.turbo\`.
+- \`onSpinStart()\` — the player pressed spin (before the network result); start anticipation.
+- \`onSpin(result, ctx)\` — draw ONE segment (a spin, or one free spin). All pacing lives here.
+- \`onEnterMode(trigger, ctx)\` / \`onExitMode(last, ctx)\` — a mode/bonus begins / ends (switch bgm here).
+- \`onSpinEnd(result, ctx)\` — the round fully drained; controls unlocked, settle to idle.
 
-\`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo }\`. The scene NEVER calls play/ack/roundId,
-never touches the balance/win readouts (the host does, post-present), and never runs the FS loop —
-a bonus is one round the host drains segment-by-segment.${cascade ? '\n\nThis game uses a CASCADE mechanic: `present` runs `result.steps` through the CascadeController and reflects `result.multiplier`.' : ''}
+Optional reactions: \`onBetChanged\`, \`onTurboChanged\`, \`onAutoplayChanged\`, \`onSkip\` (double-tap
+skip — collapse the animation to its final state; \`ctx.signal\` is aborted), \`onPause\`/\`onResume\`
+(tab focus). \`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo, signal }\`. The scene NEVER calls
+play/ack/roundId, never touches the balance/win readouts (the host does, post-onSpin), and never runs
+the FS loop — a bonus is one round the host drains segment-by-segment.${cascade ? '\n\nThis game uses a CASCADE mechanic: `onSpin` runs `result.steps` through the CascadeController and reflects `result.multiplier`.' : ''}
 
 ## Commands
 
@@ -57,8 +66,9 @@ Segment-drain of bonuses, \`roundId\` forwarding, free-spins counter (with retri
 unfinished round, win/balance HUD timing, social-mode vocabulary, the legal disclaimer, currency
 formatting, jurisdiction → feature restrictions, the insufficient-funds guard, the play-error modal
 + reconnect overlay, autoplay, the bet ladder + default bet from \`/wallet/authenticate\`, the
-open-redirect \`rgs_url\` guard, and spacebar handling. Write player-facing copy normally — it is
-socialized automatically in social mode.
+open-redirect \`rgs_url\` guard, spacebar handling, pause on tab-blur (ticker + music), and
+double-tap-to-skip (opt out with \`createSlotGame({ skipGesture: false })\`). Write player-facing
+copy normally — it is socialized automatically in social mode.
 
 ## Conventions
 

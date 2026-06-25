@@ -35,6 +35,7 @@ export class AudioManager {
   private _persist: boolean;
   private _storageKey: string;
   private _categories: Record<AudioCategoryName, CategoryState>;
+  private _masterGain = 1.0;
   private _currentMusic: string | null = null;
   private _unlocked = false;
   private _unlockHandler: (() => void) | null = null;
@@ -105,7 +106,7 @@ export class AudioManager {
     if (this._globalMuted || this._categories[category].muted) return;
 
     const { sound } = this._soundModule;
-    const vol = (options?.volume ?? 1) * this._categories[category].volume;
+    const vol = (options?.volume ?? 1) * this._categories[category].volume * this._masterGain;
 
     try {
       sound.play(alias, {
@@ -137,7 +138,7 @@ export class AudioManager {
       if (this._globalMuted || this._categories.music.muted) return;
 
       // Fade out the previous track
-      this.fadeVolume(prevAlias, this._categories.music.volume, 0, fadeDuration, () => {
+      this.fadeVolume(prevAlias, this._categories.music.volume * this._masterGain, 0, fadeDuration, () => {
         try { sound.stop(prevAlias); } catch { /* ignore */ }
       });
 
@@ -147,7 +148,7 @@ export class AudioManager {
           volume: 0,
           loop: true,
         });
-        this.fadeVolume(alias, 0, this._categories.music.volume, fadeDuration);
+        this.fadeVolume(alias, 0, this._categories.music.volume * this._masterGain, fadeDuration);
       } catch (e) {
         console.warn(`[AudioManager] Failed to play music "${alias}":`, e);
       }
@@ -162,7 +163,7 @@ export class AudioManager {
 
       try {
         sound.play(alias, {
-          volume: this._categories.music.volume,
+          volume: this._categories.music.volume * this._masterGain,
           loop: true,
         });
       } catch (e) {
@@ -193,6 +194,17 @@ export class AudioManager {
     const { sound } = this._soundModule;
     sound.stopAll();
     this._currentMusic = null;
+  }
+
+  /** Global gain (0..1) folded into every category's effective volume. Driven by the shell's
+   *  'master' settingChange. Does not affect the persisted per-category volumes. */
+  setMasterVolume(volume: number): void {
+    this._masterGain = Math.max(0, Math.min(1, volume));
+    this.applyVolumes();
+  }
+
+  getMasterVolume(): number {
+    return this._masterGain;
   }
 
   /**
@@ -350,7 +362,7 @@ export class AudioManager {
     const { sound } = this._soundModule;
     // Global mute is owned by sound.muteAll()/unmuteAll() (context.muted),
     // not by volumeAll — mixing both leaves mute un-undoable after reload.
-    sound.volumeAll = 1;
+    sound.volumeAll = this._masterGain; // master multiplies the global bus
   }
 
   private setupMobileUnlock(): void {

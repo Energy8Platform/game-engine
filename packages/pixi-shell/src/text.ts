@@ -1,4 +1,4 @@
-import { Text, TextStyle } from 'pixi.js';
+import { CanvasTextMetrics, Text, TextStyle } from 'pixi.js';
 import { SHELL_FONT_CSS } from './fonts';
 
 // The Pixi shell renders text on canvas, so it relies on the same bundled Inter webfont as the
@@ -57,6 +57,22 @@ export interface TextOpts {
   lineHeight?: number;
   /** drop shadow (the floating readouts use `text-shadow:0 1px 3px rgba(0,0,0,.65)`). */
   shadow?: boolean;
+  /** Trim to ink bounds (default true). Set false when bottom-/baseline-aligning a row of
+   *  same-size texts: trimmed glyph-tight boxes vary per content (e.g. a comma's descent), so
+   *  `align:'end'` would misalign their baselines; an untrimmed line box is uniform. */
+  trim?: boolean;
+}
+
+/** Distance (px) from an untrimmed text's top to its alphabetic baseline, for the given size/weight.
+ *  Pixi's flex has no baseline cross-align, so a row of different-size texts (e.g. a 10px label next
+ *  to a 14px value) must be baseline-aligned by hand: place each at `maxAscent - thisAscent`. Uses
+ *  the same font-metrics Pixi uses to lay text out; falls back to a ratio with no DOM/canvas. */
+export function textBaseline(size: number, weight: TextStyle['fontWeight'] = '400'): number {
+  try {
+    return CanvasTextMetrics.measureFont(`${weight} ${size}px ${FONT_FAMILY}`).ascent;
+  } catch {
+    return size * 0.92; // headless fallback (Inter ascender ≈ 0.92em)
+  }
 }
 
 /** Create a Pixi Text in the shell font, resolution-bumped for crisp small text. */
@@ -85,7 +101,7 @@ export function makeText(str: string, opts: TextOpts): Text {
   }
   // Trim to the ink bounds so vertical centring centres the visible glyphs, not the line box
   // (Pixi Text height includes ascent/descent leading → centred text otherwise sits high).
-  style.trim = true;
+  style.trim = opts.trim ?? true;
   const t = new Text({
     text: opts.upper ? str.toUpperCase() : str,
     style,

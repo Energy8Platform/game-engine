@@ -22,8 +22,10 @@ describe('currency renders as symbol, not code', () => {
     const meta = { code: 'EUR', symbol: '€', decimals: 2 };
     const currency = resolveCurrency(meta, 'EUR');
     expect(currency.symbol).toBe('€');
+    // buildShellConfig is now shell-agnostic (no mount — the pixi host adds `app` at the call
+    // site); supply the DOM shell's mount here to render and assert the currency output.
     const cfg = buildShellConfig({}, model, { balance: 12345, mode: 'base', currency });
-    const shell = createGameShell(cfg);
+    const shell = createGameShell({ ...cfg, mount: document.body });
     shell.render();
     const text = document.body.innerText || document.body.textContent || '';
     expect(text).not.toContain('EUR');
@@ -33,7 +35,7 @@ describe('currency renders as symbol, not code', () => {
   it('a small win (0.0041) shows up to 4 decimals; balance stays at 2', () => {
     const currency = resolveCurrency({ code: 'EUR', symbol: '€', decimals: 2 }, 'EUR');
     const cfg = buildShellConfig({}, model, { balance: 500, mode: 'base', currency });
-    const shell = createGameShell(cfg);
+    const shell = createGameShell({ ...cfg, mount: document.body });
     shell.setWin(0.0041); // tiny win on a small bet
     shell.render();
     const text = document.body.innerText || document.body.textContent || '';

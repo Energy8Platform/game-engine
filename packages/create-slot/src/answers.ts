@@ -20,7 +20,7 @@ function titleCase(id: string): string {
   return id.split(/[-_]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
 
-export function parseFlags(argv: string[]): Partial<Answers> {
+export function parseFlags(argv: string[]): Partial<Answers> & { dir?: string } {
   // normalize --flag=value → --flag value
   const args: string[] = [];
   for (const tok of argv) {
@@ -32,7 +32,7 @@ export function parseFlags(argv: string[]): Partial<Answers> {
     }
   }
 
-  const out: Partial<Answers> = {};
+  const out: Partial<Answers> & { dir?: string } = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--id') out.id = args[++i];
@@ -43,6 +43,7 @@ export function parseFlags(argv: string[]): Partial<Answers> {
     else if (a === '--no-cascades') out.cascades = false;
     else if (a === '--stake') out.stake = true;
     else if (a === '--no-stake') out.stake = false;
+    else if (a === '--dir') (out as { dir?: string }).dir = args[++i];
   }
   return out;
 }
@@ -66,7 +67,7 @@ export function validate(a: Answers): void {
 }
 
 /** Flags that consume the next token as their value — used to skip those tokens during positional scan. */
-const VALUE_FLAGS = new Set(['--id', '--title', '--mechanic', '--grid']);
+const VALUE_FLAGS = new Set(['--id', '--title', '--mechanic', '--grid', '--dir']);
 
 /**
  * Build an answers seed from argv: flags, plus a lone positional used as
@@ -74,7 +75,7 @@ const VALUE_FLAGS = new Set(['--id', '--title', '--mechanic', '--grid']);
  * known value-taking flags (e.g. `--mechanic cluster` — `cluster` is NOT
  * treated as a positional even when no --id is supplied).
  */
-export function seedFromArgv(argv: string[]): Partial<Answers> {
+export function seedFromArgv(argv: string[]): Partial<Answers> & { dir?: string } {
   // Normalize --flag=value to ['--flag', 'value'] for uniform processing
   const args: string[] = [];
   for (const tok of argv) {

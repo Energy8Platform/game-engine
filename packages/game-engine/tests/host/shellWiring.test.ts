@@ -11,7 +11,7 @@ import type { RenderContext, SlotSceneController } from '@/host/sceneController'
  *
  * Drives a REAL GameShell (its buy-bonus overlay + confirm DOM) and replicates the EXACT base-mode
  * `playRound` wiring from createSlotGame against the real runRound + createSlotPlay, over a stub
- * scene that only implements `present`. Asserts the chain reaches play({ action, bet }).
+ * scene that only implements `onSpin`. Asserts the chain reaches play({ action, bet }).
  *
  * createSlotGame() itself can't be unit-tested (GameApplication.init() drives Pixi, which hangs
  * headless); this pins the wiring + the host loop it contains.
@@ -19,9 +19,9 @@ import type { RenderContext, SlotSceneController } from '@/host/sceneController'
 
 interface SpinResult { totalWin: number; roundId?: string; nextActions?: string[]; complete?: boolean }
 
-/** Stub scene = the generated GameScene contract: present only (host owns the loop). */
+/** Stub scene = the generated GameScene contract: onSpin only (host owns the loop). */
 function makeScene(): SlotSceneController<SpinResult> {
-  return { async present() {} };
+  return { async onSpin() {} };
 }
 
 /** The verbatim base-mode wiring from createSlotGame.ts (playRound + handlers). */
@@ -35,18 +35,18 @@ function wireBaseMode(
   const ctx = (action: string): RenderContext => ({
     bet: getBet(), action, mode: 'BASE', formatAmount: String, get turbo() { return 0; },
   });
-  const playRound = (action: string) => {
+  const playRound = async (action: string) => {
     const scene = gameScene();
     if (!scene) return;
-    void runRound<SpinResult>(
+    await runRound<SpinResult>(
       { play: slotPlay.play, ack: slotPlay.ack, scene, context: ctx, roleOf: () => 'base' },
       action,
     );
   };
   shell.on('featureActivate', ({ id }) => { activeFeature = id; });
   shell.on('featureDeactivate', () => { activeFeature = null; });
-  shell.on('spin', () => { playRound(activeFeature ?? 'spin'); });
-  shell.on('buyBonusSelect', ({ id }) => { playRound(id); });
+  shell.on('spin', () => { void playRound(activeFeature ?? 'spin'); });
+  shell.on('buyBonusSelect', ({ id }) => { void playRound(id); });
 }
 
 const cfg = (buyBonus: BonusOption[]): ShellConfig => ({

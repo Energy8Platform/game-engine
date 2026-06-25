@@ -17,6 +17,10 @@ const LOGO_SVG = buildLogoSVG({
 
 interface PreloaderState {
   container: HTMLElement;
+  /** The container's inline `position` before we overrode it — restored on removal so we don't
+   *  permanently clobber the host page's layout (e.g. a `#game { position: fixed; inset: 0 }`
+   *  stylesheet rule, which an inline `relative` would otherwise defeat, collapsing its height). */
+  prevPosition: string;
   overlay: HTMLDivElement;
   styleEl: HTMLStyleElement;
   rectEl: SVGRectElement;
@@ -137,6 +141,10 @@ export function createCSSPreloader(
     }
   `;
 
+  // The absolute overlay needs a positioned ancestor. Only override a STATIC container, and
+  // remember the prior inline value so removeCSSPreloader can restore it (an inline `relative`
+  // left behind would beat the game's `#game { position: fixed; inset: 0 }` and collapse it).
+  const prevPosition = container.style.position;
   container.style.position = container.style.position || 'relative';
   container.appendChild(styleEl);
   container.appendChild(overlay);
@@ -148,6 +156,7 @@ export function createCSSPreloader(
     // We still record state so removeCSSPreloader works.
     state = {
       container,
+      prevPosition,
       overlay,
       styleEl,
       rectEl: null as unknown as SVGRectElement,
@@ -167,6 +176,7 @@ export function createCSSPreloader(
 
   state = {
     container,
+    prevPosition,
     overlay,
     styleEl,
     rectEl,
@@ -251,7 +261,7 @@ export function removeCSSPreloader(_container: HTMLElement): Promise<void> {
   }
 
   state.removed = true;
-  const { overlay, styleEl } = state;
+  const { overlay, styleEl, container, prevPosition } = state;
   overlay.classList.add('ge-preloader-hidden');
 
   return new Promise<void>((resolve) => {
@@ -261,6 +271,9 @@ export function removeCSSPreloader(_container: HTMLElement): Promise<void> {
       settled = true;
       overlay.remove();
       styleEl.remove();
+      // Restore the container's original inline position so the game's own layout
+      // (e.g. `#game { position: fixed; inset: 0 }`) is no longer defeated by our inline override.
+      container.style.position = prevPosition;
       state = null;
       resolve();
     };

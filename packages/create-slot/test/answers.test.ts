@@ -1,6 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { parseFlags, applyDefaults, validate, seedFromArgv } from '../src/answers';
 
+describe('parseFlags --dir', () => {
+  it('parses --dir value', () => {
+    expect(parseFlags(['my-game', '--dir', 'games/foo']).dir).toBe('games/foo');
+  });
+  it('parses --dir=value form', () => {
+    expect(parseFlags(['my-game', '--dir=../foo']).dir).toBe('../foo');
+  });
+  it('omits dir when absent', () => {
+    expect(parseFlags(['my-game']).dir).toBeUndefined();
+  });
+  it('does not treat the --dir value as the positional id', () => {
+    // seedFromArgv must skip the --dir value when scanning for a positional id
+    const seed = seedFromArgv(['cosmic', '--dir', 'games/foo']);
+    expect(seed.id).toBe('cosmic');
+    expect(seed.dir).toBe('games/foo');
+  });
+});
+
 describe('parseFlags', () => {
   it('parses id/mechanic/grid + --no-stake', () => {
     const a = parseFlags(['--id', 'moon-spice', '--mechanic', 'cluster', '--grid', '7x7', '--no-stake']);

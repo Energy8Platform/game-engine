@@ -16,6 +16,18 @@ import {
 
 const PLAQUE_H = 56;
 
+// Bar height constants — used by applyFit() and the public `height` getter.
+const WIDE_PAD_BOTTOM = 4;     // applyFit: padBottom = 4
+const WIDE_SPIN_DISC_H = 86;   // tallest wide element: SpinDisc (86px) bottom-anchors the row
+/** Pixel height the wide bar reserves at the bottom of the screen (at scale=1). */
+export const WIDE_BAR_H = WIDE_PAD_BOTTOM + WIDE_SPIN_DISC_H; // 90
+
+const MOBILE_PAD_BOTTOM = 8;   // applyFitMobile: bottom offset = 8
+// Three rows: top(46) + gap(14) + controls(62) + gap(14) + betRow(46) = 182
+const MOBILE_INNER_H = 46 + 14 + 62 + 14 + 46;
+/** Pixel height the mobile bar reserves at the bottom of the screen (at scale=1). */
+export const MOBILE_BAR_H = MOBILE_PAD_BOTTOM + MOBILE_INNER_H; // 190
+
 // turbo glyph by level — matches BottomBar.turboIcon (0/1 → turbo1, 2 → turbo2, 3 → turbo3).
 function turboIcon(level: number): IconName {
   return (['turbo1', 'turbo1', 'turbo2', 'turbo3'] as const)[Math.max(0, Math.min(3, level))];
@@ -396,10 +408,7 @@ export class BottomBar extends Container {
       gap: 0, // space-between only — plaque()'s default gap (18) inflated the natural width by 4×18,
       //         falsely tripping the fit-scale on narrow phones (over-shrunk → big side padding).
     });
-    const ctlItems: Container[] = [];
-    ctlItems.push(
-      new IconButton('menu', { color: '#fff', hover: tokens.accent, onTap: () => this.host.openMenu() }),
-    );
+    const menuBtn = new IconButton('menu', { color: '#fff', hover: tokens.accent, onTap: () => this.host.openMenu() });
     if (config.features.autoplay) {
       this.autoBtn = new IconButton('autoplay', {
         color: '#fff',
@@ -409,7 +418,6 @@ export class BottomBar extends Container {
         onTap: () => this.onAutoplay(),
       });
       if (state.autoplay.active) this.autoBtn.setGlow(true);
-      ctlItems.push(this.autoBtn);
     }
     if (isBase) {
       // DOM mobile center = isBase ? spin : null — the disc (incl. the autoplay STOP) shows only in
@@ -424,13 +432,6 @@ export class BottomBar extends Container {
       });
       if (state.autoplay.active) this.spin.setAutoplay(true, state.autoplay.remaining);
       if (state.busy) this.spin.setBusy(true);
-      ctlItems.push(this.spin);
-    }
-    if (showFsBlocks) {
-      const fs = state.freeSpins;
-      const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
-      ctlItems.push(mobileReadout(this.host, 'Free spins', fsText));
-      ctlItems.push(mobileReadout(this.host, 'Total win', this.host.fmtWin(fs.totalWin)));
     }
     if (config.features.turbo > 0) {
       this.turboBtn = new IconButton(turboIcon(state.turbo), {
@@ -441,14 +442,40 @@ export class BottomBar extends Container {
         onTap: () => this.onTurbo(),
       });
       this.turboBtn.alpha = state.turbo > 0 ? 1 : 0.5;
-      ctlItems.push(this.turboBtn);
     }
-    if (isBase) {
-      const buy = this.buildBuyBadgeMobile();
-      this.buyBadge = buy;
-      if (buy) ctlItems.push(buy);
+    const buy = isBase ? this.buildBuyBadgeMobile() : null;
+    this.buyBadge = buy;
+
+    if (isBase && this.spin) {
+      // Keep the SPIN disc centred in the bar regardless of which optional side buttons exist:
+      // split into equal-width left/right zones (menu·auto | spin | turbo·buy). With both zones the
+      // same width and equal L/R bar padding, space-between lands the disc at the exact centre —
+      // so dropping the auto or turbo button no longer shifts it left/right.
+      const SIDE_GAP = 12;
+      const leftZone = new FlexBox({ direction: 'row', align: 'center', gap: SIDE_GAP, justify: 'start' });
+      leftZone.add(menuBtn);
+      if (this.autoBtn) leftZone.add(this.autoBtn);
+      const rightZone = new FlexBox({ direction: 'row', align: 'center', gap: SIDE_GAP, justify: 'end' });
+      if (this.turboBtn) rightZone.add(this.turboBtn);
+      if (buy) rightZone.add(buy);
+      const zoneW = Math.max(leftZone.measureSize().w, rightZone.measureSize().w);
+      leftZone.setLayoutSize(zoneW, undefined);
+      rightZone.setLayoutSize(zoneW, undefined);
+      controls.add(leftZone);
+      controls.add(this.spin);
+      controls.add(rightZone);
+    } else {
+      // FS / replay: no spin disc — flow the items (menu · auto? · free-spins · total win · turbo?).
+      controls.add(menuBtn);
+      if (this.autoBtn) controls.add(this.autoBtn);
+      if (showFsBlocks) {
+        const fs = state.freeSpins;
+        const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
+        controls.add(mobileReadout(this.host, 'Free spins', fsText));
+        controls.add(mobileReadout(this.host, 'Total win', this.host.fmtWin(fs.totalWin)));
+      }
+      if (this.turboBtn) controls.add(this.turboBtn);
     }
-    for (const c of ctlItems) controls.add(c);
 
     // bet: − value + (dark)
     const betRow = plaque(this.host, 'dark', {
@@ -533,6 +560,15 @@ export class BottomBar extends Container {
   }
 
   // ── positioning / fit-scale (called by the shell after construction) ─────────
+
+  /** Pixel height this bar reserves at the bottom of the screen.
+   *  Reflects the current wide/mobile layout at scale=1 (the shell never clips the bar taller
+   *  than this). Correct immediately after construction; does not change until `applyFit()` is
+   *  called with a different layout. */
+  get height(): number {
+    return this.host.layout === 'mobile' ? MOBILE_BAR_H : WIDE_BAR_H;
+  }
+
   applyFit(): void {
     if (this.host.layout === 'mobile') {
       this.applyFitMobile();
@@ -541,9 +577,9 @@ export class BottomBar extends Container {
     const W = this.host.screenW;
     const H = this.host.screenH;
     const padX = 18;
-    const padBottom = 4; // sits the bar lower toward the frame edge (was 14)
+    const padBottom = WIDE_PAD_BOTTOM; // sits the bar lower toward the frame edge (was 14)
     const GAP = 14; // .ge-shell-bottom { gap:14px } between zones
-    const centerY = H - padBottom - 86 / 2; // tallest element (SPIN disc) bottom-anchored
+    const centerY = H - padBottom - WIDE_SPIN_DISC_H / 2; // tallest element (SPIN disc) bottom-anchored
     const winCenterY = centerY - PLAQUE_H / 2;
     const plaqueTop = centerY - PLAQUE_H / 2;
     this.inner.scale.set(1);
@@ -609,7 +645,7 @@ export class BottomBar extends Container {
     this.inner.scale.set(s);
     // Centre the scaled stack so left/right padding match. It was anchored at x=12, so once the
     // stack scaled down on narrow phones (mobile-s) it left a big gap on the right edge.
-    this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - 8);
+    this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - MOBILE_PAD_BOTTOM);
   }
 }
 

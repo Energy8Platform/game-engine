@@ -93,6 +93,16 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     return this.app.screen.height;
   }
 
+  /** Height of the bottom control bar in px (0 before first layout, or in replay-only chrome). */
+  get barHeight(): number {
+    return this.bar?.height ?? 0;
+  }
+
+  /** Insets a scene should avoid. Only the bottom bar is reserved; the rest is full-bleed. */
+  get safeArea(): { top: number; right: number; bottom: number; left: number } {
+    return { top: 0, right: 0, bottom: this.barHeight, left: 0 };
+  }
+
   t(text: string): string {
     return this.config.isSocial ? socialize(text) : text;
   }
@@ -186,7 +196,10 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
-      const blur = new BlurFilter({ strength: 10, quality: 5 });
+      // Heavier + smoother frost (≈ backdrop-filter: blur(24px)). High strength alone under-samples
+      // into directional streaks (visible as an uneven smear over the bright control bar), so we pair
+      // a strong radius with a high pass count (quality) — the extra passes are a one-off at open time.
+      const blur = new BlurFilter({ strength: 18, quality: 8 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       sprite.filters = [blur];
       this.modalLayer.addChild(sprite); // below the layer node, which is added next
@@ -303,6 +316,12 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   setFreeSpins(fs: FreeSpinsState): void {
     this.state.freeSpins = fs;
     this.render();
+  }
+
+  /** Show/hide the whole shell (bar + overlays). Used by the host to scope the bar to the
+   *  slot scene — hidden over the intro / non-slot scenes. */
+  setVisible(visible: boolean): void {
+    this.root.visible = visible;
   }
 
   /** Recolour the shell at runtime (switch dark/light scheme or accent). */
