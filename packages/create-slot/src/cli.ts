@@ -1,5 +1,6 @@
 import { argv, exit } from 'node:process';
 import { resolve } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
 import { seedFromArgv, applyDefaults } from './answers';
 import { prompt } from './prompts';
 import { generate } from './generate';
@@ -15,9 +16,13 @@ async function main(): Promise<void> {
   const seed = seedFromArgv(argv.slice(2));
   const yes = argv.includes('--yes');
   const answers = yes ? applyDefaults(seed) : await prompt(seed);
-  const dir = resolve(process.cwd(), answers.id);
+  // Target dir: explicit --dir (resolved against cwd) wins; else cwd/<id> (backward compatible).
+  const dir = seed.dir ? resolve(process.cwd(), seed.dir) : resolve(process.cwd(), answers.id);
+  if (existsSync(dir) && readdirSync(dir).length > 0) {
+    throw new Error(`Target directory ${dir} already exists and is not empty.`);
+  }
   await generate(answers, dir, PUBLISHED);
-  console.log(`\n✓ Created ${answers.id} at ${dir}\n  cd ${answers.id} && npm install && npm run dev\n`);
+  console.log(`\n✓ Created ${answers.id} at ${dir}\n  cd ${seed.dir ?? answers.id} && npm install && npm run dev\n`);
 }
 
 main().catch((err) => { console.error(err.message); exit(1); });
