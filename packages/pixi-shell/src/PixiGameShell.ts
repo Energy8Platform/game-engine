@@ -201,6 +201,10 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
+      // Darken the frosted snapshot (tint multiplies) so bright UI — the purple buy badge, the white
+      // spin disc — recedes instead of blooming through the blur into bright halos. ~38% keeps the
+      // backdrop readable while pushing it firmly behind the modal.
+      sprite.tint = 0x606060;
       const blur = new BlurFilter({ strength: 10, quality: 6 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       sprite.filters = [blur];
