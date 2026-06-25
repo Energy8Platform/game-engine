@@ -318,8 +318,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       active: () => presenting,
       onSkip: () => { currentSegmentAbort?.abort(); gameScene()?.onSkip?.(); },
     });
-    // Listen for taps on the scene root (the scene container, which is app.stage — the shell bar
-    // mounts after and eats its own pointer events, so taps reaching here are in the play area).
+    // Listen for taps on the scene root (game.worldRoot — the scaled scene container). The shell
+    // lives on the sibling uiLayer, so its bar taps never reach worldRoot — taps here are the play area.
     game.scenes.root.eventMode = 'static';
     game.scenes.root.on('pointertap', () => skip.tap(performance.now()));
 
