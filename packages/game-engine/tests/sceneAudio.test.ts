@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createSceneAudio } from '../../src/host/sceneAudio';
+import { createSceneAudio } from '@/host/sceneAudio';
 
 function fakeManager() {
   return {
