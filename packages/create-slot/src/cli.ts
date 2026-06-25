@@ -8,7 +8,7 @@ import { generate } from './generate';
 // Dependency versions written into a scaffolded game's package.json. Keep in lock-step with the
 // published @energy8platform/* versions (a create-slot test asserts these match the workspace).
 const PUBLISHED: Parameters<typeof generate>[2] = {
-  'platform-core': '^0.25.0', 'game-engine': '^0.18.0', 'stake-kit': '^0.2.0', 'stake-bridge': '^0.3.0',
+  'platform-core': '^0.25.1', 'game-engine': '^0.19.0', 'stake-kit': '^0.2.0', 'stake-bridge': '^0.3.0',
   'stake-math-tools': '^0.8.0',
 };
 

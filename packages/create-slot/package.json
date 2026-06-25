@@ -1,9 +1,14 @@
 {
   "name": "@energy8platform/create-slot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "bin": { "create-slot": "dist/cli.js" },
-  "files": ["dist", "template"],
+  "bin": {
+    "create-slot": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "template"
+  ],
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
     "test": "vitest run",
