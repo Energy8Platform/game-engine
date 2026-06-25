@@ -1,11 +1,13 @@
 // packages/game-engine/src/host/createSlotGame.ts
+import { Container } from 'pixi.js';
 import { GameApplication } from '../core';
 import { buildAppConfig } from './buildConfig';
 import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
 import { showFatalError, installGlobalErrorHandlers } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
-import type { ShellMode } from '@energy8platform/platform-core/shell';
+import type { ShellMode } from '@energy8platform/pixi-shell';
+import type { SceneApi, SlotSceneController } from './sceneController';
 
 /**
  * One-call slot bootstrap: preboot → (optional Stake bridge) → GameApplication
@@ -130,7 +132,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   });
 
   if (opts.shell) {
-    const { createGameShell } = await import('@energy8platform/platform-core/shell');
+    const { createPixiShell } = await import('@energy8platform/pixi-shell');
     const { buildShellConfig } = await import('./shellConfig');
     const { resolveReplayBonusId } = await import('./replay');
 
@@ -190,7 +192,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         `| RESOLVED.symbol=${runtime.currency?.symbol ?? '∅'} pos=${runtime.currency?.position ?? '∅'}`,
       );
     }
-    shell = createGameShell(buildShellConfig(opts.shell, opts.model, runtime));
+    // pixi-shell mounts its root onto app.stage (above the scene container). The host adds the
+    // mount target (`app`); buildShellConfig produces everything else.
+    shell = createPixiShell({ ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app });
     // The gate tracks the live wallet (for the affordability guard) but only PAINTS the balance per
     // the HUD-timing rule: the debit is buffered during play→present and shown at afterPresent; the
     // async win credit (/wallet/end-round, after the final ack) paints when it lands. `balanceGate`
