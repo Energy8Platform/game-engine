@@ -174,11 +174,29 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   }
 
   // ── one card ──────────────────────────────────────────────────────────────
-  private buildCard(bonus: BonusOption, cardW: number, em: number, mobile: boolean, areaH: number): BonusCard {
+  private buildCard(bonus: BonusOption, cardW: number, em: number, mobile: boolean, areaH: number): CardView {
     const accent = effectiveAccent(bonus);
     const ink = contrastText(accent);
     const price = bonus.priceMultiplier * this.host.state.bet;
     const enabled = this.isAffordable(bonus);
+    const select = (): void => {
+      if (this.dragged) return; // a scroll gesture, not a tap
+      if (this.isAffordable(bonus)) this.openConfirm(bonus, accent, ink);
+    };
+    // Game-supplied card UI (BonusOption.custom): the shell keeps the card slot + the buy/confirm
+    // flow via ctx.select(); the game owns the interior. (DOM .ge-bonus-card--custom: no shell bg.)
+    if (bonus.custom) {
+      const content = bonus.custom({
+        bonus,
+        bet: this.host.state.bet,
+        price,
+        priceText: this.host.fmt(price),
+        disabled: !enabled,
+        accent,
+        select,
+      });
+      return new CustomCard(content, cardW);
+    }
     const card = new BonusCard({
       host: this.host,
       bonus,
@@ -189,10 +207,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
       priceText: this.host.fmt(price),
       enabled,
       ctaLabel: this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'),
-      onSelect: () => {
-        if (this.dragged) return; // a scroll gesture, not a tap
-        if (this.isAffordable(bonus)) this.openConfirm(bonus, accent, ink);
-      },
+      onSelect: select,
     });
     void mobile;
     void areaH;
@@ -352,6 +367,29 @@ class BuyBonusOverlay extends Container implements ShellLayer {
 }
 
 // ── card view ──────────────────────────────────────────────────────────────────
+/** A card in the strip — the default `BonusCard` or a game-supplied `CustomCard`. The overlay only
+ *  needs its display node, its natural height, and a way to stretch it to the row's tallest card. */
+interface CardView {
+  node: Container;
+  height: number;
+  setHeight(total: number): void;
+}
+
+/** Wrapper for a game-supplied custom card (`BonusOption.custom`). The shell owns the slot (sizing +
+ *  the scroll/confirm flow via `ctx.select`); the game owns the visuals — no shell bg/border, like
+ *  the DOM's `.ge-bonus-card--custom`. */
+class CustomCard implements CardView {
+  readonly node = new Container();
+  height = 0;
+  constructor(content: Container, _cardW: number) {
+    this.node.addChild(content);
+    this.height = Math.max(1, content.getLocalBounds().height);
+  }
+  setHeight(total: number): void {
+    this.height = total; // the game owns its own layout; we only record the slot height
+  }
+}
+
 interface BonusCardOpts {
   host: ShellHost;
   bonus: BonusOption;
@@ -365,7 +403,7 @@ interface BonusCardOpts {
   onSelect: () => void;
 }
 
-class BonusCard {
+class BonusCard implements CardView {
   readonly node = new Container();
   height = 0;
   private opts: BonusCardOpts;
@@ -382,9 +420,14 @@ class BonusCard {
     const sidePad = 1.1 * em;
     const innerW = cardW - sidePad * 2;
 
+    // disabled (.ge-bonus-off): the title and the lit volatility bolts desaturate to grey, on top of
+    // the whole-card 0.62 alpha — matches the DOM, where they aren't just dimmed but recoloured.
+    const titleColor = opts.enabled ? accent : 'rgba(255,255,255,.6)';
+    const volColor = opts.enabled ? accent : 'rgba(255,255,255,.4)';
+
     const top = new Container();
     let y = 1.25 * em;
-    const title = makeText(bonus.title, { size: 1.3 * em, weight: '800', color: accent, letterSpacing: 1.3 * em * 0.04, upper: true, align: 'center', wrapWidth: innerW });
+    const title = makeText(bonus.title, { size: 1.3 * em, weight: '800', color: titleColor, letterSpacing: 1.3 * em * 0.04, upper: true, align: 'center', wrapWidth: innerW });
     title.position.set((cardW - title.width) / 2, y);
     top.addChild(title);
     y += title.height + 0.75 * em;
@@ -401,7 +444,7 @@ class BonusCard {
     // bottom block: volatility + price
     let by = 0;
     if (bonus.volatility) {
-      const vol = volatilityRow(host, bonus.volatility, accent, 2.1 * em);
+      const vol = volatilityRow(host, bonus.volatility, volColor, 2.1 * em);
       vol.position.set((cardW - vol.width) / 2, by);
       this.bottomBlock.addChild(vol);
       by += 2.1 * em + 0.55 * em;

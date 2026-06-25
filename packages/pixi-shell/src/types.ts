@@ -10,8 +10,6 @@ import type { Application, Container } from 'pixi.js';
 export type {
   ShellMode,
   CurrencyConfig,
-  BonusOption,
-  BonusCardContext,
   ThemeConfig,
   PaytableRow,
   PaylineDef,
@@ -22,13 +20,11 @@ export type {
   GameInfoSection,
   GameInfoContent,
   AutoplayConfig,
-  ShellFeatures,
   AutoplayOptions,
   FreeSpinsState,
   ModalAction,
   ReplayModalOptions,
   ModalOptions,
-  ShellState,
   ShellEvents,
 } from '@energy8platform/platform-core/shell';
 
@@ -37,8 +33,37 @@ import type {
   GameInfoContent,
   CurrencyConfig,
   ShellMode,
-  ShellFeatures,
+  BonusOption as CoreBonusOption,
+  BonusCardContext as CoreBonusCardContext,
+  ShellFeatures as CoreShellFeatures,
+  ShellState as CoreShellState,
 } from '@energy8platform/platform-core/shell';
+
+// ── Renderer-specific overrides ──────────────────────────────────────────────
+// The shared contract is reused verbatim EXCEPT where it bakes in the DOM renderer: a
+// `BonusOption.custom` card returns an `HTMLElement` in platform-core, which a Pixi scene can't
+// mount. Re-exporting that shape would advertise a hook that silently no-ops, so we redefine the few
+// types that reference it — the Pixi `custom` hook returns a Pixi `Container` and actually renders.
+
+/** A buy-bonus option. Same data contract as the DOM shell; a `custom` card renderer returns a Pixi
+ *  `Container` (the shell keeps the card slot + live re-pricing + buy/confirm flow via `ctx.select`;
+ *  the game owns the interior). */
+export interface BonusOption extends Omit<CoreBonusOption, 'custom'> {
+  custom?: (ctx: BonusCardContext) => Container;
+}
+
+/** Context handed to a Pixi `BonusOption.custom` renderer — the DOM shell's fields, Pixi `bonus`. */
+export interface BonusCardContext extends Omit<CoreBonusCardContext, 'bonus'> {
+  bonus: BonusOption;
+}
+
+export interface ShellFeatures extends Omit<CoreShellFeatures, 'buyBonus'> {
+  buyBonus: BonusOption[] | false;
+}
+
+export interface ShellState extends Omit<CoreShellState, 'activeFeature'> {
+  activeFeature: BonusOption | null;
+}
 
 /** Pixi-shell configuration — the renderer-agnostic shell config with a Pixi mount target.
  *  Mirrors platform-core's `ShellConfig` field-for-field, swapping `mount: HTMLElement` for the
