@@ -191,15 +191,17 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       // the downscale + upscale already softens heavily, and a moderate strength stays within the
       // blur kernel (a huge strength under-samples → a thin, weak blur). Net: a strong frosted
       // backdrop that hides the shell well, far cheaper than a full-res large-radius blur.
-      const texture = RenderTexture.create({ width: w, height: h, resolution: 0.5 });
+      // The blur STRENGTH is the radius in the snapshot's texel space; a low snapshot resolution is
+      // what makes it strong on screen (each texel covers more screen, so the same kernel blurs a far
+      // bigger area) AND smooth over the bright control bar (the downscale averages out fine detail).
+      // A huge `strength` instead under-samples into a thinner, weaker, streaky blur — so we go the
+      // other way: heavier downscale (¼ res) + a moderate kernel.
+      const texture = RenderTexture.create({ width: w, height: h, resolution: 0.25 });
       this.modalLayer.visible = false; // never capture the (empty) modal layer / a stale backdrop
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
-      // Heavier + smoother frost (≈ backdrop-filter: blur(24px)). High strength alone under-samples
-      // into directional streaks (visible as an uneven smear over the bright control bar), so we pair
-      // a strong radius with a high pass count (quality) — the extra passes are a one-off at open time.
-      const blur = new BlurFilter({ strength: 18, quality: 8 });
+      const blur = new BlurFilter({ strength: 10, quality: 6 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       sprite.filters = [blur];
       this.modalLayer.addChild(sprite); // below the layer node, which is added next
