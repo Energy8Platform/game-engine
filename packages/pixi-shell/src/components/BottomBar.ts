@@ -408,10 +408,7 @@ export class BottomBar extends Container {
       gap: 0, // space-between only — plaque()'s default gap (18) inflated the natural width by 4×18,
       //         falsely tripping the fit-scale on narrow phones (over-shrunk → big side padding).
     });
-    const ctlItems: Container[] = [];
-    ctlItems.push(
-      new IconButton('menu', { color: '#fff', hover: tokens.accent, onTap: () => this.host.openMenu() }),
-    );
+    const menuBtn = new IconButton('menu', { color: '#fff', hover: tokens.accent, onTap: () => this.host.openMenu() });
     if (config.features.autoplay) {
       this.autoBtn = new IconButton('autoplay', {
         color: '#fff',
@@ -421,7 +418,6 @@ export class BottomBar extends Container {
         onTap: () => this.onAutoplay(),
       });
       if (state.autoplay.active) this.autoBtn.setGlow(true);
-      ctlItems.push(this.autoBtn);
     }
     if (isBase) {
       // DOM mobile center = isBase ? spin : null — the disc (incl. the autoplay STOP) shows only in
@@ -436,13 +432,6 @@ export class BottomBar extends Container {
       });
       if (state.autoplay.active) this.spin.setAutoplay(true, state.autoplay.remaining);
       if (state.busy) this.spin.setBusy(true);
-      ctlItems.push(this.spin);
-    }
-    if (showFsBlocks) {
-      const fs = state.freeSpins;
-      const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
-      ctlItems.push(mobileReadout(this.host, 'Free spins', fsText));
-      ctlItems.push(mobileReadout(this.host, 'Total win', this.host.fmtWin(fs.totalWin)));
     }
     if (config.features.turbo > 0) {
       this.turboBtn = new IconButton(turboIcon(state.turbo), {
@@ -453,14 +442,40 @@ export class BottomBar extends Container {
         onTap: () => this.onTurbo(),
       });
       this.turboBtn.alpha = state.turbo > 0 ? 1 : 0.5;
-      ctlItems.push(this.turboBtn);
     }
-    if (isBase) {
-      const buy = this.buildBuyBadgeMobile();
-      this.buyBadge = buy;
-      if (buy) ctlItems.push(buy);
+    const buy = isBase ? this.buildBuyBadgeMobile() : null;
+    this.buyBadge = buy;
+
+    if (isBase && this.spin) {
+      // Keep the SPIN disc centred in the bar regardless of which optional side buttons exist:
+      // split into equal-width left/right zones (menu·auto | spin | turbo·buy). With both zones the
+      // same width and equal L/R bar padding, space-between lands the disc at the exact centre —
+      // so dropping the auto or turbo button no longer shifts it left/right.
+      const SIDE_GAP = 12;
+      const leftZone = new FlexBox({ direction: 'row', align: 'center', gap: SIDE_GAP, justify: 'start' });
+      leftZone.add(menuBtn);
+      if (this.autoBtn) leftZone.add(this.autoBtn);
+      const rightZone = new FlexBox({ direction: 'row', align: 'center', gap: SIDE_GAP, justify: 'end' });
+      if (this.turboBtn) rightZone.add(this.turboBtn);
+      if (buy) rightZone.add(buy);
+      const zoneW = Math.max(leftZone.measureSize().w, rightZone.measureSize().w);
+      leftZone.setLayoutSize(zoneW, undefined);
+      rightZone.setLayoutSize(zoneW, undefined);
+      controls.add(leftZone);
+      controls.add(this.spin);
+      controls.add(rightZone);
+    } else {
+      // FS / replay: no spin disc — flow the items (menu · auto? · free-spins · total win · turbo?).
+      controls.add(menuBtn);
+      if (this.autoBtn) controls.add(this.autoBtn);
+      if (showFsBlocks) {
+        const fs = state.freeSpins;
+        const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
+        controls.add(mobileReadout(this.host, 'Free spins', fsText));
+        controls.add(mobileReadout(this.host, 'Total win', this.host.fmtWin(fs.totalWin)));
+      }
+      if (this.turboBtn) controls.add(this.turboBtn);
     }
-    for (const c of ctlItems) controls.add(c);
 
     // bet: − value + (dark)
     const betRow = plaque(this.host, 'dark', {
