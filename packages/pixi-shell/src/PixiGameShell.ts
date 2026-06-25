@@ -201,6 +201,13 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
+      // Overscan ~6%: the low-res blurred snapshot fades/clips a strip (~20px) short of the right &
+      // bottom edges, where the SHARP scene would otherwise show through the veil. Anchor-centre and
+      // scale up so those edges sit just off-screen — the backdrop fully covers the canvas.
+      sprite.anchor.set(0.5);
+      sprite.position.set(w / 2, h / 2);
+      sprite.width = w * 1.06;
+      sprite.height = h * 1.06;
       // Match the DOM shell's `backdrop-filter: blur(20px) saturate(120%)` over its rgba(12,17,28,.5)
       // veil (the same token the overlay paints on top): a clean ~20px Gaussian (strength 10 at ½ res),
       // a high pass count so it reads as a smooth frost (not a streaky/blocky smear), and a +20%
