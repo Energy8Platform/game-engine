@@ -1,4 +1,4 @@
-import { Application, Assets, Ticker } from 'pixi.js';
+import { Application, Assets, Container, Ticker } from 'pixi.js';
 import type { CasinoGameSDK } from '@energy8platform/game-sdk';
 import type { InitData, GameConfigData, SessionData } from '@energy8platform/game-sdk';
 import { createPlatformSession, type PlatformSession } from '@energy8platform/platform-core';
@@ -65,6 +65,14 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
   /** Viewport manager */
   public viewport!: ViewportManager;
+
+  /** Scaled world root (holds scenes). Transformed by the ViewportManager to fit the design
+   *  resolution; lives below the UI layer on app.stage. */
+  public worldRoot!: Container;
+
+  /** Unscaled, screen-space UI layer. Sits above {@link worldRoot} and is NOT touched by the
+   *  viewport transform — children fill the real screen (e.g. the host's shell + overlay). */
+  public uiLayer!: Container;
 
   /** SDK instance (null in offline mode) */
   public sdk: CasinoGameSDK | null = null;
@@ -287,7 +295,15 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     // Input Manager
     this.input = new InputManager(this.app.canvas as HTMLCanvasElement);
 
-    // Viewport Manager
+    // Stage layers: a scaled world root (scenes, transformed to design resolution by the
+    // viewport) below an unscaled UI layer (screen space). app.stage itself stays identity.
+    this.worldRoot = new Container();
+    this.worldRoot.label = 'world';
+    this.uiLayer = new Container();
+    this.uiLayer.label = 'ui';
+    this.app.stage.addChild(this.worldRoot, this.uiLayer);
+
+    // Viewport Manager — scales worldRoot (NOT app.stage), so the UI layer is unscaled.
     this.viewport = new ViewportManager(
       this.app,
       this._container!,
@@ -297,16 +313,17 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
         scaleMode: this.config.scaleMode!,
         orientation: this.config.orientation!,
       },
+      this.worldRoot,
     );
 
-    // Wire SceneManager to the PixiJS stage
-    this.scenes.setRoot(this.app.stage);
+    // Wire SceneManager to the scaled world root
+    this.scenes.setRoot(this.worldRoot);
     this.scenes.setApp(this);
 
     // Wire viewport resize → scene manager + input manager
     this.viewport.on('resize', ({ width, height, scale }) => {
       this.scenes.resize(width, height);
-      this.input.setViewportTransform(scale, this.app.stage.x, this.app.stage.y);
+      this.input.setViewportTransform(scale, this.worldRoot.x, this.worldRoot.y);
       this.emit('resize', { width, height });
     });
 
