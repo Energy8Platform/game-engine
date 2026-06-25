@@ -1,4 +1,4 @@
-import { BlurFilter, ColorMatrixFilter, Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
+import { BlurFilter, Color, Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
 import type { ShellTokens } from '../theme';
 import type { IconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
@@ -11,6 +11,27 @@ import { FlexBox, type Sizable } from './flex';
 // — same sizes, colours, hover/press behaviour.
 
 // ── interaction helpers ──────────────────────────────────────────────────────
+/** grayscale(.5) brightness(.72) baked into a colour — the DOM's disabled-button filter applied to
+ *  the fill directly. A ColorMatrixFilter would render the badge to a low-res texture and pixelate
+ *  its ring; this keeps the geometry crisp. Pixi's Color parses named accents ('green') too. */
+function dimColor(input: string): string {
+  let r: number, g: number, b: number;
+  try {
+    const [cr, cg, cb] = new Color(input).toRgbArray();
+    r = cr * 255;
+    g = cg * 255;
+    b = cb * 255;
+  } catch {
+    return input;
+  }
+  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+  const ch = (c: number): string =>
+    Math.round(Math.max(0, Math.min(255, (c + (luma - c) * 0.5) * 0.72)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${ch(r)}${ch(g)}${ch(b)}`;
+}
+
 export function attachHover(node: Container, over: () => void, out: () => void): void {
   node.on('pointerover', over);
   node.on('pointerout', out);
@@ -439,6 +460,7 @@ export class BuyBonusBadge extends Container implements Sizable {
   private disc: Graphics;
   private labelText: Text;
   private bg: string;
+  private fg: string;
   private border: number;
   private ticker: Ticker;
   private _disabled = false;
@@ -451,6 +473,7 @@ export class BuyBonusBadge extends Container implements Sizable {
     this.size = opts.size ?? 80;
     this.border = opts.border ?? 3;
     this.bg = opts.bg;
+    this.fg = opts.fg ?? '#ffffff';
     this.ticker = opts.ticker;
     this.disc = new Graphics();
     this.labelText = makeText(opts.label, {
@@ -475,7 +498,9 @@ export class BuyBonusBadge extends Container implements Sizable {
   }
 
   private paint(hovering: boolean): void {
-    drawDisc(this.disc, this.size, this.bg, this.border);
+    // disabled → grayscale(.5) brightness(.72) baked into the fill/label (no filter → crisp ring)
+    drawDisc(this.disc, this.size, this._disabled ? dimColor(this.bg) : this.bg, this.border);
+    this.labelText.style.fill = this._disabled ? dimColor(this.fg) : this.fg;
     const on = hovering && !this._disabled;
     drawHalo(this.glow, this.ring, this.size, this.bg, on); // solid 3px accent ring + soft glow
     if (on) this.startPulse();
@@ -521,21 +546,7 @@ export class BuyBonusBadge extends Container implements Sizable {
     this._disabled = v;
     this.cursor = v ? 'default' : 'pointer';
     this.eventMode = v ? 'none' : 'static';
-    // .ge-shell-buybonus[disabled] { filter:grayscale(.5) brightness(.72) } — desaturate + darken
-    // opaquely (a faded green still read as an active button), exactly like the DOM.
-    try {
-      if (v) {
-        const f = new ColorMatrixFilter();
-        f.grayscale(0.5, false);
-        f.brightness(0.72, true);
-        this.filters = [f];
-      } else {
-        this.filters = [];
-      }
-    } catch {
-      this.alpha = v ? 0.6 : 1; // no-GL fallback (tests)
-    }
-    this.paint(false);
+    this.paint(false); // disabled look is baked into the fill/label (see paint) — crisp, no filter
   }
 
   setLayoutSize(): void {

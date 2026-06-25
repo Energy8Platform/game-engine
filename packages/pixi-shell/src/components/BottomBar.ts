@@ -533,7 +533,7 @@ export class BottomBar extends Container {
     const W = this.host.screenW;
     const H = this.host.screenH;
     const padX = 18;
-    const padBottom = 14;
+    const padBottom = 8; // sits the bar lower toward the frame edge (was 14)
     const GAP = 14; // .ge-shell-bottom { gap:14px } between zones
     const centerY = H - padBottom - 86 / 2; // tallest element (SPIN disc) bottom-anchored
     const winCenterY = centerY - PLAQUE_H / 2;
@@ -590,12 +590,12 @@ export class BottomBar extends Container {
       need = Math.max(need, nat);
     }
     const avail = W - 24;
-    // Rows use space-between, so on overflow content is left-anchored and spills off the RIGHT;
-    // scale from the bottom-left corner so avail/need fits it exactly (matches the DOM).
     const s = need > avail + 1 && avail > 0 ? Math.max(0.4, avail / need) : 1;
-    const stackH = this.inner.getLocalBounds().height;
+    const b = this.inner.getLocalBounds();
     this.inner.scale.set(s);
-    this.inner.position.set(12, H - stackH * s - 8);
+    // Centre the scaled stack so left/right padding match. It was anchored at x=12, so once the
+    // stack scaled down on narrow phones (mobile-s) it left a big gap on the right edge.
+    this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - 8);
   }
 }
 
@@ -639,10 +639,11 @@ class WinPill extends Container {
     this.bg.clear();
     this.bg.roundRect(0, 0, w, h, this.lifted ? 999 : 16);
     this.bg.fill(this.host.tokens.plaqueGlass);
-    // Centre the small WIN label on the value's CAP height — not the pill, and not the value's ink
-    // (which trim extends down to the comma's descender, leaving the label baseline-aligned/low).
-    const valTop = (h - this.value.height) / 2;
+    // Centre the value's CAP height (the digits) in the pill — NOT its full ink box, whose height
+    // trim extends down to the comma's descender, which would lift the digits up and leave uneven
+    // top/bottom padding (worse the shorter the pill). The small WIN label then centres on the caps.
     const valCapH = 16 * 0.72; // value font (16px) cap height, excluding the comma descender
+    const valTop = (h - valCapH) / 2;
     this.value.position.set(padX + this.labelText.width + gap, valTop);
     this.labelText.position.set(padX, valTop + (valCapH - this.labelText.height) / 2);
     this.outerWidth = w;
