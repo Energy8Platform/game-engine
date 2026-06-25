@@ -196,7 +196,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       // bigger area) AND smooth over the bright control bar (the downscale averages out fine detail).
       // A huge `strength` instead under-samples into a thinner, weaker, streaky blur — so we go the
       // other way: heavier downscale (¼ res) + a moderate kernel.
-      const texture = RenderTexture.create({ width: w, height: h, resolution: 0.5 });
+      const texture = RenderTexture.create({ width: w, height: h, resolution: 0.25 });
       this.modalLayer.visible = false; // never capture the (empty) modal layer / a stale backdrop
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
@@ -205,7 +205,9 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       // veil (the same token the overlay paints on top): a clean ~20px Gaussian (strength 10 at ½ res),
       // a high pass count so it reads as a smooth frost (not a streaky/blocky smear), and a +20%
       // saturation lift so the blurred game stays colourful rather than washing out grey.
-      const blur = new BlurFilter({ strength: 10, quality: 8 });
+      // Effective on-screen blur ≈ strength / resolution = 12 / 0.25 ≈ 48px — strong enough that the
+      // background's shapes dissolve into a frost. Bump `strength` (or drop `resolution`) for more.
+      const blur = new BlurFilter({ strength: 12, quality: 6 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       const saturate = new ColorMatrixFilter();
       saturate.saturate(0.3, false); // x = amount*2/3 + 1 ≈ 1.2 → saturate(120%)
