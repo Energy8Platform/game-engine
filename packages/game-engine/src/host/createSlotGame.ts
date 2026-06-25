@@ -104,15 +104,26 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   // Build slotPlay FIRST — bindGameScene() needs it to be in scope.
   const { createSlotPlay, enrichRoundMeta } = await import('./slotPlay');
 
+  // Injected once per controller scene the first time it becomes current (see `ensureCreated`).
+  // `sceneApi` is assembled inside the shell block; until then injection is a no-op (a shell-less
+  // launch never builds the api, so a controller scene simply never receives onCreate).
+  let sceneApi: SceneApi | null = null;
+  const createdScenes = new WeakSet<object>();
+  const ensureCreated = (s: SlotSceneController<T>) => {
+    if (!sceneApi || createdScenes.has(s)) return;
+    createdScenes.add(s);
+    s.onCreate?.(sceneApi);
+  };
+
   /** The current scene IFF it implements the SlotSceneController contract (duck-typed on
-   *  `present`). The host drives the play loop against whichever scene is current. */
+   *  `onSpin`). The host drives the play loop against whichever scene is current. Injects the
+   *  SceneApi via onCreate the first time a controller scene is seen. */
   const gameScene = () => {
-    const s = game.scenes.current?.scene as
-      | Partial<import('./sceneController').SlotSceneController<T>>
-      | undefined;
-    return typeof s?.present === 'function'
-      ? (s as import('./sceneController').SlotSceneController<T>)
-      : undefined;
+    const s = game.scenes.current?.scene as Partial<SlotSceneController<T>> | undefined;
+    if (typeof s?.onSpin !== 'function') return undefined;
+    const scene = s as SlotSceneController<T>;
+    ensureCreated(scene);
+    return scene;
   };
 
   const { runRound } = await import('./runRound');
@@ -205,6 +216,33 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
     let currentTurbo = shell.state.turbo;
     shell.on('turboChange', (level: number) => { currentTurbo = level; });
+
+    // Overlay layer sits ABOVE the shell (the shell already mounted its root onto app.stage; adding
+    // ours afterwards keeps it on top). It eats pointer events while open so shell controls are
+    // unreachable. Mounted on the same stage; tracks viewport via game's 'resize' event.
+    const { createSceneAudio } = await import('./sceneAudio');
+    const { createOverlayController } = await import('./overlayController');
+    const overlayLayer = new Container();
+    overlayLayer.label = 'overlay';
+    game.app.stage.addChild(overlayLayer);
+    const overlayCtl = createOverlayController({
+      parent: overlayLayer,
+      size: () => ({ width: game.app.renderer.width, height: game.app.renderer.height }),
+    });
+    game.on('resize', ({ width, height }: { width: number; height: number }) =>
+      overlayCtl.resize(width, height),
+    );
+
+    // Capabilities injected once per controller scene via onCreate (see `gameScene`/`ensureCreated`).
+    sceneApi = {
+      audio: createSceneAudio(game.audio),
+      overlay: overlayCtl.overlay,
+      shell: { get safeArea() { return shell!.safeArea; } },
+      formatAmount: (v) => shell!.formatWin(v),
+      get bet() { return currentBet; },
+      get mode() { return opts.model.modeMap['spin'] ?? 'BASE'; },
+      get turbo() { return currentTurbo; },
+    };
 
     const roleOf = (action: string) => opts.model.spec.actions[action]?.role;
     const makeContext = (action: string): import('./sceneController').RenderContext => ({
