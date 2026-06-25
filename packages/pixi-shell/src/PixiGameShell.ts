@@ -196,7 +196,10 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
-      const blur = new BlurFilter({ strength: 10, quality: 5 });
+      // Heavier + smoother frost (≈ backdrop-filter: blur(24px)). High strength alone under-samples
+      // into directional streaks (visible as an uneven smear over the bright control bar), so we pair
+      // a strong radius with a high pass count (quality) — the extra passes are a one-off at open time.
+      const blur = new BlurFilter({ strength: 18, quality: 8 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       sprite.filters = [blur];
       this.modalLayer.addChild(sprite); // below the layer node, which is added next
