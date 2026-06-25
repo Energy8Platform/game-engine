@@ -1,4 +1,4 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Rectangle } from 'pixi.js';
 
 // A focused flexbox for Pixi — just the slice of CSS flex the shell's CSS actually uses:
 // row/column, gap, padding, justify (start/center/end/space-between), align
@@ -35,6 +35,9 @@ export interface FlexOpts {
   /** Fixed outer size; omit a dimension for content sizing. */
   width?: number;
   height?: number;
+  /** Minimum outer height — content shorter than this is centred in the taller box (the DOM rows'
+   *  effective min height from the tallest child's line box). */
+  minHeight?: number;
 }
 
 export interface ChildOpts {
@@ -88,6 +91,7 @@ export class FlexBox extends Container implements Sizable {
   private entries: Entry[] = [];
   private fixedW?: number;
   private fixedH?: number;
+  private minH?: number;
   /** last computed outer size. */
   private outW = 0;
   private outH = 0;
@@ -102,6 +106,7 @@ export class FlexBox extends Container implements Sizable {
     this.bgStyle = opts.background;
     this.fixedW = opts.width;
     this.fixedH = opts.height;
+    this.minH = opts.minHeight;
     if (this.bgStyle) {
       this.bg = new Graphics();
       this.addChild(this.bg);
@@ -144,6 +149,21 @@ export class FlexBox extends Container implements Sizable {
       this.bgStyle.fill = fill;
       this.drawBackground();
     }
+  }
+
+  /** Make the whole box a button target. A FlexBox otherwise only hit-tests its children, so a row
+   *  used as a button (settings "Game info") was clickable/hoverable only over its icon/label, not
+   *  the padding or gaps. This maintains a hit area covering the full box across relayouts. */
+  private fullHit = false;
+  setInteractive(on = true): this {
+    this.fullHit = on;
+    this.eventMode = on ? 'static' : 'auto';
+    this.cursor = on ? 'pointer' : 'default';
+    this.updateHit();
+    return this;
+  }
+  private updateHit(): void {
+    if (this.fullHit) this.hitArea = new Rectangle(0, 0, this.outW, this.outH);
   }
 
   // ── Sizable ──────────────────────────────────────────────────────────────
@@ -194,8 +214,13 @@ export class FlexBox extends Container implements Sizable {
     const fixedMain = horizontal ? this.fixedW : this.fixedH;
     const fixedCross = horizontal ? this.fixedH : this.fixedW;
 
-    const outerMain = fixedMain ?? contentMain + padMainStart + padMainEnd;
-    const outerCross = fixedCross ?? contentCross + padCrossStart + padCrossEnd;
+    let outerMain = fixedMain ?? contentMain + padMainStart + padMainEnd;
+    let outerCross = fixedCross ?? contentCross + padCrossStart + padCrossEnd;
+    // minHeight raises the box on whichever axis is vertical (cross for a row, main for a column).
+    if (this.minH != null) {
+      if (horizontal) outerCross = Math.max(outerCross, this.minH);
+      else outerMain = Math.max(outerMain, this.minH);
+    }
     const innerMain = outerMain - padMainStart - padMainEnd;
     const innerCross = outerCross - padCrossStart - padCrossEnd;
 
@@ -270,6 +295,7 @@ export class FlexBox extends Container implements Sizable {
     this.outH = horizontal ? outerCross : outerMain;
 
     this.drawBackground();
+    this.updateHit();
   }
 
   private drawBackground(): void {

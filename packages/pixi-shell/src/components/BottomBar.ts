@@ -93,6 +93,7 @@ export class BottomBar extends Container {
     // real balance, so it's hidden (keyed on the sticky `replay` flag, not `mode`).
     const OVERLAP = 16; // .ge-shell-buybonus margin:0 -16px
     const buy = isBase ? this.buildBuyBadge() : null;
+    this.buyBadge = buy;
     const showBalance = !state.replay;
     const menu = new IconButton('menu', {
       color: '#ffffff',
@@ -223,10 +224,10 @@ export class BottomBar extends Container {
 
     const betChildren: Container[] = [betReadout];
     if (isBase) {
-      // tighter chevrons stacked (the DOM step is two 24px-tall icon buttons)
+      // stacked +/− — the DOM step is two 24px-glyph icon buttons (.ge-iconbtn font-size:24, h:24)
       const step = new FlexBox({ direction: 'column', gap: 0, align: 'center' });
-      this.betUp = new IconButton('plus', { size: 30, glyph: 20, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(1) });
-      this.betDown = new IconButton('minus', { size: 30, glyph: 20, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(-1) });
+      this.betUp = new IconButton('plus', { size: 26, glyph: 24, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(1) });
+      this.betDown = new IconButton('minus', { size: 26, glyph: 24, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(-1) });
       step.add(this.betUp);
       step.add(this.betDown);
       betChildren.push(step);
@@ -302,6 +303,7 @@ export class BottomBar extends Container {
   private betReadout?: Readout;
   private betUp?: IconButton;
   private betDown?: IconButton;
+  private buyBadge?: BuyBonusBadge | null;
   private spin?: SpinDisc;
   private autoBtn?: IconButton;
   private turboBtn?: IconButton;
@@ -345,6 +347,8 @@ export class BottomBar extends Container {
     if (this.betDown) this.betDown.disabled = lockBet || i <= 0;
     if (this.spin) this.spin.disabled = state.busy && !auto;
     if (this.autoBtn) this.autoBtn.disabled = state.busy && !auto;
+    // disabled for the whole autoplay run (not just per-spin busy) so it doesn't flicker/pulse
+    if (this.buyBadge) this.buyBadge.disabled = state.busy || auto || !state.buyBonusEnabled;
     if (this.betReadout && lockBet) {
       this.betReadout.eventMode = 'none';
       this.betReadout.cursor = 'default';
@@ -434,6 +438,7 @@ export class BottomBar extends Container {
     }
     if (isBase) {
       const buy = this.buildBuyBadgeMobile();
+      this.buyBadge = buy;
       if (buy) ctlItems.push(buy);
     }
     for (const c of ctlItems) controls.add(c);

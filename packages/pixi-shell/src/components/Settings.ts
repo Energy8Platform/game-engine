@@ -63,13 +63,15 @@ function glassRow(host: ShellHost, children: Container[], opts: { button?: boole
     direction: 'row',
     align: 'center',
     gap: 12,
-    padding: { top: 13, bottom: 13, left: 16, right: 16 },
+    // .ge-ov-row { padding: clamp(11px,2.2vh,15px) 16px } — 15 at desktop; minHeight matches the
+    // DOM row's effective height (driven by the tallest child's line box, not just the em box).
+    padding: { top: 15, bottom: 15, left: 16, right: 16 },
+    minHeight: 60,
     background: { fill: host.tokens.plaqueGlass, radius: 16 },
   });
   for (const c of children) row.add(c, c instanceof Spacer ? { grow: 1 } : {});
   if (opts.button) {
-    row.eventMode = 'static';
-    row.cursor = 'pointer';
+    row.setInteractive(true); // full-box hit area — hover + tap across the whole row, not just the icon/label
     if (opts.onTap) row.on('pointertap', opts.onTap);
     // hover: brighter glass + accent text (DOM button.ge-ov-row:hover)
     const texts = children.filter((c): c is Text => c instanceof Text);
@@ -95,7 +97,7 @@ function sliderRow(host: ShellHost, bodyWidth: number, key: string, label: strin
     direction: 'column',
     align: 'stretch',
     gap: 10,
-    padding: { top: 13, bottom: 13, left: 16, right: 16 },
+    padding: { top: 15, bottom: 15, left: 16, right: 16 },
     background: { fill: host.tokens.plaqueGlass, radius: 16 },
   });
   const head = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between' });

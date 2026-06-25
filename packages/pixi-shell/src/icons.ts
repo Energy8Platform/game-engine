@@ -27,8 +27,10 @@ const SVGS: Record<string, string> = {
   back: `<path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
   chevronRight: `<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
   star: `<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.9 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z" fill="currentColor"/>`,
-  // volatility bolt (buy-bonus cards) — supplied art, scaled from its 1254 viewBox into 24×24
-  lightning: `<path transform="scale(0.019139)" d="M747,205L433,629L622,633L497,986L801,550L614,547Z" fill="currentColor"/>`,
+  // volatility bolt (buy-bonus cards). Scale baked into the coords (was transform="scale(0.019139)"
+  // over a 1254 viewBox) — Pixi's GraphicsContext.svg ignores a `transform` on a <path>, which
+  // rendered the bolt at ~52× (giant triangles that overflowed the card once its mask was dropped).
+  lightning: `<path d="M14.297,3.924L8.287,12.038L11.904,12.115L9.512,18.871L15.330,10.526L11.751,10.469Z" fill="currentColor"/>`,
 };
 
 export type IconName = keyof typeof SVGS;

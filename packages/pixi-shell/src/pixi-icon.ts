@@ -1,5 +1,6 @@
 import { Container, Graphics, GraphicsContext } from 'pixi.js';
 import { iconSVG, type IconName } from './icons';
+import type { Sizable } from './primitives/flex';
 
 // The DOM shell renders each icon as an inline <svg> sized to 1em and recoloured via
 // `currentColor`. The Pixi shell rebuilds the same 24×24 vector paths through Pixi's SVG
@@ -24,7 +25,7 @@ function context(name: IconName, color: string): GraphicsContext {
 
 /** A recolourable, scalable icon. Its content is centred on the local origin's box so the view's
  *  bounds are `size × size` and `rotation` spins around the glyph centre (like CSS 50% 50%). */
-export class IconView extends Container {
+export class IconView extends Container implements Sizable {
   private gfx: Graphics;
   private _size: number;
   private _color: string;
@@ -61,6 +62,16 @@ export class IconView extends Container {
     if (size === this._size) return;
     this._size = size;
     this.layout();
+  }
+
+  // ── Sizable: a raw icon occupies a size×size em box (the DOM's 1em <span>), positioned by that
+  //    box so flex rows centre the EM box like CSS line-box centring — not the ink, which for
+  //    off-centre glyphs (chevron, info) sits asymmetrically and drifts vertically.
+  measureSize(): { w: number; h: number } {
+    return { w: this._size, h: this._size };
+  }
+  setLayoutSize(): void {
+    /* fixed-size glyph — no stretch */
   }
 
   /** Rotation around the glyph centre (radians) — used by the spinning SPIN disc. */

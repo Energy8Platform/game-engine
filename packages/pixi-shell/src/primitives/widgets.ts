@@ -1,4 +1,4 @@
-import { BlurFilter, Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
+import { BlurFilter, ColorMatrixFilter, Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
 import type { ShellTokens } from '../theme';
 import type { IconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
@@ -16,21 +16,46 @@ export function attachHover(node: Container, over: () => void, out: () => void):
   node.on('pointerout', out);
 }
 
-/** Press-scale on pointerdown, restore on up/out — the CSS `:active { transform:scale(x) }`. */
+/** Press-scale on pointerdown, restore on up/out — the CSS `:active { transform:scale(x) }`.
+ *  Scales around the visual centre (CSS transform-origin:50% 50%), not the top-left origin, and
+ *  holds the hit area at full WORLD size while pressed — otherwise origin-scaling slid the box away
+ *  from the pointer, so edge presses released off-target and only centre taps registered. */
 export function attachPress(node: Container, scale: number, onTap: () => void): void {
   let down = false;
-  const set = (s: number) => node.scale.set(s);
+  let home: { x: number; y: number } | null = null;
+  let savedHit: Rectangle | null = null;
+  const box = (): { x: number; y: number; width: number; height: number } =>
+    node.hitArea instanceof Rectangle ? node.hitArea : node.getLocalBounds();
+  const press = (on: boolean): void => {
+    if (on) {
+      const b = box();
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      home = { x: node.x, y: node.y };
+      node.scale.set(scale);
+      node.position.set(home.x + cx * (1 - scale), home.y + cy * (1 - scale)); // keep centre fixed
+      if (node.hitArea instanceof Rectangle) {
+        savedHit = node.hitArea;
+        const inv = 1 / scale; // grow local box so its world size is unchanged → edge taps still land
+        node.hitArea = new Rectangle(cx - (b.width * inv) / 2, cy - (b.height * inv) / 2, b.width * inv, b.height * inv);
+      }
+    } else if (home) {
+      node.scale.set(1);
+      node.position.set(home.x, home.y);
+      if (savedHit) node.hitArea = savedHit;
+      savedHit = null;
+      home = null;
+    }
+  };
   node.on('pointerdown', () => {
     down = true;
-    set(scale);
+    press(true);
   });
-  const release = () => {
-    if (down) set(1);
+  const release = (): void => {
+    if (down) press(false);
     down = false;
   };
-  node.on('pointerup', () => {
-    release();
-  });
+  node.on('pointerup', release);
   node.on('pointerupoutside', release);
   node.on('pointertap', () => onTap());
 }
@@ -252,6 +277,7 @@ export class SpinDisc extends Container implements Sizable {
   private ring = new Graphics();
   private disc: Graphics;
   private glyph: IconView;
+  private dim = new Graphics();
   private countText?: Text;
   private mode: 'spin' | 'stop' = 'spin';
   private _busy = false;
@@ -272,7 +298,7 @@ export class SpinDisc extends Container implements Sizable {
     this.disc = new Graphics();
     this.glyph = makeIcon('spin', this.glyphSize, this.tokens.spinFg);
     this.glyph.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
-    this.addChild(this.glow, this.ring, this.disc, this.glyph);
+    this.addChild(this.glow, this.ring, this.disc, this.glyph, this.dim);
     this.paint();
     this.eventMode = 'static';
     this.cursor = 'pointer';
@@ -298,10 +324,12 @@ export class SpinDisc extends Container implements Sizable {
     const glyphColor = hot ? '#ffffff' : this.tokens.spinFg;
     this.glyph.setColor(glyphColor);
     if (this.countText) this.countText.style.fill = hot ? '#ffffff' : this.tokens.spinFg;
-    this.alpha = 1;
+    // Disabled (mid-spin / can't spin): darken OPAQUELY (≈ filter:grayscale(.4) brightness(.62))
+    // with a dark veil over the disc — not alpha, which would let the bright board show through and
+    // read as a translucent/missing button (what looked "transparent" while spinning).
+    this.dim.clear();
     if (this._disabled) {
-      // approximate `filter:grayscale(.4) brightness(.62)` — dim the whole disc
-      this.alpha = 0.62;
+      this.dim.circle(this.size / 2, this.size / 2, this.size / 2 - 1.5).fill({ color: 0x000000, alpha: 0.4 });
     }
   }
 
@@ -452,7 +480,6 @@ export class BuyBonusBadge extends Container implements Sizable {
     drawHalo(this.glow, this.ring, this.size, this.bg, on); // solid 3px accent ring + soft glow
     if (on) this.startPulse();
     else this.stopPulse();
-    this.alpha = this._disabled ? 0.72 : 1;
   }
 
   private startPulse(): void {
@@ -494,6 +521,20 @@ export class BuyBonusBadge extends Container implements Sizable {
     this._disabled = v;
     this.cursor = v ? 'default' : 'pointer';
     this.eventMode = v ? 'none' : 'static';
+    // .ge-shell-buybonus[disabled] { filter:grayscale(.5) brightness(.72) } — desaturate + darken
+    // opaquely (a faded green still read as an active button), exactly like the DOM.
+    try {
+      if (v) {
+        const f = new ColorMatrixFilter();
+        f.grayscale(0.5, false);
+        f.brightness(0.72, true);
+        this.filters = [f];
+      } else {
+        this.filters = [];
+      }
+    } catch {
+      this.alpha = v ? 0.6 : 1; // no-GL fallback (tests)
+    }
     this.paint(false);
   }
 

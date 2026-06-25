@@ -5,6 +5,7 @@ import type { ShellHost } from '../src/context';
 import { resolveTheme } from '../src/theme';
 import { createInitialState } from '../src/state';
 import { IconButton, Readout, SpinDisc, BuyBonusBadge } from '../src/primitives/widgets';
+import { IconView } from '../src/pixi-icon';
 import { BottomBar } from '../src/components/BottomBar';
 import { openSettings } from '../src/components/Settings';
 import { openGameInfo } from '../src/components/GameInfo';
@@ -117,7 +118,8 @@ describe('widget centering — icons & text stay put', () => {
   it('SpinDisc centres the spin glyph and reports its size', () => {
     const disc = new SpinDisc({ size: 86, glyph: 68, tokens, ticker: stubTicker, onSpin() {}, onStop() {} });
     expect(disc.measureSize()).toEqual({ w: 86, h: 86 });
-    const glyph = disc.children[disc.children.length - 1]; // glyph is the last child (after glow/ring/disc)
+    // glyph is the IconView (after glow/ring/disc, before the disabled dim veil)
+    const glyph = disc.children.find((c) => c instanceof IconView)!;
     expect(glyph.position.x).toBeCloseTo((86 - 68) / 2, 3);
     expect(glyph.position.y).toBeCloseTo((86 - 68) / 2, 3);
   });
