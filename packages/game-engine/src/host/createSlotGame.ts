@@ -318,6 +318,30 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     game.scenes.root.eventMode = 'static';
     game.scenes.root.on('pointertap', () => skip.tap(performance.now()));
 
+    // Full auto-pause: on tab blur, freeze the ticker (stops tweens/onUpdate/in-flight onSpin),
+    // duck music to silence, hold autoplay, and notify the scene. On focus, reverse it all.
+    // `stopAutoplay` is reassigned in the base-mode block below — the closure reads it live.
+    const { createPauseController } = await import('./pauseController');
+    createPauseController({
+      isHidden: () => typeof document !== 'undefined' && document.hidden,
+      subscribe: (cb) => {
+        if (typeof document === 'undefined') return () => {};
+        document.addEventListener('visibilitychange', cb);
+        return () => document.removeEventListener('visibilitychange', cb);
+      },
+      onHidden: () => {
+        game.app.ticker.stop();    // freezes tweens, onUpdate, in-flight onSpin animation
+        game.audio.duckMusic(0);   // silence music (ducked to 0; restored on resume)
+        stopAutoplay();            // hold autoplay — don't start the next auto-round
+        gameScene()?.onPause?.();
+      },
+      onVisible: () => {
+        game.app.ticker.start();
+        game.audio.unduckMusic();
+        gameScene()?.onResume?.();
+      },
+    });
+
     /** Drive a full round (trigger + drain) against the current scene. HUD readouts (win + balance)
      *  update only AFTER each onSpin(), per the HUD-timing requirement. */
     const playRound = (action: string) => {
