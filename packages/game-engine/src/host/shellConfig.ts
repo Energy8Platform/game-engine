@@ -1,14 +1,15 @@
 // packages/game-engine/src/host/shellConfig.ts
+// `socialize` is a runtime helper that pixi-shell does NOT re-export (its index only re-exports
+// types), so it stays sourced from platform-core/shell; the shapes are structurally identical.
 import { socialize } from '@energy8platform/platform-core/shell';
 import type {
-  ShellConfig, ShellMode, CurrencyConfig, GameInfoContent, GameInfoSection, PaytableRow,
+  PixiShellConfig, ShellMode, CurrencyConfig, GameInfoContent, GameInfoSection, PaytableRow,
   BonusOption, ShellFeatures, GameMode,
-} from '@energy8platform/platform-core/shell';
+} from '@energy8platform/pixi-shell';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { WinTier } from '../slot';
 
 export interface SlotShellOptions {
-  mount?: HTMLElement;
   /** Override the derived currency (normally taken from initData). */
   currency?: CurrencyConfig;
   /** Author-supplied info sections, MERGED over the host-derived set by section identity (an author
@@ -319,8 +320,13 @@ function socializeBonusOptions(options: BonusOption[], isSocial: boolean): Bonus
   return options.map((o) => ({ ...o, title: socialize(o.title), description: socialize(o.description) }));
 }
 
-/** Pure: assemble a ShellConfig from the model + runtime context (currency/balance/language/mode). */
-export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runtime: ShellRuntime): ShellConfig {
+/** Pure: assemble the shell config (sans mount target) from the model + runtime context
+ *  (currency/balance/language/mode). The host adds `app` at the call site. */
+export function buildShellConfig(
+  opts: SlotShellOptions,
+  model: GameModel,
+  runtime: ShellRuntime,
+): Omit<PixiShellConfig, 'app' | 'parent'> {
   // Prefer the currency-specific ladder from /wallet/authenticate; fall back to the spec (dev/devBridge).
   const betLevels = runtime.betLevels?.length ? runtime.betLevels : model.spec.betLevels;
   // Stake requires the default to come from authenticate on every entry; spec default is the dev fallback.
@@ -363,7 +369,6 @@ export function buildShellConfig(opts: SlotShellOptions, model: GameModel, runti
   } as ShellFeatures;
   applyJurisdiction(features, runtime.jurisdiction);
   return {
-    mount: opts.mount ?? (typeof document !== 'undefined' ? document.body : (undefined as never)),
     language: runtime.language ?? 'en',
     isSocial,
     currency,
