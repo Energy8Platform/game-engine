@@ -98,7 +98,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@energy8platform/platform-core": "*"
+    "@energy8platform/platform-core": "*",
+    "@energy8platform/pixi-shell": "*"
   },
   "peerDependencies": {
     "@energy8platform/game-sdk": "^2.7.0",

@@ -13,6 +13,7 @@ const external = [
   '@energy8platform/platform-core/slot-result',
   '@energy8platform/platform-core/vite',
   '@energy8platform/platform-core/loading',
+  '@energy8platform/pixi-shell',
   '@esotericsoftware/spine-pixi-v8',
   '@pixi/sound',
   'vite',
