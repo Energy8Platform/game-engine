@@ -197,14 +197,16 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       // A huge `strength` instead under-samples into a thinner, weaker, streaky blur — so we go the
       // other way: heavier downscale (¼ res) + a moderate kernel.
       const texture = RenderTexture.create({ width: w, height: h, resolution: 0.25 });
+      // Capture only the SCENE behind, not the shell's own control bar: the bar's glowing buy badge
+      // and spin disc would blur into bright halos (the "криво" smear over the bar). The real bar is
+      // hidden under this backdrop sprite anyway (modalLayer sits above barLayer) while a modal is up,
+      // so dropping it from the snapshot just removes the halos.
+      this.barLayer.visible = false;
       this.modalLayer.visible = false; // never capture the (empty) modal layer / a stale backdrop
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
+      this.barLayer.visible = true;
       const sprite = new Sprite(texture);
-      // Darken the frosted snapshot (tint multiplies) so bright UI — the purple buy badge, the white
-      // spin disc — recedes instead of blooming through the blur into bright halos. ~38% keeps the
-      // backdrop readable while pushing it firmly behind the modal.
-      sprite.tint = 0x606060;
       const blur = new BlurFilter({ strength: 10, quality: 6 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       sprite.filters = [blur];
