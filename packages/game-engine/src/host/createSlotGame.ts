@@ -203,9 +203,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         `| RESOLVED.symbol=${runtime.currency?.symbol ?? '∅'} pos=${runtime.currency?.position ?? '∅'}`,
       );
     }
-    // pixi-shell mounts its root onto app.stage (above the scene container). The host adds the
-    // mount target (`app`); buildShellConfig produces everything else.
-    shell = createPixiShell({ ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app });
+    // pixi-shell mounts its root onto the engine's unscaled, screen-space UI layer (above the
+    // scaled world/scene root) so the control bar fills the real screen, not the letterboxed game.
+    // The host adds the mount target (`app`) + parent; buildShellConfig produces everything else.
+    shell = createPixiShell({ ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app, parent: game.uiLayer });
+    // Scope the bar to the slot scene: show only when a SlotSceneController scene is current
+    // (hidden over the intro / non-slot scenes). Applies in BOTH base and replay modes.
+    shell.setVisible(!!gameScene());
+    game.scenes.on('change', () => shell!.setVisible(!!gameScene()));
     // The gate tracks the live wallet (for the affordability guard) but only PAINTS the balance per
     // the HUD-timing rule: the debit is buffered during play→present and shown at afterPresent; the
     // async win credit (/wallet/end-round, after the final ack) paints when it lands. `balanceGate`
@@ -231,14 +236,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       }
     });
 
-    // Overlay layer sits ABOVE the shell (the shell already mounted its root onto app.stage; adding
-    // ours afterwards keeps it on top). It eats pointer events while open so shell controls are
-    // unreachable. Mounted on the same stage; tracks viewport via game's 'resize' event.
+    // Overlay layer sits ABOVE the shell (the shell already mounted its root onto the uiLayer;
+    // adding ours afterwards keeps it on top). It eats pointer events while open so shell controls
+    // are unreachable. Mounted on the same unscaled UI layer; tracks viewport via game's 'resize'.
     const { createSceneAudio } = await import('./sceneAudio');
     const { createOverlayController } = await import('./overlayController');
     const overlayLayer = new Container();
     overlayLayer.label = 'overlay';
-    game.app.stage.addChild(overlayLayer);
+    game.uiLayer.addChild(overlayLayer);
     const overlayCtl = createOverlayController({
       parent: overlayLayer,
       size: () => ({ width: game.app.screen.width, height: game.app.screen.height }),

@@ -315,6 +315,12 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.render();
   }
 
+  /** Show/hide the whole shell (bar + overlays). Used by the host to scope the bar to the
+   *  slot scene — hidden over the intro / non-slot scenes. */
+  setVisible(visible: boolean): void {
+    this.root.visible = visible;
+  }
+
   /** Recolour the shell at runtime (switch dark/light scheme or accent). */
   setTheme(theme: ThemeConfig): void {
     this.config.theme = theme;
