@@ -372,11 +372,12 @@ function gridIllustration(host: ShellHost, grid: { cols: number; rows: number },
 function sectionCustom(host: ShellHost, s: Extract<GameInfoSection, { type: 'custom' }>, width: number): FlexBox {
   const sec = section(host, s.title);
   const inner = width - SECTION_PAD;
-  if (s.html) {
+  if (s.node) {
+    sec.add(s.node); // game-supplied Pixi content owns its own layout
+  } else if (s.html) {
     const text = s.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     if (text) sec.add(paragraph(host, text, inner, { size: 15 }));
   }
-  // DOM-node custom content has no Pixi equivalent; it is skipped.
   return sec;
 }
 

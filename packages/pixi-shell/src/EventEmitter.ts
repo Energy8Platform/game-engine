@@ -1,11 +1,10 @@
 /**
- * Minimal typed event emitter — internal utility for platform-core.
+ * Minimal typed event emitter — internal utility for the pixi-shell.
  *
  * Supports `void` event types — events that carry no data can be emitted
  * without arguments: `emitter.emit('eventName')`.
  *
- * Mirrors the EventEmitter shipped from game-engine's core, copied here
- * so platform-core has no upward dependency on game-engine.
+ * Copied locally so the pixi-shell has no runtime dependencies beyond Pixi.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export class EventEmitter<TEvents extends {}> {

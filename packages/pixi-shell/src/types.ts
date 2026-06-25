@@ -1,73 +1,242 @@
-// The pixi-shell reuses the renderer-agnostic shell contract from platform-core verbatim
-// (so a game can swap the DOM shell for the Pixi shell with no change to its config/events),
-// and replaces only the renderer-specific mount: instead of `mount: HTMLElement` the Pixi
-// shell attaches to a Pixi `Application` / `Container`.
+// The pixi-shell owns its shell contract outright (no dependency on platform-core). It's the same
+// renderer-agnostic shape the DOM shell uses — so a game can swap shells with no config/event
+// changes — but the few renderer-specific bits are Pixi-native here: the mount is a Pixi
+// `Application` (not an `HTMLElement`), and the `custom` card / game-info hooks return a Pixi
+// `Container` (not an `HTMLElement`, which a Pixi scene can't mount).
 
 import type { Application, Container } from 'pixi.js';
 
-// Re-export the shared contract so consumers can `import type { ... } from '@energy8platform/pixi-shell'`
-// and get exactly the same types the DOM shell uses.
-export type {
-  ShellMode,
-  CurrencyConfig,
-  ThemeConfig,
-  PaytableRow,
-  PaylineDef,
-  CellRef,
-  ShapeDef,
-  WinSection,
-  GameMode,
-  GameInfoSection,
-  GameInfoContent,
-  AutoplayConfig,
-  AutoplayOptions,
-  FreeSpinsState,
-  ModalAction,
-  ReplayModalOptions,
-  ModalOptions,
-  ShellEvents,
-} from '@energy8platform/platform-core/shell';
+export type ShellMode = 'base' | 'freeSpins' | 'replay';
 
-import type {
-  ThemeConfig,
-  GameInfoContent,
-  CurrencyConfig,
-  ShellMode,
-  BonusOption as CoreBonusOption,
-  BonusCardContext as CoreBonusCardContext,
-  ShellFeatures as CoreShellFeatures,
-  ShellState as CoreShellState,
-} from '@energy8platform/platform-core/shell';
+export interface CurrencyConfig {
+  symbol: string;
+  position: 'left' | 'right';
+  /** Maximum fraction digits (default 2). Win / total-win readouts are rounded to this precision;
+   *  balance / bet / prices stay fixed at `minDecimals`. */
+  maxDecimals?: number;
+  /** Minimum fraction digits (defaults to `maxDecimals`). For win / total-win, trailing zeros are
+   *  trimmed down to this many places so small wins keep their significant digits (e.g. 0.0673)
+   *  while round amounts stay compact (e.g. 0.30). Everything else is shown at exactly this many. */
+  minDecimals?: number;
+  separator?: { thousands?: string; decimal?: string };
+}
 
-// ── Renderer-specific overrides ──────────────────────────────────────────────
-// The shared contract is reused verbatim EXCEPT where it bakes in the DOM renderer: a
-// `BonusOption.custom` card returns an `HTMLElement` in platform-core, which a Pixi scene can't
-// mount. Re-exporting that shape would advertise a hook that silently no-ops, so we redefine the few
-// types that reference it — the Pixi `custom` hook returns a Pixi `Container` and actually renders.
-
-/** A buy-bonus option. Same data contract as the DOM shell; a `custom` card renderer returns a Pixi
- *  `Container` (the shell keeps the card slot + live re-pricing + buy/confirm flow via `ctx.select`;
- *  the game owns the interior). */
-export interface BonusOption extends Omit<CoreBonusOption, 'custom'> {
+export interface BonusOption {
+  id: string;
+  /** 'bonus' buys into a bonus round, 'feature' toggles a base-game modifier (e.g. Ante).
+   *  Drives the card/button label and accent. Defaults to 'bonus'. */
+  type?: 'feature' | 'bonus';
+  title: string;
+  description: string;
+  /** Transparent art image shown at the top of the card (no background plate). */
+  thumbnail?: string;
+  volatility?: 1 | 2 | 3 | 4 | 5;
+  /** Card price = priceMultiplier × current bet, rendered in the shell currency. */
+  priceMultiplier: number;
+  /** Per-option accent override. Falls back to the type default (bonus → purple, feature → gold). */
+  accentColor?: string;
+  /** Override the card UI with a Pixi `Container`. The shell keeps the card slot, accent, and live
+   *  re-pricing, and runs the normal buy flow when you call `ctx.select()`; the game owns the
+   *  interior. */
   custom?: (ctx: BonusCardContext) => Container;
 }
 
-/** Context handed to a Pixi `BonusOption.custom` renderer — the DOM shell's fields, Pixi `bonus`. */
-export interface BonusCardContext extends Omit<CoreBonusCardContext, 'bonus'> {
+/** Context passed to a `BonusOption.custom` renderer. Build the card however you like and wire your
+ *  own control to `select()` — the buy/confirm flow stays internal to the shell. */
+export interface BonusCardContext {
   bonus: BonusOption;
+  /** Current bet. */
+  bet: number;
+  /** Card price = `bonus.priceMultiplier × bet`. */
+  price: number;
+  /** `price` formatted in the shell currency. */
+  priceText: string;
+  /** True when the option can't be bought right now (unaffordable / busy / buy-bonus disabled);
+   *  reflect it in your UI. `select()` is a no-op while disabled. */
+  disabled: boolean;
+  /** Card accent (per-option override or the type default). */
+  accent: string;
+  /** Proceed through the shell's normal flow: opens the confirm modal, then emits `buyBonusSelect`
+   *  / activates the feature. No-op while `disabled`. */
+  select: () => void;
 }
 
-export interface ShellFeatures extends Omit<CoreShellFeatures, 'buyBonus'> {
+export interface ThemeConfig {
+  /** Palette scheme: 'dark' (default) for dark games, 'light' for light backgrounds. */
+  scheme?: 'dark' | 'light';
+  /** Brand accent — active states, the SPIN hover glow, and the BUY BONUS button.
+   *  (Per-bonus card accents are set on each `BonusOption.accentColor`.) */
+  accent?: string;
+}
+
+/** One paytable entry: a symbol (text/image) and its win tiers, rendered "<count> x<multiplier>". */
+export interface PaytableRow {
+  symbol: { text?: string; image?: string };
+  wins: Array<{ count?: string; multiplier: number }>;
+}
+
+/** One payline over a cols×rows grid: the row index (0 = top) the line takes in each column. */
+export interface PaylineDef {
+  /** length must equal grid.cols; each value in 0..rows-1 */
+  pattern: number[];
+  label?: string;
+}
+
+/** A single grid cell, 0-based, row 0 = top. */
+export type CellRef = [col: number, row: number];
+
+/** A named winning shape: an arbitrary set of grid cells (not one-per-column like a payline),
+ *  shown as a grid illustration with its name and optional description. */
+export interface ShapeDef {
+  /** The lit cells, in any pattern. */
+  cells: CellRef[];
+  name: string;
+  description?: string;
+}
+
+/** How a game pays — drives the GameInfo win-section illustration. One section = one kind.
+ *  `example`/`winExample`/`loseExample` are optional; omit them for an auto-drawn illustration
+ *  sized to `grid`. */
+export type WinSection = {
+  type: 'wins';
+  title?: string;
+  order?: number;
+  grid: { cols: number; rows: number };
+  /** Optional prose shown alongside the illustration. */
+  description?: string;
+} & (
+  | { kind: 'classic'; lines: Array<number[] | PaylineDef> }
+  | { kind: 'cluster'; minCount: number; example?: CellRef[] }
+  | { kind: 'anywhere'; minCount: number; example?: CellRef[] }
+  | { kind: 'ways'; winExample?: CellRef[]; loseExample?: CellRef[] }
+  | { kind: 'shapes'; shapes: ShapeDef[] }
+);
+
+/** A playable mode / bonus-buy option, shown for comparison (informational only). */
+export interface GameMode {
+  title: string;
+  price?: string;
+  rtp?: number;
+  maxWin?: string;
+  description?: string;
+}
+
+/** A preset game-info section. `order` overrides placement; by default `modes` comes
+ *  first, `controls` second, and the rest follow in declaration order. A `custom` section renders a
+ *  game-supplied Pixi `Container` (`node`), or falls back to `html` shown as plain text. */
+export type GameInfoSection =
+  | { type: 'modes'; title?: string; order?: number; modes: GameMode[] }
+  | { type: 'controls'; title?: string; order?: number }
+  | { type: 'paytable'; title?: string; order?: number; rows: PaytableRow[] }
+  | WinSection
+  | { type: 'custom'; title?: string; order?: number; node?: Container; html?: string };
+
+export interface GameInfoContent {
+  sections?: GameInfoSection[];
+}
+
+/** Autoplay limits. Presence of this object (vs `null`) is what enables autoplay. */
+export interface AutoplayConfig {
+  /** Maximum selectable spin count in the autoplay picker. Caps the built-in presets and
+   *  drops the unlimited (∞) choice; if it isn't already a preset it becomes the top choice.
+   *  Omit for the default presets (including ∞). */
+  maxCount?: number;
+}
+
+export interface ShellFeatures {
+  turbo: 0 | 1 | 2 | 3;
+  /** Spacebar starts a spin in base mode. Defaults to `true`; set `false` to disable the
+   *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */
+  spacebar?: boolean;
+  /** Autoplay: `null` (or omitted) disables it; an object enables it (optionally with limits). */
+  autoplay?: AutoplayConfig | null;
   buyBonus: BonusOption[] | false;
 }
 
-export interface ShellState extends Omit<CoreShellState, 'activeFeature'> {
+export interface AutoplayOptions {
+  active: boolean;
+  remaining: number;
+}
+
+export interface FreeSpinsState {
+  /** Spin index for the `current / total` counter. Set to `null` (or omit) to instead show just
+   *  `total` as a single number — drive a countdown by decrementing `total` each spin. */
+  current?: number | null;
+  total: number;
+  totalWin: number;
+}
+
+/** One footer button of a generic modal. Clicking it runs `on` (if any), then closes the modal. */
+export interface ModalAction {
+  title: string;
+  /** Button fill colour (any CSS colour). Omit for a neutral/secondary button. */
+  color?: string;
+  on?: () => void;
+}
+
+/** Options for `shell.openReplay()` — a non-dismissable replay summary modal.
+ *  `bonusId` is matched against `features.buyBonus` to label the mode and read the cost
+ *  multiplier. There is no ✕ and the backdrop never closes it; the only action is START
+ *  REPLAY, which closes the modal, runs `onReplay`, then reopens it. */
+export interface ReplayModalOptions {
+  bonusId: string;
+  /** Base bet the replay was recorded at. */
+  bet: number;
+  payoutMultiplier: number;
+  /** Runs after the modal closes; the modal reopens once it resolves (immediately for sync). */
+  onReplay: () => void | Promise<void>;
+}
+
+/** Options for `shell.openModal()` — a generic, externally-triggered card modal. */
+export interface ModalOptions {
+  /** Show the ✕ in the overlay's top-right corner. */
+  availableClose: boolean;
+  title: string;
+  body: string;
+  /** Footer buttons; each closes the modal (after running its `on`). */
+  actions?: ModalAction[];
+  /** Backdrop blur in px (defaults to the shell's standard blur). */
+  blurLevel?: number;
+}
+
+export interface ShellState {
+  mode: ShellMode;
+  /** Sticky replay marker — true for a historical-round replay, regardless of the current
+   *  `mode`. Set once (from config or when `mode` becomes 'replay') and never cleared, since a
+   *  shell instance is either a live game or a replay viewer for its whole lifetime. */
+  replay: boolean;
+  balance: number;
+  win: number;
+  bet: number;
+  availableBets: number[];
+  busy: boolean;
+  autoplay: AutoplayOptions;
+  turbo: number;
+  buyBonusEnabled: boolean;
+  freeSpins: FreeSpinsState;
+  /** The currently activated `feature` option (e.g. Ante), or null. Drives the
+   *  effective-bet readout tint and the BUY BONUS → DISABLE toggle on the bar. */
   activeFeature: BonusOption | null;
 }
 
+export interface ShellEvents {
+  spin: void;
+  betChange: number;
+  autoplayStart: AutoplayOptions;
+  autoplayStop: void;
+  turboChange: number;
+  buyBonusSelect: { id: string };
+  featureActivate: { id: string };
+  featureDeactivate: { id: string };
+  menuOpen: void;
+  settingsOpen: void;
+  infoOpen: void;
+  settingChange: { key: string; value: unknown };
+}
+
 /** Pixi-shell configuration — the renderer-agnostic shell config with a Pixi mount target.
- *  Mirrors platform-core's `ShellConfig` field-for-field, swapping `mount: HTMLElement` for the
- *  Pixi `app` (its renderer drives sizing/resize + ticker, its stage hosts the shell). */
+ *  The DOM shell's `mount: HTMLElement` is replaced by the Pixi `app` (its renderer drives
+ *  sizing/resize + ticker, its stage hosts the shell). */
 export interface PixiShellConfig {
   /** The Pixi application whose renderer (size + resize events + ticker) drives the shell. */
   app: Application;

@@ -2,11 +2,7 @@ import typescript from '@rollup/plugin-typescript';
 import dts from 'rollup-plugin-dts';
 import { defineConfig } from 'rollup';
 
-const external = [
-  'pixi.js',
-  '@energy8platform/platform-core',
-  '@energy8platform/platform-core/shell',
-];
+const external = ['pixi.js'];
 
 function createBundle(input, outputName) {
   return [
