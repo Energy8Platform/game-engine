@@ -29,9 +29,11 @@ export class ScrollBox extends Container {
     this.on('pointerupoutside', this.onUp);
     if (this.canvas) {
       this.wheelHandler = (e: WheelEvent) => {
-        if (this.maxScroll <= 0) return;
+        // Always swallow the wheel while this scroll region is mounted (a modal is open) so the
+        // gesture never chains to the parent page — on Stake the game is in an iframe and an
+        // un-prevented wheel scrolls the host page. Still scroll our content when it overflows.
         e.preventDefault();
-        this.setScroll(this.scrollY + e.deltaY);
+        if (this.maxScroll > 0) this.setScroll(this.scrollY + e.deltaY);
       };
       this.canvas.addEventListener('wheel', this.wheelHandler, { passive: false });
     }
