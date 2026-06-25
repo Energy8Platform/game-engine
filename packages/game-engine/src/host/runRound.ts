@@ -27,6 +27,8 @@ export async function runRound<T extends SlotSpinResultBase>(
 ): Promise<void> {
   deps.onSpinStart?.();
 
+  const ctxBet = deps.context(action).bet;
+
   const segment = async (a: string, roundId: string | undefined): Promise<{ r: T; ctx: RenderContext }> => {
     const ac = new AbortController();
     deps.beforeSegment?.(ac);
@@ -37,8 +39,6 @@ export async function runRound<T extends SlotSpinResultBase>(
     deps.afterPresent?.(r);
     return { r, ctx };
   };
-
-  const ctxBet = deps.context(action).bet;
   let { r, ctx } = await segment(action, undefined);
 
   let inMode = false;

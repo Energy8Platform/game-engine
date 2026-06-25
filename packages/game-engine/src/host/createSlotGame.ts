@@ -241,7 +241,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     game.app.stage.addChild(overlayLayer);
     const overlayCtl = createOverlayController({
       parent: overlayLayer,
-      size: () => ({ width: game.app.renderer.width, height: game.app.renderer.height }),
+      size: () => ({ width: game.app.screen.width, height: game.app.screen.height }),
     });
     game.on('resize', ({ width, height }: { width: number; height: number }) =>
       overlayCtl.resize(width, height),
