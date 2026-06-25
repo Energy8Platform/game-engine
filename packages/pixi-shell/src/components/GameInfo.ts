@@ -10,7 +10,7 @@ import type {
   WinSection,
 } from '../types';
 import { Overlay } from '../primitives/overlay';
-import { makeText } from '../text';
+import { makeText, textBaseline } from '../text';
 import { makeIcon } from '../pixi-icon';
 import { FlexBox } from '../primitives/flex';
 import { section, paragraph, Spacer } from '../primitives/controls';
@@ -89,13 +89,22 @@ function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
   const row = new FlexBox({ direction: 'column', align: 'stretch', gap: 6, padding: { top: 12, bottom: 12 } });
   const title = makeText(m.title, { size: 16, weight: '800', color: '#ffffff' });
 
-  const cells: FlexBox[] = [];
+  // Label + value baseline-aligned within each cell (CSS .ge-gi-mode-st { align-items: baseline }).
+  // trim:false gives uniform line boxes; placing each text at `base - itsAscent` lands both on one
+  // baseline so a 14px value sits level with its 10px UPPER label — and so the comma in "5,000×"
+  // no longer drops the value relative to "100×".
+  const LABEL_SIZE = 10, VALUE_SIZE = 14, LV_GAP = 5;
+  const labelAsc = textBaseline(LABEL_SIZE, '600');
+  const valueAsc = textBaseline(VALUE_SIZE, '800');
+  const base = Math.max(labelAsc, valueAsc);
+  const cells: Container[] = [];
   const stat = (label: string, val: string): void => {
-    // trim:false → uniform line boxes so the same-size values bottom-align on a common baseline
-    // (a trimmed "5,000×" box extends lower for the comma, which would raise its baseline).
-    const cell = new FlexBox({ direction: 'row', align: 'end', gap: 5 });
-    cell.add(makeText(host.t(label), { size: 10, weight: '600', color: host.tokens.plaqueLabel, letterSpacing: 1, upper: true, trim: false }));
-    cell.add(makeText(val, { size: 14, weight: '800', color: '#ffffff', trim: false }));
+    const lt = makeText(host.t(label), { size: LABEL_SIZE, weight: '600', color: host.tokens.plaqueLabel, letterSpacing: 1, upper: true, trim: false });
+    const vt = makeText(val, { size: VALUE_SIZE, weight: '800', color: '#ffffff', trim: false });
+    lt.position.set(0, base - labelAsc);
+    vt.position.set(lt.width + LV_GAP, base - valueAsc);
+    const cell = new Container();
+    cell.addChild(lt, vt);
     cells.push(cell);
   };
   if (m.price != null) stat('Price', m.price);
@@ -103,7 +112,7 @@ function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
   if (m.maxWin != null) stat('Max win', m.maxWin);
 
   const GAP = 14;
-  const cellW = cells.map((c) => c.measureSize().w);
+  const cellW = cells.map((c) => c.getLocalBounds().width);
   const statsW = cellW.reduce((a, b) => a + b, 0) + GAP * Math.max(0, cells.length - 1);
 
   // DOM `.ge-gi-mode-top { flex-wrap:wrap; justify-content:space-between }`: title and stats share a
@@ -129,7 +138,7 @@ function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
 
 /** Pack cells left-to-right into lines no wider than maxW (a minimal flex-wrap), stacked in a
  *  column — used to wrap the mode stats below the title on narrow widths. */
-function wrapFlow(cells: FlexBox[], widths: number[], maxW: number, gapX: number, gapY: number): FlexBox {
+function wrapFlow(cells: Container[], widths: number[], maxW: number, gapX: number, gapY: number): FlexBox {
   const col = new FlexBox({ direction: 'column', align: 'start', gap: gapY });
   let line = new FlexBox({ direction: 'row', align: 'end', gap: gapX });
   let lineW = 0;
