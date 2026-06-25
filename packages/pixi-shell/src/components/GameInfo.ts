@@ -91,9 +91,11 @@ function modeRow(host: ShellHost, m: GameMode, inner: number): FlexBox {
 
   const cells: FlexBox[] = [];
   const stat = (label: string, val: string): void => {
+    // trim:false → uniform line boxes so the same-size values bottom-align on a common baseline
+    // (a trimmed "5,000×" box extends lower for the comma, which would raise its baseline).
     const cell = new FlexBox({ direction: 'row', align: 'end', gap: 5 });
-    cell.add(makeText(host.t(label), { size: 10, weight: '600', color: host.tokens.plaqueLabel, letterSpacing: 1, upper: true }));
-    cell.add(makeText(val, { size: 14, weight: '800', color: '#ffffff' }));
+    cell.add(makeText(host.t(label), { size: 10, weight: '600', color: host.tokens.plaqueLabel, letterSpacing: 1, upper: true, trim: false }));
+    cell.add(makeText(val, { size: 14, weight: '800', color: '#ffffff', trim: false }));
     cells.push(cell);
   };
   if (m.price != null) stat('Price', m.price);

@@ -57,6 +57,10 @@ export interface TextOpts {
   lineHeight?: number;
   /** drop shadow (the floating readouts use `text-shadow:0 1px 3px rgba(0,0,0,.65)`). */
   shadow?: boolean;
+  /** Trim to ink bounds (default true). Set false when bottom-/baseline-aligning a row of
+   *  same-size texts: trimmed glyph-tight boxes vary per content (e.g. a comma's descent), so
+   *  `align:'end'` would misalign their baselines; an untrimmed line box is uniform. */
+  trim?: boolean;
 }
 
 /** Create a Pixi Text in the shell font, resolution-bumped for crisp small text. */
@@ -85,7 +89,7 @@ export function makeText(str: string, opts: TextOpts): Text {
   }
   // Trim to the ink bounds so vertical centring centres the visible glyphs, not the line box
   // (Pixi Text height includes ascent/descent leading → centred text otherwise sits high).
-  style.trim = true;
+  style.trim = opts.trim ?? true;
   const t = new Text({
     text: opts.upper ? str.toUpperCase() : str,
     style,
