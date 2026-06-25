@@ -1,7 +1,7 @@
 // examples/spec-slot/GameScene.ts
 import { Scene } from '@energy8platform/game-engine/core';
 import { ReelGrid, CascadeController, BigWinOverlay, MultiplierAccumulator } from '@energy8platform/game-engine/slot';
-import type { SlotSceneController, RenderContext } from '@energy8platform/game-engine/host';
+import type { SlotSceneController, RenderContext, SceneApi } from '@energy8platform/game-engine/host';
 import { model } from './game.spec';
 import { resolveSymbol } from './slot/symbols';
 import type { SpinData } from './normalize';
@@ -36,6 +36,14 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
     this.layout(this._vw, this._vh);
   }
 
+  /** Injected once, before the first round — grab audio / overlay / safe-area off `api` here. */
+  onCreate(_api: SceneApi): void {
+    // e.g. this.sfx = _api.audio; this.overlay = _api.overlay;
+  }
+
+  /** Player pressed spin (before the network result) — kick off anticipation here. */
+  onSpinStart(): void {}
+
   /** Render one normalized result (one spin, or one free spin of a bonus). */
   async onSpin(result: SpinData, ctx: RenderContext): Promise<void> {
     const turbo = ctx.turbo > 0;
@@ -55,6 +63,9 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
     // TODO: show a bonus summary. Defaults to nothing.
     void last; void ctx;
   }
+
+  /** Round fully drained — controls are unlocked; settle back to idle here. */
+  onSpinEnd(_result: SpinData, _ctx: RenderContext): void {}
 
   onResize(width: number, height: number): void {
     this._vw = width;

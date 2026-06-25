@@ -68,21 +68,23 @@ export interface SceneApi {
 }
 
 /** The contract a slot scene implements. The HOST owns the play→present→ack→drain loop and the
- *  shell; the scene only renders + reacts. Only `onSpin` is required. */
+ *  shell; the scene only renders + reacts. The core spin-lifecycle hooks are REQUIRED (implement
+ *  them — empty bodies are fine where a game has nothing to do); the incidental reactions below
+ *  stay optional. */
 export interface SlotSceneController<T extends SlotSpinResultBase = SlotSpinResultBase> {
   /** Injected ONCE before the first round — capabilities, subscriptions, one-time setup. */
-  onCreate?(api: SceneApi): void;
+  onCreate(api: SceneApi): void;
   /** Fires once per round when the player presses spin (before the network result). */
-  onSpinStart?(): void;
-  /** Render ONE segment (a spin or one free spin). Required. Await your own pacing. */
+  onSpinStart(): void;
+  /** Render ONE segment (a spin or one free spin). Await your own pacing. */
   onSpin(result: T, ctx: RenderContext): Promise<void>;
   /** Fires when ctx.mode changes between segments (entering a non-BASE mode/bonus). */
-  onEnterMode?(result: T, ctx: RenderContext): Promise<void>;
+  onEnterMode(result: T, ctx: RenderContext): Promise<void>;
   /** Fires when leaving a mode (back toward BASE). */
-  onExitMode?(result: T, ctx: RenderContext): Promise<void>;
+  onExitMode(result: T, ctx: RenderContext): Promise<void>;
   /** Fires once per round after the full drain (controls unlocked). */
-  onSpinEnd?(result: T, ctx: RenderContext): void;
-  /** Shell events (may fire while idle). */
+  onSpinEnd(result: T, ctx: RenderContext): void;
+  /** Shell events (may fire while idle) — optional. */
   onBetChanged?(bet: number): void;
   onTurboChanged?(level: number): void;
   onAutoplayChanged?(state: AutoplaySceneState): void;

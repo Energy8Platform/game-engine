@@ -25,7 +25,7 @@ export function genGameScene(a: Answers): string {
 
   return `import { Scene } from '@energy8platform/game-engine/core';
 import { ReelGrid, ${ctrl}, BigWinOverlay${multiplierImport} } from '@energy8platform/game-engine/slot';
-import type { SlotSceneController, RenderContext } from '@energy8platform/game-engine/host';
+import type { SlotSceneController, RenderContext, SceneApi } from '@energy8platform/game-engine/host';
 import { model } from '../game.spec';
 import { resolveSymbol } from '../slot/symbols';
 import type { SpinData } from '../game/normalize';
@@ -62,6 +62,14 @@ ${multiplierField}
     this.layout(this._vw, this._vh);
   }
 
+  /** Injected once, before the first round — grab audio / overlay / safe-area off \`api\` here. */
+  onCreate(_api: SceneApi): void {
+    // e.g. this.sfx = _api.audio; this.overlay = _api.overlay;
+  }
+
+  /** Player pressed spin (before the network result) — kick off anticipation here. */
+  onSpinStart(): void {}
+
 ${present}
 
   /** Bonus starting — show an intro. trigger.freeSpins?.total = how many free spins were awarded. */
@@ -75,6 +83,9 @@ ${present}
     // TODO: show a bonus summary. Defaults to nothing.
     void last; void ctx;
   }
+
+  /** Round fully drained — controls are unlocked; settle back to idle here. */
+  onSpinEnd(_result: SpinData, _ctx: RenderContext): void {}
 
   onResize(width: number, height: number): void {
     this._vw = width;
