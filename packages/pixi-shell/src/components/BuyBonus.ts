@@ -32,7 +32,20 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private h = 0;
   private headerH = 44;
   private footerH = 44;
+  // Drag-scroll state. The drag is handled on the (unmasked) overlay, not the masked strip — a mask
+  // prunes pointer events outside its band, stalling globalpointermove mid-drag so later cards never
+  // scroll into reach. The overlay sees the whole screen, so the scroll runs the full range.
   private dragX = 0;
+  private dragAxis: 'x' | 'y' = 'y';
+  private dragMax = 0;
+  private dragBaseX = 0;
+  private dragBaseY = 0;
+  private bandTop = 0;
+  private bandH = 0;
+  private dragging = false;
+  private dragFrom = 0;
+  private dragBase = 0;
+  private dragged = false; // a tap that actually moved → suppress the card select
 
   constructor(host: ShellHost, bonuses: BonusOption[]) {
     super();
@@ -42,7 +55,48 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     this.veil.eventMode = 'static';
     this.strip.mask = this.stripMask;
     this.addChild(this.stripMask);
+    this.eventMode = 'static';
+    this.on('pointerdown', this.onDragDown);
+    this.on('globalpointermove', this.onDragMove);
+    this.on('pointerup', this.onDragUp);
+    this.on('pointerupoutside', this.onDragUp);
     this.resize(host.screenW, host.screenH);
+  }
+
+  private onDragDown = (e: FederatedPointerEvent): void => {
+    if (this.confirm || this.dragMax <= 0) return;
+    const gy = e.global.y;
+    if (gy < this.bandTop || gy > this.bandTop + this.bandH) return; // only within the card band
+    this.dragging = true;
+    this.dragged = false;
+    this.dragFrom = this.dragAxis === 'x' ? e.global.x : e.global.y;
+    this.dragBase = this.dragX;
+  };
+  private onDragMove = (e: FederatedPointerEvent): void => {
+    if (!this.dragging) return;
+    const cur = this.dragAxis === 'x' ? e.global.x : e.global.y;
+    if (Math.abs(cur - this.dragFrom) > 4) this.dragged = true;
+    this.dragX = Math.max(-this.dragMax, Math.min(0, this.dragBase + (cur - this.dragFrom)));
+    if (this.dragAxis === 'x') this.strip.position.x = this.dragBaseX + this.dragX;
+    else this.strip.position.y = this.dragBaseY + this.dragX;
+  };
+  private onDragUp = (): void => {
+    this.dragging = false;
+  };
+
+  /** Configure the scroll for the current layout (axis, the strip's resting position, the card band
+   *  the drag is allowed to start in, and the max travel). The overlay's listeners read these. */
+  private setDragRange(axis: 'x' | 'y', baseX: number, baseY: number, bandTop: number, bandH: number, max: number): void {
+    this.dragAxis = axis;
+    this.dragBaseX = baseX;
+    this.dragBaseY = baseY;
+    this.bandTop = bandTop;
+    this.bandH = bandH;
+    this.dragMax = Math.max(0, max);
+    this.dragX = 0;
+    this.dragging = false;
+    this.strip.eventMode = 'auto'; // visual-only; its children (cards) are still hit-tested in-band
+    this.strip.position.set(baseX, baseY);
   }
 
   resize(w: number, h: number): void {
@@ -103,8 +157,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
         this.strip.addChild(c.node);
       }
       this.stripMask.rect(0, top, this.w, areaH).fill(0xffffff);
-      this.strip.position.set(0, top);
-      this.enableDrag('y', areaH, y - gap);
+      this.setDragRange('y', 0, top, top, areaH, y - gap - areaH);
     } else {
       // horizontal strip — centred, drag-scroll if it overflows
       const totalW = cards.length * cardW + (cards.length - 1) * gap;
@@ -116,43 +169,8 @@ class BuyBonusOverlay extends Container implements ShellLayer {
         this.strip.addChild(c.node);
       }
       this.stripMask.rect(0, top, this.w, areaH).fill(0xffffff);
-      this.strip.position.set(0, 0);
-      this.enableDrag('x', this.w, totalW + 48);
+      this.setDragRange('x', 0, 0, top, areaH, totalW + 48 - this.w);
     }
-  }
-
-  private enableDrag(axis: 'x' | 'y', view: number, content: number): void {
-    this.dragX = 0;
-    if (content <= view) {
-      this.strip.eventMode = 'auto';
-      return;
-    }
-    const max = content - view;
-    this.strip.eventMode = 'static';
-    this.strip.hitArea = new Rectangle(0, 0, this.w, this.h);
-    let dragging = false;
-    let last = 0;
-    let base = 0;
-    const baseY = this.strip.position.y;
-    const baseX = this.strip.position.x;
-    this.strip.removeAllListeners();
-    this.strip.on('pointerdown', (e: FederatedPointerEvent) => {
-      dragging = true;
-      last = axis === 'x' ? e.global.x : e.global.y;
-      base = this.dragX;
-    });
-    this.strip.on('globalpointermove', (e: FederatedPointerEvent) => {
-      if (!dragging) return;
-      const cur = axis === 'x' ? e.global.x : e.global.y;
-      this.dragX = Math.max(-max, Math.min(0, base + (cur - last)));
-      if (axis === 'x') this.strip.position.x = baseX + this.dragX;
-      else this.strip.position.y = baseY + this.dragX;
-    });
-    const up = (): void => {
-      dragging = false;
-    };
-    this.strip.on('pointerup', up);
-    this.strip.on('pointerupoutside', up);
   }
 
   // ── one card ──────────────────────────────────────────────────────────────
@@ -172,6 +190,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
       enabled,
       ctaLabel: this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'),
       onSelect: () => {
+        if (this.dragged) return; // a scroll gesture, not a tap
         if (this.isAffordable(bonus)) this.openConfirm(bonus, accent, ink);
       },
     });

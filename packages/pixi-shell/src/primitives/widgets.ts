@@ -185,7 +185,7 @@ export interface ReadoutOpts {
   value: string;
   muted: string; // label colour
   fg: string; // value colour
-  align?: 'left' | 'center';
+  align?: 'left' | 'center' | 'right';
   shadow?: boolean; // floating readouts have a text-shadow; plaque ones don't
   valueSize?: number;
 }
@@ -193,7 +193,7 @@ export interface ReadoutOpts {
 export class Readout extends Container implements Sizable {
   readonly valueText: Text;
   private labelText: Text;
-  private align: 'left' | 'center';
+  private align: 'left' | 'center' | 'right';
 
   constructor(opts: ReadoutOpts) {
     super();
@@ -217,13 +217,9 @@ export class Readout extends Container implements Sizable {
 
   private relayout(): void {
     const w = Math.max(this.labelText.width, this.valueText.width);
-    if (this.align === 'center') {
-      this.labelText.position.set((w - this.labelText.width) / 2, 0);
-      this.valueText.position.set((w - this.valueText.width) / 2, this.labelText.height + 4);
-    } else {
-      this.labelText.position.set(0, 0);
-      this.valueText.position.set(0, this.labelText.height + 4);
-    }
+    const x = (tw: number): number => (this.align === 'center' ? (w - tw) / 2 : this.align === 'right' ? w - tw : 0);
+    this.labelText.position.set(x(this.labelText.width), 0);
+    this.valueText.position.set(x(this.valueText.width), this.labelText.height + 4);
   }
 
   setValue(v: string): void {

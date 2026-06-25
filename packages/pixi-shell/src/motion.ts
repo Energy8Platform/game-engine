@@ -5,7 +5,7 @@ import { setText } from './text';
  *  reduced so animations never block — same rule as the DOM shell's motion.ts. */
 export function prefersReducedMotion(): boolean {
   const mm = (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia;
-  if (typeof mm !== 'function') return false; // in a browser with no media support, still animate
+  if (typeof mm !== 'function') return true; // no matchMedia (jsdom/SSR) → reduced, like the DOM shell
   return mm('(prefers-reduced-motion: reduce)').matches;
 }
 

@@ -5,6 +5,7 @@ import { stepBet, nextTurbo } from '../state';
 import { effectiveAccent, contrastText } from '../colors';
 import { makeText } from '../text';
 import { FlexBox } from '../primitives/flex';
+import { Spacer } from '../primitives/controls';
 import {
   IconButton,
   Readout,
@@ -375,12 +376,13 @@ export class BottomBar extends Container {
     if (!state.replay) {
       const bal = plaqueReadout(this.host, 'Balance', this.host.fmt(state.balance));
       this.balanceValue = bal.valueText;
-      top.add(bal);
+      top.add(bal); // balance always hugs the left
     }
+    top.add(new Spacer(), { grow: 1 }); // fills the gap so balance stays left and win stays right
     if (state.win > 0) {
       const win = new WinPillInline(this.host, this.host.t('Win'), this.host.fmtWin(state.win));
       this.winValue = win.value;
-      top.add(win);
+      top.add(win); // win always hugs the right
     }
 
     // controls: menu · auto · spin · fs · totalwin · turbo · buy (dark, white).
@@ -409,7 +411,9 @@ export class BottomBar extends Container {
       if (state.autoplay.active) this.autoBtn.setGlow(true);
       ctlItems.push(this.autoBtn);
     }
-    if (isBase || state.autoplay.active) {
+    if (isBase) {
+      // DOM mobile center = isBase ? spin : null — the disc (incl. the autoplay STOP) shows only in
+      // base, same as the wide path; freeSpins/replay never render it.
       this.spin = new SpinDisc({
         size: 84,
         glyph: 66,
@@ -465,7 +469,8 @@ export class BottomBar extends Container {
       value: this.host.fmt(betShown),
       muted: feature ? effectiveAccent(feature) : '#fff',
       fg: feature ? effectiveAccent(feature) : '#fff',
-      align: 'center',
+      // centred between the +/− steppers in base; a plain stake readout (FS/replay) hugs the left
+      align: isBase ? 'center' : 'left',
       shadow: false,
     });
     this.betReadout = betR;
@@ -576,8 +581,14 @@ export class BottomBar extends Container {
       if (this.rightZone) this.rightZone.position.set(W - padX - this.rightW, plaqueTop);
       if (this.winPill) {
         this.winPill.setLifted(!winInline);
-        const y = winInline ? winCenterY : plaqueTop - this.winPill.outerHeight - 8;
-        this.winPill.position.set((W - winW) / 2, y);
+        if (winInline) {
+          // centre the pill in the GAP between the clusters (like flex space-between), not the whole
+          // frame — a frame-centred pill overlaps the Total win plaque on the left in FS mode.
+          const gapMid = (padX + this.leftW + (W - padX - this.rightW)) / 2;
+          this.winPill.position.set(gapMid - winW / 2, winCenterY);
+        } else {
+          this.winPill.position.set((W - winW) / 2, plaqueTop - this.winPill.outerHeight - 8);
+        }
       }
     }
   }
@@ -664,7 +675,7 @@ class WinPillInline extends Container {
       value,
       muted: host.tokens.plaqueLabel,
       fg: '#ffffff',
-      align: 'center',
+      align: 'right', // win always hugs the right edge of the mobile top row
       shadow: false,
     });
     this.value = r.valueText;
