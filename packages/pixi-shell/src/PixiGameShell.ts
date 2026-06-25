@@ -205,9 +205,9 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       // veil (the same token the overlay paints on top): a clean ~20px Gaussian (strength 10 at ½ res),
       // a high pass count so it reads as a smooth frost (not a streaky/blocky smear), and a +20%
       // saturation lift so the blurred game stays colourful rather than washing out grey.
-      // Effective on-screen blur ≈ strength / resolution = 12 / 0.25 ≈ 48px — strong enough that the
+      // Effective on-screen blur ≈ strength / resolution = 14 / 0.25 ≈ 56px — strong enough that the
       // background's shapes dissolve into a frost. Bump `strength` (or drop `resolution`) for more.
-      const blur = new BlurFilter({ strength: 12, quality: 6 });
+      const blur = new BlurFilter({ strength: 14, quality: 6 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       const saturate = new ColorMatrixFilter();
       saturate.saturate(0.3, false); // x = amount*2/3 + 1 ≈ 1.2 → saturate(120%)
