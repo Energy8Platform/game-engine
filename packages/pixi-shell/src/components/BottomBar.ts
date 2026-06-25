@@ -562,9 +562,9 @@ export class BottomBar extends Container {
     const W = this.host.screenW;
     const H = this.host.screenH;
     const padX = 18;
-    const padBottom = 4; // sits the bar lower toward the frame edge (was 14)
+    const padBottom = WIDE_PAD_BOTTOM; // sits the bar lower toward the frame edge (was 14)
     const GAP = 14; // .ge-shell-bottom { gap:14px } between zones
-    const centerY = H - padBottom - 86 / 2; // tallest element (SPIN disc) bottom-anchored
+    const centerY = H - padBottom - WIDE_SPIN_DISC_H / 2; // tallest element (SPIN disc) bottom-anchored
     const winCenterY = centerY - PLAQUE_H / 2;
     const plaqueTop = centerY - PLAQUE_H / 2;
     this.inner.scale.set(1);
@@ -630,7 +630,7 @@ export class BottomBar extends Container {
     this.inner.scale.set(s);
     // Centre the scaled stack so left/right padding match. It was anchored at x=12, so once the
     // stack scaled down on narrow phones (mobile-s) it left a big gap on the right edge.
-    this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - 8);
+    this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - MOBILE_PAD_BOTTOM);
   }
 }
 
