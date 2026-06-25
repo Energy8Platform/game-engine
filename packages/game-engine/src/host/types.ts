@@ -61,6 +61,9 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   dev?: boolean;
   stake?: StakeIntegration;
   shell?: SlotShellOptions;
+  /** Double-tap on the play area to skip the current spin animation. Default `true`. Set `false`
+   *  to disable the gesture (e.g. games where a tap means something else). */
+  skipGesture?: boolean;
   onFatalError?: (message: string) => void;
 }
 

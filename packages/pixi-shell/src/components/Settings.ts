@@ -38,23 +38,6 @@ function buildBody(host: ShellHost, width: number): Container {
   });
   col.add(glassRow(host, [textNode(host, host.t('Sound')), new Spacer(), speaker]));
 
-  // Skip animations (double-tap) on/off — default ON. The host gates the double-tap skip on this.
-  let skipOn = true;
-  const skipToggle = new IconButton('turbo', {
-    size: 36,
-    glyph: 24,
-    color: host.tokens.plaqueLabel,
-    hover: host.tokens.accent,
-    activeColor: '#ffffff',
-    active: true,
-    onTap: () => {
-      skipOn = !skipOn;
-      skipToggle.active = skipOn;
-      host.emit('settingChange', { key: 'skipGesture', value: skipOn });
-    },
-  });
-  col.add(glassRow(host, [textNode(host, host.t('Quick skip (double-tap)')), new Spacer(), skipToggle]));
-
   // Volume sliders
   col.add(sliderRow(host, width, 'master', host.t('Master volume')));
   col.add(sliderRow(host, width, 'music', host.t('Music')));
