@@ -138,6 +138,14 @@ export class FlexBox extends Container implements Sizable {
     }
   }
 
+  /** Recolour the background fill in place (e.g. a row's hover state) without a relayout. */
+  setBgFill(fill: string): void {
+    if (this.bgStyle) {
+      this.bgStyle.fill = fill;
+      this.drawBackground();
+    }
+  }
+
   // ── Sizable ──────────────────────────────────────────────────────────────
   setLayoutSize(w: number | undefined, h: number | undefined): void {
     this.fixedW = w;

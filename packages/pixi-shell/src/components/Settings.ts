@@ -1,11 +1,11 @@
-import { Container } from 'pixi.js';
+import { Container, Text } from 'pixi.js';
 import type { ShellHost, ShellLayer } from '../context';
 import { Overlay } from '../primitives/overlay';
 import { makeText } from '../text';
 import { makeIcon } from '../pixi-icon';
 import { FlexBox } from '../primitives/flex';
 import { Slider, Spacer } from '../primitives/controls';
-import { IconButton } from '../primitives/widgets';
+import { IconButton, attachHover } from '../primitives/widgets';
 
 /** Settings overlay — sound on/off, volume sliders, and a Game info link. */
 export function openSettings(host: ShellHost): ShellLayer {
@@ -71,6 +71,20 @@ function glassRow(host: ShellHost, children: Container[], opts: { button?: boole
     row.eventMode = 'static';
     row.cursor = 'pointer';
     if (opts.onTap) row.on('pointertap', opts.onTap);
+    // hover: brighter glass + accent text (DOM button.ge-ov-row:hover)
+    const texts = children.filter((c): c is Text => c instanceof Text);
+    const orig = texts.map((t) => t.style.fill);
+    attachHover(
+      row,
+      () => {
+        row.setBgFill(host.tokens.plaqueGlassHover);
+        texts.forEach((t) => (t.style.fill = host.tokens.accent));
+      },
+      () => {
+        row.setBgFill(host.tokens.plaqueGlass);
+        texts.forEach((t, i) => (t.style.fill = orig[i]));
+      },
+    );
   }
   return row;
 }
