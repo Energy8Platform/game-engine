@@ -1,4 +1,4 @@
-import { Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
+import { BlurFilter, Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
 import type { ShellTokens } from '../theme';
 import type { IconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
@@ -211,6 +211,28 @@ function drawDisc(g: Graphics, size: number, fill: string, border = 3): void {
   g.stroke({ color: '#000000', width: border });
 }
 
+/** A glow Graphics with a soft blur baked in — draw an accent circle into it and it reads as a halo. */
+function makeGlow(): Graphics {
+  const g = new Graphics();
+  try {
+    g.filters = [new BlurFilter({ strength: 6, quality: 3 })];
+  } catch {
+    /* no WebGL (jsdom tests) → unfiltered; tests don't render so the filter is irrelevant there */
+  }
+  return g;
+}
+
+/** The hover halo shared by SPIN + BUY BONUS: `box-shadow: 0 0 0 3px accent, 0 0 16px accent` —
+ *  a SOLID 3px accent ring hugging the disc plus a soft accent glow behind it. */
+function drawHalo(glow: Graphics, ring: Graphics, size: number, accent: string, on: boolean): void {
+  glow.clear();
+  ring.clear();
+  if (!on) return;
+  const r = size / 2;
+  glow.circle(r, r, r + 7).fill({ color: accent, alpha: 0.65 }); // blurred by the glow's filter → glow
+  ring.circle(r, r, r + 1.5).stroke({ color: accent, width: 3 }); // solid, opaque accent ring
+}
+
 // ── SpinDisc — .ge-shell-spin ────────────────────────────────────────────────
 export interface SpinDiscOpts {
   size?: number; // 86 desktop / 84 mobile
@@ -226,6 +248,8 @@ export class SpinDisc extends Container implements Sizable {
   private glyphSize: number;
   private tokens: ShellTokens;
   private ticker: Ticker;
+  private glow = makeGlow();
+  private ring = new Graphics();
   private disc: Graphics;
   private glyph: IconView;
   private countText?: Text;
@@ -248,7 +272,7 @@ export class SpinDisc extends Container implements Sizable {
     this.disc = new Graphics();
     this.glyph = makeIcon('spin', this.glyphSize, this.tokens.spinFg);
     this.glyph.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
-    this.addChild(this.disc, this.glyph);
+    this.addChild(this.glow, this.ring, this.disc, this.glyph);
     this.paint();
     this.eventMode = 'static';
     this.cursor = 'pointer';
@@ -270,6 +294,7 @@ export class SpinDisc extends Container implements Sizable {
   private paint(): void {
     const hot = this.hovering && !this._disabled && this.mode === 'spin';
     drawDisc(this.disc, this.size, hot ? this.tokens.accent : this.tokens.spin);
+    drawHalo(this.glow, this.ring, this.size, this.tokens.accent, hot); // solid ring + glow on hover
     const glyphColor = hot ? '#ffffff' : this.tokens.spinFg;
     this.glyph.setColor(glyphColor);
     if (this.countText) this.countText.style.fill = hot ? '#ffffff' : this.tokens.spinFg;
@@ -390,7 +415,8 @@ export class BuyBonusBadge extends Container implements Sizable {
   private ticker: Ticker;
   private _disabled = false;
   private pulseCancel?: () => void;
-  private glow: Graphics;
+  private glow = makeGlow();
+  private ring = new Graphics();
 
   constructor(opts: BuyBonusOpts) {
     super();
@@ -398,7 +424,6 @@ export class BuyBonusBadge extends Container implements Sizable {
     this.border = opts.border ?? 3;
     this.bg = opts.bg;
     this.ticker = opts.ticker;
-    this.glow = new Graphics();
     this.disc = new Graphics();
     this.labelText = makeText(opts.label, {
       size: opts.fontSize ?? 13,
@@ -410,7 +435,7 @@ export class BuyBonusBadge extends Container implements Sizable {
     });
     this.labelText.anchor.set(0.5);
     this.labelText.position.set(this.size / 2, this.size / 2);
-    this.addChild(this.glow, this.disc, this.labelText);
+    this.addChild(this.glow, this.ring, this.disc, this.labelText);
     this.paint(false);
     this.eventMode = 'static';
     this.cursor = 'pointer';
@@ -423,15 +448,10 @@ export class BuyBonusBadge extends Container implements Sizable {
 
   private paint(hovering: boolean): void {
     drawDisc(this.disc, this.size, this.bg, this.border);
-    this.glow.clear();
-    if (hovering && !this._disabled) {
-      // approximate `box-shadow: 0 0 0 3px accent, 0 0 16px accent` with a soft ring
-      this.glow.circle(this.size / 2, this.size / 2, this.size / 2 + 4);
-      this.glow.fill({ color: this.bg, alpha: 0.35 });
-      this.startPulse();
-    } else {
-      this.stopPulse();
-    }
+    const on = hovering && !this._disabled;
+    drawHalo(this.glow, this.ring, this.size, this.bg, on); // solid 3px accent ring + soft glow
+    if (on) this.startPulse();
+    else this.stopPulse();
     this.alpha = this._disabled ? 0.72 : 1;
   }
 

@@ -117,7 +117,7 @@ describe('widget centering — icons & text stay put', () => {
   it('SpinDisc centres the spin glyph and reports its size', () => {
     const disc = new SpinDisc({ size: 86, glyph: 68, tokens, ticker: stubTicker, onSpin() {}, onStop() {} });
     expect(disc.measureSize()).toEqual({ w: 86, h: 86 });
-    const glyph = disc.children[1]; // [disc bg, glyph]
+    const glyph = disc.children[disc.children.length - 1]; // glyph is the last child (after glow/ring/disc)
     expect(glyph.position.x).toBeCloseTo((86 - 68) / 2, 3);
     expect(glyph.position.y).toBeCloseTo((86 - 68) / 2, 3);
   });
