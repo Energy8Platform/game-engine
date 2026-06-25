@@ -16,6 +16,18 @@ import {
 
 const PLAQUE_H = 56;
 
+// Bar height constants — used by applyFit() and the public `height` getter.
+const WIDE_PAD_BOTTOM = 4;     // applyFit: padBottom = 4
+const WIDE_SPIN_DISC_H = 86;   // tallest wide element: SpinDisc (86px) bottom-anchors the row
+/** Pixel height the wide bar reserves at the bottom of the screen (at scale=1). */
+export const WIDE_BAR_H = WIDE_PAD_BOTTOM + WIDE_SPIN_DISC_H; // 90
+
+const MOBILE_PAD_BOTTOM = 8;   // applyFitMobile: bottom offset = 8
+// Three rows: top(46) + gap(14) + controls(62) + gap(14) + betRow(46) = 182
+const MOBILE_INNER_H = 46 + 14 + 62 + 14 + 46;
+/** Pixel height the mobile bar reserves at the bottom of the screen (at scale=1). */
+export const MOBILE_BAR_H = MOBILE_PAD_BOTTOM + MOBILE_INNER_H; // 190
+
 // turbo glyph by level — matches BottomBar.turboIcon (0/1 → turbo1, 2 → turbo2, 3 → turbo3).
 function turboIcon(level: number): IconName {
   return (['turbo1', 'turbo1', 'turbo2', 'turbo3'] as const)[Math.max(0, Math.min(3, level))];
@@ -533,6 +545,15 @@ export class BottomBar extends Container {
   }
 
   // ── positioning / fit-scale (called by the shell after construction) ─────────
+
+  /** Pixel height this bar reserves at the bottom of the screen.
+   *  Reflects the current wide/mobile layout at scale=1 (the shell never clips the bar taller
+   *  than this). Correct immediately after construction; does not change until `applyFit()` is
+   *  called with a different layout. */
+  get height(): number {
+    return this.host.layout === 'mobile' ? MOBILE_BAR_H : WIDE_BAR_H;
+  }
+
   applyFit(): void {
     if (this.host.layout === 'mobile') {
       this.applyFitMobile();

@@ -93,6 +93,16 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     return this.app.screen.height;
   }
 
+  /** Height of the bottom control bar in px (0 before first layout, or in replay-only chrome). */
+  get barHeight(): number {
+    return this.bar?.height ?? 0;
+  }
+
+  /** Insets a scene should avoid. Only the bottom bar is reserved; the rest is full-bleed. */
+  get safeArea(): { top: number; right: number; bottom: number; left: number } {
+    return { top: 0, right: 0, bottom: this.barHeight, left: 0 };
+  }
+
   t(text: string): string {
     return this.config.isSocial ? socialize(text) : text;
   }
