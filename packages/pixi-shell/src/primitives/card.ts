@@ -4,7 +4,7 @@ import { contrastText } from '../colors';
 import { makeIcon } from '../pixi-icon';
 import { makeText } from '../text';
 import { attachHover, attachPress } from './widgets';
-import { FlexBox } from './flex';
+import { FlexBox, roundedPath } from './flex';
 
 /** Fraction of the frame a card modal may occupy (GameShell.MODAL_FIT). */
 const MODAL_FIT = 0.86;
@@ -42,7 +42,6 @@ export class CardModal extends Container implements ShellLayer {
   private veil = new Graphics();
   private cardRoot = new Container();
   private bg = new Graphics();
-  private cardMask = new Graphics();
   private actionsRow = new Container();
   private actionsH = 0;
   private closeBtn?: Container;
@@ -78,8 +77,10 @@ export class CardModal extends Container implements ShellLayer {
     this.body.add(title);
 
     this.veil.eventMode = 'static';
-    this.cardRoot.addChild(this.bg, this.body, this.actionsRow, this.cardMask);
-    this.cardRoot.mask = this.cardMask;
+    // No mask on cardRoot: a masked container blocks pointer events to its children (chips/buttons
+    // wouldn't hover). The only thing that needs clipping is the full-bleed action buttons' bottom
+    // corners, which we round directly (setActions) — the body content never reaches the corners.
+    this.cardRoot.addChild(this.bg, this.body, this.actionsRow);
     this.addChild(this.veil, this.cardRoot);
 
     if (opts.closable !== false && opts.onClose) this.addClose(opts.onClose);
@@ -101,15 +102,16 @@ export class CardModal extends Container implements ShellLayer {
     if (!actions.length) return;
     const each = this.cardW / actions.length;
     const h = 3.1 * this.em;
+    const r = 1.3 * this.em; // card corner radius — only the outermost buttons round at the bottom
     actions.forEach((a, i) => {
-      const btn = this.makeButton(a, each, h);
+      const btn = this.makeButton(a, each, h, i === 0 ? r : 0, i === actions.length - 1 ? r : 0);
       btn.position.set(i * each, 0);
       this.actionsRow.addChild(btn);
     });
     this.actionsH = h;
   }
 
-  private makeButton(a: CardAction, w: number, h: number): Container {
+  private makeButton(a: CardAction, w: number, h: number, blRadius: number, brRadius: number): Container {
     const root = new Container();
     const fill =
       a.kind === 'accent' ? (a.accent ?? this.accent) : a.kind === 'ghost' ? this.host.tokens.plaqueGlassHover : a.kind;
@@ -117,11 +119,11 @@ export class CardModal extends Container implements ShellLayer {
     const bg = new Graphics();
     const draw = (hover: boolean): void => {
       bg.clear();
-      bg.rect(0, 0, w, h);
+      roundedPath(bg, 0, 0, w, h, [0, 0, brRadius, blRadius]); // square top (flush to body), rounded bottom
       bg.fill(a.disabled ? '#8d939e' : fill);
       if (hover && !a.disabled) {
-        bg.rect(0, 0, w, h);
-        bg.fill({ color: '#ffffff', alpha: 0.08 }); // approximates filter:brightness(1.08)
+        roundedPath(bg, 0, 0, w, h, [0, 0, brRadius, blRadius]);
+        bg.fill({ color: '#ffffff', alpha: 0.12 }); // ≈ filter:brightness(1.08), a touch stronger
       }
     };
     draw(false);
@@ -184,10 +186,6 @@ export class CardModal extends Container implements ShellLayer {
     this.bg.clear();
     this.bg.roundRect(0, 0, this.cardW, this.cardH, 1.3 * this.em);
     this.bg.fill(this.host.tokens.plaqueSolid);
-
-    this.cardMask.clear();
-    this.cardMask.roundRect(0, 0, this.cardW, this.cardH, 1.3 * this.em);
-    this.cardMask.fill(0xffffff);
 
     this.body.position.set(0, 0);
     this.actionsRow.position.set(0, bodyH);

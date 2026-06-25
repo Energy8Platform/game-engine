@@ -634,8 +634,12 @@ class WinPill extends Container {
     this.bg.clear();
     this.bg.roundRect(0, 0, w, h, this.lifted ? 999 : 16);
     this.bg.fill(this.host.tokens.plaqueGlass);
-    this.labelText.position.set(padX, (h - this.labelText.height) / 2);
-    this.value.position.set(padX + this.labelText.width + gap, (h - this.value.height) / 2);
+    // Centre the small WIN label on the value's CAP height — not the pill, and not the value's ink
+    // (which trim extends down to the comma's descender, leaving the label baseline-aligned/low).
+    const valTop = (h - this.value.height) / 2;
+    const valCapH = 16 * 0.72; // value font (16px) cap height, excluding the comma descender
+    this.value.position.set(padX + this.labelText.width + gap, valTop);
+    this.labelText.position.set(padX, valTop + (valCapH - this.labelText.height) / 2);
     this.outerWidth = w;
     this.outerHeight = h;
   }

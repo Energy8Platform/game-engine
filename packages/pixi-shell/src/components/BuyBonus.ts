@@ -7,6 +7,8 @@ import { makeText } from '../text';
 import { makeIcon } from '../pixi-icon';
 import { navButton } from '../primitives/overlay';
 import { clamp } from '../primitives/overlay';
+import { attachHover } from '../primitives/widgets';
+import { roundedPath } from '../primitives/flex';
 
 /** Buy-bonus overlay — art-forward cards (one per option), a live bet footer, and a confirm modal.
  *  Returns null when there are no bonus options. */
@@ -288,22 +290,20 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const card = new Container();
     const cardBg = new Graphics();
     cardBg.roundRect(0, 0, cardW, cardH, 1.3 * em).fill(this.host.tokens.plaqueSolid);
-    const cardMask = new Graphics();
-    cardMask.roundRect(0, 0, cardW, cardH, 1.3 * em).fill(0xffffff);
     card.addChild(cardBg, body);
-    // footer: Cancel (ghost) + Buy/Activate (accent)
+    // footer: Cancel (ghost) + Buy/Activate (accent). No mask — round the outer bottom corners so
+    // the buttons keep the card silhouette without a mask blocking their pointer events.
     const half = cardW / 2;
+    const r = 1.3 * em;
     card.addChild(
-      footerButton(this.host, this.host.t('Cancel'), 'ghost', half, ctaH, half * 0, y, () => this.removeConfirm()),
+      footerButton(this.host, this.host.t('Cancel'), 'ghost', half, ctaH, 0, y, () => this.removeConfirm(), undefined, r, 0),
       footerButton(this.host, this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'), accent, half, ctaH, half, y, () => {
         if (!this.isAffordable(bonus)) return;
         if (bonus.type === 'feature') this.host.activateFeature(bonus);
         else this.host.emit('buyBonusSelect', { id: bonus.id });
         this.host.closeLayer();
-      }, ink),
+      }, ink, 0, r),
     );
-    card.mask = cardMask;
-    card.addChild(cardMask);
     card.position.set((this.w - cardW) / 2, (this.h - cardH) / 2);
     layer.addChild(card);
 
@@ -393,13 +393,17 @@ class BonusCard {
     by += priceText.height;
     this.bottomH = by;
 
-    this.cta = ctaButton(host, opts.ctaLabel, accent, opts.ink, cardW, this.ctaH, opts.enabled, opts.onSelect);
+    this.cta = ctaButton(host, opts.ctaLabel, accent, opts.ink, cardW, this.ctaH, opts.enabled, opts.onSelect, 1.4 * em);
 
     this.node.addChild(this.bg, top, this.bottomBlock, this.cta);
     if (opts.enabled) {
       this.node.eventMode = 'static';
       this.node.cursor = 'pointer';
       this.node.on('pointertap', opts.onSelect);
+      // hover: accent outline (the DOM's box-shadow 0 0 0 1px card-acc). pointerenter/leave (not
+      // over/out) so moving onto the inner CTA doesn't toggle the card hover off and on.
+      this.node.on('pointerenter', () => { this.hovered = true; this.drawBg(); });
+      this.node.on('pointerleave', () => { this.hovered = false; this.drawBg(); });
     } else {
       this.node.alpha = 0.62;
     }
@@ -409,6 +413,19 @@ class BonusCard {
 
   private topH = 0;
 
+  private hovered = false;
+
+  /** Card background + border; the border turns accent on hover (DOM box-shadow 0 0 0 1px acc). */
+  private drawBg(): void {
+    const { cardW, em, host, accent, enabled } = this.opts;
+    const w = this.hovered ? 2 : 1;
+    this.bg.clear();
+    this.bg
+      .roundRect(w / 2, w / 2, cardW - w, this.height - w, 1.4 * em)
+      .fill(host.tokens.plaqueGlass)
+      .stroke({ color: this.hovered && enabled ? accent : host.tokens.plaqueLine, width: w });
+  }
+
   setHeight(total: number): void {
     this.height = total;
     const { cardW, em } = this.opts;
@@ -416,20 +433,11 @@ class BonusCard {
     // bottom block sits above the CTA, with the body bottom padding (.9em)
     this.bottomBlock.position.set(0, bodyH - 0.9 * em - this.bottomH);
     this.cta.position.set(0, bodyH);
-    this.bg.clear();
-    this.bg.roundRect(0, 0, cardW, total, 1.4 * em).fill(this.opts.host.tokens.plaqueGlass);
-    this.bg.stroke({ color: this.opts.host.tokens.plaqueLine, width: 1 });
-    // clip CTA corners with a card-silhouette mask
-    if (!this.maskG) {
-      this.maskG = new Graphics();
-      this.node.addChild(this.maskG);
-      this.node.mask = this.maskG;
-    }
-    this.maskG.clear();
-    this.maskG.roundRect(0, 0, cardW, total, 1.4 * em).fill(0xffffff);
+    this.drawBg();
+    // No node mask (it would block pointer events to the CTA). The CTA rounds its own bottom
+    // corners to the card radius instead — see ctaButton().
     this.node.hitArea = new Rectangle(0, 0, cardW, total);
   }
-  private maskG?: Graphics;
 }
 
 // ── shared card bits ─────────────────────────────────────────────────────────
@@ -469,11 +477,20 @@ function volatilityRow(host: ShellHost, level: number, accent: string, size: num
   return c;
 }
 
-function ctaButton(host: ShellHost, label: string, accent: string, ink: string, w: number, h: number, enabled: boolean, onTap: () => void): Container {
+function ctaButton(host: ShellHost, label: string, accent: string, ink: string, w: number, h: number, enabled: boolean, onTap: () => void, radius = 0): Container {
   const c = new Container();
   const bg = new Graphics();
   const fill = enabled ? accent : '#8d939e';
-  bg.rect(0, 0, w, h).fill(fill);
+  const draw = (hover: boolean): void => {
+    bg.clear();
+    roundedPath(bg, 0, 0, w, h, [0, 0, radius, radius]); // rounded bottom corners (card silhouette)
+    bg.fill(fill);
+    if (hover) {
+      roundedPath(bg, 0, 0, w, h, [0, 0, radius, radius]);
+      bg.fill({ color: '#ffffff', alpha: 0.1 }); // ≈ filter:brightness(1.06)
+    }
+  };
+  draw(false);
   const t = makeText(label, { size: 1.05 * (h / 3.1), weight: '800', color: enabled ? ink : '#3a3f47', letterSpacing: 0.5, upper: true, align: 'center' });
   t.position.set((w - t.width) / 2, (h - t.height) / 2);
   c.addChild(bg, t);
@@ -481,16 +498,26 @@ function ctaButton(host: ShellHost, label: string, accent: string, ink: string, 
     c.eventMode = 'static';
     c.cursor = 'pointer';
     c.hitArea = new Rectangle(0, 0, w, h);
+    attachHover(c, () => draw(true), () => draw(false));
     c.on('pointertap', onTap);
   }
   return c;
 }
 
-function footerButton(host: ShellHost, label: string, kind: 'ghost' | string, w: number, h: number, x: number, y: number, onTap: () => void, ink?: string): Container {
+function footerButton(host: ShellHost, label: string, kind: 'ghost' | string, w: number, h: number, x: number, y: number, onTap: () => void, ink?: string, blRadius = 0, brRadius = 0): Container {
   const c = new Container();
   const bg = new Graphics();
   const fill = kind === 'ghost' ? host.tokens.plaqueGlassHover : kind;
-  bg.rect(0, 0, w, h).fill(fill);
+  const draw = (hover: boolean): void => {
+    bg.clear();
+    roundedPath(bg, 0, 0, w, h, [0, 0, brRadius, blRadius]);
+    bg.fill(fill);
+    if (hover) {
+      roundedPath(bg, 0, 0, w, h, [0, 0, brRadius, blRadius]);
+      bg.fill({ color: '#ffffff', alpha: 0.1 });
+    }
+  };
+  draw(false);
   const color = kind === 'ghost' ? '#ffffff' : ink ?? contrastText(kind);
   const t = makeText(label, { size: h / 3.1, weight: '800', color, letterSpacing: 0.5, upper: true, align: 'center' });
   t.position.set((w - t.width) / 2, (h - t.height) / 2);
@@ -499,6 +526,7 @@ function footerButton(host: ShellHost, label: string, kind: 'ghost' | string, w:
   c.eventMode = 'static';
   c.cursor = 'pointer';
   c.hitArea = new Rectangle(0, 0, w, h);
+  attachHover(c, () => draw(true), () => draw(false));
   c.on('pointertap', onTap);
   return c;
 }
