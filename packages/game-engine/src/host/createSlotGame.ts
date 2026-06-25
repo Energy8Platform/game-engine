@@ -215,7 +215,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
     // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
     let currentTurbo = shell.state.turbo;
-    shell.on('turboChange', (level: number) => { currentTurbo = level; });
+    shell.on('turboChange', (level: number) => { currentTurbo = level; gameScene()?.onTurboChanged?.(level); });
     // Double-tap skip is a shell setting (default on); toggled live via the settingChange handler.
     let skipEnabled = true;
 
@@ -415,7 +415,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         if (!ensureAffordable(action)) return;
         void playRound(action);
       });
-      shell.on('betChange', (bet: number) => { currentBet = bet; });
+      shell.on('betChange', (bet: number) => { currentBet = bet; gameScene()?.onBetChanged?.(bet); });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => {
         if (!ensureAffordable(id)) return;
         void playRound(id);
@@ -428,7 +428,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         resolveAction: () => activeFeature ?? 'spin',
         canAfford: (a) => ensureAffordable(a),
         playRound: (a) => Promise.resolve(playRound(a)),
-        onState: (s) => shell!.setAutoplay(s),
+        onState: (s) => {
+          shell!.setAutoplay(s);
+          gameScene()?.onAutoplayChanged?.({ running: s.active, remaining: s.remaining });
+        },
       });
       stopAutoplay = () => autoplay.stop();
       shell.on('autoplayStart', (o: { remaining?: number }) => autoplay.start(o?.remaining ?? 0));
