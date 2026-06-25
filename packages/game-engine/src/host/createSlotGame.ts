@@ -216,6 +216,20 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // Live turbo level (0..3) — read fresh on each ctx.turbo access so a mid-round toggle is honoured.
     let currentTurbo = shell.state.turbo;
     shell.on('turboChange', (level: number) => { currentTurbo = level; });
+    // Double-tap skip is a shell setting (default on); toggled live via the settingChange handler.
+    let skipEnabled = true;
+
+    // Shell settings → engine state. Sound/volume map onto the AudioManager; the skip-gesture
+    // toggle flips `skipEnabled` (read by the double-tap detector below).
+    shell.on('settingChange', ({ key, value }: { key: string; value: unknown }) => {
+      switch (key) {
+        case 'sound': value ? game.audio.unmuteAll() : game.audio.muteAll(); break;
+        case 'master': game.audio.setMasterVolume(Number(value)); break;
+        case 'music': game.audio.setVolume('music', Number(value)); break;
+        case 'sfx': game.audio.setVolume('sfx', Number(value)); break;
+        case 'skipGesture': skipEnabled = Boolean(value); break;
+      }
+    });
 
     // Overlay layer sits ABOVE the shell (the shell already mounted its root onto app.stage; adding
     // ours afterwards keeps it on top). It eats pointer events while open so shell controls are
