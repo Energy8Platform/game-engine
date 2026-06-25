@@ -2,7 +2,7 @@
 import type { ApplicationOptions } from 'pixi.js';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { AssetManifest, LoadingScreenConfig } from '@energy8platform/platform-core';
-import type { GameShell } from '@energy8platform/platform-core/shell';
+import type { PixiGameShell } from '@energy8platform/pixi-shell';
 import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../types';
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
 import type { GameApplication } from '../core';
@@ -67,5 +67,5 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
 export interface SlotGameHandle {
   game: GameApplication;
   stakeBridge: StakeBridge | null;
-  shell: GameShell | null;
+  shell: PixiGameShell | null;
 }
