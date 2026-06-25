@@ -259,7 +259,11 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     };
 
     const roleOf = (action: string) => opts.model.spec.actions[action]?.role;
-    const makeContext = (action: string): import('./sceneController').RenderContext => ({
+    // The signal-less context. runRound injects a per-segment `signal` (for skip); resumeDrain
+    // attaches its own. So makeContext returns everything BUT `signal`.
+    const makeContext = (
+      action: string,
+    ): Omit<import('./sceneController').RenderContext, 'signal'> => ({
       bet: currentBet,
       action,
       mode: opts.model.modeMap[action] ?? action.toUpperCase(),
@@ -294,8 +298,28 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       });
     });
 
+    // Skip state: `currentSegmentAbort` is the controller for the segment presently animating;
+    // `presenting` is true for the whole play→drain window (gates the double-tap detector so taps
+    // only skip while a round is animating).
+    let currentSegmentAbort: AbortController | null = null;
+    let presenting = false;
+
+    // Double-tap skip: a double-tap on the play area aborts the current segment (the scene collapses
+    // to its final visual via ctx.signal) and notifies the scene's onSkip. Gated by the shell's
+    // skip-gesture setting (`skipEnabled`) and only active while a round is presenting.
+    const { createDoubleTapSkip } = await import('./skipGesture');
+    const skip = createDoubleTapSkip({
+      enabled: () => skipEnabled,
+      active: () => presenting,
+      onSkip: () => { currentSegmentAbort?.abort(); gameScene()?.onSkip?.(); },
+    });
+    // Listen for taps on the scene root (the scene container, which is app.stage — the shell bar
+    // mounts after and eats its own pointer events, so taps reaching here are in the play area).
+    game.scenes.root.eventMode = 'static';
+    game.scenes.root.on('pointertap', () => skip.tap(performance.now()));
+
     /** Drive a full round (trigger + drain) against the current scene. HUD readouts (win + balance)
-     *  update only AFTER each present(), per the HUD-timing requirement. */
+     *  update only AFTER each onSpin(), per the HUD-timing requirement. */
     const playRound = (action: string) => {
       const scene = gameScene();
       if (!scene) return;
@@ -306,6 +330,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       let prevWin = 0; // cumulative win up to the previous segment — the WIN readout shows the delta
       const fsCounter = createFreeSpinsCounter();
       shell!.setBusy(true); // block re-spin / spacebar while the round plays out
+      presenting = true; // open the skip window for the whole play→drain
       // RETURN the promise: the replay modal awaits onReplay() and only reopens once the round's
       // animation has finished — returning void would reopen it instantly, over a running animation.
       return runRound<T>(
@@ -316,6 +341,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           scene,
           context: makeContext,
           roleOf,
+          // Hand the host the per-segment AbortController so a double-tap can skip the live segment.
+          beforeSegment: (ac) => { currentSegmentAbort = ac; },
+          onSpinStart: () => scene.onSpinStart?.(),
+          onSpinEnd: (last, ctx) => scene.onSpinEnd?.(last, ctx),
           afterPresent: (r) => {
             // WIN readout = THIS spin's win (cumulative delta); the cumulative total goes to the
             // free-spins counter (totalWin) below, not the WIN readout.
@@ -324,20 +353,20 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
             balanceGate.afterPresent();
             if (inBonus) shell!.setFreeSpins(fsCounter.spin(r.freeSpins?.awarded ?? 0, r.totalWin));
           },
-          onBonusEnter: async (trigger, ctx) => {
+          onEnterMode: async (trigger, ctx) => {
             inBonus = true;
             shell!.setMode('freeSpins');
             shell!.setFreeSpins(fsCounter.enter(trigger.freeSpins?.awarded ?? trigger.freeSpins?.total ?? 0));
-            await scene.onBonusEnter?.(trigger, ctx);
+            await scene.onEnterMode?.(trigger, ctx);
           },
-          onBonusExit: async (last, ctx) => {
+          onExitMode: async (last, ctx) => {
             inBonus = false;
-            await scene.onBonusExit?.(last, ctx);
+            await scene.onExitMode?.(last, ctx);
             shell!.setMode('base');
           },
         },
         action,
-      ).catch(showPlayError).finally(() => shell!.setBusy(false));
+      ).catch(showPlayError).finally(() => { presenting = false; shell!.setBusy(false); });
     };
 
     /**
@@ -353,7 +382,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     ): Promise<void> => {
       const scene = gameScene();
       if (!scene || !ps) return;
-      const ctx = makeContext((firstRaw as { action?: string }).action ?? 'spin');
+      // A recovered drain isn't skippable (no live skip gesture wired to it), so it gets a stable,
+      // never-aborted signal to satisfy onSpin's RenderContext.
+      const ctx: import('./sceneController').RenderContext = {
+        ...makeContext((firstRaw as { action?: string }).action ?? 'spin'),
+        signal: new AbortController().signal,
+      };
       const fsView = (raw: unknown, totalWin: number) => {
         const s = (raw as { session?: { spinsPlayed?: number; spinsRemaining?: number } }).session;
         if (!s) return null;
@@ -371,7 +405,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       const applySegment = async (): Promise<void> => {
         // A recovered open round with remaining segments is a bonus → show FS mode + counter.
         if (!inBonus && !r.complete) { inBonus = true; shell!.setMode('freeSpins'); }
-        if (animate) await scene.present(r, ctx);
+        if (animate) await scene.onSpin(r, ctx);
         if (inBonus) { const v = fsView(raw, r.totalWin); if (v) shell!.setFreeSpins(v); }
         shell!.setWin(r.totalWin - prevWin); // THIS spin's win, not the cumulative bonus total
         prevWin = r.totalWin;
