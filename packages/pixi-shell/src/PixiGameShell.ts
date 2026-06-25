@@ -1,4 +1,4 @@
-import { BlurFilter, ColorMatrixFilter, Container, RenderTexture, Sprite, type Application, type Ticker } from 'pixi.js';
+import { BlurFilter, ColorMatrixFilter, Container, Graphics, RenderTexture, Sprite, type Application, type Ticker } from 'pixi.js';
 import { EventEmitter } from './EventEmitter';
 import type { ShellHost, ShellLayer, LayerHandle } from './context';
 import type {
@@ -175,61 +175,55 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.removeBackdrop();
   }
 
-  private backdrop?: { sprite: Sprite; texture: RenderTexture };
+  private backdrop?: { node: Container; texture: RenderTexture };
 
   /** Snapshot the scene behind the modal layer and blur it — the Pixi analogue of the overlay's
-   *  `backdrop-filter: blur(20px)`. Static (captured at open time): the game is paused under a
-   *  modal, so a live re-blur each frame isn't worth the cost. */
+   *  `backdrop-filter: blur(20px) saturate(120%)`. Static (captured at open time): the game is paused
+   *  under a modal, so a live re-blur each frame isn't worth the cost. */
   private makeBackdrop(): void {
     this.removeBackdrop();
     const renderer = this.app.renderer;
     const w = this.screenW;
     const h = this.screenH;
     if (w <= 0 || h <= 0) return;
+    const node = new Container();
+    // A SOLID base the size of the screen, under the blurred snapshot: the low-res blurred sprite can
+    // fall a hair short at the right/bottom edges, and without this the SHARP scene would show through
+    // the semi-transparent veil there. The base is the veil's own colour so the (rare) uncovered strip
+    // reads as more frost, never sharp game.
+    node.addChild(new Graphics().rect(0, 0, w, h).fill(0x0c111c));
+    this.modalLayer.addChild(node);
+    this.backdrop = { node, texture: RenderTexture.create({ width: w, height: h, resolution: 0.25 }) };
     try {
-      // Downsample the snapshot (½ res) then blur moderately, and let the sprite upscale it back:
-      // the downscale + upscale already softens heavily, and a moderate strength stays within the
-      // blur kernel (a huge strength under-samples → a thin, weak blur). Net: a strong frosted
-      // backdrop that hides the shell well, far cheaper than a full-res large-radius blur.
-      // The blur STRENGTH is the radius in the snapshot's texel space; a low snapshot resolution is
-      // what makes it strong on screen (each texel covers more screen, so the same kernel blurs a far
-      // bigger area) AND smooth over the bright control bar (the downscale averages out fine detail).
-      // A huge `strength` instead under-samples into a thinner, weaker, streaky blur — so we go the
-      // other way: heavier downscale (¼ res) + a moderate kernel.
-      const texture = RenderTexture.create({ width: w, height: h, resolution: 0.25 });
+      // Heavy downscale (¼ res) is the blur-STRENGTH lever (each texel covers more screen), far cheaper
+      // than a full-res large-radius blur and smooth over fine detail. Effective on-screen blur ≈
+      // strength / resolution = 14 / 0.25 ≈ 56px → the background dissolves into a frost. A huge
+      // `strength` instead under-samples into a thin/streaky blur, so we keep the kernel moderate.
+      const texture = this.backdrop.texture;
       this.modalLayer.visible = false; // never capture the (empty) modal layer / a stale backdrop
       renderer.render({ container: this.app.stage, target: texture, clear: true });
       this.modalLayer.visible = true;
       const sprite = new Sprite(texture);
-      // Overscan ~6%: the low-res blurred snapshot fades/clips a strip (~20px) short of the right &
-      // bottom edges, where the SHARP scene would otherwise show through the veil. Anchor-centre and
-      // scale up so those edges sit just off-screen — the backdrop fully covers the canvas.
+      // Overscan ~6% so the blurred snapshot's faded edges sit just off-screen.
       sprite.anchor.set(0.5);
       sprite.position.set(w / 2, h / 2);
       sprite.width = w * 1.06;
       sprite.height = h * 1.06;
-      // Match the DOM shell's `backdrop-filter: blur(20px) saturate(120%)` over its rgba(12,17,28,.5)
-      // veil (the same token the overlay paints on top): a clean ~20px Gaussian (strength 10 at ½ res),
-      // a high pass count so it reads as a smooth frost (not a streaky/blocky smear), and a +20%
-      // saturation lift so the blurred game stays colourful rather than washing out grey.
-      // Effective on-screen blur ≈ strength / resolution = 14 / 0.25 ≈ 56px — strong enough that the
-      // background's shapes dissolve into a frost. Bump `strength` (or drop `resolution`) for more.
       const blur = new BlurFilter({ strength: 14, quality: 6 });
       blur.repeatEdgePixels = true; // no transparent edge halo
       const saturate = new ColorMatrixFilter();
-      saturate.saturate(0.3, false); // x = amount*2/3 + 1 ≈ 1.2 → saturate(120%)
+      saturate.saturate(0.3, false); // x = amount*2/3 + 1 ≈ 1.2 → saturate(120%) (matches the DOM)
       sprite.filters = [blur, saturate];
-      this.modalLayer.addChild(sprite); // below the layer node, which is added next
-      this.backdrop = { sprite, texture };
+      node.addChild(sprite); // over the solid base, below the modal layer node
     } catch {
-      this.modalLayer.visible = true; // headless / no GL → skip the blur, the veil tint still shows
+      this.modalLayer.visible = true; // headless / no GL → skip the blur, the solid base + veil show
     }
   }
 
   private removeBackdrop(): void {
     if (this.backdrop) {
-      this.modalLayer.removeChild(this.backdrop.sprite);
-      this.backdrop.sprite.destroy();
+      this.modalLayer.removeChild(this.backdrop.node);
+      this.backdrop.node.destroy({ children: true });
       this.backdrop.texture.destroy(true);
       this.backdrop = undefined;
     }
@@ -369,7 +363,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     if (this.currentLayer) {
       this.currentLayer.resize?.(this.screenW, this.screenH);
       this.makeBackdrop(); // re-snapshot at the new size
-      if (this.backdrop) this.modalLayer.setChildIndex(this.backdrop.sprite, 0); // keep it below the layer
+      if (this.backdrop) this.modalLayer.setChildIndex(this.backdrop.node, 0); // keep it below the layer
     }
   };
 
