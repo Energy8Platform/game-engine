@@ -2,6 +2,7 @@ import { Assets, Container, Graphics, Rectangle, Sprite, Text, Texture, type Fed
 import type { ShellHost, ShellLayer } from '../context';
 import type { BonusOption } from '../types';
 import { stepBet } from '../state';
+import { betDir } from '../keyboard';
 import { effectiveAccent, contrastText } from '../colors';
 import { makeText } from '../text';
 import { makeIcon } from '../pixi-icon';
@@ -407,6 +408,18 @@ class BuyBonusOverlay extends Container implements ShellLayer {
 
   // ── keyboard navigation ────────────────────────────────────────────────────
 
+  /** Step the bet by `dir` and re-render the bar, cards (affordability + price) and footer when it
+   *  actually changed. Shared by the keyboard bet keys (the footer ± buttons keep their own copy). */
+  private stepBetBy(dir: 1 | -1): void {
+    const next = stepBet(this.host.state, dir);
+    if (next === this.host.state.bet) return;
+    this.host.state.bet = next;
+    this.host.emit('betChange', next);
+    this.host.render();
+    this.buildCards();
+    this.buildFooter();
+  }
+
   /** Apply or clear the focus ring on affordable cards. */
   private applyFocusRing(): void {
     const affordable = this.cardEntries.filter((ce) => ce.affordable);
@@ -448,6 +461,11 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const affordable = this.cardEntries.filter((ce) => ce.affordable);
     const last = affordable.length - 1;
 
+    // Bet stepping mirrors the bar's keys (Shift+↑/↓, Shift+=/-, Numpad ±). Checked BEFORE arrow
+    // navigation so a bare arrow still moves card focus while a Shift+arrow changes the bet.
+    const bet = betDir(e);
+    if (bet !== null) { this.stepBetBy(bet); return true; }
+
     // Determine navigation direction from key code + layout
     const fwdKey = e.code === 'ArrowRight' || (mobile && e.code === 'ArrowDown');
     const bwdKey = e.code === 'ArrowLeft' || (mobile && e.code === 'ArrowUp');
@@ -474,30 +492,13 @@ class BuyBonusOverlay extends Container implements ShellLayer {
           this.openConfirm(entry.bonus, accent, ink);
         }
         return true;
+      // Bare =/- also step the bet (the Shift+=/- and Numpad variants are handled by betDir above).
       case 'Equal':
-      case 'NumpadAdd': {
-        const next = stepBet(this.host.state, 1);
-        if (next !== this.host.state.bet) {
-          this.host.state.bet = next;
-          this.host.emit('betChange', next);
-          this.host.render();
-          this.buildCards();
-          this.buildFooter();
-        }
+        this.stepBetBy(1);
         return true;
-      }
       case 'Minus':
-      case 'NumpadSubtract': {
-        const next = stepBet(this.host.state, -1);
-        if (next !== this.host.state.bet) {
-          this.host.state.bet = next;
-          this.host.emit('betChange', next);
-          this.host.render();
-          this.buildCards();
-          this.buildFooter();
-        }
+        this.stepBetBy(-1);
         return true;
-      }
       case 'Escape':
         this.host.closeLayer();
         return true;

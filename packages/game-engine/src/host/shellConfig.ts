@@ -149,6 +149,8 @@ export function toBonusOptions(model: GameModel, t: (s: string) => string = (s) 
       title: t(action.title ?? key.replace(/_/g, ' ').toUpperCase()),
       description: t(action.description ?? ''),
       priceMultiplier: action.cost ?? (role === 'buy' ? 100 : 1),
+      // Volatility (1–5 bolts) is part of the spec action SSOT; forward it so the buy card shows it.
+      ...(action.volatility != null ? { volatility: action.volatility } : {}),
     });
   }
   return out;

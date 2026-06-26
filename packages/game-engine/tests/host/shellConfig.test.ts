@@ -32,6 +32,24 @@ describe('toBonusOptions', () => {
       { id: 'buy_bonus', type: 'bonus', title: 'BUY BONUS', description: 'buy spins', priceMultiplier: 100 },
     ]);
   });
+
+  it('forwards each action\'s volatility (1–5 bolts) to its buy/feature card; omits it when unset', () => {
+    const volModel = {
+      spec: {
+        ...model.spec,
+        actions: {
+          spin: { role: 'base' },
+          ante: { role: 'feature', cost: 1.5, title: 'ANTE', description: 'boost', volatility: 2 },
+          buy_bonus: { role: 'buy', cost: 100, title: 'BUY BONUS', description: 'buy spins', volatility: 5 },
+          buy_lite: { role: 'buy', cost: 50, title: 'LITE', description: 'cheaper' }, // no volatility
+        },
+      },
+    } as unknown as GameModel;
+    const opts = toBonusOptions(volModel);
+    expect(opts.find((o) => o.id === 'ante')!.volatility).toBe(2);
+    expect(opts.find((o) => o.id === 'buy_bonus')!.volatility).toBe(5);
+    expect('volatility' in opts.find((o) => o.id === 'buy_lite')!).toBe(false); // unset → key absent
+  });
 });
 
 describe('bet ladder + default bet from /wallet/authenticate', () => {

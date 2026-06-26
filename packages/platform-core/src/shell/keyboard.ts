@@ -21,7 +21,8 @@ export interface KeyboardHost {
 }
 
 // Bet key detection: bet-up needs Shift for arrow/equal, NumpadAdd is bare; same logic for down.
-function betDir(e: KeyboardEvent): 1 | -1 | null {
+// Exported so overlays with their own bet stepper (Buy bonus) honour the SAME keys as the bar.
+export function betDir(e: KeyboardEvent): 1 | -1 | null {
   if (e.code === 'ArrowUp'   && e.shiftKey) return 1;
   if (e.code === 'Equal'     && e.shiftKey) return 1;
   if (e.code === 'NumpadAdd')               return 1;
@@ -129,14 +130,18 @@ export class KeyboardController {
       }
     }
 
-    // Non-Space keys: route to open layer first, then bar shortcuts
+    // Non-Space keys: give the open layer first refusal. If it consumes the key, done; Escape closes
+    // it. Anything the layer does NOT consume falls through to the chrome hotkeys below — so the
+    // Settings/Info pages still honour Shift+I (Game info), Shift+M (sound), Shift+S, etc.
     if (this.host.hasOpenLayer()) {
       const consumed = this.host.routeToLayer(e);
-      if (!consumed && e.code === 'Escape') this.host.closeLayer();
-      return;
+      if (consumed) return;
+      if (e.code === 'Escape') { this.host.closeLayer(); return; }
+      // not consumed → fall through to the Shift+letter chrome hotkeys
     }
 
-    // Shift+letter bar hotkeys — only when no layer is open and hotkeys are enabled
+    // Shift+letter bar hotkeys — fire when no layer is open, OR when an open layer left the key
+    // unconsumed (see fall-through above); gated on hotkeys being enabled.
     if (!e.repeat && e.shiftKey && this.host.hotkeysEnabled) {
       const h = this.host;
       const s = h.state;

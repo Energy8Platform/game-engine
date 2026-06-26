@@ -157,11 +157,40 @@ describe('focus: opening an overlay drops focus from the trigger control', () =>
 
   it('leaves focus outside the shell untouched (only drops focus it owns)', () => {
     const shell = createGameShell(cfg(mount));
-    const outside = document.createElement('input');
-    document.body.appendChild(outside);
-    outside.focus();
-    expect(document.activeElement).toBe(outside);
+    const outside2 = document.createElement('input');
+    document.body.appendChild(outside2);
+    outside2.focus();
+    expect(document.activeElement).toBe(outside2);
     shell.openInfo();
-    expect(document.activeElement).toBe(outside);
+    expect(document.activeElement).toBe(outside2);
+  });
+});
+
+describe('keyboard: chrome hotkeys fall through an open overlay', () => {
+  let mount: HTMLElement;
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    mount = document.createElement('div');
+    document.body.appendChild(mount);
+    await removeGameShell();
+  });
+  const shifted = (code: string) =>
+    document.dispatchEvent(new KeyboardEvent('keydown', { code, shiftKey: true, bubbles: true, cancelable: true }));
+  const qge = (s: string) => mount.querySelector(s) as HTMLElement | null;
+
+  it('Shift+I from the Settings page jumps to Game info', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.openSettings();
+    expect(qge('[data-ge="settings-modal"]')).toBeTruthy();
+    shifted('KeyI');
+    expect(qge('[data-ge="info-modal"]')).toBeTruthy();
+  });
+
+  it('Shift+M from the Settings page toggles the shared sound state', () => {
+    const shell = createGameShell(cfg(mount));
+    shell.openSettings();
+    expect(shell.soundOn).toBe(true);
+    shifted('KeyM');
+    expect(shell.soundOn).toBe(false);
   });
 });

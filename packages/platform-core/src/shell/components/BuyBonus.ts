@@ -2,6 +2,7 @@ import type { GameShell } from '../GameShell';
 import type { BonusOption } from '../types';
 import { formatCurrency } from '../format';
 import { stepBet } from '../state';
+import { betDir } from '../keyboard';
 import { effectiveAccent, contrastText } from '../colors';
 import { createOverlay, createCardModal } from './primitives';
 import { icon, type IconName } from './icons';
@@ -49,6 +50,15 @@ export function openBuyBonusOverlay(shell: GameShell): { root: HTMLElement; onKe
   renderGrid();
   root.appendChild(buildBetBar(shell, renderGrid)); // thin bottom footer, only as tall as the pill
 
+  /** Step the bet by `dir` and re-render the grid (live prices + affordability) when it changed.
+   *  Shared by the keyboard bet keys (the footer ± buttons keep their own copy). */
+  const stepBetBy = (dir: 1 | -1): void => {
+    const next = stepBet(shell.state, dir);
+    if (next === shell.state.bet) return;
+    shell.state.bet = next; shell.emit('betChange', next); shell.render();
+    renderGrid();
+  };
+
   /** Keyboard handler for both browse and confirm phases. */
   const onKey = (e: KeyboardEvent): boolean => {
     const affordable = bonuses.filter((b) => isAffordable(shell, b));
@@ -77,6 +87,11 @@ export function openBuyBonusOverlay(shell: GameShell): { root: HTMLElement; onKe
     // ── Browse phase ──
     const last = affordable.length - 1;
     const mobile = shell.layout === 'mobile';
+
+    // Bet stepping mirrors the bar's keys (Shift+↑/↓, Shift+=/-, Numpad ±). Checked BEFORE arrow
+    // navigation so a bare arrow still moves card focus while a Shift+arrow changes the bet.
+    const bet = betDir(e);
+    if (bet !== null) { stepBetBy(bet); return true; }
 
     // Determine navigation direction from key code + layout (mobile uses vertical arrows)
     const fwdKey = e.code === 'ArrowRight' || (mobile && e.code === 'ArrowDown');
@@ -108,24 +123,13 @@ export function openBuyBonusOverlay(shell: GameShell): { root: HTMLElement; onKe
           openConfirm(shell, bonus, root, st);
         }
         return true;
+      // Bare =/- also step the bet (the Shift+=/- and Numpad variants are handled by betDir above).
       case 'Equal':
-      case 'NumpadAdd': {
-        const next = stepBet(shell.state, 1);
-        if (next !== shell.state.bet) {
-          shell.state.bet = next; shell.emit('betChange', next); shell.render();
-          renderGrid();
-        }
+        stepBetBy(1);
         return true;
-      }
       case 'Minus':
-      case 'NumpadSubtract': {
-        const next = stepBet(shell.state, -1);
-        if (next !== shell.state.bet) {
-          shell.state.bet = next; shell.emit('betChange', next); shell.render();
-          renderGrid();
-        }
+        stepBetBy(-1);
         return true;
-      }
       case 'Escape':
         shell.closeModal();
         return true;

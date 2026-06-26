@@ -148,6 +148,30 @@ describe('BuyBonus keyboard navigation (DOM shell)', () => {
     expect(shell.state.bet).toBe(2);
   });
 
+  it('Shift+↑/↓ and Shift+=/- step the bet (same keys as the bar)', () => {
+    const shell = createGameShell(cfg(mount)); // bet=2, available=[1,2,5]
+    shell.openBuyBonus();
+    const shifted = (code: string) =>
+      document.dispatchEvent(new KeyboardEvent('keydown', { code, shiftKey: true, bubbles: true, cancelable: true }));
+
+    shifted('ArrowUp'); // 2 → 5
+    expect(shell.state.bet).toBe(5);
+    shifted('ArrowDown'); // 5 → 2
+    expect(shell.state.bet).toBe(2);
+    shifted('Equal'); // 2 → 5
+    expect(shell.state.bet).toBe(5);
+    shifted('Minus'); // 5 → 2
+    expect(shell.state.bet).toBe(2);
+  });
+
+  it('bare ArrowUp/ArrowDown do NOT change the bet in wide (reserved, not bet keys)', () => {
+    const shell = createGameShell(cfg(mount)); // wide layout, bet=2
+    shell.openBuyBonus();
+    key('ArrowUp');
+    key('ArrowDown');
+    expect(shell.state.bet).toBe(2);
+  });
+
   it('ArrowLeft wraps back; Enter opens confirm for the card at new focus', () => {
     const shell = createGameShell(cfg(mount));
     const spy = vi.fn();

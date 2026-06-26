@@ -23,6 +23,9 @@ export interface ActionSpec {
   /** Shell display for buy/feature actions (SSOT). */
   title?: string;
   description?: string;
+  /** Volatility rating (1–5 lightning bolts) shown on the buy/feature card in the shell's Buy bonus
+   *  overlay. Forwarded to `BonusOption.volatility` by `toBonusOptions`. */
+  volatility?: 1 | 2 | 3 | 4 | 5;
   /** Target RTP for THIS mode (0..1), e.g. 0.96. Single source of truth: seeds the math
    *  pipeline's `targetRTP` AND the Game Info per-mode table. `math.config` keeps only optimizer
    *  tuning (CV / hit-rate / nRowsOut / tolerances), never the RTP. */

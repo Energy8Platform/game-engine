@@ -214,6 +214,40 @@ describe('BuyBonusOverlay keyboard navigation (Pixi shell)', () => {
     expect(host.state.bet).toBe(2);
   });
 
+  it('Shift+↑/↓ and Shift+=/- step the bet (same keys as the bar)', () => {
+    const host = makeHost(vi.fn(), vi.fn());
+    const onKey = requireOnKey(openBuyBonus(host)!);
+    const shifted = (code: string) =>
+      new KeyboardEvent('keydown', { code, shiftKey: true, bubbles: true, cancelable: true });
+    // bet=2, availableBets=[1,2,5]
+    expect(onKey(shifted('ArrowUp'))).toBe(true); // 2 → 5
+    expect(host.state.bet).toBe(5);
+    expect(onKey(shifted('ArrowDown'))).toBe(true); // 5 → 2
+    expect(host.state.bet).toBe(2);
+    expect(onKey(shifted('Equal'))).toBe(true); // 2 → 5
+    expect(host.state.bet).toBe(5);
+    expect(onKey(shifted('Minus'))).toBe(true); // 5 → 2
+    expect(host.state.bet).toBe(2);
+  });
+
+  it('Shift+↓ steps the bet in mobile too (does not get hijacked by card nav)', () => {
+    const host = makeHost(vi.fn(), vi.fn(), vi.fn(), { layout: 'mobile' });
+    const onKey = requireOnKey(openBuyBonus(host)!);
+    // bare ArrowDown navigates cards (bet unchanged); Shift+ArrowDown steps the bet.
+    onKey(key('ArrowDown'));
+    expect(host.state.bet).toBe(2);
+    onKey(new KeyboardEvent('keydown', { code: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true }));
+    expect(host.state.bet).toBe(1); // 2 → 1
+  });
+
+  it('bare ArrowUp/ArrowDown do NOT change the bet in wide (reserved, not bet keys)', () => {
+    const host = makeHost(vi.fn(), vi.fn(), vi.fn(), { layout: 'wide' });
+    const onKey = requireOnKey(openBuyBonus(host)!);
+    onKey(key('ArrowUp'));
+    onKey(key('ArrowDown'));
+    expect(host.state.bet).toBe(2);
+  });
+
   it('ArrowLeft moves focus backward', () => {
     const emitSpy = vi.fn();
     const closeLayerSpy = vi.fn();

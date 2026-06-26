@@ -205,6 +205,42 @@ describe('KeyboardController Shift-hotkeys', () => {
   });
 });
 
+describe('KeyboardController hotkeys fall through an unconsumed open layer', () => {
+  it('Shift+I over an open layer that ignores the key still opens info', () => {
+    const route = vi.fn(() => false); // the layer does not consume the key
+    const h = mockHost({ hasOpenLayer: () => true, routeToLayer: route });
+    const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyI', shiftKey: true }));
+    expect(route).toHaveBeenCalled();
+    expect(h.openInfo).toHaveBeenCalledTimes(1);
+    c.detach();
+  });
+
+  it('Shift+M over an open layer that ignores the key still toggles mute', () => {
+    const h = mockHost({ hasOpenLayer: () => true, routeToLayer: () => false });
+    const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyM', shiftKey: true }));
+    expect(h.toggleMute).toHaveBeenCalledTimes(1);
+    c.detach();
+  });
+
+  it('a key the layer CONSUMES does not fall through to the chrome hotkeys', () => {
+    const h = mockHost({ hasOpenLayer: () => true, routeToLayer: () => true });
+    const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyI', shiftKey: true }));
+    expect(h.openInfo).not.toHaveBeenCalled();
+    c.detach();
+  });
+
+  it('unconsumed Escape closes the layer and does not fall through', () => {
+    const h = mockHost({ hasOpenLayer: () => true, routeToLayer: () => false });
+    const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
+    expect(h.closeLayer).toHaveBeenCalledTimes(1);
+    c.detach();
+  });
+});
+
 describe('KeyboardController onBlur', () => {
   afterEach(() => { vi.useRealTimers(); });
 
