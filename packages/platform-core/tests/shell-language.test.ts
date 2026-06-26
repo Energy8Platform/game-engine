@@ -46,14 +46,14 @@ describe('shell language', () => {
     const shell = createGameShell({ ...base(), language: 'en', isSocial: true });
     // en + social: socialize is active
     expect(shell.t('Buy bonus')).toBe('Get bonus');
-    // switch to de: non-en, no translation yet → returns English source (no socialize on non-en)
+    // switch to de: non-en, LOCALES.de has a translation → returns German string
     shell.setLanguage('de');
-    expect(shell.t('Buy bonus')).toBe('Buy bonus');
+    expect(shell.t('Buy bonus')).toBe('Bonus kaufen');
   });
 
   it('setLanguage back to en+social re-enables socialize', () => {
     const shell = createGameShell({ ...base(), language: 'de' });
-    expect(shell.t('Buy bonus')).toBe('Buy bonus'); // de: no LOCALES yet → passthrough
+    expect(shell.t('Buy bonus')).toBe('Bonus kaufen'); // de: LOCALES.de has translation
     shell.setLanguage('en');
     // now en but isSocial is still false (we never set it)
     expect(shell.t('Buy bonus')).toBe('Buy bonus');
