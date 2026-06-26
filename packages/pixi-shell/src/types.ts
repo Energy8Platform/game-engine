@@ -145,6 +145,9 @@ export interface AutoplayConfig {
 
 export interface ShellFeatures {
   turbo: 0 | 1 | 2 | 3;
+  /** Master keyboard-shortcut switch. Defaults to `true`; set `false` to disable ALL hotkeys
+   *  (overrides `spacebar` and any future hotkey). */
+  hotkeys?: boolean;
   /** Spacebar starts a spin in base mode. Defaults to `true`; set `false` to disable the
    *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */
   spacebar?: boolean;

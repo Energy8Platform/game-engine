@@ -17,6 +17,7 @@ import { createInitialState } from './state';
 import { resolveTheme, type ShellTokens } from './theme';
 import { formatCurrency } from './format';
 import { createI18n, type I18n } from './i18n';
+import { KeyboardController, type KeyboardHost } from './keyboard';
 import { installShellFont, whenFontReady } from './text';
 import { countUpText, tween } from './motion';
 import { BottomBar } from './components/BottomBar';
@@ -47,7 +48,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   private prevBalance: number;
   private prevWin: number;
   private moneyAnims: Array<() => void> = [];
-  private keysBound = false;
+  private kbd!: KeyboardController;
   private i18n!: I18n;
 
   constructor(config: PixiShellConfig) {
@@ -73,12 +74,33 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.app.renderer.on('resize', this.onResize);
 
     if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.onKeyDown);
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const shell = this;
+      const host: KeyboardHost = {
+        get state() { return shell.state; },
+        get hotkeysEnabled() { return shell.config.features.hotkeys !== false; },
+        get spacebarEnabled() { return shell.config.features.spacebar !== false; },
+        get turboLevels() { return shell.config.features.turbo; },
+        get autoplayEnabled() { return shell.config.features.autoplay != null; },
+        get buyBonusEnabled() { return shell.config.features.buyBonus !== false; },
+        hasOpenLayer: () => shell.currentLayer !== null,
+        routeToLayer: () => false,
+        spin: () => shell.emit('spin'),
+        stepBet: () => {},
+        toggleAutoplay: () => {},
+        cycleTurbo: () => {},
+        openBuyBonus: () => {},
+        openInfo: () => {},
+        openMenu: () => {},
+        toggleMute: () => {},
+        closeLayer: () => shell.closeLayer(),
+      };
+      this.kbd = new KeyboardController(host);
+      this.kbd.attach();
       // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a
       // `document` keydown never fires and Space scrolls the parent. Pull focus into the frame on
       // the first pointer interaction so the spacebar shortcut works. Harmless full-page.
       document.addEventListener('pointerdown', this.pullFocus, true);
-      this.keysBound = true;
     }
 
     this.render();
@@ -393,26 +415,14 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     }
   };
 
-  private onKeyDown = (e: KeyboardEvent): void => {
-    if (this.destroyed || e.code !== 'Space' || e.repeat) return;
-    if (this.config.features.spacebar === false) return;
-    const target = e.target as HTMLElement | null;
-    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
-    e.preventDefault(); // Space is ours — swallow the page scroll even when we then bail below
-    if (this.currentLayer) return; // an overlay/modal is open
-    if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
-    this.emit('spin');
-  };
-
   /** Fade out (≈250ms, like GameShell's REMOVE_FADE_MS) then tear down; resolves when removed. */
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
     this.app.renderer.off('resize', this.onResize);
-    if (this.keysBound && typeof document !== 'undefined') {
-      document.removeEventListener('keydown', this.onKeyDown);
+    if (typeof document !== 'undefined') {
+      this.kbd?.detach();
       document.removeEventListener('pointerdown', this.pullFocus, true);
-      this.keysBound = false;
     }
     this.cancelMoneyAnims();
     this.removeAllListeners();

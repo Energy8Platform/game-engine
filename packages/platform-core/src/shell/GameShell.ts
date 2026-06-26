@@ -11,6 +11,7 @@ import type {
   ShellState,
   ThemeConfig,
 } from './types';
+import { KeyboardController, type KeyboardHost } from './keyboard';
 import { createInitialState } from './state';
 import { buildThemeVars } from './theme';
 import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
@@ -40,7 +41,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private prevBalance = 0;
   private prevWin = 0;
   private moneyAnims: Array<() => void> = [];
-  private keysBound = false;
+  private kbd!: KeyboardController;
   private i18n!: I18n;
 
   constructor(config: ShellConfig) {
@@ -65,12 +66,33 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.prevWin = this.state.win;
     this.observeLayout();
     if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.handleKeyDown);
+      const host: KeyboardHost = {
+        get state() { return shell.state; },
+        get hotkeysEnabled() { return shell.config.features.hotkeys !== false; },
+        get spacebarEnabled() { return shell.config.features.spacebar !== false; },
+        get turboLevels() { return shell.config.features.turbo; },
+        get autoplayEnabled() { return shell.config.features.autoplay != null; },
+        get buyBonusEnabled() { return shell.config.features.buyBonus !== false; },
+        hasOpenLayer: () => shell.modalHost.childElementCount > 0,
+        routeToLayer: () => false,
+        spin: () => shell.emit('spin'),
+        stepBet: () => {},
+        toggleAutoplay: () => {},
+        cycleTurbo: () => {},
+        openBuyBonus: () => {},
+        openInfo: () => {},
+        openMenu: () => {},
+        toggleMute: () => {},
+        closeLayer: () => {},
+      };
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const shell = this;
+      this.kbd = new KeyboardController(host);
+      this.kbd.attach();
       // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a `document`
       // keydown never fires and Space scrolls the parent. Pull window focus into the iframe on the
       // first pointer interaction so the spacebar shortcut works. Harmless on full-page Energy8.
       document.addEventListener('pointerdown', this.pullFocus, true);
-      this.keysBound = true;
     }
     this.render();
     // re-fit once the bundled webfont swaps in (text metrics change → row width changes)
@@ -163,28 +185,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
     }
   }
 
-  /** Spacebar starts a spin — same path as the spin disc. Ignored when `features.spacebar` is
-   *  false, while a spin is running, while autoplay is active, outside base mode, when an
-   *  overlay/modal is open, or when an editable element is focused. `repeat` (held key) is
-   *  ignored so it can't spam. */
   /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the
    *  spacebar shortcut) fires. No-op / harmless when already focused or full-page. */
   private pullFocus = (): void => { try { window.focus(); } catch { /* cross-origin / non-browser */ } };
-
-  private handleKeyDown = (e: KeyboardEvent): void => {
-    if (this.destroyed || e.code !== 'Space' || e.repeat) return;
-    if (this.config.features.spacebar === false) return; // shortcut disabled (e.g. jurisdiction)
-    const t = e.target as HTMLElement | null;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    // Space is ours now — swallow the browser default before any no-op bail. Otherwise the
-    // native "Space activates the focused button" still fires and re-clicks whichever shell
-    // <button> (menu/buy/auto) opened the overlay, tearing down + rebuilding the modal: a
-    // visible flicker. (Also stops the page from scrolling on Space.)
-    e.preventDefault();
-    if (this.modalHost.childElementCount > 0) return; // an overlay/modal is open
-    if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
-    this.emit('spin');
-  };
 
   setLayout(layout: 'wide' | 'mobile'): void {
     if (layout === this.layout) return;
@@ -347,10 +350,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.destroyed = true;
     this.ro?.disconnect();
     this.ro = null;
-    if (this.keysBound) {
-      document.removeEventListener('keydown', this.handleKeyDown);
+    if (typeof document !== 'undefined') {
+      this.kbd?.detach();
       document.removeEventListener('pointerdown', this.pullFocus, true);
-      this.keysBound = false;
     }
     this.cancelMoneyAnims();
     this.removeAllListeners();
