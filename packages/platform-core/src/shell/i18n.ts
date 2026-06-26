@@ -1,3 +1,5 @@
+import { LOCALES } from './locales';
+
 // Social-casino language. English is the source (and, for now, the only) language; `socialize`
 // rewrites the restricted gambling vocabulary into social-safe phrasing while preserving case.
 //
@@ -71,8 +73,6 @@ export function socialize(text: string): string {
     return repl == null ? m : applyCase(m, repl);
   });
 }
-
-import { LOCALES } from './locales';
 
 export type Lang = 'de'|'en'|'es'|'fi'|'fr'|'hi'|'id'|'ja'|'ko'|'pl'|'pt'|'ru'|'tr'|'vi'|'zh'|'da';
 export const LANGS: readonly Lang[] = ['de','en','es','fi','fr','hi','id','ja','ko','pl','pt','ru','tr','vi','zh','da'];
