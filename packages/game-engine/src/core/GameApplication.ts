@@ -181,19 +181,20 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
       this.emit('initialized');
 
-      // 7. Remove CSS preloader, show Canvas loading screen
-      removeCSSPreloader(this._container);
-
-      // 8. Load assets with loading screen
+      // 7. Load assets. The CSS preloader stays on screen — LoadingScene drives
+      //    its progress/tap and removes it before entering the game, so there's
+      //    a single continuous overlay from boot to gameplay (no logo flash).
       await this.loadAssets(firstScene, sceneData);
 
       this.emit('loaded');
 
-      // 9. Start the game loop
+      // 8. Start the game loop
       this._running = true;
       this.emit('started');
     } catch (err) {
       console.error('[GameEngine] Failed to start:', err);
+      // Tear down the preloader so a failure doesn't strand the brand frame.
+      if (this._container) removeCSSPreloader(this._container);
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       throw err;
     }

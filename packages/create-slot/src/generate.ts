@@ -14,6 +14,7 @@ import { genIntroScene } from './codegen/introScene';
 import { genNormalize } from './codegen/normalize';
 import { genSchema } from './codegen/schema';
 import { genMathConfig } from './codegen/mathConfig';
+import { genI18nTs } from './codegen/i18nTs';
 
 const TEMPLATE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '../template');
 
@@ -46,6 +47,7 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   writeFileSync(join(targetDir, 'package.json'), genPackageJson(a, versions));
   writeFileSync(join(targetDir, 'math.config.ts'), genMathConfig(a));
   writeFileSync(join(targetDir, 'src/scenes/GameScene.ts'), genGameScene(a));
+  writeFileSync(join(targetDir, 'src/i18n.ts'), genI18nTs(a));
   writeFileSync(join(targetDir, 'src/main.ts'), genMainTs(a));
   writeFileSync(join(targetDir, 'src/scenes/IntroScene.ts'), genIntroScene(a));
   writeFileSync(join(targetDir, 'src/game/script.logic.lua'), genLuaLogic(a));

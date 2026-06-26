@@ -76,5 +76,19 @@ copy normally — it is socialized automatically in social mode.
 - The math TARGETS (math.config.ts) and the DECLARED rtp/maxWin (game.spec) are separate — keep the
   declared values honest against the published math before submitting.
 - Tests: \`npm test\` (vitest). Typecheck: \`npx tsc --noEmit\`.
+
+## Localization — how to add a language
+
+Player-facing copy is localised via \`src/i18n.ts\`. The file uses the **english-as-key** convention:
+the English string is the key, so missing translations fall back to English automatically.
+
+To add or complete a language:
+1. Open \`src/i18n.ts\` and find the target language stub (e.g. \`'de': {}\`).
+2. Copy the key set from \`en\` into it and provide translations.
+3. Test via the harness language selector (⚙ → Language) — strings should switch immediately.
+4. Add new player-facing copy to \`en\` first, then propagate to other languages.
+
+The map is passed to \`createSlotGame({ shell: { i18n } })\` in \`src/main.ts\`. Shell-level copy (win messages,
+HUD labels, disclaimer) is handled by the framework and is NOT in \`src/i18n.ts\`.
 `;
 }

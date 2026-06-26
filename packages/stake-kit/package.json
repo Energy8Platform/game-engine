@@ -1,11 +1,14 @@
 {
   "name": "@energy8platform/stake-kit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "main": "dist/stake-kit.umd.js",
   "module": "dist/stake-kit.esm.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "import": "./dist/stake-kit.esm.js",

@@ -151,6 +151,21 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-gi-version { text-align:center; color:var(--shell-muted); font-size:11px;
   letter-spacing:.08em; opacity:.7; margin:4px 0 2px; }
 
+/* hotkeys — keycap chips → localized action label, mirrors controls row layout */
+#${SHELL_ROOT_ID} .ge-gi-hk-block { display:flex; flex-direction:column; }
+#${SHELL_ROOT_ID} .ge-gi-hk { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; }
+#${SHELL_ROOT_ID} .ge-gi-hk + .ge-gi-hk { border-top:1px solid var(--shell-plaque-line); }
+#${SHELL_ROOT_ID} .ge-gi-hk-chips { display:flex; align-items:center; flex-wrap:wrap; gap:4px; flex:0 0 auto; }
+#${SHELL_ROOT_ID} .ge-gi-hk-combo { display:inline-flex; align-items:center; gap:4px; }
+#${SHELL_ROOT_ID} .ge-gi-hk-chip { display:inline-flex; align-items:center; justify-content:center;
+  padding:2px 7px; border-radius:6px; border:1px solid var(--shell-plaque-line);
+  background:var(--shell-plaque-dark); color:#fff;
+  font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; font-size:12px;
+  font-weight:600; line-height:1.5; white-space:nowrap; min-width:1.6em; text-align:center; }
+#${SHELL_ROOT_ID} .ge-gi-hk-sep { color:var(--shell-plaque-label); font-size:11px; padding:0 1px; }
+#${SHELL_ROOT_ID} .ge-gi-hk-sep2 { color:var(--shell-plaque-label); font-size:11px; padding:0 4px; }
+#${SHELL_ROOT_ID} .ge-gi-hk-tx { color:rgba(255,255,255,.88); font-size:14px; font-weight:600; text-align:right; flex:1; }
+
 /* controls — two blocks (gameplay / menu & info), icon/name/description per control */
 #${SHELL_ROOT_ID} .ge-gi-ctl-block + .ge-gi-ctl-block { margin-top:16px; padding-top:4px; border-top:1px solid var(--shell-plaque-line); }
 #${SHELL_ROOT_ID} .ge-gi-ctl-block-h { color:var(--shell-plaque-label); font-size:11px; letter-spacing:.12em;
@@ -258,6 +273,8 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
   background:var(--shell-plaque-glass); border:1px solid var(--shell-plaque-line); color:#fff; text-align:center;
   pointer-events:auto; cursor:pointer; transition:box-shadow .12s ease, background .12s ease; }
 #${SHELL_ROOT_ID} .ge-bonus-card:hover:not(.ge-bonus-off) {
+  box-shadow:0 0 0 1px var(--card-acc), 0 12px 34px -12px var(--card-acc); }
+#${SHELL_ROOT_ID} .ge-bonus-card--kbd-focus:not(.ge-bonus-off) {
   box-shadow:0 0 0 1px var(--card-acc), 0 12px 34px -12px var(--card-acc); }
 /* custom card (BonusOption.custom): keep grid sizing + accent vars, drop the default chrome so the game owns the UI */
 #${SHELL_ROOT_ID} .ge-bonus-card--custom { background:none; border:none; cursor:default; }

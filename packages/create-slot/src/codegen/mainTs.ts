@@ -9,6 +9,7 @@ import { model } from './game.spec';
 import { GameScene } from './scenes/GameScene';
 import { IntroScene } from './scenes/IntroScene';
 import { normalize } from './game/normalize';
+import { i18n } from './i18n';
 ${stakeImport}
 createSlotGame({
   model,
@@ -26,6 +27,8 @@ createSlotGame({
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
 ${stakeOpt}  shell: {
+    // Per-game localisation map (english-as-key). Fill other languages in src/i18n.ts.
+    i18n,
     // buy/ante cards + currency derive from the spec + initData.
     // Base game-info sections. Wrap player-facing copy in t(...) so restricted gambling words are
     // rewritten to social-casino vocabulary in social mode (t is the identity otherwise). The

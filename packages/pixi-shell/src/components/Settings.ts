@@ -20,21 +20,22 @@ export function openSettings(host: ShellHost): ShellLayer {
 function buildBody(host: ShellHost, width: number): Container {
   const col = new FlexBox({ direction: 'column', align: 'stretch', gap: 10 });
 
-  // Sound on/off
-  let soundOn = true;
-  const speaker = new IconButton('soundOn', {
+  // Sound on/off — backed by the shell's shared `soundOn` state so this toggle and the Shift+M
+  // hotkey stay in sync; `setSound` emits `settingChange({ key: 'sound' })` and refreshes the icon.
+  const soundOn0 = host.soundOn ?? true;
+  const speaker = new IconButton(soundOn0 ? 'soundOn' : 'soundOff', {
     size: 36,
     glyph: 24,
     color: host.tokens.plaqueLabel,
     hover: host.tokens.accent,
     activeColor: '#ffffff',
-    active: true,
-    onTap: () => {
-      soundOn = !soundOn;
-      speaker.setIcon(soundOn ? 'soundOn' : 'soundOff');
-      speaker.active = soundOn;
-      host.emit('settingChange', { key: 'sound', value: soundOn });
-    },
+    active: soundOn0,
+    onTap: () => host.setSound?.(!(host.soundOn ?? true)),
+  });
+  // Live-update the speaker when sound changes from here OR via Shift+M (shell clears on close).
+  host.setSoundRefresh?.((on) => {
+    speaker.setIcon(on ? 'soundOn' : 'soundOff');
+    speaker.active = on;
   });
   col.add(glassRow(host, [textNode(host, host.t('Sound')), new Spacer(), speaker]));
 

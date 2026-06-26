@@ -6,23 +6,164 @@ import { effectiveAccent, contrastText } from '../colors';
 import { createOverlay, createCardModal } from './primitives';
 import { icon, type IconName } from './icons';
 
-/** Buy-bonus overlay — a grid of art-forward cards, one per option. */
-export function openBuyBonusOverlay(shell: GameShell): HTMLElement | null {
+/** Mutable state shared between the overlay DOM and the onKey handler. */
+interface OverlayState {
+  /** Index into the affordable-card subset; -1 = none (no affordable cards). */
+  focusIndex: number;
+  /** The bonus whose confirm dialog is currently open, or undefined. */
+  confirmBonus: BonusOption | undefined;
+}
+
+/** Buy-bonus overlay — a grid of art-forward cards, one per option.
+ *  Returns the overlay element + a keyboard handler for the shell's `showModal`. */
+export function openBuyBonusOverlay(shell: GameShell): { root: HTMLElement; onKey: (e: KeyboardEvent) => boolean } | null {
   const bonuses = shell.config.features.buyBonus;
   if (bonuses === false || bonuses.length === 0) return null;
 
-  const { root, body } = createOverlay({ title: shell.t('Buy bonus'), onClose: () => root.remove() });
+  const st: OverlayState = { focusIndex: -1, confirmBonus: undefined };
+
+  const { root, body } = createOverlay({ title: shell.t('Buy bonus'), onClose: () => shell.closeModal() });
   root.dataset.ge = 'buybonus-overlay';
+
   // Re-render the grid whenever the bet changes so every card's price stays live.
-  const renderGrid = () => {
+  const renderGrid = (): void => {
     body.innerHTML = '';
     const grid = document.createElement('div'); grid.className = 'ge-bb-grid';
-    for (const bonus of bonuses) grid.appendChild(buildCard(shell, bonus, root));
+    const affordable: BonusOption[] = [];
+    for (const bonus of bonuses) {
+      const card = buildCard(shell, bonus, root, st);
+      grid.appendChild(card);
+      if (isAffordable(shell, bonus)) affordable.push(bonus);
+    }
     body.appendChild(grid);
+    // Initialize or restore focus index
+    if (affordable.length > 0) {
+      if (st.focusIndex < 0) st.focusIndex = 0;
+      else st.focusIndex = Math.min(st.focusIndex, affordable.length - 1);
+      applyFocusClass(root, bonuses, affordable, st.focusIndex);
+    } else {
+      st.focusIndex = -1;
+    }
   };
+
   renderGrid();
   root.appendChild(buildBetBar(shell, renderGrid)); // thin bottom footer, only as tall as the pill
-  return root;
+
+  /** Keyboard handler for both browse and confirm phases. */
+  const onKey = (e: KeyboardEvent): boolean => {
+    const affordable = bonuses.filter((b) => isAffordable(shell, b));
+
+    // ── Confirm phase ──
+    if (st.confirmBonus) {
+      switch (e.code) {
+        case 'Enter':
+        case 'Space': {
+          const bonus = st.confirmBonus;
+          if (!isAffordable(shell, bonus)) return true;
+          if (bonus.type === 'feature') shell.activateFeature(bonus);
+          else shell.emit('buyBonusSelect', { id: bonus.id });
+          shell.closeModal();
+          return true;
+        }
+        case 'Escape':
+          // Remove the confirm dialog, return to browse
+          closeConfirm(root, st);
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    // ── Browse phase ──
+    const last = affordable.length - 1;
+    const mobile = shell.layout === 'mobile';
+
+    // Determine navigation direction from key code + layout (mobile uses vertical arrows)
+    const fwdKey = e.code === 'ArrowRight' || (mobile && e.code === 'ArrowDown');
+    const bwdKey = e.code === 'ArrowLeft' || (mobile && e.code === 'ArrowUp');
+
+    if (fwdKey) {
+      if (last < 0) return true;
+      if (st.focusIndex < last) {
+        st.focusIndex++;
+        applyFocusClass(root, bonuses, affordable, st.focusIndex);
+      }
+      return true;
+    }
+    if (bwdKey) {
+      if (last < 0) return true;
+      if (st.focusIndex > 0) {
+        st.focusIndex--;
+        applyFocusClass(root, bonuses, affordable, st.focusIndex);
+      }
+      return true;
+    }
+
+    switch (e.code) {
+      case 'Enter':
+      case 'Space':
+        if (last < 0 || st.focusIndex < 0) return true;
+        {
+          const bonus = affordable[st.focusIndex];
+          openConfirm(shell, bonus, root, st);
+        }
+        return true;
+      case 'Equal':
+      case 'NumpadAdd': {
+        const next = stepBet(shell.state, 1);
+        if (next !== shell.state.bet) {
+          shell.state.bet = next; shell.emit('betChange', next); shell.render();
+          renderGrid();
+        }
+        return true;
+      }
+      case 'Minus':
+      case 'NumpadSubtract': {
+        const next = stepBet(shell.state, -1);
+        if (next !== shell.state.bet) {
+          shell.state.bet = next; shell.emit('betChange', next); shell.render();
+          renderGrid();
+        }
+        return true;
+      }
+      case 'Escape':
+        shell.closeModal();
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  return { root, onKey };
+}
+
+/** Apply a CSS keyboard-focus class to the currently focused affordable card. */
+function applyFocusClass(overlay: HTMLElement, bonuses: BonusOption[], affordable: BonusOption[], focusIndex: number): void {
+  for (const b of bonuses) {
+    const card = overlay.querySelector(`[data-ge="bonus-card-${b.id}"]`) as HTMLElement | null;
+    if (!card) continue;
+    card.classList.remove('ge-bonus-card--kbd-focus');
+  }
+  const focused = affordable[focusIndex];
+  if (!focused) return;
+  const card = overlay.querySelector(`[data-ge="bonus-card-${focused.id}"]`) as HTMLElement | null;
+  if (card) card.classList.add('ge-bonus-card--kbd-focus');
+}
+
+/** Open the confirm dialog for the given bonus and track it in overlay state. */
+function openConfirm(shell: GameShell, bonus: BonusOption, overlay: HTMLElement, st: OverlayState): void {
+  closeConfirm(overlay, st); // remove any existing confirm
+  st.confirmBonus = bonus;
+  overlay.appendChild(buildConfirm(shell, bonus, overlay, st));
+  shell.fitModals();
+}
+
+/** Remove the confirm dialog and clear the overlay state. */
+function closeConfirm(overlay: HTMLElement, st: OverlayState): void {
+  // The confirm dialog is a .ge-sheet with data-ge="bonus-confirm" appended directly to overlay.
+  const sheet = overlay.querySelector('[data-ge="bonus-confirm"]') as HTMLElement | null;
+  if (sheet) sheet.remove();
+  st.confirmBonus = undefined;
 }
 
 /** Bet control — a compact −/+ pill around the live stake, in a thin footer at the screen bottom.
@@ -63,7 +204,7 @@ function stepButton(ge: string, name: IconName): HTMLButtonElement {
 
 /** A grid card: title → thumbnail → description → volatility → price → full-bleed CTA.
  *  Clicking (when affordable) opens the confirmation modal. */
-function buildCard(shell: GameShell, bonus: BonusOption, overlay: HTMLElement): HTMLElement {
+function buildCard(shell: GameShell, bonus: BonusOption, overlay: HTMLElement, st: OverlayState): HTMLElement {
   const accent = effectiveAccent(bonus);
   const card = document.createElement('div');
   card.className = 'ge-bonus-card'; card.dataset.ge = `bonus-card-${bonus.id}`;
@@ -75,8 +216,7 @@ function buildCard(shell: GameShell, bonus: BonusOption, overlay: HTMLElement): 
   // affordability at click time, so it's a safe no-op when the option can't be bought.
   const select = (): void => {
     if (!isAffordable(shell, bonus)) return;
-    overlay.appendChild(buildConfirm(shell, bonus, overlay));
-    shell.fitModals();
+    openConfirm(shell, bonus, overlay, st);
   };
 
   // Game-supplied card UI: the shell keeps the wrapper (grid sizing + accent vars) and runs the
@@ -123,9 +263,9 @@ function cardBody(shell: GameShell, bonus: BonusOption): HTMLElement {
 
 /** Confirmation modal — the shared card chrome (accent title heading, no ✕) with a bonus
  *  preview body and a full-bleed Cancel + action footer. */
-function buildConfirm(shell: GameShell, bonus: BonusOption, overlay: HTMLElement): HTMLElement {
+function buildConfirm(shell: GameShell, bonus: BonusOption, overlay: HTMLElement, st: OverlayState): HTMLElement {
   const accent = effectiveAccent(bonus);
-  const ui = createCardModal({ ge: 'bonus-confirm', title: bonus.title, accent, onClose: () => ui.root.remove() });
+  const ui = createCardModal({ ge: 'bonus-confirm', title: bonus.title, accent, onClose: () => { closeConfirm(overlay, st); } });
 
   const price = bonus.priceMultiplier * shell.state.bet;
   const preview = document.createElement('div'); preview.className = 'ge-confirm-preview';
@@ -140,7 +280,7 @@ function buildConfirm(shell: GameShell, bonus: BonusOption, overlay: HTMLElement
   const cancel = document.createElement('button');
   cancel.className = 'ge-modal-btn ge-modal-btn--ghost'; cancel.dataset.ge = 'bonus-confirm-cancel';
   cancel.textContent = shell.t('Cancel');
-  cancel.addEventListener('click', () => ui.root.remove());
+  cancel.addEventListener('click', () => closeConfirm(overlay, st));
   const buy = document.createElement('button');
   buy.className = 'ge-modal-btn ge-modal-btn--accent'; buy.dataset.ge = 'bonus-confirm-buy';
   buy.textContent = shell.t(actionLabel(bonus));
@@ -151,8 +291,7 @@ function buildConfirm(shell: GameShell, bonus: BonusOption, overlay: HTMLElement
     if (!isAffordable(shell, bonus)) return;
     if (bonus.type === 'feature') shell.activateFeature(bonus);
     else shell.emit('buyBonusSelect', { id: bonus.id });
-    ui.root.remove();
-    overlay.remove();
+    shell.closeModal();
   });
   actions.append(cancel, buy);
   ui.card.appendChild(actions);

@@ -3,6 +3,8 @@
 // Phaser/Three/custom-engine consumers import these from
 // `@energy8platform/platform-core` instead of pulling in game-engine.
 
+import type { PreloaderVariantName } from './loading/variants';
+
 // SDK types
 export type {
   InitData,
@@ -43,6 +45,12 @@ export interface AssetManifest {
 // engine-specific loading scenes (in @energy8platform/game-engine etc.).
 
 export interface LoadingScreenConfig {
+  /**
+   * Which visual identity the CSS preloader renders. Defaults to `'energy8'`;
+   * an unknown value falls back to the default. Ignored when `cssPreloaderHTML`
+   * is set (custom HTML bypasses the variant).
+   */
+  preloaderVariant?: PreloaderVariantName;
   /** Background color (hex number or CSS string) */
   backgroundColor?: number | string;
   /** Background gradient (CSS string applied to the CSS preloader) */

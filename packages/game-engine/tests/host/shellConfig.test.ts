@@ -101,7 +101,12 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(c.currency).toEqual({ symbol: '$', position: 'left' });
     expect(c.language).toBe('de');
     expect(c.balance).toBe(1000);
-    expect(c.features.buyBonus).toEqual(toBonusOptions(model));
+    // With language:'de' the shell's built-in LOCALES translate action titles, so compare
+    // id/type/priceMultiplier (spec-derived, language-neutral) rather than the full object.
+    const buyBonus = c.features.buyBonus as Array<{ id: string; type: string; priceMultiplier: number }>;
+    expect(buyBonus.map((o) => ({ id: o.id, type: o.type, priceMultiplier: o.priceMultiplier }))).toEqual(
+      toBonusOptions(model).map((o) => ({ id: o.id, type: o.type, priceMultiplier: o.priceMultiplier })),
+    );
   });
   it('falls back to spec.currency then neutral; opts.currency overrides', () => {
     expect(buildShellConfig({}, model, { balance: 0, mode: 'base' }).currency).toEqual({ symbol: 'EUR', position: 'left', minDecimals: 2, maxDecimals: 4 });

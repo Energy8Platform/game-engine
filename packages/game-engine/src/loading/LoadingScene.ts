@@ -1,23 +1,10 @@
-import { Container, Graphics, Text, Sprite, Assets } from 'pixi.js';
 import { Scene } from '../core/Scene';
-import { Tween } from '../animation/Tween';
-import { Easing } from '../animation/Easing';
 import type { LoadingScreenConfig } from '../types';
-import { buildLogoSVG, LOADER_BAR_MAX_WIDTH } from '@energy8platform/platform-core/loading';
-
-/**
- * Build the loading scene variant of the logo SVG.
- * Uses unique IDs (prefixed with 'ls') to avoid collisions with CSSPreloader.
- */
-function buildLoadingLogoSVG(): string {
-  return buildLogoSVG({
-    idPrefix: 'ls',
-    svgStyle: 'width:100%;height:auto;',
-    clipRectId: 'ge-loader-rect',
-    textId: 'ge-loader-pct',
-    textContent: '0%',
-  });
-}
+import {
+  setCSSPreloaderProgress,
+  waitCSSPreloaderTap,
+  removeCSSPreloader,
+} from '@energy8platform/platform-core/loading';
 
 interface LoadingSceneData {
   engine: any; // GameApplication — avoid circular import
@@ -26,22 +13,20 @@ interface LoadingSceneData {
 }
 
 /**
- * Built-in loading screen using the Energy8 SVG logo with animated loader bar.
+ * Built-in loading screen.
  *
- * Renders as an HTML overlay on top of the canvas for crisp SVG quality.
- * The loader bar fill width is driven by asset loading progress.
+ * It does NOT render its own overlay — the CSS preloader created at boot
+ * (`createPlatformSession`/`GameApplication.start`) stays on screen, and this
+ * scene merely drives it: asset-load progress → `setCSSPreloaderProgress`,
+ * tap-to-start → `waitCSSPreloaderTap`, then fades it out via
+ * `removeCSSPreloader` before entering the game. One continuous overlay from
+ * boot to gameplay — no second logo, no mid-load flash.
  */
 export class LoadingScene extends Scene {
   private _engine!: any;
   private _targetScene!: string;
   private _targetData?: unknown;
   private _config!: LoadingScreenConfig;
-
-  // HTML overlay
-  private _overlay: HTMLDivElement | null = null;
-  private _loaderRect: SVGRectElement | null = null;
-  private _percentEl: Element | null = null;
-  private _tapToStartEl: Element | null = null;
 
   // State
   private _displayedProgress = 0;
@@ -56,9 +41,6 @@ export class LoadingScene extends Scene {
     this._targetData = targetData;
     this._config = engine.config.loading ?? {};
     this._startTime = Date.now();
-
-    // Create the HTML overlay with the SVG logo
-    this.createOverlay();
 
     // Initialize asset manager
     await this._engine.assets.init();
@@ -122,16 +104,14 @@ export class LoadingScene extends Scene {
     this._displayedProgress = 1;
     this.updateLoaderBar(1);
 
-    // Show "Tap to Start" or transition directly
-    if (this._config.tapToStart !== false) {
-      await this.showTapToStart();
-    } else {
-      await this.transitionToGame();
-    }
+    // Wait for the player's tap — resolves immediately when tapToStart is
+    // false (the preloader honours that flag) — then enter the game.
+    await waitCSSPreloaderTap();
+    await this.transitionToGame();
   }
 
   override onUpdate(dt: number): void {
-    // Smooth progress bar fill via HTML (during active loading)
+    // Smooth progress bar fill (during active loading)
     if (!this._loadingComplete && this._displayedProgress < this._targetProgress) {
       this._displayedProgress = Math.min(
         this._displayedProgress + dt * 1.5,
@@ -142,107 +122,19 @@ export class LoadingScene extends Scene {
   }
 
   override onResize(_width: number, _height: number): void {
-    // Overlay is CSS-based, auto-resizes
+    // The preloader overlay is CSS-based and auto-resizes.
   }
 
   override onDestroy(): void {
-    this.removeOverlay();
-  }
-
-  // ─── HTML Overlay ──────────────────────────────────────
-
-  private createOverlay(): void {
-    const bgColor =
-      typeof this._config.backgroundColor === 'string'
-        ? this._config.backgroundColor
-        : typeof this._config.backgroundColor === 'number'
-          ? `#${this._config.backgroundColor.toString(16).padStart(6, '0')}`
-          : '#0a0a1a';
-
-    const bgGradient =
-      this._config.backgroundGradient ??
-      `linear-gradient(135deg, ${bgColor} 0%, #1a1a3e 100%)`;
-
-    this._overlay = document.createElement('div');
-    this._overlay.id = '__ge-loading-overlay__';
-    this._overlay.innerHTML = `
-      <div class="ge-loading-content">
-        ${buildLoadingLogoSVG()}
-      </div>
-    `;
-
-    const style = document.createElement('style');
-    style.id = '__ge-loading-style__';
-    style.textContent = `
-      #__ge-loading-overlay__ {
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        background: ${bgGradient};
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        transition: opacity 0.5s ease-out;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-      #__ge-loading-overlay__.ge-fade-out {
-        opacity: 0;
-        pointer-events: none;
-      }
-      .ge-loading-content {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 75%;
-        max-width: 650px;
-      }
-      .ge-loading-content svg {
-        filter: drop-shadow(0 0 40px rgba(121, 57, 194, 0.5));
-        cursor: default;
-      }
-
-      .ge-svg-pulse {
-        animation: ge-tap-pulse 1.2s ease-in-out infinite;
-      }
-      @keyframes ge-tap-pulse {
-        0%, 100% { opacity: 0.5; }
-        50% { opacity: 1; }
-      }
-    `;
-
-    // Get the container that holds the canvas
-    const container = this._engine.app?.canvas?.parentElement;
-    if (container) {
-      container.style.position = container.style.position || 'relative';
-      container.appendChild(style);
-      container.appendChild(this._overlay);
-    }
-
-    // Cache the SVG loader rect for progress updates
-    this._loaderRect = this._overlay.querySelector('#ge-loader-rect');
-    this._percentEl = this._overlay.querySelector('#ge-loader-pct');
-  }
-
-  private removeOverlay(): void {
-    this._overlay?.remove();
-    document.getElementById('__ge-loading-style__')?.remove();
-    this._overlay = null;
-    this._loaderRect = null;
-    this._percentEl = null;
-    this._tapToStartEl = null;
+    // Defensive: ensure the preloader is gone even if we never transitioned
+    // (e.g. the scene was popped externally). Idempotent.
+    void removeCSSPreloader(this.hostElement());
   }
 
   // ─── Progress ──────────────────────────────────────────
 
   private updateLoaderBar(progress: number): void {
-    if (this._loaderRect) {
-      this._loaderRect.setAttribute('width', String(LOADER_BAR_MAX_WIDTH * progress));
-    }
-    if (this._percentEl) {
-      const pct = Math.round(progress * 100);
-      (this._percentEl as SVGTextElement).textContent = `${pct}%`;
-    }
+    setCSSPreloaderProgress(Math.max(0, Math.min(1, progress)));
   }
 
   /**
@@ -275,58 +167,23 @@ export class LoadingScene extends Scene {
     });
   }
 
-  // ─── Tap to Start ─────────────────────────────────────
-
-  private async showTapToStart(): Promise<void> {
-    const tapText = this._config.tapToStartText ?? 'TAP TO START';
-
-    // Reuse the same SVG text element — replace percentage with tap text
-    if (this._percentEl) {
-      const el = this._percentEl as SVGTextElement;
-      el.textContent = tapText;
-      el.setAttribute('fill', '#ffffff');
-      el.classList.add('ge-svg-pulse');
-      this._tapToStartEl = el;
-    }
-
-    // Make overlay clickable
-    if (this._overlay) {
-      this._overlay.style.cursor = 'pointer';
-    }
-
-    // Wait for tap
-    return new Promise<void>((resolve) => {
-      const handler = async () => {
-        this._overlay?.removeEventListener('click', handler);
-        await this.transitionToGame();
-        resolve();
-      };
-
-      // Listen on the full overlay for easier mobile tap
-      this._overlay?.addEventListener('click', handler);
-    });
-  }
-
   // ─── Transition ────────────────────────────────────────
 
-  private async transitionToGame(): Promise<void> {
-    // Fade out the HTML overlay
-    if (this._overlay) {
-      this._overlay.classList.add('ge-fade-out');
-      await new Promise<void>((resolve) => {
-        this._overlay!.addEventListener('transitionend', () => resolve(), { once: true });
-        // Safety timeout
-        setTimeout(resolve, 600);
-      });
-    }
+  /** The DOM element hosting the canvas + preloader overlay. */
+  private hostElement(): HTMLElement {
+    return this._engine?.app?.canvas?.parentElement ?? document.body;
+  }
 
-    // Remove overlay
-    this.removeOverlay();
+  private async transitionToGame(): Promise<void> {
+    // Fade out and remove the shared CSS preloader (resolves after the fade).
+    await removeCSSPreloader(this.hostElement());
 
     // Navigate to the target scene, always passing the engine reference
     await this._engine.scenes.goto(this._targetScene, {
       engine: this._engine,
-      ...(this._targetData && typeof this._targetData === 'object' ? this._targetData as Record<string, unknown> : { data: this._targetData }),
+      ...(this._targetData && typeof this._targetData === 'object'
+        ? (this._targetData as Record<string, unknown>)
+        : { data: this._targetData }),
     });
   }
 }

@@ -1,7 +1,8 @@
 // packages/game-engine/src/host/shellConfig.ts
-// `socialize` is a runtime helper that pixi-shell does NOT re-export (its index only re-exports
-// types), so it stays sourced from platform-core/shell; the shapes are structurally identical.
-import { socialize } from '@energy8platform/platform-core/shell';
+// `socialize` / `createI18n` are runtime helpers sourced from platform-core/shell;
+// pixi-shell re-exports only types so we import directly from platform-core.
+import { socialize, createI18n } from '@energy8platform/platform-core/shell';
+import type { Lang } from '@energy8platform/platform-core/shell';
 import type {
   PixiShellConfig, ShellMode, CurrencyConfig, GameInfoContent, GameInfoSection, PaytableRow,
   BonusOption, ShellFeatures, GameMode,
@@ -26,6 +27,11 @@ export interface SlotShellOptions {
   buyBonus?: BonusOption[];
   tiers?: WinTier[];
   features?: Partial<ShellFeatures>;
+  /** Per-game translation map. Keys are the English source strings (from the spec or copy);
+   *  values are the translated strings for each language. Merged with the shell's built-in
+   *  `LOCALES` catalog — game strings take precedence over the built-in entries for the same key.
+   *  When not supplied, English source strings pass through verbatim (socialised in social mode). */
+  i18n?: Partial<Record<Lang, Record<string, string>>>;
 }
 
 /** The currency metadata surfaced on `initData.config.currency` (game-sdk `CurrencyMetaData`).
@@ -130,8 +136,9 @@ export function stakeForAction(model: GameModel, action: string, bet: number): n
   return cost * bet;
 }
 
-/** Derive shell buy cards + ante toggles from the spec's buy/feature actions (SSOT). */
-export function toBonusOptions(model: GameModel): BonusOption[] {
+/** Derive shell buy cards + ante toggles from the spec's buy/feature actions (SSOT).
+ *  @param t Optional translator applied to `title` and `description` before they enter the shell. */
+export function toBonusOptions(model: GameModel, t: (s: string) => string = (s) => s): BonusOption[] {
   const out: BonusOption[] = [];
   for (const [key, action] of Object.entries(model.spec.actions)) {
     const role = action.role ?? 'base';
@@ -139,16 +146,17 @@ export function toBonusOptions(model: GameModel): BonusOption[] {
     out.push({
       id: key,
       type: role === 'buy' ? 'bonus' : 'feature',
-      title: action.title ?? key.replace(/_/g, ' ').toUpperCase(),
-      description: action.description ?? '',
+      title: t(action.title ?? key.replace(/_/g, ' ').toUpperCase()),
+      description: t(action.description ?? ''),
       priceMultiplier: action.cost ?? (role === 'buy' ? 100 : 1),
     });
   }
   return out;
 }
 
-/** Build a paytable section from the model's derived paytable view (multipliers per symbol count). */
-function paytableSection(model: GameModel): GameInfoSection | null {
+/** Build a paytable section from the model's derived paytable view (multipliers per symbol count).
+ *  @param t Optional translator applied to symbol names before they enter the shell. */
+function paytableSection(model: GameModel, t: (s: string) => string = (s) => s): GameInfoSection | null {
   const symbols = model.paytable?.symbols ?? [];
   const rows: PaytableRow[] = [];
   for (const s of symbols) {
@@ -157,10 +165,12 @@ function paytableSection(model: GameModel): GameInfoSection | null {
       .filter((w) => Number.isFinite(w.multiplier) && w.multiplier > 0)
       .sort((a, b) => Number(a.count) - Number(b.count));
     if (!wins.length) continue;
-    rows.push({ symbol: { text: s.name ?? s.id }, wins });
+    rows.push({ symbol: { text: t(s.name ?? s.id) }, wins });
   }
   if (!rows.length) return null;
-  return { type: 'paytable', title: 'PAYTABLE', rows };
+  // No literal title — the shell renders `s.title ?? host.t('Paytable')`, so the heading is
+  // localized (matching how the modes/wins sections rely on the shell's translated fallback).
+  return { type: 'paytable', rows };
 }
 
 /** Build a "wins" illustration section sized to the grid; `kind` follows the spec mechanic hint. */
@@ -206,13 +216,14 @@ function orderDisclaimerLast(sections: GameInfoSection[]): GameInfoSection[] {
  * gets a real info panel for free (paytable, win illustration, controls, and the Stake
  * disclaimer when present). Author-supplied `opts.gameInfo` is MERGED over this set by
  * section identity (see `mergeGameInfo`), not wholesale-replaced.
+ * @param t Optional translator applied to spec-derived player-facing strings (symbol names, mode titles, etc.).
  */
-export function defaultGameInfo(model: GameModel, runtime: ShellRuntime): GameInfoContent {
+export function defaultGameInfo(model: GameModel, runtime: ShellRuntime, t: (s: string) => string = (s) => s): GameInfoContent {
   const sections: GameInfoSection[] = [];
   sections.push(winsSection(model));
-  const pay = paytableSection(model);
+  const pay = paytableSection(model, t);
   if (pay) sections.push(pay);
-  const modes = modesSection(model);
+  const modes = modesSection(model, t);
   if (modes) sections.push(modes);
   sections.push({ type: 'controls' });
   const disclaimer = disclaimerSection(runtime.disclaimerLines);
@@ -224,21 +235,22 @@ export function defaultGameInfo(model: GameModel, runtime: ShellRuntime): GameIn
  *  (`model.mathModes` + `spec.actions`) that drives the buy cards and the math pipeline. Stake
  *  compliance requires Cost / RTP / Max Win per mode; deriving it here means the author declares a
  *  mode once (in game.spec) and the info table can't drift. `free` actions are excluded (mathModes
- *  already drops them — free spins are part of a bonus, not a purchasable mode). */
-function modesSection(model: GameModel): GameInfoSection | null {
+ *  already drops them — free spins are part of a bonus, not a purchasable mode).
+ *  @param t Optional translator applied to row `title` and `description` before they enter the shell. */
+function modesSection(model: GameModel, t: (s: string) => string = (s) => s): GameInfoSection | null {
   const modes = model.mathModes ?? [];
   if (!modes.length) return null;
   const rows: GameMode[] = modes.map((m) => {
     const action = model.spec.actions[m.action];
     const isBase = (action?.role ?? 'base') === 'base' || m.mode === 'BASE';
     const row: GameMode = {
-      title: action?.title ?? (isBase ? 'Base game' : m.mode.replace(/_/g, ' ')),
+      title: t(action?.title ?? (isBase ? 'Base game' : m.mode.replace(/_/g, ' '))),
       maxWin: `${m.maxWin.toLocaleString('en-US')}×`,
     };
     // Cost is a bet-multiplier; a base spin (1×) reads as no premium, so only show it for buys/features.
     if (m.costMultiplier && m.costMultiplier !== 1) row.price = `${m.costMultiplier}×`;
     if (typeof m.rtp === 'number') row.rtp = Math.round(m.rtp * 1000) / 10; // 0.965 → 96.5 (%)
-    if (action?.description) row.description = action.description;
+    if (action?.description) row.description = t(action.description);
     return row;
   });
   return { type: 'modes', title: 'MODES', modes: rows };
@@ -336,18 +348,17 @@ export function buildShellConfig(
   const currency =
     opts.currency ?? runtime.currency ?? resolveCurrency(null, model.spec.currency);
   const isSocial = runtime.social ?? false;
-  // Merge author sections over the host-derived defaults, THEN socialize the WHOLE merged set in
-  // social mode — so restricted gambling vocabulary is rewritten in BOTH the built-in copy AND any
-  // author-supplied text (title + custom HTML). A game can no longer surface a forbidden word in
-  // social mode just because the author wrote it in their own info section. (Custom sections built
-  // from a raw DOM `node` can't be rewritten automatically — author owns the node and can call the
-  // exported `socialize` from '@energy8platform/game-engine/host' on their own strings.)
-  // Author gameInfo may be a plain object or a `(t) => content` factory. `t` socializes when in
-  // social mode (identity otherwise) so authors can wrap copy explicitly; the full merged set is
-  // still socialized below as a safety net.
-  const t = isSocial ? socialize : (text: string) => text;
+  // Build the merged resolver: game i18n map + shell LOCALES (via createI18n), then socialize on
+  // top for English social mode. For non-English languages, createI18n already handles the
+  // translation lookup; social rewriting is English-only and applied separately after.
+  // Author gameInfo may be a plain object or a `(t) => content` factory. `t` is the resolver so
+  // authors can wrap player-facing copy explicitly; the full merged set is still socialized below
+  // (section pass) as a safety net so restricted words can't slip through even if t() was missed.
+  const { t } = createI18n({ language: runtime.language ?? 'en', isSocial, messages: opts.i18n });
   const authored = typeof opts.gameInfo === 'function' ? opts.gameInfo(t) : opts.gameInfo;
-  let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime), authored);
+  // Pass t() through to spec-derived sections so symbol names, mode titles, and descriptions are
+  // pre-translated before they reach the shell renderer.
+  let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime, t), authored);
   // The DISCLAIMER is required legal copy and must be shown VERBATIM — never socialized (its
   // wording is mandated, and word-swaps like "bet → play" would corrupt the legal text).
   if (isSocial) {
@@ -357,8 +368,8 @@ export function buildShellConfig(
   }
   // The legal DISCLAIMER always renders LAST — author-merged or extra sections never push below it.
   gameInfo = { sections: orderDisclaimerLast(gameInfo.sections ?? []) };
-  // Buy-bonus cards: socialize the FINAL options (author override or spec-derived) in social mode.
-  const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model), isSocial);
+  // Buy-bonus cards: apply t() to spec-derived options (pre-translate), then socialize for en+social.
+  const buyBonus = socializeBonusOptions(opts.buyBonus ?? toBonusOptions(model, t), isSocial);
   // Features: defaults, then author overrides, THEN jurisdiction restrictions (a restriction wins).
   const features: ShellFeatures = {
     turbo: 0,

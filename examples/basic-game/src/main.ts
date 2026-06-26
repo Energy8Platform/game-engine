@@ -25,6 +25,7 @@ async function bootstrap() {
       tapToStart: true,
       tapToStartText: 'TAP TO PLAY',
       minDisplayTime: 2000,
+      preloaderVariant: 'voidmoon'
     },
     manifest: {
       bundles: [

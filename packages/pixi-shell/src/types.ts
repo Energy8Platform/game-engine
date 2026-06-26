@@ -127,6 +127,7 @@ export interface GameMode {
 export type GameInfoSection =
   | { type: 'modes'; title?: string; order?: number; modes: GameMode[] }
   | { type: 'controls'; title?: string; order?: number }
+  | { type: 'hotkeys'; title?: string; order?: number }
   | { type: 'paytable'; title?: string; order?: number; rows: PaytableRow[] }
   | WinSection
   | { type: 'custom'; title?: string; order?: number; node?: Container; html?: string };
@@ -145,6 +146,9 @@ export interface AutoplayConfig {
 
 export interface ShellFeatures {
   turbo: 0 | 1 | 2 | 3;
+  /** Master keyboard-shortcut switch. Defaults to `true`; set `false` to disable ALL hotkeys
+   *  (overrides `spacebar` and any future hotkey). */
+  hotkeys?: boolean;
   /** Spacebar starts a spin in base mode. Defaults to `true`; set `false` to disable the
    *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */
   spacebar?: boolean;
@@ -197,6 +201,10 @@ export interface ModalOptions {
   actions?: ModalAction[];
   /** Backdrop blur in px (defaults to the shell's standard blur). */
   blurLevel?: number;
+  /** Optional keyboard handler — called by the shell keyboard controller while this modal is
+   *  open. Return true to consume the key (prevents bar actions + Escape close); false to let
+   *  the controller handle it (Escape → closeLayer). */
+  onKey?: (e: KeyboardEvent) => boolean;
 }
 
 export interface ShellState {

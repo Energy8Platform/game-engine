@@ -19,6 +19,10 @@ export interface ShellLayer extends Container {
   fit?(): void;
   /** Called right before the layer is removed, so it can detach DOM listeners etc. */
   onRemove?(): void;
+  /** Called by the shell keyboard controller while this layer is open.
+   *  Return true to consume the key (prevents bar actions + Escape close); false to pass through
+   *  (Escape → closeLayer). */
+  onKey?(e: KeyboardEvent): boolean;
 }
 
 export interface LayerHandle {
@@ -39,8 +43,10 @@ export interface ShellHost {
   readonly screenW: number;
   readonly screenH: number;
 
-  /** Resolve a built-in string (social word-swap when `isSocial`). */
+  /** Resolve a built-in string through the i18n resolver (translation + optional socialize). */
   t(text: string): string;
+  /** Swap the active language at runtime (rebuilds resolver, re-renders bar). */
+  setLanguage?(lang: string): void;
   /** Format a money amount in the shell currency (fixed minDecimals — balance/bet/prices). */
   fmt(n: number): string;
   /** Format a win / total-win amount (variable decimals — keeps small wins' significant digits). */
@@ -56,6 +62,14 @@ export interface ShellHost {
   closeLayer(): void;
   /** Re-fit every open card modal (short-popout backstop). */
   fitModals(): void;
+
+  /** Shared sound on/off state (Settings speaker + Shift+M stay in sync). Optional so partial test
+   *  hosts can omit it; the live shell always provides it (defaults to on when absent). */
+  readonly soundOn?: boolean;
+  /** Flip sound state, emit `settingChange({ key: 'sound' })`, and refresh the open Settings icon. */
+  setSound?(on: boolean): void;
+  /** Settings registers an icon-updater while open so Shift+M live-updates its speaker (null clears). */
+  setSoundRefresh?(fn: ((on: boolean) => void) | null): void;
 
   openMenu(): void;
   openSettings(): void;

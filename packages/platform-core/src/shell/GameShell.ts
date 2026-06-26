@@ -11,7 +11,8 @@ import type {
   ShellState,
   ThemeConfig,
 } from './types';
-import { createInitialState } from './state';
+import { KeyboardController, type KeyboardHost } from './keyboard';
+import { createInitialState, nextTurbo, stepBet } from './state';
 import { buildThemeVars } from './theme';
 import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
 import { renderBottomBar } from './components/BottomBar';
@@ -23,7 +24,7 @@ import { buildModal } from './components/Modal';
 import { buildReplayModal } from './components/ReplayModal';
 import { countUp } from './motion';
 import { formatCurrency } from './format';
-import { socialize } from './i18n';
+import { createI18n, type I18n } from './i18n';
 
 const REMOVE_FADE_MS = 300;
 
@@ -40,11 +41,20 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private prevBalance = 0;
   private prevWin = 0;
   private moneyAnims: Array<() => void> = [];
-  private keysBound = false;
+  private kbd!: KeyboardController;
+  private i18n!: I18n;
+  /** onKey handler of the currently open modal/overlay, if any (set in showModal, cleared in closeModal). */
+  private modalOnKey: ((e: KeyboardEvent) => boolean) | undefined = undefined;
+  /** Shared sound on/off state — Settings speaker toggle and the Shift+M hotkey stay in sync. The
+   *  game listens to `settingChange({ key: 'sound' })` to (un)mute audio. */
+  soundOn = true;
+  /** Set by the open Settings modal so Shift+M live-updates its speaker icon; cleared on close. */
+  private soundRefresh: ((on: boolean) => void) | null = null;
 
   constructor(config: ShellConfig) {
     super();
     this.config = config;
+    this.i18n = createI18n({ language: config.language, isSocial: config.isSocial });
     this.state = createInitialState(config);
 
     this.styleEl = document.createElement('style');
@@ -63,12 +73,47 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.prevWin = this.state.win;
     this.observeLayout();
     if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.handleKeyDown);
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const shell = this;
+      const host: KeyboardHost = {
+        get state() { return shell.state; },
+        get hotkeysEnabled() { return shell.config.features.hotkeys !== false; },
+        get spacebarEnabled() { return shell.config.features.spacebar !== false; },
+        get turboLevels() { return shell.config.features.turbo; },
+        get autoplayEnabled() { return shell.config.features.autoplay != null; },
+        get buyBonusEnabled() { return shell.config.features.buyBonus !== false; },
+        hasOpenLayer: () => shell.modalHost.childElementCount > 0,
+        routeToLayer: (e) => shell.modalOnKey?.(e) ?? false,
+        spin: () => shell.emit('spin'),
+        stepBet: (dir) => {
+          const next = stepBet(shell.state, dir);
+          if (next === shell.state.bet) return;
+          shell.state.bet = next; shell.emit('betChange', next); shell.render();
+        },
+        toggleAutoplay: () => {
+          if (shell.state.autoplay.active) {
+            shell.state.autoplay = { active: false, remaining: 0 };
+            shell.emit('autoplayStop'); shell.render();
+          } else {
+            shell.openAutoplayPicker();
+          }
+        },
+        cycleTurbo: () => {
+          const next = nextTurbo(shell.state.turbo, shell.config.features.turbo);
+          shell.state.turbo = next; shell.emit('turboChange', next); shell.render();
+        },
+        openBuyBonus: () => shell.openBuyBonus(),
+        openInfo: () => shell.openInfo(),
+        openMenu: () => shell.openMenu(),
+        toggleMute: () => shell.setSound(!shell.soundOn),
+        closeLayer: () => shell.closeModal(),
+      };
+      this.kbd = new KeyboardController(host);
+      this.kbd.attach();
       // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a `document`
       // keydown never fires and Space scrolls the parent. Pull window focus into the iframe on the
       // first pointer interaction so the spacebar shortcut works. Harmless on full-page Energy8.
       document.addEventListener('pointerdown', this.pullFocus, true);
-      this.keysBound = true;
     }
     this.render();
     // re-fit once the bundled webfont swaps in (text metrics change → row width changes)
@@ -161,28 +206,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
     }
   }
 
-  /** Spacebar starts a spin — same path as the spin disc. Ignored when `features.spacebar` is
-   *  false, while a spin is running, while autoplay is active, outside base mode, when an
-   *  overlay/modal is open, or when an editable element is focused. `repeat` (held key) is
-   *  ignored so it can't spam. */
   /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the
    *  spacebar shortcut) fires. No-op / harmless when already focused or full-page. */
   private pullFocus = (): void => { try { window.focus(); } catch { /* cross-origin / non-browser */ } };
-
-  private handleKeyDown = (e: KeyboardEvent): void => {
-    if (this.destroyed || e.code !== 'Space' || e.repeat) return;
-    if (this.config.features.spacebar === false) return; // shortcut disabled (e.g. jurisdiction)
-    const t = e.target as HTMLElement | null;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    // Space is ours now — swallow the browser default before any no-op bail. Otherwise the
-    // native "Space activates the focused button" still fires and re-clicks whichever shell
-    // <button> (menu/buy/auto) opened the overlay, tearing down + rebuilding the modal: a
-    // visible flicker. (Also stops the page from scrolling on Space.)
-    e.preventDefault();
-    if (this.modalHost.childElementCount > 0) return; // an overlay/modal is open
-    if (this.state.mode !== 'base' || this.state.busy || this.state.autoplay.active) return;
-    this.emit('spin');
-  };
 
   setLayout(layout: 'wide' | 'mobile'): void {
     if (layout === this.layout) return;
@@ -190,12 +216,22 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.render();
   }
 
-  /** Resolve a built-in shell string. English is the source; with `isSocial` it is run through
-   *  the social-casino word-swap. Game-supplied strings should NOT be passed through this. */
-  t(text: string): string { return this.config.isSocial ? socialize(text) : text; }
+  /** Resolve a built-in shell string through the i18n resolver (translation + optional socialize). */
+  t(text: string): string { return this.i18n.t(text); }
 
-  /** Toggle the social vocabulary at runtime (re-renders the bar; reopen overlays to refresh them). */
-  setSocial(isSocial: boolean): void { this.config.isSocial = isSocial; this.render(); }
+  /** Toggle the social vocabulary at runtime (rebuilds resolver, re-renders bar). */
+  setSocial(isSocial: boolean): void {
+    this.config.isSocial = isSocial;
+    this.i18n = createI18n({ language: this.config.language, isSocial });
+    this.render();
+  }
+
+  /** Swap the active language at runtime (rebuilds resolver, re-renders bar). */
+  setLanguage(lang: string): void {
+    this.config.language = lang;
+    this.i18n = createI18n({ language: lang, isSocial: this.config.isSocial });
+    this.render();
+  }
 
   /** Recolour the shell at runtime (e.g. switch dark/light scheme). */
   setTheme(theme: ThemeConfig): void {
@@ -236,7 +272,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.state.mode = mode;
     this.render();
   }
-  setBusy(busy: boolean): void { this.state.busy = busy; this.render(); }
+  setBusy(busy: boolean): void { this.state.busy = busy; this.render(); this.kbd?.notifyBusyChanged(busy); }
   setAutoplay(a: AutoplayOptions): void { this.state.autoplay = a; this.render(); }
   setTurbo(level: number): void { this.state.turbo = level; this.render(); }
   /** Currency-aware money formatter for WIN amounts (variable decimals: 0.0041 stays 0.0041, not
@@ -245,7 +281,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
   setBuyBonusEnabled(enabled: boolean): void { this.state.buyBonusEnabled = enabled; this.render(); }
   setFreeSpins(fs: FreeSpinsState): void { this.state.freeSpins = fs; this.render(); }
 
-  private showModal(el: HTMLElement): void {
+  private showModal(el: HTMLElement, onKey?: (e: KeyboardEvent) => boolean): void {
     // The control that opened this overlay (menu/buy/auto) keeps DOM focus. Drop it, or a
     // stray Space/Enter would natively re-activate that <button> and rebuild the modal — a
     // visible flicker. Only relinquish focus we own (a shell control), never the host page's.
@@ -253,6 +289,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
     if (active && this.root.contains(active)) active.blur();
     this.modalHost.innerHTML = '';
     this.modalHost.appendChild(el);
+    this.modalOnKey = onKey;
     this.fitModals();
   }
 
@@ -307,18 +344,28 @@ export class GameShell extends EventEmitter<ShellEvents> {
 
   openMenu(): void { this.emit('menuOpen'); this.openSettings(); }
   openSettings(): void { this.emit('settingsOpen'); this.showModal(openSettingsModal(this)); }
-  openInfo(): void { this.emit('infoOpen'); this.showModal(openGameInfoModal(this)); }
+  openInfo(): void { this.emit('infoOpen'); const { root, onKey } = openGameInfoModal(this); this.showModal(root, onKey); }
   openBuyBonus(): void {
     if (this.config.onBonusBuy) { this.config.onBonusBuy(); return; } // game handles it (own UI)
-    const overlay = openBuyBonusOverlay(this);
-    if (overlay) this.showModal(overlay);
+    const result = openBuyBonusOverlay(this);
+    if (result) this.showModal(result.root, result.onKey);
   }
   /** Open a generic, externally-driven modal (title + body + optional action buttons).
    *  Each action runs its `on` then closes; the ✕ shows when `availableClose` is true. */
-  openModal(opts: ModalOptions): void { this.showModal(buildModal(opts)); }
+  openModal(opts: ModalOptions): void { this.showModal(buildModal(opts), opts.onKey); }
   /** Programmatically dismiss whatever modal/overlay is currently shown (e.g. auto-close the
    *  reconnect overlay once the link is restored). No-op when nothing is open. */
-  closeModal(): void { this.modalHost.innerHTML = ''; }
+  closeModal(): void { this.modalOnKey = undefined; this.soundRefresh = null; this.modalHost.innerHTML = ''; }
+
+  /** Flip the shared sound state, notify the game (`settingChange({ key: 'sound' })`), and live-update
+   *  the Settings speaker icon if that modal is open. Used by both the Settings toggle and Shift+M. */
+  setSound(on: boolean): void {
+    this.soundOn = on;
+    this.emit('settingChange', { key: 'sound', value: on });
+    this.soundRefresh?.(on);
+  }
+  /** The Settings modal registers an icon-updater while open (cleared on close). */
+  setSoundRefresh(fn: ((on: boolean) => void) | null): void { this.soundRefresh = fn; }
   /** Open the non-dismissable replay summary modal (START REPLAY → onReplay → reopen). */
   openReplay(opts: ReplayModalOptions): void {
     if (this.destroyed) return;
@@ -326,19 +373,18 @@ export class GameShell extends EventEmitter<ShellEvents> {
   }
 
   /** Bet picker — list of available bets with an accent Confirm. */
-  openBetPicker(): void { this.showModal(openBetModal(this)); }
+  openBetPicker(): void { const { root, onKey } = openBetModal(this); this.showModal(root, onKey); }
   /** Autoplay picker — spin-count list; Confirm starts autoplay. */
-  openAutoplayPicker(): void { this.showModal(openAutoplayModal(this)); }
+  openAutoplayPicker(): void { const { root, onKey } = openAutoplayModal(this); this.showModal(root, onKey); }
 
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
     this.ro?.disconnect();
     this.ro = null;
-    if (this.keysBound) {
-      document.removeEventListener('keydown', this.handleKeyDown);
+    if (typeof document !== 'undefined') {
+      this.kbd?.detach();
       document.removeEventListener('pointerdown', this.pullFocus, true);
-      this.keysBound = false;
     }
     this.cancelMoneyAnims();
     this.removeAllListeners();

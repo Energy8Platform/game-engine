@@ -76,9 +76,14 @@ export class ScrollBox extends Container {
     return this.maxScroll;
   }
 
+  /** Scroll by `dy` pixels (positive = down, negative = up), clamped to [0, maxScroll]. */
+  scrollBy(dy: number): void {
+    this.setScroll(this.scrollY + dy);
+  }
+
   private setScroll(y: number): void {
-    this.scrollY = Math.max(0, Math.min(this.maxScroll, y));
-    this.content.y = -this.scrollY;
+    this.scrollY = Math.max(0, Math.min(this.maxScroll, y)) || 0; // || 0 converts -0 to 0
+    this.content.y = this.scrollY === 0 ? 0 : -this.scrollY;
   }
 
   private onDown = (e: FederatedPointerEvent): void => {
