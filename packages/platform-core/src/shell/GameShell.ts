@@ -113,6 +113,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
     host.classList.remove('ge-fit');
     host.style.transform = '';
     host.style.transformOrigin = '';
+    // clear any per-zone height-scale from a prior pass
+    for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+      (el as HTMLElement).style.transform = '';
+      (el as HTMLElement).style.transformOrigin = '';
+    }
     if (this.layout === 'mobile') {
       // Shrink the whole stack to fit narrow phones (mobile-s, or big balance/win/total-win
       // numbers in a row). The rows use space-between, so on overflow their content is
@@ -128,24 +133,36 @@ export class GameShell extends EventEmitter<ShellEvents> {
       }
       return;
     }
-    // Scale the bar to the SCREEN, not the mode. Two independent limits, whichever bites harder:
-    //  • width  — the row mustn't exceed the frame (base's wide row hits this); and
-    //  • height — the bar mustn't eat more than BAR_MAX_FRACTION of a SHORT frame. Replay's narrow
-    //    row never overflows width, so without this it stayed full-size and ate ~47% of a Popout S
-    //    frame, overlapping the reels — while base (wide row) shrank to ~27%. Now every mode tracks
-    //    the frame size the same way.
-    // Lift the WIN pill onto its own line first when the full-width row overflows (controls stay big).
-    if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
-    // Measure natural CONTENT size — `.ge-fit` makes the bar shrink-to-content (width:max-content).
-    host.classList.add('ge-fit');
     const availW = this.root.clientWidth - 12;
     const availH = this.root.clientHeight * GameShell.BAR_MAX_FRACTION;
-    const naturalW = host.offsetWidth, naturalH = host.offsetHeight;
-    const s = Math.min(1, naturalW > 0 ? availW / naturalW : 1, naturalH > 0 ? availH / naturalH : 1);
-    if (s < 0.999) {
-      host.style.transform = `translateX(-50%) scale(${s.toFixed(4)})`;
-    } else {
-      host.classList.remove('ge-fit'); // fits full-size → restore the normal full-width bar
+    // 1) If the inline row overflows the width, lift the WIN pill onto its own line above the bar
+    //    (keeps the controls as large as possible — base's wide row + a big WIN pill hit this).
+    if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
+    // 2) Still too WIDE (the control row itself doesn't fit) → shrink-to-content + uniform scale,
+    //    centred. Only base's wide row reaches here.
+    if (bar.scrollWidth > bar.clientWidth + 1) {
+      host.classList.add('ge-fit');
+      const naturalW = host.offsetWidth, naturalH = host.offsetHeight;
+      const s = Math.min(1, naturalW > 0 ? availW / naturalW : 1, naturalH > 0 ? availH / naturalH : 1);
+      if (s < 0.999) host.style.transform = `translateX(-50%) scale(${s.toFixed(4)})`;
+      else host.classList.remove('ge-fit');
+      return;
+    }
+    // 3) Fits the WIDTH but the stack (control row + any lifted WIN pill) is too TALL for a short
+    //    frame — replay/free-spins on Popout S. Shrink each piece toward its OWN edge so the bar
+    //    keeps its full-width space-between layout (menu hard-left, controls hard-right), just
+    //    lower — NOT packed into a centred cluster. Scale by frame HEIGHT only.
+    const naturalH = host.offsetHeight;
+    if (naturalH > availH && naturalH > 0) {
+      const s = (availH / naturalH).toFixed(4);
+      const scaleEdge = (el: Element | null, origin: string): void => {
+        if (!el) return;
+        (el as HTMLElement).style.transformOrigin = origin;
+        (el as HTMLElement).style.transform = `scale(${s})`;
+      };
+      scaleEdge(bar.querySelector('.ge-zone-left'), 'left bottom');
+      scaleEdge(bar.querySelector('.ge-zone-right'), 'right bottom');
+      scaleEdge(host.querySelector('.ge-winpill'), 'center bottom');
     }
   }
 
