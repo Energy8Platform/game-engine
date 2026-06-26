@@ -18,4 +18,5 @@ export function removeGameShell(): Promise<void> {
 }
 
 export { GameShell };
-export { socialize } from './i18n';
+export { socialize, createI18n, normalizeLang } from './i18n';
+export type { Lang, I18n, I18nOptions } from './i18n';
