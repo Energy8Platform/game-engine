@@ -49,6 +49,24 @@ describe('GameInfo', () => {
     expect(q(modal, '[data-ge="info-custom"]')!.textContent).toContain('Match left to right.');
   });
 
+  it('localizes the paytable heading and the host-built custom DISCLAIMER heading', () => {
+    const shell = createGameShell({
+      ...cfg(mount, [
+        { type: 'paytable', rows: [{ symbol: { text: 'Wild' }, wins: [{ count: '5', multiplier: 10 }] }] },
+        { type: 'custom', title: 'DISCLAIMER', html: '<p>Legal text stays verbatim.</p>' },
+      ]),
+      language: 'de',
+    });
+    shell.openInfo();
+    const modal = q(mount, '[data-ge="info-modal"]')!;
+    // 'Paytable' heading localizes via the shell's translating fallback (host no longer sets a literal title).
+    expect(q(modal, '[data-ge="info-paytable"]')!.textContent).toContain('Gewinntabelle');
+    // Custom DISCLAIMER heading is translated; the legal body stays verbatim.
+    const custom = q(modal, '[data-ge="info-custom"]')!;
+    expect(custom.textContent).toContain('Haftungsausschluss');
+    expect(custom.textContent).toContain('Legal text stays verbatim.');
+  });
+
   it('wins kind "shapes" renders a row per named shape (grid + name + description)', () => {
     const shell = createGameShell(cfg(mount, [
       { type: 'wins', kind: 'shapes', grid: { cols: 5, rows: 3 }, shapes: [

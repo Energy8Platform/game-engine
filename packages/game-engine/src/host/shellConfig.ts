@@ -168,7 +168,9 @@ function paytableSection(model: GameModel, t: (s: string) => string = (s) => s):
     rows.push({ symbol: { text: t(s.name ?? s.id) }, wins });
   }
   if (!rows.length) return null;
-  return { type: 'paytable', title: 'PAYTABLE', rows };
+  // No literal title — the shell renders `s.title ?? host.t('Paytable')`, so the heading is
+  // localized (matching how the modes/wins sections rely on the shell's translated fallback).
+  return { type: 'paytable', rows };
 }
 
 /** Build a "wins" illustration section sized to the grid; `kind` follows the spec mechanic hint. */

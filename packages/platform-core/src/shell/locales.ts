@@ -7,6 +7,7 @@ import type { Lang } from './i18n';
 
 export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
   da: {
+    DISCLAIMER: 'Ansvarsfraskrivelse',
     Activate: 'Aktivér',
     Autoplay: 'Autoplay',
     Balance: 'Saldo',
@@ -63,6 +64,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Vindende former',
   },
   de: {
+    DISCLAIMER: 'Haftungsausschluss',
     Activate: 'Aktivieren',
     Autoplay: 'Autoplay',
     Balance: 'Kontostand',
@@ -119,6 +121,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Gewinnmuster',
   },
   es: {
+    DISCLAIMER: 'Aviso legal',
     Activate: 'Activar',
     Autoplay: 'Giro automático',
     Balance: 'Saldo',
@@ -175,6 +178,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Figuras ganadoras',
   },
   fi: {
+    DISCLAIMER: 'Vastuuvapauslauseke',
     Activate: 'Aktivoi',
     Autoplay: 'Automaattipeli',
     Balance: 'Saldo',
@@ -231,6 +235,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Voittokuviot',
   },
   fr: {
+    DISCLAIMER: 'Avertissement',
     Activate: 'Activer',
     Autoplay: 'Jeu automatique',
     Balance: 'Solde',
@@ -287,6 +292,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Figures gagnantes',
   },
   hi: {
+    DISCLAIMER: 'अस्वीकरण',
     Activate: 'सक्रिय करें',
     Autoplay: 'ऑटोप्ले',
     Balance: 'बैलेंस',
@@ -343,6 +349,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'जीत के आकार',
   },
   id: {
+    DISCLAIMER: 'Penafian',
     Activate: 'Aktifkan',
     Autoplay: 'Putar Otomatis',
     Balance: 'Saldo',
@@ -399,6 +406,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Bentuk kemenangan',
   },
   ja: {
+    DISCLAIMER: '免責事項',
     Activate: '有効化',
     Autoplay: 'オートプレイ',
     Balance: '残高',
@@ -455,6 +463,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': '当選形状',
   },
   ko: {
+    DISCLAIMER: '면책 조항',
     Activate: '활성화',
     Autoplay: '자동 플레이',
     Balance: '잔액',
@@ -511,6 +520,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': '당첨 패턴',
   },
   pl: {
+    DISCLAIMER: 'Zastrzeżenie',
     Activate: 'Aktywuj',
     Autoplay: 'Autoplay',
     Balance: 'Saldo',
@@ -567,6 +577,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Wzory wygrywające',
   },
   pt: {
+    DISCLAIMER: 'Aviso legal',
     Activate: 'Ativar',
     Autoplay: 'Giro automático',
     Balance: 'Saldo',
@@ -623,6 +634,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Figuras vencedoras',
   },
   ru: {
+    DISCLAIMER: 'Отказ от ответственности',
     Activate: 'Активировать',
     Autoplay: 'Автоигра',
     Balance: 'Баланс',
@@ -679,6 +691,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Выигрышные комбинации',
   },
   tr: {
+    DISCLAIMER: 'Yasal uyarı',
     Activate: 'Etkinleştir',
     Autoplay: 'Otomatik Oyun',
     Balance: 'Bakiye',
@@ -735,6 +748,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Kazanan şekiller',
   },
   vi: {
+    DISCLAIMER: 'Tuyên bố miễn trừ trách nhiệm',
     Activate: 'Kích hoạt',
     Autoplay: 'Tự động quay',
     Balance: 'Số dư',
@@ -791,6 +805,7 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': 'Hình thắng',
   },
   zh: {
+    DISCLAIMER: '免责声明',
     Activate: '激活',
     Autoplay: '自动游戏',
     Balance: '余额',

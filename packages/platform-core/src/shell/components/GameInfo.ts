@@ -80,7 +80,8 @@ function renderSection(shell: GameShell, s: GameInfoSection): HTMLElement {
     case 'hotkeys': return sectionHotkeys(shell, sec('info-hotkeys', s.title, shell.t('Hotkeys')));
     case 'paytable': return sectionPaytable(s.rows, sec('info-paytable', s.title, shell.t('Paytable')));
     case 'wins': return sectionWins(s, sec('info-wins', s.title, shell.t(winFallbackTitle(s.kind))));
-    case 'custom': return sectionCustom(s, sec('info-custom', s.title, ''));
+    // Translate the heading (e.g. the host-built DISCLAIMER title); the body stays verbatim.
+    case 'custom': return sectionCustom(s, sec('info-custom', s.title != null ? shell.t(s.title) : undefined, ''));
   }
 }
 

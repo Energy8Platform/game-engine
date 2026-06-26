@@ -472,7 +472,9 @@ function gridIllustration(host: ShellHost, grid: { cols: number; rows: number },
 
 // ── custom ─────────────────────────────────────────────────────────────────────
 function sectionCustom(host: ShellHost, s: Extract<GameInfoSection, { type: 'custom' }>, width: number): FlexBox {
-  const sec = section(host, s.title);
+  // Translate the heading (e.g. the host-built DISCLAIMER title) — the body stays verbatim. The
+  // socialize-exemption for the disclaimer runs in the host before render, so its identity is intact.
+  const sec = section(host, s.title != null ? host.t(s.title) : undefined);
   const inner = width - SECTION_PAD;
   if (s.node) {
     sec.add(s.node); // game-supplied Pixi content owns its own layout
