@@ -45,6 +45,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private i18n!: I18n;
   /** onKey handler of the currently open modal/overlay, if any (set in showModal, cleared in closeModal). */
   private modalOnKey: ((e: KeyboardEvent) => boolean) | undefined = undefined;
+  /** Shared sound on/off state — Settings speaker toggle and the Shift+M hotkey stay in sync. The
+   *  game listens to `settingChange({ key: 'sound' })` to (un)mute audio. */
+  soundOn = true;
+  /** Set by the open Settings modal so Shift+M live-updates its speaker icon; cleared on close. */
+  private soundRefresh: ((on: boolean) => void) | null = null;
 
   constructor(config: ShellConfig) {
     super();
@@ -100,7 +105,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
         openBuyBonus: () => shell.openBuyBonus(),
         openInfo: () => shell.openInfo(),
         openMenu: () => shell.openMenu(),
-        toggleMute: () => shell.emit('settingChange', { key: 'muted', value: 'toggle' }),
+        toggleMute: () => shell.setSound(!shell.soundOn),
         closeLayer: () => shell.closeModal(),
       };
       this.kbd = new KeyboardController(host);
@@ -350,7 +355,17 @@ export class GameShell extends EventEmitter<ShellEvents> {
   openModal(opts: ModalOptions): void { this.showModal(buildModal(opts), opts.onKey); }
   /** Programmatically dismiss whatever modal/overlay is currently shown (e.g. auto-close the
    *  reconnect overlay once the link is restored). No-op when nothing is open. */
-  closeModal(): void { this.modalOnKey = undefined; this.modalHost.innerHTML = ''; }
+  closeModal(): void { this.modalOnKey = undefined; this.soundRefresh = null; this.modalHost.innerHTML = ''; }
+
+  /** Flip the shared sound state, notify the game (`settingChange({ key: 'sound' })`), and live-update
+   *  the Settings speaker icon if that modal is open. Used by both the Settings toggle and Shift+M. */
+  setSound(on: boolean): void {
+    this.soundOn = on;
+    this.emit('settingChange', { key: 'sound', value: on });
+    this.soundRefresh?.(on);
+  }
+  /** The Settings modal registers an icon-updater while open (cleared on close). */
+  setSoundRefresh(fn: ((on: boolean) => void) | null): void { this.soundRefresh = fn; }
   /** Open the non-dismissable replay summary modal (START REPLAY → onReplay → reopen). */
   openReplay(opts: ReplayModalOptions): void {
     if (this.destroyed) return;

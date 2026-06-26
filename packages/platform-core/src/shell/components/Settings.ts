@@ -6,22 +6,21 @@ export function openSettingsModal(shell: GameShell): HTMLElement {
   const { root, body } = createOverlay({ title: shell.t('Settings'), onClose: () => root.remove() });
   root.dataset.ge = 'settings-modal';
 
-  // Sound on/off (starts on) — full-width row with a speaker icon button
+  // Sound on/off — backed by the shell's shared `soundOn` state so this toggle and the Shift+M
+  // hotkey stay in sync; `setSound` emits `settingChange({ key: 'sound' })` and refreshes the icon.
   const sound = (() => {
-    let on = true;
     const btn = document.createElement('button');
-    btn.className = 'ge-snd ge-active'; btn.dataset.ge = 'setting-sound';
+    btn.className = 'ge-snd'; btn.dataset.ge = 'setting-sound';
     btn.setAttribute('aria-label', shell.t('Sound'));
-    const paint = () => {
+    const paint = (on: boolean) => {
       btn.innerHTML = icon(on ? 'soundOn' : 'soundOff');
       btn.classList.toggle('ge-active', on);
       btn.setAttribute('aria-pressed', String(on));
     };
-    paint();
-    btn.addEventListener('click', () => {
-      on = !on; paint();
-      shell.emit('settingChange', { key: 'sound', value: on });
-    });
+    paint(shell.soundOn);
+    btn.addEventListener('click', () => shell.setSound(!shell.soundOn));
+    // Live-update the icon when sound changes from here OR via Shift+M (shell clears on close).
+    shell.setSoundRefresh(paint);
     const row = document.createElement('div'); row.className = 'ge-ov-row';
     row.innerHTML = `<span class="ge-grow">${shell.t('Sound')}</span>`; row.appendChild(btn);
     return row;

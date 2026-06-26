@@ -44,6 +44,12 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   private modalLayer = new Container();
   private bar?: BottomBar;
   private currentLayer: ShellLayer | null = null;
+  /** Shared sound on/off state — driven by both the Settings speaker toggle and the Shift+M hotkey
+   *  so they stay in sync. The game listens to `settingChange({ key: 'sound' })` to (un)mute audio. */
+  soundOn = true;
+  /** Set by the Settings overlay while open so a Shift+M toggle live-updates its speaker icon; the
+   *  shell clears it when the layer closes. */
+  private soundRefresh: ((on: boolean) => void) | null = null;
   private destroyed = false;
   private prevBalance: number;
   private prevWin: number;
@@ -106,7 +112,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
         openBuyBonus: () => shell.openBuyBonus(),
         openInfo: () => shell.openInfo(),
         openMenu: () => shell.openMenu(),
-        toggleMute: () => shell.emit('settingChange', { key: 'muted', value: 'toggle' }),
+        toggleMute: () => shell.setSound(!shell.soundOn),
         closeLayer: () => shell.closeLayer(),
       };
       this.kbd = new KeyboardController(host);
@@ -210,7 +216,21 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       this.currentLayer.destroy({ children: true });
       this.currentLayer = null;
     }
+    this.soundRefresh = null; // the open Settings overlay (if any) is gone
     this.removeBackdrop();
+  }
+
+  /** Flip the shared sound state, notify the game (`settingChange({ key: 'sound' })`), and live-update
+   *  the Settings speaker icon if that overlay is open. Used by both the Settings toggle and Shift+M. */
+  setSound(on: boolean): void {
+    this.soundOn = on;
+    this.emit('settingChange', { key: 'sound', value: on });
+    this.soundRefresh?.(on);
+  }
+
+  /** The Settings overlay registers an icon-updater while it's open (cleared on close). */
+  setSoundRefresh(fn: ((on: boolean) => void) | null): void {
+    this.soundRefresh = fn;
   }
 
   private backdrop?: { node: Container; texture: RenderTexture };

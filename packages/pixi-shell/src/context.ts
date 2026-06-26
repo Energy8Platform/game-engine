@@ -63,6 +63,14 @@ export interface ShellHost {
   /** Re-fit every open card modal (short-popout backstop). */
   fitModals(): void;
 
+  /** Shared sound on/off state (Settings speaker + Shift+M stay in sync). Optional so partial test
+   *  hosts can omit it; the live shell always provides it (defaults to on when absent). */
+  readonly soundOn?: boolean;
+  /** Flip sound state, emit `settingChange({ key: 'sound' })`, and refresh the open Settings icon. */
+  setSound?(on: boolean): void;
+  /** Settings registers an icon-updater while open so Shift+M live-updates its speaker (null clears). */
+  setSoundRefresh?(fn: ((on: boolean) => void) | null): void;
+
   openMenu(): void;
   openSettings(): void;
   openInfo(): void;

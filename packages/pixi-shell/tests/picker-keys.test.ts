@@ -18,6 +18,7 @@ import type { ShellHost, ShellLayer } from '../src/context';
 import { resolveTheme } from '../src/theme';
 import { createInitialState } from '../src/state';
 import { openBetPicker, openAutoplayPicker } from '../src/components/pickers';
+import { KeyboardController, type KeyboardHost } from '../src/keyboard';
 
 const tokens = resolveTheme({});
 const stubTicker = { add() {}, remove() {} } as unknown as Ticker;
@@ -320,5 +321,63 @@ describe('Pixi picker keyboard navigation — bet picker', () => {
     const onKey = requireOnKey(layer);
 
     expect(onKey(key('Tab'))).toBe(false);
+  });
+});
+
+// ─── controller-driven (end-to-end: document keydown → controller → routeToLayer → onKey) ──────
+// The tests above call layer.onKey() directly. These dispatch a REAL keydown through a
+// KeyboardController whose host routes to the open layer — the path the live shell uses, and the
+// coverage gap behind the "Enter does nothing" bug report.
+describe('Pixi picker — Enter routed through the KeyboardController', () => {
+  function controllerFor(layer: ShellLayer): { ctrl: KeyboardController; detach: () => void } {
+    const noop = () => {};
+    const kbHost: KeyboardHost = {
+      state: createInitialState(baseConfig()),
+      hotkeysEnabled: true,
+      spacebarEnabled: true,
+      turboLevels: 0,
+      autoplayEnabled: true,
+      buyBonusEnabled: false,
+      hasOpenLayer: () => true,
+      routeToLayer: (e) => layer.onKey?.(e) ?? false,
+      spin: noop,
+      stepBet: noop,
+      toggleAutoplay: noop,
+      cycleTurbo: noop,
+      openBuyBonus: noop,
+      openInfo: noop,
+      openMenu: noop,
+      toggleMute: noop,
+      closeLayer: noop,
+    };
+    const ctrl = new KeyboardController(kbHost, document);
+    ctrl.attach();
+    return { ctrl, detach: () => ctrl.detach() };
+  }
+
+  it('autoplay picker: ArrowRight then a real Enter keydown fires autoplayStart', () => {
+    const emitSpy = vi.fn();
+    const host = makeHost(emitSpy, vi.fn());
+    const layer = openAutoplayPicker(host);
+    const { detach } = controllerFor(layer);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' }));
+
+    expect(emitSpy).toHaveBeenCalledWith('autoplayStart', { active: true, remaining: 25 });
+    detach();
+  });
+
+  it('bet picker: a real Enter keydown applies the highlighted bet', () => {
+    const emitSpy = vi.fn();
+    const host = makeHost(emitSpy, vi.fn(), { config: baseConfig({ availableBets: [1, 2, 5], currentBet: 1 }) });
+    const layer = openBetPicker(host);
+    const { detach } = controllerFor(layer);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight' })); // 1 → 2
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' }));
+
+    expect(emitSpy).toHaveBeenCalledWith('betChange', 2);
+    detach();
   });
 });
