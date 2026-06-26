@@ -259,6 +259,8 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
   pointer-events:auto; cursor:pointer; transition:box-shadow .12s ease, background .12s ease; }
 #${SHELL_ROOT_ID} .ge-bonus-card:hover:not(.ge-bonus-off) {
   box-shadow:0 0 0 1px var(--card-acc), 0 12px 34px -12px var(--card-acc); }
+#${SHELL_ROOT_ID} .ge-bonus-card--kbd-focus:not(.ge-bonus-off) {
+  box-shadow:0 0 0 1px var(--card-acc), 0 12px 34px -12px var(--card-acc); }
 /* custom card (BonusOption.custom): keep grid sizing + accent vars, drop the default chrome so the game owns the UI */
 #${SHELL_ROOT_ID} .ge-bonus-card--custom { background:none; border:none; cursor:default; }
 #${SHELL_ROOT_ID} .ge-bonus-body { display:flex; flex-direction:column; align-items:center; flex:1; padding:1.25em 1.1em .9em; }
