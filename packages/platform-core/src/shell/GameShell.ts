@@ -251,7 +251,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.state.mode = mode;
     this.render();
   }
-  setBusy(busy: boolean): void { this.state.busy = busy; this.render(); }
+  setBusy(busy: boolean): void { this.state.busy = busy; this.render(); this.kbd?.notifyBusyChanged(busy); }
   setAutoplay(a: AutoplayOptions): void { this.state.autoplay = a; this.render(); }
   setTurbo(level: number): void { this.state.turbo = level; this.render(); }
   /** Currency-aware money formatter for WIN amounts (variable decimals: 0.0041 stays 0.0041, not

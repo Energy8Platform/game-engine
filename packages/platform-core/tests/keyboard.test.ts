@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { KeyboardController, type KeyboardHost } from '@/shell/keyboard';
 
 function mockHost(over: Partial<KeyboardHost> = {}): KeyboardHost {
@@ -40,5 +40,25 @@ describe('KeyboardController spin', () => {
     const h = mockHost(); const c = new KeyboardController(h, document); c.attach();
     input.dispatchEvent(Object.assign(key({ code: 'Space' }), {})); // target is input
     expect(h.spin).not.toHaveBeenCalled(); c.detach(); input.remove();
+  });
+});
+
+describe('KeyboardController hold-to-spin', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('held Space re-fires after spin completes, respecting the 120ms floor', () => {
+    vi.useFakeTimers();
+    const state: any = { mode: 'base', busy: false, autoplay: { active: false }, };
+    const h = mockHost({ state, spin: vi.fn(() => { state.busy = true; }) });
+    const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));   // spin #1, busy=true
+    expect(h.spin).toHaveBeenCalledTimes(1);
+    state.busy = false; c.notifyBusyChanged(false);                            // completes immediately
+    vi.advanceTimersByTime(119); expect(h.spin).toHaveBeenCalledTimes(1);       // floor not reached
+    vi.advanceTimersByTime(2);  expect(h.spin).toHaveBeenCalledTimes(2);        // spin #2 after 120ms
+    document.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' }));      // release
+    state.busy = false; c.notifyBusyChanged(false);
+    vi.advanceTimersByTime(200); expect(h.spin).toHaveBeenCalledTimes(2);       // no more after release
+    c.detach(); vi.useRealTimers();
   });
 });

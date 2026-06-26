@@ -23,10 +23,24 @@ export interface KeyboardHost {
 export class KeyboardController {
   private host: KeyboardHost;
   private doc: Document;
+  private spaceHeld = false;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(host: KeyboardHost, doc?: Document) {
     this.host = host;
     this.doc = doc ?? (typeof document !== 'undefined' ? document : (null as unknown as Document));
+  }
+
+  private isSpinAllowed(): boolean {
+    const h = this.host;
+    const s = h.state;
+    return (
+      h.spacebarEnabled &&
+      h.hotkeysEnabled &&
+      !h.hasOpenLayer() &&
+      s.mode === 'base' &&
+      !s.autoplay.active
+    );
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -45,6 +59,7 @@ export class KeyboardController {
       }
       const s = this.host.state;
       if (s.mode !== 'base' || s.busy || s.autoplay.active) return;
+      this.spaceHeld = true;
       this.host.spin();
       return;
     }
@@ -56,16 +71,43 @@ export class KeyboardController {
     }
   };
 
+  private onKeyUp = (e: KeyboardEvent): void => {
+    if (e.code === 'Space') {
+      this.spaceHeld = false;
+      this.clearHoldTimer();
+    }
+  };
+
+  private clearHoldTimer(): void {
+    if (this.holdTimer !== null) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+  }
+
   attach(): void {
     this.doc.addEventListener('keydown', this.onKeyDown);
+    this.doc.addEventListener('keyup', this.onKeyUp);
   }
 
   detach(): void {
     this.doc.removeEventListener('keydown', this.onKeyDown);
+    this.doc.removeEventListener('keyup', this.onKeyUp);
+    this.spaceHeld = false;
+    this.clearHoldTimer();
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  notifyBusyChanged(_busy: boolean): void {
-    // no-op stub — hold logic is Task 5
+  notifyBusyChanged(busy: boolean): void {
+    if (busy) return;
+    if (!this.spaceHeld) return;
+    if (!this.isSpinAllowed()) return;
+    // Schedule the next spin after the 120 ms floor (gap between completion and next spin).
+    this.clearHoldTimer();
+    this.holdTimer = setTimeout(() => {
+      this.holdTimer = null;
+      if (this.spaceHeld && this.isSpinAllowed()) {
+        this.host.spin();
+      }
+    }, 120);
   }
 }

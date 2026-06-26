@@ -335,6 +335,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   setBusy(busy: boolean): void {
     this.state.busy = busy;
     this.render();
+    this.kbd?.notifyBusyChanged(busy);
   }
   setAutoplay(a: AutoplayOptions): void {
     this.state.autoplay = a;
