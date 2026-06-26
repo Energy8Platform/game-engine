@@ -189,4 +189,34 @@ describe('BuyBonus keyboard navigation (DOM shell)', () => {
     key('Enter'); // no confirm opens (no affordable card focused)
     expect(q(mount, '[data-ge="bonus-confirm"]')).toBeFalsy();
   });
+
+  it('ArrowDown/ArrowUp work in mobile layout but not in wide layout (parity with Pixi shell)', () => {
+    const shell = createGameShell(cfg(mount));
+
+    // Wide layout (default): ArrowDown does NOT move focus
+    shell.openBuyBonus();
+    key('ArrowDown'); // should be ignored in wide layout
+    key('Enter');
+    // If ArrowDown moved focus to bonus (index 1), confirm would say "Buy Free Spins"
+    // In wide layout it stays at ante (index 0), so confirm says "Ante Bet"
+    expect(q(mount, '[data-ge="bonus-confirm"]')!.textContent).toContain('Ante Bet');
+    key('Escape'); // back to browse
+    key('Escape'); // close overlay
+
+    // Mobile layout: ArrowDown DOES move focus
+    shell.setLayout('mobile');
+    shell.openBuyBonus();
+    key('ArrowDown'); // moves focus from ante (0) to bonus (1)
+    key('Enter');     // confirm for bonus
+    expect(q(mount, '[data-ge="bonus-confirm"]')!.textContent).toContain('Buy Free Spins');
+    key('Escape'); // back to browse
+    key('Escape'); // close overlay
+
+    // Mobile layout: ArrowUp moves focus backward
+    shell.openBuyBonus();
+    key('ArrowDown'); // focus: bonus (1)
+    key('ArrowUp');   // focus: ante (0)
+    key('Enter');
+    expect(q(mount, '[data-ge="bonus-confirm"]')!.textContent).toContain('Ante Bet');
+  });
 });

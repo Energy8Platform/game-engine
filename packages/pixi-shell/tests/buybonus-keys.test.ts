@@ -271,4 +271,49 @@ describe('BuyBonusOverlay keyboard navigation (Pixi shell)', () => {
     expect(onKey(key('Enter'))).toBe(true); // no confirm opens
     expect(closeLayerSpy).not.toHaveBeenCalled();
   });
+
+  it('ArrowDown/ArrowUp work in mobile layout but not in wide layout (parity with DOM shell)', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+
+    // Wide layout (default in makeHost): ArrowDown does NOT move focus
+    const hostWide = makeHost(emitSpy, closeLayerSpy, vi.fn(), { layout: 'wide' });
+    const layerWide = openBuyBonus(hostWide)!;
+    const onKeyWide = requireOnKey(layerWide);
+
+    // focus starts at ante (0); ArrowDown ignored in wide → confirm should be for ante
+    onKeyWide(key('ArrowDown'));
+    onKeyWide(key('Enter'));
+    // In wide layout ArrowDown does nothing — confirm opened for ante (feature type)
+    // If it had moved to bonus, activateFeature would NOT have been called with ante
+    // We verify by checking emitSpy was not called with buyBonusSelect for ante
+    // (ante is feature type so Enter fires activateFeature, not buyBonusSelect)
+    onKeyWide(key('Enter')); // confirm → activate
+    expect(emitSpy).not.toHaveBeenCalledWith('buyBonusSelect', expect.anything());
+
+    // Mobile layout: ArrowDown DOES move focus
+    const emitSpy2 = vi.fn();
+    const closeLayerSpy2 = vi.fn();
+    const hostMobile = makeHost(emitSpy2, closeLayerSpy2, vi.fn(), { layout: 'mobile' });
+    const layerMobile = openBuyBonus(hostMobile)!;
+    const onKeyMobile = requireOnKey(layerMobile);
+
+    onKeyMobile(key('ArrowDown')); // focus: ante(0) → bonus(1)
+    onKeyMobile(key('Enter'));     // confirm for bonus
+    onKeyMobile(key('Enter'));     // buy
+    expect(emitSpy2).toHaveBeenCalledWith('buyBonusSelect', { id: 'bonus' });
+
+    // ArrowUp moves backward in mobile
+    const emitSpy3 = vi.fn();
+    const closeLayerSpy3 = vi.fn();
+    const hostMobile2 = makeHost(emitSpy3, closeLayerSpy3, vi.fn(), { layout: 'mobile' });
+    const layerMobile2 = openBuyBonus(hostMobile2)!;
+    const onKeyMobile2 = requireOnKey(layerMobile2);
+
+    onKeyMobile2(key('ArrowDown')); // focus: bonus (1)
+    onKeyMobile2(key('ArrowUp'));   // focus: ante (0)
+    onKeyMobile2(key('Enter'));     // confirm for ante (feature)
+    onKeyMobile2(key('Enter'));     // activate
+    expect(emitSpy3).not.toHaveBeenCalledWith('buyBonusSelect', expect.anything());
+  });
 });

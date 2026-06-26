@@ -76,24 +76,30 @@ export function openBuyBonusOverlay(shell: GameShell): { root: HTMLElement; onKe
 
     // ── Browse phase ──
     const last = affordable.length - 1;
+    const mobile = shell.layout === 'mobile';
+
+    // Determine navigation direction from key code + layout (mobile uses vertical arrows)
+    const fwdKey = e.code === 'ArrowRight' || (mobile && e.code === 'ArrowDown');
+    const bwdKey = e.code === 'ArrowLeft' || (mobile && e.code === 'ArrowUp');
+
+    if (fwdKey) {
+      if (last < 0) return true;
+      if (st.focusIndex < last) {
+        st.focusIndex++;
+        applyFocusClass(root, bonuses, affordable, st.focusIndex);
+      }
+      return true;
+    }
+    if (bwdKey) {
+      if (last < 0) return true;
+      if (st.focusIndex > 0) {
+        st.focusIndex--;
+        applyFocusClass(root, bonuses, affordable, st.focusIndex);
+      }
+      return true;
+    }
 
     switch (e.code) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        if (last < 0) return true;
-        if (st.focusIndex < last) {
-          st.focusIndex++;
-          applyFocusClass(root, bonuses, affordable, st.focusIndex);
-        }
-        return true;
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        if (last < 0) return true;
-        if (st.focusIndex > 0) {
-          st.focusIndex--;
-          applyFocusClass(root, bonuses, affordable, st.focusIndex);
-        }
-        return true;
       case 'Enter':
       case 'Space':
         if (last < 0 || st.focusIndex < 0) return true;
