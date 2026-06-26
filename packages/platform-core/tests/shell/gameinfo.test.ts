@@ -130,15 +130,18 @@ describe('GameInfo', () => {
     ]));
     shell.openInfo();
     const order = qa(mount, '[data-ge="info-modal"] .ge-gi-sec').map((s) => s.dataset.ge);
-    expect(order).toEqual(['info-custom', 'info-controls', 'info-modes']);
+    // Auto-injected hotkeys section (default order -0.5) sits between controls (-1) and modes (10).
+    expect(order).toEqual(['info-custom', 'info-controls', 'info-hotkeys', 'info-modes']);
   });
 
-  it('opens with no sections provided', () => {
+  it('opens with no sections provided — auto-injects hotkeys only', () => {
     const c = cfg(mount); c.gameInfo = {};
     const shell = createGameShell(c);
     shell.openInfo();
     expect(q(mount, '[data-ge="info-modal"]')).toBeTruthy();
-    expect(qa(mount, '[data-ge="info-modal"] .ge-gi-sec')).toHaveLength(0);
+    // The hotkeys section is always auto-injected (features.hotkeys is not false by default).
+    expect(qa(mount, '[data-ge="info-modal"] .ge-gi-sec')).toHaveLength(1);
+    expect(q(mount, '[data-ge="info-hotkeys"]')).toBeTruthy();
   });
 
   it('stamps the version footer at the very bottom: {version|1.0.0}.{engine no dots}', () => {

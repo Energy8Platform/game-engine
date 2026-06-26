@@ -127,6 +127,7 @@ export interface GameMode {
 export type GameInfoSection =
   | { type: 'modes'; title?: string; order?: number; modes: GameMode[] }
   | { type: 'controls'; title?: string; order?: number }
+  | { type: 'hotkeys'; title?: string; order?: number }
   | { type: 'paytable'; title?: string; order?: number; rows: PaytableRow[] }
   | WinSection
   | { type: 'custom'; title?: string; order?: number; node?: Container; html?: string };

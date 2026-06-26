@@ -9,6 +9,9 @@ import type {
   ShapeDef,
   WinSection,
 } from '../types';
+
+/** Default order key for the auto-injected hotkeys section: just after `controls` (-1). */
+const HOTKEYS_DEFAULT_ORDER = -0.5;
 import { Overlay } from '../primitives/overlay';
 import { makeText, textBaseline } from '../text';
 import { makeIcon } from '../pixi-icon';
@@ -33,7 +36,13 @@ export function openGameInfo(host: ShellHost): ShellLayer {
 
 function buildBody(host: ShellHost, width: number): Container {
   const col = new FlexBox({ direction: 'column', align: 'stretch', gap: 12 });
-  const sections = host.config.gameInfo.sections ?? [];
+  const rawSections = host.config.gameInfo.sections ?? [];
+  // Auto-inject a hotkeys section unless the game already provides one or features.hotkeys === false.
+  const sectionsWithHotkeys: GameInfoSection[] = [...rawSections];
+  if (host.config.features.hotkeys !== false && !rawSections.some((s) => s.type === 'hotkeys')) {
+    sectionsWithHotkeys.push({ type: 'hotkeys', order: HOTKEYS_DEFAULT_ORDER });
+  }
+  const sections = sectionsWithHotkeys;
   const base = (s: GameInfoSection, i: number): number =>
     s.order ?? (s.type === 'modes' ? -2 : s.type === 'controls' ? -1 : i);
   sections
@@ -63,6 +72,8 @@ function renderSection(host: ShellHost, s: GameInfoSection, width: number): Flex
       return sectionModes(host, s.modes, s.title ?? host.t('Modes'), width);
     case 'controls':
       return sectionControls(host, s.title ?? host.t('Controls'), width);
+    case 'hotkeys':
+      return sectionHotkeys(host, s.title ?? host.t('Hotkeys'), width);
     case 'paytable':
       return sectionPaytable(host, s.rows, s.title ?? host.t('Paytable'), width);
     case 'wins':
@@ -234,6 +245,86 @@ function ctlBlock(host: ShellHost, label: string, rows: CtlRow[], inner: number,
     block.add(row);
   });
   return block;
+}
+
+// ── hotkeys (keycap chips → localized action name) ────────────────────────────
+interface HkRow {
+  chips: string[];
+  name: string;
+  on: boolean;
+}
+
+function sectionHotkeys(host: ShellHost, title: string, width: number): FlexBox {
+  const sec = section(host, title);
+  const inner = width - SECTION_PAD;
+  const { features } = host.config;
+
+  const rows: HkRow[] = [
+    { chips: ['Space'],               name: 'Spin',      on: true },
+    { chips: ['Shift', '↑', 'Shift', '='], name: 'Raise bet', on: true },
+    { chips: ['Shift', '↓', 'Shift', '-'], name: 'Lower bet', on: true },
+    { chips: ['Shift', 'A'],          name: 'Autoplay',  on: features.autoplay != null },
+    { chips: ['Shift', 'T'],          name: 'Turbo',     on: features.turbo > 0 },
+    { chips: ['Shift', 'B'],          name: 'Buy bonus', on: features.buyBonus !== false },
+    { chips: ['Shift', 'I'],          name: 'Game info', on: true },
+    { chips: ['Shift', 'S'],          name: 'Menu',      on: true },
+    { chips: ['Shift', 'M'],          name: 'Mute',      on: true },
+    { chips: ['←', '→'],             name: 'Navigate',  on: true },
+    { chips: ['Enter'],               name: 'Confirm',   on: true },
+    { chips: ['Esc'],                 name: 'Close',     on: true },
+  ];
+
+  const visible = rows.filter((r) => r.on);
+  visible.forEach((r, i) => {
+    if (i > 0) sec.add(hairline(host, inner));
+    sec.add(hkRow(host, r, inner));
+  });
+  return sec;
+}
+
+/** Render a single hotkey row: keycap chip(s) on the left, action name on the right. */
+function hkRow(host: ShellHost, r: HkRow, inner: number): FlexBox {
+  const row = new FlexBox({ direction: 'row', align: 'center', gap: 14, padding: { top: 8, bottom: 8 } });
+
+  // Build chips container
+  const chipsCol = new FlexBox({ direction: 'row', align: 'center', gap: 4 });
+  const chipKeys = buildChipKeys(r);
+  for (const key of chipKeys) {
+    if (key === '/') {
+      chipsCol.add(makeText('/', { size: 12, weight: '500', color: host.tokens.plaqueLabel }));
+    } else {
+      chipsCol.add(keycap(host, key));
+    }
+  }
+
+  const nameText = makeText(host.t(r.name), { size: 15, weight: '700', color: '#ffffff' });
+  row.add(chipsCol);
+  row.add(nameText);
+  return row;
+}
+
+/** Flatten a row's chip list into display tokens — for bet rows, produce: Shift ↑ / Shift = style. */
+function buildChipKeys(r: HkRow): string[] {
+  if ((r.name === 'Raise bet' || r.name === 'Lower bet') && r.chips.length === 4) {
+    const [k1, k2, k3, k4] = r.chips;
+    return [k1, k2, '/', k3, k4];
+  }
+  return r.chips;
+}
+
+/** A small rounded rectangle with the key label — the "keycap chip" appearance. */
+function keycap(host: ShellHost, label: string): Container {
+  const c = new Container();
+  const txt = makeText(label, { size: 11, weight: '700', color: '#ffffff', letterSpacing: 0.2 });
+  const padH = 8, padV = 3;
+  const w = txt.width + padH * 2;
+  const h = txt.height + padV * 2;
+  const bg = new Graphics();
+  bg.roundRect(0, 0, w, h, 4).fill(host.tokens.plaqueGlass ?? host.tokens.plaqueDark);
+  bg.roundRect(0, 0, w, h, 4).stroke({ color: host.tokens.plaqueLine, width: 1 });
+  txt.position.set(padH, padV);
+  c.addChild(bg, txt);
+  return c;
 }
 
 // ── paytable ───────────────────────────────────────────────────────────────────

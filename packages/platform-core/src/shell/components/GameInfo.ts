@@ -4,6 +4,9 @@ import { createOverlay, twoLine } from './primitives';
 import { icon } from './icons';
 import { PACKAGE_VERSION } from '../version';
 
+/** Default order key for the auto-injected hotkeys section: just after `controls` (-1). */
+const HOTKEYS_DEFAULT_ORDER = -0.5;
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Result of openGameInfoModal — the overlay root element plus a keyboard handler. */
@@ -20,7 +23,13 @@ export function openGameInfoModal(shell: GameShell): GameInfoModal {
   });
   root.dataset.ge = 'info-modal';
 
-  const sections = shell.config.gameInfo.sections ?? [];
+  const rawSections = shell.config.gameInfo.sections ?? [];
+  // Auto-inject a hotkeys section unless the game already provides one or features.hotkeys === false.
+  const sectionsWithHotkeys: GameInfoSection[] = [...rawSections];
+  if (shell.config.features.hotkeys !== false && !rawSections.some((s) => s.type === 'hotkeys')) {
+    sectionsWithHotkeys.push({ type: 'hotkeys', order: HOTKEYS_DEFAULT_ORDER });
+  }
+  const sections = sectionsWithHotkeys;
   // Default placement: modes first, controls second, the rest in declaration order.
   // An explicit `order` overrides; ties keep declaration order (stable).
   const base = (s: GameInfoSection, i: number): number =>
@@ -68,6 +77,7 @@ function renderSection(shell: GameShell, s: GameInfoSection): HTMLElement {
   switch (s.type) {
     case 'modes': return sectionModes(shell, s.modes, sec('info-modes', s.title, shell.t('Modes')));
     case 'controls': return sectionControls(shell, sec('info-controls', s.title, shell.t('Controls')));
+    case 'hotkeys': return sectionHotkeys(shell, sec('info-hotkeys', s.title, shell.t('Hotkeys')));
     case 'paytable': return sectionPaytable(s.rows, sec('info-paytable', s.title, shell.t('Paytable')));
     case 'wins': return sectionWins(s, sec('info-wins', s.title, shell.t(winFallbackTitle(s.kind))));
     case 'custom': return sectionCustom(s, sec('info-custom', s.title, ''));
@@ -146,6 +156,69 @@ function ctlBlock(shell: GameShell, label: string, rows: CtlRow[]): HTMLElement 
     block.appendChild(row);
   }
   return block;
+}
+
+// ── hotkeys (keycap chips → localized action name) ────────────────────────────
+type HkRow = { chips: string[]; name: string; on: boolean };
+
+function sectionHotkeys(shell: GameShell, el: HTMLElement): HTMLElement {
+  const { features } = shell.config;
+
+  /** Render one or more key names as keycap chips joined by " / ". */
+  const chips = (...keys: string[]): string =>
+    keys.map((k) => `<span class="ge-gi-hk-chip">${k}</span>`).join('<span class="ge-gi-hk-sep"> / </span>');
+
+  const rows: HkRow[] = [
+    { chips: ['Space'],                        name: 'Spin',      on: true },
+    { chips: ['Shift', '↑', 'Shift', '='],     name: 'Raise bet', on: true },
+    { chips: ['Shift', '↓', 'Shift', '-'],     name: 'Lower bet', on: true },
+    { chips: ['Shift', 'A'],                   name: 'Autoplay',  on: features.autoplay != null },
+    { chips: ['Shift', 'T'],                   name: 'Turbo',     on: features.turbo > 0 },
+    { chips: ['Shift', 'B'],                   name: 'Buy bonus', on: features.buyBonus !== false },
+    { chips: ['Shift', 'I'],                   name: 'Game info', on: true },
+    { chips: ['Shift', 'S'],                   name: 'Menu',      on: true },
+    { chips: ['Shift', 'M'],                   name: 'Mute',      on: true },
+    { chips: ['←', '→'],                       name: 'Navigate',  on: true },
+    { chips: ['Enter'],                        name: 'Confirm',   on: true },
+    { chips: ['Esc'],                          name: 'Close',     on: true },
+  ];
+
+  const block = document.createElement('div');
+  block.className = 'ge-gi-hk-block';
+
+  for (const r of rows.filter((x) => x.on)) {
+    const row = document.createElement('div');
+    row.className = 'ge-gi-hk';
+
+    // Build the chips column
+    const chipsEl = document.createElement('div');
+    chipsEl.className = 'ge-gi-hk-chips';
+
+    if (r.name === 'Raise bet' || r.name === 'Lower bet') {
+      // Two combos separated by " / ": Shift+↑ / Shift+=  and  Shift+↓ / Shift+-
+      const [k1, k2, k3, k4] = r.chips;
+      chipsEl.innerHTML =
+        `<span class="ge-gi-hk-combo">${chips(k1, k2)}</span>` +
+        `<span class="ge-gi-hk-sep2"> / </span>` +
+        `<span class="ge-gi-hk-combo">${chips(k3, k4)}</span>`;
+    } else if (r.chips.length > 1) {
+      // Chord: Shift + X
+      chipsEl.innerHTML = `<span class="ge-gi-hk-combo">${chips(...r.chips)}</span>`;
+    } else {
+      chipsEl.innerHTML = chips(...r.chips);
+    }
+
+    const tx = document.createElement('div');
+    tx.className = 'ge-gi-hk-tx';
+    tx.textContent = shell.t(r.name);
+
+    row.appendChild(chipsEl);
+    row.appendChild(tx);
+    block.appendChild(row);
+  }
+
+  el.appendChild(block);
+  return el;
 }
 
 // ── paytable (cards — image on top, name, then win tiers "<count> x<mult>") ────
