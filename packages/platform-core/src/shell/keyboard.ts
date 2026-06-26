@@ -129,10 +129,34 @@ export class KeyboardController {
       }
     }
 
-    // Non-Space keys: route to open layer first, then bar shortcuts (Tasks 6-7)
+    // Non-Space keys: route to open layer first, then bar shortcuts
     if (this.host.hasOpenLayer()) {
       const consumed = this.host.routeToLayer(e);
       if (!consumed && e.code === 'Escape') this.host.closeLayer();
+      return;
+    }
+
+    // Shift+letter bar hotkeys — only when no layer is open and hotkeys are enabled
+    if (!e.repeat && e.shiftKey && this.host.hotkeysEnabled) {
+      const h = this.host;
+      const s = h.state;
+      switch (e.code) {
+        case 'KeyA':
+          if (h.autoplayEnabled && !s.replay) { h.toggleAutoplay(); return; }
+          break;
+        case 'KeyT':
+          if (h.turboLevels > 0 && !s.replay) { h.cycleTurbo(); return; }
+          break;
+        case 'KeyB':
+          if (h.buyBonusEnabled && s.mode === 'base' && !s.replay) { h.openBuyBonus(); return; }
+          break;
+        case 'KeyI':
+          h.openInfo(); return;
+        case 'KeyS':
+          h.openMenu(); return;
+        case 'KeyM':
+          h.toggleMute(); return;
+      }
     }
   };
 
@@ -149,9 +173,11 @@ export class KeyboardController {
   };
 
   private onBlur = (): void => {
-    // Window blur — stop bet repeat (same as keyup)
+    // Window blur — stop bet repeat AND hold-to-spin (same as releasing both keys)
     this.betHeldCode = null;
     this.clearBetTimer();
+    this.spaceHeld = false;
+    this.clearHoldTimer();
   };
 
   private clearHoldTimer(): void {
