@@ -18,6 +18,7 @@
  */
 
 import { SCREEN_PRESETS } from './bar';
+import { LANGS } from './langs';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -97,6 +98,12 @@ export function renderWrapperHtml(cfg: WrapperConfig): string {
     )
     .join('');
 
+  const DEFAULT_LANG = 'en';
+  const langOptions = LANGS.map(
+    (l) =>
+      `<option value="${esc(l.code)}"${l.code === DEFAULT_LANG ? ' selected' : ''}>${esc(l.label)}</option>`,
+  ).join('');
+
   const modeOptions = cfg.modes
     .map((m, i) => `<option value="${esc(m.name)}"${i === 0 ? ' selected' : ''}>${esc(m.name)}</option>`)
     .join('');
@@ -153,6 +160,7 @@ function buildLaunchUrl(opts) {
 const iframe = byId('game');
 const balanceSel = byId('balance');
 const currencySel = byId('currency');
+const langSel = byId('lang');
 const socialChk = byId('social');
 const modeSel = byId('mode');
 const roundInput = byId('round');
@@ -249,6 +257,7 @@ if (balanceSel) {
   });
 }
 socialChk.addEventListener('change', launchNormal);
+if (langSel) langSel.addEventListener('change', launchNormal);
 
 // ── Replay ──────────────────────────────────────────────────────────────────
 function updateRange() {
@@ -270,6 +279,7 @@ function launchNormal() {
     rgsUrl: CFG.rgsUrl,
     currency: currencySel.value,
     social: socialChk.checked,
+    lang: langSel ? langSel.value : 'en',
   });
 }
 
@@ -279,6 +289,7 @@ function launchReplay() {
     rgsUrl: CFG.rgsUrl,
     currency: currencySel.value,
     social: socialChk.checked,
+    lang: langSel ? langSel.value : 'en',
     replay: {
       game: CFG.gameId,
       version: CFG.version,
@@ -479,6 +490,7 @@ if (defScreen) defScreen.classList.add('active');
       <span class="cap">Social Mode</span>
       <label class="switch"><input type="checkbox" id="social" /><span class="slider"></span></label>
     </div>
+    <div class="row"><span class="cap">Language</span><select id="lang">${langOptions}</select></div>
   </div>
 
   <div class="popover" id="pop-screen" hidden>
