@@ -342,8 +342,8 @@ export class GameShell extends EventEmitter<ShellEvents> {
   openInfo(): void { this.emit('infoOpen'); this.showModal(openGameInfoModal(this)); }
   openBuyBonus(): void {
     if (this.config.onBonusBuy) { this.config.onBonusBuy(); return; } // game handles it (own UI)
-    const overlay = openBuyBonusOverlay(this);
-    if (overlay) this.showModal(overlay);
+    const result = openBuyBonusOverlay(this);
+    if (result) this.showModal(result.root, result.onKey);
   }
   /** Open a generic, externally-driven modal (title + body + optional action buttons).
    *  Each action runs its `on` then closes; the ✕ shows when `availableClose` is true. */

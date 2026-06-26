@@ -1,0 +1,274 @@
+import './setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
+// @vitest-environment jsdom
+/**
+ * Task 10: Two-phase keyboard navigation for the Buy Bonus overlay (Pixi shell).
+ *
+ * Tests that BuyBonusOverlay.onKey correctly handles both browse and confirm phases:
+ * 1. ArrowRight moves focus to the next affordable card.
+ * 2. Enter in browse phase opens confirm for the focused card.
+ * 3. Enter in confirm phase fires buyBonusSelect with the FOCUSED card id.
+ * 4. Escape from confirm returns to browse.
+ * 5. Escape from browse calls host.closeLayer().
+ * 6. Feature type: Enter in confirm calls activateFeature.
+ * 7. Equal/Minus step the bet footer.
+ * 8. Unknown keys return false.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { Ticker } from 'pixi.js';
+import type { ShellHost, ShellLayer } from '../src/context';
+import { resolveTheme } from '../src/theme';
+import { createInitialState } from '../src/state';
+import type { BonusOption } from '../src/types';
+import { openBuyBonus } from '../src/components/BuyBonus';
+
+const tokens = resolveTheme({});
+const stubTicker = { add() {}, remove() {} } as unknown as Ticker;
+
+const BONUSES: BonusOption[] = [
+  { id: 'ante', type: 'feature', title: 'Ante Bet', description: 'Boosts trigger', priceMultiplier: 10, volatility: 2 },
+  { id: 'bonus', type: 'bonus', title: 'Buy Free Spins', description: '10 spins', priceMultiplier: 50, volatility: 4 },
+];
+
+function baseConfig(over: Record<string, unknown> = {}): any {
+  return {
+    app: {} as never,
+    theme: {},
+    language: 'en',
+    currency: { symbol: '€', position: 'left' },
+    availableBets: [1, 2, 5],
+    defaultBet: 2,
+    currentBet: null,
+    balance: 1000,
+    win: 0,
+    mode: 'base',
+    gameInfo: {},
+    features: { turbo: 0, autoplay: {}, buyBonus: BONUSES },
+    ...over,
+  };
+}
+
+function makeHost(
+  emitSpy: ReturnType<typeof vi.fn>,
+  closeLayerSpy: ReturnType<typeof vi.fn>,
+  activateFeatureSpy: ReturnType<typeof vi.fn> = vi.fn(),
+  over: Partial<ShellHost> & { config?: any } = {},
+): ShellHost {
+  const config = over.config ?? baseConfig();
+  const state = createInitialState(config);
+  const noop = () => {};
+  const host: ShellHost = {
+    tokens,
+    ticker: stubTicker,
+    canvas: undefined,
+    config,
+    state,
+    layout: 'wide',
+    screenW: 1200,
+    screenH: 675,
+    t: (s) => s,
+    fmt: (n) => `€${n.toFixed(2)}`,
+    fmtWin: (n) => `€${n.toFixed(2)}`,
+    emit: emitSpy as never,
+    render: noop,
+    pushLayer: (node) => ({ root: node, close: noop }),
+    closeLayer: closeLayerSpy,
+    fitModals: noop,
+    openMenu: noop,
+    openSettings: noop,
+    openInfo: noop,
+    openBuyBonus: noop,
+    openBetPicker: noop,
+    openAutoplayPicker: noop,
+    openReplay: noop,
+    openModal: noop,
+    activateFeature: activateFeatureSpy,
+    deactivateFeature: noop,
+    ...over,
+  };
+  return host;
+}
+
+const key = (code: string): KeyboardEvent =>
+  new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true });
+
+function requireOnKey(layer: ShellLayer): (e: KeyboardEvent) => boolean {
+  if (typeof layer.onKey !== 'function') throw new Error('Layer has no onKey method');
+  return layer.onKey.bind(layer);
+}
+
+describe('BuyBonusOverlay keyboard navigation (Pixi shell)', () => {
+  it('ArrowRight moves focus; Enter opens confirm for the focused card', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    // Both bonuses affordable (ante: 10×2=20, bonus: 50×2=100, balance=1000)
+    // Default focus: index 0 (ante). ArrowRight → index 1 (bonus)
+    expect(onKey(key('ArrowRight'))).toBe(true);
+
+    // Enter: open confirm for bonus
+    expect(onKey(key('Enter'))).toBe(true);
+
+    // Confirm should now be showing (this.confirm set)
+    // buyBonusSelect not yet fired
+    expect(emitSpy).not.toHaveBeenCalledWith('buyBonusSelect', expect.anything());
+  });
+
+  it('Enter in confirm phase emits buyBonusSelect with the FOCUSED card id', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    // Focus on bonus (index 1)
+    onKey(key('ArrowRight'));
+    onKey(key('Enter')); // open confirm for bonus
+
+    // Enter again: Buy
+    onKey(key('Enter'));
+
+    expect(emitSpy).toHaveBeenCalledWith('buyBonusSelect', { id: 'bonus' });
+    expect(closeLayerSpy).toHaveBeenCalledOnce();
+  });
+
+  it('Escape from confirm returns to browse (no closeLayer called)', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    // Open confirm for first card
+    onKey(key('Enter'));
+
+    // Escape: back to browse
+    expect(onKey(key('Escape'))).toBe(true);
+
+    // closeLayer not called yet
+    expect(closeLayerSpy).not.toHaveBeenCalled();
+
+    // Now in browse phase: another Escape closes
+    expect(onKey(key('Escape'))).toBe(true);
+    expect(closeLayerSpy).toHaveBeenCalledOnce();
+  });
+
+  it('Escape from browse calls closeLayer', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    expect(onKey(key('Escape'))).toBe(true);
+    expect(closeLayerSpy).toHaveBeenCalledOnce();
+  });
+
+  it('feature: Enter in confirm calls activateFeature (not buyBonusSelect)', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const activateSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy, activateSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    // Focus on ante (index 0, feature type). Enter opens confirm.
+    onKey(key('Enter'));
+
+    // Enter again: Activate
+    onKey(key('Enter'));
+
+    expect(activateSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).not.toHaveBeenCalledWith('buyBonusSelect', expect.anything());
+    expect(closeLayerSpy).toHaveBeenCalledOnce();
+  });
+
+  it('Equal steps bet up; Minus steps bet down', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    // bet=2, availableBets=[1,2,5]
+    expect(onKey(key('Equal'))).toBe(true); // 2 → 5
+    expect(host.state.bet).toBe(5);
+
+    expect(onKey(key('Minus'))).toBe(true); // 5 → 2
+    expect(host.state.bet).toBe(2);
+  });
+
+  it('NumpadAdd and NumpadSubtract also step the bet', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    expect(onKey(key('NumpadAdd'))).toBe(true); // 2 → 5
+    expect(host.state.bet).toBe(5);
+
+    expect(onKey(key('NumpadSubtract'))).toBe(true); // 5 → 2
+    expect(host.state.bet).toBe(2);
+  });
+
+  it('ArrowLeft moves focus backward', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    onKey(key('ArrowRight')); // index 0 → 1 (bonus)
+    onKey(key('ArrowLeft'));  // index 1 → 0 (ante)
+    onKey(key('Enter'));       // open confirm for ante
+
+    // Now confirm is open; Enter fires activateFeature (ante is feature type)
+    onKey(key('Enter'));
+    expect(emitSpy).not.toHaveBeenCalledWith('buyBonusSelect', expect.anything());
+    // activateFeature called via host
+  });
+
+  it('unknown key returns false', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    expect(onKey(key('KeyX'))).toBe(false);
+    expect(emitSpy).not.toHaveBeenCalled();
+    expect(closeLayerSpy).not.toHaveBeenCalled();
+  });
+
+  it('Space also opens confirm in browse and fires buyBonusSelect in confirm', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    const host = makeHost(emitSpy, closeLayerSpy);
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    onKey(key('ArrowRight')); // focus: bonus
+    expect(onKey(key('Space'))).toBe(true); // open confirm for bonus
+
+    expect(onKey(key('Space'))).toBe(true); // Buy
+    expect(emitSpy).toHaveBeenCalledWith('buyBonusSelect', { id: 'bonus' });
+  });
+
+  it('no affordable cards: arrows swallowed, Enter does not open confirm', () => {
+    const emitSpy = vi.fn();
+    const closeLayerSpy = vi.fn();
+    // balance=10, ante=10×2=20, bonus=50×2=100 — both unaffordable
+    const config = baseConfig({ balance: 10 });
+    const host = makeHost(emitSpy, closeLayerSpy, vi.fn(), { config });
+    host.state.balance = 10;
+    const layer = openBuyBonus(host)!;
+    const onKey = requireOnKey(layer);
+
+    expect(onKey(key('ArrowRight'))).toBe(true); // swallowed, no crash
+    expect(onKey(key('Enter'))).toBe(true); // no confirm opens
+    expect(closeLayerSpy).not.toHaveBeenCalled();
+  });
+});

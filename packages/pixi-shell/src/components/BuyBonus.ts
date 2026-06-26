@@ -18,6 +18,13 @@ export function openBuyBonus(host: ShellHost): ShellLayer | null {
   return new BuyBonusOverlay(host, bonuses);
 }
 
+/** Pairing of a rendered CardView with its bonus data (affordability included). */
+interface CardEntry {
+  view: CardView;
+  bonus: BonusOption;
+  affordable: boolean;
+}
+
 class BuyBonusOverlay extends Container implements ShellLayer {
   readonly tag = 'buybonus';
   private host: ShellHost;
@@ -28,11 +35,17 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private stripMask = new Graphics();
   private footer = new Container();
   private confirm?: Container;
+  /** The bonus shown in the current confirm dialog (set by openConfirm, cleared by removeConfirm). */
+  private confirmBonus?: BonusOption;
   private w = 0;
   private h = 0;
   private headerH = 44;
   private footerH = 44;
   private chromeScale = 1; // header + bet footer shrink with the frame on short popouts (see resize)
+  /** All card entries (view + bonus + affordable flag), rebuilt by buildCards(). */
+  private cardEntries: CardEntry[] = [];
+  /** Keyboard focus index into the affordable subset of cardEntries. -1 = none. */
+  private focusIndex = -1;
   // Drag-scroll state. The drag is handled on the (unmasked) overlay, not the masked strip — a mask
   // prunes pointer events outside its band, stalling globalpointermove mid-drag so later cards never
   // scroll into reach. The overlay sees the whole screen, so the scroll runs the full range.
@@ -155,6 +168,22 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const cards = this.bonuses.map((b) => this.buildCard(b, cardW, em, mobile, areaH));
     const cardH = Math.max(...cards.map((c) => c.height));
     for (const c of cards) c.setHeight(cardH);
+
+    // Rebuild card entries for keyboard navigation
+    this.cardEntries = this.bonuses.map((b, i) => ({
+      view: cards[i],
+      bonus: b,
+      affordable: this.isAffordable(b),
+    }));
+    // Restore or init keyboard focus on the first affordable card
+    const affordable = this.cardEntries.filter((e) => e.affordable);
+    if (affordable.length > 0) {
+      if (this.focusIndex < 0) this.focusIndex = 0;
+      else this.focusIndex = Math.min(this.focusIndex, affordable.length - 1);
+      this.applyFocusRing();
+    } else {
+      this.focusIndex = -1;
+    }
 
     this.stripMask.clear();
     if (mobile) {
@@ -295,6 +324,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   // ── confirm modal (stacked on top of the overlay) ─────────────────────────────
   private openConfirm(bonus: BonusOption, accent: string, ink: string): void {
     this.removeConfirm();
+    this.confirmBonus = bonus;
     const layer = new Container();
     const veil = new Graphics();
     veil.rect(0, 0, this.w, this.h).fill(this.host.tokens.backdrop);
@@ -368,6 +398,108 @@ class BuyBonusOverlay extends Container implements ShellLayer {
       this.removeChild(this.confirm);
       this.confirm.destroy({ children: true });
       this.confirm = undefined;
+      this.confirmBonus = undefined;
+    }
+  }
+
+  // ── keyboard navigation ────────────────────────────────────────────────────
+
+  /** Apply or clear the focus ring on affordable cards. */
+  private applyFocusRing(): void {
+    const affordable = this.cardEntries.filter((ce) => ce.affordable);
+    for (let i = 0; i < affordable.length; i++) {
+      const view = affordable[i].view;
+      if (view instanceof BonusCard) {
+        view.setFocused(i === this.focusIndex);
+      }
+    }
+  }
+
+  /** Two-phase keyboard handler.
+   *  Browse phase: arrows move focus; +/- step bet; Enter/Space opens confirm; Escape closes.
+   *  Confirm phase: Enter/Space buys/activates; Escape returns to browse. */
+  onKey(e: KeyboardEvent): boolean {
+    const mobile = this.host.layout === 'mobile';
+
+    if (this.confirm && this.confirmBonus) {
+      // ── Confirm phase ──
+      switch (e.code) {
+        case 'Enter':
+        case 'Space': {
+          const bonus = this.confirmBonus;
+          if (!this.isAffordable(bonus)) return true;
+          if (bonus.type === 'feature') this.host.activateFeature(bonus);
+          else this.host.emit('buyBonusSelect', { id: bonus.id });
+          this.host.closeLayer();
+          return true;
+        }
+        case 'Escape':
+          this.removeConfirm();
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    // ── Browse phase ──
+    const affordable = this.cardEntries.filter((ce) => ce.affordable);
+    const last = affordable.length - 1;
+
+    // Determine navigation direction from key code + layout
+    const fwdKey = e.code === 'ArrowRight' || (mobile && e.code === 'ArrowDown');
+    const bwdKey = e.code === 'ArrowLeft' || (mobile && e.code === 'ArrowUp');
+
+    if (fwdKey) {
+      if (last < 0) return true;
+      if (this.focusIndex < last) { this.focusIndex++; this.applyFocusRing(); }
+      return true;
+    }
+    if (bwdKey) {
+      if (last < 0) return true;
+      if (this.focusIndex > 0) { this.focusIndex--; this.applyFocusRing(); }
+      return true;
+    }
+
+    switch (e.code) {
+      case 'Enter':
+      case 'Space':
+        if (last < 0 || this.focusIndex < 0) return true;
+        {
+          const entry = affordable[this.focusIndex];
+          const accent = effectiveAccent(entry.bonus);
+          const ink = contrastText(accent);
+          this.openConfirm(entry.bonus, accent, ink);
+        }
+        return true;
+      case 'Equal':
+      case 'NumpadAdd': {
+        const next = stepBet(this.host.state, 1);
+        if (next !== this.host.state.bet) {
+          this.host.state.bet = next;
+          this.host.emit('betChange', next);
+          this.host.render();
+          this.buildCards();
+          this.buildFooter();
+        }
+        return true;
+      }
+      case 'Minus':
+      case 'NumpadSubtract': {
+        const next = stepBet(this.host.state, -1);
+        if (next !== this.host.state.bet) {
+          this.host.state.bet = next;
+          this.host.emit('betChange', next);
+          this.host.render();
+          this.buildCards();
+          this.buildFooter();
+        }
+        return true;
+      }
+      case 'Escape':
+        this.host.closeLayer();
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -489,16 +621,25 @@ class BonusCard implements CardView {
   private topH = 0;
 
   private hovered = false;
+  private focused = false;
 
-  /** Card background + border; the border turns accent on hover (DOM box-shadow 0 0 0 1px acc). */
+  /** Set keyboard focus ring on this card (reuses the hover/accent outline visual). */
+  setFocused(focused: boolean): void {
+    this.focused = focused;
+    this.drawBg();
+  }
+
+  /** Card background + border; the border turns accent on hover or keyboard focus
+   *  (DOM box-shadow 0 0 0 1px card-acc). */
   private drawBg(): void {
     const { cardW, em, host, accent, enabled } = this.opts;
-    const w = this.hovered ? 2 : 1;
+    const active = this.hovered || this.focused;
+    const w = active ? 2 : 1;
     this.bg.clear();
     this.bg
       .roundRect(w / 2, w / 2, cardW - w, this.height - w, 1.4 * em)
       .fill(host.tokens.plaqueGlass)
-      .stroke({ color: this.hovered && enabled ? accent : host.tokens.plaqueLine, width: w });
+      .stroke({ color: active && enabled ? accent : host.tokens.plaqueLine, width: w });
   }
 
   setHeight(total: number): void {
