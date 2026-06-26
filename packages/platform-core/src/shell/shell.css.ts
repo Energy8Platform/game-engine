@@ -64,11 +64,11 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 
 /* host = bottom-anchored flex column: [win pill (on overflow)] above [the bar] */
 #${SHELL_ROOT_ID} .ge-shell-barhost { position:absolute; left:0; right:0; bottom:0; pointer-events:none;
-  display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:8px;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px;
   transform-origin:bottom center; }
 /* bottom bar: transparent, two zones (wide default) */
 #${SHELL_ROOT_ID} .ge-shell-bottom { width:100%; box-sizing:border-box; pointer-events:none;
-  display:flex; align-items:center; justify-content:space-between; padding:0 18px 14px; gap:14px; }
+  display:flex; align-items:center; justify-content:space-between; padding:0 18px 6px; gap:14px; }
 #${SHELL_ROOT_ID} .ge-zone { display:flex; align-items:center; gap:14px; pointer-events:none; }
 #${SHELL_ROOT_ID} .ge-zone > * { pointer-events:auto; }
 #${SHELL_ROOT_ID} .ge-betstep { display:flex; flex-direction:column; gap:2px; }
@@ -337,7 +337,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-pl .ge-iconbtn { color:#fff; }
 /* LEFT: [menu] ⊐ coin ⊏ [balance] — coin overlaps both; balance fixed-wide so it doesn't jiggle */
 #${SHELL_ROOT_ID} .ge-pl-menu { border-radius:16px 0 0 16px; padding-right:20px; }
-#${SHELL_ROOT_ID} .ge-pl-bal { border-radius:0 16px 16px 0; padding-left:24px; min-width:240px; }
+#${SHELL_ROOT_ID} .ge-pl-bal { border-radius:0 16px 16px 0; padding-left:24px; min-width:200px; }
 #${SHELL_ROOT_ID} .ge-zone-plaques .ge-shell-buybonus { margin:0 -16px; position:relative; z-index:3; }
 /* RIGHT: [bet] · |divider| · [auto · SPIN · turbo] */
 #${SHELL_ROOT_ID} .ge-pl-bet { border-radius:16px 0 0 16px; justify-content:space-between;

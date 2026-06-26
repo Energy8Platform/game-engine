@@ -113,10 +113,11 @@ export class GameShell extends EventEmitter<ShellEvents> {
     host.classList.remove('ge-fit');
     host.style.transform = '';
     host.style.transformOrigin = '';
-    // clear any per-zone height-scale from a prior pass
+    // clear any per-zone scale/zoom from a prior pass
     for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
       (el as HTMLElement).style.transform = '';
       (el as HTMLElement).style.transformOrigin = '';
+      (el as HTMLElement).style.removeProperty('zoom');
     }
     if (this.layout === 'mobile') {
       // Shrink the whole stack to fit narrow phones (mobile-s, or big balance/win/total-win
@@ -133,40 +134,31 @@ export class GameShell extends EventEmitter<ShellEvents> {
       }
       return;
     }
-    // Lift the WIN pill onto its own line above the bar if it would otherwise widen the control row
-    // past the frame (a wide WIN amount would push the right zone off-screen). The bar row is then
-    // just [left]…[right].
+    // ONE fit-scale, from the SCREEN SIZE, applied identically in EVERY mode — switching base⇄replay
+    // must not resize the bar. The factor is the frame WIDTH vs the bar's design width, never the
+    // current mode's content width.
+    //
+    // It's applied with `zoom` (not `transform`): zoom shrinks the LAYOUT, so the zones genuinely
+    // take less room and still sit edge-to-edge (menu hard-left, controls hard-right) even when base's
+    // wide row would overflow a merely-visually-scaled bar — so there is no per-mode centred cluster
+    // and no width/mode branching. A wide WIN pill is still lifted above the row first so it can't
+    // shove the controls off-screen. (Mobile, above, keeps its own stacked fit.)
     if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
-    // If the control row STILL overflows the frame width, the content genuinely doesn't fit — a
-    // visual (transform) scale wouldn't help (the layout still overflows, shoving the right zone off
-    // screen). Shrink-to-CONTENT (`.ge-fit` → width:max-content) and scale the whole stack, centred.
-    // Base's wide row (menu+buy+balance + bet+spin+turbo) hits this; its content fills the width so
-    // it still reads as a full bar. Narrow rows (replay / free-spins) fit and fall through to the
-    // per-zone screen-scale below.
-    if (bar.scrollWidth > bar.clientWidth + 1) {
-      host.classList.add('ge-fit');
-      const cw = host.offsetWidth;
-      const sb = cw > 0 ? Math.min(1, (this.root.clientWidth - 12) / cw) : 1;
-      if (sb < 0.999) host.style.transform = `translateX(-50%) scale(${sb.toFixed(4)})`;
-      else host.classList.remove('ge-fit');
-      return;
-    }
-    // Scale the bar by the SCREEN SIZE — the SAME factor in every mode (base / replay / free-spins).
-    // The factor is the frame WIDTH vs the bar's design width, NOT the current mode's content width,
-    // so replay's narrow row shrinks by the same amount as base's wide row instead of staying
-    // full-size on a popout. Applied per-zone (each toward its outer-bottom corner) so the bar keeps
-    // its full-width space-between layout — menu hard-left, controls hard-right — never a centred
-    // cluster. (Mobile, above, keeps its own stacked fit.)
-    const s = Math.max(GameShell.BAR_MIN_SCALE, Math.min(1, this.root.clientWidth / GameShell.BAR_REF_WIDTH));
-    const t = s < 0.999 ? `scale(${s.toFixed(4)})` : '';
-    const scaleEdge = (el: Element | null, origin: string): void => {
-      if (!el) return;
-      (el as HTMLElement).style.transformOrigin = origin;
-      (el as HTMLElement).style.transform = t;
+    const zoomBar = (z: number): void => {
+      const v = z < 0.999 ? z.toFixed(4) : '';
+      for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+        if (v) (el as HTMLElement).style.setProperty('zoom', v);
+        else (el as HTMLElement).style.removeProperty('zoom');
+      }
     };
-    scaleEdge(bar.querySelector('.ge-zone-left'), 'left bottom');
-    scaleEdge(bar.querySelector('.ge-zone-right'), 'right bottom');
-    scaleEdge(host.querySelector('.ge-winpill'), 'center bottom'); // inline (in bar) or lifted (in host)
+    const s = Math.max(GameShell.BAR_MIN_SCALE, Math.min(1, this.root.clientWidth / GameShell.BAR_REF_WIDTH));
+    zoomBar(s);
+    // Safety: a pathologically long balance/win can still overflow the frame at the screen zoom —
+    // nudge the zoom down just enough that the far control (turbo) isn't clipped. Normal content
+    // never triggers this, so base and replay keep the SAME zoom (no size change on mode switch).
+    if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
+      zoomBar(s * (bar.clientWidth / bar.scrollWidth));
+    }
   }
 
   /** Spacebar starts a spin — same path as the spin disc. Ignored when `features.spacebar` is
@@ -282,7 +274,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
    *  staying full-size on a popout. */
   private static readonly BAR_REF_WIDTH = 840;
   /** Lower bound on the bar fit-scale (guards a degenerate near-zero frame). */
-  private static readonly BAR_MIN_SCALE = 0.4;
+  private static readonly BAR_MIN_SCALE = 0.5;
 
   private fitSheet(root: HTMLElement): void {
     const card = root.querySelector('.ge-modal-card') as HTMLElement | null;
