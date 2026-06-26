@@ -128,15 +128,25 @@ export class GameShell extends EventEmitter<ShellEvents> {
       }
       return;
     }
-    if (bar.scrollWidth <= bar.clientWidth + 1) return;       // bar fits inline → leave it
-    // overflow: lift the pill onto its own row above the bar (flex column → real 8px gap)
-    if (pill) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
-    if (bar.scrollWidth <= bar.clientWidth + 1) return;       // bar now fits full-width, pill above
-    // still too wide → shrink the whole stack (pill + bar) to fit, anchored bottom-centre
+    // Scale the bar to the SCREEN, not the mode. Two independent limits, whichever bites harder:
+    //  • width  — the row mustn't exceed the frame (base's wide row hits this); and
+    //  • height — the bar mustn't eat more than BAR_MAX_FRACTION of a SHORT frame. Replay's narrow
+    //    row never overflows width, so without this it stayed full-size and ate ~47% of a Popout S
+    //    frame, overlapping the reels — while base (wide row) shrank to ~27%. Now every mode tracks
+    //    the frame size the same way.
+    // Lift the WIN pill onto its own line first when the full-width row overflows (controls stay big).
+    if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
+    // Measure natural CONTENT size — `.ge-fit` makes the bar shrink-to-content (width:max-content).
     host.classList.add('ge-fit');
-    const natural = bar.offsetWidth, avail = this.root.clientWidth - 12;
-    const s = natural > 0 && avail > 0 ? Math.min(1, avail / natural) : 1;
-    host.style.transform = `translateX(-50%) scale(${s.toFixed(4)})`;
+    const availW = this.root.clientWidth - 12;
+    const availH = this.root.clientHeight * GameShell.BAR_MAX_FRACTION;
+    const naturalW = host.offsetWidth, naturalH = host.offsetHeight;
+    const s = Math.min(1, naturalW > 0 ? availW / naturalW : 1, naturalH > 0 ? availH / naturalH : 1);
+    if (s < 0.999) {
+      host.style.transform = `translateX(-50%) scale(${s.toFixed(4)})`;
+    } else {
+      host.classList.remove('ge-fit'); // fits full-size → restore the normal full-width bar
+    }
   }
 
   /** Spacebar starts a spin — same path as the spin disc. Ignored when `features.spacebar` is
@@ -246,6 +256,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
   /** Fraction of the frame a card modal may occupy; the rest is breathing-room margin. Keeps
    *  modals from filling a small popout edge-to-edge (so even short pickers scale down there). */
   private static readonly MODAL_FIT = 0.86;
+
+  /** Max fraction of the frame HEIGHT the bottom bar may occupy before it fit-scales down. Keeps the
+   *  bar a consistent, small slice on short popouts in EVERY mode (base ≈ this already via width). */
+  private static readonly BAR_MAX_FRACTION = 0.27;
 
   private fitSheet(root: HTMLElement): void {
     const card = root.querySelector('.ge-modal-card') as HTMLElement | null;

@@ -42,7 +42,7 @@ describe('Replay modal', () => {
     expect(t).toContain('Buy Free Spins'); // MODE ← bonus title
     expect(t).toContain('100×');           // COST MULTIPLIER ← priceMultiplier
     expect(t).toContain('€200');           // TOTAL COST = bet × costMultiplier
-    expect(t).toContain('10×');            // PAYOUT MULTIPLIER
+    expect(t).toContain('10×');            // WIN MULTIPLIER ← payoutMultiplier
     expect(t).toContain('€20');            // TOTAL WIN = payoutMultiplier × bet
   });
 

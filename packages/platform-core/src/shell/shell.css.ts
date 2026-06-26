@@ -227,15 +227,30 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 /* the buy-bonus scroll area is a SIZE CONTAINER, so the cards' cqh units measure the overlay
    (the popout frame) and not the browser window — cards fit without any vertical scroll. */
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-scroll { container-type:size; }
+/* Popout / landscape: the horizontal card strip must be the ONLY scroll axis. The cqh-sized cards
+   are meant to fit the overlay height (no vertical scroll), but the old 7px font floor stopped them
+   shrinking on the tiniest popouts — so they spilled past the frame and the overlay grew a SECOND,
+   vertical scrollbar (scrollable in both directions). Two changes keep it single-axis:
+     1. the card font floor drops (below) so cards actually fit the frame height; and
+     2. vertical scrolling is locked off as a belt-and-braces guard, with the strip centred (the body
+        fills the frame and centres the grid) so any sub-pixel slack splits evenly instead of clipping
+        the price/CTA off the bottom.
+   This mirrors the pixi shell, which masks the cards and drag-scrolls on the X axis alone. (Centring
+   lives on the body, not the scroll box, so the grid keeps its width and its own X-scroll.) */
+#${SHELL_ROOT_ID}:not(.ge-mobile) [data-ge="buybonus-overlay"] .ge-ov-scroll { overflow-y:hidden; }
+#${SHELL_ROOT_ID}:not(.ge-mobile) [data-ge="buybonus-overlay"] .ge-ov-body {
+  min-height:100%; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; }
 /* buy-bonus uses the FULL overlay width (no 800px centre cap) so the card row isn't cropped at
    the sides; small horizontal padding keeps the cards off the screen edges. */
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-body { max-width:none; padding:clamp(8px,3cqh,16px) clamp(12px,3vw,28px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-body { max-width:none; padding:clamp(6px,2.5cqh,16px) clamp(12px,3vw,28px); }
 #${SHELL_ROOT_ID} .ge-bb-grid { display:flex; gap:14px; justify-content:safe center; overflow-x:auto; overflow-y:hidden; padding-bottom:6px;
   scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
 /* the one knob that scales the whole card — cqh measures the overlay (popout frame), not the
-   browser window, so cards shrink to fit the real container height. */
+   browser window, so cards shrink to fit the real container height. The floor is deliberately tiny:
+   on a 400×225 popout the whole card (incl. the CTA) only fits below ~5px, and a fully visible,
+   single-axis-scrolling card beats a bigger one whose button is clipped or needs a 2nd scrollbar. */
 #${SHELL_ROOT_ID} .ge-bb-grid .ge-bonus-card { flex:0 0 18em; scroll-snap-align:start;
-  font-size:clamp(7px, 3.6cqh, 12px); }
+  font-size:clamp(4px, 3.4cqh, 12px); }
 /* mobile: vertical stack at a fixed, readable size — scroll the list, don't shrink the cards */
 #${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid { display:flex; flex-direction:column; gap:14px; overflow:visible; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid .ge-bonus-card { flex:0 0 auto; font-size:12px; }
@@ -288,6 +303,24 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-bb-betval span { display:block; font-size:7px; font-weight:600; letter-spacing:.14em; text-transform:uppercase;
   color:var(--shell-plaque-label); }
 #${SHELL_ROOT_ID} .ge-bb-betval b { font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; color:#fff; }
+/* Popout S (short landscape): the header (title + ✕) and the bet footer are fixed-px and dwarf the
+   shrunk cards. Scale the buy-bonus chrome down with the FRAME height. Units are cqh (the overlay is a
+   size container below), NOT vh — vh tracks the browser window, which only equals the frame inside the
+   Stake iframe, so it wouldn't shrink in the demo's device-frame view. Coefficients hit the normal cap
+   by ~450px tall (Popout L) and shrink below that, to a readable floor at Popout S (225px). */
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] { container:ge-bb-frame / size; }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-head { padding:clamp(3px,1.33cqh,6px) 10px; }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-title { font-size:clamp(11px,3.5cqh,16px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-spacer { width:clamp(24px,7cqh,32px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-nav { width:clamp(24px,7cqh,32px); height:clamp(24px,7cqh,32px);
+  font-size:clamp(14px,4cqh,18px); border-radius:clamp(7px,2cqh,9px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betbar { padding:clamp(2px,.9cqh,4px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betpill { padding:clamp(2px,.67cqh,3px) clamp(4px,1.1cqh,5px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betstep { width:clamp(24px,7cqh,32px); height:clamp(24px,7cqh,32px);
+  font-size:clamp(15px,4.4cqh,20px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval { min-width:clamp(62px,17.5cqh,80px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval b { font-size:clamp(11px,3.1cqh,14px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval span { font-size:clamp(6px,1.55cqh,7px); }
 
 /* ═══ base/wide plaque bar — grouped dark + glass panels (reference-style) ═══ */
 #${SHELL_ROOT_ID} .ge-zone-plaques { gap:0; }                     /* panels connect; buttons overlap */

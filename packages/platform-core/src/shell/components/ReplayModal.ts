@@ -35,7 +35,7 @@ export function buildReplayModal(shell: GameShell, opts: ReplayModalOptions): HT
   row('Base bet', fmt(bet));
   row('Cost multiplier', `${costMultiplier}×`);
   row('Total cost', fmt(bet * costMultiplier));
-  row('Payout multiplier', `${payoutMultiplier}×`);
+  row('Win multiplier', `${payoutMultiplier}×`);
   row('Total win', fmtWin(payoutMultiplier * bet), true);
   ui.body.appendChild(rows);
 

@@ -101,4 +101,19 @@ describe('BottomBar.height — safeArea source of truth', () => {
     const safeArea = { top: 0, right: 0, bottom: barHeight, left: 0 };
     expect(safeArea.bottom).toBe(bar.height);
   });
+
+  // Regression: in replay at Popout S the row fits the width (no fit-scale) but the WIN pill sits
+  // above it, so the bar's real footprint exceeds the nominal WIDE_BAR_H. A fixed reserve let the
+  // bar overlap the reels — height must cover the MEASURED footprint after layout.
+  it('reserves the full bar footprint when a replay WIN pill overflows the nominal height (Popout S)', () => {
+    const host = makeHost({ layout: 'wide', screenW: 400, screenH: 225 });
+    host.state.mode = 'replay';
+    host.state.replay = true;
+    host.state.win = 12.3; // a win → the WIN pill renders and sits above the control row
+    const bar = new BottomBar(host);
+    bar.applyFit();
+    const occupied = host.screenH - bar.getBounds().y;
+    expect(occupied, 'precondition: this layout exceeds the nominal reserve').toBeGreaterThan(WIDE_BAR_H);
+    expect(bar.height, 'reserve covers the real footprint → no reel overlap').toBeGreaterThanOrEqual(occupied - 0.5);
+  });
 });

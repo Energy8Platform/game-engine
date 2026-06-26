@@ -561,12 +561,26 @@ export class BottomBar extends Container {
 
   // ── positioning / fit-scale (called by the shell after construction) ─────────
 
-  /** Pixel height this bar reserves at the bottom of the screen.
-   *  Reflects the current wide/mobile layout at scale=1 (the shell never clips the bar taller
-   *  than this). Correct immediately after construction; does not change until `applyFit()` is
-   *  called with a different layout. */
+  /** Pixel height this bar reserves at the bottom of the screen — the scene insets its play area by
+   *  this (`PixiGameShell.safeArea.bottom`) so it never draws under the bar.
+   *
+   *  The nominal constants (WIDE_BAR_H / MOBILE_BAR_H) are derived from the tallest *base*-mode
+   *  element (the SPIN disc). But the real footprint can exceed that — e.g. the WIN pill sits a few
+   *  px above the row, and in replay/free-spins (no spin disc) the row doesn't fit-scale on a short
+   *  popout — so a fixed reserve let the bar overlap the reels (notably replay @ Popout S). Reserve
+   *  the GREATER of the nominal height and the bar's actual measured footprint (captured at the end
+   *  of applyFit), so the scene always clears it. Before the first layout `_measured` is 0, so this
+   *  reports the nominal height — the safeArea source-of-truth value tests rely on. */
   get height(): number {
-    return this.host.layout === 'mobile' ? MOBILE_BAR_H : WIDE_BAR_H;
+    const nominal = this.host.layout === 'mobile' ? MOBILE_BAR_H : WIDE_BAR_H;
+    return Math.max(nominal, this._measured);
+  }
+
+  /** Actual bar footprint in px, measured at the end of the last applyFit (0 before first layout). */
+  private _measured = 0;
+  private measureFootprint(): void {
+    const occupied = this.host.screenH - this.getBounds().y;
+    this._measured = Number.isFinite(occupied) && occupied > 0 ? occupied : 0;
   }
 
   applyFit(): void {
@@ -627,6 +641,7 @@ export class BottomBar extends Container {
         }
       }
     }
+    this.measureFootprint();
   }
 
   private applyFitMobile(): void {
@@ -646,6 +661,7 @@ export class BottomBar extends Container {
     // Centre the scaled stack so left/right padding match. It was anchored at x=12, so once the
     // stack scaled down on narrow phones (mobile-s) it left a big gap on the right edge.
     this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - MOBILE_PAD_BOTTOM);
+    this.measureFootprint();
   }
 }
 
