@@ -20,6 +20,7 @@ const RULES: ReadonlyArray<readonly [string, string]> = [
   ['pay out', 'win / won'],
   ['paid out', 'won'],
   ['pays out', 'win'],
+  ['payout', 'win'], // single word; "pay out" (spaced) is handled above
   ['paytable', 'win table'],
   ['paylines', 'winlines'],
   ['payline', 'winline'],

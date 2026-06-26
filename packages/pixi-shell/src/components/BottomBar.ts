@@ -22,6 +22,11 @@ const WIDE_SPIN_DISC_H = 86;   // tallest wide element: SpinDisc (86px) bottom-a
 /** Pixel height the wide bar reserves at the bottom of the screen (at scale=1). */
 export const WIDE_BAR_H = WIDE_PAD_BOTTOM + WIDE_SPIN_DISC_H; // 90
 
+// Bar fit-scale (landscape). The bar shrinks with the SCREEN — the same factor in every mode, so
+// base and replay are the same size on a popout (mirrors the DOM shell's BAR_REF_WIDTH/zoom).
+const WIDE_BAR_REF_W = 840; // design width; below this the bar scales down with the frame
+const BAR_MIN_SCALE = 0.4;  // lower bound, guards a degenerate near-zero frame
+
 const MOBILE_PAD_BOTTOM = 8;   // applyFitMobile: bottom offset = 8
 // Three rows: top(46) + gap(14) + controls(62) + gap(14) + betRow(46) = 182
 const MOBILE_INNER_H = 46 + 14 + 62 + 14 + 46;
@@ -561,12 +566,23 @@ export class BottomBar extends Container {
 
   // ── positioning / fit-scale (called by the shell after construction) ─────────
 
-  /** Pixel height this bar reserves at the bottom of the screen.
-   *  Reflects the current wide/mobile layout at scale=1 (the shell never clips the bar taller
-   *  than this). Correct immediately after construction; does not change until `applyFit()` is
-   *  called with a different layout. */
+  /** Pixel height this bar reserves at the bottom of the screen — the scene insets its play area by
+   *  this (`PixiGameShell.safeArea.bottom`) so it never draws under the bar.
+   *
+   *  Reports the bar's ACTUAL footprint, measured at the end of the last applyFit. The bar fit-scales
+   *  with the screen, so on a popout it's much shorter than the nominal WIDE/MOBILE_BAR_H — reserving
+   *  the nominal there would waste reel space. Before the first layout `_measured` is 0, so this falls
+   *  back to the nominal height — the safeArea source-of-truth value the tests rely on. */
   get height(): number {
-    return this.host.layout === 'mobile' ? MOBILE_BAR_H : WIDE_BAR_H;
+    const nominal = this.host.layout === 'mobile' ? MOBILE_BAR_H : WIDE_BAR_H;
+    return this._measured > 0 ? this._measured : nominal;
+  }
+
+  /** Actual bar footprint in px, measured at the end of the last applyFit (0 before first layout). */
+  private _measured = 0;
+  private measureFootprint(): void {
+    const occupied = this.host.screenH - this.getBounds().y;
+    this._measured = Number.isFinite(occupied) && occupied > 0 ? occupied : 0;
   }
 
   applyFit(): void {
@@ -585,48 +601,41 @@ export class BottomBar extends Container {
     this.inner.scale.set(1);
     this.inner.position.set(0, 0);
 
-    const winW = this.winPill ? this.winPill.outerWidth : 0;
-    // The WIN pill stays inline between the zones only while the whole row (incl. the pill) fits;
-    // otherwise it lifts onto its own line above the bar (matching the DOM fit behaviour).
-    const naturalInline = padX + this.leftW + GAP + (winW ? winW + GAP : 0) + this.rightW + padX;
-    const winInline = !!this.winPill && naturalInline <= W;
-    // Row natural width with the pill counted only when it sits inline.
-    const rowNatural = padX + this.leftW + GAP + (winInline ? winW + GAP : 0) + this.rightW + padX;
-    const overflow = rowNatural > W;
+    // ONE fit-scale from the SCREEN SIZE, the SAME factor in every mode (base / replay / free-spins)
+    // so switching modes never resizes the bar — mirrors the DOM shell. Normally the screen factor
+    // (frame width / design width); if the row is too wide for it (a long balance), shrink just
+    // enough to fit so the far control (turbo) isn't clipped — normal content keeps the screen
+    // factor, so base and replay stay identical. Unlike the DOM (CSS `zoom`), pixi positions are
+    // manual, so we scale `inner` uniformly and place the zones at the frame EDGES (left hard-left,
+    // right hard-right) — full-width, never a centred cluster.
+    const minRow = this.leftW + GAP + this.rightW; // left + right (one gap) must fit between the pads
+    const fitScale = minRow > 0 ? Math.min(1, (W - 2 * padX) / minRow) : 1;
+    const s = Math.max(BAR_MIN_SCALE, Math.min(1, W / WIDE_BAR_REF_W, fitScale));
 
-    if (this.leftZone) this.leftZone.position.set(padX, plaqueTop);
-
-    if (overflow) {
-      // pack zones in flow (left · win? · right), then scale the row to fit, bottom-centre anchored
-      let x = padX + this.leftW + GAP;
-      if (winInline && this.winPill) {
-        this.winPill.setLifted(false);
-        this.winPill.position.set(x, winCenterY);
-        x += winW + GAP;
-      }
-      if (this.rightZone) this.rightZone.position.set(x, plaqueTop);
-      if (this.winPill && !winInline) {
-        this.winPill.setLifted(true);
-        this.winPill.position.set((rowNatural - this.winPill.outerWidth) / 2, plaqueTop - this.winPill.outerHeight - 8);
-      }
-      const s = W / rowNatural;
-      this.inner.scale.set(s);
-      this.inner.position.set((W - rowNatural * s) / 2, (H - padBottom) * (1 - s));
-    } else {
-      // fits → space-between: left flush-left, right flush-right, win centred (inline or lifted)
-      if (this.rightZone) this.rightZone.position.set(W - padX - this.rightW, plaqueTop);
-      if (this.winPill) {
-        this.winPill.setLifted(!winInline);
-        if (winInline) {
-          // centre the pill in the GAP between the clusters (like flex space-between), not the whole
-          // frame — a frame-centred pill overlaps the Total win plaque on the left in FS mode.
-          const gapMid = (padX + this.leftW + (W - padX - this.rightW)) / 2;
-          this.winPill.position.set(gapMid - winW / 2, winCenterY);
-        } else {
-          this.winPill.position.set((W - winW) / 2, plaqueTop - this.winPill.outerHeight - 8);
-        }
+    // Lay out in the bar's LOCAL space (scaled by `s` below): left at the left pad, right at the
+    // right pad, so after scaling they hug the frame edges with a constant px pad.
+    const leftX = padX / s;
+    const rightX = (W - padX) / s - this.rightW;
+    if (this.leftZone) this.leftZone.position.set(leftX, plaqueTop);
+    if (this.rightZone) this.rightZone.position.set(rightX, plaqueTop);
+    if (this.winPill) {
+      const winW = this.winPill.outerWidth;
+      const gap = rightX - (leftX + this.leftW); // room between the clusters (local px)
+      const inline = winW + 2 * GAP <= gap;
+      this.winPill.setLifted(!inline);
+      if (inline) {
+        // centre the pill in the gap between the clusters (not the whole frame — it would overlap
+        // the Total win plaque on the left in FS mode)
+        this.winPill.position.set(leftX + this.leftW + (gap - winW) / 2, winCenterY);
+      } else {
+        // won't fit between the clusters → lift onto its own line above the bar, centred
+        this.winPill.position.set((W / s - winW) / 2, plaqueTop - this.winPill.outerHeight - 8);
       }
     }
+
+    this.inner.scale.set(s);
+    this.inner.position.set(0, (H - padBottom) * (1 - s)); // bottom-anchored: the row's bottom stays put
+    this.measureFootprint();
   }
 
   private applyFitMobile(): void {
@@ -646,6 +655,7 @@ export class BottomBar extends Container {
     // Centre the scaled stack so left/right padding match. It was anchored at x=12, so once the
     // stack scaled down on narrow phones (mobile-s) it left a big gap on the right edge.
     this.inner.position.set((W - b.width * s) / 2 - b.x * s, H - b.height * s - MOBILE_PAD_BOTTOM);
+    this.measureFootprint();
   }
 }
 

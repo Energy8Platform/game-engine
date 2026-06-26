@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/pixi-shell",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "PixiJS rendering of the Energy8 branded game shell — a 1:1 port of the renderer-agnostic DOM shell (control bar, menu, settings, game info, buy bonus) drawn entirely in Pixi v8.",
   "type": "module",
   "main": "./dist/index.cjs.js",

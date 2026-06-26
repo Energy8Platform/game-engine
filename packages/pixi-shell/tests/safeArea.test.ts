@@ -101,4 +101,31 @@ describe('BottomBar.height — safeArea source of truth', () => {
     const safeArea = { top: 0, right: 0, bottom: barHeight, left: 0 };
     expect(safeArea.bottom).toBe(bar.height);
   });
+
+  // The bar fit-scales with the SCREEN in every mode, so on a popout it's SHORTER than the nominal
+  // reserve — and `height` reports that real (smaller) footprint, never overlapping the reels and not
+  // wasting space. (Regression for the earlier bug where replay stayed full-size on Popout S.)
+  it('reports the scaled-down footprint on a short popout (replay, Popout S)', () => {
+    const host = makeHost({ layout: 'wide', screenW: 400, screenH: 225 });
+    host.state.mode = 'replay';
+    host.state.replay = true;
+    host.state.win = 12.3; // a win → the WIN pill renders too
+    const bar = new BottomBar(host);
+    bar.applyFit();
+    const occupied = host.screenH - bar.getBounds().y;
+    expect(occupied, 'bar fit-scales down on a short popout').toBeLessThan(WIDE_BAR_H);
+    expect(bar.height, 'reserve == the bar\'s actual footprint').toBeCloseTo(occupied, 0);
+  });
+
+  it('base and replay get the SAME bar scale on a popout (no resize on mode switch)', () => {
+    const mk = (mode: 'base' | 'replay') => {
+      const host = makeHost({ layout: 'wide', screenW: 400, screenH: 225 });
+      host.state.mode = mode;
+      if (mode === 'replay') host.state.replay = true;
+      const bar = new BottomBar(host);
+      bar.applyFit();
+      return (bar as unknown as { inner: { scale: { x: number } } }).inner.scale.x;
+    };
+    expect(mk('base'), 'base/replay share one screen-size scale').toBeCloseTo(mk('replay'), 3);
+  });
 });

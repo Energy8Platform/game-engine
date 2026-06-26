@@ -56,11 +56,12 @@ describe('socialize', () => {
     expect(socialize('Buy bonus')).toBe('Get bonus');
     expect(socialize('Total bet')).toBe('Total play');
     expect(socialize('Price')).toBe('Play'); // Game-info modes label in social mode
+    expect(socialize('Payout multiplier')).toBe('Win multiplier'); // restricted "payout" → "win"
   });
 
   it('only swaps whole words — never inside another word', () => {
     expect(socialize('Autoplay')).toBe('Autoplay'); // "pay" is internal
-    expect(socialize('Payout multiplier')).toBe('Payout multiplier'); // "pay"/"out" internal
+    expect(socialize('Payment')).toBe('Payment'); // "pay" is internal, not a standalone word
     expect(socialize('rebetting')).toBe('rebetting'); // not "rebet" + "ting"
   });
 

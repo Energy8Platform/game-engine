@@ -32,6 +32,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private h = 0;
   private headerH = 44;
   private footerH = 44;
+  private chromeScale = 1; // header + bet footer shrink with the frame on short popouts (see resize)
   // Drag-scroll state. The drag is handled on the (unmasked) overlay, not the masked strip — a mask
   // prunes pointer events outside its band, stalling globalpointermove mid-drag so later cards never
   // scroll into reach. The overlay sees the whole screen, so the scroll runs the full range.
@@ -102,8 +103,12 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
-    this.headerH = clamp(40, 6.4 * (h / 100), 52);
-    this.footerH = 44;
+    // Chrome (header + bet footer) scales with the frame height: full size by Popout L (≈450px tall),
+    // shrinking to 0.72 on a short Popout S so it doesn't dwarf the (already shrunk) cards. Mirrors the
+    // DOM shell's vh-clamped buy-bonus chrome.
+    this.chromeScale = clamp(0.72, h / 450, 1);
+    this.headerH = 44 * this.chromeScale;
+    this.footerH = 46 * this.chromeScale;
     this.veil.clear();
     this.veil.rect(0, 0, w, h).fill(this.host.tokens.backdrop);
     this.veil.hitArea = new Rectangle(0, 0, w, h);
@@ -117,9 +122,11 @@ class BuyBonusOverlay extends Container implements ShellLayer {
 
   private buildHeader(): void {
     this.header.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const pad = 10;
-    const close = navButton(this.host, 'close', () => this.host.closeLayer());
-    const titleSize = clamp(13, 2.6 * (this.h / 100), 16);
+    const sc = this.chromeScale;
+    const pad = 10 * sc;
+    const navSz = 32 * sc;
+    const close = navButton(this.host, 'close', () => this.host.closeLayer(), navSz);
+    const titleSize = 16 * sc;
     const title = makeText(this.host.t('Buy bonus'), {
       size: titleSize,
       weight: '800',
@@ -129,7 +136,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     });
     title.anchor.set(0.5);
     title.position.set(this.w / 2, this.headerH / 2 + pad / 2);
-    close.position.set(this.w - 32 - pad, (this.headerH - 32) / 2 + pad / 2);
+    close.position.set(this.w - navSz - pad, (this.headerH - navSz) / 2 + pad / 2);
     this.header.addChild(title, close);
   }
 
@@ -138,7 +145,10 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const mobile = this.host.layout === 'mobile';
     const top = this.headerH + 6;
     const areaH = this.h - top - this.footerH - 6;
-    const em = mobile ? 12 : clamp(7, 3.6 * (areaH / 100), 12);
+    // Floor is deliberately tiny so the whole card (incl. the CTA) shrinks to fit the popout height
+    // instead of being clipped by the strip mask on a 400×225 frame — mirrors the DOM shell's
+    // `clamp(4px, 3.4cqh, 12px)`. (Landscape already drag-scrolls on X alone, so this only governs fit.)
+    const em = mobile ? 12 : clamp(4, 3.4 * (areaH / 100), 12);
     const cardW = Math.min(18 * em, this.w - 48);
     const gap = 14;
 
@@ -223,14 +233,17 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   // ── bet footer ──────────────────────────────────────────────────────────────
   private buildFooter(): void {
     this.footer.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const pillH = 38;
+    const sc = this.chromeScale;
+    const pillH = 38 * sc;
+    const stepSz = 32 * sc;
+    const glyphSz = 20 * sc;
     const pill = new Container();
     const bg = new Graphics();
     const step = (icon: 'minus' | 'plus', dir: 1 | -1): { node: Container; setDisabled: (d: boolean) => void } => {
       const b = new Container();
-      const glyph = makeIcon(icon, 20, '#ffffff');
-      glyph.position.set(6, 6);
-      b.addChild(rectHit(32, 32), glyph);
+      const glyph = makeIcon(icon, glyphSz, '#ffffff');
+      glyph.position.set((stepSz - glyphSz) / 2, (stepSz - glyphSz) / 2);
+      b.addChild(rectHit(stepSz, stepSz), glyph);
       b.eventMode = 'static';
       b.cursor = 'pointer';
       let disabled = false;
@@ -257,18 +270,18 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const down = step('minus', -1);
     const up = step('plus', 1);
     const valWrap = new Container();
-    const label = makeText(this.host.t('Bet'), { size: 7, weight: '600', color: this.host.tokens.plaqueLabel, letterSpacing: 1, upper: true });
-    const value = makeText(this.host.fmt(this.host.state.bet), { size: 14, weight: '800', color: '#ffffff' });
-    const valW = Math.max(80, value.width + 16, label.width + 16);
-    label.position.set((valW - label.width) / 2, 2);
-    value.position.set((valW - value.width) / 2, 11);
+    const label = makeText(this.host.t('Bet'), { size: 7 * sc, weight: '600', color: this.host.tokens.plaqueLabel, letterSpacing: 1, upper: true });
+    const value = makeText(this.host.fmt(this.host.state.bet), { size: 14 * sc, weight: '800', color: '#ffffff' });
+    const valW = Math.max(80 * sc, value.width + 16 * sc, label.width + 16 * sc);
+    label.position.set((valW - label.width) / 2, 2 * sc);
+    value.position.set((valW - value.width) / 2, 11 * sc);
     valWrap.addChild(label, value);
 
-    const padX = 5;
-    down.node.position.set(padX, (pillH - 32) / 2);
-    valWrap.position.set(padX + 32, (pillH - 28) / 2);
-    up.node.position.set(padX + 32 + valW, (pillH - 32) / 2);
-    const pillW = padX * 2 + 32 + valW + 32;
+    const padX = 5 * sc;
+    down.node.position.set(padX, (pillH - stepSz) / 2);
+    valWrap.position.set(padX + stepSz, (pillH - 28 * sc) / 2);
+    up.node.position.set(padX + stepSz + valW, (pillH - stepSz) / 2);
+    const pillW = padX * 2 + stepSz + valW + stepSz;
     bg.roundRect(0, 0, pillW, pillH, 999).fill(this.host.tokens.plaqueDark);
     pill.addChild(bg, down.node, valWrap, up.node);
     pill.position.set((this.w - pillW) / 2, this.h - this.footerH + (this.footerH - pillH) / 2);

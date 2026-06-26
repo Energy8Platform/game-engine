@@ -21,8 +21,9 @@ export function navButton(host: ShellHost, iconName: 'close' | 'back', onTap: ()
     bg.fill(hover ? host.tokens.plaqueGlass : host.tokens.plaqueDark);
   };
   draw(false);
-  const glyph = makeIcon(iconName, 18, '#ffffff');
-  glyph.position.set((size - 18) / 2, (size - 18) / 2);
+  const gs = Math.round(size * 0.5625); // glyph tracks the box (default 32 → 18, unchanged)
+  const glyph = makeIcon(iconName, gs, '#ffffff');
+  glyph.position.set((size - gs) / 2, (size - gs) / 2);
   root.addChild(bg, glyph);
   root.eventMode = 'static';
   root.cursor = 'pointer';

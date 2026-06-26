@@ -52,7 +52,7 @@ export function buildReplayModal(host: ShellHost, opts: ReplayModalOptions): She
   addRow('Base bet', host.fmt(bet));
   addRow('Cost multiplier', `${costMultiplier}×`);
   addRow('Total cost', host.fmt(bet * costMultiplier));
-  addRow('Payout multiplier', `${payoutMultiplier}×`);
+  addRow('Win multiplier', `${payoutMultiplier}×`);
   addRow('Total win', host.fmtWin(payoutMultiplier * bet), true);
   modal.body.add(rows);
 
