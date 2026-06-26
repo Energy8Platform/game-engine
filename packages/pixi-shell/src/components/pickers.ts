@@ -21,27 +21,88 @@ interface SheetOpts {
   onConfirm: (id: string) => void;
 }
 
+/** Extended CardModal that implements ShellLayer.onKey for keyboard navigation. */
+class PickerModal extends CardModal {
+  private _onKey: (e: KeyboardEvent) => boolean;
+
+  constructor(host: ShellHost, opts: ConstructorParameters<typeof CardModal>[1], onKey: (e: KeyboardEvent) => boolean) {
+    super(host, opts);
+    this._onKey = onKey;
+  }
+
+  onKey(e: KeyboardEvent): boolean {
+    return this._onKey(e);
+  }
+}
+
 /** A centred picker (chips grid + accent Confirm) on the shared card modal. */
-function buildSheet(host: ShellHost, opts: SheetOpts): CardModal {
-  const modal = new CardModal(host, { tag: opts.tag, title: opts.title, maxEm: opts.maxEm, onClose: () => host.closeLayer() });
-  const em = modal.emSize;
-  const gap = 0.65 * em;
-  const innerW = modal.cardWidth - 2.4 * em;
+function buildSheet(host: ShellHost, opts: SheetOpts): ShellLayer {
   const columns = typeof opts.columns === 'number'
     ? opts.columns
     : host.layout === 'mobile' ? opts.columns.mobile : opts.columns.wide;
-  const colW = (innerW - gap * (columns - 1)) / columns;
 
   let selected = opts.selected;
+  let focusIndex = opts.choices.findIndex((c) => c.id === selected);
+  if (focusIndex < 0) focusIndex = 0;
   const chips: Chip[] = [];
+
+  /** Update chip visuals to reflect the current focused index. */
+  function setHighlight(newIndex: number): void {
+    focusIndex = newIndex;
+    selected = opts.choices[focusIndex].id;
+    for (let i = 0; i < chips.length; i++) {
+      chips[i].setSelected(i === focusIndex);
+    }
+  }
+
+  function doConfirm(): void {
+    opts.onConfirm(selected);
+    host.closeLayer();
+  }
+
+  function onKey(e: KeyboardEvent): boolean {
+    const last = opts.choices.length - 1;
+    switch (e.code) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+      case 'Equal':
+      case 'NumpadAdd':
+        if (focusIndex < last) setHighlight(focusIndex + 1);
+        return true;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+      case 'Minus':
+      case 'NumpadSubtract':
+        if (focusIndex > 0) setHighlight(focusIndex - 1);
+        return true;
+      case 'Enter':
+      case 'Space':
+        doConfirm();
+        return true;
+      case 'Escape':
+        host.closeLayer();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  const modal = new PickerModal(host, { tag: opts.tag, title: opts.title, maxEm: opts.maxEm, onClose: () => host.closeLayer() }, onKey);
+  const em = modal.emSize;
+  const gap = 0.65 * em;
+  const innerW = modal.cardWidth - 2.4 * em;
+  const colW = (innerW - gap * (columns - 1)) / columns;
+
   const grid = new FlexBox({ direction: 'column', align: 'start', gap });
   for (let i = 0; i < opts.choices.length; i += columns) {
     const rowChoices = opts.choices.slice(i, i + columns);
     const row = new FlexBox({ direction: 'row', align: 'center', gap });
-    for (const c of rowChoices) {
-      const chip = new Chip(host, c.id, c.label, c.id === selected, em, (id) => {
-        selected = id;
-        for (const x of chips) x.setSelected(x.id === selected);
+    for (let j = 0; j < rowChoices.length; j++) {
+      const c = rowChoices[j];
+      const chipIndex = i + j;
+      const chip = new Chip(host, c.id, c.label, chipIndex === focusIndex, em, (id) => {
+        const idx = opts.choices.findIndex((ch) => ch.id === id);
+        if (idx >= 0) setHighlight(idx);
       });
       chip.setLayoutSize(colW, undefined);
       chips.push(chip);
@@ -56,10 +117,7 @@ function buildSheet(host: ShellHost, opts: SheetOpts): CardModal {
     {
       label: opts.confirmLabel,
       kind: 'accent',
-      onTap: () => {
-        opts.onConfirm(selected);
-        host.closeLayer();
-      },
+      onTap: doConfirm,
     },
   ]);
   modal.build();

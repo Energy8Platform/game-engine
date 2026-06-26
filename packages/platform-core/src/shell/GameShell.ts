@@ -358,9 +358,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
   }
 
   /** Bet picker — list of available bets with an accent Confirm. */
-  openBetPicker(): void { this.showModal(openBetModal(this)); }
+  openBetPicker(): void { const { root, onKey } = openBetModal(this); this.showModal(root, onKey); }
   /** Autoplay picker — spin-count list; Confirm starts autoplay. */
-  openAutoplayPicker(): void { this.showModal(openAutoplayModal(this)); }
+  openAutoplayPicker(): void { const { root, onKey } = openAutoplayModal(this); this.showModal(root, onKey); }
 
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
