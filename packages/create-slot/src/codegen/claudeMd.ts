@@ -88,7 +88,7 @@ To add or complete a language:
 3. Test via the harness language selector (⚙ → Language) — strings should switch immediately.
 4. Add new player-facing copy to \`en\` first, then propagate to other languages.
 
-The map is passed to \`createSlotGame({ i18n })\` in \`src/main.ts\`. Shell-level copy (win messages,
+The map is passed to \`createSlotGame({ shell: { i18n } })\` in \`src/main.ts\`. Shell-level copy (win messages,
 HUD labels, disclaimer) is handled by the framework and is NOT in \`src/i18n.ts\`.
 `;
 }
