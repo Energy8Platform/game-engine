@@ -327,7 +327,10 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     this.confirmBonus = bonus;
     const layer = new Container();
     const veil = new Graphics();
-    veil.rect(0, 0, this.w, this.h).fill(this.host.tokens.backdrop);
+    // The confirm sits over the BRIGHT opaque bonus cards, not the frosted game behind the overlay,
+    // so the standard ~50%-alpha `backdrop` tint barely dims them. Use a denser fill (same tint) so
+    // the confirm reads as a proper modal layer above the cards.
+    veil.rect(0, 0, this.w, this.h).fill({ color: 0x0c111c, alpha: 0.82 });
     veil.eventMode = 'static';
     veil.hitArea = new Rectangle(0, 0, this.w, this.h);
     layer.addChild(veil);
