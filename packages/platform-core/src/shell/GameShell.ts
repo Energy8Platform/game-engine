@@ -339,7 +339,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
 
   openMenu(): void { this.emit('menuOpen'); this.openSettings(); }
   openSettings(): void { this.emit('settingsOpen'); this.showModal(openSettingsModal(this)); }
-  openInfo(): void { this.emit('infoOpen'); this.showModal(openGameInfoModal(this)); }
+  openInfo(): void { this.emit('infoOpen'); const { root, onKey } = openGameInfoModal(this); this.showModal(root, onKey); }
   openBuyBonus(): void {
     if (this.config.onBonusBuy) { this.config.onBonusBuy(); return; } // game handles it (own UI)
     const result = openBuyBonusOverlay(this);

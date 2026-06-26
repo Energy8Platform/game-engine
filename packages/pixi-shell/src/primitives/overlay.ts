@@ -64,6 +64,9 @@ export class Overlay extends Container implements ShellLayer {
   private h = 0;
   private headerH = 44;
 
+  /** Expose the scroll box for keyboard/test access. */
+  get scrollContent(): ScrollBox { return this.scroll; }
+
   constructor(host: ShellHost, opts: OverlayOpts) {
     super();
     this.host = host;
@@ -130,6 +133,42 @@ export class Overlay extends Container implements ShellLayer {
     content.position.set((this.w - bodyW) / 2, vPad);
     this.scroll.content.addChild(content);
     this.scroll.refresh();
+  }
+
+  /** Handle keyboard navigation while this overlay is the top layer. */
+  onKey(e: KeyboardEvent): boolean {
+    const viewH = this.h - (this.headerH + 6); // body viewport height
+    const lineStep = 60;
+    const pageStep = Math.floor(viewH * 0.9);
+    switch (e.code) {
+      case 'ArrowDown':
+        this.scroll.scrollBy(lineStep);
+        return true;
+      case 'ArrowUp':
+        this.scroll.scrollBy(-lineStep);
+        return true;
+      case 'PageDown':
+        this.scroll.scrollBy(pageStep);
+        return true;
+      case 'PageUp':
+        this.scroll.scrollBy(-pageStep);
+        return true;
+      case 'Space':
+        if (e.shiftKey) {
+          this.scroll.scrollBy(-pageStep);
+        } else {
+          this.scroll.scrollBy(pageStep);
+        }
+        return true;
+      case 'Home':
+        this.scroll.scrollBy(-999999);
+        return true;
+      case 'End':
+        this.scroll.scrollBy(999999);
+        return true;
+      default:
+        return false;
+    }
   }
 
   fit(): void {

@@ -52,8 +52,9 @@ export interface OverlayOpts {
   onBack?: () => void;
 }
 
-/** Full-screen overlay. Returns { root, body }; append content to body. */
-export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: HTMLDivElement } {
+/** Full-screen overlay. Returns { root, body, scroll }; append content to body.
+ *  The `scroll` element is the scrollable container (overflow-y: auto). */
+export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: HTMLDivElement; scroll: HTMLDivElement } {
   const root = document.createElement('div');
   root.className = 'ge-shell-overlay';
   const head = document.createElement('div');
@@ -80,5 +81,5 @@ export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: 
   const body = document.createElement('div'); body.className = 'ge-ov-body';
   scroll.appendChild(body);
   root.append(head, scroll);
-  return { root, body };
+  return { root, body, scroll };
 }

@@ -6,8 +6,14 @@ import { PACKAGE_VERSION } from '../version';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-export function openGameInfoModal(shell: GameShell): HTMLElement {
-  const { root, body } = createOverlay({
+/** Result of openGameInfoModal — the overlay root element plus a keyboard handler. */
+export interface GameInfoModal {
+  root: HTMLElement;
+  onKey: (e: KeyboardEvent) => boolean;
+}
+
+export function openGameInfoModal(shell: GameShell): GameInfoModal {
+  const { root, body, scroll } = createOverlay({
     title: shell.t('Game info'),
     onClose: () => root.remove(),
     onBack: () => { root.remove(); shell.openSettings(); },
@@ -25,7 +31,26 @@ export function openGameInfoModal(shell: GameShell): HTMLElement {
     .forEach(({ s }) => body.appendChild(renderSection(shell, s)));
 
   body.appendChild(versionFooter(shell));
-  return root;
+
+  const LINE = 60;
+  const PAGE = (): number => Math.floor(scroll.clientHeight * 0.9) || Math.floor(540 * 0.9);
+  const onKey = (e: KeyboardEvent): boolean => {
+    switch (e.code) {
+      case 'ArrowDown':  scroll.scrollTop += LINE;                             return true;
+      case 'ArrowUp':    scroll.scrollTop = Math.max(0, scroll.scrollTop - LINE); return true;
+      case 'PageDown':   scroll.scrollTop += PAGE();                           return true;
+      case 'PageUp':     scroll.scrollTop = Math.max(0, scroll.scrollTop - PAGE()); return true;
+      case 'Space':
+        if (e.shiftKey) { scroll.scrollTop = Math.max(0, scroll.scrollTop - PAGE()); }
+        else            { scroll.scrollTop += PAGE(); }
+        return true;
+      case 'Home':       scroll.scrollTop = 0;                                 return true;
+      case 'End':        scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight; return true;
+      default:           return false;
+    }
+  };
+
+  return { root, onKey };
 }
 
 /** A muted version stamp pinned to the bottom of the game-info modal:
