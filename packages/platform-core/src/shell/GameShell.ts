@@ -12,7 +12,7 @@ import type {
   ThemeConfig,
 } from './types';
 import { KeyboardController, type KeyboardHost } from './keyboard';
-import { createInitialState } from './state';
+import { createInitialState, nextTurbo, stepBet } from './state';
 import { buildThemeVars } from './theme';
 import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
 import { renderBottomBar } from './components/BottomBar';
@@ -78,14 +78,28 @@ export class GameShell extends EventEmitter<ShellEvents> {
         hasOpenLayer: () => shell.modalHost.childElementCount > 0,
         routeToLayer: () => false,
         spin: () => shell.emit('spin'),
-        stepBet: () => {},
-        toggleAutoplay: () => {},
-        cycleTurbo: () => {},
-        openBuyBonus: () => {},
-        openInfo: () => {},
-        openMenu: () => {},
-        toggleMute: () => {},
-        closeLayer: () => {},
+        stepBet: (dir) => {
+          const next = stepBet(shell.state, dir);
+          if (next === shell.state.bet) return;
+          shell.state.bet = next; shell.emit('betChange', next); shell.render();
+        },
+        toggleAutoplay: () => {
+          if (shell.state.autoplay.active) {
+            shell.state.autoplay = { active: false, remaining: 0 };
+            shell.emit('autoplayStop'); shell.render();
+          } else {
+            shell.openAutoplayPicker();
+          }
+        },
+        cycleTurbo: () => {
+          const next = nextTurbo(shell.state.turbo, shell.config.features.turbo);
+          shell.state.turbo = next; shell.emit('turboChange', next); shell.render();
+        },
+        openBuyBonus: () => shell.openBuyBonus(),
+        openInfo: () => shell.openInfo(),
+        openMenu: () => shell.openMenu(),
+        toggleMute: () => shell.emit('settingChange', { key: 'muted', value: 'toggle' }),
+        closeLayer: () => shell.closeModal(),
       };
       this.kbd = new KeyboardController(host);
       this.kbd.attach();

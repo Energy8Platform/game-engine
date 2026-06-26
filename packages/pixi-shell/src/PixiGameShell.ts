@@ -13,7 +13,7 @@ import type {
   ModalOptions,
   ReplayModalOptions,
 } from './types';
-import { createInitialState } from './state';
+import { createInitialState, nextTurbo, stepBet } from './state';
 import { resolveTheme, type ShellTokens } from './theme';
 import { formatCurrency } from './format';
 import { createI18n, type I18n } from './i18n';
@@ -86,13 +86,27 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
         hasOpenLayer: () => shell.currentLayer !== null,
         routeToLayer: () => false,
         spin: () => shell.emit('spin'),
-        stepBet: () => {},
-        toggleAutoplay: () => {},
-        cycleTurbo: () => {},
-        openBuyBonus: () => {},
-        openInfo: () => {},
-        openMenu: () => {},
-        toggleMute: () => {},
+        stepBet: (dir) => {
+          const next = stepBet(shell.state, dir);
+          if (next === shell.state.bet) return;
+          shell.state.bet = next; shell.emit('betChange', next); shell.render();
+        },
+        toggleAutoplay: () => {
+          if (shell.state.autoplay.active) {
+            shell.state.autoplay = { active: false, remaining: 0 };
+            shell.emit('autoplayStop'); shell.render();
+          } else {
+            shell.openAutoplayPicker();
+          }
+        },
+        cycleTurbo: () => {
+          const next = nextTurbo(shell.state.turbo, shell.config.features.turbo);
+          shell.state.turbo = next; shell.emit('turboChange', next); shell.render();
+        },
+        openBuyBonus: () => shell.openBuyBonus(),
+        openInfo: () => shell.openInfo(),
+        openMenu: () => shell.openMenu(),
+        toggleMute: () => shell.emit('settingChange', { key: 'muted', value: 'toggle' }),
         closeLayer: () => shell.closeLayer(),
       };
       this.kbd = new KeyboardController(host);
