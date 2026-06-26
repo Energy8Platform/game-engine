@@ -27,9 +27,13 @@ describe('KeyboardController spin', () => {
     document.dispatchEvent(key({ code: 'Space' }));
     expect(route).toHaveBeenCalled(); expect(h.spin).not.toHaveBeenCalled(); c.detach();
   });
-  it('respects spacebarEnabled=false and hotkeysEnabled=false', () => {
+  it('respects spacebarEnabled=false', () => {
     const h1 = mockHost({ spacebarEnabled: false }); const c1 = new KeyboardController(h1, document); c1.attach();
     document.dispatchEvent(key({ code: 'Space' })); expect(h1.spin).not.toHaveBeenCalled(); c1.detach();
+  });
+  it('respects hotkeysEnabled=false', () => {
+    const h = mockHost({ hotkeysEnabled: false }); const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(key({ code: 'Space' })); expect(h.spin).not.toHaveBeenCalled(); c.detach();
   });
   it('ignores keys when an editable element is focused', () => {
     const input = document.createElement('input'); document.body.appendChild(input); input.focus();

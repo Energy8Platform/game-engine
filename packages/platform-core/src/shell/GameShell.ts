@@ -66,6 +66,8 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.prevWin = this.state.win;
     this.observeLayout();
     if (typeof document !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const shell = this;
       const host: KeyboardHost = {
         get state() { return shell.state; },
         get hotkeysEnabled() { return shell.config.features.hotkeys !== false; },
@@ -85,8 +87,6 @@ export class GameShell extends EventEmitter<ShellEvents> {
         toggleMute: () => {},
         closeLayer: () => {},
       };
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
-      const shell = this;
       this.kbd = new KeyboardController(host);
       this.kbd.attach();
       // Stake serves the game in an iframe; on first paint focus is on the HOST page, so a `document`
