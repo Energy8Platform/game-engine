@@ -190,6 +190,10 @@ export interface ModalOptions {
   actions?: ModalAction[];
   /** Backdrop blur in px (defaults to the shell's standard blur). */
   blurLevel?: number;
+  /** Optional keyboard handler — called by the shell keyboard controller while this modal is
+   *  open. Return true to consume the key (prevents bar actions + Escape close); false to let
+   *  the controller handle it (Escape → closeModal). */
+  onKey?: (e: KeyboardEvent) => boolean;
 }
 
 export interface ShellConfig {

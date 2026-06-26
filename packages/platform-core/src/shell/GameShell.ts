@@ -43,6 +43,8 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private moneyAnims: Array<() => void> = [];
   private kbd!: KeyboardController;
   private i18n!: I18n;
+  /** onKey handler of the currently open modal/overlay, if any (set in showModal, cleared in closeModal). */
+  private modalOnKey: ((e: KeyboardEvent) => boolean) | undefined = undefined;
 
   constructor(config: ShellConfig) {
     super();
@@ -76,7 +78,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
         get autoplayEnabled() { return shell.config.features.autoplay != null; },
         get buyBonusEnabled() { return shell.config.features.buyBonus !== false; },
         hasOpenLayer: () => shell.modalHost.childElementCount > 0,
-        routeToLayer: () => false,
+        routeToLayer: (e) => shell.modalOnKey?.(e) ?? false,
         spin: () => shell.emit('spin'),
         stepBet: (dir) => {
           const next = stepBet(shell.state, dir);
@@ -274,7 +276,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
   setBuyBonusEnabled(enabled: boolean): void { this.state.buyBonusEnabled = enabled; this.render(); }
   setFreeSpins(fs: FreeSpinsState): void { this.state.freeSpins = fs; this.render(); }
 
-  private showModal(el: HTMLElement): void {
+  private showModal(el: HTMLElement, onKey?: (e: KeyboardEvent) => boolean): void {
     // The control that opened this overlay (menu/buy/auto) keeps DOM focus. Drop it, or a
     // stray Space/Enter would natively re-activate that <button> and rebuild the modal — a
     // visible flicker. Only relinquish focus we own (a shell control), never the host page's.
@@ -282,6 +284,7 @@ export class GameShell extends EventEmitter<ShellEvents> {
     if (active && this.root.contains(active)) active.blur();
     this.modalHost.innerHTML = '';
     this.modalHost.appendChild(el);
+    this.modalOnKey = onKey;
     this.fitModals();
   }
 
@@ -344,10 +347,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
   }
   /** Open a generic, externally-driven modal (title + body + optional action buttons).
    *  Each action runs its `on` then closes; the ✕ shows when `availableClose` is true. */
-  openModal(opts: ModalOptions): void { this.showModal(buildModal(opts)); }
+  openModal(opts: ModalOptions): void { this.showModal(buildModal(opts), opts.onKey); }
   /** Programmatically dismiss whatever modal/overlay is currently shown (e.g. auto-close the
    *  reconnect overlay once the link is restored). No-op when nothing is open. */
-  closeModal(): void { this.modalHost.innerHTML = ''; }
+  closeModal(): void { this.modalOnKey = undefined; this.modalHost.innerHTML = ''; }
   /** Open the non-dismissable replay summary modal (START REPLAY → onReplay → reopen). */
   openReplay(opts: ReplayModalOptions): void {
     if (this.destroyed) return;

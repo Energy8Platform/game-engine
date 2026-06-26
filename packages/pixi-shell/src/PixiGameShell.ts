@@ -84,7 +84,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
         get autoplayEnabled() { return shell.config.features.autoplay != null; },
         get buyBonusEnabled() { return shell.config.features.buyBonus !== false; },
         hasOpenLayer: () => shell.currentLayer !== null,
-        routeToLayer: () => false,
+        routeToLayer: (e) => shell.currentLayer?.onKey?.(e) ?? false,
         spin: () => shell.emit('spin'),
         stepBet: (dir) => {
           const next = stepBet(shell.state, dir);

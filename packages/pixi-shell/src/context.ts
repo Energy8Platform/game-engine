@@ -19,6 +19,10 @@ export interface ShellLayer extends Container {
   fit?(): void;
   /** Called right before the layer is removed, so it can detach DOM listeners etc. */
   onRemove?(): void;
+  /** Called by the shell keyboard controller while this layer is open.
+   *  Return true to consume the key (prevents bar actions + Escape close); false to pass through
+   *  (Escape → closeLayer). */
+  onKey?(e: KeyboardEvent): boolean;
 }
 
 export interface LayerHandle {
