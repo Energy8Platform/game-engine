@@ -56,4 +56,22 @@ describe('Shift+M mute', () => {
     expect(shell.soundOn).toBe(false);
     expect(onSetting).toHaveBeenLastCalledWith({ key: 'sound', value: false });
   });
+
+  it('the Settings speaker button toggles the shared sound state (parity with Shift+M)', () => {
+    const shell = createGameShell(base());
+    const onSetting = vi.fn();
+    shell.on('settingChange', onSetting);
+    shell.openSettings();
+    const btn = document.querySelector('[data-ge="setting-sound"]') as HTMLButtonElement | null;
+    expect(btn).toBeTruthy();
+    expect(shell.soundOn).toBe(true);
+
+    btn!.click();
+    expect(shell.soundOn).toBe(false);
+    expect(onSetting).toHaveBeenLastCalledWith({ key: 'sound', value: false });
+
+    btn!.click();
+    expect(shell.soundOn).toBe(true);
+    expect(onSetting).toHaveBeenLastCalledWith({ key: 'sound', value: true });
+  });
 });
