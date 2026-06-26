@@ -43,6 +43,29 @@ describe('KeyboardController spin', () => {
   });
 });
 
+describe('KeyboardController hold-to-step-bet', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('Shift+ArrowUp steps bet once on press, then repeats after 350ms', () => {
+    vi.useFakeTimers();
+    const h = mockHost(); const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowUp', shiftKey: true }));
+    expect(h.stepBet).toHaveBeenCalledWith(1); expect(h.stepBet).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(349); expect(h.stepBet).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);   expect(h.stepBet).toHaveBeenCalledTimes(2);  // first repeat at 350ms
+    vi.advanceTimersByTime(90);  expect(h.stepBet).toHaveBeenCalledTimes(3);  // then every 90ms
+    document.dispatchEvent(new KeyboardEvent('keyup', { code: 'ArrowUp' }));
+    vi.advanceTimersByTime(500); expect(h.stepBet).toHaveBeenCalledTimes(3);
+    c.detach(); vi.useRealTimers();
+  });
+
+  it('ArrowUp WITHOUT shift does not step bet on the bar', () => {
+    const h = mockHost(); const c = new KeyboardController(h, document); c.attach();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowUp' }));
+    expect(h.stepBet).not.toHaveBeenCalled(); c.detach();
+  });
+});
+
 describe('KeyboardController hold-to-spin', () => {
   afterEach(() => { vi.useRealTimers(); });
 

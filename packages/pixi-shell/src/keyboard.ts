@@ -20,11 +20,25 @@ export interface KeyboardHost {
   closeLayer(): void;
 }
 
+// Bet key detection: bet-up needs Shift for arrow/equal, NumpadAdd is bare; same logic for down.
+function betDir(e: KeyboardEvent): 1 | -1 | null {
+  if (e.code === 'ArrowUp'   && e.shiftKey) return 1;
+  if (e.code === 'Equal'     && e.shiftKey) return 1;
+  if (e.code === 'NumpadAdd')               return 1;
+  if (e.code === 'ArrowDown' && e.shiftKey) return -1;
+  if (e.code === 'Minus'     && e.shiftKey) return -1;
+  if (e.code === 'NumpadSubtract')          return -1;
+  return null;
+}
+
 export class KeyboardController {
   private host: KeyboardHost;
   private doc: Document;
   private spaceHeld = false;
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bet hold-repeat state
+  private betHeldCode: string | null = null;
+  private betTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(host: KeyboardHost, doc?: Document) {
     this.host = host;
@@ -41,6 +55,37 @@ export class KeyboardController {
       s.mode === 'base' &&
       !s.autoplay.active
     );
+  }
+
+  private isBetAllowed(): boolean {
+    const h = this.host;
+    const s = h.state;
+    return (
+      h.hotkeysEnabled &&
+      !h.hasOpenLayer() &&
+      s.mode === 'base' &&
+      !s.busy
+    );
+  }
+
+  private clearBetTimer(): void {
+    if (this.betTimer !== null) {
+      clearTimeout(this.betTimer);
+      this.betTimer = null;
+    }
+  }
+
+  private startBetRepeat(dir: 1 | -1, elapsed: number): void {
+    // elapsed is ms already spent holding; use it to accelerate toward 45ms floor.
+    // Start at 90ms, decrease ~1ms per 10ms held after the first repeat, floor at 45ms.
+    const interval = Math.max(45, 90 - Math.floor(elapsed / 10));
+    this.betTimer = setTimeout(() => {
+      this.betTimer = null;
+      if (this.betHeldCode !== null && this.isBetAllowed()) {
+        this.host.stepBet(dir);
+        this.startBetRepeat(dir, elapsed + interval);
+      }
+    }, interval);
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -64,6 +109,26 @@ export class KeyboardController {
       return;
     }
 
+    // Bet step keys (Shift+arrows, Shift+=/-, NumpadAdd/Subtract) — non-repeat only
+    if (!e.repeat) {
+      const dir = betDir(e);
+      if (dir !== null && this.isBetAllowed()) {
+        this.betHeldCode = e.code;
+        this.host.stepBet(dir);
+        // First repeat after 350ms initial delay
+        this.clearBetTimer();
+        const capturedDir = dir;
+        this.betTimer = setTimeout(() => {
+          this.betTimer = null;
+          if (this.betHeldCode !== null && this.isBetAllowed()) {
+            this.host.stepBet(capturedDir);
+            this.startBetRepeat(capturedDir, 350);
+          }
+        }, 350);
+        return;
+      }
+    }
+
     // Non-Space keys: route to open layer first, then bar shortcuts (Tasks 6-7)
     if (this.host.hasOpenLayer()) {
       const consumed = this.host.routeToLayer(e);
@@ -76,6 +141,17 @@ export class KeyboardController {
       this.spaceHeld = false;
       this.clearHoldTimer();
     }
+    // Stop bet repeat on key release
+    if (e.code === this.betHeldCode) {
+      this.betHeldCode = null;
+      this.clearBetTimer();
+    }
+  };
+
+  private onBlur = (): void => {
+    // Window blur — stop bet repeat (same as keyup)
+    this.betHeldCode = null;
+    this.clearBetTimer();
   };
 
   private clearHoldTimer(): void {
@@ -88,13 +164,22 @@ export class KeyboardController {
   attach(): void {
     this.doc.addEventListener('keydown', this.onKeyDown);
     this.doc.addEventListener('keyup', this.onKeyUp);
+    // Use window if available for blur events
+    if (typeof window !== 'undefined') {
+      window.addEventListener('blur', this.onBlur);
+    }
   }
 
   detach(): void {
     this.doc.removeEventListener('keydown', this.onKeyDown);
     this.doc.removeEventListener('keyup', this.onKeyUp);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('blur', this.onBlur);
+    }
     this.spaceHeld = false;
     this.clearHoldTimer();
+    this.betHeldCode = null;
+    this.clearBetTimer();
   }
 
   notifyBusyChanged(busy: boolean): void {
