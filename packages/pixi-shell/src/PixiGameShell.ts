@@ -207,6 +207,11 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
 
   closeLayer(): void {
     this.clearLayer();
+    // Clear the Settings icon-updater only on a real close. NOT in clearLayer(): pushLayer() calls
+    // clearLayer() AFTER the new overlay was built (the arg is evaluated first), so clearing it there
+    // would wipe the refresher the just-opened Settings overlay registered → its speaker icon would
+    // never live-update on a Shift+M / click toggle.
+    this.soundRefresh = null;
   }
 
   private clearLayer(): void {
@@ -216,7 +221,6 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
       this.currentLayer.destroy({ children: true });
       this.currentLayer = null;
     }
-    this.soundRefresh = null; // the open Settings overlay (if any) is gone
     this.removeBackdrop();
   }
 

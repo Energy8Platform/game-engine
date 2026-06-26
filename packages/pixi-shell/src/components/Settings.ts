@@ -34,6 +34,7 @@ function buildBody(host: ShellHost, width: number): Container {
   });
   // Live-update the speaker when sound changes from here OR via Shift+M (shell clears on close).
   host.setSoundRefresh?.((on) => {
+    if (speaker.destroyed) return; // overlay torn down but refresher not yet cleared (push-over edge)
     speaker.setIcon(on ? 'soundOn' : 'soundOff');
     speaker.active = on;
   });
