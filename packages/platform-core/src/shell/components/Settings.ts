@@ -11,7 +11,7 @@ export function openSettingsModal(shell: GameShell): HTMLElement {
     let on = true;
     const btn = document.createElement('button');
     btn.className = 'ge-snd ge-active'; btn.dataset.ge = 'setting-sound';
-    btn.setAttribute('aria-label', 'Sound');
+    btn.setAttribute('aria-label', shell.t('Sound'));
     const paint = () => {
       btn.innerHTML = icon(on ? 'soundOn' : 'soundOff');
       btn.classList.toggle('ge-active', on);

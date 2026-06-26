@@ -16,7 +16,7 @@ import type {
 import { createInitialState } from './state';
 import { resolveTheme, type ShellTokens } from './theme';
 import { formatCurrency } from './format';
-import { socialize } from './i18n';
+import { createI18n, type I18n } from './i18n';
 import { installShellFont, whenFontReady } from './text';
 import { countUpText, tween } from './motion';
 import { BottomBar } from './components/BottomBar';
@@ -48,11 +48,13 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   private prevWin: number;
   private moneyAnims: Array<() => void> = [];
   private keysBound = false;
+  private i18n!: I18n;
 
   constructor(config: PixiShellConfig) {
     super();
     installShellFont();
     this.config = config;
+    this.i18n = createI18n({ language: config.language, isSocial: config.isSocial });
     this.app = config.app;
     this.ticker = config.app.ticker;
     this.canvas = config.app.canvas as HTMLCanvasElement | undefined;
@@ -104,7 +106,7 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
   }
 
   t(text: string): string {
-    return this.config.isSocial ? socialize(text) : text;
+    return this.i18n.t(text);
   }
   fmt(n: number): string {
     return formatCurrency(n, this.config.currency);
@@ -342,9 +344,17 @@ export class PixiGameShell extends EventEmitter<ShellEvents> implements ShellHos
     this.render();
   }
 
-  /** Toggle the social vocabulary at runtime (re-renders the bar; reopen overlays to refresh). */
+  /** Toggle the social vocabulary at runtime (rebuilds resolver, re-renders bar). */
   setSocial(isSocial: boolean): void {
     this.config.isSocial = isSocial;
+    this.i18n = createI18n({ language: this.config.language, isSocial });
+    this.render();
+  }
+
+  /** Swap the active language at runtime (rebuilds resolver, re-renders bar). */
+  setLanguage(lang: string): void {
+    this.config.language = lang;
+    this.i18n = createI18n({ language: lang, isSocial: this.config.isSocial });
     this.render();
   }
 

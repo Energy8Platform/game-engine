@@ -39,8 +39,10 @@ export interface ShellHost {
   readonly screenW: number;
   readonly screenH: number;
 
-  /** Resolve a built-in string (social word-swap when `isSocial`). */
+  /** Resolve a built-in string through the i18n resolver (translation + optional socialize). */
   t(text: string): string;
+  /** Swap the active language at runtime (rebuilds resolver, re-renders bar). */
+  setLanguage?(lang: string): void;
   /** Format a money amount in the shell currency (fixed minDecimals — balance/bet/prices). */
   fmt(n: number): string;
   /** Format a win / total-win amount (variable decimals — keeps small wins' significant digits). */

@@ -23,7 +23,7 @@ import { buildModal } from './components/Modal';
 import { buildReplayModal } from './components/ReplayModal';
 import { countUp } from './motion';
 import { formatCurrency } from './format';
-import { socialize } from './i18n';
+import { createI18n, type I18n } from './i18n';
 
 const REMOVE_FADE_MS = 300;
 
@@ -41,10 +41,12 @@ export class GameShell extends EventEmitter<ShellEvents> {
   private prevWin = 0;
   private moneyAnims: Array<() => void> = [];
   private keysBound = false;
+  private i18n!: I18n;
 
   constructor(config: ShellConfig) {
     super();
     this.config = config;
+    this.i18n = createI18n({ language: config.language, isSocial: config.isSocial });
     this.state = createInitialState(config);
 
     this.styleEl = document.createElement('style');
@@ -190,12 +192,22 @@ export class GameShell extends EventEmitter<ShellEvents> {
     this.render();
   }
 
-  /** Resolve a built-in shell string. English is the source; with `isSocial` it is run through
-   *  the social-casino word-swap. Game-supplied strings should NOT be passed through this. */
-  t(text: string): string { return this.config.isSocial ? socialize(text) : text; }
+  /** Resolve a built-in shell string through the i18n resolver (translation + optional socialize). */
+  t(text: string): string { return this.i18n.t(text); }
 
-  /** Toggle the social vocabulary at runtime (re-renders the bar; reopen overlays to refresh them). */
-  setSocial(isSocial: boolean): void { this.config.isSocial = isSocial; this.render(); }
+  /** Toggle the social vocabulary at runtime (rebuilds resolver, re-renders bar). */
+  setSocial(isSocial: boolean): void {
+    this.config.isSocial = isSocial;
+    this.i18n = createI18n({ language: this.config.language, isSocial });
+    this.render();
+  }
+
+  /** Swap the active language at runtime (rebuilds resolver, re-renders bar). */
+  setLanguage(lang: string): void {
+    this.config.language = lang;
+    this.i18n = createI18n({ language: lang, isSocial: this.config.isSocial });
+    this.render();
+  }
 
   /** Recolour the shell at runtime (e.g. switch dark/light scheme). */
   setTheme(theme: ThemeConfig): void {
