@@ -1,0 +1,47 @@
+{
+  "name": "@energy8platform/shell",
+  "version": "0.1.0",
+  "description": "Energy8 branded game shell — one logic core, pluggable html/pixi renderers behind a stable contract.",
+  "type": "module",
+  "main": "./dist/index.cjs.js",
+  "module": "./dist/index.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".":      { "import": "./dist/index.esm.js", "require": "./dist/index.cjs.js", "types": "./dist/index.d.ts" },
+    "./html": { "import": "./dist/html.esm.js",  "require": "./dist/html.cjs.js",  "types": "./dist/html.d.ts" },
+    "./pixi": { "import": "./dist/pixi.esm.js",  "require": "./dist/pixi.cjs.js",  "types": "./dist/pixi.d.ts" }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "gen-version": "node scripts/gen-version.mjs",
+    "prebuild": "npm run gen-version",
+    "build": "rollup -c rollup.config.mjs",
+    "dev": "rollup -c rollup.config.mjs -w",
+    "lint": "eslint src/ --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run gen-version",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": { "pixi.js": "^8.16.0" },
+  "peerDependenciesMeta": { "pixi.js": { "optional": true } },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "jsdom": "^25.0.1",
+    "pixi.js": "^8.16.0",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "keywords": ["casino", "energy8", "game-shell", "pixijs", "dom", "igaming"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/energy8platform/game-engine.git", "directory": "packages/shell" }
+}
