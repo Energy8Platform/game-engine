@@ -157,7 +157,10 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   private pullFocus = (): void => { try { (globalThis as { focus?: () => void }).focus?.(); } catch { /* cross-origin */ } };
 
   // ── overlay flow ─────────────────────────────────────────────────────────────
-  private show(req: OverlayRequest): void { this.closeModal(); this.overlay = this.renderer.openOverlay(req) ?? null; }
+  private show(req: OverlayRequest): void {
+    this.closeModal();
+    this.overlay = this.renderer.openOverlay(req) ?? null;
+  }
   openMenu(): void { this.emit('menuOpen'); this.openSettings(); }
   openSettings(): void { this.emit('settingsOpen'); this.show({ kind: 'settings' }); }
   openInfo(): void { this.emit('infoOpen'); this.show({ kind: 'gameInfo' }); }
@@ -166,8 +169,10 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   openAutoplayPicker(): void { this.show({ kind: 'autoplayPicker' }); }
   openReplay(opts: ReplayModalOptions): void { if (this.destroyed) return; this.show({ kind: 'replay', opts }); }
   openModal(opts: ModalOptions): void { this.show({ kind: 'modal', opts }); }
+  /** Programmatically dismiss whatever overlay/modal is open. No-op when nothing is shown. */
   closeModal(): void {
-    if (this.overlay) { this.overlay.close(); this.overlay = null; }
+    if (!this.overlay) return;
+    this.overlay = null;
     this.soundRefresh = null;
     this.renderer.closeOverlay();
   }

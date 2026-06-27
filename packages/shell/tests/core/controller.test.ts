@@ -86,4 +86,14 @@ describe('ShellController', () => {
     c.deactivateFeature();
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it('closeModal tears the overlay down exactly once and is a no-op when nothing is open', () => {
+    const { c, r } = make();
+    c.openSettings();
+    expect(r.closed).toBe(0);   // opening the first overlay must not fire closeOverlay
+    c.closeModal();
+    expect(r.closed).toBe(1);   // closed exactly once
+    c.closeModal();
+    expect(r.closed).toBe(1);   // no-op when nothing is open
+  });
 });
