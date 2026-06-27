@@ -4,7 +4,7 @@ import { resolveTheme, DEFAULT_ACCENT } from '@/core/theme';
 describe('resolveTheme', () => {
   it('defaults to the dark scheme palette', () => {
     const t = resolveTheme();
-    expect(t.fg).toBeTruthy();
+    expect(t.fg).toBe('#f3f5fa');
     expect(t.accent).toBe(DEFAULT_ACCENT);
   });
   it('applies a game accent override', () => {
