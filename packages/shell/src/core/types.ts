@@ -1,5 +1,13 @@
 export type ShellMode = 'base' | 'freeSpins' | 'replay';
 
+export interface ThemeConfig {
+  /** Palette scheme: 'dark' (default) for dark games, 'light' for light backgrounds. */
+  scheme?: 'dark' | 'light';
+  /** Brand accent — active states, the SPIN hover glow, and the BUY BONUS button.
+   *  (Per-bonus card accents are set on each `BonusOption.accentColor`.) */
+  accent?: string;
+}
+
 export interface CurrencyConfig {
   symbol: string;
   position: 'left' | 'right';
@@ -71,7 +79,7 @@ export interface ShellConfig {
   isSocial?: boolean;
   gameInfo?: unknown;
   version?: string;
-  theme?: unknown;
+  theme?: ThemeConfig;
   onBonusBuy?: () => void;
 }
 
