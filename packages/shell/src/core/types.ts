@@ -1,13 +1,5 @@
 export type ShellMode = 'base' | 'freeSpins' | 'replay';
 
-export interface ThemeConfig {
-  /** Palette scheme: 'dark' (default) for dark games, 'light' for light backgrounds. */
-  scheme?: 'dark' | 'light';
-  /** Brand accent — active states, the SPIN hover glow, and the BUY BONUS button.
-   *  (Per-bonus card accents are set on each `BonusOption.accentColor`.) */
-  accent?: string;
-}
-
 export interface CurrencyConfig {
   symbol: string;
   position: 'left' | 'right';
@@ -35,6 +27,113 @@ export interface BonusOption {
   priceMultiplier: number;
   /** Per-option accent override. Falls back to the type default (bonus → purple, feature → gold). */
   accentColor?: string;
+  /** Override the card UI. Return the card's inner content; the shell keeps the grid wrapper,
+   *  accent vars and live re-pricing, and runs the normal buy flow when you call `ctx.select()`.
+   *  Core uses `unknown`; each renderer re-exports a typed alias (ui/html → HTMLElement,
+   *  ui/pixi → Container). */
+  custom?: (ctx: BonusCardContext) => unknown;
+}
+
+/** Context passed to a `BonusOption.custom` renderer. Render the card however you like and wire
+ *  your own control to `select()` — the buy/confirm flow stays internal to the shell. */
+export interface BonusCardContext {
+  bonus: BonusOption;
+  /** Current bet. */
+  bet: number;
+  /** Card price = `bonus.priceMultiplier × bet`. */
+  price: number;
+  /** `price` formatted in the shell currency. */
+  priceText: string;
+  /** True when the option can't be bought right now (unaffordable / busy / buy-bonus disabled);
+   *  reflect it in your UI. `select()` is a no-op while disabled. */
+  disabled: boolean;
+  /** Card accent (per-option override or the type default); also set as the `--card-acc` CSS var. */
+  accent: string;
+  /** Proceed through the shell's normal flow: opens the confirm modal, then emits `buyBonusSelect`
+   *  / activates the feature. No-op while `disabled`. */
+  select: () => void;
+}
+
+export interface ThemeConfig {
+  /** Palette scheme: 'dark' (default) for dark games, 'light' for light backgrounds. */
+  scheme?: 'dark' | 'light';
+  /** Brand accent — active states, the SPIN hover glow, and the BUY BONUS button.
+   *  (Per-bonus card accents are set on each `BonusOption.accentColor`.) */
+  accent?: string;
+}
+
+/** One paytable entry: a symbol (text/image) and its win tiers, rendered "<count> x<multiplier>". */
+export interface PaytableRow {
+  symbol: { text?: string; image?: string };
+  wins: Array<{ count?: string; multiplier: number }>;
+}
+
+/** One payline over a cols×rows grid: the row index (0 = top) the line takes in each column. */
+export interface PaylineDef {
+  /** length must equal grid.cols; each value in 0..rows-1 */
+  pattern: number[];
+  label?: string;
+}
+
+/** A single grid cell, 0-based, row 0 = top. */
+export type CellRef = [col: number, row: number];
+
+/** A named winning shape: an arbitrary set of grid cells (not one-per-column like a payline),
+ *  shown as a grid illustration with its name and optional description. */
+export interface ShapeDef {
+  /** The lit cells, in any pattern. */
+  cells: CellRef[];
+  name: string;
+  description?: string;
+}
+
+/** How a game pays — drives the GameInfo win-section illustration. One section = one kind.
+ *  `example`/`winExample`/`loseExample` are optional; omit them for an auto-drawn illustration
+ *  sized to `grid`. */
+export type WinSection = {
+  type: 'wins';
+  title?: string;
+  order?: number;
+  grid: { cols: number; rows: number };
+  /** Optional prose shown alongside the illustration. */
+  description?: string;
+} & (
+  | { kind: 'classic'; lines: Array<number[] | PaylineDef> }
+  | { kind: 'cluster'; minCount: number; example?: CellRef[] }
+  | { kind: 'anywhere'; minCount: number; example?: CellRef[] }
+  | { kind: 'ways'; winExample?: CellRef[]; loseExample?: CellRef[] }
+  | { kind: 'shapes'; shapes: ShapeDef[] }
+);
+
+/** A playable mode / bonus-buy option, shown for comparison (informational only). */
+export interface GameMode {
+  title: string;
+  price?: string;
+  rtp?: number;
+  maxWin?: string;
+  description?: string;
+}
+
+/** A preset game-info section. `order` overrides placement; by default `modes` comes
+ *  first, `controls` second, and the rest follow in declaration order. */
+export type GameInfoSection =
+  | { type: 'modes'; title?: string; order?: number; modes: GameMode[] }
+  | { type: 'controls'; title?: string; order?: number }
+  | { type: 'hotkeys'; title?: string; order?: number }
+  | { type: 'paytable'; title?: string; order?: number; rows: PaytableRow[] }
+  | WinSection
+  | { type: 'custom'; title?: string; order?: number; node?: unknown; html?: string };
+
+export interface GameInfoContent {
+  sections?: GameInfoSection[];
+}
+
+/** Autoplay limits. Presence of this object (vs `null`) is what enables autoplay. */
+export interface AutoplayConfig {
+  /** Maximum selectable spin count in the autoplay picker. Caps the built-in presets and
+   *  drops the unlimited (∞) choice; if it isn't already a preset it becomes the top choice.
+   *  Omit for the default presets (including ∞). */
+  maxCount?: number;
 }
 
 export interface ShellFeatures {
@@ -46,7 +145,7 @@ export interface ShellFeatures {
    *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */
   spacebar?: boolean;
   /** Autoplay: `null` (or omitted) disables it; an object enables it (optionally with limits). */
-  autoplay?: { maxCount?: number } | null;
+  autoplay?: AutoplayConfig | null;
   buyBonus: BonusOption[] | false;
 }
 
@@ -63,9 +162,54 @@ export interface FreeSpinsState {
   totalWin: number;
 }
 
+/** One footer button of a generic modal. Clicking it runs `on` (if any), then closes the modal. */
+export interface ModalAction {
+  title: string;
+  /** Button fill colour (any CSS colour). Omit for a neutral/secondary button. */
+  color?: string;
+  on?: () => void;
+}
+
+/** Options for `shell.openReplay()` — a non-dismissable replay summary modal.
+ *  `bonusId` is matched against `features.buyBonus` to label the mode and read the cost
+ *  multiplier. There is no ✕ and the backdrop never closes it; the only action is START
+ *  REPLAY, which closes the modal, runs `onReplay`, then reopens it. */
+export interface ReplayModalOptions {
+  bonusId: string;
+  /** Base bet the replay was recorded at. */
+  bet: number;
+  payoutMultiplier: number;
+  /** Runs after the modal closes; the modal reopens once it resolves (immediately for sync). */
+  onReplay: () => void | Promise<void>;
+}
+
+/** Options for `shell.openModal()` — a generic, externally-triggered card modal. */
+export interface ModalOptions {
+  /** Show the ✕ in the overlay's top-right corner. */
+  availableClose: boolean;
+  title: string;
+  body: string;
+  /** Footer buttons; each closes the modal (after running its `on`). */
+  actions?: ModalAction[];
+  /** Backdrop blur in px (defaults to the shell's standard blur). */
+  blurLevel?: number;
+  /** Optional keyboard handler — called by the shell keyboard controller while this modal is
+   *  open. Return true to consume the key (prevents bar actions + Escape close); false to let
+   *  the controller handle it (Escape → closeModal). */
+  onKey?: (e: KeyboardEvent) => boolean;
+}
+
 export interface ShellConfig {
-  // NOTE: `mount: HTMLElement` is intentionally omitted — core stays node-free. Task 4 adds it.
+  // NOTE: `mount: HTMLElement` is intentionally omitted — mount target is a renderer concern.
+  theme?: ThemeConfig;
+  gameInfo: GameInfoContent;
   language: string;
+  /** Game version shown in the game-info footer (e.g. '1.2.0'). Defaults to '1.0.0'. The footer
+   *  stamp is `${version}.${engineVersionWithoutDots}` — e.g. game 1.0.0 on engine 0.24.6 → '1.0.0.0246'. */
+  version?: string;
+  /** When true, all built-in shell text is shown in the social-casino vocabulary (derived from
+   *  English via word-swap rules), regardless of `language`. Game-supplied content is untouched. */
+  isSocial?: boolean;
   currency: CurrencyConfig;
   availableBets: number[];
   defaultBet: number;
@@ -73,15 +217,21 @@ export interface ShellConfig {
   balance: number;
   win: number;
   mode: ShellMode;
-  /** Mark this shell as a read-only historical-round replay. */
+  /** Mark this shell as a read-only historical-round replay. A replay never shows the player's
+   *  balance (there's no live wallet), even while its free-spins phase runs in `freeSpins` mode.
+   *  Defaults to `mode === 'replay'`; set explicitly when a replay starts in another mode. */
   replay?: boolean;
   features: ShellFeatures;
-  isSocial?: boolean;
-  gameInfo?: unknown;
-  version?: string;
-  theme?: ThemeConfig;
+  /** Override the BUY BONUS bar button's action: when set, tapping it calls this instead of
+   *  opening the built-in buy-bonus overlay (e.g. the game shows its own bonus UI). The button
+   *  is shown whenever this OR `features.buyBonus` is set. */
   onBonusBuy?: () => void;
 }
+
+/** ShellConfig after the controller applies defaults (version, isSocial, replay, theme). No mount. */
+export type ResolvedShellConfig = Required<Pick<ShellConfig,
+  'language' | 'currency' | 'availableBets' | 'defaultBet' | 'balance' | 'win' | 'mode' | 'features' | 'gameInfo' | 'version' | 'isSocial' | 'replay'>>
+  & Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy'>;
 
 export interface ShellState {
   mode: ShellMode;
@@ -98,6 +248,22 @@ export interface ShellState {
   turbo: number;
   buyBonusEnabled: boolean;
   freeSpins: FreeSpinsState;
-  /** The currently activated `feature` option (e.g. Ante), or null. */
+  /** The currently activated `feature` option (e.g. Ante), or null. Drives the
+   *  effective-bet readout tint and the BUY BONUS → DISABLE toggle on the bar. */
   activeFeature: BonusOption | null;
+}
+
+export interface ShellEvents {
+  spin: void;
+  betChange: number;
+  autoplayStart: AutoplayOptions;
+  autoplayStop: void;
+  turboChange: number;
+  buyBonusSelect: { id: string };
+  featureActivate: { id: string };
+  featureDeactivate: { id: string };
+  menuOpen: void;
+  settingsOpen: void;
+  infoOpen: void;
+  settingChange: { key: string; value: unknown };
 }
