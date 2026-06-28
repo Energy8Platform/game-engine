@@ -9,6 +9,67 @@ export { CascadeController } from './anim/CascadeController';
 export type { CascadeStepData, CascadeTimings, CascadeAnim } from './anim/CascadeController';
 export { ReelSpinController } from './anim/ReelSpinController';
 export type { ReelSpinData, ReelSpinTimings, ReelStopPlan } from './anim/ReelSpinController';
+export { EASING_BY_NAME, easingByName } from './anim/easing-map';
+
+// ── configurable reel system ────────────────────────────────────────────────
+export {
+  DEFAULT_REEL_CONFIG,
+  INTENSITY_SCALE,
+  FEATURE_KEYS,
+  resolveReelConfig,
+  mergeReelConfig,
+  effectiveRowsPerReel,
+  waysCount,
+} from './config/ReelSystemConfig';
+export type {
+  ReelSystemConfig,
+  DeepPartial,
+  EasingName,
+  EvaluationMode,
+  MotionStyle,
+  StopMode,
+  StopOrder,
+  Intensity,
+  GridConfig,
+  MotionConfig,
+  SettleConfig,
+  SquashConfig,
+  BlurConfig,
+  AnticipationConfig,
+  CascadeConfig,
+  WinConfig,
+  FeaturesConfig,
+  FeatureKey,
+  ExpandingWildConfig,
+  StickyConfig,
+  WalkingWildConfig,
+  MultiplierConfig,
+  MysteryConfig,
+  TransformConfig,
+  GiantConfig,
+  SplitConfig,
+  StackedConfig,
+  NudgeConfig,
+  ReelModifierConfig,
+  HoldAndSpinConfig,
+  RandomWildConfig,
+} from './config/ReelSystemConfig';
+export { PRESETS, PRESET_LIST } from './config/presets';
+export type { PresetId, ReelPreset } from './config/presets';
+
+export { SpinEngine } from './motion/SpinEngine';
+export type { SpinData, SpinRunOpts, ReelStopPlan as SpinStopPlan } from './motion/SpinEngine';
+export { AnticipationController } from './motion/AnticipationController';
+export type { AnticipationDecision } from './motion/AnticipationController';
+export { TumbleController } from './cascade/TumbleController';
+export type { TumbleStep } from './cascade/TumbleController';
+
+export { FEATURES, FEATURE_LIST } from './features';
+export type { ReelFeature, FeatureContext } from './features';
+
+export { createReelSystem } from './system/ReelSystem';
+export type { ReelSystem, CreateReelSystemOptions } from './system/ReelSystem';
+
 export { pickTier, tierIndexAtValue } from './overlay/tiers';
 export type { WinTier } from './overlay/tiers';
 export { valueAt, CountUpDisplay } from './overlay/CountUpDisplay';
