@@ -96,7 +96,13 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
         if (next === this.state.bet) return;
         this.state.bet = next; this.emit('betChange', next); this.renderer.renderBar();
       },
-      setBet: (n) => this.setBet(n),
+      setBet: (n) => {
+        if (n !== this.state.bet) {
+          this.state.bet = n;
+          this.emit('betChange', n);
+          this.renderer.renderBar();
+        }
+      },
       cycleTurbo: () => {
         const next = nextTurbo(this.state.turbo, this.config.features.turbo);
         this.state.turbo = next; this.emit('turboChange', next); this.renderer.renderBar();
