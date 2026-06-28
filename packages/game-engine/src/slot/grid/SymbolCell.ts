@@ -15,8 +15,16 @@ export interface CellData {
   bonus?: number;
   sticky?: { remaining: number };
 }
-export interface CellState { winning?: boolean; removed?: boolean; fresh?: boolean; }
-export interface SymbolCellConfig { size: number; resolve: SymbolResolver; frameStyle?: CellFrameStyle; }
+export interface CellState {
+  winning?: boolean;
+  removed?: boolean;
+  fresh?: boolean;
+}
+export interface SymbolCellConfig {
+  size: number;
+  resolve: SymbolResolver;
+  frameStyle?: CellFrameStyle;
+}
 
 const DEFAULT_STYLE: Required<CellFrameStyle> = {
   radius: 8,
@@ -51,14 +59,23 @@ export class SymbolCell extends Container {
     this._drawFrame('idle');
   }
 
-  get view(): SymbolView | null { return this._view; }
+  get view(): SymbolView | null {
+    return this._view;
+  }
 
   setData(data: CellData): void {
+    if (this.destroyed) return; // a killed-tween chain may resume after the cell is gone
     // symbol view
     if (data.symbol == null) {
-      if (this._view) { this._view.destroy(); this._view = null; }
+      if (this._view) {
+        this._view.destroy();
+        this._view = null;
+      }
     } else {
-      if (this._view) { this._view.destroy(); this._view = null; }
+      if (this._view) {
+        this._view.destroy();
+        this._view = null;
+      }
       const v = this._resolve(data.symbol);
       if (v) {
         v.resize?.(this._size);
@@ -72,7 +89,14 @@ export class SymbolCell extends Container {
   }
 
   setState(state: CellState): void {
-    const key = state.winning ? 'winning' : state.removed ? 'removed' : state.fresh ? 'fresh' : 'idle';
+    if (this.destroyed) return;
+    const key = state.winning
+      ? 'winning'
+      : state.removed
+        ? 'removed'
+        : state.fresh
+          ? 'fresh'
+          : 'idle';
     this.frameStyleKey = key;
     this._drawFrame(key);
   }
@@ -81,17 +105,21 @@ export class SymbolCell extends Container {
     if (this._view?.playWin) return this._view.playWin();
     // default: scale pop
     const target = this._view ?? this;
-    return Tween.to(target, { 'scale.x': 1.15, 'scale.y': 1.15 }, 160, Easing.easeOutBack)
-      .then(() => Tween.to(target, { 'scale.x': 1, 'scale.y': 1 }, 140, Easing.easeOutQuad));
+    return Tween.to(target, { 'scale.x': 1.15, 'scale.y': 1.15 }, 160, Easing.easeOutBack).then(
+      () => Tween.to(target, { 'scale.x': 1, 'scale.y': 1 }, 140, Easing.easeOutQuad),
+    );
   }
 
-  playIdle(): void { this._view?.playIdle?.(); }
+  playIdle(): void {
+    this._view?.playIdle?.();
+  }
 
   hasBadge(kind: 'multiplier' | 'bonus'): boolean {
     return kind === 'multiplier' ? this._multBadge != null : this._bonusBadge != null;
   }
 
   private _drawFrame(key: 'idle' | 'winning' | 'removed' | 'fresh'): void {
+    if (this.destroyed || this._frame.destroyed) return;
     const s = this._style[key];
     this._frame.clear();
     this._frame
@@ -102,7 +130,10 @@ export class SymbolCell extends Container {
   }
 
   private _setMultiplier(value?: number): void {
-    if (this._multBadge) { this._multBadge.destroy(); this._multBadge = null; }
+    if (this._multBadge) {
+      this._multBadge.destroy();
+      this._multBadge = null;
+    }
     if (!value || value <= 1) return;
     this._multBadge = this._badge(`×${value}`, 0xffd24a);
     this._multBadge.position.set(this._size / 2 - 12, -this._size / 2 + 12);
@@ -110,7 +141,10 @@ export class SymbolCell extends Container {
   }
 
   private _setBonus(value?: number): void {
-    if (this._bonusBadge) { this._bonusBadge.destroy(); this._bonusBadge = null; }
+    if (this._bonusBadge) {
+      this._bonusBadge.destroy();
+      this._bonusBadge = null;
+    }
     if (!value || value <= 0) return;
     this._bonusBadge = this._badge(`+${value}`, 0x7ad7ff);
     this._bonusBadge.position.set(-this._size / 2 + 12, -this._size / 2 + 12);

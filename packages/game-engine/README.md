@@ -19,6 +19,7 @@ A casino game engine built on [PixiJS v8](https://pixijs.com/) and [@energy8plat
 - [Viewport & Scaling](#viewport--scaling)
 - [State Machine](#state-machine)
 - [Animation](#animation)
+- [Slot Reels](#slot-reels)
 - [UI Components](#ui-components)
 - [Input](#input)
 - [Vite Configuration](#vite-configuration)
@@ -107,6 +108,7 @@ import { AssetManager } from '@energy8platform/game-engine/assets';
 import { AudioManager } from '@energy8platform/game-engine/audio';
 import { FlexContainer, Button, Label, Panel, Modal, Layout, ScrollContainer, Toast, ProgressBar, BalanceDisplay, WinDisplay, Slider, Toggle, resolveView } from '@energy8platform/game-engine/ui';
 import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-engine/animation';
+import { createReelSystem, resolveReelConfig, PRESETS } from '@energy8platform/game-engine/slot';
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
 import { ReactScene, extendPixiElements, extendUIElements, useSDK, useViewport } from '@energy8platform/game-engine/react';
 import { defineGameConfig } from '@energy8platform/game-engine/vite';
@@ -392,6 +394,125 @@ const spine = await SpineHelper.create('character-skel', 'character-atlas', { sc
 await SpineHelper.playAnimation(spine, 'idle', true);
 SpineHelper.setSkin(spine, 'warrior');
 ```
+
+---
+
+## Slot Reels
+
+A fully-configurable reel system driven by a single typed `ReelSystemConfig`. Import from `@energy8platform/game-engine/slot`. **Presentation only** — the engine draws the boards you feed it; the outcome (math) always comes from your Lua/server.
+
+> Try every knob interactively in the **[reel-lab playground](../../examples/reel-lab/)** — it tweaks the whole config live, triggers every feature, and copies the resulting config (TS/JSON) into your game.
+
+### Quick Start
+
+```typescript
+import { createReelSystem, resolveReelConfig } from '@energy8platform/game-engine/slot';
+import type { SymbolView } from '@energy8platform/game-engine/slot';
+
+// 1. Tell the system how to build each symbol's visual (any PixiJS Container).
+const resolve = (id: string): SymbolView | null => new MySymbolSprite(id);
+
+// 2. Create the system — override only what you need; the rest is sensible defaults.
+const reels = createReelSystem({
+  resolve,
+  config: {
+    grid: { cols: 5, rows: 3, cellSize: 96, evaluation: 'lines' },
+    motion: { style: 'strip', spinUp: 600, blur: { enabled: true, alpha: 0.85, strength: 6, streaks: false } },
+  },
+});
+scene.container.addChild(reels.view);
+
+// 3. Drive it with results from your play loop (board[col][row]).
+await reels.spin(targetBoard, { turbo });
+await reels.cascade(cascadeSteps, { turbo });   // tumble/avalanche steps
+```
+
+### Config Shape
+
+`resolveReelConfig(partial)` deep-merges your overrides onto `DEFAULT_REEL_CONFIG`:
+
+| Section | Key knobs |
+| --- | --- |
+| `grid` | `cols`, `rows`, `rowsPerReel[]` (Megaways / variable heights), `cellSize`, `gap`, `evaluation` (`lines`/`ways`/`anywhere`/`cluster`/`megaways`/`infinity`), `mask` |
+| `motion` | `style` (`swap`/`strip`/`cascade-drop`), `spinUp`, `hold`, `stopStagger`, `stopMode` (`sequential`/`sync`/`random`), `stopOrder`, `settle`, `squash`, `blur`, `turboFactor`, `intensity`, `slamStop` |
+| `anticipation` | `enabled`, `triggerSymbols`, `threshold` (N−1), `reels` (`trailing`/indices), `slowdownFactor`, `holdMs`, `zoom` |
+| `cascade` | `enabled`, `gravity`, `timings`, `easings`, `perStepDecel`, `dimNonWinners`, `multiplier` (`mode` add/mul, `cap`, `persistInFreeSpins`) |
+| `win` | `highlightScale`, `glow`, `frameShake` |
+| `features` | per-mechanic config (see below) |
+
+Helpers: `effectiveRowsPerReel(grid)`, `waysCount(grid)` (product of per-reel heights), `mergeReelConfig(base, partial)`.
+
+### Presets
+
+Ready-made configs distilled from shipped games — use directly or as a starting point:
+
+```typescript
+import { createReelSystem, resolveReelConfig, PRESETS } from '@energy8platform/game-engine/slot';
+
+const reels = createReelSystem({ resolve, config: PRESETS['stone-rush'].config });
+// or merge a preset with your own overrides:
+const cfg = resolveReelConfig({ ...PRESETS.megaways.config, grid: { cellSize: 80 } });
+```
+
+Available: `classic`, `kitsune-wrath`, `moon-spice`, `stone-rush`, `hot-ross`, `magnus`, `megaways`.
+
+### Feature Mechanics
+
+13 built-in presentation mechanics, each toggled + parameterized under `config.features`: `expandingWild`, `sticky`, `walkingWild`, `randomWild`, `mystery`, `transform` (+ upgrade), `giant`, `split`, `stacked`, `nudge` (xNudge), `multiplier`, `holdAndSpin`, `reelModifier`.
+
+```typescript
+const reels = createReelSystem({
+  resolve,
+  config: { features: { expandingWild: { enabled: true, symbol: 'wild', reels: [1, 2, 3] } } },
+});
+
+reels.enabledFeatures();                 // active features in canonical order
+await reels.runFeature('expandingWild'); // play a feature's presentation
+```
+
+### Custom Features
+
+Not every mechanic is built in — register your own. A `ReelFeature` uses only the public `FeatureContext` (grid geometry, the `fx` overlay layer, `resolve`, `Tween`):
+
+```typescript
+import type { ReelFeature } from '@energy8platform/game-engine/slot';
+import { Tween, Easing } from '@energy8platform/game-engine/animation';
+
+const FlyingWild: ReelFeature = {
+  key: 'custom:flyingWild',
+  label: 'Flying wild',
+  enabled: () => true,
+  async demo(ctx) {
+    const from = ctx.grid.cellPosition(ctx.grid.cols - 1, 0);
+    const flyer = ctx.resolve('wild')!;
+    flyer.position.set(from.x, from.y);
+    ctx.fx.addChild(flyer);                                  // overlay above the grid
+    await Tween.to(flyer, { 'position.x': 200, 'position.y': 150 }, 640, Easing.easeInOutQuad);
+    flyer.destroy();
+  },
+};
+
+const reels = createReelSystem({ resolve, config, features: [FlyingWild] });
+// or later: reels.registerFeature(FlyingWild);
+await reels.runFeature('custom:flyingWild');
+```
+
+You can also skip the registry entirely and animate directly over `reels.grid` / `reels.fx` with `Tween` — see the [reel-lab custom features](../../examples/reel-lab/src/customFeatures.ts) for working examples (flying wild, reel highlight).
+
+### `ReelSystem` API
+
+| Member | Description |
+| --- | --- |
+| `view`, `grid`, `fx` | Root container, the `ReelGrid`, and the overlay layer |
+| `config`, `board`, `ways`, `multiplier` | Current config / board / ways-to-win / cascade multiplier |
+| `spin(target, opts?)` | Animate a spin to `target` (handles anticipation + zoom) |
+| `cascade(steps, opts?)` | Run tumble steps; `{ freeSpins }` honours `persistInFreeSpins` |
+| `update(partial)` / `setConfig(cfg)` | Re-merge / replace config (rebuilds geometry when needed) |
+| `setBoard(board)` / `resize(cellSize)` | Set the board / re-layout |
+| `registerFeature(f)` / `runFeature(key)` / `features()` | Custom-feature registry |
+| `skip()` / `destroy()` | Slam-stop / tear down |
+
+> **Low-level primitives** are also exported for bespoke setups: `ReelGrid`, `SpinEngine`, `AnticipationController`, `TumbleController`, `SymbolCell`, `AnimatedSymbol`, plus the legacy `ReelSpinController` / `CascadeController` (kept for back-compat). The overlay helpers `BigWinOverlay`, `CountUpDisplay`, `MultiplierAccumulator`, and `FreeSpinsSession` round out the slot toolkit.
 
 ---
 
