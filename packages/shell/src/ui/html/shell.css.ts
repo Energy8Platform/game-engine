@@ -260,15 +260,19 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-body { max-width:none; padding:clamp(6px,2.5cqh,16px) clamp(12px,3vw,28px); }
 #${SHELL_ROOT_ID} .ge-bb-grid { display:flex; gap:14px; justify-content:safe center; overflow-x:auto; overflow-y:hidden; padding-bottom:6px;
   scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
-/* the one knob that scales the whole card — cqh measures the overlay (popout frame), not the
-   browser window, so cards shrink to fit the real container height. The floor is deliberately tiny:
-   on a 400×225 popout the whole card (incl. the CTA) only fits below ~5px, and a fully visible,
-   single-axis-scrolling card beats a bigger one whose button is clipped or needs a 2nd scrollbar. */
+/* the one knob that scales the whole card (its whole layout is em-relative). It is the SMALLER of two
+   fits, so the card is always fully visible:
+     • 3.4cqh — height: the card stays inside the band between the header and the bet footer (cqh
+       measures the overlay popout frame, not the browser window);
+     • 84cqw / (N*18) — width: the N cards (each 18em) fit the frame width side-by-side instead of
+       overflowing into an X-scroll. --ge-bb-n is the live card count, set in BuyBonus.ts.
+   Floor is deliberately tiny: on a 400×225 popout a fully visible card beats a bigger clipped one. */
 #${SHELL_ROOT_ID} .ge-bb-grid .ge-bonus-card { flex:0 0 18em; scroll-snap-align:start;
-  font-size:clamp(4px, 3.4cqh, 12px); }
-/* mobile: vertical stack at a fixed, readable size — scroll the list, don't shrink the cards */
+  font-size:clamp(4px, min(3.4cqh, calc(84cqw / (var(--ge-bb-n,3) * 18))), 12px); }
+/* mobile: vertical stack at a fixed, readable size — scroll the list; only shrink if the card would
+   be wider than the frame (very narrow viewport), so it never overflows horizontally. */
 #${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid { display:flex; flex-direction:column; gap:14px; overflow:visible; }
-#${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid .ge-bonus-card { flex:0 0 auto; font-size:12px; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-bb-grid .ge-bonus-card { flex:0 0 auto; font-size:min(12px, calc(92cqw / 18)); }
 #${SHELL_ROOT_ID} .ge-bonus-card { display:flex; flex-direction:column; border-radius:1.4em; overflow:hidden;
   background:var(--shell-plaque-glass); border:1px solid var(--shell-plaque-line); color:#fff; text-align:center;
   pointer-events:auto; cursor:pointer; transition:box-shadow .12s ease, background .12s ease; }
@@ -331,13 +335,15 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-spacer { width:clamp(24px,7cqh,32px); }
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-ov-nav { width:clamp(24px,7cqh,32px); height:clamp(24px,7cqh,32px);
   font-size:clamp(14px,4cqh,18px); border-radius:clamp(7px,2cqh,9px); }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betbar { padding:clamp(2px,.9cqh,4px); }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betpill { padding:clamp(2px,.67cqh,3px) clamp(4px,1.1cqh,5px); }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betstep { width:clamp(24px,7cqh,32px); height:clamp(24px,7cqh,32px);
-  font-size:clamp(15px,4.4cqh,20px); }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval { min-width:clamp(62px,17.5cqh,80px); }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval b { font-size:clamp(11px,3.1cqh,14px); }
-#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval span { font-size:clamp(6px,1.55cqh,7px); }
+/* the bet pill read too large next to the shrunk cards — size it ~0.8× across the board (the floors
+   stay readable; the maxima are what dominate on Popout L / wide frames). */
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betbar { padding:clamp(2px,.75cqh,3px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betpill { padding:clamp(2px,.55cqh,3px) clamp(3px,.9cqh,4px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betstep { width:clamp(20px,5.7cqh,26px); height:clamp(20px,5.7cqh,26px);
+  font-size:clamp(12px,3.5cqh,16px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval { min-width:clamp(50px,14cqh,66px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval b { font-size:clamp(9px,2.5cqh,11px); }
+#${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval span { font-size:clamp(5px,1.25cqh,6px); }
 
 /* ═══ base/wide plaque bar — grouped dark + glass panels (reference-style) ═══ */
 #${SHELL_ROOT_ID} .ge-zone-plaques { gap:0; }                     /* panels connect; buttons overlap */
