@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/game-engine",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "description": "Universal casino game engine built on PixiJS v8 and @energy8platform/game-sdk",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -87,7 +87,7 @@
     "@energy8platform/pixi-shell": "*"
   },
   "peerDependencies": {
-    "@energy8platform/game-sdk": "^2.7.0",
+    "@energy8platform/game-sdk": "^2.8.0",
     "@energy8platform/stake-bridge": ">=0.2.1",
     "pixi.js": "^8.16.0"
   },
@@ -103,7 +103,7 @@
     }
   },
   "devDependencies": {
-    "@energy8platform/game-sdk": "^2.7.0",
+    "@energy8platform/game-sdk": "^2.8.0",
     "@energy8platform/stake-bridge": "*",
     "@esotericsoftware/spine-pixi-v8": "~4.2.0",
     "@pixi/sound": "^6.0.0",

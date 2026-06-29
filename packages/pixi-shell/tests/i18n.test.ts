@@ -17,6 +17,7 @@ describe('createI18n.t', () => {
   });
   it('socializes English only when isSocial', () => {
     expect(createI18n({ language: 'en', isSocial: true }).t('Buy bonus')).toBe('Get bonus');
+    expect(createI18n({ language: 'en', isSocial: true }).t('Top paying symbols')).toBe('Top winning symbols');
   });
   it('translates via LOCALES when present', () => {
     const t = createI18n({ language: 'ru', messages: { ru: { Settings: 'Настройки' } } }).t;

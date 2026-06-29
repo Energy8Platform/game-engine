@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/game-sdk",
-  "version": "2.7.3",
+  "version": "2.8.0",
   "description": "Energy8 Platform Game SDK — postMessage-based bridge for HTML5 game integration",
   "author": "Energy8 Platform",
   "license": "MIT",
@@ -17,6 +17,10 @@
     "./protocol": {
       "import": "./dist/protocol.js",
       "types": "./dist/protocol.d.ts"
+    },
+    "./social": {
+      "import": "./dist/social.js",
+      "types": "./dist/social.d.ts"
     }
   },
   "files": [
