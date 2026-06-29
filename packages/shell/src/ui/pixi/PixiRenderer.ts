@@ -329,7 +329,7 @@ export class PixiRenderer implements ShellRenderer {
       get actions() { return host.actions; },
       t: (s) => host.t(s),
       formatCurrency: (n, win) => host.formatCurrency(n, win),
-      emit: host.emit,
+      emit: host.emit.bind(host),
       notifyResize: (w, h) => host.notifyResize(w, h),
       setSound: (on) => host.setSound(on),
       setSoundRefresh: (fn) => host.setSoundRefresh(fn),
