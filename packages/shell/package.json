@@ -28,6 +28,7 @@
   "peerDependencies": { "pixi.js": "^8.16.0" },
   "peerDependenciesMeta": { "pixi.js": { "optional": true } },
   "devDependencies": {
+    "@rollup/plugin-alias": "^5.1.0",
     "@rollup/plugin-typescript": "^12.1.0",
     "@types/node": "^25.6.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
