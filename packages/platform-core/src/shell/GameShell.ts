@@ -148,18 +148,13 @@ export class GameShell extends EventEmitter<ShellEvents> {
     const host = this.barHost;
     const bar = host.querySelector('.ge-shell-bottom') as HTMLElement | null;
     if (!bar) return;
-    // reset to baseline (idempotent — the pill may have been lifted on a prior pass)
-    const pill = host.querySelector('.ge-winpill') as HTMLElement | null;
-    if (pill && pill.parentElement === host) {                // put a lifted pill back inline
-      const right = bar.querySelector('.ge-zone-right');
-      if (right) bar.insertBefore(pill, right); else bar.appendChild(pill);
-      pill.classList.remove('ge-up');
-    }
+    // reset to baseline (idempotent)
     host.classList.remove('ge-fit');
     host.style.transform = '';
     host.style.transformOrigin = '';
-    // clear any per-zone scale/zoom from a prior pass
-    for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+    // clear any zoom from a prior pass. We zoom the whole dark PANEL (so the bar surface shrinks with
+    // its content on a narrow popout), plus BUY BONUS + a lifted WIN pill, which live outside it.
+    for (const el of host.querySelectorAll('.ge-bar-panel, .ge-shell-buybonus')) {
       (el as HTMLElement).style.transform = '';
       (el as HTMLElement).style.transformOrigin = '';
       (el as HTMLElement).style.removeProperty('zoom');
@@ -183,18 +178,22 @@ export class GameShell extends EventEmitter<ShellEvents> {
     // must not resize the bar. The factor is the frame WIDTH vs the bar's design width, never the
     // current mode's content width.
     //
-    // It's applied with `zoom` (not `transform`): zoom shrinks the LAYOUT, so the zones genuinely
-    // take less room and still sit edge-to-edge (menu hard-left, controls hard-right) even when base's
-    // wide row would overflow a merely-visually-scaled bar — so there is no per-mode centred cluster
-    // and no width/mode branching. A wide WIN pill is still lifted above the row first so it can't
-    // shove the controls off-screen. (Mobile, above, keeps its own stacked fit.)
-    if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
+    // It's applied with `zoom` (not `transform`): zoom shrinks the LAYOUT, so the bar genuinely
+    // takes less room and still sits edge-to-edge (menu hard-left, controls hard-right) even when
+    // base's wide row would overflow a merely-visually-scaled bar — so there is no per-mode centred
+    // cluster and no width/mode branching. The WIN pill stays inline in the bar and scales with it
+    // (no lifting above the row). (Mobile, above, keeps its own stacked fit.)
     const zoomBar = (z: number): void => {
       const v = z < 0.999 ? z.toFixed(4) : '';
-      for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+      const set = (el: Element | null): void => {
+        if (!el) return;
         if (v) (el as HTMLElement).style.setProperty('zoom', v);
         else (el as HTMLElement).style.removeProperty('zoom');
-      }
+      };
+      // zoom the whole panel (surface + content, incl. the inline WIN pill, shrink together);
+      // BUY BONUS sits outside the panel, so zoom it too.
+      set(host.querySelector('.ge-bar-panel'));
+      set(bar.querySelector('.ge-shell-buybonus'));
     };
     const s = Math.max(GameShell.BAR_MIN_SCALE, Math.min(1, this.root.clientWidth / GameShell.BAR_REF_WIDTH));
     zoomBar(s);
@@ -204,6 +203,18 @@ export class GameShell extends EventEmitter<ShellEvents> {
     if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
       zoomBar(s * (bar.clientWidth / bar.scrollWidth));
     }
+    this.fitBet();
+  }
+
+  /** Keep the BET box a fixed width (so the steppers/divider/SPIN never shift as the stake changes)
+   *  by shrinking just the number when it would overflow the box — e.g. amounts above ~€100,000. */
+  private fitBet(): void {
+    const num = this.barHost.querySelector('.ge-betnum') as HTMLElement | null;
+    const box = num?.parentElement as HTMLElement | undefined;
+    if (!num || !box) return;
+    num.style.transform = '';                 // measure at full size
+    const avail = box.clientWidth, need = num.scrollWidth;
+    if (need > avail && need > 0) num.style.transform = `scale(${(avail / need).toFixed(3)})`;
   }
 
   /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the

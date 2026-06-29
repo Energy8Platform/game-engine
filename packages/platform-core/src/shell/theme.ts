@@ -44,6 +44,11 @@ export function buildThemeVars(theme: ThemeConfig = {}): string {
     `--shell-plaque-dark: rgba(6,9,15,.86)`,
     `--shell-plaque-glass: rgba(30,36,48,.70)`,
     `--shell-plaque-glass-hover: rgba(40,48,64,.86)`,
+    // The desktop control bar is one continuous, slightly-darker surface (vs the lighter plaque
+    // panels). Buttons sitting on it are white discs with black icons (see .ge-bar-panel CSS).
+    `--shell-bar: rgba(6,9,15,.86)`,
+    `--shell-btn: #f4f6fb`,
+    `--shell-btn-ink: #0b0e16`,
     // Opaque surface for centred modals (confirm, bet/autoplay pickers) so they read solid,
     // not see-through, over the frosted backdrop.
     `--shell-plaque-solid: #1a2030`,

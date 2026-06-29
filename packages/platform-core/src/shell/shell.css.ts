@@ -66,9 +66,9 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-shell-barhost { position:absolute; left:0; right:0; bottom:0; pointer-events:none;
   display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px;
   transform-origin:bottom center; }
-/* bottom bar: transparent, two zones (wide default) */
+/* bottom bar: a row of [BUY BONUS (outside-left)] + [one continuous dark panel] (wide default) */
 #${SHELL_ROOT_ID} .ge-shell-bottom { width:100%; box-sizing:border-box; pointer-events:none;
-  display:flex; align-items:center; justify-content:space-between; padding:0 18px 6px; gap:14px; }
+  display:flex; align-items:center; justify-content:flex-start; padding:0 14px 8px; gap:10px; }
 #${SHELL_ROOT_ID} .ge-zone { display:flex; align-items:center; gap:14px; pointer-events:none; }
 #${SHELL_ROOT_ID} .ge-zone > * { pointer-events:auto; }
 #${SHELL_ROOT_ID} .ge-betstep { display:flex; flex-direction:column; gap:2px; }
@@ -345,56 +345,66 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval b { font-size:clamp(9px,2.5cqh,11px); }
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval span { font-size:clamp(5px,1.25cqh,6px); }
 
-/* ═══ base/wide plaque bar — grouped dark + glass panels (reference-style) ═══ */
-#${SHELL_ROOT_ID} .ge-zone-plaques { gap:0; }                     /* panels connect; buttons overlap */
-#${SHELL_ROOT_ID} .ge-pl { display:flex; align-items:center; height:56px; box-sizing:border-box;
-  border-radius:16px; padding:0 20px; gap:18px; }
-#${SHELL_ROOT_ID} .ge-pl-dark { background:var(--shell-plaque-dark); }
-#${SHELL_ROOT_ID} .ge-pl-glass { background:var(--shell-plaque-glass); }
-/* FS/replay left blocks — Free Spins counter (compact) + Total Win, standalone glass plaques
-   sitting just right of the balance pill */
-#${SHELL_ROOT_ID} .ge-pl-fs, #${SHELL_ROOT_ID} .ge-pl-totalwin { margin-left:8px; }
-#${SHELL_ROOT_ID} .ge-pl-fs { padding:0 16px; }
-#${SHELL_ROOT_ID} .ge-pl .ge-rd { color:#fff; text-shadow:none; }
-#${SHELL_ROOT_ID} .ge-pl .ge-rd .ge-lbl { color:var(--shell-plaque-label); }
-#${SHELL_ROOT_ID} .ge-pl .ge-iconbtn { color:#fff; }
-/* LEFT: [menu] ⊐ coin ⊏ [balance] — coin overlaps both; balance fixed-wide so it doesn't jiggle */
-#${SHELL_ROOT_ID} .ge-pl-menu { border-radius:16px 0 0 16px; padding-right:20px; }
-#${SHELL_ROOT_ID} .ge-pl-bal { border-radius:0 16px 16px 0; padding-left:24px; min-width:200px; }
-#${SHELL_ROOT_ID} .ge-zone-plaques .ge-shell-buybonus { margin:0 -16px; position:relative; z-index:3; }
-/* RIGHT: [bet] · |divider| · [auto · SPIN · turbo] */
-#${SHELL_ROOT_ID} .ge-pl-bet { border-radius:16px 0 0 16px; justify-content:space-between;
-  width:210px; padding-right:8px; }   /* fixed: bet value never reflows the panel */
-#${SHELL_ROOT_ID} .ge-pl-divider { align-self:center; flex:0 0 auto; width:1px; height:30px;
-  background:var(--shell-plaque-line); }
-#${SHELL_ROOT_ID} .ge-spinwrap { display:flex; align-items:center; gap:10px; height:56px;
-  border-radius:0 16px 16px 0; padding:0 8px 0 14px; }
-#${SHELL_ROOT_ID} .ge-spinwrap .ge-iconbtn { color:#fff; }
-#${SHELL_ROOT_ID} .ge-spinwrap .ge-shell-spin { margin:0 -2px; position:relative; z-index:3; }
-/* tighter bet chevrons, parked next to autoplay */
-#${SHELL_ROOT_ID} .ge-pl-bet .ge-betstep { gap:0; }
-#${SHELL_ROOT_ID} .ge-pl-bet .ge-betstep .ge-iconbtn { height:24px; }
-/* accent hover highlight on every control */
-#${SHELL_ROOT_ID} .ge-pl .ge-iconbtn:hover, #${SHELL_ROOT_ID} .ge-spinwrap .ge-iconbtn:hover,
-#${SHELL_ROOT_ID} .ge-iconbtn:hover { color:var(--shell-accent); }
-/* turbo at rest (level 0) reads as dimmed — clearly off, but lighter than a true [disabled] control */
+/* ═══ desktop control bar — one continuous dark panel; white-disc buttons; BUY BONUS outside-left ═══ */
+/* the dark surface fills the row width (BUY BONUS sits outside, to its left) */
+#${SHELL_ROOT_ID} .ge-bar-panel { flex:1 1 auto; min-width:0; box-sizing:border-box; display:flex;
+  align-items:center; justify-content:space-between; gap:10px; height:54px; padding:0 12px;
+  border-radius:10px; background:var(--shell-bar); }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-zone-left, #${SHELL_ROOT_ID} .ge-bar-panel .ge-zone-right { gap:12px; min-width:0; }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-rd { color:#fff; text-shadow:none; }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-rd .ge-lbl { color:var(--shell-plaque-label); }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-balance { min-width:142px; }  /* fixed-wide so the digits don't reflow the row */
+
+/* white-disc buttons: black icon + black ring; hover tints just the ICON accent (no outer ring) */
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn { width:38px; height:38px; border-radius:50%; border:2px solid #000;
+  background:var(--shell-btn); color:var(--shell-btn-ink); font-size:19px; }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn:hover { background:var(--shell-btn); color:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn.ge-active { color:var(--shell-accent); }
+/* autoplay glyph reads small in its disc — enlarge it */
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="autoplay"] { font-size:25px; }
+/* MENU stays a plain (borderless) icon — just larger; no white disc */
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="menu"] { background:none; border:none;
+  width:auto; height:auto; color:#fff; font-size:30px; }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="menu"]:hover { background:none; color:var(--shell-accent); }
+/* turbo at rest reads dimmed — clearly off, but lighter than a true [disabled] control */
 #${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active) { opacity:.5; }
 #${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active):hover { opacity:1; }
-/* autoplay glow while running (beats the white .ge-spinwrap/.ge-pl colour rules) */
-#${SHELL_ROOT_ID} .ge-iconbtn.ge-glow { color:var(--shell-accent); filter:drop-shadow(0 0 6px var(--shell-accent)); }
+/* autoplay running: accent icon (the disc itself stays white) */
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn.ge-glow { color:var(--shell-accent); }
+
+/* BET group — value + tight stacked chevrons, parked close to the divider (no extra air) */
+#${SHELL_ROOT_ID} .ge-betgroup { display:flex; align-items:center; gap:8px; }
+/* the value box is a FIXED width (sized to hold up to ~€100,000) so changing the stake never shifts
+   the steppers/divider/SPIN; bigger amounts shrink the number (.ge-betnum) instead — see fitBet(). */
+#${SHELL_ROOT_ID} .ge-betgroup .ge-bet-value { flex:0 0 auto; width:90px; border-radius:0; }
+#${SHELL_ROOT_ID} .ge-betnum { display:inline-block; white-space:nowrap; transform-origin:left center; }
+#${SHELL_ROOT_ID} .ge-betgroup .ge-betstep { gap:2px; }
+/* the +/- stay plain icons (no white disc), just bolder/bigger than the default */
+#${SHELL_ROOT_ID} .ge-betgroup .ge-betstep .ge-iconbtn { background:none; border:none; width:30px; height:22px;
+  color:#fff; font-size:22px; }
+#${SHELL_ROOT_ID} .ge-betgroup .ge-betstep .ge-iconbtn:hover { background:none; color:var(--shell-accent); }
 /* tappable stake readout opens the bet picker */
 #${SHELL_ROOT_ID} .ge-betbtn { pointer-events:auto; cursor:pointer; border-radius:8px; transition:color .12s ease; }
 #${SHELL_ROOT_ID} .ge-betbtn:hover { color:var(--shell-accent); }
 #${SHELL_ROOT_ID} .ge-betbtn.ge-disabled { pointer-events:none; }
-/* WIN — inline between the groups, same block height/shape as the other plaques (glass tone) */
-#${SHELL_ROOT_ID} .ge-winpill { flex:0 0 auto; align-self:center; display:flex; align-items:center;
-  justify-content:center; gap:8px; height:56px; box-sizing:border-box; padding:0 24px; border-radius:16px;
-  white-space:nowrap; pointer-events:none; background:var(--shell-plaque-glass); color:#fff;
-  font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; text-shadow:none; }
-#${SHELL_ROOT_ID} .ge-winpill .ge-lbl { display:inline; margin:0; color:rgba(255,255,255,.7);
-  font-size:10px; letter-spacing:.12em; }
-/* lifted above the bar on overflow — compact pill (flex child of the host, scaled with it) */
-#${SHELL_ROOT_ID} .ge-winpill.ge-up { height:auto; padding:6px 16px; border-radius:999px; }
+
+/* divider — short, with air above & below (not full bar height) */
+#${SHELL_ROOT_ID} .ge-pl-divider { align-self:center; flex:0 0 auto; width:1px; height:22px;
+  background:var(--shell-plaque-line); }
+
+/* SPIN + auto/turbo cluster — SPIN is a white disc to match the other buttons, slightly oversized */
+#${SHELL_ROOT_ID} .ge-spinwrap { display:flex; align-items:center; gap:8px; }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-shell-spin { width:62px; height:62px; font-size:48px; border-width:4px;
+  background:var(--shell-btn); color:var(--shell-btn-ink); position:relative; z-index:3; }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-shell-spin:hover { background:var(--shell-btn); color:var(--shell-accent); box-shadow:none; }
+
+/* BUY BONUS — floats outside-left of the bar; keeps its accent disc + hover ring (the one exception).
+   relative/z-index so it stacks predictably under the full-screen overlays (see overlay-stacking test). */
+#${SHELL_ROOT_ID} .ge-shell-bottom > .ge-shell-buybonus { flex:0 0 auto; width:62px; height:62px;
+  font-size:11px; border-width:2px; position:relative; z-index:3; }
+
+/* WIN — a plain readout (same as balance/bet), grouped on the left with the other info */
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-win { pointer-events:none; }
 
 /* centred CARD modal — opaque card on a frosted backdrop, accent title heading at the top
    (no ✕), content, full-bleed footer button(s). Shared by the buy-bonus confirm AND the

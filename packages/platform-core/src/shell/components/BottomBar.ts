@@ -62,6 +62,13 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   const feature = state.activeFeature;
   const betShown = feature ? state.bet * feature.priceMultiplier : state.bet;
   const betValue = readout('bet-value', shell.t('Bet'), fmt(betShown));
+  // Wrap the numeric text in a span so the box can stay a FIXED width (no jiggle when the stake
+  // changes) and we instead shrink just the number when it overflows (e.g. above ~€100,000).
+  const betNum = document.createElement('span');
+  betNum.className = 'ge-betnum';
+  betNum.textContent = betValue.lastChild?.textContent ?? fmt(betShown);
+  if (betValue.lastChild) betValue.replaceChild(betNum, betValue.lastChild);
+  else betValue.append(betNum);
   if (feature) {
     const accent = effectiveAccent(feature);
     betValue.classList.add('ge-bet-feature');
@@ -102,30 +109,27 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
     bar.appendChild(plaque('ge-m-controls ge-pl-dark', compact([menu, auto, center, fsCounter, fsTotalWin, turbo, buy])));
     bar.appendChild(plaque('ge-m-bet ge-pl ge-pl-dark', compact([betDown, betValue, betUp])));
   } else {
-    // LEFT: [menu] ⊐ BUY BONUS coin ⊏ [balance] · [Free Spins] · [Total Win]
-    // (the last two only render in FS / a free-spins replay)
-    const menuPlaque = plaque('ge-pl ge-pl-dark ge-pl-menu', [menu]);
-    const balPlaque = balance ? plaque('ge-pl ge-pl-glass ge-pl-bal', [balance]) : null;
-    const fsPlaque = fsCounter ? plaque('ge-pl ge-pl-glass ge-pl-fs', [fsCounter]) : null;
-    const totalWinPlaque = fsTotalWin ? plaque('ge-pl ge-pl-glass ge-pl-totalwin', [fsTotalWin]) : null;
-    const left = zone('ge-zone-left ge-zone-plaques', ...compact([menuPlaque, buy, balPlaque, fsPlaque, totalWinPlaque]));
+    // DESKTOP: BUY BONUS floats OUTSIDE, to the left of one continuous dark bar panel.
+    // LEFT (all the info): [menu] · [balance] · [Free Spins] · [Total Win] · [WIN]
+    // (FS/Total Win only in FS / a fs replay; WIN only when there's a win this spin)
+    const left = zone('ge-zone-left', ...compact([menu, balance, fsCounter, fsTotalWin, winEl]));
 
-    // RIGHT: [bet (+ step)] · |divider| · [auto · SPIN · turbo]
+    // RIGHT (the controls): [bet (+ step)] · |divider| · [auto · SPIN · turbo]
     const betKids: HTMLElement[] = [betValue];
     if (betUp && betDown) {
       const step = document.createElement('div'); step.className = 'ge-betstep'; step.append(betUp, betDown);
       betKids.push(step);
     }
-    const betPlaque = plaque('ge-pl ge-pl-dark ge-pl-bet', betKids);
+    const betGroup = plaque('ge-betgroup', betKids);
     const divider = document.createElement('div'); divider.className = 'ge-pl-divider';
-    const spinWrap = document.createElement('div'); spinWrap.className = 'ge-spinwrap ge-pl-dark';
+    const spinWrap = document.createElement('div'); spinWrap.className = 'ge-spinwrap';
     spinWrap.append(...compact([auto, spin, turbo]));
-    const right = zone('ge-zone-right ge-zone-plaques', betPlaque, divider, spinWrap);
+    const right = zone('ge-zone-right', betGroup, divider, spinWrap);
 
-    // MIDDLE: per-spin WIN pill in every mode — lifts above the bar on overflow.
-    let middle: HTMLElement | null = null;
-    if (winEl) { winEl.classList.add('ge-winpill'); middle = winEl; }
-    bar.append(...compact([left, middle, right]));
+    // One continuous dark panel: info group hard-left, controls hard-right (space-between).
+    // BUY BONUS sits to its left, outside the panel.
+    const panel = plaque('ge-bar-panel', [left, right]);
+    bar.append(...compact([buy, panel]));
   }
 
   applyBusy(shell, bar);
