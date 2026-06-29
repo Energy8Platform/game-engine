@@ -159,12 +159,19 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const mobile = this.host.layout === 'mobile';
     const top = this.headerH + 6;
     const areaH = this.h - top - this.footerH - 6;
-    // Floor is deliberately tiny so the whole card (incl. the CTA) shrinks to fit the popout height
-    // instead of being clipped by the strip mask on a 400×225 frame — mirrors the DOM shell's
-    // `clamp(4px, 3.4cqh, 12px)`. (Landscape already drag-scrolls on X alone, so this only governs fit.)
-    const em = mobile ? 12 : clamp(4, 3.4 * (areaH / 100), 12);
-    const cardW = Math.min(18 * em, this.w - 48);
     const gap = 14;
+    const n = Math.max(1, this.bonuses.length);
+    // The whole card is laid out in `em`; pick the largest em that fits BOTH dimensions of the
+    // available area, so the card is always fully visible (no horizontal clip, CTA never under the
+    // footer). emH keeps the card height within the band between header and footer; emW makes the
+    // N cards (+ gaps + 24px side margins) fit the frame width. min() of the two = the binding fit.
+    // Floor 4 is a last-resort so a 400×225 popout still shows the CTA (then X-drag scrolls the slack).
+    const emH = 3.4 * (areaH / 100);
+    const emW = mobile
+      ? (this.w - 48) / 18 // vertical stack: a single card spans the width
+      : (this.w - 48 - (n - 1) * gap) / (18 * n); // row: N cards + gaps fit the frame width
+    const em = mobile ? Math.min(12, emW) : clamp(4, Math.min(emH, emW), 12);
+    const cardW = Math.min(18 * em, this.w - 48);
 
     const cards = this.bonuses.map((b) => this.buildCard(b, cardW, em, mobile, areaH));
     const cardH = Math.max(...cards.map((c) => c.height));
@@ -263,7 +270,9 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   // ── bet footer ──────────────────────────────────────────────────────────────
   private buildFooter(): void {
     this.footer.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const sc = this.chromeScale;
+    // The bet pill reads too large next to the (shrunk) cards, so size it at ~0.82 of the chrome
+    // scale. It still centres in the full-height footer band (footerH stays on chromeScale).
+    const sc = this.chromeScale * 0.82;
     const pillH = 38 * sc;
     const stepSz = 32 * sc;
     const glyphSz = 20 * sc;
