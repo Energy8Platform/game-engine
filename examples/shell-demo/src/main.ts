@@ -1,5 +1,5 @@
-import { createGameShell } from '@energy8platform/platform-core/shell';
-import type { GameShell, ShellMode } from '@energy8platform/platform-core/shell';
+import { createGameShell } from '@energy8platform/shell/html';
+import type { GameShell, ShellMode } from '@energy8platform/shell/html';
 
 // ─── Screen presets (game viewport sizes, width × height) ──────────────────
 interface ScreenPreset {
