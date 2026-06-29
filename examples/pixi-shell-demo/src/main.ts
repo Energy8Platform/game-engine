@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
-import { createPixiShell } from '@energy8platform/pixi-shell';
-import type { PixiGameShell, ShellMode } from '@energy8platform/pixi-shell';
+import { createPixiShell } from '@energy8platform/shell/pixi';
+import type { PixiGameShell, ShellMode } from '@energy8platform/shell/pixi';
 
 // ─── Screen presets (game viewport sizes, width × height) ──────────────────
 interface ScreenPreset {

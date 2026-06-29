@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@energy8platform/pixi-shell": "*",
+    "@energy8platform/shell": "*",
     "pixi.js": "^8.16.0"
   },
   "devDependencies": {
