@@ -53,9 +53,6 @@ export {
 // ─── Viewport ────────────────────────────────────────────
 export { ViewportManager } from './viewport/ViewportManager';
 
-// ─── State Machine ───────────────────────────────────────
-export { StateMachine } from './state/StateMachine';
-
 // ─── Animation ───────────────────────────────────────────
 export { Tween } from './animation/Tween';
 export { Timeline } from './animation/Timeline';
@@ -66,31 +63,6 @@ export type { SpriteAnimationConfig } from './animation/SpriteAnimation';
 
 // ─── Input ───────────────────────────────────────────────
 export { InputManager } from './input/InputManager';
-
-// ─── UI ──────────────────────────────────────────────────
-// UI components are available from '@energy8platform/game-engine/ui' sub-path.
-export { FlexContainer } from './ui/FlexContainer';
-export type { FlexContainerConfig, FlexDirection, JustifyContent, AlignItems, FlexItemConfig } from './ui/FlexContainer';
-export { Button } from './ui/Button';
-export type { ButtonConfig, ButtonState } from './ui/Button';
-export { ProgressBar } from './ui/ProgressBar';
-export type { ProgressBarConfig } from './ui/ProgressBar';
-export { Label } from './ui/Label';
-export type { LabelConfig } from './ui/Label';
-export { Panel } from './ui/Panel';
-export type { PanelConfig } from './ui/Panel';
-export { BalanceDisplay } from './ui/BalanceDisplay';
-export type { BalanceDisplayConfig } from './ui/BalanceDisplay';
-export { WinDisplay } from './ui/WinDisplay';
-export type { WinDisplayConfig } from './ui/WinDisplay';
-export { Modal } from './ui/Modal';
-export type { ModalConfig } from './ui/Modal';
-export { Toast } from './ui/Toast';
-export type { ToastConfig, ToastType } from './ui/Toast';
-export { Layout } from './ui/Layout';
-export type { LayoutConfig, LayoutDirection, LayoutAlignment, LayoutAnchor } from './ui/Layout';
-export { ScrollContainer } from './ui/ScrollContainer';
-export type { ScrollContainerConfig, ScrollDirection } from './ui/ScrollContainer';
 
 // ─── Loading ─────────────────────────────────────────────
 export { LoadingScene } from './loading/LoadingScene';

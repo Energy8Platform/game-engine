@@ -5,6 +5,7 @@ import dts from 'rollup-plugin-dts';
 const external = [
   '@energy8platform/game-sdk',
   '@energy8platform/game-sdk/protocol',
+  '@energy8platform/game-sdk/social',
 ];
 
 export default defineConfig([
@@ -37,6 +38,7 @@ export default defineConfig([
       globals: {
         '@energy8platform/game-sdk': 'CasinoGameSDK',
         '@energy8platform/game-sdk/protocol': 'CasinoGameSDKProtocol',
+        '@energy8platform/game-sdk/social': 'CasinoGameSDKSocial',
       },
     },
     plugins: [
@@ -76,6 +78,7 @@ export default defineConfig([
       globals: {
         '@energy8platform/game-sdk': 'CasinoGameSDK',
         '@energy8platform/game-sdk/protocol': 'CasinoGameSDKProtocol',
+        '@energy8platform/game-sdk/social': 'CasinoGameSDKSocial',
       },
     },
     plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false })],

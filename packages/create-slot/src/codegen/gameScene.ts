@@ -10,13 +10,13 @@ export function genGameScene(a: Answers): string {
     const turbo = ctx.turbo > 0;
     if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
     for (const step of result.steps) await this.controller.run(step, { turbo });
-    if (result.totalWin > 0) await this.overlay.show(result.totalWin, ctx.bet, ctx.formatAmount);
+    if (result.totalWin > 0) await this.showBigWin(result.totalWin, ctx);
   }`
     : `  /** Render one normalized result (one spin, or one free spin of a bonus). */
   async onSpin(result: SpinData, ctx: RenderContext): Promise<void> {
     const turbo = ctx.turbo > 0;
     await this.controller.run({ targetGrid: result.targetGrid }, { turbo });
-    if (result.totalWin > 0) await this.overlay.show(result.totalWin, ctx.bet, ctx.formatAmount);
+    if (result.totalWin > 0) await this.showBigWin(result.totalWin, ctx);
   }`;
 
   const multiplierImport = cascade ? ', MultiplierAccumulator' : '';
@@ -24,7 +24,8 @@ export function genGameScene(a: Answers): string {
     ? `  private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });\n` : '';
 
   return `import { Scene } from '@energy8platform/game-engine/core';
-import { ReelGrid, ${ctrl}, BigWinOverlay${multiplierImport} } from '@energy8platform/game-engine/slot';
+import { ReelGrid, ${ctrl}, BigWinOverlay, pickTier${multiplierImport} } from '@energy8platform/game-engine/slot';
+import type { WinTier } from '@energy8platform/game-engine/slot';
 import type { SlotSceneController, RenderContext, SceneApi } from '@energy8platform/game-engine/host';
 import { model } from '../game.spec';
 import { resolveSymbol } from '../slot/symbols';
@@ -36,35 +37,37 @@ import type { SpinData } from '../game/normalize';
  *  - onEnterMode(trigger, ctx): fires right before the first free spin (bonus intro).
  *  - onExitMode(last, ctx): fires after the last free spin (bonus summary).
  * ctx gives you { bet, action, mode, formatAmount(value), turbo } — turbo is live (0..3).
+ *
+ * Two distinct "overlay" layers, don't mix them up:
+ *  - this.container        — the scene's own display list (the grid lives here, UNDER the shell).
+ *  - api.overlay (SceneApi) — a host-owned modal layer mounted ABOVE the shell. Big wins, bonus
+ *    intros/summaries and dialogs go here so their dim actually covers the control bar.
  */
 export class GameScene extends Scene implements SlotSceneController<SpinData> {
   private grid!: ReelGrid;
   private controller!: ${ctrl};
-  private overlay!: BigWinOverlay;
+  private api!: SceneApi;
 ${multiplierField}
   private _vw = 1920;
   private _vh = 1080;
+
+  /** Tiers for the big-win celebration. Below the lowest minMultiplier, no overlay is shown. */
+  private readonly winTiers: WinTier[] = [
+    { id: 'big', minMultiplier: 10, title: 'BIG WIN', accentColor: 0xffd24a },
+    { id: 'mega', minMultiplier: 50, title: 'MEGA WIN', accentColor: 0x7ad7ff },
+  ];
 
   async onEnter(): Promise<void> {
     const { cols, rows } = model.spec.grid;
     this.grid = new ReelGrid({ cols, rows, cellSize: 110, gap: 6, resolve: resolveSymbol });
     this.container.addChild(this.grid);
     this.controller = new ${ctrl}(this.grid);
-    this.overlay = new BigWinOverlay({
-      tiers: [
-        { id: 'big', minMultiplier: 10, title: 'BIG WIN', accentColor: 0xffd24a },
-        { id: 'mega', minMultiplier: 50, title: 'MEGA WIN', accentColor: 0x7ad7ff },
-      ],
-      formatMoney: (v) => v.toFixed(2),
-      width: 1920, height: 1080,
-    });
-    this.container.addChild(this.overlay);
     this.layout(this._vw, this._vh);
   }
 
   /** Injected once, before the first round — grab audio / overlay / safe-area off \`api\` here. */
-  onCreate(_api: SceneApi): void {
-    // e.g. this.sfx = _api.audio; this.overlay = _api.overlay;
+  onCreate(api: SceneApi): void {
+    this.api = api; // e.g. this.sfx = api.audio
   }
 
   /** Player pressed spin (before the network result) — kick off anticipation here. */
@@ -72,15 +75,38 @@ ${multiplierField}
 
 ${present}
 
+  /**
+   * Celebrate a win on the host overlay (api.overlay) — a layer ABOVE the shell, so the backdrop
+   * covers the control bar. BigWinOverlay paints its own dim, so we pass dim: 0. Resolves when the
+   * count-up finishes, or earlier if the player taps to skip (closeOn: 'tap').
+   */
+  private async showBigWin(win: number, ctx: RenderContext): Promise<void> {
+    if (!pickTier(this.winTiers, win, ctx.bet)) return; // below the lowest tier — nothing to show
+    await this.api.overlay.show({
+      closeOn: 'tap',
+      dim: 0,
+      build: (layer, size) => {
+        const big = new BigWinOverlay({
+          tiers: this.winTiers,
+          formatMoney: ctx.formatAmount,
+          width: size.width,
+          height: size.height,
+        });
+        layer.addChild(big);
+        void big.show(win, ctx.bet, ctx.formatAmount).then(() => this.api.overlay.close());
+      },
+    });
+  }
+
   /** Bonus starting — show an intro. trigger.freeSpins?.total = how many free spins were awarded. */
   async onEnterMode(trigger: SpinData, _ctx: RenderContext): Promise<void> {
-    // TODO: show a bonus intro (e.g. "10 FREE SPINS"). Defaults to nothing.
+    // TODO: show a bonus intro (e.g. "10 FREE SPINS") via api.overlay. Defaults to nothing.
     void trigger;
   }
 
   /** Bonus finished — show a summary. ctx.formatAmount(last.totalWin) = the bonus total win. */
   async onExitMode(last: SpinData, ctx: RenderContext): Promise<void> {
-    // TODO: show a bonus summary. Defaults to nothing.
+    // TODO: show a bonus summary via api.overlay. Defaults to nothing.
     void last; void ctx;
   }
 
@@ -104,7 +130,6 @@ ${present}
     this.grid.scale.set(fit);
     this.grid.x = Math.round((w - gridW * fit) / 2);
     this.grid.y = Math.round((h - gridH * fit) / 2);
-    this.overlay?.resize?.(w, h);
   }
 }
 `;

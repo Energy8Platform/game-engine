@@ -4,6 +4,7 @@ import { defineConfig } from 'rollup';
 
 const external = [
   '@energy8platform/game-sdk',
+  '@energy8platform/game-sdk/social',
   'fengari',
   'fengari-web',
   'vite',

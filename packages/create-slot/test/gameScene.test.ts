@@ -37,13 +37,22 @@ describe('genGameScene', () => {
     expect(s).toMatch(/onEnter[\s\S]*?this\.layout\(/);
     expect(s).toMatch(/onResize[\s\S]*?this\.layout\(/);
   });
-  it('layout scales the grid to fit the viewport (scale.set + overlay.resize)', () => {
+  it('layout scales the grid to fit the viewport (scale.set, no persistent overlay)', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
     // Should guard for grid not yet created
     expect(s).toContain('if (!this.grid) return');
     // Should scale via scale.set rather than fixed position
     expect(s).toContain('this.grid.scale.set(fit)');
-    // Should resize overlay
-    expect(s).toContain('this.overlay?.resize?.(w, h)');
+  });
+  it('big wins render on the host overlay (api.overlay), not an in-scene overlay field', () => {
+    const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
+    // Celebration goes through the host overlay layer (above the shell), guarded by tier:
+    expect(s).toContain('this.api.overlay.show(');
+    expect(s).toContain('pickTier(this.winTiers');
+    expect(s).toContain('BigWinOverlay');
+    // The old, confusing in-scene `overlay` field (collided with api.overlay) is gone:
+    expect(s).not.toContain('private overlay!:');
+    expect(s).not.toContain('this.container.addChild(this.overlay)');
+    expect(s).not.toContain('this.overlay?.resize?.(w, h)');
   });
 });

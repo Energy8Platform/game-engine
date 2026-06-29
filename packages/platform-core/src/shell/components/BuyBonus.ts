@@ -30,6 +30,9 @@ export function openBuyBonusOverlay(shell: GameShell): { root: HTMLElement; onKe
   const renderGrid = (): void => {
     body.innerHTML = '';
     const grid = document.createElement('div'); grid.className = 'ge-bb-grid';
+    // Card count drives the width-fit clamp in CSS (each card is 18em; N cards must fit the frame
+    // width), so the row scales to the available width instead of overflowing into an X-scroll.
+    grid.style.setProperty('--ge-bb-n', String(bonuses.length));
     const affordable: BonusOption[] = [];
     for (const bonus of bonuses) {
       const card = buildCard(shell, bonus, root, st);

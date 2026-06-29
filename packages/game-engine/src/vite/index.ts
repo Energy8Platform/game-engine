@@ -89,9 +89,6 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     resolve: {
       dedupe: [
         'pixi.js',
-        'react',
-        'react-dom',
-        'react-reconciler',
       ],
       ...userVite.resolve,
     },
@@ -99,8 +96,6 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     optimizeDeps: {
       include: [
         'pixi.js',
-        'react',
-        'react-dom',
       ],
       exclude: [
         'fengari',

@@ -2,7 +2,7 @@ import typescript from '@rollup/plugin-typescript';
 import dts from 'rollup-plugin-dts';
 import { defineConfig } from 'rollup';
 
-const external = ['pixi.js'];
+const external = ['pixi.js', '@energy8platform/game-sdk/social'];
 
 function createBundle(input, outputName) {
   return [

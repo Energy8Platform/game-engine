@@ -52,6 +52,9 @@ export class Tween {
     easing?: EasingFunction,
     onUpdate?: (progress: number) => void,
   ): Promise<void> {
+    // A destroyed (Pixi) target has null transform fields — skip rather than throw. This guards
+    // animations whose target is torn down mid-flight (e.g. a reel grid rebuilt during a spin).
+    if (target == null || target.destroyed) return Promise.resolve();
     return new Promise((resolve) => {
       // Capture starting values
       const from: Record<string, number> = {};
@@ -86,6 +89,7 @@ export class Tween {
     easing?: EasingFunction,
     onUpdate?: (progress: number) => void,
   ): Promise<void> {
+    if (target == null || target.destroyed) return Promise.resolve();
     // Capture current values as "to"
     const to: Record<string, number> = {};
     for (const key of Object.keys(props)) {
@@ -107,6 +111,7 @@ export class Tween {
     easing?: EasingFunction,
     onUpdate?: (progress: number) => void,
   ): Promise<void> {
+    if (target == null || target.destroyed) return Promise.resolve();
     // Set starting values
     for (const key of Object.keys(fromProps)) {
       Tween.setProperty(target, key, fromProps[key]);
@@ -189,6 +194,11 @@ export class Tween {
     const completed: ActiveTween[] = [];
 
     for (const tw of Tween._tweens) {
+      // target torn down mid-tween → finish it quietly
+      if (tw.target?.destroyed) {
+        completed.push(tw);
+        continue;
+      }
       tw.elapsed += dt;
 
       if (tw.elapsed < tw.delay) continue;
@@ -232,9 +242,9 @@ export class Tween {
     const parts = key.split('.');
     let obj = target;
     for (let i = 0; i < parts.length - 1; i++) {
-      obj = obj[parts[i]];
+      obj = obj?.[parts[i]];
     }
-    return obj[parts[parts.length - 1]] ?? 0;
+    return obj?.[parts[parts.length - 1]] ?? 0;
   }
 
   /**
@@ -244,8 +254,9 @@ export class Tween {
     const parts = key.split('.');
     let obj = target;
     for (let i = 0; i < parts.length - 1; i++) {
-      obj = obj[parts[i]];
+      obj = obj?.[parts[i]];
     }
+    if (obj == null) return;
     obj[parts[parts.length - 1]] = value;
   }
 }

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reel Lab — configurable reels</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="panel-wrap">
+        <header class="panel-top">
+          <h1>Reel Lab</h1>
+          <p class="sub">Configurable reels for <code>@energy8platform/game-engine</code></p>
+          <div class="preset-row">
+            <label>Preset
+              <select id="preset"></select>
+            </label>
+          </div>
+        </header>
+        <div id="panel"></div>
+      </aside>
+
+      <main id="main">
+        <div id="toolbar">
+          <button id="btn-spin" class="primary">▶ Spin</button>
+          <button id="btn-scatter">Spin → scatters</button>
+          <button id="btn-cascade">Tumble</button>
+          <button id="btn-board">New board</button>
+          <button id="btn-mega" title="Re-roll Megaways heights">Megaways roll</button>
+          <label class="chk"><input type="checkbox" id="chk-turbo" /> Turbo</label>
+          <label class="chk"><input type="checkbox" id="chk-fs" /> Free spins</label>
+          <span class="spacer"></span>
+          <span id="ways" class="ways"></span>
+          <button id="btn-copy-ts">Copy TS</button>
+          <button id="btn-copy-json">Copy JSON</button>
+        </div>
+        <div id="stage"></div>
+        <div id="featurebar"></div>
+        <pre id="log"></pre>
+      </main>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

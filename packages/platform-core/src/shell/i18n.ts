@@ -1,56 +1,16 @@
 import { LOCALES } from './locales';
+import { SOCIAL_REPLACEMENTS } from '@energy8platform/game-sdk/social';
 
 // Social-casino language. English is the source (and, for now, the only) language; `socialize`
 // rewrites the restricted gambling vocabulary into social-safe phrasing while preserving case.
 //
-// Ordering matters: the longest / most specific phrases are listed first so they win over their
-// constituent words (e.g. "buy bonus" before "buy", "pay out" before "pay"). The JS alternation
-// tries entries left-to-right at each position, so a phrase earlier in this list takes priority.
-//
-// Conflicting duplicates in the source table are resolved to a single replacement here
-// (betting→playing, total bet→total play, paid out→won, pays out→win).
-const RULES: ReadonlyArray<readonly [string, string]> = [
-  ['be awarded to player’s accounts', 'appear in player’s accounts'],
-  ["be awarded to player's accounts", "appear in player's accounts"],
-  ['place your bets', 'come and play / join in the game'],
-  ['at the cost of', 'for'],
-  ['cost of', 'can be played for'],
-  ['win feature', 'play feature'],
-  ['total bet', 'total play'],
-  ['buy bonus', 'get bonus'],
-  ['bonus buy', 'bonus / feature'],
-  ['pay out', 'win / won'],
-  ['paid out', 'won'],
-  ['pays out', 'win'],
-  ['payout', 'win'], // single word; "pay out" (spaced) is handled above
-  ['paytable', 'win table'],
-  ['paylines', 'winlines'],
-  ['payline', 'winline'],
-  ['bet/s', 'play/s'],
-  ['betting', 'playing'],
-  ['rebet', 'respin'],
-  ['stake', 'play amount'],
-  ['payer', 'winner'],
-  ['bets', 'plays'],
-  ['pays', 'wins'],
-  ['paid', 'won'],
-  ['bought', 'instantly triggered'],
-  ['purchase', 'play'],
-  ['price', 'play'],
-  ['cost', 'play'], // standalone; the "cost of" / "at the cost of" phrases above win first
-  ['deposit', 'get coins'],
-  ['withdraw', 'redeem'],
-  ['currency', 'token'],
-  ['gamble', 'play'],
-  ['wager', 'play'],
-  ['credit', 'balance'],
-  ['money', 'coins'],
-  ['cash', 'coins'],
-  ['fund', 'balance'],
-  ['bet', 'play'],
-  ['pay', 'win'],
-  ['buy', 'play'],
-];
+// The dictionary is the SHARED, canonical list in `@energy8platform/game-sdk/social` — the DOM
+// shell, the Pixi shell and stake-bridge all consume it, so the vocabulary can't drift. We only
+// sort it here: the combined regex below matches the FIRST alternative that fits at a position, so
+// the longest / most specific phrases must come first (e.g. "buy bonus" before "buy").
+const RULES: ReadonlyArray<readonly [string, string]> = [...SOCIAL_REPLACEMENTS]
+  .sort((a, b) => b.from.length - a.from.length)
+  .map((r) => [r.from, r.to] as const);
 
 const MAP = new Map(RULES.map(([k, v]) => [k.toLowerCase(), v] as const));
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');

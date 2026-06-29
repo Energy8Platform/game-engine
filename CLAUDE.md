@@ -17,7 +17,7 @@ game-engine/                          ← repo root, not published
 │   │   ├── bin/simulate.ts           ← RTP simulation CLI
 │   │   └── scripts/install-simulate.mjs
 │   └── game-engine/                  ← @energy8platform/game-engine
-│       └── src/{core/, ui/, react/, animation/, audio/, assets/, debug/FPSOverlay, viewport/, input/, loading/, types.ts, lua/, vite/}
+│       └── src/{core/, animation/, audio/, assets/, debug/FPSOverlay, viewport/, input/, loading/, host/, slot/, types.ts, lua/, vite/}
 └── examples/
 ```
 
@@ -39,7 +39,7 @@ Sub-paths:
 
 PixiJS v8-based casino game engine. Depends on `@energy8platform/platform-core`. Sub-paths re-export platform-core modules so existing import paths (`@energy8platform/game-engine/lua`, `/debug` for DevBridge, `/vite`) stay stable.
 
-Peer deps: `@energy8platform/game-sdk`, `pixi.js`, optional `react`/`react-dom`/`react-reconciler`, optional `@pixi/sound`, `@esotericsoftware/spine-pixi-v8`.
+Peer deps: `@energy8platform/game-sdk`, `pixi.js`, optional `@pixi/sound`, `@esotericsoftware/spine-pixi-v8`. (The generic UI component set, the React reconciler bindings, and the standalone `StateMachine` were removed when the engine narrowed to the host-driven slot path — see "Module Boundaries" below.)
 
 ## Commands
 
@@ -75,59 +75,30 @@ The SDK handshake lives in [`platform-core/src/PlatformSession.ts`](packages/pla
 
 **Scene system** uses stack semantics (push/pop/replace/goto) managed by **SceneManager**. Scenes extend the abstract `Scene` class and implement lifecycle hooks: `onEnter(data?)`, `onExit()`, `onUpdate(dt)`, `onResize(w,h)`, `onDestroy()`. Scene transitions are async with configurable transition types (FADE, SLIDE_LEFT, SLIDE_RIGHT).
 
-**StateMachine** ([packages/game-engine/src/state/StateMachine.ts](packages/game-engine/src/state/StateMachine.ts)) is a generic typed FSM with transition guards, used for game flow control. States have `enter(ctx, data?)`, `exit(ctx)`, `update(ctx, dt)` hooks. Guards can block transitions conditionally.
-
-**EventEmitter** is a minimal typed event emitter shipped in both packages — game-engine has [`src/core/EventEmitter.ts`](packages/game-engine/src/core/EventEmitter.ts), platform-core has its own copy at [`src/EventEmitter.ts`](packages/platform-core/src/EventEmitter.ts) (so platform-core has no upward dep on game-engine). Both implementations are byte-identical. GameApplication, SceneManager, AudioManager, ViewportManager, StateMachine, and PlatformSession all extend or use it.
+**EventEmitter** is a minimal typed event emitter shipped in both packages — game-engine has [`src/core/EventEmitter.ts`](packages/game-engine/src/core/EventEmitter.ts), platform-core has its own copy at [`src/EventEmitter.ts`](packages/platform-core/src/EventEmitter.ts) (so platform-core has no upward dep on game-engine). Both implementations are byte-identical. GameApplication, SceneManager, AudioManager, ViewportManager, and PlatformSession all extend or use it.
 
 ### Animation
 
 Tween/Timeline system (`packages/game-engine/src/animation/`) is promise-based and runs on the PixiJS Ticker. No external animation library (no GSAP). `Tween.to()`, `Tween.from()`, `Tween.fromTo()` all return Promises for easy composition.
 
-### UI System
+### UI / shell
 
-The engine has a **built-in UI system** (`packages/game-engine/src/ui/`) with zero external UI dependencies. No `@pixi/ui`, `@pixi/layout`, or `yoga-layout` — everything is implemented from scratch.
+Slot games get their chrome (control bar, balance/bet/win, menu, settings, buy-bonus) from the **DOM shell** in `@energy8platform/pixi-shell` (re-exported via `@energy8platform/game-engine/shell`), driven by the host. In-canvas slot visuals come from the **slot module** (`/slot`: ReelGrid, controllers, `BigWinOverlay`, …) and above-shell modals from the host `SceneApi.overlay`.
 
-**FlexContainer** is the core layout primitive — a lightweight flexbox-like container:
-- `direction`: `'row' | 'column'`
-- `justifyContent`: `'start' | 'center' | 'end' | 'space-between' | 'space-around'`
-- `alignItems`: `'start' | 'center' | 'end' | 'stretch'`
-- `alignContent`: `'start' | 'center' | 'end' | 'space-between' | 'stretch'` (multi-line distribution with `flexWrap`)
-- `gap`, `padding` (or `paddingTop`/`paddingRight`/`paddingBottom`/`paddingLeft`), `flexWrap`, `maxWidth`/`maxHeight`
-- `width`/`height` accept `number | string` — string percentages (e.g. `"50%"`) resolve against parent content area
-- **Auto-sizing**: without explicit `width`/`height`, container computes size from content (`_computedWidth`/`_computedHeight`)
-- Children added via `addFlexChild(child, flexConfig?)`, supports `flexGrow`, `flexShrink`, `alignSelf`
-- `flexExclude` children support absolute positioning via `top`/`right`/`bottom`/`left`
-- `layoutWidth`/`layoutHeight` accept percentages: `{ layoutWidth: '50%' }`
-- FlexContainer children are resized via `resize()` (not PixiJS scale setter) for correct internal relayout
-- Call `updateLayout()` after adding children, or `resize(w, h)` to set explicit container size
-
-**Layout** wraps FlexContainer with a higher-level API: direction presets (`horizontal`/`vertical`/`grid`/`wrap`), viewport anchor positioning (9-point), responsive breakpoints by viewport width. Items added via `addItem()`, positioned via `updateViewport(w, h)`.
-
-**Components** — all extend PixiJS Container directly:
-- **Button** — state management (default/hover/pressed/disabled), pointer events, Tween animations, `onPress` callback
-- **Panel** — FlexContainer-based with Graphics or NineSliceSprite background
-- **Label** — auto-fit text scaling, currency/number formatting
-- **LabelValue** — two-row "caption / value" cell (BALANCE/€500, BET/€1 pattern). FlexContainer column subclass with `label`, `value`, `labelStyle`, `valueStyle`, `gap`, `align`, optional `maxWidth` for autoFit on the value
-- **BalanceDisplay** — animated countup/countdown via Tween
-- **WinDisplay** — dramatic countup with scale pop via Tween
-- **ProgressBar** — track + fill with mask-based progress, optional animated interpolation
-- **ScrollContainer** — touch/drag, mouse wheel, inertia via Ticker, mask viewport
-- **Modal** — overlay with content centering, enter/exit Tween animations
-- **Toast** — transient notifications with slide-in animation, auto-dismiss via Tween.delay
-
-All components implement proper `destroy()` cleanup (kill tweens, remove listeners, clear references).
+> The engine previously shipped a generic from-scratch UI component set (`/ui`: FlexContainer, Button, Modal, Toast, ScrollContainer, …), a React reconciler (`/react`, `/react-jsx`), and a standalone `StateMachine` (`/state`). These were **removed** when the engine narrowed to the host-driven slot path — nothing in `host`/`slot`/`core` consumed them. If you need them back, recover from git history.
 
 ### Module Boundaries & Exports
 
-`@energy8platform/game-engine` uses **sub-path exports** for tree-shaking — 11 entry points each produce separate ESM/CJS bundles via Rollup:
+`@energy8platform/game-engine` uses **sub-path exports** for tree-shaking — each entry produces separate ESM/CJS bundles via Rollup:
 - `/core` — GameApplication, Scene, SceneManager
+- `/host` — `createSlotGame`, the host-driven play loop, `SceneApi` (audio/overlay/shell), `SlotSceneController`
+- `/slot` — ReelGrid, ReelSpinController/CascadeController, BigWinOverlay, MultiplierAccumulator, reel system
 - `/animation` — Tween, Timeline, Easing
-- `/ui` — FlexContainer, Button, Label, Panel, Modal, etc.
 - `/lua` — re-exports `@energy8platform/platform-core/lua`
 - `/debug` — re-exports DevBridge from platform-core; adds local FPSOverlay
 - `/vite` — re-exports plugins from platform-core/vite; adds pixi-flavored `defineGameConfig`
-- `/assets`, `/audio`, `/react`
-- `/react-jsx` — JSX prop types. The engine **auto-augments** `react`'s `JSX.IntrinsicElements` via `declare module 'react'`, so any import from `/react` (e.g. `createPixiRoot`) activates fully-typed `<flexContainer>`, `<button>`, `<label>`, `<labelValue>`, etc. No user shim required.
+- `/shell` — re-exports the DOM game shell from `@energy8platform/pixi-shell`
+- `/assets`, `/audio`, `/game-spec`
 
 ## Architecture (platform-core)
 
