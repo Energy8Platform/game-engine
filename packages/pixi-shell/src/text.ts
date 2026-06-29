@@ -23,10 +23,18 @@ export function installShellFont(): void {
   style.textContent = SHELL_FONT_CSS;
   document.head.appendChild(style);
   // Nudge the browser to actually fetch/decode the face so text measured later is correct.
+  // `.load()` returns a PROMISE — a try/catch only traps a synchronous throw, NOT a rejection.
+  // WebKit rejects this with `NetworkError: A network error occurred.` when the (base64) face
+  // fails to decode; left unhandled it trips the host's global `unhandledrejection` handler and
+  // surfaces a fatal "reload" modal over a purely cosmetic font miss. Swallow it explicitly.
   try {
-    (document as Document & { fonts?: FontFaceSet }).fonts?.load('1em Inter');
+    (document as Document & { fonts?: FontFaceSet }).fonts
+      ?.load('1em Inter')
+      ?.catch(() => {
+        /* ignore — fallback fonts render meanwhile */
+      });
   } catch {
-    /* ignore — fallback fonts render meanwhile */
+    /* ignore — fonts API access threw synchronously */
   }
 }
 
