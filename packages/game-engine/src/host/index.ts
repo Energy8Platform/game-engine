@@ -6,7 +6,6 @@ export type {
   StakeIntegration,
   SceneRegistration,
   SceneNavData,
-  SceneEntry,
 } from './types';
 export { buildShellConfig, stakeForAction } from './shellConfig';
 export type { SlotShellOptions } from './shellConfig';

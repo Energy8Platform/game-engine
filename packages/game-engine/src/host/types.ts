@@ -25,9 +25,6 @@ export interface SceneRegistration {
   skipOnReplay?: boolean;
 }
 
-/** @deprecated alias kept for one release — use {@link SceneRegistration}. */
-export type SceneEntry = SceneRegistration;
-
 /** Navigation injected into the start data of EVERY scene the host registers.
  *  Any scene (intro, game, …) reads it from its `onEnter(data)` to navigate. */
 export interface SceneNavData {
