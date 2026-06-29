@@ -50,6 +50,21 @@ export default defineConfig([
       }),
     ],
   },
+  // Social sub-export (ESM) — canonical social-mode replacement dictionary
+  {
+    input: 'src/social.ts',
+    output: {
+      file: 'dist/social.js',
+      format: 'esm',
+      sourcemap: true,
+    },
+    plugins: [
+      typescript({
+        tsconfig: './tsconfig.json',
+        declaration: false,
+      }),
+    ],
+  },
   // Bundled type declarations — main
   {
     input: 'src/index.ts',
@@ -64,6 +79,15 @@ export default defineConfig([
     input: 'src/protocol.ts',
     output: {
       file: 'dist/protocol.d.ts',
+      format: 'esm',
+    },
+    plugins: [dts()],
+  },
+  // Bundled type declarations — social
+  {
+    input: 'src/social.ts',
+    output: {
+      file: 'dist/social.d.ts',
       format: 'esm',
     },
     plugins: [dts()],

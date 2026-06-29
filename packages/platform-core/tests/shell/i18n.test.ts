@@ -11,7 +11,7 @@ describe('socialize', () => {
     expect(socialize('money')).toBe('coins');
     expect(socialize('stake')).toBe('play amount');
     expect(socialize('payer')).toBe('winner');
-    expect(socialize('credit')).toBe('balance');
+    expect(socialize('credit')).toBe('coins'); // canonical Stake-doc value (was 'balance' in the old shell-only copy)
     expect(socialize('fund')).toBe('balance');
     expect(socialize('currency')).toBe('token');
     expect(socialize('wager')).toBe('play');
@@ -28,6 +28,8 @@ describe('socialize', () => {
     expect(socialize('Paytable')).toBe('Win table'); // game-info section title
     expect(socialize('Paylines')).toBe('Winlines');
     expect(socialize('payline')).toBe('winline');
+    expect(socialize('paying')).toBe('winning'); // verb form — the bare "pay" rule can't reach it
+    expect(socialize('Top paying symbols')).toBe('Top winning symbols');
     expect(socialize('PAYTABLE')).toBe('WIN TABLE');
   });
 
