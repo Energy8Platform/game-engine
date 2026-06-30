@@ -49,7 +49,7 @@ function log(msg: string): void {
 // ─── Create the shell (single source of truth = this demo's `state`) ───────
 const shell: GameShell = createGameShell({
   mount: gameEl,
-  theme: { scheme: currentTheme, accent: 'red' },
+  theme: { scheme: currentTheme, accent: '#8b5cf6' },
   language: 'en',
   isSocial,
   currency: { symbol: '€', position: 'left' },

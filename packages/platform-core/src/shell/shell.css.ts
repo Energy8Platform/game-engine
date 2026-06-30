@@ -1,10 +1,11 @@
 import { SHELL_FONT_CSS } from './fonts';
+import { SHELL_DIGIT_FONT_CSS } from './fonts-digits';
 
 export const SHELL_ROOT_ID = '__ge-game-shell__';
 
 // Inter (bundled, base64) leads the stack so the shell renders identically on every
 // platform; the system fonts stay as graceful fallback if the webfont ever fails to load.
-export const SHELL_CSS = SHELL_FONT_CSS + `
+export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} {
   position: absolute; inset: 0;
   container-type: size;   /* query container → centred modals size in cq units (responsive on every screen) */
@@ -55,7 +56,9 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
   color:#fff; font-weight:800; letter-spacing:.02em; font-size:13px; line-height:1.08; text-align:center;
   display:flex; align-items:center; justify-content:center; transition:transform .08s ease, box-shadow .12s ease; }
 #${SHELL_ROOT_ID} .ge-shell-buybonus span { display:inline-block; will-change:transform; }
-#${SHELL_ROOT_ID} .ge-shell-buybonus:hover { box-shadow:0 0 0 3px var(--shell-accent), 0 0 16px 1px var(--shell-accent); }
+/* the ticket glyph fills the badge (em-sized off the button's font-size, so it scales per context) */
+#${SHELL_ROOT_ID} .ge-shell-buybonus .ge-bb-tk { display:flex; font-size:3.5em; color:#0b0e16; }
+#${SHELL_ROOT_ID} .ge-shell-buybonus:hover { box-shadow:0 0 11px 1px var(--shell-accent); }
 #${SHELL_ROOT_ID} .ge-shell-buybonus:hover span { animation:ge-bb-pulse .7s ease-in-out infinite; }
 #${SHELL_ROOT_ID} .ge-shell-buybonus:active { transform:scale(.96); }
 #${SHELL_ROOT_ID} .ge-shell-buybonus[disabled] { filter:grayscale(.5) brightness(.72); box-shadow:none; cursor:default; }
@@ -66,8 +69,9 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-shell-barhost { position:absolute; left:0; right:0; bottom:0; pointer-events:none;
   display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px;
   transform-origin:bottom center; }
-/* bottom bar: a row of [BUY BONUS (outside-left)] + [one continuous dark panel] (wide default) */
-#${SHELL_ROOT_ID} .ge-shell-bottom { width:100%; box-sizing:border-box; pointer-events:none;
+/* bottom bar: a row of [BUY BONUS (outside-left)] + [one continuous dark panel] (wide default).
+   Capped at 750px and centred (the barhost centres it) so it doesn't stretch edge-to-edge on wide screens. */
+#${SHELL_ROOT_ID} .ge-shell-bottom { width:100%; max-width:850px; box-sizing:border-box; pointer-events:none;
   display:flex; align-items:center; justify-content:flex-start; padding:0 14px 8px; gap:10px; }
 #${SHELL_ROOT_ID} .ge-zone { display:flex; align-items:center; gap:14px; pointer-events:none; }
 #${SHELL_ROOT_ID} .ge-zone > * { pointer-events:auto; }
@@ -76,11 +80,11 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-autoturbo { display:flex; flex-direction:column; gap:2px; }
 #${SHELL_ROOT_ID} .ge-autoturbo .ge-iconbtn { width:40px; height:30px; }
 
-/* mobile (portrait) — full-width stacked plaques: [balance · win] · [controls] · [− bet +] */
-#${SHELL_ROOT_ID}.ge-mobile .ge-shell-bottom { flex-direction:column; align-items:center; gap:14px; padding:8px 12px 8px; }
-#${SHELL_ROOT_ID}.ge-mobile .ge-m-top { width:100%; height:46px; justify-content:space-between; }
+/* mobile (portrait) — two levels: [controls bar] over a small [balance · − bet + · win] info pill */
+#${SHELL_ROOT_ID}.ge-mobile .ge-shell-bottom { flex-direction:column; align-items:center; gap:10px; padding:8px 12px 8px; }
+/* level 1 — the dark controls bar (white icons, spin disc, buy badge) */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls { display:flex; align-items:center; justify-content:space-between;
-  width:100%; box-sizing:border-box; height:62px; border-radius:18px; padding:0 18px; }
+  width:100%; box-sizing:border-box; height:62px; border-radius:16px; padding:0 18px; background:var(--shell-bar); }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-iconbtn,
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-rd,
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-rd .ge-lbl { color:#fff; }
@@ -88,8 +92,28 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 /* mobile: restore accent hover + autoplay glow (the white rule above out-specifies the base ones) */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-iconbtn:hover,
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-iconbtn.ge-glow { color:var(--shell-accent); }
-#${SHELL_ROOT_ID}.ge-mobile .ge-m-bet { width:100%; height:46px; padding:0 18px; gap:8px; justify-content:space-between; }
-#${SHELL_ROOT_ID}.ge-mobile .ge-shell-spin { width:84px; height:84px; font-size:66px; }
+/* level 2 — the small info pill. Readouts are smaller and each can shrink long numbers (see fitBet). */
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-info { display:flex; align-items:center; justify-content:space-between;
+  width:100%; box-sizing:border-box; height:40px; border-radius:12px; padding:0 14px; gap:10px;
+  background:var(--shell-plaque-glass); }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-rd { flex:1 1 0; min-width:0; overflow:hidden; color:#fff;
+  text-shadow:none; font-size:11px; transform-origin:left center; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win { text-align:right; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win .ge-rd-val { transform-origin:right center; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-info .ge-rd .ge-lbl { color:var(--shell-plaque-label); font-size:8px; margin-bottom:2px; }
+/* bet sits in the middle: − value + (compact), fixed so the numbers don't shove balance/win */
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup { flex:0 0 auto; display:flex; align-items:center; gap:6px; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-iconbtn { width:26px; height:26px; color:#fff; font-size:18px; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-iconbtn:hover { color:var(--shell-accent); }
+/* fixed-width box (sized for up to ~€100,000) so +/- never resizes the bet or shifts balance/win;
+   bigger amounts shrink the number instead (fitBet) */
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-bet-value { flex:0 0 auto; width:76px; font-size:11px;
+  text-align:center; color:#fff; text-shadow:none; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-bet-value .ge-rd-val { transform-origin:center; }
+/* SPIN — same as desktop: white disc, black icon + ring; hover tints the icon accent (no fill/ring) */
+#${SHELL_ROOT_ID}.ge-mobile .ge-shell-spin { width:84px; height:84px; font-size:66px; border-width:4px;
+  background:var(--shell-btn); color:var(--shell-btn-ink); }
+#${SHELL_ROOT_ID}.ge-mobile .ge-shell-spin:hover { background:var(--shell-btn); color:var(--shell-accent); box-shadow:none; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-shell-buybonus { width:50px; height:50px; font-size:9px; border-width:2px; }
 /* landscape overflow — size the column to content, centre it; JS scales the whole stack to fit */
 #${SHELL_ROOT_ID} .ge-shell-barhost.ge-fit { left:50%; right:auto; width:max-content; max-width:none; }
@@ -348,8 +372,8 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 /* ═══ desktop control bar — one continuous dark panel; white-disc buttons; BUY BONUS outside-left ═══ */
 /* the dark surface fills the row width (BUY BONUS sits outside, to its left) */
 #${SHELL_ROOT_ID} .ge-bar-panel { flex:1 1 auto; min-width:0; box-sizing:border-box; display:flex;
-  align-items:center; justify-content:space-between; gap:10px; height:54px; padding:0 12px;
-  border-radius:10px; background:var(--shell-bar); }
+  align-items:center; justify-content:space-between; gap:10px; height:68px; padding:0 14px;
+  border-radius:12px; background:var(--shell-bar); }
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-zone-left, #${SHELL_ROOT_ID} .ge-bar-panel .ge-zone-right { gap:12px; min-width:0; }
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-rd { color:#fff; text-shadow:none; }
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-rd .ge-lbl { color:var(--shell-plaque-label); }
@@ -358,8 +382,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 /* white-disc buttons: black icon + black ring; hover tints just the ICON accent (no outer ring) */
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn { width:38px; height:38px; border-radius:50%; border:2px solid #000;
   background:var(--shell-btn); color:var(--shell-btn-ink); font-size:19px; }
-#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn:hover { background:var(--shell-btn); color:var(--shell-accent); }
-#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn.ge-active { color:var(--shell-accent); }
+/* hover + active/engaged tint the icon AND the ring accent (menu/steppers have no border, so unaffected) */
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn:hover { background:var(--shell-btn); color:var(--shell-accent); border-color:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn.ge-active,
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn.ge-glow { color:var(--shell-accent); border-color:var(--shell-accent); }
 /* autoplay glyph reads small in its disc — enlarge it */
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="autoplay"] { font-size:25px; }
 /* MENU stays a plain (borderless) icon — just larger; no white disc */
@@ -369,15 +395,17 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 /* turbo at rest reads dimmed — clearly off, but lighter than a true [disabled] control */
 #${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active) { opacity:.5; }
 #${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active):hover { opacity:1; }
-/* autoplay running: accent icon (the disc itself stays white) */
-#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn.ge-glow { color:var(--shell-accent); }
 
 /* BET group — value + tight stacked chevrons, parked close to the divider (no extra air) */
 #${SHELL_ROOT_ID} .ge-betgroup { display:flex; align-items:center; gap:8px; }
 /* the value box is a FIXED width (sized to hold up to ~€100,000) so changing the stake never shifts
-   the steppers/divider/SPIN; bigger amounts shrink the number (.ge-betnum) instead — see fitBet(). */
+   the steppers/divider/SPIN; bigger amounts shrink the value span instead — see fitBet(). */
 #${SHELL_ROOT_ID} .ge-betgroup .ge-bet-value { flex:0 0 auto; width:90px; border-radius:0; }
-#${SHELL_ROOT_ID} .ge-betnum { display:inline-block; white-space:nowrap; transform-origin:left center; }
+/* every readout's value is an inline-block span so it can be measured & transform-scaled to fit;
+   numerals render in OswaldNum (the digit-only subset), text glyphs fall back to Inter */
+#${SHELL_ROOT_ID} .ge-rd-val { display:inline-block; white-space:nowrap; transform-origin:left center;
+  font-family:'OswaldNum','Inter',sans-serif; font-size:1.15em; }
+#${SHELL_ROOT_ID} .ge-spin-count { font-family:'OswaldNum','Inter',sans-serif; }
 #${SHELL_ROOT_ID} .ge-betgroup .ge-betstep { gap:2px; }
 /* the +/- stay plain icons (no white disc), just bolder/bigger than the default */
 #${SHELL_ROOT_ID} .ge-betgroup .ge-betstep .ge-iconbtn { background:none; border:none; width:30px; height:22px;
@@ -392,16 +420,28 @@ export const SHELL_CSS = SHELL_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-pl-divider { align-self:center; flex:0 0 auto; width:1px; height:22px;
   background:var(--shell-plaque-line); }
 
-/* SPIN + auto/turbo cluster — SPIN is a white disc to match the other buttons, slightly oversized */
+/* SPIN + auto/turbo cluster — SPIN is the hero white disc: larger than the bar so it pops above/below */
 #${SHELL_ROOT_ID} .ge-spinwrap { display:flex; align-items:center; gap:8px; }
-#${SHELL_ROOT_ID} .ge-bar-panel .ge-shell-spin { width:62px; height:62px; font-size:48px; border-width:4px;
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-shell-spin { width:84px; height:84px; font-size:65px; border-width:4px;
   background:var(--shell-btn); color:var(--shell-btn-ink); position:relative; z-index:3; }
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-shell-spin:hover { background:var(--shell-btn); color:var(--shell-accent); box-shadow:none; }
+
+/* FS hero — replaces SPIN in free spins: same white/black-ring hero, but a rounded rectangle showing
+   the spins counter. Pops above/below the bar like SPIN (height matches the disc). */
+#${SHELL_ROOT_ID} .ge-fs-hero { pointer-events:auto; box-sizing:border-box; height:84px; min-width:96px;
+  padding:0 18px; border:4px solid #000; border-radius:20px; background:var(--shell-btn); color:var(--shell-btn-ink);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  position:relative; z-index:3; }
+/* the label wraps to ≤2 lines so long localizations ("Бесплатные вращения") fit the narrow hero */
+#${SHELL_ROOT_ID} .ge-fs-hero .ge-fs-lbl { font-weight:700; font-size:9px; line-height:1.1; letter-spacing:.08em;
+  text-transform:uppercase; color:#454c5a; text-align:center; max-width:11ch; }
+#${SHELL_ROOT_ID} .ge-fs-hero .ge-fs-num { font-family:'OswaldNum','Inter',sans-serif; font-weight:700;
+  font-size:30px; line-height:1; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* BUY BONUS — floats outside-left of the bar; keeps its accent disc + hover ring (the one exception).
    relative/z-index so it stacks predictably under the full-screen overlays (see overlay-stacking test). */
 #${SHELL_ROOT_ID} .ge-shell-bottom > .ge-shell-buybonus { flex:0 0 auto; width:62px; height:62px;
-  font-size:11px; border-width:2px; position:relative; z-index:3; }
+  font-size:11px; border-width:3px; position:relative; z-index:3; }
 
 /* WIN — a plain readout (same as balance/bet), grouped on the left with the other info */
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-win { pointer-events:none; }

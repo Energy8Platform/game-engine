@@ -44,8 +44,8 @@ describe('GameShell layout', () => {
     const host = mount.querySelector('.ge-shell-barhost') as HTMLElement;
     const bar = host.querySelector('.ge-shell-bottom') as HTMLElement;
     Object.defineProperty(bar, 'clientWidth', { configurable: true, get: () => 300 });
-    const top = bar.querySelector('.ge-m-top') as HTMLElement; // [balance · win] row
-    Object.defineProperty(top, 'scrollWidth', { configurable: true, get: () => 600 }); // 2× too wide
+    const info = bar.querySelector('.ge-m-info') as HTMLElement; // [balance · bet · win] pill row
+    Object.defineProperty(info, 'scrollWidth', { configurable: true, get: () => 600 }); // 2× too wide
     (shell as unknown as { applyFitScale(): void }).applyFitScale();
     const s = host.style.transform.match(/scale\(([0-9.]+)\)/);
     expect(s).toBeTruthy();

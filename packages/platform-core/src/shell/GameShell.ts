@@ -160,6 +160,9 @@ export class GameShell extends EventEmitter<ShellEvents> {
       (el as HTMLElement).style.removeProperty('zoom');
     }
     if (this.layout === 'mobile') {
+      // First shrink long numbers inside the info pill (per-readout) so the buttons row stays
+      // full-size; then, only if a row still overflows (tiny phones), scale the whole stack.
+      this.fitBet();
       // Shrink the whole stack to fit narrow phones (mobile-s, or big balance/win/total-win
       // numbers in a row). The rows use space-between, so on overflow their content is
       // left-anchored and spills off the RIGHT edge — scale from the bottom-left corner so
@@ -209,12 +212,21 @@ export class GameShell extends EventEmitter<ShellEvents> {
   /** Keep the BET box a fixed width (so the steppers/divider/SPIN never shift as the stake changes)
    *  by shrinking just the number when it would overflow the box — e.g. amounts above ~€100,000. */
   private fitBet(): void {
-    const num = this.barHost.querySelector('.ge-betnum') as HTMLElement | null;
-    const box = num?.parentElement as HTMLElement | undefined;
-    if (!num || !box) return;
-    num.style.transform = '';                 // measure at full size
-    const avail = box.clientWidth, need = num.scrollWidth;
-    if (need > avail && need > 0) num.style.transform = `scale(${(avail / need).toFixed(3)})`;
+    // Shrink a readout's value span (.ge-rd-val, inline-block so its true width is measurable even
+    // inside an overflow:hidden slot) to fit `box`. The label is left untouched.
+    const fit = (val: HTMLElement | null, box: HTMLElement | null | undefined): void => {
+      if (!val || !box) return;
+      val.style.transform = '';                          // measure at full size
+      const avail = box.clientWidth, need = val.scrollWidth;
+      if (need > avail + 0.5 && need > 0) val.style.transform = `scale(${(avail / need).toFixed(3)})`;
+    };
+    // BET (desktop + mobile): the value fits its fixed-width box so +/- never resizes/shifts it
+    const betBox = this.barHost.querySelector('.ge-bet-value') as HTMLElement | null;
+    fit(betBox?.querySelector('.ge-rd-val') as HTMLElement | null, betBox);
+    // mobile info pill: balance/win values fit their flex slots
+    for (const rd of this.barHost.querySelectorAll('.ge-m-info > .ge-rd')) {
+      fit(rd.querySelector('.ge-rd-val') as HTMLElement | null, rd as HTMLElement);
+    }
   }
 
   /** Pull window focus into the iframe on first pointer interaction so `document` keydown (the
@@ -410,14 +422,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
   }
 }
 
-/** Count-up the trailing text node of a .ge-rd readout (keeps its label span).
+/** Count-up the value span (.ge-rd-val) of a readout, leaving its label untouched.
  *  Returns the count-up canceler so the shell can stop it before the node is replaced. */
 function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): () => void {
-  const textNode = el.lastChild;
-  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) { el.textContent = fmt(to); return () => {}; }
-  const proxy = {
-    set textContent(v: string) { (textNode as Text).data = v; },
-    get textContent() { return (textNode as Text).data; },
-  } as unknown as HTMLElement;
-  return countUp(proxy, from, to, fmt);
+  const val = el.querySelector('.ge-rd-val') as HTMLElement | null;
+  if (!val) { el.textContent = fmt(to); return () => {}; }
+  return countUp(val, from, to, fmt);
 }
