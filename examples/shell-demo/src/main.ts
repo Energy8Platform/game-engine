@@ -26,7 +26,7 @@ const MODES: { id: ShellMode; label: string }[] = [
 ];
 
 // ─── Local game economy (the game owns all state; shell only displays it) ──
-const AVAILABLE_BETS = [0.2, 0.5, 1, 2, 5];
+const AVAILABLE_BETS = [0.2, 0.5, 1, 2, 5, 50, 500, 5000, 50000, 500000, 1000000];
 const state = { balance: 10_000_000_000, win: 1_000_000, bet: 1_000_000, busy: false };
 
 const gameEl = document.getElementById('game') as HTMLElement;
@@ -49,7 +49,7 @@ function log(msg: string): void {
 // ─── Create the shell (single source of truth = this demo's `state`) ───────
 const shell: GameShell = createGameShell({
   mount: gameEl,
-  theme: { scheme: currentTheme, accent: 'red' },
+  theme: { scheme: currentTheme, accent: '#8b5cf6' },
   language: 'en',
   isSocial,
   currency: { symbol: '€', position: 'left' },
