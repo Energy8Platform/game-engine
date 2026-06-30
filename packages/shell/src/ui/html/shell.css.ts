@@ -95,7 +95,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-autoturbo .ge-iconbtn { width:40px; height:30px; }
 
 /* mobile (portrait) — two levels: [controls bar] over a small [balance · − bet + · win] info pill */
-#${SHELL_ROOT_ID}.ge-mobile .ge-shell-bottom { flex-direction:column; align-items:center; gap:10px; padding:8px 12px 8px; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-shell-bottom { flex-direction:column; align-items:center; gap:10px; padding:8px 10px 8px; }
 /* level 1 — the dark controls bar (white icons, spin disc, buy badge) */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls { display:flex; align-items:center; justify-content:space-between;
   width:100%; box-sizing:border-box; height:62px; border-radius:16px; padding:0 18px; background:var(--shell-bar); }

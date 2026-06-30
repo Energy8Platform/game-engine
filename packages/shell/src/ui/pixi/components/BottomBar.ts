@@ -35,7 +35,7 @@ const DISC = 38;            // white-disc icon button box (auto/turbo)
 const FS_BOX = 90;          // fixed bet-value box width
 
 // mobile
-const M_CTRL_H = 62, M_INFO_H = 40, M_GAP = 10, M_PAD_BOTTOM = 8, M_SIDE = 12;
+const M_CTRL_H = 62, M_INFO_H = 40, M_GAP = 10, M_PAD_BOTTOM = 8, M_SIDE = 10;
 const M_BUY = 50;
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H; // spin pops above the controls
 
@@ -87,7 +87,9 @@ class TurboButton extends Container {
     const r = this.box / 2 - this.discBorder / 2;
     this.discG.clear();
     this.discG.circle(this.box / 2, this.box / 2, r).fill('#ffffff');
-    this.discG.stroke({ color: hovering ? this.accent : '#000000', width: this.discBorder });
+    // border lights accent on hover OR when engaged (level>0) — mirrors DOM .ge-iconbtn.ge-active
+    const ringActive = hovering || this.level > 0;
+    this.discG.stroke({ color: ringActive ? this.accent : '#000000', width: this.discBorder });
   }
 
   /** Update turbo level and repaint (called when the shell re-renders the bar). */
@@ -433,14 +435,19 @@ export class BottomBar extends Container {
     info.position.set(0, topPad + M_CTRL_H + M_GAP);
     const localBottom = topPad + M_CTRL_H + M_GAP + M_INFO_H;
 
-    // shrink the whole stack if a row overflows the frame (mobile-s + huge numbers)
-    let need = 0;
-    for (const r of [controls, info]) need = Math.max(need, (r as FlexBox).naturalWidth);
+    // When a row's content overflows the bar width, widen BOTH rows to the common content width
+    // (mirrors the DOM `.ge-fit .ge-shell-bottom { width:max-content }`) so space-between spreads to a
+    // non-negative gap instead of packing the children on top of each other (turbo over the SPIN disc).
+    // Equal widths keep the two rows centred on each other; the whole stack then scales down to fit.
     const avail = W - 2 * M_SIDE;
-    const s = need > avail + 1 && avail > 0 ? Math.max(0.4, avail / need) : 1;
+    const need = Math.max(controls.naturalWidth, info.naturalWidth);
+    const rowW = Math.max(avail, need);
+    controls.setLayoutSize(rowW, undefined);
+    info.setLayoutSize(rowW, undefined);
+    const s = rowW > 0 ? Math.max(0.4, Math.min(1, avail / rowW)) : 1;
 
     this.inner.scale.set(s);
-    this.inner.position.set((W - W * s) / 2 + M_SIDE * s, H - localBottom * s - M_PAD_BOTTOM);
+    this.inner.position.set((W - rowW * s) / 2, H - localBottom * s - M_PAD_BOTTOM);
     this.measureFootprint();
   }
 }
