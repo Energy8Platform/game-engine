@@ -72,9 +72,10 @@ describe('socialize', () => {
 });
 
 describe('icons', () => {
-  it('ships the full 21-glyph set', () => {
-    expect(ICON_NAMES.length).toBe(21);
+  it('ships the full 22-glyph set', () => {
+    expect(ICON_NAMES.length).toBe(22);
     expect(ICON_NAMES).toContain('spin');
+    expect(ICON_NAMES).toContain('ticket');
     expect(ICON_NAMES).toContain('lightning');
   });
   it('builds a parseable SVG with currentColor substituted', () => {

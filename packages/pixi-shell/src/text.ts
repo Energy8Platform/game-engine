@@ -1,5 +1,6 @@
 import { CanvasTextMetrics, Text, TextStyle } from 'pixi.js';
 import { SHELL_FONT_CSS } from './fonts';
+import { SHELL_DIGIT_FONT_CSS } from './fonts-digits';
 
 // The Pixi shell renders text on canvas, so it relies on the same bundled Inter webfont as the
 // DOM shell being registered in `document.fonts`. We inject the identical @font-face CSS (base64
@@ -11,6 +12,12 @@ const STYLE_ID = '__ge-pixi-shell-font__';
  *  the system fonts stay as graceful fallback if the webfont ever fails to load. */
 export const FONT_FAMILY = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
+/** Numeric font — Oswald (digit-only subset) leads, falling back to Inter. Used for the readout
+ *  VALUES (balance/bet/win/FS counter, autoplay countdown), mirroring the DOM's `.ge-rd-val`. */
+export const NUM_FONT_FAMILY = `OswaldNum, ${FONT_FAMILY}`;
+/** Match the DOM's `.ge-rd-val { font-size:1.15em }` bump (offsets Oswald's narrower glyphs). */
+export const NUM_FONT_SCALE = 1.15;
+
 let installed = false;
 
 /** Idempotently register the bundled Inter font in the document. No-op outside a DOM. */
@@ -20,11 +27,13 @@ export function installShellFont(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = SHELL_FONT_CSS;
+  style.textContent = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS;
   document.head.appendChild(style);
-  // Nudge the browser to actually fetch/decode the face so text measured later is correct.
+  // Nudge the browser to actually fetch/decode the faces so text measured later is correct.
   try {
-    (document as Document & { fonts?: FontFaceSet }).fonts?.load('1em Inter');
+    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+    fonts?.load('1em Inter');
+    fonts?.load('1em OswaldNum');
   } catch {
     /* ignore — fallback fonts render meanwhile */
   }
@@ -44,6 +53,8 @@ export function whenFontReady(cb: () => void): void {
 
 export interface TextOpts {
   size: number;
+  /** font-family override (e.g. NUM_FONT_FAMILY for numeric values); defaults to the Inter stack. */
+  family?: string;
   /** numeric (e.g. 700) or keyword. */
   weight?: TextStyle['fontWeight'];
   color?: string;
@@ -78,7 +89,7 @@ export function textBaseline(size: number, weight: TextStyle['fontWeight'] = '40
 /** Create a Pixi Text in the shell font, resolution-bumped for crisp small text. */
 export function makeText(str: string, opts: TextOpts): Text {
   const style = new TextStyle({
-    fontFamily: FONT_FAMILY,
+    fontFamily: opts.family ?? FONT_FAMILY,
     fontSize: opts.size,
     fontWeight: opts.weight ?? '400',
     fill: opts.color ?? '#ffffff',
