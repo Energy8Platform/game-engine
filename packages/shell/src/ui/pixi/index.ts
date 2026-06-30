@@ -23,15 +23,34 @@ export type GameInfoSection =
   | Exclude<CoreGameInfoSection, { type: 'custom' }>
   | { type: 'custom'; title?: string; order?: number; node?: Container; html?: string };
 
-let active: ShellController | null = null;
+/** The Pixi-specific surface that game scenes use to position themselves correctly. */
+export interface PixiShellSurface {
+  /** Insets a scene should avoid (only the bottom bar is reserved). */
+  readonly safeArea: { top: number; right: number; bottom: number; left: number };
+  /** Height of the bottom control bar in px. */
+  readonly barHeight: number;
+  /** Show/hide the whole shell (bar + overlays). */
+  setVisible(visible: boolean): void;
+}
+
+/** The Pixi shell handle: the renderer-agnostic controller + the Pixi-only surface game scenes use. */
+export type PixiGameShell = ShellController & PixiShellSurface;
+
+let active: PixiGameShell | null = null;
 
 /** Create the Pixi game shell. Like `createGameShell`, only one is active at a time. Returns the
  *  existing instance if one is already active. */
-export function createPixiShell(config: PixiShellConfig): ShellController {
+export function createPixiShell(config: PixiShellConfig): PixiGameShell {
   if (active) return active;
-  const { app, parent, ...shell } = config;
-  active = createShell({ ...shell, renderer: new PixiRenderer({ app, parent }) });
-  return active;
+  const renderer = new PixiRenderer({ app: config.app, parent: config.parent });
+  const shell = createShell({ ...config, renderer }) as PixiGameShell;
+  Object.defineProperties(shell, {
+    safeArea:   { get: () => renderer.safeArea, enumerable: true },
+    barHeight:  { get: () => renderer.barHeight, enumerable: true },
+    setVisible: { value: (v: boolean) => renderer.setVisible(v), enumerable: true },
+  });
+  active = shell;
+  return shell;
 }
 
 /** Tear down the active Pixi shell (fade out, detach listeners, remove its display objects).
@@ -44,7 +63,4 @@ export function removePixiShell(): Promise<void> {
 }
 
 export { PixiRenderer };
-/** Alias kept for parity with the legacy `@energy8platform/pixi-shell` public surface, where the
- *  shell class WAS the host. Here the host/brain is the renderer-agnostic ShellController. */
-export { ShellController as PixiGameShell };
 export * from '@/core';
