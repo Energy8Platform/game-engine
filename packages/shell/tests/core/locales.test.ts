@@ -1,16 +1,7 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { it, expect } from 'vitest';
 import { LOCALES } from '@/core/locales';
 import { LANGS, createI18n } from '@/core/i18n';
-
-it('locales.ts is byte-identical across both shells', () => {
-  const a = readFileSync(new URL('../../../pixi-shell/src/locales.ts', import.meta.url), 'utf8');
-  const b = readFileSync(new URL('../../src/core/locales.ts', import.meta.url), 'utf8');
-  expect(a.length, 'pixi-shell locales.ts must not be empty').toBeGreaterThan(10);
-  expect(b.length, 'shell locales.ts must not be empty').toBeGreaterThan(10);
-  expect(a).toBe(b);
-});
 
 it('every non-en language has >20 translation keys', () => {
   for (const l of LANGS) {

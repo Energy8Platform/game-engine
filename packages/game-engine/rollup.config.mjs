@@ -9,11 +9,12 @@ const external = [
   '@energy8platform/platform-core/lua',
   '@energy8platform/platform-core/game-spec',
   '@energy8platform/platform-core/dev-bridge',
-  '@energy8platform/platform-core/shell',
   '@energy8platform/platform-core/slot-result',
   '@energy8platform/platform-core/vite',
   '@energy8platform/platform-core/loading',
-  '@energy8platform/pixi-shell',
+  '@energy8platform/shell',
+  '@energy8platform/shell/html',
+  '@energy8platform/shell/pixi',
   '@esotericsoftware/spine-pixi-v8',
   '@pixi/sound',
   'vite',
@@ -74,7 +75,7 @@ export default defineConfig([
   ...createBundle('src/vite/index.ts', 'vite'),
   ...createBundle('src/lua/index.ts', 'lua'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
-  // host inlines dynamic imports: createSlotGame lazy-imports internal modules (./slotPlay, ./shellConfig, ./replay); without this Rollup splits them into chunks that conflict with output.file. External deps (platform-core/shell, stake-bridge) stay lazy.
+  // host inlines dynamic imports: createSlotGame lazy-imports internal modules (./slotPlay, ./shellConfig, ./replay); without this Rollup splits them into chunks that conflict with output.file. External deps (@energy8platform/shell, stake-bridge) stay lazy.
   ...createBundle('src/host/index.ts', 'host', { inlineDynamicImports: true, treeshake: false }),
   ...createBundle('src/slot/index.ts', 'slot'),
 ]);

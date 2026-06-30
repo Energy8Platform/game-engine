@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/platform-core",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Energy8 platform core: Lua engine, DevBridge, RTP simulation, and SDK session orchestration. Renderer-agnostic — pair with any game framework (Pixi, Phaser, Three.js, custom).",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -40,11 +40,6 @@
       "require": "./dist/loading.cjs.js",
       "types": "./dist/loading.d.ts"
     },
-    "./shell": {
-      "import": "./dist/shell.esm.js",
-      "require": "./dist/shell.cjs.js",
-      "types": "./dist/shell.d.ts"
-    },
     "./game-spec": {
       "import": "./dist/game-spec.esm.js",
       "require": "./dist/game-spec.cjs.js",
@@ -64,7 +59,6 @@
   ],
   "scripts": {
     "simulate": "tsx bin/simulate.ts",
-    "prebuild": "node scripts/gen-version.mjs",
     "build": "rollup -c rollup.config.mjs",
     "dev": "rollup -c rollup.config.mjs -w",
     "lint": "eslint src/ --ext .ts",

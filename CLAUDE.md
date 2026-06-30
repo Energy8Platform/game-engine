@@ -33,7 +33,8 @@ Sub-paths:
 - `@energy8platform/platform-core/dev-bridge` — DevBridge isolated
 - `@energy8platform/platform-core/vite` — `devBridgePlugin`, `luaPlugin`
 - `@energy8platform/platform-core/loading` — `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG` (the Energy8 brand frame, renderer-agnostic)
-- `@energy8platform/platform-core/shell` — `createGameShell`, `removeGameShell`, branded renderer-agnostic DOM game shell (control bar, menu, settings, game info, buy bonus)
+
+> The branded game shell moved out of platform-core into its own package, **`@energy8platform/shell`** — a renderer-agnostic logic core with pluggable renderers: `@energy8platform/shell/html` (DOM `createGameShell`) and `@energy8platform/shell/pixi` (`createPixiShell`). The i18n helpers (`socialize`/`createI18n`/`Lang`) live on its `.` (core) entry. game-engine's `/shell` re-exports `/html`.
 
 ### `@energy8platform/game-engine`
 
@@ -83,7 +84,7 @@ Tween/Timeline system (`packages/game-engine/src/animation/`) is promise-based a
 
 ### UI / shell
 
-Slot games get their chrome (control bar, balance/bet/win, menu, settings, buy-bonus) from the **DOM shell** in `@energy8platform/pixi-shell` (re-exported via `@energy8platform/game-engine/shell`), driven by the host. In-canvas slot visuals come from the **slot module** (`/slot`: ReelGrid, controllers, `BigWinOverlay`, …) and above-shell modals from the host `SceneApi.overlay`.
+Slot games get their chrome (control bar, balance/bet/win, menu, settings, buy-bonus) from the **DOM shell** in `@energy8platform/shell/html` (re-exported via `@energy8platform/game-engine/shell`), driven by the host. In-canvas slot visuals come from the **slot module** (`/slot`: ReelGrid, controllers, `BigWinOverlay`, …) and above-shell modals from the host `SceneApi.overlay`.
 
 > The engine previously shipped a generic from-scratch UI component set (`/ui`: FlexContainer, Button, Modal, Toast, ScrollContainer, …), a React reconciler (`/react`, `/react-jsx`), and a standalone `StateMachine` (`/state`). These were **removed** when the engine narrowed to the host-driven slot path — nothing in `host`/`slot`/`core` consumed them. If you need them back, recover from git history.
 
@@ -97,7 +98,7 @@ Slot games get their chrome (control bar, balance/bet/win, menu, settings, buy-b
 - `/lua` — re-exports `@energy8platform/platform-core/lua`
 - `/debug` — re-exports DevBridge from platform-core; adds local FPSOverlay
 - `/vite` — re-exports plugins from platform-core/vite; adds pixi-flavored `defineGameConfig`
-- `/shell` — re-exports the DOM game shell from `@energy8platform/pixi-shell`
+- `/shell` — re-exports the DOM game shell (+ `Lang`) from `@energy8platform/shell/html`
 - `/assets`, `/audio`, `/game-spec`
 
 ## Architecture (platform-core)

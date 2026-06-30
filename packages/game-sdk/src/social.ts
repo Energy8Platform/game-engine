@@ -8,7 +8,7 @@
  * This module is the one canonical dictionary for the whole platform. It is consumed by:
  *   - `@energy8platform/stake-bridge` — re-exports `applySocialReplacements` (games call it on
  *     their own in-canvas text);
- *   - `@energy8platform/platform-core` (DOM shell) and `@energy8platform/pixi-shell` (Pixi shell)
+ *   - `@energy8platform/shell` (DOM shell via /html, Pixi shell via /pixi)
  *     — both build their own `socialize()` over `SOCIAL_REPLACEMENTS` so the chrome stays in lock-step.
  * Keep all vocabulary changes HERE; do not re-introduce per-package copies (they drift).
  *

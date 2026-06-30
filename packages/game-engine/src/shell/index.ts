@@ -17,4 +17,5 @@ export type {
   GameInfoContent,
   AutoplayOptions,
   FreeSpinsState,
+  Lang,
 } from '@energy8platform/shell/html';

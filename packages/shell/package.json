@@ -1,17 +1,32 @@
 {
   "name": "@energy8platform/shell",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Energy8 branded game shell — one logic core, pluggable html/pixi renderers behind a stable contract.",
   "type": "module",
   "main": "./dist/index.cjs.js",
   "module": "./dist/index.esm.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".":      { "import": "./dist/index.esm.js", "require": "./dist/index.cjs.js", "types": "./dist/index.d.ts" },
-    "./html": { "import": "./dist/html.esm.js",  "require": "./dist/html.cjs.js",  "types": "./dist/html.d.ts" },
-    "./pixi": { "import": "./dist/pixi.esm.js",  "require": "./dist/pixi.cjs.js",  "types": "./dist/pixi.d.ts" }
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./html": {
+      "import": "./dist/html.esm.js",
+      "require": "./dist/html.cjs.js",
+      "types": "./dist/html.d.ts"
+    },
+    "./pixi": {
+      "import": "./dist/pixi.esm.js",
+      "require": "./dist/pixi.cjs.js",
+      "types": "./dist/pixi.d.ts"
+    }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "gen-version": "node scripts/gen-version.mjs",
     "prebuild": "npm run gen-version",
@@ -25,8 +40,14 @@
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
-  "peerDependencies": { "pixi.js": "^8.16.0" },
-  "peerDependenciesMeta": { "pixi.js": { "optional": true } },
+  "peerDependencies": {
+    "pixi.js": "^8.16.0"
+  },
+  "peerDependenciesMeta": {
+    "pixi.js": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@rollup/plugin-alias": "^5.1.0",
     "@rollup/plugin-typescript": "^12.1.0",
@@ -41,7 +62,18 @@
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   },
-  "keywords": ["casino", "energy8", "game-shell", "pixijs", "dom", "igaming"],
+  "keywords": [
+    "casino",
+    "energy8",
+    "game-shell",
+    "pixijs",
+    "dom",
+    "igaming"
+  ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/energy8platform/game-engine.git", "directory": "packages/shell" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/energy8platform/game-engine.git",
+    "directory": "packages/shell"
+  }
 }

@@ -50,23 +50,8 @@ export {
   LOADER_BAR_MAX_WIDTH,
 } from './loading';
 
-// ─── Branded game shell (renderer-agnostic DOM UI chrome) ─────────────────
-export { createGameShell, removeGameShell, GameShell } from './shell';
-export type {
-  ShellConfig,
-  ShellMode,
-  ShellFeatures,
-  ShellState,
-  ShellEvents,
-  BonusOption,
-  BonusCardContext,
-  CurrencyConfig,
-  ThemeConfig,
-  GameInfoContent,
-  AutoplayConfig,
-  AutoplayOptions,
-  FreeSpinsState,
-} from './shell';
+// The branded game shell (DOM + Pixi) now lives in its own package, @energy8platform/shell
+// (subpaths /html and /pixi); the i18n helpers (socialize/createI18n/Lang) moved there too.
 
 // ─── Utility ────────────────────────────────────────────
 export { EventEmitter } from './EventEmitter';

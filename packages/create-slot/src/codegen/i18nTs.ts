@@ -46,7 +46,7 @@ export function genI18nTs(a: Answers): string {
 //   1. Add a new key here using the two-letter BCP-47 code.
 //   2. Copy the keys from \`en\` and provide translations.
 //   3. Test via the harness language selector.
-import type { Lang } from '@energy8platform/platform-core/shell';
+import type { Lang } from '@energy8platform/game-engine/shell';
 
 export const i18n: Partial<Record<Lang, Record<string, string>>> = {
   en: {

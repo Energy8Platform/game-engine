@@ -17,4 +17,4 @@ export type {
 } from './sceneController';
 // Social-casino word-swap. The shell auto-socializes all gameInfo/buyBonus text in social mode;
 // authors only need this to socialize strings they render themselves (e.g. inside a custom DOM node).
-export { socialize } from '@energy8platform/platform-core/shell';
+export { socialize } from '@energy8platform/shell';

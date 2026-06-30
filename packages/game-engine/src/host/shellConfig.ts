@@ -1,11 +1,9 @@
 // packages/game-engine/src/host/shellConfig.ts
-// `socialize` / `createI18n` are runtime helpers sourced from platform-core/shell;
-// renderer-agnostic types (GameInfoSection/Content, PaytableRow, GameMode) also stay
-// on platform-core so internal helpers never see the pixi-widened `node?: Container`.
-// Only the pixi-specific surface types (PixiShellConfig + control types) come from the
-// new @energy8platform/shell/pixi entry.
-import { socialize, createI18n } from '@energy8platform/platform-core/shell';
-import type { Lang } from '@energy8platform/platform-core/shell';
+// `socialize` / `createI18n` / `Lang` are renderer-agnostic helpers from the shell core
+// (@energy8platform/shell). Renderer-agnostic types (GameInfoSection/Content, PaytableRow,
+// GameMode) and the pixi-specific surface types come from the @energy8platform/shell/pixi entry.
+import { socialize, createI18n } from '@energy8platform/shell';
+import type { Lang } from '@energy8platform/shell';
 import type { GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/shell/pixi';
 import type {
   PixiShellConfig, ShellMode, CurrencyConfig,
