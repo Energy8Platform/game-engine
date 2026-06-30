@@ -360,10 +360,10 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     body.addChild(desc);
     y += desc.height + 0.8 * em;
     if (bonus.volatility) {
-      const vol = volatilityRow(this.host, bonus.volatility, accent, 2.7 * em);
+      const vol = volatilityRow(this.host, bonus.volatility, accent, 2.2 * em);
       vol.position.set((cardW - vol.width) / 2, y);
       body.addChild(vol);
-      y += 2.7 * em + 0.55 * em;
+      y += 2.2 * em + 0.55 * em;
     }
     const priceText = makeText(this.host.fmt(price), { size: 1.6 * em, weight: '800', color: '#ffffff', align: 'center' });
     priceText.position.set((cardW - priceText.width) / 2, y);
@@ -593,10 +593,10 @@ class BonusCard implements CardView {
     // bottom block: volatility + price
     let by = 0;
     if (bonus.volatility) {
-      const vol = volatilityRow(host, bonus.volatility, volColor, 2.7 * em);
+      const vol = volatilityRow(host, bonus.volatility, volColor, 2.2 * em);
       vol.position.set((cardW - vol.width) / 2, by);
       this.bottomBlock.addChild(vol);
-      by += 2.7 * em + 0.55 * em;
+      by += 2.2 * em + 0.55 * em;
     }
     const priceText = makeText(opts.priceText, { size: 1.6 * em, weight: '800', color: '#ffffff', align: 'center' });
     priceText.position.set((cardW - priceText.width) / 2, by);
@@ -689,9 +689,11 @@ function volatilityRow(_host: PixiComponentContext, level: number, accent: strin
   const n = Math.max(0, Math.min(5, level));
   let x = 0;
   for (let i = 0; i < 5; i++) {
-    // active bolt: fill #fff + accent ring; inactive: fill #fff + black ring, dimmed
+    // active = solid accent bolt; inactive = solid black bolt, dimmed (fill==ring, 1px hairline ring
+    // per the DOM: .ge-bonus-vol svg path { stroke-width:1; fill/stroke = accent (on) / #000 (off) })
     const active = i < n;
-    const bolt = makeRingedIcon('turbo1', size, '#ffffff', active ? accent : '#000000');
+    const col = active ? accent : '#000000';
+    const bolt = makeRingedIcon('turbo1', size, col, col, 1);
     bolt.alpha = active ? 1 : 0.5;
     bolt.position.set(x, 0);
     c.addChild(bolt);

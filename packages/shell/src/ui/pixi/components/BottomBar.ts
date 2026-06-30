@@ -65,7 +65,7 @@ class TurboButton extends Container {
     this.view = makeRingedIcon('turbo1', opts.glyph, fill, ring);
     this.view.position.set((this.box - opts.glyph) / 2, (this.box - opts.glyph) / 2);
     this.addChild(this.view);
-    this.alpha = this.level > 0 ? 1 : 0.5;
+    // off is no longer dimmed — it reads as off via the black ring (DOM dropped the opacity:.5 rule)
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.hitArea = new Rectangle(0, 0, this.box, this.box);
@@ -94,7 +94,6 @@ class TurboButton extends Container {
   setLevel(level: number, accent: string): void {
     this.level = level;
     this.accent = accent;
-    this.alpha = level > 0 ? 1 : 0.5;
     this._paint(false);
   }
 
