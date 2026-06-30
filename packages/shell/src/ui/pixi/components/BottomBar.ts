@@ -442,8 +442,10 @@ export class BottomBar extends Container {
     const avail = W - 2 * M_SIDE;
     const need = Math.max(controls.naturalWidth, info.naturalWidth);
     const rowW = Math.max(avail, need);
-    controls.setLayoutSize(rowW, undefined);
-    info.setLayoutSize(rowW, undefined);
+    // keep the fixed row heights — passing undefined here would drop them to content height (the 84px
+    // SPIN hero), inflating the controls row so it overlaps the info row below it.
+    controls.setLayoutSize(rowW, M_CTRL_H);
+    info.setLayoutSize(rowW, M_INFO_H);
     const s = rowW > 0 ? Math.max(0.4, Math.min(1, avail / rowW)) : 1;
 
     this.inner.scale.set(s);
