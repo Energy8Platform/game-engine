@@ -87,7 +87,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   public platformSession: PlatformSession | null = null;
 
   /** Branded game shell (only when config.shell is set). */
-  public shell?: import('@energy8platform/platform-core/shell').GameShell;
+  public shell?: import('@energy8platform/shell/html').GameShell;
 
   /** Configuration */
   public readonly config: GameApplicationConfig;
@@ -169,7 +169,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
       // 4b. Mount the branded game shell after the SDK handshake (optional)
       if (this.config.shell) {
-        const { createGameShell } = await import('@energy8platform/platform-core/shell');
+        const { createGameShell } = await import('@energy8platform/shell/html');
         this.shell = createGameShell(this.config.shell);
       }
 
@@ -209,7 +209,7 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     this._running = false;
 
     if (this.shell) {
-      const { removeGameShell } = await import('@energy8platform/platform-core/shell');
+      const { removeGameShell } = await import('@energy8platform/shell/html');
       await removeGameShell();
       this.shell = undefined;
     }

@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction, applyJurisdiction } from '../../src/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
-import type { GameInfoContent, GameInfoSection, ShellFeatures } from '@energy8platform/platform-core/shell';
+import type { GameInfoContent, GameInfoSection, ShellFeatures } from '@energy8platform/shell/pixi';
 
 const model = {
   spec: {

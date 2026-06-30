@@ -6,7 +6,7 @@ import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
 import { showFatalError, installGlobalErrorHandlers } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
-import type { ShellMode } from '@energy8platform/pixi-shell';
+import type { ShellMode } from '@energy8platform/shell/pixi';
 import type { SceneApi, SlotSceneController } from './sceneController';
 
 /**
@@ -143,7 +143,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   });
 
   if (opts.shell) {
-    const { createPixiShell } = await import('@energy8platform/pixi-shell');
+    const { createPixiShell } = await import('@energy8platform/shell/pixi');
     const { buildShellConfig } = await import('./shellConfig');
     const { resolveReplayBonusId } = await import('./replay');
 
@@ -206,7 +206,11 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // pixi-shell mounts its root onto the engine's unscaled, screen-space UI layer (above the
     // scaled world/scene root) so the control bar fills the real screen, not the letterboxed game.
     // The host adds the mount target (`app`) + parent; buildShellConfig produces everything else.
-    shell = createPixiShell({ ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app, parent: game.uiLayer });
+    // buildShellConfig returns platform-core GameInfoContent (node?: unknown). The host never
+    // populates `node` so all sections are structurally compatible with pixi's GameInfoContent
+    // (node?: Container). Cast the assembled config to satisfy createPixiShell's parameter type.
+    const pixiShellCfg = { ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app, parent: game.uiLayer } as import('@energy8platform/shell/pixi').PixiShellConfig;
+    shell = createPixiShell(pixiShellCfg);
     // Scope the bar to the slot scene: show only when a SlotSceneController scene is current
     // (hidden over the intro / non-slot scenes). Applies in BOTH base and replay modes.
     shell.setVisible(!!gameScene());

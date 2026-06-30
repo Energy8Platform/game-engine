@@ -84,7 +84,8 @@
   },
   "dependencies": {
     "@energy8platform/platform-core": "*",
-    "@energy8platform/pixi-shell": "*"
+    "@energy8platform/pixi-shell": "*",
+    "@energy8platform/shell": "*"
   },
   "peerDependencies": {
     "@energy8platform/game-sdk": "^2.8.0",

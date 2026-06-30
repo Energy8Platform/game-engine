@@ -1,12 +1,15 @@
 // packages/game-engine/src/host/shellConfig.ts
 // `socialize` / `createI18n` are runtime helpers sourced from platform-core/shell;
-// pixi-shell re-exports only types so we import directly from platform-core.
+// renderer-agnostic types (GameInfoSection/Content, PaytableRow, GameMode) also stay
+// on platform-core so internal helpers never see the pixi-widened `node?: Container`.
+// Only the pixi-specific surface types (PixiShellConfig + control types) come from the
+// new @energy8platform/shell/pixi entry.
 import { socialize, createI18n } from '@energy8platform/platform-core/shell';
-import type { Lang } from '@energy8platform/platform-core/shell';
+import type { Lang, GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/platform-core/shell';
 import type {
-  PixiShellConfig, ShellMode, CurrencyConfig, GameInfoContent, GameInfoSection, PaytableRow,
-  BonusOption, ShellFeatures, GameMode,
-} from '@energy8platform/pixi-shell';
+  PixiShellConfig, ShellMode, CurrencyConfig,
+  BonusOption, ShellFeatures,
+} from '@energy8platform/shell/pixi';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { WinTier } from '../slot';
 
@@ -340,7 +343,7 @@ export function buildShellConfig(
   opts: SlotShellOptions,
   model: GameModel,
   runtime: ShellRuntime,
-): Omit<PixiShellConfig, 'app' | 'parent'> {
+): Omit<PixiShellConfig, 'app' | 'parent' | 'gameInfo'> & { gameInfo: GameInfoContent } {
   // Prefer the currency-specific ladder from /wallet/authenticate; fall back to the spec (dev/devBridge).
   const betLevels = runtime.betLevels?.length ? runtime.betLevels : model.spec.betLevels;
   // Stake requires the default to come from authenticate on every entry; spec default is the dev fallback.

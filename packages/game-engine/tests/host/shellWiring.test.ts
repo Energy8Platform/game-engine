@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createGameShell, removeGameShell } from '@energy8platform/platform-core/shell';
-import type { ShellConfig, BonusOption, GameShell } from '@energy8platform/platform-core/shell';
+import { createGameShell, removeGameShell } from '@energy8platform/shell/html';
+import type { ShellConfig, BonusOption, GameShell } from '@energy8platform/shell/html';
 import { createSlotPlay } from '@/host/slotPlay';
 import { runRound } from '@/host/runRound';
 import type { RenderContext, SlotSceneController } from '@/host/sceneController';

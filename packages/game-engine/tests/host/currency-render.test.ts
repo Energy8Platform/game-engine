@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from 'vitest';
-import { createGameShell, removeGameShell } from '@energy8platform/platform-core/shell';
+import { createGameShell, removeGameShell } from '@energy8platform/shell/html';
 import { buildShellConfig, resolveCurrency } from '@/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 
@@ -26,7 +26,7 @@ describe('currency renders as symbol, not code', () => {
     // site); supply the DOM shell's mount here to render and assert the currency output.
     const cfg = buildShellConfig({}, model, { balance: 12345, mode: 'base', currency });
     const shell = createGameShell({ ...cfg, mount: document.body });
-    shell.render();
+    // new ShellController auto-renders on construction via HtmlRenderer.mount()
     const text = document.body.innerText || document.body.textContent || '';
     expect(text).not.toContain('EUR');
     expect(text).toContain('€');
@@ -37,7 +37,7 @@ describe('currency renders as symbol, not code', () => {
     const cfg = buildShellConfig({}, model, { balance: 500, mode: 'base', currency });
     const shell = createGameShell({ ...cfg, mount: document.body });
     shell.setWin(0.0041); // tiny win on a small bet
-    shell.render();
+    // new ShellController auto-renders on construction via HtmlRenderer.mount()
     const text = document.body.innerText || document.body.textContent || '';
     expect(text).toContain('0,0041'); // win keeps significant digits, not rounded to 0,00
     expect(text).toContain('500,00'); // balance stays at the currency's 2 decimals
