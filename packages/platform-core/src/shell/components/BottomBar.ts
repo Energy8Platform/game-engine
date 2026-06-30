@@ -3,15 +3,17 @@ import { formatCurrency } from '../format';
 import { stepBet, nextTurbo } from '../state';
 import { effectiveAccent, contrastText } from '../colors';
 import { icon, type IconName } from './icons';
-import { twoLine } from './primitives';
 
 /** A floating labelled money readout (balance/win/bet). */
 function readout(ge: string, label: string, value: string): HTMLElement {
   const el = document.createElement('div');
   el.dataset.ge = ge;
   el.className = `ge-rd ge-${ge}`;
-  el.innerHTML = `<span class="ge-lbl">${label}</span>`;
-  el.append(document.createTextNode(value));
+  // The value lives in its own inline-block span (.ge-rd-val) so it can be measured & shrunk to fit
+  // (see GameShell.fitBet) independently of the label, and so the count-up animates just the number.
+  const lbl = document.createElement('span'); lbl.className = 'ge-lbl'; lbl.textContent = label;
+  const val = document.createElement('span'); val.className = 'ge-rd-val'; val.textContent = value;
+  el.append(lbl, val);
   return el;
 }
 
@@ -91,45 +93,59 @@ export function renderBottomBar(shell: GameShell): HTMLElement {
   // current = number → "current / total"; current = null/undefined → just the (game-driven) total.
   const fs = state.freeSpins;
   const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
-  const fsCounter = showFsBlocks ? readout('fs-counter', shell.t('Free spins'), fsText) : null;
+  // In FS the spins counter takes the SPIN slot as a rectangular hero plaque (same white/black-ring
+  // style as the SPIN disc); Total Win stays an inline readout.
+  const fsHero = showFsBlocks ? fsHeroPlaque(shell, fsText) : null;
   const fsTotalWin = showFsBlocks ? readout('fs-totalwin', shell.t('Total win'), fmtWin(fs.totalWin)) : null;
+  // The hero in the centre/spin position: SPIN in base, the FS counter in free spins, nothing else.
+  const hero = isBase ? spin : fsHero;
 
   if (mobile) {
-    // rows: [balance · win] · [menu · auto · spin · FS counter · Total Win · turbo · buy] · [− bet +]
-    // FS counter + Total Win live in the controls row (alongside menu/turbo), not the top readouts.
-    bar.appendChild(plaque('ge-m-top ge-pl ge-pl-glass', compact([balance, winEl])));
-    const center = isBase ? spin : null;
-    bar.appendChild(plaque('ge-m-controls ge-pl-dark', compact([menu, auto, center, fsCounter, fsTotalWin, turbo, buy])));
-    bar.appendChild(plaque('ge-m-bet ge-pl ge-pl-dark', compact([betDown, betValue, betUp])));
+    // Two levels:
+    //   1) controls bar — [menu · auto · SPIN-or-FS · Total Win · turbo · buy]
+    //   2) a small info pill below — [balance · − bet + · win]
+    bar.appendChild(plaque('ge-m-controls', compact([menu, auto, hero, fsTotalWin, turbo, buy])));
+    const betGroup = plaque('ge-m-betgroup', compact([betDown, betValue, betUp]));
+    // WIN always occupies its slot (shows €0 between wins) so the pill never reflows on win↔0.
+    const mWin = readout('win', shell.t('Win'), fmtWin(state.win));
+    bar.appendChild(plaque('ge-m-info', compact([balance, betGroup, mWin])));
   } else {
-    // LEFT: [menu] ⊐ BUY BONUS coin ⊏ [balance] · [Free Spins] · [Total Win]
-    // (the last two only render in FS / a free-spins replay)
-    const menuPlaque = plaque('ge-pl ge-pl-dark ge-pl-menu', [menu]);
-    const balPlaque = balance ? plaque('ge-pl ge-pl-glass ge-pl-bal', [balance]) : null;
-    const fsPlaque = fsCounter ? plaque('ge-pl ge-pl-glass ge-pl-fs', [fsCounter]) : null;
-    const totalWinPlaque = fsTotalWin ? plaque('ge-pl ge-pl-glass ge-pl-totalwin', [fsTotalWin]) : null;
-    const left = zone('ge-zone-left ge-zone-plaques', ...compact([menuPlaque, buy, balPlaque, fsPlaque, totalWinPlaque]));
+    // DESKTOP: BUY BONUS floats OUTSIDE, to the left of one continuous dark bar panel.
+    // LEFT (all the info): [menu] · [balance] · [Total Win] · [WIN]
+    // (Total Win only in FS / a fs replay; WIN only when there's a win this spin)
+    const left = zone('ge-zone-left', ...compact([menu, balance, fsTotalWin, winEl]));
 
-    // RIGHT: [bet (+ step)] · |divider| · [auto · SPIN · turbo]
+    // RIGHT (the controls): [bet (+ step)] · |divider| · [auto · SPIN-or-FS · turbo]
     const betKids: HTMLElement[] = [betValue];
     if (betUp && betDown) {
       const step = document.createElement('div'); step.className = 'ge-betstep'; step.append(betUp, betDown);
       betKids.push(step);
     }
-    const betPlaque = plaque('ge-pl ge-pl-dark ge-pl-bet', betKids);
+    const betGroup = plaque('ge-betgroup', betKids);
     const divider = document.createElement('div'); divider.className = 'ge-pl-divider';
-    const spinWrap = document.createElement('div'); spinWrap.className = 'ge-spinwrap ge-pl-dark';
-    spinWrap.append(...compact([auto, spin, turbo]));
-    const right = zone('ge-zone-right ge-zone-plaques', betPlaque, divider, spinWrap);
+    const spinWrap = document.createElement('div'); spinWrap.className = 'ge-spinwrap';
+    spinWrap.append(...compact([auto, hero, turbo]));
+    const right = zone('ge-zone-right', betGroup, divider, spinWrap);
 
-    // MIDDLE: per-spin WIN pill in every mode — lifts above the bar on overflow.
-    let middle: HTMLElement | null = null;
-    if (winEl) { winEl.classList.add('ge-winpill'); middle = winEl; }
-    bar.append(...compact([left, middle, right]));
+    // One continuous dark panel: info group hard-left, controls hard-right (space-between).
+    // BUY BONUS sits to its left, outside the panel.
+    const panel = plaque('ge-bar-panel', [left, right]);
+    bar.append(...compact([buy, panel]));
   }
 
   applyBusy(shell, bar);
   return bar;
+}
+
+/** Free-spins hero plaque — takes the SPIN slot in FS: same white disc/black-ring language as SPIN,
+ *  but a rounded RECTANGLE showing the spins counter ("3 / 10"). */
+function fsHeroPlaque(shell: GameShell, text: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'ge-fs-hero'; el.dataset.ge = 'fs-counter';
+  const lbl = document.createElement('span'); lbl.className = 'ge-fs-lbl'; lbl.textContent = shell.t('Free spins');
+  const num = document.createElement('span'); num.className = 'ge-fs-num'; num.textContent = text;
+  el.append(lbl, num);
+  return el;
 }
 
 function zone(cls: string, ...children: HTMLElement[]): HTMLElement {
@@ -159,7 +175,9 @@ function buyBtn(shell: GameShell): HTMLButtonElement {
     buy.style.background = accent; buy.style.color = contrastText(accent);
     buy.addEventListener('click', () => { if (!buy.disabled) shell.deactivateFeature(); });
   } else {
-    buy.innerHTML = `<span>${twoLine(shell.t('BUY BONUS'))}</span>`;
+    // Ticket icon (no text); keep the label for screen readers.
+    buy.setAttribute('aria-label', shell.t('BUY BONUS'));
+    buy.innerHTML = `<span class="ge-bb-tk">${icon('ticket')}</span>`;
     buy.addEventListener('click', () => { if (!buy.disabled) shell.openBuyBonus(); });
   }
   return buy;

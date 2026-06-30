@@ -148,23 +148,21 @@ export class GameShell extends EventEmitter<ShellEvents> {
     const host = this.barHost;
     const bar = host.querySelector('.ge-shell-bottom') as HTMLElement | null;
     if (!bar) return;
-    // reset to baseline (idempotent — the pill may have been lifted on a prior pass)
-    const pill = host.querySelector('.ge-winpill') as HTMLElement | null;
-    if (pill && pill.parentElement === host) {                // put a lifted pill back inline
-      const right = bar.querySelector('.ge-zone-right');
-      if (right) bar.insertBefore(pill, right); else bar.appendChild(pill);
-      pill.classList.remove('ge-up');
-    }
+    // reset to baseline (idempotent)
     host.classList.remove('ge-fit');
     host.style.transform = '';
     host.style.transformOrigin = '';
-    // clear any per-zone scale/zoom from a prior pass
-    for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+    // clear any zoom from a prior pass. We zoom the whole dark PANEL (so the bar surface shrinks with
+    // its content on a narrow popout), plus BUY BONUS + a lifted WIN pill, which live outside it.
+    for (const el of host.querySelectorAll('.ge-bar-panel, .ge-shell-buybonus')) {
       (el as HTMLElement).style.transform = '';
       (el as HTMLElement).style.transformOrigin = '';
       (el as HTMLElement).style.removeProperty('zoom');
     }
     if (this.layout === 'mobile') {
+      // First shrink long numbers inside the info pill (per-readout) so the buttons row stays
+      // full-size; then, only if a row still overflows (tiny phones), scale the whole stack.
+      this.fitBet();
       // Shrink the whole stack to fit narrow phones (mobile-s, or big balance/win/total-win
       // numbers in a row). The rows use space-between, so on overflow their content is
       // left-anchored and spills off the RIGHT edge — scale from the bottom-left corner so
@@ -183,18 +181,22 @@ export class GameShell extends EventEmitter<ShellEvents> {
     // must not resize the bar. The factor is the frame WIDTH vs the bar's design width, never the
     // current mode's content width.
     //
-    // It's applied with `zoom` (not `transform`): zoom shrinks the LAYOUT, so the zones genuinely
-    // take less room and still sit edge-to-edge (menu hard-left, controls hard-right) even when base's
-    // wide row would overflow a merely-visually-scaled bar — so there is no per-mode centred cluster
-    // and no width/mode branching. A wide WIN pill is still lifted above the row first so it can't
-    // shove the controls off-screen. (Mobile, above, keeps its own stacked fit.)
-    if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
+    // It's applied with `zoom` (not `transform`): zoom shrinks the LAYOUT, so the bar genuinely
+    // takes less room and still sits edge-to-edge (menu hard-left, controls hard-right) even when
+    // base's wide row would overflow a merely-visually-scaled bar — so there is no per-mode centred
+    // cluster and no width/mode branching. The WIN pill stays inline in the bar and scales with it
+    // (no lifting above the row). (Mobile, above, keeps its own stacked fit.)
     const zoomBar = (z: number): void => {
       const v = z < 0.999 ? z.toFixed(4) : '';
-      for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+      const set = (el: Element | null): void => {
+        if (!el) return;
         if (v) (el as HTMLElement).style.setProperty('zoom', v);
         else (el as HTMLElement).style.removeProperty('zoom');
-      }
+      };
+      // zoom the whole panel (surface + content, incl. the inline WIN pill, shrink together);
+      // BUY BONUS sits outside the panel, so zoom it too.
+      set(host.querySelector('.ge-bar-panel'));
+      set(bar.querySelector('.ge-shell-buybonus'));
     };
     const s = Math.max(GameShell.BAR_MIN_SCALE, Math.min(1, this.root.clientWidth / GameShell.BAR_REF_WIDTH));
     zoomBar(s);
@@ -203,6 +205,27 @@ export class GameShell extends EventEmitter<ShellEvents> {
     // never triggers this, so base and replay keep the SAME zoom (no size change on mode switch).
     if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
       zoomBar(s * (bar.clientWidth / bar.scrollWidth));
+    }
+    this.fitBet();
+  }
+
+  /** Keep the BET box a fixed width (so the steppers/divider/SPIN never shift as the stake changes)
+   *  by shrinking just the number when it would overflow the box — e.g. amounts above ~€100,000. */
+  private fitBet(): void {
+    // Shrink a readout's value span (.ge-rd-val, inline-block so its true width is measurable even
+    // inside an overflow:hidden slot) to fit `box`. The label is left untouched.
+    const fit = (val: HTMLElement | null, box: HTMLElement | null | undefined): void => {
+      if (!val || !box) return;
+      val.style.transform = '';                          // measure at full size
+      const avail = box.clientWidth, need = val.scrollWidth;
+      if (need > avail + 0.5 && need > 0) val.style.transform = `scale(${(avail / need).toFixed(3)})`;
+    };
+    // BET (desktop + mobile): the value fits its fixed-width box so +/- never resizes/shifts it
+    const betBox = this.barHost.querySelector('.ge-bet-value') as HTMLElement | null;
+    fit(betBox?.querySelector('.ge-rd-val') as HTMLElement | null, betBox);
+    // mobile info pill: balance/win values fit their flex slots
+    for (const rd of this.barHost.querySelectorAll('.ge-m-info > .ge-rd')) {
+      fit(rd.querySelector('.ge-rd-val') as HTMLElement | null, rd as HTMLElement);
     }
   }
 
@@ -399,14 +422,10 @@ export class GameShell extends EventEmitter<ShellEvents> {
   }
 }
 
-/** Count-up the trailing text node of a .ge-rd readout (keeps its label span).
+/** Count-up the value span (.ge-rd-val) of a readout, leaving its label untouched.
  *  Returns the count-up canceler so the shell can stop it before the node is replaced. */
 function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): () => void {
-  const textNode = el.lastChild;
-  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) { el.textContent = fmt(to); return () => {}; }
-  const proxy = {
-    set textContent(v: string) { (textNode as Text).data = v; },
-    get textContent() { return (textNode as Text).data; },
-  } as unknown as HTMLElement;
-  return countUp(proxy, from, to, fmt);
+  const val = el.querySelector('.ge-rd-val') as HTMLElement | null;
+  if (!val) { el.textContent = fmt(to); return () => {}; }
+  return countUp(val, from, to, fmt);
 }

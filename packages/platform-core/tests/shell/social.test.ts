@@ -35,16 +35,18 @@ describe('isSocial vocabulary', () => {
   it('leaves the bar in plain English by default', () => {
     createGameShell(cfg(mount, false));
     expect(q(mount, '[data-ge="bet-value"] .ge-lbl')!.textContent).toBe('Bet');
-    expect(q(mount, '[data-ge="buybonus"]')!.textContent).toContain('BUY');
+    // buy-bonus shows the ticket icon; its label lives in aria-label (socialized via i18n)
+    expect(q(mount, '[data-ge="buybonus"]')!.getAttribute('aria-label')).toContain('BUY');
   });
 
   it('swaps shell labels on the bar when isSocial', () => {
     createGameShell(cfg(mount, true));
     expect(q(mount, '[data-ge="bet-value"] .ge-lbl')!.textContent).toBe('Play'); // Bet → Play
     const buy = q(mount, '[data-ge="buybonus"]')!;
-    expect(buy.textContent).toContain('GET'); // BUY BONUS → GET BONUS
-    expect(buy.textContent).not.toContain('BUY');
-    expect(buy.innerHTML).toContain('<br>'); // still two lines
+    const label = buy.getAttribute('aria-label')!;
+    expect(label).toContain('GET'); // BUY BONUS → GET BONUS
+    expect(label).not.toContain('BUY');
+    expect(buy.querySelector('svg')).toBeTruthy(); // the ticket glyph
   });
 
   it('socializes the shell-owned Game Info strings, not the game content', () => {
