@@ -10,7 +10,11 @@ export function buildThemeVars(t: ShellTokens): string {
     `--shell-track: ${t.track}`, `--shell-soft: ${t.soft}`, `--shell-spin: ${t.spin}`, `--shell-spin-fg: ${t.spinFg}`,
     `--shell-radius: 12px`,
     `--shell-plaque-dark: ${t.plaqueDark}`, `--shell-plaque-glass: ${t.plaqueGlass}`,
-    `--shell-plaque-glass-hover: ${t.plaqueGlassHover}`, `--shell-plaque-solid: ${t.plaqueSolid}`,
+    `--shell-plaque-glass-hover: ${t.plaqueGlassHover}`,
+    // The desktop control bar is one continuous, slightly-darker surface (vs the lighter plaque
+    // panels). Buttons sitting on it are white discs with black icons (see .ge-bar-panel CSS).
+    `--shell-bar: ${t.bar}`, `--shell-btn: ${t.btn}`, `--shell-btn-ink: ${t.btnInk}`,
+    `--shell-plaque-solid: ${t.plaqueSolid}`,
     `--shell-plaque-line: ${t.plaqueLine}`, `--shell-plaque-label: ${t.plaqueLabel}`,
     `--shell-accent: ${t.accent}`,
   ].join('; ') + ';';
