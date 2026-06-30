@@ -71,23 +71,20 @@ describe('BottomBar base mode', () => {
     expect(spy).toHaveBeenCalledWith(1);
   });
 
-  it('turbo icon reflects the level (default turbo1; levels 2/3 add lines; wraps)', () => {
+  it('turbo: single bolt glyph at every level; level shown via ge-turbo-{0,1,2} class (caps at 2; wraps)', () => {
     createGameShell(cfg(mount, { turbo: 3 }));
-    // normalise both sides through the DOM so attribute serialisation matches
-    const expectIcon = (name: Parameters<typeof icon>[0]) => {
-      const tmp = document.createElement('div');
-      tmp.innerHTML = icon(name);
-      expect(q(mount, '[data-ge="turbo"]')!.innerHTML).toBe(tmp.innerHTML);
-    };
-    expectIcon('turbo1'); // level 0 — resting (grey)
-    q(mount, '[data-ge="turbo"]')!.click();
-    expectIcon('turbo1'); // level 1 — engaged (white via .ge-active)
-    q(mount, '[data-ge="turbo"]')!.click();
-    expectIcon('turbo2');
-    q(mount, '[data-ge="turbo"]')!.click();
-    expectIcon('turbo3');
-    q(mount, '[data-ge="turbo"]')!.click(); // wraps back to 0
-    expectIcon('turbo1');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = icon('turbo1');
+    const btn = () => q(mount, '[data-ge="turbo"]')!;
+    const lvl = () => ['ge-turbo-0', 'ge-turbo-1', 'ge-turbo-2'].find((c) => btn().classList.contains(c));
+    // the glyph is ALWAYS turbo1 — state is conveyed by colour/stroke (the level class), not by swapping glyphs
+    const expectBolt = () => expect(btn().innerHTML).toBe(tmp.innerHTML);
+
+    expectBolt(); expect(lvl()).toBe('ge-turbo-0'); expect(btn().classList.contains('ge-active')).toBe(false); // off — muted
+    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-1'); expect(btn().classList.contains('ge-active')).toBe(true); // L1 — white + accent outline
+    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-2'); // L2 — accent fill + outline
+    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-2'); // L3 caps at the L2 look
+    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-0'); // wraps back to off
   });
 
   it('turbo/autoplay carry ge-active (white) only when engaged', () => {

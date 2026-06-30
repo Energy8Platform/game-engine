@@ -15,11 +15,13 @@ function readout(ge: string, label: string, value: string): HTMLElement {
   return el;
 }
 
-// Resting icon is turbo1 (1 line, grey via .ge-iconbtn); engaging turbo adds the
-// .ge-active class which paints it white. Higher levels add more speed lines.
-// level: 0 → turbo1 (grey), 1 → turbo1 (white), 2 → turbo2, 3 → turbo3.
-function turboIcon(level: number): IconName {
-  return (['turbo1', 'turbo1', 'turbo2', 'turbo3'] as const)[Math.max(0, Math.min(3, level))];
+// Turbo is ONE bolt glyph (turbo1) whose state is shown by colour, not by swapping glyphs:
+//   off (0) → muted bolt · L1 → white bolt + 2px accent outline · L2 → accent-filled bolt + outline.
+// The level class (ge-turbo-0/1/2) drives the styling in shell.css; ≥2 caps at the L2 look.
+function turboBtn(host: ShellHost, level: number): HTMLButtonElement {
+  const b = iconBtn('turbo', 'turbo1', () => host.actions.cycleTurbo(), level > 0);
+  b.classList.add(`ge-turbo-${Math.min(2, level)}`);
+  return b;
 }
 
 /** A borderless icon button. */
@@ -70,8 +72,7 @@ export function renderBottomBar(host: ShellHost): HTMLElement {
     const lbl = betValue.querySelector('.ge-lbl') as HTMLElement | null;
     if (lbl) lbl.style.color = accent;
   }
-  const turbo = config.features.turbo > 0
-    ? iconBtn('turbo', turboIcon(state.turbo), () => host.actions.cycleTurbo(), state.turbo > 0) : null;
+  const turbo = config.features.turbo > 0 ? turboBtn(host, state.turbo) : null;
 
   // interactive controls — base mode only
   let betDown: HTMLElement | null = null, betUp: HTMLElement | null = null;

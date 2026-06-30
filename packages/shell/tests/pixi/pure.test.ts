@@ -72,11 +72,16 @@ describe('socialize', () => {
 });
 
 describe('icons', () => {
-  it('ships the full 22-glyph set', () => {
-    expect(ICON_NAMES.length).toBe(22);
+  it('ships the shipped glyph set (preview glyphs + ticket; unused glyphs dropped)', () => {
+    expect(ICON_NAMES.length).toBe(16);
     expect(ICON_NAMES).toContain('spin');
     expect(ICON_NAMES).toContain('ticket');
     expect(ICON_NAMES).toContain('lightning');
+    expect(ICON_NAMES).toContain('turbo1');
+    // dropped (unused) glyphs are gone
+    for (const gone of ['turbo', 'turbo2', 'turbo3', 'betUp', 'betDown', 'star']) {
+      expect(ICON_NAMES).not.toContain(gone);
+    }
   });
   it('builds a parseable SVG with currentColor substituted', () => {
     const svg = iconSVG('menu', '#abcdef');

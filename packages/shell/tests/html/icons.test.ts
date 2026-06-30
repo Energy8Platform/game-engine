@@ -16,9 +16,8 @@ describe('icon', () => {
     }
   });
 
-  it('control icons use currentColor', () => {
-    for (const name of ['spin', 'turbo', 'turbo1', 'turbo2', 'turbo3', 'autoplay', 'stop',
-      'menu', 'betUp', 'betDown', 'plus', 'minus', 'soundOn', 'soundOff', 'info', 'close'] as const) {
+  it('every shipped icon uses currentColor', () => {
+    for (const name of ICON_NAMES) {
       expect(icon(name)).toContain('currentColor');
     }
   });

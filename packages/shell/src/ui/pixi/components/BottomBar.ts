@@ -37,8 +37,10 @@ const M_CTRL_H = 62, M_INFO_H = 40, M_GAP = 10, M_PAD_BOTTOM = 8, M_SIDE = 12;
 const M_BUY = 50;
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H; // spin pops above the controls
 
-function turboIcon(level: number): IconName {
-  return (['turbo1', 'turbo1', 'turbo2', 'turbo3'] as const)[Math.max(0, Math.min(3, level))];
+// Single bolt glyph at every level (the level is conveyed by colour, matching the DOM turbo
+// redesign — the Pixi colour/ring treatment per level lands with the Pixi turbo port).
+function turboIcon(_level: number): IconName {
+  return 'turbo1';
 }
 
 /** A readout in the bar (white Oswald value, plaque-label caption, no shadow). */

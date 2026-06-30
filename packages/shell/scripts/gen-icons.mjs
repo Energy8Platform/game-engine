@@ -130,8 +130,14 @@ function buildFragment(name, { TX, TY, body }) {
   return `<g fill="currentColor" fill-rule="evenodd">${inner}</g>`;
 }
 
+// Glyphs that live in the preview sheet (design reference) but are NOT shipped — unused by any
+// component. turbo2/turbo3 went away with the single-bolt turbo redesign; betUp/betDown are
+// superseded by plus/minus; star is unused. Edit this set if a glyph becomes (un)used.
+const DROP = new Set(['turbo', 'turbo2', 'turbo3', 'betUp', 'betDown', 'star']);
+const shipped = tiles.filter((t) => !DROP.has(t.name));
+
 const built = {};
-for (const t of tiles) built[t.name] = buildFragment(t.name, t);
+for (const t of shipped) built[t.name] = buildFragment(t.name, t);
 
 // Self-check: `back` must reproduce the canonical chevron exactly (proves the transform).
 if (!/M15 6l-6 6 6 6/.test(built.back.replace(/\s+/g, ' ')) && !/M15 6 l-6 6/.test(built.back)) {
@@ -160,9 +166,12 @@ const HEADER = `// AUTO-GENERATED from ./icons-preview.svg by scripts/gen-icons.
 function emit(targetRel, withIconSVG) {
   const path = join(SRC, targetRel);
   const current = parseSvgs(readFileSync(path, 'utf8'));
-  // order: preview tile order, then any preserved extras (ticket) appended.
-  const names = tiles.map((t) => t.name);
-  const extras = Object.keys(current).filter((k) => !built[k]);
+  // order: preview tile order (minus DROPped), then any preserved extras (ticket) appended.
+  // "extras" = glyphs the current file has that are NOT in the preview at all (e.g. ticket) and are
+  // not DROPped — so a DROPped preview glyph is removed, not resurrected as an "extra".
+  const names = shipped.map((t) => t.name);
+  const tileNames = new Set(tiles.map((t) => t.name));
+  const extras = Object.keys(current).filter((k) => !tileNames.has(k) && !DROP.has(k));
   const entries = [...names.map((n) => [n, built[n]]), ...extras.map((n) => [n, current[n]])];
   const body = entries.map(([n, frag]) => `  ${n}: \`${frag}\`,`).join('\n');
   let out = `${HEADER}\nconst SVGS: Record<string, string> = {\n${body}\n};\n\n`;

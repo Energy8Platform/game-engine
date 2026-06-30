@@ -28,6 +28,20 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-iconbtn:active { transform:scale(.92); }
 #${SHELL_ROOT_ID} .ge-iconbtn[disabled] { opacity:.35; cursor:default; }
 #${SHELL_ROOT_ID} .ge-iconbtn.ge-active { color:var(--shell-icon-active); }
+/* Turbo — ONE bolt glyph (turbo1); the level is shown by colour, not by swapping glyphs:
+   off (ge-turbo-0) = muted grey · L1 (ge-turbo-1) = white bolt + 2px accent OUTER outline ·
+   L2 (ge-turbo-2) = accent-filled bolt + 2px accent outer outline.
+   Each level is a full-size bolt with a 2px OUTER ring; only the fill + ring colour change:
+   off = white fill + BLACK ring · L1 = white fill + accent ring · L2 = accent fill + accent ring.
+   The outer ring uses the paint-order:stroke + double-width trick (the stroke straddles the path, so
+   painting it BEHIND the fill hides the inner half, leaving only the outer ~2px). Hover follows the
+   standard bar-button behaviour (line ~400: white disc + accent) — the bolt + ring tint accent. */
+#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"] svg { overflow:visible; }
+#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"] svg path { paint-order:stroke; stroke:var(--shell-accent); stroke-width:4; stroke-linejoin:round; }
+#${SHELL_ROOT_ID} .ge-iconbtn.ge-turbo-0 svg path { fill:#fff; stroke:#000; }
+#${SHELL_ROOT_ID} .ge-iconbtn.ge-turbo-1 svg path { fill:#fff; }
+#${SHELL_ROOT_ID} .ge-iconbtn.ge-turbo-2 svg path { fill:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="turbo"]:hover svg path { fill:var(--shell-accent); stroke:var(--shell-accent); }
 
 /* SPIN — white disc by default, big glyph reaching for the rim; lights up accent on hover */
 #${SHELL_ROOT_ID} .ge-shell-spin { pointer-events:auto; cursor:pointer; border:3px solid #000; border-radius:50%;
@@ -315,10 +329,15 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-bonus-desc { font-size:.96em; line-height:1.45; color:rgba(255,255,255,.82); }
 #${SHELL_ROOT_ID} .ge-bonus-spacer { flex:1; min-height:.7em; }
 #${SHELL_ROOT_ID} .ge-bonus-vol { display:flex; justify-content:center; align-items:center; gap:0;
-  font-size:2.1em; line-height:1; margin-bottom:.55em; }
+  font-size:2.2em; line-height:1; margin-bottom:.55em; }
 #${SHELL_ROOT_ID} .ge-bonus-vol-on, #${SHELL_ROOT_ID} .ge-bonus-vol-off { display:inline-flex; gap:0; }
-#${SHELL_ROOT_ID} .ge-bonus-vol-on { color:var(--card-acc); }
-#${SHELL_ROOT_ID} .ge-bonus-vol-off { color:rgba(255,255,255,.18); }
+/* Volatility bolts get the same outline+fill treatment as turbo: white fill + a 2px OUTER ring
+   (paint-order:stroke + double width). Active = accent ring; inactive = black ring, dimmed. */
+#${SHELL_ROOT_ID} .ge-bonus-vol svg { overflow:visible; }
+#${SHELL_ROOT_ID} .ge-bonus-vol svg path { paint-order:stroke; fill:#fff; stroke-width:1; stroke-linejoin:round; }
+#${SHELL_ROOT_ID} .ge-bonus-vol-on svg path { stroke:var(--card-acc); fill:var(--card-acc); }
+#${SHELL_ROOT_ID} .ge-bonus-vol-off svg path { stroke:#000; fill:#000; }
+#${SHELL_ROOT_ID} .ge-bonus-vol-off { opacity:.5; }
 #${SHELL_ROOT_ID} .ge-bonus-price { font-size:1.6em; font-weight:800; color:#fff; font-variant-numeric:tabular-nums; white-space:nowrap; }
 #${SHELL_ROOT_ID} .ge-bonus-cta { width:100%; border:none; padding:1.15em; font-weight:800; font-size:1.05em;
   letter-spacing:.05em; text-transform:uppercase; cursor:pointer; background:var(--card-acc); color:var(--card-ink);
@@ -393,7 +412,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
   width:auto; height:auto; color:#fff; font-size:30px; }
 #${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="menu"]:hover { background:none; color:var(--shell-accent); }
 /* turbo at rest reads dimmed — clearly off, but lighter than a true [disabled] control */
-#${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active) { opacity:.5; }
+#${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active) {  }
 #${SHELL_ROOT_ID} [data-ge="turbo"]:not(.ge-active):hover { opacity:1; }
 
 /* BET group — value + tight stacked chevrons, parked close to the divider (no extra air) */

@@ -113,7 +113,7 @@ const shell: GameShell = createGameShell({
     ],
   },
   features: {
-    turbo: 3,
+    turbo: 2,
     autoplay: {},
     buyBonus: [
       { id: 'ante', type: 'feature', title: 'Ante Bet', description: '+25% to trigger frequency', priceMultiplier: 1.25, volatility: 2 },

@@ -307,10 +307,11 @@ function thumb(bonus: BonusOption): string {
   return `<span class="ge-bonus-thumb-ph">${icon('gift')}</span>`;
 }
 
-/** Volatility as five lightning bolts (the supplied SVG); `level` lit in the accent, rest dimmed. */
+/** Volatility as five turbo bolts; the first `level` lit (white fill + accent ring), the rest
+ *  inactive (white fill + black ring, dimmed) — same outline treatment as the turbo button. */
 function volatility(level: number): string {
   const n = Math.max(0, Math.min(5, level));
-  const bolt = icon('lightning');
+  const bolt = icon('turbo1');
   return `<span class="ge-bonus-vol-on">${bolt.repeat(n)}</span>` +
     `<span class="ge-bonus-vol-off">${bolt.repeat(5 - n)}</span>`;
 }
