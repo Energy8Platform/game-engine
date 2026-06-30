@@ -2,7 +2,7 @@ import { BlurFilter, Color, Container, Graphics, Rectangle, Text, Ticker } from 
 import type { ShellTokens } from '@/core/theme';
 import type { IconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
-import { makeText, setText } from '../text';
+import { makeText, setText, NUM_FONT_FAMILY, NUM_FONT_SCALE } from '../text';
 import { tween, type TweenOpts } from '../motion-pixi';
 import { FlexBox, type Sizable } from './flex';
 
@@ -89,6 +89,10 @@ export interface IconButtonOpts {
   hover: string; // hover colour (token.accent)
   activeColor?: string; // .ge-active colour (token.iconActive)
   active?: boolean;
+  /** White-disc style (auto/turbo on the desktop panel): a `disc` fill + `border` ring. Hover/active
+   *  tint BOTH the icon and the ring with `hover`. Omit for a plain borderless icon (menu, +/-). */
+  disc?: string;
+  discBorder?: number;
   onTap?: () => void;
 }
 
@@ -101,6 +105,9 @@ export class IconButton extends Container implements Sizable {
   private _active: boolean;
   private _disabled = false;
   private _name: IconName;
+  private discFill?: string;
+  private discBorder: number;
+  private discG?: Graphics;
 
   constructor(name: IconName, opts: IconButtonOpts) {
     super();
@@ -110,23 +117,42 @@ export class IconButton extends Container implements Sizable {
     this.hoverColor = opts.hover;
     this.activeColor = opts.activeColor ?? opts.color;
     this._active = opts.active ?? false;
+    this.discFill = opts.disc;
+    this.discBorder = opts.discBorder ?? 2;
     const glyph = opts.glyph ?? 24;
+    if (this.discFill) {
+      this.discG = new Graphics();
+      this.addChild(this.discG);
+    }
     this.view = makeIcon(name, glyph, this._active ? this.activeColor : this._color);
     this.view.position.set((this.box - glyph) / 2, (this.box - glyph) / 2);
     this.addChild(this.view);
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.hitArea = new Rectangle(0, 0, this.box, this.box);
+    this.paint(false);
     attachHover(this, () => this.paint(true), () => this.paint(false));
     attachPress(this, 0.92, () => {
       if (!this._disabled) opts.onTap?.();
     });
   }
 
+  private _glow = false;
+
   private paint(hovering: boolean): void {
-    if (this._disabled) return;
-    const c = hovering ? this.hoverColor : this._active ? this.activeColor : this._color;
+    if (this._disabled && !this.discG) return;
+    const lit = hovering || this._active || this._glow;
+    const c = this._disabled
+      ? this._color
+      : hovering || this._glow ? this.hoverColor : this._active ? this.activeColor : this._color;
     this.view.setColor(c);
+    if (this.discG && this.discFill) {
+      // white disc + black ring; lit (hover/active) → accent ring (mirrors `.ge-bar-panel .ge-iconbtn`)
+      const r = this.box / 2 - this.discBorder / 2;
+      this.discG.clear();
+      this.discG.circle(this.box / 2, this.box / 2, r).fill(this.discFill);
+      this.discG.stroke({ color: !this._disabled && lit ? this.hoverColor : '#000000', width: this.discBorder });
+    }
   }
 
   setIcon(name: IconName): void {
@@ -161,7 +187,8 @@ export class IconButton extends Container implements Sizable {
   /** Accent recolour while autoplay runs — `.ge-iconbtn.ge-glow` (the CSS also adds a
    *  drop-shadow; the colour change carries the state legibly here). */
   setGlow(on: boolean): void {
-    this.view.setColor(on ? this.hoverColor : this._active ? this.activeColor : this._color);
+    this._glow = on;
+    this.paint(false);
   }
 
   setColors(color: string, hover: string, activeColor?: string): void {
@@ -187,17 +214,24 @@ export interface ReadoutOpts {
   fg: string; // value colour
   align?: 'left' | 'center' | 'right';
   shadow?: boolean; // floating readouts have a text-shadow; plaque ones don't
-  valueSize?: number;
+  valueSize?: number; // value font-size BEFORE the Oswald 1.15× bump (default 13)
+  /** Fixed slot width — the value shrinks to fit it (no jiggle on +/-, mirrors the DOM `.ge-rd-val`
+   *  fit). The label aligns within this width too. Omit for content sizing. */
+  fixedWidth?: number;
 }
 
 export class Readout extends Container implements Sizable {
   readonly valueText: Text;
   private labelText: Text;
   private align: 'left' | 'center' | 'right';
+  private fixedW?: number;
+  // Value baseline ascent at scale 1 (for stable bottom alignment as the value scales down).
+  private valueH: number;
 
   constructor(opts: ReadoutOpts) {
     super();
     this.align = opts.align ?? 'left';
+    this.fixedW = opts.fixedWidth;
     this.labelText = makeText(opts.label, {
       size: 9,
       weight: '600',
@@ -205,21 +239,30 @@ export class Readout extends Container implements Sizable {
       letterSpacing: 0.9, // .1em at 9px
       upper: true,
     });
+    // The VALUE uses the Oswald numeral font, bumped 1.15× (mirrors `.ge-rd-val`).
     this.valueText = makeText(opts.value, {
-      size: opts.valueSize ?? 13,
+      size: Math.round((opts.valueSize ?? 13) * NUM_FONT_SCALE),
+      family: NUM_FONT_FAMILY,
       weight: '700',
       color: opts.fg,
       shadow: opts.shadow,
     });
+    this.valueH = this.valueText.height;
     this.addChild(this.labelText, this.valueText);
     this.relayout();
   }
 
   private relayout(): void {
-    const w = Math.max(this.labelText.width, this.valueText.width);
+    // shrink the value to fit a fixed slot (transform-scale, like the DOM fit)
+    this.valueText.scale.set(1);
+    if (this.fixedW != null && this.valueText.width > this.fixedW && this.valueText.width > 0) {
+      this.valueText.scale.set(this.fixedW / this.valueText.width);
+    }
+    const vW = this.valueText.width; // scaled width
+    const w = this.fixedW ?? Math.max(this.labelText.width, vW);
     const x = (tw: number): number => (this.align === 'center' ? (w - tw) / 2 : this.align === 'right' ? w - tw : 0);
     this.labelText.position.set(x(this.labelText.width), 0);
-    this.valueText.position.set(x(this.valueText.width), this.labelText.height + 4);
+    this.valueText.position.set(x(vW), this.labelText.height + 4);
   }
 
   setValue(v: string): void {
@@ -238,10 +281,11 @@ export class Readout extends Container implements Sizable {
   }
 
   setLayoutSize(): void {
-    /* content sized */
+    /* content sized (or fixed via fixedWidth) */
   }
   measureSize(): { w: number; h: number } {
-    return { w: Math.max(this.labelText.width, this.valueText.width), h: this.labelText.height + 4 + this.valueText.height };
+    const w = this.fixedW ?? Math.max(this.labelText.width, this.valueText.width);
+    return { w, h: this.labelText.height + 4 + this.valueH };
   }
 }
 
@@ -264,15 +308,12 @@ function makeGlow(): Graphics {
   return g;
 }
 
-/** The hover halo shared by SPIN + BUY BONUS: `box-shadow: 0 0 0 3px accent, 0 0 16px accent` —
- *  a SOLID 3px accent ring hugging the disc plus a soft accent glow behind it. */
-function drawHalo(glow: Graphics, ring: Graphics, size: number, accent: string, on: boolean): void {
+/** BUY BONUS hover: a SOFT accent glow only — `box-shadow: 0 0 11px 1px accent` (no solid ring). */
+function drawGlow(glow: Graphics, size: number, accent: string, on: boolean): void {
   glow.clear();
-  ring.clear();
   if (!on) return;
   const r = size / 2;
-  glow.circle(r, r, r + 7).fill({ color: accent, alpha: 0.65 }); // blurred by the glow's filter → glow
-  ring.circle(r, r, r + 1.5).stroke({ color: accent, width: 3 }); // solid, opaque accent ring
+  glow.circle(r, r, r + 6).fill({ color: accent, alpha: 0.7 }); // blurred by the glow's filter → halo
 }
 
 // ── SpinDisc — .ge-shell-spin ────────────────────────────────────────────────
@@ -306,14 +347,14 @@ export class SpinDisc extends Container implements Sizable {
 
   constructor(opts: SpinDiscOpts) {
     super();
-    this.size = opts.size ?? 86;
-    this.glyphSize = opts.glyph ?? 68;
+    this.size = opts.size ?? 84;
+    this.glyphSize = opts.glyph ?? 65;
     this.tokens = opts.tokens;
     this.ticker = opts.ticker;
     this.onSpin = opts.onSpin;
     this.onStop = opts.onStop;
     this.disc = new Graphics();
-    this.glyph = makeIcon('spin', this.glyphSize, this.tokens.spinFg);
+    this.glyph = makeIcon('spin', this.glyphSize, this.tokens.btnInk);
     this.glyph.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
     this.addChild(this.glow, this.ring, this.disc, this.glyph, this.dim);
     this.paint();
@@ -336,11 +377,12 @@ export class SpinDisc extends Container implements Sizable {
 
   private paint(): void {
     const hot = this.hovering && !this._disabled && this.mode === 'spin';
-    drawDisc(this.disc, this.size, hot ? this.tokens.accent : this.tokens.spin);
-    drawHalo(this.glow, this.ring, this.size, this.tokens.accent, hot); // solid ring + glow on hover
-    const glyphColor = hot ? '#ffffff' : this.tokens.spinFg;
+    // white disc, black 4px ring; hover tints ONLY the glyph accent (no fill/halo) — `.ge-bar-panel
+    // .ge-shell-spin`. The hero pops above/below the bar (sized by the caller).
+    drawDisc(this.disc, this.size, this.tokens.btn, 4);
+    const glyphColor = hot ? this.tokens.accent : this.tokens.btnInk;
     this.glyph.setColor(glyphColor);
-    if (this.countText) this.countText.style.fill = hot ? '#ffffff' : this.tokens.spinFg;
+    if (this.countText) this.countText.style.fill = hot ? this.tokens.accent : this.tokens.btnInk;
     // Disabled (mid-spin / can't spin): darken OPAQUELY (≈ filter:grayscale(.4) brightness(.62))
     // with a dark veil over the disc — not alpha, which would let the bright board show through and
     // read as a translucent/missing button (what looked "transparent" while spinning).
@@ -359,7 +401,7 @@ export class SpinDisc extends Container implements Sizable {
       this.glyph.visible = false;
       this.stopGlyph();
       if (!this.countText) {
-        this.countText = makeText('', { size: 22, weight: '800', color: this.tokens.spinFg, align: 'center' });
+        this.countText = makeText('', { size: 22, weight: '800', color: this.tokens.btnInk, align: 'center', family: NUM_FONT_FAMILY });
         this.addChild(this.countText); // added after the STOP glyph → renders on top of it
       }
       const label = Number.isFinite(remaining) ? String(remaining) : '∞';
@@ -381,7 +423,7 @@ export class SpinDisc extends Container implements Sizable {
   private stopGlyphView?: IconView;
   private stopGlyph(): void {
     if (!this.stopGlyphView) {
-      this.stopGlyphView = makeIcon('stop', this.glyphSize, this.tokens.spinFg);
+      this.stopGlyphView = makeIcon('stop', this.glyphSize, this.tokens.btnInk);
       this.stopGlyphView.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
       this.addChild(this.stopGlyphView);
     }
@@ -445,7 +487,11 @@ export interface BuyBonusOpts {
   border?: number; // 3 / 2
   bg: string; // accent
   fg?: string; // text colour (#fff, or contrast in feature mode)
-  label: string; // "BUY BONUS" (2-line) or "DISABLE"
+  label: string; // "DISABLE" (feature mode) — ignored when `icon` is set
+  /** Show this icon (the ticket) instead of the text label — the BUY state. */
+  icon?: IconName;
+  iconSize?: number; // glyph px (≈ size * 0.62)
+  iconColor?: string; // ticket ink (black)
   tokens: ShellTokens;
   ticker: Ticker;
   onTap: () => void;
@@ -454,7 +500,9 @@ export interface BuyBonusOpts {
 export class BuyBonusBadge extends Container implements Sizable {
   private size: number;
   private disc: Graphics;
-  private labelText: Text;
+  private labelText?: Text;
+  private iconView?: IconView;
+  private content: Container; // labelText or iconView — the pulsed node
   private bg: string;
   private fg: string;
   private border: number;
@@ -462,7 +510,6 @@ export class BuyBonusBadge extends Container implements Sizable {
   private _disabled = false;
   private pulseCancel?: () => void;
   private glow = makeGlow();
-  private ring = new Graphics();
 
   constructor(opts: BuyBonusOpts) {
     super();
@@ -472,17 +519,28 @@ export class BuyBonusBadge extends Container implements Sizable {
     this.fg = opts.fg ?? '#ffffff';
     this.ticker = opts.ticker;
     this.disc = new Graphics();
-    this.labelText = makeText(opts.label, {
-      size: opts.fontSize ?? 13,
-      weight: '800',
-      color: opts.fg ?? '#ffffff',
-      letterSpacing: (opts.fontSize ?? 13) * 0.02,
-      align: 'center',
-      lineHeight: (opts.fontSize ?? 13) * 1.08,
-    });
-    this.labelText.anchor.set(0.5);
-    this.labelText.position.set(this.size / 2, this.size / 2);
-    this.addChild(this.glow, this.ring, this.disc, this.labelText);
+    this.addChild(this.glow, this.disc);
+    if (opts.icon) {
+      const gs = opts.iconSize ?? this.size * 0.62;
+      this.iconView = makeIcon(opts.icon, gs, opts.iconColor ?? '#0b0e16');
+      this.iconView.pivot.set(gs / 2, gs / 2);             // pulse/scale around the glyph centre
+      this.iconView.position.set(this.size / 2, this.size / 2);
+      this.content = this.iconView;
+      this.addChild(this.iconView);
+    } else {
+      this.labelText = makeText(opts.label, {
+        size: opts.fontSize ?? 13,
+        weight: '800',
+        color: opts.fg ?? '#ffffff',
+        letterSpacing: (opts.fontSize ?? 13) * 0.02,
+        align: 'center',
+        lineHeight: (opts.fontSize ?? 13) * 1.08,
+      });
+      this.labelText.anchor.set(0.5);
+      this.labelText.position.set(this.size / 2, this.size / 2);
+      this.content = this.labelText;
+      this.addChild(this.labelText);
+    }
     this.paint(false);
     this.eventMode = 'static';
     this.cursor = 'pointer';
@@ -494,25 +552,25 @@ export class BuyBonusBadge extends Container implements Sizable {
   }
 
   private paint(hovering: boolean): void {
-    // disabled → grayscale(.5) brightness(.72) baked into the fill/label (no filter → crisp ring)
+    // disabled → grayscale(.5) brightness(.72) baked into the fill/label (no filter → crisp)
     drawDisc(this.disc, this.size, this._disabled ? dimColor(this.bg) : this.bg, this.border);
-    this.labelText.style.fill = this._disabled ? dimColor(this.fg) : this.fg;
+    if (this.labelText) this.labelText.style.fill = this._disabled ? dimColor(this.fg) : this.fg;
     const on = hovering && !this._disabled;
-    drawHalo(this.glow, this.ring, this.size, this.bg, on); // solid 3px accent ring + soft glow
+    drawGlow(this.glow, this.size, this.bg, on); // soft accent glow only (no ring) — `.ge-shell-buybonus:hover`
     if (on) this.startPulse();
     else this.stopPulse();
   }
 
   private startPulse(): void {
     if (this.pulseCancel) return;
+    // both the label (anchor 0.5) and the icon (pivot centred) scale around their centre
     const loop = (): void => {
       this.pulseCancel = tween(this.ticker, {
         duration: 700,
         ease: (p) => p,
         onUpdate: (p) => {
-          // 0→1→0 triangle → scale 1..1.16 (CSS ge-bb-pulse)
-          const tri = p < 0.5 ? p * 2 : (1 - p) * 2;
-          this.labelText.scale.set(1 + 0.16 * tri);
+          const tri = p < 0.5 ? p * 2 : (1 - p) * 2; // 0→1→0 triangle → scale 1..1.16 (ge-bb-pulse)
+          this.content.scale.set(1 + 0.16 * tri);
         },
         onComplete: () => {
           this.pulseCancel = undefined;
@@ -525,17 +583,17 @@ export class BuyBonusBadge extends Container implements Sizable {
   private stopPulse(): void {
     this.pulseCancel?.();
     this.pulseCancel = undefined;
-    this.labelText.scale.set(1);
+    this.content.scale.set(1);
   }
 
   setColors(bg: string, fg: string): void {
     this.bg = bg;
-    this.labelText.style.fill = fg;
+    if (this.labelText) this.labelText.style.fill = fg;
     this.paint(false);
   }
 
   setLabel(label: string): void {
-    setText(this.labelText, label);
+    if (this.labelText) setText(this.labelText, label);
   }
 
   set disabled(v: boolean) {
@@ -555,6 +613,50 @@ export class BuyBonusBadge extends Container implements Sizable {
   destroy(options?: Parameters<Container['destroy']>[0]): void {
     this.stopPulse(); // cancel the hover-pulse tween (ticker) before teardown
     super.destroy(options);
+  }
+}
+
+// ── FsHero — .ge-fs-hero (FS counter in the SPIN slot: white/black-ring RECTANGLE) ──
+export interface FsHeroOpts {
+  label: string; // localized "Free spins"
+  value: string; // "3 / 10"
+  tokens: ShellTokens;
+  height?: number; // 84 — matches the SPIN disc so it pops above/below the bar
+  minWidth?: number; // 96
+}
+
+export class FsHero extends Container implements Sizable {
+  private w: number;
+  private h: number;
+  private bgG = new Graphics();
+
+  constructor(opts: FsHeroOpts) {
+    super();
+    this.h = opts.height ?? 84;
+    const minW = opts.minWidth ?? 96;
+    const padX = 18;
+    const gap = 3;
+    // label wraps to ≤2 lines for long locales ("Бесплатные вращения")
+    const label = makeText(opts.label, {
+      size: 9, weight: '700', color: '#454c5a', letterSpacing: 0.72, upper: true,
+      align: 'center', wrapWidth: minW - padX * 2,
+    });
+    const num = makeText(opts.value, { size: 30, weight: '700', color: opts.tokens.btnInk, family: NUM_FONT_FAMILY, align: 'center' });
+    const contentW = Math.max(label.width, num.width);
+    this.w = Math.max(minW, contentW + padX * 2);
+    this.bgG.roundRect(0, 0, this.w, this.h, 20).fill(opts.tokens.btn).stroke({ color: '#000000', width: 4 });
+    const stackH = label.height + gap + num.height;
+    const top = (this.h - stackH) / 2;
+    label.position.set((this.w - label.width) / 2, top);
+    num.position.set((this.w - num.width) / 2, top + label.height + gap);
+    this.addChild(this.bgG, label, num);
+  }
+
+  measureSize(): { w: number; h: number } {
+    return { w: this.w, h: this.h };
+  }
+  setLayoutSize(): void {
+    /* fixed */
   }
 }
 

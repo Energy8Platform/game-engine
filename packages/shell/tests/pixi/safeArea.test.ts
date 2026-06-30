@@ -9,18 +9,18 @@ function makeHost(over: HostOverrides = {}): PixiComponentContext {
 }
 
 describe('BottomBar.height — safeArea source of truth', () => {
-  it('returns WIDE_BAR_H (90) in wide layout', () => {
+  it('returns WIDE_BAR_H (92) in wide layout', () => {
     const host = makeHost({ layout: 'wide', screenW: 1200, screenH: 675 });
     const bar = new BottomBar(host);
     expect(bar.height).toBe(WIDE_BAR_H);
-    expect(bar.height).toBe(90);
+    expect(bar.height).toBe(92);
   });
 
-  it('returns MOBILE_BAR_H (190) in mobile layout', () => {
+  it('returns MOBILE_BAR_H (142) in mobile layout', () => {
     const host = makeHost({ layout: 'mobile', screenW: 375, screenH: 667 });
     const bar = new BottomBar(host);
     expect(bar.height).toBe(MOBILE_BAR_H);
-    expect(bar.height).toBe(190);
+    expect(bar.height).toBe(142);
   });
 
   it('height tracks the layout set on host', () => {
