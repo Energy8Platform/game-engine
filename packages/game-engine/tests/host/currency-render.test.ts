@@ -36,8 +36,9 @@ describe('currency renders as symbol, not code', () => {
     const currency = resolveCurrency({ code: 'EUR', symbol: '€', decimals: 2 }, 'EUR');
     const cfg = buildShellConfig({}, model, { balance: 500, mode: 'base', currency });
     const shell = createGameShell({ ...cfg, mount: document.body });
+    // setWin synchronously patches the DOM (ShellController auto-renders on construction and
+    // on each setter call — no explicit shell.render() needed after the initial mount).
     shell.setWin(0.0041); // tiny win on a small bet
-    // new ShellController auto-renders on construction via HtmlRenderer.mount()
     const text = document.body.innerText || document.body.textContent || '';
     expect(text).toContain('0,0041'); // win keeps significant digits, not rounded to 0,00
     expect(text).toContain('500,00'); // balance stays at the currency's 2 decimals

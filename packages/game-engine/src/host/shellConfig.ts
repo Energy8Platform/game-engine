@@ -5,7 +5,8 @@
 // Only the pixi-specific surface types (PixiShellConfig + control types) come from the
 // new @energy8platform/shell/pixi entry.
 import { socialize, createI18n } from '@energy8platform/platform-core/shell';
-import type { Lang, GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/platform-core/shell';
+import type { Lang } from '@energy8platform/platform-core/shell';
+import type { GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/shell/pixi';
 import type {
   PixiShellConfig, ShellMode, CurrencyConfig,
   BonusOption, ShellFeatures,
@@ -279,20 +280,26 @@ function sectionKey(s: GameInfoSection): string {
  */
 export function mergeGameInfo(derived: GameInfoContent, override?: GameInfoContent): GameInfoContent {
   if (!override) return derived;
+  // `GameInfoContent.sections` is typed with the core GameInfoSection (node?: unknown) because
+  // shell/pixi re-exports GameInfoContent unchanged from core. Host-built sections never set `node`,
+  // so they are structurally compatible with pixi's GameInfoSection (node?: Container). Cast once
+  // here so the rest of the function works against the pixi-widened type.
+  const derivedSections = (derived.sections ?? []) as GameInfoSection[];
+  const overrideSections = (override.sections ?? []) as GameInfoSection[];
   const authorByKey = new Map<string, GameInfoSection>();
-  for (const s of override.sections ?? []) authorByKey.set(sectionKey(s), s);
+  for (const s of overrideSections) authorByKey.set(sectionKey(s), s);
 
   const out: GameInfoSection[] = [];
   const used = new Set<string>();
   // Keep derived order; swap in the author's version where identities collide.
-  for (const s of derived.sections ?? []) {
+  for (const s of derivedSections) {
     const k = sectionKey(s);
     const replacement = authorByKey.get(k);
     if (replacement) { out.push(replacement); used.add(k); }
     else out.push(s);
   }
   // Append author sections whose identity wasn't in the derived set, in author order.
-  for (const s of override.sections ?? []) {
+  for (const s of overrideSections) {
     const k = sectionKey(s);
     if (!used.has(k)) { out.push(s); used.add(k); }
   }
@@ -363,7 +370,9 @@ export function buildShellConfig(
   const authored = typeof opts.gameInfo === 'function' ? opts.gameInfo(t) : opts.gameInfo;
   // Pass t() through to spec-derived sections so symbol names, mode titles, and descriptions are
   // pre-translated before they reach the shell renderer.
-  let gameInfo = mergeGameInfo(defaultGameInfo(model, runtime, t), authored);
+  // Cast to { sections?: GameInfoSection[] } (pixi-widened) so downstream map/filter calls work
+  // against the pixi section union. Host-derived sections never set `node`, so the widening is safe.
+  let gameInfo: { sections?: GameInfoSection[] } = mergeGameInfo(defaultGameInfo(model, runtime, t), authored) as { sections?: GameInfoSection[] };
   // The DISCLAIMER is required legal copy and must be shown VERBATIM — never socialized (its
   // wording is mandated, and word-swaps like "bet → play" would corrupt the legal text).
   if (isSocial) {

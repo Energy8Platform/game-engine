@@ -206,10 +206,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // pixi-shell mounts its root onto the engine's unscaled, screen-space UI layer (above the
     // scaled world/scene root) so the control bar fills the real screen, not the letterboxed game.
     // The host adds the mount target (`app`) + parent; buildShellConfig produces everything else.
-    // buildShellConfig returns platform-core GameInfoContent (node?: unknown). The host never
-    // populates `node` so all sections are structurally compatible with pixi's GameInfoContent
-    // (node?: Container). Cast the assembled config to satisfy createPixiShell's parameter type.
-    const pixiShellCfg = { ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app, parent: game.uiLayer } as import('@energy8platform/shell/pixi').PixiShellConfig;
+    const pixiShellCfg: import('@energy8platform/shell/pixi').PixiShellConfig = { ...buildShellConfig(opts.shell, opts.model, runtime), app: game.app, parent: game.uiLayer };
     shell = createPixiShell(pixiShellCfg);
     // Scope the bar to the slot scene: show only when a SlotSceneController scene is current
     // (hidden over the intro / non-slot scenes). Applies in BOTH base and replay modes.
