@@ -17,16 +17,12 @@ export interface HtmlRendererOptions {
 
 const REMOVE_FADE_MS = 300;
 
-/** Count-up the trailing text node of a .ge-rd readout (keeps its label span).
+/** Count-up the value span (.ge-rd-val) of a readout, leaving its label untouched.
  *  Returns the count-up canceler so the renderer can stop it before the node is replaced. */
 function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): () => void {
-  const textNode = el.lastChild;
-  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) { el.textContent = fmt(to); return () => {}; }
-  const proxy = {
-    set textContent(v: string) { (textNode as Text).data = v; },
-    get textContent() { return (textNode as Text).data; },
-  } as unknown as HTMLElement;
-  return countUp(proxy, from, to, fmt);
+  const val = el.querySelector('.ge-rd-val') as HTMLElement | null;
+  if (!val) { el.textContent = fmt(to); return () => {}; }
+  return countUp(val, from, to, fmt);
 }
 
 export class HtmlRenderer implements ShellRenderer {
@@ -221,21 +217,20 @@ export class HtmlRenderer implements ShellRenderer {
     const bar = host.querySelector('.ge-shell-bottom') as HTMLElement | null;
     if (!bar) return;
     // reset to baseline (idempotent)
-    const pill = host.querySelector('.ge-winpill') as HTMLElement | null;
-    if (pill && pill.parentElement === host) {
-      const right = bar.querySelector('.ge-zone-right');
-      if (right) bar.insertBefore(pill, right); else bar.appendChild(pill);
-      pill.classList.remove('ge-up');
-    }
     host.classList.remove('ge-fit');
     host.style.transform = '';
     host.style.transformOrigin = '';
-    for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+    // clear any zoom from a prior pass. We zoom the whole dark PANEL (so the bar surface shrinks with
+    // its content on a narrow popout), plus BUY BONUS + a lifted WIN pill, which live outside it.
+    for (const el of host.querySelectorAll('.ge-bar-panel, .ge-shell-buybonus')) {
       (el as HTMLElement).style.transform = '';
       (el as HTMLElement).style.transformOrigin = '';
       (el as HTMLElement).style.removeProperty('zoom');
     }
     if (this.host.layout === 'mobile') {
+      // First shrink long numbers inside the info pill (per-readout) so the buttons row stays
+      // full-size; then, only if a row still overflows (tiny phones), scale the whole stack.
+      this.fitBet();
       let need = 0;
       for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
       const avail = bar.clientWidth;
@@ -245,18 +240,43 @@ export class HtmlRenderer implements ShellRenderer {
       }
       return;
     }
-    if (pill && bar.scrollWidth > bar.clientWidth + 1) { host.insertBefore(pill, bar); pill.classList.add('ge-up'); }
     const zoomBar = (z: number): void => {
       const v = z < 0.999 ? z.toFixed(4) : '';
-      for (const el of host.querySelectorAll('.ge-zone, .ge-winpill')) {
+      const set = (el: Element | null): void => {
+        if (!el) return;
         if (v) (el as HTMLElement).style.setProperty('zoom', v);
         else (el as HTMLElement).style.removeProperty('zoom');
-      }
+      };
+      // zoom the whole panel (surface + content, incl. the inline WIN pill, shrink together);
+      // BUY BONUS sits outside the panel, so zoom it too.
+      set(host.querySelector('.ge-bar-panel'));
+      set(bar.querySelector('.ge-shell-buybonus'));
     };
     const s = Math.max(HtmlRenderer.BAR_MIN_SCALE, Math.min(1, this.root.clientWidth / HtmlRenderer.BAR_REF_WIDTH));
     zoomBar(s);
     if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
       zoomBar(s * (bar.clientWidth / bar.scrollWidth));
+    }
+    this.fitBet();
+  }
+
+  /** Keep the BET box a fixed width (so the steppers/divider/SPIN never shift as the stake changes)
+   *  by shrinking just the number when it would overflow the box — e.g. amounts above ~€100,000. */
+  private fitBet(): void {
+    // Shrink a readout's value span (.ge-rd-val, inline-block so its true width is measurable even
+    // inside an overflow:hidden slot) to fit `box`. The label is left untouched.
+    const fit = (val: HTMLElement | null, box: HTMLElement | null | undefined): void => {
+      if (!val || !box) return;
+      val.style.transform = '';                          // measure at full size
+      const avail = box.clientWidth, need = val.scrollWidth;
+      if (need > avail + 0.5 && need > 0) val.style.transform = `scale(${(avail / need).toFixed(3)})`;
+    };
+    // BET (desktop + mobile): the value fits its fixed-width box so +/- never resizes/shifts it
+    const betBox = this.barHost.querySelector('.ge-bet-value') as HTMLElement | null;
+    fit(betBox?.querySelector('.ge-rd-val') as HTMLElement | null, betBox);
+    // mobile info pill: balance/win values fit their flex slots
+    for (const rd of this.barHost.querySelectorAll('.ge-m-info > .ge-rd')) {
+      fit(rd.querySelector('.ge-rd-val') as HTMLElement | null, rd as HTMLElement);
     }
   }
 

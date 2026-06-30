@@ -48,7 +48,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).not.toContain('/');
   });
 
-  it('freeSpins: Total Win shows even at €0; win uses the base WIN pill', () => {
+  it('freeSpins: Total Win shows even at €0; win uses the base WIN readout', () => {
     const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
     shell.setFreeSpins({ current: 0, total: 10, totalWin: 0 });
     expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('0'); // €0 still shown
@@ -56,7 +56,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     shell.setWin(7);
     const win = q(mount, '[data-ge="win"]')!;
     expect(win.textContent).toContain('€7');
-    expect(win.classList.contains('ge-winpill')).toBe(true);                 // base pattern
+    expect(win.closest('.ge-zone-left')).toBeTruthy();                       // grouped with the info on the left
   });
 
   it('replay: read-only bet + win (base pill) + turbo, no controls, no balance', () => {
@@ -64,7 +64,7 @@ describe('BottomBar freeSpins/replay modes', () => {
     expect(q(mount, '[data-ge="bet-value"]')!.textContent).toContain('€2');
     const win = q(mount, '[data-ge="win"]')!;
     expect(win.textContent).toContain('€12');
-    expect(win.classList.contains('ge-winpill')).toBe(true);
+    expect(win.closest('.ge-zone-left')).toBeTruthy();
     expect(q(mount, '[data-ge="bet-up"]')).toBeNull();
     expect(q(mount, '[data-ge="spin"]')).toBeNull();
     expect(q(mount, '[data-ge="buybonus"]')).toBeNull();

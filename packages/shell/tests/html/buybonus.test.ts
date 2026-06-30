@@ -226,6 +226,6 @@ describe('Feature activation', () => {
     expect(shell.state.activeFeature).toBeNull();
     const betVal = q(mount, '[data-ge="bet-value"]')!;
     expect(betVal.classList.contains('ge-bet-feature')).toBe(false);
-    expect(q(mount, '[data-ge="buybonus"]')!.textContent).toContain('BUY');
+    expect(q(mount, '[data-ge="buybonus"]')!.getAttribute('aria-label')).toContain('BUY'); // ticket icon; label in aria
   });
 });
