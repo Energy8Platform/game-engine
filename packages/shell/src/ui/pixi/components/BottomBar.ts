@@ -1,6 +1,5 @@
-import { Container, Graphics, Text } from 'pixi.js';
+import { Container, Graphics, Rectangle, Text } from 'pixi.js';
 import type { PixiComponentContext } from '../context';
-import type { IconName } from '../icons';
 import { effectiveAccent, contrastText } from '@/core/colors';
 import { FlexBox } from '../primitives/flex';
 import { roundedPath } from '../primitives/flex';
@@ -11,7 +10,10 @@ import {
   BuyBonusBadge,
   FsHero,
   divider,
+  attachHover,
+  attachPress,
 } from '../primitives/widgets';
+import { IconView, makeRingedIcon } from '../pixi-icon';
 
 // ── design constants (mirror the DOM `.ge-bar-panel` / mobile rules) ──────────
 const BAR_H = 68;            // continuous dark panel height
@@ -37,10 +39,67 @@ const M_CTRL_H = 62, M_INFO_H = 40, M_GAP = 10, M_PAD_BOTTOM = 8, M_SIDE = 12;
 const M_BUY = 50;
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H; // spin pops above the controls
 
-// Single bolt glyph at every level (the level is conveyed by colour, matching the DOM turbo
-// redesign — the Pixi colour/ring treatment per level lands with the Pixi turbo port).
-function turboIcon(_level: number): IconName {
-  return 'turbo1';
+/** Three-state turbo button: single `turbo1` bolt on a white disc, with fill+ring treatment
+ *  matching the DOM redesign. Level is conveyed by fill colour + ring colour (not glyph swap):
+ *  - off (0): bolt fill #fff + BLACK ring, container alpha .5
+ *  - L1:      bolt fill #fff + ACCENT ring, alpha 1
+ *  - L≥2:     bolt fill ACCENT + ACCENT ring, alpha 1
+ *  Hover at any level: bolt fill+ring → accent, disc border → accent (standard bar-button hover). */
+class TurboButton extends Container {
+  private box: number;
+  private view: IconView;
+  private discG: Graphics;
+  private discBorder: number;
+  private level: number;
+  private accent: string;
+
+  constructor(opts: { size: number; glyph: number; discFill: string; discBorder?: number; accent: string; level: number; onTap: () => void }) {
+    super();
+    this.box = opts.size;
+    this.accent = opts.accent;
+    this.level = opts.level;
+    this.discBorder = opts.discBorder ?? 2;
+    this.discG = new Graphics();
+    this.addChild(this.discG);
+    const { fill, ring } = this._colors(false);
+    this.view = makeRingedIcon('turbo1', opts.glyph, fill, ring);
+    this.view.position.set((this.box - opts.glyph) / 2, (this.box - opts.glyph) / 2);
+    this.addChild(this.view);
+    this.alpha = this.level > 0 ? 1 : 0.5;
+    this.eventMode = 'static';
+    this.cursor = 'pointer';
+    this.hitArea = new Rectangle(0, 0, this.box, this.box);
+    this._paint(false);
+    attachHover(this, () => this._paint(true), () => this._paint(false));
+    attachPress(this, 0.92, () => opts.onTap());
+  }
+
+  private _colors(hovering: boolean): { fill: string; ring: string } {
+    if (hovering) return { fill: this.accent, ring: this.accent };
+    if (this.level === 0) return { fill: '#ffffff', ring: '#000000' };
+    if (this.level === 1) return { fill: '#ffffff', ring: this.accent };
+    return { fill: this.accent, ring: this.accent };
+  }
+
+  private _paint(hovering: boolean): void {
+    const { fill, ring } = this._colors(hovering);
+    this.view.setColors(fill, ring);
+    const r = this.box / 2 - this.discBorder / 2;
+    this.discG.clear();
+    this.discG.circle(this.box / 2, this.box / 2, r).fill('#ffffff');
+    this.discG.stroke({ color: hovering ? this.accent : '#000000', width: this.discBorder });
+  }
+
+  /** Update turbo level and repaint (called when the shell re-renders the bar). */
+  setLevel(level: number, accent: string): void {
+    this.level = level;
+    this.accent = accent;
+    this.alpha = level > 0 ? 1 : 0.5;
+    this._paint(false);
+  }
+
+  measureSize(): { w: number; h: number } { return { w: this.box, h: this.box }; }
+  setLayoutSize(): void { /* fixed */ }
 }
 
 /** A readout in the bar (white Oswald value, plaque-label caption, no shadow). */
@@ -76,7 +135,7 @@ export class BottomBar extends Container {
   private betDown?: IconButton;
   private spin?: SpinDisc;
   private autoBtn?: IconButton;
-  private turboBtn?: IconButton;
+  private turboBtn?: TurboButton;
 
   constructor(host: PixiComponentContext) {
     super();
@@ -173,11 +232,10 @@ export class BottomBar extends Container {
       spinWrap.add(new FsHero({ label: this.host.t('Free spins'), value: fsText, tokens, height: SPIN }));
     }
     if (config.features.turbo > 0) {
-      this.turboBtn = new IconButton(turboIcon(state.turbo), {
-        size: DISC, glyph: 19, disc: tokens.btn, color: tokens.btnInk, hover: tokens.accent, activeColor: tokens.accent,
-        active: state.turbo > 0, onTap: () => this.onTurbo(),
+      this.turboBtn = new TurboButton({
+        size: DISC, glyph: 19, discFill: tokens.btn, discBorder: 2, accent: tokens.accent,
+        level: state.turbo, onTap: () => this.onTurbo(),
       });
-      this.turboBtn.alpha = state.turbo > 0 ? 1 : 0.5; // resting turbo dimmed
       spinWrap.add(this.turboBtn);
     }
 
@@ -227,8 +285,10 @@ export class BottomBar extends Container {
       if (state.autoplay.active) this.autoBtn.setGlow(true);
     }
     if (config.features.turbo > 0) {
-      this.turboBtn = new IconButton(turboIcon(state.turbo), { size: 40, glyph: 22, color: '#ffffff', hover: tokens.accent, activeColor: '#ffffff', active: state.turbo > 0, onTap: () => this.onTurbo() });
-      this.turboBtn.alpha = state.turbo > 0 ? 1 : 0.5;
+      this.turboBtn = new TurboButton({
+        size: 40, glyph: 22, discFill: tokens.btn, discBorder: 2, accent: tokens.accent,
+        level: state.turbo, onTap: () => this.onTurbo(),
+      });
     }
     const buy = isBase ? this.buildBuy(M_BUY, 9, 2) ?? undefined : undefined;
 

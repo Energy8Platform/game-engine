@@ -3,7 +3,7 @@ import { formatCurrency } from '@/core/format';
 import { resolveTheme } from '@/core/theme';
 import { effectiveAccent, contrastText, BRAND_ACCENT } from '@/core/colors';
 import { socialize } from '@/core/i18n';
-import { ICON_NAMES, iconSVG } from '@/ui/pixi/icons';
+import { ICON_NAMES, iconSVG, iconStrokeSVG } from '@/ui/pixi/icons';
 import { createInitialState, stepBet, nextTurbo } from '@/core/state';
 import type { CurrencyConfig } from '@/core/types';
 
@@ -73,13 +73,12 @@ describe('socialize', () => {
 
 describe('icons', () => {
   it('ships the shipped glyph set (preview glyphs + ticket; unused glyphs dropped)', () => {
-    expect(ICON_NAMES.length).toBe(16);
+    expect(ICON_NAMES.length).toBe(15);
     expect(ICON_NAMES).toContain('spin');
     expect(ICON_NAMES).toContain('ticket');
-    expect(ICON_NAMES).toContain('lightning');
     expect(ICON_NAMES).toContain('turbo1');
-    // dropped (unused) glyphs are gone
-    for (const gone of ['turbo', 'turbo2', 'turbo3', 'betUp', 'betDown', 'star']) {
+    // dropped (unused) glyphs are gone — lightning replaced by ringed turbo1 in volatility row
+    for (const gone of ['turbo', 'turbo2', 'turbo3', 'betUp', 'betDown', 'star', 'lightning']) {
       expect(ICON_NAMES).not.toContain(gone);
     }
   });
@@ -88,6 +87,15 @@ describe('icons', () => {
     expect(svg).toContain('viewBox="0 0 24 24"');
     expect(svg).toContain('#abcdef');
     expect(svg).not.toContain('currentColor');
+  });
+  it('iconStrokeSVG produces fill:none stroke glyph for the outer-ring technique', () => {
+    const svg = iconStrokeSVG('turbo1', '#ff0000', 4);
+    expect(svg).toContain('viewBox="0 0 24 24"');
+    expect(svg).toContain('fill="none"');
+    expect(svg).toContain('stroke="#ff0000"');
+    expect(svg).toContain('stroke-width="4"');
+    // fill="currentColor" should be replaced with the stroke attrs, not kept
+    expect(svg).not.toContain('fill="currentColor"');
   });
 });
 

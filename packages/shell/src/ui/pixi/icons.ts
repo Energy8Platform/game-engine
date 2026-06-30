@@ -19,7 +19,6 @@ const SVGS: Record<string, string> = {
   close: `<g fill="currentColor" fill-rule="evenodd"><path d="M16.89 5.27l-4.77 5.02l-4.77 -4.9l-5.14 -3.3l3.67 5.14l4.53 4.77l-5.05 5.19l-3.52 5.21l5.39 -3.67l4.77 -5.02h0.12l4.9 5.02l5.14 3.43l-3.5 -4.99l-4.95 -5.05v-0.24l4.82 -5.08l3.63 -5.19"/></g>`,
   back: `<path d="M15 6l-6 6l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
   chevronRight: `<path d="M9 6l6 6l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
-  lightning: `<path d="M14.3 3.92l-6.01 8.12l3.62 0.08l-2.39 6.76l5.82 -8.35l-3.58 -0.06l2.55 -6.55Z" fill="currentColor"/>`,
   ticket: `<path d="M1.72 9.48L19.64 4.67L20.28 7.07C19.19 7.8 18.82 9 19.11 10.09C19.41 11.19 20.33 12.04 21.64 12.13L22.28 14.52L4.36 19.32L3.72 16.93C4.81 16.2 5.18 15 4.89 13.91C4.59 12.81 3.67 11.96 2.36 11.87L1.72 9.48Z" fill="none" stroke="currentColor" stroke-width="1.84" stroke-linejoin="miter"/><path d="M12.57 7.17L9.75 13.26L11.92 12.4L11.84 16.74L14.85 10.06L12.38 11.1Z" fill="currentColor"/>`,
 };
 
@@ -35,4 +34,12 @@ export function icon(name: IconName): string {
  *  Used by the Pixi renderer to build vector geometry via GraphicsContext.svg(). */
 export function iconSVG(name: IconName, color = '#ffffff'): string {
   return `<svg viewBox="0 0 24 24">${SVGS[name].split('currentColor').join(color)}</svg>`;
+}
+
+/** A standalone SVG with the glyph rendered as a stroke-only outline (fill:none).
+ *  Used to build the outer-ring effect in Pixi: draw this first (under), then iconSVG on top;
+ *  only the outer half of the stroke is visible — the paint-order:stroke CSS equivalent. */
+export function iconStrokeSVG(name: IconName, stroke: string, width = 4): string {
+  const frag = SVGS[name].split('fill="currentColor"').join(`fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round"`);
+  return `<svg viewBox="0 0 24 24">${frag}</svg>`;
 }

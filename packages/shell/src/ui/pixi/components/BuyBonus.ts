@@ -4,7 +4,7 @@ import type { BonusOption } from '@/core/types';
 import { betDir } from '@/core/keyboard';
 import { effectiveAccent, contrastText } from '@/core/colors';
 import { makeText } from '../text';
-import { makeIcon } from '../pixi-icon';
+import { makeIcon, makeRingedIcon } from '../pixi-icon';
 import { navButton } from '../primitives/overlay';
 import { clamp } from '../primitives/overlay';
 import { attachHover } from '../primitives/widgets';
@@ -360,10 +360,10 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     body.addChild(desc);
     y += desc.height + 0.8 * em;
     if (bonus.volatility) {
-      const vol = volatilityRow(this.host, bonus.volatility, accent, 2.1 * em);
+      const vol = volatilityRow(this.host, bonus.volatility, accent, 2.7 * em);
       vol.position.set((cardW - vol.width) / 2, y);
       body.addChild(vol);
-      y += 2.1 * em + 0.55 * em;
+      y += 2.7 * em + 0.55 * em;
     }
     const priceText = makeText(this.host.fmt(price), { size: 1.6 * em, weight: '800', color: '#ffffff', align: 'center' });
     priceText.position.set((cardW - priceText.width) / 2, y);
@@ -593,10 +593,10 @@ class BonusCard implements CardView {
     // bottom block: volatility + price
     let by = 0;
     if (bonus.volatility) {
-      const vol = volatilityRow(host, bonus.volatility, volColor, 2.1 * em);
+      const vol = volatilityRow(host, bonus.volatility, volColor, 2.7 * em);
       vol.position.set((cardW - vol.width) / 2, by);
       this.bottomBlock.addChild(vol);
-      by += 2.1 * em + 0.55 * em;
+      by += 2.7 * em + 0.55 * em;
     }
     const priceText = makeText(opts.priceText, { size: 1.6 * em, weight: '800', color: '#ffffff', align: 'center' });
     priceText.position.set((cardW - priceText.width) / 2, by);
@@ -684,12 +684,15 @@ function thumbNode(host: PixiComponentContext, bonus: BonusOption, accent: strin
   return c;
 }
 
-function volatilityRow(host: PixiComponentContext, level: number, accent: string, size: number): Container {
+function volatilityRow(_host: PixiComponentContext, level: number, accent: string, size: number): Container {
   const c = new Container();
   const n = Math.max(0, Math.min(5, level));
   let x = 0;
   for (let i = 0; i < 5; i++) {
-    const bolt = makeIcon('lightning', size, i < n ? accent : 'rgba(255,255,255,.18)');
+    // active bolt: fill #fff + accent ring; inactive: fill #fff + black ring, dimmed
+    const active = i < n;
+    const bolt = makeRingedIcon('turbo1', size, '#ffffff', active ? accent : '#000000');
+    bolt.alpha = active ? 1 : 0.5;
     bolt.position.set(x, 0);
     c.addChild(bolt);
     x += size;

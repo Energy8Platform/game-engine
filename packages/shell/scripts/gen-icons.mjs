@@ -132,8 +132,9 @@ function buildFragment(name, { TX, TY, body }) {
 
 // Glyphs that live in the preview sheet (design reference) but are NOT shipped — unused by any
 // component. turbo2/turbo3 went away with the single-bolt turbo redesign; betUp/betDown are
-// superseded by plus/minus; star is unused. Edit this set if a glyph becomes (un)used.
-const DROP = new Set(['turbo', 'turbo2', 'turbo3', 'betUp', 'betDown', 'star']);
+// superseded by plus/minus; star is unused; lightning replaced by ringed turbo1 bolts in volatility.
+// Edit this set if a glyph becomes (un)used.
+const DROP = new Set(['turbo', 'turbo2', 'turbo3', 'betUp', 'betDown', 'star', 'lightning']);
 const shipped = tiles.filter((t) => !DROP.has(t.name));
 
 const built = {};
@@ -185,6 +186,12 @@ function emit(targetRel, withIconSVG) {
     out += ` *  Used by the Pixi renderer to build vector geometry via GraphicsContext.svg(). */\n`;
     out += `export function iconSVG(name: IconName, color = '#ffffff'): string {\n`;
     out += `  return \`<svg viewBox="0 0 24 24">\${SVGS[name].split('currentColor').join(color)}</svg>\`;\n}\n`;
+    out += `\n/** A standalone SVG with the glyph rendered as a stroke-only outline (fill:none).\n`;
+    out += ` *  Used to build the outer-ring effect in Pixi: draw this first (under), then iconSVG on top;\n`;
+    out += ` *  only the outer half of the stroke is visible — the paint-order:stroke CSS equivalent. */\n`;
+    out += `export function iconStrokeSVG(name: IconName, stroke: string, width = 4): string {\n`;
+    out += `  const frag = SVGS[name].split('fill="currentColor"').join(\`fill="none" stroke="\${stroke}" stroke-width="\${width}" stroke-linejoin="round"\`);\n`;
+    out += `  return \`<svg viewBox="0 0 24 24">\${frag}</svg>\`;\n}\n`;
   }
   writeFileSync(path, out);
   console.log(`wrote ${targetRel}: ${entries.length} glyphs (${names.length} from preview + ${extras.length} preserved: ${extras.join(',') || 'none'})`);

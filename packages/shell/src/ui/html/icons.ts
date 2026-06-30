@@ -19,7 +19,6 @@ const SVGS: Record<string, string> = {
   close: `<g fill="currentColor" fill-rule="evenodd"><path d="M16.89 5.27l-4.77 5.02l-4.77 -4.9l-5.14 -3.3l3.67 5.14l4.53 4.77l-5.05 5.19l-3.52 5.21l5.39 -3.67l4.77 -5.02h0.12l4.9 5.02l5.14 3.43l-3.5 -4.99l-4.95 -5.05v-0.24l4.82 -5.08l3.63 -5.19"/></g>`,
   back: `<path d="M15 6l-6 6l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
   chevronRight: `<path d="M9 6l6 6l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
-  lightning: `<path d="M14.3 3.92l-6.01 8.12l3.62 0.08l-2.39 6.76l5.82 -8.35l-3.58 -0.06l2.55 -6.55Z" fill="currentColor"/>`,
   ticket: `<g transform="translate(12 12) scale(0.0354) translate(-518.2 -535.2)"><g transform="rotate(-15 512 512)"><path d="M250 392H774L774 462C739 474 720 504 720 536C720 568 739 598 774 610V680H250V610C285 598 304 568 304 536C304 504 285 474 250 462V392Z" fill="none" stroke="currentColor" stroke-width="52" stroke-linejoin="miter" stroke-linecap="square"/><path d="M562.9 408.3L441.5 553.9L506.9 546.3L472.9 664.1L604 504L528.9 514.3Z" fill="currentColor"/></g></g>`,
 };
 
