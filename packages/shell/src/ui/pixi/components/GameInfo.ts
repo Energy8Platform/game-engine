@@ -419,9 +419,16 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
     });
   } else {
     if (s.description) sec.add(paragraph(host, s.description, inner, { size: 14, color: 'rgba(255,255,255,.78)' }));
-    const two = new FlexBox({ direction: 'row', align: 'start', gap: 22 });
-    two.add(waysCol(host, '✓ wins', host.tokens.winOk, s.grid, s.winExample ?? waysWin(s.grid)));
-    two.add(waysCol(host, '✗ no win', host.tokens.winNo, s.grid, s.loseExample ?? waysLose(s.grid)));
+    // two example grids side by side; clamp each to the available width and stack them when both
+    // won't fit on one row (mirrors the DOM `.ge-gi-win-two { flex-wrap:wrap }` — prevents the grids
+    // running off-screen on mobile-s).
+    const GAP = 22;
+    const colW = Math.min(140, inner);
+    const two = colW * 2 + GAP <= inner
+      ? new FlexBox({ direction: 'row', align: 'start', gap: GAP })
+      : new FlexBox({ direction: 'column', align: 'start', gap: 12 });
+    two.add(waysCol(host, '✓ wins', host.tokens.winOk, s.grid, s.winExample ?? waysWin(s.grid), colW));
+    two.add(waysCol(host, '✗ no win', host.tokens.winNo, s.grid, s.loseExample ?? waysLose(s.grid), colW));
     sec.add(two);
   }
   return sec;
@@ -434,10 +441,10 @@ function lineItem(host: PixiComponentContext, grid: { cols: number; rows: number
   return item;
 }
 
-function waysCol(host: PixiComponentContext, tag: string, color: string, grid: { cols: number; rows: number }, cells: CellRef[]): FlexBox {
+function waysCol(host: PixiComponentContext, tag: string, color: string, grid: { cols: number; rows: number }, cells: CellRef[], w = 140): FlexBox {
   const col = new FlexBox({ direction: 'column', align: 'center', gap: 6 });
   col.add(makeText(tag, { size: 12, weight: '700', color }));
-  col.add(gridIllustration(host, grid, cells, 140));
+  col.add(gridIllustration(host, grid, cells, w));
   return col;
 }
 

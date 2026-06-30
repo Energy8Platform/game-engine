@@ -281,7 +281,8 @@ export class BottomBar extends Container {
     }
 
     const menu = new IconButton('menu', { size: 40, glyph: 26, color: '#ffffff', hover: tokens.accent, onTap: () => this.host.actions.openMenu() });
-    if (config.features.autoplay) {
+    // autoplay is a base-mode control only — hidden in free spins / replay (matches the DOM bar)
+    if (isBase && config.features.autoplay) {
       this.autoBtn = new IconButton('autoplay', { size: 40, glyph: 26, color: '#ffffff', hover: tokens.accent, activeColor: tokens.accent, active: state.autoplay.active, onTap: () => this.onAutoplay() });
       if (state.autoplay.active) this.autoBtn.setGlow(true);
     }
@@ -331,9 +332,13 @@ export class BottomBar extends Container {
     const innerW = W - 28; // pad 14 each side
     const slot = Math.max(40, (innerW - betGroup.outerWidth - 20) / 2);
     const info = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', width: W, height: M_INFO_H, padding: { left: 14, right: 14 }, gap: 10, background: { fill: tokens.plaqueGlass, radius: 12 } });
-    const bal = readout(this.host, 'Balance', this.host.fmt(state.balance), { valueSize: 11, align: 'left', fixedWidth: slot });
-    this.balanceValue = bal.valueText;
-    info.add(bal);
+    // replay is a read-only historical round — no real balance to show (sticky `replay`, so it stays
+    // hidden through a replay's free-spins phase too); matches the DOM bar.
+    if (!state.replay) {
+      const bal = readout(this.host, 'Balance', this.host.fmt(state.balance), { valueSize: 11, align: 'left', fixedWidth: slot });
+      this.balanceValue = bal.valueText;
+      info.add(bal);
+    }
     info.add(betGroup);
     // WIN always present (no jiggle on win↔0)
     const win = readout(this.host, 'Win', this.host.fmtWin(state.win), { valueSize: 11, align: 'right', fixedWidth: slot });
