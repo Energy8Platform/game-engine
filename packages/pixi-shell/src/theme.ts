@@ -45,6 +45,10 @@ export interface ShellTokens {
   plaqueSolid: string;
   plaqueLine: string;
   plaqueLabel: string;
+  // The continuous desktop control-bar surface + the white-disc buttons that sit on it.
+  bar: string;
+  btn: string;
+  btnInk: string;
   accent: string;
   // Fixed chrome colours used inline by the CSS (frosted backdrop tint, ways win/lose ticks).
   backdrop: string;
@@ -63,6 +67,9 @@ export function resolveTheme(theme: ThemeConfig = {}): ShellTokens {
     plaqueSolid: '#1a2030',
     plaqueLine: 'rgba(255,255,255,.22)',
     plaqueLabel: 'rgba(255,255,255,.6)',
+    bar: 'rgba(6,9,15,.86)',
+    btn: '#f4f6fb',
+    btnInk: '#0b0e16',
     accent: theme.accent ?? DEFAULT_ACCENT,
     backdrop: 'rgba(12,17,28,.5)',
     white: '#ffffff',
