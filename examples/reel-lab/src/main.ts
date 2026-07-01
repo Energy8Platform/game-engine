@@ -14,9 +14,10 @@ import {
   type ReelSystemConfig,
   type DeepPartial,
 } from '@energy8platform/game-engine/slot';
+import { buildControlPanel, configDiff } from '@energy8platform/game-engine/devtools';
 import { createResolver } from './symbols';
 import { randomBoard, scatterBoard, buildCascadeSteps, rowsFor } from './board';
-import { buildControlPanel } from './controls';
+import { SCHEMA } from './schema';
 import { CUSTOM_FEATURES } from './customFeatures';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -101,6 +102,7 @@ function applyConfig(rebuildBoard: boolean): void {
 function bindPanel(): void {
   buildControlPanel($('#panel'), {
     config: workingConfig,
+    schema: SCHEMA,
     onChange: (path) => {
       // changing column count invalidates a fixed Megaways rowsPerReel — drop it so they can't desync
       if (path === 'grid.cols') {
@@ -269,20 +271,6 @@ bindPanel();
 renderFeatureBar();
 
 // ── copy config ───────────────────────────────────────────────────────────────
-function configDiff(base: any, obj: any): any {
-  const out: any = {};
-  for (const k of Object.keys(obj)) {
-    const a = base?.[k],
-      b = obj[k];
-    if (Array.isArray(b)) {
-      if (JSON.stringify(a) !== JSON.stringify(b)) out[k] = b;
-    } else if (b && typeof b === 'object') {
-      const d = configDiff(a ?? {}, b);
-      if (Object.keys(d).length) out[k] = d;
-    } else if (a !== b) out[k] = b;
-  }
-  return out;
-}
 function copy(text: string, label: string): void {
   navigator.clipboard
     ?.writeText(text)

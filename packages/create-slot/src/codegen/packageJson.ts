@@ -2,7 +2,7 @@ import type { Answers } from '../answers';
 
 export interface DepVersions {
   'platform-core': string; 'game-engine': string; 'stake-kit': string; 'stake-bridge': string;
-  'stake-math-tools': string;
+  'stake-math-tools': string; 'harness': string;
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
@@ -32,6 +32,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     dependencies: {
       '@energy8platform/platform-core': v['platform-core'],
       '@energy8platform/game-engine': v['game-engine'],
+      '@energy8platform/harness': v['harness'],
       ...(a.stake ? { '@energy8platform/stake-kit': v['stake-kit'], '@energy8platform/stake-bridge': v['stake-bridge'] } : { '@energy8platform/stake-kit': v['stake-kit'] }),
       'pixi.js': '^8.16.0',
       '@pixi/sound': '^6.0.0',

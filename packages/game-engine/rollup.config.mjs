@@ -1,8 +1,13 @@
+import { builtinModules } from 'node:module';
 import typescript from '@rollup/plugin-typescript';
 import dts from 'rollup-plugin-dts';
 import { defineConfig } from 'rollup';
 
+const nodeBuiltins = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
+
 const external = [
+  '@energy8platform/harness',
+  '@energy8platform/harness/panel',
   'pixi.js',
   '@energy8platform/game-sdk',
   '@energy8platform/platform-core',
@@ -78,4 +83,24 @@ export default defineConfig([
   // host inlines dynamic imports: createSlotGame lazy-imports internal modules (./slotPlay, ./shellConfig, ./replay); without this Rollup splits them into chunks that conflict with output.file. External deps (@energy8platform/shell, stake-bridge) stay lazy.
   ...createBundle('src/host/index.ts', 'host', { inlineDynamicImports: true, treeshake: false }),
   ...createBundle('src/slot/index.ts', 'slot'),
+  // Reel devtools: browser barrel (bridge + shared builders, pixi-free).
+  ...createBundle('src/slot/devtools/index.ts', 'devtools'),
+  // Self-contained panel client the harness serves verbatim (no bare imports).
+  ...createBundle('src/slot/devtools/panelClient.ts', 'reel-panel-client'),
+  // Node-only harness plugin (reelDevtoolsPlugin) — externalise node builtins.
+  {
+    input: 'src/harness/index.ts',
+    external: [...external, ...nodeBuiltins],
+    output: [
+      { file: 'dist/harness.esm.js', format: 'esm', sourcemap: true },
+      { file: 'dist/harness.cjs.js', format: 'cjs', sourcemap: true },
+    ],
+    plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false })],
+  },
+  {
+    input: 'src/harness/index.ts',
+    external: [...external, ...nodeBuiltins],
+    output: { file: 'dist/harness.d.ts', format: 'esm' },
+    plugins: [dts()],
+  },
 ]);

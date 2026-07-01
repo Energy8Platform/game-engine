@@ -66,6 +66,16 @@
       "import": "./dist/slot.esm.js",
       "require": "./dist/slot.cjs.js",
       "types": "./dist/slot.d.ts"
+    },
+    "./devtools": {
+      "import": "./dist/devtools.esm.js",
+      "require": "./dist/devtools.cjs.js",
+      "types": "./dist/devtools.d.ts"
+    },
+    "./harness": {
+      "import": "./dist/harness.esm.js",
+      "require": "./dist/harness.cjs.js",
+      "types": "./dist/harness.d.ts"
     }
   },
   "files": [
@@ -89,9 +99,13 @@
   "peerDependencies": {
     "@energy8platform/game-sdk": "^2.8.0",
     "@energy8platform/stake-bridge": ">=0.2.1",
+    "@energy8platform/harness": "*",
     "pixi.js": "^8.16.0"
   },
   "peerDependenciesMeta": {
+    "@energy8platform/harness": {
+      "optional": true
+    },
     "@energy8platform/stake-bridge": {
       "optional": true
     },
@@ -104,6 +118,7 @@
   },
   "devDependencies": {
     "@energy8platform/game-sdk": "^2.8.0",
+    "@energy8platform/harness": "*",
     "@energy8platform/stake-bridge": "*",
     "@esotericsoftware/spine-pixi-v8": "~4.2.0",
     "@pixi/sound": "^6.0.0",

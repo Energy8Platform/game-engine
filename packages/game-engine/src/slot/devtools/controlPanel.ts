@@ -1,34 +1,41 @@
-// examples/reel-lab/src/controls.ts
+// packages/game-engine/src/slot/devtools/controlPanel.ts
 //
-// Renders the schema into a DOM panel and binds each control to the live config object.
+// Renders the reel-config field schema into a DOM panel and binds each control to a
+// live config object. Pure DOM — no pixi. Shared by the harness reel sidebar and the
+// reel-lab playground.
 
-import type { ReelSystemConfig } from '@energy8platform/game-engine/slot';
-import { SCHEMA, type Control, type Section } from './schema';
+import { REEL_FIELD_SCHEMA, type Control, type Section } from './fieldSchema';
 
-type Cfg = ReelSystemConfig;
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export function getPath(obj: any, path: string): any {
   return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
 }
 export function setPath(obj: any, path: string, value: any): void {
   const keys = path.split('.');
-  const last = keys.pop()!;
+  const last = keys.pop() as string;
   const target = keys.reduce((o, k) => (o[k] ??= {}), obj);
   target[last] = value;
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export interface ControlPanelOptions {
-  config: Cfg;
+  /** The live config object the controls read from and mutate. */
+  config: unknown;
+  /** Called with the changed dot-path after each edit. */
   onChange: (path: string) => void;
+  /** Schema to render. Defaults to REEL_FIELD_SCHEMA. */
+  schema?: Section[];
 }
 
+/** Build the control panel into `root`. Returns a `refresh()` that re-syncs inputs from config. */
 export function buildControlPanel(
   root: HTMLElement,
   opts: ControlPanelOptions,
 ): { refresh: () => void } {
+  const schema = opts.schema ?? REEL_FIELD_SCHEMA;
   const updaters: (() => void)[] = [];
   root.innerHTML = '';
-  for (const section of SCHEMA) root.appendChild(renderSection(section, opts, updaters));
+  for (const section of schema) root.appendChild(renderSection(section, opts, updaters));
   return { refresh: () => updaters.forEach((u) => u()) };
 }
 
@@ -54,11 +61,7 @@ function renderSection(
   return wrap;
 }
 
-function renderControl(
-  c: Control,
-  opts: ControlPanelOptions,
-  updaters: (() => void)[],
-): HTMLElement {
+function renderControl(c: Control, opts: ControlPanelOptions, updaters: (() => void)[]): HTMLElement {
   const row = document.createElement('label');
   row.className = 'control';
   const name = document.createElement('span');
@@ -66,12 +69,14 @@ function renderControl(
   name.textContent = c.label;
   row.appendChild(name);
 
-  const emit = () => opts.onChange(c.path);
+  const emit = (): void => opts.onChange(c.path);
 
   if (c.kind === 'toggle') {
     const input = document.createElement('input');
     input.type = 'checkbox';
-    const sync = () => (input.checked = !!getPath(opts.config, c.path));
+    const sync = (): void => {
+      input.checked = !!getPath(opts.config, c.path);
+    };
     sync();
     input.addEventListener('change', () => {
       setPath(opts.config, c.path, input.checked);
@@ -88,7 +93,9 @@ function renderControl(
       opt.textContent = o;
       sel.appendChild(opt);
     }
-    const sync = () => (sel.value = String(getPath(opts.config, c.path)));
+    const sync = (): void => {
+      sel.value = String(getPath(opts.config, c.path));
+    };
     sync();
     sel.addEventListener('change', () => {
       setPath(opts.config, c.path, sel.value);
@@ -104,8 +111,7 @@ function renderControl(
     input.step = String(c.step);
     const val = document.createElement('output');
     val.className = 'control-value';
-    const sync = () => {
-      // fall back to another path (e.g. cellWidth → cellSize) when this value is unset/non-scalar
+    const sync = (): void => {
       let raw = getPath(opts.config, c.path);
       if ((raw == null || typeof raw !== 'number') && c.fallback != null)
         raw = getPath(opts.config, c.fallback);
@@ -126,12 +132,13 @@ function renderControl(
   } else {
     const input = document.createElement('input');
     input.type = 'color';
-    const sync = () =>
-      (input.value =
+    const sync = (): void => {
+      input.value =
         '#' +
         Number(getPath(opts.config, c.path) ?? 0)
           .toString(16)
-          .padStart(6, '0'));
+          .padStart(6, '0');
+    };
     sync();
     input.addEventListener('input', () => {
       setPath(opts.config, c.path, parseInt(input.value.slice(1), 16));
