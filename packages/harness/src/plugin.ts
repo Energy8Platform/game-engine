@@ -119,11 +119,31 @@ export function createHarness(opts: CreateHarnessOptions = {}): VitePlugin {
     name: 'harness',
     apply: 'serve',
     configureServer(server: HarnessServer): void {
+      // Loose view of the vite dev server bits watchReload needs (kept off the public
+      // HarnessServer type, which stays a minimal middleware/ssr surface).
+      const vite = server as unknown as {
+        watcher?: { on(event: string, cb: (file: string) => void): void };
+        moduleGraph?: { invalidateAll(): void };
+        ws?: { send(payload: { type: string }): void };
+      };
+
       // Shared context for backend/panel middleware.
       const ctx: HarnessServerContext = {
         server,
         readBody: (req) => collectBody(req as unknown as IncomingMessage),
         sendJson: (res, status, json) => sendJson(res as unknown as ServerResponse, status, json),
+        watchReload: (matches, onChange) => {
+          if (!vite.watcher) return;
+          const handler = (file: string): void => {
+            if (!matches(file.replace(/\\/g, '/'))) return;
+            onChange?.();
+            vite.moduleGraph?.invalidateAll();
+            vite.ws?.send({ type: 'full-reload' });
+          };
+          vite.watcher.on('change', handler);
+          vite.watcher.on('add', handler);
+          vite.watcher.on('unlink', handler);
+        },
       };
       for (const p of plugins) {
         void p.backend?.configureServer(ctx);

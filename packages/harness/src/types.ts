@@ -52,6 +52,15 @@ export interface HarnessServerContext {
   readBody(req: IncomingLike): Promise<string>;
   /** Write a JSON response. */
   sendJson(res: OutgoingLike, status: number, json: unknown): void;
+  /**
+   * Register a file watcher for HMR. When a changed/added/removed file matches `matches`,
+   * `onChange` runs first (drop your caches), then the harness invalidates the SSR module
+   * graph and full-reloads the game iframe. No-op if the dev server exposes no watcher.
+   *
+   * Backends whose logic lives server-side (e.g. an in-process Lua engine) need this: without
+   * it, editing a `.lua`/config file wouldn't hot-reload in the harness.
+   */
+  watchReload(matches: (file: string) => boolean, onChange?: () => void): void;
 }
 
 // ---------------------------------------------------------------------------

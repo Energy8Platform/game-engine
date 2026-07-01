@@ -37,6 +37,7 @@ function setup() {
       res.statusCode = status;
       res.end(JSON.stringify(json));
     },
+    watchReload: () => {},
   };
   const { backend } = stakeRgsPlugin();
   expect(backend).toBeDefined();

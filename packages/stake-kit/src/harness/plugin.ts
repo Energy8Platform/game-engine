@@ -221,6 +221,22 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
     configureServer(ctx: HarnessServerContext): void {
       server = ctx.server;
 
+      // Hot-reload the game logic: editing the Lua / math config drops the cached config +
+      // LuaEngine so the next play runs fresh code, then reloads the iframe. (In harness mode
+      // the DevBridge/luaPlugin — which normally does this — is off.) The dev-RGS balance is
+      // kept; it doesn't depend on the Lua logic.
+      ctx.watchReload(
+        (f) =>
+          f.endsWith('.lua') ||
+          f.includes('math.config') ||
+          f.includes('script.logic') ||
+          f.includes('game.spec'),
+        () => {
+          cfgPromise = null;
+          luaEngine = null;
+        },
+      );
+
       ctx.server.middlewares.use('/__rgs', (req, res) => {
         void (async () => {
           try {
