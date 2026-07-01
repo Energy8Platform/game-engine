@@ -84,11 +84,18 @@ export function createCSSPreloader(
 ${variant.css}
   `;
 
-  // The absolute overlay needs a positioned ancestor. Only override a STATIC container, and
-  // remember the prior inline value so removeCSSPreloader can restore it (an inline `relative`
-  // left behind would beat the game's `#game { position: fixed; inset: 0 }` and collapse it).
+  // The absolute overlay needs a positioned ancestor to size against. Override ONLY a container
+  // whose COMPUTED position is `static`: checking the inline style alone (as this did) misses a
+  // `#game { position: fixed; inset: 0 }` STYLESHEET rule — the inline `position` is empty there,
+  // so we'd wrongly add an inline `relative` that beats the fixed and collapses #game to content
+  // height, leaving the height:100% overlay unable to fill the screen. Remember the prior inline
+  // value so removeCSSPreloader can restore it.
   const prevPosition = container.style.position;
-  container.style.position = container.style.position || 'relative';
+  const computedPosition =
+    typeof getComputedStyle === 'function' ? getComputedStyle(container).position : prevPosition;
+  if (!computedPosition || computedPosition === 'static') {
+    container.style.position = 'relative';
+  }
   container.appendChild(styleEl);
   container.appendChild(overlay);
 

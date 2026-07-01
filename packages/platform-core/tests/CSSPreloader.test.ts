@@ -255,3 +255,52 @@ describe('removeCSSPreloader', () => {
     expect(() => setCSSPreloaderProgress(0.5)).not.toThrow();
   });
 });
+
+describe('CSSPreloader container position handling', () => {
+  let styleEl: HTMLStyleElement;
+
+  afterEach(() => {
+    styleEl?.remove();
+  });
+
+  it('makes a STATIC container relative so the absolute overlay has a positioned ancestor', async () => {
+    const container = document.createElement('div'); // no positioning → computed `static`
+    document.body.appendChild(container);
+    createCSSPreloader(container);
+    expect(container.style.position).toBe('relative');
+    await removeCSSPreloader(container);
+    container.remove();
+  });
+
+  it('does NOT override a container positioned via a stylesheet rule (regression: #game { position: fixed })', async () => {
+    // The game host sets `#game { position: fixed; inset: 0 }` from a stylesheet, so the inline
+    // style is empty. The preloader must NOT write inline `position: relative` — that would beat
+    // the fixed rule and collapse #game to content height, so the height:100% overlay can't fill
+    // the screen. It must read the COMPUTED position (fixed) and leave the container alone.
+    styleEl = document.createElement('style');
+    styleEl.textContent = '#game-host { position: fixed; inset: 0; }';
+    document.head.appendChild(styleEl);
+    const container = document.createElement('div');
+    container.id = 'game-host';
+    document.body.appendChild(container);
+
+    expect(getComputedStyle(container).position).toBe('fixed'); // precondition
+    createCSSPreloader(container);
+    expect(container.style.position).toBe(''); // inline untouched → stylesheet `fixed` still wins
+
+    await removeCSSPreloader(container);
+    expect(container.style.position).toBe(''); // still untouched after removal
+    container.remove();
+  });
+
+  it('restores the prior inline position on removal', async () => {
+    const container = document.createElement('div');
+    container.style.position = 'static'; // explicit inline, computed `static` → overridden
+    document.body.appendChild(container);
+    createCSSPreloader(container);
+    expect(container.style.position).toBe('relative');
+    await removeCSSPreloader(container);
+    expect(container.style.position).toBe('static'); // prior inline restored
+    container.remove();
+  });
+});
