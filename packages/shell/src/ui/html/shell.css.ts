@@ -397,6 +397,17 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval { min-width:clamp(50px,14cqh,66px); }
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval b { font-size:clamp(9px,2.5cqh,11px); }
 #${SHELL_ROOT_ID} [data-ge="buybonus-overlay"] .ge-bb-betval span { font-size:clamp(5px,1.25cqh,6px); }
+/* Popout S (very short landscape, e.g. 400×225): the height-fit shrank the cards' descriptions to an
+   unreadable ~4px floor with nothing to scroll. Below a ~340px frame height, drop the shrink-to-fit and
+   switch the (non-mobile) buy-bonus to a READABLE vertical stack that scrolls vertically — like mobile.
+   Query the overlay's ge-bb-frame size container so it tracks the popout frame, not the browser window. */
+@container ge-bb-frame (max-height: 340px) {
+  #${SHELL_ROOT_ID}:not(.ge-mobile) [data-ge="buybonus-overlay"] .ge-ov-scroll { overflow-y:auto; }
+  #${SHELL_ROOT_ID}:not(.ge-mobile) [data-ge="buybonus-overlay"] .ge-ov-body { justify-content:flex-start; }
+  #${SHELL_ROOT_ID}:not(.ge-mobile) .ge-bb-grid { flex-direction:column; align-items:center; overflow:visible; }
+  #${SHELL_ROOT_ID}:not(.ge-mobile) .ge-bb-grid .ge-bonus-card {
+    flex:0 0 auto; width:18em; font-size:min(12px, calc(84cqw / 18)); }
+}
 
 /* ═══ desktop control bar — one continuous dark panel; white-disc buttons; BUY BONUS outside-left ═══ */
 /* the dark surface fills the row width (BUY BONUS sits outside, to its left) */
