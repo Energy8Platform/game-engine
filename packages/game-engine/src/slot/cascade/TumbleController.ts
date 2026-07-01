@@ -147,8 +147,11 @@ export class TumbleController {
     }
     this._undim();
 
-    // 3. gravity: survivors slide down, new cells drop from above
-    const rowStep = this._grid.cellPosition(0, 1).y - this._grid.cellPosition(0, 0).y;
+    // 3. gravity: survivors slide down, new cells drop from above (per-reel row step)
+    const rowStepOf = (col: number): number =>
+      this._grid.rowsOf(col) > 1
+        ? this._grid.cellPosition(col, 1).y - this._grid.cellPosition(col, 0).y
+        : this._grid.cellSize(col).height;
     const slides = this._cfg.gravity ? (step.drops ?? this.deriveDrops(step)) : [];
     const anims: Promise<void>[] = [];
 
@@ -172,7 +175,7 @@ export class TumbleController {
       cell.setState({ fresh: true });
       cell.alpha = 1;
       cell.scale.set(1);
-      cell.position.set(home.x, home.y - rowStep * (this._grid.rowsOf(n.col) + 1));
+      cell.position.set(home.x, home.y - rowStepOf(n.col) * (this._grid.rowsOf(n.col) + 1));
       const idx = (perCol[n.col] = (perCol[n.col] ?? 0) + 1);
       anims.push(
         (async () => {

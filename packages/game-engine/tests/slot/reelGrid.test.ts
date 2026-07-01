@@ -34,4 +34,19 @@ describe('ReelGrid', () => {
     grid.resize(80);
     expect(grid.getCell(1, 0).x).toBe(80);
   });
+  it('cellSize(col) returns per-strip rectangular dimensions', () => {
+    const grid = new ReelGrid({
+      cols: 3,
+      rows: 2,
+      cellSize: 100,
+      cellSizePerReel: [100, { width: 60, height: 120 }, 100],
+      gap: 0,
+      resolve,
+    });
+    expect(grid.cellSize(0)).toEqual({ width: 100, height: 100 });
+    expect(grid.cellSize(1)).toEqual({ width: 60, height: 120 });
+    // reel 1's narrower cells shift reel 2 leftward vs a uniform grid (2*100)
+    expect(grid.getCell(1, 0).x).toBe(80);
+    expect(grid.getCell(2, 0).x).toBe(160);
+  });
 });

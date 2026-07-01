@@ -15,12 +15,14 @@ export const ReelHighlight: ReelFeature = {
   enabled: () => true, // custom features manage their own gating
   async demo(ctx: FeatureContext) {
     const col = Math.floor(ctx.grid.cols / 2);
-    const cs = ctx.grid.cellSize;
+    const cs = ctx.grid.cellSize(col);
     const rows = ctx.grid.rowsOf(col);
     const top = ctx.grid.cellPosition(col, 0);
+    const step = rows > 1 ? ctx.grid.cellPosition(col, 1).y - top.y : cs.height;
     ctx.log?.(`(custom) Reel highlight on reel ${col}`);
+    const colH = (rows - 1) * step + cs.height;
     const g = new Graphics()
-      .roundRect(top.x - cs / 2 - 2, top.y - cs / 2 - 2, cs + 4, rows * cs + 4, 12)
+      .roundRect(top.x - cs.width / 2 - 2, top.y - cs.height / 2 - 2, cs.width + 4, colH + 4, 12)
       .stroke({ color: 0xffea3a, width: 4, alpha: 0.95 });
     ctx.fx.addChild(g);
     for (let i = 0; i < 3; i++) {
@@ -40,13 +42,12 @@ export const FlyingWild: ReelFeature = {
     const col = ctx.grid.cols - 1;
     const row = Math.floor(ctx.grid.rowsOf(col) / 2);
     const from = ctx.grid.cellPosition(col, row);
-    const cx = ((ctx.grid.cols - 1) * ctx.grid.cellSize) / 2;
-    const cy = ((ctx.grid.rows - 1) * ctx.grid.cellSize) / 2;
+    const { x: cx, y: cy } = ctx.grid.center();
 
     const view = ctx.resolve('wild');
     if (!view) return;
     const flyer = new Container();
-    view.resize?.(ctx.grid.cellSize);
+    view.resize?.(ctx.grid.cellSize(col));
     flyer.addChild(view);
     flyer.position.set(from.x, from.y);
     ctx.fx.addChild(flyer);

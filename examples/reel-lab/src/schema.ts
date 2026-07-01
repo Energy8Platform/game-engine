@@ -5,7 +5,16 @@
 
 export type Control =
   | { kind: 'select'; path: string; label: string; options: string[] }
-  | { kind: 'range'; path: string; label: string; min: number; max: number; step: number }
+  | {
+      kind: 'range';
+      path: string;
+      label: string;
+      min: number;
+      max: number;
+      step: number;
+      /** When the bound value is unset (undefined / non-scalar), show this path's value instead. */
+      fallback?: string;
+    }
   | { kind: 'toggle'; path: string; label: string }
   | { kind: 'color'; path: string; label: string };
 
@@ -42,6 +51,50 @@ export const SCHEMA: Section[] = [
         options: ['lines', 'ways', 'anywhere', 'cluster', 'megaways', 'infinity'],
       },
       { kind: 'toggle', path: 'grid.mask', label: 'Mask reels' },
+    ],
+  },
+  {
+    title: 'Cell geometry',
+    collapsed: false,
+    controls: [
+      // Rectangular cells: width/height fall back to the square `cellSize` until you move them.
+      {
+        kind: 'range',
+        path: 'grid.cellWidth',
+        label: 'Cell width',
+        min: 40,
+        max: 160,
+        step: 1,
+        fallback: 'grid.cellSize',
+      },
+      {
+        kind: 'range',
+        path: 'grid.cellHeight',
+        label: 'Cell height',
+        min: 40,
+        max: 160,
+        step: 1,
+        fallback: 'grid.cellSize',
+      },
+      // Per-axis gaps: fall back to the uniform `gap`. (Use "Vary strips" for per-boundary gaps.)
+      {
+        kind: 'range',
+        path: 'grid.colGap',
+        label: 'Column gap',
+        min: 0,
+        max: 40,
+        step: 1,
+        fallback: 'grid.gap',
+      },
+      {
+        kind: 'range',
+        path: 'grid.rowGap',
+        label: 'Row gap',
+        min: 0,
+        max: 40,
+        step: 1,
+        fallback: 'grid.gap',
+      },
     ],
   },
   {

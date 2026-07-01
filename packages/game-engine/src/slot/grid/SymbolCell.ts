@@ -21,7 +21,8 @@ export interface CellState {
   fresh?: boolean;
 }
 export interface SymbolCellConfig {
-  size: number;
+  /** Square scalar or rectangular cell size in px. */
+  size: number | { width: number; height: number };
   resolve: SymbolResolver;
   frameStyle?: CellFrameStyle;
 }
@@ -34,10 +35,14 @@ const DEFAULT_STYLE: Required<CellFrameStyle> = {
   fresh: { color: 0xffffff, alpha: 0.6 },
 };
 
+const cellDims = (size: number | { width: number; height: number }) =>
+  typeof size === 'number' ? { width: size, height: size } : size;
+
 export class SymbolCell extends Container {
   readonly __uiComponent = true as const;
 
-  private _size: number;
+  private _w: number;
+  private _h: number;
   private _resolve: SymbolResolver;
   private _style: Required<CellFrameStyle>;
   private _frame: Graphics;
@@ -50,7 +55,9 @@ export class SymbolCell extends Container {
 
   constructor(config: SymbolCellConfig) {
     super();
-    this._size = config.size;
+    const { width, height } = cellDims(config.size);
+    this._w = width;
+    this._h = height;
     this._resolve = config.resolve;
     this._style = { ...DEFAULT_STYLE, ...(config.frameStyle ?? {}) } as Required<CellFrameStyle>;
     this._frame = new Graphics();
@@ -78,7 +85,7 @@ export class SymbolCell extends Container {
       }
       const v = this._resolve(data.symbol);
       if (v) {
-        v.resize?.(this._size);
+        v.resize?.({ width: this._w, height: this._h });
         this.addChildAt(v, 1); // above frame, below badges
         this._view = v;
       }
@@ -123,7 +130,7 @@ export class SymbolCell extends Container {
     const s = this._style[key];
     this._frame.clear();
     this._frame
-      .roundRect(-this._size / 2, -this._size / 2, this._size, this._size, this._style.radius)
+      .roundRect(-this._w / 2, -this._h / 2, this._w, this._h, this._style.radius)
       .fill({ color: s.color, alpha: s.alpha });
     // store the colour as tint for cheap inspection/testing
     this._frame.tint = s.color;
@@ -136,7 +143,7 @@ export class SymbolCell extends Container {
     }
     if (!value || value <= 1) return;
     this._multBadge = this._badge(`×${value}`, 0xffd24a);
-    this._multBadge.position.set(this._size / 2 - 12, -this._size / 2 + 12);
+    this._multBadge.position.set(this._w / 2 - 12, -this._h / 2 + 12);
     this._badges.addChild(this._multBadge);
   }
 
@@ -147,7 +154,7 @@ export class SymbolCell extends Container {
     }
     if (!value || value <= 0) return;
     this._bonusBadge = this._badge(`+${value}`, 0x7ad7ff);
-    this._bonusBadge.position.set(-this._size / 2 + 12, -this._size / 2 + 12);
+    this._bonusBadge.position.set(-this._w / 2 + 12, -this._h / 2 + 12);
     this._badges.addChild(this._bonusBadge);
   }
 

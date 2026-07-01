@@ -121,7 +121,12 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
       rows: config.grid.rows,
       rowsPerReel: config.grid.rowsPerReel ?? effectiveRowsPerReel(config.grid),
       cellSize: config.grid.cellSize,
+      cellWidth: config.grid.cellWidth,
+      cellHeight: config.grid.cellHeight,
+      cellSizePerReel: config.grid.cellSizePerReel,
       gap: config.grid.gap,
+      colGap: config.grid.colGap,
+      rowGap: config.grid.rowGap,
       resolve,
       frameStyle: config.grid.frameStyle,
       mask: config.grid.mask,
@@ -145,8 +150,13 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
       a.cols !== b.cols ||
       a.rows !== b.rows ||
       a.cellSize !== b.cellSize ||
+      a.cellWidth !== b.cellWidth ||
+      a.cellHeight !== b.cellHeight ||
       a.gap !== b.gap ||
       a.mask !== b.mask ||
+      JSON.stringify(a.cellSizePerReel) !== JSON.stringify(b.cellSizePerReel) ||
+      JSON.stringify(a.colGap) !== JSON.stringify(b.colGap) ||
+      JSON.stringify(a.rowGap) !== JSON.stringify(b.rowGap) ||
       JSON.stringify(a.rowsPerReel) !== JSON.stringify(b.rowsPerReel) ||
       (a.decoration?.padding ?? 0) !== (b.decoration?.padding ?? 0)
     );

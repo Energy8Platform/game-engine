@@ -5,8 +5,8 @@ export interface SymbolView extends Container {
   playIdle?(): void;
   playWin?(): Promise<void>;
   showStatic?(): void;
-  /** Resize the symbol to the given cell size in pixels. */
-  resize?(size: number): void;
+  /** Resize the symbol to the given cell size in pixels (square scalar or rectangular). */
+  resize?(size: number | { width: number; height: number }): void;
 }
 
 /** Game-supplied factory: build the view for a symbol id (sprite / layered sprites / Spine / composite). */

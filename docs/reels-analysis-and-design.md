@@ -101,3 +101,113 @@ API: `createReelSystem(config) → { grid, spin(data,opts), cascade(step,opts), 
 - Слева/сверху — DOM-панель контролов (select/slider/checkbox) по секциям конфига; справа — живой канвас с барабанами.
 - Кнопки: **Spin**, **Force scatter (anticipation)**, **Trigger cascade**, **Copy config (JSON/TS)**, пресеты (kitsune/moon-spice/stone-rush/hot-ross/magnus как готовые конфиги).
 - «Copy» кладёт в буфер готовый `ReelSystemConfig` для вставки в игру.
+
+---
+
+## 6. Вариативная геометрия ячейки (прямоугольные / per-strip)
+
+> Артефакт обсуждения на ветке `feat/shell-package`. Расширяет секцию 4 (`grid`): сейчас `cellSize` — один квадратный скаляр, `gap` — один скаляр; надо поддержать прямоугольные ячейки и разные размеры/зазоры по стрипам.
+
+### 6.1 Что есть сейчас
+
+- `GridConfig.cellSize: number` ([`config/ReelSystemConfig.ts:44`](../packages/game-engine/src/slot/config/ReelSystemConfig.ts#L44), дефолт `96`) — ячейка всегда квадратная `cellSize × cellSize`.
+- `gap: number` — один зазор и по горизонтали, и по вертикали.
+- Вся геометрия выводится из `step = cellSize + gap`; позиции идут через `grid.cellPosition(col,row)`, но много кода читает публичный `grid.cellSize` напрямую (маска, рамка `SymbolCell`, бейджи, и особенно фичи-анимации `extra.ts`/`symbols.ts`/`wilds.ts`/`types.ts`, которые считают центр грида как `cols*cellSize`).
+- Вертикальная вариативность **уже есть**: `rowsPerReel?: number[]` (Megaways), стрипы центрируются в конверте `maxRows` ([`reel/ReelGrid.ts:117`](../packages/game-engine/src/slot/reel/ReelGrid.ts#L117)).
+
+### 6.2 Ключевое ограничение
+
+Внутри **одного стрипа высота ячейки обязана быть одинаковой**. Прокрутка ленты в [`reel/SpinEngine.ts:201`](../packages/game-engine/src/slot/reel/SpinEngine.ts#L201) берёт **один** `step` на барабан (`cellPosition(reel,1).y − cellPosition(reel,0).y`) и раскладывает всю ленту с этим шагом. Разная высота ячеек внутри стрипа ⇒ ломается модель движения. Поэтому ось вариативности — **стрип целиком**, не отдельная ячейка. «Per-cell на стрипе» сознательно не поддерживаем (только для статичных не-крутящихся гридов, вне этой задачи).
+
+### 6.3 Принятые решения
+
+- **Гранулярность:** per-strip — у каждого барабана свои `{ width, height }`.
+- **Зазоры:** тоже per-strip — зазор **между** стрипами может отличаться (не один общий `gap`).
+- **Вертикальное выравнивание** при разной высоте стрипов: **центр** (как сейчас у `rowsPerReel`).
+- **Маскирование:** маска **на каждый стрип** по его собственным размерам (чисто обрезает прокрутку на разновысоких стрипах).
+
+### 6.4 Конфиг (обратно совместимо)
+
+Скаляры остаются шорткатами, сверху — опциональные оверрайды; старшее переопределяет младшее:
+
+```ts
+interface GridConfig {
+  cols: number; rows: number; rowsPerReel?: number[];
+
+  // размер ячейки
+  cellSize: number;                                  // квадрат, все стрипы (шорткат)
+  cellWidth?: number; cellHeight?: number;           // прямоугольник, все стрипы
+  cellSizePerReel?: Array<number | { width: number; height: number }>;
+
+  // зазоры
+  gap: number;                                       // единый h+v зазор (шорткат)
+  colGap?: number | number[];                        // между стрипами, length = cols-1
+  rowGap?: number | number[];                        // между рядами, скаляр или per-reel
+}
+```
+
+### 6.5 Резолвер геометрии — единый источник
+
+По образцу существующего `effectiveRowsPerReel` — один `resolveGeometry(grid)`, считающий всё один раз:
+
+```ts
+interface ResolvedGeometry {
+  cellW: number[];    // per reel
+  cellH: number[];    // per reel
+  rowGap: number[];   // per reel (верт. шаг внутри стрипа = cellH[r] + rowGap[r])
+  colX:  number[];    // центр X каждого стрипа, накопленный
+  yOff:  number[];    // верт. смещение стрипа (центрирование)
+  gridW: number; gridH: number;
+}
+```
+
+Формулы:
+
+```
+// горизонталь: накопление ширин + межстриповых зазоров
+colX[0] = cellW[0]/2
+colX[i] = colX[i-1] + cellW[i-1]/2 + colGap[i-1] + cellW[i]/2
+
+// вертикаль: высота стрипа и центрирование в общем конверте
+reelH[r] = rows[r]*cellH[r] + (rows[r]-1)*rowGap[r]
+gridH    = max(reelH)
+yOff[r]  = (gridH - reelH[r]) / 2
+
+// позиция центра ячейки
+cellPosition(col,row) = {
+  x: colX[col],
+  y: yOff[col] + row*(cellH[col]+rowGap[col]) + cellH[col]/2
+}
+```
+
+### 6.6 Рефактор — свести геометрию к двум API грида
+
+Это ~80% работы и то, что «включает» обе фичи без правок в потребителях:
+
+1. `grid.cellPosition(col,row)` — остаётся, но читает из `ResolvedGeometry`.
+2. `grid.cellSize(col): { width; height }` — **новый** аксессор вместо публичного скаляра; все прямые чтения `grid.cellSize` заменяются на него.
+
+Потребители на перевод:
+
+| Файл | Что меняется |
+| --- | --- |
+| [`grid/geometry.ts`](../packages/game-engine/src/slot/grid/geometry.ts) | **новый** — `resolveGeometry()` + `cellPositionOf()`, чистый резолвер (см. 6.5) |
+| [`grid/ReelGrid.ts`](../packages/game-engine/src/slot/grid/ReelGrid.ts) | width/height/step из резолвера; `cellSize(col)` аксессор; `center()`; маска строится **per-strip** по `cellW[col]×reelH[col]` со своим `yOff` |
+| [`grid/SymbolCell.ts`](../packages/game-engine/src/slot/grid/SymbolCell.ts) | рамка `roundRect(-w/2,-h/2,w,h)` вместо квадрата; бейджи от `w/2,h/2`; `size: number \| {width,height}` |
+| [`grid/AnimatedSymbol.ts`](../packages/game-engine/src/slot/grid/AnimatedSymbol.ts) | `resize(number \| {width,height})` (по умолчанию fill; `contain` — см. 6.7) |
+| [`motion/SpinEngine.ts`](../packages/game-engine/src/slot/motion/SpinEngine.ts) | tape-ячейки через `cellSize(reel)`; `step` per-reel из `cellPosition` |
+| [`cascade/TumbleController.ts`](../packages/game-engine/src/slot/cascade/TumbleController.ts) | `rowStep` per-column вместо общего |
+| фичи `types.ts`/`symbols.ts`/`wilds.ts`/`extra.ts` | `glowRing`/бейджи через `cellSize(col)`; `rowStepOf(grid,col)`/`colStepOf`; центр из `grid.center()` |
+| [`system/ReelSystem.ts`](../packages/game-engine/src/slot/system/ReelSystem.ts) | пробрасывает новые поля в `ReelGrid`; `geometryChanged()` учитывает их |
+
+Порядок: сначала prod-код (резолвер + аксессор + ReelGrid/SymbolCell/SpinEngine), фичи-анимации последними.
+
+> **Статус:** реализовано на ветке `feat/shell-package`. Тесты: `tests/slot/geometry.test.ts` (математика резолвера) + `tests/slot/reelGrid.test.ts` (per-strip аксессор). Все 263 теста game-engine зелёные, typecheck чистый.
+
+### 6.7 Открытый под-вопрос (решить при правке `SymbolCell`/`AnimatedSymbol`)
+
+Спрайт в прямоугольной ячейке: **растягивать под `w×h`** или **вписывать с сохранением пропорций** (`contain`, по меньшей стороне). Сейчас `AnimatedSymbol` ставит `width=height=size` ⇒ растяжение неизбежно. Предложение: `contain` по умолчанию + флаг `stretch` в стиле ячейки.
+
+### 6.8 Обратная совместимость
+
+Старые конфиги (`cellSize` + `gap`, без оверрайдов) резолвятся в равномерную квадратную сетку с тем же поведением — регрессий нет.

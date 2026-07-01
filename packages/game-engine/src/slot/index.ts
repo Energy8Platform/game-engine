@@ -5,6 +5,8 @@ export { SymbolCell } from './grid/SymbolCell';
 export type { CellFrameStyle, CellData, CellState, SymbolCellConfig } from './grid/SymbolCell';
 export { ReelGrid } from './grid/ReelGrid';
 export type { DecorationConfig, ReelGridConfig } from './grid/ReelGrid';
+export { resolveGeometry, cellPositionOf } from './grid/geometry';
+export type { GeometryInput, ResolvedGeometry, CellSizeSpec } from './grid/geometry';
 export { CascadeController } from './anim/CascadeController';
 export type { CascadeStepData, CascadeTimings, CascadeAnim } from './anim/CascadeController';
 export { ReelSpinController } from './anim/ReelSpinController';
@@ -19,6 +21,7 @@ export {
   resolveReelConfig,
   mergeReelConfig,
   effectiveRowsPerReel,
+  resolveGridGeometry,
   waysCount,
 } from './config/ReelSystemConfig';
 export type {

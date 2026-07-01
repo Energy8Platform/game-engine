@@ -46,8 +46,7 @@ export const MultiplierSymbols: ReelFeature = {
         await floatLabel(ctx.fx, x, y, `×${values[spots.indexOf(p)]}`, 0xffd24a, 500);
       }),
     );
-    const cx = (ctx.grid.cols * ctx.grid.cellSize) / 2 - ctx.grid.cellSize / 2;
-    const cy = (ctx.grid.rows * ctx.grid.cellSize) / 2 - ctx.grid.cellSize / 2;
+    const { x: cx, y: cy } = ctx.grid.center();
     await floatLabel(ctx.fx, cx, cy, `×${capped}`, 0xffe24a, 900);
   },
 };

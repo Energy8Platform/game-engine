@@ -69,7 +69,7 @@ export const StickySymbols: ReelFeature = {
         await floatLabel(
           ctx.fx,
           x,
-          y - ctx.grid.cellSize / 2,
+          y - ctx.grid.cellSize(p.col).height / 2,
           f.durationSpins ? `STICKY ${f.durationSpins}` : 'STICKY',
           f.ringColor,
           600 + i * 50,

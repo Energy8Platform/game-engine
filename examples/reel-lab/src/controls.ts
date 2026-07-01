@@ -105,7 +105,11 @@ function renderControl(
     const val = document.createElement('output');
     val.className = 'control-value';
     const sync = () => {
-      const v = Number(getPath(opts.config, c.path));
+      // fall back to another path (e.g. cellWidth → cellSize) when this value is unset/non-scalar
+      let raw = getPath(opts.config, c.path);
+      if ((raw == null || typeof raw !== 'number') && c.fallback != null)
+        raw = getPath(opts.config, c.fallback);
+      const v = Number(raw);
       input.value = String(v);
       val.textContent = String(v);
     };

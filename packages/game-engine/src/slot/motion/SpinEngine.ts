@@ -210,7 +210,7 @@ export class SpinEngine {
     tape.x = base.x;
     const landingStart = tapeLen - rows;
     for (let i = 0; i < tapeLen; i++) {
-      const cell = new SymbolCell({ size: this._grid.cellSize, resolve: this._resolve });
+      const cell = new SymbolCell({ size: this._grid.cellSize(p.reel), resolve: this._resolve });
       const sym =
         i >= landingStart
           ? (p.landing[i - landingStart]?.symbol ?? null)

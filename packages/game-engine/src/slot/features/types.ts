@@ -43,8 +43,16 @@ export function cellCenter(grid: ReelGrid, col: number, row: number): { x: numbe
   return grid.cellPosition(col, row);
 }
 
-export function rowStepOf(grid: ReelGrid): number {
-  return grid.cellPosition(0, 1).y - grid.cellPosition(0, 0).y;
+/** Vertical row-to-row step for a reel (falls back to the reel's cell height for 1-row reels). */
+export function rowStepOf(grid: ReelGrid, col = 0): number {
+  if (grid.rowsOf(col) > 1) return grid.cellPosition(col, 1).y - grid.cellPosition(col, 0).y;
+  return grid.cellSize(col).height;
+}
+
+/** Horizontal reel-to-reel step at a boundary (falls back to the reel's cell width for 1-col grids). */
+export function colStepOf(grid: ReelGrid, col = 0): number {
+  if (col + 1 < grid.cols) return grid.cellPosition(col + 1, 0).x - grid.cellPosition(col, 0).x;
+  return grid.cellSize(col).width;
 }
 
 /** A glowing ring drawn around a cell. Returns a disposer. */
@@ -57,9 +65,9 @@ export function glowRing(
 ): () => void {
   if (fx.destroyed) return () => {};
   const { x, y } = cellCenter(grid, col, row);
-  const s = grid.cellSize;
+  const { width, height } = grid.cellSize(col);
   const g = new Graphics()
-    .roundRect(x - s / 2, y - s / 2, s, s, 10)
+    .roundRect(x - width / 2, y - height / 2, width, height, 10)
     .stroke({ color, width: 3, alpha: 0.9 });
   fx.addChild(g);
   return () => g.destroy();
@@ -118,7 +126,7 @@ export async function dropCell(
 ): Promise<void> {
   if (cell.destroyed) return;
   const home = grid.cellPosition(col, row);
-  cell.position.set(home.x, home.y - rowStepOf(grid) * (row + 2));
+  cell.position.set(home.x, home.y - rowStepOf(grid, col) * (row + 2));
   cell.alpha = 1;
   cell.scale.set(1);
   await Tween.to(cell, { 'position.y': home.y }, ms, easingByName('easeOutBounce'));

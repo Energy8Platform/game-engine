@@ -3,25 +3,32 @@ import { SpriteAnimation } from '../../animation';
 import type { SymbolView } from './SymbolView';
 
 export interface SymbolTextures { base: Texture; idle?: Texture[]; win?: Texture[]; }
-export interface AnimatedSymbolConfig { textures: SymbolTextures; size: number; fps?: number; }
+export interface AnimatedSymbolConfig {
+  textures: SymbolTextures;
+  size: number | { width: number; height: number };
+  fps?: number;
+}
+
+const dims = (size: number | { width: number; height: number }) =>
+  typeof size === 'number' ? { width: size, height: size } : size;
 
 /** Built-in SymbolView: a static base sprite with optional idle/win spritesheet frames. */
 export class AnimatedSymbol extends Container implements SymbolView {
   private _base: Sprite;
   private _anim: AnimatedSprite | null = null;
   private _textures: SymbolTextures;
-  private _size: number;
+  private _w = 0;
+  private _h = 0;
   private _fps: number;
 
   constructor(config: AnimatedSymbolConfig) {
     super();
     this._textures = config.textures;
-    this._size = config.size;
     this._fps = config.fps ?? 24;
     this._base = new Sprite(config.textures.base);
     this._base.anchor.set(0.5);
     this.addChild(this._base);
-    this.resize(this._size);
+    this.resize(config.size);
   }
 
   setTextures(t: SymbolTextures): void {
@@ -30,11 +37,13 @@ export class AnimatedSymbol extends Container implements SymbolView {
     this.showStatic();
   }
 
-  resize(size: number): void {
-    this._size = size;
-    this._base.width = size;
-    this._base.height = size;
-    if (this._anim) { this._anim.width = size; this._anim.height = size; }
+  resize(size: number | { width: number; height: number }): void {
+    const { width, height } = dims(size);
+    this._w = width;
+    this._h = height;
+    this._base.width = width;
+    this._base.height = height;
+    if (this._anim) { this._anim.width = width; this._anim.height = height; }
   }
 
   showStatic(): void {
@@ -59,8 +68,8 @@ export class AnimatedSymbol extends Container implements SymbolView {
     this._base.visible = false;
     const a = SpriteAnimation.create(frames, { loop, autoPlay: true, onComplete });
     a.anchor.set(0.5);
-    a.width = this._size;
-    a.height = this._size;
+    a.width = this._w;
+    a.height = this._h;
     a.animationSpeed = this._fps / 60;
     this.addChild(a);
     this._anim = a;

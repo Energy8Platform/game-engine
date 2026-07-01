@@ -6,6 +6,7 @@ import {
   type FeatureContext,
   type ReelFeature,
   cellCenter,
+  colStepOf,
   floatLabel,
   morphSymbol,
   pickFromBoard,
@@ -96,17 +97,15 @@ export const GiantSymbol: ReelFeature = {
     ctx.log?.(`Giant ${w}×${h} "${sym}"`);
     const view = ctx.resolve(sym);
     if (!view) return;
-    const step = rowStepOf(ctx.grid);
+    const cs = ctx.grid.cellSize(anchorCol);
+    const stepX = colStepOf(ctx.grid, anchorCol);
+    const step = rowStepOf(ctx.grid, anchorCol);
     const tl = cellCenter(ctx.grid, anchorCol, 0);
     const giant = new Container();
     giant.addChild(view);
-    view.resize?.(ctx.grid.cellSize * Math.max(w, h));
-    if (view.scale)
-      view.scale.set(
-        ((ctx.grid.cellSize * w) / (ctx.grid.cellSize * Math.max(w, h))) * view.scale.x,
-        ((ctx.grid.cellSize * h) / (ctx.grid.cellSize * Math.max(w, h))) * view.scale.y,
-      );
-    giant.position.set(tl.x + ((w - 1) * step) / 2, tl.y + ((h - 1) * step) / 2);
+    // span w×h cells (footprint ignores gaps, matching the previous single-cell unit)
+    view.resize?.({ width: cs.width * w, height: cs.height * h });
+    giant.position.set(tl.x + ((w - 1) * stepX) / 2, tl.y + ((h - 1) * step) / 2);
     // hide covered cells
     for (let c = anchorCol; c < anchorCol + w; c++)
       for (let r = 0; r < h; r++) ctx.grid.getCell(c, r).visible = false;
@@ -143,11 +142,12 @@ export const SplitSymbol: ReelFeature = {
       left.map(async (p, i) => {
         await Tween.delay((i % 6) * 30);
         const { x, y } = cellCenter(ctx.grid, p.col, p.row);
+        const cs = ctx.grid.cellSize(p.col);
         await pulseCell(ctx.grid.getCell(p.col, p.row), 1.12, 200);
         await floatLabel(
           ctx.fx,
-          x + ctx.grid.cellSize / 3,
-          y - ctx.grid.cellSize / 3,
+          x + cs.width / 3,
+          y - cs.height / 3,
           `×${f.factor}`,
           0x9b5cff,
           600,

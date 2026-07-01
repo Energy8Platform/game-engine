@@ -8,6 +8,9 @@
 // Design notes are in docs/reels-analysis-and-design.md.
 
 import type { CellFrameStyle } from '../grid/SymbolCell';
+import { resolveGeometry, type CellSizeSpec, type ResolvedGeometry } from '../grid/geometry';
+
+export type { CellSizeSpec, ResolvedGeometry };
 
 /** Names of easing functions available in the engine's `Easing` map (see anim/easing-map.ts). */
 export type EasingName =
@@ -41,8 +44,19 @@ export interface GridConfig {
   rows: number;
   /** Per-reel row counts (Megaways / variable-height reels). Length should equal `cols`. */
   rowsPerReel?: number[];
+  /** Square cell size (shorthand: same width & height, all reels). */
   cellSize: number;
+  /** Rectangular cells, uniform across reels. Override `cellSize` when set. */
+  cellWidth?: number;
+  cellHeight?: number;
+  /** Per-strip cell size (square scalar or {width,height}). Overrides the above for that reel. */
+  cellSizePerReel?: CellSizeSpec[];
+  /** Uniform gap (shorthand for both axes). */
   gap: number;
+  /** Horizontal gap between adjacent reels. Scalar, or per-boundary (length cols-1). Overrides `gap`. */
+  colGap?: number | number[];
+  /** Vertical gap between rows. Scalar, or per-reel (length cols). Overrides `gap`. */
+  rowGap?: number | number[];
   evaluation: EvaluationMode;
   /** For Megaways: clamp per-reel rows to [minRows, maxRows]. */
   minRows?: number;
@@ -551,6 +565,11 @@ function structuredCloneSafe<T>(v: T): T {
 export function effectiveRowsPerReel(grid: GridConfig): number[] {
   if (grid.rowsPerReel && grid.rowsPerReel.length === grid.cols) return grid.rowsPerReel.slice();
   return Array.from({ length: grid.cols }, () => grid.rows);
+}
+
+/** Resolve a `GridConfig` into a fully-populated per-reel geometry (rectangular / per-strip aware). */
+export function resolveGridGeometry(grid: GridConfig): ResolvedGeometry {
+  return resolveGeometry(grid);
 }
 
 /** Total ways-to-win for a ways/megaways grid (product of per-reel heights). */

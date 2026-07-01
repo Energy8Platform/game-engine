@@ -7,7 +7,6 @@ import { Application } from 'pixi.js';
 import {
   createReelSystem,
   resolveReelConfig,
-  effectiveRowsPerReel,
   waysCount,
   PRESET_LIST,
   PRESETS,
@@ -30,6 +29,7 @@ let workingConfig: ReelSystemConfig = resolveReelConfig(PRESETS['hot-ross'].conf
 let turbo = false;
 let freeSpins = false;
 let busy = false;
+let varied = false; // per-strip cell-size + variable column-gap demo toggle
 
 // ── Pixi app ────────────────────────────────────────────────────────────────
 const app = new Application();
@@ -57,12 +57,11 @@ function freshBoard(): void {
 freshBoard();
 
 function layout(): void {
-  const cell = workingConfig.grid.cellSize;
-  const gap = workingConfig.grid.gap;
+  // Pull the resolved geometry from the grid — handles rectangular / per-strip / variable-gap layouts.
+  const geom = system.grid.geometry;
+  const gridW = geom.gridW;
+  const gridH = geom.gridH;
   const cols = workingConfig.grid.cols;
-  const rows = Math.max(...effectiveRowsPerReel(workingConfig.grid));
-  const gridW = cols * (cell + gap) - gap;
-  const gridH = rows * (cell + gap) - gap;
   const w = app.renderer.width / app.renderer.resolution;
   const h = app.renderer.height / app.renderer.resolution;
   // auto-fit: scale the whole grid down so tall boards (7 rows / Megaways) never clip under the bar
@@ -71,9 +70,10 @@ function layout(): void {
   system.view.scale.set(fit);
   const drawW = gridW * fit;
   const drawH = gridH * fit;
+  // the view origin is cell(0,0)'s centre; leftX/topY are the grid's top-left corner relative to it
   system.view.position.set(
-    Math.round((w - drawW) / 2 + (cell * fit) / 2),
-    Math.round((h - drawH) / 2 + (cell * fit) / 2),
+    Math.round((w - drawW) / 2 - geom.leftX * fit),
+    Math.round((h - drawH) / 2 - geom.topY * fit),
   );
   const ev = workingConfig.grid.evaluation;
   const shape = `${cols}×${rowsFor(workingConfig).join('/')}`;
@@ -103,12 +103,43 @@ function bindPanel(): void {
     config: workingConfig,
     onChange: (path) => {
       // changing column count invalidates a fixed Megaways rowsPerReel — drop it so they can't desync
-      if (path === 'grid.cols') delete workingConfig.grid.rowsPerReel;
+      if (path === 'grid.cols') {
+        delete workingConfig.grid.rowsPerReel;
+        if (varied) regenStrips(); // resize the per-strip arrays to the new column count
+      }
       applyConfig(path.startsWith('grid.'));
       renderFeatureBar();
     },
   });
 }
+
+// ── per-strip cell sizes + alternating column gaps (rectangular / per-strip demo) ──
+const varyBtn = $('#btn-vary') as HTMLButtonElement;
+function regenStrips(): void {
+  const cols = workingConfig.grid.cols;
+  const base = workingConfig.grid.cellSize;
+  // alternate widths and heights per strip so every reel differs; even/odd + every-3rd pattern
+  workingConfig.grid.cellSizePerReel = Array.from({ length: cols }, (_, c) => ({
+    width: Math.round(base * (c % 2 === 0 ? 1 : 0.7)),
+    height: Math.round(base * (c % 3 === 0 ? 1.25 : 1)),
+  }));
+  // per-boundary column gaps: tight, then wide, then tight…
+  workingConfig.grid.colGap = Array.from({ length: Math.max(0, cols - 1) }, (_, i) =>
+    i % 2 === 0 ? 4 : 22,
+  );
+}
+function setVaried(on: boolean): void {
+  varied = on;
+  if (on) regenStrips();
+  else {
+    delete workingConfig.grid.cellSizePerReel;
+    delete workingConfig.grid.colGap;
+  }
+  varyBtn.classList.toggle('active', varied);
+  applyConfig(true);
+  log(on ? 'Per-strip: varied widths/heights + alternating column gaps' : 'Per-strip: uniform');
+}
+varyBtn.addEventListener('click', () => setVaried(!varied));
 
 // ── presets ─────────────────────────────────────────────────────────────────
 const presetSel = $('#preset') as HTMLSelectElement;
@@ -122,6 +153,8 @@ presetSel.value = 'hot-ross';
 presetSel.addEventListener('change', () => {
   const preset = PRESETS[presetSel.value as keyof typeof PRESETS];
   workingConfig = resolveReelConfig(preset.config);
+  varied = false; // presets are uniform-cell; reset the per-strip toggle
+  varyBtn.classList.remove('active');
   rebuildEverything();
   log(`Preset: ${preset.name} — ${preset.note}`);
 });
