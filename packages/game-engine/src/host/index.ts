@@ -6,7 +6,17 @@ export type {
   StakeIntegration,
   SceneRegistration,
   SceneNavData,
+  ShellFactory,
 } from './types';
+
+// Shell contract for authors plugging a custom renderer via createSlotGame({ shellFactory }).
+// Implement `ShellRenderer`, build the shell with `createShell({ renderer, ...config })`, and the
+// shell core drives bet/balance/overlays unchanged. `createPixiShell`/`PixiRenderer` are the built-in.
+export { createShell, createPixiShell, PixiRenderer } from '@energy8platform/shell/pixi';
+export type {
+  Shell, ShellRenderer, ShellSurface, SafeArea, ShellHost, ShellActions, ShellTokens,
+  ShellLayoutMode, OverlayRequest, OverlayHandle, ResolvedShellConfig, PixiShellConfig,
+} from '@energy8platform/shell/pixi';
 export { buildShellConfig, stakeForAction } from './shellConfig';
 export type { SlotShellOptions } from './shellConfig';
 export { resolveReplayBonusId } from './replay';

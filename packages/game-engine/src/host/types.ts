@@ -2,7 +2,7 @@
 import type { ApplicationOptions } from 'pixi.js';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { AssetManifest, LoadingScreenConfig } from '@energy8platform/platform-core';
-import type { PixiGameShell } from '@energy8platform/shell/pixi';
+import type { Shell, PixiShellConfig } from '@energy8platform/shell/pixi';
 import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../types';
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
 import type { GameApplication } from '../core';
@@ -58,14 +58,25 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   dev?: boolean;
   stake?: StakeIntegration;
   shell?: SlotShellOptions;
+  /** Override how the control-bar shell is built. The host resolves the full shell config (theme,
+   *  features, gameInfo, currency, balance) and the Pixi mount (`app`/`parent`) and hands it to this
+   *  factory; return any `Shell` — e.g. `createShell({ renderer: new MyRenderer(...), ...config })`
+   *  to plug a custom renderer while the shell core still drives bet/balance/overlays. A custom
+   *  renderer can ignore `app`/`parent` and mount elsewhere (a DOM overlay, another canvas).
+   *  Default: the built-in Pixi shell (`createPixiShell`). */
+  shellFactory?: ShellFactory;
   /** Double-tap on the play area to skip the current spin animation. Default `true`. Set `false`
    *  to disable the gesture (e.g. games where a tap means something else). */
   skipGesture?: boolean;
   onFatalError?: (message: string) => void;
 }
 
+/** Builds the shell the host drives. Receives the fully-resolved Pixi shell config (a custom
+ *  renderer may ignore the `app`/`parent` mount fields). Must return a `Shell`. */
+export type ShellFactory = (config: PixiShellConfig) => Shell;
+
 export interface SlotGameHandle {
   game: GameApplication;
   stakeBridge: StakeBridge | null;
-  shell: PixiGameShell | null;
+  shell: Shell | null;
 }

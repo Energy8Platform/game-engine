@@ -29,6 +29,33 @@ export interface ShellRenderer {
   refreshSoundIcon?(on: boolean): void;
   /** Fade out + remove all nodes; resolve when gone. */
   destroy(): Promise<void> | void;
+
+  // ── optional surface facade ──────────────────────────────────────────────
+  // A renderer that draws a bottom bar exposes these so an embedding host can reserve space for it
+  // and toggle the whole shell. createShell() forwards them onto the returned shell (with inert
+  // defaults when a renderer omits them), so every renderer — built-in or custom — is host-drivable.
+  /** Insets a scene should avoid (only the bottom bar is reserved; the rest is full-bleed). */
+  readonly safeArea?: SafeArea;
+  /** Height of the bottom control bar in px (0 before first layout / when there's no bar). */
+  readonly barHeight?: number;
+  /** Show/hide the whole shell (bar + overlays). */
+  setVisible?(visible: boolean): void;
+}
+
+/** Bottom-bar inset a host reserves for scene content. */
+export interface SafeArea {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** The surface facade createShell() guarantees on the returned shell, delegating to the renderer
+ *  (inert defaults when the renderer omits a member). Hosts embedding a shell read these. */
+export interface ShellSurface {
+  readonly safeArea: SafeArea;
+  readonly barHeight: number;
+  setVisible(visible: boolean): void;
 }
 
 /** What the renderer (and its components) read from the brain. */

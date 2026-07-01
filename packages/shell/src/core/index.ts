@@ -1,9 +1,27 @@
 import { ShellController, type CreateShellOptions } from './ShellController';
+import type { ShellSurface, SafeArea } from './renderer';
+
+/** A shell: the renderer-agnostic controller plus the surface facade (safeArea/barHeight/setVisible)
+ *  an embedding host reads. `createShell`, `createGameShell` and `createPixiShell` all return this. */
+export type Shell = ShellController & ShellSurface;
+
+const NO_INSET: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** Create a shell with an explicit renderer instance (custom or a built-in HtmlRenderer/PixiRenderer).
- *  Built-in renderers also have the createGameShell/createPixiShell sugar in /html and /pixi. */
-export function createShell(opts: CreateShellOptions): ShellController {
-  return new ShellController(opts);
+ *  Built-in renderers also have the createGameShell/createPixiShell sugar in /html and /pixi.
+ *
+ *  The returned controller is augmented with the `ShellSurface` facade, delegating to the renderer's
+ *  optional surface members (inert defaults when it has none) — so any renderer, custom included, is
+ *  drivable by an embedding host (e.g. game-engine's createSlotGame) without Pixi-specific glue. */
+export function createShell(opts: CreateShellOptions): Shell {
+  const controller = new ShellController(opts);
+  const r = opts.renderer;
+  Object.defineProperties(controller, {
+    safeArea: { get: () => r.safeArea ?? NO_INSET, enumerable: true, configurable: true },
+    barHeight: { get: () => r.barHeight ?? 0, enumerable: true, configurable: true },
+    setVisible: { value: (v: boolean) => r.setVisible?.(v), enumerable: true, configurable: true },
+  });
+  return controller as Shell;
 }
 
 export { ShellController, resolveConfig } from './ShellController';
