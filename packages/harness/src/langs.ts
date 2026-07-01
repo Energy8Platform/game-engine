@@ -1,6 +1,5 @@
 /**
- * Supported harness languages — the 16 locales available in the Stake dev harness.
- * Defined locally so the harness stays self-contained (no extra cross-package deps).
+ * Supported harness languages. Defined locally so the core stays self-contained.
  */
 
 export interface LangEntry {

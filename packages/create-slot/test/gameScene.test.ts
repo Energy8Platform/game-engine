@@ -10,8 +10,9 @@ describe('genGameScene', () => {
     expect(s).toContain('async onExitMode(');
     expect(s).toContain('ctx.formatAmount');
     expect(s).toContain('ctx.turbo');
-    expect(s).toContain('MultiplierAccumulator');
-    expect(s).toContain('CascadeController');
+    // Cascade renders via the reel system's tumble path.
+    expect(s).toContain('createReelSystem');
+    expect(s).toContain('this.system.cascade(result.steps');
     // The game no longer touches the play protocol:
     expect(s).not.toContain('bindHost');
     expect(s).not.toContain('SlotHostApi');
@@ -22,37 +23,41 @@ describe('genGameScene', () => {
     expect(s).not.toContain('async buyBonus(');
     expect(s).not.toContain('platformSession');
   });
-  it('ways/lines uses ReelSpinController', () => {
+  it('ways/lines renders via system.spin(targetGrid)', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
-    expect(s).toContain('ReelSpinController');
-    expect(s).not.toContain('CascadeController');
+    expect(s).toContain('createReelSystem');
+    expect(s).toContain('this.system.spin(result.targetGrid');
+    expect(s).not.toContain('this.system.cascade(');
+  });
+  it('wires the dev reel bridge for the harness Reels sidebar (torn down in onDestroy)', () => {
+    const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
+    expect(s).toContain('mountReelDevBridge({ system: this.system })');
+    expect(s).toContain("from '../slot/reelConfig'");
+    expect(s).toContain('onDestroy()');
+    expect(s).toContain('this.bridge?.dispose()');
+    expect(s).toContain('this.system?.destroy()');
   });
   it('generated scene implements onResize and a layout helper for centering', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
     expect(s).toContain('onResize(width: number, height: number)');
     expect(s).toContain('private layout(');
-    expect(s).toContain('this.grid.x =');
-    expect(s).toContain('this.grid.y =');
+    expect(s).toContain('this.system.view.x =');
+    expect(s).toContain('this.system.view.y =');
     // layout is called from both onEnter and onResize
     expect(s).toMatch(/onEnter[\s\S]*?this\.layout\(/);
     expect(s).toMatch(/onResize[\s\S]*?this\.layout\(/);
   });
-  it('layout scales the grid to fit the viewport (scale.set, no persistent overlay)', () => {
+  it('layout scales the reel view to fit the viewport (scale.set, guarded)', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
-    // Should guard for grid not yet created
-    expect(s).toContain('if (!this.grid) return');
-    // Should scale via scale.set rather than fixed position
-    expect(s).toContain('this.grid.scale.set(fit)');
+    expect(s).toContain('if (!this.system) return');
+    expect(s).toContain('this.system.view.scale.set(fit)');
   });
   it('big wins render on the host overlay (api.overlay), not an in-scene overlay field', () => {
     const s = genGameScene({ id: 'g', title: 'G', mechanic: 'ways', grid: { cols: 5, rows: 3 }, stake: true, cascades: false });
-    // Celebration goes through the host overlay layer (above the shell), guarded by tier:
     expect(s).toContain('this.api.overlay.show(');
     expect(s).toContain('pickTier(this.winTiers');
     expect(s).toContain('BigWinOverlay');
-    // The old, confusing in-scene `overlay` field (collided with api.overlay) is gone:
     expect(s).not.toContain('private overlay!:');
     expect(s).not.toContain('this.container.addChild(this.overlay)');
-    expect(s).not.toContain('this.overlay?.resize?.(w, h)');
   });
 });

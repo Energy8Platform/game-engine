@@ -340,7 +340,10 @@ export class PixiRenderer implements ShellRenderer {
       get screenH() { return self.app.screen.height; },
       render: () => self.renderBar(),
       pushLayer: (node) => self.pushLayer(node),
-      closeLayer: () => self.closeLayer(),
+      // Route component-initiated closes through the controller (not straight to self.closeLayer) so
+      // it clears its OverlayHandle. Otherwise the handle goes stale: hasOpenLayer() stays true and
+      // keydowns keep routing to onKey on a destroyed overlay → write to a torn-down ScrollBox.
+      closeLayer: () => host.actions.closeOverlay(),
       fitModals: () => self.fitModals(),
       fmt: (n) => host.formatCurrency(n),
       fmtWin: (n) => host.formatCurrency(n, true),

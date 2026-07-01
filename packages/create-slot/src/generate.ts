@@ -7,6 +7,7 @@ import { genGameSpec } from './codegen/gameSpec';
 import { genClaudeMd } from './codegen/claudeMd';
 import { genPackageJson, type DepVersions } from './codegen/packageJson';
 import { genGameScene } from './codegen/gameScene';
+import { genReelConfig } from './codegen/reelConfig';
 import { genLuaLogic } from './codegen/luaLogic';
 import { genStakeAdapter } from './codegen/stakeAdapter';
 import { genMainTs } from './codegen/mainTs';
@@ -47,6 +48,7 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   writeFileSync(join(targetDir, 'package.json'), genPackageJson(a, versions));
   writeFileSync(join(targetDir, 'math.config.ts'), genMathConfig(a));
   writeFileSync(join(targetDir, 'src/scenes/GameScene.ts'), genGameScene(a));
+  writeFileSync(join(targetDir, 'src/slot/reelConfig.ts'), genReelConfig(a));
   writeFileSync(join(targetDir, 'src/i18n.ts'), genI18nTs(a));
   writeFileSync(join(targetDir, 'src/main.ts'), genMainTs(a));
   writeFileSync(join(targetDir, 'src/scenes/IntroScene.ts'), genIntroScene(a));

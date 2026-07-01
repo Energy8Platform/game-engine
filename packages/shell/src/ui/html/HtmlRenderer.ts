@@ -167,7 +167,7 @@ export class HtmlRenderer implements ShellRenderer {
         return { root };
       }
       case 'modal': {
-        const root = buildModal(req.opts);
+        const root = buildModal(this.host, req.opts);
         return { root, onKey: req.opts.onKey };
       }
     }

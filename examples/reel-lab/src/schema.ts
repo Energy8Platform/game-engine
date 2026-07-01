@@ -3,26 +3,11 @@
 // Declarative description of the control panel. Each control binds to a dot-path in the
 // ReelSystemConfig. Adding a knob is one line here.
 
-export type Control =
-  | { kind: 'select'; path: string; label: string; options: string[] }
-  | {
-      kind: 'range';
-      path: string;
-      label: string;
-      min: number;
-      max: number;
-      step: number;
-      /** When the bound value is unset (undefined / non-scalar), show this path's value instead. */
-      fallback?: string;
-    }
-  | { kind: 'toggle'; path: string; label: string }
-  | { kind: 'color'; path: string; label: string };
-
-export interface Section {
-  title: string;
-  controls: Control[];
-  collapsed?: boolean;
-}
+// Control-panel types are shared with the engine's reel devtools so the playground and
+// the harness sidebar render identically. reel-lab keeps its OWN schema below because
+// it additionally exposes board shape (grid.cols / grid.rows), which the harness omits.
+export type { Control, Section } from '@energy8platform/game-engine/devtools';
+import type { Section } from '@energy8platform/game-engine/devtools';
 
 const EASINGS = [
   'linear',

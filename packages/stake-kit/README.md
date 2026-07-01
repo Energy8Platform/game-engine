@@ -9,7 +9,7 @@ books — so you can play, buy bonuses, and replay rounds without a live Stake s
 
 - `@energy8platform/stake-kit` — the browser-safe adapter toolkit (`createGameAdapter`,
   `coerceLuaArrays`, `deriveArrayFields`, types). No Node/Vite.
-- `@energy8platform/stake-kit/harness` — the Node-only dev harness Vite plugin (`stakeHarnessPlugin`).
+- `@energy8platform/stake-kit/harness` — the Node-only Stake **backend** plugin (`stakeRgsPlugin`) for `@energy8platform/harness`.
   Dev-only (`apply: 'serve'`); never bundled into the browser build.
 
 ## Book adapter
@@ -41,13 +41,28 @@ free spin.
 
 ```ts
 import { defineGameConfig } from '@energy8platform/game-engine/vite';
-import { stakeHarnessPlugin } from '@energy8platform/stake-kit/harness';
+import { createHarness } from '@energy8platform/harness';
+import { stakeRgsPlugin } from '@energy8platform/stake-kit/harness';
+import { reelDevtoolsPlugin } from '@energy8platform/game-engine/harness';
 
 export default defineGameConfig({
   base: './',
-  vite: { plugins: [stakeHarnessPlugin({ config: './math.config.ts', booksDir: 'stake-math' })] },
+  vite: {
+    plugins: [
+      createHarness({
+        plugins: [
+          stakeRgsPlugin({ config: './math.config.ts', booksDir: 'stake-math' }),
+          reelDevtoolsPlugin(),
+        ],
+      }),
+    ],
+  },
 });
 ```
+
+> The dev harness itself (iframe framing, screen presets, Settings/Replay UI, the panel host)
+> lives in `@energy8platform/harness`. `stakeRgsPlugin` is only the **backend** (the RGS wire
+> protocol + curated books); `reelDevtoolsPlugin` adds the reel-config sidebar.
 
 `npm run stake` then serves an iframe wrapper (control bar: social toggle, currency, screen presets,
 replay) around the game, and mounts a **dev-RGS** at `/__rgs/*` implementing the Stake RGS contract

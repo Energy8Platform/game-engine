@@ -1,0 +1,36 @@
+{
+  "name": "@energy8platform/harness",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/harness.esm.js",
+  "types": "dist/harness.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/harness.esm.js",
+      "types": "./dist/harness.d.ts"
+    },
+    "./panel": {
+      "import": "./dist/panel.js",
+      "types": "./dist/panel.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@types/node": "^22.0.0",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

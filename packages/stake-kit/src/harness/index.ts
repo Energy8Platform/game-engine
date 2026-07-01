@@ -1,19 +1,19 @@
 /**
  * `@energy8platform/stake-kit/harness` — node-only entry.
  *
- * The dev-harness vite plugin plus its building blocks. Node builtins, `vite`,
- * and `@energy8platform/*` are externalised in the rollup build; this entry is
- * NOT pulled into the browser stake-kit bundle.
+ * The Stake **backend** plugin for `@energy8platform/harness` plus its building
+ * blocks (dev-RGS, RGS HTTP glue, book loading). Node builtins, `vite`, and
+ * `@energy8platform/*` are externalised in the rollup build; this entry is NOT
+ * pulled into the browser stake-kit bundle.
+ *
+ * Usage in a game's vite.config:
+ *   import { createHarness } from '@energy8platform/harness';
+ *   import { stakeRgsPlugin } from '@energy8platform/stake-kit/harness';
+ *   createHarness({ plugins: [ stakeRgsPlugin({ config: './math.config.ts', booksDir: 'stake-math' }) ] });
  */
 
-export { stakeHarnessPlugin } from './plugin';
-export type { StakeHarnessPluginOptions } from './plugin';
-
-export { renderWrapperHtml } from './wrapper';
-export type { WrapperConfig, WrapperMode } from './wrapper';
-
-export { SCREEN_PRESETS, screenPreset, buildLaunchUrl } from './bar';
-export type { ScreenPreset, LaunchOpts } from './bar';
+export { stakeRgsPlugin, runLuaRound } from './plugin';
+export type { StakeRgsPluginOptions } from './plugin';
 
 export { createDevRgs, NoBooksError } from './dev-rgs';
 export type { DevRgs, DevRgsConfig } from './dev-rgs';

@@ -18,7 +18,7 @@ export interface GameInfoModal {
 export function openGameInfoModal(host: ShellHost): GameInfoModal {
   const { root, body, scroll } = createOverlay({
     title: host.t('Game info'),
-    onClose: () => root.remove(),
+    onClose: () => host.actions.closeOverlay(),
     onBack: () => { root.remove(); host.actions.openSettings(); },
   });
   root.dataset.ge = 'info-modal';

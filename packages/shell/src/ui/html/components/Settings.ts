@@ -3,7 +3,7 @@ import { createOverlay } from '../primitives';
 import { icon } from '../icons';
 
 export function openSettingsModal(host: ShellHost): HTMLElement {
-  const { root, body } = createOverlay({ title: host.t('Settings'), onClose: () => root.remove() });
+  const { root, body } = createOverlay({ title: host.t('Settings'), onClose: () => host.actions.closeOverlay() });
   root.dataset.ge = 'settings-modal';
 
   // Sound on/off — backed by the shell's shared `soundOn` state so this toggle and the Shift+M

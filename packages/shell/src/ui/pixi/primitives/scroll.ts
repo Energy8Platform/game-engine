@@ -82,6 +82,9 @@ export class ScrollBox extends Container {
   }
 
   private setScroll(y: number): void {
+    // Ignore late scrolls after teardown: a queued keydown (or resize) can route here once the modal
+    // has been destroyed, and writing to a torn-down content Container throws (use-after-destroy).
+    if (this.destroyed || !this.content || this.content.destroyed) return;
     this.scrollY = Math.max(0, Math.min(this.maxScroll, y)) || 0; // || 0 converts -0 to 0
     this.content.y = this.scrollY === 0 ? 0 : -this.scrollY;
   }
