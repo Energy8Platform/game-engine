@@ -73,6 +73,16 @@ describe('ScrollBox.scrollBy', () => {
     const sb = makeScrollBox(400, 200);
     expect(sb.maxScrollY).toBe(200);
   });
+
+  it('scrollBy after destroy is a no-op and does not throw (use-after-destroy guard)', () => {
+    // Regression: a queued keydown (or resize) can route a scroll to a ScrollBox whose content
+    // Container was already torn down when the modal closed — writing content.y then throws
+    // "Cannot set properties of null (setting 'y')". setScroll must bail when destroyed.
+    const sb = makeScrollBox(400, 200);
+    sb.destroy({ children: true });
+    expect(() => sb.scrollBy(60)).not.toThrow();
+    expect(() => sb.scrollBy(-99999)).not.toThrow();
+  });
 });
 
 // ─── Overlay.onKey ──────────────────────────────────────────────────────────
@@ -167,5 +177,15 @@ describe('Overlay.onKey', () => {
     expect(overlay.onKey(key('KeyA'))).toBe(false);
     expect(overlay.onKey(key('Tab'))).toBe(false);
     expect(overlay.onKey(key('Enter'))).toBe(false);
+  });
+
+  it('onKey after onRemove() (overlay torn down) does not throw', () => {
+    // Regression: a keydown that races overlay teardown (close button / Escape) must not crash the
+    // render loop by scrolling a destroyed ScrollBox.
+    const overlay = makeOverlay();
+    overlay.onRemove(); // destroys the scroll box, as the renderer does on close
+    for (const code of ['ArrowDown', 'ArrowUp', 'PageDown', 'Space', 'Home', 'End']) {
+      expect(() => overlay.onKey(key(code))).not.toThrow();
+    }
   });
 });
