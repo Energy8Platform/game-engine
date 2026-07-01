@@ -99,6 +99,7 @@ export function createHarness(opts: CreateHarnessOptions = {}): VitePlugin {
       title: p.title,
       placement: p.placement,
       clientUrl: PANEL_PREFIX + p.id + '.js',
+      config: p.config,
     }));
     return {
       title: opts.title ?? backendInfo?.id ?? 'Harness',

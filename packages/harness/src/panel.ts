@@ -15,6 +15,8 @@ export interface HarnessPanelContext {
   on(handler: (message: unknown) => void): () => void;
   /** Ask the harness to relaunch the iframe with current settings. */
   relaunch(): void;
+  /** JSON config the panel's node plugin passed via `HarnessPanel.config` (or undefined). */
+  config?: unknown;
 }
 
 export type HarnessPanelMount = (ctx: HarnessPanelContext) => void;

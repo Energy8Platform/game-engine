@@ -24,7 +24,22 @@ export type Control =
   | { kind: 'toggle'; path: string; label: string }
   | { kind: 'color'; path: string; label: string };
 
+/** Stable section identifiers — used to toggle whole sections on/off from the plugin. */
+export type SectionKey = 'geometry' | 'motion' | 'anticipation' | 'cascade' | 'win' | 'features';
+
+/** All section keys, in panel order. */
+export const REEL_SECTION_KEYS: SectionKey[] = [
+  'geometry',
+  'motion',
+  'anticipation',
+  'cascade',
+  'win',
+  'features',
+];
+
 export interface Section {
+  /** Stable key for enabling/disabling the whole section (optional for ad-hoc schemas). */
+  key?: SectionKey;
   title: string;
   controls: Control[];
   collapsed?: boolean;
@@ -45,6 +60,7 @@ const EASINGS = [
 /** The editable reel-config fields, grouped into collapsible sections. */
 export const REEL_FIELD_SCHEMA: Section[] = [
   {
+    key: 'geometry',
     title: 'Cell geometry',
     controls: [
       { kind: 'range', path: 'grid.cellSize', label: 'Cell size', min: 40, max: 120, step: 1 },
@@ -95,6 +111,7 @@ export const REEL_FIELD_SCHEMA: Section[] = [
     ],
   },
   {
+    key: 'motion',
     title: 'Motion',
     controls: [
       { kind: 'select', path: 'motion.style', label: 'Style', options: ['swap', 'strip', 'cascade-drop'] },
@@ -120,6 +137,7 @@ export const REEL_FIELD_SCHEMA: Section[] = [
     ],
   },
   {
+    key: 'anticipation',
     title: 'Anticipation',
     controls: [
       { kind: 'toggle', path: 'anticipation.enabled', label: 'Enabled' },
@@ -132,6 +150,7 @@ export const REEL_FIELD_SCHEMA: Section[] = [
     ],
   },
   {
+    key: 'cascade',
     title: 'Cascade / Tumble',
     controls: [
       { kind: 'toggle', path: 'cascade.enabled', label: 'Enabled' },
@@ -149,6 +168,7 @@ export const REEL_FIELD_SCHEMA: Section[] = [
     ],
   },
   {
+    key: 'win',
     title: 'Win presentation',
     controls: [
       { kind: 'range', path: 'win.highlightScale', label: 'Highlight scale', min: 1, max: 1.4, step: 0.01 },
@@ -158,6 +178,7 @@ export const REEL_FIELD_SCHEMA: Section[] = [
     ],
   },
   {
+    key: 'features',
     title: 'Features',
     controls: [
       { kind: 'toggle', path: 'features.expandingWild.enabled', label: 'Expanding wild' },

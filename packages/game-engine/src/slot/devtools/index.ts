@@ -13,8 +13,8 @@ export type {
 export { buildControlPanel, getPath, setPath } from './controlPanel';
 export type { ControlPanelOptions } from './controlPanel';
 
-export { REEL_FIELD_SCHEMA } from './fieldSchema';
-export type { Control, Section } from './fieldSchema';
+export { REEL_FIELD_SCHEMA, REEL_SECTION_KEYS } from './fieldSchema';
+export type { Control, Section, SectionKey } from './fieldSchema';
 
 export { configDiff, diffFromDefaults, emitReelConfigTs } from './configDiff';
 

@@ -131,6 +131,12 @@ export interface HarnessPanel {
    * Must default-export `(ctx: HarnessPanelContext) => void`.
    */
   clientEntry: string;
+  /**
+   * JSON-serializable config forwarded to the panel client as `ctx.config`.
+   * Lets a node-side panel plugin parameterize its browser UI (e.g. which
+   * sections to show) without rebuilding the client bundle.
+   */
+  config?: unknown;
   /** Optional server middleware (most panels need none). */
   configureServer?(ctx: HarnessServerContext): void | Promise<void>;
 }
@@ -169,6 +175,8 @@ export interface WrapperPanelInfo {
   placement: PanelPlacement;
   /** URL the harness serves the panel's ESM at, e.g. '/__harness/panel/reels.js'. */
   clientUrl: string;
+  /** JSON config forwarded to the panel client as `ctx.config`. */
+  config?: unknown;
 }
 
 export interface WrapperData {

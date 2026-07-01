@@ -277,8 +277,8 @@ function buildReplay(): void {
 // ── Panels (sidebar + custom tabs) ─────────────────────────────────────────
 const mounted = new Set<string>();
 
-function panelContext(root: HTMLElement): HarnessPanelContext {
-  return { root, iframe, post, on, relaunch: launchNormal };
+function panelContext(root: HTMLElement, config: unknown): HarnessPanelContext {
+  return { root, iframe, post, on, relaunch: launchNormal, config };
 }
 
 async function mountPanelInto(panel: WrapperPanelInfo, root: HTMLElement): Promise<void> {
@@ -286,7 +286,7 @@ async function mountPanelInto(panel: WrapperPanelInfo, root: HTMLElement): Promi
   mounted.add(panel.id);
   try {
     const mod = (await import(/* @vite-ignore */ panel.clientUrl)) as { default?: HarnessPanelMount };
-    mod.default?.(panelContext(root));
+    mod.default?.(panelContext(root, panel.config));
   } catch (err) {
     root.innerHTML = `<p class="muted">Failed to load panel "${panel.id}": ${String(err)}</p>`;
   }

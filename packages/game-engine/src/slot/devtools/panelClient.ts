@@ -11,8 +11,15 @@
 import type { HarnessPanelMount } from '@energy8platform/harness/panel';
 import type { ReelSystemConfig } from '../config/ReelSystemConfig';
 import { buildControlPanel } from './controlPanel';
+import { REEL_FIELD_SCHEMA, type SectionKey } from './fieldSchema';
 import { emitReelConfigTs } from './configDiff';
 import { REEL_APPLY, REEL_READY, REEL_REQUEST, type ReelDevMessage } from './protocol';
+
+/** Config the harness plugin passes via ctx.config, e.g. { sections: { geometry: false } }. */
+interface ReelPanelConfig {
+  /** Per-section visibility. Missing key = shown. */
+  sections?: Partial<Record<SectionKey, boolean>>;
+}
 
 const CSS = `
 .e8rp-wait { color: #6b7480; font-size: 12px; line-height: 1.6; padding: 8px 2px; }
@@ -51,6 +58,11 @@ function injectCss(): void {
 const mount: HarnessPanelMount = (ctx) => {
   injectCss();
   const root = ctx.root;
+
+  // Section visibility from the plugin (reelDevtoolsPlugin({ sections: { geometry: false } })).
+  const panelCfg = (ctx.config ?? {}) as ReelPanelConfig;
+  const sectionOn = panelCfg.sections ?? {};
+  const schema = REEL_FIELD_SCHEMA.filter((s) => s.key == null || sectionOn[s.key] !== false);
   root.innerHTML = '<p class="e8rp-wait">Waiting for the game’s reel bridge…<br/>(the game must call <code>mountReelDevBridge</code>.)</p>';
 
   let working: ReelSystemConfig | null = null;
@@ -91,6 +103,7 @@ const mount: HarnessPanelMount = (ctx) => {
 
     buildControlPanel(controls, {
       config: working,
+      schema,
       onChange: () => {
         ctx.post({ type: REEL_APPLY, patch: working as ReelSystemConfig } satisfies ReelDevMessage);
       },
