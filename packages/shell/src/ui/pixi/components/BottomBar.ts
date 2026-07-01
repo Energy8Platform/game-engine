@@ -104,7 +104,7 @@ class TurboButton extends Container {
 }
 
 /** A readout in the bar (white Oswald value, plaque-label caption, no shadow). */
-function readout(host: PixiComponentContext, label: string, value: string, opts: { valueSize?: number; align?: 'left' | 'center' | 'right'; fixedWidth?: number; color?: string; muted?: string } = {}): Readout {
+function readout(host: PixiComponentContext, label: string, value: string, opts: { valueSize?: number; align?: 'left' | 'center' | 'right'; fixedWidth?: number; maxWidth?: number; color?: string; muted?: string } = {}): Readout {
   return new Readout({
     label: host.t(label),
     value,
@@ -113,6 +113,7 @@ function readout(host: PixiComponentContext, label: string, value: string, opts:
     align: opts.align,
     valueSize: opts.valueSize,
     fixedWidth: opts.fixedWidth,
+    maxWidth: opts.maxWidth,
     shadow: false,
   });
 }
@@ -309,7 +310,19 @@ export class BottomBar extends Container {
       controls.add(menu);
       if (this.autoBtn) controls.add(this.autoBtn);
       if (hero) controls.add(hero);
-      if (showFsBlocks) controls.add(readout(this.host, 'Total win', this.host.fmtWin(state.freeSpins.totalWin), { color: '#ffffff', muted: '#ffffff', align: 'center' }));
+      if (showFsBlocks) {
+        // Cap Total Win at the leftover row width (maxWidth, not fixed): it stays content-sized when
+        // it fits — so space-between keeps normal gaps — and only a huge amount shrinks its NUMBER
+        // (centred post-scale) instead of widening the row and forcing a whole-bar down-scale. Mirrors
+        // the DOM's shrinkable total-win slot. The floor keeps it readable; below that applyFitMobile
+        // scales the stack as a last resort.
+        const ICON = 40, PAD = 18, GAPS = 24;
+        const heroSized = hero as unknown as { measureSize?: () => { w: number; h: number } };
+        const heroW = hero ? (heroSized.measureSize?.().w ?? hero.getLocalBounds().width) : 0;
+        const fixed = ICON /* menu */ + (this.autoBtn ? ICON : 0) + heroW + (this.turboBtn ? ICON : 0);
+        const twSlot = Math.max(60, W - 2 * PAD - fixed - GAPS);
+        controls.add(readout(this.host, 'Total win', this.host.fmtWin(state.freeSpins.totalWin), { color: '#ffffff', muted: '#ffffff', align: 'center', maxWidth: twSlot }));
+      }
       if (this.turboBtn) controls.add(this.turboBtn);
     }
     controls.layout();

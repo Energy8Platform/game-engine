@@ -95,6 +95,17 @@ describe('widget centering — icons & text stay put', () => {
     expect(r.valueText.position.x).toBeGreaterThanOrEqual(0);
   });
 
+  it('Readout maxWidth is content-sized until it caps (total-win slot behaviour)', () => {
+    // short value under the cap → content-sized, value NOT scaled
+    const small = new Readout({ label: 'Total win', value: '€5,00', muted: '#999', fg: '#fff', maxWidth: 200 });
+    expect(small.measureSize().w).toBeLessThan(200);
+    expect(small.valueText.scale.x).toBeCloseTo(1, 5);
+    // long value over the cap → capped width, value shrunk to fit
+    const big = new Readout({ label: 'Total win', value: '€999.999.999.999,99', muted: '#999', fg: '#fff', maxWidth: 60 });
+    expect(big.measureSize().w).toBeLessThanOrEqual(60 + 0.5);
+    expect(big.valueText.scale.x).toBeLessThan(1);
+  });
+
   it('BuyBonusBadge centres its label inside the disc', () => {
     const badge = new BuyBonusBadge({ size: 80, fontSize: 13, bg: '#8b5cf6', label: 'BUY\nBONUS', tokens, ticker: stubTicker, onTap() {} });
     expect(badge.measureSize()).toEqual({ w: 80, h: 80 });

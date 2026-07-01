@@ -218,6 +218,10 @@ export interface ReadoutOpts {
   /** Fixed slot width — the value shrinks to fit it (no jiggle on +/-, mirrors the DOM `.ge-rd-val`
    *  fit). The label aligns within this width too. Omit for content sizing. */
   fixedWidth?: number;
+  /** Max slot width — like fixedWidth but only CAPS: the readout is content-sized until it would
+   *  exceed maxWidth, then the value shrinks to fit (mirrors the DOM's shrinkable total-win slot).
+   *  Ignored when fixedWidth is set. */
+  maxWidth?: number;
 }
 
 export class Readout extends Container implements Sizable {
@@ -225,6 +229,7 @@ export class Readout extends Container implements Sizable {
   private labelText: Text;
   private align: 'left' | 'center' | 'right';
   private fixedW?: number;
+  private maxW?: number;
   // Value baseline ascent at scale 1 (for stable bottom alignment as the value scales down).
   private valueH: number;
 
@@ -232,6 +237,7 @@ export class Readout extends Container implements Sizable {
     super();
     this.align = opts.align ?? 'left';
     this.fixedW = opts.fixedWidth;
+    this.maxW = opts.maxWidth;
     this.labelText = makeText(opts.label, {
       size: 9,
       weight: '600',
@@ -253,12 +259,14 @@ export class Readout extends Container implements Sizable {
   }
 
   private relayout(): void {
-    // shrink the value to fit a fixed slot (transform-scale, like the DOM fit)
+    // shrink the value to fit its slot (transform-scale, like the DOM fit): a fixed slot always,
+    // a max slot only when the value would overflow it. Content-sized otherwise.
     this.valueText.scale.set(1);
-    if (this.fixedW != null && this.valueText.width > this.fixedW && this.valueText.width > 0) {
-      this.valueText.scale.set(this.fixedW / this.valueText.width);
+    const cap = this.fixedW ?? this.maxW;
+    if (cap != null && this.valueText.width > cap && this.valueText.width > 0) {
+      this.valueText.scale.set(cap / this.valueText.width);
     }
-    const vW = this.valueText.width; // scaled width
+    const vW = this.valueText.width; // scaled width (== cap when it overflowed a max/fixed slot)
     const w = this.fixedW ?? Math.max(this.labelText.width, vW);
     const x = (tw: number): number => (this.align === 'center' ? (w - tw) / 2 : this.align === 'right' ? w - tw : 0);
     this.labelText.position.set(x(this.labelText.width), 0);
