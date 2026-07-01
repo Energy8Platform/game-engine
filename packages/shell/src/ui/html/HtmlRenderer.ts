@@ -228,9 +228,10 @@ export class HtmlRenderer implements ShellRenderer {
       (el as HTMLElement).style.removeProperty('zoom');
     }
     if (this.host.layout === 'mobile') {
-      // First shrink long numbers inside the info pill (per-readout) so the buttons row stays
-      // full-size; then, only if a row still overflows (tiny phones), scale the whole stack.
-      this.fitBet();
+      // First shrink long numbers per-readout (info pill balance/win, the total-win slot) so the
+      // buttons row stays full-size; then, only if a row STILL overflows (tiny phones), scale the
+      // whole stack as a last resort.
+      this.fitReadouts();
       let need = 0;
       for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
       const avail = bar.clientWidth;
@@ -257,26 +258,22 @@ export class HtmlRenderer implements ShellRenderer {
     if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
       zoomBar(s * (bar.clientWidth / bar.scrollWidth));
     }
-    this.fitBet();
+    this.fitReadouts();
   }
 
-  /** Keep the BET box a fixed width (so the steppers/divider/SPIN never shift as the stake changes)
-   *  by shrinking just the number when it would overflow the box — e.g. amounts above ~€100,000. */
-  private fitBet(): void {
-    // Shrink a readout's value span (.ge-rd-val, inline-block so its true width is measurable even
-    // inside an overflow:hidden slot) to fit `box`. The label is left untouched.
-    const fit = (val: HTMLElement | null, box: HTMLElement | null | undefined): void => {
-      if (!val || !box) return;
+  /** Unified number-fit: shrink EVERY readout's value span (`.ge-rd-val`) with a transform-scale so
+   *  it fits its readout box — the single rule for all money displays (BET, balance, win, total win),
+   *  so a large number never grows the layout. It only ever kicks in on a BOUNDED box (a fixed width,
+   *  a flex slot, or a shrinkable `min-width:0` slot); a content-sized readout has box == value, so
+   *  the pass is a no-op there. The value span is inline-block, so its true width is measurable even
+   *  inside an `overflow:hidden` slot; the label is left untouched. */
+  private fitReadouts(): void {
+    for (const rd of Array.from(this.barHost.querySelectorAll('.ge-rd')) as HTMLElement[]) {
+      const val = rd.querySelector(':scope > .ge-rd-val') as HTMLElement | null;
+      if (!val) continue;
       val.style.transform = '';                          // measure at full size
-      const avail = box.clientWidth, need = val.scrollWidth;
+      const avail = rd.clientWidth, need = val.scrollWidth;
       if (need > avail + 0.5 && need > 0) val.style.transform = `scale(${(avail / need).toFixed(3)})`;
-    };
-    // BET (desktop + mobile): the value fits its fixed-width box so +/- never resizes/shifts it
-    const betBox = this.barHost.querySelector('.ge-bet-value') as HTMLElement | null;
-    fit(betBox?.querySelector('.ge-rd-val') as HTMLElement | null, betBox);
-    // mobile info pill: balance/win values fit their flex slots
-    for (const rd of this.barHost.querySelectorAll('.ge-m-info > .ge-rd')) {
-      fit(rd.querySelector('.ge-rd-val') as HTMLElement | null, rd as HTMLElement);
     }
   }
 

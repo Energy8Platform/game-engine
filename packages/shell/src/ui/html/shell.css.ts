@@ -103,10 +103,15 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-rd,
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-rd .ge-lbl { color:#fff; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-rd { text-shadow:none; text-align:center; }
+/* Total Win is the one variable-width readout in the controls row — make it the shrinkable slot
+   (min-width:0 lets flex shrink it below content; overflow:hidden clips the pre-scale value) so a
+   large amount SHRINKS its number (fitReadouts) instead of pushing the buttons / scaling the bar.
+   The other children (menu/hero/turbo) keep their intrinsic min-width and stay put. */
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-fs-totalwin { min-width:0; overflow:hidden; }
 /* mobile: restore accent hover + autoplay glow (the white rule above out-specifies the base ones) */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-iconbtn:hover,
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-controls .ge-iconbtn.ge-glow { color:var(--shell-accent); }
-/* level 2 — the small info pill. Readouts are smaller and each can shrink long numbers (see fitBet). */
+/* level 2 — the small info pill. Readouts are smaller and each can shrink long numbers (see fitReadouts). */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-info { display:flex; align-items:center; justify-content:space-between;
   width:100%; box-sizing:border-box; height:40px; border-radius:12px; padding:0 14px; gap:10px;
   background:var(--shell-plaque-glass); }
@@ -115,7 +120,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 /* Right-align via flex, not text-align: the WIN value can be WIDER than its flex slot, and
    text-align:right only right-aligns content NARROWER than its box — so a wide value stayed
    left-aligned and overflowed the slot's right edge (clipped mid-number). align-items:flex-end
-   anchors the value's right edge to the slot right regardless of width, so fitBet's
+   anchors the value's right edge to the slot right regardless of width, so fitReadouts's
    transform-origin:right then scales it cleanly into view. */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win { display:flex; flex-direction:column; align-items:flex-end; text-align:right; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win .ge-rd-val { transform-origin:right center; }
@@ -125,7 +130,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-iconbtn { width:26px; height:26px; color:#fff; font-size:18px; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-iconbtn:hover { color:var(--shell-accent); }
 /* fixed-width box (sized for up to ~€100,000) so +/- never resizes the bet or shifts balance/win;
-   bigger amounts shrink the number instead (fitBet) */
+   bigger amounts shrink the number instead (fitReadouts) */
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-bet-value { flex:0 0 auto; width:76px; font-size:11px;
   text-align:center; color:#fff; text-shadow:none; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-betgroup .ge-bet-value .ge-rd-val { transform-origin:center; }
@@ -423,7 +428,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 /* BET group — value + tight stacked chevrons, parked close to the divider (no extra air) */
 #${SHELL_ROOT_ID} .ge-betgroup { display:flex; align-items:center; gap:8px; }
 /* the value box is a FIXED width (sized to hold up to ~€100,000) so changing the stake never shifts
-   the steppers/divider/SPIN; bigger amounts shrink the value span instead — see fitBet(). */
+   the steppers/divider/SPIN; bigger amounts shrink the value span instead — see fitReadouts(). */
 #${SHELL_ROOT_ID} .ge-betgroup .ge-bet-value { flex:0 0 auto; width:90px; border-radius:0; }
 /* every readout's value is an inline-block span so it can be measured & transform-scaled to fit;
    numerals render in OswaldNum (the digit-only subset), text glyphs fall back to Inter */

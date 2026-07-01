@@ -8,7 +8,7 @@ function readout(ge: string, label: string, value: string): HTMLElement {
   el.dataset.ge = ge;
   el.className = `ge-rd ge-${ge}`;
   // The value lives in its own inline-block span (.ge-rd-val) so it can be measured & shrunk to fit
-  // (see GameShell.fitBet) independently of the label, and so the count-up animates just the number.
+  // (see fitReadouts) independently of the label, and so the count-up animates just the number.
   const lbl = document.createElement('span'); lbl.className = 'ge-lbl'; lbl.textContent = label;
   const val = document.createElement('span'); val.className = 'ge-rd-val'; val.textContent = value;
   el.append(lbl, val);
