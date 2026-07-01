@@ -10,6 +10,11 @@ import { clamp } from '../primitives/overlay';
 import { attachHover } from '../primitives/widgets';
 import { roundedPath } from '../primitives/flex';
 
+/** Below this frame height (px), a wide/landscape popout (e.g. Popout S 400×225) stacks its cards
+ *  vertically and scrolls — like mobile — so descriptions stay readable instead of shrinking to a
+ *  ~4px floor. Wide + taller frames (Popout L and up) keep the centred horizontal row. */
+const SHORT_STACK_H = 340;
+
 /** Buy-bonus overlay — art-forward cards (one per option), a live bet footer, and a confirm modal.
  *  Returns null when there are no bonus options. */
 export function openBuyBonus(host: PixiComponentContext): ShellLayer | null {
@@ -46,6 +51,8 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private cardEntries: CardEntry[] = [];
   /** Keyboard focus index into the affordable subset of cardEntries. -1 = none. */
   private focusIndex = -1;
+  /** true when cards are stacked vertically (mobile, or a short landscape popout). */
+  private stack = false;
   // Drag-scroll state. The drag is handled on the (unmasked) overlay, not the masked strip — a mask
   // prunes pointer events outside its band, stalling globalpointermove mid-drag so later cards never
   // scroll into reach. The overlay sees the whole screen, so the scroll runs the full range.
@@ -155,7 +162,10 @@ class BuyBonusOverlay extends Container implements ShellLayer {
 
   private buildCards(): void {
     this.strip.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const mobile = this.host.layout === 'mobile';
+    // Stack (readable vertical list + scroll) on mobile OR on a short landscape popout; a shrink-to-fit
+    // horizontal row on wide + tall frames. See SHORT_STACK_H.
+    const stack = this.host.layout === 'mobile' || this.h <= SHORT_STACK_H;
+    this.stack = stack;
     const top = this.headerH + 6;
     const areaH = this.h - top - this.footerH - 6;
     const gap = 14;
@@ -166,13 +176,13 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     // N cards (+ gaps + 24px side margins) fit the frame width. min() of the two = the binding fit.
     // Floor 4 is a last-resort so a 400×225 popout still shows the CTA (then X-drag scrolls the slack).
     const emH = 3.4 * (areaH / 100);
-    const emW = mobile
+    const emW = stack
       ? (this.w - 48) / 18 // vertical stack: a single card spans the width
       : (this.w - 48 - (n - 1) * gap) / (18 * n); // row: N cards + gaps fit the frame width
-    const em = mobile ? Math.min(12, emW) : clamp(4, Math.min(emH, emW), 12);
+    const em = stack ? Math.min(12, emW) : clamp(4, Math.min(emH, emW), 12);
     const cardW = Math.min(18 * em, this.w - 48);
 
-    const cards = this.bonuses.map((b) => this.buildCard(b, cardW, em, mobile, areaH));
+    const cards = this.bonuses.map((b) => this.buildCard(b, cardW, em, stack, areaH));
     const cardH = Math.max(...cards.map((c) => c.height));
     for (const c of cards) c.setHeight(cardH);
 
@@ -193,7 +203,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     }
 
     this.stripMask.clear();
-    if (mobile) {
+    if (stack) {
       // vertical stack — scroll vertically if it overflows (simple drag)
       let y = 0;
       const colX = (this.w - cardW) / 2;
@@ -220,7 +230,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   }
 
   // ── one card ──────────────────────────────────────────────────────────────
-  private buildCard(bonus: BonusOption, cardW: number, em: number, mobile: boolean, areaH: number): CardView {
+  private buildCard(bonus: BonusOption, cardW: number, em: number, stack: boolean, areaH: number): CardView {
     const accent = effectiveAccent(bonus);
     const ink = contrastText(accent);
     const price = bonus.priceMultiplier * this.host.state.bet;
@@ -255,7 +265,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
       ctaLabel: this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'),
       onSelect: select,
     });
-    void mobile;
+    void stack;
     void areaH;
     return card;
   }
@@ -435,7 +445,8 @@ class BuyBonusOverlay extends Container implements ShellLayer {
    *  Browse phase: arrows move focus; +/- step bet; Enter/Space opens confirm; Escape closes.
    *  Confirm phase: Enter/Space buys/activates; Escape returns to browse. */
   onKey(e: KeyboardEvent): boolean {
-    const mobile = this.host.layout === 'mobile';
+    // Vertical stack (mobile / short popout) → Up/Down navigate; horizontal row → Left/Right.
+    const stack = this.stack;
 
     if (this.confirm && this.confirmBonus) {
       // ── Confirm phase ──
@@ -467,8 +478,8 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     if (bet !== null) { this.stepBetBy(bet); return true; }
 
     // Determine navigation direction from key code + layout
-    const fwdKey = e.code === 'ArrowRight' || (mobile && e.code === 'ArrowDown');
-    const bwdKey = e.code === 'ArrowLeft' || (mobile && e.code === 'ArrowUp');
+    const fwdKey = e.code === 'ArrowRight' || (stack && e.code === 'ArrowDown');
+    const bwdKey = e.code === 'ArrowLeft' || (stack && e.code === 'ArrowUp');
 
     if (fwdKey) {
       if (last < 0) return true;
