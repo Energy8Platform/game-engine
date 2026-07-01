@@ -18,6 +18,7 @@ const LOCAL = {
   'stake-kit': 'file:' + join(REPO, 'packages/stake-kit'),
   'stake-bridge': 'file:' + join(REPO, 'packages/stake-bridge'),
   'stake-math-tools': 'file:' + join(REPO, 'packages/stake-math-tools'),
+  'harness': 'file:' + join(REPO, 'packages/harness'),
 };
 
 describe('scaffold anti-drift', () => {
@@ -47,7 +48,9 @@ describe('scaffold anti-drift', () => {
       execFileSync('npm', ['install', '--no-audit', '--no-fund'], { cwd: dir, stdio: 'inherit' });
       // typecheck the generated game against the local package .d.ts
       execFileSync('npx', ['tsc', '--noEmit'], { cwd: dir, stdio: 'inherit' });
-      expect(readFileSync(join(dir, 'src/scenes/GameScene.ts'), 'utf8')).toContain('CascadeController');
+      const scene = readFileSync(join(dir, 'src/scenes/GameScene.ts'), 'utf8');
+      expect(scene).toContain('createReelSystem');
+      expect(scene).toContain('mountReelDevBridge({ system: this.system })');
     });
   }, 180_000);
 });

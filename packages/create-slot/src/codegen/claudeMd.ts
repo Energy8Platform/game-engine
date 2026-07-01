@@ -41,7 +41,9 @@ Optional reactions: \`onBetChanged\`, \`onTurboChanged\`, \`onAutoplayChanged\`,
 skip — collapse the animation to its final state; \`ctx.signal\` is aborted), \`onPause\`/\`onResume\`
 (tab focus). \`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo, signal }\`. The scene NEVER calls
 play/ack/roundId, never touches the balance/win readouts (the host does, post-onSpin), and never runs
-the FS loop — a bonus is one round the host drains segment-by-segment.${cascade ? '\n\nThis game uses a CASCADE mechanic: `onSpin` runs `result.steps` through the CascadeController and reflects `result.multiplier`.' : ''}
+the FS loop — a bonus is one round the host drains segment-by-segment.
+
+The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); \`onSpin\` feeds results to it (${cascade ? '\`system.cascade(result.steps)\`' : '\`system.spin(result.targetGrid)\`'}). In the dev harness (\`npm run stake\`) the **"Reels" sidebar** tunes \`reelConfig\` live via \`mountReelDevBridge\` — click **Copy config** and paste back into \`reelConfig.ts\` to persist (live edits are ephemeral).${cascade ? ' This is a CASCADE game — the running win multiplier is driven by \`reelConfig.cascade.multiplier\`.' : ''}
 
 ## Commands
 

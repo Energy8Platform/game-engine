@@ -2,33 +2,31 @@ import type { Answers } from '../answers';
 
 export function genGameScene(a: Answers): string {
   const cascade = a.cascades === true;
-  const ctrl = cascade ? 'CascadeController' : 'ReelSpinController';
 
   const present = cascade
-    ? `  /** Render one normalized result. Tune MultiplierAccumulator policy/reset() to your mechanic. */
+    ? `  /** Render one normalized result (a spin, or one free spin of a bonus). */
   async onSpin(result: SpinData, ctx: RenderContext): Promise<void> {
     const turbo = ctx.turbo > 0;
-    if (typeof result.multiplier === 'number') this.multiplier.set(result.multiplier);
-    for (const step of result.steps) await this.controller.run(step, { turbo });
+    // CascadeStepData is structurally a TumbleStep (extra fields optional) — pass through.
+    // The running win multiplier is driven by reelConfig.cascade.multiplier (tune it in the sidebar).
+    await this.system.cascade(result.steps, { turbo });
     if (result.totalWin > 0) await this.showBigWin(result.totalWin, ctx);
   }`
     : `  /** Render one normalized result (one spin, or one free spin of a bonus). */
   async onSpin(result: SpinData, ctx: RenderContext): Promise<void> {
     const turbo = ctx.turbo > 0;
-    await this.controller.run({ targetGrid: result.targetGrid }, { turbo });
+    await this.system.spin(result.targetGrid, { turbo });
     if (result.totalWin > 0) await this.showBigWin(result.totalWin, ctx);
   }`;
 
-  const multiplierImport = cascade ? ', MultiplierAccumulator' : '';
-  const multiplierField = cascade
-    ? `  private readonly multiplier = new MultiplierAccumulator({ policy: 'session' });\n` : '';
-
   return `import { Scene } from '@energy8platform/game-engine/core';
-import { ReelGrid, ${ctrl}, BigWinOverlay, pickTier${multiplierImport} } from '@energy8platform/game-engine/slot';
-import type { WinTier } from '@energy8platform/game-engine/slot';
+import { createReelSystem, BigWinOverlay, pickTier } from '@energy8platform/game-engine/slot';
+import type { ReelSystem, WinTier } from '@energy8platform/game-engine/slot';
+import { mountReelDevBridge } from '@energy8platform/game-engine/devtools';
+import type { ReelDevBridge } from '@energy8platform/game-engine/devtools';
 import type { SlotSceneController, RenderContext, SceneApi } from '@energy8platform/game-engine/host';
-import { model } from '../game.spec';
 import { resolveSymbol } from '../slot/symbols';
+import { reelConfig } from '../slot/reelConfig';
 import type { SpinData } from '../game/normalize';
 
 /**
@@ -38,16 +36,18 @@ import type { SpinData } from '../game/normalize';
  *  - onExitMode(last, ctx): fires after the last free spin (bonus summary).
  * ctx gives you { bet, action, mode, formatAmount(value), turbo } — turbo is live (0..3).
  *
+ * The reels are the configurable ReelSystem, driven by src/slot/reelConfig.ts. In the dev
+ * harness (\`npm run stake\`) the "Reels" sidebar tunes that config LIVE via mountReelDevBridge.
+ *
  * Two distinct "overlay" layers, don't mix them up:
- *  - this.container        — the scene's own display list (the grid lives here, UNDER the shell).
- *  - api.overlay (SceneApi) — a host-owned modal layer mounted ABOVE the shell. Big wins, bonus
- *    intros/summaries and dialogs go here so their dim actually covers the control bar.
+ *  - this.container        — the scene's own display list (the reels live here, UNDER the shell).
+ *  - api.overlay (SceneApi) — a host-owned modal layer mounted ABOVE the shell (big wins, dialogs).
  */
 export class GameScene extends Scene implements SlotSceneController<SpinData> {
-  private grid!: ReelGrid;
-  private controller!: ${ctrl};
+  private system!: ReelSystem;
+  private bridge?: ReelDevBridge;
   private api!: SceneApi;
-${multiplierField}
+
   private _vw = 1920;
   private _vh = 1080;
 
@@ -58,10 +58,10 @@ ${multiplierField}
   ];
 
   async onEnter(): Promise<void> {
-    const { cols, rows } = model.spec.grid;
-    this.grid = new ReelGrid({ cols, rows, cellSize: 110, gap: 6, resolve: resolveSymbol });
-    this.container.addChild(this.grid);
-    this.controller = new ${ctrl}(this.grid);
+    this.system = createReelSystem({ resolve: resolveSymbol, config: reelConfig });
+    this.container.addChild(this.system.view);
+    // Dev-only: lets the harness "Reels" sidebar tune the reels live (no-op in production / outside the harness).
+    this.bridge = mountReelDevBridge({ system: this.system });
     this.layout(this._vw, this._vh);
   }
 
@@ -119,17 +119,22 @@ ${present}
     this.layout(width, height);
   }
 
+  /** Tear down the reel system + dev bridge with the scene. */
+  onDestroy(): void {
+    this.bridge?.dispose();
+    this.system?.destroy();
+  }
+
   private layout(w: number, h: number): void {
     this._vw = w; this._vh = h;
-    if (!this.grid) return;
-    const cols = model.spec.grid.cols, rows = model.spec.grid.rows;
-    const cellSize = 110, gap = 6;            // must match the ReelGrid constructor above
+    if (!this.system) return;
+    const { cols, rows, cellSize, gap } = reelConfig.grid;
     const gridW = cols * cellSize + (cols - 1) * gap;
     const gridH = rows * cellSize + (rows - 1) * gap;
     const fit = Math.min((w * 0.92) / gridW, (h * 0.78) / gridH);
-    this.grid.scale.set(fit);
-    this.grid.x = Math.round((w - gridW * fit) / 2);
-    this.grid.y = Math.round((h - gridH * fit) / 2);
+    this.system.view.scale.set(fit);
+    this.system.view.x = Math.round((w - gridW * fit) / 2);
+    this.system.view.y = Math.round((h - gridH * fit) / 2);
   }
 }
 `;
