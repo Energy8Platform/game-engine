@@ -112,7 +112,12 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
   background:var(--shell-plaque-glass); }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-rd { flex:1 1 0; min-width:0; overflow:hidden; color:#fff;
   text-shadow:none; font-size:11px; transform-origin:left center; }
-#${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win { text-align:right; }
+/* Right-align via flex, not text-align: the WIN value can be WIDER than its flex slot, and
+   text-align:right only right-aligns content NARROWER than its box — so a wide value stayed
+   left-aligned and overflowed the slot's right edge (clipped mid-number). align-items:flex-end
+   anchors the value's right edge to the slot right regardless of width, so fitBet's
+   transform-origin:right then scales it cleanly into view. */
+#${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win { display:flex; flex-direction:column; align-items:flex-end; text-align:right; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-info > .ge-win .ge-rd-val { transform-origin:right center; }
 #${SHELL_ROOT_ID}.ge-mobile .ge-m-info .ge-rd .ge-lbl { color:var(--shell-plaque-label); font-size:8px; margin-bottom:2px; }
 /* bet sits in the middle: − value + (compact), fixed so the numbers don't shove balance/win */
