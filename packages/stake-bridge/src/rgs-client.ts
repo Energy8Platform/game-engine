@@ -217,6 +217,9 @@ export function parseStakeUrl(input: string | URL | Location): StakeUrlParams {
   const social = params.get('social') === 'true';
   const demo = params.get('demo') === 'true';
   const currency = params.get('currency') ?? undefined;
+  // Dev-harness only (not a Stake spec param): base URL for assets, so the game loads them
+  // from the same place as `npm run dev`. Absent in real Stake → relative resolution.
+  const assetsUrl = params.get('assetsUrl') ?? undefined;
 
   const replayFlag = params.get('replay') === 'true';
   if (replayFlag) {
@@ -244,6 +247,7 @@ export function parseStakeUrl(input: string | URL | Location): StakeUrlParams {
       social,
       demo,
       currency,
+      assetsUrl,
       replay: {
         game: params.get('game')!,
         version: params.get('version')!,
@@ -269,6 +273,7 @@ export function parseStakeUrl(input: string | URL | Location): StakeUrlParams {
     social,
     demo,
     currency,
+    assetsUrl,
     sessionID,
   };
 }

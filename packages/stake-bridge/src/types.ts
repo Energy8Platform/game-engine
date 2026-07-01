@@ -84,6 +84,13 @@ export interface StakeUrlParams {
    * fall back to it when no in-band currency is available.
    */
   currency?: string;
+  /**
+   * Base URL for game assets from the URL (`?assetsUrl=/assets/`). Not part of the
+   * production Stake launch spec — the dev harness passes it so a game loads assets
+   * from the same place as `npm run dev` (the DevBridge default). Surfaced to the game
+   * as `INIT.assetsUrl`. Absent in real Stake → assets resolve relative to the bundle.
+   */
+  assetsUrl?: string;
 }
 
 // ─── Adapter contract ────────────────────────────────────────────────

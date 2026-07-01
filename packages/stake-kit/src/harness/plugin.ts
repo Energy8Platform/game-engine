@@ -43,6 +43,12 @@ export interface StakeRgsPluginOptions {
   booksDir?: string;
   /** Starting dev balance in MAJOR units. Default 10_000. */
   startingBalance?: number;
+  /**
+   * Base URL the game loads assets from in the harness. Threaded to the game via the
+   * launch URL (`?assetsUrl=`) so the harness matches `npm run dev` (the DevBridge
+   * default `/assets/`). Set to '' for relative resolution. Default '/assets/'.
+   */
+  assetsUrl?: string;
 }
 
 /**
@@ -149,6 +155,7 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
   const configPath = opts.config ?? './math.config.ts';
   const booksDir = opts.booksDir ?? 'stake-math';
   const startingBalanceMajor = opts.startingBalance ?? 10_000;
+  const assetsUrl = opts.assetsUrl ?? '/assets/';
 
   // Captured vite dev server — set in configureServer, used by loadConfig/describe.
   let server: HarnessServer | null = null;
@@ -266,13 +273,16 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
       }));
       const rgsUrl = `${ctx.host}/__rgs`;
       const gameId = cfg.model.spec.id;
+      // Match `npm run dev`: pass the asset base to the game so it loads assets from the
+      // same place (the DevBridge default `/assets/`). Omit when '' → relative resolution.
+      const assets: Record<string, string> = assetsUrl ? { assetsUrl } : {};
       return {
         currencies: Object.keys(CURRENCY_META),
         betLevelsMajor: cfg.model.spec.betLevels,
         modes,
         launch: {
-          base: { rgs_url: rgsUrl, sessionID: 'dev' },
-          replayBase: { replay: 'true', game: gameId, version: '1', rgs_url: rgsUrl },
+          base: { rgs_url: rgsUrl, sessionID: 'dev', ...assets },
+          replayBase: { replay: 'true', game: gameId, version: '1', rgs_url: rgsUrl, ...assets },
         },
         controls: {
           setBalanceUrl: '/__rgs/__dev/balance',

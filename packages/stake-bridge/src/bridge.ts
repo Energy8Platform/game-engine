@@ -167,7 +167,8 @@ export class StakeBridge {
 
     this.modeMap = options.modeMap ?? {};
     this.gameId = options.gameId ?? '';
-    this.assetsUrl = options.assetsUrl ?? options.iframe?.src ?? '';
+    // Precedence: explicit option → URL `?assetsUrl=` (dev harness) → iframe src → '' (relative).
+    this.assetsUrl = options.assetsUrl ?? this.url.assetsUrl ?? options.iframe?.src ?? '';
     this.enforceBetLevels = options.enforceBetLevels ?? true;
     this.balancePollMs = options.balancePollMs ?? 60_000;
     this.debug = options.debug ?? false;
