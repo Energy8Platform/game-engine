@@ -5,7 +5,7 @@
 
 import type { Lang } from './i18n';
 
-export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
+const BASE_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
   da: {
     DISCLAIMER: 'Ansvarsfraskrivelse',
     Activate: 'Aktivér',
@@ -862,3 +862,129 @@ export const LOCALES: Partial<Record<Lang, Record<string, string>>> = {
     'Winning shapes': '赢利图形',
   },
 };
+
+// ── Legal disclaimer body (Stake canonical lines) ──────────────────────────────────────────────
+// Kept in a separate block (grouped per language, not interleaved) because these are long legal
+// sentences, MACHINE-TRANSLATED and pending native QA. The keys are the exact English source lines
+// the Stake bridge emits (see @energy8platform/stake-bridge `buildDisclaimer`). The copyright/brand
+// line ("TM and © {year} Stake Engine.") is deliberately omitted — it renders verbatim.
+const D = {
+  L1: 'Malfunction voids all wins and plays.',
+  L2: 'A consistent internet connection is required. In the event of a disconnection, reload the game to finish any uncompleted rounds.',
+  L3: 'The expected return is calculated over many plays.',
+  L4: 'The game display is not representative of any physical device and is for illustrative purposes only.',
+  L5: 'Winnings are settled according to the amount received from the Remote Game Server and not from events within the web browser.',
+} as const;
+
+const DISCLAIMER_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
+  da: {
+    [D.L1]: 'Fejlfunktion annullerer alle gevinster og spil.',
+    [D.L2]: 'En stabil internetforbindelse er påkrævet. I tilfælde af en afbrydelse skal du genindlæse spillet for at afslutte eventuelle uafsluttede runder.',
+    [D.L3]: 'Det forventede afkast beregnes over mange spil.',
+    [D.L4]: 'Spillets visning svarer ikke til nogen fysisk enhed og er kun til illustrative formål.',
+    [D.L5]: 'Gevinster afregnes i henhold til det beløb, der modtages fra Remote Game Server, og ikke ud fra hændelser i webbrowseren.',
+  },
+  de: {
+    [D.L1]: 'Eine Fehlfunktion macht alle Gewinne und Spiele ungültig.',
+    [D.L2]: 'Eine stabile Internetverbindung ist erforderlich. Im Falle einer Unterbrechung lade das Spiel neu, um nicht abgeschlossene Runden zu beenden.',
+    [D.L3]: 'Der erwartete Ertrag wird über viele Spiele berechnet.',
+    [D.L4]: 'Die Spieldarstellung entspricht keinem physischen Gerät und dient nur zur Veranschaulichung.',
+    [D.L5]: 'Gewinne werden gemäß dem vom Remote Game Server erhaltenen Betrag abgerechnet und nicht anhand von Ereignissen im Webbrowser.',
+  },
+  es: {
+    [D.L1]: 'Un fallo anula todas las ganancias y jugadas.',
+    [D.L2]: 'Se requiere una conexión a internet estable. En caso de desconexión, vuelve a cargar el juego para terminar las rondas no completadas.',
+    [D.L3]: 'El retorno esperado se calcula a lo largo de muchas jugadas.',
+    [D.L4]: 'La visualización del juego no representa ningún dispositivo físico y tiene fines meramente ilustrativos.',
+    [D.L5]: 'Las ganancias se liquidan según el importe recibido del Remote Game Server y no según los eventos ocurridos en el navegador web.',
+  },
+  fi: {
+    [D.L1]: 'Toimintahäiriö mitätöi kaikki voitot ja pelit.',
+    [D.L2]: 'Vakaa internetyhteys vaaditaan. Jos yhteys katkeaa, lataa peli uudelleen suorittaaksesi keskeneräiset kierrokset loppuun.',
+    [D.L3]: 'Odotettu palautus lasketaan monen pelin perusteella.',
+    [D.L4]: 'Pelin näkymä ei vastaa mitään fyysistä laitetta ja on tarkoitettu vain havainnollistamiseen.',
+    [D.L5]: 'Voitot maksetaan Remote Game Serverin ilmoittaman summan mukaan, ei verkkoselaimen tapahtumien perusteella.',
+  },
+  fr: {
+    [D.L1]: 'Un dysfonctionnement annule tous les gains et les parties.',
+    [D.L2]: 'Une connexion internet stable est requise. En cas de déconnexion, rechargez le jeu pour terminer les tours non achevés.',
+    [D.L3]: 'Le retour attendu est calculé sur de nombreuses parties.',
+    [D.L4]: "L'affichage du jeu ne représente aucun appareil physique et sert uniquement à des fins d'illustration.",
+    [D.L5]: 'Les gains sont réglés en fonction du montant reçu du Remote Game Server et non des événements survenus dans le navigateur web.',
+  },
+  hi: {
+    [D.L1]: 'खराबी सभी जीत और खेलों को रद्द कर देती है।',
+    [D.L2]: 'एक स्थिर इंटरनेट कनेक्शन आवश्यक है। कनेक्शन टूटने की स्थिति में, अधूरे राउंड पूरे करने के लिए गेम को फिर से लोड करें।',
+    [D.L3]: 'अपेक्षित रिटर्न की गणना कई खेलों पर की जाती है।',
+    [D.L4]: 'गेम का प्रदर्शन किसी भौतिक उपकरण का प्रतिनिधित्व नहीं करता और केवल उदाहरण के उद्देश्य से है।',
+    [D.L5]: 'जीत का निपटान Remote Game Server से प्राप्त राशि के अनुसार किया जाता है, न कि वेब ब्राउज़र के भीतर की घटनाओं के आधार पर।',
+  },
+  id: {
+    [D.L1]: 'Malfungsi membatalkan semua kemenangan dan permainan.',
+    [D.L2]: 'Koneksi internet yang stabil diperlukan. Jika terjadi pemutusan koneksi, muat ulang permainan untuk menyelesaikan ronde yang belum selesai.',
+    [D.L3]: 'Perkiraan pengembalian dihitung dari banyak permainan.',
+    [D.L4]: 'Tampilan permainan tidak mewakili perangkat fisik mana pun dan hanya untuk tujuan ilustrasi.',
+    [D.L5]: 'Kemenangan diselesaikan sesuai dengan jumlah yang diterima dari Remote Game Server dan bukan dari peristiwa di dalam peramban web.',
+  },
+  ja: {
+    [D.L1]: '誤作動が発生した場合、すべての勝利とプレイは無効となります。',
+    [D.L2]: '安定したインターネット接続が必要です。接続が切断された場合は、ゲームを再読み込みして未完了のラウンドを終了してください。',
+    [D.L3]: '期待される還元率は多数のプレイにわたって計算されます。',
+    [D.L4]: 'ゲームの表示は物理的な機器を表すものではなく、あくまで説明のためのものです。',
+    [D.L5]: '賞金はウェブブラウザ内のイベントではなく、Remote Game Server から受信した金額に基づいて確定されます。',
+  },
+  ko: {
+    [D.L1]: '오작동이 발생하면 모든 당첨과 플레이가 무효가 됩니다.',
+    [D.L2]: '안정적인 인터넷 연결이 필요합니다. 연결이 끊긴 경우 게임을 새로 고침하여 완료되지 않은 라운드를 마치십시오.',
+    [D.L3]: '예상 환급률은 여러 번의 플레이에 걸쳐 계산됩니다.',
+    [D.L4]: '게임 화면은 실제 기기를 나타내지 않으며 설명을 위한 용도로만 제공됩니다.',
+    [D.L5]: '당첨금은 웹 브라우저 내의 이벤트가 아니라 Remote Game Server에서 수신한 금액에 따라 정산됩니다.',
+  },
+  pl: {
+    [D.L1]: 'Awaria unieważnia wszystkie wygrane i gry.',
+    [D.L2]: 'Wymagane jest stabilne połączenie internetowe. W przypadku rozłączenia załaduj grę ponownie, aby dokończyć niezakończone rundy.',
+    [D.L3]: 'Oczekiwany zwrot jest obliczany na przestrzeni wielu gier.',
+    [D.L4]: 'Wyświetlanie gry nie odzwierciedla żadnego fizycznego urządzenia i służy wyłącznie celom ilustracyjnym.',
+    [D.L5]: 'Wygrane są rozliczane zgodnie z kwotą otrzymaną z Remote Game Server, a nie na podstawie zdarzeń w przeglądarce internetowej.',
+  },
+  pt: {
+    [D.L1]: 'Uma falha anula todos os ganhos e jogadas.',
+    [D.L2]: 'É necessária uma ligação à internet estável. Em caso de desconexão, recarregue o jogo para concluir as rondas não terminadas.',
+    [D.L3]: 'O retorno esperado é calculado ao longo de muitas jogadas.',
+    [D.L4]: 'A apresentação do jogo não representa nenhum dispositivo físico e destina-se apenas a fins ilustrativos.',
+    [D.L5]: 'Os ganhos são liquidados de acordo com o valor recebido do Remote Game Server e não com base em eventos ocorridos no navegador web.',
+  },
+  ru: {
+    [D.L1]: 'Сбой аннулирует все выигрыши и игры.',
+    [D.L2]: 'Требуется стабильное интернет-соединение. В случае разрыва соединения перезагрузите игру, чтобы завершить незаконченные раунды.',
+    [D.L3]: 'Ожидаемый возврат рассчитывается на основе множества игр.',
+    [D.L4]: 'Отображение игры не соответствует какому-либо физическому устройству и приводится исключительно в иллюстративных целях.',
+    [D.L5]: 'Выигрыши начисляются в соответствии с суммой, полученной от Remote Game Server, а не на основе событий в веб-браузере.',
+  },
+  tr: {
+    [D.L1]: 'Arıza, tüm kazançları ve oyunları geçersiz kılar.',
+    [D.L2]: 'Kararlı bir internet bağlantısı gereklidir. Bağlantının kesilmesi durumunda, tamamlanmamış turları bitirmek için oyunu yeniden yükleyin.',
+    [D.L3]: 'Beklenen getiri, çok sayıda oyun üzerinden hesaplanır.',
+    [D.L4]: 'Oyun görüntüsü herhangi bir fiziksel cihazı temsil etmez ve yalnızca açıklama amaçlıdır.',
+    [D.L5]: "Kazançlar, web tarayıcısındaki olaylara göre değil, Remote Game Server'dan alınan tutara göre ödenir.",
+  },
+  vi: {
+    [D.L1]: 'Sự cố sẽ hủy bỏ mọi phần thắng và lượt chơi.',
+    [D.L2]: 'Cần có kết nối internet ổn định. Trong trường hợp mất kết nối, hãy tải lại trò chơi để hoàn tất các vòng chưa hoàn thành.',
+    [D.L3]: 'Lợi nhuận kỳ vọng được tính trên nhiều lượt chơi.',
+    [D.L4]: 'Hiển thị của trò chơi không đại diện cho bất kỳ thiết bị vật lý nào và chỉ nhằm mục đích minh họa.',
+    [D.L5]: 'Phần thắng được thanh toán theo số tiền nhận được từ Remote Game Server chứ không dựa trên các sự kiện trong trình duyệt web.',
+  },
+  zh: {
+    [D.L1]: '故障将使所有奖金和游戏无效。',
+    [D.L2]: '需要稳定的网络连接。如果连接中断，请重新加载游戏以完成未结束的回合。',
+    [D.L3]: '预期回报是根据多次游戏计算得出的。',
+    [D.L4]: '游戏显示并不代表任何实体设备，仅供说明之用。',
+    [D.L5]: '奖金根据从 Remote Game Server 收到的金额结算，而非依据网页浏览器内的事件。',
+  },
+};
+
+/** Merge the base UI catalog with the separately-authored disclaimer lines, per language. */
+export const LOCALES: Partial<Record<Lang, Record<string, string>>> = Object.fromEntries(
+  (Object.keys(BASE_LOCALES) as Lang[]).map((l) => [l, { ...BASE_LOCALES[l], ...DISCLAIMER_LOCALES[l] }]),
+);

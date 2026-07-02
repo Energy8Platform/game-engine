@@ -21,8 +21,12 @@ function bundle(input, name, external = []) {
   ];
 }
 
+// The canonical social-mode dictionary is externalized (never inlined) so the chrome shares the
+// single source of truth in @energy8platform/game-sdk/social with the game canvas and Stake bridge.
+const SOCIAL = '@energy8platform/game-sdk/social';
+
 export default defineConfig([
-  ...bundle('src/core/index.ts', 'index'),
-  ...bundle('src/ui/html/index.ts', 'html'),
-  ...bundle('src/ui/pixi/index.ts', 'pixi', ['pixi.js']),
+  ...bundle('src/core/index.ts', 'index', [SOCIAL]),
+  ...bundle('src/ui/html/index.ts', 'html', [SOCIAL]),
+  ...bundle('src/ui/pixi/index.ts', 'pixi', ['pixi.js', SOCIAL]),
 ]);

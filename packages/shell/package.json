@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/shell",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Energy8 branded game shell — one logic core, pluggable html/pixi renderers behind a stable contract.",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -39,6 +39,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@energy8platform/game-sdk": "^2.9.0"
   },
   "peerDependencies": {
     "pixi.js": "^8.16.0"

@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/platform-core",
-  "version": "0.28.1",
+  "version": "0.28.2",
   "description": "Energy8 platform core: Lua engine, DevBridge, RTP simulation, and SDK session orchestration. Renderer-agnostic — pair with any game framework (Pixi, Phaser, Three.js, custom).",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -69,7 +69,7 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@energy8platform/game-sdk": "^2.8.0",
+    "@energy8platform/game-sdk": "^2.9.0",
     "fengari": "^0.1.4",
     "vite": "^5.0.0 || ^6.0.0"
   },

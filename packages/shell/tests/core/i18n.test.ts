@@ -33,11 +33,11 @@ describe('socialize', () => {
 
   it('matches longer phrases before their constituent words', () => {
     expect(socialize('buy bonus')).toBe('get bonus');
-    expect(socialize('bonus buy')).toBe('bonus / feature');
-    expect(socialize('pay out')).toBe('win / won');
+    expect(socialize('bonus buy')).toBe('feature');
+    expect(socialize('pay out')).toBe('win');
     expect(socialize('total bet')).toBe('total play');
     expect(socialize('win feature')).toBe('play feature');
-    expect(socialize('place your bets')).toBe('come and play / join in the game');
+    expect(socialize('place your bets')).toBe('join in the game');
     expect(socialize('at the cost of')).toBe('for');
     expect(socialize('cost of')).toBe('can be played for');
   });
@@ -61,7 +61,7 @@ describe('socialize', () => {
 
   it('only swaps whole words — never inside another word', () => {
     expect(socialize('Autoplay')).toBe('Autoplay'); // "pay" is internal
-    expect(socialize('Payment')).toBe('Payment'); // "pay" is internal, not a standalone word
+    expect(socialize('betray')).toBe('betray'); // "bet" is internal, not a standalone word
     expect(socialize('rebetting')).toBe('rebetting'); // not "rebet" + "ting"
   });
 

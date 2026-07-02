@@ -120,3 +120,55 @@ describe('host-i18n: per-game i18n map', () => {
     expect(card?.title).toBe('GET BONUS');
   });
 });
+
+describe('host-i18n: legal disclaimer localization', () => {
+  const DISCLAIMER = [
+    'Malfunction voids all wins and plays.',
+    'TM and © 2026 Stake Engine.',
+  ];
+  const findDisclaimer = (c: ReturnType<typeof buildShellConfig>): string =>
+    ((c.gameInfo.sections ?? []).find(
+      (s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER',
+    ) as { html?: string } | undefined)?.html ?? '';
+
+  it('translates the legal body but leaves the "Stake Engine" brand line verbatim', () => {
+    const c = buildShellConfig(
+      { i18n: { ru: { 'Malfunction voids all wins and plays.': 'Сбой аннулирует все выигрыши и игры.' } } },
+      model,
+      { balance: 0, mode: 'base', language: 'ru', disclaimerLines: DISCLAIMER },
+    );
+    const html = findDisclaimer(c);
+    expect(html).toContain('Сбой аннулирует все выигрыши и игры.'); // body localized
+    expect(html).toContain('TM and © 2026 Stake Engine.'); // brand line untouched
+  });
+
+  it('never socializes the legal body — en + social keeps a restricted word verbatim', () => {
+    const c = buildShellConfig(
+      {},
+      model,
+      { balance: 0, mode: 'base', language: 'en', social: true, disclaimerLines: ['Place your bets fairly.'] },
+    );
+    // "place your bets" would socialize to "join in the game" for normal copy; the disclaimer is exempt.
+    expect(findDisclaimer(c)).toContain('Place your bets fairly.');
+  });
+
+  it('localizes the canonical body from shell LOCALES (ru) without a per-game map', () => {
+    const c = buildShellConfig(
+      {},
+      model,
+      { balance: 0, mode: 'base', language: 'ru', disclaimerLines: DISCLAIMER },
+    );
+    const html = findDisclaimer(c);
+    expect(html).toContain('Сбой аннулирует все выигрыши и игры.'); // shipped LOCALES translation
+    expect(html).toContain('TM and © 2026 Stake Engine.'); // brand line still verbatim
+  });
+
+  it('falls back to the source line when no translation exists', () => {
+    const c = buildShellConfig(
+      {},
+      model,
+      { balance: 0, mode: 'base', language: 'ru', disclaimerLines: ['Custom untranslated legal note.'] },
+    );
+    expect(findDisclaimer(c)).toContain('Custom untranslated legal note.');
+  });
+});

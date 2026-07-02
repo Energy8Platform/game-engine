@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/stake-kit",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "type": "module",
   "main": "dist/stake-kit.umd.js",
   "module": "dist/stake-kit.esm.js",
@@ -27,7 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@energy8platform/game-sdk": "^2.7.2",
+    "@energy8platform/game-sdk": "^2.9.0",
     "@energy8platform/stake-bridge": ">=0.2.1",
     "@energy8platform/platform-core": "*",
     "@energy8platform/harness": "*",

@@ -50,14 +50,23 @@ export default defineConfig([
       }),
     ],
   },
-  // Social sub-export (ESM) — canonical social-mode replacement dictionary
+  // Social sub-export (ESM + CJS) — canonical social-mode replacement dictionary.
+  // The CJS output lets CommonJS consumers (e.g. the shell's `.cjs` bundles) `require` it.
   {
     input: 'src/social.ts',
-    output: {
-      file: 'dist/social.js',
-      format: 'esm',
-      sourcemap: true,
-    },
+    output: [
+      {
+        file: 'dist/social.js',
+        format: 'esm',
+        sourcemap: true,
+      },
+      {
+        file: 'dist/social.cjs',
+        format: 'cjs',
+        sourcemap: true,
+        exports: 'named',
+      },
+    ],
     plugins: [
       typescript({
         tsconfig: './tsconfig.json',

@@ -194,11 +194,23 @@ function winsSection(model: GameModel): GameInfoSection {
 /** Title of the legal disclaimer section — used to build it and to exempt it from socialization. */
 const DISCLAIMER_TITLE = 'DISCLAIMER';
 
-/** A disclaimer section from initData's disclaimer lines; null when none supplied. */
-function disclaimerSection(lines?: string[]): GameInfoSection | null {
+/** The copyright/brand line ("TM and © {year} Stake Engine.") is shown verbatim; the legal body
+ *  lines localize. Detecting the brand keeps "Stake Engine" out of the translation lookup entirely. */
+function isBrandLine(line: string): boolean {
+  return /stake\s+engine/i.test(line);
+}
+
+/** A disclaimer section from initData's disclaimer lines; null when none supplied. The legal body is
+ *  run through `t` so it localizes per language, EXCEPT the brand line, which stays verbatim. The
+ *  caller passes a translation-only resolver (never socializing) — mandated legal copy must not be
+ *  word-swapped even in social mode. */
+function disclaimerSection(
+  lines: string[] | undefined,
+  t: (s: string) => string = (s) => s,
+): GameInfoSection | null {
   const clean = (lines ?? []).map((l) => l.trim()).filter(Boolean);
   if (!clean.length) return null;
-  const html = clean.map((l) => `<p>${l}</p>`).join('');
+  const html = clean.map((l) => `<p>${isBrandLine(l) ? l : t(l)}</p>`).join('');
   return { type: 'custom', title: DISCLAIMER_TITLE, html };
 }
 
@@ -221,8 +233,14 @@ function orderDisclaimerLast(sections: GameInfoSection[]): GameInfoSection[] {
  * disclaimer when present). Author-supplied `opts.gameInfo` is MERGED over this set by
  * section identity (see `mergeGameInfo`), not wholesale-replaced.
  * @param t Optional translator applied to spec-derived player-facing strings (symbol names, mode titles, etc.).
+ * @param tDisclaimer Translation-only resolver for the legal disclaimer body (never socializes); defaults to `t`.
  */
-export function defaultGameInfo(model: GameModel, runtime: ShellRuntime, t: (s: string) => string = (s) => s): GameInfoContent {
+export function defaultGameInfo(
+  model: GameModel,
+  runtime: ShellRuntime,
+  t: (s: string) => string = (s) => s,
+  tDisclaimer: (s: string) => string = t,
+): GameInfoContent {
   const sections: GameInfoSection[] = [];
   sections.push(winsSection(model));
   const pay = paytableSection(model, t);
@@ -230,7 +248,7 @@ export function defaultGameInfo(model: GameModel, runtime: ShellRuntime, t: (s: 
   const modes = modesSection(model, t);
   if (modes) sections.push(modes);
   sections.push({ type: 'controls' });
-  const disclaimer = disclaimerSection(runtime.disclaimerLines);
+  const disclaimer = disclaimerSection(runtime.disclaimerLines, tDisclaimer);
   if (disclaimer) sections.push(disclaimer);
   return { sections };
 }
@@ -365,12 +383,18 @@ export function buildShellConfig(
   // authors can wrap player-facing copy explicitly; the full merged set is still socialized below
   // (section pass) as a safety net so restricted words can't slip through even if t() was missed.
   const { t } = createI18n({ language: runtime.language ?? 'en', isSocial, messages: opts.i18n });
+  // The legal disclaimer body localizes but must NEVER socialize (mandated copy per language). In
+  // social mode `t` would word-swap English; use a translation-only resolver so en+social keeps it
+  // verbatim while de/ru/… still translate. For non-social, `t` already never socializes.
+  const tDisclaimer = isSocial
+    ? createI18n({ language: runtime.language ?? 'en', isSocial: false, messages: opts.i18n }).t
+    : t;
   const authored = typeof opts.gameInfo === 'function' ? opts.gameInfo(t) : opts.gameInfo;
   // Pass t() through to spec-derived sections so symbol names, mode titles, and descriptions are
   // pre-translated before they reach the shell renderer.
   // Cast to { sections?: GameInfoSection[] } (pixi-widened) so downstream map/filter calls work
   // against the pixi section union. Host-derived sections never set `node`, so the widening is safe.
-  let gameInfo: { sections?: GameInfoSection[] } = mergeGameInfo(defaultGameInfo(model, runtime, t), authored) as { sections?: GameInfoSection[] };
+  let gameInfo: { sections?: GameInfoSection[] } = mergeGameInfo(defaultGameInfo(model, runtime, t, tDisclaimer), authored) as { sections?: GameInfoSection[] };
   // The DISCLAIMER is required legal copy and must be shown VERBATIM — never socialized (its
   // wording is mandated, and word-swaps like "bet → play" would corrupt the legal text).
   if (isSocial) {
