@@ -7,7 +7,13 @@
  * `formatAmount(value, meta)` exported from this module.
  *
  * The list mirrors the table in the public ts-client `helpers.ts` so
- * approval reviewers can diff one-to-one.
+ * approval reviewers can diff one-to-one — WITH ONE DELIBERATE EXCEPTION:
+ * the currencies ts-client declares with 0 fraction digits (JPY, IDR, KRW,
+ * VND, CLP) carry `decimals: 2` here. Stake lowered bet levels below one
+ * whole unit for every currency, so a 0-decimal display can no longer render
+ * a sub-unit balance (a 0.50 balance would round to "0"/"1"). `decimals` is
+ * display metadata only — money is converted via `API_MULTIPLIER` (1e6), not
+ * this field — so widening it does not affect any amount, only its rendering.
  */
 
 import type { CurrencyMetaData } from '@energy8platform/game-sdk/protocol';
@@ -15,21 +21,21 @@ import type { CurrencyMetaData } from '@energy8platform/game-sdk/protocol';
 export const CURRENCY_META: Record<string, CurrencyMetaData> = {
   USD: { code: 'USD', symbol: '$', decimals: 2 },
   CAD: { code: 'CAD', symbol: 'CA$', decimals: 2 },
-  JPY: { code: 'JPY', symbol: '¥', decimals: 0 },
+  JPY: { code: 'JPY', symbol: '¥', decimals: 2 },
   EUR: { code: 'EUR', symbol: '€', decimals: 2 },
   RUB: { code: 'RUB', symbol: '₽', decimals: 2 },
   CNY: { code: 'CNY', symbol: 'CN¥', decimals: 2 },
   PHP: { code: 'PHP', symbol: '₱', decimals: 2 },
   INR: { code: 'INR', symbol: '₹', decimals: 2 },
-  IDR: { code: 'IDR', symbol: 'Rp', decimals: 0 },
-  KRW: { code: 'KRW', symbol: '₩', decimals: 0 },
+  IDR: { code: 'IDR', symbol: 'Rp', decimals: 2 },
+  KRW: { code: 'KRW', symbol: '₩', decimals: 2 },
   BRL: { code: 'BRL', symbol: 'R$', decimals: 2 },
   MXN: { code: 'MXN', symbol: 'MX$', decimals: 2 },
   DKK: { code: 'DKK', symbol: 'KR', decimals: 2, symbolAfter: true },
   PLN: { code: 'PLN', symbol: 'zł', decimals: 2, symbolAfter: true },
-  VND: { code: 'VND', symbol: '₫', decimals: 0, symbolAfter: true },
+  VND: { code: 'VND', symbol: '₫', decimals: 2, symbolAfter: true },
   TRY: { code: 'TRY', symbol: '₺', decimals: 2 },
-  CLP: { code: 'CLP', symbol: 'CLP', decimals: 0, symbolAfter: true },
+  CLP: { code: 'CLP', symbol: 'CLP', decimals: 2, symbolAfter: true },
   ARS: { code: 'ARS', symbol: 'ARS', decimals: 2, symbolAfter: true },
   PEN: { code: 'PEN', symbol: 'S/', decimals: 2 },
   NGN: { code: 'NGN', symbol: '₦', decimals: 2 },
