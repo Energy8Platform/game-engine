@@ -984,7 +984,31 @@ const DISCLAIMER_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
   },
 };
 
-/** Merge the base UI catalog with the separately-authored disclaimer lines, per language. */
+// ── Replay summary labels ──────────────────────────────────────────────────────────────────────
+// The replay modal (html + pixi) renders these row labels via host.t(); grouped here (merged into
+// LOCALES below) so the whole replay screen localizes. Terminology matches the base Bet/Win keys.
+const REPLAY_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
+  da: { Mode: 'Tilstand', 'Base bet': 'Grundindsats', 'Cost multiplier': 'Omkostningsmultiplikator', 'Total cost': 'Samlede omkostninger', 'Win multiplier': 'Gevinstmultiplikator' },
+  de: { Mode: 'Modus', 'Base bet': 'Grundeinsatz', 'Cost multiplier': 'Kostenmultiplikator', 'Total cost': 'Gesamtkosten', 'Win multiplier': 'Gewinnmultiplikator' },
+  es: { Mode: 'Modo', 'Base bet': 'Apuesta base', 'Cost multiplier': 'Multiplicador de coste', 'Total cost': 'Coste total', 'Win multiplier': 'Multiplicador de premio' },
+  fi: { Mode: 'Tila', 'Base bet': 'Peruspanos', 'Cost multiplier': 'Kustannuskerroin', 'Total cost': 'Kokonaiskustannus', 'Win multiplier': 'Voittokerroin' },
+  fr: { Mode: 'Mode', 'Base bet': 'Mise de base', 'Cost multiplier': 'Multiplicateur de coût', 'Total cost': 'Coût total', 'Win multiplier': 'Multiplicateur de gain' },
+  hi: { Mode: 'मोड', 'Base bet': 'आधार दांव', 'Cost multiplier': 'लागत गुणक', 'Total cost': 'कुल लागत', 'Win multiplier': 'जीत गुणक' },
+  id: { Mode: 'Mode', 'Base bet': 'Taruhan dasar', 'Cost multiplier': 'Pengganda biaya', 'Total cost': 'Total biaya', 'Win multiplier': 'Pengganda kemenangan' },
+  ja: { Mode: 'モード', 'Base bet': '基本ベット', 'Cost multiplier': 'コスト倍率', 'Total cost': '合計コスト', 'Win multiplier': '当選倍率' },
+  ko: { Mode: '모드', 'Base bet': '기본 베팅', 'Cost multiplier': '비용 배수', 'Total cost': '총 비용', 'Win multiplier': '당첨 배수' },
+  pl: { Mode: 'Tryb', 'Base bet': 'Zakład podstawowy', 'Cost multiplier': 'Mnożnik kosztu', 'Total cost': 'Całkowity koszt', 'Win multiplier': 'Mnożnik wygranej' },
+  pt: { Mode: 'Modo', 'Base bet': 'Aposta base', 'Cost multiplier': 'Multiplicador de custo', 'Total cost': 'Custo total', 'Win multiplier': 'Multiplicador de ganho' },
+  ru: { Mode: 'Режим', 'Base bet': 'Базовая ставка', 'Cost multiplier': 'Множитель стоимости', 'Total cost': 'Общая стоимость', 'Win multiplier': 'Множитель выигрыша' },
+  tr: { Mode: 'Mod', 'Base bet': 'Temel bahis', 'Cost multiplier': 'Maliyet çarpanı', 'Total cost': 'Toplam maliyet', 'Win multiplier': 'Kazanç çarpanı' },
+  vi: { Mode: 'Chế độ', 'Base bet': 'Cược cơ bản', 'Cost multiplier': 'Hệ số chi phí', 'Total cost': 'Tổng chi phí', 'Win multiplier': 'Hệ số thắng' },
+  zh: { Mode: '模式', 'Base bet': '基础投注', 'Cost multiplier': '成本倍数', 'Total cost': '总成本', 'Win multiplier': '奖金倍数' },
+};
+
+/** Merge the base UI catalog with the separately-authored disclaimer + replay lines, per language. */
 export const LOCALES: Partial<Record<Lang, Record<string, string>>> = Object.fromEntries(
-  (Object.keys(BASE_LOCALES) as Lang[]).map((l) => [l, { ...BASE_LOCALES[l], ...DISCLAIMER_LOCALES[l] }]),
+  (Object.keys(BASE_LOCALES) as Lang[]).map((l) => [
+    l,
+    { ...BASE_LOCALES[l], ...DISCLAIMER_LOCALES[l], ...REPLAY_LOCALES[l] },
+  ]),
 );
