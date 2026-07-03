@@ -104,8 +104,9 @@ describe('resolveCurrency (single source of truth — initData.config.currency)'
     // symbolAfter:true → right (e.g. PLN 'zł')
     expect(resolveCurrency({ code: 'PLN', symbol: 'zł', decimals: 2, symbolAfter: true })).toEqual({ symbol: 'zł', position: 'right', minDecimals: 2, maxDecimals: 4 });
   });
-  it('a 0-decimal currency (e.g. JPY) keeps wins integer — maxDecimals 0', () => {
-    expect(resolveCurrency({ code: 'JPY', symbol: '¥', decimals: 0 })).toEqual({ symbol: '¥', position: 'left', minDecimals: 0, maxDecimals: 0 });
+  it('a 0-decimal currency (e.g. JPY) is floored to 2 display decimals so sub-unit bets render', () => {
+    // Stake lowered bet levels below one unit for these too — a 0-decimal display can't show 0.50.
+    expect(resolveCurrency({ code: 'JPY', symbol: '¥', decimals: 0 })).toEqual({ symbol: '¥', position: 'left', minDecimals: 2, maxDecimals: 4 });
   });
   it('falls back to the spec currency code, then neutral euro, when meta is absent (dev/devBridge)', () => {
     expect(resolveCurrency(null, 'ZZZ')).toEqual({ symbol: 'ZZZ', position: 'left', minDecimals: 2, maxDecimals: 4 });

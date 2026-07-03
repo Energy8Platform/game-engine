@@ -111,14 +111,21 @@ export function applyJurisdiction(features: ShellFeatures, j?: JurisdictionRestr
  *  not rounded away to 0.00. Balance / bet stay at the currency's own decimals (`minDecimals`). */
 const WIN_MAX_DECIMALS = 4;
 
-/** Attach decimals: `minDecimals` (balance/bet/prices, fixed) = the currency's decimals; `maxDecimals`
- *  (win/total-win, variable, trailing zeros trimmed) = up to WIN_MAX_DECIMALS — but only when the
- *  currency actually has fraction digits (a 0-decimal currency like JPY keeps wins integer). */
+/** Attach decimals: `minDecimals` (balance/bet/prices, fixed) and `maxDecimals` (win/total-win,
+ *  variable, trailing zeros trimmed = up to WIN_MAX_DECIMALS).
+ *
+ *  Stake lowered bet levels below one unit for EVERY currency — including the ones whose metadata
+ *  declares 0 fraction digits (JPY, IDR, KRW, VND, CLP). A 0-decimal display can't render a sub-unit
+ *  balance or win (e.g. a 0.50 balance would round to "0"/"1"), so we floor the display precision to 2:
+ *  balance/bet show a fixed 2 places and wins go up to WIN_MAX_DECIMALS. Currencies that already carry
+ *  fraction digits are unchanged. */
+const MIN_DISPLAY_DECIMALS = 2;
 function withDecimals(base: { symbol: string; position: 'left' | 'right' }, decimals: number): CurrencyConfig {
+  const display = Math.max(decimals, MIN_DISPLAY_DECIMALS);
   return {
     ...base,
-    minDecimals: decimals,
-    maxDecimals: decimals > 0 ? Math.max(decimals, WIN_MAX_DECIMALS) : 0,
+    minDecimals: display,
+    maxDecimals: Math.max(display, WIN_MAX_DECIMALS),
   };
 }
 
