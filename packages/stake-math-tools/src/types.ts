@@ -264,13 +264,13 @@ export interface StakeReport {
   /** P(payout ≥ 5000 × betCost) after Stake's cost-multiplier scaling rule:
    *  c ≥ 1000 → ×0.2, 500 ≤ c < 1000 → ×0.5, 200 ≤ c < 500 → ×0.8, else ×1.0.
    *  This is the value that gets compared against Stake's published limit
-   *  (1e-2 for both 2-star and 3-star). Equals `prob5K` when costMultiplier
+   *  (0.01 for both 2-star and 3-star). Equals `prob5K` when costMultiplier
    *  is unset or < 200. */
   prob5KScaled: number;
 
   /** P(payout ≥ 10000 × betCost) after Stake's cost-multiplier scaling
-   *  (same rule as `prob5KScaled`). Compared against the 2-star limit 8e-2
-   *  or the 3-star limit 2e-2. */
+   *  (same rule as `prob5KScaled`). Compared against the 2-star limit 0.002
+   *  or the 3-star limit 0.005. */
   prob10KScaled: number;
 
   /** Cost multiplier used for the scaled probabilities (1 when unset). */

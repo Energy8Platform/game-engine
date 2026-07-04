@@ -49,8 +49,8 @@ export function buildTieredLookup(
             maxCVaRNormalized: 800,
             maxEtl40xCost: 0.9,
             maxEtlP10000: 0.8,
-            maxProb5K: 1e-2,
-            maxProb10K: 2e-2,
+            maxProb5K: 0.01,
+            maxProb10K: 0.005,
             minBaseStd: 0.6,
             maxBaseStd: 60,
             maxPayoutMultiplier: 100_000,
@@ -60,8 +60,8 @@ export function buildTieredLookup(
             maxCVaRNormalized: 700,
             maxEtl40xCost: 0.8,
             maxEtlP10000: 0.6,
-            maxProb5K: 1e-2,
-            maxProb10K: 8e-2,
+            maxProb5K: 0.01,
+            maxProb10K: 0.002,
             minBaseStd: 0.6,
             maxBaseStd: 50,
             maxPayoutMultiplier: 25_000,
@@ -134,7 +134,7 @@ export function buildTieredLookup(
       const result = buildTieredLookup(cachedRows, inner);
       lastResult = result;
       // Compare against the *scaled* probabilities — that's what Stake
-      // checks against the published 1e-2 / 8e-2 limits for higher-cost
+      // checks against the published 0.01 / 0.002 limits (2-star) for higher-cost
       // modes (see costScale in stake-report.ts).
       const p5KScaled = result.stakeReport.prob5KScaled;
       const p10KScaled = result.stakeReport.prob10KScaled;
