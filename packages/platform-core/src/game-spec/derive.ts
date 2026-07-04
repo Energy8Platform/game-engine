@@ -61,13 +61,19 @@ export function toGameDefinition(spec: GameSpec): GameDefinition {
   for (const [key, action] of Object.entries(spec.actions)) {
     actions[key] = toActionDefinition(key, action, freeKey);
   }
-  return {
+  const def: GameDefinition = {
     id: spec.id,
     type: 'SLOT',
+    // Bare filename — the platform resolves it to games/{id}/script.lua. Required so the exported
+    // config.json points at the uploaded script.
+    script_path: spec.scriptPath ?? 'script.lua',
     actions,
     bet_levels: [...spec.betLevels],
     max_win: { multiplier: spec.maxWin },
   };
+  if (spec.sessionTtl) def.session_ttl = spec.sessionTtl;
+  if (spec.persistentState) def.persistent_state = { ...spec.persistentState };
+  return def;
 }
 
 function luaTable(record: Record<number, number>): string {

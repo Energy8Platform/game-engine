@@ -21,14 +21,15 @@ engine.destroy();
 if (typeof result.totalWin !== 'number') throw new Error('spin did not return a numeric win');
 console.log('runtime spin OK — totalWin =', result.totalWin);
 
-// 2) export path
+// 2) export path — the E8 deliverables (config.json + self-contained script.lua)
 const out = exportGame(spec, { logicLua: logic });
 const distDir = resolve(__dirname, 'dist', 'game');
 mkdirSync(distDir, { recursive: true });
-writeFileSync(resolve(distDir, 'gameDefinition.json'), out['gameDefinition.json']);
+writeFileSync(resolve(distDir, 'config.json'), out['config.json']);
 writeFileSync(resolve(distDir, 'script.lua'), out['script.lua']);
-const gd = JSON.parse(out['gameDefinition.json']);
-if (gd.id !== 'spec-slot' || gd.type !== 'SLOT') throw new Error('exported gameDefinition malformed');
+const gd = JSON.parse(out['config.json']);
+if (gd.id !== 'spec-slot' || gd.type !== 'SLOT') throw new Error('exported config.json malformed');
+if (!gd.script_path) throw new Error('exported config.json missing script_path');
 if (!out['script.lua'].includes('PAYTABLE')) throw new Error('exported script.lua missing prelude');
-console.log('export OK — wrote dist/game/{gameDefinition.json, script.lua}');
+console.log('export OK — wrote dist/game/{config.json, script.lua}');
 console.log('SMOKE PASS');

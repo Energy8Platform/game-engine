@@ -12,6 +12,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     postbuild: `rm -f ${a.id}.zip && cd dist && zip -r ../${a.id}.zip .`,
     typecheck: 'tsc --noEmit',
     smoke: 'tsx smoke.ts',
+    'export:e8': 'tsx export.e8.ts',
     sim: 'e8-math sim --config ./math.config.ts',
     pool: 'e8-math pool --config ./math.config.ts',
     curate: 'e8-math curate --config ./math.config.ts',

@@ -48,6 +48,15 @@ export interface GameSpec {
   actions: Record<string, ActionSpec>;
   /** Open hint for codegen/UI: 'cascade' | 'cluster' | 'ways' | 'lines' | … */
   mechanic?: string;
+  /**
+   * Lua script key for the exported E8 `config.json`. Default `"script.lua"`, which the platform
+   * resolves to `games/{id}/script.lua`. Override only when the script lives at a custom S3 key.
+   */
+  scriptPath?: string;
+  /** Session expiry for the exported config (Go-style duration, e.g. "24h"). Omitted when unset. */
+  sessionTtl?: string;
+  /** Cross-spin persistent state (charge meters etc.) surfaced into the exported config. */
+  persistentState?: { vars: string[]; exposed_vars: string[] };
   /** Game-level escape hatch. */
   meta?: Record<string, unknown>;
 }
