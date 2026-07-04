@@ -19,6 +19,9 @@ describe('genPackageJson', () => {
     expect(json.scripts.build).toContain('vite build');
     expect(json.scripts.typecheck).toBe('tsc --noEmit');
   });
+  it('emits the E8 export script (config.json + script.lua deliverables)', () => {
+    expect(json.scripts['export:e8']).toBe('tsx export.e8.ts');
+  });
   it('emits sim/pool/curate/math scripts via e8-math and the stake-math-tools devDep', () => {
     const json2 = JSON.parse(genPackageJson({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true } as any,
       { 'platform-core': '^0.24.4', 'game-engine': '^0.17.0', 'stake-kit': '^0.1.0', 'stake-bridge': '^0.2.1', 'stake-math-tools': '^0.8.0' }));

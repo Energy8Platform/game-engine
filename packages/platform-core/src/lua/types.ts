@@ -5,6 +5,13 @@ import type { SessionData, PlayParams } from '@energy8platform/game-sdk';
 export interface GameDefinition {
   id: string;
   type: 'SLOT' | 'TABLE';
+  /**
+   * Lua script S3 object key or bare filename (e.g. "script.lua" — the platform resolves a bare
+   * name to `games/{id}/script.lua`). Mirrors the server's `GameDefinition.ScriptPath` (omitempty).
+   * The engine itself loads the script from `LuaEngineConfig.script`, so this is only carried for
+   * the exported platform `config.json`.
+   */
+  script_path?: string;
   actions: Record<string, ActionDefinition>;
   bet_levels?: number[] | BetLevelsConfig;
   max_win?: MaxWinConfig;

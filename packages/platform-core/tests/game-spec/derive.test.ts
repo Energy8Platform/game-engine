@@ -26,6 +26,10 @@ describe('toGameDefinition', () => {
     expect(gd.bet_levels).toEqual([0.1, 0.2, 1]);
     expect(gd.max_win).toEqual({ multiplier: 1000 });
   });
+  it('defaults script_path to the bare "script.lua" the platform resolves', () => {
+    expect(gd.script_path).toBe('script.lua');
+    expect(toGameDefinition({ ...spec, scriptPath: 'games/g/script.lua' }).script_path).toBe('games/g/script.lua');
+  });
   it('maps base action with default FS-trigger transition', () => {
     expect(gd.actions.spin.debit).toBe('bet');
     expect(gd.actions.spin.credit).toBe('win');
