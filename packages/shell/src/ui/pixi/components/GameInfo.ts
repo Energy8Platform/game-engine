@@ -282,25 +282,64 @@ function sectionHotkeys(host: PixiComponentContext, title: string, width: number
   return sec;
 }
 
-/** Render a single hotkey row: keycap chip(s) on the left, action name on the right. */
+/** Render a single hotkey row: keycap chip(s) on the left, action name on the right. The row is
+ *  constrained to `inner` (chips left, label right). On narrow widths the chip combos stack onto
+ *  their own lines and the label wraps within the leftover width, so nothing clips past the plaque
+ *  — the Pixi analogue of the HTML `.ge-gi-hk-chips { flex:0 1 auto; flex-wrap }` + label wrap. */
 function hkRow(host: PixiComponentContext, r: HkRow, inner: number): FlexBox {
-  const row = new FlexBox({ direction: 'row', align: 'center', gap: 14, padding: { top: 8, bottom: 8 } });
-
-  // Build chips container
-  const chipsCol = new FlexBox({ direction: 'row', align: 'center', gap: 4 });
+  const GAP = 14;
+  const LABEL_MIN = 92; // reserve at least this much for the action label before wrapping the chips
   const chipKeys = buildChipKeys(r);
-  for (const key of chipKeys) {
-    if (key === '/') {
-      chipsCol.add(makeText('/', { size: 12, weight: '500', color: host.tokens.plaqueLabel }));
-    } else {
-      chipsCol.add(keycap(host, key));
-    }
+
+  // Lay the chips on one line and measure. If that leaves too little room for the label, stack the
+  // combos (split at the '/') onto their own lines so the chips give up horizontal width.
+  let chips: FlexBox = chipLine(host, chipKeys);
+  let chipsW = chips.measureSize().w;
+  if (chipsW > inner - GAP - LABEL_MIN) {
+    chips = chipCombos(host, chipKeys);
+    chipsW = chips.measureSize().w;
   }
 
-  const nameText = makeText(host.t(r.name), { size: 15, weight: '700', color: '#ffffff' });
-  row.add(chipsCol);
+  // The label takes the leftover width and WRAPS within it (never clips); right-aligned to sit
+  // against the plaque edge like the DOM `.ge-gi-hk-tx`.
+  const labelW = Math.max(LABEL_MIN, inner - chipsW - GAP);
+  const nameText = makeText(host.t(r.name), { size: 15, weight: '700', color: '#ffffff', wrapWidth: labelW, align: 'right' });
+
+  const row = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', gap: GAP, padding: { top: 8, bottom: 8 }, width: inner });
+  row.add(chips);
   row.add(nameText);
   return row;
+}
+
+/** Chips on a single row, with '/' separators between the combos (as flattened by buildChipKeys). */
+function chipLine(host: PixiComponentContext, chipKeys: string[]): FlexBox {
+  const line = new FlexBox({ direction: 'row', align: 'center', gap: 4 });
+  for (const key of chipKeys) {
+    if (key === '/') line.add(makeText('/', { size: 12, weight: '500', color: host.tokens.plaqueLabel }));
+    else line.add(keycap(host, key));
+  }
+  return line;
+}
+
+/** Chips stacked as combos — split at the '/' separators, one combo per line (drops the inline
+ *  '/', which reads as a line break once the combos are stacked). */
+function chipCombos(host: PixiComponentContext, chipKeys: string[]): FlexBox {
+  const col = new FlexBox({ direction: 'column', align: 'start', gap: 4 });
+  let line = new FlexBox({ direction: 'row', align: 'center', gap: 4 });
+  let filled = false;
+  const flush = (): void => {
+    if (!filled) return;
+    col.add(line);
+    line = new FlexBox({ direction: 'row', align: 'center', gap: 4 });
+    filled = false;
+  };
+  for (const key of chipKeys) {
+    if (key === '/') { flush(); continue; }
+    line.add(keycap(host, key));
+    filled = true;
+  }
+  flush();
+  return col;
 }
 
 /** Flatten a row's chip list into display tokens — for bet rows, produce: Shift ↑ / Shift = style. */

@@ -203,7 +203,12 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-gi-hk-block { display:flex; flex-direction:column; }
 #${SHELL_ROOT_ID} .ge-gi-hk { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; }
 #${SHELL_ROOT_ID} .ge-gi-hk + .ge-gi-hk { border-top:1px solid var(--shell-plaque-line); }
-#${SHELL_ROOT_ID} .ge-gi-hk-chips { display:flex; align-items:center; flex-wrap:wrap; gap:4px; flex:0 0 auto; }
+/* Let the keycaps SHRINK instead of hogging the row: flex:0 1 auto lets the chips block give up
+   width down to its widest single combo, and flex-wrap reflows the extra combos onto another line.
+   On narrow/mobile widths the many-chip rows (Raise/Lower bet) otherwise squeeze the label off the
+   right edge and clip it. (No min-width:0 here — the min-content floor is what keeps a combo intact
+   and wrapping rather than overflowing.) */
+#${SHELL_ROOT_ID} .ge-gi-hk-chips { display:flex; align-items:center; flex-wrap:wrap; gap:4px; flex:0 1 auto; }
 #${SHELL_ROOT_ID} .ge-gi-hk-combo { display:inline-flex; align-items:center; gap:4px; }
 #${SHELL_ROOT_ID} .ge-gi-hk-chip { display:inline-flex; align-items:center; justify-content:center;
   padding:2px 7px; border-radius:6px; border:1px solid var(--shell-plaque-line);
@@ -212,7 +217,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
   font-weight:600; line-height:1.5; white-space:nowrap; min-width:1.6em; text-align:center; }
 #${SHELL_ROOT_ID} .ge-gi-hk-sep { color:var(--shell-plaque-label); font-size:11px; padding:0 1px; }
 #${SHELL_ROOT_ID} .ge-gi-hk-sep2 { color:var(--shell-plaque-label); font-size:11px; padding:0 4px; }
-#${SHELL_ROOT_ID} .ge-gi-hk-tx { color:rgba(255,255,255,.88); font-size:14px; font-weight:600; text-align:right; flex:1; }
+/* flex:1 1 auto (content-based basis, NOT flex:1's 0 basis) so the label keeps demanding its word
+   width and shrinks in PROPORTION to the chips — both give ground and wrap, instead of the label
+   collapsing to nothing. No min-width:0: the min-content floor stops a word being clipped. */
+#${SHELL_ROOT_ID} .ge-gi-hk-tx { color:rgba(255,255,255,.88); font-size:14px; font-weight:600; text-align:right; flex:1 1 auto; }
 
 /* controls — two blocks (gameplay / menu & info), icon/name/description per control */
 #${SHELL_ROOT_ID} .ge-gi-ctl-block + .ge-gi-ctl-block { margin-top:16px; padding-top:4px; border-top:1px solid var(--shell-plaque-line); }
@@ -226,7 +234,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-gi-ctl-ic--bet { flex-direction:column; font-size:18px; gap:0; }
 /* buy bonus draws the real control-bar badge, scaled down & non-interactive */
 #${SHELL_ROOT_ID} .ge-gi-ctl-ic .ge-shell-buybonus { width:46px; height:46px; font-size:8px; border-width:2px; pointer-events:none; }
-#${SHELL_ROOT_ID} .ge-gi-ctl-tx { display:flex; flex-direction:column; gap:2px; }
+#${SHELL_ROOT_ID} .ge-gi-ctl-tx { display:flex; flex-direction:column; gap:2px; min-width:0; }
 #${SHELL_ROOT_ID} .ge-gi-ctl-tx b { color:#fff; font-size:15px; font-weight:700; }
 #${SHELL_ROOT_ID} .ge-gi-ctl-tx span { color:rgba(255,255,255,.7); font-size:13px; line-height:1.4; }
 
@@ -513,6 +521,14 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID}.ge-mobile .ge-sheet-grid { grid-template-columns:repeat(var(--cols-m,var(--cols,3)),1fr); }
 /* the bet picker packs 6 chips/row → give its card room (autoplay & co. stay at the 28em default) */
 #${SHELL_ROOT_ID} .ge-sheet[data-ge="bet-modal"] .ge-modal-card { max-width:44em; }
+/* Bet chips carry variable-width currency (a wide currency makes labels grow). Reflow the columns
+   to the widest label (--chip-min, computed in JS) so no chip is ever clipped, and cap the grid
+   height so a long bet ladder scrolls instead of overflowing the card's clipped edge. */
+#${SHELL_ROOT_ID} .ge-sheet[data-ge="bet-modal"] .ge-sheet-grid,
+#${SHELL_ROOT_ID}.ge-mobile .ge-sheet[data-ge="bet-modal"] .ge-sheet-grid {
+  grid-template-columns:repeat(auto-fill, minmax(min(100%, var(--chip-min, 6em)), 1fr));
+  max-height:min(50vh, 28em); overflow-y:auto; overflow-x:hidden; }
+#${SHELL_ROOT_ID} .ge-sheet[data-ge="bet-modal"] .ge-chip { min-width:0; }
 #${SHELL_ROOT_ID} .ge-chip { pointer-events:auto; cursor:pointer; border:1px solid var(--shell-plaque-line);
   border-radius:.8em; background:rgba(255,255,255,.04); color:#fff; font-size:1em; font-weight:700;
   font-variant-numeric:tabular-nums; padding:.8em .55em; transition:background .12s ease, border-color .12s ease; }

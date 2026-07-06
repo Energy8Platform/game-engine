@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/stake-kit",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "type": "module",
   "main": "dist/stake-kit.umd.js",
   "module": "dist/stake-kit.esm.js",

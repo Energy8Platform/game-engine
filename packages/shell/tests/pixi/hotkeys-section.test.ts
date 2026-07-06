@@ -139,3 +139,68 @@ describe('Hotkeys section — Pixi shell', () => {
     expect(labels.some((l) => l === 'Space')).toBe(true);
   });
 });
+
+// ── narrow-width fit (mobile) ────────────────────────────────────────────────
+// The wide "Raise bet"/"Lower bet" rows (Shift/↑/Shift/=) must not push their label off the plaque
+// on a narrow screen: the chip combos stack and the label wraps within the leftover width.
+describe('Hotkeys section — narrow-width fit (Pixi)', () => {
+  /** Overlay inner content width for a screen width, mirroring Overlay.layoutBody + section pad. */
+  function innerFor(screenW: number): number {
+    const sidePad = Math.max(16, Math.min(24, 4 * (screenW / 100)));
+    const bodyW = Math.min(800, screenW - sidePad * 2);
+    return bodyW - 18 * 2; // SECTION_PAD
+  }
+
+  function findTextNode(node: any, text: string): any {
+    if (node?.text === text) return node;
+    for (const child of node?.children ?? []) {
+      const hit = findTextNode(child, text);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /** The row + its chips/label parts for a hotkey action, at a given screen size. */
+  function hotkeyRow(screenW: number, screenH: number, action: string) {
+    const host = makeContext({
+      config: defaultConfig({
+        availableBets: [1],
+        gameInfo: { sections: [{ type: 'hotkeys' }] }, // hotkeys only → the label is unique
+        features: { turbo: 0, autoplay: {}, buyBonus: false },
+      }),
+      screenW,
+      screenH,
+    });
+    const overlay = openGameInfo(host);
+    overlay.resize?.(screenW, screenH);
+    const label = findTextNode(overlay, action);
+    const row = label?.parent;
+    const chips = row?.children.find((c: any) => c !== label);
+    return { inner: innerFor(screenW), label, row, chips };
+  }
+
+  it('constrains the wide row to the plaque and fits chips + label within it', () => {
+    const { inner, label, row, chips } = hotkeyRow(300, 700, 'Raise bet');
+    expect(label).toBeTruthy();
+    // The row is width-bounded (the old row was content-sized and overflowed the plaque).
+    expect(row.getLocalBounds().width).toBeLessThanOrEqual(inner + 2);
+    // Chips + gap + label all fit inside the inner width → nothing clips past the edge.
+    const cw = chips.getLocalBounds().width;
+    const lw = label.getLocalBounds().width;
+    expect(cw + 14 + lw).toBeLessThanOrEqual(inner + 2);
+  });
+
+  it('stacks the chip combos onto two lines when the row is narrow', () => {
+    const narrow = hotkeyRow(300, 700, 'Raise bet');
+    const wide = hotkeyRow(900, 700, 'Raise bet');
+    // Narrow: the two Shift-combos wrap → the chips block is taller than the single-line wide layout.
+    expect(narrow.chips.getLocalBounds().height).toBeGreaterThan(wide.chips.getLocalBounds().height * 1.5);
+  });
+
+  it('keeps a single-key row (Space → Spin) on one line at any width', () => {
+    const narrow = hotkeyRow(300, 700, 'Spin');
+    const wide = hotkeyRow(900, 700, 'Spin');
+    // One keycap → same height narrow vs wide (never needs to wrap).
+    expect(narrow.chips.getLocalBounds().height).toBeCloseTo(wide.chips.getLocalBounds().height, 0);
+  });
+});

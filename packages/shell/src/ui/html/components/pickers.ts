@@ -12,6 +12,9 @@ interface SheetOpts {
    *  with the shell's mobile breakpoint (driven by CSS custom props, so an open modal
    *  re-columns live on resize/rotate without being rebuilt). */
   columns: number | { wide: number; mobile: number };
+  /** Size the columns to the widest chip label (via `--chip-min`) instead of a fixed count, so
+   *  variable-width labels (e.g. a wide currency's bet values) reflow rather than clip. */
+  autoFit?: boolean;
   confirmLabel: string;
   onConfirm: (id: string) => void;
   /** Called to dismiss the picker (should invoke host.actions.closeOverlay()). */
@@ -33,6 +36,15 @@ function buildSheet(opts: SheetOpts): Sheet {
   const cols = typeof opts.columns === 'number' ? { wide: opts.columns, mobile: opts.columns } : opts.columns;
   grid.style.setProperty('--cols', String(cols.wide));
   grid.style.setProperty('--cols-m', String(cols.mobile));
+  if (opts.autoFit) {
+    // Widest label in ch (tabular digits ≈ 1ch each; symbols/separators are narrower, so this
+    // slightly over-estimates → safe) + chip padding/border. Floored so normal-width currencies
+    // keep the compact ~6-per-row look and only wide currencies drop to fewer columns.
+    const maxLen = opts.choices.reduce((m, c) => Math.max(m, c.label.length), 0);
+    // Floor at 6em ≈ the natural width of a chip in the 6-wide layout (44em card): short labels
+    // clamp here so a normal currency keeps 6 columns; wider labels raise it and drop to fewer.
+    grid.style.setProperty('--chip-min', `max(6em, calc(${maxLen}ch + 1.4em))`);
+  }
   let selected = opts.selected;
   let focusIndex = opts.choices.findIndex((c) => c.id === selected);
   if (focusIndex < 0) focusIndex = 0;
@@ -105,7 +117,7 @@ function buildSheet(opts: SheetOpts): Sheet {
 /** Bet picker — all available bets as chips (6 per row, 3 on mobile), accent Confirm applies it. */
 export function openBetModal(host: ShellHost): { root: HTMLElement; onKey: (e: KeyboardEvent) => boolean } {
   return buildSheet({
-    ge: 'bet-modal', title: host.t('Bet'), columns: { wide: 6, mobile: 3 }, confirmLabel: host.t('Confirm'),
+    ge: 'bet-modal', title: host.t('Bet'), columns: { wide: 6, mobile: 3 }, autoFit: true, confirmLabel: host.t('Confirm'),
     choices: host.state.availableBets.map((b) => ({ id: String(b), label: host.formatCurrency(b) })),
     selected: String(host.state.bet),
     onClose: () => host.actions.closeOverlay(),

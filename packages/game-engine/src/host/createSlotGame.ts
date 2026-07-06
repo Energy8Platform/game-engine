@@ -52,8 +52,18 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   let stakeBridge: SlotGameHandle['stakeBridge'] = null;
   let isStakeNow = false;
   if (opts.stake) {
-    const { isStakeLaunch } = await import('@energy8platform/stake-bridge/detect');
-    isStakeNow = isStakeLaunch(location.href);
+    const { classifyStakeLaunch } = await import('@energy8platform/stake-bridge/detect');
+    // Security gate: a launch carrying Stake session markers (sessionID / replay) MUST also carry a
+    // valid rgs_url. If the rgs_url was removed, blanked, or tampered to a non-Stake host, refuse to
+    // run — WITHOUT this the launch would fail the Stake check and silently fall through to the
+    // offline/dev bridge, letting the player spin for free. 'stake' = a valid launch (load the
+    // bridge); 'offline' = a genuine non-Stake/dev launch (no session markers at all).
+    const launch = classifyStakeLaunch(location.href);
+    if (launch === 'blocked') {
+      fatal('Invalid game server address. Please relaunch the game from the lobby.');
+      throw new Error('createSlotGame: refusing to run — Stake launch with a missing or invalid rgs_url');
+    }
+    isStakeNow = launch === 'stake';
     if (isStakeNow) {
       try {
         const { StakeBridge } = await import('@energy8platform/stake-bridge');

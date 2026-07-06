@@ -1,7 +1,8 @@
 import type { PixiComponentContext, ShellLayer } from '../context';
 import { CardModal } from '../primitives/card';
 import { Chip } from '../primitives/controls';
-import { FlexBox } from '../primitives/flex';
+import { FlexBox, type Sizable } from '../primitives/flex';
+import { ScrollBox } from '../primitives/scroll';
 
 interface Choice {
   id: string;
@@ -13,8 +14,15 @@ interface SheetOpts {
   title: string;
   choices: Choice[];
   selected: string;
-  /** Chips per row — a fixed number, or `{ wide, mobile }` that reflows with the layout. */
+  /** Chips per row — a fixed number, or `{ wide, mobile }` that reflows with the layout.
+   *  With `autoFit`, this is the *maximum* column count; the grid drops to fewer when the labels
+   *  are too wide to fit that many. */
   columns: number | { wide: number; mobile: number };
+  /** Size the columns to the widest chip label (instead of always packing `columns`), and cap the
+   *  grid height with a scroll region. For variable-width labels (a wide currency's bet values)
+   *  this reflows + scrolls rather than clipping — the Pixi analogue of the HTML shell's
+   *  `auto-fill minmax` + `overflow-y:auto`. */
+  autoFit?: boolean;
   /** Max card width in em (the 6-wide bet picker needs 44em vs the 28em default). */
   maxEm?: number;
   confirmLabel: string;
@@ -36,8 +44,24 @@ class PickerModal extends CardModal {
 }
 
 /** A centred picker (chips grid + accent Confirm) on the shared card modal. */
+/** A ScrollBox that reports a fixed box to the FlexBox layout — so a capped, scrolling grid slots
+ *  into the card body like any other sized child (measured/positioned by its viewport, not its
+ *  full content bounds). */
+class SizedScrollBox extends ScrollBox implements Sizable {
+  constructor(private readonly boxW: number, private readonly boxH: number, canvas?: HTMLCanvasElement) {
+    super(canvas);
+    this.setViewport(boxW, boxH);
+  }
+  measureSize(): { w: number; h: number } {
+    return { w: this.boxW, h: this.boxH };
+  }
+  setLayoutSize(): void {
+    /* fixed viewport — ignore layout-imposed sizing */
+  }
+}
+
 function buildSheet(host: PixiComponentContext, opts: SheetOpts): ShellLayer {
-  const columns = typeof opts.columns === 'number'
+  const maxColumns = typeof opts.columns === 'number'
     ? opts.columns
     : host.layout === 'mobile' ? opts.columns.mobile : opts.columns.wide;
 
@@ -91,27 +115,53 @@ function buildSheet(host: PixiComponentContext, opts: SheetOpts): ShellLayer {
   const em = modal.emSize;
   const gap = 0.65 * em;
   const innerW = modal.cardWidth - 2.4 * em;
+
+  // Build the chips first (at natural width) so autoFit can measure the widest label.
+  for (let i = 0; i < opts.choices.length; i++) {
+    const c = opts.choices[i];
+    const chipIndex = i;
+    chips.push(new Chip(host, c.id, c.label, chipIndex === focusIndex, em, (id) => {
+      const idx = opts.choices.findIndex((ch) => ch.id === id);
+      if (idx >= 0) setHighlight(idx);
+    }));
+  }
+
+  // Column count: with autoFit, drop below the max until the widest label fits. Short labels
+  // (a normal currency) exceed the max and clamp back to it — so the compact 6-wide layout is
+  // preserved and only wide currencies reflow to fewer columns.
+  let columns = maxColumns;
+  if (opts.autoFit) {
+    const widest = chips.reduce((m, ch) => Math.max(m, ch.measureSize().w), 0);
+    const fitCols = Math.floor((innerW + gap) / (widest + gap));
+    columns = Math.max(1, Math.min(maxColumns, fitCols));
+  }
   const colW = (innerW - gap * (columns - 1)) / columns;
 
   const grid = new FlexBox({ direction: 'column', align: 'start', gap });
-  for (let i = 0; i < opts.choices.length; i += columns) {
-    const rowChoices = opts.choices.slice(i, i + columns);
+  for (let i = 0; i < chips.length; i += columns) {
     const row = new FlexBox({ direction: 'row', align: 'center', gap });
-    for (let j = 0; j < rowChoices.length; j++) {
-      const c = rowChoices[j];
-      const chipIndex = i + j;
-      const chip = new Chip(host, c.id, c.label, chipIndex === focusIndex, em, (id) => {
-        const idx = opts.choices.findIndex((ch) => ch.id === id);
-        if (idx >= 0) setHighlight(idx);
-      });
+    for (let j = 0; j < columns && i + j < chips.length; j++) {
+      const chip = chips[i + j];
       chip.setLayoutSize(colW, undefined);
-      chips.push(chip);
       row.add(chip);
     }
-    row.layout();
     grid.add(row);
   }
-  modal.body.add(grid);
+
+  // Cap the grid height and scroll when the ladder overflows — the Pixi analogue of the HTML
+  // shell's `max-height:min(50vh,28em); overflow-y:auto`. (Mask hit-testing clips to the viewport
+  // but still lets clicks through to chips inside it — verified against pixi.js 8.16's
+  // EventBoundary.) When it fits, drop the scroll box entirely so nothing is masked needlessly.
+  const gridH = grid.measureSize().h;
+  const maxGridH = Math.min(host.screenH * 0.5, 28 * em);
+  if (opts.autoFit && gridH > maxGridH) {
+    const scroll = new SizedScrollBox(innerW, maxGridH, host.canvas);
+    scroll.content.addChild(grid);
+    scroll.refresh();
+    modal.body.add(scroll);
+  } else {
+    modal.body.add(grid);
+  }
 
   modal.setActions([
     {
@@ -130,6 +180,7 @@ export function openBetPicker(host: PixiComponentContext): ShellLayer {
     tag: 'bet-modal',
     title: host.t('Bet'),
     columns: { wide: 6, mobile: 3 },
+    autoFit: true, // reflow columns + scroll when a wide currency makes the labels grow
     maxEm: 44, // wider card to fit 6 chips/row
     confirmLabel: host.t('Confirm'),
     choices: host.state.availableBets.map((b) => ({ id: String(b), label: host.fmt(b) })),

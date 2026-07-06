@@ -19,6 +19,10 @@
 
 import type { ConnectionStatePayload } from '@energy8platform/game-sdk/protocol';
 import type { StakeRound, StakeUrlParams } from './types';
+// The open-redirect guard lives in the leaf `detect` module (shared with the host's launch gate).
+// Re-exported here so existing importers (index barrel, tests) keep resolving it from rgs-client.
+import { isValidRgsUrl } from './detect';
+export { isValidRgsUrl } from './detect';
 
 /** RGS uses 1_000_000 minor units per major currency unit. */
 export const API_MULTIPLIER = 1_000_000;
@@ -156,36 +160,6 @@ const DEFAULT_RETRY: Required<RetryPolicy> = {
  * Throws if `rgs_url` is missing, or if neither `sessionID` nor a
  * complete replay set (`game`/`version`/`mode`/`event`) is provided.
  */
-/**
- * Open-redirect guard for the `rgs_url` launch param. Stake passes it as a BARE hostname
- * (`rgs_url=rgsd.stake-engine.com`, no scheme — the bridge prepends `https://`), but a tampered
- * value (`evil.com`, `https://evil.com/x`) would otherwise become the API base and exfiltrate the
- * session. Accept ONLY `*.stake-engine.com` (the production RGS) and `localhost`/`127.0.0.1` (the
- * dev harness, which serves the dev-RGS at `/__rgs`). Everything else is rejected.
- *
- * Handles both the bare-hostname form (optionally with `:port` and a path) and a scheme-prefixed
- * URL; in both cases only the HOST is whitelisted.
- */
-export function isValidRgsUrl(raw: string): boolean {
-  if (!raw) return false;
-  let host: string;
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      host = new URL(raw).hostname;
-    } catch {
-      return false;
-    }
-  } else {
-    // Bare form: drop any path/query/fragment, then split off an optional :port.
-    const hostPort = raw.split(/[/?#]/)[0];
-    if (!/^[a-zA-Z0-9.:-]+$/.test(hostPort)) return false; // rejects spaces, slashes, etc.
-    host = hostPort.split(':')[0];
-  }
-  host = host.toLowerCase();
-  if (host === 'localhost' || host === '127.0.0.1') return true; // dev harness
-  return host === 'stake-engine.com' || host.endsWith('.stake-engine.com');
-}
-
 export function parseStakeUrl(input: string | URL | Location): StakeUrlParams {
   const href =
     typeof input === 'string'
