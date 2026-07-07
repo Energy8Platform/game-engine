@@ -28,9 +28,11 @@ import { join } from 'node:path';
 import { roundToRow } from './curate.js';
 import type { ResolvedMode } from '../mathConfig';
 
-/** zstd level for the pool library. -19 — the user-requested high-ratio setting for the huge
- *  raw dumps (curate's published books stay at the faster -9). */
-const POOL_ZSTD_LEVEL = 19;
+/** zstd level for the pool library. Default 12: on multi-GB dumps (kitsune
+ *  BASE ≈ 6.7 GB raw) -19 runs for many minutes even with -T0, for ~10% extra
+ *  ratio. Override via POOL_ZSTD_LEVEL=19 when archival size matters more
+ *  than turnaround (curate's published books stay at the faster -9). */
+const POOL_ZSTD_LEVEL = Number(process.env.POOL_ZSTD_LEVEL ?? 12);
 
 /**
  * Stream the raw dump into a 1-weight lookUpTable (`sim,weight,payoutCents`).
@@ -69,7 +71,8 @@ function compressPoolBooks(dumpPath: string, poolDir: string, mode: string): boo
   try {
     execFileSync(
       'zstd',
-      [`-${POOL_ZSTD_LEVEL}`, '-q', '-f', '--rm', dumpPath, '-o', zstPath],
+      // -T0: все ядра — на многогигабайтных дампах single-thread -19 длится минуты
+      [`-${POOL_ZSTD_LEVEL}`, '-T0', '-q', '-f', '--rm', dumpPath, '-o', zstPath],
       { stdio: 'inherit' },
     );
     return true;

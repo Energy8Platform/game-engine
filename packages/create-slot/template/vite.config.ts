@@ -14,7 +14,7 @@ export default defineGameConfig({
   devBridgeConfig: './dev.config',
   vite: {
     server: { port: 5173 },
-    optimizeDeps: { include: ['pixi.js'], exclude: ['fengari'] },
+    optimizeDeps: { include: ['pixi.js'] },
     ...(isStake ? { build: { outDir: 'dist-stake' } } : {}),
     // The dev harness: a Stake RGS backend + the reel-config sidebar panel.
     ...(isHarness

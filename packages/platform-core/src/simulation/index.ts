@@ -8,10 +8,10 @@
 
 export {
   NativeSimulationRunner,
-  findNativeBinary,
   formatNativeResult,
   buildNativeArgs,
-  requireNativeBinary,
+  findE8Binary,
+  requireE8Binary,
 } from './NativeSimulationRunner';
 export type {
   NativeSimulationConfig,
@@ -22,5 +22,3 @@ export type {
   DistributionBucket,
   NativeArgsInput,
 } from './NativeSimulationRunner';
-
-export { ParallelSimulationRunner } from './ParallelSimulationRunner';

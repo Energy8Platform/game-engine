@@ -85,7 +85,8 @@ export interface PaytableView {
 export interface GameModel {
   spec: GameSpec;
   gameDefinition: GameDefinition;
-  luaPrelude: string;
+  /** Generated .spin prelude (SPEC/SYM/PAYTABLE consts) for the spin runtime. */
+  spinPrelude: string;
   modeMap: Record<string, string>;
   mathModes: MathModeSpec[];
   paytable: PaytableView;

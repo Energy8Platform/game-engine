@@ -1,7 +1,7 @@
 /**
- * Binary-gated end-to-end test: real Go binary sim → curate → Stake artifacts.
+ * Binary-gated end-to-end test: real e8 (SpinML) sim → curate → Stake artifacts.
  *
- * Skipped when the native binary is not present (CI without the binary).
+ * Skipped when the e8 binary is not present (CI without the binary).
  * When present this test actually invokes the binary, verifies the real
  * RoundDumpRecord dump shape, and checks that curate produces valid artifacts.
  */
@@ -12,14 +12,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findNativeBinary } from '@energy8platform/platform-core/simulation';
-import { defineGame, buildLuaScript } from '@energy8platform/platform-core/game-spec';
+import { findE8Binary } from '@energy8platform/platform-core/simulation';
+import { defineGame, buildSpinScript } from '@energy8platform/platform-core/game-spec';
 import { resolveModes } from '../src/mathConfig';
 import { runSim } from '../src/pipeline/sim';
 import { curateMode } from '../src/pipeline/curate';
 import type { MathConfig } from '../src/mathConfig';
 
-const hasBinary = !!findNativeBinary();
+const hasBinary = !!findE8Binary();
 
 /** Trivial 1-action game model for the e2e. */
 const model = defineGame({
@@ -39,19 +39,31 @@ const model = defineGame({
   },
 });
 
-/** Trivial Lua: always returns 0 or small win to produce a valid pool. */
-const logicLua = `function execute(state)
-  local roll = engine.random(1, 3)
-  local win = 0
-  if roll == 1 then win = PAYTABLE["A"][3] end
-  return { total_win = win }
-end
+/** Trivial .spin: ~1/3 rounds pay PAY_A[0] — a valid pool with texture. */
+const logicSpin = `record Vars { n: int }
+record Feat { z: int }
+record D { w: float }
+game "e2e-test" {
+  bet_levels = [1.0]
+  max_win = 1000.0
+  vars = Vars
+  feature = Feat
+  data = D
+}
+action spin { stage = base_game cost = 1.0 }
+fn execute(c: ctx, v: Vars) -> outcome {
+  let roll = rng(c, 1, 3)
+  let win = 0.0
+  if roll == 1 { win = PAY_A[0] }
+  return outcome { win: win, vars: Vars { n: 0 }, data: D { w: win } }
+}
 `;
 
 // Note: action 'spin' with role 'base' → mode 'BASE' (Stake convention).
 const cfg: MathConfig = {
   model,
-  luaScript: buildLuaScript(model, logicLua),
+  runtime: 'spin',
+  luaScript: buildSpinScript(model, logicSpin),
   modes: {
     BASE: {
       sim: { iterations: 2000, bet: 1, rng: 'fast' },
@@ -79,7 +91,7 @@ afterAll(() => {
   }
 });
 
-describe.skipIf(!hasBinary)('e2e: go-native sim → curate (binary required)', () => {
+describe.skipIf(!hasBinary)('e2e: e8 sim → curate (binary required)', () => {
   let poolDir: string;
   let outDir: string;
   let dump: string;

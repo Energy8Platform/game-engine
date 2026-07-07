@@ -17,7 +17,7 @@ pipeline. This repo contains only the GAME: its spec, math logic, rendering, and
 
 ## Single source of truth: \`src/game.spec.ts\`
 
-\`defineGame(spec)\` derives everything from one file: the Lua \`GameDefinition\`, the \`modeMap\`
+\`defineGame(spec)\` derives everything from one file: the \`GameDefinition\`, the .spin prelude, the \`modeMap\`
 (action → Stake mode), the math modes, the paytable, AND the shell's buy-bonus cards + Game Info
 per-mode table. **Edit modes/symbols/bet levels/RTP/maxWin there — never duplicate them elsewhere.**
 Each \`actions[key]\` carries \`role\` (base/feature/buy/free), \`cost\`, \`rtp\`, \`maxWin\`, \`title\`,
@@ -48,7 +48,7 @@ The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); 
 ## Commands
 
 \`\`\`bash
-npm run dev            # local dev via Energy8 DevBridge (config + Lua)
+npm run dev            # local dev via Energy8 DevBridge (e8-server runs script.spin)
 npm run stake          # the Stake dev harness — iframe wrapper + dev-RGS backed by curated books
 npm run build:stake    # the Stake frontend build → dist-stake/ (base './', no DevBridge)
 npm run math:pool      # Stage A — honest large simulation (the pool); see math.config.ts

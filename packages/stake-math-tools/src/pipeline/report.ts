@@ -1,6 +1,7 @@
 import { formatNativeResult } from '@energy8platform/platform-core/simulation';
 import type { NativeSimulationResult } from '@energy8platform/platform-core/simulation';
 import { detectHitRateGaps } from '../stake-report.js';
+import { classifyVolatility } from '../metrics.js';
 import type { OptimizeResult, ToleranceMet } from '../types.js';
 
 /** Full go-native report for one mode (formatNativeResult already includes per-stage + distribution). */
@@ -27,6 +28,10 @@ export function formatCurateReport(mode: string, result: OptimizeResult): string
       `hit ${pct(achieved.hitRate)}   max ${achieved.maxPayout.toLocaleString()}c   ` +
       `Σweight ${achieved.totalWeight.toLocaleString()}`,
   );
+  // Полный итог по КУРИРОВАННОЙ таблице — те же секции и единицы, что в
+  // сим-отчёте (RTP — доля стоимости раунда, Max Win в x, шкала волатильности
+  // casino_platform, взвешенная гистограмма по сим-бакетам).
+  lines.push('', ...formatCuratedResult(result));
 
   const failed = (Object.keys(toleranceMet) as (keyof ToleranceMet)[]).filter((k) => !toleranceMet[k]);
   lines.push(`  tolerance           : ${failed.length === 0 ? 'all met ✓' : `FAILED: ${failed.join(', ')} ✗`}`);
@@ -77,4 +82,60 @@ export function formatCurateReport(mode: string, result: OptimizeResult): string
   }
 
   return lines.join('\n');
+}
+
+/** Sim-style report computed from the curated weighted table (rows). */
+export function formatCuratedResult(result: OptimizeResult): string[] {
+  const { rows, stakeReport: sr } = result;
+  const cost = sr.costMultiplier || 1;
+
+  let totalW = 0;
+  let hitW = 0;
+  let sum = 0; // Σ w · x  (x = payout in bet-multiples)
+  let sumSq = 0; // Σ w · x²
+  let maxX = 0;
+  const edges: Array<[number, number, string]> = [
+    [0, 0, '0x'],
+    [0, 1, '>0-1x'],
+    [1, 5, '1-5x'],
+    [5, 20, '5-20x'],
+    [20, 100, '20-100x'],
+    [100, 500, '100-500x'],
+    [500, Infinity, '500x+'],
+  ];
+  const dist = new Array(edges.length).fill(0);
+  for (const r of rows) {
+    const w = r.weight;
+    const x = r.payoutCents / 100;
+    totalW += w;
+    sum += w * x;
+    sumSq += w * x * x;
+    if (x > 0) hitW += w;
+    if (x > maxX) maxX = x;
+    const bi = x <= 0 ? 0 : edges.findIndex(([lo, hi]) => x > lo && x <= hi);
+    dist[bi === -1 ? edges.length - 1 : bi] += w;
+  }
+  const mean = totalW > 0 ? sum / totalW : 0;
+  const variance = Math.max(0, (totalW > 0 ? sumSq / totalW : 0) - mean * mean);
+  const stddev = Math.sqrt(variance);
+  const cv = mean > 0 ? stddev / mean : 0;
+  const vol = classifyVolatility(cv);
+  const hit = totalW > 0 ? hitW / totalW : 0;
+
+  const lines: string[] = [
+    '  --- Curated Result ---',
+    `  Rows: ${rows.length.toLocaleString()}   Σweight: ${totalW.toLocaleString()}   Cost: ×${cost}`,
+    `  Total RTP: ${((mean / cost) * 100).toFixed(2)}%`,
+    `  Hit Frequency: ${(hit * 100).toFixed(2)}%`,
+    `  Max Win: ${maxX.toLocaleString()}x`,
+    `  Volatility: ${vol.score}/10 (${vol.label})   StdDev: ${stddev.toFixed(2)}   CV: ${cv.toFixed(2)}`,
+    '  Win Distribution (weighted):',
+  ];
+  for (let i = 0; i < edges.length; i++) {
+    if (!dist[i]) continue;
+    const p = totalW > 0 ? (dist[i] / totalW) * 100 : 0;
+    const bar = '█'.repeat(Math.max(0, Math.round(p / 2.5)));
+    lines.push(`    ${edges[i][2].padEnd(9)} ${p.toFixed(2).padStart(6)}% ${bar}`);
+  }
+  return lines;
 }

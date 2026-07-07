@@ -1,7 +1,7 @@
 // packages/platform-core/tests/game-spec/derive.test.ts
 import { describe, it, expect } from 'vitest';
 import {
-  toGameDefinition, toLuaPrelude, toModeMap, toMathModes, toPaytableView,
+  toGameDefinition, toSpinPrelude, toModeMap, toMathModes, toPaytableView,
 } from '../../src/game-spec';
 import type { GameSpec } from '../../src/game-spec';
 
@@ -52,13 +52,13 @@ describe('toGameDefinition', () => {
   });
 });
 
-describe('toLuaPrelude', () => {
-  const lua = toLuaPrelude(spec);
-  it('emits SYM index table and PAYTABLE', () => {
-    expect(lua).toMatch(/SYM\s*=\s*\{/);
-    expect(lua).toMatch(/A\s*=\s*1/);
-    expect(lua).toMatch(/PAYTABLE/);
-    expect(lua).toMatch(/\[3\]\s*=\s*5/);
+describe('toSpinPrelude', () => {
+  const spin = toSpinPrelude(spec);
+  it('emits SYM const group and threshold/payout arrays', () => {
+    expect(spin).toContain('const SYM = {');
+    expect(spin).toContain('A: 1');
+    expect(spin).toContain('const PAY_COUNTS: [int; 2] = [3, 4]');
+    expect(spin).toContain('const PAY_A: [float; 2] = [5.0, 20.0]');
   });
 });
 

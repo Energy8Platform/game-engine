@@ -4,11 +4,12 @@ import { genMathConfig } from '../src/codegen/mathConfig';
 describe('genMathConfig', () => {
   const s = genMathConfig({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });
 
-  it('is node-only (reads lua via node:fs), imports the model, exports a MathConfig with a modes block', () => {
+  it('is node-only (reads the .spin via node:fs), imports the model, exports a spin-runtime MathConfig with a modes block', () => {
     expect(s).toContain("import { readFileSync } from 'node:fs'");
-    expect(s).toContain("import { buildLuaScript } from '@energy8platform/platform-core/game-spec'");
+    expect(s).toContain("import { buildSpinScript } from '@energy8platform/platform-core/game-spec'");
     expect(s).toContain("import { model } from './src/game.spec'");
-    expect(s).toContain('luaScript: buildLuaScript(model');
+    expect(s).toContain('luaScript: buildSpinScript(model');
+    expect(s).toContain("runtime: 'spin'");
     expect(s).toContain('capMaxWin: model.spec.maxWin * 100');
     expect(s).toContain('export default');
     expect(s).not.toContain('?raw'); // node-only, not the browser dev.config

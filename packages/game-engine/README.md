@@ -2,7 +2,7 @@
 
 A casino game engine built on [PixiJS v8](https://pixijs.com/) and [@energy8platform/game-sdk](https://github.com/energy8platform/game-sdk). Provides scene management, responsive scaling, audio, state machines, tweens, UI components, and React integration for developing slot machines, card games, and other iGaming titles.
 
-> **Building on a different renderer?** The platform-specific bits (Lua engine, RTP simulation, DevBridge, branded loading screen, SDK session orchestration) live in the renderer-agnostic [`@energy8platform/platform-core`](../platform-core/README.md). `game-engine` is the Pixi front-end on top of it; Phaser, Three.js, and custom-engine consumers depend only on `platform-core`.
+> **Building on a different renderer?** The platform-specific bits (SpinML math runtime, RTP simulation, DevBridge, branded loading screen, SDK session orchestration) live in the renderer-agnostic [`@energy8platform/platform-core`](../platform-core/README.md). `game-engine` is the Pixi front-end on top of it; Phaser, Three.js, and custom-engine consumers depend only on `platform-core`.
 
 ---
 
@@ -23,7 +23,7 @@ A casino game engine built on [PixiJS v8](https://pixijs.com/) and [@energy8plat
 - [UI Components](#ui-components)
 - [Input](#input)
 - [Vite Configuration](#vite-configuration)
-- [Lua Engine](#lua-engine)
+- [Game Math (SpinML)](#game-math-spinml)
 - [DevBridge](#devbridge)
 - [React Integration](#react-integration)
 - [Debug](#debug)
@@ -42,8 +42,10 @@ npm install pixi.js @energy8platform/game-sdk @energy8platform/game-engine
 npm install @pixi/sound                           # Audio
 npm install @esotericsoftware/spine-pixi-v8       # Spine animations
 npm install react react-dom react-reconciler      # React integration
-npm install fengari                               # Lua engine (in dev/sim)
 ```
+
+The SpinML engine binaries (`e8`, `e8-server`) come with `platform-core`'s
+postinstall — no extra install step for math/dev/simulation.
 
 ```typescript
 // src/main.ts
@@ -95,7 +97,6 @@ bootstrap();
 | `@esotericsoftware/spine-pixi-v8` | `~4.2.0` | Optional — Spine animations |
 | `react`, `react-dom` | `>=18.0.0` | Optional — ReactScene |
 | `react-reconciler` | `>=0.29.0` | Optional — ReactScene (custom PixiJS reconciler) |
-| `fengari` | `^0.1.4` | Optional — Lua engine (peer of `platform-core`, install only if you use Lua locally) |
 
 `@energy8platform/platform-core` is a regular dependency (not a peer) — npm pulls it in automatically when you install `game-engine`.
 
@@ -111,8 +112,8 @@ import { Tween, Timeline, Easing, SpriteAnimation } from '@energy8platform/game-
 import { createReelSystem, resolveReelConfig, PRESETS } from '@energy8platform/game-engine/slot';
 import { DevBridge, FPSOverlay } from '@energy8platform/game-engine/debug';
 import { ReactScene, extendPixiElements, extendUIElements, useSDK, useViewport } from '@energy8platform/game-engine/react';
-import { defineGameConfig } from '@energy8platform/game-engine/vite';
-import { LuaEngine, ActionRouter } from '@energy8platform/game-engine/lua';
+import { defineGameConfig, spinPlugin } from '@energy8platform/game-engine/vite';
+import type { GameDefinition, ActionDefinition } from '@energy8platform/game-engine/lua'; // types only
 ```
 
 ---
@@ -399,7 +400,7 @@ SpineHelper.setSkin(spine, 'warrior');
 
 ## Slot Reels
 
-A fully-configurable reel system driven by a single typed `ReelSystemConfig`. Import from `@energy8platform/game-engine/slot`. **Presentation only** — the engine draws the boards you feed it; the outcome (math) always comes from your Lua/server.
+A fully-configurable reel system driven by a single typed `ReelSystemConfig`. Import from `@energy8platform/game-engine/slot`. **Presentation only** — the engine draws the boards you feed it; the outcome (math) always comes from your `.spin` script / server.
 
 > Try every knob interactively in the **[reel-lab playground](../../examples/reel-lab/)** — it tweaks the whole config live, triggers every feature, and copies the resulting config (TS/JSON) into your game.
 
@@ -832,67 +833,46 @@ export default defineGameConfig({
 
 ---
 
-## Lua Engine
+## Game Math (SpinML)
 
-Runs platform Lua game scripts in the browser via `fengari` (Lua 5.3, pure JS). Replicates server-side execution for development — no backend required.
+Game logic is a `.spin` script — a statically-typed, Lua-flavored DSL
+JIT-compiled to native code by the `e8` engine. In dev the Vite `spinPlugin`
+(injected by `defineGameConfig({ devBridge: true })`) spawns `e8-server`
+with hot reload; the same script runs in RTP simulation and in production.
 
-> The Lua engine, simulation runners, and game-definition types ship from [`@energy8platform/platform-core`](../platform-core/README.md). `game-engine` re-exports them at `@energy8platform/game-engine/lua` so existing import paths keep working.
+> The runtime, the Vite plugins, and the game-definition types ship from
+> [`@energy8platform/platform-core`](../platform-core/README.md) (a
+> transitive dep). `game-engine` re-exports `/vite` and the legacy `/lua`
+> **types** so existing import paths keep working. The fengari Lua engine
+> was removed in 0.28 — legacy Lua games stay on ≤ 0.27.x; see the
+> [migration guide](../../docs/lua-to-spin-migration.md).
+>
+> Language reference: [docs/spinml.md](../../docs/spinml.md).
 
 ### DevBridge Integration (recommended)
 
 ```typescript
-// dev.config.ts
-import luaScript from './game.lua?raw';
+// dev.config.ts — the field is still named luaScript: for the client
+// DevBridge it is only the "play via POST /__lua-play" marker (the route
+// is served by e8-server through spinPlugin).
+import mathScript from './src/game/script.spin?raw';
+import gameDefinition from './src/game/config.json';
 
 export default {
   balance: 5000,
   currency: 'USD',
-  luaScript,
-  gameDefinition: {
-    id: 'my-slot',
-    type: 'SLOT',
-    actions: {
-      spin: {
-        stage: 'base_game', debit: 'bet', credit: 'win',
-        transitions: [
-          { condition: 'free_spins_awarded > 0', creates_session: true, next_actions: ['free_spin'] },
-          { condition: 'always', next_actions: ['spin'] },
-        ],
-      },
-      free_spin: { stage: 'free_spins', debit: 'none', requires_session: true,
-        transitions: [{ condition: 'always', next_actions: ['free_spin'] }],
-      },
-    },
-    bet_levels: [0.2, 0.5, 1, 2, 5],
-  },
+  luaScript: mathScript,
+  gameDefinition,
 };
 ```
 
-### Standalone Usage
-
-```typescript
-const engine = new LuaEngine({ script: luaSource, gameDefinition, seed: 42 });
-const result = engine.execute({ action: 'spin', bet: 1.0 });
-// result: { totalWin, data, nextActions, session }
-engine.destroy();
-```
-
-### Platform API (`engine.*` in Lua)
-
-| Function | Description |
-| --- | --- |
-| `engine.random(min, max)` | Random integer `[min, max]` |
-| `engine.random_float()` | Random float `[0.0, 1.0)` |
-| `engine.random_weighted(weights)` | 1-based index from weight table |
-| `engine.shuffle(arr)` | Fisher-Yates shuffle, returns copy |
-| `engine.log(level, msg)` | Log (`"debug"`, `"info"`, `"warn"`, `"error"`) |
-| `engine.get_config()` | Returns `{id, type, bet_levels}` |
-
-**Features:** Action routing, transition evaluation (`>`, `>=`, `==`, `!=`, `&&`, `||`, `"always"`), session management (free spins, retriggers), cross-spin persistent state, max win cap, buy bonus, deterministic seeded PRNG (xoshiro128**).
+Actions, costs, and session transitions are declared inside the `.spin`
+(`action spin { … opens = free_spin count free_spins_awarded }`), not in the
+dev config — the scaffolded `config.json` is derived from `game.spec.ts`.
 
 ### RTP Simulation (CLI)
 
-Run the same Lua script from `dev.config.ts` through millions of iterations to verify math. The CLI ships with [`@energy8platform/platform-core`](../platform-core/README.md) (a transitive dep when you install `game-engine`):
+Run the same `.spin` from `dev.config.ts` through millions of iterations to verify math (wraps `e8 simulate`; for the publishable book pipeline use `e8-math` from `stake-math-tools`):
 
 ```bash
 # Regular spins (1M iterations, default)
@@ -901,25 +881,21 @@ npx platform-core-simulate
 # Buy bonus simulation
 npx platform-core-simulate --action buy_bonus
 
-# Ante bet (v5: regular action, not a params flag)
+# Ante bet (a regular action, not a params flag)
 npx platform-core-simulate --action ante_spin
 
 # Custom parameters
-npx platform-core-simulate --iterations 5000000 --bet 1 --seed 42 --config ./dev.config.ts
+npx platform-core-simulate --iterations 5000000 --bet 1 --seed <hex> --config ./dev.config.ts
 ```
 
-Output matches the platform's server-side simulation format:
+Output matches the old server-side simulation format, plus volatility and win-distribution sections:
 
 ```
-Starting simulation for my-slot (1000000 iterations, action: spin)...
-Progress: 100000/1000000 (10%)
-...
-
 --- Simulation Results ---
 Game: my-slot
 Action: spin
 Iterations: 1,000,000
-Duration: 45.2s
+Duration: 0.3s
 Total RTP: 96.48%
 Base Game RTP: 72.31%
 Bonus RTP: 24.17%
@@ -928,24 +904,28 @@ Max Win: 5234.50x
 Max Win Hits: 3 (rounds capped by max_win)
 Bonus Triggered: 4,521 (1 in 221 spins)
 Bonus Spins Played: 52,847
+--- Volatility ---
+Volatility: 6/10 (Medium-High)   StdDev: 12.40   CV: 12.85
 ```
 
-The CLI reads `luaScript` and `gameDefinition` from your `dev.config.ts` — the same config used for DevBridge. Programmatic usage:
+The CLI reads the script and `gameDefinition` from your `dev.config.ts` — the same config used for DevBridge. Programmatic usage:
 
 ```typescript
-import { SimulationRunner, formatSimulationResult } from '@energy8platform/game-engine/lua';
+import { NativeSimulationRunner, findE8Binary } from '@energy8platform/platform-core/simulation';
 
-const runner = new SimulationRunner({
-  script: luaSource,
+const runner = new NativeSimulationRunner({
+  binaryPath: findE8Binary()!,
+  argsPrefix: ['simulate'],
+  script: spinSource,
+  scriptExt: 'spin',
   gameDefinition,
   iterations: 1_000_000,
   bet: 1.0,
-  seed: 42,
-  onProgress: (done, total) => console.log(`${done}/${total}`),
+  rng: 'provably-fair',
 });
 
-const result = runner.run();
-console.log(formatSimulationResult(result));
+const result = await runner.run();
+console.log(formatNativeResult(result));
 ```
 
 ---
@@ -980,7 +960,7 @@ bridge.destroy();
 
 > With the Vite plugin (`devBridge: true`), DevBridge is injected automatically before your app entry point.
 
-> **Error codes & session contract.** In Lua mode, DevBridge emits the same `PLAY_ERROR` codes the platform does (`INVALID_AMOUNT`, `INSUFFICIENT_FUNDS`, `ACTIVE_SESSION_EXISTS`, `NO_ACTIVE_SESSION`, `SESSION_EXPIRED`, `ENGINE_ERROR`, …) — see the [platform-core DevBridge section](../platform-core/README.md#platform-parity-behavior-lua-mode) for the full table and the contract details (server-generated round IDs, `session.history`, `STATE_RESPONSE` shape, `creditPending` semantics).
+> **Error codes & session contract.** In server mode, DevBridge emits the same `PLAY_ERROR` codes the platform does (`INVALID_AMOUNT`, `INSUFFICIENT_FUNDS`, `ACTIVE_SESSION_EXISTS`, `NO_ACTIVE_SESSION`, `SESSION_EXPIRED`, `ENGINE_ERROR`, …) — see the [platform-core DevBridge section](../platform-core/README.md#platform-parity-behavior-server-mode) for the full table and the contract details (server-generated round IDs, `session.history`, `STATE_RESPONSE` shape, `creditPending` semantics).
 
 ---
 

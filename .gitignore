@@ -12,8 +12,10 @@ package-lock.json
 
 # Native simulation binaries (downloaded by postinstall or built from Go)
 bin/simulate-*
+bin/e8-*
 bin/simulation-*
 packages/*/bin/simulate-*
+packages/*/bin/e8-*
 packages/*/bin/simulation-*
 
 # Brainstorming visual companion

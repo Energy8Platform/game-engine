@@ -1,6 +1,6 @@
 # @energy8platform/platform-core
 
-Renderer-agnostic core for games on the Energy8 casino platform. Pair it with PixiJS, Phaser, Three.js, DOM, or your own engine — `platform-core` ships everything that is platform-specific (Energy8 SDK lifecycle, Lua game scripts, RTP simulation, mock host bridge for local dev, branded loading frame, Vite plugins) without dragging in a renderer.
+Renderer-agnostic core for games on the Energy8 casino platform. Pair it with PixiJS, Phaser, Three.js, DOM, or your own engine — `platform-core` ships everything that is platform-specific (Energy8 SDK lifecycle, the SpinML math runtime, RTP simulation, mock host bridge for local dev, branded loading frame, Vite plugins) without dragging in a renderer.
 
 If you want the full PixiJS engine on top of this, install [`@energy8platform/game-engine`](../game-engine/README.md) instead — it depends on `platform-core` and adds scenes, UI, animation, viewport, and React integration.
 
@@ -13,8 +13,8 @@ If you want the full PixiJS engine on top of this, install [`@energy8platform/ga
 - [Quick Start](#quick-start)
 - [Public API](#public-api)
 - [PlatformSession](#platformsession)
-- [Writing your game (config + Lua)](#writing-your-game-config--lua)
-- [Lua Engine](#lua-engine)
+- [Writing your game (spec + SpinML)](#writing-your-game-spec--spinml)
+- [SpinML Runtime (e8)](#spinml-runtime-e8)
 - [DevBridge (mock casino host)](#devbridge-mock-casino-host)
 - [RTP Simulation CLI](#rtp-simulation-cli)
 - [Branded Loading Screen](#branded-loading-screen)
@@ -29,7 +29,7 @@ If you want the full PixiJS engine on top of this, install [`@energy8platform/ga
 
 ## Why this package exists
 
-The Energy8 casino platform has a contract every game must speak: an SDK handshake, a play-action lifecycle, a Lua execution model used both server-side and locally for development and RTP verification, and a host-side branded loading frame.
+The Energy8 casino platform has a contract every game must speak: an SDK handshake, a play-action lifecycle, a SpinML execution model used both server-side and locally for development and RTP verification, and a host-side branded loading frame.
 
 That contract is identical regardless of how you render. So it lives here, with **zero rendering or DOM-coupled code** in the bundle (the only DOM API used is `window` in the dev-mode `MemoryChannel` and `document` in the CSS preloader — neither touches a canvas/WebGL).
 
@@ -40,15 +40,20 @@ You bring the renderer; `platform-core` brings the platform.
 ## Installation
 
 ```bash
-npm install @energy8platform/platform-core @energy8platform/game-sdk fengari
+npm install @energy8platform/platform-core @energy8platform/game-sdk
 ```
+
+Postinstall downloads the `e8` / `e8-server` engine binaries for your
+platform from the game-engine repo's GitHub Releases (tag `e8-v<version>`)
+into `platform-core/bin`. Overrides: `E8_BINARY` / `E8_SERVER_BINARY` (local
+build), `E8_RELEASE_REPO` / `E8_DOWNLOAD_BASE` (mirror). The download is
+non-fatal — without it, spin games need one of the overrides.
 
 ### Peer dependencies
 
 | Package | Version | Required |
 | --- | --- | --- |
 | `@energy8platform/game-sdk` | `^2.7.0` | Yes |
-| `fengari` | `^0.1.4` | Yes — Lua engine runtime |
 | `vite` | `^5.0.0 \|\| ^6.0.0` | Optional — only if you import `/vite` |
 
 No `pixi.js`, no `react`, no `phaser`, no DOM rendering library is required.
@@ -59,7 +64,10 @@ No `pixi.js`, no `react`, no `phaser`, no DOM rendering library is required.
 
 ```typescript
 import { createPlatformSession, createCSSPreloader, removeCSSPreloader } from '@energy8platform/platform-core';
-import luaScript from './game.lua?raw';
+// The .spin math source. The DevBridge field is still called `luaScript` —
+// for the client it is only the "play via POST /__lua-play" marker; the
+// route is served by e8-server through the `spinPlugin` vite plugin.
+import mathScript from './game/script.spin?raw';
 import { gameDefinition } from './gameDefinition';
 
 const container = document.getElementById('app')!;
@@ -70,7 +78,7 @@ createCSSPreloader(container);
 // 2. Boot the platform session — DevBridge in dev, real SDK in prod.
 const session = await createPlatformSession({
   dev: {
-    luaScript,
+    luaScript: mathScript,
     gameDefinition,
     balance: 10000,
     currency: 'EUR',
@@ -100,13 +108,10 @@ import {
   createPlatformSession, PlatformSession,
   type PlatformSessionConfig, type PlatformSessionEvents, type SDKOptions,
 
-  // Lua engine + simulation
-  LuaEngine, LuaEngineAPI, createSeededRng,
-  ActionRouter, evaluateCondition,
-  SessionManager, PersistentState,
-  SimulationRunner, formatSimulationResult,
-  ParallelSimulationRunner,
-  NativeSimulationRunner, findNativeBinary, formatNativeResult,
+  // Simulation types (runtime classes live in the Node-only /simulation
+  // sub-path: NativeSimulationRunner, findE8Binary, formatNativeResult)
+  type NativeSimulationConfig, type NativeSimulationResult,
+  type StageStats, type DistributionBucket,
 
   // DevBridge mock host
   DevBridge, type DevBridgeConfig,
@@ -119,16 +124,21 @@ import {
   // Internal utility
   EventEmitter,
 
-  // Platform types (re-exported from @energy8platform/game-sdk + Lua module)
+  // Platform types (re-exported from @energy8platform/game-sdk + legacy /lua types)
   type InitData, type GameConfigData, type SessionData,
   type PlayParams, type PlayResultData, type BalanceData,
   type GameDefinition, type ActionDefinition, type TransitionRule,
-  type LuaEngineConfig, type LuaPlayResult, type SessionConfig,
+  type SessionConfig,
   type BuyBonusConfig, type AnteBetConfig, type MaxWinConfig,
   type AssetManifest, type AssetBundle, type AssetEntry,
   type LoadingScreenConfig,
   // …more — see src/types.ts
 } from '@energy8platform/platform-core';
+
+// Game-spec derivation (spec → SpinML prelude → platform bundle):
+import {
+  defineGame, buildSpinScript, exportGameSpin,
+} from '@energy8platform/platform-core/game-spec';
 ```
 
 ---
@@ -186,122 +196,100 @@ In dev, set up the recorded rounds via [`DevBridge` replay mode](#replay-mode-hi
 const fs = await session.play({ action: 'free_spin', bet: triggeringBet, roundId: result.roundId });
 ```
 
-The platform validates `bet` against `bet_levels` and rejects `bet: 0`. No double debit happens — the action's `debit: 'none'` keeps the wallet still, and LuaEngine reads the actual session bet from server-side session state regardless of what the client sends. See [Game Development Guide §13.16](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full conventions list.
+The platform validates `bet` against `bet_levels` and rejects `bet: 0`. No double debit happens — session actions don't debit, and the engine reads the actual session bet from server-side session state regardless of what the client sends. See [Game Development Guide §13.16](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full conventions list.
 
 ---
 
-## Writing your game (config + Lua)
+## Writing your game (spec + SpinML)
 
-Each game on the Energy8 platform consists of two artefacts:
+Each game on the Energy8 platform consists of two sources:
 
-1. A **`GameDefinition`** (JSON-shaped) — platform metadata: id, type, bet levels, max-win cap, action map with stage transitions, optional buy-bonus / ante-bet config. **No game math here.**
-2. A **Lua script** — exports a single `execute(state)` function that owns *all* game math (reels, paylines, payouts, cascades, free spins, multipliers).
+1. A **game spec** (`src/game.spec.ts`, for scaffolded games) — symbols, paytable, bet levels, max win, modes, RTP targets. One source of truth; `GameDefinition`, the SpinML prelude, and the math-pipeline mode map are all derived from it via `/game-spec`.
+2. A **SpinML script** (`.spin`) — a statically-typed, Lua-flavored DSL that owns *all* game math **and** declares its actions, costs, and session transitions. JIT-compiled to native code by the `e8` engine.
 
-The same pair runs server-side in production and locally in dev / RTP simulations.
+The same `.spin` runs in dev (e8-server behind the Vite plugin), in RTP simulation (`e8 simulate`), and in production (the platform's `engine_mode: "spin"`).
 
-### Minimal slot — `dev.config.ts`
+### Minimal slot — `script.spin`
 
-```typescript
-import luaScript from './script.lua?raw';
-import type { GameDefinition } from '@energy8platform/platform-core';
+```spin
+record Vars { free_spins_awarded: int }
 
-const gameDefinition: GameDefinition = {
-  id: 'my-slot',
-  type: 'SLOT',
-  script_path: 'games/my-slot/script.lua',          // S3 key in production
-  bet_levels: [0.20, 0.50, 1.00, 2.00, 5.00],
-  max_win: { multiplier: 10000 },                    // cap = bet × 10000
+enum SpinData tag stage {
+  base_game { matrix: [[int]]  win_line: int }
+}
 
-  actions: {
-    spin: {
-      stage: 'base_game',
-      debit: 'bet',                                  // deducts the bet
-      credit: 'win',                                 // credits total_win
-      transitions: [
-        // Could branch into a free-spins session here. See full guide.
-        { condition: 'always', next_actions: ['spin'] },
-      ],
-    },
-  },
-};
+game "my-slot" {
+  bet_levels = [0.20, 0.50, 1.00, 2.00, 5.00]
+  max_win = 10000.0
+  vars = Vars
+  data = SpinData
+}
 
-export default {
-  balance: 10_000,
-  currency: 'EUR',
-  networkDelay: 200,
-  luaScript,
-  gameDefinition,
-};
-```
+action spin { stage = base_game  cost = 1.0 }
 
-### Minimal slot — `script.lua`
-
-```lua
-local SYMBOLS = { 'A', 'K', 'Q', 'J', '10', '9' }
 -- Payouts are *bet multipliers*. The platform scales by the player's
 -- actual bet on the way out — never multiply by bet inside the script.
-local PAYOUT  = { A = 50, K = 30, Q = 20, J = 10, ['10'] = 5, ['9'] = 2 }
+const PAYS: [float; 6] = [50.0, 30.0, 20.0, 10.0, 5.0, 2.0]
 
-function execute(state)
-    -- 3 columns × 3 rows of random symbols
-    local matrix = {}
-    for col = 1, 3 do
-        matrix[col] = {}
-        for row = 1, 3 do
-            matrix[col][row] = SYMBOLS[engine.random(1, #SYMBOLS)]
-        end
-    end
+fn execute(c: ctx, v: Vars) -> outcome {
+  let matrix: [[int]] = list()
+  for col in 0..3 {
+    let rows: [int] = list()
+    for row in 0..3 { push(rows, rng(c, 0, 5)) }
+    push(matrix, rows)
+  }
 
-    -- Pay out if all 3 symbols on the middle row match
-    local center = { matrix[1][2], matrix[2][2], matrix[3][2] }
-    local total_win = 0
-    if center[1] == center[2] and center[2] == center[3] then
-        total_win = PAYOUT[center[1]]
-    end
+  -- pay if all 3 middle-row symbols match
+  let a = matrix[0][1]
+  let win = 0.0
+  let line = 0
+  if a == matrix[1][1] && a == matrix[2][1] {
+    win = PAYS[a]
+    line = 1
+  }
 
-    return {
-        total_win = total_win,
-        data = { matrix = matrix, win_lines = total_win > 0 and { 2 } or {} },
-    }
-end
+  return outcome {
+    win: win,
+    vars: Vars { free_spins_awarded: 0 },
+    data: SpinData.base_game { matrix: matrix, win_line: line },
+  }
+}
 ```
 
-That's the entire contract: a stage to dispatch on (here just `base_game`) plus a `total_win` (a **bet multiplier**, not absolute currency) and an arbitrary `data` payload. The platform handles the rest — debit/credit (`real_win = bet × total_win`), balance updates, session lifecycle, cap enforcement. See [Game Development Guide §13.2](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md#13-conventions-and-best-practices) for the full convention.
+That's the entire contract: `outcome { win, vars, data }` — a bet-multiplier
+win, the typed persisted state, and a stage-tagged payload. The platform
+handles the rest — debit/credit (`real_win = bet × win`), balance updates,
+session lifecycle (from the `opens`/`extends`/`ends when` action
+declarations), cap enforcement.
+
+In dev, `dev.config.ts` carries the script source and the (spec-derived)
+`GameDefinition` — see [Quick Start](#quick-start).
 
 ### Full reference
 
-The mini-example above covers a base-game spin only. For everything else — free spins via `creates_session` + `next_actions`, retrigger logic, persistent meters across spins (`_persist_*`), buy-bonus and ante-bet configuration, table-game session models, the full `engine.*` Lua API, JSON-Schema input/output validation, deployment and S3 layout — see the comprehensive guide:
-
-- **[Game Development Guide](https://github.com/energy8platform/game-engine/blob/main/game_development_guide.md)** (1100+ lines)
-
-Key sections to start with: §2 (`GameDefinition` shape), §7 (Lua script), §8 (`engine.*` API), §15 (table games), §16 (persistent state).
+- **[SpinML language guide](../../docs/spinml.md)** — declarations, types, const groups, builtins, limits, simulation dialect.
+- **[Lua → SpinML migration](../../docs/lua-to-spin-migration.md)** — porting an existing game.
+- **[Game Development Guide](../../game_development_guide.md)** — the platform contract: `GameDefinition` shape, actions, deployment, S3 layout, table games.
 
 ---
 
-## Lua Engine
+## SpinML Runtime (e8)
 
-Run platform Lua scripts locally in Node or the browser via `fengari` (Lua 5.3, pure JS). This replicates server-side execution byte-for-byte, so the same script you ship to production also drives local development and RTP simulations.
+The math runtime is the Rust `e8` engine (SpinML → Cranelift JIT → native
+code), delivered as per-platform binaries by postinstall:
 
-```typescript
-import { LuaEngine } from '@energy8platform/platform-core';
+- **`e8`** — CLI: `check` (compile + type-check a `.spin`) and `simulate`
+  (Go-CLI-compatible dialect — same flags, JSON shape, and statistics as the
+  old simulate binary; ~4M rounds/sec per core).
+- **`e8-server`** — the round server. In dev the Vite `spinPlugin` spawns it
+  (`--sessions memory --watch`: hot-reloads the `.spin` on save, open rounds
+  finish on the old version). In production the platform talks to the same
+  domain API over gRPC — dev exercises the exact prod contract.
 
-const engine = new LuaEngine({
-  script: '<your lua source>',
-  gameDefinition: { /* … */ },
-  seed: 42,            // optional — deterministic RNG
-});
-
-const result = engine.execute({
-  variables: { bet: 1, balance: 5000 },
-  stage: 'base_game',
-});
-// → { total_win, data, next_actions, session, persistent_state }
-```
-
-Companion classes:
-- `ActionRouter` — dispatch a play request to the matching action and evaluate transition conditions (`&&`, `||`, comparisons, `"always"`).
-- `SessionManager` — track session lifecycle: creation, spin counting, retrigger, `_persist_` data roundtrip, completion. Supports both fixed-spin slot sessions and unlimited table sessions.
-- `PersistentState` — cross-spin persistent vars (`persistent_state.vars` and `_persist_game_*` convention).
+The old in-process classes (`LuaEngine`, `ActionRouter`, `SessionManager`,
+`SimulationRunner`) were removed with the fengari runtime — the engine now
+owns rounds, sessions, idempotency, and RNG. Legacy Lua games stay on
+platform-core ≤ 0.28.x; see the migration guide to move.
 
 ---
 
@@ -324,7 +312,8 @@ const bridge = new DevBridge({
     totalWin: Math.random() < 0.4 ? bet * 5 : 0,
   }),
 
-  // Or: hand it your Lua game logic (preferred — same code as prod)
+  // Or: hand it your .spin game math (preferred — same code as prod;
+  // served by e8-server via spinPlugin, the field name is legacy)
   // luaScript, gameDefinition, luaSeed,
 });
 
@@ -336,9 +325,9 @@ bridge.destroy();
 
 Most of the time you don't construct DevBridge yourself — `createPlatformSession({ dev: { … } })` does it for you.
 
-### Platform-parity behavior (Lua mode)
+### Platform-parity behavior (server mode)
 
-In Lua mode (`luaScript` + `gameDefinition`), DevBridge mirrors the server's `PlayRound` contract so error-handling code written against dev runs unchanged in prod. Invalid requests come back as `PLAY_ERROR` and the SDK's `play()` rejects with `SDKError(code, message)`:
+With `luaScript` + `gameDefinition` set (the field name is legacy — it carries the `.spin` source and marks "play via `POST /__lua-play`", served by e8-server through `spinPlugin`), DevBridge mirrors the server's `PlayRound` contract so error-handling code written against dev runs unchanged in prod. Invalid requests come back as `PLAY_ERROR` and the SDK's `play()` rejects with `SDKError(code, message)`:
 
 | code                    | when                                                     |
 |-------------------------|----------------------------------------------------------|
@@ -348,7 +337,7 @@ In Lua mode (`luaScript` + `gameDefinition`), DevBridge mirrors the server's `Pl
 | `ACTIVE_SESSION_EXISTS` | non-session action while a session is in progress        |
 | `NO_ACTIVE_SESSION`     | session-required action without an active session        |
 | `SESSION_EXPIRED`       | session past `gameDefinition.session_ttl` (default 24h)  |
-| `ENGINE_ERROR`          | Lua execution failed (debit is rolled back)              |
+| `ENGINE_ERROR`          | script execution failed (debit is rolled back)           |
 
 Other contract details DevBridge enforces:
 
@@ -356,7 +345,7 @@ Other contract details DevBridge enforces:
 - **`STATE_RESPONSE`** returns the last `PlayResultData` (with `session.history` populated) while a session is active and not yet completed, mirroring `GET /api/games/{id}/session`.
 - **`creditPending`** is `false` in the normal path. The wire flag means "wallet credit failed, queued for retry" — never "credit deferred until session completes".
 - **`session.history`** is appended on every session round (`{spinIndex, win, data}`), so the client can rebuild the screen after reload.
-- **`MapState` parity** — `multiplier`, `global_multiplier`, `free_spins_total`, `max_win_reached` are auto-injected into `result.data` from engine variables when the Lua script doesn't set them explicitly.
+- **`MapState` parity** — `multiplier`, `global_multiplier`, `free_spins_total`, `max_win_reached` are auto-injected into `result.data` from engine variables when the script doesn't set them explicitly.
 
 ### Replay mode (historical rounds)
 
@@ -391,28 +380,25 @@ The game reacts via a single flag — see [`session.isReplay`](#platformsession)
 
 ## RTP Simulation CLI
 
-`platform-core` ships a binary that runs your Lua script through millions of iterations to verify math and stage distributions. It picks up `luaScript` and `gameDefinition` from your `dev.config.ts` automatically.
+`platform-core` ships a dev CLI that runs your `.spin` through millions of iterations via `e8 simulate` to verify math and stage distributions. It picks up the script and `gameDefinition` from your `dev.config.ts` automatically. (For the full book-bundle pipeline — pool/curate/publish — use `e8-math` from `@energy8platform/stake-math-tools`.)
 
 ```bash
 # 1M spins (default)
 npx platform-core-simulate
 
-# Buy-bonus action (v5: just simulate the action by name)
+# Buy-bonus action (just simulate the action by name)
 npx platform-core-simulate --action buy_bonus
 
-# Ante bet — also a regular action in v5
+# Ante bet — also a regular action
 npx platform-core-simulate --action ante_spin
 
 # Custom: 5M iterations, custom config path
 npx platform-core-simulate --iterations 5000000 --bet 1 --config ./dev.config.ts
-
-# Force the JS runner (skip native binary)
-npx platform-core-simulate --js
 ```
 
 ### Reproducibility: seeds, RNG backend, and replay
 
-The native binary supports the same provably-fair seeding contract as the casino platform's `cmd/simulation` tool. Pass `--seed=<hex>` to reproduce a previous run bit-for-bit; if you omit it, the binary generates one and reports it in the output (`Master seed: …`) so you can rerun the exact distribution later.
+The engine keeps the provably-fair seeding contract of the old Go simulate tool. Pass `--seed=<hex>` to reproduce a previous run bit-for-bit (results are also **core-count independent** — the master seed derives 64 RNG lanes, `round % 64`); if you omit it, a seed is generated and reported (`Master seed: …`) so you can rerun the exact distribution later.
 
 ```bash
 # Reproducible run — supply the master seed yourself
@@ -420,12 +406,12 @@ npx platform-core-simulate \
   --iterations 1000000 \
   --seed 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
 
-# Fast PCG RNG — ~50× faster but diverges from production. Local iteration only;
+# Fast PCG RNG — faster but diverges from production. Local iteration only;
 # do NOT publish RTP numbers from --rng=fast.
 npx platform-core-simulate --rng fast
 
-# Replay a single round captured in `provably_fair_rounds`. Forces single-worker
-# deterministic execution. All three flags are required and require provably-fair RNG.
+# Replay a single round captured in `provably_fair_rounds`. All three flags
+# are required and require provably-fair RNG.
 npx platform-core-simulate \
   --iterations 1 \
   --replay-server-seed <hex> \
@@ -433,32 +419,24 @@ npx platform-core-simulate \
   --replay-nonce-start 42
 ```
 
-The result echoes `masterSeed`, `rngKind`, `workerSeeds[]` (per-worker server_seed sequence), and `replay` when in replay mode — all also surface on `NativeSimulationResult` for programmatic use. Hex seeds only apply to the native binary; the JS fallback uses an integer RNG seed (decimal `--seed=42`) and ignores hex strings with a warning.
+The result echoes `masterSeed`, `rngKind`, `workerSeeds[]`, and `replay` when in replay mode — all also surface on `NativeSimulationResult` for programmatic use. Output matches the old server-side simulation format field-for-field, plus stddev/CV, the 0–10 volatility score, and the win-distribution buckets.
 
-Output matches the platform's server-side simulation format. A native Go binary is downloaded for your OS via postinstall (`packages/platform-core/bin/simulate-*`) for high-throughput runs; if it isn't available, the JS / worker-thread runner is used as a fallback.
-
-Programmatic use:
+Programmatic use (Node-only sub-path):
 
 ```typescript
-import { ParallelSimulationRunner, NativeSimulationRunner, formatSimulationResult } from '@energy8platform/platform-core';
+import { NativeSimulationRunner, findE8Binary, formatNativeResult } from '@energy8platform/platform-core/simulation';
 
-const runner = new ParallelSimulationRunner({
-  script, gameDefinition,
-  iterations: 1_000_000,
-  workers: 8,
-});
-const result = await runner.run();
-console.log(formatSimulationResult(result));
-
-// Native runner with the full provably-fair contract:
 const native = new NativeSimulationRunner({
-  binaryPath, script, gameDefinition,
+  binaryPath: findE8Binary() ?? process.env.E8_BINARY!,
+  argsPrefix: ['simulate'],
+  script, scriptExt: 'spin', gameDefinition,
   iterations: 1_000_000, bet: 1,
   rng: 'provably-fair',                // default; use 'fast' for local iteration only
   seed: '00112233...eeff',             // hex master seed; omit to auto-generate
   // replay: { serverSeed, clientSeed, nonceStart },  // single-round reproduction
 });
 const r = await native.run();
+console.log(formatNativeResult(r));
 console.log(`Reproduce with seed=${r.masterSeed}, RTP=${r.totalRtp.toFixed(4)}%`);
 ```
 
@@ -518,22 +496,19 @@ The animated shimmer inside the SVG is pure CSS keyframes, so it appears in offl
 ```typescript
 // vite.config.ts (Phaser/Three/custom — full control over your config)
 import { defineConfig } from 'vite';
-import { devBridgePlugin, luaPlugin } from '@energy8platform/platform-core/vite';
+import { devBridgePlugin, spinPlugin } from '@energy8platform/platform-core/vite';
 
 export default defineConfig({
   plugins: [
     devBridgePlugin('./dev.config'),
-    luaPlugin('./dev.config'),
+    spinPlugin({ spinPath: './src/game/script.spin', gameId: 'my-slot' }),
   ],
 });
 ```
 
 What they do:
 - **`devBridgePlugin`** injects a virtual entry that boots `DevBridge` from your `./dev.config` *before* your real entry imports. Dev-only.
-- **`luaPlugin`**:
-  1. Lets you `import luaScript from './game.lua?raw'` — Vite returns the file contents.
-  2. Spins up a server-side `LuaEngine` and exposes `POST /__lua-play`. `DevBridge` calls this endpoint, so `fengari` only ever runs in Node and never ships to the browser bundle.
-  3. HMR-reloads the Lua engine when `*.lua` or `dev.config*` changes.
+- **`spinPlugin`** spawns `e8-server` (`--sessions memory --watch`) and exposes `POST /__lua-play` (the route name is the frozen DevBridge contract). The server owns rounds/sessions/idempotency — dev exercises the exact production domain API. Saving the `.spin` hot-reloads the math; open rounds finish on the old version. Binary resolution: `binPath` option → `E8_SERVER_BINARY` → `platform-core/bin` (postinstall) → `PATH`.
 
 If you're building a Pixi game, prefer `defineGameConfig` from `@energy8platform/game-engine/vite` — it wires both plugins for you and adds Pixi-flavored Vite defaults (chunk splitting, dedupe, etc.).
 
@@ -837,14 +812,16 @@ section, all three bar modes, theme/social toggles, viewport presets, and event 
 | Path | What's there |
 | --- | --- |
 | `@energy8platform/platform-core` | Everything — re-exports from all sub-paths |
-| `@energy8platform/platform-core/lua` | Browser-safe Lua engine surface: LuaEngine, ActionRouter, SessionManager, PersistentState, JS `SimulationRunner`, types |
-| `@energy8platform/platform-core/simulation` | **Node-only.** `NativeSimulationRunner` (Go binary) and `ParallelSimulationRunner` (worker_threads). Don't import from a browser bundle — the main entry and `/lua` deliberately exclude these so they can't be tree-shake-leaked. |
+| `@energy8platform/platform-core/game-spec` | `defineGame`, `validateSpec`, `toGameDefinition`, `toSpinPrelude`, `buildSpinScript`, `exportGameSpin` — the one-source-of-truth spec layer |
+| `@energy8platform/platform-core/lua` | **Types only** (GameDefinition, ActionDefinition, …). The fengari runtime was removed in 0.29 — legacy Lua games stay on ≤ 0.28.x |
+| `@energy8platform/platform-core/simulation` | **Node-only.** `NativeSimulationRunner` / `findE8Binary` / `formatNativeResult` (wraps `e8 simulate`). Don't import from a browser bundle |
 | `@energy8platform/platform-core/dev-bridge` | `DevBridge`, `DevBridgeConfig`, `ReplayConfig`, `ReplayLaunch` |
-| `@energy8platform/platform-core/vite` | `devBridgePlugin`, `luaPlugin` |
+| `@energy8platform/platform-core/vite` | `devBridgePlugin`, `spinPlugin` |
 | `@energy8platform/platform-core/loading` | `createCSSPreloader`, `setCSSPreloaderProgress`, `waitCSSPreloaderTap`, `removeCSSPreloader`, `buildLogoSVG`, `LOADER_BAR_MAX_WIDTH` |
-| `@energy8platform/platform-core/shell` | `createGameShell`, `removeGameShell` — branded renderer-agnostic DOM game shell (control bar, menu, settings, game info, buy bonus) |
+| `@energy8platform/platform-core/slot-result` | Slot result normalization helpers shared by scaffolded games |
+| `@energy8platform/platform-core/shell` | Moved to `@energy8platform/shell` (subpaths `/html`, `/pixi`) |
 
-The sub-paths exist for tree-shaking — pulling only `/lua` doesn't drag in DevBridge or vite types. The main entry is convenient for app-level code where size hardly matters.
+The sub-paths exist for tree-shaking — pulling only `/game-spec` doesn't drag in DevBridge or vite types. The main entry is convenient for app-level code where size hardly matters.
 
 ---
 

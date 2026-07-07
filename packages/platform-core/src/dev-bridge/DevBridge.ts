@@ -173,7 +173,7 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
  * the need for postMessage and iframes.
  *
  * When `luaScript` is set, play requests are sent to the Vite dev server
- * which runs LuaEngine in Node.js — no fengari in the browser.
+ * which runs LuaEngine in Node.js — no math in the browser.
  *
  * @example
  * ```ts
@@ -466,7 +466,7 @@ export class DevBridge {
         ? this._activeRoundId!
         : generateRoundId();
 
-      this.executeLuaOnServer({ action, bet, roundId: serverRoundId, params })
+      this.executeOnServer({ action, bet, roundId: serverRoundId, params })
         .then((result) => {
           this._lastPlayResult = result;
           this.updateSessionState(result);
@@ -561,7 +561,7 @@ export class DevBridge {
     return bet;
   }
 
-  private async executeLuaOnServer(params: PlayParams): Promise<PlayResultData> {
+  private async executeOnServer(params: PlayParams): Promise<PlayResultData> {
     const response = await fetch('/__lua-play', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

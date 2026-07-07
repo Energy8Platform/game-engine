@@ -23,8 +23,17 @@ export interface ModeMathConfig {
 
 export interface MathConfig {
   model: MathModel;
-  /** node-built: buildLuaScript(model, readFileSync(logic.lua)). */
+  /**
+   * The math source. Lua runtime: buildLuaScript(model, readFileSync(logic.lua)).
+   * Spin runtime: the raw .spin source (declarations live inside it — no prelude).
+   */
   luaScript: string;
+  /**
+   * Math runtime. 'spin' (default — the Rust e8 SpinML engine) is the only
+   * supported runtime; 'lua' is rejected with a migration hint (legacy games
+   * pin stake-math-tools <= 0.8.x).
+   */
+  runtime?: 'spin' | 'lua';
   /** Per-mode overrides keyed by Stake mode (e.g. BASE). Missing modes use seeded defaults. */
   modes?: Record<string, ModeMathConfig>;
 }

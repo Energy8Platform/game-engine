@@ -28,6 +28,17 @@ export interface NativeSimulationConfig {
   binaryPath: string;
   /** Lua script source code */
   script: string;
+  /**
+   * Extension of the temp script file (default 'lua'). The e8 SpinML engine
+   * takes 'spin' — the runner is otherwise runtime-agnostic: it writes the
+   * script, points config.script_path at it and spawns the binary.
+   */
+  scriptExt?: 'lua' | 'spin';
+  /**
+   * Args prepended before the flag args (default none). The e8 binary is a
+   * multi-command CLI — its Go-compatible mode is the `simulate` subcommand.
+   */
+  argsPrefix?: string[];
   /** Platform game definition */
   gameDefinition: GameDefinition;
   /** Number of iterations */
@@ -100,6 +111,14 @@ export interface NativeSimulationResult extends SimulationResult {
   workerSeeds?: string[];
   /** Echo of replay params when the run was in replay mode. */
   replay?: NativeReplayParams;
+  /** Round-win standard deviation (currency units). */
+  stddev?: number;
+  /** Coefficient of variation (stddev / mean round win). */
+  cv?: number;
+  /** Volatility score 0..10 (casino_platform classifyVolatility buckets). */
+  volatility?: number;
+  /** Volatility tier label (Low … Extreme). */
+  volatilityLabel?: string;
 }
 
 // ─── Go JSON output shape (snake_case) ──────────────────
@@ -136,6 +155,10 @@ interface GoSimulationOutput {
   rng_kind?: NativeRNGKind;
   master_seed?: string;
   worker_seeds?: string[];
+  stddev?: number;
+  cv?: number;
+  volatility?: number;
+  volatility_label?: string;
   replay?: {
     server_seed: string;
     client_seed: string;
@@ -190,7 +213,7 @@ export class NativeSimulationRunner {
   }
 
   async run(): Promise<NativeSimulationResult> {
-    const { binaryPath, script, gameDefinition, iterations, bet, action, params, seed, rng, replay, dump } = this.config;
+    const { binaryPath, script, scriptExt, argsPrefix, gameDefinition, iterations, bet, action, params, seed, rng, replay, dump } = this.config;
 
     if (replay && rng && rng !== 'provably-fair') {
       throw new Error(`Replay mode requires rng="provably-fair" (got rng="${rng}")`);
@@ -198,28 +221,28 @@ export class NativeSimulationRunner {
 
     const id = randomBytes(8).toString('hex');
     const tmpDir = tmpdir();
-    const luaPath = join(tmpDir, `sim-${id}.lua`);
+    const scriptPath = join(tmpDir, `sim-${id}.${scriptExt ?? 'lua'}`);
     const configPath = join(tmpDir, `sim-${id}.json`);
 
     try {
       // Write temp files
       await Promise.all([
-        writeFile(luaPath, script, 'utf-8'),
-        writeFile(configPath, JSON.stringify({ ...gameDefinition, script_path: luaPath }), 'utf-8'),
+        writeFile(scriptPath, script, 'utf-8'),
+        writeFile(configPath, JSON.stringify({ ...gameDefinition, script_path: scriptPath }), 'utf-8'),
       ]);
 
       // Build CLI args
       const args = buildNativeArgs({ configPath, iterations, bet, action, params, rng, seed, dump, replay });
 
       // Execute binary
-      const output = await this.exec(binaryPath, args);
+      const output = await this.exec(binaryPath, [...(argsPrefix ?? []), ...args]);
 
       // Parse JSON output
       const json: GoSimulationOutput = JSON.parse(output);
       return mapGoResult(json);
     } finally {
       // Cleanup temp files
-      await Promise.allSettled([unlink(luaPath), unlink(configPath)]);
+      await Promise.allSettled([unlink(scriptPath), unlink(configPath)]);
     }
   }
 
@@ -298,6 +321,10 @@ function mapGoResult(json: GoSimulationOutput): NativeSimulationResult {
     rngKind: json.rng_kind,
     masterSeed: json.master_seed,
     workerSeeds: json.worker_seeds,
+    stddev: json.stddev,
+    cv: json.cv,
+    volatility: json.volatility,
+    volatilityLabel: json.volatility_label,
     replay: json.replay
       ? {
           serverSeed: json.replay.server_seed,
@@ -318,42 +345,40 @@ function mapGoResult(json: GoSimulationOutput): NativeSimulationResult {
 // ─── Binary discovery ───────────────────────────────────
 
 /**
- * Search for a native simulation binary in standard locations.
- * Returns the absolute path if found, null otherwise.
+ * Search for the e8 SpinML engine binary (Rust) — same lookup discipline as
+ * findNativeBinary: env override → <pkg>/bin/e8-<platform>-<arch> → $PATH.
+ * Fetched by scripts/install-e8.mjs on postinstall.
  */
-export function findNativeBinary(baseDir?: string): string | null {
-  // 1. Explicit env var
-  const envPath = process.env.SIMULATE_BINARY;
+export function findE8Binary(baseDir?: string): string | null {
+  const envPath = process.env.E8_BINARY;
   if (envPath && isExecutable(envPath)) {
     return envPath;
   }
 
-  const platform = process.platform; // darwin, linux, win32
-  const nodeArch = process.arch; // arm64, x64
+  const platform = process.platform;
+  const nodeArch = process.arch;
   const goArch = nodeArch === 'x64' ? 'amd64' : nodeArch;
   const goPlatform = platform === 'win32' ? 'windows' : platform;
   const ext = platform === 'win32' ? '.exe' : '';
 
-  const names = [
-    `simulate-${goPlatform}-${goArch}${ext}`,
-    `simulation-${goPlatform}-${goArch}${ext}`,
-    `simulate${ext}`,
-    `simulation${ext}`,
-  ];
+  const names = [`e8-${goPlatform}-${goArch}${ext}`, `e8${ext}`];
 
-  // Search directories: user's project first, then this package's bin/
   const searchDirs: string[] = [];
   if (baseDir) searchDirs.push(baseDir);
-
-  // This package's root (where postinstall downloads the binary)
+  // Раскладки различаются: dist/simulation.esm.js → ../bin,
+  // src/simulation/*.ts (vitest/tsx) → ../../bin. Пробуем оба уровня.
   try {
-    const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-    if (!searchDirs.includes(pkgRoot)) searchDirs.push(pkgRoot);
+    const here = dirname(fileURLToPath(import.meta.url));
+    for (const up of ['..', '../..']) {
+      const root = join(here, up);
+      if (!searchDirs.includes(root)) searchDirs.push(root);
+    }
   } catch {
-    // fallback for CJS
     if (typeof __dirname !== 'undefined') {
-      const pkgRoot = join(__dirname, '..');
-      if (!searchDirs.includes(pkgRoot)) searchDirs.push(pkgRoot);
+      for (const up of ['..', '../..']) {
+        const root = join(__dirname, up);
+        if (!searchDirs.includes(root)) searchDirs.push(root);
+      }
     }
   }
 
@@ -364,32 +389,24 @@ export function findNativeBinary(baseDir?: string): string | null {
     }
   }
 
-  // Check $PATH
-  for (const bin of ['simulate', 'simulation']) {
-    try {
-      const cmd = platform === 'win32' ? `where ${bin}` : `which ${bin}`;
-      const result = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-      if (result) return result.split('\n')[0];
-    } catch {
-      // not found
-    }
+  try {
+    const cmd = platform === 'win32' ? 'where e8' : 'which e8';
+    const result = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+    if (result) return result.split('\n')[0];
+  } catch {
+    // not found
   }
 
   return null;
 }
 
-/**
- * Return the native binary path or throw a clear, install-guiding error.
- * The math pipeline is go-native only — NO JS fallback.
- *
- * @param finder - injectable finder for testability; defaults to findNativeBinary.
- */
-export function requireNativeBinary(finder: () => string | null = findNativeBinary): string {
+/** Return the e8 binary path or throw an install-guiding error. */
+export function requireE8Binary(finder: () => string | null = findE8Binary): string {
   const bin = finder();
   if (!bin) {
     throw new Error(
-      'native simulation binary not found — run `npm install` (platform-core fetches it via install-simulate). ' +
-      'The math pipeline is go-native only (no JS fallback).',
+      'e8 engine binary not found — run `npm install` (platform-core fetches it via install-e8), ' +
+      'or point E8_BINARY at a local build (casino-platform/e8/target/release/e8).',
     );
   }
   return bin;
@@ -444,6 +461,15 @@ export function formatNativeResult(result: NativeSimulationResult): string {
     `Max Win: ${result.maxWin.toFixed(2)}x`,
     `Max Win Cap Hits: ${result.maxWinHits}`,
   );
+
+  if (result.volatilityLabel !== undefined && result.cv !== undefined) {
+    lines.push(
+      '',
+      '--- Volatility ---',
+      `Volatility: ${result.volatility}/10 (${result.volatilityLabel})`,
+      `StdDev: ${(result.stddev ?? 0).toFixed(2)}   CV: ${result.cv.toFixed(2)}`,
+    );
+  }
 
   if (result.bonusTriggered > 0) {
     const frequency = Math.round(result.iterations / result.bonusTriggered);

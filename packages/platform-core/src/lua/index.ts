@@ -1,14 +1,7 @@
-// Browser-safe Lua engine surface. Only depends on `fengari`, no Node built-ins.
-//
-// For the Node-only runners (NativeSimulationRunner backed by a Go binary,
-// ParallelSimulationRunner backed by worker_threads), import from
-// `@energy8platform/platform-core/simulation` instead.
-export { LuaEngine } from './LuaEngine';
-export { LuaEngineAPI, createSeededRng } from './LuaEngineAPI';
-export { ActionRouter, evaluateCondition } from './ActionRouter';
-export { SessionManager } from './SessionManager';
-export { PersistentState } from './PersistentState';
-export { SimulationRunner, formatSimulationResult } from './SimulationRunner';
+// Shared game-definition types. The fengari Lua engine that used to live
+// here is GONE — the math runtime is SpinML (e8): dev rounds via spinPlugin
+// + e8-server, simulation via `e8 simulate` (stake-math-tools). Legacy Lua
+// games stay on platform-core <= 0.28.x.
 export type {
   GameDefinition,
   ActionDefinition,

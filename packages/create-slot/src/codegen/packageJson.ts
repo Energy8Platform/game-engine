@@ -14,6 +14,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     smoke: 'tsx smoke.ts',
     'export:e8': 'tsx export.e8.ts',
     sim: 'e8-math sim --config ./math.config.ts',
+    'math:smoke': 'e8-math sim --config ./math.config.ts --iterations 2000',
     pool: 'e8-math pool --config ./math.config.ts',
     curate: 'e8-math curate --config ./math.config.ts',
     math: 'e8-math all --config ./math.config.ts',

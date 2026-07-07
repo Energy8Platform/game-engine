@@ -12,8 +12,8 @@ This document describes everything required to build your own game on the Casino
 4. [Buy Bonus and Ante Bet](#4-buy-bonus-and-ante-bet)
 5. [Actions — defining game actions](#5-actions--defining-game-actions)
 6. [GameState: spin state](#6-gamestate-spin-state)
-7. [Lua Script: game logic](#7-lua-script-game-logic)
-8. [Lua API Reference](#8-lua-api-reference)
+7. [Game Script (SpinML): game logic](#7-game-script-spinml-game-logic)
+8. [SpinML API Reference](#8-spinml-api-reference)
 9. [Input/Output Validation (JSON Schema)](#9-inputoutput-validation-json-schema)
 10. [Client Integration (SDK)](#10-client-integration-sdk)
 11. [Deploying a Game](#11-deploying-a-game)
@@ -33,21 +33,31 @@ This document describes everything required to build your own game on the Casino
 The platform's game engine runs server-side. Each game consists of two parts:
 
 1. **JSON configuration** (`GameDefinition`) — a minimal set of platform fields: identifier, type, bet levels, limits, actions (transitions), buy bonus / ante bet.
-2. **Lua script** — all game logic: symbols, reels/grid, paylines, payouts, cascades, free spins, multipliers, and any other math.
+2. **Game script** — all game logic: symbols, reels/grid, paylines, payouts, cascades, free spins, multipliers, and any other math.
 
 The backend handles **math only** — graphics, animation, and sound stay on the client.
 
-### Architecture: Lua-only
+### Architecture: SpinML
 
-All games use a **single Lua engine**. The JSON configuration contains no game logic — only platform metadata and transition rules (actions/transitions). The Lua script exports a single `execute(state)` function that receives `state.action` and `state.stage` and implements all game math.
+New games are written in **SpinML** (`.spin`) — a statically-typed,
+Lua-flavored math DSL JIT-compiled to native code by the `e8` engine
+(`engine_mode: "spin"`). The script exports a single `execute` function and
+declares its actions, costs, and session transitions in the same file; the
+JSON configuration keeps only platform metadata. Full language guide:
+[docs/spinml.md](docs/spinml.md).
 
-> **Note**: The JSON Flow Executor (the `engine_mode: "json"` field, the `logic`/`steps` blocks, the built-in actions `spin_reels`, `evaluate_lines`, etc.) has been **removed**. The `engine_mode` field is no longer used.
+> **Legacy Lua**: games with `engine_mode: "lua"` (an `execute(state)`
+> function on the sandboxed gopher-lua engine) keep running until they are
+> migrated, but new games must use SpinML. Porting playbook:
+> [docs/lua-to-spin-migration.md](docs/lua-to-spin-migration.md).
+>
+> **Note**: The JSON Flow Executor (the `engine_mode: "json"` field, the `logic`/`steps` blocks, the built-in actions `spin_reels`, `evaluate_lines`, etc.) has been **removed**.
 
 ### Two game types
 
 | Type | `type` field | Description |
 |------|--------------|-------------|
-| **SLOT** | `"SLOT"` | Slots — classic and video. Symbol grid, reels, paylines, cascades, free spins. All logic in the Lua script. |
+| **SLOT** | `"SLOT"` | Slots — classic and video. Symbol grid, reels, paylines, cascades, free spins. All logic in the game script. |
 | **TABLE** | `"TABLE"` | Table games — blackjack, roulette, baccarat, etc. Multi-step rounds with arbitrary decision logic. → see §15 |
 
 ### Security model
@@ -58,13 +68,14 @@ The game loads inside an iframe. The client SDK communicates with the host via `
 
 ## 2. Game Configuration Structure (JSON)
 
-The configuration is a JSON file containing **only platform fields**. All game logic (symbols, reels, paylines, payouts, cascades, etc.) is defined in the Lua script.
+The configuration is a JSON file containing **only platform fields**. All game logic (symbols, reels, paylines, payouts, cascades, etc.) is defined in the game script.
 
 ```
 GameDefinition
 ├── id                          string        (required) Unique game identifier
 ├── type                        string        (required) Category: "SLOT" | "TABLE"
-├── script_path                 string        (required) S3 key for the Lua script (e.g. "games/my-game/script.lua")
+├── engine_mode                 string        (required for new games) "spin"; legacy Lua games use "lua"
+├── script_path                 string        (required) S3 key for the game script (e.g. "games/my-game/script.spin")
 │
 ├── actions                     map           (required) → see §5 (ActionDefinition)
 │
@@ -100,7 +111,8 @@ GameDefinition
 {
   "id": "my_slot",
   "type": "SLOT",
-  "script_path": "games/my-slot/script.lua",
+  "engine_mode": "spin",
+  "script_path": "games/my-slot/script.spin",
   "bet_levels": [0.20, 0.50, 1.00, 2.00, 5.00],
   "max_win": { "multiplier": 10000 },
   "actions": {
@@ -146,7 +158,7 @@ When the cap is reached:
 
 ## 4. Action-Driven Cost: Buy Bonus and Ante Bet (v5)
 
-Cost and feature data live **on the action itself** — there are no top-level `buy_bonus` / `ante_bet` blocks. Each "expensive spin" variant is just another action with its own `cost_multiplier` and (optionally) opaque `feature_data` exposed to the Lua script as `state.action_config.feature_data`.
+Cost and feature data live **on the action itself** — there are no top-level `buy_bonus` / `ante_bet` blocks. Each "expensive spin" variant is just another action with its own cost and (optionally) feature values readable by the script (SpinML: `cost = 1.25` / `feature { ante = 1 }` on the `action` declaration, read via `feat_int`; legacy Lua: `cost_multiplier` / `feature_data` in the JSON, read via `state.action_config.feature_data`).
 
 For the v4 → v5 migration table see [§14.1](#141-migration-v4--v5-action-driven-cost-apr-2026).
 
@@ -186,9 +198,9 @@ For the v4 → v5 migration table see [§14.1](#141-migration-v4--v5-action-driv
 |-------|-------------|
 | `debit: "bet"` | Always `"bet"` in v5. The cost is the multiplier on the action. |
 | `cost_multiplier` | Wallet debit = `bet × cost_multiplier`. With bet 1.00 and multiplier 100 → 100.00 is debited. Defaults to 1.0 when omitted. |
-| `feature_data` | Opaque action-specific config exposed to Lua as `state.action_config.feature_data`. The platform reads `feature_data.scatter_distribution` to roll `state.params.forced_scatter_count` automatically. |
+| `feature_data` | Opaque action-specific config exposed to the script (legacy Lua: `state.action_config.feature_data`; SpinML games declare `feature {}` on the action instead). The platform reads `feature_data.scatter_distribution` to roll `state.params.forced_scatter_count` automatically. |
 
-**What the Lua script gets on a buy bonus call:**
+**What the script gets on a buy bonus call:**
 - `state.action == "buy_bonus"` (or `"buy_bonus_super"` etc. — dispatch on the name, not on a parallel boolean flag)
 - `state.action_config.cost_multiplier == 100`
 - `state.action_config.feature_data == { scatter_distribution = ... }`
@@ -266,7 +278,7 @@ The single endpoint `POST /api/games/{id}/play` routes requests through the `act
 | `stage` | Stage name passed as `state.stage` when calling `execute(state)` |
 | `debit` | Debit mode: `"bet"` (debit = `bet × cost_multiplier`) or `"none"`/empty (no debit) |
 | `cost_multiplier` | Multiplier on `bet` when `debit: "bet"`. Defaults to 1.0. Use 100 for buy-bonus, 1.25 for ante, etc. |
-| `feature_data` | Opaque action-specific config (e.g. `scatter_distribution`). Exposed to Lua as `state.action_config.feature_data`. |
+| `feature_data` | Opaque action-specific config (e.g. `scatter_distribution`). Exposed to the script (legacy Lua: `state.action_config.feature_data`; SpinML: `feature {}` + `feat_int`). |
 | `credit` | When to credit the win: `"win"` (immediately), `"none"`, `"defer"` |
 | `requires_session` | Requires an active session (round_id) |
 | `transitions` | Conditional transitions after the stage runs |
@@ -305,11 +317,11 @@ type GameState struct {
     Variables map[string]float64 // "multiplier", "free_spins_awarded", "max_win_reached"
     TotalWin  float64
     Params    map[string]any     // Validated client parameters
-    Data      map[string]any     // Output data from the Lua script
+    Data      map[string]any     // Output data from the game script
 }
 ```
 
-The Lua script receives `state.variables` and `state.params` and returns a table that lands in `Data`. The `total_win` key in the returned table sets `TotalWin`; the `variables` key is merged into `Variables`.
+The script's return lands here: in SpinML, `outcome.win` sets `TotalWin`, `outcome.vars` becomes `Variables`, and the `data` enum variant's fields (plus its `stage` tag) become `Data`. In legacy Lua, the returned table's `total_win` sets `TotalWin`, `variables` is merged into `Variables`, and everything else goes to `Data`.
 
 Standard engine variables:
 
@@ -324,97 +336,106 @@ Standard engine variables:
 
 ---
 
-## 7. Lua Script: game logic
+## 7. Game Script (SpinML): game logic
+
+Full language guide — declarations, types, const groups, limits:
+[docs/spinml.md](docs/spinml.md). The contract in brief:
 
 ### Entry point
 
-The script exports an `execute(state)` function:
+The script exports a typed `execute` function and dispatches on the acting
+action:
 
-```lua
-function execute(state)
-    if state.stage == "base_game" then
-        return do_base_game(state)
-    elseif state.stage == "free_spins" then
-        return do_free_spins(state)
-    end
-end
-```
-
-### `state` shape
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `state.stage` | string | Stage name from the ActionDefinition |
-| `state.action` | string | Action name the client invoked (e.g. `"spin"`, `"buy_bonus"`, `"ante_spin"`). Use this to dispatch in v5 instead of parallel boolean params. |
-| `state.action_config` | table | Resolved action config: `{ cost_multiplier, feature_data }`. `cost_multiplier` defaults to 1; `feature_data` is the opaque map you put on the action (`scatter_distribution`, etc.). |
-| `state.params` | table | Validated client parameters plus platform-injected runtime values (e.g. `forced_scatter_count` rolled from `feature_data.scatter_distribution`). |
-| `state.variables` | table | Engine variables (bet, multiplier, free_spins_remaining) |
-
-### Returned table
-
-```lua
-return {
-    total_win = 15.5,           -- required: win as a multiplier of bet
-    variables = {               -- optional: update variables
-        free_spins_awarded = 10,
-        global_multiplier = 3,
-    },
-    -- everything else → state.Data (sent to the client)
-    matrix = {{1,2,3},{4,5,6}},
-    win_lines = {...},
-    scatter_count = 3,
+```spin
+fn execute(c: ctx, v: Vars) -> outcome {
+  if action_is(c, "free_spin") { return do_free_spin(c, v) }
+  if action_is(c, "buy_bonus") { return do_buy(c, v) }
+  return do_base(c, v)
 }
 ```
 
+`c: ctx` is the engine context (RNG, action info); `v: Vars` is the round's
+persisted state — a **typed record you declare**, not a free-form table.
+
+### Returned value
+
+```spin
+return outcome {
+  win: 15.5,                     -- required: win as a multiplier of bet
+  vars: Vars {                   -- required: full Vars record (persisted)
+    free_spins_awarded: 10,
+    retrigger_spins: 0,
+    max_win_reached: false,
+  },
+  data: SpinData.base_game {     -- required: this stage's output variant
+    grid: g,
+    win_lines: wl,
+    scatter_count: 3,
+  },
+}
+```
+
+All three fields are mandatory — forgetting the payout or the persist is a
+compile error. `data` is a stage-tagged enum variant: its fields are the
+exact payload the client receives, and the `stage` tag is written from the
+variant name.
+
 ### What the script defines
 
-All game logic is described inside the Lua script:
+Everything the old Lua script defined **plus** what used to live in the JSON
+config:
 
-- **Symbols**: ID table, wild/scatter/multiplier flags
-- **Grid size** (viewport): `local COLS = 6; local ROWS = 5`
-- **Reels / symbol weights**: reel strips or weight tables
-- **Paylines / Anywhere Pays**: lines and payout tables
-- **Scatters and free spins**: trigger and retrigger rules
-- **Cascades / Tumble**: remove, shift, refill
-- **Multipliers**: collection and application logic
-- **Buy bonus**: forced-scatter placement on the grid
+- **Declarations**: `game` (bet levels, max win), `action` blocks with
+  `cost`, `feature {}`, and the session rules `opens` / `extends` /
+  `ends when` (replaces JSON `actions.transitions`)
+- **Symbols / weights / paytable**: `const` arrays and const groups
+- **Grid, evaluation, cascades, multipliers, buy bonus**: plain functions
 
-### Sandbox
+### Execution model (replaces the Lua sandbox)
 
-- Allowed libraries: `base`, `table`, `string`, `math`
-- No access to `os`, `io`, `debug`, `loadfile`, `dofile`
-- Timeout: 5 seconds
-- VM pool (`sync.Pool`) for concurrent execution
+- Ahead-of-time compiled and type-checked (`e8 check`), then JIT-executed as
+  native code — there is no interpreter and no VM pool.
+- No I/O, no OS access — the only host calls are the RNG/context builtins.
+- **Fuel guard** instead of the 5-second timeout: a 50M-iteration budget per
+  round; runaway loops fail in microseconds. Recursion is rejected at
+  compile time.
 
 ---
 
-## 8. Lua API Reference
+## 8. SpinML API Reference
 
-The `engine` module is available globally:
+Builtins available to the script (first argument is always the `ctx`):
 
 | Function | Description |
 |----------|-------------|
-| `engine.random(min, max)` | Cryptographically secure random integer [min, max] |
-| `engine.random_float()` | Random number [0.0, 1.0) |
-| `engine.random_weighted(weights)` | 1-based index from a weights table `{w1, w2, ...}` |
-| `engine.shuffle(arr)` | Shuffle (Fisher-Yates, crypto RNG); returns a copy |
-| `engine.log(level, msg)` | Server log: `"debug"`, `"info"`, `"warn"`, `"error"` |
-| `engine.get_config()` | Table: `{id, type, bet_levels}` from the JSON config |
+| `rng(c, min, max)` | Cryptographically secure random integer [min, max] |
+| `rng_float(c)` | Random number [0.0, 1.0) |
+| `rng_weighted(c, weights)` | **0-based** index from an int-weight array |
+| `shuffle(c, arr)` | Fisher-Yates shuffle, **in place** |
+| `action_is(c, "name")` | True if the round was started by that action |
+| `feat_int(c, "f")` / `feat_float(c, "f")` | Read the acting action's `feature {}` values |
+| `input_int(c, "f")` / `input_float(c, "f")` | Validated player input (declared via `game.input`) |
+| `to_int` `to_float` `floor` `ceil` `min` `max` `abs` | Math (no implicit int↔float conversion) |
+| `list()` / `push(arr, v)` | Growable typed lists |
 
-> `engine.get_symbol()` has been removed. Symbols are defined directly inside the Lua script.
+> Migrating from Lua: `engine.random_weighted` was **1-based** and
+> `engine.shuffle` returned a copy — both differ here. Full mapping table:
+> [docs/lua-to-spin-migration.md](docs/lua-to-spin-migration.md).
 
 ### Usage examples
 
-```lua
--- Weighted symbol pick
-local SYMBOL_WEIGHTS = {5, 7, 9, 11, 14, 17, 20, 23, 26}
-local idx = engine.random_weighted(SYMBOL_WEIGHTS)  -- 1-based index
+```spin
+-- Weighted symbol pick (0-based index into a const table)
+const SYMBOL_WEIGHTS: [int; 9] = [5, 7, 9, 11, 14, 17, 20, 23, 26]
+let idx = rng_weighted(c, SYMBOL_WEIGHTS)
 
--- Random position
-local pos = engine.random(1, 30)
+-- Per-mode levers as const groups
+const FOX_FS = { wild: 219, symw: [4, 6, 9, 11, 13, 13, 13, 12, 12, 12] }
+let s = rng_weighted(c, FOX_FS.symw)
 
--- Shuffle a deck
-local deck = engine.shuffle({1, 2, 3, ..., 52})
+-- Random position / shuffle
+let pos = rng(c, 0, 29)
+shuffle(c, deck)
 ```
 
 ---
@@ -539,7 +560,8 @@ sdk.destroy();
 `result.data` is `GameState.Data` assembled by the engine:
 
 - For the JSON engine: auto-mapped from `Matrix`, `WinLines`, `AnywhereWins`, etc. via `MapState()`.
-- For the Lua engine: everything the script returned in its result table (except the special keys `total_win`, `free_spins`, `variables`).
+- For SpinML: the fields of the returned `data` enum variant, plus its `stage` tag.
+- For the legacy Lua engine: everything the script returned in its result table (except the special keys `total_win`, `free_spins`, `variables`).
 
 Use `output_schema` in the config to document the `data` structure of your game.
 
@@ -587,9 +609,9 @@ Content-Type: application/json
 
 Same flow — get a URL for each asset type (`ICON`, `BACKGROUND`, `SOUND_BUNDLE`) and upload the files.
 
-### Step 4: Lua script (when `engine_mode: "lua"` or hybrid)
+### Step 4: Game script
 
-Lua scripts live in S3 alongside the configuration. Get a presigned URL with `type="script"`:
+Game scripts live in S3 alongside the configuration. Get a presigned URL with `type="script"`:
 
 ```bash
 POST /api/v1/admin/games/{id}/upload-url
@@ -597,29 +619,29 @@ Content-Type: application/json
 
 {
   "type": "script",
-  "filename": "script.lua"
+  "filename": "script.spin"
 }
 ```
 
-Upload the `.lua` file to the URL:
+Upload the `.spin` file to the URL:
 
 ```bash
 PUT {presigned_url}
 Content-Type: application/octet-stream
 
-< my_game_script.lua
+< my_game_script.spin
 ```
 
-The script is stored in S3 at `games/{gameID}/script.lua`. In the configuration, set `script_path` to the matching S3 key:
+The script is stored in S3 at `games/{gameID}/script.spin`. In the configuration, set `engine_mode` and `script_path` to the matching S3 key:
 
 ```json
 {
-  "engine_mode": "lua",
-  "script_path": "games/my-game/script.lua"
+  "engine_mode": "spin",
+  "script_path": "games/my-game/script.spin"
 }
 ```
 
-> **Note**: if `script_path` is just a file name (e.g. `"script.lua"`), the platform automatically resolves it to `games/{gameID}/script.lua`. In dev mode (file-based config repo) scripts are still read from the local `scripts/` directory.
+> **Note**: if `script_path` is just a file name (e.g. `"script.spin"`), the platform automatically resolves it to `games/{gameID}/script.spin`. In dev mode (file-based config repo) scripts are still read from the local `scripts/` directory. Legacy Lua games follow the same flow with `engine_mode: "lua"` and a `.lua` key until they are ported.
 
 ### Step 5: Activation
 
@@ -629,15 +651,21 @@ Update the game's status to expose it in the client lobby.
 
 ## 12. Simulation and RTP Verification
 
-Before deploying, use the simulation CLI to verify the math model.
+Before deploying, verify the math model with `e8 simulate` (the `e8` binary
+ships with `@energy8platform/platform-core`; scaffolded projects wrap it in
+the `math:*` scripts / `e8-math` pipeline).
 
 ### Running
 
 ```bash
-go run cmd/simulation/main.go
+e8 simulate -config config.json -iterations 1000000 -action spin \
+  -rng provably-fair -seed <hex>
 ```
 
-> By default `cmd/simulation/main.go` hard-codes `configPath` and `iterations`. Adjust them for your game.
+Flags are compatible with the old Go simulate CLI (`-bet`, `-format json`,
+`-dump rounds.jsonl`, `-replay-*`); same-seed runs are bit-identical
+regardless of CPU core count. At ~4M rounds/sec per core, 100M-round runs
+are routine.
 
 ### Sample output
 
@@ -647,7 +675,7 @@ Starting simulation for piggy_gates (1000000 iterations)...
 --- Simulation Results ---
 Game: piggy_gates
 Iterations: 1000000
-Duration: 12.5s
+Duration: 0.3s
 Total RTP: 96.48%
 Base Game RTP: 72.31%
 Free Spins RTP: 24.17%
@@ -656,6 +684,8 @@ Max Win: 5234.50x
 Max Win Hits: 3 (rounds capped by max_win)
 Free Spins Triggered: 4521 (1 in 221 spins)
 Free Spins Played: 52847
+Volatility: 6/10 (Medium-High)   StdDev: 12.40   CV: 12.85
+Win Distribution: 0x / >0-1x / 1-5x / 5-20x / 20-100x / 100-500x / 500x+
 ```
 
 ### Metrics
@@ -685,13 +715,13 @@ Run at least **1,000,000** iterations for stable results.
 
 5. **Use `input_schema`** to validate client params (`PlayRequest.Params`) — guards against malformed requests.
 
-6. **Stage and action naming**: stages can be named freely (`"base_game"`, `"free_spins"`, `"bonus_pick"`, etc.). In Lua mode the script exports a single `execute(state)` and dispatches on `state.stage`. The `actions` block is **required** in the config (see §10.1).
+6. **Stage and action naming**: stages can be named freely (`"base_game"`, `"free_spins"`, `"bonus_pick"`, etc.). The script exports a single `execute` and dispatches on the acting action (`action_is(c, "...")`); each `action` declaration names its `stage`, which tags the output. Legacy Lua games dispatch on `state.stage` and require the `actions` block in the JSON config.
 
 7. **The global multiplier (`global_multiplier`)** is preserved across free spins via the Redis session. Use it for accumulating effects.
 
 8. **Cascades implement via a loop**: condition `"last_win_amount > 0"`, body — `remove_winning_symbols` → `shift_and_fill` → evaluate → `payout`.
 
-9. **Don't rely on Lua globals** between calls — VMs are reused from a pool.
+9. **No hidden state between calls.** Everything that must survive to the next spin goes through the returned `vars` (round/session scope) or `globals` (player scope) — in SpinML there is nowhere else to put it, which is the point. (Legacy Lua: don't rely on Lua globals — VMs are reused from a pool.)
 
 10. **Test via simulation** before deploying. Achieved RTP must match the declared `rtp` within ±0.5%.
 
@@ -701,40 +731,31 @@ Run at least **1,000,000** iterations for stable results.
 
 13. **For table games (TABLE) use the `_persist_` convention** — store complex structures (deck, player hands) in `state.Data` under `_persist_<name>` keys. The platform automatically saves them in Redis between actions (→ §21.2).
 
-14. **Table games are Lua-only**. The JSON engine targets slots; card/table-game logic is significantly more complex and requires full control via `execute(state)`.
+14. **Table games need full `execute` control.** Card/table logic is significantly more complex than slot shortcuts allow. Existing table games run on the legacy Lua path with the `_persist_` convention (§15); new table games model decision steps as session actions with typed `Vars`/`globals` and `game.input` for player choices.
 
-15. **Use `engine.*` RNG only — never `math.random`**. All randomness must come from `engine.random`, `engine.random_float`, `engine.random_weighted`, `engine.shuffle`. They are seeded by the platform (and by simulation runners) so that DevBridge plays, RTP simulations, and production all replay identically. `math.random` defeats determinism and can desync simulation results from production.
+15. **All randomness comes from the engine RNG.** In SpinML this is enforced by the language — `rng` / `rng_float` / `rng_weighted` / `shuffle` are the only sources, seeded by the platform (and simulation runners) so DevBridge plays, RTP simulations, and production replay identically. In legacy Lua, never use `math.random` — only `engine.*`.
 
-16. **Send the triggering bet for session continuations — not zero**. Inside an active session (free spins, feature spins, table follow-up actions), the client passes the **same bet that triggered the session** to `sdk.play({ action: 'free_spin', bet: triggeringBet, roundId })`. The platform validates `bet` against `bet_levels` and rejects requests with `bet: 0` or any value outside the allowed set. No double debit happens because the action definition carries `debit: 'none'` — the wallet doesn't move. LuaEngine reads the actual session bet from server-side session state regardless of what the client sends, so the value is mostly a formality, but it must be a valid bet level.
+16. **Send the triggering bet for session continuations — not zero**. Inside an active session (free spins, feature spins, table follow-up actions), the client passes the **same bet that triggered the session** to `sdk.play({ action: 'free_spin', bet: triggeringBet, roundId })`. The platform validates `bet` against `bet_levels` and rejects requests with `bet: 0` or any value outside the allowed set. No double debit happens because session actions don't debit — the wallet doesn't move. The engine reads the actual session bet from server-side session state regardless of what the client sends, so the value is mostly a formality, but it must be a valid bet level.
 
 17. **Transition conditions are deliberately simple**. The condition language supports numeric comparisons against `state.variables` (`free_spins_awarded > 0`, `bonus_tier == 2`), boolean combinators (`&&`, `||`), and the literal `"always"`. **All routing variables must be plain numbers**: `bonus_tier`, `spins_after`, `feature_spins_after`, `retrigger_spins`, `round_complete`. Don't try to gate transitions on nested data structures, strings, or `state.params` keys — return whatever you need from the script as a top-level numeric variable instead.
 
-18. **Treat the Lua return shape as a public renderer contract**. Whatever your script puts in the result table (matrix, win_lines, expansions, multipliers, scatter_count, …) becomes the protocol the client reads from `result.data`. Keep that shape in a TypeScript type or a JSON Schema right next to the Lua script, and assert it in unit tests so a math change doesn't silently break the renderer. Stable keys, stable units (bet multipliers throughout, never absolute amounts).
+18. **Treat the script's return shape as a public renderer contract**. Whatever `data` carries (matrix, win_lines, expansions, multipliers, scatter_count, …) becomes the protocol the client reads from `result.data`. In SpinML this contract is the declared `data` enum itself — typed, per-stage, compiler-checked — so keep the client's TypeScript type in sync with it. Stable keys, stable units (bet multipliers throughout, never absolute amounts).
 
 19. **`GameDefinition` is platform metadata, not renderer config**. Keep the JSON config focused on `id`, `type`, `bet_levels`, `max_win`, `actions` (with their `cost_multiplier` and `feature_data`), `persistent_state`, `session_ttl`. **Do not add asset manifests, UI element names, animation keys, sound IDs, or visual tuning numbers there** — those are the renderer's concern and live in renderer-specific files (e.g. for Pixi, the engine's `AssetManifest`). Mixing them in `GameDefinition` couples the server-side platform to a specific renderer.
 
-20. **Lua entry point: dispatch only, math elsewhere**. Keep `execute(state)` short — branch on `state.stage` and delegate to focused functions:
+20. **Entry point: dispatch only, math elsewhere**. Keep `execute` short — branch on the action and delegate to focused functions:
 
-    ```lua
-    function execute(state)
-        if state.stage == "base_game" then
-            -- v5: dispatch on action name, not on parallel boolean params.
-            if state.action == "buy_bonus" or state.action == "buy_bonus_super" then
-                return buy_free_spins(state)
-            end
-            if state.action == "ante_spin" then
-                return play_round(state, { ante = true })
-            end
-            return play_round(state)
-        elseif state.stage == "free_spins" then
-            return play_free_spin(state)
-        elseif state.stage == "feature_pick" then
-            return resolve_pick(state)
-        end
-    end
+    ```spin
+    fn execute(c: ctx, v: Vars) -> outcome {
+      if action_is(c, "free_spin") { return do_free_spin(c, v) }
+      if action_is(c, "buy_bonus") || action_is(c, "buy_bonus_super") {
+        return do_buy(c, v)
+      }
+      return do_base(c, v)   -- spin and ante_spin (ante via feat_int)
+    }
     ```
 
-    Internal helpers like `spin_grid`, `evaluate_grid`, `apply_multipliers`, `place_forced_scatters` keep individual responsibilities testable. The return table always has the same top-level keys: `total_win` (bet multiplier), `variables` (platform routing — numbers only), and visual payload (`matrix`, `win_lines`, etc.) as separate top-level fields.
+    Internal helpers like `spin_grid`, `evaluate_grid`, `apply_multipliers`, `place_forced_scatters` keep individual responsibilities testable — the compiler inlines them, so decomposition costs nothing at runtime. Every return is the same typed shape: `outcome { win, vars, data }`.
 
 ---
 
@@ -861,11 +882,24 @@ Need a `mega_bonus` for 1000× bet? Just declare another action — no platform 
 }
 ```
 
+## 14.2. Migration v5 → v6: SpinML (jul 2026)
+
+v6 introduces `engine_mode: "spin"` — the SpinML runtime (`e8` engine) that
+replaces Lua for new games. Declarations move out of the JSON config into the
+`.spin` script (actions, costs, feature data, session transitions), the
+script becomes statically typed, and simulation runs ~25× faster with the
+same CLI dialect and statistics.
+
+Existing Lua games keep running on `engine_mode: "lua"` until ported. The
+full porting playbook — language mapping, mechanical traps, validation
+protocol — is in [docs/lua-to-spin-migration.md](docs/lua-to-spin-migration.md);
+the language itself is documented in [docs/spinml.md](docs/spinml.md).
+
 ---
 
 ## 15. Table Games
 
-The platform supports **table games** — blackjack, roulette, baccarat, and others. Table games use `type: "TABLE"` and a Lua script for all logic.
+The platform supports **table games** — blackjack, roulette, baccarat, and others. Table games use `type: "TABLE"` and a game script for all logic. (The examples below show the legacy Lua path with its `_persist_` convention; new table games use SpinML session actions with typed `Vars`/`globals` and `game.input`.)
 
 ### Key differences from slots
 

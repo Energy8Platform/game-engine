@@ -16,6 +16,10 @@ export async function runCli(argv: string[]): Promise<void> {
   const cfg = await loadMathConfig(flags.config ?? './math.config.ts');
   let modes = resolveModes(cfg);
   if (flags.mode) modes = modes.filter((m) => m.mode === flags.mode);
+  // --iterations N: override every selected mode's sim size (smoke runs).
+  if (flags.iterations && Number.isFinite(flags.iterations)) {
+    modes = modes.map((m) => ({ ...m, sim: { ...m.sim, iterations: flags.iterations! } }));
+  }
 
   // Pool = raw per-round dump (input to curate). Out = curated Stake artifacts.
   const poolDir = resolve(process.cwd(), 'stake-math-pool');
@@ -67,12 +71,13 @@ export async function runCli(argv: string[]): Promise<void> {
   console.log(`\nDone. Stake artifacts in ${outDir}`);
 }
 
-export function parseFlags(argv: string[]): { config?: string; mode?: string; out?: string } {
-  const out: { config?: string; mode?: string; out?: string } = {};
+export function parseFlags(argv: string[]): { config?: string; mode?: string; out?: string; iterations?: number } {
+  const out: { config?: string; mode?: string; out?: string; iterations?: number } = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--config') out.config = argv[++i];
     else if (argv[i] === '--mode') out.mode = argv[++i];
     else if (argv[i] === '--out') out.out = argv[++i];
+    else if (argv[i] === '--iterations') out.iterations = parseInt(argv[++i], 10);
   }
   return out;
 }
