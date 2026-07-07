@@ -5,7 +5,7 @@
  * engine.
  *
  * Sub-paths for fine-grained imports:
- *   - `@energy8platform/platform-core/lua`        — Lua engine + simulation
+ *   - `@energy8platform/platform-core/lua`        — shared game-definition types
  *   - `@energy8platform/platform-core/dev-bridge` — DevBridge mock host
  *   - `@energy8platform/platform-core/vite`       — Vite plugins
  */
@@ -21,17 +21,11 @@ export type {
   SDKOptions,
 } from './PlatformSession';
 
-// ─── Lua ────────────────────────────────────────────────
-// LuaEngine and friends are available only via the /lua sub-path. We
-// don't re-export them as runtime values from the main entry because
-// `fengari` (the underlying Lua VM) is a CommonJS module — pulling it
-// in unconditionally breaks Vite dev-mode ESM resolution for any
-// consumer that doesn't actually use Lua in the browser. Use:
-//
-//   import { LuaEngine } from '@energy8platform/platform-core/lua';
-//
-// For Node-only RTP simulation (Go binary, worker_threads), import from
-// '@energy8platform/platform-core/simulation' instead.
+// ─── Math runtime ───────────────────────────────────────
+// The math runtime is SpinML (the Rust e8 engine): dev rounds via the
+// `spinPlugin` vite plugin + e8-server, simulation via `e8 simulate`
+// (see '@energy8platform/platform-core/simulation'). The fengari Lua
+// engine was removed — legacy Lua games stay on <= 0.28.x.
 
 // ─── DevBridge ──────────────────────────────────────────
 export { DevBridge } from './dev-bridge';

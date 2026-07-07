@@ -43,7 +43,7 @@ import { hasBooks, loadIndex, pickWeighted, readBook, type BookMode } from './bo
 
 /**
  * Thrown by `play` / `replay` when no curated books exist for the requested
- * mode. Task 3 catches this to fall back to LuaEngine. Distinct, catchable.
+ * mode. Task 3 catches this to fall back to a live e8 round. Distinct, catchable.
  */
 export class NoBooksError extends Error {
   public readonly mode: string;

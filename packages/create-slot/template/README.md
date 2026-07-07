@@ -4,8 +4,8 @@ Generated with `npm create @energy8platform/slot`. Built on @energy8platform gam
 
 ## Develop
 - `npm install`
-- `npm run dev` — runs the game in a browser (Vite + in-process DevBridge running your Lua)
-- Edit `src/game.spec.ts` (symbols/paytable/bet levels/actions) and `src/game/script.logic.lua` (math).
+- `npm run dev` — runs the game in a browser (Vite + DevBridge; math served by e8-server with `.spin` hot reload)
+- Edit `src/game.spec.ts` (symbols/paytable/bet levels/actions) and `src/game/script.spin` (math).
 - Swap placeholder art in `public/assets/` (see NAMING.md) and wire it in `src/slot/symbols.ts`.
 
 ## Verify

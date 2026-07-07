@@ -1,53 +1,37 @@
 import type { GameSpec, GameModel } from './types';
 import { defineGame } from './defineGame';
 
-/** Compose the self-contained Lua the platform runs: generated prelude ⧺ author logic. */
-export function buildLuaScript(model: GameModel, logicLua: string): string {
-  return model.luaPrelude + '\n' + logicLua;
+/** Compose the self-contained .spin: generated const prelude ⧺ author math. */
+export function buildSpinScript(model: GameModel, logicSpin: string): string {
+  return model.spinPrelude + '\n' + logicSpin;
 }
 
-/** The two E8-platform deliverables, keyed by their on-disk filenames. */
-export interface E8Bundle {
-  /** GameDefinition JSON — uploaded to S3 as `games/{id}/config.json`. */
+/** The spin-runtime platform deliverables, keyed by on-disk filenames. */
+export interface E8SpinBundle {
+  /** GameDefinition JSON (engine_mode=spin) — S3: games/{id}/config.json. */
   'config.json': string;
-  /** Self-contained Lua (prelude ⧺ logic) — uploaded to S3 as `games/{id}/script.lua`. */
-  'script.lua': string;
+  /** Self-contained SpinML (prelude ⧺ math) — S3: games/{id}/script.spin. */
+  'script.spin': string;
 }
 
 /**
- * Produce the E8 platform deliverables from one spec + the author's `script.logic.lua`.
- * The config carries `script_path` so the platform can locate the uploaded script; the script is
- * the prelude-prepended, self-contained source. Structurally validated before returning.
+ * Produce the spin-runtime deliverables from one spec + the author's
+ * `script.spin`. The platform routes engine_mode="spin" games to the e8
+ * engine; script_path points at the uploaded .spin.
  */
-export function exportGame(spec: GameSpec, opts: { logicLua: string }): E8Bundle {
+export function exportGameSpin(spec: GameSpec, opts: { logicSpin: string }): E8SpinBundle {
   const model = defineGame(spec);
-  const bundle: E8Bundle = {
-    'config.json': JSON.stringify(model.gameDefinition, null, 2),
-    'script.lua': buildLuaScript(model, opts.logicLua),
+  const config = {
+    ...(model.gameDefinition as unknown as Record<string, unknown>),
+    engine_mode: 'spin',
+    script_path: 'script.spin',
   };
-  validateE8Bundle(bundle);
-  return bundle;
-}
-
-/**
- * Structural (fengari-free) checks that catch the obvious ways an export is unusable before it
- * reaches the platform: malformed config, missing `script_path`/`actions`, or a script with no
- * `execute` entry point. A full boot check (running the script in a LuaEngine) is the caller's job.
- */
-export function validateE8Bundle(bundle: E8Bundle): void {
-  let config: Record<string, unknown>;
-  try {
-    config = JSON.parse(bundle['config.json']);
-  } catch (e) {
-    throw new Error(`E8 export: config.json is not valid JSON — ${(e as Error).message}`);
+  const script = buildSpinScript(model, opts.logicSpin);
+  if (!/fn\s+execute\s*\(/.test(script)) {
+    throw new Error('E8 spin export: script.spin does not define `fn execute(...)`');
   }
-  if (!config.id || typeof config.id !== 'string') throw new Error('E8 export: config.json missing "id"');
-  if (config.type !== 'SLOT' && config.type !== 'TABLE') throw new Error('E8 export: config.json "type" must be SLOT or TABLE');
-  if (!config.script_path) throw new Error('E8 export: config.json missing "script_path"');
-  if (!config.actions || typeof config.actions !== 'object' || Object.keys(config.actions as object).length === 0) {
-    throw new Error('E8 export: config.json has no actions');
-  }
-  if (!/function\s+execute\s*\(/.test(bundle['script.lua'])) {
-    throw new Error('E8 export: script.lua does not define a global `execute(state)` function');
-  }
+  return {
+    'config.json': JSON.stringify(config, null, 2),
+    'script.spin': script,
+  };
 }

@@ -28,7 +28,7 @@ import type { ${cascade ? 'CascadeStepData' : 'CellData'} } from '@energy8platfo
 import { deriveArrayFields, coerceLuaArrays } from '@energy8platform/stake-kit';
 import { spinSchema, type SpinDataRaw } from './schema';
 
-/** The game's typed play result. Extend with any fields your script.logic.lua returns. */
+/** The game's typed play result. Extend with any fields your script.spin returns. */
 export interface SpinData extends SlotSpinResultBase {
 ${dataShape}
 }

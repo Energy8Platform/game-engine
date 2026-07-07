@@ -1,6 +1,6 @@
 // packages/platform-core/tests/game-spec-hatches.test.ts
 import { describe, it, expect } from 'vitest';
-import { toLuaPrelude } from '../src/game-spec/derive';
+import { toSpinPrelude } from '../src/game-spec/derive';
 import type { GameSpec } from '../src/game-spec/types';
 
 const spec: GameSpec = {
@@ -16,15 +16,15 @@ const spec: GameSpec = {
 };
 
 describe('game-spec hatches', () => {
-  it('surfaces symbol value(s) into a VALUES Lua table', () => {
-    const p = toLuaPrelude(spec);
-    expect(p).toContain('VALUES = {');
-    expect(p).toContain('MULT = {2, 3, 5}');
-    expect(p).toContain('COIN = 100');
+  it('surfaces symbol value(s) into a VAL_<ID> spin consts', () => {
+    const p = toSpinPrelude(spec);
+    expect(p).toContain('const VAL_');
+    expect(p).toContain('const VAL_MULT: [int; 3] = [2, 3, 5]');
+    expect(p).toContain('const VAL_COIN: int = 100');
   });
 
   it('omits VALUES when no symbol carries a value', () => {
-    const p = toLuaPrelude({ ...spec, symbols: [{ id: 'H1', kind: 'high', pay: { 3: 10 } }] });
-    expect(p).not.toContain('VALUES');
+    const p = toSpinPrelude({ ...spec, symbols: [{ id: 'H1', kind: 'high', pay: { 3: 10 } }] });
+    expect(p).not.toContain('const VAL_');
   });
 });

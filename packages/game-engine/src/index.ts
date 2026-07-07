@@ -73,9 +73,9 @@ export type { DevBridgeConfig, ReplayConfig, ReplayLaunch } from '@energy8platfo
 export { FPSOverlay } from './debug/FPSOverlay';
 
 // ─── Lua ────────────────────────────────────────────────
-// Lua module is Node.js only (fengari). Use the sub-path import:
+// (математика — SpinML/e8; fengari удалён из platform-core)
 //   import { LuaEngine } from '@energy8platform/game-engine/lua'
-// Re-export only types (zero runtime cost, no fengari in browser bundle).
+// (математика — SpinML/e8; fengari удалён из platform-core)
 export type {
   GameDefinition,
   ActionDefinition,

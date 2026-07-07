@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildNativeArgs, requireNativeBinary } from '../src/simulation/NativeSimulationRunner';
+import { buildNativeArgs, requireE8Binary } from '../src/simulation/NativeSimulationRunner';
 
 describe('NativeSimulationRunner dump', () => {
   it('adds -dump <path> to the args when dump is set', () => {
@@ -13,9 +13,9 @@ describe('NativeSimulationRunner dump', () => {
   });
 });
 
-describe('requireNativeBinary', () => {
+describe('requireE8Binary', () => {
   it('throws a helpful error when no binary is found', () => {
     // inject a finder that always returns null to force the not-found path
-    expect(() => requireNativeBinary(() => null)).toThrow(/native simulation binary/i);
+    expect(() => requireE8Binary(() => null)).toThrow(/e8 engine binary/i);
   });
 });

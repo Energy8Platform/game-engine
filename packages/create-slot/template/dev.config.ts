@@ -1,6 +1,9 @@
-import { buildLuaScript } from '@energy8platform/platform-core/game-spec';
+import { buildSpinScript } from '@energy8platform/platform-core/game-spec';
 import { model } from './src/game.spec';
-import logic from './src/game/script.logic.lua?raw';
+// Математика — SpinML: в деве раунды ведёт e8-server (vite-плагин spinPlugin
+// из defineGameConfig). Для клиентского DevBridge luaScript — лишь маркер
+// «играть через POST /__lua-play»; исполняет всегда сервер.
+import logic from './src/game/script.spin?raw';
 
 export default {
   balance: 100000,
@@ -8,6 +11,6 @@ export default {
   networkDelay: 80,
   debug: true,
   gameDefinition: model.gameDefinition,
-  luaScript: buildLuaScript(model, logic),
+  luaScript: buildSpinScript(model, logic),
   luaSeed: 12345,
 };

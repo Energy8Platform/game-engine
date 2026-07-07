@@ -12,7 +12,7 @@
  *   createHarness({ plugins: [ stakeRgsPlugin({ config: './math.config.ts', booksDir: 'stake-math' }) ] });
  */
 
-export { stakeRgsPlugin, runLuaRound } from './plugin';
+export { stakeRgsPlugin, runSpinRound } from './plugin';
 export type { StakeRgsPluginOptions } from './plugin';
 
 export { createDevRgs, NoBooksError } from './dev-rgs';

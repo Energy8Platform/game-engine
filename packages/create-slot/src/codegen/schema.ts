@@ -11,7 +11,7 @@ export function genSchema(a: Answers): string {
     wins: z.array(z.object({}).passthrough()).optional(),`;
   return `import { z } from 'zod';
 
-/** The inner Lua "data" table your script.logic.lua returns (the engine nests it under result.data).
+/** The inner "data" value your script.spin returns (the engine nests it under result.data).
  * Edit these fields to match your math. Array fields MUST stay z.array(...) so Lua {} coerces to []. */
 export const spinSchema = z.object({
   total_win: z.number().optional(),

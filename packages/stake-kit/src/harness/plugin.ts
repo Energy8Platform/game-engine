@@ -3,7 +3,7 @@
  *
  * It contributes only the Stake-specific play backend: the dev-RGS mounted at
  * `/__rgs/*` (the 6 Stake RGS endpoints + dev balance/currency setters), backed
- * by the curated e8-math books with a LuaEngine fallback for book-less modes,
+ * by the curated e8-math books with a live-e8-round fallback for book-less modes,
  * plus a `describe()` that tells the harness core how to launch the iframe and
  * what modes to offer in Replay.
  *
@@ -14,11 +14,14 @@
  * dev server. Never pulled into the browser stake-kit bundle.
  */
 
-import { resolve as resolvePath } from 'node:path';
+import { resolve as resolvePath, join } from 'node:path';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { findE8Binary } from '@energy8platform/platform-core/simulation';
 
 import { API_MULTIPLIER, CURRENCY_META } from '@energy8platform/stake-bridge';
 import type { RGSPlayResponse } from '@energy8platform/stake-bridge';
-import { LuaEngine } from '@energy8platform/platform-core/lua';
 import type {
   HarnessBackend,
   HarnessBackendInfo,
@@ -88,59 +91,46 @@ function costForAction(cfg: HarnessMathConfig, action: string): number {
   return cfg.model.spec.actions?.[action]?.cost ?? 1;
 }
 
-/** Shape of a single LuaEngine.execute() result we read in the session loop. */
-interface LuaExecResult {
-  totalWin?: number;
-  data?: Record<string, unknown>;
-  nextActions?: string[];
-  session?: { completed?: boolean } | null;
-}
-
-/** Minimal LuaEngine surface the session loop needs (keeps runLuaRound unit-testable). */
-interface LuaRunner {
-  execute(state: { action: string; bet: number }): LuaExecResult;
-}
-
 /**
- * Drive the game's Lua as ONE round and collect every spin into a `events` array (the kitsune
- * full-event book shape), so a bonus bought/triggered in a no-books game plays out
- * segment-by-segment in the harness. (Unchanged from the pre-split harness.)
+ * Play ONE live round through the e8 SpinML engine and collect every spin
+ * into a book-shaped `events` array — the no-books fallback plays a bonus
+ * out segment-by-segment exactly like a curated book would.
  */
-export function runLuaRound(
-  engine: LuaRunner,
+export function runSpinRound(
+  spinScript: string,
+  gameId: string,
   triggerAction: string,
   betMajor: number,
 ): { payoutCents: number; events: Array<Record<string, unknown>> } {
-  const events: Array<Record<string, unknown>> = [];
-  let runningWinX = 0; // accumulated bet-MULTIPLIER across collected spins
-
-  const pushSpin = (action: string, result: LuaExecResult): void => {
-    const completed = !!result.session?.completed;
-    const callWinX = betMajor > 0 ? (result.totalWin ?? 0) / betMajor : 0;
-    const winX = completed ? callWinX - runningWinX : callWinX;
-    runningWinX += winX;
-    const isFs = action === 'free_spin';
-    const spin: Record<string, unknown> = { ...(result.data ?? {}), total_win: winX };
-    events.push({ type: isFs ? 'free_spin' : 'spin', spin });
-  };
-
-  let result = engine.execute({ action: triggerAction, bet: betMajor });
-  pushSpin(triggerAction, result);
-
-  let guard = 100_000;
-  while (
-    result.session &&
-    !result.session.completed &&
-    result.nextActions &&
-    result.nextActions.length > 0 &&
-    guard-- > 0
-  ) {
-    const nextAction = result.nextActions[0];
-    result = engine.execute({ action: nextAction, bet: betMajor });
-    pushSpin(nextAction, result);
+  const e8 = findE8Binary();
+  if (!e8) {
+    throw new Error('stake-rgs: e8 engine binary not found for the no-books fallback (npm install fetches it, or set E8_BINARY)');
   }
-
-  return { payoutCents: Math.round(runningWinX * 100), events };
+  const dir = mkdtempSync(join(tmpdir(), 'rgs-spin-'));
+  const scriptPath = join(dir, 'game.spin');
+  const cfgPath = join(dir, 'cfg.json');
+  const dumpPath = join(dir, 'round.jsonl');
+  try {
+    writeFileSync(scriptPath, spinScript);
+    writeFileSync(cfgPath, JSON.stringify({ id: gameId, script_path: scriptPath }));
+    execFileSync(
+      e8,
+      ['simulate', '-config', cfgPath, '-iterations', '1', '-bet', String(betMajor || 1),
+       '-format', 'json', '-action', triggerAction, '-rng', 'fast', '-dump', dumpPath],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const rec = JSON.parse(readFileSync(dumpPath, 'utf8').split('\n')[0]) as {
+      total_win_x: number;
+      spins: Array<{ stage: string; win_x: number; data?: Record<string, unknown> }>;
+    };
+    const events = rec.spins.map((sp) => ({
+      type: sp.stage === 'free_spins' ? 'free_spin' : 'spin',
+      spin: { ...(sp.data ?? {}), total_win: sp.win_x },
+    }));
+    return { payoutCents: Math.round(rec.total_win_x * 100), events };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -173,9 +163,8 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
     return cfgPromise;
   }
 
-  // One DevRgs + one LuaEngine per dev-server run (created on first RGS request).
+  // One DevRgs per dev-server run (created on first RGS request).
   let devRgs: DevRgs | null = null;
-  let luaEngine: LuaEngine | null = null;
 
   async function ensure(currency: string): Promise<{ devRgs: DevRgs; luaPlay: LuaPlay }> {
     const cfg = await loadConfig();
@@ -190,25 +179,12 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
       });
     }
 
-    if (!luaEngine) {
-      try {
-        luaEngine = new LuaEngine({
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          gameDefinition: cfg.model.gameDefinition as any,
-          script: cfg.luaScript,
-          allowSessionlessActions: true,
-        });
-      } catch {
-        luaEngine = null;
-      }
-    }
-
     const luaPlay: LuaPlay = async ({ mode, amount }): Promise<RGSPlayResponse> => {
-      if (!luaEngine) throw new Error('stake-rgs: LuaEngine unavailable for no-books fallback');
       const betMajor = amount / API_MULTIPLIER;
       const triggerAction = actionForMode(cfg, mode);
       const cost = costForAction(cfg, triggerAction);
-      const { payoutCents, events } = runLuaRound(luaEngine, triggerAction, betMajor);
+      // живой раунд через e8 (rng fast, недетерминированный — дев-фолбэк)
+      const { payoutCents, events } = runSpinRound(cfg.luaScript, cfg.model.spec.id, triggerAction, betMajor);
       return devRgs!.playWithOutcome(mode, amount, { payoutCents, state: { events }, cost });
     };
 
@@ -221,19 +197,16 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
     configureServer(ctx: HarnessServerContext): void {
       server = ctx.server;
 
-      // Hot-reload the game logic: editing the Lua / math config drops the cached config +
-      // LuaEngine so the next play runs fresh code, then reloads the iframe. (In harness mode
-      // the DevBridge/luaPlugin — which normally does this — is off.) The dev-RGS balance is
-      // kept; it doesn't depend on the Lua logic.
+      // Hot-reload the game logic: editing the .spin / math config drops the
+      // cached config so the next play runs fresh code, then reloads the
+      // iframe. The dev-RGS balance is kept; it doesn't depend on the math.
       ctx.watchReload(
         (f) =>
-          f.endsWith('.lua') ||
+          f.endsWith('.spin') ||
           f.includes('math.config') ||
-          f.includes('script.logic') ||
           f.includes('game.spec'),
         () => {
           cfgPromise = null;
-          luaEngine = null;
         },
       );
 

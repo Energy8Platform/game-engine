@@ -76,30 +76,53 @@ export function toGameDefinition(spec: GameSpec): GameDefinition {
   return def;
 }
 
-function luaTable(record: Record<number, number>): string {
-  const parts = Object.entries(record).map(([k, v]) => `[${k}]=${v}`);
-  return `{${parts.join(', ')}}`;
+/** Число с гарантированной float-формой для SpinML (10 → "10.0"). */
+function spinF(n: number): string {
+  return Number.isInteger(n) ? `${n}.0` : String(n);
 }
 
-export function toLuaPrelude(spec: GameSpec): string {
+/**
+ * The generated .spin prelude: SPEC/SYM as const groups,
+ * SYMBOLS as a str array, the paytable as indexable threshold/payout arrays
+ * (PAY_COUNTS + PAY_<ID>, 0.0 = no pay at that threshold), VALUES as
+ * VAL_<ID>. Prepended to the author's script.spin by buildSpinScript.
+ */
+export function toSpinPrelude(spec: GameSpec): string {
   const lines: string[] = ['-- AUTO-GENERATED from game.spec.ts — do not edit'];
-  lines.push(`SPEC = { cols = ${spec.grid.cols}, rows = ${spec.grid.rows}, max_win = ${spec.maxWin} }`);
+  lines.push(
+    `const SPEC = { cols: ${spec.grid.cols}, rows: ${spec.grid.rows}, cells: ${spec.grid.cols * spec.grid.rows}, max_win: ${spinF(spec.maxWin)} }`,
+  );
 
   const symNames = spec.symbols.map((s) => `"${s.id}"`).join(', ');
-  lines.push(`SYMBOLS = { ${symNames} }`);
+  lines.push(`const SYMBOLS: [str; ${spec.symbols.length}] = [${symNames}]`);
+  lines.push(`const N_SYMBOLS: int = ${spec.symbols.length}`);
 
-  const symIndex = spec.symbols.map((s, i) => `${s.id}=${i + 1}`).join(', ');
-  lines.push(`SYM = { ${symIndex} }`);
+  const symIndex = spec.symbols.map((s, i) => `${s.id}: ${i + 1}`).join(', ');
+  lines.push(`-- 1-based индексы символов (порядок SYMBOLS)`);
+  lines.push(`const SYM = { ${symIndex} }`);
 
-  const payEntries = spec.symbols
-    .filter((s) => s.pay)
-    .map((s) => `  ${s.id} = ${luaTable(s.pay as Record<number, number>)}`);
-  lines.push(`PAYTABLE = {\n${payEntries.join(',\n')}\n}`);
+  const paying = spec.symbols.filter((s) => s.pay);
+  if (paying.length) {
+    const counts = Array.from(
+      new Set(paying.flatMap((s) => Object.keys(s.pay as Record<number, number>).map(Number))),
+    ).sort((a, b) => a - b);
+    lines.push(`-- пейтейбл: пороги count + выплата на порог (0.0 = нет выплаты)`);
+    lines.push(`const PAY_COUNTS: [int; ${counts.length}] = [${counts.join(', ')}]`);
+    for (const s of paying) {
+      const pay = s.pay as Record<number, number>;
+      const row = counts.map((c) => spinF(pay[c] ?? 0));
+      lines.push(`const PAY_${s.id}: [float; ${counts.length}] = [${row.join(', ')}]`);
+    }
+  }
 
-  const valEntries = spec.symbols
-    .filter((s) => s.value !== undefined)
-    .map((s) => `  ${s.id} = ${Array.isArray(s.value) ? `{${s.value.join(', ')}}` : s.value}`);
-  if (valEntries.length) lines.push(`VALUES = {\n${valEntries.join(',\n')}\n}`);
+  for (const s of spec.symbols) {
+    if (s.value === undefined) continue;
+    if (Array.isArray(s.value)) {
+      lines.push(`const VAL_${s.id}: [int; ${s.value.length}] = [${s.value.join(', ')}]`);
+    } else {
+      lines.push(`const VAL_${s.id}: int = ${s.value}`);
+    }
+  }
 
   return lines.join('\n') + '\n';
 }

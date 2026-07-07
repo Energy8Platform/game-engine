@@ -354,6 +354,32 @@ Pipes `zstd -dc → mapper → zstd -<level>` so the working set is one line —
 
 In identity mode (no mapper) the implementation is a pure byte pipe — fastest path (~25 MB/s compressed input on a single core). With `mapper` / `binaryMapper` it splits on LF via `Buffer.indexOf` and runs ~20–25 MB/s for regex prefixes, ~6 MB/s for full `JSON.parse` rewrites.
 
+## Math runtime: SpinML (Rust `e8`)
+
+`e8-math` runs game math through the Rust `e8` engine (SpinML, Cranelift
+JIT; fetched by `install-e8.mjs` from the game-engine repo's Releases,
+override with `E8_BINARY=/path/to/e8`):
+
+```ts
+export default {
+  runtime: 'spin',              // default and only supported runtime
+  model,
+  // raw SpinML source — declarations live inside the .spin file
+  luaScript: readFileSync(new URL('./src/game/script.spin', import.meta.url), 'utf8'),
+  modes: { BASE: { sim: { iterations: 1_000_000 } } },
+} satisfies MathConfig;
+```
+
+Same flag dialect, stdout report, and per-round `-dump` JSONL as the old Go
+`simulate` binary — pool and curate run unchanged, ~25× faster.
+Master-seeded runs are deterministic independent of the host's core count
+(rounds are bound to 64 seed lanes), and any dumped round replays
+bit-for-bit via `(rng.server_seed, rng.client_seed, spins[0].nonce)`.
+
+`runtime: 'lua'` is rejected with a migration hint — legacy Lua games pin
+`stake-math-tools ≤ 0.8.x`. Porting: see
+[docs/lua-to-spin-migration.md](../../docs/lua-to-spin-migration.md).
+
 ## Scripts
 
 ```bash

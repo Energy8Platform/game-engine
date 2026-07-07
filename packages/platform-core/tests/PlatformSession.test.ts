@@ -20,9 +20,9 @@ import {
   type AssetManifest,
   type LoadingScreenConfig,
 } from '../src/index';
-// LuaEngine is intentionally absent from the main entry (fengari is CJS
-// and would break browser ESM consumers). It lives in the /lua sub-path.
-import { LuaEngine } from '../src/lua';
+// The /lua sub-path now carries only shared game-definition types — the
+// fengari engine was removed (math runtime is SpinML/e8).
+import type { GameDefinition } from '../src/lua';
 
 // MemoryChannel (used by DevBridge in devMode) keys its singleton off
 // `window`. This test runs under vitest's node environment; install a
@@ -80,7 +80,6 @@ describe('platform-core smoke test (no pixi)', () => {
   it('exposes the renderer-agnostic public API', () => {
     expect(typeof createPlatformSession).toBe('function');
     expect(typeof PlatformSession).toBe('function');
-    expect(typeof LuaEngine).toBe('function');
     expect(typeof DevBridge).toBe('function');
     // Branded loading screen primitives — work in any renderer.
     expect(typeof createCSSPreloader).toBe('function');

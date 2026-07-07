@@ -244,7 +244,7 @@ function writeEvents(
 
   try {
     // `--rm` removes the raw .jsonl on success; same call kitsune's native.ts uses.
-    execFileSync('zstd', ['-9', '-q', '-f', '--rm', rawPath, '-o', zstPath], { stdio: 'inherit' });
+    execFileSync('zstd', ['-9', '-T0', '-q', '-f', '--rm', rawPath, '-o', zstPath], { stdio: 'inherit' });
   } catch {
     process.stderr.write(
       `  [${mode}] zstd not found — wrote raw books_${mode}.jsonl; install zstd for the .zst\n`,

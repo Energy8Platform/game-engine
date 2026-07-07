@@ -53,3 +53,28 @@ export function computeMetrics(rows: ReadonlyArray<LookupRow>): OptimizeAchieved
 export function isNearMax(payoutCents: number, capMaxWin: number, fraction: number): boolean {
   return payoutCents >= fraction * capMaxWin;
 }
+
+/**
+ * CV → (score 0..10, label). Таблица classifyVolatility из
+ * casino_platform/internal/engine/volatility.go — ей же считает e8 simulate,
+ * поэтому sim- и curate-отчёты показывают одну и ту же шкалу.
+ */
+export function classifyVolatility(cv: number): { score: number; label: string } {
+  const v = Number.isNaN(cv) || cv < 0 ? 0 : cv;
+  const buckets: Array<[number, number, string]> = [
+    [2.0, 0, 'Low'],
+    [3.5, 1, 'Low'],
+    [5.0, 2, 'Medium-Low'],
+    [7.0, 3, 'Medium-Low'],
+    [9.0, 4, 'Medium'],
+    [12.0, 5, 'Medium'],
+    [16.0, 6, 'Medium-High'],
+    [22.0, 7, 'High'],
+    [32.0, 8, 'High'],
+    [50.0, 9, 'Very High'],
+  ];
+  for (const [hi, score, label] of buckets) {
+    if (v < hi) return { score, label };
+  }
+  return { score: 10, label: 'Extreme' };
+}

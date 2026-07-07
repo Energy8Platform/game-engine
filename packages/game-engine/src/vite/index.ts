@@ -1,9 +1,9 @@
 import type { UserConfig, Plugin } from 'vite';
-import { devBridgePlugin, luaPlugin } from '@energy8platform/platform-core/vite';
+import { devBridgePlugin, spinPlugin } from '@energy8platform/platform-core/vite';
 
 // Re-export so users importing from `@energy8platform/game-engine/vite`
 // can still grab the plugins directly without a separate platform-core import.
-export { devBridgePlugin, luaPlugin } from '@energy8platform/platform-core/vite';
+export { devBridgePlugin, spinPlugin } from '@energy8platform/platform-core/vite';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -16,6 +16,12 @@ export interface GameConfig {
 
   /** Path to DevBridge config file (default: './dev.config.ts') */
   devBridgeConfig?: string;
+
+  /** Path to the game's .spin math (default: './src/game/script.spin'). */
+  spinScript?: string;
+
+  /** Game id for the spin dev server (default: first loaded game). */
+  gameId?: string;
 
   /** Additional Vite config to merge */
   vite?: UserConfig;
@@ -53,7 +59,13 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
   if (config.devBridge) {
     const configPath = config.devBridgeConfig ?? './dev.config';
     plugins.push(devBridgePlugin(configPath));
-    plugins.push(luaPlugin(configPath));
+    // e8-server ведёт раунды и hot-reload .spin (математика — SpinML)
+    plugins.push(
+      spinPlugin({
+        spinPath: config.spinScript ?? './src/game/script.spin',
+        gameId: config.gameId,
+      }),
+    );
   }
 
   const userVite = config.vite ?? {};
@@ -96,9 +108,6 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
     optimizeDeps: {
       include: [
         'pixi.js',
-      ],
-      exclude: [
-        'fengari',
       ],
       esbuildOptions: {
         target: 'esnext',
