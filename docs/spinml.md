@@ -256,8 +256,15 @@ Every function that touches the round takes `c: ctx` as its first parameter
   microseconds instead of the old 5-second Lua timeout. Real games use well
   under 0.1% of the budget; you will never hit it with working math.
 - `execute` returns `outcome { win, vars, data }` — all three required
-  (`win` is a **bet multiplier**, never currency). Optional fourth field
-  `globals`: player-scoped state that survives across rounds (omit = keep).
+  (`win` is a **bet multiplier**, never currency).
+- **Player-persist (`globals`)** — state that survives across rounds
+  (meters, accumulators): declare `game { globals = Globals }`, and the
+  signature becomes `fn execute(c: ctx, v: Vars, g: Globals) -> outcome`.
+  Update via the optional `outcome` field `globals:` — omitting it means
+  "unchanged". The engine stores it per player (`memory`/Redis), and the
+  platform layers expose the full record to the client as
+  `data.persistent_state` on every play (the same key the legacy Lua
+  `exposed_vars` used). Not available in Stake books (stateless RGS).
 
 ---
 

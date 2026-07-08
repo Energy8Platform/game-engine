@@ -34,6 +34,7 @@ Read [spinml.md](spinml.md) first for the language itself.
 | `variables.free_spins_awarded` opening the bonus | `opens = free_spin count free_spins_awarded` on the trigger actions |
 | `variables.retrigger_spins` | `extends = retrigger_spins` on the session action |
 | max-win cutoff flag | `ends when max_win_reached` |
+| `persistent_state.vars` + `exposed_vars` (cross-round meters) | `game { globals = Globals }` + third param `g: Globals` in `execute`; update via optional `outcome.globals`. The client keeps reading `data.persistent_state` — filled automatically from the engine's player-persist |
 
 The engine no longer interprets magic variable names — the session comes from
 the `opens`/`extends`/`ends when` declarations, and the checker verifies the

@@ -186,6 +186,13 @@ export function spinPlugin(opts: SpinPluginOptions = {}): Plugin {
   function toLegacy(r: any, roundId: string) {
     const meta = rounds.get(roundId)!;
     const data = r.data_json ? JSON.parse(r.data_json) : null;
+    // Player-persist (globals) → data.persistent_state — тот же клиентский
+    // ключ, что у exposed_vars Lua-платформы. До history.push, чтобы записи
+    // истории (resume после перезагрузки) тоже несли значение.
+    const globals = r.globals_json ? JSON.parse(r.globals_json) : null;
+    if (data && globals && Object.keys(globals).length > 0) {
+      data.persistent_state = globals;
+    }
     meta.history.push({
       spinIndex: r.spins_played - 1,
       win: r.win * meta.bet,
@@ -212,7 +219,6 @@ export function spinPlugin(opts: SpinPluginOptions = {}): Plugin {
           }
         : null,
       variables: r.vars_json ? JSON.parse(r.vars_json) : {},
-      globals: r.globals_json ? JSON.parse(r.globals_json) : {},
       creditDeferred: !r.round_complete,
       roundId,
     };
