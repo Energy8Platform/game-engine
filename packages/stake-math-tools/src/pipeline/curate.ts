@@ -16,7 +16,7 @@
  */
 
 import {
-  existsSync, mkdirSync, openSync, writeSync, closeSync, readFileSync,
+  existsSync, mkdirSync, openSync, writeSync, readSync, closeSync, readFileSync,
   writeFileSync, unlinkSync,
 } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -147,35 +147,6 @@ function poolDumpLineStream(poolDir: string, mode: string): ReturnType<typeof cr
 }
 
 /**
- * Read the per-round EVENTS (the round's `spins[]` mapped to book events) for the selected pool
- * sims. One pass over the pool dump, picking only the wanted line indices (the canonical sim ids).
- * Returns sim → events. Empty map when no dump is available (books then carry no events — graceful).
- */
-async function readEventsForSims(
-  poolDir: string,
-  mode: string,
-  sims: Set<number>,
-): Promise<Map<number, Record<string, unknown>[]>> {
-  const out = new Map<number, Record<string, unknown>[]>();
-  const rl = poolDumpLineStream(poolDir, mode);
-  if (!rl) return out;
-  let sim = 0;
-  for await (const line of rl) {
-    if (line.trim()) {
-      if (sims.has(sim)) {
-        try {
-          const rec = JSON.parse(line) as { spins?: Record<string, unknown>[] };
-          const spins = Array.isArray(rec.spins) ? rec.spins : [];
-          out.set(sim, spins.map(spinToEvent));
-        } catch { /* skip malformed line */ }
-      }
-      sim++;
-    }
-  }
-  return out;
-}
-
-/**
  * Resolve the optimizer params from the mode's curate overrides, defaulting
  * any unspecified target to the source distribution (preserve it) — same
  * policy kitsune's optimize-lut uses. `capMaxWin` is required (in cents) and
@@ -213,34 +184,107 @@ function writeLut(rows: LookupRow[], path: string): void {
  * bonus book is a SINGLE round the game can replay spin-by-spin, matching the kitsune library.
  * When no per-round events were available (no dump), `events` is `[]`.
  *
+ * MEMORY: the pool dump is streamed once and each selected round's events are serialized to a
+ * temp file the moment they're read — only ONE round's parsed payload is ever resident. This is
+ * why curate memory is O(1 round) instead of O(nRowsOut × book-size): a high-cost bonus mode with
+ * 150k selected rounds of ~40KB each would otherwise materialize ~20GB of parsed objects at once.
+ *
+ * Ordering: the dump is in pool-sim order but the published books MUST be in curated-row order
+ * (0,1,2,… — the LUT sim column lines up positionally with the book `id`). We record each output
+ * row's (offset,len) in the temp file, then a second pass reads the temp file in row order (random
+ * access by offset) and writes the final `books_<MODE>.jsonl`. The `slot` index is a few MB; the
+ * event payloads never all land in the heap.
+ *
  * `zstd` may not be on PATH. On failure we keep the raw `.jsonl`, log a note, and do NOT fail.
  */
-function writeEvents(
+async function streamWriteEvents(
   rows: LookupRow[],
-  eventsPerRow: Record<string, unknown>[][],
+  originalSims: number[],
+  poolDir: string,
   outDir: string,
   mode: string,
   capCents: number,
-): void {
+): Promise<void> {
   const rawPath = join(outDir, `books_${mode}.jsonl`);
   const zstPath = join(outDir, `books_${mode}.jsonl.zst`);
-  if (existsSync(rawPath)) unlinkSync(rawPath);
-  if (existsSync(zstPath)) unlinkSync(zstPath);
+  const tmpPath = join(outDir, `books_${mode}.tmp.jsonl`);
+  for (const p of [rawPath, zstPath, tmpPath]) if (existsSync(p)) unlinkSync(p);
 
-  const fd = openSync(rawPath, 'w');
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    const events = eventsPerRow[i] ?? [];
+  // Pool sim → output-row indices that need that round's events. Synthetic padding rows
+  // (sim < 0) carry no events and are filled with `[]` in the fill pass below.
+  const simToOut = new Map<number, number[]>();
+  for (let i = 0; i < originalSims.length; i++) {
+    const s = originalSims[i];
+    if (s < 0) continue;
+    const arr = simToOut.get(s);
+    if (arr) arr.push(i);
+    else simToOut.set(s, [i]);
+  }
+
+  // Per-output-row location of its serialized book line in the temp file (null until written).
+  const slot: ({ off: number; len: number } | null)[] = new Array(rows.length).fill(null);
+
+  const tmpFd = openSync(tmpPath, 'w');
+  let tmpOff = 0;
+  const appendBook = (outIdx: number, events: Record<string, unknown>[]): void => {
+    const r = rows[outIdx];
     // Canonical Stake book row: {id, payoutMultiplier (integer cents = CSV col3), events:[{type,spin}], criteria}.
-    writeSync(fd, JSON.stringify({
+    const line = JSON.stringify({
       id: r.sim,
       payoutMultiplier: r.payoutCents,
       events,
       criteria: deriveCriteria(r.payoutCents, events, capCents),
-    }));
-    writeSync(fd, '\n');
+    }) + '\n';
+    const buf = Buffer.from(line, 'utf8');
+    writeSync(tmpFd, buf, 0, buf.length, tmpOff);
+    slot[outIdx] = { off: tmpOff, len: buf.length };
+    tmpOff += buf.length;
+  };
+
+  // Pass 1: stream the pool dump once, serializing each selected round as it's read. `sim` counts
+  // non-blank lines (the canonical sim id the LUT/events are positionally validated against).
+  const rl = simToOut.size > 0 ? poolDumpLineStream(poolDir, mode) : null;
+  if (rl) {
+    let sim = 0;
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      const outIdxs = simToOut.get(sim);
+      if (outIdxs) {
+        let events: Record<string, unknown>[] = [];
+        try {
+          const rec = JSON.parse(line) as { spins?: Record<string, unknown>[] };
+          const spins = Array.isArray(rec.spins) ? rec.spins : [];
+          events = spins.map(spinToEvent);
+        } catch { /* malformed line → empty events (graceful) */ }
+        for (const outIdx of outIdxs) appendBook(outIdx, events);
+        simToOut.delete(sim); // done with this sim — free the mapping
+      }
+      sim++;
+    }
   }
-  closeSync(fd);
+
+  // Pass 2: fill any row that never matched a dump line — padding rows (sim < 0) and, gracefully,
+  // selected sims absent from the dump (no dump available, or truncated) — with empty events.
+  for (let i = 0; i < rows.length; i++) {
+    if (slot[i] === null) appendBook(i, []);
+  }
+  closeSync(tmpFd);
+
+  // Pass 3: reorder temp → final raw books in curated-row order (random access by offset). One
+  // reusable buffer sized to the largest line; only one book line is resident at a time.
+  let maxLen = 1;
+  for (const s of slot) if (s && s.len > maxLen) maxLen = s.len;
+  const buf = Buffer.allocUnsafe(maxLen);
+  const readFd = openSync(tmpPath, 'r');
+  const outFd = openSync(rawPath, 'w');
+  for (let i = 0; i < rows.length; i++) {
+    const s = slot[i]!; // pass 2 guarantees every row is filled
+    readSync(readFd, buf, 0, s.len, s.off);
+    writeSync(outFd, buf, 0, s.len);
+  }
+  closeSync(readFd);
+  closeSync(outFd);
+  unlinkSync(tmpPath);
 
   try {
     // `--rm` removes the raw .jsonl on success; same call kitsune's native.ts uses.
@@ -288,11 +332,9 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   const params = resolveOptimizeParams(mode.curate, rawRows);
   const result = optimizeLookupTable(rawRows, params);
 
-  // Pull each selected round's events (trigger + all free spins) from the pool dump BEFORE
-  // renumbering — the optimizer's rows still carry their original pool sim (the dump line index).
+  // Capture each selected row's original pool sim (the dump line index) BEFORE renumbering — the
+  // event stream keys off it. Held as a flat number[] (a few MB), not the parsed event payloads.
   const originalSims = result.rows.map((r) => r.sim);
-  const eventsBySim = await readEventsForSims(opts.poolDir, mode.mode, new Set(originalSims));
-  const eventsPerRow = originalSims.map((s) => eventsBySim.get(s) ?? []);
 
   // Renumber the curated rows with curate's OWN 0-based contiguous ids (matching the shipped
   // kitsune library: lookUpTable sim column and books `id` both run 0,1,2,…). The optimizer keeps
@@ -301,7 +343,9 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   result.rows.forEach((r, i) => { r.sim = i; });
 
   writeLut(result.rows, join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`));
-  writeEvents(result.rows, eventsPerRow, opts.outDir, mode.mode, mode.curate.capMaxWin);
+  await streamWriteEvents(
+    result.rows, originalSims, opts.poolDir, opts.outDir, mode.mode, mode.curate.capMaxWin,
+  );
   upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
 
   return result;
