@@ -10,6 +10,9 @@ interface OverlayDeps {
 
 interface ActiveOverlay {
   layer: Container;
+  /** The scene-owned content container from `build` — re-laid-out on resize. */
+  content: Container;
+  onResize: OverlayShowOptions['onResize'];
   resolve(): void;
   timer: ReturnType<typeof setTimeout> | null;
   dim: number;
@@ -58,7 +61,7 @@ export function createOverlayController(deps: OverlayDeps): {
 
       return new Promise<void>((resolve) => {
         const dimValue = opts.dim ?? 0.0001;
-        current = { layer, resolve, timer: null, dim: dimValue };
+        current = { layer, content, onResize: opts.onResize, resolve, timer: null, dim: dimValue };
         const closeOn = opts.closeOn ?? 'tap';
         if (closeOn === 'tap') hit.on('pointertap', teardown);
         if (typeof opts.autoCloseMs === 'number') {
@@ -75,6 +78,7 @@ export function createOverlayController(deps: OverlayDeps): {
       if (!current) return;
       const hit = current.layer.getChildAt(0) as Graphics;
       hit.clear().rect(0, 0, w, h).fill({ color: 0x000000, alpha: current.dim });
+      current.onResize?.(current.content, { width: w, height: h });
     },
     destroy(): void { teardown(); },
   };

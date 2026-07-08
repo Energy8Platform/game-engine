@@ -30,6 +30,10 @@ export interface SceneAudio {
 export interface OverlayShowOptions {
   /** Draw the overlay content into `container` (sized to the canvas). */
   build(container: Container, size: { width: number; height: number }): void;
+  /** Re-layout the same `container` when the canvas resizes while the overlay is open.
+   *  Receives the content container from `build` and the new size. Optional — omit for
+   *  overlays that self-center or don't care about resize. */
+  onResize?(container: Container, size: { width: number; height: number }): void;
   /** Auto-close after N ms (combine with closeOn — whichever fires first). */
   autoCloseMs?: number;
   /** Dismiss on a single tap. Default 'tap'. Set false to require an explicit close(). */
