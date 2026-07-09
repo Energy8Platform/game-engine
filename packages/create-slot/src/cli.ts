@@ -9,7 +9,7 @@ import { generate } from './generate';
 // published @energy8platform/* versions (a create-slot test asserts these match the workspace).
 const PUBLISHED: Parameters<typeof generate>[2] = {
   'platform-core': '^0.30.1',
-  'game-engine': '^0.32.2',
+  'game-engine': '^0.32.3',
   'stake-kit': '^0.6.2',
   'stake-bridge': '^0.6.1',
   'stake-math-tools': '^0.9.1',
