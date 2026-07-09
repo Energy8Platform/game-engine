@@ -129,8 +129,9 @@ export interface DevBridgeConfig {
   currency?: string;
   /** Game config */
   gameConfig?: Partial<GameConfigData>;
-  /** Base URL for assets (default: '/' — the site root; the folder lives in the asset paths, not
-   *  the base, so a game isn't forced to name its folder `assets`). */
+  /** Base URL for assets (default: '' — RELATIVE to the game document, like Vite's `base: './'`.
+   *  The folder lives in the asset paths, not the base, so the same layout resolves under a CDN
+   *  sub-path (e.g. Stake `/game/v7/`) and at the dev root. Set an absolute URL only for a CDN. */
   assetsUrl?: string;
   /** Active session to resume (null = no active session) */
   session?: SessionData | null;
@@ -167,7 +168,7 @@ const DEFAULT_CONFIG: Omit<
     viewport: { width: 1920, height: 1080 },
     betLevels: [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50],
   },
-  assetsUrl: '/',
+  assetsUrl: '',
   session: null,
   onPlay: () => ({}),
   networkDelay: 200,

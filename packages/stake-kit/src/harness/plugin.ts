@@ -48,9 +48,9 @@ export interface StakeRgsPluginOptions {
   startingBalance?: number;
   /**
    * Base URL the game loads assets from in the harness. Threaded to the game via the
-   * launch URL (`?assetsUrl=`) so the harness matches `npm run dev` (the DevBridge
-   * default `/`). Set to '' for relative resolution. Default '/' (site root — the asset
-   * folder lives in the paths, not the base).
+   * launch URL (`?assetsUrl=`) so the harness matches `npm run dev`. Default '' — RELATIVE
+   * to the game document (the asset folder lives in the paths, not the base), which also
+   * matches a CDN sub-path deploy. Set an absolute URL only for a separate asset CDN.
    */
   assetsUrl?: string;
 }
@@ -163,7 +163,7 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
   const configPath = opts.config ?? './math.config.ts';
   const booksDir = opts.booksDir ?? 'stake-math';
   const startingBalanceMajor = opts.startingBalance ?? 10_000;
-  const assetsUrl = opts.assetsUrl ?? '/';
+  const assetsUrl = opts.assetsUrl ?? '';
 
   // Captured vite dev server — set in configureServer, used by loadConfig/describe.
   let server: HarnessServer | null = null;

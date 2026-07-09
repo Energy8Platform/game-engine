@@ -167,10 +167,11 @@ export class StakeBridge {
 
     this.modeMap = options.modeMap ?? {};
     this.gameId = options.gameId ?? '';
-    // Precedence: explicit option → URL `?assetsUrl=` (dev harness) → iframe src → '/' (site root).
-    // Default '/' loads assets from the root so the folder lives in the game's paths, not the base;
-    // pass an explicit `assetsUrl` (option or `?assetsUrl=`) for a CDN sub-path deployment.
-    this.assetsUrl = options.assetsUrl ?? this.url.assetsUrl ?? options.iframe?.src ?? '/';
+    // Precedence: explicit option → URL `?assetsUrl=` (dev harness) → iframe src → '' (RELATIVE).
+    // Default '' resolves assets relative to the game document — like Vite's `base: './'` for the
+    // bundle JS — so a CDN sub-path deploy (Stake `/game/v7/`) loads assets from the SAME sub-path,
+    // not the domain root. Pass an explicit absolute `assetsUrl` only for a separate asset CDN.
+    this.assetsUrl = options.assetsUrl ?? this.url.assetsUrl ?? options.iframe?.src ?? '';
     this.enforceBetLevels = options.enforceBetLevels ?? true;
     this.balancePollMs = options.balancePollMs ?? 60_000;
     this.debug = options.debug ?? false;

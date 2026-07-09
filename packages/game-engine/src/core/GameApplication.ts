@@ -287,9 +287,10 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   }
 
   private initSubSystems(): void {
-    // Asset Manager. Base defaults to '/' (site root) when the bridge sends no assetsUrl — the
-    // asset folder lives in the manifest paths, not the base, so it needn't be named `assets`.
-    const basePath = this.initData?.assetsUrl ?? '/';
+    // Asset Manager. Base defaults to '' (RELATIVE to the game document, like Vite's `base: './'`)
+    // when the bridge sends no assetsUrl — the asset folder lives in the manifest paths, not the
+    // base, so the same layout resolves under a CDN sub-path (Stake `/game/v7/`) and at the dev root.
+    const basePath = this.initData?.assetsUrl ?? '';
     this.assets = new AssetManager(basePath, this.config.manifest);
 
     // Audio Manager
