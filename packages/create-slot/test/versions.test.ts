@@ -19,7 +19,10 @@ const cliSrc = readFileSync(fileURLToPath(new URL('../src/cli.ts', import.meta.u
 describe('scaffold dependency versions track the workspace', () => {
   for (const p of PKGS) {
     it(`@energy8platform/${p} default matches the current workspace version`, () => {
-      expect(cliSrc).toContain(`'${p}': '^${versionOf(p)}'`);
+      // Key may be quoted ('stake-kit') or a bare identifier (harness) — prettier drops quotes
+      // from keys that don't need them, so match either form.
+      const version = versionOf(p).replace(/\./g, '\\.');
+      expect(cliSrc).toMatch(new RegExp(`(?:'${p}'|${p}):\\s*'\\^${version}'`));
     });
   }
 });
