@@ -49,7 +49,8 @@ export interface StakeRgsPluginOptions {
   /**
    * Base URL the game loads assets from in the harness. Threaded to the game via the
    * launch URL (`?assetsUrl=`) so the harness matches `npm run dev` (the DevBridge
-   * default `/assets/`). Set to '' for relative resolution. Default '/assets/'.
+   * default `/`). Set to '' for relative resolution. Default '/' (site root — the asset
+   * folder lives in the paths, not the base).
    */
   assetsUrl?: string;
 }
@@ -104,7 +105,9 @@ export function runSpinRound(
 ): { payoutCents: number; events: Array<Record<string, unknown>> } {
   const e8 = findE8Binary();
   if (!e8) {
-    throw new Error('stake-rgs: e8 engine binary not found for the no-books fallback (npm install fetches it, or set E8_BINARY)');
+    throw new Error(
+      'stake-rgs: e8 engine binary not found for the no-books fallback (npm install fetches it, or set E8_BINARY)',
+    );
   }
   const dir = mkdtempSync(join(tmpdir(), 'rgs-spin-'));
   const scriptPath = join(dir, 'game.spin');
@@ -115,8 +118,23 @@ export function runSpinRound(
     writeFileSync(cfgPath, JSON.stringify({ id: gameId, script_path: scriptPath }));
     execFileSync(
       e8,
-      ['simulate', '-config', cfgPath, '-iterations', '1', '-bet', String(betMajor || 1),
-       '-format', 'json', '-action', triggerAction, '-rng', 'fast', '-dump', dumpPath],
+      [
+        'simulate',
+        '-config',
+        cfgPath,
+        '-iterations',
+        '1',
+        '-bet',
+        String(betMajor || 1),
+        '-format',
+        'json',
+        '-action',
+        triggerAction,
+        '-rng',
+        'fast',
+        '-dump',
+        dumpPath,
+      ],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const rec = JSON.parse(readFileSync(dumpPath, 'utf8').split('\n')[0]) as {
@@ -145,7 +163,7 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
   const configPath = opts.config ?? './math.config.ts';
   const booksDir = opts.booksDir ?? 'stake-math';
   const startingBalanceMajor = opts.startingBalance ?? 10_000;
-  const assetsUrl = opts.assetsUrl ?? '/assets/';
+  const assetsUrl = opts.assetsUrl ?? '/';
 
   // Captured vite dev server — set in configureServer, used by loadConfig/describe.
   let server: HarnessServer | null = null;
@@ -156,9 +174,9 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
   function loadConfig(): Promise<HarnessMathConfig> {
     if (!cfgPromise) {
       if (!server) throw new Error('stake-rgs: loadConfig called before configureServer');
-      cfgPromise = server.ssrLoadModule(configPath).then(
-        (m) => (m.default ?? m) as HarnessMathConfig,
-      );
+      cfgPromise = server
+        .ssrLoadModule(configPath)
+        .then((m) => (m.default ?? m) as HarnessMathConfig);
     }
     return cfgPromise;
   }
@@ -184,7 +202,12 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
       const triggerAction = actionForMode(cfg, mode);
       const cost = costForAction(cfg, triggerAction);
       // живой раунд через e8 (rng fast, недетерминированный — дев-фолбэк)
-      const { payoutCents, events } = runSpinRound(cfg.luaScript, cfg.model.spec.id, triggerAction, betMajor);
+      const { payoutCents, events } = runSpinRound(
+        cfg.luaScript,
+        cfg.model.spec.id,
+        triggerAction,
+        betMajor,
+      );
       return devRgs!.playWithOutcome(mode, amount, { payoutCents, state: { events }, cost });
     };
 
@@ -201,10 +224,7 @@ export function stakeRgsPlugin(opts: StakeRgsPluginOptions = {}): HarnessPlugin 
       // cached config so the next play runs fresh code, then reloads the
       // iframe. The dev-RGS balance is kept; it doesn't depend on the math.
       ctx.watchReload(
-        (f) =>
-          f.endsWith('.spin') ||
-          f.includes('math.config') ||
-          f.includes('game.spec'),
+        (f) => f.endsWith('.spin') || f.includes('math.config') || f.includes('game.spec'),
         () => {
           cfgPromise = null;
         },

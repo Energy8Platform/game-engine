@@ -167,8 +167,10 @@ export class StakeBridge {
 
     this.modeMap = options.modeMap ?? {};
     this.gameId = options.gameId ?? '';
-    // Precedence: explicit option → URL `?assetsUrl=` (dev harness) → iframe src → '' (relative).
-    this.assetsUrl = options.assetsUrl ?? this.url.assetsUrl ?? options.iframe?.src ?? '';
+    // Precedence: explicit option → URL `?assetsUrl=` (dev harness) → iframe src → '/' (site root).
+    // Default '/' loads assets from the root so the folder lives in the game's paths, not the base;
+    // pass an explicit `assetsUrl` (option or `?assetsUrl=`) for a CDN sub-path deployment.
+    this.assetsUrl = options.assetsUrl ?? this.url.assetsUrl ?? options.iframe?.src ?? '/';
     this.enforceBetLevels = options.enforceBetLevels ?? true;
     this.balancePollMs = options.balancePollMs ?? 60_000;
     this.debug = options.debug ?? false;
@@ -253,21 +255,15 @@ export class StakeBridge {
   // ─── Message subscriptions ───────────────────────────────────────────
 
   private subscribe(): void {
-    this.bridge.on<GameReadyPayload>('GAME_READY', (_payload, id) =>
-      this.onGameReady(id),
-    );
+    this.bridge.on<GameReadyPayload>('GAME_READY', (_payload, id) => this.onGameReady(id));
     this.bridge.on<PlayRequestPayload>('PLAY_REQUEST', (payload, id) =>
       this.onPlayRequest(payload, id),
     );
     this.bridge.on<PlayResultAckPayload>('PLAY_RESULT_ACK', (payload, id) =>
       this.onPlayAck(payload, id),
     );
-    this.bridge.on<GetBalancePayload>('GET_BALANCE', (_payload, id) =>
-      this.onGetBalance(id),
-    );
-    this.bridge.on<GetStatePayload>('GET_STATE', (_payload, id) =>
-      this.onGetState(id),
-    );
+    this.bridge.on<GetBalancePayload>('GET_BALANCE', (_payload, id) => this.onGetBalance(id));
+    this.bridge.on<GetStatePayload>('GET_STATE', (_payload, id) => this.onGetState(id));
     this.bridge.on<OpenDepositPayload>('OPEN_DEPOSIT', () => {
       this.log('OPEN_DEPOSIT received — no-op on Stake');
     });
@@ -314,8 +310,7 @@ export class StakeBridge {
     // The fetched round's own amount (minor) wins over the URL amount when present;
     // payoutMultiplier feeds the replay modal. Stake's /bet/replay returns payoutMultiplier in
     // CENTS (e.g. 495), so divide by 100 to get the ×bet multiplier the round/modal use.
-    this.replayAmountMinor =
-      (this.replayBook as { amount?: number } | null)?.amount ?? r.amount;
+    this.replayAmountMinor = (this.replayBook as { amount?: number } | null)?.amount ?? r.amount;
     this.replayPayout =
       ((this.replayBook as { payoutMultiplier?: number } | null)?.payoutMultiplier ?? 0) / 100;
 
@@ -354,11 +349,7 @@ export class StakeBridge {
       await this.adapterLoad;
       const ctx = this.makeRoundContext(data.round);
       const segments = this.adapter!.splitRound(data.round.state, ctx);
-      const cursor = this.adapter!.resumeFrom?.(
-        data.round.state,
-        data.round.event,
-        ctx,
-      ) ?? 0;
+      const cursor = this.adapter!.resumeFrom?.(data.round.state, data.round.event, ctx) ?? 0;
       this.active = {
         roundId: ctx.roundId,
         betID: data.round.betID,
@@ -405,19 +396,13 @@ export class StakeBridge {
       };
       this.bridge.send('INIT', init, id);
     } catch (err) {
-      this.bridge.send(
-        'ERROR',
-        { code: this.errCode(err), message: this.errMessage(err) },
-        id,
-      );
+      this.bridge.send('ERROR', { code: this.errCode(err), message: this.errMessage(err) }, id);
     }
   }
 
   private buildGameConfig(auth: RGSAuthenticateResponse): GameConfigData {
     const c = auth.config;
-    const jurisdiction = (c.jurisdiction ?? undefined) as
-      | JurisdictionFlagsData
-      | undefined;
+    const jurisdiction = (c.jurisdiction ?? undefined) as JurisdictionFlagsData | undefined;
 
     const socialMode = !!this.url.social || !!jurisdiction?.socialCasino;
     const demo = !!this.url.demo;
@@ -482,20 +467,13 @@ export class StakeBridge {
 
   // ─── PLAY_REQUEST ────────────────────────────────────────────────────
 
-  private async onPlayRequest(
-    payload: PlayRequestPayload,
-    id?: string,
-  ): Promise<void> {
+  private async onPlayRequest(payload: PlayRequestPayload, id?: string): Promise<void> {
     try {
       await this.bootPromise;
       await this.adapterLoad;
 
       // Continuation of an in-flight round?
-      if (
-        this.active &&
-        payload.roundId &&
-        payload.roundId === this.active.roundId
-      ) {
+      if (this.active && payload.roundId && payload.roundId === this.active.roundId) {
         await this.streamNextSegment(payload, id);
         return;
       }
@@ -538,10 +516,7 @@ export class StakeBridge {
     }
   }
 
-  private async startNewRound(
-    payload: PlayRequestPayload,
-    requestId?: string,
-  ): Promise<void> {
+  private async startNewRound(payload: PlayRequestPayload, requestId?: string): Promise<void> {
     if (this._isReplay) {
       await this.startReplayRound(payload, requestId);
       return;
@@ -601,10 +576,7 @@ export class StakeBridge {
    * re-streams it on every subsequent "Play Again" — no `/wallet/play`,
    * no `/wallet/end-round`, no `/bet/event`.
    */
-  private async startReplayRound(
-    payload: PlayRequestPayload,
-    requestId?: string,
-  ): Promise<void> {
+  private async startReplayRound(payload: PlayRequestPayload, requestId?: string): Promise<void> {
     const r = this.url.replay!;
 
     // Normally pre-fetched in bootReplay (per Stake rules). Re-fetch only if that failed.
@@ -615,19 +587,16 @@ export class StakeBridge {
         mode: r.mode,
         event: r.event,
       });
-      this.replayAmountMinor =
-        (this.replayBook as { amount?: number }).amount ?? r.amount;
+      this.replayAmountMinor = (this.replayBook as { amount?: number }).amount ?? r.amount;
       this.replayPayout =
         ((this.replayBook as { payoutMultiplier?: number }).payoutMultiplier ?? 0) / 100;
     }
 
     // The replay endpoint may return the book directly, or wrap it in
     // `state` (matching the `/wallet/play` round shape). Accept both.
-    const bookData =
-      (this.replayBook as { state?: unknown }).state ?? this.replayBook;
+    const bookData = (this.replayBook as { state?: unknown }).state ?? this.replayBook;
     const payoutMultiplier = this.replayPayout;
-    const costMultiplier =
-      (this.replayBook as { costMultiplier?: number }).costMultiplier ?? 1;
+    const costMultiplier = (this.replayBook as { costMultiplier?: number }).costMultiplier ?? 1;
 
     const ctx: RoundContext = {
       mode: r.mode,
@@ -664,10 +633,7 @@ export class StakeBridge {
     await this.deliverSegment(0, requestId);
   }
 
-  private async streamNextSegment(
-    payload: PlayRequestPayload,
-    requestId?: string,
-  ): Promise<void> {
+  private async streamNextSegment(payload: PlayRequestPayload, requestId?: string): Promise<void> {
     const round = this.active!;
     const next = round.cursor + 1;
     if (next >= round.segments.length) {
@@ -754,10 +720,7 @@ export class StakeBridge {
     void isFinal;
   }
 
-  private synthSession(
-    round: ActiveRound,
-    segment?: BookSegment,
-  ): SessionData | null {
+  private synthSession(round: ActiveRound, segment?: BookSegment): SessionData | null {
     const total = round.segments.length;
     const seg = segment ?? round.segments[round.cursor];
     if (seg.session === null) return null;
@@ -884,28 +847,16 @@ export class StakeBridge {
   private async onGetBalance(id?: string): Promise<void> {
     if (this._isReplay) {
       // No wallet to read — return the synthetic 0 balance.
-      this.bridge.send<BalanceUpdatePayload>(
-        'BALANCE_UPDATE',
-        { balance: this.balance },
-        id,
-      );
+      this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance }, id);
       return;
     }
     try {
       const { balance } = await this.rgs.balance();
       this.balance = fromMinor(balance.amount);
       this.startBalancePolling();
-      this.bridge.send<BalanceUpdatePayload>(
-        'BALANCE_UPDATE',
-        { balance: this.balance },
-        id,
-      );
+      this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance }, id);
     } catch (err) {
-      this.bridge.send(
-        'ERROR',
-        { code: this.errCode(err), message: this.errMessage(err) },
-        id,
-      );
+      this.bridge.send('ERROR', { code: this.errCode(err), message: this.errMessage(err) }, id);
     }
   }
 
@@ -913,11 +864,7 @@ export class StakeBridge {
 
   private onGetState(id?: string): void {
     if (!this.active) {
-      this.bridge.send<StateResponsePayload>(
-        'STATE_RESPONSE',
-        { session: null },
-        id,
-      );
+      this.bridge.send<StateResponsePayload>('STATE_RESPONSE', { session: null }, id);
       return;
     }
     // Replay the segment at the current cursor without advancing it.
@@ -937,11 +884,7 @@ export class StakeBridge {
       creditPending: this.active.rgsActive,
       bonusFreeSpin: segment.bonusFreeSpin ?? null,
     };
-    this.bridge.send<StateResponsePayload>(
-      'STATE_RESPONSE',
-      { session: snapshot },
-      id,
-    );
+    this.bridge.send<StateResponsePayload>('STATE_RESPONSE', { session: snapshot }, id);
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────
@@ -962,18 +905,20 @@ export class StakeBridge {
       );
     }
     if (c.stepBet > 0 && minor % c.stepBet !== 0) {
-      throw new Error(
-        `Bet ${fromMinor(minor)} is not a multiple of step ${fromMinor(c.stepBet)}`,
-      );
+      throw new Error(`Bet ${fromMinor(minor)} is not a multiple of step ${fromMinor(c.stepBet)}`);
     }
     if (this.enforceBetLevels && !c.betLevels.includes(minor)) {
-      throw new Error(
-        `Bet ${fromMinor(minor)} is not one of the configured bet levels`,
-      );
+      throw new Error(`Bet ${fromMinor(minor)} is not one of the configured bet levels`);
     }
   }
 
-  private makeRoundContext<T>(round: { betID: number; mode: string; payoutMultiplier: number; amount?: number; state: T }): RoundContext {
+  private makeRoundContext<T>(round: {
+    betID: number;
+    mode: string;
+    payoutMultiplier: number;
+    amount?: number;
+    state: T;
+  }): RoundContext {
     return {
       mode: round.mode,
       triggerAction: this.invertMode(round.mode),
@@ -1040,20 +985,10 @@ export class StakeBridge {
 
   private log(msg: string): void {
     if (!this.debug) return;
-    console.debug(
-      `%cstake-bridge%c ${msg}`,
-      'color: #f59e0b; font-weight: bold',
-      'color: inherit',
-    );
+    console.debug(`%cstake-bridge%c ${msg}`, 'color: #f59e0b; font-weight: bold', 'color: inherit');
   }
 }
 
 // ─── Type re-exports for convenience ─────────────────────────────────
 
-export type {
-  StakeBridgeOptions,
-  BookAdapter,
-  BookSegment,
-  RoundContext,
-  ModeMap,
-} from './types';
+export type { StakeBridgeOptions, BookAdapter, BookSegment, RoundContext, ModeMap } from './types';

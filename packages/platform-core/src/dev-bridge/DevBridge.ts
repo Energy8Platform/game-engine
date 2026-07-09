@@ -81,11 +81,16 @@ function parseSessionTtl(ttl: string | undefined): number {
   if (!m) return DEFAULT_SESSION_TTL_MS;
   const n = parseFloat(m[1]);
   switch (m[2]) {
-    case 'ms': return n;
-    case 's':  return n * 1000;
-    case 'm':  return n * 60 * 1000;
-    case 'h':  return n * 60 * 60 * 1000;
-    default:   return DEFAULT_SESSION_TTL_MS;
+    case 'ms':
+      return n;
+    case 's':
+      return n * 1000;
+    case 'm':
+      return n * 60 * 1000;
+    case 'h':
+      return n * 60 * 60 * 1000;
+    default:
+      return DEFAULT_SESSION_TTL_MS;
   }
 }
 
@@ -124,7 +129,8 @@ export interface DevBridgeConfig {
   currency?: string;
   /** Game config */
   gameConfig?: Partial<GameConfigData>;
-  /** Base URL for assets (default: '/assets/') */
+  /** Base URL for assets (default: '/' — the site root; the folder lives in the asset paths, not
+   *  the base, so a game isn't forced to name its folder `assets`). */
   assetsUrl?: string;
   /** Active session to resume (null = no active session) */
   session?: SessionData | null;
@@ -148,7 +154,10 @@ export interface DevBridgeConfig {
   replay?: ReplayConfig;
 }
 
-const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinition' | 'luaSeed' | 'replay'> = {
+const DEFAULT_CONFIG: Omit<
+  Required<DevBridgeConfig>,
+  'luaScript' | 'gameDefinition' | 'luaSeed' | 'replay'
+> = {
   balance: 10000,
   currency: 'USD',
   gameConfig: {
@@ -158,7 +167,7 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
     viewport: { width: 1920, height: 1080 },
     betLevels: [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50],
   },
-  assetsUrl: '/assets/',
+  assetsUrl: '/',
   session: null,
   onPlay: () => ({}),
   networkDelay: 200,
@@ -192,7 +201,20 @@ const DEFAULT_CONFIG: Omit<Required<DevBridgeConfig>, 'luaScript' | 'gameDefinit
  * ```
  */
 export class DevBridge {
-  private _config: Required<Pick<DevBridgeConfig, 'balance' | 'currency' | 'gameConfig' | 'assetsUrl' | 'session' | 'onPlay' | 'networkDelay' | 'debug'>> & Pick<DevBridgeConfig, 'luaScript' | 'gameDefinition' | 'luaSeed' | 'replay'>;
+  private _config: Required<
+    Pick<
+      DevBridgeConfig,
+      | 'balance'
+      | 'currency'
+      | 'gameConfig'
+      | 'assetsUrl'
+      | 'session'
+      | 'onPlay'
+      | 'networkDelay'
+      | 'debug'
+    >
+  > &
+    Pick<DevBridgeConfig, 'luaScript' | 'gameDefinition' | 'luaSeed' | 'replay'>;
   private _balance: number;
   private _roundCounter = 0;
   private _bridge: Bridge | null = null;
@@ -346,9 +368,7 @@ export class DevBridge {
   private resolveReplayResults(): Promise<PlayResultData[]> {
     if (!this._replayResults) {
       const { mode, roundId } = this._replayLaunch ?? {};
-      this._replayResults = Promise.resolve(
-        this._config.replay!.resolve(mode, roundId),
-      );
+      this._replayResults = Promise.resolve(this._config.replay!.resolve(mode, roundId));
     }
     return this._replayResults;
   }
@@ -382,10 +402,7 @@ export class DevBridge {
       });
   }
 
-  private handlePlayRequest(
-    payload: PlayParams,
-    id?: string,
-  ): void {
+  private handlePlayRequest(payload: PlayParams, id?: string): void {
     if (this._replayLaunch) {
       this.handleReplayPlay(id);
       return;
@@ -462,9 +479,7 @@ export class DevBridge {
       // Round id rules mirror server's playRound:
       //   non-session  → fresh UUID, client-supplied id is ignored
       //   session-based → reuse the active session's round id
-      const serverRoundId = actionDef.requires_session
-        ? this._activeRoundId!
-        : generateRoundId();
+      const serverRoundId = actionDef.requires_session ? this._activeRoundId! : generateRoundId();
 
       this.executeOnServer({ action, bet, roundId: serverRoundId, params })
         .then((result) => {
@@ -481,7 +496,8 @@ export class DevBridge {
       // Fallback to onPlay callback
       const { roundId } = payload;
       const customResult = this._config.onPlay({ action, bet, roundId, params });
-      const totalWin = customResult.totalWin ?? (Math.random() > 0.6 ? bet * (1 + Math.random() * 10) : 0);
+      const totalWin =
+        customResult.totalWin ?? (Math.random() > 0.6 ? bet * (1 + Math.random() * 10) : 0);
 
       this._balance += totalWin;
 

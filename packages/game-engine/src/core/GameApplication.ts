@@ -241,9 +241,10 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
     const pixiOpts = {
       preference: 'webgl' as const,
-      background: typeof this.config.loading?.backgroundColor === 'number'
-        ? this.config.loading.backgroundColor
-        : 0x000000,
+      background:
+        typeof this.config.loading?.backgroundColor === 'number'
+          ? this.config.loading.backgroundColor
+          : 0x000000,
       antialias: true,
       resolution: Math.min(window.devicePixelRatio, 2),
       autoDensity: true,
@@ -286,8 +287,9 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
   }
 
   private initSubSystems(): void {
-    // Asset Manager
-    const basePath = this.initData?.assetsUrl ?? '';
+    // Asset Manager. Base defaults to '/' (site root) when the bridge sends no assetsUrl — the
+    // asset folder lives in the manifest paths, not the base, so it needn't be named `assets`.
+    const basePath = this.initData?.assetsUrl ?? '/';
     this.assets = new AssetManager(basePath, this.config.manifest);
 
     // Audio Manager

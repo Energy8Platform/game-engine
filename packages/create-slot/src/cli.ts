@@ -8,8 +8,12 @@ import { generate } from './generate';
 // Dependency versions written into a scaffolded game's package.json. Keep in lock-step with the
 // published @energy8platform/* versions (a create-slot test asserts these match the workspace).
 const PUBLISHED: Parameters<typeof generate>[2] = {
-  'platform-core': '^0.29.0', 'game-engine': '^0.31.0', 'stake-kit': '^0.5.0', 'stake-bridge': '^0.5.0',
-  'stake-math-tools': '^0.9.1', 'harness': '^0.3.0',
+  'platform-core': '^0.30.0',
+  'game-engine': '^0.32.0',
+  'stake-kit': '^0.6.0',
+  'stake-bridge': '^0.6.0',
+  'stake-math-tools': '^0.9.1',
+  harness: '^0.3.0',
 };
 
 async function main(): Promise<void> {
@@ -22,7 +26,12 @@ async function main(): Promise<void> {
     throw new Error(`Target directory ${dir} already exists and is not empty.`);
   }
   await generate(answers, dir, PUBLISHED);
-  console.log(`\n✓ Created ${answers.id} at ${dir}\n  cd ${seed.dir ?? answers.id} && npm install && npm run dev\n`);
+  console.log(
+    `\n✓ Created ${answers.id} at ${dir}\n  cd ${seed.dir ?? answers.id} && npm install && npm run dev\n`,
+  );
 }
 
-main().catch((err) => { console.error(err.message); exit(1); });
+main().catch((err) => {
+  console.error(err.message);
+  exit(1);
+});
