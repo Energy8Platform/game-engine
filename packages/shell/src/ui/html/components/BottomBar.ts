@@ -9,8 +9,12 @@ function readout(ge: string, label: string, value: string): HTMLElement {
   el.className = `ge-rd ge-${ge}`;
   // The value lives in its own inline-block span (.ge-rd-val) so it can be measured & shrunk to fit
   // (see fitReadouts) independently of the label, and so the count-up animates just the number.
-  const lbl = document.createElement('span'); lbl.className = 'ge-lbl'; lbl.textContent = label;
-  const val = document.createElement('span'); val.className = 'ge-rd-val'; val.textContent = value;
+  const lbl = document.createElement('span');
+  lbl.className = 'ge-lbl';
+  lbl.textContent = label;
+  const val = document.createElement('span');
+  val.className = 'ge-rd-val';
+  val.textContent = value;
   el.append(lbl, val);
   return el;
 }
@@ -25,12 +29,19 @@ function turboBtn(host: ShellHost, level: number): HTMLButtonElement {
 }
 
 /** A borderless icon button. */
-function iconBtn(ge: string, name: IconName, onClick: () => void, active = false): HTMLButtonElement {
+function iconBtn(
+  ge: string,
+  name: IconName,
+  onClick: () => void,
+  active = false,
+): HTMLButtonElement {
   const b = document.createElement('button');
   b.className = `ge-iconbtn${active ? ' ge-active' : ''}`;
   b.dataset.ge = ge;
   b.innerHTML = icon(name);
-  b.addEventListener('click', () => { if (!b.disabled) onClick(); });
+  b.addEventListener('click', () => {
+    if (!b.disabled) onClick();
+  });
   return b;
 }
 
@@ -49,16 +60,14 @@ export function renderBottomBar(host: ShellHost): HTMLElement {
   // All three modes share the base plaque layout. FS/replay hide the controls that don't apply
   // and add Free Spins + Total Win blocks on the left; the per-spin WIN uses the base pill.
   const isBase = state.mode === 'base';
-  const isFS = state.mode === 'freeSpins';
+  const isFS = state.mode === 'freeSpins' || state.mode === 'bonus';
   // FS always shows the spins counter + accumulated Total Win (even €0); a replay shows them
   // only when it's a free-spins replay (freeSpins.total > 0).
   const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
 
   // Replay is a read-only historical round — there's no real balance to show, so hide it. Keyed on
   // the sticky `replay` flag (not `mode`) so it stays hidden through a replay's free-spins phase.
-  const balance = state.replay
-    ? null
-    : readout('balance', host.t('Balance'), fmt(state.balance));
+  const balance = state.replay ? null : readout('balance', host.t('Balance'), fmt(state.balance));
   // With a feature active (e.g. Ante) the BET readout shows the effective stake, tinted with
   // the feature accent; the base state.bet is unchanged and returns once the feature is off.
   const feature = state.activeFeature;
@@ -75,27 +84,35 @@ export function renderBottomBar(host: ShellHost): HTMLElement {
   const turbo = config.features.turbo > 0 ? turboBtn(host, state.turbo) : null;
 
   // interactive controls — base mode only
-  let betDown: HTMLElement | null = null, betUp: HTMLElement | null = null;
-  let spin: HTMLElement | null = null, auto: HTMLElement | null = null, buy: HTMLElement | null = null;
+  let betDown: HTMLElement | null = null,
+    betUp: HTMLElement | null = null;
+  let spin: HTMLElement | null = null,
+    auto: HTMLElement | null = null,
+    buy: HTMLElement | null = null;
   if (isBase) {
     betDown = iconBtn('bet-down', 'minus', () => host.actions.stepBet(-1));
     betUp = iconBtn('bet-up', 'plus', () => host.actions.stepBet(1));
-    betValue.classList.add('ge-betbtn');                       // tap the stake → bet picker
-    betValue.addEventListener('click', () => { if (!betLocked(host)) host.actions.openBetPicker(); });
+    betValue.classList.add('ge-betbtn'); // tap the stake → bet picker
+    betValue.addEventListener('click', () => {
+      if (!betLocked(host)) host.actions.openBetPicker();
+    });
     spin = spinButton(host);
     auto = config.features.autoplay ? autoButton(host) : null;
-    buy = (config.features.buyBonus !== false || config.onBonusBuy) ? buyBtn(host) : null;
+    buy = config.features.buyBonus !== false || config.onBonusBuy ? buyBtn(host) : null;
   }
 
   const winEl = state.win > 0 ? readout('win', host.t('Win'), fmtWin(state.win)) : null;
   // FS/replay left blocks: spins counter + accumulated Total Win (shown even at €0).
   // current = number → "current / total"; current = null/undefined → just the (game-driven) total.
   const fs = state.freeSpins;
-  const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
+  const fsText =
+    state.bonus?.value ?? (fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`);
   // In FS the spins counter takes the SPIN slot as a rectangular hero plaque (same white/black-ring
   // style as the SPIN disc); Total Win stays an inline readout.
-  const fsHero = showFsBlocks ? fsHeroPlaque(host, fsText) : null;
-  const fsTotalWin = showFsBlocks ? readout('fs-totalwin', host.t('Total win'), fmtWin(fs.totalWin)) : null;
+  const fsHero = showFsBlocks ? fsHeroPlaque(host, fsText, state.bonus?.label) : null;
+  const fsTotalWin = showFsBlocks
+    ? readout('fs-totalwin', host.t('Total win'), fmtWin(fs.totalWin))
+    : null;
   // The hero in the centre/spin position: SPIN in base, the FS counter in free spins, nothing else.
   const hero = isBase ? spin : fsHero;
 
@@ -117,12 +134,16 @@ export function renderBottomBar(host: ShellHost): HTMLElement {
     // RIGHT (the controls): [bet (+ step)] · |divider| · [auto · SPIN-or-FS · turbo]
     const betKids: HTMLElement[] = [betValue];
     if (betUp && betDown) {
-      const step = document.createElement('div'); step.className = 'ge-betstep'; step.append(betUp, betDown);
+      const step = document.createElement('div');
+      step.className = 'ge-betstep';
+      step.append(betUp, betDown);
       betKids.push(step);
     }
     const betGroup = plaque('ge-betgroup', betKids);
-    const divider = document.createElement('div'); divider.className = 'ge-pl-divider';
-    const spinWrap = document.createElement('div'); spinWrap.className = 'ge-spinwrap';
+    const divider = document.createElement('div');
+    divider.className = 'ge-pl-divider';
+    const spinWrap = document.createElement('div');
+    spinWrap.className = 'ge-spinwrap';
     spinWrap.append(...compact([auto, hero, turbo]));
     const right = zone('ge-zone-right', betGroup, divider, spinWrap);
 
@@ -138,11 +159,16 @@ export function renderBottomBar(host: ShellHost): HTMLElement {
 
 /** Free-spins hero plaque — takes the SPIN slot in FS: same white disc/black-ring language as SPIN,
  *  but a rounded RECTANGLE showing the spins counter ("3 / 10"). */
-function fsHeroPlaque(host: ShellHost, text: string): HTMLElement {
+function fsHeroPlaque(host: ShellHost, text: string, label?: string): HTMLElement {
   const el = document.createElement('div');
-  el.className = 'ge-fs-hero'; el.dataset.ge = 'fs-counter';
-  const lbl = document.createElement('span'); lbl.className = 'ge-fs-lbl'; lbl.textContent = host.t('Free spins');
-  const num = document.createElement('span'); num.className = 'ge-fs-num'; num.textContent = text;
+  el.className = 'ge-fs-hero';
+  el.dataset.ge = 'fs-counter';
+  const lbl = document.createElement('span');
+  lbl.className = 'ge-fs-lbl';
+  lbl.textContent = host.t(label ?? 'Free spins');
+  const num = document.createElement('span');
+  num.className = 'ge-fs-num';
+  num.textContent = text;
   el.append(lbl, num);
   return el;
 }
@@ -160,24 +186,32 @@ function plaque(cls: string, children: HTMLElement[]): HTMLElement {
   d.append(...children);
   return d;
 }
-function compact(items: (HTMLElement | null)[]): HTMLElement[] { return items.filter((x): x is HTMLElement => x !== null); }
+function compact(items: (HTMLElement | null)[]): HTMLElement[] {
+  return items.filter((x): x is HTMLElement => x !== null);
+}
 
 function buyBtn(host: ShellHost): HTMLButtonElement {
   const buy = document.createElement('button');
-  buy.className = 'ge-shell-buybonus'; buy.dataset.ge = 'buybonus';
+  buy.className = 'ge-shell-buybonus';
+  buy.dataset.ge = 'buybonus';
   const feature = host.state.activeFeature;
   if (feature) {
     // A feature is active → this button turns into DISABLE (tinted with the feature accent).
     const accent = effectiveAccent(feature);
     buy.classList.add('ge-disable');
     buy.innerHTML = `<span>${host.t('DISABLE')}</span>`;
-    buy.style.background = accent; buy.style.color = contrastText(accent);
-    buy.addEventListener('click', () => { if (!buy.disabled) host.actions.deactivateFeature(); });
+    buy.style.background = accent;
+    buy.style.color = contrastText(accent);
+    buy.addEventListener('click', () => {
+      if (!buy.disabled) host.actions.deactivateFeature();
+    });
   } else {
     // Ticket icon (no text); keep the label for screen readers.
     buy.setAttribute('aria-label', host.t('BUY BONUS'));
     buy.innerHTML = `<span class="ge-bb-tk">${icon('ticket')}</span>`;
-    buy.addEventListener('click', () => { if (!buy.disabled) host.actions.openBuyBonus(); });
+    buy.addEventListener('click', () => {
+      if (!buy.disabled) host.actions.openBuyBonus();
+    });
   }
   return buy;
 }
@@ -190,17 +224,22 @@ function betLocked(host: ShellHost): boolean {
 function spinButton(host: ShellHost): HTMLButtonElement {
   const { state } = host;
   const sp = document.createElement('button');
-  sp.className = 'ge-shell-spin'; sp.dataset.ge = 'spin';
+  sp.className = 'ge-shell-spin';
+  sp.dataset.ge = 'spin';
   if (state.autoplay.active) {
     sp.classList.add('ge-stop');
     const rem = state.autoplay.remaining;
     const label = Number.isFinite(rem) ? String(rem) : '∞';
     sp.innerHTML = `<span class="ge-spin-stop">${icon('stop')}</span><span class="ge-spin-count">${label}</span>`;
-    sp.addEventListener('click', () => { if (!sp.disabled) host.actions.stopAutoplay(); });
+    sp.addEventListener('click', () => {
+      if (!sp.disabled) host.actions.stopAutoplay();
+    });
   } else {
     sp.innerHTML = icon('spin');
     if (state.busy) sp.classList.add('ge-spinning');
-    sp.addEventListener('click', () => { if (!sp.disabled) host.actions.spin(); });
+    sp.addEventListener('click', () => {
+      if (!sp.disabled) host.actions.spin();
+    });
   }
   return sp;
 }
@@ -230,7 +269,7 @@ function applyBusy(host: ShellHost, bar: HTMLElement): void {
   const i = host.state.availableBets.indexOf(host.state.bet);
   disable('bet-up', lockBet || i >= host.state.availableBets.length - 1);
   disable('bet-down', lockBet || i <= 0);
-  disable('spin', busy && !auto);     // keep the STOP disc clickable through autoplay
+  disable('spin', busy && !auto); // keep the STOP disc clickable through autoplay
   disable('autoplay', busy && !auto); // keep autoplay (stop) clickable through autoplay
   const betVal = bar.querySelector('[data-ge="bet-value"]') as HTMLElement | null;
   if (betVal) betVal.classList.toggle('ge-disabled', lockBet);

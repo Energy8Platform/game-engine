@@ -13,6 +13,10 @@ export interface RenderContext {
   formatAmount(value: number): string;
   /** LIVE turbo level (0 = off, 1..3 = escalating speed). Read at access. */
   readonly turbo: number;
+  /** Only meaningful in `onEnterMode`: true when RETURNING to a suspended parent bonus after a
+   *  nested sub-bonus finished (e.g. back to free spins after an adventure), false on a fresh
+   *  entry. Lets a scene restore vs rebuild. Undefined outside `onEnterMode`. */
+  resumed?: boolean;
   /** Aborted when the player skips this segment (double-tap). The scene's async pacing can race or
    *  cancel on it; on abort the scene must collapse to the segment's final visual state. */
   signal: AbortSignal;
@@ -82,9 +86,13 @@ export interface SlotSceneController<T extends SlotSpinResultBase = SlotSpinResu
   onSpinStart(): void;
   /** Render ONE segment (a spin or one free spin). Await your own pacing. */
   onSpin(result: T, ctx: RenderContext): Promise<void>;
-  /** Fires when ctx.mode changes between segments (entering a non-BASE mode/bonus). */
+  /** Fires when a bonus LEVEL begins. With nested bonuses this fires once per level (free spins,
+   *  then adventure, …) — check `ctx.mode` for which. `ctx.resumed` is true when returning to a
+   *  suspended parent after a nested sub-bonus finished, so a scene can restore instead of rebuild.
+   *  A single-bonus round fires it exactly once (as before). */
   onEnterMode(result: T, ctx: RenderContext): Promise<void>;
-  /** Fires when leaving a mode (back toward BASE). */
+  /** Fires when a bonus LEVEL ends — popping a nested sub-bonus back to its parent, or unwinding
+   *  the last level back to BASE. `ctx.mode` is the level being left. Fires once per level. */
   onExitMode(result: T, ctx: RenderContext): Promise<void>;
   /** Fires once per round after the full drain (controls unlocked). */
   onSpinEnd(result: T, ctx: RenderContext): void;

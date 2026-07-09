@@ -3,13 +3,23 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
 import type { ShellConfig } from '@/core/types';
 
-function cfg(mount: HTMLElement, over: Partial<ShellConfig> = {}): ShellConfig & { mount: HTMLElement } {
+function cfg(
+  mount: HTMLElement,
+  over: Partial<ShellConfig> = {},
+): ShellConfig & { mount: HTMLElement } {
   return {
-    mount, gameInfo: {}, language: 'en',
+    mount,
+    gameInfo: {},
+    language: 'en',
     currency: { symbol: '€', position: 'left' },
-    availableBets: [1, 2, 5], defaultBet: 2, currentBet: null,
-    balance: 1000, win: 0, mode: 'base',
-    features: { turbo: 2, autoplay: {}, buyBonus: false }, ...over,
+    availableBets: [1, 2, 5],
+    defaultBet: 2,
+    currentBet: null,
+    balance: 1000,
+    win: 0,
+    mode: 'base',
+    features: { turbo: 2, autoplay: {}, buyBonus: false },
+    ...over,
   };
 }
 const q = (m: HTMLElement, s: string) => m.querySelector(s) as HTMLElement | null;
@@ -52,11 +62,11 @@ describe('BottomBar freeSpins/replay modes', () => {
     const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
     shell.setFreeSpins({ current: 0, total: 10, totalWin: 0 });
     expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('0'); // €0 still shown
-    expect(q(mount, '[data-ge="win"]')).toBeNull();                          // no win yet
+    expect(q(mount, '[data-ge="win"]')).toBeNull(); // no win yet
     shell.setWin(7);
     const win = q(mount, '[data-ge="win"]')!;
     expect(win.textContent).toContain('€7');
-    expect(win.closest('.ge-zone-left')).toBeTruthy();                       // grouped with the info on the left
+    expect(win.closest('.ge-zone-left')).toBeTruthy(); // grouped with the info on the left
   });
 
   it('replay: read-only bet + win (base pill) + turbo, no controls, no balance', () => {
@@ -74,7 +84,7 @@ describe('BottomBar freeSpins/replay modes', () => {
 
   it('replay: Free Spins + Total Win only for a free-spins replay (total > 0)', () => {
     const shell = createGameShell(cfg(mount, { mode: 'replay', win: 12 }));
-    expect(q(mount, '[data-ge="fs-counter"]')).toBeNull();   // plain replay → no FS blocks
+    expect(q(mount, '[data-ge="fs-counter"]')).toBeNull(); // plain replay → no FS blocks
     expect(q(mount, '[data-ge="fs-totalwin"]')).toBeNull();
     shell.setFreeSpins({ current: 8, total: 8, totalWin: 40 });
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('8');
@@ -89,6 +99,28 @@ describe('BottomBar freeSpins/replay modes', () => {
     shell.setMode('freeSpins');
     shell.setFreeSpins({ current: 2, total: 10, totalWin: 30 });
     expect(q(mount, '[data-ge="fs-counter"]')!.textContent).toContain('10'); // FS layout active
-    expect(q(mount, '[data-ge="balance"]')).toBeNull();                      // …yet no balance
+    expect(q(mount, '[data-ge="balance"]')).toBeNull(); // …yet no balance
+  });
+
+  it('bonus: generic mode reuses the FS layout with a game-supplied label + value', () => {
+    const shell = createGameShell(cfg(mount, { mode: 'bonus' }));
+    shell.setBonus({ label: 'Hold & Spin', value: '3', totalWin: 40 });
+    // Same host-driven layout as free spins: no controls, hero counter + Total Win.
+    expect(q(mount, '[data-ge="spin"]')).toBeNull();
+    expect(q(mount, '[data-ge="bet-up"]')).toBeNull();
+    const hero = q(mount, '[data-ge="fs-counter"]')!;
+    expect(hero.querySelector('.ge-fs-lbl')!.textContent).toBe('Hold & Spin'); // game label, not "Free spins"
+    expect(hero.querySelector('.ge-fs-num')!.textContent).toBe('3'); // verbatim value (no "current / total")
+    expect(q(mount, '[data-ge="fs-totalwin"]')!.textContent).toContain('40'); // totalWin folded into the accumulator
+  });
+
+  it('bonus: setFreeSpins clears a prior bonus override back to the derived counter', () => {
+    const shell = createGameShell(cfg(mount, { mode: 'freeSpins' }));
+    shell.setBonus({ label: 'Adventure', value: '×5', totalWin: 0 });
+    expect(q(mount, '[data-ge="fs-counter"] .ge-fs-lbl')!.textContent).toBe('Adventure');
+    shell.setFreeSpins({ current: 2, total: 10, totalWin: 0 }); // reverts to the default readout
+    const hero = q(mount, '[data-ge="fs-counter"]')!;
+    expect(hero.querySelector('.ge-fs-lbl')!.textContent).toBe('Free spins');
+    expect(hero.querySelector('.ge-fs-num')!.textContent).toContain('2 / 10');
   });
 });

@@ -2,14 +2,15 @@
 import type { GameApplicationConfig } from '../types';
 import { ScaleMode, Orientation } from '../types';
 import type { CreateSlotGameOptions } from './types';
+import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
 
 /**
  * Pure: map host options to a GameApplicationConfig with sane defaults.
  * `isStakeNow` is computed by the orchestrator (kept out of here so this
  * stays a pure, renderer-free function).
  */
-export function buildAppConfig(
-  opts: CreateSlotGameOptions,
+export function buildAppConfig<T extends SlotSpinResultBase = SlotSpinResultBase>(
+  opts: CreateSlotGameOptions<T>,
   isStakeNow: boolean,
 ): GameApplicationConfig {
   return {

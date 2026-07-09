@@ -16,26 +16,30 @@ import {
 import { IconView, makeRingedIcon } from '../pixi-icon';
 
 // ── design constants (mirror the DOM `.ge-bar-panel` / mobile rules) ──────────
-const BAR_H = 68;            // continuous dark panel height
-const SPIN = 84;            // hero disc — pops above/below the bar
+const BAR_H = 68; // continuous dark panel height
+const SPIN = 84; // hero disc — pops above/below the bar
 const SPIN_POP = (SPIN - BAR_H) / 2; // 8 — how far the disc sticks out top/bottom
-const MAX_BAR_W = 850;      // .ge-shell-bottom max-width
-const OUTER_PAD = 14;       // .ge-shell-bottom padding
-const PANEL_PAD = 14;       // .ge-bar-panel padding
-const ZONE_GAP = 12;        // .ge-zone gap
-const ROW_GAP = 10;         // BUY BONUS ↔ panel gap
-const MID_GAP = 24;         // minimum gap between the left info group and the right controls
-const BAR_REF_W = 840;      // zoom reference width
+const MAX_BAR_W = 850; // .ge-shell-bottom max-width
+const OUTER_PAD = 14; // .ge-shell-bottom padding
+const PANEL_PAD = 14; // .ge-bar-panel padding
+const ZONE_GAP = 12; // .ge-zone gap
+const ROW_GAP = 10; // BUY BONUS ↔ panel gap
+const MID_GAP = 24; // minimum gap between the left info group and the right controls
+const BAR_REF_W = 840; // zoom reference width
 const BAR_MIN_SCALE = 0.5;
 const WIDE_PAD_BOTTOM = 8;
 export const WIDE_BAR_H = WIDE_PAD_BOTTOM + SPIN; // ≈92
 
-const BUY_W = 62;           // buy-bonus disc on desktop
-const DISC = 38;            // white-disc icon button box (auto/turbo)
-const FS_BOX = 90;          // fixed bet-value box width
+const BUY_W = 62; // buy-bonus disc on desktop
+const DISC = 38; // white-disc icon button box (auto/turbo)
+const FS_BOX = 90; // fixed bet-value box width
 
 // mobile
-const M_CTRL_H = 62, M_INFO_H = 40, M_GAP = 10, M_PAD_BOTTOM = 8, M_SIDE = 10;
+const M_CTRL_H = 62,
+  M_INFO_H = 40,
+  M_GAP = 10,
+  M_PAD_BOTTOM = 8,
+  M_SIDE = 10;
 const M_BUY = 50;
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H; // spin pops above the controls
 
@@ -53,7 +57,15 @@ class TurboButton extends Container {
   private level: number;
   private accent: string;
 
-  constructor(opts: { size: number; glyph: number; discFill: string; discBorder?: number; accent: string; level: number; onTap: () => void }) {
+  constructor(opts: {
+    size: number;
+    glyph: number;
+    discFill: string;
+    discBorder?: number;
+    accent: string;
+    level: number;
+    onTap: () => void;
+  }) {
     super();
     this.box = opts.size;
     this.accent = opts.accent;
@@ -70,7 +82,11 @@ class TurboButton extends Container {
     this.cursor = 'pointer';
     this.hitArea = new Rectangle(0, 0, this.box, this.box);
     this._paint(false);
-    attachHover(this, () => this._paint(true), () => this._paint(false));
+    attachHover(
+      this,
+      () => this._paint(true),
+      () => this._paint(false),
+    );
     attachPress(this, 0.92, () => opts.onTap());
   }
 
@@ -99,12 +115,28 @@ class TurboButton extends Container {
     this._paint(false);
   }
 
-  measureSize(): { w: number; h: number } { return { w: this.box, h: this.box }; }
-  setLayoutSize(): void { /* fixed */ }
+  measureSize(): { w: number; h: number } {
+    return { w: this.box, h: this.box };
+  }
+  setLayoutSize(): void {
+    /* fixed */
+  }
 }
 
 /** A readout in the bar (white Oswald value, plaque-label caption, no shadow). */
-function readout(host: PixiComponentContext, label: string, value: string, opts: { valueSize?: number; align?: 'left' | 'center' | 'right'; fixedWidth?: number; maxWidth?: number; color?: string; muted?: string } = {}): Readout {
+function readout(
+  host: PixiComponentContext,
+  label: string,
+  value: string,
+  opts: {
+    valueSize?: number;
+    align?: 'left' | 'center' | 'right';
+    fixedWidth?: number;
+    maxWidth?: number;
+    color?: string;
+    muted?: string;
+  } = {},
+): Readout {
   return new Readout({
     label: host.t(label),
     value,
@@ -151,21 +183,30 @@ export class BottomBar extends Container {
   private buildWide(): void {
     const { state, tokens } = this.host;
     const isBase = state.mode === 'base';
-    const isFS = state.mode === 'freeSpins';
+    const isFS = state.mode === 'freeSpins' || state.mode === 'bonus';
     const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
 
     // BUY BONUS — floats outside-left of the panel (base only)
-    this.buy = isBase ? this.buildBuy(BUY_W, 13, 3) ?? undefined : undefined;
+    this.buy = isBase ? (this.buildBuy(BUY_W, 13, 3) ?? undefined) : undefined;
 
     // LEFT info group: menu · balance · (Total win) · (Win)
     const left = new FlexBox({ direction: 'row', align: 'center', gap: ZONE_GAP });
-    left.add(new IconButton('menu', { size: 36, glyph: 30, color: '#ffffff', hover: tokens.accent, onTap: () => this.host.actions.openMenu() }));
+    left.add(
+      new IconButton('menu', {
+        size: 36,
+        glyph: 30,
+        color: '#ffffff',
+        hover: tokens.accent,
+        onTap: () => this.host.actions.openMenu(),
+      }),
+    );
     if (!state.replay) {
       const bal = readout(this.host, 'Balance', this.host.fmt(state.balance));
       this.balanceValue = bal.valueText;
       left.add(bal);
     }
-    if (showFsBlocks) left.add(readout(this.host, 'Total win', this.host.fmtWin(state.freeSpins.totalWin)));
+    if (showFsBlocks)
+      left.add(readout(this.host, 'Total win', this.host.fmtWin(state.freeSpins.totalWin)));
     if (state.win > 0) {
       const win = readout(this.host, 'Win', this.host.fmtWin(state.win));
       this.winValue = win.valueText;
@@ -199,7 +240,9 @@ export class BottomBar extends Container {
     if (isBase) {
       bet.eventMode = 'static';
       bet.cursor = 'pointer';
-      bet.on('pointertap', () => { if (!this.betLocked()) this.host.actions.openBetPicker(); });
+      bet.on('pointertap', () => {
+        if (!this.betLocked()) this.host.actions.openBetPicker();
+      });
     }
 
     const betGroup = new FlexBox({ direction: 'row', align: 'center', gap: 8 });
@@ -207,8 +250,20 @@ export class BottomBar extends Container {
     if (isBase) {
       // plain (borderless) +/- icons, bolder — stacked
       const step = new FlexBox({ direction: 'column', align: 'center', gap: 2 });
-      this.betUp = new IconButton('plus', { size: 24, glyph: 22, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(1) });
-      this.betDown = new IconButton('minus', { size: 24, glyph: 22, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(-1) });
+      this.betUp = new IconButton('plus', {
+        size: 24,
+        glyph: 22,
+        color: '#ffffff',
+        hover: tokens.accent,
+        onTap: () => this.onBet(1),
+      });
+      this.betDown = new IconButton('minus', {
+        size: 24,
+        glyph: 22,
+        color: '#ffffff',
+        hover: tokens.accent,
+        onTap: () => this.onBet(-1),
+      });
       step.add(this.betUp);
       step.add(this.betDown);
       betGroup.add(step);
@@ -217,26 +272,52 @@ export class BottomBar extends Container {
     const spinWrap = new FlexBox({ direction: 'row', align: 'center', gap: 8 });
     if (isBase && config.features.autoplay) {
       this.autoBtn = new IconButton('autoplay', {
-        size: DISC, glyph: 25, disc: tokens.btn, color: tokens.btnInk, hover: tokens.accent, activeColor: tokens.accent,
-        active: state.autoplay.active, onTap: () => this.onAutoplay(),
+        size: DISC,
+        glyph: 25,
+        disc: tokens.btn,
+        color: tokens.btnInk,
+        hover: tokens.accent,
+        activeColor: tokens.accent,
+        active: state.autoplay.active,
+        onTap: () => this.onAutoplay(),
       });
       if (state.autoplay.active) this.autoBtn.setGlow(true);
       spinWrap.add(this.autoBtn);
     }
     if (isBase) {
-      this.spin = new SpinDisc({ size: SPIN, glyph: 65, tokens, ticker: this.host.ticker, onSpin: () => this.host.actions.spin(), onStop: () => this.stopAutoplay() });
+      this.spin = new SpinDisc({
+        size: SPIN,
+        glyph: 65,
+        tokens,
+        ticker: this.host.ticker,
+        onSpin: () => this.host.actions.spin(),
+        onStop: () => this.stopAutoplay(),
+      });
       if (state.autoplay.active) this.spin.setAutoplay(true, state.autoplay.remaining);
       if (state.busy) this.spin.setBusy(true);
       spinWrap.add(this.spin);
     } else if (showFsBlocks) {
       const fs = state.freeSpins;
-      const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
-      spinWrap.add(new FsHero({ label: this.host.t('Free spins'), value: fsText, tokens, height: SPIN }));
+      const fsText =
+        state.bonus?.value ?? (fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`);
+      spinWrap.add(
+        new FsHero({
+          label: this.host.t(state.bonus?.label ?? 'Free spins'),
+          value: fsText,
+          tokens,
+          height: SPIN,
+        }),
+      );
     }
     if (config.features.turbo > 0) {
       this.turboBtn = new TurboButton({
-        size: DISC, glyph: 19, discFill: tokens.btn, discBorder: 2, accent: tokens.accent,
-        level: state.turbo, onTap: () => this.onTurbo(),
+        size: DISC,
+        glyph: 19,
+        discFill: tokens.btn,
+        discBorder: 2,
+        accent: tokens.accent,
+        level: state.turbo,
+        onTap: () => this.onTurbo(),
       });
       spinWrap.add(this.turboBtn);
     }
@@ -255,57 +336,124 @@ export class BottomBar extends Container {
     const feature = state.activeFeature;
     if (feature) {
       const accent = effectiveAccent(feature);
-      return new BuyBonusBadge({ size, fontSize, border, bg: accent, fg: contrastText(accent), label: this.host.t('DISABLE'), tokens, ticker: this.host.ticker, onTap: () => this.host.actions.deactivateFeature() });
+      return new BuyBonusBadge({
+        size,
+        fontSize,
+        border,
+        bg: accent,
+        fg: contrastText(accent),
+        label: this.host.t('DISABLE'),
+        tokens,
+        ticker: this.host.ticker,
+        onTap: () => this.host.actions.deactivateFeature(),
+      });
     }
-    return new BuyBonusBadge({ size, border, bg: tokens.accent, icon: 'ticket', iconSize: size * 0.55, iconColor: tokens.btnInk, label: '', tokens, ticker: this.host.ticker, onTap: () => this.host.actions.openBuyBonus() });
+    return new BuyBonusBadge({
+      size,
+      border,
+      bg: tokens.accent,
+      icon: 'ticket',
+      iconSize: size * 0.55,
+      iconColor: tokens.btnInk,
+      label: '',
+      tokens,
+      ticker: this.host.ticker,
+      onTap: () => this.host.actions.openBuyBonus(),
+    });
   }
 
   // ── mobile / portrait ─────────────────────────────────────────────────────
   private buildMobile(): void {
     const { state, config, tokens } = this.host;
     const isBase = state.mode === 'base';
-    const isFS = state.mode === 'freeSpins';
+    const isFS = state.mode === 'freeSpins' || state.mode === 'bonus';
     const showFsBlocks = isFS || (state.mode === 'replay' && state.freeSpins.total > 0);
     const W = this.host.screenW - 2 * M_SIDE;
 
     // hero (centre): SPIN in base, FS counter in free spins
     let hero: Container | undefined;
     if (isBase) {
-      this.spin = new SpinDisc({ size: SPIN, glyph: 65, tokens, ticker: this.host.ticker, onSpin: () => this.host.actions.spin(), onStop: () => this.stopAutoplay() });
+      this.spin = new SpinDisc({
+        size: SPIN,
+        glyph: 65,
+        tokens,
+        ticker: this.host.ticker,
+        onSpin: () => this.host.actions.spin(),
+        onStop: () => this.stopAutoplay(),
+      });
       if (state.autoplay.active) this.spin.setAutoplay(true, state.autoplay.remaining);
       if (state.busy) this.spin.setBusy(true);
       hero = this.spin;
     } else if (showFsBlocks) {
       const fs = state.freeSpins;
-      const fsText = fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`;
-      hero = new FsHero({ label: this.host.t('Free spins'), value: fsText, tokens, height: SPIN });
+      const fsText =
+        state.bonus?.value ?? (fs.current == null ? `${fs.total}` : `${fs.current} / ${fs.total}`);
+      hero = new FsHero({
+        label: this.host.t(state.bonus?.label ?? 'Free spins'),
+        value: fsText,
+        tokens,
+        height: SPIN,
+      });
     }
 
-    const menu = new IconButton('menu', { size: 40, glyph: 26, color: '#ffffff', hover: tokens.accent, onTap: () => this.host.actions.openMenu() });
+    const menu = new IconButton('menu', {
+      size: 40,
+      glyph: 26,
+      color: '#ffffff',
+      hover: tokens.accent,
+      onTap: () => this.host.actions.openMenu(),
+    });
     // autoplay is a base-mode control only — hidden in free spins / replay (matches the DOM bar)
     if (isBase && config.features.autoplay) {
-      this.autoBtn = new IconButton('autoplay', { size: 40, glyph: 26, color: '#ffffff', hover: tokens.accent, activeColor: tokens.accent, active: state.autoplay.active, onTap: () => this.onAutoplay() });
+      this.autoBtn = new IconButton('autoplay', {
+        size: 40,
+        glyph: 26,
+        color: '#ffffff',
+        hover: tokens.accent,
+        activeColor: tokens.accent,
+        active: state.autoplay.active,
+        onTap: () => this.onAutoplay(),
+      });
       if (state.autoplay.active) this.autoBtn.setGlow(true);
     }
     if (config.features.turbo > 0) {
       this.turboBtn = new TurboButton({
-        size: 40, glyph: 22, discFill: tokens.btn, discBorder: 2, accent: tokens.accent,
-        level: state.turbo, onTap: () => this.onTurbo(),
+        size: 40,
+        glyph: 22,
+        discFill: tokens.btn,
+        discBorder: 2,
+        accent: tokens.accent,
+        level: state.turbo,
+        onTap: () => this.onTurbo(),
       });
     }
-    const buy = isBase ? this.buildBuy(M_BUY, 9, 2) ?? undefined : undefined;
+    const buy = isBase ? (this.buildBuy(M_BUY, 9, 2) ?? undefined) : undefined;
 
     // level 1 — controls bar (dark)
-    const controls = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', gap: 0, width: W, height: M_CTRL_H, padding: { left: 18, right: 18 }, background: { fill: tokens.bar, radius: 16 } });
+    const controls = new FlexBox({
+      direction: 'row',
+      align: 'center',
+      justify: 'space-between',
+      gap: 0,
+      width: W,
+      height: M_CTRL_H,
+      padding: { left: 18, right: 18 },
+      background: { fill: tokens.bar, radius: 16 },
+    });
     if (isBase && hero) {
       const SIDE = 12;
       const lz = new FlexBox({ direction: 'row', align: 'center', gap: SIDE, justify: 'start' });
-      lz.add(menu); if (this.autoBtn) lz.add(this.autoBtn);
+      lz.add(menu);
+      if (this.autoBtn) lz.add(this.autoBtn);
       const rz = new FlexBox({ direction: 'row', align: 'center', gap: SIDE, justify: 'end' });
-      if (this.turboBtn) rz.add(this.turboBtn); if (buy) rz.add(buy);
+      if (this.turboBtn) rz.add(this.turboBtn);
+      if (buy) rz.add(buy);
       const zw = Math.max(lz.measureSize().w, rz.measureSize().w);
-      lz.setLayoutSize(zw, undefined); rz.setLayoutSize(zw, undefined);
-      controls.add(lz); controls.add(hero); controls.add(rz);
+      lz.setLayoutSize(zw, undefined);
+      rz.setLayoutSize(zw, undefined);
+      controls.add(lz);
+      controls.add(hero);
+      controls.add(rz);
     } else {
       controls.add(menu);
       if (this.autoBtn) controls.add(this.autoBtn);
@@ -316,12 +464,22 @@ export class BottomBar extends Container {
         // (centred post-scale) instead of widening the row and forcing a whole-bar down-scale. Mirrors
         // the DOM's shrinkable total-win slot. The floor keeps it readable; below that applyFitMobile
         // scales the stack as a last resort.
-        const ICON = 40, PAD = 18, GAPS = 24;
+        const ICON = 40,
+          PAD = 18,
+          GAPS = 24;
         const heroSized = hero as unknown as { measureSize?: () => { w: number; h: number } };
         const heroW = hero ? (heroSized.measureSize?.().w ?? hero.getLocalBounds().width) : 0;
-        const fixed = ICON /* menu */ + (this.autoBtn ? ICON : 0) + heroW + (this.turboBtn ? ICON : 0);
+        const fixed =
+          ICON /* menu */ + (this.autoBtn ? ICON : 0) + heroW + (this.turboBtn ? ICON : 0);
         const twSlot = Math.max(60, W - 2 * PAD - fixed - GAPS);
-        controls.add(readout(this.host, 'Total win', this.host.fmtWin(state.freeSpins.totalWin), { color: '#ffffff', muted: '#ffffff', align: 'center', maxWidth: twSlot }));
+        controls.add(
+          readout(this.host, 'Total win', this.host.fmtWin(state.freeSpins.totalWin), {
+            color: '#ffffff',
+            muted: '#ffffff',
+            align: 'center',
+            maxWidth: twSlot,
+          }),
+        );
       }
       if (this.turboBtn) controls.add(this.turboBtn);
     }
@@ -332,29 +490,76 @@ export class BottomBar extends Container {
     const feature = state.activeFeature;
     const betShown = feature ? state.bet * feature.priceMultiplier : state.bet;
     if (isBase) {
-      this.betDown = new IconButton('minus', { size: 26, glyph: 18, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(-1) });
+      this.betDown = new IconButton('minus', {
+        size: 26,
+        glyph: 18,
+        color: '#ffffff',
+        hover: tokens.accent,
+        onTap: () => this.onBet(-1),
+      });
       betGroup.add(this.betDown);
     }
-    const bet = new Readout({ label: this.host.t('Bet'), value: this.host.fmt(betShown), muted: feature ? effectiveAccent(feature) : tokens.plaqueLabel, fg: feature ? effectiveAccent(feature) : '#ffffff', valueSize: 11, align: 'center', fixedWidth: 76, shadow: false });
+    const bet = new Readout({
+      label: this.host.t('Bet'),
+      value: this.host.fmt(betShown),
+      muted: feature ? effectiveAccent(feature) : tokens.plaqueLabel,
+      fg: feature ? effectiveAccent(feature) : '#ffffff',
+      valueSize: 11,
+      align: 'center',
+      fixedWidth: 76,
+      shadow: false,
+    });
     this.betReadout = bet;
-    if (isBase) { bet.eventMode = 'static'; bet.cursor = 'pointer'; bet.on('pointertap', () => { if (!this.betLocked()) this.host.actions.openBetPicker(); }); }
+    if (isBase) {
+      bet.eventMode = 'static';
+      bet.cursor = 'pointer';
+      bet.on('pointertap', () => {
+        if (!this.betLocked()) this.host.actions.openBetPicker();
+      });
+    }
     betGroup.add(bet);
-    if (isBase) { this.betUp = new IconButton('plus', { size: 26, glyph: 18, color: '#ffffff', hover: tokens.accent, onTap: () => this.onBet(1) }); betGroup.add(this.betUp); }
+    if (isBase) {
+      this.betUp = new IconButton('plus', {
+        size: 26,
+        glyph: 18,
+        color: '#ffffff',
+        hover: tokens.accent,
+        onTap: () => this.onBet(1),
+      });
+      betGroup.add(this.betUp);
+    }
     betGroup.layout();
 
     const innerW = W - 28; // pad 14 each side
     const slot = Math.max(40, (innerW - betGroup.outerWidth - 20) / 2);
-    const info = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between', width: W, height: M_INFO_H, padding: { left: 14, right: 14 }, gap: 10, background: { fill: tokens.plaqueGlass, radius: 12 } });
+    const info = new FlexBox({
+      direction: 'row',
+      align: 'center',
+      justify: 'space-between',
+      width: W,
+      height: M_INFO_H,
+      padding: { left: 14, right: 14 },
+      gap: 10,
+      background: { fill: tokens.plaqueGlass, radius: 12 },
+    });
     // replay is a read-only historical round — no real balance to show (sticky `replay`, so it stays
     // hidden through a replay's free-spins phase too); matches the DOM bar.
     if (!state.replay) {
-      const bal = readout(this.host, 'Balance', this.host.fmt(state.balance), { valueSize: 11, align: 'left', fixedWidth: slot });
+      const bal = readout(this.host, 'Balance', this.host.fmt(state.balance), {
+        valueSize: 11,
+        align: 'left',
+        fixedWidth: slot,
+      });
       this.balanceValue = bal.valueText;
       info.add(bal);
     }
     info.add(betGroup);
     // WIN always present (no jiggle on win↔0)
-    const win = readout(this.host, 'Win', this.host.fmtWin(state.win), { valueSize: 11, align: 'right', fixedWidth: slot });
+    const win = readout(this.host, 'Win', this.host.fmtWin(state.win), {
+      valueSize: 11,
+      align: 'right',
+      fixedWidth: slot,
+    });
     this.winValue = win.valueText;
     info.add(win);
     info.layout();
@@ -399,7 +604,10 @@ export class BottomBar extends Container {
     if (this.spin) this.spin.disabled = state.busy && !auto;
     if (this.autoBtn) this.autoBtn.disabled = state.busy && !auto;
     if (this.buy) this.buy.disabled = state.busy || auto || !state.buyBonusEnabled;
-    if (this.betReadout && lockBet) { this.betReadout.eventMode = 'none'; this.betReadout.cursor = 'default'; }
+    if (this.betReadout && lockBet) {
+      this.betReadout.eventMode = 'none';
+      this.betReadout.cursor = 'default';
+    }
   }
 
   // ── height / fit ──────────────────────────────────────────────────────────
@@ -414,9 +622,13 @@ export class BottomBar extends Container {
   }
 
   applyFit(): void {
-    if (this.host.layout === 'mobile') { this.applyFitMobile(); return; }
+    if (this.host.layout === 'mobile') {
+      this.applyFitMobile();
+      return;
+    }
     const { screenW: W, screenH: H, tokens } = this.host;
-    const left = this.leftZone!, right = this.rightZone!;
+    const left = this.leftZone!,
+      right = this.rightZone!;
     const buyW = this.buy ? BUY_W + ROW_GAP : 0;
 
     // content area = buy + panel; panel holds left (hard-left) and right (hard-right) with ≥MID_GAP.
@@ -436,16 +648,20 @@ export class BottomBar extends Container {
 
     if (this.buy) this.buy.position.set(OUTER_PAD, panelCenterY - BUY_W / 2);
     left.position.set(panelX + PANEL_PAD, panelCenterY - left.outerHeight / 2);
-    right.position.set(panelRight - PANEL_PAD - right.outerWidth, panelCenterY - right.outerHeight / 2);
+    right.position.set(
+      panelRight - PANEL_PAD - right.outerWidth,
+      panelCenterY - right.outerHeight / 2,
+    );
 
     this.inner.scale.set(s);
-    this.inner.position.set((W - barW * s) / 2, (H - WIDE_PAD_BOTTOM) - SPIN * s);
+    this.inner.position.set((W - barW * s) / 2, H - WIDE_PAD_BOTTOM - SPIN * s);
     this.measureFootprint();
   }
 
   private applyFitMobile(): void {
     const { screenW: W, screenH: H } = this.host;
-    const controls = this.mobileControls!, info = this.mobileInfo!;
+    const controls = this.mobileControls!,
+      info = this.mobileInfo!;
     const pop = this.mobileHeroPop; // how far the hero sticks above the controls bar
     // vertical stack: [controls (hero pops `pop` above)] gap [info]
     const topPad = pop;

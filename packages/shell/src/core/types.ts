@@ -1,4 +1,8 @@
-export type ShellMode = 'base' | 'freeSpins' | 'replay';
+/** `freeSpins` and `bonus` are the SAME bar layout (host-driven hero + Total Win); `freeSpins` is
+ *  kept as a back-compat alias for the common case (its readout is derived current/total), while
+ *  `bonus` pairs with `setBonus()` to show a game-supplied label + value (adventure, hold-and-spin,
+ *  respins — anything that isn't a plain free-spins counter). */
+export type ShellMode = 'base' | 'bonus' | 'freeSpins' | 'replay';
 
 export interface CurrencyConfig {
   symbol: string;
@@ -162,6 +166,20 @@ export interface FreeSpinsState {
   totalWin: number;
 }
 
+/** A game-supplied bonus readout for the bar hero, set via `setBonus()`. Generalizes the
+ *  free-spins counter: the shell renders `label` (localized via the shell translator, so a game
+ *  i18n entry for it is honoured) + `value` (a pre-formatted string, shown verbatim — "2 / 10",
+ *  "3", "×5", "7 coins") + the Total Win accumulator. The shell stays free of any per-game bonus
+ *  concept — the label/value semantics live in the game/host. */
+export interface BonusReadout {
+  /** Bar label, e.g. 'Free spins' | 'Adventure' | 'Hold & Spin'. Run through the shell translator. */
+  label: string;
+  /** Pre-formatted counter value shown verbatim (NOT translated). */
+  value: string;
+  /** Cumulative bonus win for the Total Win readout. */
+  totalWin: number;
+}
+
 /** One footer button of a generic modal. Clicking it runs `on` (if any), then closes the modal. */
 export interface ModalAction {
   title: string;
@@ -229,9 +247,24 @@ export interface ShellConfig {
 }
 
 /** ShellConfig after the controller applies defaults (version, isSocial, replay, theme). No mount. */
-export type ResolvedShellConfig = Required<Pick<ShellConfig,
-  'language' | 'currency' | 'availableBets' | 'defaultBet' | 'balance' | 'win' | 'mode' | 'features' | 'gameInfo' | 'version' | 'isSocial' | 'replay'>>
-  & Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy'>;
+export type ResolvedShellConfig = Required<
+  Pick<
+    ShellConfig,
+    | 'language'
+    | 'currency'
+    | 'availableBets'
+    | 'defaultBet'
+    | 'balance'
+    | 'win'
+    | 'mode'
+    | 'features'
+    | 'gameInfo'
+    | 'version'
+    | 'isSocial'
+    | 'replay'
+  >
+> &
+  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy'>;
 
 export interface ShellState {
   mode: ShellMode;
@@ -248,6 +281,9 @@ export interface ShellState {
   turbo: number;
   buyBonusEnabled: boolean;
   freeSpins: FreeSpinsState;
+  /** Game-supplied bonus label + value override (from `setBonus()`). When null the bar derives the
+   *  readout from `freeSpins` (label 'Free spins', value current/total) — the back-compat default. */
+  bonus: { label: string; value: string } | null;
   /** The currently activated `feature` option (e.g. Ante), or null. Drives the
    *  effective-bet readout tint and the BUY BONUS → DISABLE toggle on the bar. */
   activeFeature: BonusOption | null;

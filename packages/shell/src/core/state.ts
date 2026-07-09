@@ -13,6 +13,7 @@ export function createInitialState(config: ShellConfig): ShellState {
     turbo: 0,
     buyBonusEnabled: true,
     freeSpins: { current: 0, total: 0, totalWin: 0 },
+    bonus: null,
     activeFeature: null,
   };
 }

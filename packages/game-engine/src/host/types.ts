@@ -7,7 +7,27 @@ import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../t
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
 import type { GameApplication } from '../core';
 import type { SlotShellOptions } from './shellConfig';
-import type { SlotSpinResultBase, SlotResultNormalizer } from '@energy8platform/platform-core/slot-result';
+import type {
+  SlotSpinResultBase,
+  SlotResultNormalizer,
+} from '@energy8platform/platform-core/slot-result';
+import type { FreeSpinsView } from './freeSpinsCounter';
+
+/** Turns a bonus segment into the bar readout for games whose bonus ISN'T a plain free-spins
+ *  counter (adventure, hold-and-spin, respins). The shell shows a host-driven hero + Total Win in
+ *  ANY bonus; this only customises the label + counter VALUE. Omit `bonus` entirely and the host
+ *  falls back to the free-spins default (label 'Free spins', value current/total, retrigger-aware). */
+export interface BonusReadoutConfig<T extends SlotSpinResultBase = SlotSpinResultBase> {
+  /** Bar label (localized by the shell, so a game i18n entry is honoured). A string, or a function
+   *  of the current mode (e.g. `m => m === 'ADVENTURE' ? 'Adventure' : 'Free spins'`).
+   *  Default: 'Free spins'. */
+  label?: string | ((mode: string) => string);
+  /** Format the counter VALUE string from the settled segment. `view` is the host's default
+   *  free-spins counter (current/total, retrigger-aware) — use it for the common case, or ignore it
+   *  and read your own fields off `result` (respins left, coins collected, a multiplier).
+   *  Default: `view.current == null ? String(view.total) : `${view.current} / ${view.total}``. */
+  readout?: (result: T, ctx: { view: FreeSpinsView; mode: string }) => string;
+}
 
 export interface StakeIntegration {
   /** The game's BookAdapter (or its module). modeMap + gameId come from the model. */
@@ -58,6 +78,9 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   dev?: boolean;
   stake?: StakeIntegration;
   shell?: SlotShellOptions;
+  /** Customise the bonus bar readout for games whose bonus isn't plain free spins (adventure,
+   *  hold-and-spin, respins). Omit for the free-spins default. See `BonusReadoutConfig`. */
+  bonus?: BonusReadoutConfig<T>;
   /** Override how the control-bar shell is built. The host resolves the full shell config (theme,
    *  features, gameInfo, currency, balance) and the Pixi mount (`app`/`parent`) and hands it to this
    *  factory; return any `Shell` — e.g. `createShell({ renderer: new MyRenderer(...), ...config })`

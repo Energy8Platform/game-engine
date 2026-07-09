@@ -6,14 +6,31 @@ import { createI18n, type I18n } from './i18n';
 import { KeyboardController, type KeyboardHost } from './keyboard';
 import { PACKAGE_VERSION } from './version';
 import type {
-  ShellConfig, ResolvedShellConfig, ShellState, ShellEvents, ShellMode,
-  AutoplayOptions, FreeSpinsState, BonusOption, ThemeConfig, ModalOptions, ReplayModalOptions,
+  ShellConfig,
+  ResolvedShellConfig,
+  ShellState,
+  ShellEvents,
+  ShellMode,
+  AutoplayOptions,
+  FreeSpinsState,
+  BonusReadout,
+  BonusOption,
+  ThemeConfig,
+  ModalOptions,
+  ReplayModalOptions,
 } from './types';
 import type {
-  ShellRenderer, ShellHost, ShellActions, OverlayHandle, OverlayRequest, ShellLayoutMode,
+  ShellRenderer,
+  ShellHost,
+  ShellActions,
+  OverlayHandle,
+  OverlayRequest,
+  ShellLayoutMode,
 } from './renderer';
 
-export interface CreateShellOptions extends ShellConfig { renderer: ShellRenderer; }
+export interface CreateShellOptions extends ShellConfig {
+  renderer: ShellRenderer;
+}
 
 /** Apply defaults to the raw config (the mount target lives on the renderer, not here). */
 export function resolveConfig(config: ShellConfig): ResolvedShellConfig {
@@ -79,12 +96,21 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   }
 
   // ── ShellHost ──────────────────────────────────────────────────────────────
-  t(text: string): string { return this.i18n.t(text); }
-  formatCurrency(n: number, win = false): string { return formatCurrency(n, this.config.currency, win); }
-  formatWin(value: number): string { return this.formatCurrency(value, true); }
+  t(text: string): string {
+    return this.i18n.t(text);
+  }
+  formatCurrency(n: number, win = false): string {
+    return formatCurrency(n, this.config.currency, win);
+  }
+  formatWin(value: number): string {
+    return this.formatCurrency(value, true);
+  }
   notifyResize(w: number, h: number): void {
     const layout: ShellLayoutMode = w !== 0 && h > w ? 'mobile' : 'wide';
-    if (layout !== this.layout) { this.layout = layout; this.renderer.setLayout(layout); }
+    if (layout !== this.layout) {
+      this.layout = layout;
+      this.renderer.setLayout(layout);
+    }
     this.renderer.renderBar();
   }
 
@@ -94,7 +120,9 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
       stepBet: (dir) => {
         const next = stepBet(this.state, dir);
         if (next === this.state.bet) return;
-        this.state.bet = next; this.emit('betChange', next); this.renderer.renderBar();
+        this.state.bet = next;
+        this.emit('betChange', next);
+        this.renderer.renderBar();
       },
       setBet: (n) => {
         if (n !== this.state.bet) {
@@ -105,7 +133,9 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
       },
       cycleTurbo: () => {
         const next = nextTurbo(this.state.turbo, this.config.features.turbo);
-        this.state.turbo = next; this.emit('turboChange', next); this.renderer.renderBar();
+        this.state.turbo = next;
+        this.emit('turboChange', next);
+        this.renderer.renderBar();
       },
       toggleAutoplay: () => {
         if (this.state.autoplay.active) a.stopAutoplay();
@@ -113,11 +143,13 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
       },
       startAutoplay: (remaining) => {
         this.state.autoplay = { active: true, remaining };
-        this.emit('autoplayStart', { active: true, remaining }); this.renderer.renderBar();
+        this.emit('autoplayStart', { active: true, remaining });
+        this.renderer.renderBar();
       },
       stopAutoplay: () => {
         this.state.autoplay = { active: false, remaining: 0 };
-        this.emit('autoplayStop'); this.renderer.renderBar();
+        this.emit('autoplayStop');
+        this.renderer.renderBar();
       },
       openMenu: () => this.openMenu(),
       openSettings: () => this.openSettings(),
@@ -138,12 +170,24 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     const host: KeyboardHost = {
-      get state() { return self.state; },
-      get hotkeysEnabled() { return self.config.features.hotkeys !== false; },
-      get spacebarEnabled() { return self.config.features.spacebar !== false; },
-      get turboLevels() { return self.config.features.turbo; },
-      get autoplayEnabled() { return self.config.features.autoplay != null; },
-      get buyBonusEnabled() { return self.config.features.buyBonus !== false; },
+      get state() {
+        return self.state;
+      },
+      get hotkeysEnabled() {
+        return self.config.features.hotkeys !== false;
+      },
+      get spacebarEnabled() {
+        return self.config.features.spacebar !== false;
+      },
+      get turboLevels() {
+        return self.config.features.turbo;
+      },
+      get autoplayEnabled() {
+        return self.config.features.autoplay != null;
+      },
+      get buyBonusEnabled() {
+        return self.config.features.buyBonus !== false;
+      },
       hasOpenLayer: () => self.overlay !== null,
       routeToLayer: (e) => self.overlay?.onKey?.(e) ?? false,
       spin: () => self.actions.spin(),
@@ -160,21 +204,51 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     this.kbd.attach();
   }
 
-  private pullFocus = (): void => { try { (globalThis as { focus?: () => void }).focus?.(); } catch { /* cross-origin */ } };
+  private pullFocus = (): void => {
+    try {
+      (globalThis as { focus?: () => void }).focus?.();
+    } catch {
+      /* cross-origin */
+    }
+  };
 
   // ── overlay flow ─────────────────────────────────────────────────────────────
   private show(req: OverlayRequest): void {
     this.closeModal();
     this.overlay = this.renderer.openOverlay(req) ?? null;
   }
-  openMenu(): void { this.emit('menuOpen'); this.openSettings(); }
-  openSettings(): void { this.emit('settingsOpen'); this.show({ kind: 'settings' }); }
-  openInfo(): void { this.emit('infoOpen'); this.show({ kind: 'gameInfo' }); }
-  openBuyBonus(): void { if (this.config.onBonusBuy) { this.config.onBonusBuy(); return; } this.show({ kind: 'buyBonus' }); }
-  openBetPicker(): void { this.show({ kind: 'betPicker' }); }
-  openAutoplayPicker(): void { this.show({ kind: 'autoplayPicker' }); }
-  openReplay(opts: ReplayModalOptions): void { if (this.destroyed) return; this.show({ kind: 'replay', opts }); }
-  openModal(opts: ModalOptions): void { this.show({ kind: 'modal', opts }); }
+  openMenu(): void {
+    this.emit('menuOpen');
+    this.openSettings();
+  }
+  openSettings(): void {
+    this.emit('settingsOpen');
+    this.show({ kind: 'settings' });
+  }
+  openInfo(): void {
+    this.emit('infoOpen');
+    this.show({ kind: 'gameInfo' });
+  }
+  openBuyBonus(): void {
+    if (this.config.onBonusBuy) {
+      this.config.onBonusBuy();
+      return;
+    }
+    this.show({ kind: 'buyBonus' });
+  }
+  openBetPicker(): void {
+    this.show({ kind: 'betPicker' });
+  }
+  openAutoplayPicker(): void {
+    this.show({ kind: 'autoplayPicker' });
+  }
+  openReplay(opts: ReplayModalOptions): void {
+    if (this.destroyed) return;
+    this.show({ kind: 'replay', opts });
+  }
+  openModal(opts: ModalOptions): void {
+    this.show({ kind: 'modal', opts });
+  }
   /** Programmatically dismiss whatever overlay/modal is open. No-op when nothing is shown. */
   closeModal(): void {
     if (!this.overlay) return;
@@ -190,16 +264,22 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     this.soundRefresh?.(on);
     this.renderer.refreshSoundIcon?.(on);
   }
-  setSoundRefresh(fn: ((on: boolean) => void) | null): void { this.soundRefresh = fn; }
+  setSoundRefresh(fn: ((on: boolean) => void) | null): void {
+    this.soundRefresh = fn;
+  }
 
   // ── features ─────────────────────────────────────────────────────────────────
   activateFeature(bonus: BonusOption): void {
-    this.state.activeFeature = bonus; this.emit('featureActivate', { id: bonus.id }); this.renderer.renderBar();
+    this.state.activeFeature = bonus;
+    this.emit('featureActivate', { id: bonus.id });
+    this.renderer.renderBar();
   }
   deactivateFeature(): void {
     const prev = this.state.activeFeature;
     if (!prev) return;
-    this.state.activeFeature = null; this.emit('featureDeactivate', { id: prev.id }); this.renderer.renderBar();
+    this.state.activeFeature = null;
+    this.emit('featureDeactivate', { id: prev.id });
+    this.renderer.renderBar();
   }
 
   // ── game-facing public API (mirrors GameShell/PixiGameShell) ───────────────────
@@ -207,19 +287,79 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     this.renderer.renderBar();
     if (to !== from) this.renderer.animateMoney(field, from, to);
   }
-  setBalance(n: number): void { const from = this.prevBalance; this.state.balance = n; this.prevBalance = n; this.money('balance', from, n); }
-  setWin(n: number): void { const from = this.prevWin; this.state.win = n; this.prevWin = n; this.money('win', from, n); }
-  setBet(n: number): void { this.state.bet = n; this.renderer.renderBar(); }
-  setMode(mode: ShellMode): void { if (mode === 'replay') this.state.replay = true; this.state.mode = mode; this.renderer.renderBar(); }
-  setBusy(busy: boolean): void { this.state.busy = busy; this.renderer.renderBar(); this.kbd?.notifyBusyChanged(busy); }
-  setAutoplay(a: AutoplayOptions): void { this.state.autoplay = a; this.renderer.renderBar(); }
-  setTurbo(level: number): void { this.state.turbo = level; this.renderer.renderBar(); }
-  setBuyBonusEnabled(enabled: boolean): void { this.state.buyBonusEnabled = enabled; this.renderer.renderBar(); }
-  setFreeSpins(fs: FreeSpinsState): void { this.state.freeSpins = fs; this.renderer.renderBar(); }
-  setTheme(theme: ThemeConfig): void { this.config.theme = theme; this.tokens = resolveTheme(theme); this.renderer.applyTheme(this.tokens); this.renderer.renderBar(); }
-  setLanguage(lang: string): void { this.config.language = lang; this.i18n = createI18n({ language: lang, isSocial: this.config.isSocial }); this.renderer.renderBar(); }
-  setSocial(isSocial: boolean): void { this.config.isSocial = isSocial; this.i18n = createI18n({ language: this.config.language, isSocial }); this.renderer.renderBar(); }
-  setLayout(layout: ShellLayoutMode): void { if (layout === this.layout) return; this.layout = layout; this.renderer.setLayout(layout); this.renderer.renderBar(); }
+  setBalance(n: number): void {
+    const from = this.prevBalance;
+    this.state.balance = n;
+    this.prevBalance = n;
+    this.money('balance', from, n);
+  }
+  setWin(n: number): void {
+    const from = this.prevWin;
+    this.state.win = n;
+    this.prevWin = n;
+    this.money('win', from, n);
+  }
+  setBet(n: number): void {
+    this.state.bet = n;
+    this.renderer.renderBar();
+  }
+  setMode(mode: ShellMode): void {
+    if (mode === 'replay') this.state.replay = true;
+    this.state.mode = mode;
+    this.renderer.renderBar();
+  }
+  setBusy(busy: boolean): void {
+    this.state.busy = busy;
+    this.renderer.renderBar();
+    this.kbd?.notifyBusyChanged(busy);
+  }
+  setAutoplay(a: AutoplayOptions): void {
+    this.state.autoplay = a;
+    this.renderer.renderBar();
+  }
+  setTurbo(level: number): void {
+    this.state.turbo = level;
+    this.renderer.renderBar();
+  }
+  setBuyBonusEnabled(enabled: boolean): void {
+    this.state.buyBonusEnabled = enabled;
+    this.renderer.renderBar();
+  }
+  setFreeSpins(fs: FreeSpinsState): void {
+    this.state.freeSpins = fs;
+    this.state.bonus = null;
+    this.renderer.renderBar();
+  }
+  /** Generic bonus readout (adventure / hold-and-spin / respins). Sets a game-supplied label+value
+   *  override for the bar hero and folds `totalWin` into the shared accumulator. Pairs with
+   *  `setMode('bonus')`. `setFreeSpins()` clears the override back to the derived current/total. */
+  setBonus(b: BonusReadout): void {
+    this.state.bonus = { label: b.label, value: b.value };
+    this.state.freeSpins = { ...this.state.freeSpins, totalWin: b.totalWin };
+    this.renderer.renderBar();
+  }
+  setTheme(theme: ThemeConfig): void {
+    this.config.theme = theme;
+    this.tokens = resolveTheme(theme);
+    this.renderer.applyTheme(this.tokens);
+    this.renderer.renderBar();
+  }
+  setLanguage(lang: string): void {
+    this.config.language = lang;
+    this.i18n = createI18n({ language: lang, isSocial: this.config.isSocial });
+    this.renderer.renderBar();
+  }
+  setSocial(isSocial: boolean): void {
+    this.config.isSocial = isSocial;
+    this.i18n = createI18n({ language: this.config.language, isSocial });
+    this.renderer.renderBar();
+  }
+  setLayout(layout: ShellLayoutMode): void {
+    if (layout === this.layout) return;
+    this.layout = layout;
+    this.renderer.setLayout(layout);
+    this.renderer.renderBar();
+  }
 
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
