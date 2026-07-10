@@ -47,6 +47,7 @@ export class SymbolCell extends Container {
   private _style: Required<CellFrameStyle>;
   private _frame: Graphics;
   private _view: SymbolView | null = null;
+  private _data: CellData = { symbol: null };
   private _badges = new Container();
   private _multBadge: Container | null = null;
   private _bonusBadge: Container | null = null;
@@ -70,8 +71,14 @@ export class SymbolCell extends Container {
     return this._view;
   }
 
+  /** The last applied cell data (symbol + badges). Read by motion controllers that rebuild tapes. */
+  get data(): CellData {
+    return this._data;
+  }
+
   setData(data: CellData): void {
     if (this.destroyed) return; // a killed-tween chain may resume after the cell is gone
+    this._data = data;
     // symbol view
     if (data.symbol == null) {
       if (this._view) {

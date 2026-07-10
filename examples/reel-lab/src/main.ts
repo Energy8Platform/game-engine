@@ -16,7 +16,7 @@ import {
 } from '@energy8platform/game-engine/slot';
 import { buildControlPanel, configDiff } from '@energy8platform/game-engine/devtools';
 import { createResolver } from './symbols';
-import { randomBoard, scatterBoard, buildCascadeSteps, rowsFor } from './board';
+import { randomBoard, scatterBoard, buildCascadeSteps, buildReelStepSteps, rowsFor } from './board';
 import { SCHEMA } from './schema';
 import { CUSTOM_FEATURES } from './customFeatures';
 
@@ -216,6 +216,28 @@ $('#btn-cascade').addEventListener('click', () =>
     }
     log(`Tumble: ${steps.length} cascade step(s)`);
     await system.cascade(steps, { turbo, freeSpins });
+  }),
+);
+
+$('#btn-reelstep').addEventListener('click', () =>
+  guarded(async () => {
+    if (!workingConfig.cascade.enabled) {
+      log('Tip: enable Cascade/Tumble first — ReelStep reuses its timings/multiplier');
+      return;
+    }
+    let start = system.board;
+    let steps = buildReelStepSteps(workingConfig, start);
+    if (!steps.length) {
+      // seed a guaranteed 3-in-a-row line on the top row so the demo always moves
+      start = randomBoard(workingConfig);
+      for (let c = 0; c < Math.min(3, start.length); c++) start[c][0] = { symbol: 'h1' };
+      system.setBoard(start);
+      steps = buildReelStepSteps(workingConfig, start);
+    }
+    log(
+      `ReelStep: ${steps.length} step(s) — shifts ${steps.map((s) => `[${s.shifts.join(',')}]`).join(' → ')}`,
+    );
+    await system.reelStep(steps, { turbo, freeSpins });
   }),
 );
 

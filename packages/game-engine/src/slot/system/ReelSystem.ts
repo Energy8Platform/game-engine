@@ -12,6 +12,7 @@ import type { SymbolResolver } from '../grid/SymbolView';
 import { SpinEngine, type SpinData, type SpinRunOpts } from '../motion/SpinEngine';
 import { AnticipationController } from '../motion/AnticipationController';
 import { TumbleController, type TumbleStep } from '../cascade/TumbleController';
+import { ReelStepController, type ReelStepData } from '../cascade/ReelStepController';
 import { FEATURES, FEATURE_LIST, type FeatureContext, type ReelFeature } from '../features';
 import {
   DEFAULT_REEL_CONFIG,
@@ -53,7 +54,13 @@ export interface ReelSystem {
   spin(target: CellData[][], opts?: SpinRunOpts): Promise<void>;
   /** Run a cascade chain. With `freeSpins` + `cascade.multiplier.persistInFreeSpins`, the multiplier carries over instead of resetting. */
   cascade(steps: TumbleStep[], opts?: { turbo?: boolean; freeSpins?: boolean }): Promise<void>;
-  /** Current running cascade multiplier. */
+  /**
+   * Run a ReelStep™ chain: each step pays its winning cells, then scrolls every reel down by
+   * `shifts[col]` positions (0 = reel stays put). Multiplier carries over with `freeSpins` +
+   * `cascade.multiplier.persistInFreeSpins`, same as `cascade`.
+   */
+  reelStep(steps: ReelStepData[], opts?: { turbo?: boolean; freeSpins?: boolean }): Promise<void>;
+  /** Current running cascade / reel-step multiplier. */
   readonly multiplier: number;
   /** Register a custom feature (or override a built-in by reusing its key). */
   registerFeature(feature: ReelFeature): void;
@@ -91,6 +98,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
   let spin!: SpinEngine;
   let anticipation!: AnticipationController;
   let tumble!: TumbleController;
+  let reelStepCtl!: ReelStepController;
   let board: CellData[][] = opts.board ?? emptyBoard(config);
   // custom features keyed by id; built-ins live in FEATURES/FEATURE_LIST
   const custom = new Map<string, ReelFeature>();
@@ -113,6 +121,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
     if (grid) {
       spin?.skip();
       tumble?.skip();
+      reelStepCtl?.skip();
       for (const child of fx?.children.slice() ?? []) Tween.killTweensOf(child);
       grid.destroy({ children: true });
     }
@@ -140,6 +149,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
     spin = new SpinEngine(grid, resolve, config.motion, config.win);
     anticipation = new AnticipationController(config.anticipation);
     tumble = new TumbleController(grid, config.cascade, config.win);
+    reelStepCtl = new ReelStepController(grid, resolve, config.cascade, config.win);
     grid.setGrid(board);
   }
 
@@ -203,6 +213,8 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
         anticipation.setConfig(config.anticipation);
         tumble.setConfig(config.cascade);
         tumble.setWin(config.win);
+        reelStepCtl.setConfig(config.cascade);
+        reelStepCtl.setWin(config.win);
       }
     },
 
@@ -229,7 +241,8 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
     },
 
     get multiplier() {
-      return tumble.multiplier;
+      // cascade and reelStep share the same config start; only the active mechanic climbs.
+      return Math.max(tumble.multiplier, reelStepCtl.multiplier);
     },
 
     async cascade(steps, cOpts) {
@@ -241,6 +254,17 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
         board = steps[i].settledGrid;
       }
       if (config.cascade.multiplier.enabled) log?.(`Cascade multiplier ×${tumble.multiplier}`);
+    },
+
+    async reelStep(steps, rOpts) {
+      const persist = config.cascade.multiplier.persistInFreeSpins && !!rOpts?.freeSpins;
+      if (!persist) reelStepCtl.resetMultiplier();
+      for (let i = 0; i < steps.length; i++) {
+        await reelStepCtl.step(steps[i], i, rOpts);
+        board = steps[i].settledGrid;
+      }
+      if (config.cascade.multiplier.enabled)
+        log?.(`ReelStep multiplier ×${reelStepCtl.multiplier}`);
     },
 
     registerFeature(feature) {
@@ -280,6 +304,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
     skip() {
       spin.skip();
       tumble.skip();
+      reelStepCtl.skip();
       // kill in-flight overlay tweens (labels/rings) so a rebuild never animates destroyed nodes
       for (const child of fx.children.slice()) Tween.killTweensOf(child);
       fx.removeChildren().forEach((c) => c.destroy());

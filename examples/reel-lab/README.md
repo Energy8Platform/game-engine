@@ -36,6 +36,7 @@ npm run dev --workspace reel-lab-example                  # → http://localhost
 | **Spin** | Spins to a fresh random board with the current motion settings. |
 | **Spin → scatters** | Spins to a board seeded with scatters (exercises anticipation). |
 | **Tumble** | Runs a cascade sequence (needs Cascade enabled). |
+| **ReelStep** | Pays the winning fixed lines, then scrolls each winning reel DOWN by N (= distinct winning symbols on it), and repeats until no lines win. Needs Cascade enabled (shares its timings/multiplier). |
 | **New board** | Drops in a fresh random board. |
 | **Megaways roll** | Re-rolls per-reel heights within `minRows…maxRows`. |
 | **Copy TS / JSON** | Copies the config — TS copies only the diff vs `DEFAULT_REEL_CONFIG`. |
