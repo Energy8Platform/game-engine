@@ -139,13 +139,18 @@ export function runSpinRound(
     );
     const rec = JSON.parse(readFileSync(dumpPath, 'utf8').split('\n')[0]) as {
       total_win_x: number;
+      cost_multiplier?: number;
       spins: Array<{ stage: string; win_x: number; data?: Record<string, unknown> }>;
     };
     const events = rec.spins.map((sp) => ({
       type: sp.stage === 'free_spins' ? 'free_spin' : 'spin',
       spin: { ...(sp.data ?? {}), total_win: sp.win_x },
     }));
-    return { payoutCents: Math.round(rec.total_win_x * 100), events };
+    // total_win_x в дампе — Go-парность: нормирован на round_cost. Payout
+    // для книги должен быть в множителях БАЗОВОЙ ставки (мост кредитует
+    // bet × payout), поэтому восстанавливаем умножением на cost_multiplier.
+    const payoutX = rec.total_win_x * (rec.cost_multiplier || 1);
+    return { payoutCents: Math.round(payoutX * 100), events };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
