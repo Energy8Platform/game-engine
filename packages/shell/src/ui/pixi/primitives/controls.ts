@@ -182,6 +182,13 @@ export class Slider extends Container implements Sizable {
     this.hitArea = new Rectangle(0, 0, this.w, h);
   }
 
+  /** Programmatically move the thumb (0..1) without firing onInput — for live updates driven by
+   *  `host.setVolume()` while the overlay is open. */
+  setValue(v: number): void {
+    this._value = Math.max(0, Math.min(1, v));
+    this.draw();
+  }
+
   setLayoutSize(w: number | undefined): void {
     if (w != null) this.w = w;
     this.draw();

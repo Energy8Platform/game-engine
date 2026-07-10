@@ -1,4 +1,5 @@
 import { Container, Text } from 'pixi.js';
+import type { VolumeKey } from '@/core/types';
 import type { PixiComponentContext, ShellLayer } from '../context';
 import { Overlay } from '../primitives/overlay';
 import { makeText } from '../text';
@@ -40,10 +41,13 @@ function buildBody(host: PixiComponentContext, width: number): Container {
   });
   col.add(glassRow(host, [textNode(host, host.t('Sound')), new Spacer(), speaker]));
 
-  // Volume sliders
-  col.add(sliderRow(host, width, 'master', host.t('Master volume')));
-  col.add(sliderRow(host, width, 'music', host.t('Music')));
-  col.add(sliderRow(host, width, 'sfx', host.t('SFX')));
+  // Volume sliders — positions read from the shell's stored volumes (stateful across opens); the
+  // registered refreshers let `host.setVolume()` from game code move the thumbs live.
+  const updaters: Partial<Record<VolumeKey, (v: number) => void>> = {};
+  col.add(sliderRow(host, width, 'master', host.t('Master volume'), updaters));
+  col.add(sliderRow(host, width, 'music', host.t('Music'), updaters));
+  col.add(sliderRow(host, width, 'sfx', host.t('SFX'), updaters));
+  host.setVolumeRefresh?.((key, v) => updaters[key]?.(v));
 
   // Game info link
   const infoIcon = makeIcon('info', 22, '#ffffff');
@@ -94,7 +98,13 @@ function glassRow(host: PixiComponentContext, children: Container[], opts: { but
 }
 
 /** A column row: head (label + live % value) over a draggable slider. */
-function sliderRow(host: PixiComponentContext, bodyWidth: number, key: string, label: string): FlexBox {
+function sliderRow(
+  host: PixiComponentContext,
+  bodyWidth: number,
+  key: VolumeKey,
+  label: string,
+  updaters: Partial<Record<VolumeKey, (v: number) => void>>,
+): FlexBox {
   const row = new FlexBox({
     direction: 'column',
     align: 'stretch',
@@ -103,14 +113,19 @@ function sliderRow(host: PixiComponentContext, bodyWidth: number, key: string, l
     background: { fill: host.tokens.plaqueGlass, radius: 16 },
   });
   const head = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between' });
-  const valueText = makeText('100%', { size: 13, weight: '700', color: host.tokens.plaqueLabel });
+  const initial = host.getVolume(key);
+  const valueText = makeText(`${Math.round(initial * 100)}%`, { size: 13, weight: '700', color: host.tokens.plaqueLabel });
   head.add(makeText(label, { size: 14, weight: '600', color: '#ffffff' }));
   head.add(new Spacer(), { grow: 1 });
   head.add(valueText);
-  const slider = new Slider(host, 1, (v) => {
+  const slider = new Slider(host, initial, (v) => {
     valueText.text = `${Math.round(v * 100)}%`;
-    host.emit('settingChange', { key, value: v });
+    host.setVolume(key, v);
   });
+  updaters[key] = (v) => {
+    valueText.text = `${Math.round(v * 100)}%`;
+    slider.setValue(v);
+  };
   row.add(head);
   row.add(slider);
   return row;

@@ -38,7 +38,8 @@ export const PAY_IDS = [...HIGH_IDS, ...LOW_IDS];
 class TileSymbol extends Container implements SymbolView {
   private _bg = new Graphics();
   private _label: Text;
-  private _size = 64;
+  private _w = 64;
+  private _h = 64;
   private _idle: { kill: boolean } | null = null;
   constructor(private def: SymbolDef) {
     super();
@@ -49,17 +50,21 @@ class TileSymbol extends Container implements SymbolView {
     });
     this._label.anchor.set(0.5);
     this.addChild(this._label);
-    this.resize(this._size);
+    this.resize({ width: this._w, height: this._h });
   }
-  resize(size: number): void {
-    this._size = size;
+  // The engine passes a rectangular {width,height} (per-strip geometry); accept a scalar too.
+  resize(size: number | { width: number; height: number }): void {
+    const { width, height } = typeof size === 'number' ? { width: size, height: size } : size;
+    this._w = width;
+    this._h = height;
     // fill the whole cell so the grid `gap` is the only spacing — at gap:0 tiles sit flush
-    const s = size;
-    const r = Math.max(4, s * 0.12);
+    const r = Math.max(4, Math.min(width, height) * 0.12);
     this._bg.clear();
-    this._bg.roundRect(-s / 2, -s / 2, s, s, r).fill({ color: this.def.color });
-    this._bg.roundRect(-s / 2, -s / 2, s, s, r).stroke({ color: 0x0b1020, width: 2, alpha: 0.5 });
-    this._label.style.fontSize = Math.round(size * 0.42);
+    this._bg.roundRect(-width / 2, -height / 2, width, height, r).fill({ color: this.def.color });
+    this._bg
+      .roundRect(-width / 2, -height / 2, width, height, r)
+      .stroke({ color: 0x0b1020, width: 2, alpha: 0.5 });
+    this._label.style.fontSize = Math.round(Math.min(width, height) * 0.42);
   }
   playWin(): Promise<void> {
     return Tween.to(this, { 'scale.x': 1.18, 'scale.y': 1.18 }, 150, Easing.easeOutBack).then(() =>

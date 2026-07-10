@@ -1,5 +1,10 @@
 // examples/reel-lab/src/board.ts
-import type { CellData, ReelSystemConfig, TumbleStep } from '@energy8platform/game-engine/slot';
+import type {
+  CellData,
+  ReelSystemConfig,
+  ReelStepData,
+  TumbleStep,
+} from '@energy8platform/game-engine/slot';
 import { effectiveRowsPerReel } from '@energy8platform/game-engine/slot';
 import { PAY_IDS } from './symbols';
 
@@ -98,6 +103,79 @@ export function buildCascadeSteps(
       newCells,
       settledGrid: settled,
     });
+    board = settled;
+  }
+  return steps;
+}
+
+// ── ReelStep™ ────────────────────────────────────────────────────────────────
+
+/**
+ * Evaluate straight fixed lines (each row is a left-aligned payline, `wild` substitutes) on a
+ * board. Returns the winning cells and, per reel, the set of distinct winning symbols on it —
+ * the count of which is that reel's ReelStep shift.
+ */
+function evaluateLines(board: CellData[][], minLen = 3) {
+  const rows = Math.min(...board.map((col) => col.length));
+  const winning = new Set<string>(); // "col:row"
+  const symbolsByReel = new Map<number, Set<string>>();
+  const mark = (c: number, r: number, sym: string) => {
+    winning.add(`${c}:${r}`);
+    if (!symbolsByReel.has(c)) symbolsByReel.set(c, new Set());
+    symbolsByReel.get(c)!.add(sym);
+  };
+  for (let r = 0; r < rows; r++) {
+    // anchor = the first non-wild symbol on the line (a fully-wild run pays as wild)
+    let anchor = board[0][r].symbol;
+    for (let c = 0; c < board.length && anchor === 'wild'; c++) {
+      const s = board[c][r].symbol;
+      if (s && s !== 'wild') anchor = s;
+    }
+    if (!anchor) continue;
+    let len = 0;
+    for (let c = 0; c < board.length; c++) {
+      const s = board[c][r].symbol;
+      if (s === anchor || s === 'wild') len++;
+      else break;
+    }
+    if (len >= minLen) for (let c = 0; c < len; c++) mark(c, r, board[c][r].symbol!);
+  }
+  return { winning, symbolsByReel };
+}
+
+/**
+ * Build a ReelStep™ chain from a board: pay the winning lines, then scroll each reel DOWN by the
+ * number of distinct winning symbols that played on it (0 = the reel stays put), fresh symbols
+ * entering from the top. Re-evaluate the shifted board and repeat until no lines win.
+ */
+export function buildReelStepSteps(
+  cfg: ReelSystemConfig,
+  start: CellData[][],
+  maxSteps = 6,
+): ReelStepData[] {
+  const steps: ReelStepData[] = [];
+  let board = clone(start);
+  for (let s = 0; s < maxSteps; s++) {
+    const { winning, symbolsByReel } = evaluateLines(board);
+    if (!winning.size) break;
+
+    const winningCells = [...winning].map((k) => {
+      const [col, row] = k.split(':').map(Number);
+      return { col, row };
+    });
+    // N per reel = distinct winning symbols on it, clamped to the reel height
+    const shifts = board.map((col, c) => Math.min(symbolsByReel.get(c)?.size ?? 0, col.length));
+
+    // scroll each reel down by N: fresh symbols on top, the rest ride down
+    const settled = board.map((col, c) => {
+      const n = shifts[c];
+      const rows = col.length;
+      return Array.from({ length: rows }, (_, r) =>
+        r < n ? { symbol: pick(PAY_IDS) as string | null } : { ...col[r - n] },
+      );
+    });
+
+    steps.push({ winningCells, shifts, settledGrid: settled });
     board = settled;
   }
   return steps;

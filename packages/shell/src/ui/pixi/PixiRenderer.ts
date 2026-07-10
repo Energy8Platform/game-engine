@@ -333,6 +333,9 @@ export class PixiRenderer implements ShellRenderer {
       notifyResize: (w, h) => host.notifyResize(w, h),
       setSound: (on) => host.setSound(on),
       setSoundRefresh: (fn) => host.setSoundRefresh(fn),
+      getVolume: (key) => host.getVolume(key),
+      setVolume: (key, v) => host.setVolume(key, v),
+      setVolumeRefresh: (fn) => host.setVolumeRefresh(fn),
       // — Pixi-specific surface —
       get ticker() { return self.app.ticker; },
       get canvas() { return self.app.canvas as HTMLCanvasElement | undefined; },

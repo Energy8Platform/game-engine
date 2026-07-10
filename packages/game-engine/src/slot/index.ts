@@ -66,6 +66,8 @@ export { AnticipationController } from './motion/AnticipationController';
 export type { AnticipationDecision } from './motion/AnticipationController';
 export { TumbleController } from './cascade/TumbleController';
 export type { TumbleStep } from './cascade/TumbleController';
+export { ReelStepController, buildReelStepTape } from './cascade/ReelStepController';
+export type { ReelStepData } from './cascade/ReelStepController';
 
 export { FEATURES, FEATURE_LIST } from './features';
 export type { ReelFeature, FeatureContext } from './features';

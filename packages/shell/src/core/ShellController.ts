@@ -18,6 +18,7 @@ import type {
   ThemeConfig,
   ModalOptions,
   ReplayModalOptions,
+  VolumeKey,
 } from './types';
 import type {
   ShellRenderer,
@@ -47,6 +48,7 @@ export function resolveConfig(config: ShellConfig): ResolvedShellConfig {
     features: config.features,
     theme: config.theme,
     onBonusBuy: config.onBonusBuy,
+    volumes: config.volumes,
     version: config.version ?? '1.0.0',
     isSocial: config.isSocial ?? false,
     replay: config.replay ?? config.mode === 'replay',
@@ -70,6 +72,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   private kbd?: KeyboardController;
   private overlay: OverlayHandle | null = null;
   private soundRefresh: ((on: boolean) => void) | null = null;
+  private volumeRefresh: ((key: VolumeKey, value: number) => void) | null = null;
   private prevBalance: number;
   private prevWin: number;
   private destroyed = false;
@@ -254,6 +257,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     if (!this.overlay) return;
     this.overlay = null;
     this.soundRefresh = null;
+    this.volumeRefresh = null;
     this.renderer.closeOverlay();
   }
 
@@ -266,6 +270,23 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   }
   setSoundRefresh(fn: ((on: boolean) => void) | null): void {
     this.soundRefresh = fn;
+  }
+
+  // ── volume ─────────────────────────────────────────────────────────────────
+  getVolume(key: VolumeKey): number {
+    return this.state.volumes[key];
+  }
+  /** Set a volume slider (0..1). Shared by the slider control (drag) and game code (public API):
+   *  clamps, stores so a reopened Settings overlay reflects it, emits `settingChange`, and
+   *  live-updates the slider if the overlay is currently open. */
+  setVolume(key: VolumeKey, value: number): void {
+    const v = Math.max(0, Math.min(1, value));
+    this.state.volumes[key] = v;
+    this.emit('settingChange', { key, value: v });
+    this.volumeRefresh?.(key, v);
+  }
+  setVolumeRefresh(fn: ((key: VolumeKey, value: number) => void) | null): void {
+    this.volumeRefresh = fn;
   }
 
   // ── features ─────────────────────────────────────────────────────────────────
