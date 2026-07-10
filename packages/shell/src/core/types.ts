@@ -4,6 +4,10 @@
  *  respins — anything that isn't a plain free-spins counter). */
 export type ShellMode = 'base' | 'bonus' | 'freeSpins' | 'replay';
 
+/** The three independent volume sliders shown in the Settings overlay. */
+export type VolumeKey = 'master' | 'music' | 'sfx';
+export type VolumeLevels = Record<VolumeKey, number>;
+
 export interface CurrencyConfig {
   symbol: string;
   position: 'left' | 'right';
@@ -244,6 +248,10 @@ export interface ShellConfig {
    *  opening the built-in buy-bonus overlay (e.g. the game shows its own bonus UI). The button
    *  is shown whenever this OR `features.buyBonus` is set. */
   onBonusBuy?: () => void;
+  /** Initial Settings-overlay volume slider positions (each 0..1, defaults to 1 = 100%). The shell
+   *  keeps them stateful across opens; read/update at runtime via `shell.getVolume()` /
+   *  `shell.setVolume()`, and listen to `settingChange` ({ key: 'master'|'music'|'sfx' }) to apply. */
+  volumes?: Partial<VolumeLevels>;
 }
 
 /** ShellConfig after the controller applies defaults (version, isSocial, replay, theme). No mount. */
@@ -264,7 +272,7 @@ export type ResolvedShellConfig = Required<
     | 'replay'
   >
 > &
-  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy'>;
+  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy' | 'volumes'>;
 
 export interface ShellState {
   mode: ShellMode;
@@ -287,6 +295,9 @@ export interface ShellState {
   /** The currently activated `feature` option (e.g. Ante), or null. Drives the
    *  effective-bet readout tint and the BUY BONUS → DISABLE toggle on the bar. */
   activeFeature: BonusOption | null;
+  /** Volume slider positions (0..1) surfaced in the Settings overlay. Stateful across opens so a
+   *  reopened overlay reflects the last-set positions instead of resetting to 100%. */
+  volumes: VolumeLevels;
 }
 
 export interface ShellEvents {

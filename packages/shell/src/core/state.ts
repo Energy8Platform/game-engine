@@ -15,7 +15,17 @@ export function createInitialState(config: ShellConfig): ShellState {
     freeSpins: { current: 0, total: 0, totalWin: 0 },
     bonus: null,
     activeFeature: null,
+    volumes: {
+      master: clampVolume(config.volumes?.master),
+      music: clampVolume(config.volumes?.music),
+      sfx: clampVolume(config.volumes?.sfx),
+    },
   };
+}
+
+/** Clamp a configured volume to 0..1, defaulting to full (1) when unset/invalid. */
+export function clampVolume(v: number | undefined): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
 }
 
 /** Step bet up/down within availableBets, clamped at the ends. */

@@ -2,7 +2,7 @@ import type { EventEmitter } from './EventEmitter';
 import type { ShellTokens } from './theme';
 import type {
   ResolvedShellConfig, ShellState, ShellEvents, BonusOption,
-  ModalOptions, ReplayModalOptions,
+  ModalOptions, ReplayModalOptions, VolumeKey,
 } from './types';
 
 export type ShellLayoutMode = 'wide' | 'mobile';
@@ -77,6 +77,13 @@ export interface ShellHost {
   setSound(on: boolean): void;
   /** An open Settings overlay registers an icon updater here (null clears it on close). */
   setSoundRefresh(fn: ((on: boolean) => void) | null): void;
+  /** Current volume slider position (0..1) for master/music/sfx. */
+  getVolume(key: VolumeKey): number;
+  /** Set a volume slider (0..1): clamps, stores, emits `settingChange`, and live-updates an open
+   *  Settings overlay. Called by the slider control on drag AND by game code as the public API. */
+  setVolume(key: VolumeKey, value: number): void;
+  /** An open Settings overlay registers a slider updater here (null clears it on close). */
+  setVolumeRefresh(fn: ((key: VolumeKey, value: number) => void) | null): void;
   /** Logic-bearing actions invoked by renderer controls. */
   readonly actions: ShellActions;
 }
