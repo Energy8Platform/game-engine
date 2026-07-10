@@ -25,7 +25,7 @@ const REPO = process.env.E8_RELEASE_REPO || 'energy8platform/game-engine';
 // e8 binary version — bump when new Rust binaries are uploaded to Releases.
 // The binary is game-agnostic (it compiles any .spin), so it only needs to
 // move when the engine/CLI itself changes.
-const BINARY_VERSION = process.env.E8_BINARY_VERSION || '0.1.1';
+const BINARY_VERSION = process.env.E8_BINARY_VERSION || '0.1.2';
 
 // Два бинаря на платформу: e8 (математика/симуляция) и e8-server
 // (дев-раунды для Vite-плагина).
