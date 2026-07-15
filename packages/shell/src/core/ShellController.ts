@@ -314,10 +314,17 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     this.prevBalance = n;
     this.money('balance', from, n);
   }
-  setWin(n: number): void {
+  /** Set the WIN readout. Counts up/down from the previous value by default. Pass
+   *  `{ animate: false }` to SNAP instantly (renderBar cancels any in-flight count-up) — used by the
+   *  host to clear WIN to 0 at spin start, where an animated count-DOWN would look wrong. */
+  setWin(n: number, opts?: { animate?: boolean }): void {
     const from = this.prevWin;
     this.state.win = n;
     this.prevWin = n;
+    if (opts?.animate === false) {
+      this.renderer.renderBar(); // instant repaint from state; cancels running money anims
+      return;
+    }
     this.money('win', from, n);
   }
   setBet(n: number): void {

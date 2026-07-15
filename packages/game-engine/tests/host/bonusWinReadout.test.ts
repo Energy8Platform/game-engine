@@ -25,7 +25,7 @@ function fakeShell() {
   return {
     winCalls,
     modeCalls,
-    setWin(n: number) {
+    setWin(n: number, _opts?: { animate?: boolean }) {
       winCalls.push(n);
     },
     setMode(m: string) {
@@ -126,5 +126,55 @@ describe('WIN readout + mode across bonus rounds', () => {
     await drive(shell, [{ totalWin: 4, complete: true, roundId: 'r1' }]);
     expect(shell.winCalls).toEqual([4]);
     expect(shell.modeCalls).toEqual([]);
+  });
+});
+
+/** The WIN slice WITH the beforeSegment spin-start reset createSlotGame wires (setWin(0) per
+ *  segment). Every spin — base and each free spin — clears WIN before it animates, then afterPresent
+ *  counts up to that segment's delta. */
+async function driveWithReset(
+  shell: ReturnType<typeof fakeShell>,
+  results: SpinResult[],
+): Promise<void> {
+  let i = 0;
+  const scene: Pick<SlotSceneController<SpinResult>, 'onSpin'> = { async onSpin() {} };
+  let prevWin = 0;
+  await runRound<SpinResult>(
+    {
+      play: async () => results[i++],
+      ack: () => {},
+      scene,
+      context: ctxFor,
+      modeOf,
+      isBonusAction: isBonus,
+      beforeSegment: () => shell.setWin(0, { animate: false }), // spin-start reset
+      afterPresent: (r) => {
+        shell.setWin(r.totalWin - prevWin);
+        prevWin = r.totalWin;
+      },
+      onModeExit: async (_mode, last) => {
+        shell.setWin(last.totalWin);
+      },
+    },
+    'spin',
+  );
+}
+
+describe('WIN readout resets at the start of every spin', () => {
+  it('base round: WIN clears to 0 before the spin, then shows the win', async () => {
+    const shell = fakeShell();
+    await driveWithReset(shell, [{ totalWin: 4, complete: true, roundId: 'r1' }]);
+    expect(shell.winCalls).toEqual([0, 4]); // reset, then this spin's win
+  });
+
+  it('bonus: each free spin clears WIN to 0 before its delta lands', async () => {
+    const shell = fakeShell();
+    await driveWithReset(shell, [
+      { totalWin: 2, complete: false, roundId: 'r1', nextActions: ['free'], freeSpins: { awarded: 2 } },
+      { totalWin: 5, complete: false, roundId: 'r1', nextActions: ['free'] },
+      { totalWin: 12, complete: true, roundId: 'r1' },
+    ]);
+    // per segment: reset(0) then delta — 0,2 | 0,3 | 0,7 — then cumulative 12 on return to base
+    expect(shell.winCalls).toEqual([0, 2, 0, 3, 0, 7, 12]);
   });
 });

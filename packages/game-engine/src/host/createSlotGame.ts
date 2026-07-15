@@ -555,6 +555,11 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           // Hand the host the per-segment AbortController so a double-tap can skip the live segment.
           beforeSegment: (ac) => {
             currentSegmentAbort = ac;
+            // Clear the WIN readout the instant a spin starts (base spin AND each free spin), so the
+            // previous win doesn't linger through the animation. Snap (no count-down) — afterPresent
+            // then counts UP to this segment's delta. prevWin (the cumulative-delta tracker) is
+            // untouched; this only resets the DISPLAY.
+            shell!.setWin(0, { animate: false });
           },
           onSpinStart: () => scene.onSpinStart?.(),
           onSpinEnd: (last, ctx) => scene.onSpinEnd?.(last, ctx),
@@ -619,6 +624,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           inBonus = true;
           shell!.setMode(bonusShellMode);
         }
+        shell!.setWin(0, { animate: false }); // clear WIN before this segment animates (see playRound)
         if (animate) await scene.onSpin(r, ctx);
         if (inBonus) {
           const v = fsView(raw, r.totalWin);

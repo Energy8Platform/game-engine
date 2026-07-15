@@ -1,6 +1,9 @@
 /** Minimal, renderer-agnostic base every normalized slot result satisfies. */
 export interface SlotSpinResultBase {
-  /** Currency win amount for this play (PlatformSession.play() already applied the bet). */
+  /** Currency win for the round SO FAR — CUMULATIVE, not this segment's win (PlatformSession.play()
+   *  already applied the bet). In a bonus every drained segment must report the running total, so
+   *  the host derives each spin's WIN readout as `totalWin - prevSegmentTotal` and the final base
+   *  return shows the round total. Feed the RGS `total_win` (accumulated), never `spin_win`. */
   totalWin: number;
   freeSpins?: { awarded?: number; total?: number; remaining?: number };
   // ── Round-continuation metadata (Stake segment-drain) ──────────────────
