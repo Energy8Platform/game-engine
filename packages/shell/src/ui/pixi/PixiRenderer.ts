@@ -75,6 +75,12 @@ export class PixiRenderer implements ShellRenderer {
     this.app.stage.eventMode = 'static';
 
     this.app.renderer.on('resize', this.onResize);
+    // Seed the layout from the CURRENT screen size. The renderer was resized to the container during
+    // boot (ViewportManager.refresh) BEFORE this shell mounted and subscribed above, so that initial
+    // 'resize' event is already gone and won't fire again on a stationary device. Without this seed
+    // the controller's layout stays at its 'wide' DEFAULT — a portrait mobile would show the DESKTOP
+    // bar. (The HTML renderer gets this for free: its ResizeObserver fires immediately on observe.)
+    if (this.screenW > 0) this.host.notifyResize(this.screenW, this.screenH);
     whenFontReady(() => {
       if (!this.destroyed) this.renderBar();
     });
