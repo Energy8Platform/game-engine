@@ -159,4 +159,54 @@ describe('curateMode', () => {
     expect(result.stakeReport.payoutMultMax).toBeGreaterThan(0);
     expect(typeof result.achieved.rtp).toBe('number');
   });
+
+  it('applies a per-book transformEvents hook before serialization (edits events + drives criteria/size)', async () => {
+    const seenCtx: { bookId: number; payoutCents: number; capCents: number; mode: string }[] = [];
+    const hookedMode: ResolvedMode = {
+      ...resolvedMode,
+      transformEvents: (events, ctx) => {
+        seenCtx.push({ ...ctx });
+        // Tag every event's spin payload — the converted array is what must ship.
+        return events.map((e) => ({
+          ...e,
+          spin: { ...(e.spin as Record<string, unknown>), tagged: ctx.bookId },
+        }));
+      },
+    };
+    const hookedOut = join(dir, 'out-hooked');
+    mkdirSync(hookedOut, { recursive: true });
+
+    const result = await curateMode(hookedMode, { poolDir, outDir: hookedOut });
+
+    // Called once per output book, with book-scoped context.
+    expect(seenCtx.length).toBe(result.rows.length);
+    expect(seenCtx.every((c) => c.mode === 'BASE' && c.capCents === CAP_X * 100)).toBe(true);
+
+    const rawBooks = join(hookedOut, 'books_BASE.jsonl');
+    const zstBooks = join(hookedOut, 'books_BASE.jsonl.zst');
+    let firstNonEmpty: string;
+    if (existsSync(rawBooks)) {
+      firstNonEmpty = readFileSync(rawBooks, 'utf-8').split('\n').find((l) => {
+        const b = l.trim() ? JSON.parse(l) as { events: unknown[] } : null;
+        return b !== null && b.events.length > 0;
+      })!;
+    } else {
+      const { execFileSync } = await import('node:child_process');
+      firstNonEmpty = execFileSync('zstd', ['-dc', '-q', zstBooks], { encoding: 'utf-8' })
+        .split('\n')
+        .find((l) => {
+          const b = l.trim() ? JSON.parse(l) as { events: unknown[] } : null;
+          return b !== null && b.events.length > 0;
+        })!;
+    }
+    const book = JSON.parse(firstNonEmpty) as {
+      id: number;
+      events: { type: string; spin: { tagged: number } }[];
+    };
+    // The tag injected by the hook is present → transform ran before serialization.
+    expect(book.events[0].spin.tagged).toBe(book.id);
+    // Size stat is populated (measured on the transformed events).
+    expect(result.stakeReport.maxEventsBytes).toBeGreaterThan(0);
+    expect(result.stakeReport.booksOverEventsLimit).toBe(0);
+  });
 });

@@ -27,7 +27,7 @@ import { optimizeLookupTable } from '../optimize-lookup.js';
 import { computeMetrics } from '../metrics.js';
 import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
 import type { LookupRow, OptimizeParams, OptimizeResult } from '../types.js';
-import type { ResolvedMode } from '../mathConfig';
+import type { ResolvedMode, CurateEventsTransform } from '../mathConfig';
 
 export interface CurateOptions {
   /** Directory holding the raw `books_<MODE>.jsonl` pool dump. */
@@ -215,6 +215,7 @@ async function streamWriteEvents(
   outDir: string,
   mode: string,
   capCents: number,
+  transformEvents?: CurateEventsTransform,
 ): Promise<EventsSizeStats> {
   const rawPath = join(outDir, `books_${mode}.jsonl`);
   const zstPath = join(outDir, `books_${mode}.jsonl.zst`);
@@ -241,17 +242,30 @@ async function streamWriteEvents(
   let tmpOff = 0;
   const appendBook = (outIdx: number, events: Record<string, unknown>[]): void => {
     const r = rows[outIdx];
+    // Optional per-book (per-line) events conversion, applied before size-check + criteria so both
+    // reflect exactly what ships. Must return an array; a throw here fails the run loudly (config bug).
+    let outEvents = events;
+    if (transformEvents) {
+      outEvents = transformEvents(events, {
+        mode, bookId: r.sim, payoutCents: r.payoutCents, capCents,
+      });
+      if (!Array.isArray(outEvents)) {
+        throw new Error(
+          `transformEvents must return an array (book id ${r.sim}, mode ${mode}), got ${typeof outEvents}`,
+        );
+      }
+    }
     // Canonical Stake book row: {id, payoutMultiplier (integer cents = CSV col3), events:[{type,spin}], criteria}.
     // Serialize `events` ONCE and splice it into the line so we can measure its exact UTF-8 size
     // (Stake caps a book's `events` field at STAKE_EVENTS_MAX_BYTES) without a second stringify pass.
-    const eventsJson = JSON.stringify(events);
+    const eventsJson = JSON.stringify(outEvents);
     const eventsBytes = Buffer.byteLength(eventsJson, 'utf8');
     if (eventsBytes > stats.maxEventsBytes) {
       stats.maxEventsBytes = eventsBytes;
       stats.maxEventsBytesBookId = r.sim;
     }
     if (eventsBytes > STAKE_EVENTS_MAX_BYTES) stats.booksOverEventsLimit++;
-    const criteria = deriveCriteria(r.payoutCents, events, capCents);
+    const criteria = deriveCriteria(r.payoutCents, outEvents, capCents);
     const line =
       `{"id":${r.sim},"payoutMultiplier":${r.payoutCents},"events":${eventsJson},` +
       `"criteria":${JSON.stringify(criteria)}}\n`;
@@ -367,6 +381,7 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   writeLut(result.rows, join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`));
   const eventsSize = await streamWriteEvents(
     result.rows, originalSims, opts.poolDir, opts.outDir, mode.mode, mode.curate.capMaxWin,
+    mode.transformEvents,
   );
   upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
 

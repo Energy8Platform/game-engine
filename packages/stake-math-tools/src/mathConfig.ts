@@ -15,10 +15,37 @@ export interface ModeSimConfig {
   params?: unknown;
 }
 
+/** Context passed to a `transformEvents` hook alongside one book's events. */
+export interface CurateEventContext {
+  /** Stake mode being curated (e.g. `BASE`). */
+  mode: string;
+  /** Curated book id (== the LUT `sim` and the book's `id`). */
+  bookId: number;
+  /** The book's payout in integer cents (== book `payoutMultiplier`). */
+  payoutCents: number;
+  /** Max-win cap in cents (0 = uncapped). */
+  capCents: number;
+}
+
+/**
+ * Per-book events transform, applied during curate to each book's `events`
+ * array right before it's serialized (one call per output "line"). Return the
+ * events to ship — the same array mutated, or a brand-new array. You may edit,
+ * add, drop, split, or merge events; return `[]` to ship an empty book. The
+ * transformed result is what gets size-checked (Stake's 1 MiB `events` cap) and
+ * what `criteria` is derived from, so keep `type: 'free_spin'` on feature spins.
+ */
+export type CurateEventsTransform = (
+  events: Record<string, unknown>[],
+  ctx: CurateEventContext,
+) => Record<string, unknown>[];
+
 export interface ModeMathConfig {
   sim?: ModeSimConfig;
   /** Curate params (stake-math-tools OptimizeParams); capMaxWin defaults to spec.maxWin × 100 (cents). */
   curate?: Partial<OptimizeParams>;
+  /** Per-mode override of the events transform (falls back to the top-level `transformEvents`). */
+  transformEvents?: CurateEventsTransform;
 }
 
 export interface MathConfig {
@@ -36,6 +63,9 @@ export interface MathConfig {
   runtime?: 'spin' | 'lua';
   /** Per-mode overrides keyed by Stake mode (e.g. BASE). Missing modes use seeded defaults. */
   modes?: Record<string, ModeMathConfig>;
+  /** Default events transform applied to every mode's books during curate.
+   *  A per-mode `modes[mode].transformEvents` overrides it for that mode. */
+  transformEvents?: CurateEventsTransform;
 }
 
 export interface ResolvedMode {
@@ -44,6 +74,8 @@ export interface ResolvedMode {
   costMultiplier: number;
   sim: { iterations: number; bet: number; rng: 'provably-fair' | 'fast'; seed?: string; params?: unknown };
   curate: Partial<OptimizeParams> & { capMaxWin: number; costMultiplier: number };
+  /** Resolved events transform for this mode (per-mode override ?? top-level default ?? none). */
+  transformEvents?: CurateEventsTransform;
 }
 
 const SIM_DEFAULTS = { iterations: 1_000_000, bet: 1, rng: 'provably-fair' as const };
@@ -60,6 +92,7 @@ export function resolveModes(cfg: MathConfig): ResolvedMode[] {
       sim: { ...SIM_DEFAULTS, ...over.sim },
       // capMaxWin is in CENTS: payoutCents is bet-mult × 100, so the cap is maxWin × 100.
       curate: { capMaxWin: maxWin * 100, costMultiplier: m.costMultiplier, ...over.curate },
+      transformEvents: over.transformEvents ?? cfg.transformEvents,
     };
   });
 }
