@@ -55,6 +55,9 @@ export const CURRENCY_META: Record<string, CurrencyMetaData> = {
   BHD: { code: 'BHD', symbol: 'BD', decimals: 2 },
   XGC: { code: 'XGC', symbol: 'GC', decimals: 2, symbolAfter: true },
   XSC: { code: 'XSC', symbol: 'SC', decimals: 2, symbolAfter: true },
+  // Stake Euro Cash — the EU social-mode currency. Displayed as "SC" for
+  // stake.eu EU-compliance (same social-coin symbol as XSC).
+  XEC: { code: 'XEC', symbol: 'SC', decimals: 2, symbolAfter: true },
 };
 
 /**
