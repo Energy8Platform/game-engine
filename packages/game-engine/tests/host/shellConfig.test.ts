@@ -50,6 +50,22 @@ describe('toBonusOptions', () => {
     expect(opts.find((o) => o.id === 'buy_bonus')!.volatility).toBe(5);
     expect('volatility' in opts.find((o) => o.id === 'buy_lite')!).toBe(false); // unset → key absent
   });
+
+  it('forwards each action\'s hero art to its card thumbnail (verbatim); omits it when unset', () => {
+    const artModel = {
+      spec: {
+        ...model.spec,
+        actions: {
+          spin: { role: 'base' },
+          ante: { role: 'feature', cost: 1.5, title: 'ANTE', description: 'boost', art: '/assets/ante.png' },
+          buy_bonus: { role: 'buy', cost: 100, title: 'BUY BONUS', description: 'buy spins' }, // no art
+        },
+      },
+    } as unknown as GameModel;
+    const opts = toBonusOptions(artModel);
+    expect(opts.find((o) => o.id === 'ante')!.thumbnail).toBe('/assets/ante.png'); // passed as-is
+    expect('thumbnail' in opts.find((o) => o.id === 'buy_bonus')!).toBe(false); // unset → key absent
+  });
 });
 
 describe('bet ladder + default bet from /wallet/authenticate', () => {

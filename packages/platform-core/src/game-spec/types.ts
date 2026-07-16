@@ -23,6 +23,10 @@ export interface ActionSpec {
   /** Shell display for buy/feature actions (SSOT). */
   title?: string;
   description?: string;
+  /** Transparent hero art for the top of the buy/feature card (no background plate). Forwarded
+   *  verbatim to `BonusOption.thumbnail` by `toBonusOptions` — the shell loads it as-is (pixi
+   *  `Assets.load`, html `<img src>`), so it's the same path/URL a static `thumbnail` would take. */
+  art?: string;
   /** Volatility rating (1–5 lightning bolts) shown on the buy/feature card in the shell's Buy bonus
    *  overlay. Forwarded to `BonusOption.volatility` by `toBonusOptions`. */
   volatility?: 1 | 2 | 3 | 4 | 5;

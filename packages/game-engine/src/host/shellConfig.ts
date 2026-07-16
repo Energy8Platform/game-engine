@@ -160,6 +160,9 @@ export function toBonusOptions(model: GameModel, t: (s: string) => string = (s) 
       priceMultiplier: action.cost ?? (role === 'buy' ? 100 : 1),
       // Volatility (1–5 bolts) is part of the spec action SSOT; forward it so the buy card shows it.
       ...(action.volatility != null ? { volatility: action.volatility } : {}),
+      // Hero art (SSOT) → card thumbnail. Passed verbatim: the shell loads it as-is, so no URL
+      // resolver is needed (matches a static buyBonus `thumbnail`). Keeps i18n/price/accent/social.
+      ...(action.art ? { thumbnail: action.art } : {}),
     });
   }
   return out;
