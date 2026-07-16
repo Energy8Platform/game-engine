@@ -523,7 +523,7 @@ function sectionCustom(host: PixiComponentContext, s: Extract<GameInfoSection, {
   const sec = section(host, s.title != null ? host.t(s.title) : undefined);
   const inner = width - SECTION_PAD;
   if (s.node) {
-    sec.add(s.node as Container); // game-supplied Pixi content owns its own layout
+    sec.add(persistentSlot(s.node as Container)); // game-supplied Pixi content owns its own layout
   } else if (s.html) {
     const text = s.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     if (text) sec.add(paragraph(host, text, inner, { size: 15 }));
@@ -577,6 +577,23 @@ function spacerBox(w: number, h: number): Graphics {
   const g = new Graphics();
   g.rect(0, 0, w, h).fill({ color: 0xffffff, alpha: 0 });
   return g;
+}
+
+/** Wrap a GAME-supplied custom `node` so the shell BORROWS it instead of owning it. The overlay is
+ *  torn down with `destroy({ children: true })` on every close; that would recursively destroy the
+ *  game's node, so the section renders blank on reopen. This slot's `destroy` DETACHES the node
+ *  (leaving it intact) and destroys only the empty wrapper — the SAME node instance is re-mounted,
+ *  with all its drawing, the next time Game info opens. Mirrors the HTML shell, where the game's DOM
+ *  node simply persists in config across open/close. The game owns the node's lifetime, not us. */
+function persistentSlot(node: Container): Container {
+  const slot = new Container();
+  slot.addChild(node);
+  const destroySelf = Container.prototype.destroy.bind(slot);
+  slot.destroy = () => {
+    if (node.parent === slot) slot.removeChild(node); // keep the game node alive for the next open
+    destroySelf({ children: false });
+  };
+  return slot;
 }
 
 /** A fixed box that loads an image into it (object-fit: contain) once the texture resolves. */
