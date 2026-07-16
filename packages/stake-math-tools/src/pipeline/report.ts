@@ -2,6 +2,7 @@ import { formatNativeResult } from '@energy8platform/platform-core/simulation';
 import type { NativeSimulationResult } from '@energy8platform/platform-core/simulation';
 import { detectHitRateGaps } from '../stake-report.js';
 import { classifyVolatility } from '../metrics.js';
+import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
 import type { OptimizeResult, ToleranceMet } from '../types.js';
 
 /** Full go-native report for one mode (formatNativeResult already includes per-stage + distribution). */
@@ -10,6 +11,7 @@ export function formatGoReport(mode: string, result: NativeSimulationResult): st
 }
 
 const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+const fmtBytes = (b: number) => (b >= 1024 ? `${(b / 1024).toFixed(1)} KiB` : `${b} B`);
 
 /**
  * Full curate report for one mode — prints everything from `OptimizeResult`:
@@ -47,6 +49,15 @@ export function formatCurateReport(mode: string, result: OptimizeResult): string
   lines.push(
     `  risk / liability    : CVaR(norm) ${sr.cvarNormalized.toFixed(2)}×bet   ` +
       `ETL>40×cost ${pct(sr.etl40xCost)}   ETL>10000×bet ${pct(sr.etlP10000)}`,
+  );
+
+  // Stake caps a book's serialized `events` field at STAKE_EVENTS_MAX_BYTES (1 MiB).
+  const evMark =
+    sr.booksOverEventsLimit > 0 ? `${sr.booksOverEventsLimit} OVER LIMIT ✗` : 'within limit ✓';
+  lines.push(
+    `  events size (max)   : ${fmtBytes(sr.maxEventsBytes)} / ${fmtBytes(STAKE_EVENTS_MAX_BYTES)} ` +
+      `(${pct(sr.maxEventsBytes / STAKE_EVENTS_MAX_BYTES)})` +
+      `${sr.maxEventsBytesBookId >= 0 ? `   book #${sr.maxEventsBytesBookId}` : ''}   ${evMark}`,
   );
 
   const top = (k: number) => (sr.topKShare.find((t) => t.k === k)?.share ?? 0);

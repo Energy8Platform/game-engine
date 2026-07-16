@@ -25,6 +25,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { optimizeLookupTable } from '../optimize-lookup.js';
 import { computeMetrics } from '../metrics.js';
+import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
 import type { LookupRow, OptimizeParams, OptimizeResult } from '../types.js';
 import type { ResolvedMode } from '../mathConfig';
 
@@ -197,6 +198,16 @@ function writeLut(rows: LookupRow[], path: string): void {
  *
  * `zstd` may not be on PATH. On failure we keep the raw `.jsonl`, log a note, and do NOT fail.
  */
+/** Byte-size stats for the serialized `events` arrays, surfaced to the curate report. */
+interface EventsSizeStats {
+  /** Largest serialized `events` field across all books, in UTF-8 bytes. */
+  maxEventsBytes: number;
+  /** Book id (== LUT sim) that holds the largest `events` field, or -1 when no books. */
+  maxEventsBytesBookId: number;
+  /** How many books exceed `STAKE_EVENTS_MAX_BYTES`. */
+  booksOverEventsLimit: number;
+}
+
 async function streamWriteEvents(
   rows: LookupRow[],
   originalSims: number[],
@@ -204,7 +215,7 @@ async function streamWriteEvents(
   outDir: string,
   mode: string,
   capCents: number,
-): Promise<void> {
+): Promise<EventsSizeStats> {
   const rawPath = join(outDir, `books_${mode}.jsonl`);
   const zstPath = join(outDir, `books_${mode}.jsonl.zst`);
   const tmpPath = join(outDir, `books_${mode}.tmp.jsonl`);
@@ -224,17 +235,26 @@ async function streamWriteEvents(
   // Per-output-row location of its serialized book line in the temp file (null until written).
   const slot: ({ off: number; len: number } | null)[] = new Array(rows.length).fill(null);
 
+  const stats: EventsSizeStats = { maxEventsBytes: 0, maxEventsBytesBookId: -1, booksOverEventsLimit: 0 };
+
   const tmpFd = openSync(tmpPath, 'w');
   let tmpOff = 0;
   const appendBook = (outIdx: number, events: Record<string, unknown>[]): void => {
     const r = rows[outIdx];
     // Canonical Stake book row: {id, payoutMultiplier (integer cents = CSV col3), events:[{type,spin}], criteria}.
-    const line = JSON.stringify({
-      id: r.sim,
-      payoutMultiplier: r.payoutCents,
-      events,
-      criteria: deriveCriteria(r.payoutCents, events, capCents),
-    }) + '\n';
+    // Serialize `events` ONCE and splice it into the line so we can measure its exact UTF-8 size
+    // (Stake caps a book's `events` field at STAKE_EVENTS_MAX_BYTES) without a second stringify pass.
+    const eventsJson = JSON.stringify(events);
+    const eventsBytes = Buffer.byteLength(eventsJson, 'utf8');
+    if (eventsBytes > stats.maxEventsBytes) {
+      stats.maxEventsBytes = eventsBytes;
+      stats.maxEventsBytesBookId = r.sim;
+    }
+    if (eventsBytes > STAKE_EVENTS_MAX_BYTES) stats.booksOverEventsLimit++;
+    const criteria = deriveCriteria(r.payoutCents, events, capCents);
+    const line =
+      `{"id":${r.sim},"payoutMultiplier":${r.payoutCents},"events":${eventsJson},` +
+      `"criteria":${JSON.stringify(criteria)}}\n`;
     const buf = Buffer.from(line, 'utf8');
     writeSync(tmpFd, buf, 0, buf.length, tmpOff);
     slot[outIdx] = { off: tmpOff, len: buf.length };
@@ -294,6 +314,8 @@ async function streamWriteEvents(
       `  [${mode}] zstd not found — wrote raw books_${mode}.jsonl; install zstd for the .zst\n`,
     );
   }
+
+  return stats;
 }
 
 interface IndexMode { name: string; cost: number; events: string; weights: string }
@@ -343,10 +365,22 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   result.rows.forEach((r, i) => { r.sim = i; });
 
   writeLut(result.rows, join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`));
-  await streamWriteEvents(
+  const eventsSize = await streamWriteEvents(
     result.rows, originalSims, opts.poolDir, opts.outDir, mode.mode, mode.curate.capMaxWin,
   );
   upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
+
+  // Fold the just-measured events-size stats into the stake report + warnings.
+  result.stakeReport.maxEventsBytes = eventsSize.maxEventsBytes;
+  result.stakeReport.maxEventsBytesBookId = eventsSize.maxEventsBytesBookId;
+  result.stakeReport.booksOverEventsLimit = eventsSize.booksOverEventsLimit;
+  if (eventsSize.booksOverEventsLimit > 0) {
+    result.warnings.push(
+      `${eventsSize.booksOverEventsLimit} book(s) exceed Stake's ${STAKE_EVENTS_MAX_BYTES}-byte events ` +
+        `limit (largest ${eventsSize.maxEventsBytes} bytes at book id ${eventsSize.maxEventsBytesBookId}) — ` +
+        `these will be rejected on publication`,
+    );
+  }
 
   return result;
 }

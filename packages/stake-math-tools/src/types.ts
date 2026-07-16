@@ -227,6 +227,10 @@ export interface HitRateBucket {
   effectiveHitRate: number;
 }
 
+/** Stake rejects a book whose serialized `events` field exceeds this many UTF-8
+ *  bytes (1 MiB). Curate measures each book's `events` size against this cap. */
+export const STAKE_EVENTS_MAX_BYTES = 1_048_576;
+
 export interface StakeReport {
   /** Maximum payout in the output, as a bet multiplier (payoutCents / betCostCents). */
   payoutMultMax: number;
@@ -301,6 +305,19 @@ export interface StakeReport {
 
   /** Bet cost in cents used for the multiplier conversions (echoed from params). */
   betCostCents: number;
+
+  /** Largest serialized `events` array across all curated books, in UTF-8 bytes.
+   *  Compared against `STAKE_EVENTS_MAX_BYTES` (1 MiB). Populated by curate when
+   *  the books are streamed to disk; 0 before serialization (e.g. sim-only runs). */
+  maxEventsBytes: number;
+
+  /** Curated book id (== LUT sim) holding the largest `events` array, or -1 when
+   *  no books have been serialized yet. */
+  maxEventsBytesBookId: number;
+
+  /** Number of curated books whose serialized `events` exceed
+   *  `STAKE_EVENTS_MAX_BYTES` — these would be rejected on publication. */
+  booksOverEventsLimit: number;
 }
 
 export interface RefinementStats {

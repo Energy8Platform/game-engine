@@ -181,6 +181,10 @@ export function computeStakeReport(
     uniqueEvents: uniquePayouts.size,
     nonZeroPayouts,
     betCostCents,
+    // Filled in by curate once the books are serialized (unknown at optimize time).
+    maxEventsBytes: 0,
+    maxEventsBytesBookId: -1,
+    booksOverEventsLimit: 0,
   };
 }
 
