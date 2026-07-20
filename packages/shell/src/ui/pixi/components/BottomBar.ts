@@ -654,7 +654,11 @@ export class BottomBar extends Container {
     );
 
     this.inner.scale.set(s);
-    this.inner.position.set((W - barW * s) / 2, H - WIDE_PAD_BOTTOM - SPIN * s);
+    // Scale the bottom gap WITH the bar (…* s), not a flat 8px. On a small/short popout the bar is
+    // fit-scaled down but a constant 8px gap would look like too much air — so the bar floated off the
+    // bottom edge. Scaling matches the HTML shell, whose whole barhost scales from transform-origin
+    // bottom center (gap → 8·s). Desktop (s≈1) is unchanged.
+    this.inner.position.set((W - barW * s) / 2, H - (WIDE_PAD_BOTTOM + SPIN) * s);
     this.measureFootprint();
   }
 
