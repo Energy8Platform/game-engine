@@ -1,7 +1,8 @@
 import type { ShellHost } from '@/core/renderer';
 import type { CellRef, GameInfoSection, GameMode, PaytableRow, PaylineDef, ShapeDef, WinSection } from '@/core/types';
-import { createOverlay, twoLine } from '../primitives';
+import { createOverlay } from '../primitives';
 import { icon } from '../icons';
+import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART } from '../../buy-bonus-art';
 import { PACKAGE_VERSION } from '@/core/version';
 
 /** Default order key for the auto-injected hotkeys section: just after `controls` (-1). */
@@ -122,8 +123,9 @@ type CtlRow = { vis: string; name: string; desc: string; on: boolean };
 function sectionControls(host: ShellHost, el: HTMLElement): HTMLElement {
   const { features } = host.config;
   const slot = (inner: string, cls = '') => `<span class="ge-gi-ctl-ic ${cls}">${inner}</span>`;
-  const buyLabel = twoLine(host.t('BUY BONUS'));
-  const buyBadge = slot(`<span class="ge-shell-buybonus"><span>${buyLabel}</span></span>`);
+  // the same coin the bar shows (social variant in social mode)
+  const buyArt = host.config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART;
+  const buyBadge = slot(`<span class="ge-shell-buybonus ge-bb-coin"><span class="ge-bb-coin-art">${buyArt}</span></span>`);
 
   // Block 1 — gameplay. Bet is split into two rows: one to raise, one to lower.
   const game: CtlRow[] = [

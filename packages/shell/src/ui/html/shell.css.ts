@@ -28,20 +28,13 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-iconbtn:active { transform:scale(.92); }
 #${SHELL_ROOT_ID} .ge-iconbtn[disabled] { opacity:.35; cursor:default; }
 #${SHELL_ROOT_ID} .ge-iconbtn.ge-active { color:var(--shell-icon-active); }
-/* Turbo — ONE bolt glyph (turbo1); the level is shown by colour, not by swapping glyphs:
-   off (ge-turbo-0) = muted grey · L1 (ge-turbo-1) = white bolt + 2px accent OUTER outline ·
-   L2 (ge-turbo-2) = accent-filled bolt + 2px accent outer outline.
-   Each level is a full-size bolt with a 2px OUTER ring; only the fill + ring colour change:
-   off = white fill + BLACK ring · L1 = white fill + accent ring · L2 = accent fill + accent ring.
-   The outer ring uses the paint-order:stroke + double-width trick (the stroke straddles the path, so
-   painting it BEHIND the fill hides the inner half, leaving only the outer ~2px). Hover follows the
-   standard bar-button behaviour (line ~400: white disc + accent) — the bolt + ring tint accent. */
-#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"] svg { overflow:visible; }
-#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"] svg path { paint-order:stroke; stroke:var(--shell-accent); stroke-width:4; stroke-linejoin:round; }
-#${SHELL_ROOT_ID} .ge-iconbtn.ge-turbo-0 svg path { fill:#fff; stroke:#000; }
-#${SHELL_ROOT_ID} .ge-iconbtn.ge-turbo-1 svg path { fill:#fff; }
-#${SHELL_ROOT_ID} .ge-iconbtn.ge-turbo-2 svg path { fill:var(--shell-accent); }
-#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="turbo"]:hover svg path { fill:var(--shell-accent); stroke:var(--shell-accent); }
+/* Turbo shows its level by SWAPPING the glyph (off → single bolt turboOff, L1 → single bolt
+   turbo1, L2 → bolt-with-speed-lines turbo2). Colour just marks state — no outline:
+   off (ge-turbo-0) = #ccc (the svg turbo-off grey) · engaged (L1/L2) = accent · hover = accent. */
+#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"].ge-turbo-0 { color:#ccc; }
+#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"].ge-turbo-1,
+#${SHELL_ROOT_ID} .ge-iconbtn[data-ge="turbo"].ge-turbo-2 { color:var(--shell-accent); }
+#${SHELL_ROOT_ID} .ge-bar-panel .ge-iconbtn[data-ge="turbo"]:hover { color:var(--shell-accent); }
 
 /* SPIN — white disc by default, big glyph reaching for the rim; lights up accent on hover */
 #${SHELL_ROOT_ID} .ge-shell-spin { pointer-events:auto; cursor:pointer; border:3px solid #000; border-radius:50%;
@@ -61,8 +54,9 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-spin-stop { display:flex; }            /* STOP glyph at the disc's full size, like SPIN */
 /* no entrance animation: the bar re-renders many times per spin, so any animation here
    would replay each time and make the counter visibly jump. tabular-nums keeps it steady. */
+/* the STOP glyph is a solid dark square, so the autoplay count is always pure white to read on it. */
 #${SHELL_ROOT_ID} .ge-spin-count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  font-size:22px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+  font-size:22px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; color:#fff; }
 
 /* BUY BONUS — round accent badge, 2-line label, text pulses + accent glow on hover */
 #${SHELL_ROOT_ID} .ge-shell-buybonus { pointer-events:auto; cursor:pointer; box-sizing:border-box;
@@ -72,7 +66,14 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-shell-buybonus span { display:inline-block; will-change:transform; }
 /* the ticket glyph fills the badge (em-sized off the button's font-size, so it scales per context) */
 #${SHELL_ROOT_ID} .ge-shell-buybonus .ge-bb-tk { display:flex; font-size:3.5em; color:#0b0e16; }
+/* coin variant (BUY state): the full-colour coin IS the button — drop the accent disc + border,
+   keep the circular hit/glow. The coin art fills the button and is the pulsed node on hover. */
+#${SHELL_ROOT_ID} .ge-shell-buybonus.ge-bb-coin { background:none; border:none; }
+#${SHELL_ROOT_ID} .ge-shell-buybonus .ge-bb-coin-art { display:flex; width:100%; height:100%; }
+#${SHELL_ROOT_ID} .ge-shell-buybonus .ge-bb-coin-art svg { width:100%; height:100%; display:block; }
 #${SHELL_ROOT_ID} .ge-shell-buybonus:hover { box-shadow:0 0 11px 1px var(--shell-accent); }
+/* the coin needs no accent halo on hover/active — it carries its own gold look */
+#${SHELL_ROOT_ID} .ge-shell-buybonus.ge-bb-coin:hover { box-shadow:none; }
 #${SHELL_ROOT_ID} .ge-shell-buybonus:hover span { animation:ge-bb-pulse .7s ease-in-out infinite; }
 #${SHELL_ROOT_ID} .ge-shell-buybonus:active { transform:scale(.96); }
 #${SHELL_ROOT_ID} .ge-shell-buybonus[disabled] { filter:grayscale(.5) brightness(.72); box-shadow:none; cursor:default; }
@@ -138,7 +139,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID}.ge-mobile .ge-shell-spin { width:84px; height:84px; font-size:66px; border-width:4px;
   background:var(--shell-btn); color:var(--shell-btn-ink); }
 #${SHELL_ROOT_ID}.ge-mobile .ge-shell-spin:hover { background:var(--shell-btn); color:var(--shell-accent); box-shadow:none; }
-#${SHELL_ROOT_ID}.ge-mobile .ge-shell-buybonus { width:50px; height:50px; font-size:9px; border-width:2px; }
+#${SHELL_ROOT_ID}.ge-mobile .ge-shell-buybonus { width:58px; height:58px; font-size:9px; border-width:2px; }
 /* landscape overflow — size the column to content, centre it; JS scales the whole stack to fit */
 #${SHELL_ROOT_ID} .ge-shell-barhost.ge-fit { left:50%; right:auto; width:max-content; max-width:none; }
 #${SHELL_ROOT_ID} .ge-shell-barhost.ge-fit .ge-shell-bottom { width:max-content; }
@@ -349,12 +350,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-bonus-vol { display:flex; justify-content:center; align-items:center; gap:0;
   font-size:2.2em; line-height:1; margin-bottom:.55em; }
 #${SHELL_ROOT_ID} .ge-bonus-vol-on, #${SHELL_ROOT_ID} .ge-bonus-vol-off { display:inline-flex; gap:0; }
-/* Volatility bolts get the same outline+fill treatment as turbo: white fill + a 2px OUTER ring
-   (paint-order:stroke + double width). Active = accent ring; inactive = black ring, dimmed. */
-#${SHELL_ROOT_ID} .ge-bonus-vol svg { overflow:visible; }
-#${SHELL_ROOT_ID} .ge-bonus-vol svg path { paint-order:stroke; fill:#fff; stroke-width:1; stroke-linejoin:round; }
-#${SHELL_ROOT_ID} .ge-bonus-vol-on svg path { stroke:var(--card-acc); fill:var(--card-acc); }
-#${SHELL_ROOT_ID} .ge-bonus-vol-off svg path { stroke:#000; fill:#000; }
+/* Volatility = the turbo bolt (turbo1) repeated: active bolts filled accent, inactive filled black
+   and dimmed. Solid fill, no outline. */
+#${SHELL_ROOT_ID} .ge-bonus-vol-on svg path { fill:var(--card-acc); }
+#${SHELL_ROOT_ID} .ge-bonus-vol-off svg path { fill:#000; }
 #${SHELL_ROOT_ID} .ge-bonus-vol-off { opacity:.5; }
 #${SHELL_ROOT_ID} .ge-bonus-price { font-size:1.6em; font-weight:800; color:#fff; font-variant-numeric:tabular-nums; white-space:nowrap; }
 #${SHELL_ROOT_ID} .ge-bonus-cta { width:100%; border:none; padding:1.15em; font-weight:800; font-size:1.05em;
@@ -488,7 +487,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 
 /* BUY BONUS — floats outside-left of the bar; keeps its accent disc + hover ring (the one exception).
    relative/z-index so it stacks predictably under the full-screen overlays (see overlay-stacking test). */
-#${SHELL_ROOT_ID} .ge-shell-bottom > .ge-shell-buybonus { flex:0 0 auto; width:62px; height:62px;
+#${SHELL_ROOT_ID} .ge-shell-bottom > .ge-shell-buybonus { flex:0 0 auto; width:71px; height:71px;
   font-size:11px; border-width:3px; position:relative; z-index:3; }
 
 /* WIN — a plain readout (same as balance/bet), grouped on the left with the other info */

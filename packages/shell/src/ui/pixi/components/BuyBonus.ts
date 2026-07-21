@@ -4,7 +4,7 @@ import type { BonusOption } from '@/core/types';
 import { betDir } from '@/core/keyboard';
 import { effectiveAccent, contrastText } from '@/core/colors';
 import { makeText } from '../text';
-import { makeIcon, makeRingedIcon } from '../pixi-icon';
+import { makeIcon } from '../pixi-icon';
 import { navButton } from '../primitives/overlay';
 import { clamp } from '../primitives/overlay';
 import { attachHover } from '../primitives/widgets';
@@ -700,11 +700,11 @@ function volatilityRow(_host: PixiComponentContext, level: number, accent: strin
   const n = Math.max(0, Math.min(5, level));
   let x = 0;
   for (let i = 0; i < 5; i++) {
-    // active = solid accent bolt; inactive = solid black bolt, dimmed (fill==ring, 1px hairline ring
-    // per the DOM: .ge-bonus-vol svg path { stroke-width:1; fill/stroke = accent (on) / #000 (off) })
+    // active = solid accent bolt; inactive = solid black bolt, dimmed
+    // (DOM: .ge-bonus-vol svg path fill = accent (on) / #000 (off))
     const active = i < n;
     const col = active ? accent : '#000000';
-    const bolt = makeRingedIcon('turbo1', size, col, col, 1);
+    const bolt = makeIcon('turbo1', size, col);
     bolt.alpha = active ? 1 : 0.5;
     bolt.position.set(x, 0);
     c.addChild(bolt);

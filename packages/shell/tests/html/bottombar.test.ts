@@ -71,20 +71,22 @@ describe('BottomBar base mode', () => {
     expect(spy).toHaveBeenCalledWith(1);
   });
 
-  it('turbo: single bolt glyph at every level; level shown via ge-turbo-{0,1,2} class (caps at 2; wraps)', () => {
+  it('turbo: glyph SWAPS per level (turboOff → turbo1 → turbo2); ge-turbo-{0,1,2} class caps at 2; wraps', () => {
     createGameShell(cfg(mount, { turbo: 3 }));
-    const tmp = document.createElement('div');
-    tmp.innerHTML = icon('turbo1');
+    const glyphHTML = (name: 'turboOff' | 'turbo1' | 'turbo2') => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = icon(name);
+      return tmp.innerHTML;
+    };
     const btn = () => q(mount, '[data-ge="turbo"]')!;
     const lvl = () => ['ge-turbo-0', 'ge-turbo-1', 'ge-turbo-2'].find((c) => btn().classList.contains(c));
-    // the glyph is ALWAYS turbo1 — state is conveyed by colour/stroke (the level class), not by swapping glyphs
-    const expectBolt = () => expect(btn().innerHTML).toBe(tmp.innerHTML);
+    const expectGlyph = (name: 'turboOff' | 'turbo1' | 'turbo2') => expect(btn().innerHTML).toBe(glyphHTML(name));
 
-    expectBolt(); expect(lvl()).toBe('ge-turbo-0'); expect(btn().classList.contains('ge-active')).toBe(false); // off — muted
-    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-1'); expect(btn().classList.contains('ge-active')).toBe(true); // L1 — white + accent outline
-    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-2'); // L2 — accent fill + outline
-    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-2'); // L3 caps at the L2 look
-    btn().click(); expectBolt(); expect(lvl()).toBe('ge-turbo-0'); // wraps back to off
+    expectGlyph('turboOff'); expect(lvl()).toBe('ge-turbo-0'); expect(btn().classList.contains('ge-active')).toBe(false); // off — single bolt, muted
+    btn().click(); expectGlyph('turbo1'); expect(lvl()).toBe('ge-turbo-1'); expect(btn().classList.contains('ge-active')).toBe(true); // L1 — single bolt, accent
+    btn().click(); expectGlyph('turbo2'); expect(lvl()).toBe('ge-turbo-2'); // L2 — bolt + speed lines
+    btn().click(); expectGlyph('turbo2'); expect(lvl()).toBe('ge-turbo-2'); // L3 caps at the L2 glyph
+    btn().click(); expectGlyph('turboOff'); expect(lvl()).toBe('ge-turbo-0'); // wraps back to off
   });
 
   it('turbo/autoplay carry ge-active (white) only when engaged', () => {

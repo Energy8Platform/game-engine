@@ -211,7 +211,10 @@ describe('Feature activation', () => {
     expect(betVal.style.color).toBeTruthy();               // value tinted
     const lblColor = (betVal.querySelector('.ge-lbl') as HTMLElement).style.color;
     expect(lblColor).toBe(betVal.style.color);             // "BET" label tinted with the same accent
-    expect(q(mount, '[data-ge="buybonus"]')!.textContent).toContain('DISABLE');
+    // the button becomes the "deactivate" coin variant (SVG, no text) — identified by its aria-label
+    const buy = q(mount, '[data-ge="buybonus"]')!;
+    expect(buy.getAttribute('aria-label')).toContain('DISABLE');
+    expect(buy.querySelector('.ge-bb-coin-art svg')).toBeTruthy();
   });
 
   it('clicking DISABLE deactivates the feature and reverts the bet', () => {

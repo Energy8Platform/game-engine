@@ -1,6 +1,7 @@
-import { Container, Graphics, Rectangle, Text } from 'pixi.js';
+import { Container, Graphics, Text } from 'pixi.js';
 import type { PixiComponentContext } from '../context';
-import { effectiveAccent, contrastText } from '@/core/colors';
+import { effectiveAccent } from '@/core/colors';
+import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART, BUY_BONUS_DISABLED_ART } from '../../buy-bonus-art';
 import { FlexBox } from '../primitives/flex';
 import { roundedPath } from '../primitives/flex';
 import {
@@ -10,10 +11,8 @@ import {
   BuyBonusBadge,
   FsHero,
   divider,
-  attachHover,
-  attachPress,
 } from '../primitives/widgets';
-import { IconView, makeRingedIcon } from '../pixi-icon';
+import type { IconName } from '../icons';
 
 // ── design constants (mirror the DOM `.ge-bar-panel` / mobile rules) ──────────
 const BAR_H = 68; // continuous dark panel height
@@ -30,7 +29,7 @@ const BAR_MIN_SCALE = 0.5;
 const WIDE_PAD_BOTTOM = 8;
 export const WIDE_BAR_H = WIDE_PAD_BOTTOM + SPIN; // ≈92
 
-const BUY_W = 62; // buy-bonus disc on desktop
+const BUY_W = 71; // buy-bonus coin on desktop (+15% over the old 62 disc)
 const DISC = 38; // white-disc icon button box (auto/turbo)
 const FS_BOX = 90; // fixed bet-value box width
 
@@ -40,87 +39,36 @@ const M_CTRL_H = 62,
   M_GAP = 10,
   M_PAD_BOTTOM = 8,
   M_SIDE = 10;
-const M_BUY = 50;
+const M_BUY = 58; // mobile buy-bonus coin (+15%)
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H; // spin pops above the controls
 
-/** Three-state turbo button: single `turbo1` bolt on a white disc, with fill+ring treatment
- *  matching the DOM redesign. Level is conveyed by fill colour + ring colour (not glyph swap):
- *  - off (0): bolt fill #fff + BLACK ring, container alpha .5
- *  - L1:      bolt fill #fff + ACCENT ring, alpha 1
- *  - L≥2:     bolt fill ACCENT + ACCENT ring, alpha 1
- *  Hover at any level: bolt fill+ring → accent, disc border → accent (standard bar-button hover). */
-class TurboButton extends Container {
-  private box: number;
-  private view: IconView;
-  private discG: Graphics;
-  private discBorder: number;
-  private level: number;
-  private accent: string;
+/** Three-state turbo glyph: the level is shown by SWAPPING the glyph (off → single bolt `turboOff`,
+ *  L1 → single bolt `turbo1`, L≥2 → bolt-with-speed-lines `turbo2`). off = svg turbo-off grey (#ccc),
+ *  engaged/hover = accent. On desktop it sits on the white disc (like auto); mobile is disc-less. */
+function turboGlyph(level: number): IconName {
+  if (level <= 0) return 'turboOff';
+  return level >= 2 ? 'turbo2' : 'turbo1';
+}
 
-  constructor(opts: {
-    size: number;
-    glyph: number;
-    discFill: string;
-    discBorder?: number;
-    accent: string;
-    level: number;
-    onTap: () => void;
-  }) {
-    super();
-    this.box = opts.size;
-    this.accent = opts.accent;
-    this.level = opts.level;
-    this.discBorder = opts.discBorder ?? 2;
-    this.discG = new Graphics();
-    this.addChild(this.discG);
-    const { fill, ring } = this._colors(false);
-    this.view = makeRingedIcon('turbo1', opts.glyph, fill, ring);
-    this.view.position.set((this.box - opts.glyph) / 2, (this.box - opts.glyph) / 2);
-    this.addChild(this.view);
-    // off is no longer dimmed — it reads as off via the black ring (DOM dropped the opacity:.5 rule)
-    this.eventMode = 'static';
-    this.cursor = 'pointer';
-    this.hitArea = new Rectangle(0, 0, this.box, this.box);
-    this._paint(false);
-    attachHover(
-      this,
-      () => this._paint(true),
-      () => this._paint(false),
-    );
-    attachPress(this, 0.92, () => opts.onTap());
-  }
-
-  private _colors(hovering: boolean): { fill: string; ring: string } {
-    if (hovering) return { fill: this.accent, ring: this.accent };
-    if (this.level === 0) return { fill: '#ffffff', ring: '#000000' };
-    if (this.level === 1) return { fill: '#ffffff', ring: this.accent };
-    return { fill: this.accent, ring: this.accent };
-  }
-
-  private _paint(hovering: boolean): void {
-    const { fill, ring } = this._colors(hovering);
-    this.view.setColors(fill, ring);
-    const r = this.box / 2 - this.discBorder / 2;
-    this.discG.clear();
-    this.discG.circle(this.box / 2, this.box / 2, r).fill('#ffffff');
-    // border lights accent on hover OR when engaged (level>0) — mirrors DOM .ge-iconbtn.ge-active
-    const ringActive = hovering || this.level > 0;
-    this.discG.stroke({ color: ringActive ? this.accent : '#000000', width: this.discBorder });
-  }
-
-  /** Update turbo level and repaint (called when the shell re-renders the bar). */
-  setLevel(level: number, accent: string): void {
-    this.level = level;
-    this.accent = accent;
-    this._paint(false);
-  }
-
-  measureSize(): { w: number; h: number } {
-    return { w: this.box, h: this.box };
-  }
-  setLayoutSize(): void {
-    /* fixed */
-  }
+function makeTurboButton(
+  host: PixiComponentContext,
+  level: number,
+  onTap: () => void,
+  size = DISC,
+  glyph = 19,
+  disc = false,
+): IconButton {
+  const { tokens } = host;
+  return new IconButton(turboGlyph(level), {
+    size,
+    glyph,
+    ...(disc ? { disc: tokens.btn, discBorder: 2 } : {}),
+    color: '#cccccc', // svg turbo-off grey (off); engaged/hover switch to accent
+    hover: tokens.accent,
+    activeColor: tokens.accent,
+    active: level > 0,
+    onTap,
+  });
 }
 
 /** A readout in the bar (white Oswald value, plaque-label caption, no shadow). */
@@ -169,7 +117,7 @@ export class BottomBar extends Container {
   private betDown?: IconButton;
   private spin?: SpinDisc;
   private autoBtn?: IconButton;
-  private turboBtn?: TurboButton;
+  private turboBtn?: IconButton;
 
   constructor(host: PixiComponentContext) {
     super();
@@ -310,15 +258,7 @@ export class BottomBar extends Container {
       );
     }
     if (config.features.turbo > 0) {
-      this.turboBtn = new TurboButton({
-        size: DISC,
-        glyph: 19,
-        discFill: tokens.btn,
-        discBorder: 2,
-        accent: tokens.accent,
-        level: state.turbo,
-        onTap: () => this.onTurbo(),
-      });
+      this.turboBtn = makeTurboButton(this.host, state.turbo, () => this.onTurbo(), DISC, 19, true);
       spinWrap.add(this.turboBtn);
     }
 
@@ -335,14 +275,13 @@ export class BottomBar extends Container {
     if (config.features.buyBonus === false && !config.onBonusBuy) return null;
     const feature = state.activeFeature;
     if (feature) {
-      const accent = effectiveAccent(feature);
+      // a feature is active → the coin becomes the "deactivate" variant
       return new BuyBonusBadge({
         size,
-        fontSize,
         border,
-        bg: accent,
-        fg: contrastText(accent),
-        label: this.host.t('DISABLE'),
+        bg: effectiveAccent(feature),
+        coinArt: BUY_BONUS_DISABLED_ART,
+        label: '',
         tokens,
         ticker: this.host.ticker,
         onTap: () => this.host.actions.deactivateFeature(),
@@ -352,9 +291,7 @@ export class BottomBar extends Container {
       size,
       border,
       bg: tokens.accent,
-      icon: 'ticket',
-      iconSize: size * 0.55,
-      iconColor: tokens.btnInk,
+      coinArt: config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART,
       label: '',
       tokens,
       ticker: this.host.ticker,
@@ -417,15 +354,7 @@ export class BottomBar extends Container {
       if (state.autoplay.active) this.autoBtn.setGlow(true);
     }
     if (config.features.turbo > 0) {
-      this.turboBtn = new TurboButton({
-        size: 40,
-        glyph: 22,
-        discFill: tokens.btn,
-        discBorder: 2,
-        accent: tokens.accent,
-        level: state.turbo,
-        onTap: () => this.onTurbo(),
-      });
+      this.turboBtn = makeTurboButton(this.host, state.turbo, () => this.onTurbo(), 40, 22);
     }
     const buy = isBase ? (this.buildBuy(M_BUY, 9, 2) ?? undefined) : undefined;
 

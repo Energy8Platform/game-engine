@@ -1,6 +1,7 @@
 import type { ShellHost } from '@/core/renderer';
-import { effectiveAccent, contrastText } from '@/core/colors';
+import { effectiveAccent } from '@/core/colors';
 import { icon, type IconName } from '../icons';
+import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART, BUY_BONUS_DISABLED_ART } from '../../buy-bonus-art';
 
 /** A floating labelled money readout (balance/win/bet). */
 function readout(ge: string, label: string, value: string): HTMLElement {
@@ -19,11 +20,15 @@ function readout(ge: string, label: string, value: string): HTMLElement {
   return el;
 }
 
-// Turbo is ONE bolt glyph (turbo1) whose state is shown by colour, not by swapping glyphs:
-//   off (0) → muted bolt · L1 → white bolt + 2px accent outline · L2 → accent-filled bolt + outline.
-// The level class (ge-turbo-0/1/2) drives the styling in shell.css; ≥2 caps at the L2 look.
+// Turbo shows its level by SWAPPING the glyph (off → single bolt `turboOff`, L1 → single bolt
+// `turbo1`, L≥2 → bolt-with-speed-lines `turbo2`); the active colour comes from `.ge-active`.
+// The level class (ge-turbo-0/1/2) is kept for any level-specific tweaks in shell.css.
+function turboGlyph(level: number): IconName {
+  if (level <= 0) return 'turboOff';
+  return level >= 2 ? 'turbo2' : 'turbo1';
+}
 function turboBtn(host: ShellHost, level: number): HTMLButtonElement {
-  const b = iconBtn('turbo', 'turbo1', () => host.actions.cycleTurbo(), level > 0);
+  const b = iconBtn('turbo', turboGlyph(level), () => host.actions.cycleTurbo(), level > 0);
   b.classList.add(`ge-turbo-${Math.min(2, level)}`);
   return b;
 }
@@ -192,23 +197,23 @@ function compact(items: (HTMLElement | null)[]): HTMLElement[] {
 
 function buyBtn(host: ShellHost): HTMLButtonElement {
   const buy = document.createElement('button');
-  buy.className = 'ge-shell-buybonus';
+  buy.className = 'ge-shell-buybonus ge-bb-coin';
   buy.dataset.ge = 'buybonus';
+  const setCoin = (art: string) => {
+    buy.innerHTML = `<span class="ge-bb-coin-art">${art}</span>`;
+  };
   const feature = host.state.activeFeature;
   if (feature) {
-    // A feature is active → this button turns into DISABLE (tinted with the feature accent).
-    const accent = effectiveAccent(feature);
-    buy.classList.add('ge-disable');
-    buy.innerHTML = `<span>${host.t('DISABLE')}</span>`;
-    buy.style.background = accent;
-    buy.style.color = contrastText(accent);
+    // A feature is active → the coin becomes the "deactivate" variant.
+    buy.setAttribute('aria-label', host.t('DISABLE'));
+    setCoin(BUY_BONUS_DISABLED_ART);
     buy.addEventListener('click', () => {
       if (!buy.disabled) host.actions.deactivateFeature();
     });
   } else {
-    // Ticket icon (no text); keep the label for screen readers.
+    // Default / social buy-bonus coin (no accent disc); keep the label for screen readers.
     buy.setAttribute('aria-label', host.t('BUY BONUS'));
-    buy.innerHTML = `<span class="ge-bb-tk">${icon('ticket')}</span>`;
+    setCoin(host.config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART);
     buy.addEventListener('click', () => {
       if (!buy.disabled) host.actions.openBuyBonus();
     });

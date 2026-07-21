@@ -1,4 +1,4 @@
-import { BlurFilter, Color, Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
+import { BlurFilter, Color, Container, Graphics, GraphicsContext, Rectangle, Text, Ticker } from 'pixi.js';
 import type { ShellTokens } from '@/core/theme';
 import type { IconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
@@ -324,6 +324,35 @@ function drawGlow(glow: Graphics, size: number, accent: string, on: boolean): vo
   glow.circle(r, r, r + 6).fill({ color: accent, alpha: 0.7 }); // blurred by the glow's filter → halo
 }
 
+// Each buy-bonus coin variant (default/social/disabled) is parsed once from its shared SVG art
+// (same vectors as the DOM shell), keyed by the art string.
+const _coinCache = new Map<string, { ctx: GraphicsContext; vb: { x: number; y: number; w: number; h: number } }>();
+function coinData(art: string): { ctx: GraphicsContext; vb: { x: number; y: number; w: number; h: number } } {
+  let d = _coinCache.get(art);
+  if (!d) {
+    const m = art.match(/viewBox="([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)"/);
+    d = {
+      ctx: new GraphicsContext().svg(art),
+      vb: m ? { x: +m[1], y: +m[2], w: +m[3], h: +m[4] } : { x: 0, y: 0, w: 24, h: 24 },
+    };
+    _coinCache.set(art, d);
+  }
+  return d;
+}
+/** A Container holding the coin `art` scaled to fit `size`, pivoted on its centre so it can pulse. */
+function buildCoin(size: number, art: string): Container {
+  const { ctx, vb } = coinData(art);
+  const wrap = new Container();
+  const g = new Graphics(ctx);
+  const s = size / Math.max(vb.w, vb.h);
+  g.scale.set(s);
+  g.position.set(-vb.x * s + (size - vb.w * s) / 2, -vb.y * s + (size - vb.h * s) / 2);
+  wrap.addChild(g);
+  wrap.pivot.set(size / 2, size / 2);
+  wrap.position.set(size / 2, size / 2);
+  return wrap;
+}
+
 // ── SpinDisc — .ge-shell-spin ────────────────────────────────────────────────
 export interface SpinDiscOpts {
   size?: number; // 86 desktop / 84 mobile
@@ -390,7 +419,8 @@ export class SpinDisc extends Container implements Sizable {
     drawDisc(this.disc, this.size, this.tokens.btn, 4);
     const glyphColor = hot ? this.tokens.accent : this.tokens.btnInk;
     this.glyph.setColor(glyphColor);
-    if (this.countText) this.countText.style.fill = hot ? this.tokens.accent : this.tokens.btnInk;
+    // the count sits ON the solid (btnInk) STOP square, so it must be light to read
+    if (this.countText) this.countText.style.fill = '#ffffff';
     // Disabled (mid-spin / can't spin): darken OPAQUELY (≈ filter:grayscale(.4) brightness(.62))
     // with a dark veil over the disc — not alpha, which would let the bright board show through and
     // read as a translucent/missing button (what looked "transparent" while spinning).
@@ -409,7 +439,7 @@ export class SpinDisc extends Container implements Sizable {
       this.glyph.visible = false;
       this.stopGlyph();
       if (!this.countText) {
-        this.countText = makeText('', { size: 22, weight: '800', color: this.tokens.btnInk, align: 'center', family: NUM_FONT_FAMILY });
+        this.countText = makeText('', { size: 22, weight: '800', color: '#ffffff', align: 'center', family: NUM_FONT_FAMILY });
         this.addChild(this.countText); // added after the STOP glyph → renders on top of it
       }
       const label = Number.isFinite(remaining) ? String(remaining) : '∞';
@@ -495,8 +525,10 @@ export interface BuyBonusOpts {
   border?: number; // 3 / 2
   bg: string; // accent
   fg?: string; // text colour (#fff, or contrast in feature mode)
-  label: string; // "DISABLE" (feature mode) — ignored when `icon` is set
-  /** Show this icon (the ticket) instead of the text label — the BUY state. */
+  label: string; // "DISABLE" (feature mode) — ignored when `icon`/`coinArt` is set
+  /** Render this full-colour buy-bonus coin SVG (default/social/disabled) — replaces the accent disc. */
+  coinArt?: string;
+  /** Show this icon instead of the text label. */
   icon?: IconName;
   iconSize?: number; // glyph px (≈ size * 0.62)
   iconColor?: string; // ticket ink (black)
@@ -510,7 +542,9 @@ export class BuyBonusBadge extends Container implements Sizable {
   private disc: Graphics;
   private labelText?: Text;
   private iconView?: IconView;
-  private content: Container; // labelText or iconView — the pulsed node
+  private content: Container; // labelText / iconView / coin — the pulsed node
+  private isCoin = false;
+  private dim?: Graphics; // disabled veil over the coin (no filter → crisp, mirrors the spin disc)
   private bg: string;
   private fg: string;
   private border: number;
@@ -528,7 +562,13 @@ export class BuyBonusBadge extends Container implements Sizable {
     this.ticker = opts.ticker;
     this.disc = new Graphics();
     this.addChild(this.glow, this.disc);
-    if (opts.icon) {
+    if (opts.coinArt) {
+      this.isCoin = true;
+      const coin = buildCoin(this.size, opts.coinArt);
+      this.content = coin;
+      this.dim = new Graphics();
+      this.addChild(coin, this.dim); // veil on top for the disabled state
+    } else if (opts.icon) {
       const gs = opts.iconSize ?? this.size * 0.62;
       this.iconView = makeIcon(opts.icon, gs, opts.iconColor ?? '#0b0e16');
       this.iconView.pivot.set(gs / 2, gs / 2);             // pulse/scale around the glyph centre
@@ -560,11 +600,20 @@ export class BuyBonusBadge extends Container implements Sizable {
   }
 
   private paint(hovering: boolean): void {
-    // disabled → grayscale(.5) brightness(.72) baked into the fill/label (no filter → crisp)
-    drawDisc(this.disc, this.size, this._disabled ? dimColor(this.bg) : this.bg, this.border);
-    if (this.labelText) this.labelText.style.fill = this._disabled ? dimColor(this.fg) : this.fg;
+    if (this.isCoin) {
+      // no accent disc — the coin IS the button. disabled → dark veil (crisp, no filter).
+      if (this.dim) {
+        this.dim.clear();
+        if (this._disabled) this.dim.circle(this.size / 2, this.size / 2, this.size / 2).fill({ color: 0x000000, alpha: 0.5 });
+      }
+    } else {
+      // disabled → grayscale(.5) brightness(.72) baked into the fill/label (no filter → crisp)
+      drawDisc(this.disc, this.size, this._disabled ? dimColor(this.bg) : this.bg, this.border);
+      if (this.labelText) this.labelText.style.fill = this._disabled ? dimColor(this.fg) : this.fg;
+    }
     const on = hovering && !this._disabled;
-    drawGlow(this.glow, this.size, this.bg, on); // soft accent glow only (no ring) — `.ge-shell-buybonus:hover`
+    // the coin carries its own gold look — no accent halo (mirrors `.ge-bb-coin:hover`)
+    drawGlow(this.glow, this.size, this.bg, this.isCoin ? false : on);
     if (on) this.startPulse();
     else this.stopPulse();
   }
