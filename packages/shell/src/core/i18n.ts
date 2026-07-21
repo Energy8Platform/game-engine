@@ -26,11 +26,18 @@ export interface I18nOptions { language: string; isSocial?: boolean; messages?: 
 export interface I18n { readonly lang: Lang; t(src: string): string; }
 
 export function createI18n(opts: I18nOptions): I18n {
-  // Social is the `en-social` pseudo-locale: it rewrites the English source. Non-English locales are
-  // authored social-safe already, so `socialize` only runs on the English source string.
+  // Social is the `en-social` pseudo-locale: it rewrites the English source into social-safe
+  // vocabulary. The replacement dictionary only exists for English, so social mode FORCES English —
+  // the requested `language` is ignored, matching the `isSocial` contract ("…derived from English…
+  // regardless of `language`"). Rendering a non-English locale in social mode would leak untranslated
+  // restricted terms, so we never do it.
+  if (opts.isSocial) {
+    const t = (src: string): string => socialize(src);
+    return { lang: 'en', t };
+  }
   const lang = normalizeLang(opts.language);
   const t = (src: string): string => {
-    if (lang === 'en') return opts.isSocial ? socialize(src) : src;
+    if (lang === 'en') return src;
     return opts.messages?.[lang]?.[src] ?? LOCALES[lang]?.[src] ?? src;
   };
   return { lang, t };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { socialize } from '@/core/i18n';
+import { socialize, createI18n } from '@/core/i18n';
 
 describe('socialize', () => {
   it('swaps single restricted words', () => {
@@ -71,5 +71,26 @@ describe('socialize', () => {
     expect(socialize('Balance')).toBe('Balance');
     expect(socialize('Free spins')).toBe('Free spins');
     expect(socialize('Max win')).toBe('Max win');
+  });
+});
+
+describe('createI18n social mode', () => {
+  it('socializes English source in social mode', () => {
+    const i18n = createI18n({ language: 'en', isSocial: true });
+    expect(i18n.lang).toBe('en');
+    expect(i18n.t('bet')).toBe('play');
+  });
+
+  it('forces English regardless of the requested language', () => {
+    // Non-English + social must NOT fall through to the localized (restricted-vocabulary) string.
+    const i18n = createI18n({ language: 'ru', isSocial: true });
+    expect(i18n.lang).toBe('en');
+    expect(i18n.t('Paytable')).toBe('Win table');
+  });
+
+  it('honors the localized string when social is off', () => {
+    const i18n = createI18n({ language: 'ru', messages: { ru: { bet: 'ставка' } } });
+    expect(i18n.lang).toBe('ru');
+    expect(i18n.t('bet')).toBe('ставка');
   });
 });

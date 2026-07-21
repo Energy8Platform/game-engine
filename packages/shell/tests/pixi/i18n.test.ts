@@ -29,7 +29,11 @@ describe('createI18n.t', () => {
     const i = createI18n({ language: 'de', messages: { de: { Spin: 'XXX' } } });
     expect(i.t('Spin')).toBe('XXX');
   });
-  it('does NOT socialize non-English', () => {
-    expect(createI18n({ language: 'ru', isSocial: true, messages: { ru: { 'Buy bonus': 'Бонус' } } }).t('Buy bonus')).toBe('Бонус');
+  it('forces English social vocabulary regardless of language', () => {
+    // The social dictionary is English-only, so social mode ignores `language` (and any localized
+    // messages) and renders the socialized English source — never a restricted-vocabulary locale.
+    const i = createI18n({ language: 'ru', isSocial: true, messages: { ru: { 'Buy bonus': 'Бонус' } } });
+    expect(i.lang).toBe('en');
+    expect(i.t('Buy bonus')).toBe('Get bonus');
   });
 });

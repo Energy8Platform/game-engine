@@ -43,12 +43,20 @@ describe('shell language', () => {
   });
 
   it('setLanguage swaps the resolver at runtime', () => {
-    const shell = createGameShell({ ...base(), language: 'en', isSocial: true });
-    // en + social: socialize is active
-    expect(shell.t('Buy bonus')).toBe('Get bonus');
+    const shell = createGameShell({ ...base(), language: 'en', isSocial: false });
+    // en, no social: source string unchanged
+    expect(shell.t('Buy bonus')).toBe('Buy bonus');
     // switch to de: non-en, LOCALES.de has a translation → returns German string
     shell.setLanguage('de');
     expect(shell.t('Buy bonus')).toBe('Bonus kaufen');
+  });
+
+  it('social forces English even after setLanguage', () => {
+    const shell = createGameShell({ ...base(), language: 'en', isSocial: true });
+    expect(shell.t('Buy bonus')).toBe('Get bonus');
+    // social mode ignores the language switch — the English social vocabulary stays active
+    shell.setLanguage('de');
+    expect(shell.t('Buy bonus')).toBe('Get bonus');
   });
 
   it('setLanguage back to en+social re-enables socialize', () => {
