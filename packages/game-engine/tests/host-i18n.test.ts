@@ -152,6 +152,20 @@ describe('host-i18n: legal disclaimer localization', () => {
     expect(findDisclaimer(c)).toContain('Place your bets fairly.');
   });
 
+  it('social forces the disclaimer to English (verbatim) even for a non-English language', () => {
+    // Social mode forces the whole shell to English; the disclaimer must follow — English source,
+    // NOT the ru translation (and still un-socialized, since legal copy is never word-swapped).
+    const c = buildShellConfig(
+      { i18n: { ru: { 'Malfunction voids all wins and plays.': 'Сбой аннулирует все выигрыши и игры.' } } },
+      model,
+      { balance: 0, mode: 'base', language: 'ru', social: true, disclaimerLines: DISCLAIMER },
+    );
+    const html = findDisclaimer(c);
+    expect(html).toContain('Malfunction voids all wins and plays.'); // English source, not the ru translation
+    expect(html).not.toContain('Сбой'); // the ru translation must NOT leak in social mode
+    expect(html).toContain('TM and © 2026 Stake Engine.');
+  });
+
   it('localizes the canonical body from shell LOCALES (ru) without a per-game map', () => {
     const c = buildShellConfig(
       {},

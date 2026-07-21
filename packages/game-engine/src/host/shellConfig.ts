@@ -393,11 +393,12 @@ export function buildShellConfig(
   // authors can wrap player-facing copy explicitly; the full merged set is still socialized below
   // (section pass) as a safety net so restricted words can't slip through even if t() was missed.
   const { t } = createI18n({ language: runtime.language ?? 'en', isSocial, messages: opts.i18n });
-  // The legal disclaimer body localizes but must NEVER socialize (mandated copy per language). In
-  // social mode `t` would word-swap English; use a translation-only resolver so en+social keeps it
-  // verbatim while de/ru/… still translate. For non-social, `t` already never socializes.
+  // The legal disclaimer body must NEVER socialize (mandated copy — word-swaps like "bet → play"
+  // would corrupt legal text). In NON-social mode it localizes per language. In SOCIAL mode the whole
+  // shell is forced to English, so the disclaimer follows: resolve against English (source verbatim),
+  // never the requested locale — otherwise it'd be the lone non-English holdout in an English UI.
   const tDisclaimer = isSocial
-    ? createI18n({ language: runtime.language ?? 'en', isSocial: false, messages: opts.i18n }).t
+    ? createI18n({ language: 'en', isSocial: false }).t
     : t;
   const authored = typeof opts.gameInfo === 'function' ? opts.gameInfo(t) : opts.gameInfo;
   // Pass t() through to spec-derived sections so symbol names, mode titles, and descriptions are
