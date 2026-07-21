@@ -312,22 +312,28 @@ export function mergeGameInfo(derived: GameInfoContent, override?: GameInfoConte
   // here so the rest of the function works against the pixi-widened type.
   const derivedSections = (derived.sections ?? []) as GameInfoSection[];
   const overrideSections = (override.sections ?? []) as GameInfoSection[];
-  const authorByKey = new Map<string, GameInfoSection>();
-  for (const s of overrideSections) authorByKey.set(sectionKey(s), s);
-
-  const out: GameInfoSection[] = [];
-  const used = new Set<string>();
-  // Keep derived order; swap in the author's version where identities collide.
-  for (const s of derivedSections) {
-    const k = sectionKey(s);
-    const replacement = authorByKey.get(k);
-    if (replacement) { out.push(replacement); used.add(k); }
-    else out.push(s);
-  }
-  // Append author sections whose identity wasn't in the derived set, in author order.
+  // The FIRST author section of a given key is the one that REPLACES a matching derived section;
+  // every other author section is appended. Keying by title means several `custom` sections can
+  // share a key (same/absent title) — those must NOT annihilate each other, so consumption is
+  // tracked by section IDENTITY, not by key. (Key-gated appends silently dropped all but one.)
+  const replacementByKey = new Map<string, GameInfoSection>();
   for (const s of overrideSections) {
     const k = sectionKey(s);
-    if (!used.has(k)) { out.push(s); used.add(k); }
+    if (!replacementByKey.has(k)) replacementByKey.set(k, s);
+  }
+
+  const out: GameInfoSection[] = [];
+  const consumed = new Set<GameInfoSection>();
+  // Keep derived order; swap in the author's version where an identity matches a derived section.
+  for (const s of derivedSections) {
+    const replacement = replacementByKey.get(sectionKey(s));
+    if (replacement && !consumed.has(replacement)) { out.push(replacement); consumed.add(replacement); }
+    else out.push(s);
+  }
+  // Append every author section not already used as a replacement, in author order — including
+  // multiple `custom` sections that share (or omit) a title.
+  for (const s of overrideSections) {
+    if (!consumed.has(s)) { out.push(s); consumed.add(s); }
   }
   return { sections: out };
 }

@@ -295,6 +295,30 @@ describe('mergeGameInfo', () => {
     const out = mergeGameInfo(derived, override).sections ?? [];
     expect(out).toHaveLength(2); // appended, not replaced
   });
+
+  it('keeps every author custom section, even when they share (or omit) a title', () => {
+    // Keying custom sections by title must not collapse distinct game-supplied sections — a game
+    // that adds two untitled (or same-titled) custom blocks must see BOTH rendered.
+    const derived: GameInfoContent = { sections: [{ type: 'controls' } as GameInfoSection] };
+    const override: GameInfoContent = {
+      sections: [
+        { type: 'custom', html: '<p>A</p>' },
+        { type: 'custom', html: '<p>B</p>' },
+        { type: 'custom', title: 'Same', html: '<p>C</p>' },
+        { type: 'custom', title: 'Same', html: '<p>D</p>' },
+      ] as GameInfoSection[],
+    };
+    const customs = (mergeGameInfo(derived, override).sections ?? []).filter((s) => s.type === 'custom') as Array<{ html?: string }>;
+    expect(customs.map((s) => s.html)).toEqual(['<p>A</p>', '<p>B</p>', '<p>C</p>', '<p>D</p>']);
+  });
+
+  it('an author section still REPLACES a derived section of the same identity', () => {
+    const derived: GameInfoContent = { sections: [{ type: 'custom', title: 'DISCLAIMER', html: '<p>derived</p>' } as GameInfoSection] };
+    const override: GameInfoContent = { sections: [{ type: 'custom', title: 'DISCLAIMER', html: '<p>author</p>' } as GameInfoSection] };
+    const customs = (mergeGameInfo(derived, override).sections ?? []) as Array<{ html?: string }>;
+    expect(customs).toHaveLength(1);
+    expect(customs[0].html).toBe('<p>author</p>');
+  });
 });
 
 describe('defaultGameInfo', () => {
