@@ -10,40 +10,42 @@ describe('createBalanceGate', () => {
     expect(gate.balance).toBe(120);
   });
 
-  it('suppresses the debit during play→present, then paints it at afterPresent', () => {
+  it('paints the DEBIT immediately during play→present (stake leaves the balance on spin)', () => {
     const paint = vi.fn();
     const gate = createBalanceGate(paint, 1000);
     gate.beginPlay();
-    gate.onBalance(900); // debit landed before the animation — must NOT flash
-    expect(paint).not.toHaveBeenCalled();
-    expect(gate.balance).toBe(900); // tracked for affordability even while suppressed
+    gate.onBalance(900); // debit landed on play — must show NOW, not after the animation
+    expect(paint).toHaveBeenCalledWith(900);
+    expect(gate.balance).toBe(900);
     gate.afterPresent();
-    expect(paint).toHaveBeenCalledWith(900); // painted only after present
+    // Already painted — no redundant repaint of the same value.
+    expect(paint).toHaveBeenCalledTimes(1);
   });
 
   it('paints the async win credit that lands AFTER present (the bonus repro)', () => {
     const paint = vi.fn();
     const gate = createBalanceGate(paint, 9700);
-    // play debits the buy cost (suppressed), present animates, afterPresent paints the debit.
+    // play debits the buy cost (paints immediately), present animates, afterPresent opens the gate.
     gate.beginPlay();
-    gate.onBalance(9663.2); // post-debit
-    gate.afterPresent();
+    gate.onBalance(9663.2); // post-debit → painted now
     expect(paint).toHaveBeenLastCalledWith(9663.2);
+    gate.afterPresent();
     // end-round settles asynchronously after the final ack/afterPresent → credit must paint now.
     gate.onBalance(9708);
     expect(paint).toHaveBeenLastCalledWith(9708);
     expect(gate.balance).toBe(9708);
   });
 
-  it('a credit that lands DURING present is already reflected by afterPresent (no double paint gap)', () => {
+  it('buffers a CREDIT that lands DURING present, flushing it at afterPresent', () => {
     const paint = vi.fn();
     const gate = createBalanceGate(paint, 50);
     gate.beginPlay();
-    gate.onBalance(40); // debit
-    gate.onBalance(60); // fast credit during the animation (still suppressed)
-    expect(paint).not.toHaveBeenCalled();
+    gate.onBalance(40); // debit → paints immediately
+    expect(paint).toHaveBeenLastCalledWith(40);
+    gate.onBalance(60); // fast credit during the animation → held back (win must wait)
+    expect(paint).toHaveBeenLastCalledWith(40); // NOT 60 yet
     gate.afterPresent();
-    expect(paint).toHaveBeenCalledTimes(1);
-    expect(paint).toHaveBeenCalledWith(60); // latest value painted post-present
+    expect(paint).toHaveBeenLastCalledWith(60); // credit posts after present
+    expect(gate.balance).toBe(60);
   });
 });

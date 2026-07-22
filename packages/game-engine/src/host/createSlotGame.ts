@@ -245,10 +245,11 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // (hidden over the intro / non-slot scenes). Applies in BOTH base and replay modes.
     shell.setVisible(!!gameScene());
     game.scenes.on('change', () => shell!.setVisible(!!gameScene()));
-    // The gate tracks the live wallet (for the affordability guard) but only PAINTS the balance per
-    // the HUD-timing rule: the debit is buffered during play→present and shown at afterPresent; the
-    // async win credit (/wallet/end-round, after the final ack) paints when it lands. `balanceGate`
-    // is the single source for both the displayed balance and `ensureAffordable`.
+    // The gate tracks the live wallet (for the affordability guard) and PAINTS the balance per the
+    // HUD-timing rule: the debit paints immediately (the stake leaves the balance on spin); a win
+    // credit landing during play→present is held to afterPresent so it doesn't post before the
+    // animation; the async credit (/wallet/end-round, after the final ack) paints when it lands.
+    // `balanceGate` is the single source for both the displayed balance and `ensureAffordable`.
     const balanceGate = createBalanceGate((b) => shell!.setBalance(b), balance);
     ps?.on('balanceUpdate', (d: { balance: number }) => {
       balanceGate.onBalance(d.balance);
@@ -542,7 +543,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       // animation has finished — returning void would reopen it instantly, over a running animation.
       return runRound<T>(
         {
-          // Suppress the debit paint from play() until this segment's afterPresent (HUD timing).
+          // Open the play→present window: the debit still paints immediately, but a win credit that
+          // lands mid-animation is held until afterPresent (HUD timing).
           play: (a, b, rid) => {
             balanceGate.beginPlay();
             return slotPlay.play(a, b, rid);
