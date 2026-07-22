@@ -259,25 +259,26 @@ describe('event', () => {
 // ---------------------------------------------------------------------------
 
 describe('replay', () => {
-  it('returns the Stake replay shape: payoutMultiplier (cents), costMultiplier, state array', async () => {
+  it('returns the Stake replay shape: payoutMultiplier (×bet multiplier), costMultiplier, state array', async () => {
     const rgs = makeRgs();
     const res: RGSReplayResponse = await rgs.replay({ mode: 'BASE', event: '1' });
-    // Stake returns payoutMultiplier in CENTS (250), plus the mode's costMultiplier.
-    expect(res.payoutMultiplier).toBe(250);
+    // Stake returns payoutMultiplier as the ×bet MULTIPLIER (2.5), not cents — the same scale
+    // /wallet/play uses; the bridge surfaces it verbatim. (book cents 250 / 100 = 2.5×.)
+    expect(res.payoutMultiplier).toBe(2.5);
     expect(res.costMultiplier).toBe(1); // BASE cost from index.json
     // state is the EVENTS ARRAY directly (not wrapped in { events }).
     const state = res.state as { spin: { total_win: number } }[];
     expect(Array.isArray(state)).toBe(true);
     expect(state.length).toBeGreaterThan(0);
-    expect(state[0].spin.total_win).toBe(2.5); // 250 / 100, decimal in the event
+    expect(state[0].spin.total_win).toBe(2.5); // decimal ×bet multiplier in the event
   });
 
-  it('replays the 50x book (id 2) — payoutMultiplier 5000 cents, event total_win 50', async () => {
+  it('replays the 50x book (id 2) — payoutMultiplier 50 (×bet), event total_win 50', async () => {
     const rgs = makeRgs();
     const res = await rgs.replay({ mode: 'BASE', event: '2' });
-    expect(res.payoutMultiplier).toBe(5000);
+    expect(res.payoutMultiplier).toBe(50); // book cents 5000 / 100 = 50×
     const state = res.state as { spin: { total_win: number } }[];
-    expect(state[0].spin.total_win).toBe(50); // 5000 / 100
+    expect(state[0].spin.total_win).toBe(50);
   });
 });
 

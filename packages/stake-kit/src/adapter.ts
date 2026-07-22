@@ -56,7 +56,10 @@ export function createGameAdapter<TData extends Record<string, unknown>>(
         const seg: BookSegment = {
           action: core.action,
           data: (core.data ?? payload) as Record<string, unknown>,
-          winThisSegment: roundMoney(core.winX * round.betAmount),
+          // Round to the Stake money grid (minor units = 6 dp), NOT cents (2 dp): the shell's win
+          // readout shows up to 4 decimals for sub-cent wins (e.g. 0.0247 on a small bet), so a
+          // 2-dp round here would silently drop those digits before the formatter ever sees them.
+          winThisSegment: roundMoney(core.winX * round.betAmount, 'microUnits'),
           nextActions: isFinal ? nextRoundActions(config.model) : [built[index + 1].core.action],
           progressMarker: progressMarker(index),
         };

@@ -20,7 +20,6 @@ import { openBuyBonus } from './components/BuyBonus';
 import { openBetPicker, openAutoplayPicker } from './components/pickers';
 import { buildModal } from './components/Modal';
 import { buildReplayModal } from './components/ReplayModal';
-import type { ReplayModalOptions } from '@/core/types';
 
 export interface PixiRendererOptions {
   app: Application;
@@ -147,7 +146,7 @@ export class PixiRenderer implements ShellRenderer {
         layer = openAutoplayPicker(this.ctx);
         break;
       case 'replay':
-        layer = buildReplayModal(this.ctx, req.opts, () => this.openReplayInternal(req.opts));
+        layer = buildReplayModal(this.ctx, req.opts, () => this.host.openReplay(req.opts));
         break;
       case 'modal':
         layer = buildModal(this.ctx, req.opts);
@@ -224,15 +223,6 @@ export class PixiRenderer implements ShellRenderer {
 
   fitModals(): void {
     this.currentLayer?.fit?.();
-  }
-
-  /** Replay's reopen path: a replay modal can rebuild itself (e.g. after a replay completes). It is
-   *  routed back through the controller-equivalent open flow so the layer stack + backdrop stay in
-   *  sync — mirrors PixiGameShell.openReplay (push a fresh replay modal). */
-  private openReplayInternal(opts: ReplayModalOptions): void {
-    if (this.destroyed) return;
-    const layer = buildReplayModal(this.ctx, opts, () => this.openReplayInternal(opts));
-    this.pushLayer(layer);
   }
 
   // ── frosted backdrop ─────────────────────────────────────────────────────────
@@ -333,6 +323,7 @@ export class PixiRenderer implements ShellRenderer {
       get layout() { return host.layout; },
       get soundOn() { return host.soundOn; },
       get actions() { return host.actions; },
+      openReplay: (opts) => host.openReplay(opts),
       t: (s) => host.t(s),
       formatCurrency: (n, win) => host.formatCurrency(n, win),
       emit: host.emit.bind(host),

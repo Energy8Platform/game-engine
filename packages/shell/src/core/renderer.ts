@@ -86,6 +86,11 @@ export interface ShellHost {
   setVolumeRefresh(fn: ((key: VolumeKey, value: number) => void) | null): void;
   /** Logic-bearing actions invoked by renderer controls. */
   readonly actions: ShellActions;
+  /** Re-show the replay summary modal through the controller (keeps its OverlayHandle in sync).
+   *  Used as the modal's own reopen callback after START REPLAY, so a renderer never re-pushes a
+   *  replay modal behind the controller's back (which would strand `overlay` and dead-end the
+   *  next close). */
+  openReplay(opts: ReplayModalOptions): void;
 }
 
 /** Every state-changing thing a control can do. Each runs logic in the controller, emits the

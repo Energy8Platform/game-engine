@@ -387,9 +387,10 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
       const id = Number(event);
       const book = await loadBook(mode, id);
       // Mirror Stake's /bet/replay shape exactly:
-      //   { payoutMultiplier: <cents>, costMultiplier: <×>, state: [ ...events... ] }
-      // - payoutMultiplier is the book's raw value in CENTS (e.g. 495 = 4.95×); the bridge divides
-      //   by 100 to get the ×bet multiplier.
+      //   { payoutMultiplier: <×bet multiplier>, costMultiplier: <×>, state: [ ...events... ] }
+      // - payoutMultiplier is the ×bet MULTIPLIER (e.g. 4.95 for a 4.95× round), the SAME scale
+      //   /wallet/play returns for round.payoutMultiplier — the bridge surfaces it verbatim. The
+      //   book stores the payout in CENTS (payoutCents = ×bet × 100), so divide by 100 here.
       // - state is the EVENTS ARRAY directly (not wrapped in `{ events }`); the adapter's ensureBook
       //   accepts a bare array. A curated book carries the round's full events (trigger + free
       //   spins) so a bonus replays segment-by-segment; legacy books fall back to one synthetic
@@ -400,7 +401,7 @@ export function createDevRgs(ctx: DevRgsConfig): DevRgs {
           ? (bookEvents as unknown[])
           : [{ type: 'spin', spin: { total_win: book.payoutMultiplier / 100 } }];
       return {
-        payoutMultiplier: book.payoutMultiplier,
+        payoutMultiplier: book.payoutMultiplier / 100,
         costMultiplier: costOf(modes, mode),
         state,
       };

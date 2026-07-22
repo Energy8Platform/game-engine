@@ -64,6 +64,13 @@ describe('createGameAdapter.splitRound', () => {
     expect(segs[1].winThisSegment).toBe(8); // 4 × 2
     expect(segs[1].nextActions.sort()).toEqual(['buy_bonus', 'spin']); // final → next-round actions
   });
+  it('preserves sub-cent win precision (money grid, not cents)', () => {
+    // 0.1234× on a 0.2 bet = 0.02468 — the shell shows up to 4 decimals, so this must NOT be
+    // rounded to 0.02 (cents) here. betAmount 0.2 via a dedicated ctx.
+    const subCentCtx = { ...ctx, betAmount: 0.2 };
+    const segs = adapter.splitRound!([{ stage: 'base_game', data: { total_win: 0.1234, cascades: [] } }], subCentCtx);
+    expect(segs[0].winThisSegment).toBe(0.02468); // 0.1234 × 0.2, full precision (was 0.02 with cents rounding)
+  });
 });
 
 describe('resumeFromBook', () => {

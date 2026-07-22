@@ -103,6 +103,11 @@ export function makeText(str: string, opts: TextOpts): Text {
   if (opts.wrapWidth != null) {
     style.wordWrap = true;
     style.wordWrapWidth = opts.wrapWidth;
+    // CJK (and any long unbroken run) has no spaces to wrap on — without breakWords the line
+    // overflows the wrap width instead of wrapping. This is the single shell text helper (How to
+    // Play, disclaimer, Game Info section titles, mode table, win messages, buy-bonus cards), so
+    // one flag fixes wrapping everywhere.
+    style.breakWords = true;
   }
   if (opts.lineHeight != null) style.lineHeight = opts.lineHeight;
   if (opts.shadow) {

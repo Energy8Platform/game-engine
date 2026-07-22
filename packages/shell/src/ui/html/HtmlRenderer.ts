@@ -162,7 +162,9 @@ export class HtmlRenderer implements ShellRenderer {
       }
       case 'replay': {
         const opts = req.opts;
-        const reopen = (): void => { this.openReplayInternal(opts); };
+        // Reopen through the controller (not a renderer-direct re-push) so its OverlayHandle stays
+        // in sync — otherwise a reopened replay modal is untracked and the next close no-ops.
+        const reopen = (): void => { this.host.openReplay(opts); };
         const root = buildReplayModal(this.host, opts, reopen);
         return { root };
       }
@@ -171,14 +173,6 @@ export class HtmlRenderer implements ShellRenderer {
         return { root, onKey: req.opts.onKey };
       }
     }
-  }
-
-  /** Opens a replay modal and shows it — used as the reopen callback after START REPLAY. */
-  private openReplayInternal(opts: import('@/core/types').ReplayModalOptions): void {
-    if (this.destroyed) return;
-    const reopen = (): void => { this.openReplayInternal(opts); };
-    const root = buildReplayModal(this.host, opts, reopen);
-    this.showModal(root);
   }
 
   private showModal(el: HTMLElement, onKey?: (e: KeyboardEvent) => boolean): void {
