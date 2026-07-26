@@ -233,6 +233,42 @@ describe('createReelSystem', () => {
     expect(ran2).toBe(1);
     sys.destroy();
   });
+  it('cascade/reelStep call onStep after every settled step (the per-step payout hook)', async () => {
+    // cascade.enabled: false makes each step settle the board synchronously — no ticker needed.
+    const sys = createReelSystem({
+      resolve,
+      config: { grid: { cols: 2, rows: 2 }, cascade: { enabled: false } },
+    });
+    const cell = (symbol: string): CellData[][] => [
+      [{ symbol }, { symbol }],
+      [{ symbol }, { symbol }],
+    ];
+    const seen: Array<{ i: number; mult: number; symbol: string }> = [];
+    await sys.cascade(
+      [
+        { winningCells: [], removedCells: [], newCells: [], settledGrid: cell('a') },
+        { winningCells: [], removedCells: [], newCells: [], settledGrid: cell('b') },
+      ],
+      {
+        onStep: (i, step, mult) => {
+          seen.push({ i, mult, symbol: step.settledGrid[0][0].symbol });
+        },
+      },
+    );
+    expect(seen).toEqual([
+      { i: 0, mult: 1, symbol: 'a' },
+      { i: 1, mult: 1, symbol: 'b' },
+    ]);
+    // the hook sees the board AFTER its step settled
+    expect(sys.board[0][0].symbol).toBe('b');
+
+    const reelSeen: number[] = [];
+    await sys.reelStep([{ shifts: [0, 0], winningCells: [], settledGrid: cell('c') }], {
+      onStep: (i) => reelSeen.push(i),
+    });
+    expect(reelSeen).toEqual([0]);
+    sys.destroy();
+  });
   it('exposes the running cascade multiplier (starts at config.start)', () => {
     const sys = createReelSystem({
       resolve,

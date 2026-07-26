@@ -6,7 +6,7 @@ export class FakeRenderer implements ShellRenderer {
   bars = 0;
   layouts: string[] = [];
   themes = 0;
-  money: Array<{ field: string; from: number; to: number }> = [];
+  money: Array<{ field: string; from: number; to: number; durationMs?: number }> = [];
   overlays: OverlayRequest[] = [];
   closed = 0;
   destroyed = false;
@@ -16,7 +16,7 @@ export class FakeRenderer implements ShellRenderer {
   renderBar(): void { this.bars++; }
   setLayout(l: 'wide' | 'mobile'): void { this.layouts.push(l); }
   applyTheme(): void { this.themes++; }
-  animateMoney(field: 'balance' | 'win', from: number, to: number): void { this.money.push({ field, from, to }); }
+  animateMoney(field: 'balance' | 'win', from: number, to: number, durationMs?: number): void { this.money.push({ field, from, to, durationMs }); }
   openOverlay(req: OverlayRequest): OverlayHandle { this.overlays.push(req); return { onKey: this.onKey, close: () => { this.closed++; } }; }
   closeOverlay(): void { this.closed++; }
   destroy(): void { this.destroyed = true; }

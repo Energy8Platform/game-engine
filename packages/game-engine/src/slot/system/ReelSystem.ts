@@ -35,6 +35,19 @@ export interface CreateReelSystemOptions {
   features?: ReelFeature[];
 }
 
+/** Options for a stepped chain (`cascade` / `reelStep`). */
+export interface StepRunOpts<TStep> {
+  turbo?: boolean;
+  /** Carry the running multiplier across free spins (with `cascade.multiplier.persistInFreeSpins`). */
+  freeSpins?: boolean;
+  /**
+   * Fires after each step has settled, with the step's index and the running multiplier AFTER it.
+   * The hook for a step-by-step payout readout: report the win accrued so far to the shell via
+   * `api.shell.reportWin(...)`. Awaited, so an async hook paces the chain.
+   */
+  onStep?: (index: number, step: TStep, multiplier: number) => void | Promise<void>;
+}
+
 export interface ReelSystem {
   /** Root container — add this to your scene. */
   readonly view: Container;
@@ -52,14 +65,16 @@ export interface ReelSystem {
   /** Replace the whole config. */
   setConfig(config: ReelSystemConfig): void;
   spin(target: CellData[][], opts?: SpinRunOpts): Promise<void>;
-  /** Run a cascade chain. With `freeSpins` + `cascade.multiplier.persistInFreeSpins`, the multiplier carries over instead of resetting. */
-  cascade(steps: TumbleStep[], opts?: { turbo?: boolean; freeSpins?: boolean }): Promise<void>;
+  /** Run a cascade chain. With `freeSpins` + `cascade.multiplier.persistInFreeSpins`, the multiplier
+   *  carries over instead of resetting. Generic in the step type, so `onStep` hands back the game's
+   *  own step (with its per-step win) rather than the bare TumbleStep. */
+  cascade<TStep extends TumbleStep>(steps: TStep[], opts?: StepRunOpts<TStep>): Promise<void>;
   /**
    * Run a ReelStep™ chain: each step pays its winning cells, then scrolls every reel down by
    * `shifts[col]` positions (0 = reel stays put). Multiplier carries over with `freeSpins` +
    * `cascade.multiplier.persistInFreeSpins`, same as `cascade`.
    */
-  reelStep(steps: ReelStepData[], opts?: { turbo?: boolean; freeSpins?: boolean }): Promise<void>;
+  reelStep<TStep extends ReelStepData>(steps: TStep[], opts?: StepRunOpts<TStep>): Promise<void>;
   /** Current running cascade / reel-step multiplier. */
   readonly multiplier: number;
   /** Register a custom feature (or override a built-in by reusing its key). */
@@ -252,6 +267,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
       for (let i = 0; i < steps.length; i++) {
         await tumble.step(steps[i], i, cOpts);
         board = steps[i].settledGrid;
+        await cOpts?.onStep?.(i, steps[i], tumble.multiplier);
       }
       if (config.cascade.multiplier.enabled) log?.(`Cascade multiplier ×${tumble.multiplier}`);
     },
@@ -262,6 +278,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
       for (let i = 0; i < steps.length; i++) {
         await reelStepCtl.step(steps[i], i, rOpts);
         board = steps[i].settledGrid;
+        await rOpts?.onStep?.(i, steps[i], reelStepCtl.multiplier);
       }
       if (config.cascade.multiplier.enabled)
         log?.(`ReelStep multiplier ×${reelStepCtl.multiplier}`);

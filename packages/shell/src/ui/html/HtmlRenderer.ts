@@ -19,10 +19,10 @@ const REMOVE_FADE_MS = 300;
 
 /** Count-up the value span (.ge-rd-val) of a readout, leaving its label untouched.
  *  Returns the count-up canceler so the renderer can stop it before the node is replaced. */
-function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string): () => void {
+function animateReadout(el: HTMLElement, from: number, to: number, fmt: (n: number) => string, durationMs?: number): () => void {
   const val = el.querySelector('.ge-rd-val') as HTMLElement | null;
   if (!val) { el.textContent = fmt(to); return () => {}; }
-  return countUp(val, from, to, fmt);
+  return durationMs == null ? countUp(val, from, to, fmt) : countUp(val, from, to, fmt, durationMs);
 }
 
 export class HtmlRenderer implements ShellRenderer {
@@ -87,10 +87,10 @@ export class HtmlRenderer implements ShellRenderer {
     this.renderBar();
   }
 
-  animateMoney(field: 'balance' | 'win', from: number, to: number): void {
+  animateMoney(field: 'balance' | 'win', from: number, to: number, durationMs?: number): void {
     const fmt = (n: number) => this.host.formatCurrency(n, field === 'win');
     const el = this.barHost.querySelector(`[data-ge="${field}"]`) as HTMLElement | null;
-    if (el) this.moneyAnims.push(animateReadout(el, from, to, fmt));
+    if (el) this.moneyAnims.push(animateReadout(el, from, to, fmt, durationMs));
   }
 
   openOverlay(req: OverlayRequest): OverlayHandle | void {

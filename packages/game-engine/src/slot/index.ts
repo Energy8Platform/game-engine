@@ -73,7 +73,7 @@ export { FEATURES, FEATURE_LIST } from './features';
 export type { ReelFeature, FeatureContext } from './features';
 
 export { createReelSystem } from './system/ReelSystem';
-export type { ReelSystem, CreateReelSystemOptions } from './system/ReelSystem';
+export type { ReelSystem, CreateReelSystemOptions, StepRunOpts } from './system/ReelSystem';
 
 export { pickTier, tierIndexAtValue } from './overlay/tiers';
 export type { WinTier } from './overlay/tiers';

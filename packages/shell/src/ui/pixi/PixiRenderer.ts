@@ -6,6 +6,7 @@ import {
   RenderTexture,
   Sprite,
   type Application,
+  type Text,
   type Ticker,
 } from 'pixi.js';
 import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle } from '@/core/renderer';
@@ -109,16 +110,17 @@ export class PixiRenderer implements ShellRenderer {
 
   /** Count a money readout from→to on the freshly-rendered bar's value Text node. Mirrors
    *  PixiGameShell.animateMoney (which counted on the just-built bar's value Texts). */
-  animateMoney(field: 'balance' | 'win', from: number, to: number): void {
+  animateMoney(field: 'balance' | 'win', from: number, to: number, durationMs?: number): void {
     if (!this.bar) return;
+    // countUpText defaults durationMs to 450 — pass it only when the caller overrode it.
+    const count = (text: Text, fmt: (n: number) => string) =>
+      durationMs == null
+        ? countUpText(this.ticker, text, from, to, fmt)
+        : countUpText(this.ticker, text, from, to, fmt, durationMs);
     if (field === 'balance' && this.bar.balanceValue) {
-      this.moneyAnims.push(
-        countUpText(this.ticker, this.bar.balanceValue, from, to, (n) => this.ctx.fmt(n)),
-      );
+      this.moneyAnims.push(count(this.bar.balanceValue, (n) => this.ctx.fmt(n)));
     } else if (field === 'win' && this.bar.winValue) {
-      this.moneyAnims.push(
-        countUpText(this.ticker, this.bar.winValue, from, to, (n) => this.ctx.fmtWin(n)),
-      );
+      this.moneyAnims.push(count(this.bar.winValue, (n) => this.ctx.fmtWin(n)));
     }
   }
 

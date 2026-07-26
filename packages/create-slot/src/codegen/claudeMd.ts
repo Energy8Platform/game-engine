@@ -31,7 +31,9 @@ The core lifecycle hooks are REQUIRED (empty bodies are fine where there's nothi
 - \`onCreate(api)\` — injected ONCE before the first round. Capabilities live on \`api\`: \`api.audio\`
   (play sfx, switch bgm), \`api.overlay.show({ build, autoCloseMs?, closeOn?, dim? })\` (a host layer
   ABOVE the bar — use it for big-win), \`api.shell.safeArea\` (bottom-bar inset; read it in onResize),
-  \`api.formatAmount\`, and live \`api.bet\` / \`api.mode\` / \`api.turbo\`.
+  \`api.shell.reportWin(winSoFar, { durationMs? })\` (grow the bar's WIN readout DURING a segment —
+  for cascade/tumble games that pay step by step; the value is the segment's running total, and it's
+  only honoured inside \`onSpin\`), \`api.formatAmount\`, and live \`api.bet\` / \`api.mode\` / \`api.turbo\`.
 - \`onSpinStart()\` — the player pressed spin (before the network result); start anticipation.
 - \`onSpin(result, ctx)\` — draw ONE segment (a spin, or one free spin). All pacing lives here.
 - \`onEnterMode(trigger, ctx)\` / \`onExitMode(last, ctx)\` — a mode/bonus begins / ends (switch bgm here).
@@ -40,10 +42,12 @@ The core lifecycle hooks are REQUIRED (empty bodies are fine where there's nothi
 Optional reactions: \`onBetChanged\`, \`onTurboChanged\`, \`onAutoplayChanged\`, \`onSkip\` (double-tap
 skip — collapse the animation to its final state; \`ctx.signal\` is aborted), \`onPause\`/\`onResume\`
 (tab focus). \`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo, signal }\`. The scene NEVER calls
-play/ack/roundId, never touches the balance/win readouts (the host does, post-onSpin), and never runs
-the FS loop — a bonus is one round the host drains segment-by-segment.
+play/ack/roundId, never touches the balance readout, and never runs the FS loop — a bonus is one round
+the host drains segment-by-segment. The WIN readout is the host's too (cleared at spin start, set
+post-onSpin); the ONE exception is \`api.shell.reportWin\` for a step-by-step cascade climb, which the
+host reconciles to the segment's real win afterwards.
 
-The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); \`onSpin\` feeds results to it (${cascade ? '\`system.cascade(result.steps)\`' : '\`system.spin(result.targetGrid)\`'}). In the dev harness (\`npm run stake\`) the **"Reels" sidebar** tunes \`reelConfig\` live via \`mountReelDevBridge\` — click **Copy config** and paste back into \`reelConfig.ts\` to persist (live edits are ephemeral).${cascade ? ' This is a CASCADE game — the running win multiplier is driven by \`reelConfig.cascade.multiplier\`.' : ''}
+The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); \`onSpin\` feeds results to it (${cascade ? '\`system.cascade(result.steps)\`' : '\`system.spin(result.targetGrid)\`'}). In the dev harness (\`npm run stake\`) the **"Reels" sidebar** tunes \`reelConfig\` live via \`mountReelDevBridge\` — click **Copy config** and paste back into \`reelConfig.ts\` to persist (live edits are ephemeral).${cascade ? ' This is a CASCADE game — the running win multiplier is driven by \`reelConfig.cascade.multiplier\`, and each settled step should call \`api.shell.reportWin(winSoFar, { durationMs })\` so the bar\'s WIN climbs with the cascade instead of jumping once at the end.' : ''}
 
 ## Commands
 

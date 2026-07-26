@@ -25,6 +25,9 @@ export type {
   SlotSceneController, RenderContext, SceneApi, SceneAudio, SceneOverlay, SceneShell,
   OverlayShowOptions, AutoplaySceneState,
 } from './sceneController';
+// Progressive (cascade/tumble) WIN readout — the gate behind `api.shell.reportWin`.
+export { createWinReporter } from './winReporter';
+export type { WinReporter, WinReportOptions } from './winReporter';
 // Social-casino word-swap. The shell auto-socializes all gameInfo/buyBonus text in social mode;
 // authors only need this to socialize strings they render themselves (e.g. inside a custom DOM node).
 export { socialize } from '@energy8platform/shell';

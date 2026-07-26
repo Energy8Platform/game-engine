@@ -43,6 +43,27 @@ describe('ShellController', () => {
     expect(r.money.at(-1)).toEqual({ field: 'balance', from: 1000, to: 1200 });
   });
 
+  it('setWin count-up: default length, per-call durationMs, and snap', () => {
+    const { c, r } = make();
+    c.setWin(0.4);
+    expect(r.money.at(-1)).toEqual({ field: 'win', from: 0, to: 0.4, durationMs: undefined });
+    // A cascade step passes its own length so the count-up fits inside the step.
+    c.setWin(1.2, { durationMs: 220 });
+    expect(r.money.at(-1)).toEqual({ field: 'win', from: 0.4, to: 1.2, durationMs: 220 });
+    const anims = r.money.length;
+    c.setWin(0, { animate: false });
+    expect(r.money.length).toBe(anims); // snapped: repaint only, no count-up
+    expect(c.state.win).toBe(0);
+  });
+
+  it('setWin does not re-animate when the value already matches (host final == last report)', () => {
+    const { c, r } = make();
+    c.setWin(3.8, { durationMs: 220 }); // the scene's last cascade report
+    const anims = r.money.length;
+    c.setWin(3.8); // the host's authoritative segment value — same number, no visual jump
+    expect(r.money.length).toBe(anims);
+  });
+
   it('openSettings emits settingsOpen and opens the settings overlay', () => {
     const { c, r } = make();
     const spy = vi.fn();

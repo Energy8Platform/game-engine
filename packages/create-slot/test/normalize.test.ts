@@ -7,14 +7,20 @@ describe('genNormalize', () => {
   it('cascade: declares SpinData with steps + a normalize that maps cascades', () => {
     const s = genNormalize({ ...base, mechanic: 'cluster', cascades: true });
     expect(s).toContain('export interface SpinData extends SlotSpinResultBase');
-    expect(s).toContain('steps: CascadeStepData[]');
+    expect(s).toContain('steps: CascadeStep[]');
     expect(s).toContain('export const normalize: SlotResultNormalizer<SpinData>');
     expect(s).toContain('winningCells');
+  });
+  it('cascade: each step carries its own win so the scene can report a climbing WIN', () => {
+    const s = genNormalize({ ...base, mechanic: 'cluster', cascades: true });
+    expect(s).toContain('export type CascadeStep = CascadeStepData & { win: number }');
+    expect(s).toContain('win: step.win ?? 0');
   });
   it('ways: maps a targetGrid instead of steps', () => {
     const s = genNormalize({ ...base, mechanic: 'ways', cascades: false });
     expect(s).toContain('targetGrid');
-    expect(s).not.toContain('steps: CascadeStepData[]');
+    expect(s).not.toContain('steps: CascadeStep[]');
+    expect(s).not.toContain('CascadeStep');
   });
 
   const s = genNormalize({ id: 'g', title: 'G', mechanic: 'cluster', grid: { cols: 7, rows: 7 }, stake: true, cascades: true });

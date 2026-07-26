@@ -304,9 +304,9 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   }
 
   // ── game-facing public API (mirrors GameShell/PixiGameShell) ───────────────────
-  private money(field: 'balance' | 'win', from: number, to: number): void {
+  private money(field: 'balance' | 'win', from: number, to: number, durationMs?: number): void {
     this.renderer.renderBar();
-    if (to !== from) this.renderer.animateMoney(field, from, to);
+    if (to !== from) this.renderer.animateMoney(field, from, to, durationMs);
   }
   setBalance(n: number): void {
     const from = this.prevBalance;
@@ -316,8 +316,10 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   }
   /** Set the WIN readout. Counts up/down from the previous value by default. Pass
    *  `{ animate: false }` to SNAP instantly (renderBar cancels any in-flight count-up) — used by the
-   *  host to clear WIN to 0 at spin start, where an animated count-DOWN would look wrong. */
-  setWin(n: number, opts?: { animate?: boolean }): void {
+   *  host to clear WIN to 0 at spin start, where an animated count-DOWN would look wrong.
+   *  `{ durationMs }` shortens/lengthens the count-up (default 450ms) — a scene reporting a win per
+   *  cascade step passes its step length so each count-up finishes before the next step lands. */
+  setWin(n: number, opts?: { animate?: boolean; durationMs?: number }): void {
     const from = this.prevWin;
     this.state.win = n;
     this.prevWin = n;
@@ -325,7 +327,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
       this.renderer.renderBar(); // instant repaint from state; cancels running money anims
       return;
     }
-    this.money('win', from, n);
+    this.money('win', from, n, opts?.durationMs);
   }
   setBet(n: number): void {
     this.state.bet = n;

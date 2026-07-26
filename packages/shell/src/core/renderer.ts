@@ -18,8 +18,10 @@ export interface ShellRenderer {
   setLayout(layout: ShellLayoutMode): void;
   /** Apply colour tokens (CSS vars in DOM / repaint in Pixi). */
   applyTheme(tokens: ShellTokens): void;
-  /** Count a money readout from→to on the freshly-rendered bar (DOM rAF / Pixi ticker). */
-  animateMoney(field: 'balance' | 'win', from: number, to: number): void;
+  /** Count a money readout from→to on the freshly-rendered bar (DOM rAF / Pixi ticker).
+   *  `durationMs` overrides the renderer's default count-up length — a cascade/tumble scene
+   *  reporting a win per step needs each count-up to fit inside its step. */
+  animateMoney(field: 'balance' | 'win', from: number, to: number, durationMs?: number): void;
   /** Build + show an overlay from a controller-supplied model; return a handle for key routing
    *  and programmatic close. Returns void when nothing was shown. */
   openOverlay(req: OverlayRequest): OverlayHandle | void;

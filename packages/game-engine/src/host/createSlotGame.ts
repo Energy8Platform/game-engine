@@ -298,6 +298,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       overlayCtl.resize(width, height),
     );
 
+    // Progressive WIN readout for cascade/tumble scenes. The window is open from the moment a
+    // segment starts (WIN cleared to 0) until the host has painted that segment's final win; outside
+    // it the host owns the readout alone. See winReporter.ts.
+    const { createWinReporter } = await import('./winReporter');
+    const winReporter = createWinReporter((amount, opts) => shell!.setWin(amount, opts));
+
     // Capabilities injected once per controller scene via onCreate (see `gameScene`/`ensureCreated`).
     sceneApi = {
       audio: createSceneAudio(game.audio),
@@ -306,6 +312,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         get safeArea() {
           return shell!.safeArea;
         },
+        reportWin: winReporter.report,
       },
       formatAmount: (v) => shell!.formatWin(v),
       get bet() {
@@ -562,12 +569,15 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
             // then counts UP to this segment's delta. prevWin (the cumulative-delta tracker) is
             // untouched; this only resets the DISPLAY.
             shell!.setWin(0, { animate: false });
+            winReporter.open(); // the scene may now grow WIN per cascade step
           },
           onSpinStart: () => scene.onSpinStart?.(),
           onSpinEnd: (last, ctx) => scene.onSpinEnd?.(last, ctx),
           afterPresent: (r) => {
             // WIN readout = THIS spin's win (cumulative delta); the cumulative total goes to the
-            // bonus counter (totalWin) via settle(), not the WIN readout.
+            // bonus counter (totalWin) via settle(), not the WIN readout. A scene that reported
+            // per-step wins already landed on this number, so the count-up is a no-op there.
+            winReporter.close();
             shell!.setWin(r.totalWin - prevWin);
             prevWin = r.totalWin;
             balanceGate.afterPresent();
@@ -581,6 +591,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         .catch(showPlayError)
         .finally(() => {
           presenting = false;
+          winReporter.close(); // also closes the window when a segment threw mid-flight
           shell!.setBusy(false);
         });
     };
@@ -627,11 +638,13 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           shell!.setMode(bonusShellMode);
         }
         shell!.setWin(0, { animate: false }); // clear WIN before this segment animates (see playRound)
+        if (animate) winReporter.open(); // a fast-forward drain doesn't present → no reports expected
         if (animate) await scene.onSpin(r, ctx);
         if (inBonus) {
           const v = fsView(raw, r.totalWin);
           if (v) applyBonusReadout(r, v, ctx.mode);
         }
+        winReporter.close();
         shell!.setWin(r.totalWin - prevWin); // THIS spin's win, not the cumulative bonus total
         prevWin = r.totalWin;
         ps!.playAck(raw); // settles via /wallet/end-round on the FINAL segment
@@ -655,6 +668,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           shell!.setWin(r.totalWin);
         }
       } finally {
+        winReporter.close(); // also closes the window when a drained segment threw
         shell!.setBusy(false);
       }
     };

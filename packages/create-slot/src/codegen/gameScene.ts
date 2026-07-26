@@ -9,7 +9,14 @@ export function genGameScene(a: Answers): string {
     const turbo = ctx.turbo > 0;
     // CascadeStepData is structurally a TumbleStep (extra fields optional) — pass through.
     // The running win multiplier is driven by reelConfig.cascade.multiplier (tune it in the sidebar).
-    await this.system.cascade(result.steps, { turbo });
+    let paid = 0; // this segment's win so far — the bar's WIN climbs with the cascade
+    await this.system.cascade(result.steps, {
+      turbo,
+      onStep: (_i, step) => {
+        paid += step.win;
+        this.api.shell.reportWin(paid, { durationMs: turbo ? 200 : 380 });
+      },
+    });
     if (result.totalWin > 0) await this.showBigWin(result.totalWin, ctx);
   }`
     : `  /** Render one normalized result (one spin, or one free spin of a bonus). */

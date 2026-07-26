@@ -7,7 +7,7 @@ export function genNormalize(a: Answers): string {
 
   const dataShape = cascade
     ? `  /** Cascade steps the scene animates via CascadeController. */
-  steps: CascadeStepData[];
+  steps: CascadeStep[];
   /** Optional running multiplier the scene reflects. */
   multiplier?: number;`
     : `  /** Result grid by column for the reel spin. */
@@ -19,15 +19,24 @@ export function genNormalize(a: Answers): string {
       removedCells: step.removed ?? [],
       newCells: step.new ?? [],
       settledGrid: step.grid ?? [],
+      win: step.win ?? 0,
     })) : [],
     multiplier: d.multiplier,`
     : `    targetGrid: d.matrix ?? [],`;
+
+  const stepType = cascade
+    ? `
+/** One cascade step: the board mutation plus what THAT step paid (major units — the scene reports
+ *  the running total to the shell so the WIN readout climbs with the cascade). */
+export type CascadeStep = CascadeStepData & { win: number };
+`
+    : '';
 
   return `import type { SlotSpinResultBase, SlotResultNormalizer } from '@energy8platform/platform-core/slot-result';
 import type { ${cascade ? 'CascadeStepData' : 'CellData'} } from '@energy8platform/game-engine/slot';
 import { deriveArrayFields, coerceLuaArrays } from '@energy8platform/stake-kit';
 import { spinSchema, type SpinDataRaw } from './schema';
-
+${stepType}
 /** The game's typed play result. Extend with any fields your script.spin returns. */
 export interface SpinData extends SlotSpinResultBase {
 ${dataShape}

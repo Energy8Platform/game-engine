@@ -1,5 +1,6 @@
 import type { Container } from 'pixi.js';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
+import type { WinReportOptions } from './winReporter';
 
 /** Everything a scene needs to render one segment. The host builds it per segment. */
 export interface RenderContext {
@@ -57,6 +58,25 @@ export interface SceneOverlay {
 export interface SceneShell {
   /** Live insets (px). `bottom` = the shell bar height; read inside onResize. */
   readonly safeArea: { top: number; right: number; bottom: number; left: number };
+  /**
+   * Grow the shell's WIN readout WHILE a segment presents — for cascade/tumble games that pay in
+   * steps instead of one lump at the end.
+   *
+   * `amountSoFar` is ABSOLUTE: the win accumulated by this segment up to now (not the step's
+   * delta), so a re-report, a skip, or an aborted step can just restate the truth. The host owns
+   * the readout around it — it clears WIN to 0 when the segment starts and sets the segment's
+   * final value once `onSpin` resolves (counting up from your last report, so matching numbers
+   * produce no jump). In a bonus this moves WIN only; the Total Win accumulator still lands once
+   * per segment.
+   *
+   * Only honoured while a segment is presenting (inside `onSpin`); calls from anywhere else are
+   * ignored, so a scene still ticking after an abort can't overwrite the host's final number.
+   *
+   * `durationMs` sets this count-up's length (default 450ms) — pass your step length (or a shorter
+   * one under turbo) so each count-up finishes before the next step lands. `{ animate: false }`
+   * snaps, e.g. when collapsing to the final value on skip.
+   */
+  reportWin(amountSoFar: number, opts?: WinReportOptions): void;
 }
 
 export interface AutoplaySceneState {
