@@ -21,4 +21,8 @@ createSlotGame({
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
   shell: {}, // buy/ante cards + currency derive from the spec + initData
+
+  loading: {
+    tapToStart: true,
+  },
 }).catch((err) => { console.error('[spec-slot] failed to start', err); });
