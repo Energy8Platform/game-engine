@@ -23,6 +23,13 @@ export interface GameConfig {
   /** Game id for the spin dev server (default: first loaded game). */
   gameId?: string;
 
+  /**
+   * Starting gRPC port for the spin dev server (default: `E8_SERVER_PORT`
+   * → 50151). If the port is taken — e.g. another game's `npm run dev` is
+   * already up — the next free one is used instead.
+   */
+  spinPort?: number;
+
   /** Additional Vite config to merge */
   vite?: UserConfig;
 }
@@ -64,6 +71,7 @@ export function defineGameConfig(config: GameConfig = {}): UserConfig {
       spinPlugin({
         spinPath: config.spinScript ?? './src/game/script.spin',
         gameId: config.gameId,
+        port: config.spinPort,
       }),
     );
   }

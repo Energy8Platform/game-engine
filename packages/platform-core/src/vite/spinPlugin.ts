@@ -14,10 +14,43 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { accessSync, constants as fsConstants, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Plugin } from 'vite';
+
+/** стартовый порт gRPC, если не задан явно и нет E8_SERVER_PORT */
+export const DEFAULT_SPIN_PORT = 50151;
+/** сколько портов подряд пробуем от стартового, прежде чем сдаться */
+const PORT_SCAN_RANGE = 20;
+/** сколько раз перезапускаем поиск, если сервер не поднялся на выбранном порту */
+const START_ATTEMPTS = 3;
+
+/**
+ * Свободен ли порт. Биндимся на 0.0.0.0 — e8-server слушает все интерфейсы,
+ * так что занятость на любом из них ему помешает.
+ */
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createNetServer();
+    probe.once('error', () => resolve(false));
+    probe.once('listening', () => probe.close(() => resolve(true)));
+    probe.listen(port, '0.0.0.0');
+  });
+}
+
+/**
+ * Первый свободный порт начиная со `start`. Нужен, потому что порт по
+ * умолчанию один на все игры: без этого второй `npm run dev` не забиндил бы
+ * свой e8-server и молча ходил бы в чужой (с чужим --games-dir).
+ */
+async function findFreePort(start: number, range = PORT_SCAN_RANGE): Promise<number> {
+  for (let p = start; p < start + range; p++) {
+    if (await isPortFree(p)) return p;
+  }
+  throw new Error(`[e8] нет свободного порта в диапазоне ${start}..${start + range - 1}`);
+}
 
 /**
  * Поиск бинаря e8-server в порядке их NativeSimulationRunner:
@@ -63,7 +96,10 @@ export interface SpinPluginOptions {
   gamesDir?: string;
   /** id игры из декларации game "..." (default: первая загруженная) */
   gameId?: string;
-  /** порт gRPC (default 50151) */
+  /**
+   * Стартовый порт gRPC (default: E8_SERVER_PORT → 50151). Если занят —
+   * берётся следующий свободный, кроме случая `external`, где порт точный.
+   */
   port?: number;
   /** server_seed дев-сессий (детерминированный replay) */
   serverSeed?: string;
@@ -146,7 +182,10 @@ message HealthResponse { bool ok = 1; uint32 games_loaded = 2; string sessions_b
 `;
 
 export function spinPlugin(opts: SpinPluginOptions = {}): Plugin {
-  const port = opts.port ?? 50151;
+  const basePort = opts.port ?? (Number(process.env.E8_SERVER_PORT) || DEFAULT_SPIN_PORT);
+  // фактический порт: при `external` — ровно basePort, иначе подбирается в
+  // configureServer и дальше читается замыканиями grpc()/логами
+  let port = basePort;
   const serverSeed = opts.serverSeed ?? 'e8-dev-seed';
   let child: ChildProcess | null = null;
   let client: any = null;
@@ -224,6 +263,72 @@ export function spinPlugin(opts: SpinPluginOptions = {}): Plugin {
     };
   }
 
+  /**
+   * Дождаться готовности сервера и запомнить gameId/entry_actions.
+   * `isDead` даёт выйти сразу, если наш процесс умер (не забиндил порт) —
+   * иначе ждали бы 30 секунд впустую.
+   */
+  async function connect(isDead: () => boolean = () => false): Promise<boolean> {
+    for (let i = 0; i < 100; i++) {
+      if (isDead()) return false;
+      try {
+        const games: any = await call('ListGames', {});
+        if (!gameId) gameId = games.games[0]?.game_id ?? '';
+        const info = games.games.find((g: any) => g.game_id === gameId);
+        entryActions = info?.entry_actions ?? [];
+        console.log(
+          `[e8] connected: :${port} game=${gameId} script=${info?.script_sha256?.slice(0, 12)} entry=[${entryActions}]`,
+        );
+        return true;
+      } catch {
+        await new Promise((res) => setTimeout(res, 300));
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Поднять собственный e8-server на свободном порту. Порт проверяется до
+   * спавна, но между проверкой и биндом есть гонка (и порт мог занять другой
+   * e8-server) — поэтому при неудачном старте ищем дальше со следующего.
+   */
+  async function startServer(): Promise<void> {
+    const bin = resolveServerBinary(opts.binPath);
+    let from = basePort;
+
+    for (let attempt = 0; attempt < START_ATTEMPTS; attempt++) {
+      try {
+        port = await findFreePort(from);
+      } catch (e: any) {
+        console.error(e.message);
+        return;
+      }
+      if (port !== basePort) {
+        console.log(`[e8] порт ${basePort} занят → e8-server на :${port}`);
+      }
+
+      const args = ['--port', String(port), '--sessions', 'memory', '--watch'];
+      if (opts.gamesDir) args.push('--games-dir', opts.gamesDir);
+      else if (opts.spinPath) {
+        const dir = opts.spinPath.replace(/\/[^/]+$/, '') || '.';
+        args.push('--games-dir', dir);
+      }
+
+      let exited = false;
+      child = spawn(bin, args, { stdio: 'inherit' });
+      child.once('exit', () => (exited = true));
+      client = grpc();
+
+      if (await connect(() => exited)) return;
+
+      child?.kill();
+      child = null;
+      from = port + 1;
+    }
+
+    console.error(`[e8] e8-server не поднялся за ${START_ATTEMPTS} попытки от :${basePort}`);
+  }
+
   async function play(body: any): Promise<unknown> {
     const action: string = body.action ?? 'spin';
     const params = body.params ? JSON.stringify(body.params) : '';
@@ -281,31 +386,14 @@ export function spinPlugin(opts: SpinPluginOptions = {}): Plugin {
     enforce: 'pre',
 
     async configureServer(server) {
-      if (!opts.external) {
-        const args = ['--port', String(port), '--sessions', 'memory', '--watch'];
-        if (opts.gamesDir) args.push('--games-dir', opts.gamesDir);
-        else if (opts.spinPath) {
-          const dir = opts.spinPath.replace(/\/[^/]+$/, '') || '.';
-          args.push('--games-dir', dir);
+      if (opts.external) {
+        client = grpc();
+        if (!(await connect())) {
+          console.error(`[e8] нет сервера на 127.0.0.1:${port} (external: true)`);
         }
-        child = spawn(resolveServerBinary(opts.binPath), args, { stdio: 'inherit' });
+      } else {
+        await startServer();
         server.httpServer?.on('close', () => child?.kill());
-      }
-      client = grpc();
-
-      for (let i = 0; i < 100; i++) {
-        try {
-          const games: any = await call('ListGames', {});
-          if (!gameId) gameId = games.games[0]?.game_id ?? '';
-          const info = games.games.find((g: any) => g.game_id === gameId);
-          entryActions = info?.entry_actions ?? [];
-          console.log(
-            `[e8] connected: game=${gameId} script=${info?.script_sha256?.slice(0, 12)} entry=[${entryActions}]`,
-          );
-          break;
-        } catch {
-          await new Promise((res) => setTimeout(res, 300));
-        }
       }
 
       server.middlewares.use('/__lua-play', (req: any, res: any) => {
