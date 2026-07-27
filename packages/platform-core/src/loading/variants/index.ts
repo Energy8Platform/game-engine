@@ -1,4 +1,5 @@
 import { energy8Variant } from './energy8';
+import { slottechVariant } from './slottech';
 import { voidmoonVariant } from './voidmoon';
 
 /**
@@ -8,6 +9,7 @@ import { voidmoonVariant } from './voidmoon';
  */
 export const VARIANTS = {
   energy8: energy8Variant,
+  slottech: slottechVariant,
   voidmoon: voidmoonVariant,
 } as const;
 

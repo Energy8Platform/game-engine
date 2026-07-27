@@ -58,6 +58,57 @@ describe('createCSSPreloader — variant selection', () => {
   });
 });
 
+describe('slottech variant', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    await removeCSSPreloader(container);
+    container.remove();
+  });
+
+  it('is a registered variant', () => {
+    expect(Object.keys(VARIANTS)).toContain('slottech');
+  });
+
+  it('renders its own loader rect + text (not the energy8 ids)', () => {
+    createCSSPreloader(container, { preloaderVariant: 'slottech' });
+    expect(container.querySelector('#ge-st-loader-rect')).not.toBeNull();
+    expect(container.querySelector('#ge-st-loader-text')).not.toBeNull();
+    // energy8's ids must NOT be present
+    expect(container.querySelector('#ge-pl-loader-rect')).toBeNull();
+  });
+
+  it('drives the loader rect width on progress (max width 841.89)', () => {
+    createCSSPreloader(container, { preloaderVariant: 'slottech' });
+    setCSSPreloaderProgress(0.5);
+    const rect = container.querySelector('#ge-st-loader-rect') as SVGRectElement;
+    expect(rect.getAttribute('width')).toBe(String(0.5 * 841.89));
+    expect(rect.classList.contains('driven')).toBe(true);
+  });
+
+  it('shows percentage text when showPercentage: true', () => {
+    createCSSPreloader(container, {
+      preloaderVariant: 'slottech',
+      showPercentage: true,
+    });
+    setCSSPreloaderProgress(0.37);
+    const text = container.querySelector('#ge-st-loader-text') as SVGTextElement;
+    expect(text.textContent).toBe('37%');
+  });
+
+  it('swaps to the tap label while waiting for tap', () => {
+    createCSSPreloader(container, { preloaderVariant: 'slottech' });
+    void waitCSSPreloaderTap();
+    const text = container.querySelector('#ge-st-loader-text') as SVGTextElement;
+    expect(text.textContent).toBe('TAP TO START');
+  });
+});
+
 describe('voidmoon variant', () => {
   let container: HTMLElement;
 
