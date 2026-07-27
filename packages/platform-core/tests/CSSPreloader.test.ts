@@ -1,12 +1,29 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   createCSSPreloader,
   removeCSSPreloader,
   setCSSPreloaderProgress,
   waitCSSPreloaderTap,
 } from '../src/loading';
+import { BRAND_FLOOR_MS, SPLASH_DURATION_MS } from '../src/loading/splash';
+
+/** Fast-forward past the powered-by splash + brand floor that gates every start. */
+const BRAND_GATE_MS = SPLASH_DURATION_MS + BRAND_FLOOR_MS;
+
+/**
+ * Run `fn` on fake timers, always restoring real ones — `afterEach` tears the
+ * preloader down through a real 600ms timeout and would hang otherwise.
+ */
+async function withFakeTimers(fn: () => Promise<void>): Promise<void> {
+  vi.useFakeTimers();
+  try {
+    await fn();
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 // This describe block MUST come first in the file so that module-scoped `state`
 // is genuinely null — no prior test has called createCSSPreloader yet.
@@ -127,9 +144,36 @@ describe('waitCSSPreloaderTap (skip path)', () => {
     container.remove();
   });
 
-  it('resolves immediately when config.tapToStart === false', async () => {
-    createCSSPreloader(container, { tapToStart: false });
-    await expect(waitCSSPreloaderTap()).resolves.toBeUndefined();
+  it('resolves once the brand gate elapses when config.tapToStart === false', async () => {
+    await withFakeTimers(async () => {
+      createCSSPreloader(container, { tapToStart: false });
+      const tap = waitCSSPreloaderTap();
+      await vi.advanceTimersByTimeAsync(BRAND_GATE_MS);
+      await expect(tap).resolves.toBeUndefined();
+    });
+  });
+
+  it('does NOT resolve while the powered-by splash is still playing', async () => {
+    await withFakeTimers(async () => {
+      createCSSPreloader(container, { tapToStart: false });
+      let settled = false;
+      void waitCSSPreloaderTap().then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(SPLASH_DURATION_MS - 1);
+      expect(settled).toBe(false);
+    });
+  });
+
+  it('keeps driving progress behind the gate (bar is not frozen)', async () => {
+    await withFakeTimers(async () => {
+      createCSSPreloader(container, { tapToStart: false, showPercentage: true });
+      void waitCSSPreloaderTap();
+      setCSSPreloaderProgress(0.6);
+      const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
+      expect(text.textContent).toBe('60%');
+    });
   });
 });
 
@@ -169,13 +213,35 @@ describe('waitCSSPreloaderTap (active path)', () => {
   });
 
   it('resolves when a pointerdown is dispatched on the overlay', async () => {
-    createCSSPreloader(container);
-    const tap = waitCSSPreloaderTap();
+    await withFakeTimers(async () => {
+      createCSSPreloader(container);
+      const tap = waitCSSPreloaderTap();
 
-    const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
-    overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
+      overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
 
-    await expect(tap).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(BRAND_GATE_MS);
+      await expect(tap).resolves.toBeUndefined();
+    });
+  });
+
+  it('an early tap still waits out the brand gate', async () => {
+    await withFakeTimers(async () => {
+      createCSSPreloader(container);
+      let settled = false;
+      void waitCSSPreloaderTap().then(() => {
+        settled = true;
+      });
+
+      const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
+      overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+      await vi.advanceTimersByTimeAsync(BRAND_GATE_MS - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+    });
   });
 
   it('returns the same Promise on subsequent calls (memoized)', () => {
@@ -195,15 +261,18 @@ describe('waitCSSPreloaderTap (active path)', () => {
   });
 
   it('ignores setCSSPreloaderProgress after tap resolved (text stays as tap label)', async () => {
-    createCSSPreloader(container, { showPercentage: true });
-    const tap = waitCSSPreloaderTap();
-    const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
-    overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    await tap;
+    await withFakeTimers(async () => {
+      createCSSPreloader(container, { showPercentage: true });
+      const tap = waitCSSPreloaderTap();
+      const overlay = document.getElementById('__ge-css-preloader__') as HTMLDivElement;
+      overlay.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(BRAND_GATE_MS);
+      await tap;
 
-    setCSSPreloaderProgress(0.9);
-    const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
-    expect(text.textContent).toBe('TAP TO START');
+      setCSSPreloaderProgress(0.9);
+      const text = container.querySelector('#ge-pl-loader-text') as SVGTextElement;
+      expect(text.textContent).toBe('TAP TO START');
+    });
   });
 });
 
