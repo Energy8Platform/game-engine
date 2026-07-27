@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  LOADER_BAR_MAX_WIDTH,
   createCSSPreloader,
   removeCSSPreloader,
   setCSSPreloaderProgress,
@@ -73,7 +74,7 @@ describe('powered-by splash', () => {
     // Still inside the splash window — the bar must already be drivable.
     setCSSPreloaderProgress(0.5);
     const rect = container.querySelector('#ge-pl-loader-rect') as SVGRectElement;
-    expect(rect.getAttribute('width')).toBe(String(0.5 * 174));
+    expect(rect.getAttribute('width')).toBe(String(0.5 * LOADER_BAR_MAX_WIDTH));
   });
 
   it('is torn down with the overlay when removed mid-splash', async () => {

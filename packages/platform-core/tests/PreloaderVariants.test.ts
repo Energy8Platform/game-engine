@@ -2,6 +2,7 @@
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import {
+  LOADER_BAR_MAX_WIDTH,
   createCSSPreloader,
   removeCSSPreloader,
   setCSSPreloaderProgress,
@@ -47,7 +48,7 @@ describe('createCSSPreloader — variant selection', () => {
     createCSSPreloader(container);
     setCSSPreloaderProgress(0.5);
     const rect = container.querySelector('#ge-pl-loader-rect') as SVGRectElement;
-    expect(rect.getAttribute('width')).toBe(String(0.5 * 174));
+    expect(rect.getAttribute('width')).toBe(String(0.5 * LOADER_BAR_MAX_WIDTH));
   });
 
   it('falls back to energy8 for an unknown variant name', () => {

@@ -1,43 +1,60 @@
 /**
- * Shared Energy8 SVG logo with an embedded loader bar.
+ * Shared Energy8 SVG logo with a loader bar underneath.
  *
- * The loader bar fill is controlled via a `<clipPath>` whose `<rect>` width
+ * The wordmark is the official ENERGY8 artwork as vector outlines, kept at its
+ * native coordinates (836.01 × 185.55). Two deviations from the Illustrator
+ * export:
+ *
+ * - Fourteen zero-area `<path d="M…"/>` stubs are dropped (export artifacts),
+ *   same as in splash.ts.
+ * - The export gives every shape its own `<linearGradient>` even though they
+ *   collapse to two distinct ramps — one over the letters that sit on the
+ *   baseline (y 0..160.85), one over the two that descend (y 0..185.55).
+ *   Colours are attributes rather than a `<style>` block on purpose: inlining
+ *   the export's `<style>` would leak rules for the generic `.st0` selector
+ *   into the host page.
+ *
+ * The loader bar is NOT part of the artwork — it is a pill drawn below the
+ * wordmark, with the fill controlled via a `<clipPath>` whose `<rect>` width
  * is animatable. Different consumers customise gradient IDs and the clip
  * element's ID/class to avoid collisions when both CSSPreloader and
  * LoadingScene appear in the same DOM.
  */
 
-/** SVG path data for the Energy8 wordmark — reused across loaders */
-const WORDMARK_PATHS = `
-  <path d="m241 81.75h-19.28c-1.77 0-6.73 4.98-7.43 6.99l-4.36 12.22c-0.49 1.37 0.05 2.92 1.06 4.32-2.07 1.19-3.69 3.08-4.36 5.43l-3.25 10.41c-0.86 2.89 2.39 6.63 4.31 6.63h19.28c1.96 0 7.4-5.56 7.96-7.51l2.96-10.22c0.63-2.25 0.1-3.98-1.22-4.99 2.55-1.56 3.86-4.14 4.55-6.31l2.77-9.31c0.74-2.57-1.37-7.66-2.99-7.66zm-13.36 28.31-2.27 7.03h-8.28l2.58-8.28h8.28l-0.31 1.25zm4.06-16.97-2.11 6.7h-7.04l2.25-7.34h7.26l-0.36 0.64z" fill="url(#GID0)"/>
-  <path d="m202.5 81.75-9.31 14.97-2.32-14.97h-11.82l4.32 25.15-0.57 4.91-8.64 26.44 15.31-12.76 5.63-16.48 19.96-27.26h-12.56z" fill="url(#GID1)"/>
-  <path d="m174.2 81.75h-19.78l-5.75 5.16-10.79 33.2c-0.77 2.53 2.48 6.93 4.87 6.93h17.38c2.63 0 7.85-5.34 8.32-6.83l5.37-18.14h-15.17l-2.2 7.64h3.78l-2.25 7.2h-8.01l7.1-25.52h7.58l-1.48 8.4 12.78-5.98c1.28-0.63 1.97-3.99 1.61-6.61-0.36-2.34-1.64-5.45-3.36-5.45z" fill="url(#GID2)"/>
-  <path d="m140.6 81.75h-70.6l-5.36 19.37-4.26-19.37h-46.76l2.95 5.88-10.58 39.28h26.84l2.95-9.52-15.63-0.13 2.55-8.34h8.74l8.47-9.81h-14.61l2.11-7.3h15.47l2.54-8.71 2.58 4.74-11.4 39.07h11.05l6.46-21.49 8.84 36.33 19.18-55.67-1.83-3.36 3.68 4.09-12.07 40.1h28.18l3.39-10.31h-17.01l2.67-8.03h9.98l7.58-9.52h-14.28l1.93-6.6h14.61l3.25-9.73 2.81 5.12-11.3 38.89h11.05l5.23-17.81h1.62l1.48 17.6h10.69l-1.48-16.81c4.75-1.28 7.52-5.9 8.64-9.81l2.95-11.3c0.86-2.73-1.43-6.85-3.3-6.85zm-9.8 17.3h-8.69l2.54-7.84h8.35l-2.2 7.84z" fill="url(#GID3)"/>
-  <path d="m205.9 148.9h-122.6l-2.61-3.12h-32.4l-2.51 3.12h-1.59c-5.34 0-7.94 4.88-7.94 7.65v0.03c0 4.2 3.55 7.6 7.74 7.6h103.6l2.11 3.12h36.09l1.82-3.12h18.3c5.25 0 6.64-5.3 6.64-7.35v-0.25c0-4.23-2.9-7.68-6.64-7.68zm-0.7 12.83h-160.6c-3.69 0-6.11-2.58-6.11-5.47v-0.03c0-2.89 2.1-5.47 5.61-5.47h161.1c3.45 0 4.89 3.12 4.89 5.65v0.17c0 2.57-2.11 5.15-4.89 5.15z" fill="url(#GID4)"/>`;
+/** Full width of the artwork in SVG units — the bar spans it edge to edge. */
+const LOGO_WIDTH = 836.01;
+/** Loader bar geometry, in SVG units, below the wordmark's 185.55 baseline. */
+const BAR_Y = 215;
+const BAR_H = 24;
 
-/** Gradient definitions template (gradient IDs are replaced per-consumer) */
+/** SVG path data for the Energy8 wordmark, in reading order: E N E R G Y 8 */
+const WORDMARK_PATHS = `
+  <polygon points="133.44 0 34.47 0 0 160.84 98.96 160.89 106.94 123.69 45.07 123.72 50.37 98.97 87.48 99.01 95.46 61.78 58.31 61.89 63.63 37.09 125.48 37.15 133.44 0" fill="url(#GID0)"/>
+  <polygon points="205.08 185.4 176.15 185.55 164.37 86.6 148.43 161.13 111.28 161.1 145.81 0 182.93 0 191.76 74.24 207.67 0 244.79 0 205.08 185.4" fill="url(#GID1)"/>
+  <polygon points="356.14 0 257.15 0 222.7 160.82 321.67 160.8 329.64 123.59 267.78 123.61 273.07 98.96 310.18 98.94 318.16 61.73 281.02 61.84 286.34 37.02 348.18 37.14 356.14 0" fill="url(#GID0)"/>
+  <path d="M455.1,0h-86.6c-11.53,53.8-22.93,107.03-34.46,160.82h37.12l13.24-61.85h12.38s-.88,61.86-.88,61.86l37.12-.04.88-61.83,15.02-12.37,15.91-74.24L455.1,0ZM417.1,61.87l-24.74-.03c1.76-8.22,6.2-28.9,7.96-37.12l24.76-.06-7.97,37.21Z" fill="url(#GID0)"/>
+  <polygon points="457.75 160.84 455.99 111.33 477.21 12.3 492.22 0 578.83 0 588.59 12.19 580.6 49.49 543.46 49.53 546.13 37.08 509.01 37.11 490.46 123.69 527.57 123.7 532.87 98.98 520.5 98.96 525.8 74.24 575.31 74.2 559.4 148.42 544.35 160.9 457.75 160.84" fill="url(#GID0)"/>
+  <polygon points="624.78 74.24 603.58 0 640.69 0 654.85 49.4 690.17 0 727.3 0 656.6 98.95 643.37 160.81 600.95 185.55 624.78 74.24" fill="url(#GID1)"/>
+  <path d="M836.01,12.37L826.27,0h-74.23s-15.02,12.36-15.02,12.36l-13.23,61.84,15.9,6.69-18.56,5.71-13.25,61.84,9.72,12.37h74.23s15.03-12.39,15.03-12.39l13.25-61.82-18.56-5.76,21.2-6.6,13.26-61.87ZM772.38,136.13l-24.73-.04c1.76-8.22,6.19-28.89,7.95-37.1h24.74s-7.96,37.14-7.96,37.14ZM788.29,61.86l-24.74-.02c1.76-8.21,6.19-28.88,7.95-37.09l24.75-.02-7.96,37.13Z" fill="url(#GID0)"/>`;
+
+/**
+ * Gradient definitions template (gradient IDs are replaced per-consumer).
+ * GID0/GID1 are the wordmark's two vertical ramps — bottom-to-top, so y1 is
+ * the shape's baseline and y2 its top. GID2 is the cyan loader fill.
+ */
 const GRADIENT_DEFS = `
-    <linearGradient id="GID0" x1="223.7" x2="223.7" y1="81.75" y2="127.8" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#663BA6"/><stop stop-color="#7939C2" offset=".349"/><stop stop-color="#8A2FC0" offset=".6615"/><stop stop-color="#791BA3" offset="1"/>
+    <linearGradient id="GID0" x1="0" x2="0" y1="160.85" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#892ebf"/><stop stop-color="#862fbf" offset=".23"/><stop stop-color="#7f35c1" offset=".36"/><stop stop-color="#7539be" offset=".67"/><stop stop-color="#7139b7" offset=".72"/><stop stop-color="#6c3aae" offset=".83"/><stop stop-color="#6b3bac" offset="1"/>
     </linearGradient>
-    <linearGradient id="GID1" x1="194.6" x2="194.6" y1="81.75" y2="138.3" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#663BA6"/><stop stop-color="#7939C2" offset=".349"/><stop stop-color="#8A2FC0" offset=".6615"/><stop stop-color="#791BA3" offset="1"/>
+    <linearGradient id="GID1" x1="0" x2="0" y1="185.55" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#892ebf"/><stop stop-color="#862fbf" offset=".23"/><stop stop-color="#7f35c1" offset=".36"/><stop stop-color="#7539be" offset=".67"/><stop stop-color="#7139b7" offset=".72"/><stop stop-color="#6c3aae" offset=".83"/><stop stop-color="#6b3bac" offset="1"/>
     </linearGradient>
-    <linearGradient id="GID2" x1="157.8" x2="157.8" y1="81.75" y2="127" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#663BA6"/><stop stop-color="#7939C2" offset=".349"/><stop stop-color="#8A2FC0" offset=".6615"/><stop stop-color="#791BA3" offset="1"/>
-    </linearGradient>
-    <linearGradient id="GID3" x1="79.96" x2="79.96" y1="81.75" y2="141.8" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#663BA6"/><stop stop-color="#7939C2" offset=".349"/><stop stop-color="#8A2FC0" offset=".6615"/><stop stop-color="#791BA3" offset="1"/>
-    </linearGradient>
-    <linearGradient id="GID4" x1="36.18" x2="212.5" y1="156.6" y2="156.6" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#316FB0"/><stop stop-color="#1FCDE6" offset=".5"/><stop stop-color="#29FEE7" offset="1"/>
-    </linearGradient>
-    <linearGradient id="GID5" x1="40.27" x2="208.2" y1="156.4" y2="156.4" gradientUnits="userSpaceOnUse">
+    <linearGradient id="GID2" x1="0" x2="${LOGO_WIDTH}" y1="${BAR_Y}" y2="${BAR_Y}" gradientUnits="userSpaceOnUse">
       <stop stop-color="#316FB0"/><stop stop-color="#1FCDE6" offset=".5"/><stop stop-color="#29FEE7" offset="1"/>
     </linearGradient>`;
 
 /** Max width of the loader bar in SVG units */
-export const LOADER_BAR_MAX_WIDTH = 174;
+export const LOADER_BAR_MAX_WIDTH = LOGO_WIDTH;
 
 interface LogoSVGOptions {
   /** Prefix for gradient/clip IDs to avoid collisions (e.g. 'pl' or 'ls') */
@@ -72,7 +89,7 @@ export function buildLogoSVG(opts: LogoSVGOptions): string {
   const defs = GRADIENT_DEFS.replace(/GID(\d)/g, `${idPrefix}$1`);
 
   const clipId = `${idPrefix}-loader-clip`;
-  const fillGradientId = `${idPrefix}5`;
+  const fillGradientId = `${idPrefix}2`;
 
   const classAttr = svgClass ? ` class="${svgClass}"` : '';
   const styleAttr = svgStyle ? ` style="${svgStyle}"` : '';
@@ -81,13 +98,16 @@ export function buildLogoSVG(opts: LogoSVGOptions): string {
   const txtIdAttr = textId ? ` id="${textId}"` : '';
   const txtClassAttr = textClass ? ` class="${textClass}"` : '';
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 200" fill="none"${classAttr}${styleAttr}>
+  const bar = `x="0" y="${BAR_Y}" width="${LOGO_WIDTH}" height="${BAR_H}" rx="${BAR_H / 2}"`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LOGO_WIDTH} 310" fill="none"${classAttr}${styleAttr}>
 ${paths}
   <clipPath id="${clipId}">
-    <rect${rectIdAttr} x="37" y="148" width="0" height="20"${rectClassAttr}/>
+    <rect${rectIdAttr} x="0" y="${BAR_Y}" width="0" height="${BAR_H}"${rectClassAttr}/>
   </clipPath>
-  <path d="m204.5 152.6h-159.8c-2.78 0-4.45 1.69-4.45 3.99v0.11c0 2.04 1.42 3.43 3.64 3.43h160.6c2.88 0 3.67-2.07 3.67-3.43v-0.25c0-2.04-1.48-3.85-3.67-3.85z" fill="url(#${fillGradientId})" clip-path="url(#${clipId})"/>
-  <text${txtIdAttr} x="125" y="196" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" font-size="8" font-weight="600" letter-spacing="1.5"${txtClassAttr}>${textContent ?? 'Loading...'}</text>
+  <rect ${bar} fill="url(#${fillGradientId})" opacity=".18"/>
+  <rect ${bar} fill="url(#${fillGradientId})" clip-path="url(#${clipId})"/>
+  <text${txtIdAttr} x="${LOGO_WIDTH / 2}" y="294" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" font-size="26" font-weight="600" letter-spacing="5"${txtClassAttr}>${textContent ?? 'Loading...'}</text>
   <defs>
 ${defs}
   </defs>

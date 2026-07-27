@@ -46,7 +46,7 @@ export const energy8Variant: PreloaderVariant = {
 
     @keyframes ge-loader-fill {
       0%   { width: 0; }
-      50%  { width: 174; }
+      50%  { width: ${LOADER_BAR_MAX_WIDTH}; }
       100% { width: 0; }
     }
 

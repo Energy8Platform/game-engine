@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  LOADER_BAR_MAX_WIDTH,
   createCSSPreloader,
   removeCSSPreloader,
   setCSSPreloaderProgress,
@@ -83,11 +84,11 @@ describe('setCSSPreloaderProgress', () => {
     container.remove();
   });
 
-  it('updates the rect width to progress * LOADER_BAR_MAX_WIDTH (174)', () => {
+  it('updates the rect width to progress * LOADER_BAR_MAX_WIDTH', () => {
     createCSSPreloader(container);
     setCSSPreloaderProgress(0.5);
     const rect = container.querySelector('#ge-pl-loader-rect') as SVGRectElement;
-    expect(rect.getAttribute('width')).toBe(String(0.5 * 174));
+    expect(rect.getAttribute('width')).toBe(String(0.5 * LOADER_BAR_MAX_WIDTH));
   });
 
   it('adds .driven class to the rect on first progress update', () => {
@@ -116,7 +117,7 @@ describe('setCSSPreloaderProgress', () => {
     createCSSPreloader(container);
     setCSSPreloaderProgress(1.5);
     const rect = container.querySelector('#ge-pl-loader-rect') as SVGRectElement;
-    expect(rect.getAttribute('width')).toBe('174');
+    expect(rect.getAttribute('width')).toBe(String(LOADER_BAR_MAX_WIDTH));
 
     setCSSPreloaderProgress(-0.5);
     expect(rect.getAttribute('width')).toBe('0');
