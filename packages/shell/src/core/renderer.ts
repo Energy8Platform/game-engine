@@ -74,12 +74,12 @@ export interface ShellHost {
   emit: EventEmitter<ShellEvents>['emit'];
   /** Renderer reports its surface size; the controller recomputes layout + re-renders. */
   notifyResize(w: number, h: number): void;
-  /** Flip shared sound state (emits settingChange + refreshes an open Settings icon). */
+  /** Flip shared sound state (emits settingChange + refreshes an open menu's sound icon). */
   setSound(on: boolean): void;
   /** Current volume slider position (0..1) for music/sfx. */
   getVolume(key: VolumeKey): number;
   /** Set a volume slider (0..1): clamps, stores, emits `settingChange`, and live-updates an open
-   *  Settings overlay. Called by the slider control on drag AND by game code as the public API. */
+   *  menu. Called by the slider control on drag AND by game code as the public API. */
   setVolume(key: VolumeKey, value: number): void;
   /** The configured menu items (see core/menu.ts). */
   readonly menu: MenuItem[];
