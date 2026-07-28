@@ -26,6 +26,7 @@ export class Popover extends Container implements ShellLayer {
   private opts: PopoverOpts;
   private _cardX = 0;
   private _cardY = 0;
+  private _cardW = 0;
   private _arrowX = -1;
 
   constructor(host: PixiComponentContext, opts: PopoverOpts) {
@@ -48,6 +49,7 @@ export class Popover extends Container implements ShellLayer {
 
   get cardX(): number { return this._cardX; }
   get cardY(): number { return this._cardY; }
+  get cardWidth(): number { return this._cardW; }
   get arrowX(): number { return this._arrowX; }
   get arrowVisible(): boolean { return this.arrow.visible; }
 
@@ -57,7 +59,26 @@ export class Popover extends Container implements ShellLayer {
     this.dismissLayer.hitArea = new Rectangle(0, 0, w, h);
 
     const pad = 8;
-    const width = popoverWidth(w, POPOVER.minW);
+    // Width is content-driven (spec: clamped to [220, min(320, surfaceWidth-16)]), so the real
+    // content has to be measured before we know the final width to lay it out at. Probe-build once
+    // at the SMALLEST allowed inner width purely to measure natural size, then throw that copy away
+    // and build the kept one at the resolved final width.
+    //
+    // The probe deliberately measures at the MINIMUM, not the maximum: a decorative row (the menu's
+    // separator) draws its divider line at exactly the width `build()` is called with — it has no
+    // content-driven size of its own, unlike every real row, which ignores that parameter and sizes
+    // from its icon/label/control regardless. Probing at the maximum would make that separator line
+    // alone measure near-maximum and dominate `naturalWidth`, pegging the card at ~maxW for every
+    // menu that has a separator — which the default menu always does. Probing at the minimum cannot
+    // distort the result the other way: content narrower than the probe still clamps to minW either
+    // way (nothing above changes), and content wider than the probe always wins the max() the layout
+    // takes over row widths, so real content still drives growth past minW correctly.
+    const probeW = POPOVER.minW - pad * 2;
+    const probe = this.opts.build(probeW);
+    const measured = probe instanceof FlexBox ? probe.measureSize().w : probe.getSize().width;
+    probe.destroy({ children: true });
+
+    const width = popoverWidth(w, measured + pad * 2);
     const content = this.opts.build(width - pad * 2);
     if (content instanceof FlexBox) content.setLayoutSize(width - pad * 2, undefined);
     const contentH = content.getSize().height;
@@ -90,6 +111,7 @@ export class Popover extends Container implements ShellLayer {
     this.card.position.set(p.x, p.y);
     this._cardX = p.x;
     this._cardY = p.y;
+    this._cardW = width;
     this._arrowX = p.arrowX;
   }
 
