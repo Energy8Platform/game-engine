@@ -105,10 +105,6 @@ export class HtmlRenderer implements ShellRenderer {
     this.modalHost.innerHTML = '';
   }
 
-  refreshSoundIcon?(_on: boolean): void {
-    // Settings registers via host.setSoundRefresh; nothing extra here
-  }
-
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
@@ -139,7 +135,7 @@ export class HtmlRenderer implements ShellRenderer {
 
   private buildOverlay(req: OverlayRequest): { root: HTMLElement; onKey?: (e: KeyboardEvent) => boolean } | null {
     switch (req.kind) {
-      case 'settings': {
+      case 'menu': {
         const root = openSettingsModal(this.host);
         return { root };
       }

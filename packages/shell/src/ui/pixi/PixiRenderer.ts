@@ -132,7 +132,7 @@ export class PixiRenderer implements ShellRenderer {
   openOverlay(req: OverlayRequest): OverlayHandle | void {
     let layer: ShellLayer | null = null;
     switch (req.kind) {
-      case 'settings':
+      case 'menu':
         layer = openSettings(this.ctx);
         break;
       case 'gameInfo':
@@ -165,11 +165,6 @@ export class PixiRenderer implements ShellRenderer {
 
   closeOverlay(): void {
     this.closeLayer();
-  }
-
-  refreshSoundIcon(_on: boolean): void {
-    // No-op: the open Settings overlay registers its icon updater via host.setSoundRefresh, which
-    // the controller's setSound path drives. The renderer has nothing extra to refresh.
   }
 
   /** Fade out (≈250ms, like GameShell's REMOVE_FADE_MS) then tear down; resolves when removed. */
@@ -324,6 +319,7 @@ export class PixiRenderer implements ShellRenderer {
       get tokens() { return host.tokens; },
       get layout() { return host.layout; },
       get soundOn() { return host.soundOn; },
+      get menu() { return host.menu; },
       get actions() { return host.actions; },
       openReplay: (opts) => host.openReplay(opts),
       t: (s) => host.t(s),
@@ -331,10 +327,11 @@ export class PixiRenderer implements ShellRenderer {
       emit: host.emit.bind(host),
       notifyResize: (w, h) => host.notifyResize(w, h),
       setSound: (on) => host.setSound(on),
-      setSoundRefresh: (fn) => host.setSoundRefresh(fn),
       getVolume: (key) => host.getVolume(key),
       setVolume: (key, v) => host.setVolume(key, v),
-      setVolumeRefresh: (fn) => host.setVolumeRefresh(fn),
+      getMenuValue: (id) => host.getMenuValue(id),
+      setMenuValue: (id, v) => host.setMenuValue(id, v),
+      setMenuRefresh: (fn) => host.setMenuRefresh(fn),
       // — Pixi-specific surface —
       get ticker() { return self.app.ticker; },
       get canvas() { return self.app.canvas as HTMLCanvasElement | undefined; },

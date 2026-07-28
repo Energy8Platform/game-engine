@@ -7,6 +7,10 @@ export function openSettingsModal(host: ShellHost): HTMLElement {
   const { root, body } = createOverlay({ title: host.t('Settings'), onClose: () => host.actions.closeOverlay() });
   root.dataset.ge = 'settings-modal';
 
+  // Volume-slider updaters. Declared before the sound block below so its single setMenuRefresh
+  // registration (which handles BOTH the sound icon and any slider) can close over this map.
+  const updaters: Partial<Record<VolumeKey, (v: number) => void>> = {};
+
   // Sound on/off — backed by the shell's shared `soundOn` state so this toggle and the Shift+M
   // hotkey stay in sync; `setSound` emits `settingChange({ key: 'sound' })` and refreshes the icon.
   const sound = (() => {
@@ -20,8 +24,12 @@ export function openSettingsModal(host: ShellHost): HTMLElement {
     };
     paint(host.soundOn);
     btn.addEventListener('click', () => host.setSound(!host.soundOn));
-    // Live-update the icon when sound changes from here OR via Shift+M (shell clears on close).
-    host.setSoundRefresh(paint);
+    // Live-update the icon when sound changes from here OR via Shift+M, and forward any slider
+    // update to its own updater — one registration serves both (shell clears it on close).
+    host.setMenuRefresh((id, v) => {
+      if (id === 'sound') paint(v === true);
+      else updaters[id as VolumeKey]?.(Number(v));
+    });
     const row = document.createElement('div'); row.className = 'ge-ov-row';
     row.innerHTML = `<span class="ge-grow">${host.t('Sound')}</span>`; row.appendChild(btn);
     return row;
@@ -30,8 +38,7 @@ export function openSettingsModal(host: ShellHost): HTMLElement {
 
   // Volume sliders — full-width column rows with a live value readout. Positions are read from the
   // shell's stored volumes (not hardcoded to 100%), so reopening the overlay reflects the last set
-  // value, and `host.setVolume()` from game code updates them live via the registered refreshers.
-  const updaters: Partial<Record<VolumeKey, (v: number) => void>> = {};
+  // value, and `host.setVolume()` from game code updates them live via the registered refresher above.
   const slider = (key: VolumeKey, label: string) => {
     const row = document.createElement('div'); row.className = 'ge-ov-row ge-col';
     const head = document.createElement('div'); head.className = 'ge-row-head';
@@ -50,11 +57,8 @@ export function openSettingsModal(host: ShellHost): HTMLElement {
     row.append(head, input);
     return row;
   };
-  body.appendChild(slider('master', host.t('Master volume')));
   body.appendChild(slider('music', host.t('Music')));
   body.appendChild(slider('sfx', host.t('SFX')));
-  // Live-update sliders when volume changes via host.setVolume (shell clears on close).
-  host.setVolumeRefresh((key, v) => updaters[key]?.(v));
 
   // Game info — full-width row button that opens its own overlay
   const gameInfo = document.createElement('button');

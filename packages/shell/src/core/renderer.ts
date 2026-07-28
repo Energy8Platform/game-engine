@@ -4,6 +4,7 @@ import type {
   ResolvedShellConfig, ShellState, ShellEvents, BonusOption,
   ModalOptions, ReplayModalOptions, VolumeKey,
 } from './types';
+import type { MenuItem } from './menu';
 
 export type ShellLayoutMode = 'wide' | 'mobile';
 
@@ -27,8 +28,6 @@ export interface ShellRenderer {
   openOverlay(req: OverlayRequest): OverlayHandle | void;
   /** Tear down any open overlay. */
   closeOverlay(): void;
-  /** If the open overlay registered a sound-icon refresher, the controller calls this to refresh it. */
-  refreshSoundIcon?(on: boolean): void;
   /** Fade out + remove all nodes; resolve when gone. */
   destroy(): Promise<void> | void;
 
@@ -77,15 +76,19 @@ export interface ShellHost {
   notifyResize(w: number, h: number): void;
   /** Flip shared sound state (emits settingChange + refreshes an open Settings icon). */
   setSound(on: boolean): void;
-  /** An open Settings overlay registers an icon updater here (null clears it on close). */
-  setSoundRefresh(fn: ((on: boolean) => void) | null): void;
-  /** Current volume slider position (0..1) for master/music/sfx. */
+  /** Current volume slider position (0..1) for music/sfx. */
   getVolume(key: VolumeKey): number;
   /** Set a volume slider (0..1): clamps, stores, emits `settingChange`, and live-updates an open
    *  Settings overlay. Called by the slider control on drag AND by game code as the public API. */
   setVolume(key: VolumeKey, value: number): void;
-  /** An open Settings overlay registers a slider updater here (null clears it on close). */
-  setVolumeRefresh(fn: ((key: VolumeKey, value: number) => void) | null): void;
+  /** The configured menu items (see core/menu.ts). */
+  readonly menu: MenuItem[];
+  /** Current value of a menu item — presets included (sound → soundOn, music/sfx → volumes). */
+  getMenuValue(id: string): boolean | number | undefined;
+  /** Set a menu value: clamps ranges, stores, emits `settingChange`, refreshes an open menu. */
+  setMenuValue(id: string, value: boolean | number): void;
+  /** An open menu registers a row updater here (null clears it on close). */
+  setMenuRefresh(fn: ((id: string, value: boolean | number) => void) | null): void;
   /** Logic-bearing actions invoked by renderer controls. */
   readonly actions: ShellActions;
   /** Re-show the replay summary modal through the controller (keeps its OverlayHandle in sync).
@@ -126,7 +129,7 @@ export interface OverlayHandle {
 }
 
 export type OverlayRequest =
-  | { kind: 'settings' }
+  | { kind: 'menu' }
   | { kind: 'gameInfo' }
   | { kind: 'buyBonus' }
   | { kind: 'betPicker' }

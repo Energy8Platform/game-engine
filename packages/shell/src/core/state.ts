@@ -1,4 +1,5 @@
 import type { ShellConfig, ShellState } from './types';
+import { DEFAULT_MENU, seedMenuValues } from './menu';
 
 export function createInitialState(config: ShellConfig): ShellState {
   return {
@@ -16,10 +17,10 @@ export function createInitialState(config: ShellConfig): ShellState {
     bonus: null,
     activeFeature: null,
     volumes: {
-      master: clampVolume(config.volumes?.master),
       music: clampVolume(config.volumes?.music),
       sfx: clampVolume(config.volumes?.sfx),
     },
+    menu: seedMenuValues(config.menu ?? DEFAULT_MENU),
   };
 }
 

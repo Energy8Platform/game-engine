@@ -1,11 +1,13 @@
+import type { MenuItem } from './menu';
+
 /** `freeSpins` and `bonus` are the SAME bar layout (host-driven hero + Total Win); `freeSpins` is
  *  kept as a back-compat alias for the common case (its readout is derived current/total), while
  *  `bonus` pairs with `setBonus()` to show a game-supplied label + value (adventure, hold-and-spin,
  *  respins — anything that isn't a plain free-spins counter). */
 export type ShellMode = 'base' | 'bonus' | 'freeSpins' | 'replay';
 
-/** The three independent volume sliders shown in the Settings overlay. */
-export type VolumeKey = 'master' | 'music' | 'sfx';
+/** The two independent volume sliders shown in the bar menu. */
+export type VolumeKey = 'music' | 'sfx';
 export type VolumeLevels = Record<VolumeKey, number>;
 
 export interface CurrencyConfig {
@@ -250,8 +252,10 @@ export interface ShellConfig {
   onBonusBuy?: () => void;
   /** Initial Settings-overlay volume slider positions (each 0..1, defaults to 1 = 100%). The shell
    *  keeps them stateful across opens; read/update at runtime via `shell.getVolume()` /
-   *  `shell.setVolume()`, and listen to `settingChange` ({ key: 'master'|'music'|'sfx' }) to apply. */
+   *  `shell.setVolume()`, and listen to `settingChange` ({ key: 'music'|'sfx' }) to apply. */
   volumes?: Partial<VolumeLevels>;
+  /** Bar-menu items, in order. Omit for the default list (sound, music, sfx, ─, game info). */
+  menu?: MenuItem[];
 }
 
 /** ShellConfig after the controller applies defaults (version, isSocial, replay, theme). No mount. */
@@ -272,7 +276,7 @@ export type ResolvedShellConfig = Required<
     | 'replay'
   >
 > &
-  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy' | 'volumes'>;
+  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy' | 'volumes' | 'menu'>;
 
 export interface ShellState {
   mode: ShellMode;
@@ -295,9 +299,11 @@ export interface ShellState {
   /** The currently activated `feature` option (e.g. Ante), or null. Drives the
    *  effective-bet readout tint and the BUY BONUS → DISABLE toggle on the bar. */
   activeFeature: BonusOption | null;
-  /** Volume slider positions (0..1) surfaced in the Settings overlay. Stateful across opens so a
-   *  reopened overlay reflects the last-set positions instead of resetting to 100%. */
+  /** Volume slider positions (0..1) for the two sliders in the menu. */
   volumes: VolumeLevels;
+  /** Values of CUSTOM menu items, keyed by id. Seeded from the item list; preset values live in
+   *  their own homes (`soundOn`, `volumes`) and are reached through `getMenuValue`. */
+  menu: Record<string, boolean | number>;
 }
 
 export interface ShellEvents {

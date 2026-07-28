@@ -25,7 +25,8 @@ export interface LayerHandle {
  *  PixiRenderer provides (ticker, screen size, layer stack).
  *
  *  Members already on core ShellHost (state, config, tokens, layout, soundOn, t, emit, setSound,
- *  setSoundRefresh, actions, formatCurrency, notifyResize) are NOT re-declared here.
+ *  getVolume, setVolume, menu, getMenuValue, setMenuValue, setMenuRefresh, actions, formatCurrency,
+ *  notifyResize) are NOT re-declared here.
  *
  *  fmt/fmtWin decision: pixi components in pixi-shell use `host.fmt(n)` / `host.fmtWin(n)`.
  *  Rather than retargeting all components to `host.formatCurrency(n)` / `host.formatCurrency(n, true)`

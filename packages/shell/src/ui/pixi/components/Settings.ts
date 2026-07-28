@@ -21,6 +21,10 @@ export function openSettings(host: PixiComponentContext): ShellLayer {
 function buildBody(host: PixiComponentContext, width: number): Container {
   const col = new FlexBox({ direction: 'column', align: 'stretch', gap: 10 });
 
+  // Volume-slider updaters, declared before the sound block so the single setMenuRefresh
+  // registration below (which handles BOTH the sound icon and any slider) can close over it.
+  const updaters: Partial<Record<VolumeKey, (v: number) => void>> = {};
+
   // Sound on/off — backed by the shell's shared `soundOn` state so this toggle and the Shift+M
   // hotkey stay in sync; `setSound` emits `settingChange({ key: 'sound' })` and refreshes the icon.
   const soundOn0 = host.soundOn ?? true;
@@ -33,21 +37,23 @@ function buildBody(host: PixiComponentContext, width: number): Container {
     active: soundOn0,
     onTap: () => host.setSound?.(!(host.soundOn ?? true)),
   });
-  // Live-update the speaker when sound changes from here OR via Shift+M (shell clears on close).
-  host.setSoundRefresh?.((on) => {
-    if (speaker.destroyed) return; // overlay torn down but refresher not yet cleared (push-over edge)
-    speaker.setIcon(on ? 'soundOn' : 'soundOff');
-    speaker.active = on;
+  // Live-update the speaker when sound changes from here OR via Shift+M, and forward any slider
+  // update to its own updater — one registration serves both (shell clears it on close).
+  host.setMenuRefresh((id, v) => {
+    if (id === 'sound') {
+      if (speaker.destroyed) return; // overlay torn down but refresher not yet cleared (push-over edge)
+      speaker.setIcon(v ? 'soundOn' : 'soundOff');
+      speaker.active = v === true;
+    } else {
+      updaters[id as VolumeKey]?.(Number(v));
+    }
   });
   col.add(glassRow(host, [textNode(host, host.t('Sound')), new Spacer(), speaker]));
 
   // Volume sliders — positions read from the shell's stored volumes (stateful across opens); the
-  // registered refreshers let `host.setVolume()` from game code move the thumbs live.
-  const updaters: Partial<Record<VolumeKey, (v: number) => void>> = {};
-  col.add(sliderRow(host, width, 'master', host.t('Master volume'), updaters));
+  // registered refresher above lets `host.setVolume()` from game code move the thumbs live.
   col.add(sliderRow(host, width, 'music', host.t('Music'), updaters));
   col.add(sliderRow(host, width, 'sfx', host.t('SFX'), updaters));
-  host.setVolumeRefresh?.((key, v) => updaters[key]?.(v));
 
   // Game info link
   const infoIcon = makeIcon('info', 22, '#ffffff');

@@ -38,6 +38,18 @@ describe('createInitialState', () => {
     expect(s.autoplay).toEqual({ active: false, remaining: 0 });
     expect(s.freeSpins).toEqual({ current: 0, total: 0, totalWin: 0 });
   });
+
+  it('seeds volumes without master and menu values from the item list', () => {
+    const s = createInitialState({
+      language: 'en', currency: { symbol: '€', position: 'left' },
+      availableBets: [1], defaultBet: 1, currentBet: null, balance: 0, win: 0,
+      mode: 'base', gameInfo: {}, features: { turbo: 0, autoplay: null, buyBonus: false },
+      volumes: { music: 0.4 },
+      menu: [{ id: 'sound' }, { id: 'lefty', type: 'toggle', label: 'L', value: true }],
+    } as never);
+    expect(s.volumes).toEqual({ music: 0.4, sfx: 1 });
+    expect(s.menu).toEqual({ lefty: true });
+  });
 });
 
 describe('stepBet', () => {
