@@ -665,6 +665,7 @@ await removeGameShell();
 | `balance` / `win` | `number` | Initial readouts. |
 | `mode` | `'base' \| 'freeSpins' \| 'replay'` | Drives which bottom-bar variant renders. |
 | `gameInfo` | `GameInfoContent` | Sections for the game-info overlay (see below). |
+| `menu` | `MenuItem[]?` | Bar-menu popover items, in order (see below). Omit for the default list. |
 | `features` | `ShellFeatures` | `{ turbo: 0–3, spacebar?, autoplay, buyBonus }`. `spacebar?: boolean` (default `true`) — `false` disables the Spacebar → spin shortcut. `autoplay: AutoplayConfig \| null` — `null`/omitted disables it; `{}` enables it; `{ maxCount }` caps the picker (drops ∞). `buyBonus: BonusOption[] \| false`. |
 | `onBonusBuy` | `(() => void)?` | Override the BUY BONUS button action — opens your own UI instead of the built-in overlay (also shows the button without a `buyBonus` array). See [Buy bonus](#buy-bonus--features). |
 
@@ -678,8 +679,10 @@ await removeGameShell();
 | `turboChange` | `number` | Turbo level cycled. |
 | `buyBonusSelect` | `{ id }` | A `type: 'bonus'` card was bought. |
 | `featureActivate` / `featureDeactivate` | `{ id }` | A `type: 'feature'` option (e.g. Ante) toggled. |
-| `menuOpen` / `settingsOpen` / `infoOpen` | — | Overlay opened. |
-| `settingChange` | `{ key, value }` | Settings control changed. Keys: `sound` (bool), `master` / `music` / `sfx` (0–100). |
+| `menuOpen` | — | Burger tapped — the bar-menu popover opened (or closed it, if it was already open). |
+| `settingsOpen` | — | **Deprecated** — only emitted by the deprecated `openSettings()` alias (which still opens the menu). New code should call `openMenu()` and listen for `menuOpen`. |
+| `infoOpen` | — | Game-info overlay opened. |
+| `settingChange` | `{ key, value }` | A bar-menu item's value changed (preset or custom). `key` is the item's id. Built-in: `sound` (bool), `music` / `sfx` (0–1). A custom item reports its own id and value type. |
 
 ### State setters (`game → shell`)
 
@@ -763,10 +766,62 @@ gameInfo: {
 }
 ```
 
+### Bar menu (`ShellConfig.menu`)
+
+The burger button opens a compact popover anchored to itself — not a full-screen overlay. Its
+content is declared as a list: a built-in `id` selects a preset, otherwise `type` says how to draw
+a custom row.
+
+- `{ id: 'sound' }` — sound on/off toggle.
+- `{ id: 'music' }` / `{ id: 'sfx' }` — volume sliders (0–1, percent readout).
+- `{ id: 'gameInfo' }` — opens the game-info overlay.
+- `{ type: 'toggle', value?, onChange? }` — a custom on/off row; `onChange` fires when it's toggled.
+- `{ type: 'range', min?, max?, step?, value?, format?, onChange? }` — a custom slider. Omitted
+  bounds default to `min: 0, max: 1, step: (max-min)/20` (exactly a volume slider); `format`
+  defaults to a percent readout for a 0..1 range, else the raw number.
+- `{ type: 'button', chevron?, onSelect? }` — a row that runs a callback (e.g. opens your own UI).
+- `{ type: 'separator' }` — a divider line.
+
+Every kind (preset or custom) also takes `label?` (translated override), `icon?` (a name from the
+shell's built-in glyph set) and `disabled?` (dims the row and blocks interaction).
+
+```typescript
+createGameShell({
+  // …
+  menu: [
+    { id: 'sound' }, { id: 'music' }, { id: 'sfx' },
+    { type: 'separator' },
+    { id: 'gameInfo' },
+    { id: 'lefty', type: 'toggle', label: 'Left-hand mode',
+      value: false, onChange: (v) => layout.mirror(v) },
+    { id: 'speed', type: 'range', label: 'Reel speed', min: 1, max: 5, step: 1,
+      value: 2, format: (v) => `×${v}`, onChange: (v) => reels.setSpeed(v) },
+    { id: 'paytable', type: 'button', label: 'Paytable', icon: 'ticket',
+      chevron: true, onSelect: () => openPaytable() },
+  ],
+});
+```
+
+Omit `menu` for the default list: `sound`, `music`, `sfx`, a separator, `gameInfo`.
+
+| Method | Behaviour |
+| --- | --- |
+| `shell.setMenu(items)` | Replaces the list; an open popover rebuilds. Values already in state are kept; new ids are seeded from their `value`. |
+| `shell.getMenuValue(id)` | Reads a preset or custom item's current value (`boolean \| number \| undefined`; `undefined` for unknown ids and for `button` / `separator`). |
+| `shell.setMenuValue(id, v)` | Writes a value — clamps a range to its declared bounds, stores it, emits `settingChange`, and live-updates an open popover. |
+| `shell.openMenu()` | Opens the popover; called again while it's open, closes it (the burger toggles). |
+
+`shell.setSound(on)` / `shell.getVolume(key)` / `shell.setVolume(key, v)` stay as thin aliases over
+the same state for the `sound` / `music` / `sfx` presets — existing code keeps working.
+
+`shell.openSettings()` is a **deprecated** alias for `openMenu()`, kept for compatibility; it also
+still emits the deprecated `settingsOpen` event (see Events above). New code should call
+`openMenu()` and listen for `menuOpen`.
+
 ### Opening overlays & modals programmatically
 
 ```typescript
-shell.openSettings();  shell.openInfo();  shell.openBuyBonus();
+shell.openMenu();      shell.openInfo();     shell.openBuyBonus();
 shell.openBetPicker(); shell.openAutoplayPicker();
 
 // generic card modal
@@ -794,7 +849,8 @@ shell.openReplay({ bonusId: 'fs', bet: shell.state.bet, payoutMultiplier: 87.5,
 Transparent neutral chrome that doesn't compete with the game — brand colour appears only on the
 BUY BONUS control and a duotone icon set. The bottom bar **adapts by viewport** automatically (a
 `ResizeObserver` on the mount): landscape → one row scaled to fit, portrait → stacked mobile
-layout; Settings / Game info / Buy bonus open as full-screen overlays. Motion is minimal (press
+layout; Game info / Buy bonus open as full-screen overlays, while the bar menu opens as a compact,
+light-dismiss popover anchored to the burger button. Motion is minimal (press
 feedback, money count-up, overlay fades) and respects `prefers-reduced-motion`. Spacebar triggers
 a spin in base mode (ignored while busy, in autoplay, when a modal/input is focused, or when
 `features.spacebar` is `false`).
