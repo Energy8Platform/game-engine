@@ -254,12 +254,13 @@ function emit(targetRel, withIconSVG) {
   const { map, order } = parseSvgs(readFileSync(path, 'utf8'));
   const merged = { ...map };
   for (const n of names) merged[n] = built[n];
-  // keep existing key order, then append any newly-added glyph names (turboOff/turbo2/chevronUp/…)
-  const keys = [...order, ...names.filter((n) => !order.includes(n))];
+  // key order is hoisted into KEYS (see below) so both renderer files match core/icon-names.ts
+  const keys = KEYS;
   const body = keys.map((n) => `  ${n}: \`${merged[n]}\`,`).join('\n');
   let out = `${HEADER}\nconst SVGS: Record<string, string> = {\n${body}\n};\n\n`;
-  out += `export type IconName = keyof typeof SVGS;\n`;
-  out += `export const ICON_NAMES = Object.keys(SVGS) as IconName[];\n\n`;
+  out += `export type { IconName } from '@/core/icon-names';\n`;
+  out += `import type { IconName } from '@/core/icon-names';\n`;
+  out += `export { ICON_NAMES } from '@/core/icon-names';\n\n`;
   out += `/** Inline SVG string for an icon, sized to 1em (scale via font-size/width). */\n`;
   out += `export function icon(name: IconName): string {\n`;
   out += `  return \`<svg viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">\${SVGS[name]}</svg>\`;\n}\n`;
@@ -272,6 +273,25 @@ function emit(targetRel, withIconSVG) {
   writeFileSync(path, out);
   console.log(`wrote ${targetRel}: ${keys.length} glyphs (${names.length} from svg, +${keys.length - order.length} new)`);
 }
+
+function emitCoreNames(keys) {
+  const path = join(ROOT, 'src', 'core/icon-names.ts');
+  const list = keys.map((n) => `  '${n}',`).join('\n');
+  const out =
+    `${HEADER}\n` +
+    `// The single glyph-name union, shared by core (menu items) and both renderers.\n` +
+    `export const ICON_NAMES = [\n${list}\n] as const;\n\n` +
+    `export type IconName = (typeof ICON_NAMES)[number];\n`;
+  writeFileSync(path, out);
+  console.log(`wrote core/icon-names.ts: ${keys.length} names`);
+}
+
+function keyOrder(targetRel) {
+  const { order } = parseSvgs(readFileSync(join(ROOT, 'src', targetRel), 'utf8'));
+  return [...order, ...names.filter((n) => !order.includes(n))];
+}
+const KEYS = keyOrder('ui/html/icons.ts');
+emitCoreNames(KEYS);
 
 emit(join('ui', 'html', 'icons.ts'), false);
 emit(join('ui', 'pixi', 'icons.ts'), true);
