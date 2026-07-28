@@ -4,7 +4,7 @@ import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
 import { buildThemeVars } from './theme-css';
 import { countUp } from './motion-dom';
 import { renderBottomBar } from './components/BottomBar';
-import { openSettingsModal } from './components/Settings';
+import { openMenuPopover } from './components/Menu';
 import { openGameInfoModal } from './components/GameInfo';
 import { openBuyBonusOverlay } from './components/BuyBonus';
 import { openBetModal, openAutoplayModal } from './components/pickers';
@@ -35,6 +35,7 @@ export class HtmlRenderer implements ShellRenderer {
   private ro: ResizeObserver | null = null;
   private moneyAnims: Array<() => void> = [];
   private modalOnKey: ((e: KeyboardEvent) => boolean) | undefined;
+  private popoverPosition: (() => void) | null = null;
   private destroyed = false;
 
   /** MutationObserver for buy-bonus confirm fit — fires fitModals() when nodes are added
@@ -102,6 +103,7 @@ export class HtmlRenderer implements ShellRenderer {
 
   closeOverlay(): void {
     this.modalOnKey = undefined;
+    this.popoverPosition = null;
     this.modalHost.innerHTML = '';
   }
 
@@ -136,7 +138,8 @@ export class HtmlRenderer implements ShellRenderer {
   private buildOverlay(req: OverlayRequest): { root: HTMLElement; onKey?: (e: KeyboardEvent) => boolean } | null {
     switch (req.kind) {
       case 'menu': {
-        const root = openSettingsModal(this.host);
+        const { root, position } = openMenuPopover(this.host, this.root);
+        this.popoverPosition = position;
         return { root };
       }
       case 'gameInfo': {
@@ -179,6 +182,7 @@ export class HtmlRenderer implements ShellRenderer {
     this.modalHost.appendChild(el);
     this.modalOnKey = onKey;
     this.fitModals();
+    this.popoverPosition?.(); // measure + place now that the card is in the DOM
   }
 
   /** Uniformly scale every open centred card modal (.ge-sheet) down so it fits a short/narrow
@@ -276,6 +280,7 @@ export class HtmlRenderer implements ShellRenderer {
       this.host.notifyResize(w, h);
       this.applyFitScale();
       this.fitModals();
+      this.popoverPosition?.(); // re-place the card if the surface itself resized
     });
     this.ro.observe(this.root);
   }

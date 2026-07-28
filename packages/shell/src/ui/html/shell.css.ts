@@ -191,6 +191,22 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-snd:hover { color:var(--shell-accent); }
 #${SHELL_ROOT_ID} .ge-snd:active { transform:scale(.92); }
 
+/* bar menu popover — light dismiss (no dim, no blur), card anchored to the burger */
+#${SHELL_ROOT_ID} .ge-pop-layer { position:absolute; inset:0; z-index:55; pointer-events:auto; }
+#${SHELL_ROOT_ID} .ge-pop { position:absolute; box-sizing:border-box; display:flex; flex-direction:column;
+  padding:8px; border-radius:18px; background:var(--shell-plaque-dark);
+  box-shadow:0 14px 38px rgba(0,0,0,.5); backdrop-filter:blur(12px) saturate(120%);
+  -webkit-backdrop-filter:blur(12px) saturate(120%); animation:ge-ov-in .12s ease-out; }
+#${SHELL_ROOT_ID} .ge-pop-body { overflow-y:auto; overflow-x:hidden; min-height:0; }
+#${SHELL_ROOT_ID} .ge-pop .ge-ov-row { padding:10px 12px; margin-bottom:6px; font-size:13px; }
+#${SHELL_ROOT_ID} .ge-pop .ge-ov-row:last-child { margin-bottom:0; }
+#${SHELL_ROOT_ID} .ge-pop-sep { height:1px; margin:6px 4px; background:var(--shell-plaque-line); opacity:.5; }
+#${SHELL_ROOT_ID} .ge-pop-arrow { position:absolute; bottom:-7px; width:14px; height:14px; margin-left:-7px;
+  background:var(--shell-plaque-dark); transform:rotate(45deg); border-radius:3px; }
+#${SHELL_ROOT_ID} .ge-pop.ge-pop-below .ge-pop-arrow { bottom:auto; top:-7px; }
+#${SHELL_ROOT_ID} .ge-pop .ge-mi-icon { flex:0 0 auto; width:20px; font-size:20px; display:flex; }
+#${SHELL_ROOT_ID} .ge-pop .ge-mi-chev { flex:0 0 auto; width:16px; font-size:16px; color:var(--shell-muted); display:flex; }
+
 /* game info — each section is its own glass plaque; body text sized for comfortable reading */
 #${SHELL_ROOT_ID} .ge-gi-sec { margin-bottom:12px; background:var(--shell-plaque-glass);
   border-radius:16px; padding:16px 18px; }

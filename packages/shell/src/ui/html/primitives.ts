@@ -1,4 +1,5 @@
 import { icon } from './icons';
+import { placePopover, popoverWidth, POPOVER, type Rect } from '@/core/popover';
 
 /** Render a (possibly socialised) two-word label across two lines — the BUY BONUS badge.
  *  Shared so the bottom-bar button and the Game-info control legend break identically. */
@@ -82,4 +83,65 @@ export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: 
   scroll.appendChild(body);
   root.append(head, scroll);
   return { root, body, scroll };
+}
+
+export interface PopoverOpts {
+  ge: string;
+  /** The shell root — the popover is placed in its coordinate space and clamped to it. */
+  surface: HTMLElement;
+  /** The control the card points at; `null` centres the card and hides the arrow. */
+  anchor: HTMLElement | null;
+  onClose: () => void;
+}
+
+/** A light-dismiss popover: a transparent full-surface layer (closes on pointerdown) holding a
+ *  card with an arrow that points at `anchor`. Append rows to `body`; call `position()` after the
+ *  card is in the DOM and again on resize. */
+export function createPopover(opts: PopoverOpts): {
+  root: HTMLDivElement;
+  card: HTMLDivElement;
+  body: HTMLDivElement;
+  position(): void;
+} {
+  const root = document.createElement('div');
+  root.className = 'ge-pop-layer';
+  root.dataset.ge = opts.ge;
+  const card = document.createElement('div');
+  card.className = 'ge-pop';
+  card.dataset.ge = 'menu-card';
+  const body = document.createElement('div');
+  body.className = 'ge-pop-body';
+  const arrow = document.createElement('span');
+  arrow.className = 'ge-pop-arrow';
+  card.append(body, arrow);
+  root.appendChild(card);
+  // Clicks inside the card must not reach the dismiss layer.
+  card.addEventListener('pointerdown', (e) => e.stopPropagation());
+  root.addEventListener('pointerdown', opts.onClose);
+
+  const position = (): void => {
+    const surfaceRect = opts.surface.getBoundingClientRect();
+    const surface = { w: surfaceRect.width || opts.surface.clientWidth, h: surfaceRect.height || opts.surface.clientHeight };
+    if (surface.w <= 0 || surface.h <= 0) return;
+    const w = popoverWidth(surface.w, card.scrollWidth || POPOVER.minW);
+    card.style.width = `${w}px`;
+    let anchor: Rect | null = null;
+    if (opts.anchor) {
+      const a = opts.anchor.getBoundingClientRect();
+      if (a.width > 0 || a.height > 0) {
+        anchor = { x: a.left - surfaceRect.left, y: a.top - surfaceRect.top, w: a.width, h: a.height };
+      }
+    }
+    const p = placePopover(anchor, surface, { w, h: card.offsetHeight || POPOVER.minH });
+    card.style.left = `${p.x}px`;
+    card.style.top = `${p.y}px`;
+    card.style.maxHeight = `${p.maxH}px`;
+    card.classList.toggle('ge-pop-below', p.below);
+    if (p.arrowX < 0) arrow.style.display = 'none';
+    else {
+      arrow.style.display = '';
+      arrow.style.left = `${p.arrowX}px`;
+    }
+  };
+  return { root, card, body, position };
 }

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * Runtime-bug fix: Shift+M (and the Settings speaker) toggle a SHARED `soundOn` state and emit
- * `settingChange({ key: 'sound', value: <boolean> })` — the event the game's audio actually listens
- * to. Previously toggleMute emitted `{ key: 'muted', value: 'toggle' }`, which nothing handled, and
- * there was no shared state for any icon to reflect. Driven end-to-end through the real GameShell +
- * its KeyboardController (the integration the prior unit tests skipped).
+ * Runtime-bug fix: Shift+M (and the bar menu's sound button) toggle a SHARED `soundOn` state and
+ * emit `settingChange({ key: 'sound', value: <boolean> })` — the event the game's audio actually
+ * listens to. Previously toggleMute emitted `{ key: 'muted', value: 'toggle' }`, which nothing
+ * handled, and there was no shared state for any icon to reflect. Driven end-to-end through the
+ * real GameShell + its KeyboardController (the integration the prior unit tests skipped).
+ * (Task 5: the sound button moved from the Settings overlay into the bar-menu popover.)
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
@@ -57,12 +58,12 @@ describe('Shift+M mute', () => {
     expect(onSetting).toHaveBeenLastCalledWith({ key: 'sound', value: false });
   });
 
-  it('the Settings speaker button toggles the shared sound state (parity with Shift+M)', () => {
+  it("the bar menu's sound button toggles the shared sound state (parity with Shift+M)", () => {
     const shell = createGameShell(base());
     const onSetting = vi.fn();
     shell.on('settingChange', onSetting);
-    shell.openSettings();
-    const btn = document.querySelector('[data-ge="setting-sound"]') as HTMLButtonElement | null;
+    shell.openMenu();
+    const btn = document.querySelector('[data-ge="menu-item-sound"]') as HTMLButtonElement | null;
     expect(btn).toBeTruthy();
     expect(shell.soundOn).toBe(true);
 

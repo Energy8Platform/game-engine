@@ -178,17 +178,17 @@ describe('keyboard: chrome hotkeys fall through an open overlay', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { code, shiftKey: true, bubbles: true, cancelable: true }));
   const qge = (s: string) => mount.querySelector(s) as HTMLElement | null;
 
-  it('Shift+I from the Settings page jumps to Game info', () => {
+  it('Shift+I from the bar menu jumps to Game info', () => {
     const shell = createGameShell(cfg(mount));
-    shell.openSettings();
-    expect(qge('[data-ge="settings-modal"]')).toBeTruthy();
+    shell.openMenu();
+    expect(qge('[data-ge="menu-popover"]')).toBeTruthy();
     shifted('KeyI');
     expect(qge('[data-ge="info-modal"]')).toBeTruthy();
   });
 
-  it('Shift+M from the Settings page toggles the shared sound state', () => {
+  it('Shift+M from the bar menu toggles the shared sound state', () => {
     const shell = createGameShell(cfg(mount));
-    shell.openSettings();
+    shell.openMenu();
     expect(shell.soundOn).toBe(true);
     shifted('KeyM');
     expect(shell.soundOn).toBe(false);

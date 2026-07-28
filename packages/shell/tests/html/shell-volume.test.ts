@@ -9,8 +9,11 @@
  * The master slider/key is gone (Task 4 of the bar-menu-popover plan). The drag/reopen/live-update
  * cases below used to run through `master`; they are retargeted to `music` (the exact same mechanism
  * — one combined `setMenuRefresh` callback drives every slider) so this file keeps covering the path
- * Task 4 itself rewired (`ui/html/components/Settings.ts`'s merged sound+volume refresher). Task 5
- * still rewrites this file wholesale for the new popover.
+ * Task 4 itself rewired.
+ *
+ * Task 5: the Settings full-screen overlay is gone, replaced by the bar-menu popover
+ * (`ui/html/components/Menu.ts`). Retargeted to the new hooks (`menu-item-music`) and
+ * `shell.openMenu()` — the mechanism (one `setMenuRefresh` callback driving every row) is unchanged.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
@@ -30,7 +33,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const music = () => document.querySelector('[data-ge="setting-music"]') as HTMLInputElement | null;
+const music = () => document.querySelector('[data-ge="menu-item-music"]') as HTMLInputElement | null;
 
 describe('Settings volume sliders', () => {
   beforeEach(() => {
@@ -42,7 +45,7 @@ describe('Settings volume sliders', () => {
     const shell = createGameShell(base());
     const onSetting = vi.fn();
     shell.on('settingChange', onSetting);
-    shell.openSettings();
+    shell.openMenu();
 
     expect(music()!.value).toBe('1');
     expect(shell.getVolume('music')).toBe(1);
@@ -57,13 +60,13 @@ describe('Settings volume sliders', () => {
 
   it('reopening the overlay reflects the last-set position (not a reset to 100%)', () => {
     const shell = createGameShell(base());
-    shell.openSettings();
+    shell.openMenu();
     const input = music()!;
     input.value = '0.3';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     shell.closeModal();
 
-    shell.openSettings();
+    shell.openMenu();
     expect(music()!.value).toBe('0.3');
   });
 
@@ -77,7 +80,7 @@ describe('Settings volume sliders', () => {
     const shell = createGameShell(base());
     const onSetting = vi.fn();
     shell.on('settingChange', onSetting);
-    shell.openSettings();
+    shell.openMenu();
 
     shell.setVolume('music', 0.75);
     expect(shell.getVolume('music')).toBe(0.75);

@@ -180,10 +180,10 @@ describe('GameInfo', () => {
     expect(ver.textContent).toContain(`2.3.1.${pkgStamp}`);
   });
 
-  it('has a back control that returns to Settings', () => {
+  it('has a back control that returns to the bar menu', () => {
     const shell = createGameShell(cfg(mount));
     shell.openInfo();
     q(mount, '[data-ge="info-back"]')!.click();
-    expect(q(mount, '[data-ge="settings-modal"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="menu-popover"]')).toBeTruthy();
   });
 });
