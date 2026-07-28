@@ -127,10 +127,15 @@ export function createPopover(opts: PopoverOpts): {
     const surfaceRect = opts.surface.getBoundingClientRect();
     const surface = { w: surfaceRect.width || opts.surface.clientWidth, h: surfaceRect.height || opts.surface.clientHeight };
     if (surface.w <= 0 || surface.h <= 0) return;
-    // Clear a prior run's constrained width before measuring — otherwise scrollWidth reports the
-    // already-clamped box (not the natural content width) on every call after the first, and the
-    // card can shrink to fit a narrower surface but never grow back when the surface widens again.
+    // Clear a prior run's constrained width AND height before measuring — otherwise scrollWidth /
+    // offsetHeight report the already-clamped box (not the natural content size) on every call
+    // after the first, and the card can shrink to fit a narrower/shorter surface but never grow
+    // back when the surface widens/grows again. An uncleared max-height is the worse of the two:
+    // placePopover positions a card sized for the STALE clamped height, then the un-clamped natural
+    // height (restored by the assignment below) springs back afterward — so the rendered card can
+    // overlap the anchor or run off the surface edge until the popover is closed and reopened.
     card.style.width = '';
+    card.style.maxHeight = '';
     const w = popoverWidth(surface.w, card.scrollWidth || POPOVER.minW);
     card.style.width = `${w}px`;
     let anchor: Rect | null = null;

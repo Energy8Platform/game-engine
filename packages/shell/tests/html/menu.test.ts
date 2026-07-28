@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
 import { createPopover } from '@/ui/html/primitives';
+import { POPOVER } from '@/core/popover';
 import type { ShellConfig } from '@/core/types';
 
 const rect = (x: number, y: number, w: number, h: number): DOMRect =>
@@ -176,5 +177,58 @@ describe('bar menu popover', () => {
     expect(parseFloat(pop.card.style.left)).toBe(300); // tracks the NEW element, not the stale one
     const arrow = pop.card.querySelector('.ge-pop-arrow') as HTMLElement;
     expect(arrow.style.display).not.toBe('none'); // still anchored — arrow stays visible, not centred
+  });
+
+  // Regression: position() clears a prior run's constrained WIDTH before measuring (see the comment
+  // in createPopover), but must do the same for max-height. offsetHeight respects `max-height` in a
+  // real browser, so once a first position() call clamps the card short, an uncleared max-height
+  // makes every later call measure the CLAMPED height forever — even after the surface regrows and
+  // the card no longer needs clamping. jsdom's real offsetHeight is a constant 0 (which is exactly
+  // why this whole branch is otherwise untested), so this getter emulates a real browser: it reports
+  // the natural height, or the max-height clamp when one is narrower.
+  it('re-measures the true content height after a max-height clamp, so a regrown surface repositions correctly', () => {
+    const NATURAL_H = 420;
+    const surface = document.createElement('div');
+    document.body.appendChild(surface);
+    let surfaceH = 360;
+    surface.getBoundingClientRect = () => rect(0, 0, 800, surfaceH);
+
+    // Models a bottom-bar burger: it re-anchors near the surface's bottom edge on resize, exactly
+    // like the real control bar does.
+    const anchorEl = document.createElement('button');
+    anchorEl.getBoundingClientRect = () => rect(20, surfaceH - 60, 40, 40);
+
+    const pop = createPopover({ ge: 'x', surface, anchor: anchorEl, onClose: () => {} });
+    document.body.appendChild(pop.root);
+    Object.defineProperty(pop.card, 'offsetHeight', {
+      configurable: true,
+      get() {
+        const mh = parseFloat(pop.card.style.maxHeight || '');
+        return Number.isFinite(mh) ? Math.min(NATURAL_H, mh) : NATURAL_H;
+      },
+    });
+
+    // First open: surface 800x360, burger near the bottom — the card is height-clamped to fit above it.
+    pop.position();
+    const firstMaxH = parseFloat(pop.card.style.maxHeight);
+    expect(firstMaxH).toBeLessThan(NATURAL_H); // genuinely clamped, not just capped by content
+    const firstTop = parseFloat(pop.card.style.top);
+    const firstRenderedBottom = firstTop + Math.min(NATURAL_H, firstMaxH);
+    expect(firstTop).toBeGreaterThanOrEqual(POPOVER.margin);
+    expect(firstRenderedBottom).toBeLessThanOrEqual(surfaceH - POPOVER.margin);
+
+    // Surface grows a lot (rotate / popout resize) — the burger re-anchors near the new bottom.
+    surfaceH = 900;
+    pop.position();
+
+    const top = parseFloat(pop.card.style.top);
+    const maxH = parseFloat(pop.card.style.maxHeight);
+    const renderedBottom = top + Math.min(NATURAL_H, maxH);
+    // The bug placed the card using the stale CLAMPED height, then lifted the clamp — so the card
+    // sprang back to its natural height after being positioned, spilling past the (regrown)
+    // surface's bottom edge and into the re-anchored burger.
+    expect(top).toBeGreaterThanOrEqual(POPOVER.margin);
+    expect(renderedBottom).toBeLessThanOrEqual(surfaceH - POPOVER.margin);
+    expect(renderedBottom).toBeLessThanOrEqual(surfaceH - 60); // clear of the re-anchored burger
   });
 });
