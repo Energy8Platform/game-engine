@@ -117,14 +117,17 @@ export function seedMenuValues(
     if (isSeparator(item)) continue;
     const type = (item as { type?: string }).type;
     if (!type || isPresetId(item.id)) continue;
-    if (item.id in prev) {
-      out[item.id] = prev[item.id];
-      continue;
-    }
-    if (type === 'toggle') out[item.id] = (item as MenuToggleItem).value ?? false;
-    else if (type === 'range') {
+    // A previous value only carries over when its runtime type still matches this item's kind.
+    // Without this guard, reconfiguring the same id from a toggle to a range (or back) would seed
+    // a boolean into a slider's position math (or a stale number into a checkbox) — a legitimate
+    // reconfiguration, not a config error, so it falls through to the item's own default instead
+    // of warning.
+    const prevValue = prev[item.id];
+    if (type === 'toggle') {
+      out[item.id] = typeof prevValue === 'boolean' ? prevValue : ((item as MenuToggleItem).value ?? false);
+    } else if (type === 'range') {
       const r = item as MenuRangeItem;
-      out[item.id] = r.value ?? rangeBounds(r).min;
+      out[item.id] = typeof prevValue === 'number' ? prevValue : (r.value ?? rangeBounds(r).min);
     }
   }
   return out;
@@ -136,8 +139,15 @@ function safeIcon(name: string | undefined): IconName | undefined {
   return name && (ICON_NAMES as readonly string[]).includes(name) ? (name as IconName) : undefined;
 }
 
-/** Expand the configured list into render-ready rows. Unknown ids are dropped with one warning —
- *  a typo in a preset id must be visible, not silently invisible. */
+/** Every drop/collision warning goes through here so the message style stays uniform. */
+function warn(message: string): void {
+  console.warn(`[shell] ${message}`);
+}
+
+/** Expand the configured list into render-ready rows. A config mistake — an unknown preset id, an
+ *  unrecognized custom `type`, or an invalid range span — is dropped with one warning rather than
+ *  silently misbehaving: a typo must be visible, not silently invisible. A custom id that collides
+ *  with a reserved preset id also warns, but keeps its row (see `custom()`). */
 export function resolveMenu(host: MenuHost): MenuRow[] {
   const rows: MenuRow[] = [];
   for (const item of host.menu) {
@@ -149,10 +159,11 @@ export function resolveMenu(host: MenuHost): MenuRow[] {
     if (!type) {
       const row = preset(host, item as MenuPresetItem);
       if (row) rows.push(row);
-      else console.warn(`[shell] unknown menu preset id "${item.id}" — item skipped`);
+      else warn(`unknown menu preset id "${item.id}" — item skipped`);
       continue;
     }
-    rows.push(custom(host, item as MenuToggleItem | MenuRangeItem | MenuButtonItem, type));
+    const row = custom(host, item as MenuToggleItem | MenuRangeItem | MenuButtonItem, type);
+    if (row) rows.push(row);
   }
   return rows;
 }
@@ -214,7 +225,13 @@ function custom(
   host: MenuHost,
   item: MenuToggleItem | MenuRangeItem | MenuButtonItem,
   type: string,
-): MenuRow {
+): MenuRow | null {
+  // Same store, different semantics: the real preset's get() and a custom row's get() disagree
+  // (see the preset cases below vs. the toggle case here). Routing does not change — Task 4's
+  // ShellHost is what actually owns the value — this warning just makes the clash visible.
+  if (isPresetId(item.id)) {
+    warn(`menu item id "${item.id}" collides with a built-in preset id — preset ids are reserved`);
+  }
   const disabled = item.disabled ?? false;
   const label = host.t(item.label ?? item.id);
   const icon = safeIcon(item.icon);
@@ -236,6 +253,12 @@ function custom(
   if (type === 'range') {
     const it = item as MenuRangeItem;
     const { min, max, step } = rangeBounds(it);
+    if (max <= min) {
+      // A renderer's position math ((value - min) / (max - min)) turns this into Infinity/NaN —
+      // drop the row instead, exactly like an unknown preset id.
+      warn(`menu item "${it.id}" has invalid range bounds (min ${min}, max ${max}) — item skipped`);
+      return null;
+    }
     return {
       kind: 'range',
       id: it.id,
@@ -253,14 +276,20 @@ function custom(
       format: it.format ?? (min === 0 && max === 1 ? percent : (v) => String(v)),
     };
   }
-  const it = item as MenuButtonItem;
-  return {
-    kind: 'button',
-    id: it.id,
-    label,
-    icon,
-    disabled,
-    chevron: it.chevron ?? false,
-    select: () => it.onSelect?.(),
-  };
+  if (type === 'button') {
+    const it = item as MenuButtonItem;
+    return {
+      kind: 'button',
+      id: it.id,
+      label,
+      icon,
+      disabled,
+      chevron: it.chevron ?? false,
+      select: () => it.onSelect?.(),
+    };
+  }
+  // Neither toggle, range, nor button — a typo'd `type` used to fall through to an unconditional
+  // button row with no onSelect. Drop it visibly instead.
+  warn(`menu item "${item.id}" has unknown type "${type}" — item skipped`);
+  return null;
 }

@@ -126,3 +126,62 @@ it('marks disabled rows', () => {
   const rows = resolveMenu(host([{ id: 'gameInfo', disabled: true }]));
   expect(rows[0].kind === 'button' && rows[0].disabled).toBe(true);
 });
+
+// ── Fix round 1: silent-failure edge cases found in review ─────────────────────────────────────
+
+it('drops a custom range row when min > max, warning once', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const items: MenuItem[] = [{ id: 'backwards', type: 'range', label: 'Backwards', min: 5, max: 1, value: 3 }];
+  const rows = resolveMenu(host(items));
+  expect(rows).toHaveLength(0);
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore();
+});
+
+it('drops a custom range row when min === max, warning once', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const items: MenuItem[] = [{ id: 'flat', type: 'range', label: 'Flat', min: 3, max: 3, value: 3 }];
+  const rows = resolveMenu(host(items));
+  expect(rows).toHaveLength(0);
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore();
+});
+
+it('reseeds from the item value, not a stale prev, when the runtime type no longer matches: toggle -> range', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const first = seedMenuValues([{ id: 'x', type: 'toggle', value: true, label: 'X' }]);
+  expect(first).toEqual({ x: true });
+  const second = seedMenuValues([{ id: 'x', type: 'range', min: 0, max: 10, value: 5, label: 'X' }], first);
+  expect(second).toEqual({ x: 5 });
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
+});
+
+it('reseeds from the item value, not a stale prev, when the runtime type no longer matches: range -> toggle', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const first = seedMenuValues([{ id: 'x', type: 'range', min: 0, max: 10, value: 5, label: 'X' }]);
+  expect(first).toEqual({ x: 5 });
+  const second = seedMenuValues([{ id: 'x', type: 'toggle', value: true, label: 'X' }], first);
+  expect(second).toEqual({ x: true });
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
+});
+
+it('drops a custom row with an unrecognized type, warning once', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const items = [{ id: 'z', type: 'toogle', value: true, label: 'Z' }] as unknown as MenuItem[];
+  const rows = resolveMenu(host(items));
+  expect(rows).toHaveLength(0);
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore();
+});
+
+it('warns when a custom item id collides with a built-in preset id, but still produces the row', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const items: MenuItem[] = [{ id: 'sound', type: 'toggle', label: 'Custom Sound', value: true }];
+  const rows = resolveMenu(host(items));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ kind: 'toggle', id: 'sound', label: 'Custom Sound' });
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore();
+});
