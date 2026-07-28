@@ -18,4 +18,5 @@ export type {
   AutoplayOptions,
   FreeSpinsState,
   Lang,
+  MenuItem,
 } from '@energy8platform/shell/html';

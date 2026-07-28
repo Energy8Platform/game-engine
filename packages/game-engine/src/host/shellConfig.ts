@@ -7,7 +7,7 @@ import type { Lang } from '@energy8platform/shell';
 import type { GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/shell/pixi';
 import type {
   PixiShellConfig, ShellMode, CurrencyConfig,
-  BonusOption, ShellFeatures,
+  BonusOption, ShellFeatures, MenuItem,
 } from '@energy8platform/shell/pixi';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { WinTier } from '../slot';
@@ -29,6 +29,10 @@ export interface SlotShellOptions {
   buyBonus?: BonusOption[];
   tiers?: WinTier[];
   features?: Partial<ShellFeatures>;
+  /** Bar-menu popover items, in order. Omit for the shell's default list (sound/music/sfx,
+   *  separator, gameInfo). See `@energy8platform/shell`'s `MenuItem` for preset ids and custom
+   *  toggle/range/button/separator row kinds. */
+  menu?: MenuItem[];
   /** Per-game translation map. Keys are the English source strings (from the spec or copy);
    *  values are the translated strings for each language. Merged with the shell's built-in
    *  `LOCALES` catalog — game strings take precedence over the built-in entries for the same key.
@@ -444,5 +448,6 @@ export function buildShellConfig(
     win: 0,
     mode: runtime.mode,
     features,
+    menu: opts.menu,
   };
 }
