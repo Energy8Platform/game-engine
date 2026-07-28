@@ -185,3 +185,21 @@ it('warns when a custom item id collides with a built-in preset id, but still pr
   expect(warn).toHaveBeenCalledTimes(1);
   warn.mockRestore();
 });
+
+// ── Final review fixes ──────────────────────────────────────────────────────────────────────
+
+it('falls back to the derived step when a custom range declares step 0 or negative', () => {
+  const items: MenuItem[] = [
+    { id: 'zeroStep', type: 'range', label: 'Zero step', min: 0, max: 10, step: 0, value: 5 },
+    { id: 'negStep', type: 'range', label: 'Negative step', min: 0, max: 10, step: -2, value: 5 },
+  ];
+  const rows = resolveMenu(host(items));
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    if (row.kind !== 'range') throw new Error('range expected');
+    // Same derived step an omitted `step` would get for this span — (10-0)/20 — NOT the declared
+    // non-positive value, which would make a renderer's (raw-min)/step position math divide by
+    // zero (or invert direction) and produce NaN.
+    expect(row.step).toBe(0.5);
+  }
+});

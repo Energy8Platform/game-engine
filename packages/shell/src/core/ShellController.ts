@@ -284,8 +284,8 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     return this.state.volumes[key];
   }
   /** Set a volume slider (0..1). Shared by the slider control (drag) and game code (public API):
-   *  clamps, stores so a reopened Settings overlay reflects it, emits `settingChange`, and
-   *  live-updates the slider if the overlay is currently open. */
+   *  clamps, stores so a reopened menu popover reflects it, emits `settingChange`, and
+   *  live-updates the slider if the menu is currently open. */
   setVolume(key: VolumeKey, value: number): void {
     const v = Math.max(0, Math.min(1, value));
     this.state.volumes[key] = v;
@@ -441,6 +441,11 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
+    // With the menu (or any overlay) open at teardown, `menuRefresh` / `overlay` / `overlayKind`
+    // would otherwise survive the renderer's destroy — so a later setVolume()/setSound() call
+    // invokes a stale row updater against already-destroyed Pixi Graphics (or a detached DOM node)
+    // and throws. Run BEFORE the renderer teardown below, while it can still close cleanly.
+    this.closeModal();
     if (typeof document !== 'undefined') {
       this.kbd?.detach();
       document.removeEventListener('pointerdown', this.pullFocus, true);

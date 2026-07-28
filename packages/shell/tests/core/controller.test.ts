@@ -197,4 +197,23 @@ describe('menu', () => {
     shell.setVolume('sfx', 0.5);
     expect(seen).toHaveLength(2);
   });
+
+  // Regression: destroy() left an open menu's overlay/overlayKind/menuRefresh untouched, so a
+  // stale refresher survived teardown — a later setVolume()/setSound() call (e.g. from game code
+  // that doesn't know the shell was torn down) would invoke it against an already-destroyed
+  // renderer control (Pixi Graphics) and throw.
+  it('destroy() closes an open menu first, so a stale refresher never fires after teardown', async () => {
+    const { c: shell, r } = make();
+    const refresh = vi.fn();
+    shell.openMenu();
+    shell.setMenuRefresh(refresh);
+    expect(r.closed).toBe(0);
+
+    await shell.destroy();
+    expect(r.closed).toBe(1); // closeModal() ran and told the renderer to close
+
+    shell.setVolume('music', 0.4);
+    shell.setSound(false);
+    expect(refresh).not.toHaveBeenCalled(); // the stale refresher was cleared, not just orphaned
+  });
 });

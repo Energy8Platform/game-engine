@@ -21,7 +21,8 @@ export class ScrollBox extends Container {
     this.canvas = canvas;
     this.addChild(this.content);
     // maskG is added to the scene only while scrolling (see refresh) — a leftover unused mask
-    // graphic renders as a white rect, and a masked container blocks pointer events to its children.
+    // graphic renders as a white rect. (Masking does NOT gate pointer events to the content, despite
+    // what an earlier version of this comment claimed — see the correction in refresh() below.)
     this.eventMode = 'static';
     this.on('pointerdown', this.onDown);
     this.on('globalpointermove', this.onMove);

@@ -103,7 +103,13 @@ export function rangeBounds(item: { min?: number; max?: number; step?: number })
 } {
   const min = item.min ?? 0;
   const max = item.max ?? 1;
-  return { min, max, step: item.step ?? (max - min) / 20 };
+  const derivedStep = (max - min) / 20;
+  // A declared `step` must be a genuinely positive number. `??` alone doesn't catch this: an
+  // explicit 0 (or a negative value) is not null/undefined, so it would sail through unchanged —
+  // and a renderer's position math divides by it (Pixi's fromUnit: `(raw-min)/step`), turning the
+  // slider's value into NaN, which then reaches `state.menu` and the `settingChange` payload.
+  const step = item.step != null && item.step > 0 ? item.step : derivedStep;
+  return { min, max, step };
 }
 
 /** Initial values for CUSTOM items (presets keep their own homes). Values already in `prev` win, so
