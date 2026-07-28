@@ -91,6 +91,19 @@ const shell: PixiGameShell = createPixiShell({
   balance: state.balance,
   win: state.win,
   mode: currentMode,
+  menu: [
+    { id: 'sound' },
+    { id: 'music' },
+    { id: 'sfx' },
+    { type: 'separator' },
+    { id: 'gameInfo' },
+    { id: 'lefty', type: 'toggle', label: 'Left-hand mode', value: false,
+      onChange: (v) => log(`left-hand: ${v}`) },
+    { id: 'speed', type: 'range', label: 'Reel speed', min: 1, max: 5, step: 1, value: 2,
+      format: (v) => `×${v}`, onChange: (v) => log(`speed: ${v}`) },
+    { id: 'paytable', type: 'button', label: 'Paytable', icon: 'ticket', chevron: true,
+      onSelect: () => log('paytable') },
+  ],
   gameInfo: {
     sections: [
       {

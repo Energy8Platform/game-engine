@@ -35,6 +35,11 @@ Sub-paths:
 - `@energy8platform/platform-core/loading` — `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG` (the Energy8 brand frame, renderer-agnostic)
 
 > The branded game shell moved out of platform-core into its own package, **`@energy8platform/shell`** — a renderer-agnostic logic core with pluggable renderers: `@energy8platform/shell/html` (DOM `createGameShell`) and `@energy8platform/shell/pixi` (`createPixiShell`). The i18n helpers (`socialize`/`createI18n`/`Lang`) live on its `.` (core) entry. game-engine's `/shell` re-exports `/html`.
+>
+> The burger on the bar opens a **configurable popover menu** (`ShellConfig.menu`: preset ids
+> `sound`/`music`/`sfx`/`gameInfo` plus custom `toggle`/`range`/`button`/`separator` rows), whose
+> values live in shell state (`getMenuValue`/`setMenuValue`). The old full-screen Settings overlay
+> is gone; `openSettings()` is a deprecated alias for `openMenu()`.
 
 ### `@energy8platform/game-engine`
 
