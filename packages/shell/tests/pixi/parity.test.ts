@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { Application, Ticker } from 'pixi.js';
 import { Container } from 'pixi.js';
 import { createPixiShell, removePixiShell, type PixiShellConfig } from '@/ui/pixi/index';
+import { resolveMenu, DEFAULT_MENU } from '@/core/menu';
 
 // ── Minimal Application stub ──────────────────────────────────────────────────
 // createPixiShell needs a Pixi Application; the renderer accesses .ticker, .screen,
@@ -116,5 +117,12 @@ describe('createPixiShell — PixiGameShell API-parity facade', () => {
     removePixiShell();
     const second = createPixiShell(makeConfig());
     expect(first).not.toBe(second);
+  });
+
+  it('the menu model both renderers draw has one row per configured item', () => {
+    const shell = createPixiShell(makeConfig());
+    const rows = resolveMenu(shell as never);
+    expect(rows).toHaveLength(DEFAULT_MENU.length);
+    expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'separator', 'button']);
   });
 });

@@ -15,7 +15,7 @@ import type { PixiComponentContext, ShellLayer, LayerHandle } from './context';
 import { installShellFont, whenFontReady } from './text';
 import { countUpText, tween } from './motion-pixi';
 import { BottomBar } from './components/BottomBar';
-import { openSettings } from './components/Settings';
+import { openMenu } from './components/Menu';
 import { openGameInfo } from './components/GameInfo';
 import { openBuyBonus } from './components/BuyBonus';
 import { openBetPicker, openAutoplayPicker } from './components/pickers';
@@ -133,7 +133,7 @@ export class PixiRenderer implements ShellRenderer {
     let layer: ShellLayer | null = null;
     switch (req.kind) {
       case 'menu':
-        layer = openSettings(this.ctx);
+        layer = openMenu(this.ctx, this.bar);
         break;
       case 'gameInfo':
         layer = openGameInfo(this.ctx);
@@ -155,7 +155,7 @@ export class PixiRenderer implements ShellRenderer {
         break;
     }
     if (!layer) return;
-    this.pushLayer(layer);
+    this.pushLayer(layer, { backdrop: req.kind !== 'menu' });
     const built = layer;
     return {
       onKey: built.onKey ? built.onKey.bind(built) : undefined,
