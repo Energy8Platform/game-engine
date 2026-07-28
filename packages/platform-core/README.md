@@ -587,7 +587,7 @@ Nothing in this code is Pixi-specific. The same pattern fits Three.js, Babylon, 
 
 `@energy8platform/platform-core/shell` is a **vanilla-DOM UI overlay** you layer over the game
 canvas — no Pixi, no React, no framework. It owns the control bar (3 modes: base / freeSpins /
-replay), the menu, settings, the game-info panel, and a buy-bonus selection overlay, plus generic
+replay), the bar menu, the game-info panel, and a buy-bonus selection overlay, plus generic
 modals and a replay summary. Branded Energy8 chrome, fully renderer-agnostic — pair it with Pixi,
 Phaser, Three.js, or a custom engine.
 
@@ -679,7 +679,7 @@ await removeGameShell();
 | `turboChange` | `number` | Turbo level cycled. |
 | `buyBonusSelect` | `{ id }` | A `type: 'bonus'` card was bought. |
 | `featureActivate` / `featureDeactivate` | `{ id }` | A `type: 'feature'` option (e.g. Ante) toggled. |
-| `menuOpen` | — | Burger tapped — the bar-menu popover opened (or closed it, if it was already open). |
+| `menuOpen` | — | The bar-menu popover opened. A second burger tap closes it and emits nothing. |
 | `settingsOpen` | — | **Deprecated** — only emitted by the deprecated `openSettings()` alias (which still opens the menu). New code should call `openMenu()` and listen for `menuOpen`. |
 | `infoOpen` | — | Game-info overlay opened. |
 | `settingChange` | `{ key, value }` | A bar-menu item's value changed (preset or custom). `key` is the item's id. Built-in: `sound` (bool), `music` / `sfx` (0–1). A custom item reports its own id and value type. |
