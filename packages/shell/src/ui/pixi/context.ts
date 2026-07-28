@@ -39,7 +39,7 @@ export interface PixiComponentContext extends ShellHost {
   readonly screenW: number;
   readonly screenH: number;
   render(): void;
-  pushLayer(node: ShellLayer): LayerHandle;
+  pushLayer(node: ShellLayer, opts?: { backdrop?: boolean }): LayerHandle;
   closeLayer(): void;
   fitModals(): void;
   /** Swap the active language at runtime (rebuilds resolver, re-renders bar). Optional. */

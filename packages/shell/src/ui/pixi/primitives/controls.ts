@@ -198,6 +198,52 @@ export class Slider extends Container implements Sizable {
   }
 }
 
+/** Pill switch — the Pixi twin of the DOM `.ge-toggle`. 42×24, knob 20, accent when on. */
+export class Toggle extends Container {
+  private track = new Graphics();
+  private knob = new Graphics();
+  private _value: boolean;
+  private onChange: (v: boolean) => void;
+  private accent: string;
+  private offFill: string;
+
+  constructor(value: boolean, onChange: (v: boolean) => void, accent = '#8b5cf6', off = 'rgba(255,255,255,.22)') {
+    super();
+    this._value = value;
+    this.onChange = onChange;
+    this.accent = accent;
+    this.offFill = off;
+    this.addChild(this.track, this.knob);
+    this.eventMode = 'static';
+    this.cursor = 'pointer';
+    this.hitArea = new Rectangle(0, 0, 42, 24);
+    this.on('pointertap', () => this.onChange(!this._value));
+    this.paint();
+  }
+
+  get value(): boolean {
+    return this._value;
+  }
+  setValue(v: boolean): void {
+    this._value = v;
+    this.paint();
+  }
+  private paint(): void {
+    this.track.clear();
+    this.track.roundRect(0, 0, 42, 24, 12);
+    this.track.fill(this._value ? this.accent : this.offFill);
+    this.knob.clear();
+    this.knob.circle(this._value ? 30 : 12, 12, 10);
+    this.knob.fill('#ffffff');
+  }
+  measureSize(): { w: number; h: number } {
+    return { w: 42, h: 24 };
+  }
+  setLayoutSize(): void {
+    /* fixed size */
+  }
+}
+
 /** Picker chip — `.ge-chip`. Selected = accent bg + accent border. */
 export class Chip extends Container implements Sizable {
   readonly id: string;

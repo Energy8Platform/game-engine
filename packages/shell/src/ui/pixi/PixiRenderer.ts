@@ -190,9 +190,11 @@ export class PixiRenderer implements ShellRenderer {
   }
 
   // ── layer stack ────────────────────────────────────────────────────────────
-  pushLayer(node: ShellLayer): LayerHandle {
+  pushLayer(node: ShellLayer, opts?: { backdrop?: boolean }): LayerHandle {
     this.clearLayer();
-    this.makeBackdrop(); // frosted snapshot of the scene behind (the DOM's backdrop-filter:blur)
+    // Light-dismiss layers (the menu popover) opt out with `{ backdrop: false }` — no frosted
+    // snapshot, the game stays visible behind them. Every other caller is unaffected (defaults on).
+    if (opts?.backdrop !== false) this.makeBackdrop(); // frosted snapshot (the DOM's backdrop-filter:blur)
     this.currentLayer = node;
     this.modalLayer.addChild(node);
     this.fitModals();
@@ -338,7 +340,7 @@ export class PixiRenderer implements ShellRenderer {
       get screenW() { return self.app.screen.width; },
       get screenH() { return self.app.screen.height; },
       render: () => self.renderBar(),
-      pushLayer: (node) => self.pushLayer(node),
+      pushLayer: (node, opts) => self.pushLayer(node, opts),
       // Route component-initiated closes through the controller (not straight to self.closeLayer) so
       // it clears its OverlayHandle. Otherwise the handle goes stale: hasOpenLayer() stays true and
       // keydowns keep routing to onKey on a destroyed overlay → write to a torn-down ScrollBox.

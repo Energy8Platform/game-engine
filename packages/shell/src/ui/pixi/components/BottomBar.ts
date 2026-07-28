@@ -118,6 +118,7 @@ export class BottomBar extends Container {
   private spin?: SpinDisc;
   private autoBtn?: IconButton;
   private turboBtn?: IconButton;
+  private menuBtn?: IconButton;
 
   constructor(host: PixiComponentContext) {
     super();
@@ -125,6 +126,14 @@ export class BottomBar extends Container {
     this.addChild(this.inner);
     if (host.layout === 'mobile') this.buildMobile();
     else this.buildWide();
+  }
+
+  /** Screen-space rect of the burger, for anchoring the menu popover. */
+  menuAnchor(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.menuBtn || this.menuBtn.destroyed) return null;
+    const p = this.menuBtn.getGlobalPosition();
+    const s = this.menuBtn.getSize();
+    return { x: p.x, y: p.y, w: s.width, h: s.height };
   }
 
   // ── wide / landscape ──────────────────────────────────────────────────────
@@ -139,15 +148,14 @@ export class BottomBar extends Container {
 
     // LEFT info group: menu · balance · (Total win) · (Win)
     const left = new FlexBox({ direction: 'row', align: 'center', gap: ZONE_GAP });
-    left.add(
-      new IconButton('menu', {
-        size: 36,
-        glyph: 30,
-        color: '#ffffff',
-        hover: tokens.accent,
-        onTap: () => this.host.actions.openMenu(),
-      }),
-    );
+    this.menuBtn = new IconButton('menu', {
+      size: 36,
+      glyph: 30,
+      color: '#ffffff',
+      hover: tokens.accent,
+      onTap: () => this.host.actions.openMenu(),
+    });
+    left.add(this.menuBtn);
     if (!state.replay) {
       const bal = readout(this.host, 'Balance', this.host.fmt(state.balance));
       this.balanceValue = bal.valueText;
@@ -340,6 +348,7 @@ export class BottomBar extends Container {
       hover: tokens.accent,
       onTap: () => this.host.actions.openMenu(),
     });
+    this.menuBtn = menu;
     // autoplay is a base-mode control only — hidden in free spins / replay (matches the DOM bar)
     if (isBase && config.features.autoplay) {
       this.autoBtn = new IconButton('autoplay', {
