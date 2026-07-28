@@ -9,11 +9,14 @@ export function openMenuPopover(
   host: ShellHost,
   surface: HTMLElement,
 ): { root: HTMLElement; position(): void } {
-  const anchor = surface.querySelector('[data-ge="menu"]') as HTMLElement | null;
   const pop = createPopover({
     ge: 'menu-popover',
     surface,
-    anchor,
+    // Resolved lazily on every position() call, not captured once: HtmlRenderer's renderBar() (run
+    // on every resize, and on ~20 other state changes) rebuilds the bottom bar from scratch, so the
+    // burger is a brand-new element after it — a captured reference would already be detached by
+    // the next position() call and the card would silently recentre with its arrow hidden.
+    anchor: () => surface.querySelector('[data-ge="menu"]') as HTMLElement | null,
     onClose: () => host.actions.closeOverlay(),
   });
   const updaters: Record<string, (v: boolean | number) => void> = {};

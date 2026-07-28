@@ -89,8 +89,12 @@ export interface PopoverOpts {
   ge: string;
   /** The shell root — the popover is placed in its coordinate space and clamped to it. */
   surface: HTMLElement;
-  /** The control the card points at; `null` centres the card and hides the arrow. */
-  anchor: HTMLElement | null;
+  /** The control the card points at; `null` centres the card and hides the arrow. A function is
+   *  re-resolved on EVERY `position()` call rather than captured once — a renderer that rebuilds
+   *  its DOM on resize/re-render (e.g. HtmlRenderer's `renderBar()`) replaces the anchor element,
+   *  so a captured reference would go stale and silently fall back to a centred card. Pass a
+   *  resolver whenever the anchor can be rebuilt out from under the popover. */
+  anchor: HTMLElement | null | (() => HTMLElement | null);
   onClose: () => void;
 }
 
@@ -123,11 +127,17 @@ export function createPopover(opts: PopoverOpts): {
     const surfaceRect = opts.surface.getBoundingClientRect();
     const surface = { w: surfaceRect.width || opts.surface.clientWidth, h: surfaceRect.height || opts.surface.clientHeight };
     if (surface.w <= 0 || surface.h <= 0) return;
+    // Clear a prior run's constrained width before measuring — otherwise scrollWidth reports the
+    // already-clamped box (not the natural content width) on every call after the first, and the
+    // card can shrink to fit a narrower surface but never grow back when the surface widens again.
+    card.style.width = '';
     const w = popoverWidth(surface.w, card.scrollWidth || POPOVER.minW);
     card.style.width = `${w}px`;
     let anchor: Rect | null = null;
-    if (opts.anchor) {
-      const a = opts.anchor.getBoundingClientRect();
+    // Resolve fresh every call — see the PopoverOpts.anchor doc comment.
+    const anchorEl = typeof opts.anchor === 'function' ? opts.anchor() : opts.anchor;
+    if (anchorEl) {
+      const a = anchorEl.getBoundingClientRect();
       if (a.width > 0 || a.height > 0) {
         anchor = { x: a.left - surfaceRect.left, y: a.top - surfaceRect.top, w: a.width, h: a.height };
       }

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
+import { createPopover } from '@/ui/html/primitives';
 import type { ShellConfig } from '@/core/types';
+
+const rect = (x: number, y: number, w: number, h: number): DOMRect =>
+  ({ x, y, left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, toJSON: () => ({}) }) as DOMRect;
 
 function cfg(mount: HTMLElement, over: Partial<ShellConfig> = {}): ShellConfig & { mount: HTMLElement } {
   return {
@@ -22,14 +26,22 @@ describe('bar menu popover', () => {
     mount = document.createElement('div');
     document.body.appendChild(mount);
     await removeGameShell();
+    // ShellController installs a global capture-phase pointerdown listener (unrelated to this
+    // popover) that calls window.focus() to pull focus into the game frame. jsdom doesn't
+    // implement window.focus and logs "Not implemented" via its virtual console on every call;
+    // the "closes on a click outside" test below dispatches a real pointerdown, so stub it quiet.
+    vi.spyOn(window, 'focus').mockImplementation(() => {});
   });
 
   it('burger opens the popover with the default rows, in order', () => {
     const shell = createGameShell(cfg(mount));
     const opened = vi.fn();
+    const setSpy = vi.fn();
     shell.on('menuOpen', opened);
+    shell.on('settingsOpen', setSpy);
     q(mount, '[data-ge="menu"]')!.click();
     expect(opened).toHaveBeenCalledOnce();
+    expect(setSpy).not.toHaveBeenCalled(); // settingsOpen is only emitted by the deprecated openSettings() alias
     expect(q(mount, '[data-ge="menu-popover"]')).toBeTruthy();
     const rows = Array.from(mount.querySelectorAll('[data-ge^="menu-row-"], [data-ge="menu-sep"]'));
     expect(rows.map((r) => (r as HTMLElement).dataset.ge)).toEqual([
@@ -135,5 +147,34 @@ describe('bar menu popover', () => {
     const card = q(mount, '[data-ge="menu-card"]')!;
     expect(parseFloat(card.style.left)).toBe(20);
     expect(parseFloat(card.style.top)).toBeLessThan(540);
+  });
+
+  // Regression: HtmlRenderer's ResizeObserver calls renderBar() (which does barHost.innerHTML = ''
+  // and rebuilds the bottom bar — a brand-new burger element) BEFORE re-calling position(). A
+  // popover that captured its anchor once would already be pointing at a detached element by then,
+  // silently recentring with its arrow hidden on every resize. createPopover must re-resolve an
+  // anchor FUNCTION on every position() call instead of tracking a fixed reference.
+  it('re-resolves a function anchor on every position() call, tracking a rebuilt element', () => {
+    const surface = document.createElement('div');
+    document.body.appendChild(surface);
+    surface.getBoundingClientRect = () => rect(0, 0, 1000, 600);
+
+    let current = document.createElement('button');
+    current.getBoundingClientRect = () => rect(20, 540, 40, 40);
+
+    const pop = createPopover({ ge: 'x', surface, anchor: () => current, onClose: () => {} });
+    document.body.appendChild(pop.root);
+    pop.position();
+    expect(parseFloat(pop.card.style.left)).toBe(20);
+
+    // Simulate renderBar(): the old burger is discarded; a brand-new one takes its place at a
+    // different position — exactly what a barHost rebuild does to the real `[data-ge="menu"]` node.
+    current = document.createElement('button');
+    current.getBoundingClientRect = () => rect(300, 540, 40, 40);
+    pop.position();
+
+    expect(parseFloat(pop.card.style.left)).toBe(300); // tracks the NEW element, not the stale one
+    const arrow = pop.card.querySelector('.ge-pop-arrow') as HTMLElement;
+    expect(arrow.style.display).not.toBe('none'); // still anchored — arrow stays visible, not centred
   });
 });
