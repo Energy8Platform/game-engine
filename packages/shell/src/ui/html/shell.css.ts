@@ -172,7 +172,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
   border-radius:16px; background:var(--shell-plaque-glass); color:#fff; font-size:14px; font-weight:600; }
 #${SHELL_ROOT_ID} .ge-ov-row .ge-grow { flex:1; text-align:left; }
 #${SHELL_ROOT_ID} button.ge-ov-row { cursor:pointer; font-family:inherit; transition:background .12s ease, color .12s ease; }
-#${SHELL_ROOT_ID} button.ge-ov-row:hover { background:var(--shell-plaque-glass-hover); color:var(--shell-accent); }
+#${SHELL_ROOT_ID} button.ge-ov-row:hover:not([disabled]) { background:var(--shell-plaque-glass-hover); color:var(--shell-accent); }
+/* disabled rows — mirrors Pixi's box.alpha = 0.5 for all three row kinds. A <button> row carries
+   the native attribute directly; a toggle/range row is a <div> wrapper, so it gets .ge-disabled. */
+#${SHELL_ROOT_ID} .ge-ov-row[disabled], #${SHELL_ROOT_ID} .ge-ov-row.ge-disabled { opacity:.5; cursor:default; }
 #${SHELL_ROOT_ID} .ge-ov-row.ge-col { flex-direction:column; align-items:stretch; gap:10px; }
 #${SHELL_ROOT_ID} .ge-ov-row .ge-row-head { display:flex; justify-content:space-between; align-items:center; }
 #${SHELL_ROOT_ID} .ge-ov-row .ge-row-head .ge-val { color:var(--shell-plaque-label); font-variant-numeric:tabular-nums; font-weight:700; }
@@ -183,6 +186,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-toggle i { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
   background:#fff; transition:left .12s ease; }
 #${SHELL_ROOT_ID} .ge-toggle.ge-on i { left:20px; }
+#${SHELL_ROOT_ID} .ge-toggle:disabled { cursor:default; }
 /* sound on/off — speaker icon button (replaces the toggle) */
 #${SHELL_ROOT_ID} .ge-snd { pointer-events:auto; cursor:pointer; border:none; background:none; padding:0;
   width:36px; height:36px; display:flex; align-items:center; justify-content:center; font-size:24px;

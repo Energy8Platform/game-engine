@@ -127,6 +127,46 @@ describe('bar menu popover', () => {
     expect(onSelect).toHaveBeenCalledOnce();
   });
 
+  // Regression: Pixi dims every disabled row (box.alpha = 0.5); the DOM previously set only the
+  // native `disabled` attribute, so a disabled toggle/range row (a <div> wrapper, which cannot
+  // carry [disabled] itself) had NO visual treatment at all, and a disabled BUTTON row still lit up
+  // on hover because bare `:hover` matches a disabled element. `disabled` is public MenuItem API, so
+  // a game that ships it must get one consistent behaviour, not two.
+  it('disabled rows of every kind are visually marked and do not write through', () => {
+    const onSelect = vi.fn();
+    const onChange = vi.fn();
+    const shell = createGameShell(cfg(mount, {
+      menu: [
+        { id: 'lefty', type: 'toggle', label: 'Left-hand', value: false, disabled: true, onChange },
+        { id: 'speed', type: 'range', label: 'Speed', min: 1, max: 5, step: 1, value: 2, disabled: true },
+        { id: 'paytable', type: 'button', label: 'Paytable', disabled: true, onSelect },
+      ],
+    }));
+    shell.openMenu();
+
+    // toggle — the row container is a <div>, so it needs the class; the control itself is a real
+    // <button disabled>.
+    const toggleRow = q(mount, '[data-ge="menu-row-lefty"]')!;
+    expect(toggleRow.classList.contains('ge-disabled')).toBe(true);
+    const toggleBtn = q(mount, '[data-ge="menu-item-lefty"]') as HTMLButtonElement;
+    expect(toggleBtn.disabled).toBe(true);
+    toggleBtn.click();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(shell.getMenuValue('lefty')).toBe(false);
+
+    // range — same <div>-wrapper story; the native attribute already reaches the <input>.
+    const rangeRow = q(mount, '[data-ge="menu-row-speed"]')!;
+    expect(rangeRow.classList.contains('ge-disabled')).toBe(true);
+    const rangeInput = q(mount, '[data-ge="menu-item-speed"]') as HTMLInputElement;
+    expect(rangeInput.disabled).toBe(true);
+
+    // button — the row IS the control, so [disabled] alone marks and blocks it.
+    const payBtn = q(mount, '[data-ge="menu-item-paytable"]') as HTMLButtonElement;
+    expect(payBtn.disabled).toBe(true);
+    payBtn.click();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it('live-updates an open popover from setMenuValue', () => {
     const shell = createGameShell(cfg(mount));
     shell.openMenu();

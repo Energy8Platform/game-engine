@@ -74,6 +74,7 @@ function buildRow(
   if (row.kind === 'toggle') {
     const el = document.createElement('div');
     el.className = 'ge-ov-row';
+    el.classList.toggle('ge-disabled', row.disabled); // a <div> can't carry [disabled] itself
     el.dataset.ge = `menu-row-${row.id}`;
     const ico = glyph(row.icon(row.get()), 'ge-mi-icon');
     const label = document.createElement('span');
@@ -102,6 +103,7 @@ function buildRow(
   // range
   const el = document.createElement('div');
   el.className = 'ge-ov-row ge-col';
+  el.classList.toggle('ge-disabled', row.disabled); // a <div> can't carry [disabled] itself
   el.dataset.ge = `menu-row-${row.id}`;
   const head = document.createElement('div');
   head.className = 'ge-row-head';
