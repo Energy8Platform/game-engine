@@ -133,7 +133,10 @@ export class PixiRenderer implements ShellRenderer {
     let layer: ShellLayer | null = null;
     switch (req.kind) {
       case 'menu':
-        layer = openMenu(this.ctx, this.bar);
+        // A getter, not `this.bar` by value: renderBar() destroys/rebuilds the bar on every resize
+        // and ~20 other state changes, in the same resize handler that then repositions this popover
+        // — see Menu.ts's openMenu doc comment for why this must stay lazy.
+        layer = openMenu(this.ctx, () => this.bar?.menuAnchor() ?? null);
         break;
       case 'gameInfo':
         layer = openGameInfo(this.ctx);

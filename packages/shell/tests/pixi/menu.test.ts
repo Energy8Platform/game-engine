@@ -2,8 +2,9 @@ import './setup-canvas';
 import { describe, it, expect, vi } from 'vitest';
 import { Container, EventBoundary, Matrix } from 'pixi.js';
 import { openMenu } from '@/ui/pixi/components/Menu';
-import { Toggle } from '@/ui/pixi/primitives/controls';
+import { Toggle, Slider } from '@/ui/pixi/primitives/controls';
 import { ScrollBox } from '@/ui/pixi/primitives/scroll';
+import { Popover } from '@/ui/pixi/primitives/popover';
 import { IconView } from '@/ui/pixi/pixi-icon';
 import type { PixiComponentContext } from '@/ui/pixi/context';
 import { makeContext } from './_host';
@@ -177,5 +178,88 @@ describe('Pixi bar menu — rows stay interactive under the scroll mask (risk 2)
     expect(hit).toBe(toggleLast);
     hit!.emit('pointertap');
     expect(host.getMenuValue('t19')).toBe(true);
+  });
+});
+
+// ── Finding 1 (fix round 1): the anchor must track a bar REPLACED after open, not the reference
+// captured at open time. PixiRenderer.renderBar() destroys and rebuilds the BottomBar on every
+// resize AND on ~20 other state changes, in the SAME resize handler that then repositions the open
+// menu — so openMenu takes a getAnchor FUNCTION precisely so each reposition reads whichever bar is
+// current, never a captured (possibly already-destroyed) instance. ─────────────────────────────────
+describe('Pixi bar menu — anchor re-resolves after the bar is replaced (finding 1)', () => {
+  it('follows a bar swapped in after open, not the one captured at open time', () => {
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    let current = { menuAnchor: () => ({ x: 100, y: 540, w: 40, h: 40 }) };
+    const layer = openMenu(host, () => current.menuAnchor()) as unknown as Popover;
+    expect(layer.arrowVisible).toBe(true);
+    expect(layer.cardX).toBe(100);
+
+    // Simulate PixiRenderer.renderBar(): the old bar is torn down and a brand-new one, at a
+    // different position, takes its place — exactly what happens to the real BottomBar on the next
+    // resize/bet/balance change while the menu stays open.
+    current = { menuAnchor: () => ({ x: 300, y: 540, w: 40, h: 40 }) };
+    layer.resize(1000, 600);
+
+    expect(layer.arrowVisible).toBe(true);
+    expect(layer.cardX).toBe(300); // tracks the NEW bar's rect, not the stale one from open time
+  });
+
+  it('recentres (arrow hidden) once the current bar reports no anchor, instead of freezing on the old one', () => {
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    let current: { menuAnchor(): { x: number; y: number; w: number; h: number } | null } | null = {
+      menuAnchor: () => ({ x: 100, y: 540, w: 40, h: 40 }),
+    };
+    const layer = openMenu(host, () => current?.menuAnchor() ?? null) as unknown as Popover;
+    expect(layer.arrowVisible).toBe(true);
+
+    current = null; // e.g. the bar was destroyed and hasn't been rebuilt yet
+    layer.resize(1000, 600);
+    expect(layer.arrowVisible).toBe(false);
+  });
+});
+
+// ── Finding 2 (fix round 1): row.disabled was ignored for toggle and range rows — the button
+// branch dimmed + skipped wiring, but a disabled custom toggle/range item rendered fully interactive
+// and wrote through, unlike the DOM renderer, which sets the native `disabled` attribute on both. ──
+describe('Pixi bar menu — disabled toggle/range rows do not write through (finding 2)', () => {
+  it('a disabled toggle row is dimmed, non-hit-testable, and ignores a direct tap', () => {
+    const host = makeContext({ menu: [{ id: 'x', type: 'toggle', label: 'X', disabled: true }] });
+    const layer = openMenu(host);
+    const row = findByLabel(layer as never, 'menu-row-x')!;
+    expect(row.alpha).toBe(0.5);
+    const toggle = row.children.find((c: unknown) => c instanceof Toggle) as Toggle;
+    expect(toggle.eventMode).toBe('none');
+    toggle.emit('pointertap'); // even a direct emit (bypassing hit-testing) must not write through
+    expect(host.getMenuValue('x')).toBeUndefined(); // never written — the disabled row ignored the tap
+  });
+
+  it('a disabled range row is dimmed, non-hit-testable, and ignores a direct drag', () => {
+    const host = makeContext({ menu: [{ id: 'y', type: 'range', label: 'Y', min: 0, max: 1, disabled: true }] });
+    const layer = openMenu(host);
+    const row = findByLabel(layer as never, 'menu-row-y')!;
+    expect(row.alpha).toBe(0.5);
+    const slider = row.children.find((c: unknown) => c instanceof Slider) as Slider;
+    expect(slider.eventMode).toBe('none');
+    expect(host.getMenuValue('y')).toBeUndefined(); // nothing has written to it yet
+    slider.emit('pointerdown', { global: { x: 99999, y: 0 } } as any); // would normally start a drag
+    expect(host.getMenuValue('y')).toBeUndefined(); // still nothing — the disabled row ignored it
+  });
+});
+
+// ── Finding 3 (fix round 1): the slider snapped to a bare multiple of `step`, ignoring the `min`
+// offset — wrong whenever min isn't itself a multiple of step, which the default step (span/20)
+// makes the common case. A far-left drag on { min: 1, max: 10 } (step 0.45) used to emit 0.9. ──────
+describe('Pixi bar menu — range slider snaps to the min-anchored lattice (finding 3)', () => {
+  it('dragging to the far left/right emits exactly min/max, not an off-lattice value below min', () => {
+    const host = makeContext({ menu: [{ id: 'r', type: 'range', label: 'R', min: 1, max: 10 }] });
+    const layer = openMenu(host);
+    const row = findByLabel(layer as never, 'menu-row-r')!;
+    const slider = row.children.find((c: unknown) => c instanceof Slider) as Slider;
+
+    slider.emit('pointerdown', { global: { x: -99999, y: 0 } } as any); // drag to the far left (u → 0)
+    expect(host.getMenuValue('r')).toBe(1); // exactly min — the old formula gave 0.9
+
+    slider.emit('pointerdown', { global: { x: 99999, y: 0 } } as any); // drag to the far right (u → 1)
+    expect(host.getMenuValue('r')).toBe(10); // exactly max, still on the lattice
   });
 });
