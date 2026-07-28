@@ -8,7 +8,7 @@ export interface PopoverPlacement {
   /** Top-left of the popover card, in surface coordinates. */
   x: number;
   y: number;
-  /** Height cap for the card on the chosen side; the row list scrolls inside it. */
+  /** True space on the chosen side, in surface coordinates; may be less than minH on a very short surface. The row list scrolls inside it. */
   maxH: number;
   /** Arrow centre, relative to the card's left edge. `-1` when there is no anchor to point at. */
   arrowX: number;
@@ -34,7 +34,7 @@ const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.m
 /** Card width: content width clamped to [minW, maxW] and never wider than the surface. */
 export function popoverWidth(surfaceW: number, contentW: number): number {
   const hi = Math.min(POPOVER.maxW, surfaceW - POPOVER.margin * 2);
-  return clamp(contentW, Math.min(POPOVER.minW, hi), hi);
+  return Math.max(0, clamp(contentW, Math.min(POPOVER.minW, hi), hi));
 }
 
 /** Place the card above the anchor (below if it does not fit), left-aligned to the anchor and
@@ -46,10 +46,14 @@ export function placePopover(
 ): PopoverPlacement {
   const { margin, gap, arrowInset, minH } = POPOVER;
   if (!anchor) {
+    const maxH = Math.max(0, surface.h - margin * 2);
+    const h = Math.min(size.h, maxH);
+    const rawY = (surface.h - h) / 2;
+    const y = clamp(rawY, margin, Math.max(margin, surface.h - h - margin));
     return {
       x: Math.max(margin, (surface.w - size.w) / 2),
-      y: Math.max(margin, (surface.h - size.h) / 2),
-      maxH: Math.max(minH, surface.h - margin * 2),
+      y,
+      maxH,
       arrowX: -1,
       below: false,
     };
@@ -59,10 +63,11 @@ export function placePopover(
   // Prefer above; flip only when the card would be squeezed below its usable minimum AND there is
   // genuinely more room on the other side.
   const below = spaceAbove < Math.min(size.h, minH) && spaceBelow > spaceAbove;
-  const maxH = Math.max(minH, below ? spaceBelow : spaceAbove);
+  const maxH = Math.max(0, below ? spaceBelow : spaceAbove);
   const h = Math.min(size.h, maxH);
   const x = clamp(anchor.x, margin, Math.max(margin, surface.w - size.w - margin));
-  const y = below ? anchor.y + anchor.h + gap : anchor.y - gap - h;
+  const rawY = below ? anchor.y + anchor.h + gap : anchor.y - gap - h;
+  const y = clamp(rawY, margin, Math.max(margin, surface.h - h - margin));
   const arrowX = clamp(anchor.x + anchor.w / 2 - x, arrowInset, Math.max(arrowInset, size.w - arrowInset));
   return { x, y, maxH, arrowX, below };
 }
