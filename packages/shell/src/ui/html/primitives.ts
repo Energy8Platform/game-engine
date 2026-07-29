@@ -103,6 +103,15 @@ export interface PopoverOpts {
    *  caller before `plate`/`pointer` were split) keeps behaving exactly as it did before. Same
    *  re-resolve-per-call rule as `plate`. */
   pointer?: HTMLElement | null | (() => HTMLElement | null);
+  /** An element that visually pops out ABOVE the plate's own box — e.g. the mobile SPIN/FS hero,
+   *  taller than the `.ge-m-controls` row and vertically centred, so it overflows the row's own top
+   *  edge. When present (and its measured top is above the plate's), the plate rect's TOP edge is
+   *  extended upward to match it — bottom edge untouched — so `placePopover` sees the row's true
+   *  visual extent on the side that matters, instead of a card whose bottom (only `gap` above the
+   *  plate's own top) can clip the popped-out control's arc. Omit/return null when nothing pops out
+   *  (e.g. the wide layout, whose plate already contains its content) — a no-op. Same
+   *  re-resolve-per-call rule as `plate`/`pointer`. */
+  plateOverflowTop?: HTMLElement | null | (() => HTMLElement | null);
   /** The scale factor the bar currently applies to itself (HtmlRenderer.applyFitScale's `s`). The
    *  card matches it so its typography/padding/row-heights scale in lockstep with the bar chrome.
    *  Defaults to 1 (no scaling) when omitted. */
@@ -183,7 +192,18 @@ export function createPopover(opts: PopoverOpts): {
     // screen units even though the card's own layout (width/height above) is still LOCAL/unscaled.
     const plateEl = resolveEl(opts.plate);
     const pointerEl = resolveEl(opts.pointer);
-    const plate = rectOf(plateEl, surfaceRect) ?? rectOf(pointerEl, surfaceRect);
+    let plate = rectOf(plateEl, surfaceRect) ?? rectOf(pointerEl, surfaceRect);
+    // Extend the plate's TOP edge upward to a popped-out hero's true top (e.g. the mobile SPIN/FS
+    // control, taller than its row) — bottom edge untouched. Both rects are already in the SAME
+    // surface-coordinate space (post any bar-scale transform), so this is a plain coordinate compare,
+    // no separate unit conversion needed.
+    const overflowEl = resolveEl(opts.plateOverflowTop);
+    if (plate) {
+      const overflowRect = rectOf(overflowEl, surfaceRect);
+      if (overflowRect && overflowRect.y < plate.y) {
+        plate = { ...plate, h: plate.h + (plate.y - overflowRect.y), y: overflowRect.y };
+      }
+    }
     const pointer = rectOf(pointerEl, surfaceRect);
     const p = placePopover(plate, surface, { w: resolvedW, h: naturalH * s }, pointer);
 

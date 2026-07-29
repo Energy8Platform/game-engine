@@ -362,6 +362,72 @@ describe('Pixi bar menu — plate drives placement, pointer drives only the arro
   });
 });
 
+// ── Defect 1 (review of the anchoring fix): on mobile the controls row is 62px (M_CTRL_H) tall but
+// the SPIN/FS hero is 84px, centred, so it pops (84-62)/2 = 11px above (and, separately, below) the
+// row's own box. The plate the popover math used only ever covered the row's own 62px box, so the
+// card's bottom — `gap`(8px) above the plate's top — clipped the top ~3px of the hero's arc (11-8=3).
+// Fixed by extending the plate's TOP edge upward by the hero's pop-out amount (`pop`), so the plate
+// is the row's true visual extent on the side that matters, without touching the wide layout (whose
+// own pop(8) already exactly equals `gap`, so it never needed the fix) or the row's bottom edge
+// (the info pill's own, separate concern). ──────────────────────────────────────────────────────────
+describe('Pixi bar menu — mobile plate clears the popped-out hero (defect 1)', () => {
+  const POP = 11; // (SPIN 84 − M_CTRL_H 62) / 2 — the hero's pop-out on each side of the row
+
+  it("menuPlate()'s top matches the hero's true (popped-out) top, not the row's own lower top", () => {
+    const host = makeContext({ layout: 'mobile', screenW: 375, screenH: 667 }); // mode: 'base' by default
+    const bar = new BottomBar(host);
+    bar.applyFit();
+
+    const s = bar.fitScale();
+    const origin = (bar as unknown as { inner: { getGlobalPosition(): { y: number } } }).inner.getGlobalPosition();
+    // The hero is vertically centred over a row 22px shorter than itself (topPad === pop, by
+    // construction — see applyFitMobile), so its own true top always sits at LOCAL y=0, i.e. exactly
+    // at the bar's own origin — independent of this fix, which only changes what the PLATE reports.
+    const heroTrueTop = origin.y;
+
+    const plate = bar.menuPlate();
+    expect(plate).not.toBeNull();
+    expect(plate!.y).toBeCloseTo(heroTrueTop, 5);
+    // Regression guard: the PRE-fix value (the row's own top, `pop` below the hero's true top) must
+    // be clearly distinct — i.e. this assertion couldn't have passed by coincidence either way.
+    expect(plate!.y).not.toBeCloseTo(heroTrueTop + POP * s, 1);
+  });
+
+  it('a real popover opened against the mobile bar clears the hero — its bottom never dips past the true top', () => {
+    const host = makeContext({ layout: 'mobile', screenW: 375, screenH: 667 });
+    const bar = new BottomBar(host);
+    bar.applyFit();
+    const origin = (bar as unknown as { inner: { getGlobalPosition(): { y: number } } }).inner.getGlobalPosition();
+    const heroTrueTop = origin.y;
+
+    const layer = openMenu(
+      host,
+      () => bar.menuAnchor(),
+      () => bar.menuPlate(),
+      () => bar.fitScale(),
+    ) as unknown as Popover;
+    // card.height reflects card.scale AND the arrow (which itself extends ~7px past the rounded
+    // card body, pointing down at the plate/burger) — i.e. the card's FULL visual footprint, arrow
+    // tip included. That footprint must never dip below the hero's true top.
+    const cardBottom = layer.cardY + layer.card.height;
+    expect(cardBottom).toBeLessThanOrEqual(heroTrueTop + 0.01);
+  });
+
+  it('the wide layout (whose plate already contains its content) is unaffected', () => {
+    const host = makeContext({ layout: 'wide', screenW: 1200, screenH: 675 });
+    const bar = new BottomBar(host);
+    bar.applyFit();
+    const plateWide = bar.menuPlate();
+    // Wide's own hero pop (8px = SPIN_POP) already equals POPOVER.gap (8px) — the fix only ever
+    // touches applyFitMobile's plateRect computation, so the wide plate's y is the panel's own,
+    // un-extended top exactly as before.
+    const origin = (bar as unknown as { inner: { getGlobalPosition(): { y: number } } }).inner.getGlobalPosition();
+    const s = bar.fitScale();
+    const SPIN_POP_WIDE = 8; // (SPIN 84 − BAR_H 68) / 2
+    expect(plateWide!.y).toBeCloseTo(origin.y + SPIN_POP_WIDE * s, 5);
+  });
+});
+
 // ── Finding 2 (fix round 1): row.disabled was ignored for toggle and range rows — the button
 // branch dimmed + skipped wiring, but a disabled custom toggle/range item rendered fully interactive
 // and wrote through, unlike the DOM renderer, which sets the native `disabled` attribute on both. ──

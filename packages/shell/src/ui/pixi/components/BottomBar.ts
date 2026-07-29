@@ -673,9 +673,17 @@ export class BottomBar extends Container {
     controls.setLayoutSize(rowW, M_CTRL_H);
     info.setLayoutSize(rowW, M_INFO_H);
     // The menu's plate — the controls row (NOT the info pill below it), local to `inner`. Read from
-    // `controls.outerWidth/outerHeight` (its own nominal box) rather than the FlexBox's bounds, which
-    // would include the SPIN hero popping out above/below it (see menuPlate()'s doc comment).
-    this.plateRect = { x: 0, y: topPad, w: controls.outerWidth, h: controls.outerHeight };
+    // `controls.outerWidth/outerHeight` (its own nominal box), NOT the FlexBox's own bounds (which
+    // would include the SPIN/FS hero popping out both above AND below it — see menuPlate()'s doc
+    // comment) — but the TOP edge is deliberately extended upward by `pop`, the same hero pop-out
+    // amount reserved as `topPad` above, so the plate the popover math sees is the row's true visual
+    // extent on the side that matters: without this, the card's bottom (only `gap` above the plate's
+    // top) can clip the top ~(pop-gap)px of the hero's arc, since 62px M_CTRL_H is 11px shorter than
+    // the 84px hero. The BOTTOM edge is left alone — the hero's symmetric under-pop is a separate,
+    // unrelated concern (the info pill sits right below with its own small gap) and extending it too
+    // would perturb the `below`-placement branch (spaceBelow) for no benefit. A no-op when `pop` is 0
+    // (no hero shown — e.g. replay without free spins).
+    this.plateRect = { x: 0, y: topPad - pop, w: controls.outerWidth, h: controls.outerHeight + pop };
     const s = rowW > 0 ? Math.max(0.4, Math.min(1, avail / rowW)) : 1;
 
     this.inner.scale.set(s);

@@ -21,6 +21,15 @@ export function openMenuPopover(
     // (NOT the info pill below it) — so the card sits flush with the WHOLE bar, not just the burger.
     plate: () => surface.querySelector(host.layout === 'mobile' ? '.ge-m-controls' : '.ge-bar-panel') as HTMLElement | null,
     pointer: () => surface.querySelector('[data-ge="menu"]') as HTMLElement | null,
+    // Mobile only: the SPIN disc / FS counter is taller than `.ge-m-controls` and centred inside it
+    // (`align-items:center` over a shorter fixed-height row), so it pops above the row's own top edge
+    // — see createPopover's `plateOverflowTop` doc comment. Exactly one of the two (or neither, e.g. a
+    // replay with no free spins) is ever rendered, so a combined selector resolves to whichever is
+    // current. Wide's plate already contains its content, so this deliberately resolves to null there.
+    plateOverflowTop: () =>
+      host.layout === 'mobile'
+        ? (surface.querySelector('[data-ge="spin"], [data-ge="fs-counter"]') as HTMLElement | null)
+        : null,
     scale: getScale,
     onClose: () => host.actions.closeOverlay(),
   });

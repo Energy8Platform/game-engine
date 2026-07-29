@@ -218,6 +218,44 @@ describe('bar menu popover', () => {
     expect(parseFloat(arrow.style.left)).toBeCloseTo(118 - 40, 5);
   });
 
+  // Defect 1 (review of the anchoring fix): on mobile the controls row (`.ge-m-controls`, CSS
+  // height:62px) is shorter than the SPIN/FS hero (84px) it contains, centred via `align-items:
+  // center` — so the hero pops out (84-62)/2=11px above the row's own top edge. The plate used to
+  // report only the row's own 62px box, so the card's bottom — only `gap`(8px) above the plate's
+  // top — clipped the top ~3px (11-8) of the hero's popped-out arc. Fixed by extending the plate's
+  // TOP edge upward to the hero's true (measured) top; the bottom edge is untouched.
+  it('mobile popover clears the popped-out SPIN hero instead of clipping its top arc', () => {
+    const shell = createGameShell(cfg(mount));
+    const root = mount.querySelector('#__ge-game-shell__') as HTMLElement;
+    Object.defineProperty(root, 'clientWidth', { value: 1000, configurable: true });
+    Object.defineProperty(root, 'clientHeight', { value: 600, configurable: true });
+    root.getBoundingClientRect = () => rect(0, 0, 1000, 600);
+    shell.setLayout('mobile');
+    (shell as unknown as { renderer: HtmlRenderer }).renderer.fitBar(); // deterministic s=1
+
+    // The controls row's OWN box — 62px tall, as CSS declares (`.ge-m-controls{height:62px}`).
+    const plate = q(mount, '.ge-m-controls')!;
+    plate.getBoundingClientRect = () => rect(10, 520, 980, 62);
+    // The SPIN disc — 84px tall, centred over the row (`align-items:center`), so it pops 11px above
+    // the row's own top: 520-11=509.
+    const hero = q(mount, '[data-ge="spin"]')!;
+    hero.getBoundingClientRect = () => rect(450, 509, 84, 84);
+    const burger = q(mount, '[data-ge="menu"]')!;
+    burger.getBoundingClientRect = () => rect(20, 531, 40, 40);
+
+    shell.openMenu();
+    const card = q(mount, '[data-ge="menu-card"]')!;
+    const top = parseFloat(card.style.top);
+    const maxH = parseFloat(card.style.maxHeight);
+    const renderedH = Math.min(POPOVER.minH, maxH); // jsdom offsetHeight is 0 → falls back to minH
+    const cardBottom = top + renderedH;
+
+    // Clears the HERO's true top (509) — the pre-fix bug placed the bottom only `gap` above the
+    // ROW's own top (520-8=512), 3px INTO the hero's popped-out arc (512 > 509).
+    expect(cardBottom).toBeLessThanOrEqual(509);
+    expect(cardBottom).toBeCloseTo(509 - POPOVER.gap, 5); // exactly `gap` above the hero's true top
+  });
+
   // Defect 2: the popover must scale with the SAME factor the bar applies to itself, and that
   // scaled card must still land fully inside the surface (not just clamped by content but correctly
   // converted between the card's own local/unscaled units and the screen units placePopover uses).
