@@ -100,8 +100,12 @@ export class Popover extends Container implements ShellLayer {
     // The plate falls back to the pointer when it can't be resolved (no distinct plaque), and to the
     // centred/arrow-less layout when neither resolves — placePopover itself already defaults the
     // ARROW to `pointer ?? plate`, so passing the pointer through unconditionally is enough there.
-    const plateRect = this.opts.plate() ?? this.opts.pointer?.() ?? null;
+    // A DEGENERATE (fully zero-sized) plate counts as unresolved too, matching the DOM renderer's
+    // rectOf(): `??` only falls through on null/undefined, so a real-but-{w:0,h:0} rect (e.g. read
+    // before the bar's first layout pass) would otherwise silently win over a perfectly good pointer.
     const pointerRect = this.opts.pointer?.() ?? null;
+    const rawPlate = this.opts.plate();
+    const plateRect = rawPlate && !(rawPlate.w <= 0 && rawPlate.h <= 0) ? rawPlate : pointerRect;
     const p = placePopover(plateRect, { w, h }, { w: screenW, h: (contentH + pad * 2) * s }, pointerRect);
     const maxHLocal = s > 0 ? p.maxH / s : p.maxH;
     const cardH = Math.min(contentH + pad * 2, maxHLocal); // local units

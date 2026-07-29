@@ -157,6 +157,12 @@ export class BottomBar extends Container {
    *  mobile FlexBox and the wide panel's own drawn rect are both LOCAL sizes, unaffected by `inner`'s
    *  ancestor scale, same reasoning as `menuAnchor` above). */
   menuPlate(): Rect | null {
+    // Pixi v8's Container.destroy() nulls `_position`/`_scale`, so `inner.scale.x` /
+    // `inner.getGlobalPosition()` on a destroyed bar throws — guard for symmetry with menuAnchor()
+    // above, which already returns null once its button is destroyed. Not reachable today
+    // (PixiRenderer.renderBar() destroys and reassigns `this.bar` synchronously, in the same call),
+    // but the asymmetry is a trap for a future caller that holds a reference across a render.
+    if (this.destroyed) return null;
     if (!this.plateRect) return null;
     const s = this.inner.scale.x;
     const origin = this.inner.getGlobalPosition();
@@ -172,6 +178,9 @@ export class BottomBar extends Container {
    *  popover so its typography/padding/row-heights scale in lockstep with the bar's own chrome,
    *  instead of ignoring the viewport like a fixed-local-size card would. */
   fitScale(): number {
+    // Same destroyed guard as menuPlate()/menuAnchor() above, and the same neutral fallback a
+    // scale factor should have (1 = no scaling) rather than throwing.
+    if (this.destroyed) return 1;
     return this.inner.scale.x;
   }
 

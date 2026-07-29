@@ -240,6 +240,34 @@ describe('Pixi bar menu — plate drives placement, pointer drives only the arro
     expect(layer.arrowVisible).toBe(true);
   });
 
+  // Defect 4: a DEGENERATE (fully zero-sized) plate must fall back to the pointer exactly like a
+  // null plate does — matching the DOM renderer's rectOf(), which treats {w:0,h:0} (e.g. a plaque
+  // read before the bar's first layout pass) as unresolved. Before the fix, Pixi's `??` chain only
+  // checked for null/undefined, so this real-but-zero-sized rect would win over a good pointer.
+  it('falls back to the pointer when the plate resolves to a degenerate (zero-sized) rect', () => {
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    const layer = openMenu(
+      host,
+      () => ({ x: 100, y: 540, w: 40, h: 40 }), // getAnchor — a good pointer
+      () => ({ x: 0, y: 0, w: 0, h: 0 }), // getPlate — degenerate
+    ) as unknown as Popover;
+    expect(layer.cardX).toBe(100); // the pointer's rect, not clamped/centred as if plate had "won"
+    expect(layer.arrowVisible).toBe(true);
+  });
+
+  // A zero-HEIGHT (or zero-WIDTH) plate alone is still a REAL rect, per placePopover's own rule
+  // (a not-yet-laid-out anchor). Only BOTH being zero counts as degenerate — this must keep winning
+  // over the pointer, so the fix above doesn't overreach into the already-correct case.
+  it('a plate with only one dimension at zero is still resolved (not degenerate)', () => {
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    const layer = openMenu(
+      host,
+      () => ({ x: 100, y: 540, w: 40, h: 40 }), // getAnchor — a distinct pointer
+      () => ({ x: 40, y: 500, w: 400, h: 0 }), // getPlate — zero HEIGHT only, width is real
+    ) as unknown as Popover;
+    expect(layer.cardX).toBe(40); // the plate's x, not the pointer's (100)
+  });
+
   it('re-resolves the PLATE getter on every reposition, tracking a bar rebuilt after open', () => {
     // Mirrors "Finding 1" above (which does this for the pointer/menuAnchor) — renderBar() destroys
     // and rebuilds the BottomBar the SAME way regardless of which rect a caller reads off it, so
@@ -295,6 +323,24 @@ describe('Pixi bar menu — plate drives placement, pointer drives only the arro
     // this close to the left edge is expected to land on the margin floor, not the unclamped value.
     expect(layer.cardX).toBeCloseTo(Math.max(POPOVER.margin, plate!.x), 5);
     expect(layer.card.scale.x).toBeCloseTo(s, 5);
+  });
+
+  // Defect 3: menuPlate()/fitScale() lacked the `destroyed` guard menuAnchor() already has. Pixi v8's
+  // Container.destroy() nulls `_position`/`_scale`, so `inner.scale.x` / `inner.getGlobalPosition()`
+  // on a destroyed bar throws. Not reachable today (PixiRenderer destroys and reassigns `this.bar`
+  // synchronously), but the asymmetry is a trap for a future caller.
+  it('menuPlate()/fitScale() return the destroyed-safe fallback instead of throwing once torn down', () => {
+    const host = makeContext({ screenW: 420, screenH: 675, layout: 'wide' });
+    const bar = new BottomBar(host);
+    bar.applyFit();
+    expect(bar.menuPlate()).not.toBeNull();
+    expect(bar.fitScale()).toBeGreaterThan(0);
+
+    bar.destroy({ children: true });
+    expect(() => bar.menuPlate()).not.toThrow();
+    expect(bar.menuPlate()).toBeNull();
+    expect(() => bar.fitScale()).not.toThrow();
+    expect(bar.fitScale()).toBe(1);
   });
 });
 
