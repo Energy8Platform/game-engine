@@ -296,22 +296,40 @@ describe('Pixi bar menu — plate drives placement, pointer drives only the arro
 
   // A real BottomBar (not a stub) actually exposes menuPlate()/fitScale() correctly, and openMenu
   // wired to it (mirroring PixiRenderer.openOverlay's 'menu' case) ends up scaled and placed by it.
+  //
+  // Defect 6 (review of the anchoring fix): the two assertions below used to be unable to fail.
+  // `expect(s).toBe(bar.inner.scale.x)` is tautological — fitScale() is LITERALLY `return
+  // this.inner.scale.x`, so this can never observe a real bug — and the cardX assertion re-derived
+  // its own expectation from `bar.menuPlate()`, the very method under test. Both are replaced with
+  // independently-derived expectations from the layout constants, so a real regression in either
+  // method's arithmetic (wrong field, a missing `* s`, ...) would actually be caught.
   it('a real BottomBar exposes a usable menuPlate()/fitScale(), and openMenu positions by them', () => {
     const host = makeContext({ screenW: 420, screenH: 675, layout: 'wide' }); // narrow → forces fit-scale
     const bar = new BottomBar(host);
     bar.applyFit();
 
+    // screenW(420) = BAR_REF_W(840)/2. The bar's design-width floor (MAX_BAR_W=850, minus 2*
+    // OUTER_PAD=14 padding) means barW is ALWAYS ≥ 850 regardless of content, so the content-fit ratio
+    // (W-28)/barW ≤ 392/850 ≈ 0.46 — strictly below BAR_MIN_SCALE(0.5) — for ANY content width. `s`
+    // therefore lands exactly on the 0.5 floor: a known value derived from the layout constants alone,
+    // not from the same `inner.scale.x` this assertion exists to verify was never independently
+    // recomputed with different (possibly disagreeing) arithmetic.
     const s = bar.fitScale();
-    expect(s).toBeGreaterThan(0);
-    expect(s).toBeLessThanOrEqual(1);
-    // fitScale() reads the exact same `inner.scale` the bar renders itself with — never a second,
-    // possibly-disagreeing, computation.
-    expect(s).toBe((bar as unknown as { inner: { scale: { x: number } } }).inner.scale.x);
+    expect(s).toBe(0.5);
 
     const plate = bar.menuPlate();
     expect(plate).not.toBeNull();
     expect(plate!.w).toBeGreaterThan(0);
     expect(plate!.h).toBeGreaterThan(0);
+
+    // menuPlate().x = origin.x + panelX*s. panelX = OUTER_PAD(14) + buyW — this host's default config
+    // has features.buyBonus: false and no onBonusBuy, so BUY BONUS doesn't render and buyW = 0, giving
+    // panelX = 14. `origin.x` is read straight off the bar's OWN stored inner.position.x (not
+    // re-derived via menuPlate() itself) — bar has no parent here, so its global position equals its
+    // local one.
+    const innerX = (bar as unknown as { inner: { position: { x: number } } }).inner.position.x;
+    const PANEL_X = 14; // OUTER_PAD; no BUY BONUS badge in this config
+    expect(plate!.x).toBeCloseTo(innerX + PANEL_X * s, 5);
 
     const layer = openMenu(
       host,
