@@ -317,6 +317,54 @@ describe('bar menu popover', () => {
     expect(parseFloat(arrow.style.left)).toBeCloseTo((208 - left) / s, 5);
   });
 
+  // Defect 2 (review of the anchoring fix): renderBar() re-fits the bar (barScale + plate can
+  // change) on ~20 state changes, but only the ResizeObserver hook used to reposition an open
+  // popover — so a live bar-content change while the menu was open (e.g. a WIN pill appearing
+  // mid-autoplay, which can retrigger the overflow-tightening branch) left the card at the old
+  // scale/position until the next resize.
+  it('a renderBar() triggered by a state change (not a resize) repositions an already-open popover', () => {
+    const shell = createGameShell(cfg(mount));
+    const root = mount.querySelector('#__ge-game-shell__') as HTMLElement;
+    Object.defineProperty(root, 'clientWidth', { value: 1000, configurable: true });
+    Object.defineProperty(root, 'clientHeight', { value: 600, configurable: true });
+    root.getBoundingClientRect = () => rect(0, 0, 1000, 600);
+    (shell as unknown as { renderer: HtmlRenderer }).renderer.fitBar(); // deterministic s=1
+
+    // renderBar() rebuilds the plate/burger from scratch every pass (barHost.innerHTML = '' then a
+    // fresh renderBottomBar()) — a per-ELEMENT stub would already be stale the instant the SAME
+    // renderBar() call that's supposed to reposition the card also replaces the element it stubbed.
+    // Stub by selector on the prototype instead, so whichever plate/burger is CURRENT reports the
+    // live rect; restore it after, so other tests keep jsdom's real (all-zero) default.
+    const nativeRect = HTMLElement.prototype.getBoundingClientRect;
+    let plateRect = rect(40, 500, 400, 70);
+    let burgerRect = rect(100, 516, 36, 36);
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.classList.contains('ge-bar-panel')) return plateRect;
+      if (this.dataset.ge === 'menu') return burgerRect;
+      return nativeRect.call(this);
+    };
+    try {
+      shell.openMenu();
+      const card = q(mount, '[data-ge="menu-card"]')!;
+      expect(parseFloat(card.style.left)).toBe(40);
+
+      // A state change the review calls out by name — setBet() is the plainest one that calls
+      // renderer.renderBar() unconditionally, with no animation involved. The plate itself also
+      // reports a NEW rect here (as it would if the bar's own content forced a re-fit at a different
+      // width), so this assertion actually distinguishes "repositioned" from "coincidentally
+      // unchanged" — it could not pass by the card simply staying where it already was.
+      plateRect = rect(200, 500, 300, 70);
+      burgerRect = rect(260, 516, 36, 36);
+      shell.setBet(2); // → renderer.renderBar(), NOT a resize
+
+      expect(parseFloat(card.style.left)).toBe(200); // followed the plate's new rect
+      const arrow = q(mount, '.ge-pop-arrow') as HTMLElement;
+      expect(parseFloat(arrow.style.left)).toBeCloseTo(260 + 18 - 200, 5); // arrow re-tracked the burger too
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = nativeRect;
+    }
+  });
+
   // Regression: HtmlRenderer's ResizeObserver calls renderBar() (which does barHost.innerHTML = ''
   // and rebuilds the bottom bar — a brand-new burger element) BEFORE re-calling position(). A
   // popover that captured its anchor once would already be pointing at a detached element by then,

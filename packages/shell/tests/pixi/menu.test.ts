@@ -1,8 +1,11 @@
 import './setup-canvas';
 import { describe, it, expect, vi } from 'vitest';
 import { Container, EventBoundary, Matrix } from 'pixi.js';
+import type { Application } from 'pixi.js';
 import { openMenu } from '@/ui/pixi/components/Menu';
 import { BottomBar } from '@/ui/pixi/components/BottomBar';
+import { PixiRenderer } from '@/ui/pixi/PixiRenderer';
+import { ShellController } from '@/core/ShellController';
 import { POPOVER } from '@/core/popover';
 import { Toggle, Slider } from '@/ui/pixi/primitives/controls';
 import { ScrollBox } from '@/ui/pixi/primitives/scroll';
@@ -471,5 +474,78 @@ describe('Pixi bar menu — range slider snaps to the min-anchored lattice (find
 
     slider.emit('pointerdown', { global: { x: 99999, y: 0 } } as any); // drag to the far right (u → 1)
     expect(host.getMenuValue('r')).toBe(10); // exactly max, still on the lattice
+  });
+});
+
+// ── Defect 2 (review of the anchoring fix): renderBar() re-fits the bar (barScale + plate can
+// change) on ~20 state changes, but only the RESIZE hook (onResize) used to reposition an open
+// popover — so a live bar-content change while the menu was open (e.g. a WIN pill appearing
+// mid-autoplay, which can retrigger the overflow-tightening branch) left the card at the old
+// scale/position until the next resize. Tested at the PixiRenderer level (not just Popover/BottomBar
+// in isolation) since the defect is specifically in the WIRING between renderBar() and the open
+// layer — mirrors tests/pixi/mount-layout.test.ts's ShellController+PixiRenderer+fake-Application
+// pattern. ──────────────────────────────────────────────────────────────────────────────────────────
+describe('Pixi bar menu — renderBar() repositions an already-open popover (defect 2)', () => {
+  const stubTicker = { add() {}, remove() {} };
+
+  function fakeApp(w: number, h: number): Application {
+    return {
+      screen: { width: w, height: h },
+      ticker: stubTicker,
+      renderer: { on() {}, off() {} },
+      stage: new Container(),
+    } as unknown as Application;
+  }
+
+  function mountShell(w: number, h: number): { controller: ShellController; renderer: PixiRenderer } {
+    const renderer = new PixiRenderer({ app: fakeApp(w, h), parent: new Container() });
+    const controller = new ShellController({
+      renderer,
+      language: 'en',
+      currency: { symbol: '€', position: 'left' },
+      availableBets: [0.5, 1, 2, 5],
+      defaultBet: 1,
+      currentBet: null,
+      balance: 100,
+      win: 0,
+      mode: 'base',
+      gameInfo: {},
+      // Rich enough (auto + turbo + buy, matching mount-layout.test.ts's feature set) that the wide
+      // layout's content width sits close to the MAX_BAR_W design floor — so adding a WIN readout
+      // measurably shifts the bar's own centring, not just its (already content-independent) scale.
+      features: { turbo: 3, autoplay: {}, buyBonus: {} },
+    });
+    return { controller, renderer };
+  }
+
+  it('a state change that triggers renderBar() (not a resize) repositions the open menu popover', () => {
+    const { controller, renderer } = mountShell(1400, 675); // wide, well above BAR_REF_W(840) → s=1 baseline
+    controller.actions.openMenu();
+
+    const priv = renderer as unknown as { currentLayer: Popover | null };
+    expect(priv.currentLayer).not.toBeNull();
+    // Spy WITHOUT replacing the implementation — the real resize() must still run so the card's
+    // geometry genuinely updates, not just get observed as "called".
+    const resizeSpy = vi.spyOn(priv.currentLayer!, 'resize');
+    const beforeX = priv.currentLayer!.cardX;
+
+    // Leaving base mode (e.g. entering free spins) drops the whole BUY BONUS badge from the wide
+    // panel — `this.buy = isBase ? … : undefined` — which shrinks panelX (OUTER_PAD + buyW) by
+    // BUY_W+ROW_GAP (81px), a guaranteed, content-metric-independent shift. This is exactly the
+    // "same renderBar(), different content" class of change the review calls out (its own example —
+    // a WIN pill appearing mid-autoplay — shifts the SAME panelX-relative geometry, just by a much
+    // smaller, FlexBox-text-metric-dependent amount that isn't reliably assertable byte-for-byte
+    // here). setMode() calls renderer.renderBar() directly — no resize/onResize involved.
+    controller.setMode('freeSpins');
+
+    expect(resizeSpy).toHaveBeenCalledWith(1400, 675); // the mechanism: renderBar() invoked it
+    // Outcome: BUY BONUS disappearing shifts the panel's own left edge — the card actually followed
+    // to the NEW position, not a stale one.
+    expect(priv.currentLayer!.cardX).not.toBe(beforeX);
+  });
+
+  it('does not throw when renderBar() runs with no layer open', () => {
+    const { controller } = mountShell(1400, 675);
+    expect(() => controller.setWin(25, { animate: false })).not.toThrow();
   });
 });

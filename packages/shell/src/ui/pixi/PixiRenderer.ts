@@ -96,6 +96,15 @@ export class PixiRenderer implements ShellRenderer {
     this.bar = new BottomBar(this.ctx);
     this.barLayer.addChild(this.bar);
     this.bar.applyFit();
+    // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
+    // which can change the bar's own fitScale()/menuPlate() (e.g. a WIN pill appearing mid-autoplay
+    // retriggers the wide layout's overflow-tightening branch). Only onResize used to reposition the
+    // open layer, so a live bar-content change while the menu was open left it at the stale
+    // scale/position until the next resize. Every ShellLayer's resize() only re-reads current
+    // geometry and re-fits/re-centres itself — none of them call back into renderBar() (verified:
+    // Popover, CardModal, Overlay, BuyBonusOverlay) — so this cannot recurse; `currentLayer` is
+    // `null` whenever nothing is open, so this cannot throw either.
+    this.currentLayer?.resize?.(this.screenW, this.screenH);
   }
 
   setLayout(): void {

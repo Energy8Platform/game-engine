@@ -85,6 +85,14 @@ export class HtmlRenderer implements ShellRenderer {
     this.barHost.innerHTML = '';
     this.barHost.appendChild(renderBottomBar(this.host));
     this.applyFitScale();
+    // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
+    // which can change barScale and/or the plate rect (e.g. a WIN pill appearing mid-autoplay
+    // retriggers the overflow-tightening branch). Only the resize hook used to reposition an open
+    // popover, so a live bar-content change while the menu was open left the card at the stale
+    // scale/position until the next resize. `popoverPosition` only reads plate/pointer/scale getters
+    // and writes card styles — no path back into renderBar() — so this cannot recurse; it's `null`
+    // whenever no popover is open (or a different overlay kind is), so this cannot throw either.
+    this.popoverPosition?.();
   }
 
   setLayout(): void {
