@@ -29,7 +29,7 @@ export function openGameInfo(host: PixiComponentContext): ShellLayer {
     onClose: () => host.closeLayer(),
     onBack: () => {
       host.closeLayer();
-      host.actions.openSettings();
+      host.actions.openMenu();
     },
     build: (w) => buildBody(host, w),
   });

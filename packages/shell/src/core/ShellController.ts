@@ -4,6 +4,7 @@ import { resolveTheme, type ShellTokens } from './theme';
 import { formatCurrency } from './format';
 import { createI18n, type I18n } from './i18n';
 import { KeyboardController, type KeyboardHost } from './keyboard';
+import { DEFAULT_MENU, rangeBounds, seedMenuValues, type MenuItem, type MenuRangeItem } from './menu';
 import { PACKAGE_VERSION } from './version';
 import type {
   ShellConfig,
@@ -49,6 +50,7 @@ export function resolveConfig(config: ShellConfig): ResolvedShellConfig {
     theme: config.theme,
     onBonusBuy: config.onBonusBuy,
     volumes: config.volumes,
+    menu: config.menu,
     version: config.version ?? '1.0.0',
     isSocial: config.isSocial ?? false,
     replay: config.replay ?? config.mode === 'replay',
@@ -71,8 +73,9 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   private i18n: I18n;
   private kbd?: KeyboardController;
   private overlay: OverlayHandle | null = null;
-  private soundRefresh: ((on: boolean) => void) | null = null;
-  private volumeRefresh: ((key: VolumeKey, value: number) => void) | null = null;
+  private menuItems: MenuItem[];
+  private menuRefresh: ((id: string, value: boolean | number) => void) | null = null;
+  private overlayKind: OverlayRequest['kind'] | null = null;
   private prevBalance: number;
   private prevWin: number;
   private destroyed = false;
@@ -84,6 +87,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     this.config = resolveConfig(config);
     this.i18n = createI18n({ language: this.config.language, isSocial: this.config.isSocial });
     this.state = createInitialState(this.config);
+    this.menuItems = this.config.menu ?? DEFAULT_MENU;
     this.tokens = resolveTheme(this.config.theme);
     this.prevBalance = this.state.balance;
     this.prevWin = this.state.win;
@@ -219,14 +223,21 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   private show(req: OverlayRequest): void {
     this.closeModal();
     this.overlay = this.renderer.openOverlay(req) ?? null;
+    this.overlayKind = this.overlay ? req.kind : null;
   }
+  /** Open the bar menu. Called again while it is open, it closes it — the burger toggles. */
   openMenu(): void {
+    if (this.overlayKind === 'menu') {
+      this.closeModal();
+      return;
+    }
     this.emit('menuOpen');
-    this.openSettings();
+    this.show({ kind: 'menu' });
   }
+  /** @deprecated The Settings overlay is gone — this opens the bar menu. */
   openSettings(): void {
     this.emit('settingsOpen');
-    this.show({ kind: 'settings' });
+    this.openMenu();
   }
   openInfo(): void {
     this.emit('infoOpen');
@@ -256,8 +267,8 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   closeModal(): void {
     if (!this.overlay) return;
     this.overlay = null;
-    this.soundRefresh = null;
-    this.volumeRefresh = null;
+    this.overlayKind = null;
+    this.menuRefresh = null;
     this.renderer.closeOverlay();
   }
 
@@ -265,11 +276,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   setSound(on: boolean): void {
     this.soundOn = on;
     this.emit('settingChange', { key: 'sound', value: on });
-    this.soundRefresh?.(on);
-    this.renderer.refreshSoundIcon?.(on);
-  }
-  setSoundRefresh(fn: ((on: boolean) => void) | null): void {
-    this.soundRefresh = fn;
+    this.menuRefresh?.('sound', on);
   }
 
   // ── volume ─────────────────────────────────────────────────────────────────
@@ -277,16 +284,56 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     return this.state.volumes[key];
   }
   /** Set a volume slider (0..1). Shared by the slider control (drag) and game code (public API):
-   *  clamps, stores so a reopened Settings overlay reflects it, emits `settingChange`, and
-   *  live-updates the slider if the overlay is currently open. */
+   *  clamps, stores so a reopened menu popover reflects it, emits `settingChange`, and
+   *  live-updates the slider if the menu is currently open. */
   setVolume(key: VolumeKey, value: number): void {
     const v = Math.max(0, Math.min(1, value));
     this.state.volumes[key] = v;
     this.emit('settingChange', { key, value: v });
-    this.volumeRefresh?.(key, v);
+    this.menuRefresh?.(key, v);
   }
-  setVolumeRefresh(fn: ((key: VolumeKey, value: number) => void) | null): void {
-    this.volumeRefresh = fn;
+
+  // ── menu ───────────────────────────────────────────────────────────────────
+  get menu(): MenuItem[] {
+    return this.menuItems;
+  }
+  /** Replace the item list. Values of ids already in state are kept; new ids are seeded. */
+  setMenu(items: MenuItem[]): void {
+    this.menuItems = items;
+    this.state.menu = seedMenuValues(items, this.state.menu);
+    if (this.overlayKind === 'menu') this.show({ kind: 'menu' });
+  }
+  getMenuValue(id: string): boolean | number | undefined {
+    if (id === 'sound') return this.soundOn;
+    if (id === 'music' || id === 'sfx') return this.state.volumes[id];
+    return this.state.menu[id];
+  }
+  /** Set a menu value. Presets route to their own homes so there is never a second copy. */
+  setMenuValue(id: string, value: boolean | number): void {
+    if (id === 'sound') {
+      this.setSound(value !== false);
+      return;
+    }
+    if (id === 'music' || id === 'sfx') {
+      this.setVolume(id, Number(value));
+      return;
+    }
+    const next = typeof value === 'number' ? this.clampRange(id, value) : value;
+    this.state.menu[id] = next;
+    this.emit('settingChange', { key: id, value: next });
+    this.menuRefresh?.(id, next);
+  }
+  setMenuRefresh(fn: ((id: string, value: boolean | number) => void) | null): void {
+    this.menuRefresh = fn;
+  }
+  /** Clamp to the declared bounds of a custom `range` item (a non-range id passes through). */
+  private clampRange(id: string, value: number): number {
+    const item = this.menuItems.find((i) => (i as { id?: string }).id === id) as
+      | MenuRangeItem
+      | undefined;
+    if (!item || (item as { type?: string }).type !== 'range') return value;
+    const { min, max } = rangeBounds(item);
+    return Math.max(min, Math.min(max, value));
   }
 
   // ── features ─────────────────────────────────────────────────────────────────
@@ -394,6 +441,11 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   destroy(): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     this.destroyed = true;
+    // With the menu (or any overlay) open at teardown, `menuRefresh` / `overlay` / `overlayKind`
+    // would otherwise survive the renderer's destroy — so a later setVolume()/setSound() call
+    // invokes a stale row updater against already-destroyed Pixi Graphics (or a detached DOM node)
+    // and throws. Run BEFORE the renderer teardown below, while it can still close cleanly.
+    this.closeModal();
     if (typeof document !== 'undefined') {
       this.kbd?.detach();
       document.removeEventListener('pointerdown', this.pullFocus, true);

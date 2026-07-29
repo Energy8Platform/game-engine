@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ShellController } from '@/core/ShellController';
 import { FakeRenderer } from './FakeRenderer';
 import type { ShellConfig } from '@/core/types';
+import { DEFAULT_MENU } from '@/core/menu';
 
 function make(over: Partial<ShellConfig> = {}): { c: ShellController; r: FakeRenderer } {
   const r = new FakeRenderer();
@@ -64,13 +65,13 @@ describe('ShellController', () => {
     expect(r.money.length).toBe(anims);
   });
 
-  it('openSettings emits settingsOpen and opens the settings overlay', () => {
+  it('openSettings emits settingsOpen and opens the menu overlay (deprecated alias)', () => {
     const { c, r } = make();
     const spy = vi.fn();
     c.on('settingsOpen', spy);
     c.openSettings();
     expect(spy).toHaveBeenCalled();
-    expect(r.overlays.at(-1)).toEqual({ kind: 'settings' });
+    expect(r.overlays.at(-1)).toEqual({ kind: 'menu' });
   });
 
   it('onBonusBuy override is called instead of opening the overlay', () => {
@@ -88,16 +89,16 @@ describe('ShellController', () => {
     expect(r.layouts.at(-1)).toBe('mobile');
   });
 
-  it('setSound flips shared state, emits settingChange, and refreshes the open settings icon', () => {
+  it('setSound flips shared state, emits settingChange, and refreshes the open menu', () => {
     const { c } = make();
     const changed = vi.fn();
     const refresh = vi.fn();
     c.on('settingChange', changed);
-    c.setSoundRefresh(refresh);
+    c.setMenuRefresh(refresh);
     c.setSound(false);
     expect(c.soundOn).toBe(false);
     expect(changed).toHaveBeenCalledWith({ key: 'sound', value: false });
-    expect(refresh).toHaveBeenCalledWith(false);
+    expect(refresh).toHaveBeenCalledWith('sound', false);
   });
 
   it('deactivateFeature is a no-op with no active feature', () => {
@@ -116,5 +117,103 @@ describe('ShellController', () => {
     expect(r.closed).toBe(1);   // closed exactly once
     c.closeModal();
     expect(r.closed).toBe(1);   // no-op when nothing is open
+  });
+});
+
+describe('menu', () => {
+  it('opens the menu overlay and toggles it closed on a second call', () => {
+    const { c: shell, r } = make();
+    const opened = vi.fn();
+    shell.on('menuOpen', opened);
+    shell.openMenu();
+    expect(r.overlays.at(-1)).toEqual({ kind: 'menu' });
+    expect(opened).toHaveBeenCalledOnce();
+    const closedBefore = r.closed;
+    shell.openMenu();
+    expect(r.closed).toBe(closedBefore + 1);
+    expect(opened).toHaveBeenCalledOnce(); // the second call closed, it did not re-open
+  });
+
+  it('openSettings stays as a deprecated alias', () => {
+    const { c: shell, r } = make();
+    const settings = vi.fn();
+    shell.on('settingsOpen', settings);
+    shell.openSettings();
+    expect(settings).toHaveBeenCalledOnce();
+    expect(r.overlays.at(-1)).toEqual({ kind: 'menu' });
+  });
+
+  it('defaults to DEFAULT_MENU and swaps the list with setMenu', () => {
+    const { c: shell } = make();
+    expect(shell.menu).toEqual(DEFAULT_MENU);
+    shell.setMenu([{ id: 'sound' }, { id: 'speed', type: 'range', label: 'S', min: 1, max: 5, value: 3 }]);
+    expect(shell.getMenuValue('speed')).toBe(3);
+  });
+
+  it('routes menu values to sound, volumes and the custom map', () => {
+    const { c: shell } = make({
+      menu: [{ id: 'sound' }, { id: 'music' }, { id: 'lefty', type: 'toggle', label: 'L' }],
+    });
+    const changes: Array<{ key: string; value: unknown }> = [];
+    shell.on('settingChange', (e) => changes.push(e));
+
+    shell.setMenuValue('sound', false);
+    expect(shell.soundOn).toBe(false);
+    expect(shell.getMenuValue('sound')).toBe(false);
+
+    shell.setMenuValue('music', 5); // out of range → clamped
+    expect(shell.getVolume('music')).toBe(1);
+    expect(shell.getMenuValue('music')).toBe(1);
+
+    shell.setMenuValue('lefty', true);
+    expect(shell.state.menu.lefty).toBe(true);
+    expect(shell.getMenuValue('lefty')).toBe(true);
+
+    expect(changes).toEqual([
+      { key: 'sound', value: false },
+      { key: 'music', value: 1 },
+      { key: 'lefty', value: true },
+    ]);
+  });
+
+  it('clamps a custom range to its declared bounds', () => {
+    const { c: shell } = make({
+      menu: [{ id: 'speed', type: 'range', label: 'S', min: 1, max: 5, value: 2 }],
+    });
+    shell.setMenuValue('speed', 99);
+    expect(shell.getMenuValue('speed')).toBe(5);
+    shell.setMenuValue('speed', -3);
+    expect(shell.getMenuValue('speed')).toBe(1);
+  });
+
+  it('pushes every value change to a registered refresher', () => {
+    const { c: shell } = make();
+    const seen: Array<[string, unknown]> = [];
+    shell.setMenuRefresh((id, v) => seen.push([id, v]));
+    shell.setSound(false);
+    shell.setVolume('sfx', 0.25);
+    expect(seen).toEqual([['sound', false], ['sfx', 0.25]]);
+    shell.setMenuRefresh(null);
+    shell.setVolume('sfx', 0.5);
+    expect(seen).toHaveLength(2);
+  });
+
+  // Regression: destroy() left an open menu's overlay/overlayKind/menuRefresh untouched, so a
+  // stale refresher survived teardown — a later setVolume()/setSound() call (e.g. from game code
+  // that doesn't know the shell was torn down) would invoke it against an already-destroyed
+  // renderer control (Pixi Graphics) and throw.
+  it('destroy() closes an open menu first, so a stale refresher never fires after teardown', async () => {
+    const { c: shell, r } = make();
+    const refresh = vi.fn();
+    shell.openMenu();
+    shell.setMenuRefresh(refresh);
+    expect(r.closed).toBe(0);
+
+    await shell.destroy();
+    expect(r.closed).toBe(1); // closeModal() ran and told the renderer to close
+
+    shell.setVolume('music', 0.4);
+    shell.setSound(false);
+    expect(refresh).not.toHaveBeenCalled(); // the stale refresher was cleared, not just orphaned
   });
 });

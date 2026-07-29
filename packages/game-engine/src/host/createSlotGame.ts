@@ -270,9 +270,6 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         case 'sound':
           value ? game.audio.unmuteAll() : game.audio.muteAll();
           break;
-        case 'master':
-          game.audio.setMasterVolume(Number(value));
-          break;
         case 'music':
           game.audio.setVolume('music', Number(value));
           break;

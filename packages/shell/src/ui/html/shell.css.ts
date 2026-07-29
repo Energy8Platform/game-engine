@@ -172,7 +172,10 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
   border-radius:16px; background:var(--shell-plaque-glass); color:#fff; font-size:14px; font-weight:600; }
 #${SHELL_ROOT_ID} .ge-ov-row .ge-grow { flex:1; text-align:left; }
 #${SHELL_ROOT_ID} button.ge-ov-row { cursor:pointer; font-family:inherit; transition:background .12s ease, color .12s ease; }
-#${SHELL_ROOT_ID} button.ge-ov-row:hover { background:var(--shell-plaque-glass-hover); color:var(--shell-accent); }
+#${SHELL_ROOT_ID} button.ge-ov-row:hover:not([disabled]) { background:var(--shell-plaque-glass-hover); color:var(--shell-accent); }
+/* disabled rows — mirrors Pixi's box.alpha = 0.5 for all three row kinds. A <button> row carries
+   the native attribute directly; a toggle/range row is a <div> wrapper, so it gets .ge-disabled. */
+#${SHELL_ROOT_ID} .ge-ov-row[disabled], #${SHELL_ROOT_ID} .ge-ov-row.ge-disabled { opacity:.5; cursor:default; }
 #${SHELL_ROOT_ID} .ge-ov-row.ge-col { flex-direction:column; align-items:stretch; gap:10px; }
 #${SHELL_ROOT_ID} .ge-ov-row .ge-row-head { display:flex; justify-content:space-between; align-items:center; }
 #${SHELL_ROOT_ID} .ge-ov-row .ge-row-head .ge-val { color:var(--shell-plaque-label); font-variant-numeric:tabular-nums; font-weight:700; }
@@ -183,6 +186,7 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-toggle i { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
   background:#fff; transition:left .12s ease; }
 #${SHELL_ROOT_ID} .ge-toggle.ge-on i { left:20px; }
+#${SHELL_ROOT_ID} .ge-toggle:disabled { cursor:default; }
 /* sound on/off — speaker icon button (replaces the toggle) */
 #${SHELL_ROOT_ID} .ge-snd { pointer-events:auto; cursor:pointer; border:none; background:none; padding:0;
   width:36px; height:36px; display:flex; align-items:center; justify-content:center; font-size:24px;
@@ -190,6 +194,22 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 #${SHELL_ROOT_ID} .ge-snd:not(.ge-active) { color:var(--shell-plaque-label); }
 #${SHELL_ROOT_ID} .ge-snd:hover { color:var(--shell-accent); }
 #${SHELL_ROOT_ID} .ge-snd:active { transform:scale(.92); }
+
+/* bar menu popover — light dismiss (no dim, no blur), card anchored to the burger */
+#${SHELL_ROOT_ID} .ge-pop-layer { position:absolute; inset:0; z-index:55; pointer-events:auto; }
+#${SHELL_ROOT_ID} .ge-pop { position:absolute; box-sizing:border-box; display:flex; flex-direction:column;
+  padding:8px; border-radius:18px; background:var(--shell-plaque-dark);
+  box-shadow:0 14px 38px rgba(0,0,0,.5); backdrop-filter:blur(12px) saturate(120%);
+  -webkit-backdrop-filter:blur(12px) saturate(120%); animation:ge-ov-in .12s ease-out; }
+#${SHELL_ROOT_ID} .ge-pop-body { overflow-y:auto; overflow-x:hidden; min-height:0; }
+#${SHELL_ROOT_ID} .ge-pop .ge-ov-row { padding:10px 12px; margin-bottom:6px; font-size:13px; }
+#${SHELL_ROOT_ID} .ge-pop .ge-ov-row:last-child { margin-bottom:0; }
+#${SHELL_ROOT_ID} .ge-pop-sep { height:1px; margin:6px 4px; background:var(--shell-plaque-line); opacity:.5; }
+#${SHELL_ROOT_ID} .ge-pop-arrow { position:absolute; bottom:-7px; width:14px; height:14px; margin-left:-7px;
+  background:var(--shell-plaque-dark); transform:rotate(45deg); border-radius:3px; }
+#${SHELL_ROOT_ID} .ge-pop.ge-pop-below .ge-pop-arrow { bottom:auto; top:-7px; }
+#${SHELL_ROOT_ID} .ge-pop .ge-mi-icon { flex:0 0 auto; width:20px; font-size:20px; display:flex; }
+#${SHELL_ROOT_ID} .ge-pop .ge-mi-chev { flex:0 0 auto; width:16px; font-size:16px; color:var(--shell-muted); display:flex; }
 
 /* game info — each section is its own glass plaque; body text sized for comfortable reading */
 #${SHELL_ROOT_ID} .ge-gi-sec { margin-bottom:12px; background:var(--shell-plaque-glass);

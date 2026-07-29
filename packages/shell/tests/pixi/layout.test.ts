@@ -6,7 +6,7 @@ import { resolveTheme } from '@/core/theme';
 import { IconButton, Readout, SpinDisc, BuyBonusBadge } from '@/ui/pixi/primitives/widgets';
 import { IconView } from '@/ui/pixi/pixi-icon';
 import { BottomBar } from '@/ui/pixi/components/BottomBar';
-import { openSettings } from '@/ui/pixi/components/Settings';
+import { openMenu } from '@/ui/pixi/components/Menu';
 import { openGameInfo } from '@/ui/pixi/components/GameInfo';
 import { openBuyBonus } from '@/ui/pixi/components/BuyBonus';
 import { openBetPicker, openAutoplayPicker } from '@/ui/pixi/components/pickers';
@@ -213,11 +213,11 @@ describe('overlays & modals — content stays within the screen', () => {
     ['mobile-m', 375, 667],
   ];
   for (const [name, w, h] of sizes) {
-    it(`Settings overlay fits ${name}`, () => {
+    it(`Menu popover fits ${name}`, () => {
       const host = makeHost({ screenW: w, screenH: h });
-      const ov = openSettings(host);
+      const ov = openMenu(host);
       ov.resize?.(w, h);
-      expectWithinScreen(ov, w, h, `settings/${name}`);
+      expectWithinScreen(ov, w, h, `menu/${name}`);
     });
     it(`Game info overlay fits ${name}`, () => {
       const host = makeHost({ screenW: w, screenH: h });

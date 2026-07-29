@@ -31,10 +31,10 @@ describe('GameShell layout', () => {
     expect(mount.querySelector('#__ge-game-shell__')!.classList.contains('ge-mobile')).toBe(true);
   });
 
-  it('opening the menu opens the Settings overlay', () => {
+  it('opening the menu opens the bar-menu popover', () => {
     const shell = createGameShell(cfg(mount));
     shell.openMenu();
-    expect(mount.querySelector('[data-ge="settings-modal"]')).toBeTruthy();
+    expect(mount.querySelector('[data-ge="menu-popover"]')).toBeTruthy();
   });
 
   // Regression: on mobile-s, large balance/win/total-win values must not run off the screen.

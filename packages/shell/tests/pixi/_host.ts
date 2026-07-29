@@ -107,10 +107,17 @@ export function makeContext(over: HostOverrides = {}): PixiComponentContext {
     emit,
     notifyResize: over.notifyResize ?? noop,
     setSound: over.setSound ?? noop,
-    setSoundRefresh: over.setSoundRefresh ?? noop,
     getVolume: over.getVolume ?? ((key) => state.volumes[key]),
     setVolume: over.setVolume ?? ((key, v) => { state.volumes[key] = Math.max(0, Math.min(1, v)); emit('settingChange', { key, value: state.volumes[key] }); }),
-    setVolumeRefresh: over.setVolumeRefresh ?? noop,
+    menu: over.menu ?? [{ id: 'sound' }, { id: 'music' }, { id: 'sfx' }, { type: 'separator' }, { id: 'gameInfo' }],
+    getMenuValue: over.getMenuValue ?? ((id: string) =>
+      id === 'sound' ? true : id === 'music' || id === 'sfx' ? state.volumes[id] : state.menu[id]),
+    setMenuValue: over.setMenuValue ?? ((id: string, v: boolean | number) => {
+      if (id === 'music' || id === 'sfx') state.volumes[id] = Math.max(0, Math.min(1, Number(v)));
+      else state.menu[id] = v;
+      emit('settingChange', { key: id, value: v });
+    }),
+    setMenuRefresh: over.setMenuRefresh ?? noop,
     actions,
     render: over.render ?? noop,
     pushLayer: over.pushLayer ?? ((node: ShellLayer): LayerHandle => ({ root: node, close: noop })),

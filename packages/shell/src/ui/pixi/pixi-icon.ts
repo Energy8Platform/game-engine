@@ -35,11 +35,11 @@ export class IconView extends Container implements Sizable {
   private gfx: Graphics;
   private _size: number;
   private _color: string;
-  readonly iconName: IconName;
+  private _iconName: IconName;
 
   constructor(name: IconName, size: number, color = '#ffffff') {
     super();
-    this.iconName = name;
+    this._iconName = name;
     this._size = size;
     this._color = color;
     this.gfx = new Graphics(context(name, color));
@@ -58,10 +58,22 @@ export class IconView extends Container implements Sizable {
     return this._size;
   }
 
+  get iconName(): IconName {
+    return this._iconName;
+  }
+
   setColor(color: string): void {
     if (color === this._color) return;
     this._color = color;
-    this.gfx.context = context(this.iconName, color);
+    this.gfx.context = context(this._iconName, color);
+  }
+
+  /** Swap the glyph in place (e.g. the menu's sound row flips soundOn/soundOff on toggle) — same
+   *  cached-context rebuild as setColor, keyed on the new name instead of a new colour. */
+  setIcon(name: IconName): void {
+    if (name === this._iconName) return;
+    this._iconName = name;
+    this.gfx.context = context(name, this._color);
   }
 
   setSize(size: number): void {

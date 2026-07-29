@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction, applyJurisdiction } from '../../src/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
-import type { GameInfoContent, GameInfoSection, ShellFeatures } from '@energy8platform/shell/pixi';
+import type { GameInfoContent, GameInfoSection, ShellFeatures, MenuItem } from '@energy8platform/shell/pixi';
 
 const model = {
   spec: {
@@ -209,6 +209,21 @@ describe('buildShellConfig (runtime ctx)', () => {
     const derived = defaultGameInfo(model, { balance: 0, mode: 'base' });
     const c = buildShellConfig({}, model, { balance: 0, mode: 'base' });
     expect(c.gameInfo).toEqual(derived);
+  });
+
+  // A scaffolded game (npm create @energy8platform/slot) has no other way to reach the bar-menu
+  // popover's item list — SlotShellOptions.menu is a straight passthrough, exactly like `currency`:
+  // no host-derived default to merge with, so an omitted value stays undefined and the shell package
+  // applies its own DEFAULT_MENU.
+  it('passes opts.menu straight through; omitted stays undefined (shell applies its own default)', () => {
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base' });
+    expect(c.menu).toBeUndefined();
+    const menu: MenuItem[] = [
+      { id: 'sound' },
+      { id: 'speed', type: 'range', label: 'Speed', min: 1, max: 5, value: 2 },
+    ];
+    const c2 = buildShellConfig({ menu }, model, { balance: 0, mode: 'base' });
+    expect(c2.menu).toBe(menu); // passthrough, not a copy or transform
   });
 
   it('social mode socializes PAYTABLE symbol names (from spec symbols[].name)', () => {

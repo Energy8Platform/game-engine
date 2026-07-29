@@ -4,7 +4,7 @@ import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
 import { buildThemeVars } from './theme-css';
 import { countUp } from './motion-dom';
 import { renderBottomBar } from './components/BottomBar';
-import { openSettingsModal } from './components/Settings';
+import { openMenuPopover } from './components/Menu';
 import { openGameInfoModal } from './components/GameInfo';
 import { openBuyBonusOverlay } from './components/BuyBonus';
 import { openBetModal, openAutoplayModal } from './components/pickers';
@@ -35,7 +35,11 @@ export class HtmlRenderer implements ShellRenderer {
   private ro: ResizeObserver | null = null;
   private moneyAnims: Array<() => void> = [];
   private modalOnKey: ((e: KeyboardEvent) => boolean) | undefined;
+  private popoverPosition: (() => void) | null = null;
   private destroyed = false;
+  /** The scale factor last applied to the bar by applyFitScale() — exposed so the menu popover can
+   *  match it exactly (see getBarScale) rather than re-derive its own, possibly-disagreeing, value. */
+  private barScale = 1;
 
   /** MutationObserver for buy-bonus confirm fit — fires fitModals() when nodes are added
    *  inside the modalHost (e.g. the confirm dialog appended after the grid is open). */
@@ -81,6 +85,14 @@ export class HtmlRenderer implements ShellRenderer {
     this.barHost.innerHTML = '';
     this.barHost.appendChild(renderBottomBar(this.host));
     this.applyFitScale();
+    // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
+    // which can change barScale and/or the plate rect (e.g. a WIN pill appearing mid-autoplay
+    // retriggers the overflow-tightening branch). Only the resize hook used to reposition an open
+    // popover, so a live bar-content change while the menu was open left the card at the stale
+    // scale/position until the next resize. `popoverPosition` only reads plate/pointer/scale getters
+    // and writes card styles — no path back into renderBar() — so this cannot recurse; it's `null`
+    // whenever no popover is open (or a different overlay kind is), so this cannot throw either.
+    this.popoverPosition?.();
   }
 
   setLayout(): void {
@@ -102,11 +114,8 @@ export class HtmlRenderer implements ShellRenderer {
 
   closeOverlay(): void {
     this.modalOnKey = undefined;
+    this.popoverPosition = null;
     this.modalHost.innerHTML = '';
-  }
-
-  refreshSoundIcon?(_on: boolean): void {
-    // Settings registers via host.setSoundRefresh; nothing extra here
   }
 
   destroy(): Promise<void> {
@@ -130,6 +139,11 @@ export class HtmlRenderer implements ShellRenderer {
   /** Trigger a bar fit-scale pass (used by tests that stub geometry after the initial render). */
   fitBar(): void { this.applyFitScale(); }
 
+  /** The scale factor applyFitScale() last applied to the bar — the menu popover multiplies its own
+   *  card by this SAME number so its typography/padding/row-heights carry the same visual weight
+   *  relationship the bar has, instead of ignoring the viewport like a fixed-px card would. */
+  getBarScale(): number { return this.barScale; }
+
   // ── private ────────────────────────────────────────────────────────────────
 
   private cancelMoneyAnims(): void {
@@ -139,8 +153,9 @@ export class HtmlRenderer implements ShellRenderer {
 
   private buildOverlay(req: OverlayRequest): { root: HTMLElement; onKey?: (e: KeyboardEvent) => boolean } | null {
     switch (req.kind) {
-      case 'settings': {
-        const root = openSettingsModal(this.host);
+      case 'menu': {
+        const { root, position } = openMenuPopover(this.host, this.root, () => this.getBarScale());
+        this.popoverPosition = position;
         return { root };
       }
       case 'gameInfo': {
@@ -183,6 +198,7 @@ export class HtmlRenderer implements ShellRenderer {
     this.modalHost.appendChild(el);
     this.modalOnKey = onKey;
     this.fitModals();
+    this.popoverPosition?.(); // measure + place now that the card is in the DOM
   }
 
   /** Uniformly scale every open centred card modal (.ge-sheet) down so it fits a short/narrow
@@ -229,13 +245,18 @@ export class HtmlRenderer implements ShellRenderer {
       let need = 0;
       for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
       const avail = bar.clientWidth;
+      let s = 1;
       if (need > avail + 1 && avail > 0) {
+        s = Math.max(0.4, avail / need);
         host.style.transformOrigin = 'bottom left';
-        host.style.transform = `scale(${Math.max(0.4, avail / need).toFixed(4)})`;
+        host.style.transform = `scale(${s.toFixed(4)})`;
       }
+      this.barScale = s;
       return;
     }
+    let sApplied = 1;
     const zoomBar = (z: number): void => {
+      sApplied = z;
       const v = z < 0.999 ? z.toFixed(4) : '';
       const set = (el: Element | null): void => {
         if (!el) return;
@@ -252,6 +273,7 @@ export class HtmlRenderer implements ShellRenderer {
     if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
       zoomBar(s * (bar.clientWidth / bar.scrollWidth));
     }
+    this.barScale = sApplied;
     this.fitReadouts();
   }
 
@@ -280,6 +302,7 @@ export class HtmlRenderer implements ShellRenderer {
       this.host.notifyResize(w, h);
       this.applyFitScale();
       this.fitModals();
+      this.popoverPosition?.(); // re-place the card if the surface itself resized
     });
     this.ro.observe(this.root);
   }

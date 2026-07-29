@@ -15,7 +15,7 @@ import type { PixiComponentContext, ShellLayer, LayerHandle } from './context';
 import { installShellFont, whenFontReady } from './text';
 import { countUpText, tween } from './motion-pixi';
 import { BottomBar } from './components/BottomBar';
-import { openSettings } from './components/Settings';
+import { openMenu } from './components/Menu';
 import { openGameInfo } from './components/GameInfo';
 import { openBuyBonus } from './components/BuyBonus';
 import { openBetPicker, openAutoplayPicker } from './components/pickers';
@@ -96,6 +96,15 @@ export class PixiRenderer implements ShellRenderer {
     this.bar = new BottomBar(this.ctx);
     this.barLayer.addChild(this.bar);
     this.bar.applyFit();
+    // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
+    // which can change the bar's own fitScale()/menuPlate() (e.g. a WIN pill appearing mid-autoplay
+    // retriggers the wide layout's overflow-tightening branch). Only onResize used to reposition the
+    // open layer, so a live bar-content change while the menu was open left it at the stale
+    // scale/position until the next resize. Every ShellLayer's resize() only re-reads current
+    // geometry and re-fits/re-centres itself — none of them call back into renderBar() (verified:
+    // Popover, CardModal, Overlay, BuyBonusOverlay) — so this cannot recurse; `currentLayer` is
+    // `null` whenever nothing is open, so this cannot throw either.
+    this.currentLayer?.resize?.(this.screenW, this.screenH);
   }
 
   setLayout(): void {
@@ -132,8 +141,18 @@ export class PixiRenderer implements ShellRenderer {
   openOverlay(req: OverlayRequest): OverlayHandle | void {
     let layer: ShellLayer | null = null;
     switch (req.kind) {
-      case 'settings':
-        layer = openSettings(this.ctx);
+      case 'menu':
+        // Getters, not `this.bar` by value: renderBar() destroys/rebuilds the bar on every resize
+        // and ~20 other state changes, in the same resize handler that then repositions this popover
+        // — see Menu.ts's openMenu doc comment for why this must stay lazy. menuAnchor (the burger)
+        // is the arrow's pointer; menuPlate (the plaque) drives placement; fitScale is the same
+        // factor BottomBar applies to its own content via `inner.scale`.
+        layer = openMenu(
+          this.ctx,
+          () => this.bar?.menuAnchor() ?? null,
+          () => this.bar?.menuPlate() ?? null,
+          () => this.bar?.fitScale() ?? 1,
+        );
         break;
       case 'gameInfo':
         layer = openGameInfo(this.ctx);
@@ -155,7 +174,7 @@ export class PixiRenderer implements ShellRenderer {
         break;
     }
     if (!layer) return;
-    this.pushLayer(layer);
+    this.pushLayer(layer, { backdrop: req.kind !== 'menu' });
     const built = layer;
     return {
       onKey: built.onKey ? built.onKey.bind(built) : undefined,
@@ -165,11 +184,6 @@ export class PixiRenderer implements ShellRenderer {
 
   closeOverlay(): void {
     this.closeLayer();
-  }
-
-  refreshSoundIcon(_on: boolean): void {
-    // No-op: the open Settings overlay registers its icon updater via host.setSoundRefresh, which
-    // the controller's setSound path drives. The renderer has nothing extra to refresh.
   }
 
   /** Fade out (≈250ms, like GameShell's REMOVE_FADE_MS) then tear down; resolves when removed. */
@@ -195,9 +209,11 @@ export class PixiRenderer implements ShellRenderer {
   }
 
   // ── layer stack ────────────────────────────────────────────────────────────
-  pushLayer(node: ShellLayer): LayerHandle {
+  pushLayer(node: ShellLayer, opts?: { backdrop?: boolean }): LayerHandle {
     this.clearLayer();
-    this.makeBackdrop(); // frosted snapshot of the scene behind (the DOM's backdrop-filter:blur)
+    // Light-dismiss layers (the menu popover) opt out with `{ backdrop: false }` — no frosted
+    // snapshot, the game stays visible behind them. Every other caller is unaffected (defaults on).
+    if (opts?.backdrop !== false) this.makeBackdrop(); // frosted snapshot (the DOM's backdrop-filter:blur)
     this.currentLayer = node;
     this.modalLayer.addChild(node);
     this.fitModals();
@@ -324,6 +340,7 @@ export class PixiRenderer implements ShellRenderer {
       get tokens() { return host.tokens; },
       get layout() { return host.layout; },
       get soundOn() { return host.soundOn; },
+      get menu() { return host.menu; },
       get actions() { return host.actions; },
       openReplay: (opts) => host.openReplay(opts),
       t: (s) => host.t(s),
@@ -331,17 +348,18 @@ export class PixiRenderer implements ShellRenderer {
       emit: host.emit.bind(host),
       notifyResize: (w, h) => host.notifyResize(w, h),
       setSound: (on) => host.setSound(on),
-      setSoundRefresh: (fn) => host.setSoundRefresh(fn),
       getVolume: (key) => host.getVolume(key),
       setVolume: (key, v) => host.setVolume(key, v),
-      setVolumeRefresh: (fn) => host.setVolumeRefresh(fn),
+      getMenuValue: (id) => host.getMenuValue(id),
+      setMenuValue: (id, v) => host.setMenuValue(id, v),
+      setMenuRefresh: (fn) => host.setMenuRefresh(fn),
       // — Pixi-specific surface —
       get ticker() { return self.app.ticker; },
       get canvas() { return self.app.canvas as HTMLCanvasElement | undefined; },
       get screenW() { return self.app.screen.width; },
       get screenH() { return self.app.screen.height; },
       render: () => self.renderBar(),
-      pushLayer: (node) => self.pushLayer(node),
+      pushLayer: (node, opts) => self.pushLayer(node, opts),
       // Route component-initiated closes through the controller (not straight to self.closeLayer) so
       // it clears its OverlayHandle. Otherwise the handle goes stale: hasOpenLayer() stays true and
       // keydowns keep routing to onKey on a destroyed overlay → write to a torn-down ScrollBox.

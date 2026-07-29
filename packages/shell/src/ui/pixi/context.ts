@@ -25,7 +25,8 @@ export interface LayerHandle {
  *  PixiRenderer provides (ticker, screen size, layer stack).
  *
  *  Members already on core ShellHost (state, config, tokens, layout, soundOn, t, emit, setSound,
- *  setSoundRefresh, actions, formatCurrency, notifyResize) are NOT re-declared here.
+ *  getVolume, setVolume, menu, getMenuValue, setMenuValue, setMenuRefresh, actions, formatCurrency,
+ *  notifyResize) are NOT re-declared here.
  *
  *  fmt/fmtWin decision: pixi components in pixi-shell use `host.fmt(n)` / `host.fmtWin(n)`.
  *  Rather than retargeting all components to `host.formatCurrency(n)` / `host.formatCurrency(n, true)`
@@ -38,7 +39,7 @@ export interface PixiComponentContext extends ShellHost {
   readonly screenW: number;
   readonly screenH: number;
   render(): void;
-  pushLayer(node: ShellLayer): LayerHandle;
+  pushLayer(node: ShellLayer, opts?: { backdrop?: boolean }): LayerHandle;
   closeLayer(): void;
   fitModals(): void;
   /** Swap the active language at runtime (rebuilds resolver, re-renders bar). Optional. */

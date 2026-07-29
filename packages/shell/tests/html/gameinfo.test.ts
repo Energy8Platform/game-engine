@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
 import { PACKAGE_VERSION } from '@/core/version';
 import type { ShellConfig, GameInfoSection } from '@/core/types';
@@ -180,10 +180,25 @@ describe('GameInfo', () => {
     expect(ver.textContent).toContain(`2.3.1.${pkgStamp}`);
   });
 
-  it('has a back control that returns to Settings', () => {
+  it('has a back control that returns to the bar menu', () => {
     const shell = createGameShell(cfg(mount));
     shell.openInfo();
     q(mount, '[data-ge="info-back"]')!.click();
-    expect(q(mount, '[data-ge="settings-modal"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="menu-popover"]')).toBeTruthy();
+  });
+
+  // Regression: Back used to call actions.openSettings() — the deprecated alias — so ordinary
+  // back-navigation emitted the deprecated `settingsOpen` event on every trip through Game info.
+  // It must go through the current openMenu() path instead.
+  it('Back emits menuOpen, not the deprecated settingsOpen', () => {
+    const shell = createGameShell(cfg(mount));
+    const menuOpen = vi.fn();
+    const settingsOpen = vi.fn();
+    shell.on('menuOpen', menuOpen);
+    shell.on('settingsOpen', settingsOpen);
+    shell.openInfo();
+    q(mount, '[data-ge="info-back"]')!.click();
+    expect(menuOpen).toHaveBeenCalledOnce();
+    expect(settingsOpen).not.toHaveBeenCalled();
   });
 });

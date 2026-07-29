@@ -21,7 +21,8 @@ export class ScrollBox extends Container {
     this.canvas = canvas;
     this.addChild(this.content);
     // maskG is added to the scene only while scrolling (see refresh) — a leftover unused mask
-    // graphic renders as a white rect, and a masked container blocks pointer events to its children.
+    // graphic renders as a white rect. (Masking does NOT gate pointer events to the content, despite
+    // what an earlier version of this comment claimed — see the correction in refresh() below.)
     this.eventMode = 'static';
     this.on('pointerdown', this.onDown);
     this.on('globalpointermove', this.onMove);
@@ -55,10 +56,13 @@ export class ScrollBox extends Container {
     const b = this.content.getLocalBounds();
     const contentH = b.height + b.y; // content laid out from y≈0 downward
     this.maxScroll = Math.max(0, contentH - this.viewH);
-    // Only clip + grab pointer/drag when the content actually overflows: a masked container blocks
-    // pointer events to its children in Pixi v8, so when it fits we leave it unmasked and passive →
-    // interactive controls (settings sliders/buttons) work. Tall scrolling content (game info) that
-    // does get masked has no interactive children, so nothing is lost there.
+    // Only clip + grab pointer/drag when the content actually overflows. (An earlier version of this
+    // comment claimed a masked container blocks pointer events to its children in Pixi v8 — that's
+    // false: EventBoundary's hitPruneFn only prunes a point OUTSIDE the mask/hitArea, so interactive
+    // children stay reachable anywhere inside the visible viewport; see tests/pixi/bet-picker-fit.test.ts
+    // and tests/pixi/menu.test.ts, which hit-test an overflowing, masked list on purpose to prove it.
+    // We still only mask + grab the pointer when scrollable, since an unmasked, passive box is
+    // simpler and cheaper when there's nothing to clip or drag.)
     const scrollable = this.maxScroll > 0;
     if (scrollable) {
       this.addChild(this.maskG);

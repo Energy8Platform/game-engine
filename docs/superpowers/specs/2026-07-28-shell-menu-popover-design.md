@@ -17,7 +17,7 @@ volume sliders and a "Game info" row. Two problems:
 
 ## Goals
 
-- The burger opens a **compact popover anchored to the button** ("tooltip menu"), not a full-screen
+- The burger opens a **compact popover placed against the bar** ("tooltip menu"), not a full-screen
   overlay. Same behaviour in wide and mobile layouts, in both renderers.
 - The popover **replaces** the Settings overlay — sliders and all live inside it. The Settings
   overlay is deleted.
@@ -226,27 +226,43 @@ setMenuRefresh(fn: ((id: string, value: boolean | number) => void) | null): void
 ## Renderer contract
 
 - `OverlayRequest` gains `{ kind: 'menu' }`. `{ kind: 'settings' }` is removed.
-- The **anchor is a renderer concern**: the DOM renderer reads the burger's `getBoundingClientRect()`,
-  the Pixi renderer asks its `BottomBar` for the button's global bounds. Core stays geometry-free.
+- **The plate and pointer are a renderer concern**: the DOM renderer reads the bar plaque's
+  (`.ge-bar-panel` wide / `.ge-m-controls` mobile) and the burger's `getBoundingClientRect()`; the
+  Pixi renderer asks its `BottomBar` for the same two rects (`menuPlate()` / `menuAnchor()`), plus its
+  own fit-scale (`fitScale()`). Core stays geometry-free — `placePopover(plate, surface, size,
+  pointer)` is pure math over whatever rects the renderer hands it.
 - The controller tracks the open layer's kind (`private overlayKind: OverlayRequest['kind'] | null`)
   so `openMenu()` can toggle instead of re-opening.
 - **Light dismiss.** The popover is not a frosted modal: no backdrop blur, no dim, no scene snapshot.
   A transparent full-surface layer sits under it and closes it on `pointerdown`; `Escape` closes it
   through the existing keyboard path (`hasOpenLayer()` → `onKey` returns false → `closeLayer`).
   While it is open, bar hotkeys stay suppressed exactly as they are for other layers.
-- **No anchor → centre.** If the bar is hidden (`setVisible(false)`) or the button cannot be found,
-  the popover centres itself on the surface rather than throwing.
+- **No plate or pointer → centre.** If the bar is hidden (`setVisible(false)`) or neither the plaque
+  nor the burger can be found, the popover centres itself on the surface rather than throwing.
 
 ### Geometry (identical in both renderers)
 
 - Width: content-driven, clamped to `[220px, min(320px, surfaceWidth − 16)]`.
-- Placement: above the anchor, popover left edge aligned to the anchor's left edge, then clamped to
-  `[8, surfaceWidth − width − 8]`. If the space above is smaller than the popover's minimum height,
-  it flips below the anchor and the arrow flips with it.
-- Arrow: 10px triangle centred on the anchor's centre-x, clamped to stay ≥14px from either rounded
-  corner.
-- Height: capped at the available space minus 16px; the row list scrolls inside.
-- Re-anchors on resize (both renderers already have a resize hook that fires on the open layer).
+- Placement: driven by the bar's **plate** — the whole plaque (`.ge-bar-panel` wide / `.ge-m-controls`
+  mobile), not the burger alone — so the card sits flush with the WHOLE bar rather than with whichever
+  control opened it. The card's left edge is flush with the plate's left edge, then clamped to
+  `[8, surfaceWidth − width − 8]`. If the space above is smaller than the popover's minimum height, it
+  flips below the plate and the arrow flips with it. On mobile the plate's top edge is additionally
+  extended upward to the popped-out SPIN/FS hero's true top (the hero is taller than its row and
+  centred, so it overflows the row's own top edge) — otherwise the card's bottom clips the top of the
+  hero's arc. A degenerate (fully zero-sized) plate falls back to the pointer, identically in both
+  renderers.
+- Arrow: 10px triangle centred on the **pointer**'s centre-x — the burger, which can sit anywhere
+  inside the plate — clamped to stay ≥14px from either rounded corner. Falls back to the plate's own
+  centre when no distinct pointer is given.
+- Scale: the card carries the SAME scale factor the bar currently applies to itself
+  (`HtmlRenderer.getBarScale()` / `BottomBar.fitScale()`), so its typography/padding/row-heights
+  shrink in lockstep with the bar chrome on a small popout, instead of ignoring the viewport.
+- Height: capped at the available space on the chosen side; the row list scrolls inside.
+- Re-anchors (plate, pointer and scale, all re-resolved) on resize, and at the end of every
+  `renderBar()` pass — not resize alone. `renderBar()` runs on ~20 state changes besides a resize
+  (bet/win/turbo/mode/…), any of which can change the bar's own fit and leave an open card at a stale
+  scale/position if only the resize hook repositioned it.
 
 ### DOM (`ui/html`)
 
@@ -257,7 +273,10 @@ setMenuRefresh(fn: ((id: string, value: boolean | number) => void) | null): void
   container (`.ge-popover`, `.ge-popover-arrow`, `.ge-popover-dismiss`) plus tighter row padding
   inside it.
 - The popover mounts in the existing `modalHost`, so `closeOverlay()` (which clears that host) tears
-  it down unchanged. It is not a `.ge-sheet`, so the card fit-scale pass ignores it.
+  it down unchanged. It is not a `.ge-sheet`, so the SHEET fit-scale pass (`fitModals`/`fitSheet`)
+  never touches it — instead the card carries the bar's own scale factor (`getBarScale()`), applied as
+  a single `transform: scale()` alongside its measured position, so it shrinks in lockstep with the
+  bar chrome rather than ignoring the viewport.
 
 ### Pixi (`ui/pixi`)
 
@@ -268,9 +287,13 @@ setMenuRefresh(fn: ((id: string, value: boolean | number) => void) | null): void
   glass-row visuals lifted out of the deleted `components/Settings.ts`.
 - `PixiRenderer.pushLayer(node, opts?: { backdrop?: boolean })` — the menu passes `backdrop: false`
   so no `RenderTexture` snapshot / blur is taken. Every other layer keeps today's behaviour.
-- `BottomBar` keeps a reference to its menu `IconButton` and exposes
-  `menuAnchor(): { x: number; y: number; w: number; h: number } | null` in global coordinates (both
-  the wide and mobile builders create the button).
+- `BottomBar` exposes three lazily-resolved accessors, each re-read on every reposition rather than
+  captured once (`renderBar()` destroys and rebuilds the whole bar on every resize and ~20 other state
+  changes): `menuAnchor(): { x: number; y: number; w: number; h: number } | null` — the burger's
+  global rect, the arrow's POINTER; `menuPlate()` — the same shape for the plaque's (wide panel /
+  mobile controls row) global rect, which drives PLACEMENT; and `fitScale(): number` — the same
+  `inner.scale.x` the bar renders itself with, which the popover card matches. All three return a
+  neutral fallback (`null` / `null` / `1`) once the bar is destroyed, rather than throwing.
 
 ## Migration
 
@@ -299,12 +322,14 @@ New and reworked suites, all runnable via `npm test --workspace @energy8platform
   (the guard that makes `MenuItem.icon` safe).
 - `tests/core/controller.test.ts` — `openMenu()` toggles (second call closes); `openSettings()`
   still opens the menu and emits `settingsOpen`.
-- `tests/html/menu.test.ts` — rewritten: popover rows in declared order, custom kinds render,
-  anchored above the burger and clamped inside the root, click-outside and `Escape` close, the
-  `gameInfo` row opens the info overlay, live update from `setMenuValue` while open.
+- `tests/html/menu.test.ts` — rewritten: popover rows in declared order, custom kinds render, placed
+  above the bar's plate and clamped inside the root with the arrow on the burger, click-outside and
+  `Escape` close, the `gameInfo` row opens the info overlay, live update from `setMenuValue` while
+  open.
 - `tests/html/shell-volume.test.ts` — retargeted to the two sliders inside the popover.
 - `tests/pixi/menu.test.ts` — popover opens as a layer with **no backdrop node**, rows match the
-  model, `menuAnchor()` positions it, dismiss layer closes it.
+  model, `menuPlate()`/`fitScale()` position and scale it, `menuAnchor()` aims the arrow, dismiss layer
+  closes it.
 - `tests/pixi/parity.test.ts` — extended with a menu-model parity assertion: both renderers render
   one row per resolved `MenuRow`, in the same order.
 
