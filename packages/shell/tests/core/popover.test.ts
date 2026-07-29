@@ -128,6 +128,37 @@ it('clamps the pointer-derived arrowX inside the rounded corners', () => {
   expect(right.arrowX).toBe(260 - POPOVER.arrowInset);
 });
 
+// ── Missing combination (review finding 7): `below` placement was never exercised together with a
+// DISTINCT pointer — the arrow must still track the POINTER's centre (not the plate's), clamped
+// inside the rounded corners, even once the card has flipped to sit below the anchor. ─────────────
+it('below placement still derives arrowX from a distinct pointer, not the plate', () => {
+  const plate = { x: 100, y: 20, w: 400, h: 40 }; // near the top edge → forces the flip to `below`
+  const pointer = { x: 130, y: 30, w: 20, h: 20 }; // off-centre inside the plate
+  const withoutPointer = placePopover(plate, surface, { w: 260, h: 300 });
+  const withPointer = placePopover(plate, surface, { w: 260, h: 300 }, pointer);
+  expect(withoutPointer.below).toBe(true); // sanity: this scenario really does flip
+  expect(withPointer.below).toBe(true);
+  // placement (x/y/maxH/below) is unaffected by the pointer — only the arrow reads it
+  expect(withPointer.x).toBe(withoutPointer.x);
+  expect(withPointer.y).toBe(withoutPointer.y);
+  expect(withPointer.maxH).toBe(withoutPointer.maxH);
+  // the arrow follows the POINTER's centre (130+10=140), not the plate's (100+200=300)
+  expect(withPointer.arrowX).toBe(140 - withPointer.x);
+  expect(withPointer.arrowX).not.toBe(withoutPointer.arrowX);
+});
+
+it('below placement clamps the pointer-derived arrowX inside the rounded corners', () => {
+  const plate = { x: 100, y: 20, w: 400, h: 40 }; // same top-edge plate — forces `below`
+  // pointer near the plate's left edge — its centre alone would land inside the arrow inset
+  const left = placePopover(plate, surface, { w: 260, h: 300 }, { x: 100, y: 30, w: 12, h: 12 });
+  expect(left.below).toBe(true);
+  expect(left.arrowX).toBe(POPOVER.arrowInset);
+  // pointer near the plate's right edge — its centre alone would overshoot the far corner
+  const right = placePopover(plate, surface, { w: 260, h: 300 }, { x: 488, y: 30, w: 12, h: 12 });
+  expect(right.below).toBe(true);
+  expect(right.arrowX).toBe(260 - POPOVER.arrowInset);
+});
+
 it('a pointer without an anchor keeps the centred, arrow-less fallback', () => {
   const pointer = { x: 400, y: 300, w: 40, h: 40 };
   const p = placePopover(null, surface, { w: 260, h: 300 }, pointer);
