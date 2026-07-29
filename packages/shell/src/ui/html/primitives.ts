@@ -153,7 +153,7 @@ export function createPopover(opts: PopoverOpts): {
     if (surface.w <= 0 || surface.h <= 0) return;
     const s = opts.scale?.() ?? 1;
 
-    // 1. Clear a prior run's constraints (transform + width + max-height) before measuring —
+    // 1. Clear a prior run's constraints (transform + width + max-height + left) before measuring —
     // otherwise scrollWidth/offsetHeight report the already-scaled/clamped box (not the natural
     // content size) on every call after the first, and the card can shrink to fit a
     // narrower/shorter surface but never grow back when the surface widens/grows again. An uncleared
@@ -161,9 +161,14 @@ export function createPopover(opts: PopoverOpts): {
     // height, then the un-clamped natural height (restored below) springs back afterward — so the
     // rendered card can overlap the plate or run off the surface edge until reopened. The transform
     // doesn't affect layout either way, but clearing it keeps every pass measuring the same way.
+    // `left` matters too: `.ge-pop` is absolutely positioned inside an `inset:0` layer, so with the
+    // previous pass's `left` still applied, its shrink-to-fit width is bounded by (layerWidth − left)
+    // instead of the card's true natural width. Invisible at scale 1; a scale below 1 lays the card
+    // out at up to 1/s its on-screen width, so a stale left — only ever a few hundred px — can clip it.
     card.style.transform = '';
     card.style.width = '';
     card.style.maxHeight = '';
+    card.style.left = '0px';
     const naturalW = card.scrollWidth || POPOVER.minW;
 
     // 2. Resolve the ON-SCREEN width from the natural (unscaled) width scaled up to screen units,

@@ -360,4 +360,43 @@ describe('bar menu popover', () => {
     expect(renderedBottom).toBeLessThanOrEqual(surfaceH - POPOVER.margin);
     expect(renderedBottom).toBeLessThanOrEqual(surfaceH - 60); // clear of the re-anchored burger
   });
+
+  // Regression: position() clears transform/width/max-height before measuring (see the comment in
+  // createPopover) but, until now, not `left`. `.ge-pop` is absolutely positioned inside an inset:0
+  // layer, so an uncleared LEFT from the PREVIOUS pass bounds the shrink-to-fit measurement to
+  // (surfaceWidth − left) instead of the card's true natural width. Invisible at scale 1 (every other
+  // geometry test in this file runs there); a scale below 1 lays the card out at up to 1/s its
+  // on-screen width, so a stale left — itself only ever a few hundred px — clips a wide local box.
+  // jsdom's real scrollWidth is a constant 0 (why this branch is otherwise untested); this getter
+  // emulates a real browser's shrink-to-fit-bounded-by-left behaviour.
+  it('measures the card at a neutral left, not the previous pass\'s stale offset', () => {
+    const TRUE_NATURAL_W = 600; // genuinely wants to be wider than maxW — content-driven
+    const surface = document.createElement('div');
+    document.body.appendChild(surface);
+    surface.getBoundingClientRect = () => rect(0, 0, 1000, 600);
+
+    // Near the right edge, so the first pass's resolved left clamps far from 0.
+    const plateEl = document.createElement('div');
+    plateEl.getBoundingClientRect = () => rect(960, 300, 20, 20);
+
+    const pop = createPopover({ ge: 'x', surface, plate: plateEl, scale: () => 0.5, onClose: () => {} });
+    document.body.appendChild(pop.root);
+    Object.defineProperty(pop.card, 'scrollWidth', {
+      configurable: true,
+      get() {
+        const left = parseFloat(pop.card.style.left || '0');
+        // shrink-to-fit bounded by (surfaceWidth − left) — the real CSS rule for an absolutely
+        // positioned, unwidthed box with `left` set and `right` auto.
+        return Math.max(0, Math.min(TRUE_NATURAL_W, 1000 - left));
+      },
+    });
+
+    pop.position();
+    // resolvedW = popoverWidth(1000, 600*0.5=300) = 300 → x clamps to 1000-300-margin.
+    expect(parseFloat(pop.card.style.left)).toBe(1000 - 300 - POPOVER.margin);
+    expect(parseFloat(pop.card.style.width)).toBeCloseTo(TRUE_NATURAL_W, 5); // 600 local, unclipped
+
+    pop.position(); // second pass — left is still ~692px from the first; must not bound this measurement
+    expect(parseFloat(pop.card.style.width)).toBeCloseTo(TRUE_NATURAL_W, 5);
+  });
 });
