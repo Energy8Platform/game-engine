@@ -89,17 +89,29 @@ export interface PopoverOpts {
   ge: string;
   /** The shell root — the popover is placed in its coordinate space and clamped to it. */
   surface: HTMLElement;
-  /** The control the card points at; `null` centres the card and hides the arrow. A function is
-   *  re-resolved on EVERY `position()` call rather than captured once — a renderer that rebuilds
-   *  its DOM on resize/re-render (e.g. HtmlRenderer's `renderBar()`) replaces the anchor element,
-   *  so a captured reference would go stale and silently fall back to a centred card. Pass a
-   *  resolver whenever the anchor can be rebuilt out from under the popover. */
-  anchor: HTMLElement | null | (() => HTMLElement | null);
+  /** The plate: the bar's own plaque (`.ge-bar-panel` wide / `.ge-m-controls` mobile). Drives the
+   *  card's x, y, maxH and above/below flip, so the card sits flush with the WHOLE bar rather than
+   *  with whichever control opened it. Falls back to `pointer` when it can't be resolved (no plaque
+   *  found), and to a centred, arrow-less card when neither resolves. A function is re-resolved on
+   *  EVERY `position()` call rather than captured once — a renderer that rebuilds its DOM on
+   *  resize/re-render (e.g. HtmlRenderer's `renderBar()`) replaces the element, so a captured
+   *  reference would go stale and silently fall back to a centred card. Pass a resolver whenever the
+   *  element can be rebuilt out from under the popover. */
+  plate: HTMLElement | null | (() => HTMLElement | null);
+  /** The control the arrow points at (the burger button). Defaults to `plate` when omitted — the
+   *  historical single-rect behaviour, kept so every caller that only ever had one rect (i.e. every
+   *  caller before `plate`/`pointer` were split) keeps behaving exactly as it did before. Same
+   *  re-resolve-per-call rule as `plate`. */
+  pointer?: HTMLElement | null | (() => HTMLElement | null);
+  /** The scale factor the bar currently applies to itself (HtmlRenderer.applyFitScale's `s`). The
+   *  card matches it so its typography/padding/row-heights scale in lockstep with the bar chrome.
+   *  Defaults to 1 (no scaling) when omitted. */
+  scale?: () => number;
   onClose: () => void;
 }
 
 /** A light-dismiss popover: a transparent full-surface layer (closes on pointerdown) holding a
- *  card with an arrow that points at `anchor`. Append rows to `body`; call `position()` after the
+ *  card with an arrow that points at `pointer`. Append rows to `body`; call `position()` after the
  *  card is in the DOM and again on resize. */
 export function createPopover(opts: PopoverOpts): {
   root: HTMLDivElement;
@@ -123,39 +135,67 @@ export function createPopover(opts: PopoverOpts): {
   card.addEventListener('pointerdown', (e) => e.stopPropagation());
   root.addEventListener('pointerdown', opts.onClose);
 
+  const resolveEl = (v: HTMLElement | null | (() => HTMLElement | null) | undefined): HTMLElement | null =>
+    typeof v === 'function' ? v() : (v ?? null);
+
+  /** A rect in surface coordinates, or null when unresolved/fully zero-sized (a zero-HEIGHT rect —
+   *  e.g. a not-yet-laid-out anchor — is still considered valid, matching placePopover's own rule). */
+  const rectOf = (el: HTMLElement | null, surfaceRect: DOMRect): Rect | null => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 && r.height <= 0) return null;
+    return { x: r.left - surfaceRect.left, y: r.top - surfaceRect.top, w: r.width, h: r.height };
+  };
+
   const position = (): void => {
     const surfaceRect = opts.surface.getBoundingClientRect();
     const surface = { w: surfaceRect.width || opts.surface.clientWidth, h: surfaceRect.height || opts.surface.clientHeight };
     if (surface.w <= 0 || surface.h <= 0) return;
-    // Clear a prior run's constrained width AND height before measuring — otherwise scrollWidth /
-    // offsetHeight report the already-clamped box (not the natural content size) on every call
-    // after the first, and the card can shrink to fit a narrower/shorter surface but never grow
-    // back when the surface widens/grows again. An uncleared max-height is the worse of the two:
-    // placePopover positions a card sized for the STALE clamped height, then the un-clamped natural
-    // height (restored by the assignment below) springs back afterward — so the rendered card can
-    // overlap the anchor or run off the surface edge until the popover is closed and reopened.
+    const s = opts.scale?.() ?? 1;
+
+    // 1. Clear a prior run's constraints (transform + width + max-height) before measuring —
+    // otherwise scrollWidth/offsetHeight report the already-scaled/clamped box (not the natural
+    // content size) on every call after the first, and the card can shrink to fit a
+    // narrower/shorter surface but never grow back when the surface widens/grows again. An uncleared
+    // max-height is the worse of the two: placePopover positions a card sized for the STALE clamped
+    // height, then the un-clamped natural height (restored below) springs back afterward — so the
+    // rendered card can overlap the plate or run off the surface edge until reopened. The transform
+    // doesn't affect layout either way, but clearing it keeps every pass measuring the same way.
+    card.style.transform = '';
     card.style.width = '';
     card.style.maxHeight = '';
-    const w = popoverWidth(surface.w, card.scrollWidth || POPOVER.minW);
-    card.style.width = `${w}px`;
-    let anchor: Rect | null = null;
-    // Resolve fresh every call — see the PopoverOpts.anchor doc comment.
-    const anchorEl = typeof opts.anchor === 'function' ? opts.anchor() : opts.anchor;
-    if (anchorEl) {
-      const a = anchorEl.getBoundingClientRect();
-      if (a.width > 0 || a.height > 0) {
-        anchor = { x: a.left - surfaceRect.left, y: a.top - surfaceRect.top, w: a.width, h: a.height };
-      }
-    }
-    const p = placePopover(anchor, surface, { w, h: card.offsetHeight || POPOVER.minH });
+    const naturalW = card.scrollWidth || POPOVER.minW;
+
+    // 2. Resolve the ON-SCREEN width from the natural (unscaled) width scaled up to screen units,
+    // then set the LOCAL style.width so the card renders at that resolved width once scaled — and
+    // re-measure the height at that width (wrapping may have changed it).
+    const resolvedW = popoverWidth(surface.w, naturalW * s);
+    card.style.width = `${resolvedW / s}px`;
+    const naturalH = card.offsetHeight || POPOVER.minH;
+
+    // 3. Resolve plate/pointer in surface coordinates and place using SCREEN-space size —
+    // placePopover works in surface pixels throughout, so both the anchor rects and `size` here are
+    // screen units even though the card's own layout (width/height above) is still LOCAL/unscaled.
+    const plateEl = resolveEl(opts.plate);
+    const pointerEl = resolveEl(opts.pointer);
+    const plate = rectOf(plateEl, surfaceRect) ?? rectOf(pointerEl, surfaceRect);
+    const pointer = rectOf(pointerEl, surfaceRect);
+    const p = placePopover(plate, surface, { w: resolvedW, h: naturalH * s }, pointer);
+
+    // 4. Apply. maxHeight and the arrow's offset are LOCAL (unscaled) too, since both live inside the
+    // scaled card; transform-origin:top left keeps left/top (screen units) as the card's visual
+    // top-left regardless of `s`, and — since a transform doesn't affect layout — the next
+    // measurement pass stays clean without needing any extra bookkeeping.
     card.style.left = `${p.x}px`;
     card.style.top = `${p.y}px`;
-    card.style.maxHeight = `${p.maxH}px`;
+    card.style.maxHeight = `${p.maxH / s}px`;
+    card.style.transformOrigin = 'top left';
+    card.style.transform = Math.abs(s - 1) > 0.001 ? `scale(${s})` : '';
     card.classList.toggle('ge-pop-below', p.below);
     if (p.arrowX < 0) arrow.style.display = 'none';
     else {
       arrow.style.display = '';
-      arrow.style.left = `${p.arrowX}px`;
+      arrow.style.left = `${p.arrowX / s}px`;
     }
   };
   return { root, card, body, position };

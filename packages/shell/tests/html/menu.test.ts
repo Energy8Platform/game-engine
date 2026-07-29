@@ -4,6 +4,7 @@ import { createGameShell, removeGameShell } from '@/ui/html';
 import { createPopover } from '@/ui/html/primitives';
 import { POPOVER } from '@/core/popover';
 import type { ShellConfig } from '@/core/types';
+import type { HtmlRenderer } from '@/ui/html/HtmlRenderer';
 
 const rect = (x: number, y: number, w: number, h: number): DOMRect =>
   ({ x, y, left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, toJSON: () => ({}) }) as DOMRect;
@@ -176,18 +177,106 @@ describe('bar menu popover', () => {
     expect(q(mount, '[data-ge="menu-row-sfx"]')!.textContent).toContain('25%');
   });
 
-  it('places the card above the burger, clamped inside the shell root', () => {
+  // Regression: this test used to anchor the card to the BURGER (left === burger.x), which is
+  // exactly the old, rejected behaviour — the card's left edge lined up with the glyph, not with
+  // anything a player would read as intentional, and its bottom edge could land ON the bar's own
+  // surface rather than above it. Updated for the plate/pointer split: the plate (`.ge-bar-panel`)
+  // now drives x/y/maxH, and only the arrow still follows the burger (the "pointer").
+  it('places the card above the WHOLE bar plaque, left-aligned to it, with the arrow on the burger', () => {
     const shell = createGameShell(cfg(mount));
     const root = mount.querySelector('#__ge-game-shell__') as HTMLElement;
     Object.defineProperty(root, 'clientWidth', { value: 1000, configurable: true });
     Object.defineProperty(root, 'clientHeight', { value: 600, configurable: true });
-    root.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600, toJSON: () => ({}) }) as DOMRect;
+    root.getBoundingClientRect = () => rect(0, 0, 1000, 600);
+    // Force a deterministic bar scale (s=1) so this test isolates the plate/pointer geometry change
+    // from the separate scale behaviour covered below.
+    (shell as unknown as { renderer: HtmlRenderer }).renderer.fitBar();
+
+    // The plate (the wide dark panel) is WIDER than, and offset from, the burger inside it — if the
+    // card anchored to the burger instead, left/arrow would coincide; they must not.
+    const plate = q(mount, '.ge-bar-panel')!;
+    plate.getBoundingClientRect = () => rect(40, 500, 400, 70);
     const burger = q(mount, '[data-ge="menu"]')!;
-    burger.getBoundingClientRect = () => ({ x: 20, y: 540, left: 20, top: 540, width: 40, height: 40, right: 60, bottom: 580, toJSON: () => ({}) }) as DOMRect;
+    burger.getBoundingClientRect = () => rect(100, 516, 36, 36);
+
     shell.openMenu();
     const card = q(mount, '[data-ge="menu-card"]')!;
-    expect(parseFloat(card.style.left)).toBe(20);
-    expect(parseFloat(card.style.top)).toBeLessThan(540);
+
+    // left edge flush with the PLATE's left edge (40), not the burger's (100)
+    expect(parseFloat(card.style.left)).toBe(40);
+
+    // bottom edge clears the PLATE's top edge (500) by the usual gap — never overlaps the bar's own
+    // surface. jsdom's offsetHeight is 0, so the rendered height is the POPOVER.minH fallback (120).
+    const top = parseFloat(card.style.top);
+    const maxH = parseFloat(card.style.maxHeight);
+    const renderedH = Math.min(POPOVER.minH, maxH);
+    expect(top + renderedH).toBeLessThanOrEqual(500 - POPOVER.gap);
+
+    // arrow centred on the BURGER's centre (100+18=118), relative to the card's left edge (40) —
+    // NOT the plate's own centre (40+200=240).
+    const arrow = q(mount, '.ge-pop-arrow') as HTMLElement;
+    expect(parseFloat(arrow.style.left)).toBeCloseTo(118 - 40, 5);
+  });
+
+  // Defect 2: the popover must scale with the SAME factor the bar applies to itself, and that
+  // scaled card must still land fully inside the surface (not just clamped by content but correctly
+  // converted between the card's own local/unscaled units and the screen units placePopover uses).
+  it('scales the card by the bar\'s own fit-scale, and a scaled card still lands fully inside the surface', () => {
+    const shell = createGameShell(cfg(mount));
+    const root = mount.querySelector('#__ge-game-shell__') as HTMLElement;
+    // BAR_REF_WIDTH is 840 — a 420-wide root computes s = max(0.5, min(1, 420/840)) = 0.5.
+    Object.defineProperty(root, 'clientWidth', { value: 420, configurable: true });
+    Object.defineProperty(root, 'clientHeight', { value: 600, configurable: true });
+    root.getBoundingClientRect = () => rect(0, 0, 420, 600);
+    (shell as unknown as { renderer: HtmlRenderer }).renderer.fitBar();
+
+    const plate = q(mount, '.ge-bar-panel')!;
+    plate.getBoundingClientRect = () => rect(10, 520, 380, 60);
+    const burger = q(mount, '[data-ge="menu"]')!;
+    burger.getBoundingClientRect = () => rect(190, 532, 36, 36);
+
+    shell.openMenu();
+    const card = q(mount, '[data-ge="menu-card"]')!;
+
+    // Stub the card's own content size as a real browser would (jsdom's scrollWidth/offsetHeight are
+    // always 0), then force a reposition — setMenuValue on a RANGE row is the one path that calls
+    // reposition() on an already-open popover (see the "live-updates" test above).
+    Object.defineProperty(card, 'scrollWidth', { value: 500, configurable: true });
+    Object.defineProperty(card, 'offsetHeight', {
+      configurable: true,
+      get() {
+        const mh = parseFloat(card.style.maxHeight || '');
+        return Number.isFinite(mh) ? Math.min(300, mh) : 300;
+      },
+    });
+    shell.setMenuValue('music', 0.4);
+
+    const s = 0.5;
+    // typography/paddings/row-heights all scale together via one transform on the whole card
+    expect(card.style.transform).toContain(`scale(${s})`);
+    // The LOCAL (pre-scale) width/max-height are the resolved SCREEN-space numbers divided by s.
+    // Getting this backwards (or dropping the division) would shrink the card's real content box
+    // (width) or clip it far short of the space actually available (max-height); 500/1008 vs a
+    // wrong 250/504 make either mistake obvious.
+    expect(parseFloat(card.style.width)).toBeCloseTo(500, 5);
+    expect(parseFloat(card.style.maxHeight)).toBeCloseTo(1008, 5);
+
+    // left/top are already screen units (position isn't itself scaled — only the card's content is,
+    // around its top-left transform-origin) — and, once the card's own scale is applied on top, it
+    // must still land fully inside the surface.
+    const left = parseFloat(card.style.left);
+    const top = parseFloat(card.style.top);
+    const screenW = 250; // popoverWidth(420, 500*0.5) — already screen units
+    const screenH = Math.min(300, 1008) * s; // min(natural, local max-height) * s
+    expect(left).toBeGreaterThanOrEqual(POPOVER.margin);
+    expect(top).toBeGreaterThanOrEqual(POPOVER.margin);
+    expect(left + screenW).toBeLessThanOrEqual(420 - POPOVER.margin);
+    expect(top + screenH).toBeLessThanOrEqual(600 - POPOVER.margin);
+
+    // arrow still on the burger's centre (190+18=208 screen px), converted to LOCAL units (÷ s)
+    // since the arrow lives inside the scaled card.
+    const arrow = q(mount, '.ge-pop-arrow') as HTMLElement;
+    expect(parseFloat(arrow.style.left)).toBeCloseTo((208 - left) / s, 5);
   });
 
   // Regression: HtmlRenderer's ResizeObserver calls renderBar() (which does barHost.innerHTML = ''
@@ -203,7 +292,7 @@ describe('bar menu popover', () => {
     let current = document.createElement('button');
     current.getBoundingClientRect = () => rect(20, 540, 40, 40);
 
-    const pop = createPopover({ ge: 'x', surface, anchor: () => current, onClose: () => {} });
+    const pop = createPopover({ ge: 'x', surface, plate: () => current, onClose: () => {} });
     document.body.appendChild(pop.root);
     pop.position();
     expect(parseFloat(pop.card.style.left)).toBe(20);
@@ -238,7 +327,7 @@ describe('bar menu popover', () => {
     const anchorEl = document.createElement('button');
     anchorEl.getBoundingClientRect = () => rect(20, surfaceH - 60, 40, 40);
 
-    const pop = createPopover({ ge: 'x', surface, anchor: anchorEl, onClose: () => {} });
+    const pop = createPopover({ ge: 'x', surface, plate: anchorEl, onClose: () => {} });
     document.body.appendChild(pop.root);
     Object.defineProperty(pop.card, 'offsetHeight', {
       configurable: true,

@@ -8,15 +8,20 @@ import { icon, type IconName } from '../icons';
 export function openMenuPopover(
   host: ShellHost,
   surface: HTMLElement,
+  getScale: () => number,
 ): { root: HTMLElement; position(): void } {
   const pop = createPopover({
     ge: 'menu-popover',
     surface,
     // Resolved lazily on every position() call, not captured once: HtmlRenderer's renderBar() (run
     // on every resize, and on ~20 other state changes) rebuilds the bottom bar from scratch, so the
-    // burger is a brand-new element after it — a captured reference would already be detached by
-    // the next position() call and the card would silently recentre with its arrow hidden.
-    anchor: () => surface.querySelector('[data-ge="menu"]') as HTMLElement | null,
+    // plate/burger are brand-new elements after it — a captured reference would already be detached
+    // by the next position() call and the card would silently recentre with its arrow hidden.
+    // The plate is the bar's own plaque — the continuous dark panel wide, the controls row mobile
+    // (NOT the info pill below it) — so the card sits flush with the WHOLE bar, not just the burger.
+    plate: () => surface.querySelector(host.layout === 'mobile' ? '.ge-m-controls' : '.ge-bar-panel') as HTMLElement | null,
+    pointer: () => surface.querySelector('[data-ge="menu"]') as HTMLElement | null,
+    scale: getScale,
     onClose: () => host.actions.closeOverlay(),
   });
   const updaters: Record<string, (v: boolean | number) => void> = {};

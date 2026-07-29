@@ -37,6 +37,9 @@ export class HtmlRenderer implements ShellRenderer {
   private modalOnKey: ((e: KeyboardEvent) => boolean) | undefined;
   private popoverPosition: (() => void) | null = null;
   private destroyed = false;
+  /** The scale factor last applied to the bar by applyFitScale() — exposed so the menu popover can
+   *  match it exactly (see getBarScale) rather than re-derive its own, possibly-disagreeing, value. */
+  private barScale = 1;
 
   /** MutationObserver for buy-bonus confirm fit — fires fitModals() when nodes are added
    *  inside the modalHost (e.g. the confirm dialog appended after the grid is open). */
@@ -128,6 +131,11 @@ export class HtmlRenderer implements ShellRenderer {
   /** Trigger a bar fit-scale pass (used by tests that stub geometry after the initial render). */
   fitBar(): void { this.applyFitScale(); }
 
+  /** The scale factor applyFitScale() last applied to the bar — the menu popover multiplies its own
+   *  card by this SAME number so its typography/padding/row-heights carry the same visual weight
+   *  relationship the bar has, instead of ignoring the viewport like a fixed-px card would. */
+  getBarScale(): number { return this.barScale; }
+
   // ── private ────────────────────────────────────────────────────────────────
 
   private cancelMoneyAnims(): void {
@@ -138,7 +146,7 @@ export class HtmlRenderer implements ShellRenderer {
   private buildOverlay(req: OverlayRequest): { root: HTMLElement; onKey?: (e: KeyboardEvent) => boolean } | null {
     switch (req.kind) {
       case 'menu': {
-        const { root, position } = openMenuPopover(this.host, this.root);
+        const { root, position } = openMenuPopover(this.host, this.root, () => this.getBarScale());
         this.popoverPosition = position;
         return { root };
       }
@@ -229,13 +237,18 @@ export class HtmlRenderer implements ShellRenderer {
       let need = 0;
       for (const row of Array.from(bar.children) as HTMLElement[]) need = Math.max(need, row.scrollWidth);
       const avail = bar.clientWidth;
+      let s = 1;
       if (need > avail + 1 && avail > 0) {
+        s = Math.max(0.4, avail / need);
         host.style.transformOrigin = 'bottom left';
-        host.style.transform = `scale(${Math.max(0.4, avail / need).toFixed(4)})`;
+        host.style.transform = `scale(${s.toFixed(4)})`;
       }
+      this.barScale = s;
       return;
     }
+    let sApplied = 1;
     const zoomBar = (z: number): void => {
+      sApplied = z;
       const v = z < 0.999 ? z.toFixed(4) : '';
       const set = (el: Element | null): void => {
         if (!el) return;
@@ -252,6 +265,7 @@ export class HtmlRenderer implements ShellRenderer {
     if (bar.scrollWidth > bar.clientWidth + 1 && bar.scrollWidth > 0) {
       zoomBar(s * (bar.clientWidth / bar.scrollWidth));
     }
+    this.barScale = sApplied;
     this.fitReadouts();
   }
 
