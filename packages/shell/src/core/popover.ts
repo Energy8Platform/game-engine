@@ -37,12 +37,19 @@ export function popoverWidth(surfaceW: number, contentW: number): number {
   return Math.max(0, clamp(contentW, Math.min(POPOVER.minW, hi), hi));
 }
 
-/** Place the card above the anchor (below if it does not fit), left-aligned to the anchor and
- *  clamped inside the surface. `anchor === null` (no bar / hidden shell) centres it, arrow off. */
+/** Place the card above the `anchor` (below if it does not fit), left-aligned to it and clamped
+ *  inside the surface. `anchor === null` (no bar / hidden shell) centres it, arrow off.
+ *
+ *  `anchor` drives PLACEMENT (x, y, maxH, below) — normally the bar's whole plaque ("plate"), so the
+ *  card sits flush with the bar as a whole rather than with whichever control opened it. `pointer` is
+ *  the (optional) rect the ARROW points at — normally the burger button, which can sit anywhere
+ *  inside the plate. Defaults to `anchor` when omitted, so every caller that only ever had one rect
+ *  (i.e. every caller before `pointer` existed) keeps behaving exactly as it did before. */
 export function placePopover(
   anchor: Rect | null,
   surface: Surface,
   size: { w: number; h: number },
+  pointer: Rect | null = null,
 ): PopoverPlacement {
   const { margin, gap, arrowInset, minH } = POPOVER;
   if (!anchor) {
@@ -68,6 +75,7 @@ export function placePopover(
   const x = clamp(anchor.x, margin, Math.max(margin, surface.w - size.w - margin));
   const rawY = below ? anchor.y + anchor.h + gap : anchor.y - gap - h;
   const y = clamp(rawY, margin, Math.max(margin, surface.h - h - margin));
-  const arrowX = clamp(anchor.x + anchor.w / 2 - x, arrowInset, Math.max(arrowInset, size.w - arrowInset));
+  const arrowAnchor = pointer ?? anchor;
+  const arrowX = clamp(arrowAnchor.x + arrowAnchor.w / 2 - x, arrowInset, Math.max(arrowInset, size.w - arrowInset));
   return { x, y, maxH, arrowX, below };
 }

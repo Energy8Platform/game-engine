@@ -85,6 +85,57 @@ it('guards popoverWidth against negative values', () => {
   expect(popoverWidth(10, 400)).toBeGreaterThanOrEqual(0);
 });
 
+// ── `pointer` (defect 1: plate drives placement, pointer drives the arrow only) ──────────────────
+it('computes arrowX from the pointer rect while placement still follows the plate anchor', () => {
+  const plate = { x: 100, y: 540, w: 300, h: 40 }; // a wide plaque
+  const pointer = { x: 130, y: 550, w: 20, h: 20 }; // e.g. a burger sitting inside it, off-centre
+  const withoutPointer = placePopover(plate, surface, { w: 260, h: 300 });
+  const withPointer = placePopover(plate, surface, { w: 260, h: 300 }, pointer);
+  // placement is unchanged — it never reads `pointer`
+  expect(withPointer.x).toBe(withoutPointer.x);
+  expect(withPointer.y).toBe(withoutPointer.y);
+  expect(withPointer.maxH).toBe(withoutPointer.maxH);
+  expect(withPointer.below).toBe(withoutPointer.below);
+  // the arrow follows the POINTER's centre (130+10=140), not the plate's (100+150=250)
+  expect(withPointer.arrowX).toBe(140 - withPointer.x);
+  expect(withPointer.arrowX).not.toBe(withoutPointer.arrowX);
+});
+
+it('omitting the pointer is identical to today (arrow follows the anchor)', () => {
+  const cases: Array<[typeof surface, { w: number; h: number }]> = [
+    [surface, { w: 260, h: 300 }],
+  ];
+  for (const [surf, size] of cases) {
+    for (const anchor of [
+      { x: 100, y: 540, w: 40, h: 40 },
+      { x: 2, y: 540, w: 12, h: 12 },
+      { x: 100, y: 20, w: 40, h: 40 },
+    ]) {
+      const withExplicitNull = placePopover(anchor, surf, size, null);
+      const withNoFourthArg = placePopover(anchor, surf, size);
+      expect(withExplicitNull).toEqual(withNoFourthArg);
+    }
+  }
+});
+
+it('clamps the pointer-derived arrowX inside the rounded corners', () => {
+  const plate = { x: 100, y: 540, w: 400, h: 60 };
+  // pointer near the plate's left edge — its centre alone would land inside the arrow inset
+  const left = placePopover(plate, surface, { w: 260, h: 300 }, { x: 100, y: 550, w: 12, h: 12 });
+  expect(left.arrowX).toBe(POPOVER.arrowInset);
+  // pointer near the plate's right edge — its centre alone would overshoot the far corner
+  const right = placePopover(plate, surface, { w: 260, h: 300 }, { x: 388, y: 550, w: 12, h: 12 });
+  expect(right.arrowX).toBe(260 - POPOVER.arrowInset);
+});
+
+it('a pointer without an anchor keeps the centred, arrow-less fallback', () => {
+  const pointer = { x: 400, y: 300, w: 40, h: 40 };
+  const p = placePopover(null, surface, { w: 260, h: 300 }, pointer);
+  expect(p.x).toBe((1000 - 260) / 2);
+  expect(p.y).toBe((600 - 300) / 2);
+  expect(p.arrowX).toBe(-1);
+});
+
 it('ensures the card stays within margins after both-sides-short flip', () => {
   // Verify the three reviewer reproductions stay inside the surface
   const p1 = placePopover({ x: 100, y: 100, w: 40, h: 100 }, { w: 1000, h: 300 }, { w: 260, h: 300 });
