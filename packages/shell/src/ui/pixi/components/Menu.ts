@@ -11,18 +11,28 @@ import { attachHover } from '../primitives/widgets';
 
 /** The bar menu as a Pixi popover. Same rows, same order as the DOM — both come from resolveMenu.
  *
- *  `getAnchor` is a FUNCTION, resolved lazily on every reposition — not a captured `BottomBar`
- *  instance. `PixiRenderer.renderBar()` destroys and rebuilds the BottomBar on every resize AND on
- *  ~20 other state changes, in the SAME resize handler that then repositions this popover. A captured
- *  instance would already be destroyed by the time `resize()` next runs, so `menuAnchor()` on it
- *  would return `null` and the card would silently recentre with its arrow hidden — the exact bug the
- *  DOM renderer shipped and fixed the same way (see `html/Menu.ts`'s anchor callback). Passing a
- *  getter means every call reads whichever bar is CURRENT. */
-export function openMenu(host: PixiComponentContext, getAnchor?: () => Rect | null): ShellLayer {
+ *  `getAnchor` (the burger — the arrow's POINTER), `getPlate` (the bar's plaque — drives placement)
+ *  and `getScale` (the bar's own fit-scale) are all FUNCTIONS, resolved lazily on every reposition —
+ *  never a captured `BottomBar` instance. `PixiRenderer.renderBar()` destroys and rebuilds the
+ *  BottomBar on every resize AND on ~20 other state changes, in the SAME resize handler that then
+ *  repositions this popover. A captured instance would already be destroyed by the time `resize()`
+ *  next runs, so `menuAnchor()`/`menuPlate()` on it would return `null` and the card would silently
+ *  recentre with its arrow hidden — the exact bug the DOM renderer shipped and fixed the same way
+ *  (see `html/Menu.ts`'s plate/pointer callbacks). Passing getters means every call reads whichever
+ *  bar is CURRENT. `getPlate`/`getScale` are optional so every pre-existing caller (which only ever
+ *  passed `getAnchor`) keeps behaving exactly as it did before the plate/pointer/scale split. */
+export function openMenu(
+  host: PixiComponentContext,
+  getAnchor?: () => Rect | null,
+  getPlate?: () => Rect | null,
+  getScale?: () => number,
+): ShellLayer {
   const updaters: Record<string, (v: boolean | number) => void> = {};
   const layer = new Popover(host, {
     tag: 'menu',
-    anchor: () => getAnchor?.() ?? null,
+    plate: () => getPlate?.() ?? null,
+    pointer: () => getAnchor?.() ?? null,
+    scale: () => getScale?.() ?? 1,
     onClose: () => host.closeLayer(),
     build: (width) => {
       const col = new FlexBox({ direction: 'column', align: 'stretch', gap: 6 });

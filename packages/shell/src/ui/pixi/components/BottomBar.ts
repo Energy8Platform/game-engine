@@ -1,5 +1,6 @@
 import { Container, Graphics, Text } from 'pixi.js';
 import type { PixiComponentContext } from '../context';
+import type { Rect } from '@/core/popover';
 import { effectiveAccent } from '@/core/colors';
 import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART, BUY_BONUS_DISABLED_ART } from '../../buy-bonus-art';
 import { FlexBox } from '../primitives/flex';
@@ -119,6 +120,10 @@ export class BottomBar extends Container {
   private autoBtn?: IconButton;
   private turboBtn?: IconButton;
   private menuBtn?: IconButton;
+  /** The menu's PLATE, in LOCAL coordinates relative to `inner` — the continuous dark panel (wide)
+   *  or the controls row (mobile). Set at the point `applyFit()`/`applyFitMobile()` compute it;
+   *  `menuPlate()` converts it to screen space lazily (see that method's doc comment for why). */
+  private plateRect: Rect | null = null;
 
   constructor(host: PixiComponentContext) {
     super();
@@ -128,12 +133,46 @@ export class BottomBar extends Container {
     else this.buildWide();
   }
 
-  /** Screen-space rect of the burger, for anchoring the menu popover. */
-  menuAnchor(): { x: number; y: number; w: number; h: number } | null {
+  /** Screen-space rect of the burger — the menu popover's POINTER (the arrow's target only; see
+   *  `menuPlate` for what drives placement). `measureSize()` (the button's own nominal box, e.g.
+   *  36×36) rather than the built-in `getSize()` (the glyph's ink bounds only) so a burger whose icon
+   *  doesn't fill its box still reports its true hit-box size; multiplied by `inner.scale` — `getSize`
+   *  /`measureSize` only reflect the node's OWN scale (always 1 here), not the ancestor `inner.scale`
+   *  the bar's whole fit-scale lives on, so the UNMULTIPLIED width/height would silently overstate the
+   *  burger's true on-screen footprint on a scaled-down bar and skew the arrow off-centre. */
+  menuAnchor(): Rect | null {
     if (!this.menuBtn || this.menuBtn.destroyed) return null;
     const p = this.menuBtn.getGlobalPosition();
-    const s = this.menuBtn.getSize();
-    return { x: p.x, y: p.y, w: s.width, h: s.height };
+    const s = this.inner.scale.x;
+    const size = this.menuBtn.measureSize();
+    return { x: p.x, y: p.y, w: size.w * s, h: size.h * s };
+  }
+
+  /** Screen-space rect of the menu's PLATE — the continuous dark panel (wide) or the controls row
+   *  (mobile), NOT the burger itself and NOT (mobile) the info pill below it. Drives the popover's
+   *  x/y/maxH/below; the burger (`menuAnchor`) drives only the arrow. Resolved lazily on every call,
+   *  like `menuAnchor` — `PixiRenderer.renderBar()` destroys and rebuilds this BottomBar on every
+   *  resize and ~20 other state changes, so a value captured once would go stale. `plateRect` is
+   *  local to `inner`; `getGlobalPosition` + `inner.scale` convert it to screen space (`outer*` on the
+   *  mobile FlexBox and the wide panel's own drawn rect are both LOCAL sizes, unaffected by `inner`'s
+   *  ancestor scale, same reasoning as `menuAnchor` above). */
+  menuPlate(): Rect | null {
+    if (!this.plateRect) return null;
+    const s = this.inner.scale.x;
+    const origin = this.inner.getGlobalPosition();
+    return {
+      x: origin.x + this.plateRect.x * s,
+      y: origin.y + this.plateRect.y * s,
+      w: this.plateRect.w * s,
+      h: this.plateRect.h * s,
+    };
+  }
+
+  /** The scale factor the bar currently applies to itself (`inner.scale`) — shared with the menu
+   *  popover so its typography/padding/row-heights scale in lockstep with the bar's own chrome,
+   *  instead of ignoring the viewport like a fixed-local-size card would. */
+  fitScale(): number {
+    return this.inner.scale.x;
   }
 
   // ── wide / landscape ──────────────────────────────────────────────────────
@@ -583,6 +622,8 @@ export class BottomBar extends Container {
     this.panelBg.clear();
     roundedPath(this.panelBg, panelX, SPIN_POP, panelRight - panelX, BAR_H, [12, 12, 12, 12]);
     this.panelBg.fill(tokens.bar);
+    // The menu's plate — the whole continuous dark panel, local to `inner` (see menuPlate()).
+    this.plateRect = { x: panelX, y: SPIN_POP, w: panelRight - panelX, h: BAR_H };
 
     if (this.buy) this.buy.position.set(OUTER_PAD, panelCenterY - BUY_W / 2);
     left.position.set(panelX + PANEL_PAD, panelCenterY - left.outerHeight / 2);
@@ -622,6 +663,10 @@ export class BottomBar extends Container {
     // SPIN hero), inflating the controls row so it overlaps the info row below it.
     controls.setLayoutSize(rowW, M_CTRL_H);
     info.setLayoutSize(rowW, M_INFO_H);
+    // The menu's plate — the controls row (NOT the info pill below it), local to `inner`. Read from
+    // `controls.outerWidth/outerHeight` (its own nominal box) rather than the FlexBox's bounds, which
+    // would include the SPIN hero popping out above/below it (see menuPlate()'s doc comment).
+    this.plateRect = { x: 0, y: topPad, w: controls.outerWidth, h: controls.outerHeight };
     const s = rowW > 0 ? Math.max(0.4, Math.min(1, avail / rowW)) : 1;
 
     this.inner.scale.set(s);

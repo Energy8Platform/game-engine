@@ -133,10 +133,17 @@ export class PixiRenderer implements ShellRenderer {
     let layer: ShellLayer | null = null;
     switch (req.kind) {
       case 'menu':
-        // A getter, not `this.bar` by value: renderBar() destroys/rebuilds the bar on every resize
+        // Getters, not `this.bar` by value: renderBar() destroys/rebuilds the bar on every resize
         // and ~20 other state changes, in the same resize handler that then repositions this popover
-        // — see Menu.ts's openMenu doc comment for why this must stay lazy.
-        layer = openMenu(this.ctx, () => this.bar?.menuAnchor() ?? null);
+        // — see Menu.ts's openMenu doc comment for why this must stay lazy. menuAnchor (the burger)
+        // is the arrow's pointer; menuPlate (the plaque) drives placement; fitScale is the same
+        // factor BottomBar applies to its own content via `inner.scale`.
+        layer = openMenu(
+          this.ctx,
+          () => this.bar?.menuAnchor() ?? null,
+          () => this.bar?.menuPlate() ?? null,
+          () => this.bar?.fitScale() ?? 1,
+        );
         break;
       case 'gameInfo':
         layer = openGameInfo(this.ctx);

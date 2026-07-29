@@ -2,6 +2,8 @@ import './setup-canvas';
 import { describe, it, expect, vi } from 'vitest';
 import { Container, EventBoundary, Matrix } from 'pixi.js';
 import { openMenu } from '@/ui/pixi/components/Menu';
+import { BottomBar } from '@/ui/pixi/components/BottomBar';
+import { POPOVER } from '@/core/popover';
 import { Toggle, Slider } from '@/ui/pixi/primitives/controls';
 import { ScrollBox } from '@/ui/pixi/primitives/scroll';
 import { Popover } from '@/ui/pixi/primitives/popover';
@@ -215,6 +217,84 @@ describe('Pixi bar menu — anchor re-resolves after the bar is replaced (findin
     current = null; // e.g. the bar was destroyed and hasn't been rebuilt yet
     layer.resize(1000, 600);
     expect(layer.arrowVisible).toBe(false);
+  });
+});
+
+// ── Defect 1 & 2: openMenu's PLATE (placement) vs POINTER (arrow only), and the shared bar-scale ──
+describe('Pixi bar menu — plate drives placement, pointer drives only the arrow, scale matches the bar', () => {
+  it('places the card by the injected PLATE and points the arrow at a distinct POINTER', () => {
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    const layer = openMenu(
+      host,
+      () => ({ x: 100, y: 516, w: 36, h: 36 }), // getAnchor — the burger (pointer)
+      () => ({ x: 40, y: 500, w: 400, h: 70 }), // getPlate — the wide plaque
+    ) as unknown as Popover;
+    expect(layer.cardX).toBe(40); // plate's left, not the pointer's (100)
+    expect(layer.arrowX).toBeCloseTo(118 - 40, 5); // pointer's centre, not the plate's
+  });
+
+  it('falls back to the pointer for placement when getPlate is omitted (today\'s single-rect behaviour)', () => {
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    const layer = openMenu(host, () => ({ x: 100, y: 540, w: 40, h: 40 })) as unknown as Popover;
+    expect(layer.cardX).toBe(100);
+    expect(layer.arrowVisible).toBe(true);
+  });
+
+  it('re-resolves the PLATE getter on every reposition, tracking a bar rebuilt after open', () => {
+    // Mirrors "Finding 1" above (which does this for the pointer/menuAnchor) — renderBar() destroys
+    // and rebuilds the BottomBar the SAME way regardless of which rect a caller reads off it, so
+    // menuPlate() needs the identical re-resolve-per-call treatment or a resize after rebuild would
+    // silently keep placing the card at the stale bar's position.
+    const host = makeContext({ screenW: 1000, screenH: 600 });
+    let plate = { x: 40, y: 500, w: 400, h: 70 };
+    const layer = openMenu(host, undefined, () => plate) as unknown as Popover;
+    expect(layer.cardX).toBe(40);
+
+    plate = { x: 200, y: 500, w: 400, h: 70 }; // e.g. renderBar() rebuilt the bar at a new position
+    layer.resize(1000, 600);
+    expect(layer.cardX).toBe(200);
+  });
+
+  it('scales the card by the injected getScale factor', () => {
+    const host = makeContext({ screenW: 420, screenH: 600 });
+    const layer = openMenu(
+      host,
+      () => ({ x: 190, y: 532, w: 36, h: 36 }),
+      () => ({ x: 10, y: 520, w: 380, h: 60 }),
+      () => 0.5,
+    ) as unknown as Popover;
+    expect(layer.card.scale.x).toBeCloseTo(0.5, 5);
+  });
+
+  // A real BottomBar (not a stub) actually exposes menuPlate()/fitScale() correctly, and openMenu
+  // wired to it (mirroring PixiRenderer.openOverlay's 'menu' case) ends up scaled and placed by it.
+  it('a real BottomBar exposes a usable menuPlate()/fitScale(), and openMenu positions by them', () => {
+    const host = makeContext({ screenW: 420, screenH: 675, layout: 'wide' }); // narrow → forces fit-scale
+    const bar = new BottomBar(host);
+    bar.applyFit();
+
+    const s = bar.fitScale();
+    expect(s).toBeGreaterThan(0);
+    expect(s).toBeLessThanOrEqual(1);
+    // fitScale() reads the exact same `inner.scale` the bar renders itself with — never a second,
+    // possibly-disagreeing, computation.
+    expect(s).toBe((bar as unknown as { inner: { scale: { x: number } } }).inner.scale.x);
+
+    const plate = bar.menuPlate();
+    expect(plate).not.toBeNull();
+    expect(plate!.w).toBeGreaterThan(0);
+    expect(plate!.h).toBeGreaterThan(0);
+
+    const layer = openMenu(
+      host,
+      () => bar.menuAnchor(),
+      () => bar.menuPlate(),
+      () => bar.fitScale(),
+    ) as unknown as Popover;
+    // clamped inside the surface margins exactly like placePopover always clamps x — a raw plate.x
+    // this close to the left edge is expected to land on the margin floor, not the unclamped value.
+    expect(layer.cardX).toBeCloseTo(Math.max(POPOVER.margin, plate!.x), 5);
+    expect(layer.card.scale.x).toBeCloseTo(s, 5);
   });
 });
 
