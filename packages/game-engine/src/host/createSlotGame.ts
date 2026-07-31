@@ -186,7 +186,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         jurisdiction?: import('./shellConfig').JurisdictionRestrictions;
         betLevels?: number[];
         defaultBet?: number;
-        stake?: { defaultBetLevel?: number };
+        stake?: { defaultBetLevel?: number; minBet?: number; maxBet?: number };
       };
       lang?: string;
     } | null;
@@ -218,7 +218,20 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       // absent on dev/devBridge → buildShellConfig falls back to the spec.
       betLevels: config?.betLevels,
       defaultBet: config?.stake?.defaultBetLevel ?? config?.defaultBet,
+      // Hard stake window; the bridge rejects anything outside it before /bet/play.
+      minBet: config?.stake?.minBet,
+      maxBet: config?.stake?.maxBet,
     };
+    // On a real Stake launch the ladder is CURRENCY-SPECIFIC and mandatory. Falling back to the
+    // spec's (EUR-shaped) ladder here would put the game on bets the wallet can't honour — every
+    // spin rejected on a high-denomination currency (ARS minBet 50), or silently mispriced. Fail
+    // where the cause is visible instead of at the first spin.
+    if (isStakeNow && !runtime.betLevels?.length) {
+      fatal('Could not load the bet levels for your currency. Please relaunch the game.');
+      throw new Error(
+        'createSlotGame: Stake launch returned no config.betLevels — refusing to fall back to the spec ladder',
+      );
+    }
     if (opts.dev) {
       // Dev-only diagnostic. Logged as PLAIN STRINGS (not collapsed objects) so the values are
       // readable in the console without expanding. If the shown symbol is a bare code ("EUR")
@@ -238,6 +251,12 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       app: game.app,
       parent: game.uiLayer,
     };
+    // Adopt the bet the shell is about to display. `currentBet` was seeded from the SPEC above,
+    // which is only ever right by accident: the authoritative default is the per-currency one from
+    // /wallet/authenticate. The shell re-syncs us on `betChange`, but that fires ONLY when the
+    // player moves the bet — so without this the FIRST spin (and any bonus buy before it) plays at
+    // the spec's bet while the bar shows the RGS one.
+    currentBet = pixiShellCfg.currentBet ?? currentBet;
     // The game may swap in its own shell (a custom renderer over the same core) via shellFactory;
     // default is the built-in Pixi shell. The host drives whichever it gets through the Shell contract.
     shell = (opts.shellFactory ?? createPixiShell)(pixiShellCfg);

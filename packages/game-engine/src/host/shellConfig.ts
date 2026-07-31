@@ -73,6 +73,40 @@ export interface ShellRuntime {
   /** Per-currency default bet from `/wallet/authenticate` (the bridge surfaces it as
    *  `config.stake.defaultBetLevel`). Stake requires the selector to start here on every entry. */
   defaultBet?: number;
+  /** Hard per-currency stake bounds from `/wallet/authenticate` (`config.stake.minBet/maxBet`,
+   *  major units). The bridge REJECTS any bet outside them before `/bet/play`, so the resolved
+   *  default is clamped into this window — see `resolveDefaultBet`. */
+  minBet?: number;
+  maxBet?: number;
+}
+
+/**
+ * Resolve the bet the game must START on — the single source of truth for BOTH the shell's
+ * selector and the host's `currentBet` (they must never disagree; if they do, the player is
+ * charged a bet they never chose).
+ *
+ * The `preferred` bet is the RGS default when there is one, else the spec's. Neither is trusted
+ * blindly: the result is always an actual rung of `betLevels`, inside `[minBet, maxBet]`.
+ *
+ * Why snapping matters beyond the bounds check: the shell's `stepBet()` locates the current bet
+ * with `availableBets.indexOf(state.bet)`. An off-ladder default makes that return -1, so the very
+ * first +/- press jumps the bet to `availableBets[0]` instead of stepping.
+ */
+export function resolveDefaultBet(
+  betLevels: number[],
+  preferred: number | undefined,
+  bounds?: { minBet?: number; maxBet?: number },
+): number {
+  if (!betLevels.length) return preferred ?? 0; // no ladder to snap to — nothing better to offer
+  // Drop rungs the RGS would reject outright. If the bounds exclude the WHOLE ladder the data is
+  // self-contradictory; keep the ladder rather than hand back a bet that isn't even selectable.
+  const inBounds = betLevels.filter(
+    (l) => (bounds?.minBet == null || l >= bounds.minBet) && (bounds?.maxBet == null || l <= bounds.maxBet),
+  );
+  const pool = inBounds.length ? inBounds : betLevels;
+  if (preferred == null) return pool[0];
+  // Nearest rung; ties go to the cheaper one (`<` keeps the earlier, ascending-ladder entry).
+  return pool.reduce((best, l) => (Math.abs(l - preferred) < Math.abs(best - preferred) ? l : best), pool[0]);
 }
 
 /** The subset of Stake's jurisdiction flags the shell can enforce via `ShellFeatures`. */
@@ -389,8 +423,19 @@ export function buildShellConfig(
 ): Omit<PixiShellConfig, 'app' | 'parent' | 'gameInfo'> & { gameInfo: GameInfoContent } {
   // Prefer the currency-specific ladder from /wallet/authenticate; fall back to the spec (dev/devBridge).
   const betLevels = runtime.betLevels?.length ? runtime.betLevels : model.spec.betLevels;
-  // Stake requires the default to come from authenticate on every entry; spec default is the dev fallback.
-  const defaultBet = runtime.defaultBet ?? model.spec.defaultBet ?? betLevels[0];
+  // Stake requires the default to come from authenticate on every entry; spec default is the dev
+  // fallback. Snapped onto the ladder + clamped to the RGS bounds so the selector and the host's
+  // `currentBet` both start on a bet the server will actually accept.
+  // EXCEPT in replay: there the bridge reports the replayed round's OWN stake, a historical amount
+  // that need not be a rung of today's ladder. Snapping it would misreport what was actually bet.
+  const preferredBet = runtime.defaultBet ?? model.spec.defaultBet;
+  const defaultBet =
+    runtime.mode === 'replay'
+      ? (preferredBet ?? betLevels[0])
+      : resolveDefaultBet(betLevels, preferredBet, {
+          minBet: runtime.minBet,
+          maxBet: runtime.maxBet,
+        });
   // runtime.currency is the resolved CurrencyConfig (derived from initData.config.currency by the
   // host); opts.currency still wins. Fall back to the spec code, then a neutral euro.
   const currency =

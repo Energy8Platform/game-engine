@@ -1,6 +1,6 @@
 // packages/game-engine/tests/host/shellConfig.test.ts
 import { describe, it, expect } from 'vitest';
-import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction, applyJurisdiction } from '../../src/host/shellConfig';
+import { buildShellConfig, defaultGameInfo, toBonusOptions, resolveCurrency, mergeGameInfo, stakeForAction, applyJurisdiction, resolveDefaultBet } from '../../src/host/shellConfig';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { GameInfoContent, GameInfoSection, ShellFeatures, MenuItem } from '@energy8platform/shell/pixi';
 
@@ -79,6 +79,88 @@ describe('bet ladder + default bet from /wallet/authenticate', () => {
     const c = buildShellConfig({}, model, { balance: 0, mode: 'base' });
     expect(c.availableBets).toEqual([0.1, 1, 5]); // spec.betLevels
     expect(c.defaultBet).toBe(1);                  // spec.defaultBet
+  });
+
+  // The spec default is a EUR-shaped number. On a high-denomination currency (ARS: minBet 50)
+  // the runtime ladder is the ONLY valid source — the spec default must never leak through.
+  it('ignores the spec default entirely when authenticate brings its own (ARS)', () => {
+    const c = buildShellConfig({}, model, {
+      balance: 0, mode: 'base',
+      betLevels: [50, 100, 250, 500], defaultBet: 50, minBet: 50, maxBet: 750000,
+    });
+    expect(c.defaultBet).toBe(50);
+    expect(c.currentBet).toBe(50); // NOT spec.defaultBet (1) — that is below Stake's minBet
+  });
+
+  // Regression: the shell's stepBet() does availableBets.indexOf(state.bet). A default that is not
+  // ON the ladder makes indexOf return -1, so the first +/- press snaps the bet to availableBets[0].
+  it('snaps a default that is off-ladder onto the nearest rung (keeps stepBet indexable)', () => {
+    const c = buildShellConfig({}, model, {
+      balance: 0, mode: 'base', betLevels: [0.2, 1, 2, 4], defaultBet: 1.7,
+    });
+    expect(c.availableBets).toContain(c.defaultBet);
+    expect(c.defaultBet).toBe(2);
+  });
+
+  it('clamps a default outside [minBet, maxBet] into the allowed rungs', () => {
+    const hi = buildShellConfig({}, model, {
+      balance: 0, mode: 'base', betLevels: [1, 2, 5, 10], defaultBet: 10, maxBet: 5,
+    });
+    expect(hi.defaultBet).toBe(5);
+    const lo = buildShellConfig({}, model, {
+      balance: 0, mode: 'base', betLevels: [1, 2, 5, 10], defaultBet: 1, minBet: 2,
+    });
+    expect(lo.defaultBet).toBe(2);
+  });
+
+  // A replayed round's stake is a historical fact — it need not be a rung of today's ladder, and
+  // snapping it would misreport what the player actually bet.
+  it('reports a replay stake verbatim, off-ladder or not', () => {
+    const c = buildShellConfig({}, model, {
+      balance: 0, mode: 'replay', betLevels: [0.2, 1, 2], defaultBet: 0.75,
+    });
+    expect(c.defaultBet).toBe(0.75);
+    expect(c.currentBet).toBe(0.75);
+  });
+
+  // Every launch shape must land on a rung — this is what the host adopts as its starting bet.
+  it.each([
+    ['spec only', {}],
+    ['stake ARS', { betLevels: [50, 100], defaultBet: 50, minBet: 50, maxBet: 750000 }],
+    ['off-ladder default', { betLevels: [0.2, 1], defaultBet: 0.7 }],
+    ['default below minBet', { betLevels: [0.2, 1], defaultBet: 0.2, minBet: 1 }],
+  ])('currentBet is always a rung of availableBets (%s)', (_name, runtime) => {
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base', ...runtime });
+    expect(c.availableBets.indexOf(c.currentBet!)).toBeGreaterThanOrEqual(0);
+    expect(c.currentBet).toBe(c.defaultBet);
+  });
+});
+
+describe('resolveDefaultBet (the bet the host and the shell must BOTH start on)', () => {
+  it('returns the preferred bet when it is already a rung', () => {
+    expect(resolveDefaultBet([0.2, 1, 2], 1)).toBe(1);
+  });
+
+  it('falls back to the cheapest rung when nothing is preferred', () => {
+    expect(resolveDefaultBet([0.2, 1, 2], undefined)).toBe(0.2);
+  });
+
+  it('snaps to the nearest rung, preferring the cheaper one on a tie', () => {
+    expect(resolveDefaultBet([1, 2, 3], 2.4)).toBe(2);
+    expect(resolveDefaultBet([1, 3], 2)).toBe(1); // exact tie → cheaper
+  });
+
+  it('drops rungs outside [minBet, maxBet] before snapping', () => {
+    expect(resolveDefaultBet([1, 2, 5, 10], 1, { minBet: 2, maxBet: 5 })).toBe(2);
+    expect(resolveDefaultBet([1, 2, 5, 10], 10, { minBet: 2, maxBet: 5 })).toBe(5);
+  });
+
+  it('keeps the ladder when the bounds would exclude every rung (bad RGS data beats no bet)', () => {
+    expect(resolveDefaultBet([1, 2], 2, { minBet: 100, maxBet: 200 })).toBe(2);
+  });
+
+  it('returns the preferred bet unchanged when there is no ladder at all', () => {
+    expect(resolveDefaultBet([], 7)).toBe(7);
   });
 });
 
