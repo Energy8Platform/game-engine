@@ -135,11 +135,11 @@ describe('voidmoon variant', () => {
     expect(container.querySelector('#ge-pl-loader-rect')).toBeNull();
   });
 
-  it('drives the loader rect width on progress (max width 751)', () => {
+  it('drives the loader rect width on progress (max width 519)', () => {
     createCSSPreloader(container, { preloaderVariant: 'voidmoon' });
     setCSSPreloaderProgress(0.5);
     const rect = container.querySelector('#ge-vm-loader-rect') as SVGRectElement;
-    expect(rect.getAttribute('width')).toBe(String(0.5 * 751));
+    expect(rect.getAttribute('width')).toBe(String(0.5 * 519));
     expect(rect.classList.contains('driven')).toBe(true);
   });
 
