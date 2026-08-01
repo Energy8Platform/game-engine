@@ -434,6 +434,19 @@ export class StakeBridge {
       },
     };
 
+    // A round `authenticate` handed back still open (a mid-bonus page refresh) was played at its
+    // OWN stake, which has nothing to do with today's `defaultBetLevel`. State it so the game
+    // restores the bar — and the bet it drains the round at — from the round instead of resetting
+    // to the default. Omitted when there is no open round, or when the RGS gave it no `amount`:
+    // a bet of 0 would be worse than saying nothing.
+    if (this.active && this.active.betAmount > 0) {
+      baseConfig.activeRound = {
+        bet: this.active.betAmount,
+        roundId: this.active.roundId,
+        mode: this.active.mode,
+      };
+    }
+
     if (this.adapter?.enrichConfig) {
       try {
         return this.adapter.enrichConfig(baseConfig);

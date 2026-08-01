@@ -251,3 +251,129 @@ describe('StakeBridge resume of a 1-segment winning round', () => {
     expect(results).toHaveLength(2);
   });
 });
+
+/**
+ * Refreshing mid-BONUS must bring the player back on the bet the open round was
+ * bought at — not the currency's default bet level. `/wallet/authenticate` carries
+ * that stake on `round.amount`; the bridge already turns it into `active.betAmount`
+ * for its own accounting, but never told the game. INIT now states it explicitly on
+ * `config.activeRound` so the host can seed the bar (and its `currentBet`) from the
+ * round instead of from `config.defaultBetLevel`.
+ */
+describe('StakeBridge — INIT states the bet of the round being resumed', () => {
+  let sb: { ready(): Promise<void>; destroy(): void };
+  let received: Captured[];
+
+  /** A bonus round of three segments, refreshed after the first free spin. */
+  const bonusAdapter: BookAdapter = {
+    splitRound: () => [
+      { action: 'spin', data: {}, winThisSegment: 0, nextActions: ['free_spin'] },
+      { action: 'free_spin', data: {}, winThisSegment: 5, nextActions: ['free_spin'] },
+      { action: 'free_spin', data: {}, winThisSegment: 7, nextActions: ['spin'] },
+    ],
+    resumeFrom: () => 1,
+  };
+
+  /** Authenticate config where the default bet (1) is NOT the open round's bet (5). */
+  const config = {
+    gameID: 'test-game',
+    minBet: 1 * MILLION,
+    maxBet: 100 * MILLION,
+    stepBet: 1 * MILLION,
+    defaultBetLevel: 1 * MILLION,
+    betLevels: [1 * MILLION, 5 * MILLION, 10 * MILLION],
+    betModes: { BASE: {}, BONUS: {} },
+  };
+
+  beforeEach(() => {
+    installWindow();
+    rgs.authenticate.mockReset();
+    rgs.balance.mockReset();
+    rgs.event.mockReset();
+    rgs.balance.mockResolvedValue({ balance: { amount: 100 * MILLION, currency: 'USD' } });
+    rgs.event.mockResolvedValue({ event: 'seg-1' });
+    received = [];
+  });
+
+  afterEach(() => {
+    sb?.destroy();
+  });
+
+  /** Boot the bridge and return the INIT payload the game receives. */
+  async function bootAndInit(): Promise<{ config: Record<string, unknown> }> {
+    sb = new StakeBridge({
+      devMode: true,
+      url: LIVE_URL,
+      adapter: bonusAdapter,
+      modeMap: { spin: 'BASE', buy_bonus: 'BONUS', default: 'BASE' },
+      gameId: 'test-game',
+      balancePollMs: 0,
+    });
+    await sb.ready();
+    const channel = (globalThis as { window: { __casinoBridgeChannel: any } }).window
+      .__casinoBridgeChannel;
+    channel.onGuest((msg: Captured) => received.push(msg));
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    const init = received.find((m) => m.type === 'INIT');
+    expect(init, 'no INIT delivered').toBeTruthy();
+    return init!.payload as { config: Record<string, unknown> };
+  }
+
+  it('publishes the open round’s stake on config.activeRound', async () => {
+    rgs.authenticate.mockResolvedValue({
+      balance: { amount: 100 * MILLION, currency: 'USD' },
+      // `amount` is the round's stake in MINOR units — the bet the player bought at.
+      round: {
+        betID: 4242,
+        amount: 5 * MILLION,
+        payoutMultiplier: 12,
+        costMultiplier: 100,
+        active: true,
+        mode: 'BONUS',
+        state: { events: ['bonus'] },
+        event: 'seg-1',
+      },
+      config,
+    });
+
+    const init = await bootAndInit();
+
+    // The default bet level is still published — it is simply not what a resumed round starts on.
+    expect((init.config.stake as { defaultBetLevel: number }).defaultBetLevel).toBe(1);
+    expect(init.config.activeRound).toEqual({ bet: 5, roundId: '4242', mode: 'BONUS' });
+  });
+
+  it('omits activeRound when authenticate returns no open round', async () => {
+    rgs.authenticate.mockResolvedValue({
+      balance: { amount: 100 * MILLION, currency: 'USD' },
+      round: null,
+      config,
+    });
+
+    const init = await bootAndInit();
+
+    expect(init.config.activeRound).toBeUndefined();
+  });
+
+  // A round with no `amount` gives us nothing to restore; publishing bet 0 would be worse than
+  // saying nothing (the host would start the bar on a stake the wallet cannot honour).
+  it('omits activeRound when the open round carries no amount', async () => {
+    rgs.authenticate.mockResolvedValue({
+      balance: { amount: 100 * MILLION, currency: 'USD' },
+      round: {
+        betID: 4242,
+        payoutMultiplier: 12,
+        costMultiplier: 100,
+        active: true,
+        mode: 'BONUS',
+        state: { events: ['bonus'] },
+      },
+      config,
+    });
+
+    const init = await bootAndInit();
+
+    expect(init.config.activeRound).toBeUndefined();
+  });
+});

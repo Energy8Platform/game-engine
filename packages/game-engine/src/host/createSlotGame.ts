@@ -187,10 +187,22 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         betLevels?: number[];
         defaultBet?: number;
         stake?: { defaultBetLevel?: number; minBet?: number; maxBet?: number };
+        /** Set by the Stake bridge when `/wallet/authenticate` returned a still-open round. */
+        activeRound?: { bet?: number; roundId?: string; mode?: string };
       };
+      /** Present only on a resume — the bridge synthesises it from the open round. */
+      session?: { betAmount?: number };
       lang?: string;
     } | null;
     const config = initData?.config;
+    // A reload mid-round is just another entry: authenticate answers with BOTH the currency's
+    // default bet and the round still open from the previous page-load. That round was played at
+    // its own stake, so the default is the wrong bet to come back on — the bar would show it while
+    // the resume drain (and the ×bet win data the scene renders) ran against something else.
+    // `config.activeRound.bet` is the bridge stating it outright; `session.betAmount` is the older
+    // carrier for the same value (INIT only ever has a session on a resume). Both are ignored when
+    // absent or 0 so an ordinary launch still starts on the default.
+    const resumedBet = config?.activeRound?.bet || initData?.session?.betAmount || undefined;
     const { resolveCurrency } = await import('./shellConfig');
     // SINGLE source of truth for the symbol: the Stake bridge already puts a full CurrencyMetaData
     // (symbol + placement) on initData.config.currency. In the non-stake/devBridge path that meta
@@ -217,7 +229,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       // Currency-specific ladder + per-currency default from /wallet/authenticate (Stake);
       // absent on dev/devBridge → buildShellConfig falls back to the spec.
       betLevels: config?.betLevels,
-      defaultBet: config?.stake?.defaultBetLevel ?? config?.defaultBet,
+      defaultBet: resumedBet ?? config?.stake?.defaultBetLevel ?? config?.defaultBet,
       // Hard stake window; the bridge rejects anything outside it before /bet/play.
       minBet: config?.stake?.minBet,
       maxBet: config?.stake?.maxBet,

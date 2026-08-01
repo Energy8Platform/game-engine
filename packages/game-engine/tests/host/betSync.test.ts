@@ -101,9 +101,13 @@ function fakeShell() {
 }
 
 /** Boot the real host with an authenticate payload on initData.config. */
-async function boot(config: Record<string, unknown> | undefined, stake = false) {
+async function boot(
+  config: Record<string, unknown> | undefined,
+  stake = false,
+  session?: Record<string, unknown>,
+) {
   const shell = fakeShell();
-  initDataFixture = { balance: 1_000_000, config };
+  initDataFixture = { balance: 1_000_000, config, session: session ?? null };
   const scene = { async onSpin() {} };
   sceneCurrent = { scene };
   const handle = await createSlotGame({
@@ -188,5 +192,78 @@ describe('createSlotGame — starting bet comes from /wallet/authenticate, not t
   it('boots a Stake launch that DID bring a ladder', async () => {
     const { cfg } = await boot(ARS, true);
     expect(cfg().currentBet).toBe(50);
+  });
+});
+
+/**
+ * Reloading the page mid-bonus must come back on the bet the open round was played at.
+ *
+ * A refresh is just another entry: authenticate answers with the currency's default bet AND with
+ * the still-open round. The host used to read only the former, so the bar dropped to the default
+ * while the round it was about to drain had been bought at something else — and since `ctx.bet`
+ * is what the scene multiplies its ×bet win data by, the resumed bonus paid out visibly wrong
+ * numbers. Stake requires the bet to be restored from the active round.
+ */
+describe('createSlotGame — a resumed round restores its own bet', () => {
+  beforeEach(() => {
+    plays.length = 0;
+    sceneCurrent = null;
+    delete (window as unknown as Record<string, unknown>).__e8SlotBooted__;
+    document.body.innerHTML = '';
+  });
+
+  /** The ARS ladder, refreshed mid-round on a 250 bet (default is 50). */
+  const RESUMED = { ...ARS, activeRound: { bet: 250, roundId: '4242', mode: 'BONUS' } };
+
+  it('starts the bar on the open round’s bet, not the default bet level', async () => {
+    const { cfg } = await boot(RESUMED);
+    expect(cfg().currentBet).toBe(250);
+  });
+
+  it('drains and spins at the open round’s bet (no betChange yet)', async () => {
+    const { emit } = await boot(RESUMED);
+    emit('spin');
+    await vi.waitFor(() => expect(plays.length).toBe(1));
+    expect(plays[0]).toEqual({ action: 'spin', bet: 250 }); // was 50 → wrong ×bet win amounts
+  });
+
+  // Fallback for bridges that predate `config.activeRound`: the resumed round's stake also rides
+  // on INIT's session (`SessionData.betAmount`), which is only ever populated on a resume.
+  it('falls back to the INIT session’s betAmount', async () => {
+    const { cfg } = await boot(ARS, false, {
+      spinsRemaining: 4,
+      spinsPlayed: 6,
+      totalWin: 12,
+      betAmount: 500,
+    });
+    expect(cfg().currentBet).toBe(500);
+  });
+
+  it('prefers config.activeRound over the session when both are present', async () => {
+    const { cfg } = await boot(RESUMED, false, {
+      spinsRemaining: 4,
+      spinsPlayed: 6,
+      totalWin: 12,
+      betAmount: 500,
+    });
+    expect(cfg().currentBet).toBe(250);
+  });
+
+  // Nothing open → the default bet level still wins. A stale/zero bet must never take over.
+  it('ignores a zero restored bet', async () => {
+    const { cfg } = await boot({ ...ARS, activeRound: { bet: 0 } });
+    expect(cfg().currentBet).toBe(50);
+  });
+
+  it('ignores a session that carries no betAmount', async () => {
+    const { cfg } = await boot(ARS, false, { spinsRemaining: 0, spinsPlayed: 1, totalWin: 0 });
+    expect(cfg().currentBet).toBe(50);
+  });
+
+  // The restored bet is still snapped onto the live ladder: the shell locates the current bet with
+  // `availableBets.indexOf(bet)`, so an off-ladder value breaks the very first +/- press.
+  it('snaps the restored bet onto the ladder', async () => {
+    const { cfg } = await boot({ ...ARS, activeRound: { bet: 260, roundId: '1', mode: 'BASE' } });
+    expect(cfg().currentBet).toBe(250);
   });
 });
