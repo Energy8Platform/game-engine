@@ -37,6 +37,12 @@ export class AudioManager {
   private _categories: Record<AudioCategoryName, CategoryState>;
   private _masterGain = 1.0;
   private _currentMusic: string | null = null;
+  /** Duck factor (0..1) from duckMusic/unduckMusic. A presentation state, not a player setting. */
+  private _musicDuck = 1;
+  /** Crossfade ramp (0..1) for the track that is fading IN. 1 whenever no fade is running. */
+  private _musicFade = 1;
+  /** Generation counter so a superseded crossfade ramp stops writing over the new track's. */
+  private _musicFadeToken = 0;
   private _unlocked = false;
   private _unlockHandler: (() => void) | null = null;
 
@@ -106,7 +112,10 @@ export class AudioManager {
     if (this._globalMuted || this._categories[category].muted) return;
 
     const { sound } = this._soundModule;
-    const vol = (options?.volume ?? 1) * this._categories[category].volume * this._masterGain;
+    // The master gain lives on the GLOBAL bus (`sound.volumeAll`, see applyVolumes) and @pixi/sound
+    // already multiplies it in — folding it in here as well squared it, so a master of 0.5 played
+    // sfx at 0.25.
+    const vol = (options?.volume ?? 1) * this._categories[category].volume;
 
     try {
       sound.play(alias, {
@@ -129,47 +138,45 @@ export class AudioManager {
     if (!this._initialized || !this._soundModule) return;
 
     const { sound } = this._soundModule;
+    const prevAlias = this._currentMusic;
+    const crossfade = !!prevAlias && prevAlias !== alias && fadeDuration > 0;
 
-    // Stop current music with fade-out, start new music with fade-in
-    if (this._currentMusic && fadeDuration > 0) {
-      const prevAlias = this._currentMusic;
-      this._currentMusic = alias;
-
-      if (this._globalMuted || this._categories.music.muted) return;
-
-      // Fade out the previous track
-      this.fadeVolume(prevAlias, this._categories.music.volume * this._masterGain, 0, fadeDuration, () => {
+    // Retire the outgoing track. Its own SOUND-level volume is the only thing still pointing at it,
+    // so fading that to 0 is safe — nothing else writes it once `_currentMusic` has moved on.
+    if (prevAlias) {
+      if (crossfade) {
+        const from = this.soundVolumeOf(prevAlias);
+        this.fadeVolume(prevAlias, from, 0, fadeDuration, () => {
+          try { sound.stop(prevAlias); } catch { /* ignore */ }
+        });
+      } else {
         try { sound.stop(prevAlias); } catch { /* ignore */ }
-      });
-
-      // Start new track at zero volume, fade in
-      try {
-        sound.play(alias, {
-          volume: 0,
-          loop: true,
-        });
-        this.fadeVolume(alias, 0, this._categories.music.volume * this._masterGain, fadeDuration);
-      } catch (e) {
-        console.warn(`[AudioManager] Failed to play music "${alias}":`, e);
-      }
-    } else {
-      // No crossfade — instant switch
-      if (this._currentMusic) {
-        try { sound.stop(this._currentMusic); } catch { /* ignore */ }
-      }
-
-      this._currentMusic = alias;
-      if (this._globalMuted || this._categories.music.muted) return;
-
-      try {
-        sound.play(alias, {
-          volume: this._categories.music.volume * this._masterGain,
-          loop: true,
-        });
-      } catch (e) {
-        console.warn(`[AudioManager] Failed to play music "${alias}":`, e);
       }
     }
+
+    this._currentMusic = alias;
+    this._musicFadeToken++; // any ramp still running belongs to a track we just replaced
+
+    // Deliberately started even while muted. Global mute is the @pixi/sound CONTEXT mute and a
+    // muted music category is a 0 term in `musicGain()` — both already make this inaudible, and
+    // both undo themselves the moment the player flips them back. Returning early here instead
+    // meant a track begun while muted never existed, so unmuting restored silence until some
+    // later mode change happened to switch tracks.
+
+    // The incoming track plays at INSTANCE volume 1 and carries its whole gain on the SOUND layer
+    // (`musicGain()`), which is the layer the slider, the duck and this fade all write. Splitting
+    // them across layers is what silenced every crossfade: the track was started at instance volume
+    // 0 and the ramp then moved the sound layer, whose product with 0 is 0 for the track's life.
+    // The gain is written BEFORE play() so the first frame is never at full volume.
+    this._musicFade = crossfade ? 0 : 1;
+    this.applyMusicGain();
+    try {
+      sound.play(alias, { volume: 1, loop: true });
+    } catch (e) {
+      console.warn(`[AudioManager] Failed to play music "${alias}":`, e);
+      return;
+    }
+    if (crossfade) this.rampMusicFade(fadeDuration);
   }
 
   /**
@@ -184,6 +191,10 @@ export class AudioManager {
       // ignore
     }
     this._currentMusic = null;
+    // Retire any running ramp and clear the fade term, so the next track does not inherit a
+    // half-finished crossfade and start silent.
+    this._musicFadeToken++;
+    this._musicFade = 1;
   }
 
   /**
@@ -212,6 +223,9 @@ export class AudioManager {
    */
   setVolume(category: AudioCategoryName, volume: number): void {
     this._categories[category].volume = Math.max(0, Math.min(1, volume));
+    // applyVolumes() re-pushes the music gain, so moving the Music slider is heard on the track
+    // that is ALREADY playing — it used to take effect only at the next playMusic (a mode change).
+    // SFX need no push: play() reads the category volume fresh on every call.
     this.applyVolumes();
     this.saveState();
   }
@@ -291,27 +305,20 @@ export class AudioManager {
    * @param factor - Volume multiplier (0..1), e.g. 0.3 = 30% of normal
    */
   duckMusic(factor: number): void {
-    if (!this._initialized || !this._soundModule || !this._currentMusic) return;
-    const { sound } = this._soundModule;
-    const vol = this._categories.music.volume * factor;
-    try {
-      sound.volume(this._currentMusic, vol);
-    } catch {
-      // ignore
-    }
+    // Held as a FACTOR rather than written as a finished volume: the duck used to write
+    // `category × factor` onto a track whose instance already carried the category volume, so it
+    // ducked to category², and unducking restored category² instead of category. Keeping it as one
+    // term of `musicGain()` also keeps the slider live while ducked.
+    this._musicDuck = Math.max(0, Math.min(1, factor));
+    this.applyMusicGain();
   }
 
   /**
    * Restore music to normal volume after ducking.
    */
   unduckMusic(): void {
-    if (!this._initialized || !this._soundModule || !this._currentMusic) return;
-    const { sound } = this._soundModule;
-    try {
-      sound.volume(this._currentMusic, this._categories.music.volume);
-    } catch {
-      // ignore
-    }
+    this._musicDuck = 1;
+    this.applyMusicGain();
   }
 
   /**
@@ -357,12 +364,63 @@ export class AudioManager {
     requestAnimationFrame(tick);
   }
 
+  /**
+   * The SOUND-layer gain for the running music track.
+   *
+   * @pixi/sound resolves a playing instance as `instance × sound × global` (WebAudioInstance.
+   * refresh). Each of those three has exactly ONE owner here, which is what keeps the mixer honest:
+   *   global   — the master gain (`applyVolumes`)
+   *   sound    — music: this function. sfx: untouched, left at 1.
+   *   instance — sfx: the per-call volume × the sfx category. music: always 1.
+   * Everything that can move music volume — the player's slider, the category mute, a big-win duck,
+   * a crossfade — is a term below, so they compose instead of overwriting each other.
+   */
+  private musicGain(): number {
+    const c = this._categories.music;
+    return (c.muted ? 0 : 1) * c.volume * this._musicDuck * this._musicFade;
+  }
+
+  /** Push `musicGain()` at the current track. Safe before it starts playing and with none playing. */
+  private applyMusicGain(): void {
+    if (!this._soundModule || !this._currentMusic) return;
+    try {
+      this._soundModule.sound.volume(this._currentMusic, this.musicGain());
+    } catch {
+      // ignore — alias not registered yet
+    }
+  }
+
+  /** Current SOUND-layer volume of `alias`, or 0 when it cannot be read. */
+  private soundVolumeOf(alias: string): number {
+    try {
+      return Number(this._soundModule.sound.volume(alias)) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Ramp the crossfade term 0 → 1 over `durationMs`, recomposing the gain each frame so a slider
+   *  drag or a duck landing mid-fade is honoured rather than overwritten when the fade ends. */
+  private rampMusicFade(durationMs: number): void {
+    const token = this._musicFadeToken;
+    const start = Date.now();
+    const tick = (): void => {
+      if (token !== this._musicFadeToken) return; // a newer track owns the music now
+      const t = Math.min((Date.now() - start) / durationMs, 1);
+      this._musicFade = t;
+      this.applyMusicGain();
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
   private applyVolumes(): void {
     if (!this._soundModule) return;
     const { sound } = this._soundModule;
     // Global mute is owned by sound.muteAll()/unmuteAll() (context.muted),
     // not by volumeAll — mixing both leaves mute un-undoable after reload.
     sound.volumeAll = this._masterGain; // master multiplies the global bus
+    this.applyMusicGain(); // category volume/mute reach the RUNNING track
   }
 
   private setupMobileUnlock(): void {
