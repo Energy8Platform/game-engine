@@ -8,15 +8,19 @@ import type { CurrencyConfig } from './types';
  *  trailing zeros are trimmed down to (but never past) `minDecimals`, so small wins keep their
  *  significant digits. Balance / bet / prices stay fixed at `minDecimals`.
  *
+ *  Separators default to the platform convention — `.` decimal, `,` thousands (`€1,234.50`).
+ *  A comma decimal is NOT safe as a default: players read "2,50" as 250 and believe they were
+ *  paid far more than they were. Games that need another convention pass `currency.separator`.
+ *
  *  Example with `maxDecimals: 4, minDecimals: 2`:
- *    fixed    → 0.0673 → 0,07     0.3 → 0,30
- *    variable → 0.0673 → 0,0673   0.067 → 0,067   0.3 → 0,30   0 → 0,00
+ *    fixed    → 0.0673 → 0.07     0.3 → 0.30
+ *    variable → 0.0673 → 0.0673   0.067 → 0.067   0.3 → 0.30   0 → 0.00
  */
 export function formatCurrency(value: number, currency: CurrencyConfig, variableDecimals = false): string {
   const maxDecimals = currency.maxDecimals ?? 2;
   const minDecimals = Math.max(0, Math.min(maxDecimals, currency.minDecimals ?? maxDecimals));
-  const thousands = currency.separator?.thousands ?? '.';
-  const decimal = currency.separator?.decimal ?? ',';
+  const thousands = currency.separator?.thousands ?? ',';
+  const decimal = currency.separator?.decimal ?? '.';
   const safe = Number.isFinite(value) ? value : 0;
 
   // fixed callers round at minDecimals; variable callers round at maxDecimals then trim back down.

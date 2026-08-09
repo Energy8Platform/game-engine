@@ -659,7 +659,7 @@ await removeGameShell();
 | `theme` | `ThemeConfig?` | `{ scheme?: 'dark' \| 'light', accent? }`. Defaults to dark. `accent` also tints the BUY BONUS button; per-card accents are `BonusOption.accentColor`. |
 | `language` | `string` | Currently `'en'` is the source language. |
 | `isSocial` | `boolean?` | Swap built-in text to social-casino vocabulary (bet → play, win → …). Game-supplied strings are untouched. |
-| `currency` | `CurrencyConfig` | `{ symbol, position: 'left'\|'right', maxDecimals?, minDecimals?, separator? }`. `maxDecimals` (default 2) / `minDecimals` (default `maxDecimals`): **win & total-win** show up to `maxDecimals`, trimming trailing zeros down to `minDecimals`; **balance / bet / prices** stay fixed at `minDecimals`. |
+| `currency` | `CurrencyConfig` | `{ symbol, position: 'left'\|'right', maxDecimals?, minDecimals?, separator? }`. `maxDecimals` (default 2) / `minDecimals` (default `maxDecimals`): **win & total-win** show up to `maxDecimals`, trimming trailing zeros down to `minDecimals`; **balance / bet / prices** stay fixed at `minDecimals`. `separator` defaults to `{ thousands: ',', decimal: '.' }` → `€1,234.50`. |
 | `availableBets` | `number[]` | Bet ladder shown in the bet picker. |
 | `defaultBet` / `currentBet` | `number` / `number \| null` | `currentBet` restores a saved bet; `null` falls back to `defaultBet`. |
 | `balance` / `win` | `number` | Initial readouts. |

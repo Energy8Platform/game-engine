@@ -29,7 +29,7 @@ describe('BottomBar base mode', () => {
     expect(q(mount, '[data-ge="spin"]')).toBeTruthy();
     expect(q(mount, '[data-ge="bet-up"]')).toBeTruthy();
     expect(q(mount, '[data-ge="bet-down"]')).toBeTruthy();
-    expect(q(mount, '[data-ge="balance"]')!.textContent).toContain('€1.000');
+    expect(q(mount, '[data-ge="balance"]')!.textContent).toContain('€1,000.00');
     expect(q(mount, '[data-ge="menu"]')).toBeTruthy();
   });
 

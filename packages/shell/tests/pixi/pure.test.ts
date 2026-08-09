@@ -12,24 +12,24 @@ import type { CurrencyConfig } from '@/core/types';
 
 describe('formatCurrency (maxDecimals + variableDecimals)', () => {
   const eur: CurrencyConfig = { symbol: '€', position: 'left' };
-  it('defaults to 2 fixed decimals with . thousands / , decimal', () => {
-    expect(formatCurrency(1234.5, eur)).toBe('€1.234,50');
-    expect(formatCurrency(0, eur)).toBe('€0,00');
+  it('defaults to 2 fixed decimals with , thousands / . decimal', () => {
+    expect(formatCurrency(1234.5, eur)).toBe('€1,234.50');
+    expect(formatCurrency(0, eur)).toBe('€0.00');
   });
   it('places the symbol on the right when configured', () => {
-    expect(formatCurrency(1234.5, { symbol: '€', position: 'right' })).toBe('1.234,50 €');
+    expect(formatCurrency(1234.5, { symbol: '€', position: 'right' })).toBe('1,234.50 €');
   });
   it('fixed callers round at minDecimals', () => {
     const c: CurrencyConfig = { symbol: '€', position: 'left', maxDecimals: 4, minDecimals: 2 };
-    expect(formatCurrency(0.0673, c)).toBe('€0,07'); // fixed → rounds at minDecimals=2
-    expect(formatCurrency(0.3, c)).toBe('€0,30');
+    expect(formatCurrency(0.0673, c)).toBe('€0.07'); // fixed → rounds at minDecimals=2
+    expect(formatCurrency(0.3, c)).toBe('€0.30');
   });
   it('variable callers keep significant digits down to minDecimals', () => {
     const c: CurrencyConfig = { symbol: '€', position: 'left', maxDecimals: 4, minDecimals: 2 };
-    expect(formatCurrency(0.0673, c, true)).toBe('€0,0673');
-    expect(formatCurrency(0.067, c, true)).toBe('€0,067');
-    expect(formatCurrency(0.3, c, true)).toBe('€0,30');
-    expect(formatCurrency(0, c, true)).toBe('€0,00');
+    expect(formatCurrency(0.0673, c, true)).toBe('€0.0673');
+    expect(formatCurrency(0.067, c, true)).toBe('€0.067');
+    expect(formatCurrency(0.3, c, true)).toBe('€0.30');
+    expect(formatCurrency(0, c, true)).toBe('€0.00');
   });
 });
 

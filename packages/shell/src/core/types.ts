@@ -20,6 +20,9 @@ export interface CurrencyConfig {
    *  trimmed down to this many places so small wins keep their significant digits (e.g. 0.0673)
    *  while round amounts stay compact (e.g. 0.30). Everything else is shown at exactly this many. */
   minDecimals?: number;
+  /** Defaults to the platform convention: `{ thousands: ',', decimal: '.' }` → `€1,234.50`.
+   *  Override only for a jurisdiction that requires another convention — a comma decimal reads
+   *  as a thousands group to most players and inflates the perceived payout. */
   separator?: { thousands?: string; decimal?: string };
 }
 
