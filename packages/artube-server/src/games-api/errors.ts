@@ -37,9 +37,15 @@ export const IDEMPOTENT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Коды, при которых повтор имеет смысл. Для всего остального дока прямо
- * говорит: повторный запрос не поможет, нужна диагностика.
+ * Коды, при которых повтор имеет смысл. Дока прямо говорит: только
+ * `BackPressureRejected` — платформа явно просит повторить и присылает
+ * `details.retry_after_ms`. Для всего остального, включая `InternalServerError`
+ * (в т.ч. локальные: не было коннекта, RPC не ответил за таймаут, коннект
+ * оборвался — все они помечаются этим же кодом через `GamesApiError.internal`),
+ * дока говорит: повтор не поможет, нужна диагностика. Ретраить их означало бы
+ * жечь до ~3× `rpcTimeoutMs` на каждый неотвечающий бэкенд — ровно тогда,
+ * когда вызывающему нужен быстрый и предсказуемый отказ.
  */
 export function isRetryable(code: string): boolean {
-  return code === 'BackPressureRejected' || code === 'InternalServerError';
+  return code === 'BackPressureRejected';
 }
