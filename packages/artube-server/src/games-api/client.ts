@@ -16,7 +16,15 @@ import {
   type Envelope,
 } from './envelope.js';
 import { GamesApiError, IDEMPOTENT_TYPES, isRetryable } from './errors.js';
-import type { ErrorPayload } from './types.js';
+import type {
+  SessionInfoRequest, SessionInfoResponse,
+  PlayRoundRequest, PlayRoundResponse,
+  OpenRoundRequest, OpenRoundResponse,
+  UpdateRoundStateRequest, UpdateRoundStateResponse,
+  CloseRoundRequest, CloseRoundResponse,
+  AutocloseRoundRequest,
+  ErrorPayload,
+} from './types.js';
 
 /**
  * Все типы, которые Games API может прислать на этом коннекте. Дока
@@ -48,7 +56,14 @@ export interface GamesApiClientOptions {
   debug?: boolean;
 }
 
-type ClientEvent = 'connected' | 'disconnected' | 'goAway';
+type ClientEvent =
+  | 'connected'
+  | 'disconnected'
+  | 'goAway'
+  | 'balanceChanged'
+  | 'sessionClosed'
+  | 'newConnection'
+  | 'autocloseRequest';
 
 export class GamesApiClient {
   protected socket: WebSocket | null = null;
@@ -138,6 +153,31 @@ export class GamesApiClient {
     });
   }
 
+  sessionInfo(req: SessionInfoRequest): Promise<SessionInfoResponse> {
+    return this.rpc('SessionInfoRequest', req);
+  }
+
+  playRound(req: PlayRoundRequest): Promise<PlayRoundResponse> {
+    return this.rpc('PlayRoundRequest', req);
+  }
+
+  openRound(req: OpenRoundRequest): Promise<OpenRoundResponse> {
+    return this.rpc('OpenRoundRequest', req);
+  }
+
+  updateRoundState(req: UpdateRoundStateRequest): Promise<UpdateRoundStateResponse> {
+    return this.rpc('UpdateRoundStateRequest', req);
+  }
+
+  closeRound(req: CloseRoundRequest): Promise<CloseRoundResponse> {
+    return this.rpc('CloseRoundRequest', req);
+  }
+
+  /** Ответ на AutocloseRoundRequest приходит типом CloseRoundResponse. */
+  autocloseRound(req: AutocloseRoundRequest): Promise<CloseRoundResponse> {
+    return this.rpc('AutocloseRoundRequest', req);
+  }
+
   protected onEnvelope(env: Envelope): void {
     if (env.chan !== 'rpc' || !env.corr_id) return this.onEvent(env);
     const waiter = this.pending.get(env.corr_id);
@@ -151,8 +191,17 @@ export class GamesApiClient {
     }
   }
 
-  /** Точка расширения для событий канала `events` (Task 4). */
-  protected onEvent(_env: Envelope): void {}
+  protected onEvent(env: Envelope): void {
+    if (env.chan !== 'events') return;
+    const map: Record<string, ClientEvent> = {
+      BalanceChangedEvent: 'balanceChanged',
+      SessionClosedEvent: 'sessionClosed',
+      NewConnectionEvent: 'newConnection',
+      AutocloseRequestEvent: 'autocloseRequest',
+    };
+    const name = map[env.type];
+    if (name) this.emit(name, env.payload);
+  }
 
   protected onDisconnected(reason: string): void {
     for (const [, waiter] of this.pending) {
