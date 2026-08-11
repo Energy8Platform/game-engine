@@ -161,7 +161,25 @@ describe('ArtubeBridge', () => {
     expect(play!.payload.session.maxWinReached).toBe(true);
   });
 
-  it('незакрытый раунд из init доигрывается с того же места', async () => {
+  it('GET_BALANCE отдаёт текущий баланс', async () => {
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('GET_BALANCE', {});
+    await flush();
+    const bal = sent.find((m) => m.type === 'BALANCE_UPDATE');
+    expect(bal!.payload.balance).toBe(100);
+  });
+
+  it('GET_STATE без незакрытого раунда отдаёт пустую сессию', async () => {
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('GET_STATE', {});
+    await flush();
+    const state = sent.find((m) => m.type === 'STATE_RESPONSE');
+    expect(state!.payload.session).toBeNull();
+  });
+
+  it('незакрытый раунд из init доступен игре через INIT.session и GET_STATE', async () => {
     backend.connect.mockResolvedValue({
       ...INIT,
       resume: result({ action: 'free_spin', creditPending: true, balanceAfter: null, spinsPlayed: 2 }),
@@ -176,8 +194,52 @@ describe('ArtubeBridge', () => {
     await bridge.ready();
     channel.sendToHost('GAME_READY', {});
     await flush();
-    expect(sent.find((m) => m.type === 'INIT')).toBeDefined();
-    const resumed = sent.find((m) => m.type === 'PLAY_RESULT');
-    expect(resumed!.payload.action).toBe('free_spin');
+    // Сводка приходит прямо на INIT (как sdk.ready().session)...
+    const init = sent.find((m) => m.type === 'INIT');
+    expect(init).toBeDefined();
+    expect(init!.payload.session).toMatchObject({ spinsPlayed: 2, completed: false });
+
+    // ...а полный снимок раунда — по запросу через GET_STATE, тот самый канал,
+    // которым `createSlotGame`'s `offerResume()` реально пользуется. Раньше
+    // мост толкал непрошеный PLAY_RESULT, которого CasinoGameSDK никогда не
+    // слушает вне активного play() — эта ветка была мертва end-to-end.
+    channel.sendToHost('GET_STATE', {});
+    await flush();
+    const state = sent.find((m) => m.type === 'STATE_RESPONSE');
+    expect(state).toBeDefined();
+    expect(state!.payload.session.roundId).toBe('r1');
+    expect(state!.payload.session.action).toBe('free_spin');
+  });
+
+  it('игра через настоящий CasinoGameSDK узнаёт о незакрытом раунде через getState() и подтверждает его верным курсором', async () => {
+    backend.connect.mockResolvedValue({
+      ...INIT,
+      resume: result({ action: 'free_spin', creditPending: true, balanceAfter: null, spinsPlayed: 2 }),
+    });
+    bridge.destroy();
+    installWindow();
+    const { MemoryChannel, CasinoGameSDK } = await import('@energy8platform/game-sdk');
+    channel = MemoryChannel.getGlobal();
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game' });
+    await bridge.ready();
+
+    // No raw channel inspection from here on — drive the real guest-side SDK,
+    // the same way an actual game does.
+    const sdk = new CasinoGameSDK({ devMode: true });
+    const initData = await sdk.ready();
+    expect(initData.session?.spinsPlayed).toBe(2);
+
+    const snap = await sdk.getState();
+    expect(snap).not.toBeNull();
+    expect(snap!.roundId).toBe('r1');
+    expect(snap!.action).toBe('free_spin');
+
+    sdk.playAck(snap!);
+    await flush();
+    // Server expects `state.cursor + 1` for the ack (see artube-server's ws.ts);
+    // for a resumed round that's spinsPlayed, NOT spinsPlayed - 1.
+    expect(backend.ack).toHaveBeenCalledWith('r1', 2);
+
+    sdk.destroy();
   });
 });

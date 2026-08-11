@@ -5,27 +5,41 @@
  * протокол игрового бэкенда и обратно. Per-game адаптера нет: нарезку раунда
  * на сегменты знает бэкенд, он единственный видит математику.
  *
- * Реконнект и `init.resume`: `ArtubeClient` эмитит `'init'` для каждого
- * инита, пришедшего ПОСЛЕ первого (см. doc-comment client.ts). Если это
- * случилось ДО того, как игра прислала свой первый `GAME_READY`, мост просто
- * запоминает свежий `init` — `onGameReady` подхватит его как обычно и, если
- * там есть `resume`, доиграет раунд с места обрыва. Но игрок может словить
- * обрыв связи и посреди уже показанной фичи (мост давно отправил `INIT`,
- * игра ждёт следующий сегмент) — для этого случая мост дополнительно шлёт
- * свежий баланс и незакрытый сегмент как отдельные `BALANCE_UPDATE` /
- * `PLAY_RESULT` без повторной отправки `INIT`, которую игра не ждёт после
- * старта и которая сбросила бы её экран.
+ * Незакрытый раунд (`init.resume`) доезжает до игры ДВУМЯ каналами, оба
+ * пассивные — мост никогда не проталкивает раунд игре сам:
+ *  - `InitPayload.session` на самом `INIT` — сводка (spinsRemaining и т.п.),
+ *    как её строит `sdk.ready()`;
+ *  - `GET_STATE` → `STATE_RESPONSE` — полный снимок последнего сегмента,
+ *    именно то, что вызывает `sdk.getState()` (см. `createSlotGame`'s
+ *    `offerResume()`). Это и есть настоящий канал: `CasinoGameSDK` слушает
+ *    `PLAY_RESULT` только внутри промиса конкретного `play()`, поэтому
+ *    непрошеный push этого типа туда, где игра его не ждёт, молча теряется.
+ * `lastDelivered` — кеш снимка для `GET_STATE`; живёт, пока раунд не
+ * закрыт (`creditPending`), и обнуляется в момент расчёта.
+ *
+ * Реконнект: `ArtubeClient` эмитит `'init'` для каждого инита, пришедшего
+ * ПОСЛЕ первого (см. doc-comment client.ts). Если это случилось ДО того, как
+ * игра прислала свой первый `GAME_READY`, мост просто запоминает свежий
+ * `init` — `onGameReady` подхватит его как обычно. Если же игра уже идёт
+ * (мидроунд network blip), мост обновляет свой курсор/`lastDelivered` и
+ * шлёт свежий `BALANCE_UPDATE` (его `CasinoGameSDK` слушает постоянно), но
+ * НЕ пересылает `INIT` повторно и не толкает `PLAY_RESULT` — только что
+ * объяснённые причины ровно те же: игра сама узнает при следующем
+ * `getState()`/подтверждении своего текущего сегмента.
  */
 
 import { Bridge } from '@energy8platform/game-sdk';
 import type {
   GameReadyPayload,
+  GetBalancePayload,
+  GetStatePayload,
   PlayRequestPayload,
   PlayResultAckPayload,
   PlayResultPayload,
   PlayErrorPayload,
   InitPayload,
   BalanceUpdatePayload,
+  StateResponsePayload,
   GameConfigData,
   SessionData,
 } from '@energy8platform/game-sdk/protocol';
@@ -57,11 +71,18 @@ export class ArtubeBridge {
 
   private init: ServerInit | null = null;
   private balance = 0;
-  /** Сколько сегментов текущего раунда уже показано игроку. */
+  /**
+   * Курсор незакрытого раунда — совпадает с `spinsPlayed` последнего
+   * выданного сегмента (не "число выданных сегментов" как отдельный
+   * счётчик: сервер (`packages/artube-server/src/http/ws.ts`) сверяет
+   * `ack.cursor` именно с этим числом).
+   */
   private cursor = 0;
   private currentRoundId: string | null = null;
   /** true после того, как игра получила свой первый INIT (см. class doc-comment). */
   private initSent = false;
+  /** Снимок незакрытого раунда для `GET_STATE`; `null`, когда раунд расчитан. */
+  private lastDelivered: PlayResultPayload | null = null;
 
   constructor(private readonly options: ArtubeBridgeOptions = {}) {
     const url = parseArtubeUrl(options.url ?? window.location.href);
@@ -101,6 +122,8 @@ export class ArtubeBridge {
     this.bridge.on<GameReadyPayload>('GAME_READY', (_p, id) => void this.onGameReady(id));
     this.bridge.on<PlayRequestPayload>('PLAY_REQUEST', (p, id) => void this.onPlay(p, id));
     this.bridge.on<PlayResultAckPayload>('PLAY_RESULT_ACK', (p) => this.onAck(p));
+    this.bridge.on<GetBalancePayload>('GET_BALANCE', (_p, id) => this.onGetBalance(id));
+    this.bridge.on<GetStatePayload>('GET_STATE', (_p, id) => this.onGetState(id));
   }
 
   /** Резолвится, когда бэкенд отдал init. */
@@ -120,6 +143,8 @@ export class ArtubeBridge {
       // reconnect can have refreshed it (with a newer `resume`) while
       // GAME_READY was still in flight (e.g. during asset loading).
       const init = this.init!;
+      const resumeSnapshot = init.resume ? this.toPlayResult(init.resume) : null;
+
       const config: GameConfigData = {
         id: this.gameId,
         type: 'slot',
@@ -140,18 +165,19 @@ export class ArtubeBridge {
         currency: init.currency ?? 'FUN',
         balance: init.balance,
         config,
-        session: null,
+        session: resumeSnapshot?.session ?? null,
         lang: this.lang,
         device: this.device,
       };
       this.bridge.send('INIT', payload, id);
       this.initSent = true;
 
-      // Незакрытый раунд: показываем сегмент, на котором игрок остановился.
-      if (init.resume) {
+      // Незакрытый раунд: держим курсор и снимок наготове для GET_STATE —
+      // именно так игра о нём узнаёт (см. class doc-comment).
+      if (init.resume && resumeSnapshot) {
         this.currentRoundId = init.resume.roundId;
-        this.cursor = init.resume.spinsPlayed - 1;
-        this.bridge.send('PLAY_RESULT', this.toPlayResult(init.resume));
+        this.cursor = init.resume.spinsPlayed;
+        this.lastDelivered = resumeSnapshot;
       }
     } catch (err) {
       this.bridge.send('ERROR', { code: this.codeOf(err), message: String(err) }, id);
@@ -172,7 +198,10 @@ export class ArtubeBridge {
       }
       this.cursor += 1;
       if (result.balanceAfter !== null) this.balance = result.balanceAfter;
-      this.bridge.send('PLAY_RESULT', this.toPlayResult(result), id);
+      const delivered = this.toPlayResult(result);
+      // Keep GET_STATE's snapshot in step: nothing to resume once settled.
+      this.lastDelivered = delivered.creditPending ? delivered : null;
+      this.bridge.send('PLAY_RESULT', delivered, id);
     } catch (err) {
       this.bridge.send<PlayErrorPayload>(
         'PLAY_ERROR',
@@ -187,14 +216,30 @@ export class ArtubeBridge {
     if (payload.roundId === this.currentRoundId) this.client.ack(payload.roundId, this.cursor);
   }
 
+  /** Текущий баланс — то же значение, что несёт последний BALANCE_UPDATE/PLAY_RESULT. */
+  private onGetBalance(id?: string): void {
+    this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance }, id);
+  }
+
+  /**
+   * Настоящий канал, которым игра узнаёт о незакрытом раунде (см. class
+   * doc-comment) — `createSlotGame`'s `offerResume()` зовёт это на каждом
+   * запуске сцены. `null`, когда расчитывать нечего.
+   */
+  private onGetState(id?: string): void {
+    this.bridge.send<StateResponsePayload>('STATE_RESPONSE', { session: this.lastDelivered }, id);
+  }
+
   /**
    * Инит, пришедший после реконнекта (не первый за жизнь клиента — см.
    * `ArtubeClient` doc-comment). Всегда обновляет наше представление о
    * платформенном состоянии; если игра ещё не получила свой первый INIT,
    * этим и ограничиваемся — `onGameReady` сам подхватит свежий `this.init`.
    * Если же игра уже идёт (мидроунд network blip), недостаточно молчать:
-   * доносим свежий баланс и незакрытый сегмент явно, отдельными
-   * сообщениями, не пересылая INIT повторно.
+   * доносим свежий баланс (`BALANCE_UPDATE` — единственный push, который
+   * `CasinoGameSDK` слушает постоянно) и обновляем курсор/снимок раунда, чтобы
+   * следующий `getState()`/ack от игры адресовался правильному состоянию —
+   * но НЕ пересылаем `INIT` повторно, которую игра не ждёт после старта.
    */
   private onReconnectInit(init: ServerInit): void {
     this.init = init;
@@ -204,8 +249,8 @@ export class ArtubeBridge {
     this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance });
     if (init.resume) {
       this.currentRoundId = init.resume.roundId;
-      this.cursor = init.resume.spinsPlayed - 1;
-      this.bridge.send('PLAY_RESULT', this.toPlayResult(init.resume));
+      this.cursor = init.resume.spinsPlayed;
+      this.lastDelivered = this.toPlayResult(init.resume);
     }
   }
 
