@@ -58,6 +58,19 @@ hands over (see the table below) and throws with the missing variable's name
 if a required one is absent — fail fast on a broken deploy, not on the first
 request.
 
+> **Check your emitted path before trusting `CMD ["node", "dist/index.js"]`.**
+> The Dockerfile template's `CMD` assumes your own `tsconfig.json` compiles
+> `server/index.ts` straight to `dist/index.js`. If your `rootDir` is the
+> repo root (or anything other than the folder `server/index.ts` lives in),
+> `tsc` will instead nest the output — e.g. `dist/server/index.js` — and the
+> container will fail to start with `Error: Cannot find module
+> '/app/dist/index.js'`, discovered only once it's running (or not) in the
+> cluster. This exact `rootDir`/`outDir` mismatch is why this package's own
+> `package.json` `main`/`exports` briefly pointed at paths that didn't exist —
+> after building, always confirm with `ls dist/index.js` (or update the
+> `CMD` to match wherever your build actually puts it) before shipping the
+> image.
+
 ## Environment variables
 
 | Variable         | Required | Meaning                                                                 |

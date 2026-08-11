@@ -13,7 +13,11 @@ ENV NODE_ENV=production
 ENV PORT=80
 ARG GIT_HASH
 ENV GIT_HASH=$GIT_HASH
-COPY --from=build /app/node_modules ./node_modules
+# Own install, not a copy of the build stage's node_modules — the build
+# stage's install pulls in devDependencies (typescript, vitest, ...) that
+# have no business in the shipped image.
+COPY package*.json ./
+RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY game.spin ./game.spin
 EXPOSE 80
