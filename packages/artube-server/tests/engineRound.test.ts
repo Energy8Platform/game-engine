@@ -13,10 +13,7 @@ const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 let engine: EngineClient;
 
 beforeAll(async () => {
-  // Third file in this package to start a real engine process — pinned to
-  // its own distant port so it can't race engine.test.ts's default scan
-  // (50251+) or engine-spawn-failure.test.ts's pin (52251).
-  engine = await startEngine({ gamesDir: fixtures, port: 54251 });
+  engine = await startEngine({ gamesDir: fixtures });
 }, 30_000);
 
 afterAll(() => engine?.close());

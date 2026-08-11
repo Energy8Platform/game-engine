@@ -12,12 +12,7 @@ const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 let engine: EngineClient;
 
 beforeAll(async () => {
-  // Fourth file in this package to start a real engine process. Vitest runs
-  // test files concurrently, and `findFreePort`'s probe-then-spawn has a
-  // TOCTOU race at the default port (50251) shared with engine.test.ts and
-  // orchestrator-simple.test.ts — pin a distant port, same as
-  // engine-spawn-failure.test.ts (52251) and engineRound.test.ts (54251).
-  engine = await startEngine({ gamesDir: fixtures, port: 56251 });
+  engine = await startEngine({ gamesDir: fixtures });
 }, 30_000);
 
 afterAll(() => engine?.close());

@@ -13,7 +13,7 @@ let engine: EngineClient;
 let scriptSha: string;
 
 beforeAll(async () => {
-  engine = await startEngine({ gamesDir: fixtures, port: 58251 });
+  engine = await startEngine({ gamesDir: fixtures });
   scriptSha = (await engine.listGames()).find((g) => g.game_id === 'feature-game')!.script_sha256;
 }, 30_000);
 
