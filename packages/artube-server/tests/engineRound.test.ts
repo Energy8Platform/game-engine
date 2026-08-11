@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { startEngine, type EngineClient } from '../src/engine';
+import {
+  startEngine, type EngineClient, type RoundResponse, type RoundStateResponse,
+} from '../src/engine';
 import {
   openEntry, ensureOpen, stepRound, playToEnd, ScriptMismatchError,
 } from '../src/round/engineRound';
@@ -33,6 +35,29 @@ function stateFor(over: Partial<RoundStateV1> = {}): RoundStateV1 {
     actions: [],
     ...over,
   };
+}
+
+/**
+ * Wrap the real, already-running `engine` so individual calls can be
+ * overridden per test (an injected transient failure, a tampered
+ * `getRound` view) while everything else still hits the real e8-server.
+ * `EngineClient` is a class with private fields, so a plain object literal
+ * needs the double cast to stand in for it structurally.
+ */
+function wrapEngine(
+  real: EngineClient,
+  overrides: Partial<Pick<EngineClient, 'step' | 'getRound'>>,
+): EngineClient {
+  return {
+    listGames: () => real.listGames(),
+    getConfig: (gameId: string) => real.getConfig(gameId),
+    startRound: (a: Parameters<EngineClient['startRound']>[0]) => real.startRound(a),
+    step: (roundId: string, action: string, paramsJson: string, requestId: string) =>
+      real.step(roundId, action, paramsJson, requestId),
+    getRound: (roundId: string) => real.getRound(roundId),
+    close: () => real.close(),
+    ...overrides,
+  } as unknown as EngineClient;
 }
 
 describe('раунд в движке', () => {
@@ -141,5 +166,126 @@ describe('раунд в движке', () => {
   it('playToEnd доигрывает остаток раунда и отдаёт итоговый множитель', async () => {
     const state = stateFor({ cursor: 1, actions: [{ a: 'free_spin' }] });
     expect(await playToEnd(engine, 'feature-game', state)).toBe(3);
+  });
+
+  it('ensureOpen резюмируется после частичного сбоя восстановления, не теряя позицию', async () => {
+    // Hot reference: play the whole round directly, segment by segment, to
+    // get a canonical value for the position cold needs to land on too.
+    const seed = newSeed();
+    const hot = stateFor({ seed, eid: newEngineRoundId() });
+    await openEntry(engine, 'feature-game', hot); // segment 1 (entry)
+    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' }); // segment 2
+    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' }); // segment 3
+    const hotFinal = await stepRound(engine, hot, 'free_spin'); // segment 4, final
+
+    // Cold has both post-entry free_spins already confirmed (cursor: 2) but
+    // its eid was never opened — a full recovery is needed. Make the SECOND
+    // replayed Step (recover-1, i.e. cold.actions[1]) fail once, simulating
+    // a transient engine error that strands the recovery loop partway
+    // through — the exact scenario the reviewer flagged.
+    const cold = stateFor({
+      seed, eid: newEngineRoundId(), cursor: 2,
+      actions: [{ a: 'free_spin' }, { a: 'free_spin' }],
+    });
+    let armed = true;
+    const flaky = wrapEngine(engine, {
+      step: (roundId, action, paramsJson, requestId) => {
+        if (armed && requestId.endsWith('-recover-1')) {
+          armed = false;
+          const failed: RoundResponse = {
+            win: 0, total_win: 0, data_json: '', vars_json: '', globals_json: '',
+            next_actions: [], round_complete: false, spins_remaining: 0,
+            spins_played: 0, script_sha256: '', error: 'injected transient failure', bet: 1,
+          };
+          return Promise.resolve(failed);
+        }
+        return engine.step(roundId, action, paramsJson, requestId);
+      },
+    });
+
+    await expect(ensureOpen(flaky, 'feature-game', cold)).rejects.toThrow(
+      /injected transient failure/,
+    );
+
+    // The failed Step never reached the real engine, so only the entry and
+    // the FIRST logged free_spin actually landed: spins_played is 2, one
+    // short of the 3 the log (cursor: 2) accounts for.
+    const afterFailure = await engine.getRound(cold.eid);
+    expect(afterFailure.spins_played).toBe(2);
+
+    // Retry on the same pod, same state, same (now-disarmed) client — this
+    // is the "ordinary resilience pattern" from the review. A version that
+    // only checked `found` would return here without finishing the replay.
+    await ensureOpen(flaky, 'feature-game', cold);
+
+    const afterResume = await engine.getRound(cold.eid);
+    expect(afterResume.spins_played).toBe(3); // caught up, without redoing action[0]
+
+    const coldFinal = await stepRound(engine, cold, 'free_spin'); // segment 4
+    expect(coldFinal.isFinal).toBe(hotFinal.isFinal);
+    expect(coldFinal.totalWinX).toBe(hotFinal.totalWinX);
+    expect(coldFinal.data).toEqual(hotFinal.data);
+  });
+
+  it('ensureOpen ловит рассинхрон, если движок сыграл больше, чем объясняет лог', async () => {
+    // A real round genuinely at spins_played 2 (entry + 1 free_spin), but
+    // round_state's log only accounts for 1 (expected = 1 + 0 = 1) — as if
+    // some other caller advanced this round_id past what we recorded.
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []
+
+    await expect(ensureOpen(engine, 'feature-game', state)).rejects.toThrow(
+      /ahead of round_state/,
+    );
+  });
+
+  it('ensureOpen ловит расхождение скрипта на горячем пути, до всякого шага', async () => {
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state); // round open, state.script now the real sha
+    const tampered: RoundStateV1 = { ...state, script: 'sha256:другой-скрипт-в-движке-уже-нет' };
+    let stepped = false;
+    const spy = wrapEngine(engine, {
+      step: (...args: Parameters<EngineClient['step']>) => {
+        stepped = true;
+        return engine.step(...args);
+      },
+    });
+    await expect(ensureOpen(spy, 'feature-game', tampered)).rejects.toBeInstanceOf(
+      ScriptMismatchError,
+    );
+    expect(stepped).toBe(false); // no segment served before the mismatch is caught
+  });
+
+  it('playToEnd бросает ошибку вместо частичного итога, если раунд не завершился за guard', async () => {
+    // Fully-stubbed engine that always reports "one more free_spin to go" —
+    // proves the guard's failure mode is a thrown error, not a laundered
+    // partial total, without spending 1000 real round-trips to the binary.
+    const state = stateFor();
+    const stuckResponse: RoundResponse = {
+      win: 1, total_win: 1, data_json: '{}', vars_json: '', globals_json: '',
+      next_actions: ['free_spin'], round_complete: false, spins_remaining: 1,
+      spins_played: 2, script_sha256: 'a'.repeat(64), error: '', bet: 1,
+    };
+    // spins_played: 1 matches `state`'s empty actions log (expected = 1 + 0)
+    // so ensureOpen's own catch-up check passes immediately and playToEnd's
+    // loop is what actually runs out of guard budget, not ensureOpen.
+    const stuckState: RoundStateResponse = {
+      found: true, game_id: 'feature-game', script_sha256: 'a'.repeat(64),
+      total_win: 1, spins_played: 1, spins_remaining: 1, next_actions: ['free_spin'],
+      round_complete: false, vars_json: '', error: '', bet: 1,
+    };
+    const stuck: EngineClient = {
+      listGames: () => Promise.resolve([]),
+      getConfig: () => Promise.resolve({}),
+      startRound: () => Promise.resolve(stuckResponse),
+      step: () => Promise.resolve(stuckResponse),
+      getRound: () => Promise.resolve(stuckState),
+      close: () => {},
+    } as unknown as EngineClient;
+
+    await expect(playToEnd(stuck, 'feature-game', state)).rejects.toThrow(
+      /did not finish after 1000 steps/,
+    );
   });
 });

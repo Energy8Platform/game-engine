@@ -87,8 +87,31 @@ export async function openEntry(
 }
 
 /**
- * Гарантировать, что раунд открыт в движке. Горячий путь ничего не делает;
- * холодный — поднимает раунд заново и догоняет курсор по логу действий.
+ * Доиграть лог действий с позиции `fromIndex` — общий хвост для полного
+ * холодного подъёма (fromIndex 0) и для резюме недоигранного восстановления
+ * (fromIndex посередине лога).
+ */
+async function replayFrom(
+  engine: EngineClient,
+  state: RoundStateV1,
+  fromIndex: number,
+): Promise<void> {
+  for (let i = fromIndex; i < state.actions.length; i++) {
+    const logged = state.actions[i];
+    const response = await engine.step(
+      state.eid,
+      logged.a,
+      logged.p ? JSON.stringify(logged.p) : '',
+      `${state.eid}-recover-${i}`,
+    );
+    if (response.error) throw new Error(`engine Step (recover): ${response.error}`);
+  }
+}
+
+/**
+ * Гарантировать, что раунд открыт в движке и доигран ровно до нашего лога.
+ * Горячий путь ничего не делает; холодный — поднимает раунд заново и
+ * догоняет лог действий.
  */
 export async function ensureOpen(
   engine: EngineClient,
@@ -100,20 +123,35 @@ export async function ensureOpen(
     if (state.script && known.script_sha256 && state.script !== known.script_sha256) {
       throw new ScriptMismatchError(state.script, known.script_sha256);
     }
-    return;
+    // `spins_played` — счётчик самого движка: 1 сразу после StartRound, +1
+    // на каждый Step. Это единственный надёжный ответ на вопрос "движок
+    // реально доигран до нашего лога?" — "found" сам по себе не отличает
+    // горячий путь от раунда, чей предыдущий холодный подъём упал посреди
+    // цикла восстановления (транзиентная ошибка движка на каком-то Step) и
+    // оставил раунд открытым, но позади state.actions.length. Без сверки по
+    // числу ретрай того же ensureOpen на том же поде увидел бы found: true и
+    // молча продолжил бы с чужой позиции — hot и cold разошлись бы без следа.
+    const expected = 1 + state.actions.length;
+    if (known.spins_played === expected) {
+      return; // горячий путь: движок уже точно совпадает с логом
+    }
+    if (known.spins_played < expected) {
+      // Резюме прерванного восстановления: доигрываем только недостающий
+      // хвост, чтобы повторный вызов после частичного сбоя был идемпотентным.
+      await replayFrom(engine, state, known.spins_played - 1);
+      return;
+    }
+    // known.spins_played > expected: движок сыграл больше сегментов, чем
+    // объясняет наш лог. Гадать, каким из лишних шагов доверять, и было бы
+    // тем самым молчаливым расхождением, которое эта функция должна ловить.
+    throw new Error(
+      `round ${state.eid} is ahead of round_state: engine has played ` +
+        `${known.spins_played} segments, round_state accounts for only ${expected}`,
+    );
   }
   // Холодный подъём: заново под тем же eid, затем догоняем лог действий.
   await start(engine, gameId, state, `${state.eid}-recover`);
-  for (let i = 0; i < state.actions.length; i++) {
-    const logged = state.actions[i];
-    const response = await engine.step(
-      state.eid,
-      logged.a,
-      logged.p ? JSON.stringify(logged.p) : '',
-      `${state.eid}-recover-${i}`,
-    );
-    if (response.error) throw new Error(`engine Step (recover): ${response.error}`);
-  }
+  await replayFrom(engine, state, 0);
 }
 
 /** Один сегмент. Вызывается после `ensureOpen`. */
@@ -152,16 +190,23 @@ export async function playToEnd(
   await ensureOpen(engine, gameId, state);
   let known = await engine.getRound(state.eid);
   let total = known.total_win;
-  let guard = 0;
-  while (known.found && !known.round_complete && guard++ < 1000) {
+  const maxSteps = 1000;
+  for (let steps = 0; steps < maxSteps; steps++) {
+    if (!known.found || known.round_complete) return total;
     const action = known.next_actions[0];
     const segment = await stepRound(engine, state, action);
     state.actions.push({ a: action });
     state.cursor += 1;
     total = segment.totalWinX;
     state.totalWinX = total;
-    if (segment.isFinal) break;
+    if (segment.isFinal) return total;
     known = await engine.getRound(state.eid);
   }
-  return total;
+  // Exhausting the guard means the round genuinely never reached
+  // round_complete — a caller that fed this into auto-close would otherwise
+  // report `total` (a partial sum) as the round's final win. Throwing keeps
+  // that distinction visible instead of laundering it into a number.
+  throw new Error(
+    `playToEnd(${state.eid}): round did not finish after ${maxSteps} steps`,
+  );
 }
