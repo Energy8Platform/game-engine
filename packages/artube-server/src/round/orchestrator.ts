@@ -9,7 +9,7 @@
  */
 
 import type { EngineClient } from '../engine/index.js';
-import { openEntry, type Segment } from './engineRound.js';
+import { openEntry, ensureOpen, stepRound, type Segment } from './engineRound.js';
 import {
   encodeRoundState, newEngineRoundId, newSeed, ROUND_STATE_VERSION, type RoundStateV1,
 } from './roundState.js';
@@ -145,13 +145,112 @@ async function finishSimple(
   return { delivery, round: null };
 }
 
-/** Заглушка на время Task 7 — многосегментный путь приходит в Task 8. */
+/**
+ * Раунд из нескольких сегментов: OpenRound списывает ставку, выигрыш
+ * зачислится только на CloseRound. До тех пор сегменты уезжают во фронт
+ * с `creditPending`, а баланс раунда остаётся неизвестным.
+ */
 async function openComplex(
-  _deps: RoundDeps,
-  _ctx: SessionContext,
-  _state: RoundStateV1,
-  _first: Segment,
-  _betAmount: number,
+  deps: RoundDeps,
+  ctx: SessionContext,
+  state: RoundStateV1,
+  first: Segment,
+  betAmount: number,
+): Promise<{ delivery: SegmentDelivery; round: ActiveRound }> {
+  const res = await deps.api.openRound({
+    session_id: ctx.sessionId,
+    price_multiplier: state.priceMultiplier,
+    bet_index: state.betIndex,
+    free_round_campaign_id: ctx.frcId,
+    round_state_version: ROUND_STATE_VERSION,
+    round_state: encodeRoundState(state),
+  });
+  return {
+    delivery: toDelivery(first, res.round_id, betAmount, null, true, false),
+    round: {
+      roundId: res.round_id,
+      roundVersion: res.round_version,
+      state,
+      delivered: first,
+    },
+  };
+}
+
+/**
+ * Игрок увидел сегмент — двигаем курсор в состоянии платформы.
+ *
+ * Именно поэтому UpdateRoundState шлётся на подтверждении, а не на выдаче:
+ * реконнект посреди фичи должен вернуть неподтверждённый сегмент, а не
+ * съесть его.
+ */
+export async function acknowledgeSegment(
+  deps: RoundDeps,
+  ctx: SessionContext,
+  round: ActiveRound,
+  cursor: number,
+): Promise<ActiveRound> {
+  const state: RoundStateV1 = {
+    ...round.state,
+    cursor,
+    totalWinX: round.delivered?.totalWinX ?? round.state.totalWinX,
+  };
+  const res = await deps.api.updateRoundState({
+    session_id: ctx.sessionId,
+    round_id: round.roundId,
+    round_version: round.roundVersion,
+    round_state_version: ROUND_STATE_VERSION,
+    round_state: encodeRoundState(state),
+  });
+  return { ...round, roundVersion: res.round_version, state };
+}
+
+/**
+ * Следующий сегмент открытого раунда — ровно один шаг движка. На финальном
+ * шлём CloseRound, и только он приносит настоящий баланс.
+ */
+export async function advanceRound(
+  deps: RoundDeps,
+  ctx: SessionContext,
+  round: ActiveRound,
+  req: PlayRequest,
 ): Promise<{ delivery: SegmentDelivery; round: ActiveRound | null }> {
-  throw new Error('complex round not implemented yet');
+  const allowed = round.delivered?.nextActions ?? [];
+  if (allowed.length > 0 && !allowed.includes(req.action)) {
+    throw new Error(`action "${req.action}" is not allowed here, expected one of ${allowed.join(', ')}`);
+  }
+
+  // Горячий путь ничего не стоит; холодный поднимет раунд из лога действий.
+  await ensureOpen(deps.engine, deps.gameId, round.state);
+  const segment = await stepRound(deps.engine, round.state, req.action, req.params);
+
+  // Действие обязано попасть в лог до того, как состояние уедет к Artube:
+  // без него холодный подъём воспроизведёт другой раунд.
+  const logged = req.params ? { a: req.action, p: req.params } : { a: req.action };
+  const state: RoundStateV1 = { ...round.state, actions: [...round.state.actions, logged] };
+  const betAmount = ctx.allowedBets[state.betIndex];
+
+  if (!segment.isFinal) {
+    return {
+      delivery: toDelivery(segment, round.roundId, betAmount, null, true, false),
+      round: { ...round, state, delivered: segment },
+    };
+  }
+
+  const finalState: RoundStateV1 = {
+    ...state,
+    cursor: state.cursor + 1,
+    totalWinX: segment.totalWinX,
+  };
+  const res = await deps.api.closeRound({
+    session_id: ctx.sessionId,
+    round_id: round.roundId,
+    win_multiplier: segment.totalWinX,
+    status: 'completed',
+    round_version: round.roundVersion,
+    round_state_version: ROUND_STATE_VERSION,
+    round_state: encodeRoundState(finalState),
+  });
+  const delivery = toDelivery(segment, round.roundId, betAmount, res.balance, false, false);
+  delivery.frc = res.free_round_campaign ?? null;
+  return { delivery, round: null };
 }
