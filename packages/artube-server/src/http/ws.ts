@@ -160,7 +160,10 @@ export async function handleConnection(
           },
           resume: async (info) => {
             if (!info.last_round || info.last_round.finished_at) return { settled: false, round: null };
-            const recovered = await resumeRound(roundDeps, ctx, info.last_round);
+            // msg.action — то, что клиент реально пытался сыграть и из-за
+            // чего сработало восстановление; единственный источник правды,
+            // если окажется, что движок на шаг впереди платформенного лога.
+            const recovered = await resumeRound(roundDeps, ctx, info.last_round, msg.action);
             if (!recovered) return { settled: false, round: null };
             // Сегмент, который мы переигрывали, оказался финальным —
             // resumeRound уже сам закрыл раунд на платформе. Клиентское

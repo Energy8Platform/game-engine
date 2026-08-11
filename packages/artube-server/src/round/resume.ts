@@ -62,11 +62,19 @@ async function closeWith(
 /**
  * Вернуть игрока туда, где он остановился. `null` — восстанавливать нечего:
  * раунд уже закрыт платформой.
+ *
+ * `attemptedAction` — действие, которое клиент пытался сыграть и из-за
+ * которого сработало восстановление (`msg.action` из провалившегося `play` —
+ * `ws.ts` передаёт его только на пути `InvalidRoundOperation`). Это
+ * единственный источник правды о том, что играть на "движок на один шаг
+ * впереди лога": без него resumeRound не гадает — просто не разрешает
+ * ensureOpen'у терпеть этот разрыв, и тот бросает строгую ошибку, как раньше.
  */
 export async function resumeRound(
   deps: RoundDeps,
   ctx: SessionContext,
   lastRound: LastRound,
+  attemptedAction?: string,
 ): Promise<ResumeOutcome | null> {
   if (lastRound.finished_at) return null;
 
@@ -75,13 +83,14 @@ export async function resumeRound(
 
   let segment: Segment;
   try {
-    // tolerateAheadByOne: только здесь безопасно, потому что действие, которым
-    // мы переиграем "лишний" шаг ниже (`state.actions.at(-1)?.a ?? state.action`),
-    // вычисляется из ТОГО ЖЕ лога, что определяет и `expected` — оно заведомо
-    // совпадает с тем, что уже привело движок в это состояние. `advanceRound`
-    // (обычный горячий путь) такого разрешения не передаёт и обязан бросать
-    // строгую ошибку — см. `EnsureOpenOptions`.
-    await ensureOpen(deps.engine, deps.gameId, state, { tolerateAheadByOne: true });
+    // tolerateAheadByOne только когда известно, ЧТО сыграть на этом лишнем
+    // шаге — то есть только когда вызывающий передал attemptedAction. Обычный
+    // реконнект (ws.ts, без provided attemptedAction) не может объяснить
+    // разрыв в один шаг и обязан остаться под строгой проверкой — см.
+    // `EnsureOpenOptions`.
+    await ensureOpen(deps.engine, deps.gameId, state, {
+      tolerateAheadByOne: attemptedAction !== undefined,
+    });
     const known = await deps.engine.getRound(state.eid);
     const expected = 1 + state.actions.length;
     if (known.round_complete && known.spins_played === expected) {
@@ -106,18 +115,33 @@ export async function resumeRound(
         recovered: false,
       };
     }
-    // Либо раунд ещё не завершён (обычный путь — неподтверждённый сегмент
-    // переигрываем, игрок его не досмотрел), либо он завершён, но движок на
-    // один шаг впереди нашего лога (ensureOpen это уже проверил и пропустил):
-    // тот же процесс успел доиграть финальный сегмент в движке раньше, чем
-    // платформа подтвердила закрытие раунда. В обоих случаях следующий шаг —
-    // то, что мы сейчас переигрываем; для второго случая `known.next_actions`
-    // относится уже к завершённому раунду (чем стартовать новый), а не к
-    // мидраунд-продолжению — действие берём из последнего записанного в лог
-    // (тот же тип действия, что и предыдущее), а не оттуда.
-    const nextAction = known.round_complete
-      ? (state.actions.at(-1)?.a ?? state.action)
-      : known.next_actions[0];
+    // Раунд ещё не завершён — обычный путь, следующее действие берём из
+    // движка (`known.next_actions[0]` описывает продолжение ЭТОГО раунда).
+    //
+    // Если он всё же завершён, попасть сюда можно только через "движок на
+    // один шаг впереди лога, с attemptedAction" — без attemptedAction
+    // ensureOpen выше бросил бы строгую ошибку раньше, чем мы дошли досюда.
+    // Действие для этого шага — ТОЛЬКО attemptedAction, не последнее из лога
+    // и не `known.next_actions[0]` (тот на этой позиции описывает, чем
+    // начинать НОВЫЙ раунд после уже сыгранного лишнего шага, а не сам этот
+    // шаг) — гадать нельзя: неверная метка попадёт в персистентный
+    // `round_state.actions` и более поздний холодный подъём на другом поде
+    // воспроизведёт по ней уже другой раунд.
+    let nextAction: string;
+    if (known.round_complete) {
+      if (attemptedAction === undefined) {
+        // Недостижимо на практике: без attemptedAction ensureOpen не
+        // допустил бы разрыв в один шаг, он бросил бы выше. Явная проверка
+        // вместо `!`-утверждения — чтобы будущий рефакторинг этого
+        // инварианта не смог молча подписать чужой сегмент.
+        throw new Error(
+          `round ${state.eid}: engine ahead of round_state with no attempted action to explain it`,
+        );
+      }
+      nextAction = attemptedAction;
+    } else {
+      nextAction = known.next_actions[0];
+    }
     segment = await stepRound(deps.engine, state, nextAction);
   } catch (err) {
     if (!(err instanceof ScriptMismatchError)) throw err;
