@@ -192,6 +192,118 @@ describe('WS-цикл раунда', () => {
   }, 40_000);
 });
 
+describe('восстановление после ошибок сессии/раунда (WS)', () => {
+  /** Отвечает `Error` с заданным кодом на первое совпадение `matchType`, затем — как обычно. */
+  function respondOnceThenRecover(matchType: string, code: string, message: string) {
+    let failed = false;
+    return (env: any, socket: any, self: FakeGamesApi) => {
+      if (env.type === matchType && !failed) {
+        failed = true;
+        self.send(socket, {
+          proto: 1, schema: 1, chan: 'rpc', type: 'Error',
+          id: `e-${env.id}`, corr_id: env.id, op_seq: env.op_seq,
+          timestamp: new Date().toISOString(),
+          payload: { code, message, details: {} },
+        });
+        return;
+      }
+      responder()(env, socket, self);
+    };
+  }
+
+  it('SessionIsNotInitialized: SessionInfo перечитывается, play повторяется и доходит до игрока', async () => {
+    const flaky = await startFakeGamesApi({
+      onMessage: respondOnceThenRecover(
+        'OpenRoundRequest', 'SessionIsNotInitialized', 'Call SessionInfoRequest first.',
+      ),
+    });
+    const s = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: flaky.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await s.listen(0);
+    const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-1`);
+    await c.open;
+    await c.waitFor('init');
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 }));
+    const result = await c.waitFor('result');
+    expect(result.id).toBe('p0');
+    expect(result.creditPending).toBe(true);
+
+    // Один провал + одно восстановление: SessionInfo уходит дважды (коннект
+    // + перечитывание в recovery), OpenRoundRequest — дважды (провал + повтор).
+    expect(flaky.received.filter((e) => e.type === 'SessionInfoRequest')).toHaveLength(2);
+    expect(flaky.received.filter((e) => e.type === 'OpenRoundRequest')).toHaveLength(2);
+
+    c.socket.close();
+    await s.close();
+    await flaky.close();
+  }, 40_000);
+
+  it('SessionIsNotInitialized, упорствующая и после повтора — уходит во фронт как error, без зависания', async () => {
+    const alwaysFailing = await startFakeGamesApi({
+      onMessage: (env, socket, self) => {
+        if (env.type === 'OpenRoundRequest') {
+          self.send(socket, {
+            proto: 1, schema: 1, chan: 'rpc', type: 'Error',
+            id: `e-${env.id}`, corr_id: env.id, op_seq: env.op_seq,
+            timestamp: new Date().toISOString(),
+            payload: { code: 'SessionIsNotInitialized', message: 'nope', details: {} },
+          });
+          return;
+        }
+        responder()(env, socket, self);
+      },
+    });
+    const s = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: alwaysFailing.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await s.listen(0);
+    const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-2`);
+    await c.open;
+    await c.waitFor('init');
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 }));
+    const err = await c.waitFor('error');
+    expect(err.code).toBe('SessionIsNotInitialized');
+    // Ровно один повтор: два OpenRoundRequest, не больше.
+    expect(alwaysFailing.received.filter((e) => e.type === 'OpenRoundRequest')).toHaveLength(2);
+
+    c.socket.close();
+    await s.close();
+    await alwaysFailing.close();
+  }, 40_000);
+
+  it('InvalidRoundOperation: SessionInfo подтверждает, что раунда нет, play повторяется тем же действием', async () => {
+    const flaky = await startFakeGamesApi({
+      onMessage: respondOnceThenRecover(
+        'OpenRoundRequest', 'InvalidRoundOperation', 'Round is already opened.',
+      ),
+    });
+    const s = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: flaky.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await s.listen(0);
+    const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-3`);
+    await c.open;
+    await c.waitFor('init');
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 }));
+    const result = await c.waitFor('result');
+    expect(result.id).toBe('p0');
+    expect(result.creditPending).toBe(true);
+
+    // Свежий SessionInfo не принёс незакрытого раунда (responder() его и не
+    // отдаёт) — resume() возвращает null, повтор идёт тем же действием.
+    expect(flaky.received.filter((e) => e.type === 'SessionInfoRequest')).toHaveLength(2);
+    expect(flaky.received.filter((e) => e.type === 'OpenRoundRequest')).toHaveLength(2);
+
+    c.socket.close();
+    await s.close();
+    await flaky.close();
+  }, 40_000);
+});
+
 describe('graceful shutdown', () => {
   it('close() резолвится быстро и уведомляет открытых WS-клиентов, а не висит до SIGKILL', async () => {
     const shutdownApi = await startFakeGamesApi({ onMessage: responder() });

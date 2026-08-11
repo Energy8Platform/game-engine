@@ -15,6 +15,7 @@ import {
   type ActiveRound, type RoundDeps,
 } from '../round/orchestrator.js';
 import { resumeRound } from '../round/resume.js';
+import { withSessionRecovery } from '../session/recovery.js';
 import { buildInit, isDemoSession, toSessionContext } from '../session/init.js';
 import { createDemoApi } from '../session/demo.js';
 import type { SessionContext } from '../session/types.js';
@@ -141,9 +142,26 @@ export async function handleConnection(
       }
       // Демо: движок крутится, платформу не трогаем — она отвечает
       // OperationNotAllowed на раундовые RPC демо-сессии.
-      const outcome = current
-        ? await advanceRound(roundDeps, ctx, current, msg)
-        : await startRound(roundDeps, ctx, msg);
+      //
+      // `SessionIsNotInitialized` и `InvalidRoundOperation` чинятся
+      // перечитыванием состояния, а не слепым ретраем — withSessionRecovery
+      // переинициализирует сессию/раунд и повторяет попытку ровно один раз.
+      const outcome = await withSessionRecovery(
+        {
+          sessionInfo: () =>
+            deps.api.sessionInfo({ session_id: sessionId, player_connection_info: {} }),
+          resume: async (info) => {
+            if (!info.last_round || info.last_round.finished_at) return null;
+            const recovered = await resumeRound(roundDeps, ctx, info.last_round);
+            return recovered?.round ?? null;
+          },
+        },
+        (activeRound) =>
+          activeRound
+            ? advanceRound(roundDeps, ctx, activeRound, msg)
+            : startRound(roundDeps, ctx, msg),
+        current,
+      );
       current = outcome.round;
       send({ t: 'result', id: msg.id, ...outcome.delivery });
     } catch (err) {
