@@ -15,6 +15,8 @@ import {
   type Channel,
   type Envelope,
 } from './envelope.js';
+import { GamesApiError, IDEMPOTENT_TYPES, isRetryable } from './errors.js';
+import type { ErrorPayload } from './types.js';
 
 /**
  * Все типы, которые Games API может прислать на этом коннекте. Дока
@@ -51,6 +53,11 @@ type ClientEvent = 'connected' | 'disconnected' | 'goAway';
 export class GamesApiClient {
   protected socket: WebSocket | null = null;
   protected readonly seq = new OpSeq();
+  /** Ожидающие ответа RPC, ключ — id запроса (он же corr_id ответа). */
+  private readonly pending = new Map<
+    string,
+    { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+  >();
   private readonly handlers = new Map<ClientEvent, Set<(arg?: any) => void>>();
   private reconnectAttempts = 0;
   private stopped = false;
@@ -96,11 +103,64 @@ export class GamesApiClient {
     return env;
   }
 
-  /** Точка расширения: приходящие конверты, кроме control-канала. */
-  protected onEnvelope(_env: Envelope): void {}
+  /**
+   * Один запрос-ответ. Повтор — только для идемпотентных типов и только на
+   * кодах, где дока обещает, что повтор поможет.
+   */
+  async rpc<TReq, TRes>(type: string, payload: TReq, attempt = 0): Promise<TRes> {
+    if (!this.connected) {
+      // Дока: пока коннекта нет, запросы должны немедленно падать, а не висеть.
+      throw GamesApiError.internal('no connection to Games API');
+    }
+    try {
+      return await this.dispatch<TReq, TRes>(type, payload);
+    } catch (err) {
+      const retryable =
+        err instanceof GamesApiError &&
+        IDEMPOTENT_TYPES.has(type) &&
+        isRetryable(err.code) &&
+        attempt < 2;
+      if (!retryable) throw err;
+      const delay = (err as GamesApiError).retryAfterMs ?? 200 * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, delay));
+      return this.rpc<TReq, TRes>(type, payload, attempt + 1);
+    }
+  }
 
-  /** Точка расширения: коннект оборвался, надо отбить висящие RPC. */
-  protected onDisconnected(_reason: string): void {}
+  private dispatch<TReq, TRes>(type: string, payload: TReq): Promise<TRes> {
+    return new Promise<TRes>((resolve, reject) => {
+      const env = this.sendEnvelope('rpc', type, payload);
+      const timer = setTimeout(() => {
+        this.pending.delete(env.id);
+        reject(GamesApiError.internal(`timeout waiting for response to ${type}`));
+      }, this.opts.rpcTimeoutMs ?? 15_000);
+      this.pending.set(env.id, { resolve, reject, timer });
+    });
+  }
+
+  protected onEnvelope(env: Envelope): void {
+    if (env.chan !== 'rpc' || !env.corr_id) return this.onEvent(env);
+    const waiter = this.pending.get(env.corr_id);
+    if (!waiter) return;
+    this.pending.delete(env.corr_id);
+    clearTimeout(waiter.timer);
+    if (env.type === 'Error') {
+      waiter.reject(new GamesApiError(env.payload as ErrorPayload));
+    } else {
+      waiter.resolve(env.payload);
+    }
+  }
+
+  /** Точка расширения для событий канала `events` (Task 4). */
+  protected onEvent(_env: Envelope): void {}
+
+  protected onDisconnected(reason: string): void {
+    for (const [, waiter] of this.pending) {
+      clearTimeout(waiter.timer);
+      waiter.reject(GamesApiError.internal(reason));
+    }
+    this.pending.clear();
+  }
 
   private openSocket(): Promise<void> {
     return new Promise((resolve, reject) => {
