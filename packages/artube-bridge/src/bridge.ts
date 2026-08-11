@@ -45,6 +45,7 @@ import type {
 } from '@energy8platform/game-sdk/protocol';
 import { ArtubeClient, ArtubeBackendError } from './client';
 import { parseArtubeUrl } from './detect';
+import { DemoWallet } from './demo';
 import type { ArtubeBridgeOptions, ServerInit, ServerResult } from './types';
 
 /**
@@ -83,6 +84,8 @@ export class ArtubeBridge {
   private initSent = false;
   /** Снимок незакрытого раунда для `GET_STATE`; `null`, когда раунд расчитан. */
   private lastDelivered: PlayResultPayload | null = null;
+  /** Демо-баланс: заведён, только когда `init.demo` — платформа его не считает. */
+  private demoWallet: DemoWallet | null = null;
 
   constructor(private readonly options: ArtubeBridgeOptions = {}) {
     const url = parseArtubeUrl(options.url ?? window.location.href);
@@ -108,6 +111,11 @@ export class ArtubeBridge {
       (init) => {
         this.init = init;
         this.balance = init.balance;
+        // В демо баланс ведём здесь: платформа его не считает.
+        if (init.demo) {
+          this.demoWallet = new DemoWallet(this.options.demoBalance ?? init.balance);
+          this.balance = this.demoWallet.balance;
+        }
         return init;
       },
       (err) => {
@@ -198,6 +206,12 @@ export class ArtubeBridge {
       }
       this.cursor += 1;
       if (result.balanceAfter !== null) this.balance = result.balanceAfter;
+      if (this.demoWallet) {
+        // Ставку списываем на входе в раунд, выигрыш зачисляем на выходе.
+        if (this.cursor === 1) this.demoWallet.bet(payload.bet);
+        if (!result.creditPending) this.demoWallet.credit(result.totalWinX * result.betAmount);
+        this.balance = this.demoWallet.balance;
+      }
       const delivered = this.toPlayResult(result);
       // Keep GET_STATE's snapshot in step: nothing to resume once settled.
       this.lastDelivered = delivered.creditPending ? delivered : null;

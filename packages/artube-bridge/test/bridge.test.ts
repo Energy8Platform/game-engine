@@ -242,4 +242,23 @@ describe('ArtubeBridge', () => {
 
     sdk.destroy();
   });
+
+  it('в демо баланс ведёт клиент', async () => {
+    backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null });
+    backend.play.mockResolvedValue(result({ balanceAfter: null, winX: 3, totalWinX: 3, betAmount: 1 }));
+    bridge.destroy();
+    installWindow();
+    sent = [];
+    const { MemoryChannel } = await import('@energy8platform/game-sdk');
+    channel = MemoryChannel.getGlobal();
+    channel.onGuest((m: any) => sent.push({ type: m.type, payload: m.payload }));
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game', demoBalance: 50 });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+    const play = sent.find((m) => m.type === 'PLAY_RESULT');
+    expect(play!.payload.balanceAfter).toBe(52); // 50 − 1 ставка + 3 выигрыш
+  });
 });

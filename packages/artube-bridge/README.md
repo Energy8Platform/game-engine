@@ -1,0 +1,146 @@
+# @energy8platform/artube-bridge
+
+Drop-in host-side wrapper that lets a game written against
+[`@energy8platform/game-sdk`](../game-sdk) run on the
+[Artube](https://docs.artube-888.live) platform without modification.
+
+## Why
+
+Artube's Games API only talks to a **backend** — the browser has no direct
+access to it. So unlike a pure-frontend bridge, this package is one half of a
+pair: `@energy8platform/artube-server` runs the game's backend (WS
+protocol, round math, Games API calls), and `ArtubeBridge` is the thin
+frontend piece that connects the game's `CasinoGameSDK` to that backend over
+same-origin WebSocket. The game code is unaware of the split — it always
+talks only to `CasinoGameSDK`, same as on Energy8 or Stake.
+
+## How this differs from `stake-bridge`
+
+[`@energy8platform/stake-bridge`](../stake-bridge) does the RGS calls itself,
+in the browser, and needs a per-game `BookAdapter` to slice Stake's
+pre-generated "book" into segments. Artube inverts both of those:
+
+| | `stake-bridge` | `artube-bridge` |
+|---|---|---|
+| Who calls the platform API | the browser (`StakeBridge` itself) | **only the game's backend** — the browser has no access |
+| Round math / segment splitting | per-game `BookAdapter` in the frontend | the backend (`artube-server`); the bridge just forwards |
+| Transport | HTTPS REST to Stake's RGS | same-origin WebSocket to the game's own backend (`/api/ws`) |
+| Per-game artifact | `BookAdapter` (required) | **none** |
+
+Because the backend already knows the round shape, `artube-bridge` has no
+adapter concept at all — it is purely a protocol translator between
+`CasinoGameSDK`'s messages and the backend's WS wire format.
+
+## What the bridge owns vs. what the backend owns
+
+| `ArtubeBridge` (this package) | `artube-server` (the game's backend) |
+|---|---|
+| URL parsing (`sessionId`/`lang`/`device` query params) | Games API session (`SessionInfo`, reconnect, resume) |
+| Translating `PLAY_REQUEST`/`PLAY_RESULT`/`PLAY_RESULT_ACK`/`GET_STATE`/`GET_BALANCE` ↔ the backend's `play`/`result`/`ack`/`init`/`balance` WS messages | Splitting a round into segments and deciding simple vs. multi-segment (`PlayRound` vs. `OpenRound`/`UpdateRoundState`/`CloseRound`) |
+| Converting a bet **amount** the game sends to the `betIndex` the backend expects (`betIndexOf`, nearest match against `config.betLevels`) | All money math — the bridge never computes a win or balance itself |
+| Delivering an unfinished round back to the game on reconnect (`INIT.session` + `GET_STATE`) | Persisting round state in Games API's `round_state` (the backend itself is stateless) |
+| The demo wallet (see below) when `init.demo` is set | Detecting demo sessions (`currency === null`) and reporting `demo: true` |
+
+## Installation
+
+```bash
+npm install @energy8platform/game-sdk @energy8platform/artube-bridge
+```
+
+## Quick start: the three-platform entry point
+
+A game built against `@energy8platform/game-sdk` picks its host at runtime
+from the launch URL. Adding Artube alongside Energy8 (and optionally Stake)
+means one more branch in the same entry point — no other code changes:
+
+```ts
+// src/main.ts
+import { CasinoGameSDK } from '@energy8platform/game-sdk';
+import { isArtubeLaunch } from '@energy8platform/artube-bridge/detect';
+import { runGame } from './game';
+
+const isArtube = isArtubeLaunch(location.href); // ?sessionId=…
+
+if (isArtube) {
+  const { ArtubeBridge } = await import('@energy8platform/artube-bridge');
+  new ArtubeBridge({ devMode: true, gameId: 'sweet-bonanza' });
+}
+
+const sdk = new CasinoGameSDK({ devMode: isArtube });
+await sdk.ready();
+runGame(sdk);
+```
+
+`isArtubeLaunch` lives in its own leaf module (`/detect`, no import of
+`ArtubeBridge` itself) specifically so a bundler can chunk it separately —
+Energy8-only builds never pull in the bridge's WebSocket client.
+
+`ArtubeBridge` runs **in-process** with the game, exactly like `StakeBridge`:
+no extra iframe, communication happens over the same in-memory channel
+`CasinoGameSDK` already uses for `devMode`.
+
+## `new ArtubeBridge(options)`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `devMode` | `boolean` | `true` | Run in-process via `MemoryChannel`. |
+| `url` | `string \| URL \| Location` | `window.location.href` | Source for the `sessionId`/`lang`/`device` query params. |
+| `apiBase` | `string` | the launch URL's origin | Origin of the game's backend. Only override this for local dev against a backend on a different port — production must be same-origin (see below). |
+| `gameId` | `string` | `'artube-game'` | Surfaced on `PLAY_RESULT.gameId`. |
+| `demoBalance` | `number` | the backend's starting demo balance | Starting virtual balance for demo sessions — see below. |
+| `debug` | `boolean` | `false` | Verbose logging. |
+
+## Demo mode
+
+Artube's Games API has no concept of a demo session that supports round
+RPCs: a session is demo when `currency === null`, and any `PlayRound`/
+`OpenRound`/etc. call against one is rejected with `OperationNotAllowed`.
+`artube-server` works around this with a small in-memory stand-in scoped to
+one WebSocket connection — but that state resets on every reconnect, and
+holding it there at all only exists to keep the backend's own round-shape
+bookkeeping self-consistent within a connection. It is not a balance the
+game should trust across a page's whole demo session.
+
+`ArtubeBridge` instead keeps the balance the player actually sees itself,
+client-side, in a `DemoWallet` (`src/demo.ts`):
+
+- On `INIT`, if `init.demo` is `true`, the bridge creates a `DemoWallet`
+  seeded from `options.demoBalance` if given, otherwise from `init.balance`
+  (the backend's own `DEMO_BALANCE`-configured starting amount, 1000 by
+  default — see `artube-server`'s README).
+- On each `PLAY_REQUEST` that starts a new round, the wallet is debited the
+  bet **once**, at the round's first segment — not per segment.
+- On the round's **final** segment (`creditPending: false`), the wallet is
+  credited the win once. A multi-segment round (free spins, gamble, …)
+  streams several `PLAY_RESULT`s with `creditPending: true` in between;
+  those do not touch the wallet.
+- Amounts are held in minor units (`Math.round(amount * 100)`) internally so
+  repeated small bets and credits don't accumulate floating-point error.
+
+This coexists with the bridge's normal balance path
+(`if (result.balanceAfter !== null) this.balance = result.balanceAfter`)
+without the two fighting: whenever `demoWallet` is set, the wallet's own
+figure is applied **after** that line and unconditionally wins, regardless
+of whatever `balanceAfter` the wire happened to carry. That is deliberate —
+the wallet, not the connection-scoped backend stand-in, is what survives a
+mid-session WS reconnect, so it is the only balance worth trusting for the
+lifetime of the page.
+
+The demo wallet is purely a UX convenience — it is never sent to the
+backend or persisted anywhere. A page refresh loses it, same as any other
+purely client-side state.
+
+## Deployment requirement: same-origin backend
+
+`ArtubeBridge` connects over `${apiBase}/api/ws?sessionId=…`, and by default
+derives `apiBase` from the launch URL's own origin. This is not
+configuration convenience — it is required: Artube serves the game's
+frontend and its backend under **the same domain**, splitting them only by
+path (`/api/**` → backend, everything else → the static frontend). There is
+no CORS story here because there is no cross-origin request; deploying the
+backend anywhere else breaks the bridge's default `apiBase` and requires
+overriding it, which is not a supported production configuration.
+
+See [`@energy8platform/artube-server`](../artube-server)'s README for the
+backend side of this contract (`Dockerfile.template`, `/api` prefix,
+`/livez`/`/healthz` outside of it).
