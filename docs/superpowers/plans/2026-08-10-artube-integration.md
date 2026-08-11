@@ -2243,7 +2243,9 @@ describe('раунд в движке', () => {
     }
     expect(last!.isFinal).toBe(true);
     expect(last!.totalWinX).toBe(3);
-    expect(last!.nextActions).toEqual(['spin']);
+    // На завершении движок предлагает ВСЕ entry-действия игры, а у
+    // feature.spin их два: spin и buy_bonus. Проверено на живом бинаре.
+    expect(last!.nextActions).toEqual(['spin', 'buy_bonus']);
   });
 
   it('ensureOpen ничего не делает, пока раунд жив в движке', async () => {
