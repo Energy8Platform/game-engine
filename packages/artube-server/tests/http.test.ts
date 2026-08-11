@@ -191,3 +191,35 @@ describe('WS-цикл раунда', () => {
     await demoApi.close();
   }, 40_000);
 });
+
+describe('graceful shutdown', () => {
+  it('close() резолвится быстро и уведомляет открытых WS-клиентов, а не висит до SIGKILL', async () => {
+    const shutdownApi = await startFakeGamesApi({ onMessage: responder() });
+    const shutdownServer = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: shutdownApi.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await shutdownServer.listen(0);
+
+    const c = connect(`ws://127.0.0.1:${shutdownServer.port}/api/ws?sessionId=sess-shutdown`);
+    await c.open;
+    await c.waitFor('init');
+
+    const closedMessage = c.waitFor('session_closed');
+    const clientClosedCode = new Promise<number>((resolve) => c.socket.on('close', (code) => resolve(code)));
+
+    // Клиент подключён и жив на момент close() — именно тот сценарий, в
+    // котором `wss.close()` + `http.close(cb)` сами по себе зависают,
+    // потому что ни один из них не завершает уже открытые апгрейженные сокеты.
+    const started = Date.now();
+    await Promise.race([
+      shutdownServer.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('close() не завершился вовремя')), 8000)),
+    ]);
+    expect(Date.now() - started).toBeLessThan(8000);
+
+    expect((await closedMessage).reason).toBeTruthy();
+    expect(await clientClosedCode).toBe(1001);
+
+    await shutdownApi.close();
+  }, 20_000);
+});

@@ -70,7 +70,12 @@ export function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-export async function findFreePort(start: number, range = 20): Promise<number> {
+// Wider than a single process ever needs alone: several test files probe
+// from the same `start` at once, so a wide window means each of them is
+// likely to land on a *different* free port on its very first probe instead
+// of relying on `spawnEngine`'s retry loop to fan them out one collision at
+// a time.
+export async function findFreePort(start: number, range = 64): Promise<number> {
   for (let p = start; p < start + range; p++) {
     if (await isPortFree(p)) return p;
   }
@@ -104,9 +109,20 @@ export function spawnFailureOf(child: ChildProcess): Error | undefined {
  */
 const SPAWN_CHECK_MS = 400;
 
-/** One initial attempt + this many retries on the next port, bounding the
- *  search so a run of colliding processes can't retry forever. */
-const MAX_SPAWN_ATTEMPTS = 6;
+/**
+ * One initial attempt + this many retries on the next port, bounding the
+ * search so a run of colliding processes can't retry forever.
+ *
+ * Sized for vitest's default parallel-file execution, not just a single
+ * process: every test file that calls `startEngine` races the same
+ * `DEFAULT_ENGINE_PORT` starting point concurrently, so the number of
+ * attempts any one of them needs to land on a free port grows with how many
+ * spawn at once (each collision only advances *that* process's own `from`
+ * pointer, not a shared one). Seven engine-spawning test files at 6 attempts
+ * was already too tight — this leaves headroom for the suite to keep
+ * growing without going back to hand-pinned ports.
+ */
+const MAX_SPAWN_ATTEMPTS = 24;
 
 /**
  * Race the child's own 'error'/'exit' events against a short timer. Resolves
