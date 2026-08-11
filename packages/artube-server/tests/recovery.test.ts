@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { withSessionRecovery } from '../src/session/recovery';
+import { withSessionRecovery, type PlayOutcome, type ResumeResult } from '../src/session/recovery';
 import { GamesApiError } from '../src/games-api/errors';
 import type { ActiveRound } from '../src/round/orchestrator';
+import type { SegmentDelivery } from '../src/session/types';
 
 const round = (version: number): ActiveRound => ({
   roundId: 'r1',
@@ -13,18 +14,31 @@ const round = (version: number): ActiveRound => ({
   delivered: null,
 });
 
-function deps(recovered: ActiveRound | null = round(5)) {
+const delivery = (over: Partial<SegmentDelivery> = {}): SegmentDelivery => ({
+  roundId: 'r1', action: 'free_spin', data: {}, winX: 1, totalWinX: 3, betAmount: 1,
+  nextActions: ['spin'], spinsRemaining: 0, spinsPlayed: 4, balanceAfter: 150,
+  creditPending: false, maxWinReached: false,
+  ...over,
+});
+
+const outcome = (round: ActiveRound | null, over: Partial<SegmentDelivery> = {}): PlayOutcome => ({
+  delivery: delivery(over),
+  round,
+});
+
+function deps(resume: ResumeResult = { settled: false, round: round(5) }) {
   return {
     sessionInfo: vi.fn(async () => ({}) as any),
-    resume: vi.fn(async () => recovered),
+    resume: vi.fn(async () => resume),
   };
 }
 
 describe('восстановление сессии', () => {
   it('успешный вызов проходит без вмешательства', async () => {
     const d = deps();
-    const run = vi.fn(async () => 'ok');
-    expect(await withSessionRecovery(d, run, null)).toBe('ok');
+    const first = outcome(null);
+    const run = vi.fn(async () => first);
+    expect(await withSessionRecovery(d, run, null)).toBe(first);
     expect(d.sessionInfo).not.toHaveBeenCalled();
   });
 
@@ -35,15 +49,17 @@ describe('восстановление сессии', () => {
       if (++calls === 1) {
         throw new GamesApiError({ code: 'SessionIsNotInitialized', message: 'call SessionInfo first' });
       }
-      return 'ok';
+      return outcome(null);
     });
-    expect(await withSessionRecovery(d, run, null)).toBe('ok');
+    const result = await withSessionRecovery(d, run, null);
+    expect(result.round).toBeNull();
     expect(d.sessionInfo).toHaveBeenCalledTimes(1);
     expect(calls).toBe(2);
+    expect(d.resume).not.toHaveBeenCalled(); // resume() чинит раунд, здесь чинить нечего
   });
 
   it('InvalidRoundOperation чинит раунд из SessionInfo и повторяет', async () => {
-    const d = deps(round(5));
+    const d = deps({ settled: false, round: round(5) });
     const seen: Array<ActiveRound | null> = [];
     let calls = 0;
     const run = vi.fn(async (current: ActiveRound | null) => {
@@ -51,11 +67,26 @@ describe('восстановление сессии', () => {
       if (++calls === 1) {
         throw new GamesApiError({ code: 'InvalidRoundOperation', message: 'Invalid round version to update.' });
       }
-      return 'ok';
+      return outcome(current);
     });
-    expect(await withSessionRecovery(d, run, round(1))).toBe('ok');
+    await withSessionRecovery(d, run, round(1));
     expect(seen[0]!.roundVersion).toBe(1); // первая попытка со старой версией
     expect(seen[1]!.roundVersion).toBe(5); // повтор с версией от платформы
+  });
+
+  it('InvalidRoundOperation на финальном сегменте: recovery сам закрыл раунд — run() клиентским действием не повторяется', async () => {
+    // resumeRound переиграл и тут же закрыл раунд (сегмент оказался
+    // финальным) — settled-исход уже готов, а run() звать второй раз нельзя:
+    // клиентское действие относилось к уже закрытому раунду, и startRound
+    // принял бы его как entry нового раунда с реальным списанием денег.
+    const settledOutcome = outcome(null, { creditPending: false, balanceAfter: 150, totalWinX: 3 });
+    const d = deps({ settled: true, outcome: settledOutcome });
+    const run = vi.fn(async () => {
+      throw new GamesApiError({ code: 'InvalidRoundOperation', message: 'Invalid round version to update.' });
+    });
+    const result = await withSessionRecovery(d, run, round(3));
+    expect(result).toBe(settledOutcome);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('повторяет ровно один раз', async () => {

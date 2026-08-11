@@ -77,14 +77,15 @@ export async function resumeRound(
   try {
     await ensureOpen(deps.engine, deps.gameId, state);
     const known = await deps.engine.getRound(state.eid);
-    if (known.round_complete) {
-      // Лог уже покрывает весь раунд целиком: ensureOpen догнало движок ровно
-      // до конца, а неподтверждённого сегмента, который можно было бы
-      // переиграть, за логом больше нет. Это НЕ ScriptMismatch — раунд
-      // воспроизвёлся честно, просто CloseRound по нему раньше не прошёл.
-      // Курсор не двигаем: лог уже отражает все подтверждённые сегменты, а
-      // дальше степать по завершённому раунду нечем — next_actions здесь
-      // означает "чем стартовать новый раунд", а не продолжение этого.
+    const expected = 1 + state.actions.length;
+    if (known.round_complete && known.spins_played === expected) {
+      // Лог уже покрывает весь раунд целиком: движок ровно на нашем логе, а
+      // неподтверждённого сегмента, который можно было бы переиграть, за
+      // логом больше нет. Это НЕ ScriptMismatch — раунд воспроизвёлся честно,
+      // просто CloseRound по нему раньше не прошёл. Курсор не двигаем: лог
+      // уже отражает все подтверждённые сегменты, а дальше степать по
+      // завершённому раунду нечем — next_actions здесь означает "чем
+      // стартовать новый раунд", а не продолжение этого.
       const balance = await closeWith(deps, ctx, lastRound, state, state.totalWinX);
       return {
         delivery: toDelivery(
@@ -99,8 +100,19 @@ export async function resumeRound(
         recovered: false,
       };
     }
-    // Неподтверждённый сегмент переигрываем заново: игрок его не досмотрел.
-    segment = await stepRound(deps.engine, state, known.next_actions[0]);
+    // Либо раунд ещё не завершён (обычный путь — неподтверждённый сегмент
+    // переигрываем, игрок его не досмотрел), либо он завершён, но движок на
+    // один шаг впереди нашего лога (ensureOpen это уже проверил и пропустил):
+    // тот же процесс успел доиграть финальный сегмент в движке раньше, чем
+    // платформа подтвердила закрытие раунда. В обоих случаях следующий шаг —
+    // то, что мы сейчас переигрываем; для второго случая `known.next_actions`
+    // относится уже к завершённому раунду (чем стартовать новый), а не к
+    // мидраунд-продолжению — действие берём из последнего записанного в лог
+    // (тот же тип действия, что и предыдущее), а не оттуда.
+    const nextAction = known.round_complete
+      ? (state.actions.at(-1)?.a ?? state.action)
+      : known.next_actions[0];
+    segment = await stepRound(deps.engine, state, nextAction);
   } catch (err) {
     if (!(err instanceof ScriptMismatchError)) throw err;
     // Курсор не двигаем: ничего нового не сыграли, отдаём накопленное как

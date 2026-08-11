@@ -302,6 +302,125 @@ describe('восстановление после ошибок сессии/ра
     await s.close();
     await flaky.close();
   }, 40_000);
+
+  it('InvalidRoundOperation на финальном сегменте: игрок получает досчитанный результат, фантомный раунд не открывается', async () => {
+    // Фейковый Games API держит round_state ровно из последнего успешного
+    // UpdateRoundStateRequest — то, что платформа реально подтвердила до
+    // финального (провалившегося) действия — и отдаёт его в SessionInfo,
+    // как это сделала бы настоящая платформа. round_state не выдумывается:
+    // это буквально то, что сервер сам нам прислал на предыдущем ack.
+    let lastConfirmedState: string | null = null;
+    let version = 0;
+    let closeFailedOnce = false;
+    const api = await startFakeGamesApi({
+      onMessage: (env, socket, self) => {
+        const reply = (type: string, payload: unknown) =>
+          self.send(socket, {
+            proto: 1, schema: 1, chan: 'rpc', type,
+            id: `res-${env.id}`, corr_id: env.id, op_seq: env.op_seq,
+            timestamp: new Date().toISOString(), payload,
+          });
+        if (env.type === 'SessionInfoRequest') {
+          reply('SessionInfoResponse', {
+            security_hash: 'h', currency: 'USD', balance: 100,
+            game_settings: {
+              default_bet_index: 0, currency_minimal_unit: 0.01, allowed_bets: [1],
+              available_auto_spin_counts: [10], rtp_options: [],
+              rtp_settings: { is_visible: false }, locales: ['EN'],
+            },
+            last_round: lastConfirmedState && {
+              round_id: 'round-1', price_multiplier: 1, bet_index: 0,
+              win_multiplier: 0, win: 0, started_at: '2026-08-10T10:00:00.000Z',
+              finished_at: null, round_version: version, round_state_version: '1',
+              round_state: lastConfirmedState, is_platform_max_win_reached: false,
+            },
+          });
+          return;
+        }
+        if (env.type === 'OpenRoundRequest') {
+          reply('OpenRoundResponse', { round_version: 0, round_id: 'round-1', balance: 99 });
+          return;
+        }
+        if (env.type === 'UpdateRoundStateRequest') {
+          version += 1;
+          lastConfirmedState = env.payload.round_state;
+          reply('UpdateRoundStateResponse', { round_version: version });
+          return;
+        }
+        if (env.type === 'CloseRoundRequest') {
+          if (!closeFailedOnce) {
+            closeFailedOnce = true;
+            reply('Error', {
+              code: 'InvalidRoundOperation', message: 'Invalid round version to update.', details: {},
+            });
+            return;
+          }
+          reply('CloseRoundResponse', { balance: 102, free_round_campaign: null });
+          return;
+        }
+      },
+    });
+    const s = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await s.listen(0);
+    const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-final`);
+    await c.open;
+    await c.waitFor('init');
+
+    // Заводим раунд и доигрываем два фриспина из трёх, каждый раз честно
+    // подтверждая курсор — ровно то, что делает настоящий фронт.
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 }));
+    const spin = await c.waitFor('result');
+    c.socket.send(JSON.stringify({ t: 'ack', roundId: spin.roundId, cursor: 1 }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p1', action: 'free_spin', betIndex: 0 }));
+    const fs1 = await c.waitFor('result');
+    expect(c.messages.filter((m) => m.t === 'result')).toHaveLength(2);
+    c.socket.send(JSON.stringify({ t: 'ack', roundId: fs1.roundId, cursor: 2 }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p2', action: 'free_spin', betIndex: 0 }));
+    await new Promise<void>((resolve) => {
+      const tick = setInterval(() => {
+        if (c.messages.filter((m) => m.t === 'result').length >= 3) { clearInterval(tick); resolve(); }
+      }, 10);
+    });
+    const fs2 = c.messages.filter((m) => m.t === 'result').at(-1);
+    c.socket.send(JSON.stringify({ t: 'ack', roundId: fs2.roundId, cursor: 3 }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Третий (последний) фриспин: CloseRoundRequest сначала падает с
+    // InvalidRoundOperation, recovery перечитывает SessionInfo, сам
+    // досчитывает и закрывает раунд — а игроку прилетает готовый результат,
+    // без второго OpenRoundRequest и без единого PlayRoundRequest.
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p3', action: 'free_spin', betIndex: 0 }));
+    await new Promise<void>((resolve) => {
+      const tick = setInterval(() => {
+        if (c.messages.filter((m) => m.t === 'result').length >= 4) { clearInterval(tick); resolve(); }
+      }, 10);
+    });
+    const final = c.messages.filter((m) => m.t === 'result').at(-1);
+    expect(final.id).toBe('p3');
+    expect(final.creditPending).toBe(false);
+    expect(final.balanceAfter).toBe(102);
+    expect(final.totalWinX).toBe(3);
+    expect(c.messages.some((m) => m.t === 'error')).toBe(false);
+
+    // Единственная и решающая проверка: восстановление не должно было
+    // задеть ни одну денежную RPC сверх плана — ни повторного OpenRound
+    // (это был бы фантомный раунд), ни тем более PlayRound (это был бы
+    // одиночный раунд, выставленный за клиентское действие, которое на
+    // самом деле относилось к уже закрытому раунду).
+    expect(api.received.filter((e) => e.type === 'OpenRoundRequest')).toHaveLength(1);
+    expect(api.received.filter((e) => e.type === 'PlayRoundRequest')).toHaveLength(0);
+    expect(api.received.filter((e) => e.type === 'CloseRoundRequest')).toHaveLength(2); // провал + успешный повтор изнутри recovery
+
+    c.socket.close();
+    await s.close();
+    await api.close();
+  }, 40_000);
 });
 
 describe('graceful shutdown', () => {

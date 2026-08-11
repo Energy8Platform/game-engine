@@ -148,12 +148,29 @@ export async function handleConnection(
       // переинициализирует сессию/раунд и повторяет попытку ровно один раз.
       const outcome = await withSessionRecovery(
         {
-          sessionInfo: () =>
-            deps.api.sessionInfo({ session_id: sessionId, player_connection_info: {} }),
+          sessionInfo: async () => {
+            const info = await deps.api.sessionInfo({
+              session_id: sessionId, player_connection_info: {},
+            });
+            // Смысл перечитывания — синхронизироваться с платформой: ставки
+            // и фри-раунд могли поменяться, повтор обязан идти со свежими
+            // значениями, а не с теми, что были на коннекте.
+            ctx = toSessionContext(sessionId, info);
+            return info;
+          },
           resume: async (info) => {
-            if (!info.last_round || info.last_round.finished_at) return null;
+            if (!info.last_round || info.last_round.finished_at) return { settled: false, round: null };
             const recovered = await resumeRound(roundDeps, ctx, info.last_round);
-            return recovered?.round ?? null;
+            if (!recovered) return { settled: false, round: null };
+            // Сегмент, который мы переигрывали, оказался финальным —
+            // resumeRound уже сам закрыл раунд на платформе. Клиентское
+            // действие относилось к этому (уже закрытому) раунду: отдаём
+            // готовый исход, а не гоняем его через startRound как entry
+            // нового раунда — тот принял бы его буквально и выставил бы
+            // реальный счёт за раунд, который игрок не заказывал.
+            return recovered.round
+              ? { settled: false, round: recovered.round }
+              : { settled: true, outcome: { delivery: recovered.delivery, round: null } };
           },
         },
         (activeRound) =>

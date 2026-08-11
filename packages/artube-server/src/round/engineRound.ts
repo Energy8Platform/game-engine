@@ -119,7 +119,15 @@ export async function ensureOpen(
   state: RoundStateV1,
 ): Promise<void> {
   const known = await engine.getRound(state.eid);
-  if (known.found && !known.round_complete) {
+  // `found` — а не `found && !round_complete` — потому что "движок знает этот
+  // eid" делает холодный `start()` ниже невозможным (StartRound отказывает,
+  // если раунд уже существует) НЕЗАВИСИМО от того, довёл ли он раунд до
+  // конца. Раунд, уже сыгранный этим же процессом до финала (например,
+  // advanceRound успел доиграть и закрыть его в движке, а CloseRound
+  // платформе не прошёл), — это `found: true, round_complete: true`, и его
+  // тоже нужно сверять по `spins_played`, а не гнать в заведомо провальный
+  // холодный путь.
+  if (known.found) {
     if (state.script && known.script_sha256 && state.script !== known.script_sha256) {
       throw new ScriptMismatchError(state.script, known.script_sha256);
     }
@@ -141,9 +149,22 @@ export async function ensureOpen(
       await replayFrom(engine, state, known.spins_played - 1);
       return;
     }
-    // known.spins_played > expected: движок сыграл больше сегментов, чем
-    // объясняет наш лог. Гадать, каким из лишних шагов доверять, и было бы
-    // тем самым молчаливым расхождением, которое эта функция должна ловить.
+    if (known.spins_played === expected + 1) {
+      // Движок уже сыграл РОВНО тот один сегмент, который вызывающий
+      // (advanceRound/resumeRound) сейчас переиграет сам следующим Step —
+      // это ровно паттерн "тот же процесс, тот же раунд, попытка закрыть его
+      // на платформе не прошла, а сам сегмент в движке уже честно сыгран".
+      // Ничего доигрывать не нужно: запрос вызывающего использует тот же
+      // детерминированный `request_id` (функция только длины лога действий),
+      // и движок трактует его как идемпотентный повтор — отдаст закэшированный
+      // ответ того самого сегмента, а не сыграет заново.
+      return;
+    }
+    // known.spins_played > expected + 1: движок сыграл больше сегментов, чем
+    // объясняет наш лог, причём больше, чем можно закрыть одним идемпотентным
+    // повтором следующего Step. Гадать, каким из лишних шагов доверять, и
+    // было бы тем самым молчаливым расхождением, которое эта функция должна
+    // ловить.
     throw new Error(
       `round ${state.eid} is ahead of round_state: engine has played ` +
         `${known.spins_played} segments, round_state accounts for only ${expected}`,

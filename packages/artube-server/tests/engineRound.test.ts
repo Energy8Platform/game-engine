@@ -224,13 +224,43 @@ describe('раунд в движке', () => {
     expect(coldFinal.data).toEqual(hotFinal.data);
   });
 
-  it('ensureOpen ловит рассинхрон, если движок сыграл больше, чем объясняет лог', async () => {
-    // A real round genuinely at spins_played 2 (entry + 1 free_spin), but
-    // round_state's log only accounts for 1 (expected = 1 + 0 = 1) — as if
-    // some other caller advanced this round_id past what we recorded.
+  it('ensureOpen допускает движок ровно на один шаг впереди лога — тот сегмент вызывающий переиграет сам', async () => {
+    // entry + 1 free_spin real, log accounts for only the entry (expected =
+    // 1 + 0 = 1, spins_played = 2 = expected + 1). This is exactly the shape
+    // an in-process InvalidRoundOperation recovery produces: advanceRound
+    // already stepped the engine forward before its CloseRound/UpdateRound
+    // call failed, so the engine is one segment ahead of the last state we
+    // can prove the platform saw.
     const state = stateFor();
     await openEntry(engine, 'feature-game', state);
-    await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []
+    const already = await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []
+
+    await ensureOpen(engine, 'feature-game', state); // must not throw
+
+    // The caller's next Step reuses the same deterministic request_id
+    // (`${eid}-${actions.length}` = `${eid}-0`, same as the step just taken)
+    // — the engine treats it as an idempotent retry and returns the exact
+    // same segment, not a freshly-rolled one.
+    const replayed = await stepRound(engine, state, 'free_spin');
+    expect(replayed.winX).toBe(already.winX);
+    expect(replayed.totalWinX).toBe(already.totalWinX);
+    expect(replayed.data).toEqual(already.data);
+  });
+
+  it('ensureOpen ловит рассинхрон, если движок сыграл больше, чем объясняет лог, и это не один идемпотентный шаг', async () => {
+    // A real round genuinely at spins_played 3 (entry + 2 free_spins), but
+    // round_state's log only accounts for the entry (expected = 1 + 0 = 1,
+    // spins_played = 3 = expected + 2) — two steps ahead can't be explained
+    // by "the caller is about to idempotently replay the next one".
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    await stepRound(engine, state, 'free_spin');
+    // Advance the log so the second Step gets its own request_id (`${eid}-1`,
+    // not a repeat of the first) — otherwise the engine's idempotent cache
+    // would just replay segment 1 again and spins_played would stay at 2.
+    state.actions.push({ a: 'free_spin' });
+    await stepRound(engine, state, 'free_spin'); // real spins_played is now 3
+    state.actions.length = 0; // ...but the round_state log we compare against stays []
 
     await expect(ensureOpen(engine, 'feature-game', state)).rejects.toThrow(
       /ahead of round_state/,
