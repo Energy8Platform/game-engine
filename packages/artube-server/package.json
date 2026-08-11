@@ -1,0 +1,43 @@
+{
+  "name": "@energy8platform/artube-server",
+  "version": "0.1.0",
+  "description": "Game backend that runs an @energy8platform/game-sdk slot on the Artube platform",
+  "author": "Energy8 Platform",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": { "artube-server": "dist/bin/artube-server.js" },
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
+    "./games-api": { "import": "./dist/games-api/index.js", "types": "./dist/games-api/index.d.ts" },
+    "./engine": { "import": "./dist/engine/index.js", "types": "./dist/engine/index.d.ts" }
+  },
+  "files": ["dist", "Dockerfile.template", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.0",
+    "@grpc/proto-loader": "^0.7.13",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "keywords": ["casino", "artube", "games-api", "slot", "backend"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/energy8platform/game-engine.git",
+    "directory": "packages/artube-server"
+  }
+}
