@@ -48,6 +48,21 @@ export interface RecoveryDeps {
   resume(info: SessionInfoResponse): Promise<ResumeResult>;
 }
 
+/**
+ * Раунд, в котором игрок был, платформа больше не считает открытым — его
+ * успели закрыть автозакрытием, другой вкладкой или ретраем платформы.
+ * Клиентское действие относилось к ТОМУ раунду, и повторять его как вход в
+ * новый нельзя: это был бы реальный счёт за раунд, которого игрок не заказывал.
+ */
+export class RoundNoLongerOpenError extends Error {
+  readonly code = 'RoundAlreadySettled';
+
+  constructor(roundId: string) {
+    super(`round ${roundId} is no longer open on the platform`);
+    this.name = 'RoundNoLongerOpenError';
+  }
+}
+
 const RECOVERABLE = new Set(['SessionIsNotInitialized', 'InvalidRoundOperation']);
 
 export async function withSessionRecovery(
@@ -65,6 +80,18 @@ export async function withSessionRecovery(
     if (err.code === 'SessionIsNotInitialized') return run(round);
     // InvalidRoundOperation: курсор/версия раунда — платформенные, идём с ними.
     const resumed = await deps.resume(info);
-    return resumed.settled ? resumed.outcome : run(resumed.round);
+    if (resumed.settled) return resumed.outcome;
+    // Раунда у платформы больше нет, а мы в нём были: значит клиентское
+    // сообщение — мидраундовое действие уже закрытого раунда. `run(null)`
+    // сыграл бы его как ВХОД в новый раунд и выставил бы за него настоящий
+    // счёт. Единственная безопасная реакция — честно сказать, что раунд
+    // закрыт; повторять действие не в чем.
+    //
+    // Сегодня от этого случайно спасал бы движок (мидраундовое действие
+    // обычно не является entry-действием и отвергается до всякой RPC), но
+    // ровно до первой игры, где вход и продолжение раунда называются
+    // одинаково — respin/tumble, у которых в `next_actions` лежит `spin`.
+    if (round && !resumed.round) throw new RoundNoLongerOpenError(round.roundId);
+    return run(resumed.round);
   }
 }

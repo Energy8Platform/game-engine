@@ -8,7 +8,6 @@
 
 import type { WebSocket } from 'ws';
 import type { GamesApiClient } from '../games-api/client.js';
-import { GamesApiError } from '../games-api/errors.js';
 import type { EngineClient } from '../engine/index.js';
 import {
   startRound, advanceRound, acknowledgeSegment,
@@ -58,7 +57,13 @@ export async function handleConnection(
   };
 
   const fail = (err: unknown, id?: string) => {
-    const code = err instanceof GamesApiError ? err.code : 'InternalServerError';
+    // Код берём у любой ошибки, которая его несёт (`GamesApiError` и наши
+    // собственные вроде `RoundNoLongerOpenError`): фронту нужен повод
+    // отличить "раунд уже закрыт" от неизвестной поломки сервера.
+    const code =
+      typeof (err as { code?: unknown })?.code === 'string'
+        ? (err as { code: string }).code
+        : 'InternalServerError';
     const message = err instanceof Error ? err.message : String(err);
     log.error('request failed', err, { code });
     send({ t: 'error', id, code, message });

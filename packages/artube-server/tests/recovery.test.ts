@@ -89,6 +89,41 @@ describe('восстановление сессии', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it('раунда у платформы больше нет, а мы в нём были — мидраундовое действие НЕ играется как новый раунд', async () => {
+    // Реальная последовательность: игрок крутит последний фриспин, CloseRound
+    // падает с InvalidRoundOperation (раунд успели закрыть автозакрытием, второй
+    // вкладкой или ретраем платформы), свежий SessionInfo подтверждает, что
+    // открытого раунда нет. `run(null)` здесь — это `startRound` с исходным
+    // клиентским сообщением, то есть настоящий счёт за раунд, которого игрок
+    // не заказывал.
+    const d = deps({ settled: false, round: null });
+    let calls = 0;
+    const run = vi.fn(async () => {
+      calls += 1;
+      throw new GamesApiError({ code: 'InvalidRoundOperation', message: 'Round is already closed.' });
+    });
+    await expect(withSessionRecovery(d, run, round(3))).rejects.toMatchObject({
+      code: 'RoundAlreadySettled',
+    });
+    expect(calls).toBe(1); // ни одной повторной попытки — играть нечего
+  });
+
+  it('раунда не было и не должно быть — вход в новый раунд разрешён', async () => {
+    // Тот же ответ платформы ("открытого раунда нет"), но провалился ВХОД в
+    // раунд: клиентское действие и есть entry, повторить его правильно.
+    const d = deps({ settled: false, round: null });
+    let calls = 0;
+    const run = vi.fn(async (current: ActiveRound | null) => {
+      if (++calls === 1) {
+        throw new GamesApiError({ code: 'InvalidRoundOperation', message: 'Round is already opened.' });
+      }
+      return outcome(current);
+    });
+    const result = await withSessionRecovery(d, run, null);
+    expect(result.round).toBeNull();
+    expect(calls).toBe(2);
+  });
+
   it('повторяет ровно один раз', async () => {
     const d = deps();
     const run = vi.fn(async () => {

@@ -179,6 +179,45 @@ describe('обрыв посреди анимации сегмента', () => {
   }, 40_000);
 });
 
+describe('раунд закрыли, пока игрок его доигрывал', () => {
+  it('мидраундовое действие не превращается в новый раунд — игрок получает RoundAlreadySettled', async () => {
+    // Раунд закрывает кто-то другой (автозакрытие, вторая вкладка, ретрай
+    // платформы) ровно в тот момент, когда игрок жмёт последний фриспин:
+    // CloseRound отвечает InvalidRoundOperation, а свежий SessionInfo уже
+    // показывает раунд завершённым. Клиентское `free_spin` относилось к ТОМУ
+    // раунду — сыграть его как вход в новый значило бы выставить игроку счёт
+    // за раунд, которого он не заказывал.
+    const c = connect('sess-settled-elsewhere');
+    await c.waitFor('init');
+    c.send({ t: 'play', id: 'p0', action: 'spin', betIndex: 1 });
+    const spin = await c.waitFor('result');
+    c.send({ t: 'ack', roundId: spin.roundId, cursor: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    for (const [i, id] of ['p1', 'p2'].entries()) {
+      c.send({ t: 'play', id, action: 'free_spin', betIndex: 1 });
+      const res = await c.nth('result', i + 2);
+      c.send({ t: 'ack', roundId: res.roundId, cursor: i + 2 });
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    // Раунд закрывают у нас за спиной, прямо перед нашим CloseRound.
+    const round = platform.roundOf('sess-settled-elsewhere')!;
+    round.finished_at = new Date().toISOString();
+    round.win_multiplier = 2;
+
+    c.send({ t: 'play', id: 'p3', action: 'free_spin', betIndex: 1 });
+    const err = await c.waitFor('error');
+    expect(err.id).toBe('p3');
+    expect(err.code).toBe('RoundAlreadySettled');
+
+    // Ни одной лишней денежной RPC: ни второго OpenRound, ни PlayRound.
+    expect(platform.countOf('OpenRoundRequest')).toBe(1);
+    expect(platform.countOf('PlayRoundRequest')).toBe(0);
+    await c.close();
+  }, 40_000);
+});
+
 async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
