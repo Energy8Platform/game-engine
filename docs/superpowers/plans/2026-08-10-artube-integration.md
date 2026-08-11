@@ -1643,10 +1643,14 @@ describe('EngineClient', () => {
   it('конфиг отдаёт стоимость действий — источник price_multiplier', async () => {
     // RoundResponse.bet — это эхо переданной ставки, а НЕ стоимость действия,
     // поэтому множитель цены берём только отсюда.
+    //
+    // Внимание: gRPC GetConfig отдаёт actions МАССИВОМ объектов
+    // { name, cost, session, stage } — не тем словарём с cost_multiplier,
+    // который печатает CLI `e8 emit-config`. Проверено на живом бинаре.
     const config = await engine.getConfig('feature-game');
-    const actions = config.actions as Record<string, { cost_multiplier: number }>;
-    expect(actions.spin.cost_multiplier).toBe(1);
-    expect(actions.buy_bonus.cost_multiplier).toBe(5);
+    const actions = config.actions as Array<{ name: string; cost: number }>;
+    expect(actions.find((a) => a.name === 'spin')!.cost).toBe(1);
+    expect(actions.find((a) => a.name === 'buy_bonus')!.cost).toBe(5);
   });
 
   it('играет раунд целиком: 4 сегмента, total_win 3.0', async () => {
@@ -4401,10 +4405,10 @@ export class ArtubeServer {
       : dirname(this.config.spinPath);
     this.engine = await startEngine({ gamesDir });
     const config = await this.engine.getConfig(this.config.gameId);
-    const actions = (config.actions ?? {}) as Record<string, { cost_multiplier: number }>;
-    const costMultipliers = Object.fromEntries(
-      Object.entries(actions).map(([name, a]) => [name, a.cost_multiplier]),
-    );
+    // gRPC GetConfig отдаёт actions массивом { name, cost, session, stage } —
+    // не словарём с cost_multiplier, который печатает CLI `e8 emit-config`.
+    const actions = (config.actions ?? []) as Array<{ name: string; cost: number }>;
+    const costMultipliers = Object.fromEntries(actions.map((a) => [a.name, a.cost]));
 
     this.api = new GamesApiClient({
       url: this.config.gamesApiUrl,
