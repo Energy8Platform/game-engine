@@ -5,13 +5,13 @@
   "author": "Energy8 Platform",
   "license": "MIT",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "bin": { "artube-server": "dist/bin/artube-server.js" },
   "exports": {
-    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
-    "./games-api": { "import": "./dist/games-api/index.js", "types": "./dist/games-api/index.d.ts" },
-    "./engine": { "import": "./dist/engine/index.js", "types": "./dist/engine/index.d.ts" }
+    ".": { "import": "./dist/src/index.js", "types": "./dist/src/index.d.ts" },
+    "./games-api": { "import": "./dist/src/games-api/index.js", "types": "./dist/src/games-api/index.d.ts" },
+    "./engine": { "import": "./dist/src/engine/index.js", "types": "./dist/src/engine/index.d.ts" }
   },
   "files": ["dist", "Dockerfile.template", "README.md"],
   "scripts": {

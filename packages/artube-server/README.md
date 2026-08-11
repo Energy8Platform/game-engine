@@ -1,0 +1,111 @@
+# @energy8platform/artube-server
+
+Game backend that runs an `@energy8platform/game-sdk` slot on the Artube
+platform. It speaks the platform's GamesAPI over a persistent WebSocket
+(session open/resume, round open/update/close, autoclose of abandoned
+rounds), drives the game's math via a local engine subprocess, and exposes a
+thin player-facing WS API (`/api/ws`) plus the two health probes the platform
+expects (`/livez`, `/healthz`).
+
+This package is a **library + CLI**, not a deployable service on its own. A
+game studio's server repo depends on it, writes a few lines of glue
+(`server/index.ts`, shown below), and ships that repo's own Docker image —
+built from the `Dockerfile.template` this package provides.
+
+## Entry points
+
+- `@energy8platform/artube-server` (`.`) — `createArtubeServer`, `ArtubeServer`,
+  `loadConfigFromEnv`, `type ArtubeServerConfig`, `createLogger`, and the wire
+  types (`ClientMessage`, `ServerMessage`, `SessionContext`, `PlayRequest`,
+  `SegmentDelivery`, `InitPayload`, `InitConfig`, `FrcInfo`). Everything a
+  studio's own `server/index.ts` needs.
+- `@energy8platform/artube-server/games-api` — `GamesApiClient` and the
+  envelope/contract primitives (`buildEnvelope`, `parseEnvelope`,
+  `GamesApiError`, `ANNOUNCED_CONTRACTS`, …) for talking to the platform's
+  GamesAPI directly, without the HTTP/WS layer.
+- `@energy8platform/artube-server/engine` — `startEngine`, `EngineClient`,
+  and the engine-subprocess primitives (`spawnEngine`, `resolveEngineBinary`,
+  `findFreePort`) for driving the game's math engine directly.
+
+The package also installs a CLI binary, `artube-server` (`bin/artube-server.ts`,
+built to `dist/bin/artube-server.js`) — mainly useful for running the service
+locally against the public sandbox without writing any glue code; see
+"Running against the sandbox" below.
+
+## Usage: `server/index.ts`
+
+A studio's server repo wraps this package in its own tiny entry point. This
+is what the `Dockerfile.template`'s `CMD ["node", "dist/index.js"]` expects
+to find once that repo builds its own TypeScript:
+
+```ts
+// server/index.ts
+import { createArtubeServer, loadConfigFromEnv } from '@energy8platform/artube-server';
+
+const config = loadConfigFromEnv();
+const server = createArtubeServer(config);
+await server.listen();
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    void server.close().then(() => process.exit(0));
+  });
+}
+```
+
+`loadConfigFromEnv()` reads the environment variables the platform's DevOps
+hands over (see the table below) and throws with the missing variable's name
+if a required one is absent — fail fast on a broken deploy, not on the first
+request.
+
+## Environment variables
+
+| Variable         | Required | Meaning                                                                 |
+| ---------------- | -------- | ------------------------------------------------------------------------ |
+| `GameId`         | yes      | The game's `publicGameId`, set by the platform.                          |
+| `GamesApiUrl`    | yes      | Full WSS URL of the platform's GamesAPI, including the `game` query param.|
+| `GamesApiKey`    | yes      | Secret used to authenticate with the GamesAPI.                           |
+| `SPIN_PATH`      | no       | Path to the game's `.spin` file or a directory containing one. Defaults to `./game.spin`. |
+| `PORT`           | no       | HTTP/WS listen port. Defaults to `80` — the platform's deployment contract. |
+| `DEMO_BALANCE`   | no       | Starting virtual balance for demo (non-authenticated) sessions. Defaults to `1000`. |
+
+`GIT_HASH` is not read from the runtime environment — it's a Docker
+**build-arg** (see `Dockerfile.template`), baked in at image build time and
+surfaced read-only at `GET /api/version`.
+
+## Deployment contract
+
+- `Dockerfile.template`, copied to the repo root as `Dockerfile`, builds and
+  runs the studio's `server/index.ts`. The container **listens on port 80**
+  (`EXPOSE 80`) — the platform's Kubernetes ingress expects exactly that.
+- Every player/platform-facing HTTP and WS route lives under `/api`
+  (`/api/ws`, `/api/version`); `/livez` and `/healthz` sit outside `/api`
+  because that's where the platform's Kubernetes liveness/readiness probes
+  look for them.
+- `GIT_HASH` is passed as `--build-arg GIT_HASH=$(git rev-parse HEAD)` (or
+  equivalent CI variable) and shows up at `/api/version`.
+
+## Running against the sandbox
+
+For local development and integration testing without a real platform
+session, use the CLI's `--sandbox` flag — it points `GamesApiUrl` at the
+public Artube sandbox instead of whatever `GamesApiUrl` is set to:
+
+```bash
+artube-server --spin ./game.spin --sandbox
+```
+
+`--sandbox` resolves to `wss://gamesapi-sandbox.artube-888.live/v1/ws`, the
+same GamesAPI protocol that runs on dev and prod. Other flags:
+
+- `--spin <path>` — path to the `.spin` file/directory (overrides `SPIN_PATH`).
+- `--port <n>` — HTTP/WS listen port (overrides `PORT`).
+
+`GameId`, `GamesApiUrl`, and `GamesApiKey` must still be set in the
+environment even when using `--sandbox` — `--sandbox` only replaces the URL,
+it doesn't invent a game ID or key.
+
+**The sandbox's data is short-lived — about 24 hours.** If a session that
+worked yesterday is suddenly dead today, that's expected, not a regression:
+recreate it from the Sandbox UI by pressing **"Generate Data"** and then
+**"Create Session"** before debugging further.
