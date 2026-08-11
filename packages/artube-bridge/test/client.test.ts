@@ -127,7 +127,8 @@ describe('ArtubeClient', () => {
     await expect(pending).rejects.toBeInstanceOf(ArtubeBackendError);
   });
 
-  it('init после реконнекта прокидывается через событие init, а не теряется', async () => {
+  /** Помогает поднять сервер, отдающий разные init на первое и последующие соединения. */
+  async function startResumeBackend() {
     let firstSocket: any;
     wss = new WebSocketServer({ port: 0 });
     let connectionCount = 0;
@@ -137,26 +138,177 @@ describe('ArtubeClient', () => {
       const payload =
         connectionCount === 1
           ? INIT
-          : { ...INIT, balance: 55, resume: { roundId: 'r9', action: 'spin', data: {}, winX: 0, totalWinX: 0, betAmount: 1, nextActions: [], spinsRemaining: 1, spinsPlayed: 1, balanceAfter: null, creditPending: true, maxWinReached: false } };
+          : {
+              ...INIT,
+              balance: 55,
+              resume: {
+                roundId: 'r9', action: 'spin', data: {}, winX: 0, totalWinX: 0, betAmount: 1,
+                nextActions: [], spinsRemaining: 1, spinsPlayed: 1, balanceAfter: null,
+                creditPending: true, maxWinReached: false,
+              },
+            };
       socket.send(JSON.stringify(payload));
     });
     await new Promise<void>((r) => wss.on('listening', () => r()));
     const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+    return { url, getFirstSocket: () => firstSocket };
+  }
 
+  it('первый init идёт только через промис connect(), событие init не дублирует его', async () => {
+    const { url, getFirstSocket } = await startResumeBackend();
     client = new ArtubeClient(url, 10);
     const inits: any[] = [];
     client.on('init', (init: any) => inits.push(init));
     const firstInit = await client.connect();
     expect(firstInit.balance).toBe(100);
+    expect(inits).toEqual([]);
 
-    // Симулируем обрыв связи — клиент должен сам переподключиться.
-    firstSocket.terminate();
+    // Обрыв связи — клиент сам переподключается и получает второй init.
+    getFirstSocket().terminate();
     await new Promise((r) => setTimeout(r, 200));
 
-    expect(inits.length).toBeGreaterThanOrEqual(2);
-    expect(inits[0].balance).toBe(100);
-    const resumeInit = inits.find((i) => i.resume != null);
-    expect(resumeInit?.resume?.roundId).toBe('r9');
-    expect(resumeInit?.balance).toBe(55);
+    expect(inits.length).toBe(1);
+    expect(inits[0].balance).toBe(55);
+    expect(inits[0].resume?.roundId).toBe('r9');
+  });
+
+  it('поздний подписчик на init всё равно получает пропущенный реконнект-init', async () => {
+    const { url, getFirstSocket } = await startResumeBackend();
+    client = new ArtubeClient(url, 10);
+    await client.connect();
+
+    getFirstSocket().terminate();
+    // Реконнект-init уже приходит и оседает в клиенте — подписчиков ещё нет.
+    await new Promise((r) => setTimeout(r, 200));
+
+    const inits: any[] = [];
+    client.on('init', (init: any) => inits.push(init));
+
+    expect(inits.length).toBe(1);
+    expect(inits[0].resume?.roundId).toBe('r9');
+  });
+
+  it('error без id перед закрытием сокета отбивает connect(), а не виснет', async () => {
+    wss = new WebSocketServer({ port: 0 });
+    wss.on('connection', (socket) => {
+      socket.send(JSON.stringify({ t: 'error', code: 'InvalidSession', message: 'session not found' }));
+      socket.close(1011, 'session init failed');
+    });
+    await new Promise<void>((r) => wss.on('listening', () => r()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=bad`;
+
+    client = new ArtubeClient(url, 200);
+    await expect(client.connect()).rejects.toMatchObject({
+      name: 'ArtubeBackendError',
+      code: 'InvalidSession',
+    });
+  });
+
+  it('обрыв соединения до init отбивает connect(), а не виснет', async () => {
+    wss = new WebSocketServer({ port: 0 });
+    wss.on('connection', (socket) => {
+      socket.terminate(); // ничего не шлём — рвём сразу
+    });
+    await new Promise<void>((r) => wss.on('listening', () => r()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+
+    client = new ArtubeClient(url, 200);
+    await expect(client.connect()).rejects.toBeInstanceOf(ArtubeBackendError);
+  });
+
+  it('close() во время бэкоффа не открывает сокет-зомби', async () => {
+    let connections = 0;
+    wss = new WebSocketServer({ port: 0 });
+    wss.on('connection', (socket) => {
+      connections += 1;
+      socket.send(JSON.stringify(INIT));
+    });
+    await new Promise<void>((r) => wss.on('listening', () => r()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+
+    client = new ArtubeClient(url, 50);
+    await client.connect();
+    expect(connections).toBe(1);
+
+    wss.clients.forEach((c) => c.terminate()); // клиент планирует реконнект через ~50мс
+    await new Promise((r) => setTimeout(r, 10)); // точно ещё внутри бэкоффа
+    client.close();
+
+    await new Promise((r) => setTimeout(r, 150)); // бэкофф давно бы истёк, будь баг жив
+    expect(connections).toBe(1);
+  });
+
+  it('реконнект не плодит параллельные цепочки при устойчивом сбое соединения', async () => {
+    let connections = 0;
+    wss = new WebSocketServer({ port: 0 });
+    wss.on('connection', (socket) => {
+      connections += 1;
+      // Рвём сразу после установления, ни разу не дожидаясь init — так
+      // сервер раз за разом проваливает попытки клиента переподключиться.
+      socket.terminate();
+    });
+    await new Promise<void>((r) => wss.on('listening', () => r()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+
+    const RealWebSocket = globalThis.WebSocket;
+    let openNow = 0;
+    let maxOpenAtOnce = 0;
+    class CountingWebSocket extends RealWebSocket {
+      constructor(target: string | URL) {
+        super(target);
+        openNow += 1;
+        maxOpenAtOnce = Math.max(maxOpenAtOnce, openNow);
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          openNow -= 1;
+        };
+        this.addEventListener('close', settle);
+        this.addEventListener('error', settle);
+      }
+    }
+    (globalThis as { WebSocket: typeof WebSocket }).WebSocket =
+      CountingWebSocket as unknown as typeof WebSocket;
+
+    try {
+      client = new ArtubeClient(url, 5);
+      await client.connect().catch(() => {});
+      // 5 ретраев с бэкоффом ×2 от 5мс: 5+10+20+40+80 = 155мс — берём с запасом.
+      await new Promise((r) => setTimeout(r, 600));
+    } finally {
+      (globalThis as { WebSocket: typeof WebSocket }).WebSocket = RealWebSocket;
+    }
+
+    // Параллельные цепочки реконнекта означали бы, что в какой-то момент
+    // одновременно открыт больше чем один сокет.
+    expect(maxOpenAtOnce).toBeLessThanOrEqual(1);
+    // Реконнект вообще случился (больше одной попытки)...
+    expect(connections).toBeGreaterThan(1);
+    // ...но не больше потолка: первый коннект + 5 ретраев.
+    expect(connections).toBeLessThanOrEqual(6);
+
+    const afterFirstWindow = connections;
+    await new Promise((r) => setTimeout(r, 200));
+    // Луп исчерпал лимит попыток и остановился — не бесконечный шторм с
+    // постоянным интервалом (что и происходит без реэнтрантного флага, раз
+    // потолок в 5 попыток никогда не достигается).
+    expect(connections).toBe(afterFirstWindow);
+  });
+
+  it('битый JSON-фрейм не роняет обработчик сообщений', async () => {
+    const url = await startBackend((msg, socket) => {
+      if (msg.t !== 'play') return;
+      socket.send('not json {{{');
+      socket.send(JSON.stringify({
+        t: 'result', id: msg.id, roundId: 'r1', action: msg.action, data: {},
+        winX: 1, totalWinX: 1, betAmount: 1, nextActions: [], spinsRemaining: 0,
+        spinsPlayed: 1, balanceAfter: 10, creditPending: false, maxWinReached: false,
+      }));
+    });
+    client = new ArtubeClient(url);
+    await client.connect();
+    const res = await client.play({ action: 'spin', betIndex: 0 });
+    expect(res.roundId).toBe('r1');
   });
 });
