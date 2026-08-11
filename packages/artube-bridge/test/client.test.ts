@@ -1,0 +1,162 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'node:net';
+import { ArtubeClient, ArtubeBackendError } from '../src/client';
+
+let wss: WebSocketServer;
+let client: ArtubeClient;
+
+const INIT = {
+  t: 'init', currency: 'USD', balance: 100, demo: false, frc: null,
+  config: {
+    betLevels: [0.1, 1, 5], defaultBetIndex: 1, currencyMinimalUnit: 0.01,
+    autoSpinCounts: [10], locales: ['EN'], rtp: { isVisible: false }, platformMaxWin: null,
+  },
+};
+
+/** Поднять фейковый бэкенд игры. `onPlay` описывает реакцию на play/ack. */
+async function startBackend(onMessage?: (msg: any, socket: any) => void) {
+  wss = new WebSocketServer({ port: 0 });
+  wss.on('connection', (socket) => {
+    socket.send(JSON.stringify(INIT));
+    socket.on('message', (raw) => onMessage?.(JSON.parse(raw.toString()), socket));
+  });
+  await new Promise<void>((r) => wss.on('listening', () => r()));
+  return `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+}
+
+afterEach(async () => {
+  client?.close();
+  await new Promise<void>((r) => wss?.close(() => r()));
+});
+
+describe('ArtubeClient', () => {
+  it('коннект возвращает init', async () => {
+    const url = await startBackend();
+    client = new ArtubeClient(url);
+    const init = await client.connect();
+    expect(init.balance).toBe(100);
+    expect(init.config.betLevels).toEqual([0.1, 1, 5]);
+  });
+
+  it('play разрешается ответом с тем же id', async () => {
+    const url = await startBackend((msg, socket) => {
+      if (msg.t !== 'play') return;
+      socket.send(JSON.stringify({
+        t: 'result', id: msg.id, roundId: 'r1', action: msg.action, data: { stage: 'base' },
+        winX: 2, totalWinX: 2, betAmount: 1, nextActions: ['spin'],
+        spinsRemaining: 0, spinsPlayed: 1, balanceAfter: 102,
+        creditPending: false, maxWinReached: false,
+      }));
+    });
+    client = new ArtubeClient(url);
+    await client.connect();
+    const res = await client.play({ action: 'spin', betIndex: 1 });
+    expect(res.roundId).toBe('r1');
+    expect(res.winX).toBe(2);
+  });
+
+  it('параллельные play не путаются', async () => {
+    const url = await startBackend((msg, socket) => {
+      if (msg.t !== 'play') return;
+      const delay = msg.action === 'slow' ? 50 : 5;
+      setTimeout(() => socket.send(JSON.stringify({
+        t: 'result', id: msg.id, roundId: msg.action, action: msg.action, data: {},
+        winX: 0, totalWinX: 0, betAmount: 1, nextActions: [], spinsRemaining: 0,
+        spinsPlayed: 1, balanceAfter: 1, creditPending: false, maxWinReached: false,
+      })), delay);
+    });
+    client = new ArtubeClient(url);
+    await client.connect();
+    const [slow, fast] = await Promise.all([
+      client.play({ action: 'slow', betIndex: 0 }),
+      client.play({ action: 'fast', betIndex: 0 }),
+    ]);
+    expect(slow.roundId).toBe('slow');
+    expect(fast.roundId).toBe('fast');
+  });
+
+  it('error с id отбивает конкретный play', async () => {
+    const url = await startBackend((msg, socket) => {
+      if (msg.t !== 'play') return;
+      socket.send(JSON.stringify({
+        t: 'error', id: msg.id, code: 'InsufficientFunds', message: 'no money',
+      }));
+    });
+    client = new ArtubeClient(url);
+    await client.connect();
+    await expect(client.play({ action: 'spin', betIndex: 0 })).rejects.toMatchObject({
+      name: 'ArtubeBackendError', code: 'InsufficientFunds',
+    });
+  });
+
+  it('ack уходит на бэкенд', async () => {
+    const seen: any[] = [];
+    const url = await startBackend((msg) => seen.push(msg));
+    client = new ArtubeClient(url);
+    await client.connect();
+    client.ack('r1', 2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(seen).toContainEqual({ t: 'ack', roundId: 'r1', cursor: 2 });
+  });
+
+  it('balance и session_closed прокидываются подписчикам', async () => {
+    const url = await startBackend((msg, socket) => {
+      if (msg.t !== 'play') return;
+      socket.send(JSON.stringify({ t: 'balance', balance: 77, reason: 'Win' }));
+      socket.send(JSON.stringify({ t: 'session_closed', reason: 'timeout' }));
+    });
+    client = new ArtubeClient(url);
+    const balances: number[] = [];
+    let closedReason = '';
+    client.on('balance', (p: { balance: number }) => balances.push(p.balance));
+    client.on('sessionClosed', (p: { reason: string }) => { closedReason = p.reason; });
+    await client.connect();
+    void client.play({ action: 'spin', betIndex: 0 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(balances).toEqual([77]);
+    expect(closedReason).toBe('timeout');
+  });
+
+  it('обрыв связи отбивает висящие play', async () => {
+    const url = await startBackend(() => {});
+    client = new ArtubeClient(url);
+    await client.connect();
+    const pending = client.play({ action: 'spin', betIndex: 0 });
+    wss.clients.forEach((c) => c.terminate());
+    await expect(pending).rejects.toBeInstanceOf(ArtubeBackendError);
+  });
+
+  it('init после реконнекта прокидывается через событие init, а не теряется', async () => {
+    let firstSocket: any;
+    wss = new WebSocketServer({ port: 0 });
+    let connectionCount = 0;
+    wss.on('connection', (socket) => {
+      connectionCount += 1;
+      if (connectionCount === 1) firstSocket = socket;
+      const payload =
+        connectionCount === 1
+          ? INIT
+          : { ...INIT, balance: 55, resume: { roundId: 'r9', action: 'spin', data: {}, winX: 0, totalWinX: 0, betAmount: 1, nextActions: [], spinsRemaining: 1, spinsPlayed: 1, balanceAfter: null, creditPending: true, maxWinReached: false } };
+      socket.send(JSON.stringify(payload));
+    });
+    await new Promise<void>((r) => wss.on('listening', () => r()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+
+    client = new ArtubeClient(url, 10);
+    const inits: any[] = [];
+    client.on('init', (init: any) => inits.push(init));
+    const firstInit = await client.connect();
+    expect(firstInit.balance).toBe(100);
+
+    // Симулируем обрыв связи — клиент должен сам переподключиться.
+    firstSocket.terminate();
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(inits.length).toBeGreaterThanOrEqual(2);
+    expect(inits[0].balance).toBe(100);
+    const resumeInit = inits.find((i) => i.resume != null);
+    expect(resumeInit?.resume?.roundId).toBe('r9');
+    expect(resumeInit?.balance).toBe(55);
+  });
+});

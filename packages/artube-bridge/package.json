@@ -35,11 +35,13 @@
   "devDependencies": {
     "@rollup/plugin-typescript": "^12.1.0",
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.13",
     "rollup": "^4.24.0",
     "rollup-plugin-dts": "^6.1.0",
     "tslib": "^2.8.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "ws": "^8.18.0"
   },
   "keywords": ["casino", "artube", "slot", "bridge"],
   "repository": {
