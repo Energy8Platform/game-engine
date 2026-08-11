@@ -4,7 +4,7 @@
 
 **Goal:** Дать играм на `@energy8platform/game-sdk` работать на платформе Artube — бэкенд `@energy8platform/artube-server` говорит с Artube Games API, фронтовый мост `@energy8platform/artube-bridge` переводит это в протокол SDK, код игры не меняется.
 
-**Architecture:** Бэкенд stateless: состояние раунда живёт в `round_state` на стороне Artube как тройка сидов + курсор, а раунд воспроизводится детерминированно на каждом запросе через SpinML-движок `e8-server` (gRPC). Один сегмент → `PlayRound`; несколько → `OpenRound` → `UpdateRoundState`* → `CloseRound`. Фронтовый мост — зеркало `stake-bridge`: WS к `/api/ws`, `MemoryChannel` в `CasinoGameSDK`, per-game адаптера нет.
+**Architecture:** Бэкенд stateless: состояние раунда живёт в `round_state` на стороне Artube как тройка сидов + курсор + лог действий. Каждый сегмент — один шаг SpinML-движка `e8-server` (gRPC); открытый раунд в движке это кэш, и при его потере раунд поднимается из `round_state` детерминированно. Один сегмент → `PlayRound`; несколько → `OpenRound` → `UpdateRoundState`* → `CloseRound`. Фронтовый мост — зеркало `stake-bridge`: WS к `/api/ws`, `MemoryChannel` в `CasinoGameSDK`, per-game адаптера нет.
 
 **Tech Stack:** TypeScript (ESM, strict), Node ≥ 20, `ws`, `@grpc/grpc-js` + `@grpc/proto-loader`, Vitest 2, Rollup (только для фронтового пакета), нативный бинарь `e8-server` из `platform-core/bin`.
 
@@ -34,7 +34,7 @@
 | `src/engine/spawn.ts` | поиск бинаря `e8-server`, спавн, ожидание готовности |
 | `src/engine/client.ts` | `EngineClient`: `ListGames` / `StartRound` / `Step` / `GetRound` |
 | `src/round/roundState.ts` | кодек `round_state`: сериализация, парсинг, версия, лимит размера |
-| `src/round/replay.ts` | `replayRound(engine, state)` → `Segment[]` |
+| `src/round/engineRound.ts` | раунд в движке: `openEntry` / `ensureOpen` / `stepRound` / `playToEnd` |
 | `src/round/orchestrator.ts` | `playSegment` / `resumeRound` / `autocloseRound` — чистые функции |
 | `src/session/types.ts` | `SessionContext`, `PlayRequest`, `PlayResult` — контракт фронт↔бэк |
 | `src/http/log.ts` | JSON-логгер, одна строка на запись |
@@ -2070,17 +2070,24 @@ git commit -m "feat(artube-server): gRPC-клиент SpinML-движка и д�
 
 ---
 
-### Task 6: Кодек `round_state` и детерминированное воспроизведение раунда
+### Task 6: Кодек `round_state` и раунд в движке — горячий и холодный путь
 
 **Files:**
 - Create: `packages/artube-server/src/round/roundState.ts`
-- Create: `packages/artube-server/src/round/replay.ts`
+- Create: `packages/artube-server/src/round/engineRound.ts`
 - Test: `packages/artube-server/tests/roundState.test.ts`
-- Test: `packages/artube-server/tests/replay.test.ts`
+- Test: `packages/artube-server/tests/engineRound.test.ts`
 
 **Interfaces:**
-- Consumes: из Task 5 — `EngineClient`, `RoundResponse`.
-- Produces: `const ROUND_STATE_VERSION = '1'`; `interface RoundStateV1 { v: 1; seed: { server: string; client: string; nonce: number }; script: string; action: string; betIndex: number; priceMultiplier: number; cursor: number; totalWinX: number; actions: Array<{ a: string; p?: Record<string, unknown> }>; frcId?: string }`; `function encodeRoundState(s: RoundStateV1): string`; `function decodeRoundState(raw: string): RoundStateV1`; `function newSeed(): { server: string; client: string; nonce: number }`; `interface Segment { action: string; data: Record<string, unknown>; winX: number; totalWinX: number; nextActions: string[]; spinsRemaining: number; spinsPlayed: number; isFinal: boolean }`; `interface ReplayResult { segments: Segment[]; scriptSha: string; totalWinX: number }`; `function replayRound(engine: EngineClient, gameId: string, state: RoundStateV1): Promise<ReplayResult>`; `class ScriptMismatchError extends Error { readonly expected: string; readonly actual: string }`.
+- Consumes: из Task 5 — `EngineClient`, `RoundResponse`, `GetRound`.
+- Produces: `const ROUND_STATE_VERSION = '1'`; `interface RoundStateV1 { v: 1; seed: { server: string; client: string; nonce: number }; eid: string; script: string; action: string; betIndex: number; priceMultiplier: number; cursor: number; totalWinX: number; actions: Array<{ a: string; p?: Record<string, unknown> }>; frcId?: string }`; `function encodeRoundState(s): string`; `function decodeRoundState(raw): RoundStateV1`; `function newSeed()`; `function newEngineRoundId(): string`; `interface Segment { action: string; data: Record<string, unknown>; winX: number; totalWinX: number; nextActions: string[]; spinsRemaining: number; spinsPlayed: number; isFinal: boolean }`; `async function openEntry(engine, gameId, state): Promise<Segment>`; `async function ensureOpen(engine, gameId, state): Promise<void>`; `async function stepRound(engine, state, action, params): Promise<Segment>`; `async function playToEnd(engine, gameId, state): Promise<number>`; `class ScriptMismatchError extends Error { readonly expected: string; readonly actual: string }`.
+
+> **Ключевое решение.** Раунд НЕ проигрывается заранее: entry-действие — один `StartRound`,
+> каждый следующий сегмент — один `Step`. Открытый раунд в движке это **кэш**: `GetRound`
+> нашёл — работаем дальше (O(1)); не нашёл (рестарт пода, запрос на другом поде) —
+> воспроизводим из сидов и лога действий до курсора (O(N) один раз). Правда всегда лежит
+> в `round_state` у Artube, поэтому потеря кэша ничего не стоит. Из той же модели следует
+> гэмбл: выбор игрока приезжает в `params` ДО шага, который на нём ветвится.
 
 - [ ] **Step 1: Написать падающий тест кодека**
 
@@ -2089,7 +2096,7 @@ git commit -m "feat(artube-server): gRPC-клиент SpinML-движка и д�
 ```ts
 import { describe, it, expect } from 'vitest';
 import {
-  encodeRoundState, decodeRoundState, newSeed, ROUND_STATE_VERSION,
+  encodeRoundState, decodeRoundState, newSeed, newEngineRoundId, ROUND_STATE_VERSION,
   type RoundStateV1,
 } from '../src/round/roundState';
 import { MAX_MESSAGE_BYTES } from '../src/games-api/envelope';
@@ -2097,6 +2104,7 @@ import { MAX_MESSAGE_BYTES } from '../src/games-api/envelope';
 const sample: RoundStateV1 = {
   v: 1,
   seed: { server: 'srv', client: 'cli', nonce: 7 },
+  eid: 'e-1',
   script: 'sha-1',
   action: 'spin',
   betIndex: 2,
@@ -2119,13 +2127,21 @@ describe('round_state', () => {
     expect(typeof encodeRoundState(sample)).toBe('string');
   });
 
-  it('состояние остаётся крошечным даже с логом действий', () => {
+  it('состояние остаётся крошечным даже с полным логом фичи', () => {
     const withActions: RoundStateV1 = {
       ...sample,
-      cursor: 30,
-      actions: Array.from({ length: 30 }, (_, i) => ({ a: 'pick', p: { slot: i } })),
+      cursor: 50,
+      actions: Array.from({ length: 50 }, () => ({ a: 'free_spin' })),
     };
     expect(encodeRoundState(withActions).length).toBeLessThan(MAX_MESSAGE_BYTES / 10);
+  });
+
+  it('интерактивный выбор игрока сохраняется в логе', () => {
+    const withGamble: RoundStateV1 = {
+      ...sample,
+      actions: [{ a: 'gamble', p: { choice: 'red' } }],
+    };
+    expect(decodeRoundState(encodeRoundState(withGamble)).actions[0].p).toEqual({ choice: 'red' });
   });
 
   it('отвергает чужую версию формата', () => {
@@ -2136,104 +2152,153 @@ describe('round_state', () => {
     expect(() => decodeRoundState('not json')).toThrow();
   });
 
-  it('newSeed даёт разные сиды', () => {
-    const a = newSeed();
-    const b = newSeed();
-    expect(a.server).not.toBe(b.server);
-    expect(a.server).toMatch(/^[0-9a-f]{32}$/);
+  it('newSeed даёт разные сиды, newEngineRoundId — разные id', () => {
+    expect(newSeed().server).not.toBe(newSeed().server);
+    expect(newSeed().server).toMatch(/^[0-9a-f]{32}$/);
+    expect(newEngineRoundId()).not.toBe(newEngineRoundId());
   });
 });
 ```
 
-- [ ] **Step 2: Написать падающий тест воспроизведения**
+- [ ] **Step 2: Написать падающий тест раунда в движке**
 
-`packages/artube-server/tests/replay.test.ts`:
+`packages/artube-server/tests/engineRound.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { startEngine, type EngineClient } from '../src/engine';
-import { replayRound, ScriptMismatchError } from '../src/round/replay';
-import { newSeed, type RoundStateV1 } from '../src/round/roundState';
+import {
+  openEntry, ensureOpen, stepRound, playToEnd, ScriptMismatchError,
+} from '../src/round/engineRound';
+import { newSeed, newEngineRoundId, type RoundStateV1 } from '../src/round/roundState';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 let engine: EngineClient;
-let scriptSha: string;
 
 beforeAll(async () => {
   engine = await startEngine({ gamesDir: fixtures });
-  const games = await engine.listGames();
-  scriptSha = games.find((g) => g.game_id === 'feature-game')!.script_sha256;
 }, 30_000);
 
 afterAll(() => engine?.close());
 
-function stateFor(overrides: Partial<RoundStateV1> = {}): RoundStateV1 {
+function stateFor(over: Partial<RoundStateV1> = {}): RoundStateV1 {
   return {
     v: 1,
-    seed: { server: 'srv-fixed', client: 'cli', nonce: 11 },
-    script: scriptSha,
+    seed: newSeed(),
+    eid: newEngineRoundId(),
+    script: '',
     action: 'spin',
     betIndex: 0,
     priceMultiplier: 1,
     cursor: 0,
     totalWinX: 0,
     actions: [],
-    ...overrides,
+    ...over,
   };
 }
 
-describe('replayRound', () => {
-  it('разворачивает раунд в список сегментов', async () => {
-    const res = await replayRound(engine, 'feature-game', stateFor());
-    expect(res.segments).toHaveLength(4);
-    expect(res.segments.map((s) => s.action)).toEqual(['spin', 'free_spin', 'free_spin', 'free_spin']);
-    expect(res.segments.map((s) => s.winX)).toEqual([0, 1, 1, 1]);
-    expect(res.totalWinX).toBe(3);
-  });
-
-  it('размечает финальный сегмент и накопленный выигрыш', async () => {
-    const res = await replayRound(engine, 'feature-game', stateFor());
-    expect(res.segments.map((s) => s.isFinal)).toEqual([false, false, false, true]);
-    expect(res.segments.map((s) => s.totalWinX)).toEqual([0, 1, 2, 3]);
-    expect(res.segments[3].nextActions).toEqual(['spin']);
-  });
-
-  it('данные сегмента — распарсенный data_json движка', async () => {
-    const res = await replayRound(engine, 'feature-game', stateFor());
-    expect(res.segments[0].data).toMatchObject({ stage: 'base_game', win: 0 });
-    expect(res.segments[1].data).toMatchObject({ stage: 'free_spins', win: 1 });
-  });
-
-  it('два воспроизведения одного состояния совпадают', async () => {
+describe('раунд в движке', () => {
+  it('entry-действие — ровно один шаг, раунд остаётся открытым', async () => {
     const state = stateFor();
-    const a = await replayRound(engine, 'feature-game', state);
-    const b = await replayRound(engine, 'feature-game', state);
-    expect(a.segments).toEqual(b.segments);
+    const first = await openEntry(engine, 'feature-game', state);
+    expect(first.action).toBe('spin');
+    expect(first.winX).toBe(0);
+    expect(first.isFinal).toBe(false);
+    expect(first.nextActions).toEqual(['free_spin']);
+    // sha скрипта проставляется в состояние — на нём держится защита от деплоя
+    expect(state.script).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('падает ScriptMismatchError, если скрипт разъехался', async () => {
-    const stale = stateFor({ script: 'sha256:другой-скрипт' });
-    await expect(replayRound(engine, 'feature-game', stale)).rejects.toBeInstanceOf(
+  it('раунд без фичи закрывается тем же одним шагом', async () => {
+    const first = await openEntry(engine, 'one-shot-game', stateFor({ action: 'one_shot' }));
+    expect(first.isFinal).toBe(true);
+    expect(first.totalWinX).toBe(0);
+  });
+
+  it('каждый следующий сегмент — один шаг', async () => {
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    const wins: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const segment = await stepRound(engine, state, 'free_spin');
+      wins.push(segment.winX);
+      state.actions.push({ a: 'free_spin' });
+    }
+    expect(wins).toEqual([1, 1, 1]);
+  });
+
+  it('последний сегмент помечен финальным и несёт итог', async () => {
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    let last;
+    for (let i = 0; i < 3; i++) {
+      last = await stepRound(engine, state, 'free_spin');
+      state.actions.push({ a: 'free_spin' });
+    }
+    expect(last!.isFinal).toBe(true);
+    expect(last!.totalWinX).toBe(3);
+    expect(last!.nextActions).toEqual(['spin']);
+  });
+
+  it('ensureOpen ничего не делает, пока раунд жив в движке', async () => {
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    await ensureOpen(engine, 'feature-game', state);
+    const segment = await stepRound(engine, state, 'free_spin');
+    expect(segment.winX).toBe(1);
+  });
+
+  it('ensureOpen поднимает раунд заново, если движок его не знает', async () => {
+    // Состояние есть, а раунда в движке нет — так выглядит запрос на другом поде.
+    const state = stateFor({
+      cursor: 2,
+      actions: [{ a: 'free_spin' }, { a: 'free_spin' }],
+    });
+    await ensureOpen(engine, 'feature-game', state);
+    // Раунд доигран до курсора: следующий шаг — третий фриспин, он же последний.
+    const segment = await stepRound(engine, state, 'free_spin');
+    expect(segment.isFinal).toBe(true);
+    expect(segment.totalWinX).toBe(3);
+  });
+
+  it('холодный подъём воспроизводит те же значения, что горячий путь', async () => {
+    const seed = newSeed();
+    const hot = stateFor({ seed, eid: newEngineRoundId() });
+    await openEntry(engine, 'feature-game', hot);
+    const hotSecond = await stepRound(engine, hot, 'free_spin');
+
+    const cold = stateFor({
+      seed, eid: newEngineRoundId(), cursor: 1, actions: [{ a: 'free_spin' }],
+    });
+    await ensureOpen(engine, 'feature-game', cold);
+    const coldSecond = await stepRound(engine, cold, 'free_spin');
+    expect(coldSecond.data).toEqual(hotSecond.data);
+    expect(coldSecond.totalWinX).toBe(hotSecond.totalWinX);
+  });
+
+  it('расхождение скрипта ловится при холодном подъёме', async () => {
+    const state = stateFor({ script: 'sha256:другой-скрипт', cursor: 1, actions: [{ a: 'free_spin' }] });
+    await expect(ensureOpen(engine, 'feature-game', state)).rejects.toBeInstanceOf(
       ScriptMismatchError,
     );
   });
 
-  it('не оставляет за собой раунд с тем же id, что у Artube', async () => {
-    // Воспроизведение идёт под эфемерным round_id, поэтому повторный вызов
-    // с тем же состоянием не упирается в «раунд уже существует».
-    const state = stateFor({ seed: newSeed() });
-    await replayRound(engine, 'feature-game', state);
-    await expect(replayRound(engine, 'feature-game', state)).resolves.toBeDefined();
+  it('playToEnd доигрывает остаток раунда и отдаёт итоговый множитель', async () => {
+    const state = stateFor({ cursor: 1, actions: [{ a: 'free_spin' }] });
+    expect(await playToEnd(engine, 'feature-game', state)).toBe(3);
   });
 });
 ```
 
 - [ ] **Step 3: Убедиться, что тесты падают**
 
-Run: `npm test --workspace @energy8platform/artube-server -- roundState replay`
+Run: `npm test --workspace @energy8platform/artube-server -- roundState engineRound`
 Expected: FAIL — `Cannot find module '../src/round/roundState'`
+
+> `one-shot-game` — фикстура из Task 7, шаг 2. Если Task 7 ещё не выполнен, создайте
+> `tests/fixtures/one-shot.spin` сейчас: её содержимое приведено там.
 
 - [ ] **Step 4: Реализовать кодек**
 
@@ -2244,11 +2309,11 @@ Expected: FAIL — `Cannot find module '../src/round/roundState'`
  * `round_state` — единственное место, где живёт состояние раунда.
  *
  * Кладём туда не дамп движка, а рецепт его воспроизведения: тройку сидов,
- * курсор и лог интерактивных действий игрока. Десятки байт вместо килобайтов,
- * и любой под может продолжить раунд, ничего не помня.
+ * идентификатор раунда в движке, курсор и лог действий игрока. Десятки байт
+ * вместо килобайтов, и любой под продолжит раунд, ничего не помня.
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 /** Значение поля `round_state_version` в запросах к Games API. */
 export const ROUND_STATE_VERSION = '1';
@@ -2262,7 +2327,9 @@ export interface RoundSeed {
 export interface RoundStateV1 {
   v: 1;
   seed: RoundSeed;
-  /** sha скрипта, которым раунд был сыгран, — защита от деплоя посреди раунда. */
+  /** Идентификатор раунда в движке. Кэш живёт под ним, пока под жив. */
+  eid: string;
+  /** sha скрипта, которым раунд играется, — защита от деплоя посреди раунда. */
   script: string;
   /** entry-действие раунда: 'spin' | 'buy_bonus' | … */
   action: string;
@@ -2272,7 +2339,10 @@ export interface RoundStateV1 {
   cursor: number;
   /** Накопленный множитель выигрыша по подтверждённым сегментам. */
   totalWinX: number;
-  /** Интерактивный ввод игрока, без которого раунд не воспроизвести. */
+  /**
+   * Лог действий ПОСЛЕ entry — по одному на сегмент, с параметрами
+   * интерактивного выбора. Без него холодный подъём не воспроизвести.
+   */
   actions: Array<{ a: string; p?: Record<string, unknown> }>;
   frcId?: string;
 }
@@ -2296,44 +2366,43 @@ export function newSeed(): RoundSeed {
     nonce: 1,
   };
 }
+
+export function newEngineRoundId(): string {
+  return `e-${randomUUID()}`;
+}
 ```
 
-- [ ] **Step 5: Реализовать воспроизведение**
+- [ ] **Step 5: Реализовать работу с раундом движка**
 
-`packages/artube-server/src/round/replay.ts`:
+`packages/artube-server/src/round/engineRound.ts`:
 
 ```ts
 /**
- * Воспроизведение раунда из `round_state`.
+ * Раунд в движке: горячий и холодный путь.
  *
- * Движок provably-fair детерминирован: та же тройка (server_seed, client_seed,
- * nonce) даёт ту же последовательность сегментов, даже под другим round_id.
- * Поэтому воспроизводим под эфемерным идентификатором — раунд Artube и раунд
- * движка живут в разных пространствах имён и не конфликтуют.
+ * Горячий — раунд ещё открыт в `e8-server` на этом поде: один `Step` на сегмент.
+ * Холодный — движок раунда не знает (рестарт, другой под): поднимаем его заново
+ * из тройки сидов и лога действий, доигрываем до курсора и продолжаем.
+ *
+ * Открытый раунд — кэш, а не состояние: его потеря ничего не стоит, потому что
+ * правда лежит в `round_state` на стороне Artube.
  */
 
-import { randomUUID } from 'node:crypto';
-import type { EngineClient } from '../engine';
+import type { EngineClient, RoundResponse } from '../engine';
 import type { RoundStateV1 } from './roundState';
 
 export interface Segment {
-  /** Действие, которому соответствует сегмент: 'spin' | 'free_spin' | 'pick'. */
+  /** Действие, которому соответствует сегмент: 'spin' | 'free_spin' | 'gamble'. */
   action: string;
   data: Record<string, unknown>;
   /** Выигрыш этого сегмента в множителях ставки. */
   winX: number;
-  /** Накопленный выигрыш по сегменты включительно, в множителях. */
+  /** Накопленный выигрыш по сегмент включительно, в множителях. */
   totalWinX: number;
   nextActions: string[];
   spinsRemaining: number;
   spinsPlayed: number;
   isFinal: boolean;
-}
-
-export interface ReplayResult {
-  segments: Segment[];
-  scriptSha: string;
-  totalWinX: number;
 }
 
 export class ScriptMismatchError extends Error {
@@ -2343,84 +2412,168 @@ export class ScriptMismatchError extends Error {
   }
 }
 
+function toSegment(response: RoundResponse, action: string): Segment {
+  return {
+    action,
+    data: response.data_json ? (JSON.parse(response.data_json) as Record<string, unknown>) : {},
+    winX: response.win,
+    totalWinX: response.total_win,
+    nextActions: response.next_actions,
+    spinsRemaining: response.spins_remaining,
+    spinsPlayed: response.spins_played,
+    isFinal: response.round_complete,
+  };
+}
+
 /**
- * Развернуть раунд целиком. Ставку в движок всегда передаём как 1.0, чтобы
- * `win` и `total_win` приходили чистыми множителями.
+ * Начать раунд. Ставку в движок всегда передаём как 1.0, чтобы `win` и
+ * `total_win` приходили чистыми множителями — тем, что Artube ждёт в
+ * `win_multiplier`. Деньги считает Games API, не мы.
  */
-export async function replayRound(
+async function start(
   engine: EngineClient,
   gameId: string,
   state: RoundStateV1,
-): Promise<ReplayResult> {
-  const ephemeralId = `replay-${randomUUID()}`;
-  const segments: Segment[] = [];
-
-  let response = await engine.startRound({
+  requestId: string,
+): Promise<RoundResponse> {
+  const response = await engine.startRound({
     gameId,
     playerId: 'artube',
-    roundId: ephemeralId,
+    roundId: state.eid,
     serverSeed: state.seed.server,
     clientSeed: state.seed.client,
     nonce: state.seed.nonce,
     action: state.action,
     bet: 1,
     paramsJson: '',
-    requestId: `${ephemeralId}-0`,
+    requestId,
   });
   if (response.error) throw new Error(`engine StartRound: ${response.error}`);
-
-  // Сверяем скрипт до того, как отдадим хоть один сегмент: раунд, сыгранный
-  // другой версией математики, воспроизвести нельзя.
   if (state.script && response.script_sha256 && state.script !== response.script_sha256) {
     throw new ScriptMismatchError(state.script, response.script_sha256);
   }
+  state.script = response.script_sha256;
+  return response;
+}
 
-  const push = (r: typeof response, action: string) => {
-    segments.push({
-      action,
-      data: r.data_json ? (JSON.parse(r.data_json) as Record<string, unknown>) : {},
-      winX: r.win,
-      totalWinX: r.total_win,
-      nextActions: r.next_actions,
-      spinsRemaining: r.spins_remaining,
-      spinsPlayed: r.spins_played,
-      isFinal: r.round_complete,
-    });
-  };
+/** Entry-действие: один шаг. `isFinal` в ответе решает, простой раунд или сложный. */
+export async function openEntry(
+  engine: EngineClient,
+  gameId: string,
+  state: RoundStateV1,
+): Promise<Segment> {
+  return toSegment(await start(engine, gameId, state, `${state.eid}-open`), state.action);
+}
 
-  push(response, state.action);
-
-  let index = 0;
-  while (!response.round_complete) {
-    // Интерактивный ввод берём из лога; если его нет — идём первым доступным
-    // действием (фриспины и каскады не требуют выбора игрока).
-    const logged = state.actions[index];
-    const action = logged?.a ?? response.next_actions[0];
-    const params = logged?.p ? JSON.stringify(logged.p) : '';
-    index += 1;
-    response = await engine.step(ephemeralId, action, params, `${ephemeralId}-${index}`);
-    if (response.error) throw new Error(`engine Step: ${response.error}`);
-    push(response, action);
+/**
+ * Гарантировать, что раунд открыт в движке. Горячий путь ничего не делает;
+ * холодный — поднимает раунд заново и догоняет курсор по логу действий.
+ */
+export async function ensureOpen(
+  engine: EngineClient,
+  gameId: string,
+  state: RoundStateV1,
+): Promise<void> {
+  const known = await engine.getRound(state.eid);
+  if (known.found && !known.round_complete) {
+    if (state.script && known.script_sha256 && state.script !== known.script_sha256) {
+      throw new ScriptMismatchError(state.script, known.script_sha256);
+    }
+    return;
   }
+  // Холодный подъём: заново под тем же eid, затем догоняем лог действий.
+  await start(engine, gameId, state, `${state.eid}-recover`);
+  for (let i = 0; i < state.actions.length; i++) {
+    const logged = state.actions[i];
+    const response = await engine.step(
+      state.eid,
+      logged.a,
+      logged.p ? JSON.stringify(logged.p) : '',
+      `${state.eid}-recover-${i}`,
+    );
+    if (response.error) throw new Error(`engine Step (recover): ${response.error}`);
+  }
+}
 
-  return {
-    segments,
-    scriptSha: response.script_sha256,
-    totalWinX: response.total_win,
-  };
+/** Один сегмент. Вызывается после `ensureOpen`. */
+export async function stepRound(
+  engine: EngineClient,
+  state: RoundStateV1,
+  action: string,
+  params?: Record<string, unknown>,
+): Promise<Segment> {
+  const response = await engine.step(
+    state.eid,
+    action,
+    params ? JSON.stringify(params) : '',
+    `${state.eid}-${state.actions.length}`,
+  );
+  if (response.error) throw new Error(`engine Step: ${response.error}`);
+  return toSegment(response, action);
+}
+
+/**
+ * Доиграть раунд до конца от лица игрока — нужен автозакрытию. Ветки выбираем
+ * первым доступным действием: интерактив за игрока додумывать нечем.
+ */
+export async function playToEnd(
+  engine: EngineClient,
+  gameId: string,
+  state: RoundStateV1,
+): Promise<number> {
+  await ensureOpen(engine, gameId, state);
+  let known = await engine.getRound(state.eid);
+  let total = known.total_win;
+  let guard = 0;
+  while (known.found && !known.round_complete && guard++ < 1000) {
+    const segment = await stepRound(engine, state, known.next_actions[0]);
+    total = segment.totalWinX;
+    if (segment.isFinal) break;
+    known = await engine.getRound(state.eid);
+  }
+  return total;
 }
 ```
 
-- [ ] **Step 6: Убедиться, что тесты проходят**
+- [ ] **Step 6: Добавить `getRound` в клиент движка**
+
+В `packages/artube-server/src/engine/client.ts` добавить тип и метод:
+
+```ts
+export interface RoundStateResponse {
+  found: boolean;
+  game_id: string;
+  script_sha256: string;
+  total_win: number;
+  spins_played: number;
+  spins_remaining: number;
+  next_actions: string[];
+  round_complete: boolean;
+  vars_json: string;
+  error: string;
+  bet: number;
+}
+```
+
+```ts
+  /** Жив ли раунд в кэше движка. `found: false` — нужен холодный подъём. */
+  getRound(roundId: string): Promise<RoundStateResponse> {
+    return this.call<RoundStateResponse>('GetRound', { round_id: roundId });
+  }
+```
+
+и в `packages/artube-server/src/engine/index.ts` дописать `RoundStateResponse` в список экспортируемых типов.
+
+- [ ] **Step 7: Убедиться, что тесты проходят**
 
 Run: `npm test --workspace @energy8platform/artube-server`
-Expected: PASS — 45 тестов
+Expected: PASS — все тесты Task 1–6
 
-- [ ] **Step 7: Коммит**
+- [ ] **Step 8: Коммит**
 
 ```bash
 git add packages/artube-server
-git commit -m "feat(artube-server): кодек round_state и детерминированное воспроизведение раунда"
+git commit -m "feat(artube-server): round_state и раунд в движке — шаг на сегмент, холодный подъём из лога"
 ```
 
 ---
@@ -2430,13 +2583,46 @@ git commit -m "feat(artube-server): кодек round_state и детермини
 **Files:**
 - Create: `packages/artube-server/src/session/types.ts`
 - Create: `packages/artube-server/src/round/orchestrator.ts`
+- Create: `packages/artube-server/tests/fixtures/one-shot.spin`
 - Test: `packages/artube-server/tests/orchestrator-simple.test.ts`
 
 **Interfaces:**
-- Consumes: из Task 4 — методы `GamesApiClient`; из Task 5 — `EngineClient`; из Task 6 — `replayRound`, `Segment`, `RoundStateV1`, `encodeRoundState`, `newSeed`, `ROUND_STATE_VERSION`.
-- Produces: `interface RoundApi` (узкий структурный интерфейс поверх `GamesApiClient`); `interface SessionContext { sessionId: string; currency: string | null; allowedBets: number[]; frcId?: string }`; `interface PlayRequest { id: string; action: string; betIndex: number; params?: Record<string, unknown> }`; `interface SegmentDelivery { … }`; `interface ActiveRound { roundId: string; roundVersion: number; state: RoundStateV1; segments: Segment[] }`; `interface RoundDeps { api: RoundApi; engine: EngineClient; gameId: string; costMultipliers: Record<string, number> }`; `function resolvePriceMultiplier(deps, action, frcActive): number`; `async function startRound(deps, ctx, req): Promise<{ delivery: SegmentDelivery; round: ActiveRound | null }>`.
+- Consumes: из Task 4 — методы `GamesApiClient`; Task 5 — `EngineClient`; Task 6 — `openEntry`, `Segment`, `RoundStateV1`, `encodeRoundState`, `newSeed`, `newEngineRoundId`, `ROUND_STATE_VERSION`.
+- Produces: `interface RoundApi`; `interface SessionContext { sessionId: string; currency: string | null; allowedBets: number[]; frcId?: string }`; `interface PlayRequest { id: string; action: string; betIndex: number; params?: Record<string, unknown> }`; `interface SegmentDelivery { … }`; `interface ActiveRound { roundId: string; roundVersion: number; state: RoundStateV1; delivered: Segment | null }`; `interface RoundDeps { api: RoundApi; engine: EngineClient; gameId: string; costMultipliers: Record<string, number> }`; `function resolvePriceMultiplier(deps, action, frcActive): number`; `export function toDelivery(...)`; `async function startRound(deps, ctx, req): Promise<{ delivery: SegmentDelivery; round: ActiveRound | null }>`.
 
-- [ ] **Step 1: Написать падающий тест**
+- [ ] **Step 1: Создать фикстуру без фичи**
+
+`packages/artube-server/tests/fixtures/one-shot.spin` — раунд из одного сегмента, отличает простой путь от сложного:
+
+```
+-- Раунд без фичи: ровно один сегмент, выигрыш всегда 0.
+record Vars { dummy: int }
+record Feat { dummy: int }
+record Data { stage: str }
+
+game "one-shot-game" {
+  bet_levels = [1.0]
+  max_win = 10.0
+  vars = Vars
+  feature = Feat
+  data = Data
+}
+
+action one_shot { stage = base_game  cost = 1.0 }
+
+fn execute(c: ctx, v: Vars) -> outcome {
+  return outcome {
+    win: 0.0,
+    vars: Vars { dummy: 0 },
+    data: Data { stage: "base_game" },
+  }
+}
+```
+
+Run: `./packages/platform-core/bin/e8-darwin-arm64 check packages/artube-server/tests/fixtures/one-shot.spin`
+Expected: `OK: … execute`
+
+- [ ] **Step 2: Написать падающий тест**
 
 `packages/artube-server/tests/orchestrator-simple.test.ts`:
 
@@ -2477,8 +2663,11 @@ function fakeApi() {
   };
 }
 
-function deps(api: ReturnType<typeof fakeApi>): RoundDeps {
-  return { api, engine, gameId: 'feature-game', costMultipliers: { spin: 1, buy_bonus: 5, free_spin: 1 } };
+function deps(api: ReturnType<typeof fakeApi>, gameId = 'one-shot-game'): RoundDeps {
+  return {
+    api, engine, gameId,
+    costMultipliers: { one_shot: 1, spin: 1, buy_bonus: 5, free_spin: 1 },
+  };
 }
 
 describe('оркестратор — простой раунд', () => {
@@ -2493,7 +2682,6 @@ describe('оркестратор — простой раунд', () => {
   });
 
   it('одиночный сегмент уходит одним PlayRound', async () => {
-    // one-shot.spin — игра без фичи, ровно один сегмент
     const api = fakeApi();
     const out = await startRound(deps(api), ctx, { id: 'p1', action: 'one_shot', betIndex: 2 });
     expect(api.playRound).toHaveBeenCalledTimes(1);
@@ -2519,6 +2707,7 @@ describe('оркестратор — простой раунд', () => {
     const state = decodeRoundState(api.playRound.mock.calls[0][0].round_state);
     expect(state.v).toBe(1);
     expect(state.seed.server).toMatch(/^[0-9a-f]{32}$/);
+    expect(state.eid).toMatch(/^e-/);
     expect(state.action).toBe('one_shot');
     expect(state.betIndex).toBe(2);
     expect(state.cursor).toBe(1);
@@ -2534,7 +2723,6 @@ describe('оркестратор — простой раунд', () => {
     expect(delivery.balanceAfter).toBe(199); // из ответа платформы, не наш расчёт
     expect(delivery.betAmount).toBe(1); // allowed_bets[2]
     expect(delivery.creditPending).toBe(false);
-    expect(delivery.nextActions).toContain('spin');
   });
 
   it('флаг платформенного максвина пробрасывается как есть', async () => {
@@ -2556,46 +2744,6 @@ describe('оркестратор — простой раунд', () => {
     expect(api.playRound).not.toHaveBeenCalled();
   });
 });
-```
-
-- [ ] **Step 2: Добавить фикстуру без фичи**
-
-`packages/artube-server/tests/fixtures/one-shot.spin` — раунд из одного сегмента, нужен, чтобы отличать простой путь от сложного:
-
-```
--- Раунд без фичи: ровно один сегмент, выигрыш всегда 0.
-record Vars { dummy: int }
-record Feat { dummy: int }
-record Data { stage: str }
-
-game "one-shot-game" {
-  bet_levels = [1.0]
-  max_win = 10.0
-  vars = Vars
-  feature = Feat
-  data = Data
-}
-
-action one_shot { stage = base_game  cost = 1.0 }
-
-fn execute(c: ctx, v: Vars) -> outcome {
-  return outcome {
-    win: 0.0,
-    vars: Vars { dummy: 0 },
-    data: Data { stage: "base_game" },
-  }
-}
-```
-
-Проверить: `./packages/platform-core/bin/e8-darwin-arm64 check packages/artube-server/tests/fixtures/one-shot.spin`
-Expected: `OK: … execute`
-
-В тесте использовать `gameId: 'one-shot-game'` для одиночных сегментов — поправить `deps()`:
-
-```ts
-function deps(api: ReturnType<typeof fakeApi>, gameId = 'one-shot-game'): RoundDeps {
-  return { api, engine, gameId, costMultipliers: { one_shot: 1, spin: 1, buy_bonus: 5, free_spin: 1 } };
-}
 ```
 
 - [ ] **Step 3: Убедиться, что тест падает**
@@ -2627,6 +2775,7 @@ export interface PlayRequest {
   id: string;
   action: string;
   betIndex: number;
+  /** Интерактивный выбор игрока: гэмбл, пик бонуса и подобное. */
   params?: Record<string, unknown>;
 }
 
@@ -2660,17 +2809,17 @@ export interface SegmentDelivery {
 /**
  * Оркестратор раунда — чистые функции поверх Games API и движка.
  *
- * Ни одного поля, переживающего запрос: всё, что нужно для продолжения
- * раунда, возвращается наружу и уезжает в `round_state` платформы.
+ * Ни одного поля, переживающего запрос: всё, что нужно для продолжения раунда,
+ * возвращается наружу и уезжает в `round_state` платформы.
  *
- * Движок на entry-действии играет раунд до конца, поэтому итог известен
- * сразу: один сегмент → PlayRound, несколько → Open/Update/Close.
+ * Entry-действие — один шаг движка; `isFinal` в ответе решает, простой это
+ * раунд (PlayRound) или сложный (Open/Update/Close).
  */
 
 import type { EngineClient } from '../engine';
-import { replayRound, type Segment } from './replay';
+import { openEntry, type Segment } from './engineRound';
 import {
-  encodeRoundState, newSeed, ROUND_STATE_VERSION, type RoundStateV1,
+  encodeRoundState, newEngineRoundId, newSeed, ROUND_STATE_VERSION, type RoundStateV1,
 } from './roundState';
 import type {
   PlayRoundRequest, PlayRoundResponse,
@@ -2707,7 +2856,8 @@ export interface ActiveRound {
   /** Версия раунда, которую считает Games API. */
   roundVersion: number;
   state: RoundStateV1;
-  segments: Segment[];
+  /** Последний выданный сегмент, ещё не подтверждённый игроком. */
+  delivered: Segment | null;
 }
 
 export function resolvePriceMultiplier(
@@ -2720,7 +2870,7 @@ export function resolvePriceMultiplier(
   return deps.costMultipliers[action] ?? 1;
 }
 
-function toDelivery(
+export function toDelivery(
   segment: Segment,
   roundId: string,
   betAmount: number,
@@ -2745,8 +2895,8 @@ function toDelivery(
 }
 
 /**
- * Начать раунд. Возвращает первый сегмент и, если раунд многосегментный,
- * дескриптор для продолжения. Для одиночного сегмента `round` равен `null`.
+ * Начать раунд: один шаг движка, затем одна RPC платформе. Для одиночного
+ * сегмента `round` равен `null` — продолжения не будет.
  */
 export async function startRound(
   deps: RoundDeps,
@@ -2758,27 +2908,24 @@ export async function startRound(
     throw new Error(`bet_index ${req.betIndex} вне allowed_bets`);
   }
 
-  const frcActive = Boolean(ctx.frcId);
   const state: RoundStateV1 = {
     v: 1,
     seed: newSeed(),
+    eid: newEngineRoundId(),
     script: '',
     action: req.action,
     betIndex: req.betIndex,
-    priceMultiplier: resolvePriceMultiplier(deps, req.action, frcActive),
+    priceMultiplier: resolvePriceMultiplier(deps, req.action, Boolean(ctx.frcId)),
     cursor: 0,
     totalWinX: 0,
-    actions: req.params ? [{ a: req.action, p: req.params }] : [],
+    actions: [],
     frcId: ctx.frcId,
   };
 
-  const replay = await replayRound(deps.engine, deps.gameId, state);
-  state.script = replay.scriptSha;
-
-  if (replay.segments.length === 1) {
-    return finishSimple(deps, ctx, state, replay.segments[0], betAmount);
-  }
-  return openComplex(deps, ctx, state, replay.segments, betAmount);
+  const first = await openEntry(deps.engine, deps.gameId, state);
+  return first.isFinal
+    ? finishSimple(deps, ctx, state, first, betAmount)
+    : openComplex(deps, ctx, state, first, betAmount);
 }
 
 /** Раунд из одного сегмента: ставка и выигрыш одной транзакцией. */
@@ -2811,7 +2958,7 @@ async function openComplex(
   _deps: RoundDeps,
   _ctx: SessionContext,
   _state: RoundStateV1,
-  _segments: Segment[],
+  _first: Segment,
   _betAmount: number,
 ): Promise<{ delivery: SegmentDelivery; round: ActiveRound | null }> {
   throw new Error('complex round not implemented yet');
@@ -2835,11 +2982,11 @@ git commit -m "feat(artube-server): оркестратор простого ра
 ### Task 8: Оркестратор — сложный раунд (`OpenRound` → `UpdateRoundState` → `CloseRound`)
 
 **Files:**
-- Modify: `packages/artube-server/src/round/orchestrator.ts` (заменить заглушку `openComplex`, добавить `advanceRound`)
+- Modify: `packages/artube-server/src/round/orchestrator.ts` (заменить заглушку `openComplex`, добавить `advanceRound` и `acknowledgeSegment`)
 - Test: `packages/artube-server/tests/orchestrator-complex.test.ts`
 
 **Interfaces:**
-- Consumes: из Task 7 — `RoundDeps`, `ActiveRound`, `SegmentDelivery`, `startRound`, `toDelivery`.
+- Consumes: из Task 6 — `ensureOpen`, `stepRound`; из Task 7 — `RoundDeps`, `ActiveRound`, `SegmentDelivery`, `startRound`, `toDelivery`.
 - Produces: `async function advanceRound(deps, ctx, round, req): Promise<{ delivery: SegmentDelivery; round: ActiveRound | null }>`; `async function acknowledgeSegment(deps, ctx, round, cursor): Promise<ActiveRound>`.
 
 - [ ] **Step 1: Написать падающий тест**
@@ -2852,7 +2999,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { startEngine, type EngineClient } from '../src/engine';
 import {
-  startRound, advanceRound, acknowledgeSegment, type RoundDeps,
+  startRound, advanceRound, acknowledgeSegment, type ActiveRound, type RoundDeps,
 } from '../src/round/orchestrator';
 import { decodeRoundState } from '../src/round/roundState';
 import type { SessionContext } from '../src/session/types';
@@ -2877,7 +3024,7 @@ function fakeApi() {
       round_id: 'r', balance: 0, win: 0, is_platform_max_win_reached: false,
     })),
     openRound: vi.fn(async () => ({ round_version: 0, round_id: 'round-complex', balance: 95 })),
-    updateRoundState: vi.fn(async () => ({ round_version: ++version + 0 })),
+    updateRoundState: vi.fn(async () => ({ round_version: ++version })),
     closeRound: vi.fn(async () => ({ balance: 98, free_round_campaign: null })),
     autocloseRound: vi.fn(async () => ({ balance: 98 })),
   };
@@ -2890,20 +3037,20 @@ function deps(api: ReturnType<typeof fakeApi>): RoundDeps {
   };
 }
 
-/** Пройти раунд целиком: spin + три фриспина, с подтверждением каждого сегмента. */
+/** Пройти раунд целиком: spin + три фриспина, подтверждая каждый сегмент. */
 async function playWhole(api: ReturnType<typeof fakeApi>) {
   const d = deps(api);
   const deliveries = [];
-  let out = await startRound(d, ctx, { id: 'p0', action: 'spin', betIndex: 2 });
+  const out = await startRound(d, ctx, { id: 'p0', action: 'spin', betIndex: 2 });
   deliveries.push(out.delivery);
-  let round = out.round!;
-  round = await acknowledgeSegment(d, ctx, round, 1);
+  let round: ActiveRound | null = await acknowledgeSegment(d, ctx, out.round!, 1);
   let i = 0;
   while (round) {
-    out = await advanceRound(d, ctx, round, { id: `p${++i}`, action: 'free_spin', betIndex: 2 });
-    deliveries.push(out.delivery);
-    if (!out.round) break;
-    round = await acknowledgeSegment(d, ctx, out.round, out.round.state.cursor + 1);
+    const next = await advanceRound(d, ctx, round, {
+      id: `p${++i}`, action: 'free_spin', betIndex: 2,
+    });
+    deliveries.push(next.delivery);
+    round = next.round ? await acknowledgeSegment(d, ctx, next.round, next.round.state.cursor + 1) : null;
   }
   return deliveries;
 }
@@ -2919,7 +3066,7 @@ describe('оркестратор — сложный раунд', () => {
     expect(out.round!.roundVersion).toBe(0);
   });
 
-  it('в OpenRound нет win_multiplier — выигрыш ещё не известен платформе', async () => {
+  it('в OpenRound нет win_multiplier — выигрыш ещё не сыгран', async () => {
     const api = fakeApi();
     await startRound(deps(api), ctx, { id: 'p1', action: 'spin', betIndex: 2 });
     const sent = api.openRound.mock.calls[0][0];
@@ -2951,6 +3098,27 @@ describe('оркестратор — сложный раунд', () => {
     expect(advanced.state.cursor).toBe(1);
   });
 
+  it('каждый сегмент — один шаг движка, лог действий растёт', async () => {
+    const api = fakeApi();
+    const d = deps(api);
+    const { round } = await startRound(d, ctx, { id: 'p1', action: 'spin', betIndex: 2 });
+    const acked = await acknowledgeSegment(d, ctx, round!, 1);
+    const next = await advanceRound(d, ctx, acked, { id: 'p2', action: 'free_spin', betIndex: 2 });
+    expect(next.delivery.winX).toBe(1);
+    expect(next.round!.state.actions).toEqual([{ a: 'free_spin' }]);
+  });
+
+  it('интерактивный выбор игрока попадает в лог — иначе раунд не поднять', async () => {
+    const api = fakeApi();
+    const d = deps(api);
+    const { round } = await startRound(d, ctx, { id: 'p1', action: 'spin', betIndex: 2 });
+    const acked = await acknowledgeSegment(d, ctx, round!, 1);
+    const next = await advanceRound(d, ctx, acked, {
+      id: 'p2', action: 'free_spin', betIndex: 2, params: { pick: 3 },
+    });
+    expect(next.round!.state.actions).toEqual([{ a: 'free_spin', p: { pick: 3 } }]);
+  });
+
   it('раунд доигрывается до конца и закрывается CloseRound', async () => {
     const api = fakeApi();
     const deliveries = await playWhole(api);
@@ -2974,9 +3142,9 @@ describe('оркестратор — сложный раунд', () => {
   it('CloseRound везёт round_version из последнего UpdateRoundState', async () => {
     const api = fakeApi();
     await playWhole(api);
-    const lastUpdate = api.updateRoundState.mock.results.at(-1)!.value as Promise<{ round_version: number }>;
-    const closed = api.closeRound.mock.calls[0][0];
-    expect(closed.round_version).toBe((await lastUpdate).round_version);
+    const updates = api.updateRoundState.mock.results;
+    const lastVersion = (await (updates.at(-1)!.value as Promise<{ round_version: number }>)).round_version;
+    expect(api.closeRound.mock.calls[0][0].round_version).toBe(lastVersion);
   });
 
   it('чужое действие в незакрытом раунде отвергается', async () => {
@@ -2997,19 +3165,19 @@ Expected: FAIL — `complex round not implemented yet`
 
 - [ ] **Step 3: Реализовать открытие сложного раунда**
 
-В `packages/artube-server/src/round/orchestrator.ts` заменить заглушку `openComplex`:
+В `packages/artube-server/src/round/orchestrator.ts` добавить импорт `import { ensureOpen, stepRound } from './engineRound';` и заменить заглушку:
 
 ```ts
 /**
  * Раунд из нескольких сегментов: OpenRound списывает ставку, выигрыш
- * зачислится только на CloseRound. До тех пор все сегменты уезжают во фронт
+ * зачислится только на CloseRound. До тех пор сегменты уезжают во фронт
  * с `creditPending`, а баланс раунда остаётся неизвестным.
  */
 async function openComplex(
   deps: RoundDeps,
   ctx: SessionContext,
   state: RoundStateV1,
-  segments: Segment[],
+  first: Segment,
   betAmount: number,
 ): Promise<{ delivery: SegmentDelivery; round: ActiveRound }> {
   const res = await deps.api.openRound({
@@ -3020,14 +3188,13 @@ async function openComplex(
     round_state_version: ROUND_STATE_VERSION,
     round_state: encodeRoundState(state),
   });
-  const first = segments[0];
   return {
     delivery: toDelivery(first, res.round_id, betAmount, null, true, false),
     round: {
       roundId: res.round_id,
       roundVersion: res.round_version,
       state,
-      segments,
+      delivered: first,
     },
   };
 }
@@ -3051,11 +3218,10 @@ export async function acknowledgeSegment(
   round: ActiveRound,
   cursor: number,
 ): Promise<ActiveRound> {
-  const delivered = round.segments[cursor - 1];
   const state: RoundStateV1 = {
     ...round.state,
     cursor,
-    totalWinX: delivered ? delivered.totalWinX : round.state.totalWinX,
+    totalWinX: round.delivered?.totalWinX ?? round.state.totalWinX,
   };
   const res = await deps.api.updateRoundState({
     session_id: ctx.sessionId,
@@ -3068,8 +3234,8 @@ export async function acknowledgeSegment(
 }
 
 /**
- * Отдать следующий сегмент открытого раунда. На финальном — CloseRound,
- * и только он приносит настоящий баланс.
+ * Следующий сегмент открытого раунда — ровно один шаг движка. На финальном
+ * шлём CloseRound, и только он приносит настоящий баланс.
  */
 export async function advanceRound(
   deps: RoundDeps,
@@ -3077,34 +3243,31 @@ export async function advanceRound(
   round: ActiveRound,
   req: PlayRequest,
 ): Promise<{ delivery: SegmentDelivery; round: ActiveRound | null }> {
-  const previous = round.segments[round.state.cursor - 1];
-  const allowed = previous?.nextActions ?? [];
+  const allowed = round.delivered?.nextActions ?? [];
   if (allowed.length > 0 && !allowed.includes(req.action)) {
     throw new Error(`action "${req.action}" is not allowed here, expected one of ${allowed.join(', ')}`);
   }
 
-  const segment = round.segments[round.state.cursor];
-  if (!segment) {
-    throw new Error(`round ${round.roundId} has no segment at cursor ${round.state.cursor}`);
-  }
+  // Горячий путь ничего не стоит; холодный поднимет раунд из лога действий.
+  await ensureOpen(deps.engine, deps.gameId, round.state);
+  const segment = await stepRound(deps.engine, round.state, req.action, req.params);
 
-  const betAmount = ctx.allowedBets[round.state.betIndex];
-
-  // Интерактивный ввод обязан попасть в лог: без него раунд не воспроизвести.
-  const state: RoundStateV1 = req.params
-    ? { ...round.state, actions: [...round.state.actions, { a: req.action, p: req.params }] }
-    : round.state;
+  // Действие обязано попасть в лог до того, как состояние уедет к Artube:
+  // без него холодный подъём воспроизведёт другой раунд.
+  const logged = req.params ? { a: req.action, p: req.params } : { a: req.action };
+  const state: RoundStateV1 = { ...round.state, actions: [...round.state.actions, logged] };
+  const betAmount = ctx.allowedBets[state.betIndex];
 
   if (!segment.isFinal) {
     return {
       delivery: toDelivery(segment, round.roundId, betAmount, null, true, false),
-      round: { ...round, state },
+      round: { ...round, state, delivered: segment },
     };
   }
 
   const finalState: RoundStateV1 = {
     ...state,
-    cursor: round.segments.length,
+    cursor: state.cursor + 1,
     totalWinX: segment.totalWinX,
   };
   const res = await deps.api.closeRound({
@@ -3131,7 +3294,7 @@ Expected: PASS — все тесты Task 1–8
 
 ```bash
 git add packages/artube-server
-git commit -m "feat(artube-server): сложный раунд — Open/Update/Close с creditPending и подтверждением сегментов"
+git commit -m "feat(artube-server): сложный раунд — шаг на сегмент, creditPending и подтверждение курсора"
 ```
 
 ---
@@ -3143,10 +3306,12 @@ git commit -m "feat(artube-server): сложный раунд — Open/Update/Cl
 - Test: `packages/artube-server/tests/resume.test.ts`
 
 **Interfaces:**
-- Consumes: из Task 6 — `decodeRoundState`, `replayRound`, `ScriptMismatchError`; из Task 7/8 — `RoundDeps`, `ActiveRound`, `SegmentDelivery`, `toDelivery` (экспортировать из `orchestrator.ts`).
+- Consumes: из Task 6 — `decodeRoundState`, `ensureOpen`, `stepRound`, `playToEnd`, `ScriptMismatchError`; из Task 7/8 — `RoundDeps`, `ActiveRound`, `toDelivery`.
 - Produces: `interface ResumeOutcome { delivery: SegmentDelivery; round: ActiveRound | null; recovered: boolean }`; `async function resumeRound(deps, ctx, lastRound: LastRound): Promise<ResumeOutcome | null>`; `async function autocloseRound(deps, ctx, lastRound: LastRound): Promise<number>`.
 
-> `toDelivery` из Task 7 нужно пометить `export`, чтобы модуль восстановления собирал доставку теми же правилами.
+> Восстановление всегда идёт холодным путём: игрок вернулся после разрыва, и раунда в
+> кэше движка, скорее всего, уже нет. `ensureOpen` догоняет курсор по логу действий и
+> отдаёт неподтверждённый сегмент заново.
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -3158,7 +3323,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { startEngine, type EngineClient } from '../src/engine';
 import { resumeRound, autocloseRound } from '../src/round/resume';
-import { encodeRoundState, type RoundStateV1 } from '../src/round/roundState';
+import { encodeRoundState, newEngineRoundId, type RoundStateV1 } from '../src/round/roundState';
 import type { RoundDeps } from '../src/round/orchestrator';
 import type { SessionContext } from '../src/session/types';
 import type { LastRound } from '../src/games-api/types';
@@ -3190,11 +3355,15 @@ function deps(api: ReturnType<typeof fakeApi>): RoundDeps {
   return { api, engine, gameId: 'feature-game', costMultipliers: { spin: 1, free_spin: 1 } };
 }
 
-function lastRound(state: Partial<RoundStateV1>, finished: string | null = null): LastRound {
+/** Незакрытый раунд, у которого подтверждено `cursor` сегментов. */
+function lastRound(over: Partial<RoundStateV1> = {}, finished: string | null = null): LastRound {
+  const cursor = over.cursor ?? 1;
   const full: RoundStateV1 = {
-    v: 1, seed: { server: 'srv-r', client: 'cli', nonce: 3 }, script: scriptSha,
-    action: 'spin', betIndex: 2, priceMultiplier: 1, cursor: 2, totalWinX: 1, actions: [],
-    ...state,
+    v: 1, seed: { server: 'srv-r', client: 'cli', nonce: 3 }, eid: newEngineRoundId(),
+    script: scriptSha, action: 'spin', betIndex: 2, priceMultiplier: 1,
+    cursor, totalWinX: Math.max(0, cursor - 1),
+    actions: Array.from({ length: Math.max(0, cursor - 1) }, () => ({ a: 'free_spin' })),
+    ...over,
   };
   return {
     round_id: 'round-open', price_multiplier: 1, bet_index: 2, win_multiplier: 0, win: 0,
@@ -3210,20 +3379,21 @@ describe('восстановление раунда', () => {
     expect(res).toBeNull();
   });
 
-  it('возвращает сегмент, на котором игрок остановился', async () => {
+  it('возвращает неподтверждённый сегмент, на котором игрок остановился', async () => {
+    // cursor 2 — подтверждены spin и первый фриспин; показываем второй фриспин
     const res = await resumeRound(deps(fakeApi()), ctx, lastRound({ cursor: 2 }));
     expect(res).not.toBeNull();
     expect(res!.recovered).toBe(false);
-    // курсор 2 — два сегмента подтверждены, показываем третий
     expect(res!.delivery.action).toBe('free_spin');
+    expect(res!.delivery.winX).toBe(1);
     expect(res!.delivery.creditPending).toBe(true);
     expect(res!.round!.roundId).toBe('round-open');
     expect(res!.round!.roundVersion).toBe(1);
   });
 
-  it('раунд, доигранный до конца, закрывается сразу', async () => {
+  it('если оставался последний сегмент — раунд закрывается', async () => {
     const api = fakeApi();
-    const res = await resumeRound(deps(api), ctx, lastRound({ cursor: 4, totalWinX: 3 }));
+    const res = await resumeRound(deps(api), ctx, lastRound({ cursor: 4 }));
     expect(api.closeRound).toHaveBeenCalledTimes(1);
     expect(api.closeRound.mock.calls[0][0].win_multiplier).toBe(3);
     expect(res!.round).toBeNull();
@@ -3232,7 +3402,9 @@ describe('восстановление раунда', () => {
 
   it('разъехавшийся скрипт закрывает раунд накопленным выигрышем', async () => {
     const api = fakeApi();
-    const res = await resumeRound(deps(api), ctx, lastRound({ script: 'sha-старый', totalWinX: 2 }));
+    const res = await resumeRound(
+      deps(api), ctx, lastRound({ script: 'sha-старый', cursor: 3, totalWinX: 2 }),
+    );
     expect(res!.recovered).toBe(true);
     expect(api.closeRound).toHaveBeenCalledTimes(1);
     const closed = api.closeRound.mock.calls[0][0];
@@ -3243,7 +3415,7 @@ describe('восстановление раунда', () => {
 
   it('автозакрытие доигрывает раунд и шлёт AutocloseRoundRequest', async () => {
     const api = fakeApi();
-    const balance = await autocloseRound(deps(api), ctx, lastRound({ cursor: 1, totalWinX: 0 }));
+    const balance = await autocloseRound(deps(api), ctx, lastRound({ cursor: 1 }));
     expect(api.autocloseRound).toHaveBeenCalledTimes(1);
     const sent = api.autocloseRound.mock.calls[0][0];
     expect(sent.round_id).toBe('round-open');
@@ -3255,7 +3427,7 @@ describe('восстановление раунда', () => {
 
   it('автозакрытие при разъехавшемся скрипте берёт накопленное', async () => {
     const api = fakeApi();
-    await autocloseRound(deps(api), ctx, lastRound({ script: 'sha-старый', totalWinX: 2 }));
+    await autocloseRound(deps(api), ctx, lastRound({ script: 'sha-старый', cursor: 3, totalWinX: 2 }));
     expect(api.autocloseRound.mock.calls[0][0].win_multiplier).toBe(2);
   });
 });
@@ -3266,11 +3438,7 @@ describe('восстановление раунда', () => {
 Run: `npm test --workspace @energy8platform/artube-server -- resume`
 Expected: FAIL — `Cannot find module '../src/round/resume'`
 
-- [ ] **Step 3: Пометить `toDelivery` экспортируемой**
-
-В `packages/artube-server/src/round/orchestrator.ts` заменить `function toDelivery(` на `export function toDelivery(`.
-
-- [ ] **Step 4: Реализовать восстановление**
+- [ ] **Step 3: Реализовать восстановление**
 
 `packages/artube-server/src/round/resume.ts`:
 
@@ -3279,13 +3447,13 @@ Expected: FAIL — `Cannot find module '../src/round/resume'`
  * Восстановление незакрытого раунда и автозакрытие.
  *
  * Оба сценария начинаются одинаково: берём `round_state` из платформы и
- * воспроизводим раунд. Если воспроизвести нельзя — скрипт разъехался после
- * деплоя — закрываем раунд накопленным множителем: игрок получает деньги,
- * хоть и не досматривает фичу.
+ * поднимаем раунд в движке холодным путём. Если поднять нельзя — скрипт
+ * разъехался после деплоя — закрываем раунд накопленным множителем: игрок
+ * получает деньги, хоть и не досматривает фичу.
  */
 
 import { ROUND_STATE_VERSION, decodeRoundState, encodeRoundState, type RoundStateV1 } from './roundState';
-import { replayRound, ScriptMismatchError, type Segment } from './replay';
+import { ensureOpen, playToEnd, stepRound, ScriptMismatchError, type Segment } from './engineRound';
 import { toDelivery, type ActiveRound, type RoundDeps } from './orchestrator';
 import type { SegmentDelivery, SessionContext } from '../session/types';
 import type { LastRound } from '../games-api/types';
@@ -3298,7 +3466,7 @@ export interface ResumeOutcome {
   recovered: boolean;
 }
 
-/** Синтетический сегмент для случая, когда воспроизвести раунд не удалось. */
+/** Синтетический сегмент для случая, когда раунд поднять не удалось. */
 function recoveredSegment(state: RoundStateV1): Segment {
   return {
     action: state.action,
@@ -3345,41 +3513,40 @@ export async function resumeRound(
   const state = decodeRoundState(lastRound.round_state);
   const betAmount = ctx.allowedBets[state.betIndex] ?? 0;
 
-  let segments: Segment[];
+  let segment: Segment;
   try {
-    segments = (await replayRound(deps.engine, deps.gameId, state)).segments;
+    await ensureOpen(deps.engine, deps.gameId, state);
+    // Неподтверждённый сегмент переигрываем заново: игрок его не досмотрел.
+    const known = await deps.engine.getRound(state.eid);
+    segment = await stepRound(deps.engine, state, known.next_actions[0]);
   } catch (err) {
     if (!(err instanceof ScriptMismatchError)) throw err;
     const balance = await closeWith(deps, ctx, lastRound, state, state.totalWinX);
-    const segment = recoveredSegment(state);
     return {
-      delivery: toDelivery(segment, lastRound.round_id, betAmount, balance, false, false),
+      delivery: toDelivery(recoveredSegment(state), lastRound.round_id, betAmount, balance, false, false),
       round: null,
       recovered: true,
     };
   }
 
-  const pending = segments[state.cursor];
-  if (!pending) {
-    // Все сегменты подтверждены, а раунд не закрыт — закрываем итогом математики.
-    const total = segments[segments.length - 1].totalWinX;
-    const balance = await closeWith(deps, ctx, lastRound, state, total);
+  const nextState: RoundStateV1 = { ...state, actions: [...state.actions, { a: segment.action }] };
+
+  if (segment.isFinal) {
+    const balance = await closeWith(deps, ctx, lastRound, nextState, segment.totalWinX);
     return {
-      delivery: toDelivery(
-        segments[segments.length - 1], lastRound.round_id, betAmount, balance, false, false,
-      ),
+      delivery: toDelivery(segment, lastRound.round_id, betAmount, balance, false, false),
       round: null,
       recovered: false,
     };
   }
 
   return {
-    delivery: toDelivery(pending, lastRound.round_id, betAmount, null, true, false),
+    delivery: toDelivery(segment, lastRound.round_id, betAmount, null, true, false),
     round: {
       roundId: lastRound.round_id,
       roundVersion: lastRound.round_version,
-      state,
-      segments,
+      state: nextState,
+      delivered: segment,
     },
     recovered: false,
   };
@@ -3398,10 +3565,10 @@ export async function autocloseRound(
   const state = decodeRoundState(lastRound.round_state);
   let winX = state.totalWinX;
   try {
-    winX = (await replayRound(deps.engine, deps.gameId, state)).totalWinX;
+    winX = await playToEnd(deps.engine, deps.gameId, state);
   } catch (err) {
     if (!(err instanceof ScriptMismatchError)) throw err;
-    // Воспроизвести нечем — отдаём то, что игрок уже накопил.
+    // Поднять раунд нечем — отдаём то, что игрок уже накопил.
   }
   const res = await deps.api.autocloseRound({
     session_id: ctx.sessionId,
@@ -3416,12 +3583,12 @@ export async function autocloseRound(
 }
 ```
 
-- [ ] **Step 5: Убедиться, что тесты проходят**
+- [ ] **Step 4: Убедиться, что тесты проходят**
 
 Run: `npm test --workspace @energy8platform/artube-server`
 Expected: PASS — все тесты Task 1–9
 
-- [ ] **Step 6: Коммит**
+- [ ] **Step 5: Коммит**
 
 ```bash
 git add packages/artube-server
@@ -3429,6 +3596,7 @@ git commit -m "feat(artube-server): восстановление незакры�
 ```
 
 ---
+
 
 ### Task 10: Сессия — INIT, демо-режим, FRC и max-win
 
