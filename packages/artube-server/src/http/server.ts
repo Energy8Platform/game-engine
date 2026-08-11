@@ -85,12 +85,24 @@ export class ArtubeServer {
 
     this.wss = new WebSocketServer({ noServer: true });
     this.http.on('upgrade', (req, socket, head) => {
+      // Сырой сокет тоже EventEmitter: сетевая ошибка на нём до апгрейда
+      // (RST в середине хендшейка) без подписчика на 'error' — то же
+      // необработанное исключение, что и битый кадр после апгрейда.
+      socket.on('error', () => {});
       // Выключение уже началось — новых игроков на закрывающийся под не пускаем.
       if (this.closing) return socket.destroy();
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (url.pathname !== '/api/ws') return socket.destroy();
       const sessionId = url.searchParams.get('sessionId');
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
+        // Подписчик на 'error' обязан существовать с самого момента приёма
+        // сокета: `ws` рапортует протокольный брак кадра ('MASK must be set'
+        // на немаскированном кадре, например) именно событием 'error', а
+        // EventEmitter без подписчика перебрасывает его наружу — под, где
+        // сидят все остальные игроки, падает от одного кривого клиента.
+        // Здесь молча: сессионный обработчик в handleConnection пишет лог,
+        // а этот покрывает окно до него и путь без sessionId.
+        ws.on('error', () => {});
         if (!sessionId) return ws.close(1008, 'sessionId is required');
         this.clients.add(ws);
         ws.on('close', () => this.clients.delete(ws));

@@ -39,6 +39,13 @@ export async function handleConnection(
   const log = deps.log.child({ session_id: sessionId });
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
 
+  // Синхронно, до первого await: `ws` рапортует протокольный брак кадра
+  // событием 'error' на сокете, и EventEmitter без подписчика перебрасывает
+  // его наружу — необработанное исключение убивает под со всеми остальными
+  // игроками. `ws` сам закроет это соединение кодом 1002; наше дело — не дать
+  // ошибке всплыть и записать её.
+  socket.on('error', (err) => log.warn('websocket error', { error: String(err) }));
+
   let ctx: SessionContext;
   let current: ActiveRound | null = null;
   let demo = false;
