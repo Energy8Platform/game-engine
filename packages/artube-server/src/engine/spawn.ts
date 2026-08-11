@@ -82,6 +82,18 @@ export interface SpawnedEngine {
   child: ChildProcess;
 }
 
+/**
+ * Records a spawn-time failure for a given child (e.g. `ENOENT` when the
+ * resolved binary doesn't exist), read back by `startEngine`'s readiness
+ * loop via `spawnFailureOf`. See the `child.on('error', ...)` note in
+ * `spawnEngine` for why this exists at all.
+ */
+const spawnFailures = new WeakMap<ChildProcess, Error>();
+
+export function spawnFailureOf(child: ChildProcess): Error | undefined {
+  return spawnFailures.get(child);
+}
+
 export async function spawnEngine(opts: {
   gamesDir: string;
   binPath?: string;
@@ -100,5 +112,14 @@ export async function spawnEngine(opts: {
     ],
     { stdio: 'inherit' },
   );
+  // `ChildProcess` is an `EventEmitter`; an unlistened 'error' event (e.g.
+  // ENOENT when `bin` doesn't exist) throws synchronously and takes down
+  // the whole host process. Attach a listener immediately so the failure
+  // becomes data instead: `startEngine`'s readiness loop reads it back via
+  // `spawnFailureOf` and rejects with a clear message naming the binary
+  // that failed, rather than crashing the process.
+  child.on('error', (err) => {
+    spawnFailures.set(child, err);
+  });
   return { port, child };
 }

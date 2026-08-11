@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { createGrpcClient } from './proto.js';
-import { spawnEngine } from './spawn.js';
+import { spawnEngine, spawnFailureOf } from './spawn.js';
 
 export interface GameInfo {
   game_id: string;
@@ -108,6 +108,20 @@ export async function startEngine(opts: {
   const grpc = createGrpcClient(port);
   const client = new EngineClient(grpc, child);
   for (let i = 0; i < 100; i++) {
+    // A failed spawn (e.g. ENOENT on a bad binPath) or a binary that exits
+    // immediately (e.g. bad CLI args) never becomes reachable over gRPC —
+    // waiting out the full 20s timeout below would still be "correct" but
+    // is a needlessly slow, uninformative way to report it. Fail fast with
+    // the concrete reason instead.
+    const spawnErr = spawnFailureOf(child);
+    if (spawnErr) {
+      throw new Error(`[artube] e8-server failed to start (${child.spawnfile}): ${spawnErr.message}`);
+    }
+    if (child.exitCode !== null) {
+      throw new Error(
+        `[artube] e8-server exited early (${child.spawnfile}), code ${child.exitCode}`,
+      );
+    }
     try {
       await client.listGames();
       return client;
