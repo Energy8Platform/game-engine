@@ -62,23 +62,39 @@ describe('восстановление раунда', () => {
     expect(res).toBeNull();
   });
 
-  it('возвращает неподтверждённый сегмент, на котором игрок остановился', async () => {
-    // cursor 2 — подтверждены spin и первый фриспин; показываем второй фриспин
-    const res = await resumeRound(deps(fakeApi()), ctx, lastRound({ cursor: 2 }));
+  it('неподтверждённый сегмент отдаётся заново, а не съедается', async () => {
+    // cursor 2 при двух сыгранных фриспинах: игрок подтвердил spin и первый
+    // фриспин, а второй ему уже отдали — и связь оборвалась посреди его
+    // анимации. Вернуть обязаны именно его.
+    const res = await resumeRound(
+      deps(fakeApi()), ctx, lastRound({ cursor: 2, actions: [{ a: 'free_spin' }, { a: 'free_spin' }] }),
+    );
     expect(res).not.toBeNull();
     expect(res!.recovered).toBe(false);
     expect(res!.delivery.action).toBe('free_spin');
     expect(res!.delivery.winX).toBe(1);
+    expect(res!.delivery.totalWinX).toBe(2); // второй фриспин, а не третий
+    expect(res!.delivery.spinsPlayed).toBe(3);
     expect(res!.delivery.creditPending).toBe(true);
     expect(res!.round!.roundId).toBe('round-open');
     expect(res!.round!.roundVersion).toBe(1);
+    // Лог не вырос: этот сегмент в нём уже был.
+    expect(res!.round!.state.actions).toHaveLength(2);
+  });
+
+  it('всё сыгранное подтверждено — играем следующий сегмент', async () => {
+    // cursor 2, один сыгранный фриспин: игрок досмотрел всё, что ему отдали.
+    const res = await resumeRound(deps(fakeApi()), ctx, lastRound({ cursor: 2 }));
+    expect(res!.delivery.action).toBe('free_spin');
+    expect(res!.delivery.totalWinX).toBe(2); // сыгран следующий, второй фриспин
+    expect(res!.delivery.creditPending).toBe(true);
+    expect(res!.round!.state.actions).toHaveLength(2);
   });
 
   it('единственный неподтверждённый сегмент оказывается финальным — курсор и лог согласуются', async () => {
-    // cursor 3 — подтверждены spin и два фриспина; переигрываем третий (последний)
-    // фриспин заново. В отличие от cursor:4 движок ЕЩЁ не считает раунд
-    // завершённым до этого шага — сюда попадает не round_complete-ветка, а
-    // "переиграли — и это оказался финал", ветка с `cursor: nextState.cursor + 1`.
+    // cursor 3, два сыгранных фриспина: всё сыгранное подтверждено, значит
+    // играем следующий — и он оказывается последним. Ветка "переиграли лог,
+    // шагнули вперёд, попали в финал".
     const api = fakeApi();
     const res = await resumeRound(deps(api), ctx, lastRound({ cursor: 3 }));
     expect(api.closeRound).toHaveBeenCalledTimes(1);
@@ -96,11 +112,14 @@ describe('восстановление раунда', () => {
     expect(persisted.cursor).toBe(4);
   });
 
-  it('если оставался последний сегмент — раунд закрывается', async () => {
+  it('лог уже покрывает раунд целиком — закрываем настоящим итогом из движка', async () => {
+    // cursor 4 при трёх сыгранных фриспинах: продолжать нечем, но раунд у
+    // платформы всё ещё открыт (CloseRound по нему когда-то не прошёл).
     const api = fakeApi();
     const res = await resumeRound(deps(api), ctx, lastRound({ cursor: 4 }));
     expect(api.closeRound).toHaveBeenCalledTimes(1);
     expect(api.closeRound.mock.calls[0][0].win_multiplier).toBe(3);
+    expect(decodeRoundState(api.closeRound.mock.calls[0][0].round_state).cursor).toBe(4);
     expect(res!.round).toBeNull();
     expect(res!.delivery.balanceAfter).toBe(150);
   });
@@ -118,13 +137,11 @@ describe('восстановление раунда', () => {
     expect(res!.round).toBeNull();
   });
 
-  it('движок в этом же процессе уже сыграл финальный сегмент — с attemptedAction resumeRound идёт по нему идемпотентно, а не бросает рассинхрон', async () => {
+  it('движок на поде уже сыграл этот сегмент — resumeRound переигрывает его заново, а не спотыкается о рассинхрон', async () => {
     // Ставим раунд туда, где его застаёт advanceRound перед CloseRound:
     // entry + 2 подтверждённых free_spin сыграны и в движке, и в логе; третий
-    // (финальный) free_spin УЖЕ сыгран в движке (как это делает advanceRound
-    // до вызова CloseRound), но лог, который видела платформа, ещё не знает о
-    // нём — именно так выглядит "CloseRound не прошёл" изнутри одного
-    // процесса, и ровно это чинит InvalidRoundOperation-восстановление.
+    // (финальный) free_spin УЖЕ сыгран в движке, но платформа о нём ещё не
+    // знает — так выглядит "CloseRound не прошёл" изнутри одного процесса.
     const seed = newSeed();
     const eid = newEngineRoundId();
     const hot: RoundStateV1 = {
@@ -132,10 +149,9 @@ describe('восстановление раунда', () => {
       cursor: 0, totalWinX: 0, actions: [],
     };
     await openEntry(engine, 'feature-game', hot);
-    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' }); // confirmed segment 2
-    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' }); // confirmed segment 3
-    // Сегмент 4 (финальный) — сыгран в движке, но платформа о нём ещё не знает.
-    const ahead = await stepRound(engine, hot, 'free_spin');
+    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' });
+    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' });
+    const ahead = await stepRound(engine, hot, 'free_spin'); // сыгран в движке, не в round_state
     expect(ahead.isFinal).toBe(true);
 
     const api = fakeApi();
@@ -143,33 +159,28 @@ describe('восстановление раунда', () => {
       eid, seed, script: hot.script, cursor: 3, totalWinX: 2,
       actions: [{ a: 'free_spin' }, { a: 'free_spin' }],
     });
-    // attemptedAction — то самое действие, которое клиент реально играл (и
-    // которое поэтому уже лежит в движке под этим request_id) — resumeRound
-    // не имеет права его угадывать, только принять от вызывающего.
-    const res = await resumeRound(deps(api), ctx, last, 'free_spin');
+    const res = await resumeRound(deps(api), ctx, last);
 
     expect(res).not.toBeNull();
     expect(res!.round).toBeNull(); // раунд закрыт
     expect(res!.recovered).toBe(false); // честный доигранный итог, не ScriptMismatch-аварийка
     expect(api.closeRound).toHaveBeenCalledTimes(1);
-    // Персистентный лог, который прочтёт последующий ХОЛОДНЫЙ подъём на
-    // другом поде, обязан нести именно attemptedAction, а не угаданную
-    // метку — иначе холодная реплика воспроизведёт другой раунд.
     const persisted = decodeRoundState(api.closeRound.mock.calls[0][0].round_state);
     expect(persisted.actions.at(-1)).toEqual({ a: 'free_spin' });
-    // Настоящий итог из движка (идемпотентный кэш-хит того самого сегмента),
-    // а не устаревшее state.totalWinX из round_state (там было бы 2).
+    expect(persisted.actions).toHaveLength(3);
+    expect(persisted.cursor).toBe(4);
+    // Значения совпадают с тем, что движок уже посчитал горячим путём —
+    // переигрывание под новым eid воспроизводит раунд посегментно.
     expect(api.closeRound.mock.calls[0][0].win_multiplier).toBe(ahead.totalWinX);
     expect(res!.delivery.totalWinX).toBe(ahead.totalWinX);
+    expect(res!.delivery.data).toEqual(ahead.data);
     expect(res!.delivery.creditPending).toBe(false);
   });
 
-  it('без attemptedAction (обычный реконнект) resumeRound не угадывает и бросает рассинхрон, даже если движок всего на шаг впереди', async () => {
-    // Тот же самый расклад позиции, что и в предыдущем тесте — движок ровно
-    // на один шаг впереди лога, — но вызванный так, как это делает обычный
-    // реконнект в ws.ts (без InvalidRoundOperation и без attemptedAction).
-    // Без известного действия resumeRound не имеет права угадывать его ни по
-    // логу, ни по движку — разрыв остаётся строгой ошибкой, как и раньше.
+  it('обычный реконнект посреди анимации: движок впереди лога — сегмент возвращается, а не роняет восстановление', async () => {
+    // Ровно то состояние, в котором обрыв связи застаёт под чаще всего:
+    // сегмент отдан игроку (и потому сыгран в движке и записан в лог), но
+    // `ack` по нему не пришёл. Раньше это была фатальная ошибка рассинхрона.
     const seed = newSeed();
     const eid = newEngineRoundId();
     const hot: RoundStateV1 = {
@@ -178,16 +189,19 @@ describe('восстановление раунда', () => {
     };
     await openEntry(engine, 'feature-game', hot);
     await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' });
-    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' });
-    await stepRound(engine, hot, 'free_spin'); // played hot, platform log doesn't know about it
+    const unacked = await stepRound(engine, hot, 'free_spin'); // отдан игроку, не подтверждён
 
     const api = fakeApi();
-    const last = lastRound({
-      eid, seed, script: hot.script, cursor: 3, totalWinX: 2,
+    const res = await resumeRound(deps(api), ctx, lastRound({
+      eid, seed, script: hot.script, cursor: 2, totalWinX: 1,
       actions: [{ a: 'free_spin' }, { a: 'free_spin' }],
-    });
-    await expect(resumeRound(deps(api), ctx, last)).rejects.toThrow(/ahead of round_state/);
-    expect(api.closeRound).not.toHaveBeenCalled();
+    }));
+
+    expect(res!.round).not.toBeNull();
+    expect(res!.delivery.winX).toBe(unacked.winX);
+    expect(res!.delivery.totalWinX).toBe(unacked.totalWinX);
+    expect(res!.delivery.data).toEqual(unacked.data);
+    expect(api.closeRound).not.toHaveBeenCalled(); // раунд не закрыт: он продолжается
   });
 
   it('автозакрытие доигрывает раунд и шлёт AutocloseRoundRequest', async () => {

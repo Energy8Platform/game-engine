@@ -112,6 +112,43 @@ describe('оркестратор — сложный раунд', () => {
     expect(next.round!.state.actions).toEqual([{ a: 'free_spin' }]);
   });
 
+  it('сыгранный сегмент уезжает в round_state сразу, курсор при этом стоит', async () => {
+    const api = fakeApi();
+    const d = deps(api);
+    const { round } = await startRound(d, ctx, { id: 'p1', action: 'spin', betIndex: 2 });
+    const acked = await acknowledgeSegment(d, ctx, round!, 1); // update #1: курсор 1
+    const next = await advanceRound(d, ctx, acked, { id: 'p2', action: 'free_spin', betIndex: 2 });
+
+    // update #2 — это запись самого факта "сегмент сыгран". Без неё сегмент,
+    // который игрок сейчас смотрит, существовал бы только в памяти пода.
+    expect(api.updateRoundState).toHaveBeenCalledTimes(2);
+    const played = decodeRoundState(api.updateRoundState.mock.calls[1][0].round_state);
+    expect(played.actions).toEqual([{ a: 'free_spin' }]);
+    expect(played.cursor).toBe(1); // курсор двигает только ack
+    // Версия раунда, которую вернул UpdateRoundState, обязана поехать дальше:
+    // с устаревшей платформа отобьёт следующий UpdateRoundState/CloseRound.
+    expect(next.round!.roundVersion).toBe(2);
+  });
+
+  it('финальный сегмент не платит лишней RPC — его действие едет в самом CloseRound', async () => {
+    const api = fakeApi();
+    const d = deps(api);
+    let round = (await startRound(d, ctx, { id: 'p1', action: 'spin', betIndex: 2 })).round!;
+    round = await acknowledgeSegment(d, ctx, round, 1);
+    for (let i = 0; i < 2; i++) {
+      const out = await advanceRound(d, ctx, round, { id: `p${i}`, action: 'free_spin', betIndex: 2 });
+      round = await acknowledgeSegment(d, ctx, out.round!, out.round!.state.cursor + 1);
+    }
+    const updatesBefore = api.updateRoundState.mock.calls.length;
+    const final = await advanceRound(d, ctx, round, { id: 'p3', action: 'free_spin', betIndex: 2 });
+
+    expect(final.round).toBeNull();
+    expect(api.updateRoundState.mock.calls).toHaveLength(updatesBefore);
+    const closed = decodeRoundState(api.closeRound.mock.calls[0][0].round_state);
+    expect(closed.actions).toHaveLength(3);
+    expect(closed.cursor).toBe(4);
+  });
+
   it('интерактивный выбор игрока попадает в лог — иначе раунд не поднять', async () => {
     const api = fakeApi();
     const d = deps(api);

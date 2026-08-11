@@ -5,7 +5,7 @@ import {
   startEngine, type EngineClient, type RoundResponse, type RoundStateResponse,
 } from '../src/engine';
 import {
-  openEntry, ensureOpen, stepRound, playToEnd, ScriptMismatchError,
+  openEntry, ensureOpen, stepRound, replayRound, playToEnd, ScriptMismatchError,
 } from '../src/round/engineRound';
 import { newSeed, newEngineRoundId, type RoundStateV1 } from '../src/round/roundState';
 
@@ -224,37 +224,64 @@ describe('раунд в движке', () => {
     expect(coldFinal.data).toEqual(hotFinal.data);
   });
 
-  it('ensureOpen с явным tolerateAheadByOne допускает движок ровно на один шаг впереди лога — тот сегмент вызывающий переиграет сам', async () => {
-    // entry + 1 free_spin real, log accounts for only the entry (expected =
-    // 1 + 0 = 1, spins_played = 2 = expected + 1). This is exactly the shape
-    // an in-process InvalidRoundOperation recovery produces: advanceRound
-    // already stepped the engine forward before its CloseRound/UpdateRound
-    // call failed, so the engine is one segment ahead of the last state we
-    // can prove the platform saw. Only `resumeRound` is allowed to pass this
-    // permission — the hot path (`advanceRound`) never does, see the next test.
-    const state = stateFor();
-    await openEntry(engine, 'feature-game', state);
-    const already = await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []
+  it('replayRound переигрывает раунд под новым eid посегментно так же, как горячий путь', async () => {
+    // Главное утверждение всей модели восстановления: движок детерминирован по
+    // тройке сидов и списку действий, поэтому раунд можно переиграть заново
+    // вместо того, чтобы доверять кэшу движка. Горячий путь играет раунд
+    // сегмент за сегментом; replayRound под НОВЫМ eid обязан отдать ровно те
+    // же значения на той же позиции.
+    const seed = newSeed();
+    const hot = stateFor({ seed, eid: newEngineRoundId() });
+    const hotSegments = [await openEntry(engine, 'feature-game', hot)];
+    for (let i = 0; i < 3; i++) {
+      hotSegments.push(await stepRound(engine, hot, 'free_spin'));
+      hot.actions.push({ a: 'free_spin' });
+    }
 
-    await ensureOpen(engine, 'feature-game', state, { tolerateAheadByOne: true }); // must not throw
-
-    // The caller's next Step reuses the same deterministic request_id
-    // (`${eid}-${actions.length}` = `${eid}-0`, same as the step just taken)
-    // — the engine treats it as an idempotent retry and returns the exact
-    // same segment, not a freshly-rolled one.
-    const replayed = await stepRound(engine, state, 'free_spin');
-    expect(replayed.winX).toBe(already.winX);
-    expect(replayed.totalWinX).toBe(already.totalWinX);
-    expect(replayed.data).toEqual(already.data);
+    // Позиция 2: entry + два фриспина. Тот же лог, но eid движок не знает.
+    const cold = stateFor({
+      seed, eid: newEngineRoundId(),
+      actions: [{ a: 'free_spin' }, { a: 'free_spin' }, { a: 'free_spin' }],
+    });
+    const replayed = await replayRound(engine, 'feature-game', cold, 2);
+    expect(replayed.winX).toBe(hotSegments[2].winX);
+    expect(replayed.totalWinX).toBe(hotSegments[2].totalWinX);
+    expect(replayed.data).toEqual(hotSegments[2].data);
+    expect(replayed.isFinal).toBe(false);
+    expect(replayed.spinsPlayed).toBe(3);
   });
 
-  it('ensureOpen без tolerateAheadByOne (по умолчанию) бросает даже на "ровно один шаг впереди" — только recovery вправе это разрешить', async () => {
-    // Тот же самый сценарий позиции (spins_played = expected + 1), что и в
-    // предыдущем тесте, но без явного разрешения — то есть ровно то, что
-    // делает горячий путь `advanceRound`. Без единственного писателя на
-    // раунд "на один шаг впереди" неотличимо от того, что ДРУГОЙ коннект
-    // сыграл иное действие поверх того же раунда — строгая проверка обязана
-    // остаться дефолтом, разрешение должно быть explicit на каждом вызове.
+  it('replayRound работает и когда раунд в кэше движка впереди лога — он его не трогает', async () => {
+    // Тот самый расклад, из-за которого реконнект посреди анимации ронял
+    // раунд: движок уже сыграл сегмент, которого нет в подтверждённом
+    // состоянии. replayRound не спрашивает движок о старом раунде вовсе.
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    const ahead = await stepRound(engine, state, 'free_spin'); // движок впереди лога
+    const oldEid = state.eid;
+
+    state.actions.push({ a: 'free_spin' });
+    const replayed = await replayRound(engine, 'feature-game', state, 1);
+    expect(state.eid).not.toBe(oldEid); // новый eid — StartRound по старому отказал бы
+    expect(replayed.winX).toBe(ahead.winX);
+    expect(replayed.totalWinX).toBe(ahead.totalWinX);
+    expect(replayed.data).toEqual(ahead.data);
+  });
+
+  it('replayRound с нулём шагов отдаёт entry-сегмент', async () => {
+    const state = stateFor({ actions: [{ a: 'free_spin' }] });
+    const replayed = await replayRound(engine, 'feature-game', state, 0);
+    expect(replayed.action).toBe('spin');
+    expect(replayed.spinsPlayed).toBe(1);
+    expect(replayed.nextActions).toEqual(['free_spin']);
+  });
+
+  it('ensureOpen бросает и на "ровно один шаг впереди" — гадать, чей это шаг, нельзя', async () => {
+    // Горячий путь (`advanceRound`) обязан застать движок ровно на логе:
+    // сыгранное действие уезжает в round_state в тот же момент, когда
+    // сегмент сыгран. "Впереди на шаг" здесь означает, что кто-то ещё сыграл
+    // поверх этого раунда — гадать, чей это шаг, нельзя. Восстановление сюда
+    // не ходит: оно переигрывает раунд заново (см. replayRound).
     const state = stateFor();
     await openEntry(engine, 'feature-game', state);
     await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []

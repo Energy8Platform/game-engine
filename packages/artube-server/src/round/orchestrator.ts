@@ -179,9 +179,10 @@ async function openComplex(
 /**
  * Игрок увидел сегмент — двигаем курсор в состоянии платформы.
  *
- * Именно поэтому UpdateRoundState шлётся на подтверждении, а не на выдаче:
- * реконнект посреди фичи должен вернуть неподтверждённый сегмент, а не
- * съесть его.
+ * Курсор двигает только подтверждение: пока `ack` не пришёл, сегмент считается
+ * недосмотренным, и реконнект обязан вернуть именно его. Сам факт того, что
+ * сегмент сыгран, в `round_state` уже записан — это делает `advanceRound` в
+ * момент игры, отдельным UpdateRoundState.
  */
 export async function acknowledgeSegment(
   deps: RoundDeps,
@@ -230,12 +231,30 @@ export async function advanceRound(
   const betAmount = ctx.allowedBets[state.betIndex];
 
   if (!segment.isFinal) {
+    // Сегмент сыгран — платформа обязана узнать об этом СЕЙЧАС, а не на
+    // подтверждении. Между выдачей сегмента и `ack` живёт вся анимация фичи,
+    // и обрыв связи в этом окне — обычное дело: без этой записи сыгранный
+    // сегмент существовал бы только в памяти пода, а `round_state` описывал бы
+    // раунд короче, чем он есть. Курсор не двигаем — его двигает только `ack`.
+    // UpdateRoundState идемпотентен и потому дёшев и безопасен.
+    const res = await deps.api.updateRoundState({
+      session_id: ctx.sessionId,
+      round_id: round.roundId,
+      round_version: round.roundVersion,
+      round_state_version: ROUND_STATE_VERSION,
+      round_state: encodeRoundState(state),
+    });
     return {
       delivery: toDelivery(segment, round.roundId, betAmount, null, true, false),
-      round: { ...round, state, delivered: segment },
+      round: { ...round, roundVersion: res.round_version, state, delivered: segment },
     };
   }
 
+  // Финальный сегмент везёт своё действие в самом CloseRound — лишней RPC
+  // перед денежной не делаем. Если CloseRound не пройдёт, лог у платформы
+  // останется на шаг короче реально сыгранного, и восстановление (которое
+  // переигрывает раунд из лога и доигрывает вперёд) воспроизведёт этот же
+  // сегмент заново — движок детерминирован.
   const finalState: RoundStateV1 = {
     ...state,
     cursor: state.cursor + 1,

@@ -8,7 +8,7 @@
  */
 
 import { ROUND_STATE_VERSION, decodeRoundState, encodeRoundState, type RoundStateV1 } from './roundState.js';
-import { ensureOpen, playToEnd, stepRound, ScriptMismatchError, type Segment } from './engineRound.js';
+import { playToEnd, replayRound, stepRound, ScriptMismatchError, type Segment } from './engineRound.js';
 import { toDelivery, type ActiveRound, type RoundDeps } from './orchestrator.js';
 import type { SegmentDelivery, SessionContext } from '../session/types.js';
 import type { LastRound } from '../games-api/types.js';
@@ -63,86 +63,61 @@ async function closeWith(
  * Вернуть игрока туда, где он остановился. `null` — восстанавливать нечего:
  * раунд уже закрыт платформой.
  *
- * `attemptedAction` — действие, которое клиент пытался сыграть и из-за
- * которого сработало восстановление (`msg.action` из провалившегося `play` —
- * `ws.ts` передаёт его только на пути `InvalidRoundOperation`). Это
- * единственный источник правды о том, что играть на "движок на один шаг
- * впереди лога": без него resumeRound не гадает — просто не разрешает
- * ensureOpen'у терпеть этот разрыв, и тот бросает строгую ошибку, как раньше.
+ * Раунд поднимаем ПЕРЕИГРЫВАНИЕМ из `round_state` под новым `eid`, а не
+ * продолжением того, что лежит в кэше движка. Кэш на этом пути доверия не
+ * заслуживает: обрыв связи почти всегда случается посреди анимации сегмента,
+ * то есть тогда, когда движок на шаг впереди подтверждённого курсора. Движок
+ * детерминирован, поэтому переигрывание отдаёт ровно тот же сегмент — и на
+ * горячем поде, и на холодном, без единой ветки "а вдруг он уже сыгран".
+ *
+ * Что именно отдать, решает `round_state`:
+ *  - `cursor` меньше числа сыгранных сегментов → игрок не досмотрел сегмент
+ *    `cursor`, и он же отдаётся заново;
+ *  - всё сыгранное подтверждено → играем следующий сегмент.
  */
 export async function resumeRound(
   deps: RoundDeps,
   ctx: SessionContext,
   lastRound: LastRound,
-  attemptedAction?: string,
 ): Promise<ResumeOutcome | null> {
   if (lastRound.finished_at) return null;
 
   const state = decodeRoundState(lastRound.round_state);
   const betAmount = ctx.allowedBets[state.betIndex] ?? 0;
+  // Сегментов подтверждено, считая entry первым. Зажимаем сверху: курсор
+  // впереди лога означал бы битое состояние, и играть по нему хуже, чем
+  // отдать игроку последний воспроизводимый сегмент.
+  const acked = Math.max(0, Math.min(state.cursor, state.actions.length + 1));
+  const hasUnacked = acked <= state.actions.length;
 
   let segment: Segment;
+  let actions = state.actions;
   try {
-    // tolerateAheadByOne только когда известно, ЧТО сыграть на этом лишнем
-    // шаге — то есть только когда вызывающий передал attemptedAction. Обычный
-    // реконнект (ws.ts, без provided attemptedAction) не может объяснить
-    // разрыв в один шаг и обязан остаться под строгой проверкой — см.
-    // `EnsureOpenOptions`.
-    await ensureOpen(deps.engine, deps.gameId, state, {
-      tolerateAheadByOne: attemptedAction !== undefined,
-    });
-    const known = await deps.engine.getRound(state.eid);
-    const expected = 1 + state.actions.length;
-    if (known.round_complete && known.spins_played === expected) {
-      // Лог уже покрывает весь раунд целиком: движок ровно на нашем логе, а
-      // неподтверждённого сегмента, который можно было бы переиграть, за
-      // логом больше нет. Это НЕ ScriptMismatch — раунд воспроизвёлся честно,
-      // просто CloseRound по нему раньше не прошёл. Курсор не двигаем: лог
-      // уже отражает все подтверждённые сегменты, а дальше степать по
-      // завершённому раунду нечем — next_actions здесь означает "чем
-      // стартовать новый раунд", а не продолжение этого.
-      const balance = await closeWith(deps, ctx, lastRound, state, state.totalWinX);
-      return {
-        delivery: toDelivery(
-          finalSegment(state, known.next_actions),
-          lastRound.round_id,
-          betAmount,
-          balance,
-          false,
-          false,
-        ),
-        round: null,
-        recovered: false,
-      };
-    }
-    // Раунд ещё не завершён — обычный путь, следующее действие берём из
-    // движка (`known.next_actions[0]` описывает продолжение ЭТОГО раунда).
-    //
-    // Если он всё же завершён, попасть сюда можно только через "движок на
-    // один шаг впереди лога, с attemptedAction" — без attemptedAction
-    // ensureOpen выше бросил бы строгую ошибку раньше, чем мы дошли досюда.
-    // Действие для этого шага — ТОЛЬКО attemptedAction, не последнее из лога
-    // и не `known.next_actions[0]` (тот на этой позиции описывает, чем
-    // начинать НОВЫЙ раунд после уже сыгранного лишнего шага, а не сам этот
-    // шаг) — гадать нельзя: неверная метка попадёт в персистентный
-    // `round_state.actions` и более поздний холодный подъём на другом поде
-    // воспроизведёт по ней уже другой раунд.
-    let nextAction: string;
-    if (known.round_complete) {
-      if (attemptedAction === undefined) {
-        // Недостижимо на практике: без attemptedAction ensureOpen не
-        // допустил бы разрыв в один шаг, он бросил бы выше. Явная проверка
-        // вместо `!`-утверждения — чтобы будущий рефакторинг этого
-        // инварианта не смог молча подписать чужой сегмент.
-        throw new Error(
-          `round ${state.eid}: engine ahead of round_state with no attempted action to explain it`,
-        );
-      }
-      nextAction = attemptedAction;
+    const replayed = await replayRound(
+      deps.engine,
+      deps.gameId,
+      state,
+      hasUnacked ? acked : state.actions.length,
+    );
+    if (hasUnacked) {
+      // Переигранный сегмент — ровно тот, который игрок не досмотрел.
+      // Всё, что было сыграно ЗА ним и тоже не подтверждено, из лога
+      // выпадает: игрок этого не видел, а раунд отсюда пойдёт заново.
+      segment = replayed;
+      actions = state.actions.slice(0, acked);
+    } else if (replayed.isFinal) {
+      // Лог уже покрывает раунд целиком (CloseRound по нему когда-то не
+      // прошёл). Это не рассинхрон: раунд воспроизвёлся честно, продолжать в
+      // нём нечего — закрываем настоящим итогом из движка.
+      segment = replayed;
     } else {
-      nextAction = known.next_actions[0];
+      const action = replayed.nextActions[0];
+      if (!action) {
+        throw new Error(`round ${state.eid}: сегмент не финальный, но продолжать нечем`);
+      }
+      segment = await stepRound(deps.engine, state, action);
+      actions = [...state.actions, { a: action }];
     }
-    segment = await stepRound(deps.engine, state, nextAction);
   } catch (err) {
     if (!(err instanceof ScriptMismatchError)) throw err;
     // Курсор не двигаем: ничего нового не сыграли, отдаём накопленное как
@@ -155,15 +130,12 @@ export async function resumeRound(
     };
   }
 
-  const nextState: RoundStateV1 = { ...state, actions: [...state.actions, { a: segment.action }] };
+  const nextState: RoundStateV1 = { ...state, actions };
 
   if (segment.isFinal) {
-    // Сегмент, который мы только что переиграли, впервые попадает в лог
-    // здесь — курсор обязан вырасти вместе с ним, иначе actions.length и
-    // cursor разъедутся на единицу (тот самый разрыв, из-за которого
-    // acknowledgeSegment нельзя доверять курсору без проверки). Тот же приём,
-    // что и в advanceRound: finalState = ...state + cursor+1.
-    const finalState: RoundStateV1 = { ...nextState, cursor: nextState.cursor + 1 };
+    // Раунд доигран: подтверждать в нём больше нечего, курсор встаёт на
+    // конец лога (entry + все действия).
+    const finalState: RoundStateV1 = { ...nextState, cursor: actions.length + 1 };
     const balance = await closeWith(deps, ctx, lastRound, finalState, segment.totalWinX);
     return {
       delivery: toDelivery(segment, lastRound.round_id, betAmount, balance, false, false),
@@ -181,20 +153,6 @@ export async function resumeRound(
       delivered: segment,
     },
     recovered: false,
-  };
-}
-
-/** Синтетический сегмент для раунда, чей лог уже полностью доигран. */
-function finalSegment(state: RoundStateV1, nextActions: string[]): Segment {
-  return {
-    action: state.action,
-    data: { stage: 'closed' },
-    winX: 0,
-    totalWinX: state.totalWinX,
-    nextActions,
-    spinsRemaining: 0,
-    spinsPlayed: state.cursor,
-    isFinal: true,
   };
 }
 

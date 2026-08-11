@@ -10,7 +10,7 @@
  */
 
 import type { EngineClient, RoundResponse } from '../engine/index.js';
-import type { RoundStateV1 } from './roundState.js';
+import { newEngineRoundId, type RoundStateV1 } from './roundState.js';
 
 export interface Segment {
   /** Действие, которому соответствует сегмент: 'spin' | 'free_spin' | 'gamble'. */
@@ -108,43 +108,60 @@ async function replayFrom(
   }
 }
 
-export interface EnsureOpenOptions {
-  /**
-   * Разрешить "движок ровно на один шаг впереди лога" — молча считать это
-   * состоянием, которое переиграет следующий Step вызывающего, вместо того
-   * чтобы бросать ошибку рассинхрона.
-   *
-   * По умолчанию `false` — строгая проверка. Это НЕ безопасно в общем случае:
-   * ничего в этом кодбейсе не гарантирует единственного писателя на раунд
-   * (несколько WS-коннектов с одним `sessionId` делят один `EngineClient`,
-   * сериализация — только по очереди ОДНОГО коннекта). Если "впереди на один
-   * шаг" вызвано ДРУГИМ коннектом, чьё действие отличалось от того, что
-   * собирается сыграть текущий вызывающий, идемпотентный кэш движка отдаст
-   * результат ЧУЖОГО действия под чужим `request_id`, а `stepRound` подпишет
-   * его текущим (неверным) именем действия — именно тот тихий рассинхрон,
-   * который строгая проверка обязана ловить.
-   *
-   * Единственный безопасный вызывающий — `resumeRound`, и только когда ему
-   * известно действие, которое клиент реально пытался сыграть
-   * (`attemptedAction`, из провалившегося `play`-сообщения): это
-   * единственный источник правды о том, что играть на этом лишнем шаге.
-   * `resumeRound` не гадает действие по логу или по движку — при отсутствии
-   * `attemptedAction` он не разрешает эту толерантность вовсе, и разрыв в
-   * один шаг остаётся строгой ошибкой, как и для любого другого вызывающего.
-   */
-  tolerateAheadByOne?: boolean;
+/**
+ * Переиграть раунд с нуля под НОВЫМ `eid` и вернуть последний сегмент.
+ *
+ * Движок детерминирован: по тройке (server_seed, client_seed, nonce) и тому
+ * же списку действий он воспроизводит раунд посегментно одинаково, под каким
+ * бы `eid` его ни играли (см. `tests/engine.test.ts`, блок rng-game). Поэтому
+ * восстановлению не нужно ни угадывать, доигран ли уже раунд в кэше движка,
+ * ни терпеть расхождения с ним: оно просто играет раунд заново из `round_state`
+ * и получает ровно те же сегменты — на горячем поде так же, как на холодном.
+ *
+ * Новый `eid` (а не старый) обязателен: `StartRound` отказывает, если раунд с
+ * таким идентификатором уже существует, а старый как раз и мог остаться в
+ * кэше этого пода. Брошенная копия — временный мусор в памяти движка, он
+ * живёт до TTL сессии и ничего не стоит: правда всё равно в `round_state`.
+ *
+ * @param steps сколько действий из `state.actions` переиграть.
+ */
+export async function replayRound(
+  engine: EngineClient,
+  gameId: string,
+  state: RoundStateV1,
+  steps: number,
+): Promise<Segment> {
+  const limit = Math.max(0, Math.min(steps, state.actions.length));
+  state.eid = newEngineRoundId();
+  let segment = toSegment(await start(engine, gameId, state, `${state.eid}-open`), state.action);
+  for (let i = 0; i < limit; i++) {
+    const logged = state.actions[i];
+    const response = await engine.step(
+      state.eid,
+      logged.a,
+      logged.p ? JSON.stringify(logged.p) : '',
+      `${state.eid}-replay-${i}`,
+    );
+    if (response.error) throw new Error(`engine Step (replay): ${response.error}`);
+    segment = toSegment(response, logged.a);
+  }
+  return segment;
 }
 
 /**
  * Гарантировать, что раунд открыт в движке и доигран ровно до нашего лога.
  * Горячий путь ничего не делает; холодный — поднимает раунд заново и
  * догоняет лог действий.
+ *
+ * Проверка строгая и без исключений: лог действий пишется в `round_state` в
+ * тот момент, когда сегмент сыгран (`advanceRound`), поэтому "движок впереди
+ * лога" не бывает нормой ни на одном пути. Восстановление сюда не ходит вовсе
+ * — оно переигрывает раунд заново через {@link replayRound}.
  */
 export async function ensureOpen(
   engine: EngineClient,
   gameId: string,
   state: RoundStateV1,
-  options: EnsureOpenOptions = {},
 ): Promise<void> {
   const known = await engine.getRound(state.eid);
   // `found` — а не `found && !round_complete` — потому что "движок знает этот
@@ -177,27 +194,11 @@ export async function ensureOpen(
       await replayFrom(engine, state, known.spins_played - 1);
       return;
     }
-    if (known.spins_played === expected + 1 && options.tolerateAheadByOne) {
-      // Движок уже сыграл РОВНО тот один сегмент, который вызывающий сейчас
-      // переиграет сам следующим Step — паттерн "тот же процесс, тот же
-      // раунд, попытка закрыть его на платформе не прошла, а сам сегмент в
-      // движке уже честно сыгран". Ничего доигрывать не нужно: запрос
-      // вызывающего использует тот же детерминированный `request_id`
-      // (функция только длины лога действий), и движок трактует его как
-      // идемпотентный повтор — отдаст закэшированный ответ того самого
-      // сегмента, а не сыграет заново. Разрешено только явным
-      // `tolerateAheadByOne` — без него это неотличимо от другого коннекта,
-      // сыгравшего чужое действие поверх того же раунда (см. комментарий у
-      // `EnsureOpenOptions`).
-      return;
-    }
-    // known.spins_played > expected (и либо разница больше единицы, либо
-    // вызывающий не попросил толерантности): движок сыграл больше сегментов,
-    // чем объясняет наш лог. Гадать, каким из лишних шагов доверять, и было
-    // бы тем самым молчаливым расхождением, которое эта функция должна ловить
-    // — единственный сценарий, где такое расхождение безопасно объяснимо
-    // (собственный отложенный Step того же вызывающего), обрабатывается выше
-    // явным разрешением, а не молчанием по умолчанию.
+    // known.spins_played > expected: движок сыграл больше сегментов, чем
+    // объясняет наш лог. Гадать, каким из лишних шагов доверять, и было бы
+    // тем самым молчаливым расхождением, которое эта функция должна ловить.
+    // Восстановление раунда в такую ситуацию не попадает — оно не переиспользует
+    // раунд из кэша движка, а переигрывает его заново (`replayRound`).
     throw new Error(
       `round ${state.eid} is ahead of round_state: engine has played ` +
         `${known.spins_played} segments, round_state accounts for only ${expected}`,
@@ -229,7 +230,12 @@ export async function stepRound(
  * Доиграть раунд до конца от лица игрока — нужен автозакрытию. Ветки выбираем
  * первым доступным действием: интерактив за игрока додумывать нечем.
  *
- * Каждый сыгранный сегмент дописываем в `state.actions` — как это делает
+ * Раунд поднимаем переигрыванием из `round_state` (а не из кэша движка):
+ * брошенный раунд почти всегда застаёт под с раундом, который на сегмент
+ * впереди подтверждённого курсора, и доверять этому кэшу нечему — зато лог
+ * действий описывает ровно то, что реально было сыграно.
+ *
+ * Каждый досыгранный сегмент дописываем в `state.actions` — как это делает
  * любой другой вызывающий `stepRound`. Без этого `request_id` следующего
  * шага (`${eid}-${state.actions.length}`) не меняется между итерациями, а
  * движок трактует повтор `request_id` как идемпотентный ретрай и отдаёт
@@ -241,20 +247,26 @@ export async function playToEnd(
   gameId: string,
   state: RoundStateV1,
 ): Promise<number> {
-  await ensureOpen(engine, gameId, state);
-  let known = await engine.getRound(state.eid);
-  let total = known.total_win;
+  let segment = await replayRound(engine, gameId, state, state.actions.length);
+  let total = segment.totalWinX;
+  state.totalWinX = total;
   const maxSteps = 1000;
   for (let steps = 0; steps < maxSteps; steps++) {
-    if (!known.found || known.round_complete) return total;
-    const action = known.next_actions[0];
-    const segment = await stepRound(engine, state, action);
+    if (segment.isFinal) {
+      // Раунд доигран целиком — подтверждать в нём больше нечего.
+      state.cursor = 1 + state.actions.length;
+      return total;
+    }
+    const action = segment.nextActions[0];
+    if (!action) {
+      throw new Error(
+        `playToEnd(${state.eid}): сегмент не финальный, но продолжать нечем`,
+      );
+    }
+    segment = await stepRound(engine, state, action);
     state.actions.push({ a: action });
-    state.cursor += 1;
     total = segment.totalWinX;
     state.totalWinX = total;
-    if (segment.isFinal) return total;
-    known = await engine.getRound(state.eid);
   }
   // Exhausting the guard means the round genuinely never reached
   // round_complete — a caller that fed this into auto-close would otherwise
