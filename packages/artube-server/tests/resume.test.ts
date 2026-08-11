@@ -3,7 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { startEngine, type EngineClient } from '../src/engine';
 import { resumeRound, autocloseRound } from '../src/round/resume';
-import { decodeRoundState, encodeRoundState, newEngineRoundId, type RoundStateV1 } from '../src/round/roundState';
+import { openEntry, stepRound } from '../src/round/engineRound';
+import {
+  decodeRoundState, encodeRoundState, newEngineRoundId, newSeed, type RoundStateV1,
+} from '../src/round/roundState';
 import type { RoundDeps } from '../src/round/orchestrator';
 import type { SessionContext } from '../src/session/types';
 import type { LastRound } from '../src/games-api/types';
@@ -113,6 +116,44 @@ describe('восстановление раунда', () => {
     expect(closed.win_multiplier).toBe(2); // накопленное из round_state, не ноль
     expect(closed.status).toBe('completed');
     expect(res!.round).toBeNull();
+  });
+
+  it('движок в этом же процессе уже сыграл финальный сегмент — resumeRound идёт по нему идемпотентно, а не бросает рассинхрон', async () => {
+    // Ставим раунд туда, где его застаёт advanceRound перед CloseRound:
+    // entry + 2 подтверждённых free_spin сыграны и в движке, и в логе; третий
+    // (финальный) free_spin УЖЕ сыгран в движке (как это делает advanceRound
+    // до вызова CloseRound), но лог, который видела платформа, ещё не знает о
+    // нём — именно так выглядит "CloseRound не прошёл" изнутри одного
+    // процесса, и ровно это чинит InvalidRoundOperation-восстановление.
+    const seed = newSeed();
+    const eid = newEngineRoundId();
+    const hot: RoundStateV1 = {
+      v: 1, seed, eid, script: '', action: 'spin', betIndex: 2, priceMultiplier: 1,
+      cursor: 0, totalWinX: 0, actions: [],
+    };
+    await openEntry(engine, 'feature-game', hot);
+    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' }); // confirmed segment 2
+    await stepRound(engine, hot, 'free_spin'); hot.actions.push({ a: 'free_spin' }); // confirmed segment 3
+    // Сегмент 4 (финальный) — сыгран в движке, но платформа о нём ещё не знает.
+    const ahead = await stepRound(engine, hot, 'free_spin');
+    expect(ahead.isFinal).toBe(true);
+
+    const api = fakeApi();
+    const last = lastRound({
+      eid, seed, script: hot.script, cursor: 3, totalWinX: 2,
+      actions: [{ a: 'free_spin' }, { a: 'free_spin' }],
+    });
+    const res = await resumeRound(deps(api), ctx, last);
+
+    expect(res).not.toBeNull();
+    expect(res!.round).toBeNull(); // раунд закрыт
+    expect(res!.recovered).toBe(false); // честный доигранный итог, не ScriptMismatch-аварийка
+    expect(api.closeRound).toHaveBeenCalledTimes(1);
+    // Настоящий итог из движка (идемпотентный кэш-хит того самого сегмента),
+    // а не устаревшее state.totalWinX из round_state (там было бы 2).
+    expect(api.closeRound.mock.calls[0][0].win_multiplier).toBe(ahead.totalWinX);
+    expect(res!.delivery.totalWinX).toBe(ahead.totalWinX);
+    expect(res!.delivery.creditPending).toBe(false);
   });
 
   it('автозакрытие доигрывает раунд и шлёт AutocloseRoundRequest', async () => {

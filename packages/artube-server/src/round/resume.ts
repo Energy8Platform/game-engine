@@ -75,7 +75,13 @@ export async function resumeRound(
 
   let segment: Segment;
   try {
-    await ensureOpen(deps.engine, deps.gameId, state);
+    // tolerateAheadByOne: только здесь безопасно, потому что действие, которым
+    // мы переиграем "лишний" шаг ниже (`state.actions.at(-1)?.a ?? state.action`),
+    // вычисляется из ТОГО ЖЕ лога, что определяет и `expected` — оно заведомо
+    // совпадает с тем, что уже привело движок в это состояние. `advanceRound`
+    // (обычный горячий путь) такого разрешения не передаёт и обязан бросать
+    // строгую ошибку — см. `EnsureOpenOptions`.
+    await ensureOpen(deps.engine, deps.gameId, state, { tolerateAheadByOne: true });
     const known = await deps.engine.getRound(state.eid);
     const expected = 1 + state.actions.length;
     if (known.round_complete && known.spins_played === expected) {

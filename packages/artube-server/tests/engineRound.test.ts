@@ -224,18 +224,19 @@ describe('раунд в движке', () => {
     expect(coldFinal.data).toEqual(hotFinal.data);
   });
 
-  it('ensureOpen допускает движок ровно на один шаг впереди лога — тот сегмент вызывающий переиграет сам', async () => {
+  it('ensureOpen с явным tolerateAheadByOne допускает движок ровно на один шаг впереди лога — тот сегмент вызывающий переиграет сам', async () => {
     // entry + 1 free_spin real, log accounts for only the entry (expected =
     // 1 + 0 = 1, spins_played = 2 = expected + 1). This is exactly the shape
     // an in-process InvalidRoundOperation recovery produces: advanceRound
     // already stepped the engine forward before its CloseRound/UpdateRound
     // call failed, so the engine is one segment ahead of the last state we
-    // can prove the platform saw.
+    // can prove the platform saw. Only `resumeRound` is allowed to pass this
+    // permission — the hot path (`advanceRound`) never does, see the next test.
     const state = stateFor();
     await openEntry(engine, 'feature-game', state);
     const already = await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []
 
-    await ensureOpen(engine, 'feature-game', state); // must not throw
+    await ensureOpen(engine, 'feature-game', state, { tolerateAheadByOne: true }); // must not throw
 
     // The caller's next Step reuses the same deterministic request_id
     // (`${eid}-${actions.length}` = `${eid}-0`, same as the step just taken)
@@ -245,6 +246,22 @@ describe('раунд в движке', () => {
     expect(replayed.winX).toBe(already.winX);
     expect(replayed.totalWinX).toBe(already.totalWinX);
     expect(replayed.data).toEqual(already.data);
+  });
+
+  it('ensureOpen без tolerateAheadByOne (по умолчанию) бросает даже на "ровно один шаг впереди" — только recovery вправе это разрешить', async () => {
+    // Тот же самый сценарий позиции (spins_played = expected + 1), что и в
+    // предыдущем тесте, но без явного разрешения — то есть ровно то, что
+    // делает горячий путь `advanceRound`. Без единственного писателя на
+    // раунд "на один шаг впереди" неотличимо от того, что ДРУГОЙ коннект
+    // сыграл иное действие поверх того же раунда — строгая проверка обязана
+    // остаться дефолтом, разрешение должно быть explicit на каждом вызове.
+    const state = stateFor();
+    await openEntry(engine, 'feature-game', state);
+    await stepRound(engine, state, 'free_spin'); // real spins_played is now 2, log stays []
+
+    await expect(ensureOpen(engine, 'feature-game', state)).rejects.toThrow(
+      /ahead of round_state/,
+    );
   });
 
   it('ensureOpen ловит рассинхрон, если движок сыграл больше, чем объясняет лог, и это не один идемпотентный шаг', async () => {
