@@ -119,12 +119,26 @@ client-side, in a `DemoWallet` (`src/demo.ts`):
 
 This coexists with the bridge's normal balance path
 (`if (result.balanceAfter !== null) this.balance = result.balanceAfter`)
-without the two fighting: whenever `demoWallet` is set, the wallet's own
-figure is applied **after** that line and unconditionally wins, regardless
-of whatever `balanceAfter` the wire happened to carry. That is deliberate —
-the wallet, not the connection-scoped backend stand-in, is what survives a
-mid-session WS reconnect, so it is the only balance worth trusting for the
-lifetime of the page.
+without the two fighting: whenever `demoWallet` is set, it is the single
+source of truth for every balance the game is shown — unconditionally, at
+every point that number reaches the game, not only the common one:
+
+- `INIT.balance` on the game's very first `INIT` (not the server's
+  `init.balance`, which may differ from `options.demoBalance`);
+- `PLAY_RESULT.balanceAfter` on every settled round (not the wire's
+  `result.balanceAfter`, which — despite the wire never sending a real
+  balance for a non-demo round in progress — *is* a real, non-null number
+  for a settled demo round, just not one the wallet agrees with);
+- the `BALANCE_UPDATE` a reconnect's fresh `init` triggers (not that init's
+  `init.balance`, which is the backend's per-connection stand-in reset back
+  to its starting value);
+- a `balanceChanged` event pushed unprompted by the backend over the wire
+  (ignored outright while `demoWallet` is set, rather than forwarded as a
+  `BALANCE_UPDATE`).
+
+That is deliberate — the wallet, not the connection-scoped backend
+stand-in, is what survives a mid-session WS reconnect, so it is the only
+balance worth trusting for the lifetime of the page.
 
 The demo wallet is purely a UX convenience — it is never sent to the
 backend or persisted anywhere. A page refresh loses it, same as any other

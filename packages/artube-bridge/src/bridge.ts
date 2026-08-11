@@ -98,6 +98,10 @@ export class ArtubeBridge {
     this.bridge = new Bridge({ devMode: options.devMode ?? true, debug: options.debug });
 
     this.client.on('balance', (p: { balance: number }) => {
+      // Демо-баланс ведёт кошелёк — серверный пуш здесь не источник правды
+      // (per-connection заглушка), и его число может не совпадать с тем,
+      // что видел игрок.
+      if (this.demoWallet) return;
       this.balance = p.balance;
       this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: p.balance });
     });
@@ -171,7 +175,9 @@ export class ArtubeBridge {
       };
       const payload: InitPayload = {
         currency: init.currency ?? 'FUN',
-        balance: init.balance,
+        // В демо `init.balance` — стартовое значение серверной заглушки, не
+        // обязательно совпадающее с тем, что видит кошелёк (см. `options.demoBalance`).
+        balance: this.demoWallet ? this.demoWallet.balance : init.balance,
         config,
         session: resumeSnapshot?.session ?? null,
         lang: this.lang,
@@ -254,10 +260,16 @@ export class ArtubeBridge {
    * `CasinoGameSDK` слушает постоянно) и обновляем курсор/снимок раунда, чтобы
    * следующий `getState()`/ack от игры адресовался правильному состоянию —
    * но НЕ пересылаем `INIT` повторно, которую игра не ждёт после старта.
+   *
+   * В демо `init.balance` — заново созданная на сервере per-connection
+   * заглушка (см. `artube-server`'s `createDemoApi`), обнулённая до
+   * стартового значения на каждом новом соединении. Кошелёк реконнект
+   * переживает, эта заглушка — нет, поэтому в демо баланс остаётся
+   * кошельковым: платформенный `init.balance` сюда не подставляем.
    */
   private onReconnectInit(init: ServerInit): void {
     this.init = init;
-    this.balance = init.balance;
+    this.balance = this.demoWallet ? this.demoWallet.balance : init.balance;
     if (!this.initSent) return;
 
     this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance });
@@ -282,7 +294,10 @@ export class ArtubeBridge {
     return {
       roundId: result.roundId,
       action: result.action,
-      balanceAfter: result.balanceAfter ?? this.balance,
+      // В демо кошелёк — единственный источник правды: серверный
+      // `balanceAfter` в демо всегда реален (per-connection заглушка его
+      // считает), но не переживает реконнект и не то, что видел игрок.
+      balanceAfter: this.demoWallet ? this.demoWallet.balance : (result.balanceAfter ?? this.balance),
       totalWin: result.totalWinX * result.betAmount,
       currency: this.init?.currency ?? 'FUN',
       gameId: this.gameId,

@@ -243,9 +243,16 @@ describe('ArtubeBridge', () => {
     sdk.destroy();
   });
 
-  it('в демо баланс ведёт клиент', async () => {
+  it('в демо баланс ведёт клиент, даже когда сервер шлёт свой (нереальный для игрока) balanceAfter', async () => {
     backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null });
-    backend.play.mockResolvedValue(result({ balanceAfter: null, winX: 3, totalWinX: 3, betAmount: 1 }));
+    // Реалистичная форма: `artube-server`'s `createDemoApi` (see
+    // `src/session/demo.ts`) settles a demo round with a real, non-null
+    // `balance` — it's a per-connection stand-in seeded from the server's
+    // own `startingDemoBalance` (1000 by default), unrelated to whatever
+    // `demoBalance` this bridge instance was configured with. 1002 here
+    // stands in for that server-side number to prove the wallet, not the
+    // wire value, wins.
+    backend.play.mockResolvedValue(result({ balanceAfter: 1002, winX: 3, totalWinX: 3, betAmount: 1 }));
     bridge.destroy();
     installWindow();
     sent = [];
@@ -260,5 +267,89 @@ describe('ArtubeBridge', () => {
     await flush();
     const play = sent.find((m) => m.type === 'PLAY_RESULT');
     expect(play!.payload.balanceAfter).toBe(52); // 50 − 1 ставка + 3 выигрыш
+    expect(play!.payload.balanceAfter).not.toBe(1002); // не серверная заглушка
+  });
+
+  it('в демо стартовый INIT.balance берётся из кошелька, а не из серверной заглушки', async () => {
+    backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null, balance: 1000 });
+    bridge.destroy();
+    installWindow();
+    sent = [];
+    const { MemoryChannel } = await import('@energy8platform/game-sdk');
+    channel = MemoryChannel.getGlobal();
+    channel.onGuest((m: any) => sent.push({ type: m.type, payload: m.payload }));
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game', demoBalance: 50 });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    const init = sent.find((m) => m.type === 'INIT');
+    expect(init!.payload.balance).toBe(50); // demoBalance, не серверные 1000
+  });
+
+  it('в демо реконнект не подмешивает баланс серверной per-connection заглушки', async () => {
+    backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null, balance: 1000 });
+    backend.play.mockResolvedValue(result({ balanceAfter: 900, winX: 3, totalWinX: 3, betAmount: 1 }));
+    bridge.destroy();
+    installWindow();
+    sent = [];
+    const { MemoryChannel } = await import('@energy8platform/game-sdk');
+    channel = MemoryChannel.getGlobal();
+    channel.onGuest((m: any) => sent.push({ type: m.type, payload: m.payload }));
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game', demoBalance: 50 });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush(); // wallet is now 52 (50 − 1 + 3)
+    sent = [];
+
+    // Simulate a reconnect: the server hands back a brand-new per-connection
+    // demo stand-in, reset to its own starting balance — the exact scenario
+    // `createDemoApi` produces on every new WS connection.
+    const reconnectInit = backend.on.mock.calls
+      .filter(([event]: [string]) => event === 'init')
+      .pop()?.[1];
+    expect(reconnectInit).toBeDefined();
+    reconnectInit({ ...INIT, demo: true, currency: null, balance: 1000 });
+    await flush();
+
+    const balanceUpdate = sent.find((m) => m.type === 'BALANCE_UPDATE');
+    expect(balanceUpdate!.payload.balance).toBe(52); // кошелёк, не сброшенные 1000
+
+    channel.sendToHost('GET_BALANCE', {});
+    await flush();
+    const getBalance = sent.filter((m) => m.type === 'BALANCE_UPDATE').pop();
+    expect(getBalance!.payload.balance).toBe(52);
+  });
+
+  it('в демо серверный push balance (balanceChanged) игнорируется', async () => {
+    backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null, balance: 1000 });
+    backend.play.mockResolvedValue(result({ balanceAfter: 900, winX: 3, totalWinX: 3, betAmount: 1 }));
+    bridge.destroy();
+    installWindow();
+    sent = [];
+    const { MemoryChannel } = await import('@energy8platform/game-sdk');
+    channel = MemoryChannel.getGlobal();
+    channel.onGuest((m: any) => sent.push({ type: m.type, payload: m.payload }));
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game', demoBalance: 50 });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush(); // wallet is now 52
+    sent = [];
+
+    const balanceCb = backend.on.mock.calls
+      .filter(([event]: [string]) => event === 'balance')
+      .pop()?.[1];
+    expect(balanceCb).toBeDefined();
+    balanceCb({ balance: 12345, reason: 'external adjustment' });
+    await flush();
+
+    expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
+    channel.sendToHost('GET_BALANCE', {});
+    await flush();
+    const getBalance = sent.find((m) => m.type === 'BALANCE_UPDATE');
+    expect(getBalance!.payload.balance).toBe(52);
   });
 });
