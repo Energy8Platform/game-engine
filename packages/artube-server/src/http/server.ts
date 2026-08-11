@@ -28,8 +28,17 @@ export class ArtubeServer {
   private engine: EngineClient | null = null;
   private actualPort = 0;
   private closing = false;
-  /** Живые WS-соединения этого пода — `wss.close()` сам их не закрывает. */
-  private readonly clients = new Set<WebSocket>();
+  /**
+   * Живые WS-соединения этого пода, по одному на сессию — `wss.close()` сам
+   * их не закрывает, а второй коннект той же сессии вытесняет первый.
+   *
+   * Это не состояние раунда, а реестр живых соединений — ровно то же, чем был
+   * `Set<WebSocket>` до этого. Ключ по `sessionId` схлопывает "две вкладки" в
+   * "реконнект": один писатель на сессию в рамках пода, а поверх подов
+   * настоящей защитой денег остаётся `round_version` платформы (мьютекс в
+   * процессе обещал бы гарантию, которую не может дать между подами).
+   */
+  private readonly clients = new Map<string, WebSocket>();
 
   constructor(private readonly config: ArtubeServerConfig) {}
 
@@ -104,8 +113,21 @@ export class ArtubeServer {
         // а этот покрывает окно до него и путь без sessionId.
         ws.on('error', () => {});
         if (!sessionId) return ws.close(1008, 'sessionId is required');
-        this.clients.add(ws);
-        ws.on('close', () => this.clients.delete(ws));
+        // Вторая вкладка (или реконнект, чей прежний сокет ещё жив) — это по
+        // сути реконнект той же сессии: старое соединение получает честное
+        // `session_closed` и закрывается, новое становится единственным.
+        // Иначе два соединения одной сессии независимо двигали бы один раунд.
+        const previous = this.clients.get(sessionId);
+        if (previous && previous !== ws) {
+          log.info('session superseded by a new connection', { session_id: sessionId });
+          closeSocket(previous, 'superseded by a new connection');
+        }
+        this.clients.set(sessionId, ws);
+        // Удаляем только своё: `close` вытесненного сокета приходит уже после
+        // того, как в реестре лежит новый, и безусловный delete снёс бы его.
+        ws.on('close', () => {
+          if (this.clients.get(sessionId) === ws) this.clients.delete(sessionId);
+        });
         void handleConnection(ws, sessionId, {
           api: this.api!,
           engine: this.engine!,
@@ -138,7 +160,7 @@ export class ArtubeServer {
   }
 
   private async closeClients(): Promise<void> {
-    const sockets = [...this.clients];
+    const sockets = [...this.clients.values()];
     if (sockets.length === 0) return;
 
     const allClosed = Promise.all(
@@ -151,17 +173,7 @@ export class ArtubeServer {
       ),
     );
 
-    for (const ws of sockets) {
-      if (ws.readyState !== WebSocket.OPEN) continue;
-      try {
-        const msg: ServerMessage = { t: 'session_closed', reason: 'server shutting down' };
-        ws.send(JSON.stringify(msg));
-      } catch {
-        // Сокет мог начать закрываться между чтением readyState и отправкой —
-        // ниже мы всё равно закроем/добьём его, сообщение тут необязательно.
-      }
-      ws.close(1001, 'server shutting down');
-    }
+    for (const ws of sockets) closeSocket(ws, 'server shutting down', 1001);
 
     await Promise.race([
       allClosed,
@@ -174,6 +186,20 @@ export class ArtubeServer {
       if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
     }
   }
+}
+
+/** Честно попрощаться с игроком и закрыть сокет. */
+function closeSocket(ws: WebSocket, reason: string, code = 1000): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    try {
+      const msg: ServerMessage = { t: 'session_closed', reason };
+      ws.send(JSON.stringify(msg));
+    } catch {
+      // Сокет мог начать закрываться между чтением readyState и отправкой —
+      // вызывающий всё равно закроет/добьёт его, сообщение тут необязательно.
+    }
+  }
+  ws.close(code, reason);
 }
 
 function respond(res: import('node:http').ServerResponse, status: number, body: unknown): void {

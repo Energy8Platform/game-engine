@@ -33,7 +33,10 @@ export interface FakePlatform {
   /** Мутируемо: тест может укоротить список ставок посреди раунда. */
   allowedBets: number[];
   currency: string | null;
-  round: StoredRound | null;
+  /** Раунд конкретной сессии — раунды у платформы всегда пер-сессионные. */
+  roundOf(sessionId: string): StoredRound | null;
+  /** Последний тронутый раунд — удобство для тестов с одной сессией. */
+  readonly round: StoredRound | null;
   /** Сколько запросов такого типа пришло от сервера. */
   countOf(type: string): number;
   received(type: string): any[];
@@ -88,6 +91,9 @@ export async function startFakePlatform(
 ): Promise<FakePlatform> {
   let socket: WebSocket | null = null;
   let rounds = 0;
+  /** Раунды по сессиям: у платформы нет одного глобального раунда. */
+  const bySession = new Map<string, StoredRound>();
+  let lastTouched: string | null = null;
 
   const platform: FakePlatform = {
     api: null as unknown as FakeGamesApi,
@@ -95,7 +101,10 @@ export async function startFakePlatform(
     balance: opts.balance ?? 100,
     allowedBets: opts.allowedBets ?? [1],
     currency: opts.currency === undefined ? 'USD' : opts.currency,
-    round: null,
+    roundOf: (sessionId) => bySession.get(sessionId) ?? null,
+    get round() {
+      return lastTouched ? (bySession.get(lastTouched) ?? null) : null;
+    },
     countOf: (type) => platform.api.received.filter((e) => e.type === type).length,
     received: (type) => platform.api.received.filter((e) => e.type === type),
     emitEvent(type, payload) {
@@ -126,6 +135,13 @@ export async function startFakePlatform(
       if (opts.intercept?.(env, { reply, fail, platform })) return;
 
       const bet = (index: number) => platform.allowedBets[index] ?? 0;
+      const session: string = env.payload?.session_id;
+      const openRound = () => bySession.get(session) ?? null;
+      const store = (round: StoredRound) => {
+        bySession.set(session, round);
+        lastTouched = session;
+        return round;
+      };
 
       switch (env.type) {
         case 'SessionInfoRequest':
@@ -142,14 +158,14 @@ export async function startFakePlatform(
               rtp_settings: { is_visible: false },
               locales: ['EN'],
             },
-            last_round: platform.round,
+            last_round: openRound(),
           });
 
         case 'PlayRoundRequest': {
           const p = env.payload;
           platform.balance +=
             (p.win_multiplier - p.price_multiplier) * bet(p.bet_index);
-          platform.round = {
+          const played = store({
             round_id: `round-${++rounds}`,
             round_version: 0,
             round_state: p.round_state,
@@ -161,9 +177,9 @@ export async function startFakePlatform(
             bet_index: p.bet_index,
             price_multiplier: p.price_multiplier,
             is_platform_max_win_reached: false,
-          };
+          });
           return reply('PlayRoundResponse', {
-            round_id: platform.round.round_id,
+            round_id: played.round_id,
             balance: platform.balance,
             win: p.win_multiplier * bet(p.bet_index),
             is_platform_max_win_reached: false,
@@ -172,11 +188,12 @@ export async function startFakePlatform(
 
         case 'OpenRoundRequest': {
           const p = env.payload;
-          if (platform.round && !platform.round.finished_at) {
+          const previous = openRound();
+          if (previous && !previous.finished_at) {
             return fail('InvalidRoundOperation', 'Round is already opened.');
           }
           platform.balance -= p.price_multiplier * bet(p.bet_index);
-          platform.round = {
+          const opened = store({
             round_id: `round-${++rounds}`,
             round_version: 0,
             round_state: p.round_state,
@@ -188,17 +205,17 @@ export async function startFakePlatform(
             bet_index: p.bet_index,
             price_multiplier: p.price_multiplier,
             is_platform_max_win_reached: false,
-          };
+          });
           return reply('OpenRoundResponse', {
             round_version: 0,
-            round_id: platform.round.round_id,
+            round_id: opened.round_id,
             balance: platform.balance,
           });
         }
 
         case 'UpdateRoundStateRequest': {
           const p = env.payload;
-          const round = platform.round;
+          const round = openRound();
           if (!round || round.round_id !== p.round_id || round.finished_at) {
             return fail('InvalidRoundOperation', 'Round is not open.');
           }
@@ -211,7 +228,7 @@ export async function startFakePlatform(
         case 'CloseRoundRequest':
         case 'AutocloseRoundRequest': {
           const p = env.payload;
-          const round = platform.round;
+          const round = openRound();
           // Дока: ответ на AutocloseRoundRequest приходит типом CloseRoundResponse.
           const responseType = 'CloseRoundResponse';
           if (!round || round.round_id !== p.round_id || round.finished_at) {
