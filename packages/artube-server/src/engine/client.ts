@@ -38,6 +38,20 @@ export interface StartRoundArgs {
   requestId: string;
 }
 
+export interface RoundStateResponse {
+  found: boolean;
+  game_id: string;
+  script_sha256: string;
+  total_win: number;
+  spins_played: number;
+  spins_remaining: number;
+  next_actions: string[];
+  round_complete: boolean;
+  vars_json: string;
+  error: string;
+  bet: number;
+}
+
 export class EngineClient {
   constructor(
     private readonly grpc: any,
@@ -91,6 +105,11 @@ export class EngineClient {
       params_json: paramsJson,
       request_id: requestId,
     });
+  }
+
+  /** Жив ли раунд в кэше движка. `found: false` — нужен холодный подъём. */
+  getRound(roundId: string): Promise<RoundStateResponse> {
+    return this.call<RoundStateResponse>('GetRound', { round_id: roundId });
   }
 
   close(): void {
