@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { startEngine, type EngineClient } from '../src/engine';
 import { resumeRound, autocloseRound } from '../src/round/resume';
-import { encodeRoundState, newEngineRoundId, type RoundStateV1 } from '../src/round/roundState';
+import { decodeRoundState, encodeRoundState, newEngineRoundId, type RoundStateV1 } from '../src/round/roundState';
 import type { RoundDeps } from '../src/round/orchestrator';
 import type { SessionContext } from '../src/session/types';
 import type { LastRound } from '../src/games-api/types';
@@ -69,6 +69,28 @@ describe('восстановление раунда', () => {
     expect(res!.delivery.creditPending).toBe(true);
     expect(res!.round!.roundId).toBe('round-open');
     expect(res!.round!.roundVersion).toBe(1);
+  });
+
+  it('единственный неподтверждённый сегмент оказывается финальным — курсор и лог согласуются', async () => {
+    // cursor 3 — подтверждены spin и два фриспина; переигрываем третий (последний)
+    // фриспин заново. В отличие от cursor:4 движок ЕЩЁ не считает раунд
+    // завершённым до этого шага — сюда попадает не round_complete-ветка, а
+    // "переиграли — и это оказался финал", ветка с `cursor: nextState.cursor + 1`.
+    const api = fakeApi();
+    const res = await resumeRound(deps(api), ctx, lastRound({ cursor: 3 }));
+    expect(api.closeRound).toHaveBeenCalledTimes(1);
+    const sent = api.closeRound.mock.calls[0][0];
+    expect(sent.win_multiplier).toBe(3);
+    expect(res!.round).toBeNull();
+    expect(res!.recovered).toBe(false);
+    expect(res!.delivery.creditPending).toBe(false);
+    expect(res!.delivery.balanceAfter).toBe(150);
+    // Именно это должно упасть, если арифметику курсора когда-нибудь сломают:
+    // персистентный round_state обязан описывать все 3 сыгранных фриспина и
+    // курсор на единицу больше их числа (entry + 3 подтверждённых фриспина).
+    const persisted = decodeRoundState(sent.round_state);
+    expect(persisted.actions.length).toBe(3);
+    expect(persisted.cursor).toBe(4);
   });
 
   it('если оставался последний сегмент — раунд закрывается', async () => {
