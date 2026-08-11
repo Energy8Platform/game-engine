@@ -55,6 +55,8 @@ export class GamesApiClient {
   private reconnectAttempts = 0;
   private stopped = false;
   private ready = false;
+  /** Guards against `scheduleReconnect` being re-entered by a failed attempt's own close event. */
+  private reconnecting = false;
 
   constructor(protected readonly opts: GamesApiClientOptions) {}
 
@@ -112,7 +114,10 @@ export class GamesApiClient {
       // молча — поэтому готовность объявляем и по дедлайну.
       let settled = false;
       const finish = () => {
-        if (settled) return;
+        // `stopped` can flip true between Welcome/timeout firing and this
+        // running — e.g. GoAway arrived, or close() was called mid-handshake.
+        // Don't resurrect a connection that's already been told to stop.
+        if (settled || this.stopped) return;
         settled = true;
         clearTimeout(timer);
         this.ready = true;
@@ -137,18 +142,19 @@ export class GamesApiClient {
           return;
         }
         if (env.chan === 'control') {
-          if (env.type === 'Welcome') {
-            // Welcome can reach us before our own just-sent Hello has been
-            // read on the other end (same-process fake server in tests, or
-            // a fast platform edge in prod) — yield one tick so in-flight
-            // writes settle before we declare the connection ready.
-            setTimeout(finish, 0);
-            return;
-          }
+          if (env.type === 'Welcome') return finish();
           if (env.type === 'GoAway') {
+            // Settle this attempt as "done" right now so neither a pending
+            // hello-timeout nor a not-yet-processed Welcome can call finish()
+            // afterward and flip us back to ready/'connected'. Resolve (not
+            // reject) connect() ourselves — GoAway can arrive before Welcome
+            // or the deadline, and nothing else would ever settle it.
+            settled = true;
+            clearTimeout(timer);
             this.stopped = true;
             this.ready = false;
             this.emit('goAway', (env.payload as { reason?: string })?.reason ?? 'goaway');
+            resolve();
             return;
           }
         }
@@ -168,25 +174,44 @@ export class GamesApiClient {
         this.ready = false;
         this.onDisconnected('socket closed');
         this.emit('disconnected');
+        // A connection attempt can be dropped (e.g. the remote just resets
+        // the TCP connection) without 'error' ever firing, which would
+        // otherwise leave this attempt's promise settled forever and stall
+        // scheduleReconnect()'s loop on a `catch` that never runs.
+        if (!settled) {
+          settled = true;
+          reject(new Error('socket closed before the connection settled'));
+        }
         if (!this.stopped) void this.scheduleReconnect();
       });
     });
   }
 
   private async scheduleReconnect(): Promise<void> {
-    const max = this.opts.maxReconnectAttempts ?? 5;
-    const base = this.opts.baseReconnectDelayMs ?? 1000;
-    while (!this.stopped && this.reconnectAttempts < max) {
-      const delay = base * 2 ** this.reconnectAttempts;
-      this.reconnectAttempts += 1;
-      await new Promise((r) => setTimeout(r, delay));
-      if (this.stopped) return;
-      try {
-        await this.openSocket();
-        return;
-      } catch {
-        // следующая попытка с большей задержкой
+    // Every openSocket() attempt made *inside* this loop also has its own
+    // `close` handler, which — on failure — fires this same method again.
+    // Without this guard, each failed attempt spawns a sibling loop racing
+    // the same `reconnectAttempts` counter, stacking concurrent reconnect
+    // attempts instead of retrying serially.
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    try {
+      const max = this.opts.maxReconnectAttempts ?? 5;
+      const base = this.opts.baseReconnectDelayMs ?? 1000;
+      while (!this.stopped && this.reconnectAttempts < max) {
+        const delay = base * 2 ** this.reconnectAttempts;
+        this.reconnectAttempts += 1;
+        await new Promise((r) => setTimeout(r, delay));
+        if (this.stopped) return;
+        try {
+          await this.openSocket();
+          return;
+        } catch {
+          // следующая попытка с большей задержкой
+        }
       }
+    } finally {
+      this.reconnecting = false;
     }
   }
 }
