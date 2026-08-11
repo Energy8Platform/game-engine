@@ -62,6 +62,26 @@ export function resolvePriceMultiplier(
   return deps.costMultipliers[action] ?? 1;
 }
 
+/**
+ * Ставка раунда для показа игроку.
+ *
+ * Источник правды — сам раунд: `allowed_bets` платформа вправе поменять
+ * посреди раунда (и `ctx` перечитывается из свежего SessionInfo на каждом
+ * восстановлении), после чего индекс раунда в новом списке может ничего не
+ * значить или указывать на чужую сумму. Без этого `betAmount` уезжал бы
+ * наружу как `undefined`, `JSON.stringify` выбрасывал бы поле, а фронт
+ * считал бы `totalWinX * undefined` — NaN в балансе и в выигрыше.
+ *
+ * Резервные ветки нужны только для состояний, записанных сборкой без поля
+ * `bet`: сначала пробуем платформенный список, и лишь потом сдаёмся в ноль —
+ * показать ноль честнее, чем показать NaN.
+ */
+export function roundBetAmount(state: RoundStateV1, ctx: SessionContext): number {
+  if (Number.isFinite(state.bet)) return state.bet;
+  const fromSession = ctx.allowedBets[state.betIndex];
+  return Number.isFinite(fromSession) ? fromSession : 0;
+}
+
 export function toDelivery(
   segment: Segment,
   roundId: string,
@@ -107,6 +127,9 @@ export async function startRound(
     script: '',
     action: req.action,
     betIndex: req.betIndex,
+    // Фиксируем сумму ставки на всё время раунда: список allowed_bets
+    // платформа вправе поменять, пока раунд идёт.
+    bet: betAmount,
     priceMultiplier: resolvePriceMultiplier(deps, req.action, Boolean(ctx.frcId)),
     cursor: 0,
     totalWinX: 0,
@@ -228,7 +251,7 @@ export async function advanceRound(
   // без него холодный подъём воспроизведёт другой раунд.
   const logged = req.params ? { a: req.action, p: req.params } : { a: req.action };
   const state: RoundStateV1 = { ...round.state, actions: [...round.state.actions, logged] };
-  const betAmount = ctx.allowedBets[state.betIndex];
+  const betAmount = roundBetAmount(state, ctx);
 
   if (!segment.isFinal) {
     // Сегмент сыгран — платформа обязана узнать об этом СЕЙЧАС, а не на

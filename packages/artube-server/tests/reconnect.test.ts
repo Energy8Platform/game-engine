@@ -179,6 +179,40 @@ describe('обрыв посреди анимации сегмента', () => {
   }, 40_000);
 });
 
+describe('платформа укоротила allowed_bets посреди раунда', () => {
+  it('ставка раунда остаётся той, с которой он открыт, а не превращается в undefined', async () => {
+    const c = connect('sess-bets-changed');
+    await c.waitFor('init');
+    c.send({ t: 'play', id: 'p0', action: 'spin', betIndex: 1 }); // ставка 2
+    const spin = await c.waitFor('result');
+    expect(spin.betAmount).toBe(2);
+    c.send({ t: 'ack', roundId: spin.roundId, cursor: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Платформа убирает старшую ставку. Индекс 1 в новом списке не значит
+    // ничего — а раунд идёт и обязан считаться по своей ставке.
+    platform.allowedBets = [0.5];
+    await c.close();
+
+    // Реконнект перечитывает SessionInfo, то есть и `allowed_bets`.
+    const back = connect('sess-bets-changed');
+    const init = await back.waitFor('init');
+    expect(init.config.betLevels).toEqual([0.5]);
+    expect(init.resume.betAmount).toBe(2);
+
+    back.send({ t: 'ack', roundId: init.resume.roundId, cursor: init.resume.spinsPlayed });
+    await new Promise((r) => setTimeout(r, 50));
+    back.send({ t: 'play', id: 'r1', action: 'free_spin', betIndex: 1 });
+    const next = await back.waitFor('result');
+    // Поле обязано доехать до фронта: `undefined` JSON.stringify выбрасывает,
+    // и мост считает `totalWinX * undefined` — NaN в балансе и выигрыше.
+    expect(Object.prototype.hasOwnProperty.call(next, 'betAmount')).toBe(true);
+    expect(next.betAmount).toBe(2);
+    expect(Number.isFinite(next.totalWinX * next.betAmount)).toBe(true);
+    await back.close();
+  }, 40_000);
+});
+
 describe('раунд закрыли, пока игрок его доигрывал', () => {
   it('мидраундовое действие не превращается в новый раунд — игрок получает RoundAlreadySettled', async () => {
     // Раунд закрывает кто-то другой (автозакрытие, вторая вкладка, ретрай

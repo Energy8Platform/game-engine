@@ -9,7 +9,7 @@
 
 import { ROUND_STATE_VERSION, decodeRoundState, encodeRoundState, type RoundStateV1 } from './roundState.js';
 import { playToEnd, replayRound, stepRound, ScriptMismatchError, type Segment } from './engineRound.js';
-import { toDelivery, type ActiveRound, type RoundDeps } from './orchestrator.js';
+import { roundBetAmount, toDelivery, type ActiveRound, type RoundDeps } from './orchestrator.js';
 import type { SegmentDelivery, SessionContext } from '../session/types.js';
 import type { LastRound } from '../games-api/types.js';
 
@@ -83,7 +83,7 @@ export async function resumeRound(
   if (lastRound.finished_at) return null;
 
   const state = decodeRoundState(lastRound.round_state);
-  const betAmount = ctx.allowedBets[state.betIndex] ?? 0;
+  const betAmount = roundBetAmount(state, ctx);
   // Сегментов подтверждено, считая entry первым. Зажимаем сверху: курсор
   // впереди лога означал бы битое состояние, и играть по нему хуже, чем
   // отдать игроку последний воспроизводимый сегмент.
