@@ -6,7 +6,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { GamesApiClient } from '../games-api/client.js';
 import { startEngine, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
-import { handleAutocloseRequest } from './autoclose.js';
+import { createAutocloseHandler } from './autoclose.js';
 import { createLogger } from './log.js';
 import type { ServerMessage } from './wire.js';
 import type { ArtubeServerConfig } from '../config.js';
@@ -68,12 +68,12 @@ export class ArtubeServer {
     this.api.on('goAway', (reason: string) => log.warn('games api asked to go away', { reason }));
     // Брошенный раунд: события приходят на подовый коннект, не на конкретное
     // WS-соединение (того обычно уже нет) — подписка живёт здесь, один раз.
-    this.api.on('autocloseRequest', (event: AutocloseRequestEvent) => {
-      void handleAutocloseRequest(
-        { api: this.api!, engine: this.engine!, gameId: this.config.gameId, costMultipliers, log },
-        event,
-      );
+    // Обработчик создаём тоже один раз: он держит защёлку от параллельных
+    // проходов по одному раунду (дубль события = вторая денежная RPC).
+    const autoclose = createAutocloseHandler({
+      api: this.api, engine: this.engine, gameId: this.config.gameId, costMultipliers, log,
     });
+    this.api.on('autocloseRequest', (event: AutocloseRequestEvent) => void autoclose(event));
 
     this.http = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost');

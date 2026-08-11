@@ -7,9 +7,10 @@
 import { describe, it, expect } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { WebSocket } from 'ws';
 import { createArtubeServer, type ArtubeServer } from '../src/index';
 import { startFakeGamesApi, type FakeGamesApi } from './helpers/fakeGamesApi';
+import { startFakePlatform } from './helpers/fakePlatform';
+import { WebSocket } from 'ws';
 import { encodeRoundState, newEngineRoundId, newSeed, type RoundStateV1 } from '../src/round/roundState';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -53,6 +54,33 @@ function pushAutocloseEvent(api: FakeGamesApi, socket: WebSocket, sessionId: str
     timestamp: new Date().toISOString(),
     payload: { session_id: sessionId, round_id: roundId },
   });
+}
+
+/** Минимальный WS-клиент к нашему серверу. */
+class WsClient {
+  private readonly socket: WebSocket;
+  readonly messages: any[] = [];
+
+  constructor(url: string) {
+    this.socket = new WebSocket(url);
+    this.socket.on('message', (d) => this.messages.push(JSON.parse(d.toString())));
+  }
+
+  async waitFor(t: string): Promise<any> {
+    await waitUntil(() => this.messages.some((m) => m.t === t));
+    return this.messages.find((m) => m.t === t);
+  }
+
+  send(msg: unknown): void {
+    this.socket.send(JSON.stringify(msg));
+  }
+
+  close(): Promise<void> {
+    return new Promise((resolve) => {
+      this.socket.on('close', () => resolve());
+      this.socket.close();
+    });
+  }
 }
 
 describe('автозакрытие брошенного раунда (AutocloseRequestEvent)', () => {
@@ -101,6 +129,35 @@ describe('автозакрытие брошенного раунда (AutocloseR
 
     await server.close();
     await api.close();
+  }, 40_000);
+
+  it('дубль события не превращается во вторую денежную RPC', async () => {
+    // Копия события может прийти от кого угодно: ретрай платформы, реконнект
+    // подового коннекта, просто две отправки. `AutocloseRoundRequest` двигает
+    // деньги и повторяться не имеет права ни при каком раскладе.
+    const platform = await startFakePlatform({ allowedBets: [2] });
+    const server: ArtubeServer = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: platform.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await server.listen(0);
+
+    // Настоящий брошенный раунд: игрок открыл его и ушёл.
+    const client = new WsClient(`ws://127.0.0.1:${server.port}/api/ws?sessionId=sess-dup`);
+    await client.waitFor('init');
+    client.send({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 });
+    await client.waitFor('result');
+    await client.close();
+
+    const roundId = platform.roundOf('sess-dup')!.round_id;
+    platform.emitEvent('AutocloseRequestEvent', { session_id: 'sess-dup', round_id: roundId });
+    platform.emitEvent('AutocloseRequestEvent', { session_id: 'sess-dup', round_id: roundId });
+
+    await waitUntil(() => platform.roundOf('sess-dup')!.finished_at !== null);
+    await new Promise((r) => setTimeout(r, 300)); // дать второму проходу шанс успеть
+    expect(platform.countOf('AutocloseRoundRequest')).toBe(1);
+
+    await server.close();
+    await platform.close();
   }, 40_000);
 
   it('раунд уже завершён на платформе — AutocloseRoundRequest не отправляется', async () => {
