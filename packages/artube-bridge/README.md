@@ -47,23 +47,66 @@ adapter concept at all — it is purely a protocol translator between
 npm install @energy8platform/game-sdk @energy8platform/artube-bridge
 ```
 
-## Quick start: the three-platform entry point
+## Quick start: a game on `@energy8platform/game-engine`
 
-A game built against `@energy8platform/game-sdk` picks its host at runtime
-from the launch URL. Adding Artube alongside Energy8 (and optionally Stake)
-means one more branch in the same entry point — no other code changes:
+Games scaffolded with `npm create @energy8platform/slot` do **not** hand-roll
+a host-selection branch: `createSlotGame` owns host selection, and Artube is
+one option on it — the same shape as `stake: { adapter }`:
+
+```ts
+// src/main.ts
+createSlotGame({
+  model,
+  normalize,
+  scenes: [ … ],
+  // …
+  artube: {},          // ← the whole opt-in; no per-game adapter exists on Artube
+});
+```
+
+With `artube` present the host classifies the launch URL
+(`classifyArtubeLaunch`), **refuses to run** on a malformed one (see the
+security gate below), dynamically imports this package only on a real Artube
+launch, constructs `ArtubeBridge`, awaits `ready()`, and puts the SDK into
+in-process (`devMode`) mode so the game talks to the bridge over
+`MemoryChannel`. `ArtubeIntegration` also takes an optional `demoBalance`
+(starting virtual balance for demo sessions) and `apiBase` (local-dev
+override only — production is same-origin, see below).
+
+Pair it with the **Artube build target** (`BUILD_TARGET=artube`, i.e.
+`npm run dev:artube` / `npm run build:artube` in a scaffolded game): that
+build has no DevBridge compiled in, which is the structural half of the
+security gate below. `dev:artube` serves only the frontend — the game's
+backend runs as a second process
+(`artube-server --spin ./game.spin --sandbox --port 8080`), and the dev
+server proxies `/api` to it so the bridge's same-origin assumption holds in
+dev too.
+
+## Quick start: a game without `game-engine`
+
+A game that talks to `@energy8platform/game-sdk` directly picks its host in
+its own entry point. Classify first, refuse on `'blocked'`, and only then
+load the bridge:
 
 ```ts
 // src/main.ts
 import { CasinoGameSDK } from '@energy8platform/game-sdk';
-import { isArtubeLaunch } from '@energy8platform/artube-bridge/detect';
+import { classifyArtubeLaunch } from '@energy8platform/artube-bridge/detect';
 import { runGame } from './game';
 
-const isArtube = isArtubeLaunch(location.href); // ?sessionId=…
+const launch = classifyArtubeLaunch(location.href); // 'artube' | 'blocked' | 'offline'
+if (launch === 'blocked') {
+  // The URL claims a session but carries no id — do NOT fall back to an offline bridge.
+  throw new Error('Invalid game session. Relaunch the game from the lobby.');
+}
 
+const isArtube = launch === 'artube'; // ?sessionId=…
 if (isArtube) {
-  const { ArtubeBridge } = await import('@energy8platform/artube-bridge');
-  new ArtubeBridge({ devMode: true, gameId: 'sweet-bonanza' });
+  const bridge = new (await import('@energy8platform/artube-bridge')).ArtubeBridge({
+    devMode: true,
+    gameId: 'sweet-bonanza',
+  });
+  await bridge.ready();
 }
 
 const sdk = new CasinoGameSDK({ devMode: isArtube });
@@ -71,13 +114,36 @@ await sdk.ready();
 runGame(sdk);
 ```
 
-`isArtubeLaunch` lives in its own leaf module (`/detect`, no import of
-`ArtubeBridge` itself) specifically so a bundler can chunk it separately —
-Energy8-only builds never pull in the bridge's WebSocket client.
+`classifyArtubeLaunch` / `isArtubeLaunch` live in their own leaf module
+(`/detect`, no import of `ArtubeBridge` itself) specifically so a bundler can
+chunk it separately — Energy8-only builds never pull in the bridge's
+WebSocket client.
 
 `ArtubeBridge` runs **in-process** with the game, exactly like `StakeBridge`:
 no extra iframe, communication happens over the same in-memory channel
 `CasinoGameSDK` already uses for `devMode`.
+
+## Security gate: a launch that claims a session must carry one
+
+`classifyArtubeLaunch(url)` returns:
+
+| kind | when | what the host must do |
+|---|---|---|
+| `'artube'` | `sessionId` present and non-blank | load the bridge |
+| `'blocked'` | `sessionId` present but empty / whitespace (`?sessionId=`) | **refuse to run** |
+| `'offline'` | no `sessionId` at all | genuine dev / non-Artube launch |
+
+`'blocked'` exists for the same reason as `classifyStakeLaunch`'s: a launch
+whose session marker was stripped fails the "is this Artube?" check and
+would otherwise **silently fall through to the offline/dev bridge, letting
+the player spin for free**. Artube's own attack surface is smaller than
+Stake's — `apiBase` comes from `url.origin`, so no `rgs_url`-style
+open-redirect is possible — but the fall-through is identical.
+
+What URL classification alone cannot catch: a `sessionId` removed
+*entirely* is indistinguishable from a dev launch. That half is structural —
+the Artube build target compiles no DevBridge into the bundle, so there is
+nothing to fall through to.
 
 ## `new ArtubeBridge(options)`
 
