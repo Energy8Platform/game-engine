@@ -75,6 +75,8 @@ export class ArtubeClient {
   private hasReceivedInit = false;
   private lastUnseenInit: ServerInit | null = null;
   private reconnecting = false;
+  /** Пришёл ли на текущем соединении кадр `session_closed` (см. {@link onMessage}). */
+  private sessionEnded = false;
 
   constructor(
     private readonly url: string,
@@ -114,13 +116,14 @@ export class ArtubeClient {
           reject(err);
         },
       };
+      this.sessionEnded = false;
       const socket = new WebSocket(this.url);
       this.socket = socket;
       socket.onmessage = (event) => this.onMessage(String(event.data));
       socket.onerror = () => {
         this.initSettle?.reject(new ArtubeBackendError('ConnectionFailed', 'ws error'));
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         this.failPending('connection lost');
         this.emit('connection', { connected: false });
         // Init can fail server-side (e.g. an unknown/expired sessionId) or
@@ -129,6 +132,11 @@ export class ArtubeClient {
         this.initSettle?.reject(
           new ArtubeBackendError('ConnectionFailed', 'connection closed before init'),
         );
+        // A closed session is terminal — see `sessionEnded` in onMessage.
+        // 1001 "going away" is the one exception: that's the pod shutting
+        // down (a rolling deploy), not this player's session ending, so the
+        // ordinary reconnect applies and lands on another pod.
+        if (this.sessionEnded && event?.code !== 1001) this.closed = true;
         if (!this.closed) this.scheduleReconnect();
       };
       socket.onopen = () => this.emit('connection', { connected: true });
@@ -175,7 +183,20 @@ export class ArtubeClient {
       return;
     }
     if (msg.t === 'balance') return this.emit('balance', msg);
-    if (msg.t === 'session_closed') return this.emit('sessionClosed', msg);
+    if (msg.t === 'session_closed') {
+      // Терминально: сессии больше нет. Кадр приходит из двух мест, и оба
+      // означают "это соединение не должно вернуться":
+      //  - платформа закрыла сессию (`SessionClosedEvent`);
+      //  - сервер вытеснил нас новым соединением той же сессии. У Artube на
+      //    сессию живёт одно соединение; переподключиться — значит вытеснить
+      //    того, кто вытеснил нас, и получить бесконечную войну двух вкладок
+      //    (каждый успешный коннект сбрасывает счётчик попыток, так что
+      //    потолок реконнектов её не останавливает). Стоять должен тот, кого
+      //    вытеснили.
+      // Игру об этом всё равно уведомляем — подписчик `sessionClosed` жив.
+      this.sessionEnded = true;
+      return this.emit('sessionClosed', msg);
+    }
     if (msg.t === 'result') {
       const waiter = msg.id ? this.pending.get(msg.id) : undefined;
       if (waiter) {

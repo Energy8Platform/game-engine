@@ -296,6 +296,54 @@ describe('ArtubeClient', () => {
     expect(connections).toBe(afterFirstWindow);
   });
 
+  /** Сервер, который прощается кадром `session_closed` и закрывает сокет. */
+  async function startClosingBackend(code: number, reason: string) {
+    let connections = 0;
+    wss = new WebSocketServer({ port: 0 });
+    wss.on('connection', (socket) => {
+      connections += 1;
+      socket.send(JSON.stringify(INIT));
+      if (connections > 1) return; // реконнект живёт спокойно
+      setTimeout(() => {
+        socket.send(JSON.stringify({ t: 'session_closed', reason }));
+        socket.close(code, reason);
+      }, 20);
+    });
+    await new Promise<void>((r) => wss.on('listening', () => r()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}/api/ws?sessionId=s1`;
+    return { url, connections: () => connections };
+  }
+
+  it('session_closed терминален: вытесненная вкладка не переподключается', async () => {
+    // Вытеснение приходит от сервера ровно так (см. artube-server's
+    // `closeSocket`). Переподключиться — значит вытеснить того, кто вытеснил
+    // нас: две вкладки одной сессии будут вытеснять друг друга бесконечно,
+    // потолок попыток не спасает (успешный коннект сбрасывает счётчик).
+    const { url, connections } = await startClosingBackend(1000, 'superseded by a new connection');
+    client = new ArtubeClient(url, 20);
+    const reasons: string[] = [];
+    client.on('sessionClosed', (p: { reason: string }) => reasons.push(p.reason));
+    await client.connect();
+
+    await new Promise((r) => setTimeout(r, 400)); // бэкофф давно бы истёк
+    // Игра всё равно узнала, что случилось...
+    expect(reasons).toEqual(['superseded by a new connection']);
+    // ...но нового коннекта не было.
+    expect(connections()).toBe(1);
+  });
+
+  it('уходящий под (close 1001) — не конец сессии: клиент возвращается', async () => {
+    // Обратная сторона: терминален не всякий `session_closed`. При выключении
+    // пода (`ws.close(1001)`, «going away») сессия жива, и реконнект должен
+    // привести игрока на другой под, а не оставить его с мёртвой вкладкой.
+    const { url, connections } = await startClosingBackend(1001, 'server shutting down');
+    client = new ArtubeClient(url, 20);
+    await client.connect();
+
+    await new Promise((r) => setTimeout(r, 400));
+    expect(connections()).toBeGreaterThan(1);
+  });
+
   it('битый JSON-фрейм не роняет обработчик сообщений', async () => {
     const url = await startBackend((msg, socket) => {
       if (msg.t !== 'play') return;
