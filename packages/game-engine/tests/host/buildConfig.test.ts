@@ -31,9 +31,52 @@ describe('buildAppConfig', () => {
     );
     expect(c.designWidth).toBe(1080);
     expect(c.designHeight).toBe(1920);
-    expect(c.loading).toBe(loading);
+    expect(c.loading).toMatchObject(loading);
     expect(c.audio).toBe(audio);
     expect(c.pixi).toBe(pixi);
+  });
+  /**
+   * `loading` is MERGED with the host's defaults, not replaced by the game's object.
+   *
+   * Replacing was the bug: the engine's own default for `tapToStart` is `true` (for direct
+   * GameApplication users), the host's is `false`, so a game that set any single loading option
+   * silently re-armed tap-to-start. The Artube target made it visible — a game supplying only
+   * `externalOverlay` inside its Artube branch waited for a tap there and nowhere else, from one
+   * source line. This is exactly the kind of thing that regresses silently, hence the suite.
+   */
+  describe('loading defaults survive a partial override', () => {
+    const loadingOf = (loading?: CreateSlotGameOptions['loading']) =>
+      buildAppConfig(minimal({ loading }), false).loading!;
+
+    it('defaults to no tap gate and a 600ms minimum when the game says nothing', () => {
+      expect(loadingOf()).toEqual({ tapToStart: false, minDisplayTime: 600 });
+    });
+
+    it('keeps tapToStart:false when the game overrides only minDisplayTime', () => {
+      expect(loadingOf({ minDisplayTime: 900 })).toEqual({
+        tapToStart: false,
+        minDisplayTime: 900,
+      });
+    });
+
+    it('keeps tapToStart:false when the game supplies only an external overlay', () => {
+      // The scaffolded Artube branch, verbatim: `{ loading: { externalOverlay: artubeLoader } }`.
+      const overlay = { showLoader() {}, updateProgress() {}, hideLoader() {} };
+      const c = loadingOf({ externalOverlay: overlay });
+      expect(c.tapToStart).toBe(false);
+      expect(c.minDisplayTime).toBe(600);
+      expect(c.externalOverlay).toBe(overlay);
+    });
+
+    it('still lets a game ask for a tap explicitly', () => {
+      expect(loadingOf({ tapToStart: true }).tapToStart).toBe(true);
+    });
+
+    it('does not mutate the game’s own object', () => {
+      const loading = { minDisplayTime: 900 };
+      buildAppConfig(minimal({ loading }), false);
+      expect(loading).toEqual({ minDisplayTime: 900 });
+    });
   });
   it('computes sdk.devMode across all isStakeNow/dev combinations', () => {
     const dm = (isStakeNow: boolean, dev?: boolean) =>
