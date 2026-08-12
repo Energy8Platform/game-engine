@@ -29,6 +29,17 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   let shell: SlotGameHandle['shell'] = null;
 
   const fatal = (message: string) => {
+    // Take down a game-supplied loading overlay (`loading.externalOverlay`) first. Several fatal
+    // paths below — a refused Artube launch, a bridge that cannot connect — happen BEFORE
+    // `GameApplication.start()`, so its own error path never runs and nothing else would ever
+    // dismiss the overlay. Artube's is already on screen from index.html at z-index 9999: leaving
+    // it up means the player stares at a frozen loading screen, and a custom `onFatalError`
+    // renderer would be hidden underneath it entirely. Idempotent and cheap after boot.
+    try {
+      opts.loading?.externalOverlay?.hideLoader();
+    } catch {
+      /* the overlay is the game's; a throw here must not swallow the error we came to report */
+    }
     if (opts.onFatalError) return opts.onFatalError(message);
     // Once the shell is up, use ITS branded modal (consistent chrome, social vocabulary, fit
     // scaling) rather than the bare DOM fallback. Errors thrown before the shell boots (asset

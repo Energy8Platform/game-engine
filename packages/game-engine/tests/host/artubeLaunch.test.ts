@@ -131,6 +131,29 @@ describe('createSlotGame: Artube host selection', () => {
     expect(constructed[0].sdk?.devMode).toBe(false); // plain offline boot, opts.dev unset
   });
 
+  it('takes the game-supplied loading overlay down when it refuses the launch', async () => {
+    // The refusal happens BEFORE GameApplication exists, so the engine's own boot-error teardown
+    // never runs. Artube's loader is already on screen from index.html (z-index 9999): if nothing
+    // dismissed it here, the player would be left on a frozen loading screen with the explanation
+    // stuck behind it — and a custom `onFatalError` renderer hidden completely.
+    launchAt('https://test-slot.artube-888.live/?sessionId=&lang=ru');
+    const { createSlotGame } = await import('@/host/createSlotGame');
+
+    const calls: string[] = [];
+    const externalOverlay = {
+      showLoader: () => void calls.push('show'),
+      updateProgress: () => void calls.push('progress'),
+      hideLoader: () => void calls.push('hide'),
+    };
+
+    await expect(
+      createSlotGame(opts({ artube: { load }, loading: { externalOverlay } })),
+    ).rejects.toThrow(/refusing to run/i);
+
+    expect(calls).toContain('hide');
+    expect(document.body.textContent).toMatch(/relaunch the game/i);
+  });
+
   it('does not classify anything when the game did not opt into Artube', async () => {
     // Same blank-sessionId URL as the first test: without `artube`, the game has no Artube path to
     // protect, so the gate must not fire (and must not block an unrelated game).
