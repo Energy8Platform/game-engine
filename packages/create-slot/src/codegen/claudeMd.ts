@@ -61,6 +61,32 @@ exactly as it will in production — a plain \`npm run dev\` would answer spins 
   frontend ends up live against last week's backend math. Read \`dist-artube-server/README.md\`.
   It is generated output: wiped and rewritten on every build, so never edit it.
 
+**Loading screen: Artube's, not ours.** \`artubePartnerLoader()\` from \`@artube/loader\` (the Artube
+branch of \`vite.config.ts\`) injects a two-phase branded loader into \`index.html\`, so it is painted
+before the game bundle is even fetched. \`src/main.ts\` constructs its \`LoaderViewController\` — but
+only when the injected markup is on the page (\`document.getElementById('loader')\`), because the
+constructor throws otherwise and every other target must keep the Energy8 preloader — and passes it
+as \`loading.externalOverlay\`. The engine then mounts NO preloader of its own and routes the same
+asset-load progress into Artube's bar, hiding it at the same moment it would have removed ours
+(including on the boot-error path). One continuous overlay; never two.
+
+\`loading.externalOverlay\` is typed structurally (\`{ showLoader, updateProgress, hideLoader }\`) so no
+\`@energy8platform\` package ever imports \`@artube/loader\` — the same discipline as
+\`artube: { load }\`: the engine describes the shape, THIS game supplies the instance.
+
+**\`@artube/loader\` is on a private registry.** \`npm install\` cannot resolve it without an \`.npmrc\`
+naming Artube's GitLab registry and a token:
+
+\`\`\`ini
+@artube:registry=https://gitlab.com/api/v4/projects/81086971/packages/npm/
+//gitlab.com/api/v4/projects/81086971/packages/npm/:_authToken=\${GITLAB_TOKEN}
+\`\`\`
+
+Export \`GITLAB_TOKEN\` (a GitLab token with \`read_api\` on that project) before \`npm install\`, in dev
+and in CI. npm expands the \`\${GITLAB_TOKEN}\` reference from the environment, so that \`.npmrc\` is
+safe to commit — a literal token is not. Note that npm reads \`.npmrc\` from the working directory
+UPWARD: a token that works in one checkout does nothing for a sibling repo.
+
 The \`BUILD_TARGET=artube\` flag does NOT harden the frontend bundle — the DevBridge is injected by a
 dev-server-only Vite plugin, so no production build has ever carried one. What protects a real
 launch is the host's gate: a launch claiming a session with a blank \`sessionId\` makes the game

@@ -51,6 +51,30 @@ function artubeReadme(a: Answers): string {
 - Enabled in \`src/main.ts\` via
   \`createSlotGame({ artube: { load: () => import('@energy8platform/artube-bridge') } })\`; the host
   classifies the launch, refuses a malformed one, and loads the bridge itself.
+- **Loading screen** — an Artube build shows ARTUBE's branded two-phase loader instead of the
+  Energy8 preloader. \`artubePartnerLoader()\` (vite.config.ts) injects it into \`index.html\`, so it
+  is on screen before the game bundle loads; \`src/main.ts\` passes its \`LoaderViewController\` as
+  \`loading.externalOverlay\`, which suppresses the engine's own preloader and routes the same
+  asset-load progress into Artube's bar. One continuous overlay — every other target is unchanged.
+
+### \`npm install\` needs Artube's private registry
+
+\`@artube/loader\` is published to Artube's GitLab package registry, so a plain \`npm install\` cannot
+resolve it. Add an \`.npmrc\` next to \`package.json\` and export a token before installing:
+
+\`\`\`ini
+@artube:registry=https://gitlab.com/api/v4/projects/81086971/packages/npm/
+//gitlab.com/api/v4/projects/81086971/packages/npm/:_authToken=\${GITLAB_TOKEN}
+\`\`\`
+
+\`\`\`bash
+export GITLAB_TOKEN=<a GitLab token with read_api on that project>
+npm install
+\`\`\`
+
+npm expands \`\${GITLAB_TOKEN}\` from the environment, so THIS \`.npmrc\` is safe to commit — a literal
+token never is. CI needs the same variable. Ask Artube for the token; without it \`npm install\` fails
+for the whole project, not just the loader.
 
 `;
 }

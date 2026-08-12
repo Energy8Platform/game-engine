@@ -27,9 +27,16 @@ const isArtube = target === 'artube';
 // Escape hatch: `ARTUBE_BACKEND=http://localhost:8080 npm run dev:artube` proxies at a backend you
 // run yourself (debugging the server in an IDE), and starts nothing.
 //
-// The import is dynamic and lives INSIDE the Artube branch on purpose: `artube-server` is a
-// dev-only, Node-side dependency, and a game that only ships to Energy8/Stake must never have to
-// resolve it — a static import here would make an uninstalled package break every build.
+// `artubePartnerLoader` is Artube's OWN branded loading screen. It injects its markup into
+// index.html, so the loader is painted before this game's bundle is even fetched — the property
+// no JS-mounted preloader can have. `src/main.ts` hands the engine the matching controller, which
+// suppresses the engine's own CSS preloader and routes asset-load progress into this one instead:
+// one continuous overlay, never two.
+//
+// Both imports are dynamic and live INSIDE the Artube branch on purpose: `artube-server` is a
+// dev-only Node-side dependency and `@artube/loader` sits on Artube's private registry, and a game
+// that only ships to Energy8/Stake must never have to resolve either — a static import here would
+// make an uninstalled package break every build.
 export default async () => {
   const plugins = [
     ...(isArtube
@@ -37,6 +44,7 @@ export default async () => {
           (await import('@energy8platform/artube-server/vite')).artubePlugin({
             spinPath: './src/game/script.spin',
           }),
+          (await import('@artube/loader')).artubePartnerLoader(),
         ]
       : []),
     // The dev harness: a Stake RGS backend + the reel-config sidebar panel.

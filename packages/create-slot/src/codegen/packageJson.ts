@@ -1,5 +1,10 @@
 import type { Answers } from '../answers';
 
+/** Artube's own loading screen. Not an @energy8platform package (so it isn't in `DepVersions`,
+ *  which tracks the workspace) — it is published to Artube's private GitLab registry and versioned
+ *  by them. Bump when Artube ships a loader whose controller/plugin API moves. */
+const ARTUBE_LOADER_VERSION = '^2.1.0';
+
 export interface DepVersions {
   'platform-core': string; 'game-engine': string; 'stake-kit': string; 'stake-bridge': string;
   'stake-math-tools': string; 'harness': string; 'artube-bridge': string; 'artube-server': string;
@@ -53,7 +58,18 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       ...(a.stake ? { '@energy8platform/stake-kit': v['stake-kit'], '@energy8platform/stake-bridge': v['stake-bridge'] } : { '@energy8platform/stake-kit': v['stake-kit'] }),
       // The host lazy-imports the bridge, but the bundler still has to resolve it at build time —
       // so the BRIDGE is a runtime dependency. The SERVER is not: see devDependencies below.
-      ...(a.artube ? { '@energy8platform/artube-bridge': v['artube-bridge'] } : {}),
+      //
+      // `@artube/loader` is Artube's branded loading screen: the Vite plugin half injects it into
+      // index.html and `src/main.ts` imports the controller, so it is a runtime dependency too.
+      // It lives on ARTUBE'S PRIVATE REGISTRY — `npm install` needs the `@artube` registry line and
+      // a token (see README/CLAUDE.md). That is why nothing in @energy8platform depends on it: the
+      // engine only describes the controller's SHAPE, and this game supplies the instance.
+      ...(a.artube
+        ? {
+            '@energy8platform/artube-bridge': v['artube-bridge'],
+            '@artube/loader': ARTUBE_LOADER_VERSION,
+          }
+        : {}),
       'pixi.js': '^8.16.0',
       '@pixi/sound': '^6.0.0',
       '@esotericsoftware/spine-pixi-v8': '~4.2.0',
