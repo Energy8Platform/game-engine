@@ -6,9 +6,12 @@ import { generate } from '../src/generate';
 import { applyDefaults } from '../src/answers';
 
 /**
- * The Artube target is the structural half of the free-play guard: a bundle built for Artube must
- * carry no DevBridge, and must land in the folder Artube's CI actually deploys (`dist`). These
- * assertions are on the FILES a real scaffold writes, not on a re-description of them.
+ * The Artube target's job: develop against the real backend (no dev bridge, `/api` proxied) and
+ * build into the folder Artube's CI actually deploys (`dist`). It is NOT a build-time security
+ * control — the DevBridge bootstrapper comes from a `apply: 'serve'` plugin, so no build carries
+ * one and the Artube bundle is byte-equivalent to a plain one; the launch gate in createSlotGame is
+ * what protects a session-less launch. These assertions are on the FILES a real scaffold writes,
+ * not on a re-description of them.
  */
 
 let dir = '';
@@ -30,12 +33,12 @@ async function scaffold(artube: boolean): Promise<string> {
 const read = (d: string, f: string): string => readFileSync(join(d, f), 'utf8');
 
 describe('the Artube target (--artube)', () => {
-  it('turns the DevBridge OFF for the artube build target', async () => {
+  it('turns the DevBridge OFF for the artube target', async () => {
     const d = await scaffold(true);
     const vite = read(d, 'vite.config.ts');
     expect(vite).toContain("const isArtube = target === 'artube'");
-    // The whole point: no DevBridge in an Artube bundle → nothing for a session-less launch to
-    // fall through to.
+    // Where this bites is `dev:artube`: development answers spins from the backend, like production,
+    // instead of from local offline math.
     expect(vite).toMatch(/devBridge:\s*!isStake\s*&&\s*!isHarness\s*&&\s*!isArtube/);
   });
 
@@ -45,8 +48,8 @@ describe('the Artube target (--artube)', () => {
     expect(scripts['build:artube']).toBe('rm -rf dist && BUILD_TARGET=artube vite build');
     expect(scripts['dev:artube']).toBe('BUILD_TARGET=artube vite');
     expect(scripts['bundle:artube']).toContain('build:artube');
-    // No dist-artube anywhere: a folder the platform pipeline never looks at would silently deploy
-    // whatever `dist` happened to hold.
+    // No dist-artube anywhere: the platform pipeline only ever deploys `dist`, so an artifact left
+    // in a folder it never looks at would silently ship whatever `dist` happened to hold.
     expect(read(d, 'vite.config.ts')).not.toMatch(/outDir:\s*'dist-artube'/);
     expect(JSON.stringify(scripts)).not.toContain('dist-artube');
     // The Stake target keeps its own out dir — the two builds must not share a folder.

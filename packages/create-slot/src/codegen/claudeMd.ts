@@ -16,8 +16,9 @@ npm run bundle:artube  # build:artube + a zip of dist/ for manual upload
 
 \`createSlotGame({ artube: { load: () => import('@energy8platform/artube-bridge') } })\` in
 \`src/main.ts\` is the whole game-side wiring: the host detects
-the launch (\`?sessionId=…\`), REFUSES a launch that claims a session but carries a blank one (that
-would otherwise fall through to the offline bridge and pay out for free), lazy-loads
+the launch (\`?sessionId=…\`), REFUSES a launch that claims a session but carries a blank one —
+without that refusal it falls through to whatever else answers: an offline dev bridge locally
+(free spins) or, in a deployed build, nothing at all (a hang) — lazy-loads
 \`@energy8platform/artube-bridge\`, and drives the same play loop as everywhere else. There is no
 per-game adapter on Artube — the game's BACKEND owns the round shape.
 

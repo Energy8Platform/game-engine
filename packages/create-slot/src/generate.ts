@@ -35,7 +35,8 @@ function substituteTree(dir: string, vars: Record<string, string>): void {
 function artubeReadme(a: Answers): string {
   if (!a.artube) return '';
   return `## Artube
-- \`npm run dev:artube\` — the Artube target (no DevBridge). The backend is a SECOND process:
+- \`npm run dev:artube\` — the Artube target: no dev bridge, so spins come from the backend exactly
+  as in production. The backend is a SECOND process:
   \`artube-server --spin ./game.spin --sandbox --port 8080\` (the dev server proxies \`/api\` to it).
 - \`npm run build:artube\` — the Artube bundle → \`dist/\` (what the client repo's CI deploys). It is
   the same bytes as \`npm run build\` (no build carries a DevBridge); the script names the target and

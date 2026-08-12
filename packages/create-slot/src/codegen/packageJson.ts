@@ -28,9 +28,11 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
   }
   if (a.artube) {
     // Artube's CI builds with `npm run build` and deploys `dist/` — so the Artube build TARGETS
-    // `dist` (see vite.config.ts). Wipe it first: the Energy8 build writes there too, and a stale
-    // mix of the two is exactly what must never reach the CDN. Set BUILD_TARGET=artube as a CI
-    // variable and the platform's own `npm run build` produces the Artube bundle unchanged.
+    // `dist` (see vite.config.ts), not a `dist-artube` the pipeline would never look at. The two
+    // builds are byte-equivalent (the DevBridge bootstrapper comes from a dev-server-only plugin,
+    // so no build carries one), so `rm -rf dist` is hygiene against a previous build's stale hashed
+    // assets riding along to the CDN — not protection from mixing two different artifacts. Setting
+    // BUILD_TARGET=artube in CI is likewise optional today; the script names the target.
     scripts['dev:artube'] = 'BUILD_TARGET=artube vite';
     scripts['build:artube'] = 'rm -rf dist && BUILD_TARGET=artube vite build';
     scripts['bundle:artube'] =
