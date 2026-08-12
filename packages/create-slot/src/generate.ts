@@ -51,30 +51,21 @@ function artubeReadme(a: Answers): string {
 - Enabled in \`src/main.ts\` via
   \`createSlotGame({ artube: { load: () => import('@energy8platform/artube-bridge') } })\`; the host
   classifies the launch, refuses a malformed one, and loads the bridge itself.
-- **Loading screen** — an Artube build shows ARTUBE's branded two-phase loader instead of the
-  Energy8 preloader. \`artubePartnerLoader()\` (vite.config.ts) injects it into \`index.html\`, so it
-  is on screen before the game bundle loads; \`src/main.ts\` passes its \`LoaderViewController\` as
-  \`loading.externalOverlay\`, which suppresses the engine's own preloader and routes the same
-  asset-load progress into Artube's bar. One continuous overlay — every other target is unchanged.
+- **Loading screen** — an Artube build opens on ARTUBE's branded two-phase loader.
+  \`artubePartnerLoader()\` (vite.config.ts) injects it into \`index.html\`, so it is painted before
+  the game bundle is even fetched, and \`src/main.ts\` hands the engine its controller as
+  \`loading.externalOverlay\`. It covers exactly the gap nothing of this game can paint — bundle
+  download, Pixi init, the SDK handshake — and the engine dismisses it the moment ITS OWN loading
+  screen has painted its first frame. From there the player gets this game's loading screen, bar
+  and tap-to-start, exactly as on every other target. In order: Artube's dark partner screen →
+  Artube's green branded screen with the bar filling as the game boots → this game's loading
+  screen → the game.
 
-### \`npm install\` needs Artube's private registry
+### Nothing to install from Artube
 
-\`@artube/loader\` is published to Artube's GitLab package registry, so a plain \`npm install\` cannot
-resolve it. Add an \`.npmrc\` next to \`package.json\` and export a token before installing:
-
-\`\`\`ini
-@artube:registry=https://gitlab.com/api/v4/projects/81086971/packages/npm/
-//gitlab.com/api/v4/projects/81086971/packages/npm/:_authToken=\${GITLAB_TOKEN}
-\`\`\`
-
-\`\`\`bash
-export GITLAB_TOKEN=<a GitLab token with read_api on that project>
-npm install
-\`\`\`
-
-npm expands \`\${GITLAB_TOKEN}\` from the environment, so THIS \`.npmrc\` is safe to commit — a literal
-token never is. CI needs the same variable. Ask Artube for the token; without it \`npm install\` fails
-for the whole project, not just the loader.
+There is no registry to configure, no \`.npmrc\` and no token: Artube's loader is vendored into
+\`@energy8platform/artube-bridge\` (the browser controller) and \`@energy8platform/artube-server\`
+(the Vite plugin that injects the markup). A plain \`npm install\` resolves everything.
 
 `;
 }

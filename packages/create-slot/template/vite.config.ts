@@ -29,22 +29,23 @@ const isArtube = target === 'artube';
 //
 // `artubePartnerLoader` is Artube's OWN branded loading screen. It injects its markup into
 // index.html, so the loader is painted before this game's bundle is even fetched — the property
-// no JS-mounted preloader can have. `src/main.ts` hands the engine the matching controller, which
-// suppresses the engine's own CSS preloader and routes asset-load progress into this one instead:
-// one continuous overlay, never two.
+// no JS-mounted preloader can have. It covers exactly that gap: `src/main.ts` hands the engine the
+// matching controller, and the engine dismisses Artube's screen the moment its own loading screen
+// has painted its first frame. Everything after that frame is the same on every target.
 //
-// Both imports are dynamic and live INSIDE the Artube branch on purpose: `artube-server` is a
-// dev-only Node-side dependency and `@artube/loader` sits on Artube's private registry, and a game
-// that only ships to Energy8/Stake must never have to resolve either — a static import here would
-// make an uninstalled package break every build.
+// It is Artube's code VENDORED into `@energy8platform/artube-server` (the Node half) and
+// `@energy8platform/artube-bridge` (the browser half), so a game installs no Artube package, needs
+// no private registry and no token. Both halves of the import below are dev-time Node-side: the
+// dynamic, branch-local form is because `artube-server` is a devDependency an Energy8/Stake-only
+// build must never have to resolve — a static import would make it break every build.
 export default async () => {
+  const artube = isArtube ? await import('@energy8platform/artube-server/vite') : null;
+
   const plugins = [
-    ...(isArtube
+    ...(artube
       ? [
-          (await import('@energy8platform/artube-server/vite')).artubePlugin({
-            spinPath: './src/game/script.spin',
-          }),
-          (await import('@artube/loader')).artubePartnerLoader(),
+          artube.artubePlugin({ spinPath: './src/game/script.spin' }),
+          artube.artubePartnerLoader(),
         ]
       : []),
     // The dev harness: a Stake RGS backend + the reel-config sidebar panel.

@@ -61,31 +61,30 @@ exactly as it will in production — a plain \`npm run dev\` would answer spins 
   frontend ends up live against last week's backend math. Read \`dist-artube-server/README.md\`.
   It is generated output: wiped and rewritten on every build, so never edit it.
 
-**Loading screen: Artube's, not ours.** \`artubePartnerLoader()\` from \`@artube/loader\` (the Artube
-branch of \`vite.config.ts\`) injects a two-phase branded loader into \`index.html\`, so it is painted
-before the game bundle is even fetched. \`src/main.ts\` constructs its \`LoaderViewController\` — but
-only when the injected markup is on the page (\`document.getElementById('loader')\`), because the
-constructor throws otherwise and every other target must keep the Energy8 preloader — and passes it
-as \`loading.externalOverlay\`. The engine then mounts NO preloader of its own and routes the same
-asset-load progress into Artube's bar, hiding it at the same moment it would have removed ours
-(including on the boot-error path). One continuous overlay; never two.
+**Loading screen: Artube's first, then this game's.** \`artubePartnerLoader()\` (the Artube branch of
+\`vite.config.ts\`) injects Artube's two-phase branded loader into \`index.html\`, so it is painted
+before the game bundle is even fetched. \`src/main.ts\` calls \`createArtubeLoader()\` — null on every
+other target, where the markup is absent — and passes the controller as \`loading.externalOverlay\`.
 
-\`loading.externalOverlay\` is typed structurally (\`{ showLoader, updateProgress, hideLoader }\`) so no
-\`@energy8platform\` package ever imports \`@artube/loader\` — the same discipline as
-\`artube: { load }\`: the engine describes the shape, THIS game supplies the instance.
+That overlay covers ONLY the gap the game cannot paint: bundle download, Pixi init, the SDK
+handshake. The engine reports boot milestones into Artube's bar (which is also what makes their
+loader crossfade from the dark partner phase to the green branded one — that transition fires on
+the first progress above zero), then mounts its own loading screen, waits for its FIRST FRAME to be
+painted, and only then dismisses Artube's. From that frame on, loading is identical
+to every other target: this game's brand, bar, tap-to-start and \`minDisplayTime\`. Set loading
+options OUTSIDE the Artube branch — they apply on all targets, Artube included.
 
-**\`@artube/loader\` is on a private registry.** \`npm install\` cannot resolve it without an \`.npmrc\`
-naming Artube's GitLab registry and a token:
+The dismissal also happens on every failure path, so a boot that throws cannot leave Artube's
+screen stranded over a dead game.
 
-\`\`\`ini
-@artube:registry=https://gitlab.com/api/v4/projects/81086971/packages/npm/
-//gitlab.com/api/v4/projects/81086971/packages/npm/:_authToken=\${GITLAB_TOKEN}
-\`\`\`
+\`loading.externalOverlay\` is typed structurally (\`{ showLoader, updateProgress, hideLoader }\`) so
+no engine package names an Artube type — the same discipline as \`artube: { load }\`: the engine
+describes the shape, THIS game supplies the instance.
 
-Export \`GITLAB_TOKEN\` (a GitLab token with \`read_api\` on that project) before \`npm install\`, in dev
-and in CI. npm expands the \`\${GITLAB_TOKEN}\` reference from the environment, so that \`.npmrc\` is
-safe to commit — a literal token is not. Note that npm reads \`.npmrc\` from the working directory
-UPWARD: a token that works in one checkout does nothing for a sibling repo.
+**Nothing is installed from Artube.** Their loader is vendored into \`@energy8platform/artube-bridge\`
+(browser controller, at \`/loader\`) and \`@energy8platform/artube-server\` (the Vite plugin). No
+private registry, no \`.npmrc\`, no token — a plain \`npm install\` is enough. When Artube ships a new
+loader version, the vendored copies are updated in the game-engine monorepo, not here.
 
 The \`BUILD_TARGET=artube\` flag does NOT harden the frontend bundle — the DevBridge is injected by a
 dev-server-only Vite plugin, so no production build has ever carried one. What protects a real

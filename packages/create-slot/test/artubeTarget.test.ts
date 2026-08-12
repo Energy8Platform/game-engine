@@ -108,7 +108,7 @@ describe('the Artube target (--artube)', () => {
     const vite = read(await scaffold(true), 'vite.config.ts');
     expect(vite).not.toMatch(/^import .*artube-server/m);
     expect(vite).toContain("await import('@energy8platform/artube-server/vite')");
-    expect(vite).toMatch(/isArtube\s*\n?\s*\?\s*\[/);
+    expect(vite).toMatch(/isArtube\s*\n?\s*\?\s*await import/);
   });
 
   it('keeps an escape hatch for a backend the developer runs themselves', async () => {
@@ -134,42 +134,69 @@ describe('the Artube target (--artube)', () => {
   it("injects Artube's own loading screen from the Artube branch, dynamically", async () => {
     const vite = read(await scaffold(true), 'vite.config.ts');
     // Injected into index.html by the plugin, which is the whole point: the loader is painted
-    // before the game bundle is fetched, which no JS-mounted preloader can be.
-    expect(vite).toContain("(await import('@artube/loader')).artubePartnerLoader()");
-    // Static import = every non-Artube build of this game has to resolve a package on a private,
-    // token-gated registry. Same trap as artube-server, same fix.
-    expect(vite).not.toMatch(/^import .*@artube\/loader/m);
-    expect(vite).toMatch(/isArtube\s*\n?\s*\?\s*\[/);
+    // before the game bundle is fetched, which no JS-mounted preloader can be. It comes from OUR
+    // package — Artube's plugin is vendored there, so there is nothing of Artube's to install.
+    expect(vite).toContain('artubePartnerLoader()');
+    expect(vite).toContain("await import('@energy8platform/artube-server/vite')");
+    // Still dynamic and branch-local: `artube-server` is a devDependency, and a static import
+    // would make an Energy8/Stake-only build have to resolve it.
+    expect(vite).not.toMatch(/^import .*artube-server/m);
+    expect(vite).toMatch(/isArtube\s*\n?\s*\?\s*await import/);
   });
 
-  it("hands the engine Artube's controller instead of the built-in preloader", async () => {
+  it("hands the engine Artube's controller, from OUR package", async () => {
     const d = await scaffold(true);
     const main = read(d, 'src/main.ts');
-    // The engine names no Artube package: `externalOverlay` is a structural
-    // `{ showLoader, updateProgress, hideLoader }`, and the GAME supplies the instance.
-    expect(main).toContain("import { LoaderViewController } from '@artube/loader';");
-    expect(main).toContain("document.getElementById('loader') ? new LoaderViewController() : null");
-    expect(main).toContain('loading: { externalOverlay: artubeLoader');
-    // Guarded, because the markup only exists in an Artube build and the constructor throws
-    // without it — a plain `npm run dev` of this same game must still get the Energy8 preloader.
-    expect(main).toMatch(/\.\.\.\(artubeLoader\s*\n?\s*\?/);
-    // The bundler resolves the static import in every target of this game, so it is a runtime dep.
-    expect(JSON.parse(read(d, 'package.json')).dependencies['@artube/loader']).toBe('^2.1.0');
+    // The engine names no Artube type: `externalOverlay` is a structural
+    // `{ showLoader, updateProgress, hideLoader }`, and the GAME supplies the instance. The
+    // instance now comes from the vendored copy in artube-bridge, at its own leaf entry so a
+    // non-Artube build of this same game does not pull the bridge in with it.
+    expect(main).toContain(
+      "import { createArtubeLoader } from '@energy8platform/artube-bridge/loader';",
+    );
+    expect(main).toContain('const artubeLoader = createArtubeLoader();');
+    expect(main).toContain('loading: { externalOverlay: artubeLoader }');
+    // Guarded, because the markup only exists in an Artube build — a plain `npm run dev` of this
+    // same game must still get the Energy8 preloader from its first frame.
+    expect(main).toMatch(/\.\.\.\(artubeLoader\s*\?/);
   });
 
-  it('tells the studio how to install a package from a private registry', async () => {
-    // Without this, `npm install` fails for the WHOLE project with a 404 on @artube/loader and
-    // nothing on the page says why. The token must never be written into a committed file, so the
-    // documented form is an env-var reference.
+  it('passes NOTHING but the overlay — loading behaves the same on every target', async () => {
+    // The overlay covers the pre-first-frame gap and then hands over. Pinning tapToStart or
+    // minDisplayTime inside the Artube branch (as an earlier version did) would give the Artube
+    // build a different loading screen from the game's other targets, silently.
+    const main = read(await scaffold(true), 'src/main.ts');
+    expect(main).not.toContain('tapToStart');
+    expect(main).not.toContain('minDisplayTime');
+  });
+
+  it('needs no private registry, no .npmrc and no token — anywhere', async () => {
+    // The reason the loader was vendored: a token-gated dependency made `npm install` fail for the
+    // WHOLE project unless every studio had an account on Artube's GitLab.
+    const d = await scaffold(true);
+    const pkg = JSON.parse(read(d, 'package.json'));
+    for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
+      expect(dep.startsWith('@artube/'), `${dep} must not come from Artube's registry`).toBe(false);
+    }
+    expect(read(d, 'src/main.ts')).not.toContain('@artube/');
+    expect(read(d, 'vite.config.ts')).not.toContain('@artube/');
+    for (const f of ['README.md', 'CLAUDE.md']) {
+      const text = read(d, f);
+      // Saying "no .npmrc is needed" is fine and wanted; telling a studio how to write one is not.
+      expect(text, `${f} must not still ask for a token`).not.toContain('GITLAB_TOKEN');
+      expect(text, `${f} must not still describe an auth line`).not.toContain('_authToken');
+      expect(text, `${f} must not name the private registry`).not.toContain('gitlab.com/api/v4');
+      expect(text, `${f} must say a plain install is enough`).toMatch(/no token|no .npmrc/i);
+    }
+  });
+
+  it('describes the hand-over, so nobody re-reads it as "Artube replaces our loader"', async () => {
     const d = await scaffold(true);
     for (const f of ['README.md', 'CLAUDE.md']) {
       const text = read(d, f);
-      expect(text, `${f} must name the registry`).toContain(
-        '@artube:registry=https://gitlab.com/api/v4/projects/81086971/packages/npm/',
-      );
-      expect(text, `${f} must name the token variable`).toContain('GITLAB_TOKEN');
-      expect(text, `${f} must not suggest pasting a literal token`).toContain(
-        '_authToken=${GITLAB_TOKEN}',
+      expect(text, `${f} must say where Artube's screen stops`).toMatch(/first frame/i);
+      expect(text, `${f} must say the game's own loading screen follows`).toMatch(
+        /every other target|same on every target|exactly as on every other target/i,
       );
     }
   });
@@ -196,9 +223,9 @@ describe('the Artube target (--artube)', () => {
     expect(pkg.scripts['dev:artube']).toBeUndefined();
     expect(pkg.scripts['build:artube']).toBeUndefined();
     expect(pkg.dependencies['@energy8platform/artube-bridge']).toBeUndefined();
-    // No token-gated dependency, and no loader wiring, in a game that never opted into Artube.
+    // No loader wiring at all in a game that never opted into Artube.
     expect(pkg.dependencies['@artube/loader']).toBeUndefined();
-    expect(read(d, 'src/main.ts')).not.toContain('@artube/loader');
+    expect(read(d, 'src/main.ts')).not.toContain('createArtubeLoader');
     expect(read(d, 'src/main.ts')).not.toContain('externalOverlay');
     expect(read(d, 'src/main.ts')).not.toContain('artube');
     expect(read(d, 'CLAUDE.md')).not.toContain('Artube');
