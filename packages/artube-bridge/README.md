@@ -89,9 +89,15 @@ value is in DEV: `dev:artube` runs without the DevBridge and proxies `/api`
 to the backend, so development uses the same backend-owned math and
 same-origin shape as production. It does not change the production artifact —
 the DevBridge bootstrapper comes from a `apply: 'serve'` Vite plugin, so no
-build has ever carried one. `dev:artube` serves only the frontend; the game's
-backend runs as a second process
-(`artube-server --spin ./game.spin --sandbox --port 8080`).
+build has ever carried one.
+
+`dev:artube` is **one command**: the `artubePlugin` from
+`@energy8platform/artube-server/vite` starts the game's backend as a child of
+the dev server, on a free port it picks itself, and configures the `/api`
+proxy from it. Nothing has to be started alongside it. To develop against a
+backend you run yourself, set `ARTUBE_BACKEND=http://localhost:8080` — the
+plugin then only proxies. See
+[`@energy8platform/artube-server`](../artube-server)'s README.
 
 ## Quick start: a game without `game-engine`
 

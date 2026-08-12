@@ -359,4 +359,47 @@ describe('ArtubeClient', () => {
     const res = await client.play({ action: 'spin', betIndex: 0 });
     expect(res.roundId).toBe('r1');
   });
+  /**
+   * The message a developer (or a support agent reading a player's console)
+   * gets when nothing is listening. It used to be `ws error`, which named
+   * neither the address nor a cause and sent the reader hunting — the whole
+   * reason `dev:artube` now starts the backend itself.
+   */
+  describe('a failed connection explains itself', () => {
+    it('names the address it tried and what to check, keeping code=ConnectionFailed', async () => {
+      // Port 1 is privileged and never has our backend on it: a guaranteed
+      // refusal without racing a real listener.
+      client = new ArtubeClient('ws://127.0.0.1:1/api/ws?sessionId=s1', 5);
+      const err = await client.connect().catch((e) => e as ArtubeBackendError);
+      client.close();
+
+      expect(err).toBeInstanceOf(ArtubeBackendError);
+      // Other code and tests branch on the code — it must not move.
+      expect((err as ArtubeBackendError).code).toBe('ConnectionFailed');
+      expect(err.message).toContain('ws://127.0.0.1:1/api/ws');
+      expect(err.message).toMatch(/backend running/);
+      // The sessionId is a bearer credential for the player's session; it has
+      // no business in a message that reaches a player's screen.
+      expect(err.message).not.toContain('sessionId');
+      expect(err.message).not.toContain('s1');
+    });
+
+    it('says so when the socket opens but closes before init', async () => {
+      // How a rejected sessionId looks from here: an accepted socket that is
+      // closed without an init frame.
+      wss = new WebSocketServer({ port: 0 });
+      wss.on('connection', (socket) => socket.close(1008, 'sessionId is required'));
+      await new Promise<void>((r) => wss.on('listening', () => r()));
+      const port = (wss.address() as AddressInfo).port;
+
+      client = new ArtubeClient(`ws://127.0.0.1:${port}/api/ws?sessionId=nope`, 5);
+      const err = await client.connect().catch((e) => e as ArtubeBackendError);
+      client.close();
+
+      expect((err as ArtubeBackendError).code).toBe('ConnectionFailed');
+      expect(err.message).toContain(`ws://127.0.0.1:${port}/api/ws`);
+      expect(err.message).toContain('before the backend sent init');
+      expect(err.message).not.toContain('nope');
+    });
+  });
 });

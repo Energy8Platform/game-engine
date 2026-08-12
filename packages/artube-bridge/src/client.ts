@@ -49,6 +49,37 @@ export class ArtubeBackendError extends Error {
   }
 }
 
+/**
+ * The socket address, minus the query string, for use in error messages.
+ *
+ * A failed connection used to report itself as `ws error` — a message that
+ * names neither what was attempted nor anything to check, so the reader's
+ * only move was to guess (the usual answer being "the backend isn't
+ * running"). Naming the endpoint turns that into a lookup.
+ *
+ * The query goes because it carries the `sessionId`, and these messages are
+ * surfaced to whoever is looking at the page — in production that is a
+ * player, and a session id is a bearer credential for their session. Origin
+ * and path are the page's own address and reveal nothing new.
+ */
+export function describeEndpoint(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.search = '';
+    parsed.hash = '';
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    // Not parseable — better a vague label than an exception inside an
+    // error path, and better than echoing an unknown string wholesale.
+    return 'the game backend';
+  }
+}
+
+/** Same tail on both connection failures: what to check, in one line. */
+const CHECK_HINT = 'is the game backend running, and is /api routed to it?';
+
 type ClientEvent = 'balance' | 'sessionClosed' | 'connection' | 'init';
 
 export interface PlayArgs {
@@ -78,10 +109,15 @@ export class ArtubeClient {
   /** Пришёл ли на текущем соединении кадр `session_closed` (см. {@link onMessage}). */
   private sessionEnded = false;
 
+  /** `url` without its `sessionId` — see {@link describeEndpoint}. */
+  private readonly endpoint: string;
+
   constructor(
     private readonly url: string,
     private readonly baseReconnectDelayMs = 1000,
-  ) {}
+  ) {
+    this.endpoint = describeEndpoint(url);
+  }
 
   on(event: ClientEvent, cb: (arg: any) => void): void {
     if (!this.handlers.has(event)) this.handlers.set(event, new Set());
@@ -121,7 +157,13 @@ export class ArtubeClient {
       this.socket = socket;
       socket.onmessage = (event) => this.onMessage(String(event.data));
       socket.onerror = () => {
-        this.initSettle?.reject(new ArtubeBackendError('ConnectionFailed', 'ws error'));
+        // `code` stays 'ConnectionFailed' — callers and tests branch on it.
+        this.initSettle?.reject(
+          new ArtubeBackendError(
+            'ConnectionFailed',
+            `could not open a WebSocket to ${this.endpoint} — ${CHECK_HINT}`,
+          ),
+        );
       };
       socket.onclose = (event) => {
         this.failPending('connection lost');
@@ -130,7 +172,11 @@ export class ArtubeClient {
         // the socket can drop mid-handshake before init ever arrives —
         // either way a caller awaiting connect() must not be left hanging.
         this.initSettle?.reject(
-          new ArtubeBackendError('ConnectionFailed', 'connection closed before init'),
+          new ArtubeBackendError(
+            'ConnectionFailed',
+            `the connection to ${this.endpoint} closed before the backend sent init — ` +
+              `${CHECK_HINT} (a rejected sessionId closes the socket the same way)`,
+          ),
         );
         // A closed session is terminal — see `sessionEnded` in onMessage.
         // 1001 "going away" is the one exception: that's the pod shutting
