@@ -40,7 +40,7 @@ describe('currency renders as symbol, not code', () => {
     // on each setter call — no explicit shell.render() needed after the initial mount).
     shell.setWin(0.0041); // tiny win on a small bet
     const text = document.body.innerText || document.body.textContent || '';
-    expect(text).toContain('0,0041'); // win keeps significant digits, not rounded to 0,00
-    expect(text).toContain('500,00'); // balance stays at the currency's 2 decimals
+    expect(text).toContain('0.0041'); // win keeps significant digits, not rounded to 0.00
+    expect(text).toContain('500.00'); // balance stays at the currency's 2 decimals
   });
 });
