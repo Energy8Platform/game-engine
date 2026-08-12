@@ -1,9 +1,12 @@
 import { Scene } from '../core/Scene';
 import type { LoadingScreenConfig } from '../types';
 import {
+  createCSSPreloader,
   setCSSPreloaderProgress,
   waitCSSPreloaderTap,
   removeCSSPreloader,
+  hasExternalOverlay,
+  releaseExternalOverlay,
 } from '@energy8platform/platform-core/loading';
 
 interface LoadingSceneData {
@@ -22,10 +25,13 @@ interface LoadingSceneData {
  * `removeCSSPreloader` before entering the game. One continuous overlay from
  * boot to gameplay — no second logo, no mid-load flash.
  *
- * A game that supplied its own overlay (`loading.externalOverlay`, e.g. Artube's
- * `LoaderViewController`) gets the same three calls: those functions route to it
- * instead of to our DOM, so this scene needs no branch and the continuity
- * property holds for both.
+ * When the game supplied its own overlay (`loading.externalOverlay`, e.g.
+ * Artube's `LoaderViewController`), this scene is also the HAND-OVER point: that
+ * overlay covered the gap this scene's existence ends — the bundle download,
+ * Pixi init and the SDK handshake, none of which the engine can paint over. The
+ * first thing `onEnter` does is mount the preloader, wait for it to be painted,
+ * and dismiss the game's overlay. Everything after that line is identical on
+ * every platform.
  */
 export class LoadingScene extends Scene {
   private _engine!: any;
@@ -45,6 +51,12 @@ export class LoadingScene extends Scene {
     this._targetScene = targetScene;
     this._targetData = targetData;
     this._config = engine.config.loading ?? {};
+
+    // Take the screen from a game-supplied loading overlay, if there is one. Before any awaited
+    // work: from here on the player is looking at OUR loading screen, and `_startTime` (which
+    // `minDisplayTime` is measured from) must start when that becomes true.
+    await this.takeOverFromExternalOverlay();
+
     this._startTime = Date.now();
 
     // Initialize asset manager
@@ -134,6 +146,46 @@ export class LoadingScene extends Scene {
     // Defensive: ensure the preloader is gone even if we never transitioned
     // (e.g. the scene was popped externally). Idempotent.
     void removeCSSPreloader(this.hostElement());
+  }
+
+  // ─── Hand-over from a game-supplied overlay ────────────
+
+  /**
+   * Swap a game-supplied loading overlay for the engine's own loading screen.
+   *
+   * The overlay (Artube's) has been on screen since before this bundle was fetched, covering a gap
+   * nothing of ours could. Its job ends here, at the first frame the engine paints; the player then
+   * gets the game's own brand, progress bar and tap-to-start, exactly as on every other target.
+   *
+   * The order of the three steps is the whole design, and each is wrong on its own:
+   *
+   *  1. Mount the preloader FIRST. It is opaque and sits at a higher z-index than Artube's
+   *     (10000 vs 9999), so from the frame it appears in it covers theirs completely. There is
+   *     never a moment with neither on screen, whatever happens next.
+   *  2. Wait for that frame to actually be PAINTED — mounting only queues it. Dismissing theirs
+   *     before the paint is precisely the flash of bare background this ordering exists to avoid.
+   *     Two `requestAnimationFrame`s: the first callback runs before the frame it belongs to is
+   *     composited, the second after. Two frames is also enough for Pixi's own rAF-driven ticker
+   *     to have rendered this scene at least once, so "the loading scene has painted" is literally
+   *     true by the time step 3 runs.
+   *  3. Only then dismiss theirs. Their `hideLoader()` plays a 0.3s fade and removes the element;
+   *     that fade runs UNDERNEATH our preloader, so it is invisible and can neither be seen over
+   *     the game nor leave a gap. Not waiting for it is deliberate — it is an animation on someone
+   *     else's element, and blocking a boot on it would be a hang waiting to happen.
+   */
+  private async takeOverFromExternalOverlay(): Promise<void> {
+    if (!hasExternalOverlay()) return;
+    createCSSPreloader(this.hostElement(), this._config);
+    await this.nextPaint();
+    releaseExternalOverlay();
+  }
+
+  /** Resolves after the browser has composited at least one frame (see step 2 above). */
+  private nextPaint(): Promise<void> {
+    if (typeof requestAnimationFrame !== 'function') return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
   }
 
   // ─── Progress ──────────────────────────────────────────

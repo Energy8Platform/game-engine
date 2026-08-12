@@ -5,6 +5,7 @@ import { buildAppConfig } from './buildConfig';
 import { loadFonts, applyTextureDefaults, bootGuard } from './preboot';
 import { showFatalError, installGlobalErrorHandlers } from './fatalError';
 import type { CreateSlotGameOptions, SlotGameHandle } from './types';
+import { releaseExternalOverlay } from '@energy8platform/platform-core/loading';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
 import type { ShellMode } from '@energy8platform/shell/pixi';
 import type { SceneApi, SlotSceneController, RenderContext } from './sceneController';
@@ -34,11 +35,18 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // `GameApplication.start()`, so its own error path never runs and nothing else would ever
     // dismiss the overlay. Artube's is already on screen from index.html at z-index 9999: leaving
     // it up means the player stares at a frozen loading screen, and a custom `onFatalError`
-    // renderer would be hidden underneath it entirely. Idempotent and cheap after boot.
-    try {
-      opts.loading?.externalOverlay?.hideLoader();
-    } catch {
-      /* the overlay is the game's; a throw here must not swallow the error we came to report */
+    // renderer would be hidden underneath it entirely.
+    //
+    // `releaseExternalOverlay` handles the case where the engine already adopted it (and keeps the
+    // dismissal idempotent, which matters now that the normal hand-over also dismisses it). Its
+    // `false` means the engine never got that far — those are exactly the pre-boot refusals, where
+    // hiding the game's overlay directly is the only thing that can work.
+    if (!releaseExternalOverlay()) {
+      try {
+        opts.loading?.externalOverlay?.hideLoader();
+      } catch {
+        /* the overlay is the game's; a throw here must not swallow the error we came to report */
+      }
     }
     if (opts.onFatalError) return opts.onFatalError(message);
     // Once the shell is up, use ITS branded modal (consistent chrome, social vocabulary, fit

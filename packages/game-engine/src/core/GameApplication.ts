@@ -11,7 +11,14 @@ import { AudioManager } from '../audio/AudioManager';
 import { InputManager } from '../input/InputManager';
 import { ViewportManager } from '../viewport/ViewportManager';
 import { LoadingScene } from '../loading/LoadingScene';
-import { createCSSPreloader, removeCSSPreloader } from '@energy8platform/platform-core/loading';
+import {
+  createCSSPreloader,
+  removeCSSPreloader,
+  adoptExternalOverlay,
+  advanceExternalOverlay,
+  releaseExternalOverlay,
+  hasExternalOverlay,
+} from '@energy8platform/platform-core/loading';
 import { FPSOverlay } from '../debug/FPSOverlay';
 
 /**
@@ -160,22 +167,31 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
       //    so it paints before this bundle is even fetched — and until the engine has adopted it,
       //    the catch below has no way to take it down. A bad `container` selector (step 1) would
       //    otherwise strand it on screen forever. It needs no container of ours.
-      if (this.config.loading?.externalOverlay) {
-        createCSSPreloader(document.body, this.config.loading);
-      }
+      const external = this.config.loading?.externalOverlay;
+      if (external) adoptExternalOverlay(external);
 
       // 1. Resolve container element
       this._container = this.resolveContainer();
 
-      // 2. Show CSS preloader immediately (before PixiJS). A no-op once an external overlay has
-      //    been adopted above: the game's overlay REPLACES ours, it never stacks with it.
-      createCSSPreloader(this._container, this.config.loading);
+      // 2. Show the CSS preloader immediately (before PixiJS) — UNLESS a game-supplied overlay is
+      //    already covering the screen. In that case the preloader is mounted later, by LoadingScene
+      //    at its first frame, which is where the hand-over happens. Mounting it here instead would
+      //    put our brand over theirs for the whole of Pixi init and the SDK handshake, i.e. hand
+      //    over long before the gap the external overlay exists to cover has closed.
+      if (!hasExternalOverlay()) createCSSPreloader(this._container, this.config.loading);
 
       // 3. Initialize PixiJS
       await this.initPixi();
+      // Milestones through the pre-first-frame gap, for a game-supplied overlay only (no-ops
+      // otherwise, so the built-in preloader's behaviour is untouched). They are also what makes
+      // Artube's loader crossfade from its dark partner phase to its branded one: that transition
+      // fires on the first progress above zero, and without it the player would never see the
+      // brand the loader exists to show. Values are honest weights of what remains, not a timer.
+      advanceExternalOverlay(0.35);
 
       // 4. Initialize SDK (if enabled)
       await this.initSDK();
+      advanceExternalOverlay(0.7);
 
       // 4b. Mount the branded game shell after the SDK handshake (optional)
       if (this.config.shell) {
@@ -188,14 +204,19 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
       // 6. Initialize sub-systems
       this.initSubSystems();
+      advanceExternalOverlay(0.85);
 
       this.emit('initialized');
 
-      // 7. Load assets. The loading overlay stays on screen — LoadingScene drives
+      // 7. Load assets. The CSS preloader stays on screen — LoadingScene drives
       //    its progress/tap and removes it before entering the game, so there's
       //    a single continuous overlay from boot to gameplay (no logo flash).
-      //    Same for a game-supplied overlay: it is the same three calls, routed
-      //    to `loading.externalOverlay` instead of to our own DOM.
+      //
+      //    With a game-supplied overlay the sequence has one extra step at the
+      //    front: LoadingScene MOUNTS the preloader, waits for its first painted
+      //    frame, and only then dismisses the external overlay. From that frame
+      //    on this path and every other are identical — same brand, same bar,
+      //    same tap-to-start.
       await this.loadAssets(firstScene, sceneData);
 
       this.emit('loaded');
@@ -205,10 +226,12 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
       this.emit('started');
     } catch (err) {
       console.error('[GameEngine] Failed to start:', err);
-      // Tear down the overlay so a failure doesn't strand the brand frame — ours, or the game's
-      // own. The container may never have resolved (step 1 is inside this try); an external overlay
-      // ignores the element anyway, and with no overlay mounted this is a no-op, so fall back to
-      // `document.body` rather than skipping teardown.
+      // Tear down both possible overlays so a failure strands neither brand frame. BOTH calls run:
+      // a throw during the hand-over window can leave the preloader mounted AND the external
+      // overlay still adopted, and each call is a no-op when there is nothing to remove. The
+      // container may never have resolved (step 1 is inside this try), hence the `document.body`
+      // fallback — the external overlay ignores the element entirely.
+      releaseExternalOverlay();
       void removeCSSPreloader(this._container ?? document.body);
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       throw err;

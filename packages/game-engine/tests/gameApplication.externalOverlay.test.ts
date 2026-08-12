@@ -5,16 +5,19 @@ import { GameApplication } from '../src/core/GameApplication';
 import type { ExternalLoadingOverlay } from '../src/types';
 
 /**
- * A game may hand the engine its own loading overlay (`loading.externalOverlay`) — Artube's
- * `LoaderViewController` is the reason the seam exists. Two properties matter at THIS level (the
- * routing itself is platform-core's, tested there):
+ * A game may hand the engine its own loading overlay (`loading.externalOverlay`) covering the gap
+ * before the engine's loading screen paints — Artube's `LoaderViewController` is the reason the
+ * seam exists. Two properties matter at THIS level (the overlay's own lifecycle is platform-core's,
+ * tested there; the hand-over itself is LoadingScene's):
  *
  *  1. the overlay is adopted before anything in `start()` can throw, and
  *  2. a boot failure hides it — the same guarantee the CSS preloader already had in the catch.
  *
  * Property 2 is sharper here than for the built-in preloader: an external overlay is ALREADY on
  * screen when the engine starts (Artube's is injected into index.html), so failing to hide it
- * leaves a dead loading screen up forever rather than merely never showing one.
+ * leaves a dead loading screen up forever rather than merely never showing one. It is also the
+ * property that had to survive the hand-over becoming a separate, later step — a boot that dies
+ * between adoption and hand-over is exactly the window this covers.
  */
 function spyOverlay(): ExternalLoadingOverlay & { calls: string[] } {
   const calls: string[] = [];
@@ -46,7 +49,7 @@ describe('GameApplication + a game-supplied loading overlay', () => {
     expect(overlay.calls).toEqual(['show', 'hide']);
   });
 
-  it('mounts no CSS preloader of its own on that path', async () => {
+  it('has not mounted the CSS preloader yet when the boot dies that early', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const game = new GameApplication({
       container: '#does-not-exist',
@@ -54,6 +57,9 @@ describe('GameApplication + a game-supplied loading overlay', () => {
     });
 
     await expect(game.start('game')).rejects.toThrow();
+    // The preloader is mounted at the HAND-OVER (LoadingScene's first frame), which this boot never
+    // reached. Mounting it at boot step 2 as usual would have put our brand over Artube's for the
+    // whole of Pixi init and the SDK handshake — the gap their loader exists to cover.
     expect(document.getElementById('__ge-css-preloader__')).toBeNull();
   });
 });

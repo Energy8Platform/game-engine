@@ -1,4 +1,4 @@
-import type { ExternalLoadingOverlay, LoadingScreenConfig } from '../types';
+import type { LoadingScreenConfig } from '../types';
 import { VARIANTS, DEFAULT_VARIANT_NAME } from './variants';
 import type { PreloaderVariantHandle } from './variants';
 import {
@@ -39,27 +39,6 @@ interface PreloaderState {
 
 let state: PreloaderState | null = null;
 
-/**
- * Set when the game supplied its own overlay (`LoadingScreenConfig.externalOverlay`). Mutually
- * exclusive with `state`: on this path the CSS preloader mounts nothing at all, so the two can
- * never end up stacked on screen. Every entry point below checks it FIRST.
- */
-let external: { overlay: ExternalLoadingOverlay; removed: boolean } | null = null;
-
-/**
- * Call into the game's overlay without letting it break the boot. A third-party controller is
- * outside our control (`@artube/loader`'s throws if its markup is missing, for one), and none of
- * these three calls is worth failing a game over — least of all `hideLoader`, where a throw
- * propagating out of the teardown path is exactly how an overlay gets stranded on screen.
- */
-function callOverlay(method: string, fn: () => void): void {
-  try {
-    fn();
-  } catch (err) {
-    console.warn(`[GameEngine] loading overlay ${method}() threw`, err);
-  }
-}
-
 function clampProgress(p: number): number {
   if (!Number.isFinite(p)) return 0;
   return Math.max(0, Math.min(1, p));
@@ -80,18 +59,6 @@ export function createCSSPreloader(
   container: HTMLElement,
   config?: LoadingScreenConfig,
 ): void {
-  // A game-supplied overlay REPLACES this one: adopt it and mount nothing. `container` is
-  // deliberately unused here — an external overlay owns its own mounting (Artube's is already in
-  // the DOM, injected into index.html), which is what lets the engine adopt it before it has even
-  // resolved a container.
-  const supplied = config?.externalOverlay;
-  if (supplied) {
-    if (external && !external.removed) return; // idempotent, like the DOM guard below
-    external = { overlay: supplied, removed: false };
-    callOverlay('showLoader', () => supplied.showLoader());
-    return;
-  }
-
   if (document.getElementById(PRELOADER_ID)) return;
 
   const bgColor =
@@ -201,15 +168,6 @@ ${SPLASH_CSS}
 }
 
 export function setCSSPreloaderProgress(progress: number): void {
-  // The external overlay gets the SAME progress the built-in bar would have shown, as a percentage
-  // (0–100) — the unit `ILoaderViewController.updateProgress` documents.
-  if (external) {
-    if (external.removed) return;
-    const overlay = external.overlay;
-    callOverlay('updateProgress', () => overlay.updateProgress(clampProgress(progress) * 100));
-    return;
-  }
-
   if (!state || state.removed) return;
   if (state.tapState === 'waiting' || state.tapState === 'resolved') return;
   if (!state.handle) return;
@@ -218,11 +176,6 @@ export function setCSSPreloaderProgress(progress: number): void {
 }
 
 export function waitCSSPreloaderTap(): Promise<void> {
-  // Nothing to gate on: the external overlay owns its presentation, we have no element of ours to
-  // attach a tap to, and no powered-by splash is playing behind it. Resolving immediately is what
-  // keeps `tapToStart` (a built-in-preloader option) from hanging a boot forever on this path.
-  if (external) return Promise.resolve();
-
   if (!state) {
     throw new Error(
       'CSS preloader not initialized — call createCSSPreloader first',
@@ -285,19 +238,6 @@ export function waitCSSPreloaderTap(): Promise<void> {
 }
 
 export function removeCSSPreloader(_container: HTMLElement): Promise<void> {
-  // Hand the dismissal to the game's overlay and forget it. Idempotent, like the built-in path:
-  // this is called both on handover to the first scene and defensively (LoadingScene.onDestroy,
-  // GameApplication's boot-error catch), and a second `hideLoader()` must not fire.
-  if (external) {
-    if (external.removed) return Promise.resolve();
-    const { overlay } = external;
-    external = null;
-    callOverlay('hideLoader', () => overlay.hideLoader());
-    // Resolves immediately: the overlay owns its own fade-out, and the engine's next step is the
-    // first scene — which must not wait on an animation we cannot observe.
-    return Promise.resolve();
-  }
-
   if (!state || state.removed) return Promise.resolve();
 
   // Drop the splash's pending detach — the whole overlay is going away, and a

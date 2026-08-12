@@ -40,6 +40,10 @@ export {
   setCSSPreloaderProgress,
   waitCSSPreloaderTap,
   removeCSSPreloader,
+  adoptExternalOverlay,
+  advanceExternalOverlay,
+  releaseExternalOverlay,
+  hasExternalOverlay,
   buildLogoSVG,
   LOADER_BAR_MAX_WIDTH,
 } from './loading';

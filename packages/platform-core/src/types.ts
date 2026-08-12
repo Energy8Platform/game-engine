@@ -45,20 +45,23 @@ export interface AssetManifest {
 // engine-specific loading scenes (in @energy8platform/game-engine etc.).
 
 /**
- * A loading overlay the GAME owns, handed to the engine to use INSTEAD of the built-in CSS
- * preloader. Described structurally on purpose: the only implementation we know of ships in
- * `@artube/loader` (its `LoaderViewController`, injected into `index.html` by their Vite plugin so
- * the overlay is painted before any of our JavaScript runs), and that package lives on a private
- * registry. Naming it here would put a token-gated specifier in a package every consumer installs —
- * the same trap as the host's Artube bridge import (see `ArtubeIntegration.load`). The shape is
- * satisfied by `new LoaderViewController()` with no adapter.
+ * A loading overlay the GAME owns, covering the gap BEFORE the engine's own loading screen exists:
+ * from the browser's first paint to the first frame the engine paints. It does not replace the
+ * loading screen — see `LoadingScreenConfig.externalOverlay`.
  *
- * The engine drives it exactly where it drives the CSS preloader, so there is one continuous
- * overlay from boot through asset loading into the first scene:
- *  - `showLoader()` once at boot (`createCSSPreloader`),
- *  - `updateProgress(0..100)` throughout asset loading (`setCSSPreloaderProgress`),
- *  - `hideLoader()` when the loading scene hands over — AND on the boot-error path, so a failed
- *    start can never leave the overlay on screen forever.
+ * Described structurally on purpose. The implementation this exists for is Artube's
+ * `LoaderViewController` (vendored at `@energy8platform/artube-bridge/loader`), whose markup their
+ * Vite plugin injects into `index.html` so the overlay is painted before our bundle is even
+ * fetched. Naming that type here would tie every consumer of platform-core to the Artube packages;
+ * the shape is satisfied with no adapter, and nothing in `@energy8platform/platform-core` knows
+ * Artube exists.
+ *
+ * The engine's use of it, in order:
+ *  - `showLoader()` once, at the very start of boot, before anything that can throw;
+ *  - `updateProgress(0..100)` at boot milestones (Pixi up, SDK handshake done, subsystems up) —
+ *    real progress through the gap, not the asset loading that follows;
+ *  - `hideLoader()` the moment the engine's loading screen has painted its first frame — AND on
+ *    every failure path, so a boot that throws can never leave the overlay on screen forever.
  */
 export interface ExternalLoadingOverlay {
   /** Reveal the overlay / its progress affordance. Called once, at the start of boot. */
@@ -72,11 +75,15 @@ export interface ExternalLoadingOverlay {
 
 export interface LoadingScreenConfig {
   /**
-   * A game-supplied loading overlay that REPLACES the built-in CSS preloader (they never stack).
-   * When set, the engine mounts no overlay of its own and routes the same progress here instead.
-   * The `preloaderVariant`/`backgroundGradient`/`cssPreloaderHTML`/`tapToStart` options describe the
-   * built-in preloader and are ignored on this path — the external overlay owns its presentation,
-   * including whether it gates on a tap.
+   * A game-supplied loading overlay covering ONLY the gap before the engine's own loading screen
+   * paints — Artube's branded loader is the case this exists for. It is not a replacement: once the
+   * loading screen has painted its first frame, the overlay is dismissed and the rest of the boot
+   * (brand, progress bar, tap-to-start, minimum display time) is exactly what it is on every other
+   * target. Every other option in this object therefore still applies.
+   *
+   * The two never stack visibly: the built-in preloader is mounted only at the hand-over, and it
+   * covers the external overlay (z-index) from the frame it appears in, so there is no gap, no
+   * flash and no bare background at the seam.
    */
   externalOverlay?: ExternalLoadingOverlay;
   /**
