@@ -39,6 +39,16 @@ export class ArtubeServer {
    * процессе обещал бы гарантию, которую не может дать между подами).
    */
   private readonly clients = new Map<string, WebSocket>();
+  /**
+   * Все принятые сокеты этого пода — реестр выключения, а не сессий.
+   *
+   * Отдельно от `clients`, потому что вытеснённый сокет из `clients` уходит
+   * (там уже сидит новое соединение той же сессии), а закрывать при
+   * выключении его всё равно надо: если его пир не отвечает на close-хендшейк,
+   * `http.close()` будет ждать этот апгрейженный сокет до собственного
+   * 30-секундного таймера `ws`.
+   */
+  private readonly sockets = new Set<WebSocket>();
 
   constructor(private readonly config: ArtubeServerConfig) {}
 
@@ -112,6 +122,10 @@ export class ArtubeServer {
         // Здесь молча: сессионный обработчик в handleConnection пишет лог,
         // а этот покрывает окно до него и путь без sessionId.
         ws.on('error', () => {});
+        // В реестр выключения — сразу и независимо от сессии: любой принятый
+        // сокет способен задержать `http.close()`.
+        this.sockets.add(ws);
+        ws.on('close', () => this.sockets.delete(ws));
         if (!sessionId) return ws.close(1008, 'sessionId is required');
         // Вторая вкладка (или реконнект, чей прежний сокет ещё жив) — это по
         // сути реконнект той же сессии: старое соединение получает честное
@@ -160,7 +174,7 @@ export class ArtubeServer {
   }
 
   private async closeClients(): Promise<void> {
-    const sockets = [...this.clients.values()];
+    const sockets = [...this.sockets];
     if (sockets.length === 0) return;
 
     const allClosed = Promise.all(
