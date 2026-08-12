@@ -155,10 +155,20 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
     }
 
     try {
+      // 0. Adopt a game-supplied loading overlay (`loading.externalOverlay`) BEFORE anything that
+      //    can throw. Such an overlay is already on screen — Artube's is injected into index.html,
+      //    so it paints before this bundle is even fetched — and until the engine has adopted it,
+      //    the catch below has no way to take it down. A bad `container` selector (step 1) would
+      //    otherwise strand it on screen forever. It needs no container of ours.
+      if (this.config.loading?.externalOverlay) {
+        createCSSPreloader(document.body, this.config.loading);
+      }
+
       // 1. Resolve container element
       this._container = this.resolveContainer();
 
-      // 2. Show CSS preloader immediately (before PixiJS)
+      // 2. Show CSS preloader immediately (before PixiJS). A no-op once an external overlay has
+      //    been adopted above: the game's overlay REPLACES ours, it never stacks with it.
       createCSSPreloader(this._container, this.config.loading);
 
       // 3. Initialize PixiJS
@@ -181,9 +191,11 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
 
       this.emit('initialized');
 
-      // 7. Load assets. The CSS preloader stays on screen — LoadingScene drives
+      // 7. Load assets. The loading overlay stays on screen — LoadingScene drives
       //    its progress/tap and removes it before entering the game, so there's
       //    a single continuous overlay from boot to gameplay (no logo flash).
+      //    Same for a game-supplied overlay: it is the same three calls, routed
+      //    to `loading.externalOverlay` instead of to our own DOM.
       await this.loadAssets(firstScene, sceneData);
 
       this.emit('loaded');
@@ -193,8 +205,11 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
       this.emit('started');
     } catch (err) {
       console.error('[GameEngine] Failed to start:', err);
-      // Tear down the preloader so a failure doesn't strand the brand frame.
-      if (this._container) removeCSSPreloader(this._container);
+      // Tear down the overlay so a failure doesn't strand the brand frame — ours, or the game's
+      // own. The container may never have resolved (step 1 is inside this try); an external overlay
+      // ignores the element anyway, and with no overlay mounted this is a no-op, so fall back to
+      // `document.body` rather than skipping teardown.
+      void removeCSSPreloader(this._container ?? document.body);
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       throw err;
     }

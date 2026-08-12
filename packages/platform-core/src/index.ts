@@ -81,6 +81,7 @@ export type {
   AssetBundle,
   AssetEntry,
   LoadingScreenConfig,
+  ExternalLoadingOverlay,
 } from './types';
 
 // ─── Native simulation types ────────────────────────────

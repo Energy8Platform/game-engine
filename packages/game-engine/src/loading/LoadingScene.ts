@@ -21,6 +21,11 @@ interface LoadingSceneData {
  * tap-to-start → `waitCSSPreloaderTap`, then fades it out via
  * `removeCSSPreloader` before entering the game. One continuous overlay from
  * boot to gameplay — no second logo, no mid-load flash.
+ *
+ * A game that supplied its own overlay (`loading.externalOverlay`, e.g. Artube's
+ * `LoaderViewController`) gets the same three calls: those functions route to it
+ * instead of to our DOM, so this scene needs no branch and the continuity
+ * property holds for both.
  */
 export class LoadingScene extends Scene {
   private _engine!: any;

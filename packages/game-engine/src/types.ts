@@ -37,6 +37,7 @@ export enum Orientation {
 // existing game-engine consumers keep their imports.
 import type {
   LoadingScreenConfig,
+  ExternalLoadingOverlay,
   AssetManifest,
   AssetBundle,
   AssetEntry,
@@ -44,6 +45,7 @@ import type {
 
 export type {
   LoadingScreenConfig,
+  ExternalLoadingOverlay,
   AssetManifest,
   AssetBundle,
   AssetEntry,
