@@ -38,6 +38,9 @@ export function isArtubeLaunch(input: string | URL | Location): boolean {
   return classifyArtubeLaunch(input) === 'artube';
 }
 
+/** Как хосту трактовать URL запуска — см. {@link classifyArtubeLaunch}. */
+export type ArtubeLaunchKind = 'artube' | 'blocked' | 'offline';
+
 /**
  * Как хосту трактовать URL запуска:
  *  - `'artube'`  — полноценный запуск на Artube (есть непустой `sessionId`); грузим мост.
@@ -52,12 +55,15 @@ export function isArtubeLaunch(input: string | URL | Location): boolean {
  * что здесь ловится ровно вырезанный идентификатор сессии.
  *
  * Чего этот детект НЕ может: параметр, удалённый целиком, неотличим от честного дев-запуска —
- * по URL это одно и то же. Вторая половина защиты структурная: артуб-таргет
- * (`BUILD_TARGET=artube`) не поднимает DevBridge ни в dev, ни в сборке — отвечать на спин
- * оффлайну нечем.
+ * по URL это одно и то же. В продакшене проваливаться всё равно некуда: бутстрап DevBridge
+ * внедряет вайт-плагин с `apply: 'serve'`, так что ни одна сборка его не несёт — независимо от
+ * `BUILD_TARGET` (артуб-таргет важен для `dev`, а не для сборки). А под обычным `npm run dev`
+ * DevBridge уже поднят к моменту старта игры, и защищает там именно отказ игры стартовать.
+ *
+ * Дубль параметра (`?sessionId=&sessionId=real`) разрешается ПЕРВЫМ вхождением — так же, как его
+ * прочитает `parseArtubeUrl` и, значит, мост. Для подсунутого пустого первого значения это
+ * означает `'blocked'`: отказ, а не тихий выбор «удобного» второго.
  */
-export type ArtubeLaunchKind = 'artube' | 'blocked' | 'offline';
-
 export function classifyArtubeLaunch(input: string | URL | Location): ArtubeLaunchKind {
   const url = toUrl(input);
   if (!url) return 'offline'; // неразбираемый URL — нечего защищать

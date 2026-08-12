@@ -5,7 +5,7 @@ import type { Answers } from '../answers';
 export function genClaudeMd(a: Answers): string {
   const cascade = a.cascades === true;
   const artubeCommands = a.artube
-    ? `npm run dev:artube    # the Artube target (no DevBridge) — needs the backend running too, see below
+    ? `npm run dev:artube    # the Artube target: no dev bridge, /api proxied — needs the backend, see below
 npm run build:artube   # the Artube frontend build → dist/ (what the client-repo CI deploys)
 npm run bundle:artube  # build:artube + a zip of dist/ for manual upload
 `
@@ -14,7 +14,8 @@ npm run bundle:artube  # build:artube + a zip of dist/ for manual upload
     ? `
 ## Artube
 
-\`createSlotGame({ artube: {} })\` in \`src/main.ts\` is the whole game-side wiring: the host detects
+\`createSlotGame({ artube: { load: () => import('@energy8platform/artube-bridge') } })\` in
+\`src/main.ts\` is the whole game-side wiring: the host detects
 the launch (\`?sessionId=…\`), REFUSES a launch that claims a session but carries a blank one (that
 would otherwise fall through to the offline bridge and pay out for free), lazy-loads
 \`@energy8platform/artube-bridge\`, and drives the same play loop as everywhere else. There is no
@@ -29,14 +30,18 @@ artube-server --spin ./game.spin --sandbox --port 8080   # GameId must be set in
 \`\`\`
 
 — and the dev server proxies \`/api\` (HTTP + WS) to it, so dev has the same single-origin shape as
-production (\`ARTUBE_BACKEND\` overrides the target). Neither the Artube dev server nor the Artube
-build bootstraps a DevBridge: on Artube the math runs on the backend, never in the browser.
+production (\`ARTUBE_BACKEND\` overrides the target). \`dev:artube\` also runs WITHOUT the DevBridge,
+so during development the math comes from the backend exactly as it will in production — a plain
+\`npm run dev\` would answer spins locally instead.
 
 **Deployment:** the platform's CI runs \`npm run build\` and deploys the \`dist\` folder, so the Artube
-build writes to \`dist\` (not a \`dist-artube\` the pipeline would never look at) and
-\`build:artube\` wipes it first so an Energy8 build can't leak into an Artube deploy. Either point the
-pipeline at \`npm run build:artube\` or set \`BUILD_TARGET=artube\` as a CI variable — with that set,
-the platform's stock \`npm run build\` produces the Artube bundle unchanged.
+build writes to \`dist\` — not a \`dist-artube\` the pipeline would never look at. Be clear about what
+\`build:artube\` does and doesn't buy: the DevBridge is injected by a dev-server-only Vite plugin, so
+NO production build carries it and the Artube bundle is byte-for-byte the plain one. The script
+exists to name the target (and to clear a previous build's stale hashed assets from \`dist\`);
+setting \`BUILD_TARGET=artube\` in CI is optional and changes nothing about today's artifact. What
+protects a real launch is the host's gate: a launch claiming a session with a blank \`sessionId\`
+makes the game refuse to start.
 `
     : '';
   return `# CLAUDE.md

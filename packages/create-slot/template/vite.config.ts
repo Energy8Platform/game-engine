@@ -17,10 +17,12 @@ const artubeBackend = process.env.ARTUBE_BACKEND ?? 'http://localhost:8080';
 export default defineGameConfig({
   base: './',
   // Stake builds and harness run inside the Stake RGS shell — no local DevBridge.
-  // The Artube target drops it too, and that is a security property, not tidiness: the plugin is
-  // what BOOTSTRAPS the offline DevBridge (it injects `new DevBridge(dev.config).start()` ahead of
-  // the game's entry), so with it off no local math can answer a play — in dev OR in a build. A
-  // launch that lost its session then fails loudly instead of quietly paying out.
+  // The Artube target drops it too, so `npm run dev:artube` develops against the REAL backend
+  // (math on the server, /api proxied below) instead of local offline math.
+  // What this flag does NOT do: change any production bundle. `devBridgePlugin` is `apply: 'serve'`,
+  // so no `vite build` has ever injected the DevBridge bootstrapper — `BUILD_TARGET=artube vite
+  // build` and a plain `vite build` emit the same bytes. In production what protects a
+  // session-less launch is the host's gate (createSlotGame refuses to start), not this flag.
   devBridge: !isStake && !isHarness && !isArtube,
   devBridgeConfig: './dev.config',
   vite: {
@@ -32,8 +34,9 @@ export default defineGameConfig({
     },
     optimizeDeps: { include: ['pixi.js'] },
     // Artube's frontend CI takes the `dist` folder verbatim, so the Artube build IS `dist` — there
-    // is deliberately no `dist-artube`. `npm run build:artube` wipes it first so the two targets
-    // can never be mixed in one folder.
+    // is deliberately no `dist-artube` for a pipeline that would never look at it. `build:artube`
+    // wipes `dist` first: not a security matter (the bytes match a plain build), just so a previous
+    // build's stale hashed assets don't ride along to the CDN.
     ...(isStake ? { build: { outDir: 'dist-stake' } } : {}),
     // The dev harness: a Stake RGS backend + the reel-config sidebar panel.
     ...(isHarness

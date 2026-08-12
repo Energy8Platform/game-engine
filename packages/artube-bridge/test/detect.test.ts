@@ -82,4 +82,22 @@ describe('классификация запуска (защитный конту
   it('битый URL не роняет классификацию', () => {
     expect(classifyArtubeLaunch('не url')).toBe('offline');
   });
+
+  it('дублированный sessionId: побеждает первый — пустой первый блокирует запуск', () => {
+    // Классификация и разбор обязаны читать ОДНО и то же значение, иначе подсунутый пустой первый
+    // параметр пропустил бы гейт, а мост поехал бы на втором. Fail-closed: 'blocked'.
+    expect(classifyArtubeLaunch('https://game.artube-888.live/?sessionId=&sessionId=real')).toBe(
+      'blocked',
+    );
+    expect(() =>
+      parseArtubeUrl('https://game.artube-888.live/?sessionId=&sessionId=real'),
+    ).toThrow(/sessionId/);
+    // И наоборот: живой первый — запуск валиден и мост берёт именно его.
+    expect(classifyArtubeLaunch('https://game.artube-888.live/?sessionId=real&sessionId=')).toBe(
+      'artube',
+    );
+    expect(parseArtubeUrl('https://game.artube-888.live/?sessionId=real&sessionId=').sessionId).toBe(
+      'real',
+    );
+  });
 });
