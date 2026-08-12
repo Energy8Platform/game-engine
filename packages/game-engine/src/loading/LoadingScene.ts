@@ -159,19 +159,26 @@ export class LoadingScene extends Scene {
    *
    * The order of the three steps is the whole design, and each is wrong on its own:
    *
-   *  1. Mount the preloader FIRST. It is opaque and sits at a higher z-index than Artube's
-   *     (10000 vs 9999), so from the frame it appears in it covers theirs completely. There is
-   *     never a moment with neither on screen, whatever happens next.
+   *  1. Mount the preloader FIRST, opaque and full-bleed, while theirs is still up. Both are on
+   *     screen together for a few frames, so there is never a moment with neither, whatever
+   *     happens next.
    *  2. Wait for that frame to actually be PAINTED — mounting only queues it. Dismissing theirs
    *     before the paint is precisely the flash of bare background this ordering exists to avoid.
    *     Two `requestAnimationFrame`s: the first callback runs before the frame it belongs to is
    *     composited, the second after. Two frames is also enough for Pixi's own rAF-driven ticker
    *     to have rendered this scene at least once, so "the loading scene has painted" is literally
    *     true by the time step 3 runs.
-   *  3. Only then dismiss theirs. Their `hideLoader()` plays a 0.3s fade and removes the element;
-   *     that fade runs UNDERNEATH our preloader, so it is invisible and can neither be seen over
-   *     the game nor leave a gap. Not waiting for it is deliberate — it is an animation on someone
-   *     else's element, and blocking a boot on it would be a hang waiting to happen.
+   *  3. Only then dismiss theirs. Their `hideLoader()` plays a 0.3s fade and removes the element.
+   *     Not waiting for that fade is deliberate — it is an animation on someone else's element,
+   *     and blocking a boot on it would be a hang waiting to happen.
+   *
+   * Which of the two is visually on top is the host page's business, not ours, and it does NOT
+   * change the guarantee. On a typical game page (`#game { position: fixed; inset: 0 }`) the fixed
+   * container establishes a stacking context, so the preloader's z-index is scoped inside it and
+   * Artube's `position: fixed; z-index: 9999` sits above — their fade then crossfades onto our
+   * loading screen, which is what was observed live and looks right. On a page where ours wins
+   * instead, their fade simply plays underneath, unseen. Either way the seam is covered, because
+   * what step 2 buys is that OUR screen is already painted before theirs starts going away.
    */
   private async takeOverFromExternalOverlay(): Promise<void> {
     if (!hasExternalOverlay()) return;
