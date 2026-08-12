@@ -81,10 +81,50 @@ request.
 | `SPIN_PATH`      | no       | Path to the game's `.spin` file or a directory containing one. Defaults to `./game.spin`. |
 | `PORT`           | no       | HTTP/WS listen port. Defaults to `80` — the platform's deployment contract. |
 | `DEMO_BALANCE`   | no       | Starting virtual balance for demo (non-authenticated) sessions. Defaults to `1000`. |
+| `E8_SERVER_BINARY` | no     | Explicit path to a local `e8-server` binary. Overrides the `@energy8platform/platform-core` lookup — see "Engine binary" below. |
 
 `GIT_HASH` is not read from the runtime environment — it's a Docker
 **build-arg** (see `Dockerfile.template`), baked in at image build time and
 surfaced read-only at `GET /api/version`.
+
+## Engine binary
+
+At runtime this package spawns `e8-server`, the native SpinML math engine,
+as a child process (`resolveEngineBinary` in `src/engine/spawn.ts`). It is
+looked up in this order: an explicit `binPath` → `E8_SERVER_BINARY` → the
+copy that `@energy8platform/platform-core` downloads for the current
+platform → a bare `e8-server` on `PATH`.
+
+That download is `@energy8platform/platform-core`'s own `postinstall`
+script (`scripts/install-e8.mjs`), which fetches the binary for your
+platform from this repo's GitHub Releases into platform-core's own `bin/`
+directory. `artube-server` depends on `@energy8platform/platform-core`
+specifically to get this for free — **the build needs network access to
+GitHub Releases** for the `npm ci` step in `Dockerfile.template`'s final
+stage to succeed at anything more than a no-op.
+
+Two things make that download silently absent even though `npm ci`
+otherwise succeeds:
+
+- A build environment with no network reachability to GitHub Releases —
+  `install-e8.mjs` treats a failed download as non-fatal (so Lua-only games
+  aren't broken by it) and just logs and moves on.
+- `npm ci --ignore-scripts`, which skips `postinstall` entirely.
+
+Either way, the container would previously build cleanly and then die on
+its first spin with "no such file or directory" or a bare `e8-server` from
+`PATH` that doesn't exist. `Dockerfile.template`'s final stage now runs a
+build-time check, right after its own `npm ci --omit=dev`, that resolves
+the binary exactly the way `resolveEngineBinary` does at runtime and
+confirms it exists and is executable — **if it fires, the image build fails
+with `[artube-server] no usable e8-server binary found`**, instead of the
+image shipping and the first player's spin failing instead.
+
+For an air-gapped build, or to use a locally-built engine, set
+`E8_SERVER_BINARY` to a path baked into the image (e.g. via `COPY` in a
+studio's own `Dockerfile` layered on this template) — both the runtime
+lookup and the build-time check honor it ahead of the platform-core
+download.
 
 ## Deployment contract
 
@@ -97,6 +137,9 @@ surfaced read-only at `GET /api/version`.
   look for them.
 - `GIT_HASH` is passed as `--build-arg GIT_HASH=$(git rev-parse HEAD)` (or
   equivalent CI variable) and shows up at `/api/version`.
+- The final stage's `npm ci --omit=dev` must reach GitHub Releases (or have
+  `E8_SERVER_BINARY` baked in) to install the `e8-server` engine binary —
+  see "Engine binary" above.
 
 ## Running against the sandbox
 

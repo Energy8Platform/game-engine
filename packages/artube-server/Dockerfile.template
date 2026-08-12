@@ -18,6 +18,37 @@ ENV GIT_HASH=$GIT_HASH
 # have no business in the shipped image.
 COPY package*.json ./
 RUN npm ci --omit=dev
+# `npm ci` runs `@energy8platform/platform-core`'s postinstall, which
+# downloads the `e8-server` engine binary this image needs to spawn at
+# runtime — but that postinstall never fails the install (a build with no
+# network, or `npm ci --ignore-scripts`, silently skips it). Fail the
+# *image build* here instead of the first player's spin: resolve the binary
+# the same way `resolveEngineBinary` (artube-server's own lookup) does, and
+# confirm it exists and is executable.
+RUN node -e " \
+  const { accessSync, constants } = require('fs'); \
+  const { join } = require('path'); \
+  const arch = process.arch === 'x64' ? 'amd64' : process.arch; \
+  const platform = process.platform === 'win32' ? 'windows' : process.platform; \
+  const ext = process.platform === 'win32' ? '.exe' : ''; \
+  const name = \`e8-server-\${platform}-\${arch}\${ext}\`; \
+  const isExecutable = (p) => { try { accessSync(p, constants.X_OK); return true; } catch { return false; } }; \
+  const candidates = []; \
+  if (process.env.E8_SERVER_BINARY) candidates.push(process.env.E8_SERVER_BINARY); \
+  try { \
+    const main = require.resolve('@energy8platform/platform-core'); \
+    candidates.push(join(main, '..', '..', 'bin', name)); \
+  } catch {} \
+  const found = candidates.find(isExecutable); \
+  if (!found) { \
+    console.error(\`[artube-server] no usable e8-server binary found (checked: \${candidates.join(', ') || '(no candidates)'}).\`); \
+    console.error('[artube-server] this usually means the build had no network access to download it via'); \
+    console.error(\"[artube-server] @energy8platform/platform-core's postinstall, or ran with --ignore-scripts.\"); \
+    console.error('[artube-server] set E8_SERVER_BINARY to a locally-built/vendored binary for air-gapped builds.'); \
+    process.exit(1); \
+  } \
+  console.log(\`[artube-server] engine binary OK: \${found}\`); \
+"
 COPY --from=build /app/dist ./dist
 COPY game.spin ./game.spin
 EXPOSE 80
