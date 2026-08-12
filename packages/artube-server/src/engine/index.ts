@@ -5,3 +5,4 @@ export {
 export {
   resolveEngineBinary, spawnEngine, findFreePort, DEFAULT_ENGINE_PORT,
 } from './spawn.js';
+export { resolveEngineGameId, type ResolveEngineGameIdOptions } from './gameId.js';

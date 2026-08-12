@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { GamesApiClient } from '../games-api/client.js';
-import { startEngine, type EngineClient } from '../engine/index.js';
+import { startEngine, resolveEngineGameId, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
 import { createAutocloseHandler } from './autoclose.js';
 import { createLogger } from './log.js';
@@ -63,7 +63,16 @@ export class ArtubeServer {
       ? this.config.spinPath
       : dirname(this.config.spinPath);
     this.engine = await startEngine({ gamesDir });
-    const config = await this.engine.getConfig(this.config.gameId);
+    // Движку — его собственный id игры (из `.spin`), платформе — её `GameId`. См. resolveEngineGameId:
+    // подстановка `GameId` в вызовы движка роняла старт на `unknown game "game1"`.
+    const engineGameId = await resolveEngineGameId(this.engine, this.config.gameId, {
+      onFallback: (engineId, platformId) =>
+        log.info('engine game id differs from the platform GameId', {
+          engine_game_id: engineId,
+          platform_game_id: platformId,
+        }),
+    });
+    const config = await this.engine.getConfig(engineGameId);
     // gRPC GetConfig отдаёт actions массивом { name, cost, session, stage } —
     // не словарём с cost_multiplier, который печатает CLI `e8 emit-config`.
     const actions = (config.actions ?? []) as Array<{ name: string; cost: number }>;
@@ -81,7 +90,7 @@ export class ArtubeServer {
     // Обработчик создаём тоже один раз: он держит защёлку от параллельных
     // проходов по одному раунду (дубль события = вторая денежная RPC).
     const autoclose = createAutocloseHandler({
-      api: this.api, engine: this.engine, gameId: this.config.gameId, costMultipliers, log,
+      api: this.api, engine: this.engine, gameId: engineGameId, costMultipliers, log,
     });
     this.api.on('autocloseRequest', (event: AutocloseRequestEvent) => void autoclose(event));
 
@@ -145,7 +154,7 @@ export class ArtubeServer {
         void handleConnection(ws, sessionId, {
           api: this.api!,
           engine: this.engine!,
-          gameId: this.config.gameId,
+          gameId: engineGameId,
           costMultipliers,
           startingDemoBalance: this.config.startingDemoBalance ?? 1000,
           log,
