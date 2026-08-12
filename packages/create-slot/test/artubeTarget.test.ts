@@ -7,11 +7,12 @@ import { applyDefaults } from '../src/answers';
 
 /**
  * The Artube target's job: develop against the real backend (no dev bridge, `/api` proxied) and
- * build into the folder Artube's CI actually deploys (`dist`). It is NOT a build-time security
- * control — the DevBridge bootstrapper comes from a `apply: 'serve'` plugin, so no build carries
- * one and the Artube bundle is byte-equivalent to a plain one; the launch gate in createSlotGame is
- * what protects a session-less launch. These assertions are on the FILES a real scaffold writes,
- * not on a re-description of them.
+ * build BOTH deployables — the frontend into its own folder (`dist-artube`, like `dist-stake`) and
+ * the backend into `dist-artube-server`. It is NOT a build-time security control — the DevBridge
+ * bootstrapper comes from a `apply: 'serve'` plugin, so no build carries one and the Artube bundle
+ * is byte-equivalent to a plain one; the launch gate in createSlotGame is what protects a
+ * session-less launch. These assertions are on the FILES a real scaffold writes, not on a
+ * re-description of them.
  */
 
 let dir = '';
@@ -42,18 +43,46 @@ describe('the Artube target (--artube)', () => {
     expect(vite).toMatch(/devBridge:\s*!isStake\s*&&\s*!isHarness\s*&&\s*!isArtube/);
   });
 
-  it('builds into dist/ — Artube CI deploys that folder — and wipes it first', async () => {
+  it('gives every target its own out dir, and wipes the Artube ones first', async () => {
     const d = await scaffold(true);
     const scripts = JSON.parse(read(d, 'package.json')).scripts;
-    expect(scripts['build:artube']).toBe('rm -rf dist && BUILD_TARGET=artube vite build');
+    expect(scripts['build:artube']).toBe(
+      'rm -rf dist-artube dist-artube-server && BUILD_TARGET=artube vite build',
+    );
     expect(scripts['dev:artube']).toBe('BUILD_TARGET=artube vite');
     expect(scripts['bundle:artube']).toContain('build:artube');
-    // No dist-artube anywhere: the platform pipeline only ever deploys `dist`, so an artifact left
-    // in a folder it never looks at would silently ship whatever `dist` happened to hold.
-    expect(read(d, 'vite.config.ts')).not.toMatch(/outDir:\s*'dist-artube'/);
-    expect(JSON.stringify(scripts)).not.toContain('dist-artube');
-    // The Stake target keeps its own out dir — the two builds must not share a folder.
-    expect(read(d, 'vite.config.ts')).toContain("outDir: 'dist-stake'");
+    // Never `dist`: two targets sharing a folder is how a build silently ships another target's
+    // bytes. Stake already had its own; Artube now does too.
+    const vite = read(d, 'vite.config.ts');
+    expect(vite).toContain("outDir: 'dist-stake'");
+    expect(vite).toContain("outDir: 'dist-artube'");
+    expect(scripts['bundle:artube']).toContain('cd dist-artube');
+    // Both generated folders are output, not source.
+    const ignore = read(d, '.gitignore');
+    expect(ignore).toContain('dist-artube');
+    expect(ignore).toContain('dist-artube-server');
+  });
+
+  it('states the pipeline consequence of dist-artube wherever a studio will read it', async () => {
+    // Artube's CI deploys the repo's `dist` folder, so a game on `dist-artube` needs its pipeline
+    // pointed there. Documenting it is the whole reason the choice is safe to make.
+    const d = await scaffold(true);
+    for (const f of ['README.md', 'CLAUDE.md']) {
+      expect(read(d, f), `${f} must name the folder the pipeline has to point at`).toContain(
+        'dist-artube',
+      );
+      expect(read(d, f)).toMatch(/pipeline/i);
+    }
+  });
+
+  it("emits the deployable backend from the same plugin — with the game's own math", async () => {
+    // The seam this closes: the `.spin` lives in the client repo and the backend image needs it.
+    // A human copying it between repos is how a frontend goes live against last week's math.
+    const d = await scaffold(true);
+    for (const f of ['README.md', 'CLAUDE.md']) {
+      expect(read(d, f), `${f} must document the backend artifact`).toContain('dist-artube-server');
+    }
+    expect(read(d, 'vite.config.ts')).toContain('dist-artube-server');
   });
 
   it('starts the backend itself — `dev:artube` is ONE command', async () => {

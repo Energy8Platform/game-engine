@@ -6,8 +6,8 @@ export function genClaudeMd(a: Answers): string {
   const cascade = a.cascades === true;
   const artubeCommands = a.artube
     ? `npm run dev:artube    # ONE command: frontend + the game's backend, /api proxied — see below
-npm run build:artube   # the Artube frontend build → dist/ (what the client-repo CI deploys)
-npm run bundle:artube  # build:artube + a zip of dist/ for manual upload
+npm run build:artube   # BOTH Artube deployables: dist-artube/ (frontend) + dist-artube-server/
+npm run bundle:artube  # build:artube + a zip of dist-artube/ for manual upload
 `
     : '';
   const artubeSection = a.artube
@@ -22,9 +22,9 @@ without that refusal it falls through to whatever else answers: an offline dev b
 \`@energy8platform/artube-bridge\`, and drives the same play loop as everywhere else. There is no
 per-game adapter on Artube — the game's BACKEND owns the round shape.
 
-Artube ships as two deployables — this repo is the *client*, and the backend
-(\`@energy8platform/artube-server\`) is deployed from its own repo — but **development is one
-command.** \`npm run dev:artube\` runs \`artubePlugin\` from
+Artube ships as two deployables — a frontend and a backend — and this repo now BUILDS BOTH
+(see "Deployment"), while **development is one command.** \`npm run dev:artube\` runs
+\`artubePlugin\` from
 \`@energy8platform/artube-server/vite\` (see \`vite.config.ts\`), which starts the backend as a child
 of the dev server, on a free port it picks itself, waits until it actually serves, and proxies
 \`/api\` (HTTP + WS) to it — so dev has the same single-origin shape as production. The backend is
@@ -47,14 +47,24 @@ If the backend cannot start, \`vite\` aborts with the reason and the backend's l
 \`dev:artube\` also runs WITHOUT the DevBridge, so during development the math comes from the backend
 exactly as it will in production — a plain \`npm run dev\` would answer spins locally instead.
 
-**Deployment:** the platform's CI runs \`npm run build\` and deploys the \`dist\` folder, so the Artube
-build writes to \`dist\` — not a \`dist-artube\` the pipeline would never look at. Be clear about what
-\`build:artube\` does and doesn't buy: the DevBridge is injected by a dev-server-only Vite plugin, so
-NO production build carries it and the Artube bundle is byte-for-byte the plain one. The script
-exists to name the target (and to clear a previous build's stale hashed assets from \`dist\`);
-setting \`BUILD_TARGET=artube\` in CI is optional and changes nothing about today's artifact. What
-protects a real launch is the host's gate: a launch claiming a session with a blank \`sessionId\`
-makes the game refuse to start.
+**Deployment: \`npm run build:artube\` produces BOTH deployables.**
+
+- \`dist-artube/\` — the frontend. Its own folder (like \`dist-stake/\`), so no target can silently
+  ship another target's bytes. **Artube's CI pipeline deploys the repo's \`dist\` folder**, so a game
+  built this way needs its pipeline pointed at \`dist-artube\` — change the job's artifact path, or
+  copy the folder in CI. That is the accepted trade for keeping the targets visibly separate.
+- \`dist-artube-server/\` — the backend, emitted by the same \`artubePlugin\` (its \`apply: 'build'\`
+  half). It contains this game's \`.spin\` copied byte-for-byte, a plain-JS \`index.js\`, a
+  \`package.json\` pinning \`@energy8platform/artube-server\`, and a \`Dockerfile\`. \`docker build\` it
+  as-is, or commit its contents into the server repo. The plugin does this because it already knows
+  the spin path — the alternative was a human copying the math between repos, which is how a
+  frontend ends up live against last week's backend math. Read \`dist-artube-server/README.md\`.
+  It is generated output: wiped and rewritten on every build, so never edit it.
+
+The \`BUILD_TARGET=artube\` flag does NOT harden the frontend bundle — the DevBridge is injected by a
+dev-server-only Vite plugin, so no production build has ever carried one. What protects a real
+launch is the host's gate: a launch claiming a session with a blank \`sessionId\` makes the game
+refuse to start.
 `
     : '';
   return `# CLAUDE.md

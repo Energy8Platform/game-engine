@@ -40,9 +40,14 @@ function artubeReadme(a: Answers): string {
   on a free port it picks, and proxies \`/api\` to it — there is nothing else to start.
   Against the public sandbox by default; \`ARTUBE_BACKEND=http://localhost:8080\` proxies at a
   backend you run yourself instead.
-- \`npm run build:artube\` — the Artube bundle → \`dist/\` (what the client repo's CI deploys). It is
-  the same bytes as \`npm run build\` (no build carries a DevBridge); the script names the target and
-  clears stale files from \`dist\`.
+- \`npm run build:artube\` — BOTH Artube deployables:
+  - \`dist-artube/\` — the frontend (its own folder, like \`dist-stake/\`). **Artube's CI pipeline
+    deploys the repo's \`dist\` folder**, so point the pipeline at \`dist-artube\` — change the job's
+    artifact path, or copy the folder in CI.
+  - \`dist-artube-server/\` — the deployable backend, emitted by the same plugin: this game's
+    \`.spin\` byte-for-byte, a plain-JS entry point, a \`package.json\` and a \`Dockerfile\`.
+    \`docker build\` it as-is, or commit it into the server repo. See its README. Generated output —
+    wiped and rewritten every build.
 - Enabled in \`src/main.ts\` via
   \`createSlotGame({ artube: { load: () => import('@energy8platform/artube-bridge') } })\`; the host
   classifies the launch, refuses a malformed one, and loads the bridge itself.

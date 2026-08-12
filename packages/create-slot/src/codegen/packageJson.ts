@@ -27,16 +27,19 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       `rm -rf dist-stake stake-math ${a.id}-stake.zip stake-math.zip && npm run build:stake && npm run math && cd dist-stake && zip -r ../${a.id}-stake.zip . && cd ../stake-math && zip -r ../stake-math.zip . && cd .. && echo 'Stake artifacts: ${a.id}-stake.zip + stake-math.zip'`;
   }
   if (a.artube) {
-    // Artube's CI builds with `npm run build` and deploys `dist/` — so the Artube build TARGETS
-    // `dist` (see vite.config.ts), not a `dist-artube` the pipeline would never look at. The two
-    // builds are byte-equivalent (the DevBridge bootstrapper comes from a dev-server-only plugin,
-    // so no build carries one), so `rm -rf dist` is hygiene against a previous build's stale hashed
-    // assets riding along to the CDN — not protection from mixing two different artifacts. Setting
-    // BUILD_TARGET=artube in CI is likewise optional today; the script names the target.
+    // `build:artube` produces BOTH of Artube's deployables: the frontend in `dist-artube` (its own
+    // folder, like `dist-stake`, so no target can silently ship another's bytes) and the backend in
+    // `dist-artube-server` (emitted by artubePlugin's build half — with this game's `.spin` in it).
+    // Both are wiped first so a previous build's stale hashed assets can't ride along to the CDN.
+    //
+    // CONSEQUENCE: Artube's CI pipeline deploys the repo's `dist` folder, so point the pipeline at
+    // `dist-artube` (change the job's artifact path, or copy the folder in CI). That is the accepted
+    // trade for keeping the targets separate.
     scripts['dev:artube'] = 'BUILD_TARGET=artube vite';
-    scripts['build:artube'] = 'rm -rf dist && BUILD_TARGET=artube vite build';
+    scripts['build:artube'] =
+      'rm -rf dist-artube dist-artube-server && BUILD_TARGET=artube vite build';
     scripts['bundle:artube'] =
-      `rm -f ${a.id}-artube.zip && npm run build:artube && cd dist && zip -r ../${a.id}-artube.zip . && cd .. && echo 'Artube artifact: dist/ (what the client-repo CI deploys) + ${a.id}-artube.zip'`;
+      `rm -f ${a.id}-artube.zip && npm run build:artube && cd dist-artube && zip -r ../${a.id}-artube.zip . && cd .. && echo 'Artube artifacts: dist-artube/ (point the CI pipeline here) + ${a.id}-artube.zip, and dist-artube-server/ (docker build it)'`;
   }
   const pkg = {
     name: a.id,
