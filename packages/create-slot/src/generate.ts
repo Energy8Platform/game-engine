@@ -35,9 +35,11 @@ function substituteTree(dir: string, vars: Record<string, string>): void {
 function artubeReadme(a: Answers): string {
   if (!a.artube) return '';
   return `## Artube
-- \`npm run dev:artube\` — the Artube target: no dev bridge, so spins come from the backend exactly
-  as in production. The backend is a SECOND process:
-  \`artube-server --spin ./game.spin --sandbox --port 8080\` (the dev server proxies \`/api\` to it).
+- \`npm run dev:artube\` — ONE command. No dev bridge, so spins come from the backend exactly as in
+  production. The dev server starts the game's backend (\`@energy8platform/artube-server\`) itself,
+  on a free port it picks, and proxies \`/api\` to it — there is nothing else to start.
+  Against the public sandbox by default; \`ARTUBE_BACKEND=http://localhost:8080\` proxies at a
+  backend you run yourself instead.
 - \`npm run build:artube\` — the Artube bundle → \`dist/\` (what the client repo's CI deploys). It is
   the same bytes as \`npm run build\` (no build carries a DevBridge); the script names the target and
   clears stale files from \`dist\`.

@@ -21,7 +21,7 @@ afterEach(() => {
 
 const versions = {
   'platform-core': '*', 'game-engine': '*', 'stake-kit': '*', 'stake-bridge': '*',
-  'stake-math-tools': '*', harness: '*', 'artube-bridge': '^0.1.0',
+  'stake-math-tools': '*', harness: '*', 'artube-bridge': '^0.1.0', 'artube-server': '^0.1.0',
 };
 
 async function scaffold(artube: boolean): Promise<string> {
@@ -56,10 +56,37 @@ describe('the Artube target (--artube)', () => {
     expect(read(d, 'vite.config.ts')).toContain("outDir: 'dist-stake'");
   });
 
-  it('proxies /api to the separately-run backend so dev is same-origin like production', async () => {
+  it('starts the backend itself — `dev:artube` is ONE command', async () => {
+    const d = await scaffold(true);
+    const vite = read(d, 'vite.config.ts');
+    // The plugin owns the backend AND the port, and configures the /api proxy from it. A hardcoded
+    // proxy target would be back to "start it yourself in a second terminal" — the failure that
+    // showed up in the browser as a bare `ArtubeBackendError: ws error`.
+    expect(vite).toContain("artubePlugin({");
+    expect(vite).toContain("spinPath: './src/game/script.spin'");
+    expect(vite).not.toMatch(/proxy:\s*\{\s*'\/api'/);
+    // The plugin is a DEV dependency, never a runtime one: it is Node-side and only vite.config.ts
+    // touches it.
+    const pkg = JSON.parse(read(d, 'package.json'));
+    expect(pkg.devDependencies['@energy8platform/artube-server']).toBe('^0.1.0');
+    expect(pkg.dependencies['@energy8platform/artube-server']).toBeUndefined();
+  });
+
+  it('imports the backend plugin dynamically, inside the Artube branch only', async () => {
+    // A static import would make an uninstalled `artube-server` break EVERY build of the game,
+    // including the Energy8/Stake ones that have nothing to do with Artube — the same trap the
+    // host's bridge import was earlier on this branch.
     const vite = read(await scaffold(true), 'vite.config.ts');
-    expect(vite).toContain("proxy: { '/api': { target: artubeBackend, ws: true, changeOrigin: true } }");
-    expect(vite).toContain('artube-server --spin ./game.spin --sandbox --port 8080');
+    expect(vite).not.toMatch(/^import .*artube-server/m);
+    expect(vite).toContain("await import('@energy8platform/artube-server/vite')");
+    expect(vite).toMatch(/isArtube\s*\n?\s*\?\s*\[/);
+  });
+
+  it('keeps an escape hatch for a backend the developer runs themselves', async () => {
+    // Someone debugging the server in an IDE must be able to point dev at it.
+    for (const f of ['vite.config.ts', 'CLAUDE.md']) {
+      expect(read(await scaffold(true), f)).toContain('ARTUBE_BACKEND');
+    }
   });
 
   it('opts in with a caller-supplied loader and depends on the bridge', async () => {
@@ -75,13 +102,18 @@ describe('the Artube target (--artube)', () => {
     );
   });
 
-  it('documents the pairing with the backend process in README + CLAUDE.md', async () => {
+  it('documents ONE command, not two, in README + CLAUDE.md', async () => {
     const d = await scaffold(true);
     for (const f of ['README.md', 'CLAUDE.md']) {
       const text = read(d, f);
       expect(text, `${f} must document dev:artube`).toContain('npm run dev:artube');
-      // A dev script that silently needs a second process is a trap — name it.
-      expect(text, `${f} must name the backend process`).toContain('artube-server');
+      expect(text, `${f} must name the backend package`).toContain('artube-server');
+      // The old two-terminal instruction must not survive anywhere: docs that tell a developer to
+      // start a second process are exactly what made a missing backend look like a game bug.
+      expect(text, `${f} must not tell anyone to run the backend by hand`).not.toMatch(
+        /second terminal|SECOND process|second process/,
+      );
+      expect(text).not.toContain('artube-server --spin');
     }
     expect(read(d, 'CLAUDE.md')).toContain('BUILD_TARGET=artube');
   });

@@ -5,7 +5,7 @@ import type { Answers } from '../answers';
 export function genClaudeMd(a: Answers): string {
   const cascade = a.cascades === true;
   const artubeCommands = a.artube
-    ? `npm run dev:artube    # the Artube target: no dev bridge, /api proxied — needs the backend, see below
+    ? `npm run dev:artube    # ONE command: frontend + the game's backend, /api proxied — see below
 npm run build:artube   # the Artube frontend build → dist/ (what the client-repo CI deploys)
 npm run bundle:artube  # build:artube + a zip of dist/ for manual upload
 `
@@ -22,18 +22,30 @@ without that refusal it falls through to whatever else answers: an offline dev b
 \`@energy8platform/artube-bridge\`, and drives the same play loop as everywhere else. There is no
 per-game adapter on Artube — the game's BACKEND owns the round shape.
 
-Artube is a two-repo integration: this repo is the *client*, and the backend
-(\`@energy8platform/artube-server\`) lives in its own repo. \`npm run dev:artube\` starts ONLY the
-frontend; run the backend in a second terminal —
+Artube ships as two deployables — this repo is the *client*, and the backend
+(\`@energy8platform/artube-server\`) is deployed from its own repo — but **development is one
+command.** \`npm run dev:artube\` runs \`artubePlugin\` from
+\`@energy8platform/artube-server/vite\` (see \`vite.config.ts\`), which starts the backend as a child
+of the dev server, on a free port it picks itself, waits until it actually serves, and proxies
+\`/api\` (HTTP + WS) to it — so dev has the same single-origin shape as production. The backend is
+killed when the dev server closes.
+
+Defaults: the public sandbox (\`GameId=game1\`, no API key) and \`./src/game/script.spin\`. Override
+with \`artubePlugin({ gameId, gamesApiUrl, apiKey, spinPath, port })\`, or with the platform's own
+env vars (\`GameId\`, \`GamesApiUrl\`, \`GamesApiKey\`). To point at a backend you run yourself (an IDE
+debug session):
 
 \`\`\`bash
-artube-server --spin ./game.spin --sandbox --port 8080   # GameId must be set in the environment
+ARTUBE_BACKEND=http://localhost:8080 npm run dev:artube   # proxies there, starts nothing
 \`\`\`
 
-— and the dev server proxies \`/api\` (HTTP + WS) to it, so dev has the same single-origin shape as
-production (\`ARTUBE_BACKEND\` overrides the target). \`dev:artube\` also runs WITHOUT the DevBridge,
-so during development the math comes from the backend exactly as it will in production — a plain
-\`npm run dev\` would answer spins locally instead.
+If the backend cannot start, \`vite\` aborts with the reason and the backend's last output — a bad
+\`.spin\`, a missing \`e8-server\` binary and an unreachable GamesAPI all name themselves there.
+\`artube-server\` is a **devDependency** and is imported dynamically inside the Artube branch of
+\`vite.config.ts\`, so an Energy8/Stake-only build never resolves it.
+
+\`dev:artube\` also runs WITHOUT the DevBridge, so during development the math comes from the backend
+exactly as it will in production — a plain \`npm run dev\` would answer spins locally instead.
 
 **Deployment:** the platform's CI runs \`npm run build\` and deploys the \`dist\` folder, so the Artube
 build writes to \`dist\` — not a \`dist-artube\` the pipeline would never look at. Be clear about what

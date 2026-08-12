@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
  * asserts cli.ts references each as a caret range — so a future version bump that forgets the
  * scaffold defaults fails here.
  */
-const PKGS = ['platform-core', 'game-engine', 'stake-kit', 'stake-bridge', 'stake-math-tools', 'harness', 'artube-bridge'] as const;
+const PKGS = ['platform-core', 'game-engine', 'stake-kit', 'stake-bridge', 'stake-math-tools', 'harness', 'artube-bridge', 'artube-server'] as const;
 
 const versionOf = (pkg: string): string =>
   JSON.parse(readFileSync(fileURLToPath(new URL(`../../${pkg}/package.json`, import.meta.url)), 'utf8')).version;

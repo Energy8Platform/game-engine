@@ -15,9 +15,10 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   'stake-math-tools': '^0.9.3',
   harness: '^0.3.1',
   // UNPUBLISHED at the time of writing: `--artube` scaffolds cannot `npm install` until
-  // @energy8platform/artube-bridge ships. Re-pin this to the published version at that point —
-  // test/versions.test.ts fails the moment this drifts from the workspace's own version.
+  // @energy8platform/artube-bridge and -server ship. Re-pin these to the published versions at that
+  // point — test/versions.test.ts fails the moment they drift from the workspace's own versions.
   'artube-bridge': '^0.1.0',
+  'artube-server': '^0.1.0',
 };
 
 async function main(): Promise<void> {

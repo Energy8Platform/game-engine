@@ -20,6 +20,7 @@ const LOCAL = {
   'stake-math-tools': 'file:' + join(REPO, 'packages/stake-math-tools'),
   'harness': 'file:' + join(REPO, 'packages/harness'),
   'artube-bridge': 'file:' + join(REPO, 'packages/artube-bridge'),
+  'artube-server': 'file:' + join(REPO, 'packages/artube-server'),
 };
 
 describe('scaffold anti-drift', () => {

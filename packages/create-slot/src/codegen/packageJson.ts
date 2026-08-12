@@ -2,7 +2,7 @@ import type { Answers } from '../answers';
 
 export interface DepVersions {
   'platform-core': string; 'game-engine': string; 'stake-kit': string; 'stake-bridge': string;
-  'stake-math-tools': string; 'harness': string; 'artube-bridge': string;
+  'stake-math-tools': string; 'harness': string; 'artube-bridge': string; 'artube-server': string;
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
@@ -48,7 +48,8 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       '@energy8platform/game-engine': v['game-engine'],
       '@energy8platform/harness': v['harness'],
       ...(a.stake ? { '@energy8platform/stake-kit': v['stake-kit'], '@energy8platform/stake-bridge': v['stake-bridge'] } : { '@energy8platform/stake-kit': v['stake-kit'] }),
-      // The host lazy-imports the bridge, but the bundler still has to resolve it at build time.
+      // The host lazy-imports the bridge, but the bundler still has to resolve it at build time —
+      // so the BRIDGE is a runtime dependency. The SERVER is not: see devDependencies below.
       ...(a.artube ? { '@energy8platform/artube-bridge': v['artube-bridge'] } : {}),
       'pixi.js': '^8.16.0',
       '@pixi/sound': '^6.0.0',
@@ -56,6 +57,11 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       zod: '^3.23.0',
     },
     devDependencies: {
+      // `dev:artube` starts the game's backend itself (artubePlugin in vite.config.ts). It is a
+      // DEV dependency and nothing else: Node-side, imported only from vite.config.ts, and never
+      // part of any bundle — an Energy8/Stake-only build must not have to resolve it, which is why
+      // vite.config.ts imports it dynamically inside the Artube branch.
+      ...(a.artube ? { '@energy8platform/artube-server': v['artube-server'] } : {}),
       '@energy8platform/stake-math-tools': v['stake-math-tools'],
       '@types/node': '^20.0.0',
       tsx: '^4.21.0',
