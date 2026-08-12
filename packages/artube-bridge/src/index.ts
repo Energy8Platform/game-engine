@@ -38,6 +38,15 @@ export {
   type ArtubeUrlParams, type ArtubeLaunchKind,
 } from './detect';
 export { ArtubeClient, ArtubeBackendError, type PlayArgs } from './client';
+/**
+ * Загрузочный экран Artube — ВЕНДОРНЫЙ код `@artube/loader` 2.1.0, см. шапку
+ * `loader.ts`. Игре импортировать его надо из `@energy8platform/artube-bridge/loader`:
+ * тот модуль — лист без зависимостей, и статический импорт из `main.ts` не тянет
+ * в бандл ни мост, ни game-sdk. Здесь реэкспорт только ради полноты API.
+ */
+export {
+  LoaderViewController, createArtubeLoader, type ILoaderViewController,
+} from './loader';
 export type {
   ArtubeBridgeOptions, ServerInit, ServerResult, ServerInitConfig,
 } from './types';

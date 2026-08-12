@@ -14,6 +14,19 @@
  */
 export { artubePlugin } from './plugin.js';
 export { artubeBuildPlugin } from './buildPlugin.js';
+/**
+ * Artube's own branded loading screen, VENDORED from `@artube/loader` 2.1.0 —
+ * see the provenance header in `partnerLoader.ts`. It lives here, and not in a
+ * dependency of the game, so that a studio needs no account on Artube's private
+ * registry: the Vite half is Node-side, exactly like everything else on this
+ * entry. The browser half is `@energy8platform/artube-bridge/loader`.
+ */
+export {
+  artubePartnerLoader,
+  artubeLoader,
+  ARTUBE_LOADER_ELEMENT_IDS,
+  type PartnerLoaderOptions,
+} from './partnerLoader.js';
 export {
   artubeDevPlugin,
   resolveExternalTarget,

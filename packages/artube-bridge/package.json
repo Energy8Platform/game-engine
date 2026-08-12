@@ -18,6 +18,11 @@
       "import": "./dist/detect.esm.js",
       "require": "./dist/detect.umd.js",
       "types": "./dist/detect.d.ts"
+    },
+    "./loader": {
+      "import": "./dist/loader.esm.js",
+      "require": "./dist/loader.umd.js",
+      "types": "./dist/loader.d.ts"
     }
   },
   "files": ["dist", "README.md"],

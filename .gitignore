@@ -25,3 +25,6 @@ packages/*/bin/simulation-*
 idea.md
 /examples/demo-slot
 /.claude
+
+# npm registry auth (contains a private-registry token — never commit)
+.npmrc

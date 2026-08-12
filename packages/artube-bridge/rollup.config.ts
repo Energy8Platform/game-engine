@@ -57,4 +57,28 @@ export default defineConfig([
     output: { file: 'dist/detect.d.ts', format: 'esm' },
     plugins: [dts()],
   },
+  // Artube's vendored loading-screen controller. Its own entry so a game's
+  // main.ts can import it statically on EVERY target without dragging the
+  // bridge (and the game-sdk) into a non-Artube bundle.
+  {
+    input: 'src/loader.ts',
+    external,
+    output: { file: 'dist/loader.esm.js', format: 'esm', sourcemap: true },
+    plugins: [ts()],
+  },
+  {
+    input: 'src/loader.ts',
+    external,
+    output: {
+      file: 'dist/loader.umd.js', format: 'umd', name: 'ArtubeBridgeLoader',
+      sourcemap: true, exports: 'named', globals,
+    },
+    plugins: [ts()],
+  },
+  {
+    input: 'src/loader.ts',
+    external,
+    output: { file: 'dist/loader.d.ts', format: 'esm' },
+    plugins: [dts()],
+  },
 ]);
