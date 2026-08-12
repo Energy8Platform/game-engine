@@ -121,10 +121,51 @@ with `[artube-server] no usable e8-server binary found`**, instead of the
 image shipping and the first player's spin failing instead.
 
 For an air-gapped build, or to use a locally-built engine, set
-`E8_SERVER_BINARY` to a path baked into the image (e.g. via `COPY` in a
-studio's own `Dockerfile` layered on this template) — both the runtime
-lookup and the build-time check honor it ahead of the platform-core
-download.
+`E8_SERVER_BINARY` — both the runtime lookup and the build-time check honor
+it ahead of the platform-core download. **It must be an `ENV`, not an
+`ARG`.** Docker only exposes a build-arg to the `RUN` step that declared it
+via a matching `ARG` line in that stage — the template declares none, so
+`docker build --build-arg E8_SERVER_BINARY=…` alone is a silent no-op and
+the build-time check still fails. And even a declared `ARG` doesn't survive
+into the running container, so a build could pass the check and then die on
+the first spin anyway — the exact failure this package's build-time check
+exists to catch, reopened through a less obvious path. `ENV` is visible to
+every later step *and* to the running container, which is what both the
+check and the runtime `spawnEngine()` need.
+
+Bake in your own binary (e.g. copied from a private build) and point
+`E8_SERVER_BINARY` at it in a studio `Dockerfile` layered on this template,
+**before** the `Dockerfile.template` lines that run `npm ci --omit=dev` and
+the build-time check:
+
+```dockerfile
+# Before the `RUN npm ci --omit=dev` / engine-binary-check block from
+# Dockerfile.template:
+COPY vendor/e8-server /usr/local/bin/e8-server
+ENV E8_SERVER_BINARY=/usr/local/bin/e8-server
+```
+
+## `@energy8platform/game-sdk` comes along too
+
+`@energy8platform/platform-core` declares `@energy8platform/game-sdk: ^2.9.0`
+as a (non-optional) `peerDependency`. Under npm 7+'s default peer
+auto-install, adding `artube-server` to a studio's server repo therefore
+also installs `game-sdk@^2.9.0` there, even though nothing in this package
+imports it.
+
+That's not an accidental surprise — it's the same floor stated twice. The
+frontend half of this integration, `@energy8platform/artube-bridge`,
+already requires `@energy8platform/game-sdk: ^2.9.0` as a hard `dependency`.
+A studio integrating Artube needs `game-sdk` 2.9 on both sides regardless of
+what `artube-server` does; this just makes the backend side explicit
+instead of leaving it to be discovered when the frontend won't install.
+
+If your project is still pinned to an older `game-sdk` (`^2.7.x` and
+`^2.8.x` pins exist elsewhere in this monorepo, e.g. in example projects),
+`npm install` will fail with `ERESOLVE` the moment you add `artube-server`
+or `artube-bridge`. The fix is to upgrade `game-sdk` to `^2.9.0` — that's
+the real requirement, not an artifact of this package. `--legacy-peer-deps`
+is an escape hatch to stage the upgrade rather than a long-term fix.
 
 ## Deployment contract
 
