@@ -11,8 +11,9 @@ export function genMainTs(a: Answers): string {
   // then constructs the bridge. The GAME passes the import so the specifier never ends up in
   // game-engine's own bundle (games without the dependency must still build).
   const artubeOpt = a.artube
-    ? `  // Artube: enabled by the launch URL (?sessionId=…). Build with \`npm run build:artube\`;
-  // the backend runs separately (\`artube-server --spin ./game.spin --sandbox --port 8080\`).
+    ? `  // Artube: enabled by the launch URL (?sessionId=…). \`npm run dev:artube\` is ONE command —
+  // the Vite plugin starts this game's backend itself and proxies \`/api\` to it (see
+  // vite.config.ts); \`npm run build:artube\` emits both deployables, frontend and backend.
   artube: { load: () => import('@energy8platform/artube-bridge') },
   // Artube's loader covers the gap this game cannot paint — bundle download, Pixi init, the SDK
   // handshake — and the engine dismisses it once ITS loading screen has painted AND Artube's has
