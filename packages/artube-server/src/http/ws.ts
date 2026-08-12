@@ -14,7 +14,7 @@ import {
   type ActiveRound, type RoundDeps,
 } from '../round/orchestrator.js';
 import { resumeRound } from '../round/resume.js';
-import { withSessionRecovery } from '../session/recovery.js';
+import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
 import { buildInit, isDemoSession, toSessionContext } from '../session/init.js';
 import { createDemoApi } from '../session/demo.js';
 import type { SessionContext } from '../session/types.js';
@@ -67,6 +67,38 @@ export async function handleConnection(
     const message = err instanceof Error ? err.message : String(err);
     log.error('request failed', err, { code });
     send({ t: 'error', id, code, message });
+  };
+
+  /**
+   * Раунд, в котором мы были, платформа больше открытым не считает
+   * (`RoundAlreadySettled`). Соединение при этом целое, и игрок вправе
+   * продолжать играть — но только с чистого листа:
+   *
+   *  - `current` обязана обнулиться. Иначе КАЖДЫЙ следующий `play`, включая
+   *    новый `spin`, пойдёт в `advanceRound` мёртвого раунда и разобьётся о
+   *    проверку `nextActions` — соединение навсегда заклинено, игрок не может
+   *    играть до перезагрузки страницы.
+   *  - вслед за ошибкой шлём свежий `init`. Деньги за тот раунд двигала
+   *    платформа, а не мы: баланс у игрока на экране (и в кеше моста, которым
+   *    он отвечает на `getBalance`) устарел ровно в этот момент.
+   *
+   * `resume: null` здесь не догадка: до этой ошибки восстановление уже
+   * перечитало SessionInfo и увидело раунд закрытым — открывать нечего.
+   */
+  const forgetSettledRound = async (): Promise<void> => {
+    current = null;
+    try {
+      const info = await deps.api.sessionInfo({
+        session_id: sessionId,
+        player_connection_info: {},
+      });
+      ctx = toSessionContext(sessionId, info);
+      send({ t: 'init', ...buildInit(info), resume: null });
+    } catch (err) {
+      // Перечитать не вышло — соединение всё равно расклинено, а баланс
+      // приедет со следующим `balance`-событием платформы или реконнектом.
+      log.warn('failed to refresh session after a settled round', { error: String(err) });
+    }
   };
 
   try {
@@ -195,6 +227,7 @@ export async function handleConnection(
       send({ t: 'result', id: msg.id, ...outcome.delivery });
     } catch (err) {
       fail(err, msg.t === 'play' ? msg.id : undefined);
+      if (err instanceof RoundNoLongerOpenError) await forgetSettledRound();
     }
   };
   socket.on('message', (raw) => {

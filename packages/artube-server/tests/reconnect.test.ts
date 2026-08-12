@@ -250,6 +250,45 @@ describe('раунд закрыли, пока игрок его доигрыва
     expect(platform.countOf('PlayRoundRequest')).toBe(0);
     await c.close();
   }, 40_000);
+
+  it('после RoundAlreadySettled соединение живо: свежий init и новый spin открывает новый раунд', async () => {
+    // Ошибка «раунд уже закрыт» — не конец соединения. Раунда, в котором игрок
+    // был, больше нет ни у платформы, ни у нас: держать его как `current`
+    // значит гнать КАЖДЫЙ следующий play (включая новый spin) в advanceRound
+    // уже мёртвого раунда. Игрок не смог бы играть до перезагрузки страницы.
+    const c = connect('sess-settled-then-plays');
+    await c.waitFor('init');
+    c.send({ t: 'play', id: 'p0', action: 'spin', betIndex: 1 });
+    const spin = await c.waitFor('result');
+    c.send({ t: 'ack', roundId: spin.roundId, cursor: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Раунд закрывают у нас за спиной честным выигрышем — на платформе деньги
+    // уже зачислены, наш экземпляр раунда протух.
+    const round = platform.roundOf('sess-settled-then-plays')!;
+    round.finished_at = new Date().toISOString();
+    round.win_multiplier = 3;
+    platform.balance += 3 * 2;
+
+    c.send({ t: 'play', id: 'p1', action: 'free_spin', betIndex: 1 });
+    const err = await c.waitFor('error');
+    expect(err.code).toBe('RoundAlreadySettled');
+
+    // Вслед за ошибкой — свежий init: баланс игрока изменился там, а мост
+    // отвечает на getBalance из кеша и без этого показывал бы старое число.
+    const refreshed = await c.nth('init', 2);
+    expect(refreshed.balance).toBe(platform.balance);
+    expect(refreshed.resume ?? null).toBe(null);
+
+    // И главное: то же самое соединение продолжает играть.
+    c.send({ t: 'play', id: 'p2', action: 'spin', betIndex: 1 });
+    const next = await c.nth('result', 2);
+    expect(next.roundId).not.toBe(spin.roundId);
+    expect(next.action).toBe('spin');
+    expect(platform.countOf('OpenRoundRequest')).toBe(2);
+    expect(platform.countOf('PlayRoundRequest')).toBe(0);
+    await c.close();
+  }, 40_000);
 });
 
 async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {

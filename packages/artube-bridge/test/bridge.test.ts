@@ -322,6 +322,45 @@ describe('ArtubeBridge', () => {
     expect(getBalance!.payload.balance).toBe(52);
   });
 
+  it('свежий init без resume обновляет баланс и убирает снимок закрытого раунда', async () => {
+    // Так выглядит хвост `RoundAlreadySettled`: раунд досчитали не у нас,
+    // сервер шлёт вслед за ошибкой свежий init (см. artube-server's ws.ts).
+    // Мост обязан показать новый баланс — на getBalance он отвечает из кеша —
+    // и забыть снимок раунда, иначе getState() предложит игре доигрывать уже
+    // закрытый раунд.
+    backend.connect.mockResolvedValue({
+      ...INIT,
+      resume: result({ action: 'free_spin', creditPending: true, balanceAfter: null, spinsPlayed: 2 }),
+    });
+    bridge.destroy();
+    installWindow();
+    sent = [];
+    const { MemoryChannel } = await import('@energy8platform/game-sdk');
+    channel = MemoryChannel.getGlobal();
+    channel.onGuest((m: any) => sent.push({ type: m.type, payload: m.payload }));
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game' });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('GET_STATE', {});
+    await flush();
+    expect(sent.find((m) => m.type === 'STATE_RESPONSE')!.payload.session).not.toBeNull();
+    sent = [];
+
+    const reconnectInit = backend.on.mock.calls
+      .filter(([event]: [string]) => event === 'init')
+      .pop()?.[1];
+    reconnectInit({ ...INIT, balance: 106 });
+    await flush();
+
+    expect(sent.find((m) => m.type === 'BALANCE_UPDATE')!.payload.balance).toBe(106);
+    channel.sendToHost('GET_BALANCE', {});
+    channel.sendToHost('GET_STATE', {});
+    await flush();
+    expect(sent.filter((m) => m.type === 'BALANCE_UPDATE').pop()!.payload.balance).toBe(106);
+    expect(sent.find((m) => m.type === 'STATE_RESPONSE')!.payload.session).toBeNull();
+  });
+
   it('в демо серверный push balance (balanceChanged) игнорируется', async () => {
     backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null, balance: 1000 });
     backend.play.mockResolvedValue(result({ balanceAfter: 900, winX: 3, totalWinX: 3, betAmount: 1 }));

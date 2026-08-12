@@ -277,6 +277,14 @@ export class ArtubeBridge {
       this.currentRoundId = init.resume.roundId;
       this.cursor = init.resume.spinsPlayed;
       this.lastDelivered = this.toPlayResult(init.resume);
+    } else {
+      // Незакрытого раунда у платформы нет — значит его нет и у нас. Свежий
+      // init без `resume` приходит в том числе вслед за `RoundAlreadySettled`
+      // (раунд досчитали где-то ещё), и оставленный снимок заставил бы
+      // `getState()` предложить игре доигрывать уже закрытый раунд.
+      this.currentRoundId = null;
+      this.cursor = 0;
+      this.lastDelivered = null;
     }
   }
 
