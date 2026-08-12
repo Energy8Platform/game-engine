@@ -62,6 +62,20 @@ export function betIndexOf(betLevels: number[], bet: number): number {
   return best;
 }
 
+/**
+ * Код валюты в контракте SDK — это ISO 4217, ВЕРХНИМ регистром: по нему игра
+ * (и `lookupCurrency` из stake-bridge) ищет символ. GamesAPI отдаёт его
+ * строчными (`"usd"`), и без нормализации поиск промахивался, а шелл писал
+ * игроку «1 000 000.00 usd» вместо «$1 000 000.00» — на КАЖДОЙ реальной
+ * сессии Artube. Нормализуем ровно здесь, на границе провода: дальше по
+ * коду валюта уже канонична.
+ *
+ * `null` — демо-сессия (у GamesAPI это и есть её признак); показываем 'FUN'.
+ */
+function currencyCodeOf(currency: string | null | undefined): string {
+  return currency ? currency.toUpperCase() : 'FUN';
+}
+
 export class ArtubeBridge {
   private readonly bridge: Bridge;
   private readonly client: ArtubeClient;
@@ -174,7 +188,7 @@ export class ArtubeBridge {
         },
       };
       const payload: InitPayload = {
-        currency: init.currency ?? 'FUN',
+        currency: currencyCodeOf(init.currency),
         // В демо `init.balance` — стартовое значение серверной заглушки, не
         // обязательно совпадающее с тем, что видит кошелёк (см. `options.demoBalance`).
         balance: this.demoWallet ? this.demoWallet.balance : init.balance,
@@ -307,7 +321,7 @@ export class ArtubeBridge {
       // считает), но не переживает реконнект и не то, что видел игрок.
       balanceAfter: this.demoWallet ? this.demoWallet.balance : (result.balanceAfter ?? this.balance),
       totalWin: result.totalWinX * result.betAmount,
-      currency: this.init?.currency ?? 'FUN',
+      currency: currencyCodeOf(this.init?.currency),
       gameId: this.gameId,
       data: result.data,
       nextActions: result.nextActions,

@@ -94,6 +94,34 @@ describe('ArtubeBridge', () => {
     expect(init!.payload.device).toBe('mobile');
   });
 
+  it('код валюты нормализуется в ISO-регистр — GamesAPI шлёт его строчными', async () => {
+    // Живая песочница отдаёт `"usd"`; по такому коду lookupCurrency промахивается
+    // и игрок видит «1 000 000.00 usd» вместо «$1 000 000.00».
+    backend.connect.mockResolvedValue({ ...INIT, currency: 'usd' });
+    bridge.destroy();
+    sent.length = 0;
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game' });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    expect(sent.find((m) => m.type === 'INIT')!.payload.currency).toBe('USD');
+
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+    expect(sent.find((m) => m.type === 'PLAY_RESULT')!.payload.currency).toBe('USD');
+  });
+
+  it('демо-сессия (currency: null) остаётся FUN', async () => {
+    backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null });
+    bridge.destroy();
+    sent.length = 0;
+    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game' });
+    await bridge.ready();
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    expect(sent.find((m) => m.type === 'INIT')!.payload.currency).toBe('FUN');
+  });
+
   it('PLAY_REQUEST переводится в индекс ставки', async () => {
     channel.sendToHost('GAME_READY', {});
     await flush();
