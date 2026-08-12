@@ -210,3 +210,54 @@ non-empty one.
 worked yesterday is suddenly dead today, that's expected, not a regression:
 recreate it from the Sandbox UI by pressing **"Generate Data"** and then
 **"Create Session"** before debugging further.
+
+## Developing the game's frontend against it: `@energy8platform/artube-server/vite`
+
+The Artube dev loop used to be two processes — a Vite dev server for the game
+and this service, started by hand in a second terminal. Forgetting the second
+one produced a page that opened `ws://localhost:5173/api/ws`, hit a dead
+proxy, and reported `ArtubeBackendError: ws error`, which named neither the
+address nor the missing process. So this package ships the plugin that removes
+the failure mode:
+
+```ts
+// vite.config.ts — inside the Artube branch only
+const { artubePlugin } = await import('@energy8platform/artube-server/vite');
+plugins.push(artubePlugin({ spinPath: './src/game/script.spin' }));
+```
+
+`npm run dev:artube` is then one command. The plugin:
+
+- **starts this service as a child of the dev server** (`node dist/bin/artube-server.js`,
+  never in-process — it is a separate service with its own logs and its own
+  engine subprocess, and its output is echoed straight through);
+- **owns the port.** It scans from `8080` upward for a free one and configures
+  the `/api` proxy (`ws: true`) from whatever it bound, so two games can run
+  `dev:artube` at the same time without colliding — and neither one can
+  silently proxy into the other's math;
+- **waits until `/livez` answers** before Vite finishes resolving its config,
+  so the page is never served against a backend that isn't up yet;
+- **kills the child** when the dev server closes (and on `SIGINT`/exit);
+- **`apply: 'serve'`** — it can never take part in a production build.
+
+If the backend cannot start, `vite` aborts with a message naming the spin
+path, the `GameId`, the GamesAPI URL, and the child's last output — a missing
+`e8-server` binary, an unreachable GamesAPI and a `.spin` that won't load all
+identify themselves there rather than turning into a browser-side `ws error`.
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `spinPath` | `./src/game/script.spin` | Resolved against the Vite root; where `create-slot` puts it. A missing file is reported before anything is spawned. |
+| `gameId` | `GameId` env → `game1` in sandbox mode | The platform's `publicGameId`. **Required** against a real GamesAPI — only the sandbox has a default, and it is the id every public sandbox tenant is created with. |
+| `sandbox` | `true` unless a `gamesApiUrl` is given | Passes `--sandbox`, which also relaxes the CLI's `GamesApiUrl`/`GamesApiKey` requirements. |
+| `gamesApiUrl` / `apiKey` | `GamesApiUrl` / `GamesApiKey` env | Setting a URL turns `sandbox` off, and then the key is required — that is a real GamesAPI. |
+| `port` | `ARTUBE_PORT` env → `8080` | Where the scan *starts*; the plugin takes the first free port from there. |
+| `external` | `ARTUBE_BACKEND` env | Escape hatch: proxy at a backend somebody else is running (debugging this service in an IDE) and start nothing. `ARTUBE_BACKEND=http://localhost:8080` on its own is enough. |
+| `demoBalance` | `DEMO_BALANCE` env | Starting virtual balance for demo sessions. |
+
+The plugin is Node-side and dev-only: a game declares it as a
+**devDependency** and imports it dynamically inside the Artube branch of
+`vite.config.ts`, so a game that only ships to Energy8/Stake never has to
+resolve it.
