@@ -96,8 +96,17 @@ build has ever carried one.
 the dev server, on a free port it picks itself, and configures the `/api`
 proxy from it. Nothing has to be started alongside it. To develop against a
 backend you run yourself, set `ARTUBE_BACKEND=http://localhost:8080` — the
-plugin then only proxies. See
-[`@energy8platform/artube-server`](../artube-server)'s README.
+plugin then only proxies.
+
+`build:artube` produces **both** deployables. The frontend goes to
+`dist-artube/` (mirroring `build:stake` → `dist-stake/`, so the two targets
+never share a folder); the same plugin's build half writes
+`dist-artube-server/` — the backend, with the game's `.spin` copied in
+byte-for-byte, a plain-JS entry point, a `package.json` and a `Dockerfile` —
+so the math the frontend was built against and the math the backend runs come
+from one place. Note that Artube's CI pipeline deploys the repo's `dist`
+folder, so a game using `dist-artube` needs its pipeline pointed at that
+folder. See [`@energy8platform/artube-server`](../artube-server)'s README.
 
 ## Quick start: a game without `game-engine`
 
@@ -243,4 +252,5 @@ overriding it, which is not a supported production configuration.
 
 See [`@energy8platform/artube-server`](../artube-server)'s README for the
 backend side of this contract (`Dockerfile.template`, `/api` prefix,
-`/livez`/`/healthz` outside of it).
+`/livez`/`/healthz` outside of it) — and note that `npm run build:artube`
+emits that backend for you, in `dist-artube-server/`.

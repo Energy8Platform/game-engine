@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   artubePlugin,
+  artubeDevPlugin,
   buildChildArgs,
   buildChildEnv,
   describeStartFailure,
@@ -82,7 +83,7 @@ function occupy(port: number): Promise<void> {
 }
 
 type ConfigHook = (config: Record<string, unknown>, env: unknown) => Promise<any>;
-const runConfig = (plugin: ReturnType<typeof artubePlugin>, root: string) =>
+const runConfig = (plugin: ReturnType<typeof artubeDevPlugin>, root: string) =>
   (plugin.config as unknown as ConfigHook)({ root }, { command: 'serve', mode: 'development' });
 
 /** Minimal Vite dev-server shape: only `httpServer`'s close event is used. */
@@ -210,16 +211,26 @@ describe('describeStartFailure — the message that replaces "ws error"', () => 
   });
 });
 
-describe('artubePlugin', () => {
-  it('is dev-only, so no production build can be affected by it', () => {
-    const plugin = artubePlugin();
-    expect(plugin.name).toBe('artube:backend');
-    expect(plugin.apply).toBe('serve');
+describe('artubePlugin — the two halves', () => {
+  /**
+   * One call site, two plugin objects, each with an unconditional `apply`.
+   * That is the whole guarantee: neither half can run in the other's mode,
+   * and you can read that off the object instead of tracing a `command`
+   * branch inside a hook.
+   */
+  it('returns a serve half and a build half, and nothing that applies to both', () => {
+    const plugins = artubePlugin();
+    expect(plugins.map((p) => [p.name, p.apply])).toEqual([
+      ['artube:backend', 'serve'],
+      ['artube:server-artifact', 'build'],
+    ]);
   });
+});
 
+describe('artubeDevPlugin', () => {
   it('external mode proxies /api without starting anything', async () => {
     const config = await runConfig(
-      artubePlugin({ external: 'http://127.0.0.1:9999' }),
+      artubeDevPlugin({ external: 'http://127.0.0.1:9999' }),
       gameRoot(),
     );
     expect(config.server.proxy['/api']).toEqual({
@@ -230,7 +241,7 @@ describe('artubePlugin', () => {
   });
 
   it('starts a backend and proxies /api at the port it actually bound', async () => {
-    const plugin = artubePlugin({ cliPath: fakeCli(), spinPath: './script.spin', port: 8140 });
+    const plugin = artubeDevPlugin({ cliPath: fakeCli(), spinPath: './script.spin', port: 8140 });
     const server = fakeServer();
     cleanups.push(() => server.httpServer.emit('close'));
 
@@ -245,7 +256,7 @@ describe('artubePlugin', () => {
 
   it('scans past a taken port, so two games can run at once', async () => {
     await occupy(8150);
-    const plugin = artubePlugin({ cliPath: fakeCli(), spinPath: './script.spin', port: 8150 });
+    const plugin = artubeDevPlugin({ cliPath: fakeCli(), spinPath: './script.spin', port: 8150 });
     const server = fakeServer();
     cleanups.push(() => server.httpServer.emit('close'));
 
@@ -255,7 +266,7 @@ describe('artubePlugin', () => {
   });
 
   it('kills the backend when the dev server closes', async () => {
-    const plugin = artubePlugin({ cliPath: fakeCli(), spinPath: './script.spin', port: 8160 });
+    const plugin = artubeDevPlugin({ cliPath: fakeCli(), spinPath: './script.spin', port: 8160 });
     const server = fakeServer();
     await runConfig(plugin, gameRoot());
     (plugin.configureServer as any)(server);
@@ -274,12 +285,12 @@ describe('artubePlugin', () => {
     const dying = fakeCli(
       `console.error('Error: engine GetConfig: unknown game "game1"');\nprocess.exit(1);\n`,
     );
-    const plugin = artubePlugin({ cliPath: dying, spinPath: './script.spin', port: 8170 });
+    const plugin = artubeDevPlugin({ cliPath: dying, spinPath: './script.spin', port: 8170 });
     await expect(runConfig(plugin, gameRoot())).rejects.toThrow(/unknown game "game1"/);
   });
 
   it('names a missing .spin instead of starting a backend that cannot serve', async () => {
-    const plugin = artubePlugin({ cliPath: fakeCli(), spinPath: './nope.spin' });
+    const plugin = artubeDevPlugin({ cliPath: fakeCli(), spinPath: './nope.spin' });
     await expect(runConfig(plugin, gameRoot())).rejects.toThrow(/spin math not found[\s\S]*nope\.spin/);
   });
 });

@@ -1,30 +1,42 @@
 # Шаблон для серверного репозитория игры. Контракт Artube: Dockerfile в
 # корне, слушаем порт 80, health-пробы /livez и /healthz.
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM node:20-alpine AS final
+#
+# `@energy8platform/artube-server/vite` copies THIS FILE verbatim into the
+# `dist-artube-server/` artifact it emits on `BUILD_TARGET=artube vite build`,
+# next to a generated `index.js`, a `package.json` and the game's `game.spin`.
+# One file, so the template a studio reads here and the Dockerfile a studio
+# actually builds can never drift.
+#
+# Single stage on purpose: the entry point is plain JavaScript, so the image
+# needs no TypeScript toolchain and no build step. That also removes the
+# `rootDir`/`outDir` trap the earlier two-stage template had — `tsc` could put
+# a studio's `server/index.ts` at `dist/server/index.js` while `CMD` looked for
+# `dist/index.js`, a mismatch discovered only once the container failed to
+# start in the cluster.
+FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# The platform's Kubernetes ingress talks to port 80.
 ENV PORT=80
+# Where the emitted artifact puts the game's math (a file, or a directory of
+# .spin files — the loader and `COPY` treat both the same).
+ENV SPIN_PATH=/app/game.spin
 ARG GIT_HASH
 ENV GIT_HASH=$GIT_HASH
-# Own install, not a copy of the build stage's node_modules — the build
-# stage's install pulls in devDependencies (typescript, vitest, ...) that
-# have no business in the shipped image.
-COPY package*.json ./
-RUN npm ci --omit=dev
-# `npm ci` runs `@energy8platform/platform-core`'s postinstall, which
+
+# The `*` glob makes the lockfile optional: the emitted artifact has none (it
+# cannot be generated offline). Run `npm install` once, commit the lockfile
+# into your server repo, and this COPY starts honouring it.
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+
+# `npm install` runs `@energy8platform/platform-core`'s postinstall, which
 # downloads the `e8-server` engine binary this image needs to spawn at
 # runtime — but that postinstall never fails the install (a build with no
-# network, or `npm ci --ignore-scripts`, silently skips it). Fail the
-# *image build* here instead of the first player's spin: resolve the binary
-# the same way `resolveEngineBinary` (artube-server's own lookup) does, and
-# confirm it exists and is executable.
+# network, or `--ignore-scripts`, silently skips it). Fail the *image build*
+# here instead of the first player's spin: resolve the binary the same way
+# `resolveEngineBinary` (artube-server's own lookup) does, and confirm it
+# exists and is executable.
 RUN node -e " \
   const { accessSync, constants } = require('fs'); \
   const { join } = require('path'); \
@@ -49,7 +61,8 @@ RUN node -e " \
   } \
   console.log(\`[artube-server] engine binary OK: \${found}\`); \
 "
-COPY --from=build /app/dist ./dist
+
+COPY index.js ./
 COPY game.spin ./game.spin
 EXPOSE 80
-CMD ["node", "dist/index.js"]
+CMD ["node", "index.js"]

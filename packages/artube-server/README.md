@@ -7,10 +7,13 @@ rounds), drives the game's math via a local engine subprocess, and exposes a
 thin player-facing WS API (`/api/ws`) plus the two health probes the platform
 expects (`/livez`, `/healthz`).
 
-This package is a **library + CLI**, not a deployable service on its own. A
-game studio's server repo depends on it, writes a few lines of glue
-(`server/index.ts`, shown below), and ships that repo's own Docker image —
-built from the `Dockerfile.template` this package provides.
+This package is a **library + CLI**, not a deployable service on its own — but
+you should not have to assemble one by hand either. The Vite plugin this
+package ships (`@energy8platform/artube-server/vite`) **emits the deployable
+backend** as part of the game's own `npm run build:artube`: a
+`dist-artube-server/` directory with the game's `.spin`, a generated entry
+point, a `package.json` and a `Dockerfile`, ready to `docker build` or to
+commit into the studio's `server` repo. See "Building the backend" below.
 
 ## Entry points
 
@@ -32,14 +35,83 @@ built to `dist/bin/artube-server.js`) — mainly useful for running the service
 locally against the public sandbox without writing any glue code; see
 "Running against the sandbox" below.
 
-## Usage: `server/index.ts`
+## Building the backend: `npm run build:artube`
 
-A studio's server repo wraps this package in its own tiny entry point. This
-is what the `Dockerfile.template`'s `CMD ["node", "dist/index.js"]` expects
-to find once that repo builds its own TypeScript:
+The game's math (`src/game/script.spin`) lives in the *client* repo; the
+backend image is what has to run it. Nothing used to carry it across, so a
+studio copied it by hand — the kind of step that ships yesterday's math to
+production without anyone noticing. The Vite plugin already knows that path
+(it hands it to the dev backend on every `npm run dev:artube`), so the build
+half now writes the whole deployable:
+
+```
+dist-artube-server/
+  Dockerfile      ← this package's Dockerfile.template, copied verbatim
+  index.js        ← generated entry point, plain JS
+  package.json    ← one dependency: @energy8platform/artube-server
+  game.spin       ← the game's math, byte-for-byte
+  README.md       ← what to do with the directory
+```
+
+```bash
+cd dist-artube-server
+docker build --build-arg GIT_HASH=$(git rev-parse HEAD) -t my-game-server .
+docker run -p 8080:80 -e GameId=… -e GamesApiUrl=wss://… -e GamesApiKey=… my-game-server
+```
+
+`GameId` / `GamesApiUrl` / `GamesApiKey` are **runtime** environment, never
+baked in: the same image is promoted across the platform's environments. The
+artifact is therefore configuration-free — `vite build` needs only the `.spin`
+path, and never fails for a `GameId` a build has no business knowing.
+
+The directory is wiped and rewritten on every build, so nothing you edit in
+there survives; edit the game and rebuild. `artubePlugin({ emitServer: false })`
+turns it off, `{ serverOutDir }` moves it, `{ serverSpec }` changes the npm
+spec the emitted `package.json` pins (see "Versioning" below).
+
+### The emitted entry point is JavaScript, and that is the point
+
+The old template compiled a studio's `server/index.ts` inside the image, which
+made `CMD ["node", "dist/index.js"]` depend on that repo's `rootDir`/`outDir`:
+get it wrong and `tsc` nests the output at `dist/server/index.js`, the
+container fails to start with `Cannot find module '/app/dist/index.js'`, and
+you find out in the cluster. A generated entry that is *already runnable*
+deletes the class: the image is a single stage with no TypeScript toolchain
+and no build step, and there is nothing left for the two paths to disagree
+about. `Dockerfile.template` is that single-stage file, and the plugin copies
+it verbatim rather than generating its own, so the template a studio reads
+here and the Dockerfile a studio actually builds cannot drift.
+
+### Versioning
+
+The emitted `package.json` pins `@energy8platform/artube-server` to
+`^<version>` read from the installed copy of this package at emit time — not
+a literal written into the plugin, which would keep pinning `0.1.x` long after
+the package moved on and install a backend that does not match the plugin that
+produced it.
+
+**Today that pin does not resolve: this package is not published yet.** A
+`docker build` of the emitted artifact will fail at `npm install` with `E404`
+until it ships. Until then, use `serverSpec` with something that does resolve:
 
 ```ts
-// server/index.ts
+// after `npm pack --workspace @energy8platform/artube-server`
+artubePlugin({ serverSpec: 'file:./energy8platform-artube-server-0.1.0.tgz' })
+// …and COPY the tarball into the image next to package.json.
+```
+
+a git ref (`github:energy8platform/game-engine#…`) works too, as does a private
+registry. **At publish time nothing in the plugin changes** — the default pin
+already names the published version, and `serverSpec` becomes unnecessary.
+
+## Usage: a hand-written entry point
+
+The emitted `index.js` is eight lines, and this is what they are. Write them
+yourself if you are assembling a server repo by hand instead of using the
+plugin's artifact:
+
+```ts
+// index.ts — or just index.js, and skip the compile
 import { createArtubeServer, loadConfigFromEnv } from '@energy8platform/artube-server';
 
 const config = loadConfigFromEnv();
@@ -58,18 +130,11 @@ hands over (see the table below) and throws with the missing variable's name
 if a required one is absent — fail fast on a broken deploy, not on the first
 request.
 
-> **Check your emitted path before trusting `CMD ["node", "dist/index.js"]`.**
-> The Dockerfile template's `CMD` assumes your own `tsconfig.json` compiles
-> `server/index.ts` straight to `dist/index.js`. If your `rootDir` is the
-> repo root (or anything other than the folder `server/index.ts` lives in),
-> `tsc` will instead nest the output — e.g. `dist/server/index.js` — and the
-> container will fail to start with `Error: Cannot find module
-> '/app/dist/index.js'`, discovered only once it's running (or not) in the
-> cluster. This exact `rootDir`/`outDir` mismatch is why this package's own
-> `package.json` `main`/`exports` briefly pointed at paths that didn't exist —
-> after building, always confirm with `ls dist/index.js` (or update the
-> `CMD` to match wherever your build actually puts it) before shipping the
-> image.
+> If you do compile it, `Dockerfile.template`'s `CMD ["node", "index.js"]` no
+> longer matches — point it at whatever your build actually emits, and check
+> with `ls` before shipping. (This is the `rootDir`/`outDir` mismatch the
+> template used to have to warn about at length; it only exists on the
+> hand-rolled path now, because the plugin's artifact has no compile step.)
 
 ## Environment variables
 
@@ -100,8 +165,8 @@ script (`scripts/install-e8.mjs`), which fetches the binary for your
 platform from this repo's GitHub Releases into platform-core's own `bin/`
 directory. `artube-server` depends on `@energy8platform/platform-core`
 specifically to get this for free — **the build needs network access to
-GitHub Releases** for the `npm ci` step in `Dockerfile.template`'s final
-stage to succeed at anything more than a no-op.
+GitHub Releases** for the `npm install` step in `Dockerfile.template` to
+succeed at anything more than a no-op.
 
 Two things make that download silently absent even though `npm ci`
 otherwise succeeds:
@@ -109,12 +174,12 @@ otherwise succeeds:
 - A build environment with no network reachability to GitHub Releases —
   `install-e8.mjs` treats a failed download as non-fatal (so Lua-only games
   aren't broken by it) and just logs and moves on.
-- `npm ci --ignore-scripts`, which skips `postinstall` entirely.
+- `--ignore-scripts`, which skips `postinstall` entirely.
 
 Either way, the container would previously build cleanly and then die on
 its first spin with "no such file or directory" or a bare `e8-server` from
-`PATH` that doesn't exist. `Dockerfile.template`'s final stage now runs a
-build-time check, right after its own `npm ci --omit=dev`, that resolves
+`PATH` that doesn't exist. `Dockerfile.template` now runs a
+build-time check, right after `npm install --omit=dev`, that resolves
 the binary exactly the way `resolveEngineBinary` does at runtime and
 confirms it exists and is executable — **if it fires, the image build fails
 with `[artube-server] no usable e8-server binary found`**, instead of the
@@ -135,11 +200,11 @@ check and the runtime `spawnEngine()` need.
 
 Bake in your own binary (e.g. copied from a private build) and point
 `E8_SERVER_BINARY` at it in a studio `Dockerfile` layered on this template,
-**before** the `Dockerfile.template` lines that run `npm ci --omit=dev` and
-the build-time check:
+**before** the `Dockerfile.template` lines that run `npm install --omit=dev`
+and the build-time check:
 
 ```dockerfile
-# Before the `RUN npm ci --omit=dev` / engine-binary-check block from
+# Before the `RUN npm install --omit=dev` / engine-binary-check block from
 # Dockerfile.template:
 COPY vendor/e8-server /usr/local/bin/e8-server
 ENV E8_SERVER_BINARY=/usr/local/bin/e8-server
@@ -169,16 +234,23 @@ is an escape hatch to stage the upgrade rather than a long-term fix.
 
 ## Deployment contract
 
-- `Dockerfile.template`, copied to the repo root as `Dockerfile`, builds and
-  runs the studio's `server/index.ts`. The container **listens on port 80**
-  (`EXPOSE 80`) — the platform's Kubernetes ingress expects exactly that.
+- `Dockerfile.template` — emitted as `dist-artube-server/Dockerfile` by the
+  build plugin, or copied to a server repo's root as `Dockerfile` by hand. A
+  single stage: no TypeScript build, `CMD ["node", "index.js"]`. The container
+  **listens on port 80** (`EXPOSE 80`) — the platform's Kubernetes ingress
+  expects exactly that.
+- There is no `package-lock.json` in the emitted artifact (it cannot be
+  generated offline), so the Dockerfile uses `npm install --omit=dev` and
+  `COPY package.json package-lock.json* ./`. Run `npm install` once, commit
+  the lockfile into your server repo, and the same Dockerfile starts honouring
+  it.
 - Every player/platform-facing HTTP and WS route lives under `/api`
   (`/api/ws`, `/api/version`); `/livez` and `/healthz` sit outside `/api`
   because that's where the platform's Kubernetes liveness/readiness probes
   look for them.
 - `GIT_HASH` is passed as `--build-arg GIT_HASH=$(git rev-parse HEAD)` (or
   equivalent CI variable) and shows up at `/api/version`.
-- The final stage's `npm ci --omit=dev` must reach GitHub Releases (or have
+- `npm install --omit=dev` must reach GitHub Releases (or have
   `E8_SERVER_BINARY` baked in) to install the `e8-server` engine binary —
   see "Engine binary" above.
 
@@ -211,7 +283,25 @@ worked yesterday is suddenly dead today, that's expected, not a regression:
 recreate it from the Sandbox UI by pressing **"Generate Data"** and then
 **"Create Session"** before debugging further.
 
-## Developing the game's frontend against it: `@energy8platform/artube-server/vite`
+## The Vite plugin: `@energy8platform/artube-server/vite`
+
+`artubePlugin({ spinPath })` is one call site and two plugin objects — a
+`apply: 'serve'` dev half and a `apply: 'build'` half — because each then
+keeps an unconditional `apply`, so "neither can run in the other's mode" is a
+property you read off the object rather than a branch inside a hook. Vite
+flattens plugin arrays, so a game's `vite.config.ts` is unchanged.
+
+### The build half: `apply: 'build'`
+
+Emits `dist-artube-server/` — see "Building the backend" above. It runs on
+`closeBundle`, throws (failing `vite build`) if the `.spin` is missing, and
+touches nothing else about the bundle.
+
+A game that never targets Artube never pays for any of it: `vite.config.ts`
+imports this package **dynamically, inside the Artube branch**, so an
+Energy8/Stake-only build does not resolve it at all.
+
+### The dev half: `apply: 'serve'`
 
 The Artube dev loop used to be two processes — a Vite dev server for the game
 and this service, started by hand in a second terminal. Forgetting the second
@@ -238,7 +328,7 @@ plugins.push(artubePlugin({ spinPath: './src/game/script.spin' }));
 - **waits until `/livez` answers** before Vite finishes resolving its config,
   so the page is never served against a backend that isn't up yet;
 - **kills the child** when the dev server closes (and on `SIGINT`/exit);
-- **`apply: 'serve'`** — it can never take part in a production build.
+- **`apply: 'serve'`** — this half can never take part in a production build.
 
 If the backend cannot start, `vite` aborts with a message naming the spin
 path, the `GameId`, the GamesAPI URL, and the child's last output — a missing
@@ -256,6 +346,21 @@ identify themselves there rather than turning into a browser-side `ws error`.
 | `port` | `ARTUBE_PORT` env → `8080` | Where the scan *starts*; the plugin takes the first free port from there. |
 | `external` | `ARTUBE_BACKEND` env | Escape hatch: proxy at a backend somebody else is running (debugging this service in an IDE) and start nothing. `ARTUBE_BACKEND=http://localhost:8080` on its own is enough. |
 | `demoBalance` | `DEMO_BALANCE` env | Starting virtual balance for demo sessions. |
+| `serverOutDir` | `dist-artube-server` | Build half: where the deployable backend is written, relative to the Vite root. |
+| `serverSpec` | `^<this package's version>` | Build half: the npm spec the emitted `package.json` pins. A private registry, a git ref or `file:…tgz` all work — see "Versioning". |
+| `emitServer` | `true` | Build half: set `false` to build only the frontend. |
+
+### `build:artube` writes `dist-artube`, not `dist`
+
+The frontend half of the Artube build emits `dist-artube/`, mirroring
+`build:stake` → `dist-stake/`, so the two targets never share a folder and
+neither can silently ship the other's bytes.
+
+**Consequence, and it is a real one:** Artube's own CI pipeline deploys the
+repo's `dist` folder (`artube-docs-ru/game-development/hosting.md`,
+`devops.md`). A game using `dist-artube` must have its pipeline pointed at
+that folder — change the job's artifact path, or add a copy step. That is the
+accepted trade for keeping the targets visibly separate.
 
 The plugin is Node-side and dev-only: a game declares it as a
 **devDependency** and imports it dynamically inside the Artube branch of

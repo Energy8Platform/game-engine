@@ -1,5 +1,11 @@
 /**
- * `artubePlugin` — one-command dev loop for an Artube game.
+ * `artubeDevPlugin` — one-command dev loop for an Artube game.
+ *
+ * This is the `apply: 'serve'` half of {@link artubePlugin}; the build half
+ * (which emits the deployable backend) lives in `buildPlugin.ts`. They are
+ * separate plugin objects rather than one object branching on `command`
+ * precisely so each can keep an unconditional `apply` — a guarantee you can
+ * read off the object instead of reasoning about a hook.
  *
  * The Artube target has always been two processes: a Vite dev server for the
  * frontend and `artube-server` for the game's own backend. Nothing enforced
@@ -99,6 +105,26 @@ export interface ArtubePluginOptions {
   demoBalance?: number;
   /** Explicit path to the `artube-server` CLI entry (tests / odd layouts). */
   cliPath?: string;
+
+  // ── build half (see `buildPlugin.ts`) ──────────────────────────────────
+  /**
+   * Where `vite build` writes the deployable backend, relative to the Vite
+   * root. Default {@link DEFAULT_SERVER_OUT_DIR}.
+   */
+  serverOutDir?: string;
+  /**
+   * npm spec for `@energy8platform/artube-server` in the emitted
+   * `package.json`. Defaults to `^<the installed version>` — override for a
+   * private registry, a git ref, or a `file:…` tarball.
+   */
+  serverSpec?: string;
+  /**
+   * Set `false` to build only the frontend. The backend artifact is cheap
+   * (four small files) and stale math is the failure it prevents, so it is on
+   * by default; a studio whose backend repo is assembled some other way can
+   * turn it off.
+   */
+  emitServer?: boolean;
 }
 
 // ── configuration resolution (pure, unit-tested) ─────────────────────────
@@ -128,6 +154,23 @@ export function resolveExternalTarget(
   if (opts.external === true) return env.ARTUBE_BACKEND ?? `http://localhost:${DEFAULT_ARTUBE_DEV_PORT}`;
   if (opts.external === false) return null;
   return env.ARTUBE_BACKEND ?? null;
+}
+
+/**
+ * Where the game's math is. Split out of {@link resolveSpawnConfig} because
+ * the build half needs *only* this: a backend artifact is configuration-free
+ * (GameId/GamesApiUrl/GamesApiKey are runtime environment, so the same image
+ * can be promoted across environments), and making `vite build` throw for a
+ * missing `GameId` it will never use would be a build broken by a value that
+ * does not belong to builds.
+ */
+export function resolveSpinPath(
+  opts: Pick<ArtubePluginOptions, 'spinPath'> = {},
+  env: Env = process.env,
+  root = process.cwd(),
+): string {
+  const raw = opts.spinPath ?? env.SPIN_PATH ?? './src/game/script.spin';
+  return isAbsolute(raw) ? raw : resolvePath(root, raw);
 }
 
 /**
@@ -168,8 +211,7 @@ export function resolveSpawnConfig(
     );
   }
 
-  const rawSpin = opts.spinPath ?? env.SPIN_PATH ?? './src/game/script.spin';
-  const spinPath = isAbsolute(rawSpin) ? rawSpin : resolvePath(root, rawSpin);
+  const spinPath = resolveSpinPath(opts, env, root);
 
   const basePort = opts.port ?? (env.ARTUBE_PORT ? Number(env.ARTUBE_PORT) : DEFAULT_ARTUBE_DEV_PORT);
   if (!Number.isInteger(basePort) || basePort < 1 || basePort > 65535) {
@@ -310,7 +352,7 @@ async function waitUntilServing(
 
 // ── the plugin ───────────────────────────────────────────────────────────
 
-export function artubePlugin(opts: ArtubePluginOptions = {}): Plugin {
+export function artubeDevPlugin(opts: ArtubePluginOptions = {}): Plugin {
   let child: ChildProcess | null = null;
   let target = '';
 
