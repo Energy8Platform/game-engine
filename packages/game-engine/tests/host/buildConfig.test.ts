@@ -43,4 +43,11 @@ describe('buildAppConfig', () => {
     expect(dm(true, false)).toBe(true);
     expect(dm(false, true)).toBe(true);
   });
+  it('an Artube launch also forces sdk.devMode (the bridge is in-process)', () => {
+    const dm = (isArtubeNow: boolean, dev?: boolean) =>
+      (buildAppConfig(minimal({ dev }), false, isArtubeNow).sdk as { devMode: boolean }).devMode;
+    expect(dm(true, false)).toBe(true);
+    expect(dm(true, undefined)).toBe(true);
+    expect(dm(false, false)).toBe(false); // omitted → unchanged from the pre-Artube behaviour
+  });
 });

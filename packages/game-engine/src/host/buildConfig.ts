@@ -6,12 +6,18 @@ import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-res
 
 /**
  * Pure: map host options to a GameApplicationConfig with sane defaults.
- * `isStakeNow` is computed by the orchestrator (kept out of here so this
- * stays a pure, renderer-free function).
+ * `isStakeNow` / `isArtubeNow` are computed by the orchestrator (kept out of
+ * here so this stays a pure, renderer-free function).
+ *
+ * Both host bridges run IN-PROCESS with the game, so either one means the SDK
+ * must be in `devMode` — that is what makes it talk over the in-memory channel
+ * the bridge listens on instead of postMessage-ing an outer host that isn't
+ * there. (`dev` is the third, unrelated reason for the same flag: DevBridge.)
  */
 export function buildAppConfig<T extends SlotSpinResultBase = SlotSpinResultBase>(
   opts: CreateSlotGameOptions<T>,
   isStakeNow: boolean,
+  isArtubeNow = false,
 ): GameApplicationConfig {
   return {
     container: opts.container ?? '#game',
@@ -23,7 +29,7 @@ export function buildAppConfig<T extends SlotSpinResultBase = SlotSpinResultBase
     manifest: opts.manifest,
     audio: opts.audio,
     pixi: opts.pixi,
-    sdk: { devMode: isStakeNow || (opts.dev ?? false) },
+    sdk: { devMode: isStakeNow || isArtubeNow || (opts.dev ?? false) },
     debug: opts.dev ?? false,
   };
 }

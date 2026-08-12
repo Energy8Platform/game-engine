@@ -4,6 +4,7 @@ export type {
   CreateSlotGameOptions,
   SlotGameHandle,
   StakeIntegration,
+  ArtubeIntegration,
   SceneRegistration,
   SceneNavData,
   ShellFactory,

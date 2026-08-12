@@ -11,7 +11,7 @@ import type { SceneApi, SlotSceneController, RenderContext } from './sceneContro
 import type { FreeSpinsView } from './freeSpinsCounter';
 
 /**
- * One-call slot bootstrap: preboot → (optional Stake bridge) → GameApplication
+ * One-call slot bootstrap: preboot → (optional Stake / Artube bridge) → GameApplication
  * → register scene → start. Collapses the per-game main.ts boilerplate.
  *
  * Not unit-tested: GameApplication.init() drives Pixi, which hangs in headless
@@ -100,7 +100,51 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     }
   }
 
-  const game = new GameApplication(buildAppConfig(opts, isStakeNow));
+  let artubeBridge: SlotGameHandle['artubeBridge'] = null;
+  let isArtubeNow = false;
+  // `!isStakeNow`: both bridges install themselves in-process on the SAME SDK memory channel, so
+  // whichever launch already claimed the game wins. (The two launch shapes are disjoint in practice
+  // — Stake's marker is `sessionID`/`replay`, Artube's is `sessionId` — so this never fires; it just
+  // makes the precedence explicit rather than leaving two bridges racing.)
+  if (opts.artube && !isStakeNow) {
+    const { classifyArtubeLaunch } = await import('@energy8platform/artube-bridge/detect');
+    // Security gate, the Artube counterpart of the Stake one above. Artube's only launch marker is
+    // `sessionId`, and unlike Stake there is no attacker-suppliable server address to validate
+    // (`apiBase` is the launch URL's own origin). What IS reachable is stripping the session: a URL
+    // that carries `sessionId` with an empty/blank value claims a session it doesn't have, fails the
+    // "is this Artube?" check, and would silently fall through to the offline/dev bridge — the
+    // free-play hole. 'artube' = a real launch (load the bridge); 'offline' = no marker at all, a
+    // genuine dev launch. A marker removed ENTIRELY is indistinguishable from dev here; that half is
+    // structural — the BUILD_TARGET=artube bundle has no DevBridge to fall through to.
+    const launch = classifyArtubeLaunch(location.href);
+    if (launch === 'blocked') {
+      fatal('Invalid game session. Please relaunch the game from the lobby.');
+      throw new Error(
+        'createSlotGame: refusing to run — Artube launch with a missing or blank sessionId',
+      );
+    }
+    isArtubeNow = launch === 'artube';
+    if (isArtubeNow) {
+      try {
+        const { ArtubeBridge } = await import('@energy8platform/artube-bridge');
+        artubeBridge = new ArtubeBridge({
+          // In-process over the SDK's MemoryChannel (see buildAppConfig's devMode).
+          devMode: true,
+          gameId: opts.model.spec.id,
+          url: location.href,
+          // Same-origin in production; both fields are dev/demo escape hatches (see ArtubeIntegration).
+          ...(opts.artube.apiBase ? { apiBase: opts.artube.apiBase } : {}),
+          ...(opts.artube.demoBalance != null ? { demoBalance: opts.artube.demoBalance } : {}),
+        });
+        await artubeBridge.ready();
+      } catch (err) {
+        fatal('Could not connect to the game server. Please reload.');
+        throw err;
+      }
+    }
+  }
+
+  const game = new GameApplication(buildAppConfig(opts, isStakeNow, isArtubeNow));
 
   // Register EVERY scene up front so any of them can navigate to any other.
   for (const { key, scene } of opts.scenes) game.scenes.register(key, scene);
@@ -174,6 +218,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
     const ps = game.platformSession;
     const balance = (game.initData?.balance as number | undefined) ?? 0;
+    // Replay is a STAKE concept (a shared link that re-plays one recorded round). Artube has no
+    // equivalent, so an Artube launch is always 'base' — nothing to mirror here.
     const isReplay = !!stakeBridge?.isReplay;
     const mode: ShellMode = isReplay ? 'replay' : 'base';
     // initData.config carries the Stake bridge's currency/social/disclaimer surface (GameConfigData);
@@ -189,9 +235,16 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         stake?: { defaultBetLevel?: number; minBet?: number; maxBet?: number };
         /** Set by the Stake bridge when `/wallet/authenticate` returned a still-open round. */
         activeRound?: { bet?: number; roundId?: string; mode?: string };
+        /** Artube's platform block. The default bet arrives as an INDEX into `config.betLevels`
+         *  (the platform's `allowed_bets`), where Stake states an amount. */
+        artube?: { defaultBetIndex?: number };
       };
-      /** Present only on a resume — the bridge synthesises it from the open round. */
+      /** Present only on a resume — the bridge synthesises it from the open round. Both the Stake
+       *  and the Artube bridge fill it the same way, so the resumed-bet path below is shared. */
       session?: { betAmount?: number };
+      /** Session currency CODE. The Artube bridge's only currency surface (the platform picks it
+       *  per session; demo sessions are 'FUN'); Stake sends full meta on `config.currency` instead. */
+      currency?: string;
       lang?: string;
     } | null;
     const config = initData?.config;
@@ -203,33 +256,44 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // carrier for the same value (INIT only ever has a session on a resume). Both are ignored when
     // absent or 0 so an ordinary launch still starts on the default.
     const resumedBet = config?.activeRound?.bet || initData?.session?.betAmount || undefined;
+    // Artube states its per-session default bet as an INDEX into the platform's ladder; resolve it
+    // against that SAME ladder so `runtime.defaultBet` is an amount on both platforms.
+    const artubeDefaultBet = isArtubeNow
+      ? config?.betLevels?.[config?.artube?.defaultBetIndex ?? -1]
+      : undefined;
     const { resolveCurrency } = await import('./shellConfig');
     // SINGLE source of truth for the symbol: the Stake bridge already puts a full CurrencyMetaData
     // (symbol + placement) on initData.config.currency. In the non-stake/devBridge path that meta
     // is absent and we only have the spec's currency CODE — resolve it through the SAME table
     // (stake-bridge's lookupCurrency) so e.g. 'EUR' renders as '€', not the literal text "EUR".
     // stake-bridge ships with every scaffold; if it's somehow absent we degrade to the code.
+    // On Artube the session currency is the PLATFORM's (per player, and 'FUN' for demo sessions) and
+    // arrives as a bare code on initData — there is no meta object. It outranks the spec's static
+    // code, which would otherwise show every Artube player the spec's currency symbol.
+    const currencyCode = (isArtubeNow ? initData?.currency : undefined) || opts.model.spec.currency;
     let currencyMeta = config?.currency;
-    if (!currencyMeta?.symbol && opts.model.spec.currency) {
+    if (!currencyMeta?.symbol && currencyCode) {
       try {
         const { lookupCurrency } = await import('@energy8platform/stake-bridge');
-        currencyMeta = lookupCurrency(opts.model.spec.currency);
+        currencyMeta = lookupCurrency(currencyCode);
       } catch {
         /* stake-bridge not installed — resolveCurrency falls back to the code */
       }
     }
     const runtime = {
       balance,
-      currency: resolveCurrency(currencyMeta, opts.model.spec.currency),
+      currency: resolveCurrency(currencyMeta, currencyCode),
       language: initData?.lang,
       mode,
       social: config?.socialMode,
       disclaimerLines: config?.disclaimerLines,
       jurisdiction: config?.jurisdiction,
-      // Currency-specific ladder + per-currency default from /wallet/authenticate (Stake);
-      // absent on dev/devBridge → buildShellConfig falls back to the spec.
+      // Currency-specific ladder + per-currency default from /wallet/authenticate (Stake) or the
+      // backend's `allowed_bets` (Artube); absent on dev/devBridge → buildShellConfig falls back to
+      // the spec.
       betLevels: config?.betLevels,
-      defaultBet: resumedBet ?? config?.stake?.defaultBetLevel ?? config?.defaultBet,
+      defaultBet:
+        resumedBet ?? config?.stake?.defaultBetLevel ?? artubeDefaultBet ?? config?.defaultBet,
       // Hard stake window; the bridge rejects anything outside it before /bet/play.
       minBet: config?.stake?.minBet,
       maxBet: config?.stake?.maxBet,
@@ -238,10 +302,14 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // spec's (EUR-shaped) ladder here would put the game on bets the wallet can't honour — every
     // spin rejected on a high-denomination currency (ARS minBet 50), or silently mispriced. Fail
     // where the cause is visible instead of at the first spin.
-    if (isStakeNow && !runtime.betLevels?.length) {
+    // Artube is the same requirement by a different route: the wire carries a bet INDEX, not an
+    // amount, and the bridge maps the amount the game plays to the NEAREST rung of the platform's
+    // ladder — so a spec-shaped ladder wouldn't be rejected, it would silently charge a different
+    // price than the bar shows. Refuse there too.
+    if ((isStakeNow || isArtubeNow) && !runtime.betLevels?.length) {
       fatal('Could not load the bet levels for your currency. Please relaunch the game.');
       throw new Error(
-        'createSlotGame: Stake launch returned no config.betLevels — refusing to fall back to the spec ladder',
+        `createSlotGame: ${isStakeNow ? 'Stake' : 'Artube'} launch returned no config.betLevels — refusing to fall back to the spec ladder`,
       );
     }
     if (opts.dev) {
@@ -811,5 +879,5 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     }
   }
 
-  return { game, stakeBridge, shell };
+  return { game, stakeBridge, artubeBridge, shell };
 }

@@ -5,6 +5,7 @@ import type { AssetManifest, LoadingScreenConfig } from '@energy8platform/platfo
 import type { Shell, PixiShellConfig } from '@energy8platform/shell/pixi';
 import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../types';
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
+import type { ArtubeBridge } from '@energy8platform/artube-bridge';
 import type { GameApplication } from '../core';
 import type { SlotShellOptions } from './shellConfig';
 import type {
@@ -32,6 +33,21 @@ export interface BonusReadoutConfig<T extends SlotSpinResultBase = SlotSpinResul
 export interface StakeIntegration {
   /** The game's BookAdapter (or its module). modeMap + gameId come from the model. */
   adapter: BookAdapter | AdapterModule;
+}
+
+/** Artube host integration. There is no per-game artifact to pass: the game's own BACKEND
+ *  (`@energy8platform/artube-server`) owns the round shape, so the bridge is a pure protocol
+ *  translator — `artube: {}` is the whole opt-in, and both fields below are optional.
+ *  `gameId` comes from the model, the launch params from the URL. */
+export interface ArtubeIntegration {
+  /** Starting virtual balance for a DEMO session (the platform doesn't keep one — the bridge does,
+   *  client-side). Default: the backend's own configured demo balance. Ignored for real sessions. */
+  demoBalance?: number;
+  /** Origin of the game's backend. Default (and the only supported PRODUCTION value) is the launch
+   *  URL's own origin: Artube serves frontend and backend on one domain, split by path (`/api/**`).
+   *  Override only for local dev against a backend on another port — prefer proxying `/api` from the
+   *  dev server (what the `BUILD_TARGET=artube` target does) so dev matches production. */
+  apiBase?: string;
 }
 
 /** One scene registered with the host: a key + its constructor. The list order matters — the
@@ -77,6 +93,9 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   textureDefaults?: boolean;
   dev?: boolean;
   stake?: StakeIntegration;
+  /** Run on Artube when the launch URL says so (`?sessionId=…`). Pass `{}` to enable — see
+   *  `ArtubeIntegration`. Build the game with `BUILD_TARGET=artube` for the Artube bundle. */
+  artube?: ArtubeIntegration;
   shell?: SlotShellOptions;
   /** Customise the bonus bar readout for games whose bonus isn't plain free spins (adventure,
    *  hold-and-spin, respins). Omit for the free-spins default. See `BonusReadoutConfig`. */
@@ -101,5 +120,7 @@ export type ShellFactory = (config: PixiShellConfig) => Shell;
 export interface SlotGameHandle {
   game: GameApplication;
   stakeBridge: StakeBridge | null;
+  /** The live Artube bridge — non-null only on a real Artube launch (`opts.artube` + `?sessionId=…`). */
+  artubeBridge: ArtubeBridge | null;
   shell: Shell | null;
 }
