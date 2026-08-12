@@ -19,6 +19,14 @@ describe('конфиг из окружения', () => {
   it('падает без обязательной переменной', () => {
     expect(() => loadConfigFromEnv({ ...env, GamesApiKey: undefined })).toThrow(/GamesApiKey/);
   });
+
+  it('в режиме sandbox не требует GamesApiUrl и GamesApiKey, но требует GameId', () => {
+    const config = loadConfigFromEnv({ GameId: 'my-game' }, { sandbox: true });
+    expect(config.gameId).toBe('my-game');
+    expect(config.gamesApiUrl).toBe('');
+    expect(config.apiKey).toBe('');
+    expect(() => loadConfigFromEnv({}, { sandbox: true })).toThrow(/GameId/);
+  });
 });
 
 describe('аргументы CLI', () => {
@@ -28,6 +36,26 @@ describe('аргументы CLI', () => {
     });
     expect(args.gamesApiUrl).toBe(SANDBOX_URL);
     expect(args.spinPath).toBe('./game.spin');
+  });
+
+  it('--sandbox не требует GamesApiUrl — флаг сам его подставит', () => {
+    const args = parseArgs(['--sandbox'], { GameId: 'g' });
+    expect(args.gamesApiUrl).toBe(SANDBOX_URL);
+  });
+
+  it('--sandbox не требует GamesApiKey — песочница проверяет ключ, только если он задан у интеграции', () => {
+    const args = parseArgs(['--sandbox'], { GameId: 'g' });
+    expect(args.apiKey).toBe('');
+  });
+
+  it('--sandbox всё равно требует GameId — он должен совпадать с publicGameId сессии в Sandbox UI', () => {
+    expect(() => parseArgs(['--sandbox'], {})).toThrow(/GameId/);
+  });
+
+  it('без --sandbox отсутствие GamesApiUrl всё равно падает', () => {
+    expect(() =>
+      parseArgs([], { GameId: 'g', GamesApiKey: 'k' }),
+    ).toThrow(/GamesApiUrl/);
   });
 
   it('--port переопределяет порт', () => {

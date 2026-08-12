@@ -157,9 +157,13 @@ same GamesAPI protocol that runs on dev and prod. Other flags:
 - `--spin <path>` — path to the `.spin` file/directory (overrides `SPIN_PATH`).
 - `--port <n>` — HTTP/WS listen port (overrides `PORT`).
 
-`GameId`, `GamesApiUrl`, and `GamesApiKey` must still be set in the
-environment even when using `--sandbox` — `--sandbox` only replaces the URL,
-it doesn't invent a game ID or key.
+`GameId` must still be set in the environment when using `--sandbox` — it
+has to match the `publicGameId` created in the Sandbox UI, and there's no
+sane default for it. `GamesApiUrl` and `GamesApiKey`, however, are **not**
+required in sandbox mode: `--sandbox` supplies the URL itself (requiring you
+to also set `GamesApiUrl` first would be pointless friction), and the
+sandbox only checks `GamesApiKey` when the integration under test defines a
+non-empty one.
 
 **The sandbox's data is short-lived — about 24 hours.** If a session that
 worked yesterday is suddenly dead today, that's expected, not a regression:

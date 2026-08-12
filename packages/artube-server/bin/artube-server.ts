@@ -14,7 +14,13 @@ import { loadConfigFromEnv, type ArtubeServerConfig } from '../src/config.js';
 export const SANDBOX_URL = 'wss://gamesapi-sandbox.artube-888.live/v1/ws';
 
 export function parseArgs(argv: string[], env = process.env): ArtubeServerConfig {
-  const config = loadConfigFromEnv(env);
+  // Scanned up front, not discovered mid-loop: `loadConfigFromEnv` needs to
+  // know *before* it validates env vars whether `--sandbox` is about to
+  // overwrite `gamesApiUrl` itself, so it can stop demanding `GamesApiUrl`
+  // (and relax `GamesApiKey`) for a flag whose whole point is frictionless
+  // local runs.
+  const sandbox = argv.includes('--sandbox');
+  const config = loadConfigFromEnv(env, { sandbox });
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--sandbox') config.gamesApiUrl = SANDBOX_URL;
     if (argv[i] === '--spin') {
