@@ -5,6 +5,8 @@ export type {
   SlotGameHandle,
   StakeIntegration,
   ArtubeIntegration,
+  ArtubeModule,
+  ArtubeBridgeLike,
   SceneRegistration,
   SceneNavData,
   ShellFactory,

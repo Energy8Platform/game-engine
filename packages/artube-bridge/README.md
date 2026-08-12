@@ -60,27 +60,38 @@ createSlotGame({
   normalize,
   scenes: [ … ],
   // …
-  artube: {},          // ← the whole opt-in; no per-game adapter exists on Artube
+  // The whole opt-in; no per-game adapter exists on Artube.
+  artube: { load: () => import('@energy8platform/artube-bridge') },
 });
 ```
 
-With `artube` present the host classifies the launch URL
+The game supplies the `load` thunk rather than the host importing this
+package itself: a bare `import('@energy8platform/artube-bridge')` inside
+game-engine's always-shipped `/host` entry is resolved statically by every
+bundler, so it would have to resolve in games that never installed this
+package (esbuild/webpack fail the build; Vite silently substitutes an empty
+module for an uninstalled optional peer, which is worse). With the loader the
+specifier only appears in the bundle of a game that took the dependency. The
+launch classifier ships in the same module as the bridge, so this is one
+load, not two.
+
+Given `artube`, the host calls `load()`, classifies the launch URL
 (`classifyArtubeLaunch`), **refuses to run** on a malformed one (see the
-security gate below), dynamically imports this package only on a real Artube
-launch, constructs `ArtubeBridge`, awaits `ready()`, and puts the SDK into
-in-process (`devMode`) mode so the game talks to the bridge over
-`MemoryChannel`. `ArtubeIntegration` also takes an optional `demoBalance`
-(starting virtual balance for demo sessions) and `apiBase` (local-dev
-override only — production is same-origin, see below).
+security gate below), constructs `ArtubeBridge` only on a real Artube launch,
+awaits `ready()`, and puts the SDK into in-process (`devMode`) mode so the
+game talks to the bridge over `MemoryChannel`. `ArtubeIntegration` also takes
+an optional `demoBalance` (starting virtual balance for demo sessions) and
+`apiBase` (local-dev override only — production is same-origin, see below).
 
 Pair it with the **Artube build target** (`BUILD_TARGET=artube`, i.e.
-`npm run dev:artube` / `npm run build:artube` in a scaffolded game): that
-target never bootstraps the offline DevBridge, which is the structural half
-of the security gate below. `dev:artube` serves only the frontend — the game's
+`npm run dev:artube` / `npm run build:artube` in a scaffolded game). Its real
+value is in DEV: `dev:artube` runs without the DevBridge and proxies `/api`
+to the backend, so development uses the same backend-owned math and
+same-origin shape as production. It does not change the production artifact —
+the DevBridge bootstrapper comes from a `apply: 'serve'` Vite plugin, so no
+build has ever carried one. `dev:artube` serves only the frontend; the game's
 backend runs as a second process
-(`artube-server --spin ./game.spin --sandbox --port 8080`), and the dev
-server proxies `/api` to it so the bridge's same-origin assumption holds in
-dev too.
+(`artube-server --spin ./game.spin --sandbox --port 8080`).
 
 ## Quick start: a game without `game-engine`
 
@@ -141,10 +152,12 @@ Stake's — `apiBase` comes from `url.origin`, so no `rgs_url`-style
 open-redirect is possible — but the fall-through is identical.
 
 What URL classification alone cannot catch: a `sessionId` removed
-*entirely* is indistinguishable from a dev launch. That half is structural —
-the Artube target never bootstraps the offline DevBridge (the Vite plugin
-that injects it is off for `BUILD_TARGET=artube`, in dev as well as in a
-build), so no local math exists to answer a play.
+*entirely* is indistinguishable from a dev launch. In a production build
+there is nothing to fall through to regardless — the DevBridge bootstrapper
+is injected by a dev-server-only Vite plugin, so no build carries one. Under
+a plain `npm run dev` a DevBridge *is* already running by the time the game
+boots (the bootstrapper wraps the entry module), and there the protection is
+precisely that the game refuses to start, not that no bridge exists.
 
 ## `new ArtubeBridge(options)`
 

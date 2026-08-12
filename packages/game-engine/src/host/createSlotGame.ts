@@ -107,17 +107,32 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
   // — Stake's marker is `sessionID`/`replay`, Artube's is `sessionId` — so this never fires; it just
   // makes the precedence explicit rather than leaving two bridges racing.)
   if (opts.artube && !isStakeNow) {
-    const { classifyArtubeLaunch } = await import('@energy8platform/artube-bridge/detect');
+    // The GAME supplies the loader (see `ArtubeIntegration.load`): a bare
+    // `import('@energy8platform/artube-bridge')` here would be resolved statically by every bundler
+    // and would break — loudly or, under Vite, silently — every game that never installed the
+    // package. Classifier and bridge come from the same module, so this is one load.
+    let artube: import('./types').ArtubeModule;
+    try {
+      artube = await opts.artube.load();
+    } catch (err) {
+      fatal('Could not start the game.');
+      throw err;
+    }
     // Security gate, the Artube counterpart of the Stake one above. Artube's only launch marker is
     // `sessionId`, and unlike Stake there is no attacker-suppliable server address to validate
     // (`apiBase` is the launch URL's own origin). What IS reachable is stripping the session: a URL
     // that carries `sessionId` with an empty/blank value claims a session it doesn't have, fails the
     // "is this Artube?" check, and would silently fall through to the offline/dev bridge — the
     // free-play hole. 'artube' = a real launch (load the bridge); 'offline' = no marker at all, a
-    // genuine dev launch. A marker removed ENTIRELY is indistinguishable from dev here; that half is
-    // structural — the BUILD_TARGET=artube target never injects the DevBridge bootstrapper, so no
-    // offline math exists to answer a play.
-    const launch = classifyArtubeLaunch(location.href);
+    // genuine dev launch.
+    //
+    // What URL classification cannot catch: a marker removed ENTIRELY is indistinguishable from a
+    // dev launch. In a production BUILD there is nothing to fall through to anyway — the DevBridge
+    // bootstrapper is injected by a Vite plugin with `apply: 'serve'`, so no build carries one,
+    // whatever BUILD_TARGET says. Under a plain `npm run dev` the bootstrapper HAS already started a
+    // DevBridge before this code runs (it wraps the entry module), so there the protection is this
+    // gate refusing to start the game — not the absence of a bridge.
+    const launch = artube.classifyArtubeLaunch(location.href);
     if (launch === 'blocked') {
       fatal('Invalid game session. Please relaunch the game from the lobby.');
       throw new Error(
@@ -127,8 +142,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     isArtubeNow = launch === 'artube';
     if (isArtubeNow) {
       try {
-        const { ArtubeBridge } = await import('@energy8platform/artube-bridge');
-        artubeBridge = new ArtubeBridge({
+        artubeBridge = new artube.ArtubeBridge({
           // In-process over the SDK's MemoryChannel (see buildAppConfig's devMode).
           devMode: true,
           gameId: opts.model.spec.id,

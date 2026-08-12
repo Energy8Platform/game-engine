@@ -26,8 +26,6 @@ const external = [
   'fengari',
   '@energy8platform/stake-bridge',
   '@energy8platform/stake-bridge/detect',
-  '@energy8platform/artube-bridge',
-  '@energy8platform/artube-bridge/detect',
 ];
 
 function createBundle(input, outputName, opts = {}) {

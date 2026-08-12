@@ -37,9 +37,12 @@ function artubeReadme(a: Answers): string {
   return `## Artube
 - \`npm run dev:artube\` — the Artube target (no DevBridge). The backend is a SECOND process:
   \`artube-server --spin ./game.spin --sandbox --port 8080\` (the dev server proxies \`/api\` to it).
-- \`npm run build:artube\` — the Artube bundle → \`dist/\` (what the client repo's CI deploys). Set
-  \`BUILD_TARGET=artube\` in CI and the stock \`npm run build\` produces the same bundle.
-- Enabled in \`src/main.ts\` via \`createSlotGame({ artube: {} })\`; the host does the rest.
+- \`npm run build:artube\` — the Artube bundle → \`dist/\` (what the client repo's CI deploys). It is
+  the same bytes as \`npm run build\` (no build carries a DevBridge); the script names the target and
+  clears stale files from \`dist\`.
+- Enabled in \`src/main.ts\` via
+  \`createSlotGame({ artube: { load: () => import('@energy8platform/artube-bridge') } })\`; the host
+  classifies the launch, refuses a malformed one, and loads the bridge itself.
 
 `;
 }

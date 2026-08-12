@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { classifyArtubeLaunch } from '@energy8platform/artube-bridge/detect';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { CreateSlotGameOptions } from '@/host/types';
 
@@ -10,16 +11,34 @@ import type { CreateSlotGameOptions } from '@/host/types';
  * gate from createSlotGame makes the first test fail, because the boot then continues into
  * GameApplication instead of rejecting.
  *
- * GameApplication is stubbed (the real one drives Pixi, which hangs headless); the launch
- * CLASSIFIER is real (`@energy8platform/artube-bridge/detect`, aliased to source in vitest.config),
- * so the URLs below are the ones the platform actually produces. The bridge itself is stubbed to
- * keep the test off a WebSocket — it is a dependency, not the input under test.
+ * GameApplication is stubbed (the real one drives Pixi, which hangs headless). The launch
+ * CLASSIFIER handed to the host is the REAL one (`@energy8platform/artube-bridge/detect`, aliased to
+ * source in vitest.config), so the URLs below are the ones the platform actually produces and a
+ * mismatch between the host's expected verdicts and the classifier's real ones would fail here.
+ * Only the bridge CLASS is a stub — to keep the test off a WebSocket.
  */
 
 /** Every GameApplication the boot constructed — empty means the boot never got past the gate. */
 const constructed: { sdk?: { devMode?: boolean } }[] = [];
 /** Every ArtubeBridge the boot constructed, with the options it was given. */
 const bridges: Record<string, unknown>[] = [];
+/** How many times the game's `load()` thunk ran (the host must not load without `opts.artube`). */
+let loads = 0;
+
+class FakeArtubeBridge {
+  constructor(options: Record<string, unknown>) {
+    bridges.push(options);
+  }
+  async ready(): Promise<void> {}
+  destroy(): void {}
+}
+
+/** What a real game passes: `() => import('@energy8platform/artube-bridge')`. Real classifier, stub
+ *  bridge class — the module shape the host consumes. */
+const load = async () => {
+  loads += 1;
+  return { classifyArtubeLaunch, ArtubeBridge: FakeArtubeBridge };
+};
 
 vi.mock('@/core', () => ({
   GameApplication: class {
@@ -31,15 +50,6 @@ vi.mock('@/core', () => ({
       // Stand-in for the real boot: proves control reached GameApplication (i.e. was NOT blocked).
       throw new Error('STUB_START');
     }
-  },
-}));
-
-vi.mock('@energy8platform/artube-bridge', () => ({
-  ArtubeBridge: class {
-    constructor(options: Record<string, unknown>) {
-      bridges.push(options);
-    }
-    async ready(): Promise<void> {}
   },
 }));
 
@@ -69,6 +79,7 @@ function launchAt(href: string): void {
 beforeEach(() => {
   constructed.length = 0;
   bridges.length = 0;
+  loads = 0;
   // createSlotGame boots at most once per page; reset its guard between tests.
   delete (window as unknown as Record<string, unknown>).__e8SlotBooted__;
   document.body.innerHTML = '';
@@ -79,7 +90,7 @@ describe('createSlotGame: Artube host selection', () => {
     launchAt('https://test-slot.artube-888.live/?sessionId=&lang=ru');
     const { createSlotGame } = await import('@/host/createSlotGame');
 
-    await expect(createSlotGame(opts({ artube: {} }))).rejects.toThrow(/refusing to run/i);
+    await expect(createSlotGame(opts({ artube: { load } }))).rejects.toThrow(/refusing to run/i);
 
     // The whole point of the gate: the boot must STOP, not continue into an offline/dev bridge.
     expect(constructed).toHaveLength(0);
@@ -92,7 +103,7 @@ describe('createSlotGame: Artube host selection', () => {
     launchAt('https://test-slot.artube-888.live/?sessionId=abc-123&lang=ru&device=mobile');
     const { createSlotGame } = await import('@/host/createSlotGame');
 
-    await expect(createSlotGame(opts({ artube: { demoBalance: 500 } }))).rejects.toThrow(
+    await expect(createSlotGame(opts({ artube: { load, demoBalance: 500 } }))).rejects.toThrow(
       'STUB_START',
     );
 
@@ -113,7 +124,7 @@ describe('createSlotGame: Artube host selection', () => {
     launchAt('http://localhost:3000/');
     const { createSlotGame } = await import('@/host/createSlotGame');
 
-    await expect(createSlotGame(opts({ artube: {} }))).rejects.toThrow('STUB_START');
+    await expect(createSlotGame(opts({ artube: { load } }))).rejects.toThrow('STUB_START');
 
     expect(bridges).toHaveLength(0);
     expect(constructed).toHaveLength(1);
@@ -128,5 +139,6 @@ describe('createSlotGame: Artube host selection', () => {
 
     await expect(createSlotGame(opts())).rejects.toThrow('STUB_START');
     expect(constructed).toHaveLength(1);
+    expect(loads).toBe(0); // nothing artube-shaped is even loaded
   });
 });

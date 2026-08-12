@@ -5,7 +5,6 @@ import type { AssetManifest, LoadingScreenConfig } from '@energy8platform/platfo
 import type { Shell, PixiShellConfig } from '@energy8platform/shell/pixi';
 import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../types';
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
-import type { ArtubeBridge } from '@energy8platform/artube-bridge';
 import type { GameApplication } from '../core';
 import type { SlotShellOptions } from './shellConfig';
 import type {
@@ -35,11 +34,48 @@ export interface StakeIntegration {
   adapter: BookAdapter | AdapterModule;
 }
 
+/** The live Artube bridge, structurally. Kept minimal so game-engine never has to import
+ *  `@energy8platform/artube-bridge` — see `ArtubeIntegration.load`. */
+export interface ArtubeBridgeLike {
+  /** Resolves once the backend has sent its init. */
+  ready(): Promise<void>;
+  destroy(): void;
+}
+
+/** What `ArtubeIntegration.load()` must resolve to. `@energy8platform/artube-bridge`'s own entry
+ *  satisfies this structurally, so `load: () => import('@energy8platform/artube-bridge')` typechecks
+ *  with no adapter. The launch CLASSIFIER comes from the same module as the bridge: one import, and
+ *  no chicken-and-egg where the host would have to load something to decide whether to load. */
+export interface ArtubeModule {
+  classifyArtubeLaunch: (url: string) => 'artube' | 'blocked' | 'offline';
+  ArtubeBridge: new (options: {
+    devMode?: boolean;
+    gameId?: string;
+    url?: string;
+    apiBase?: string;
+    demoBalance?: number;
+  }) => ArtubeBridgeLike;
+}
+
 /** Artube host integration. There is no per-game artifact to pass: the game's own BACKEND
  *  (`@energy8platform/artube-server`) owns the round shape, so the bridge is a pure protocol
- *  translator — `artube: {}` is the whole opt-in, and both fields below are optional.
- *  `gameId` comes from the model, the launch params from the URL. */
+ *  translator — `load` is the only required field. `gameId` comes from the model, the launch params
+ *  from the URL. */
 export interface ArtubeIntegration {
+  /** REQUIRED. How the host reaches the bridge:
+   *  `load: () => import('@energy8platform/artube-bridge')`.
+   *
+   *  Why the GAME supplies this instead of the host importing the package itself: a bare
+   *  `import('@energy8platform/artube-bridge')` inside this always-shipped `/host` entry is resolved
+   *  STATICALLY by every bundler, so it would have to resolve in games that never opted into Artube
+   *  and therefore never installed the package — esbuild/webpack fail the build outright, and Vite
+   *  silently substitutes an empty module (it stubs uninstalled optional peers), which is worse:
+   *  the game builds and then dies at runtime. With the loader, the specifier only ever appears in
+   *  the bundle of a game that took the dependency.
+   *
+   *  The loaded chunk is fetched on every launch of such a game (the classifier lives in it), which
+   *  is the point of the split: only Artube-targeted builds pay for it. */
+  load: () => Promise<ArtubeModule>;
   /** Starting virtual balance for a DEMO session (the platform doesn't keep one — the bridge does,
    *  client-side). Default: the backend's own configured demo balance. Ignored for real sessions. */
   demoBalance?: number;
@@ -93,8 +129,9 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
   textureDefaults?: boolean;
   dev?: boolean;
   stake?: StakeIntegration;
-  /** Run on Artube when the launch URL says so (`?sessionId=…`). Pass `{}` to enable — see
-   *  `ArtubeIntegration`. Build the game with `BUILD_TARGET=artube` for the Artube bundle. */
+  /** Run on Artube when the launch URL says so (`?sessionId=…`):
+   *  `artube: { load: () => import('@energy8platform/artube-bridge') }`. See `ArtubeIntegration`
+   *  for why the game supplies the loader. Build with `BUILD_TARGET=artube`. */
   artube?: ArtubeIntegration;
   shell?: SlotShellOptions;
   /** Customise the bonus bar readout for games whose bonus isn't plain free spins (adventure,
@@ -121,6 +158,6 @@ export interface SlotGameHandle {
   game: GameApplication;
   stakeBridge: StakeBridge | null;
   /** The live Artube bridge — non-null only on a real Artube launch (`opts.artube` + `?sessionId=…`). */
-  artubeBridge: ArtubeBridge | null;
+  artubeBridge: ArtubeBridgeLike | null;
   shell: Shell | null;
 }

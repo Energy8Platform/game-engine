@@ -4,11 +4,13 @@ export function genMainTs(a: Answers): string {
   const stakeImport = a.stake ? `import adapter from './stake/adapter';\n` : '';
   const stakeOpt = a.stake ? `  stake: { adapter },\n` : '';
   // Artube needs no per-game artifact: the game's backend (artube-server) owns the round shape, so
-  // `{}` IS the opt-in. The host detects the launch, refuses a malformed one and loads the bridge.
+  // the loader IS the opt-in. The host classifies the launch, refuses a malformed one, and only
+  // then constructs the bridge. The GAME passes the import so the specifier never ends up in
+  // game-engine's own bundle (games without the dependency must still build).
   const artubeOpt = a.artube
     ? `  // Artube: enabled by the launch URL (?sessionId=…). Build with \`npm run build:artube\`;
   // the backend runs separately (\`artube-server --spin ./game.spin --sandbox --port 8080\`).
-  artube: {},\n`
+  artube: { load: () => import('@energy8platform/artube-bridge') },\n`
     : '';
   return `import { createSlotGame } from '@energy8platform/game-engine/host';
 import { ScaleMode } from '@energy8platform/game-engine';

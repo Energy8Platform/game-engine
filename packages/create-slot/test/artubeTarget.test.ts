@@ -59,10 +59,14 @@ describe('the Artube target (--artube)', () => {
     expect(vite).toContain('artube-server --spin ./game.spin --sandbox --port 8080');
   });
 
-  it('opts the game in via createSlotGame({ artube: {} }) and depends on the bridge', async () => {
+  it('opts in with a caller-supplied loader and depends on the bridge', async () => {
     const d = await scaffold(true);
-    expect(read(d, 'src/main.ts')).toContain('artube: {},');
-    // The host imports the bridge dynamically, but the bundler still must resolve it.
+    // The GAME passes the import, so the specifier lives in the game's bundle — never in
+    // game-engine's own, where it would have to resolve for games that never installed the package.
+    expect(read(d, 'src/main.ts')).toContain(
+      "artube: { load: () => import('@energy8platform/artube-bridge') },",
+    );
+    // Dynamically imported, but the bundler still must resolve it here.
     expect(JSON.parse(read(d, 'package.json')).dependencies['@energy8platform/artube-bridge']).toBe(
       '^0.1.0',
     );
