@@ -6,6 +6,7 @@ import {
   waitCSSPreloaderTap,
   removeCSSPreloader,
   hasExternalOverlay,
+  externalOverlayHold,
   releaseExternalOverlay,
 } from '@energy8platform/platform-core/loading';
 
@@ -121,8 +122,10 @@ export class LoadingScene extends Scene {
     this._displayedProgress = 1;
     this.updateLoaderBar(1);
 
-    // Wait for the player's tap — resolves immediately when tapToStart is
-    // false (the preloader honours that flag) — then enter the game.
+    // Wait for the player's tap — resolves immediately when tapToStart is false — then enter the
+    // game. This is the preloader's gate and it reads the preloader's config, so it means the same
+    // thing on every target: a game-supplied overlay has no say in it, and by now no part in the
+    // screen either. It was dismissed at the hand-over above; the player is looking at ours.
     await waitCSSPreloaderTap();
     await this.transitionToGame();
   }
@@ -157,11 +160,17 @@ export class LoadingScene extends Scene {
    * nothing of ours could. Its job ends here, at the first frame the engine paints; the player then
    * gets the game's own brand, progress bar and tap-to-start, exactly as on every other target.
    *
-   * The order of the three steps is the whole design, and each is wrong on its own:
+   * The order of the four steps is the whole design, and each is wrong on its own:
    *
-   *  1. Mount the preloader FIRST, opaque and full-bleed, while theirs is still up. Both are on
-   *     screen together for a few frames, so there is never a moment with neither, whatever
-   *     happens next.
+   *  0. Wait out whatever the overlay is still owed on screen (`externalOverlayMinDisplayTime`,
+   *     default 1.5s, plus room for a phase crossfade already in flight). The gap this overlay
+   *     covers can be under half a second, which is not long enough for a partner's brand to
+   *     register. Waiting here — BEFORE mounting ours — rather than after is what keeps the two
+   *     screens' timelines from overlapping: our splash and brand floor start when the player can
+   *     actually see them, not behind someone else's overlay. On any boot slower than the floor
+   *     this step costs nothing, and on a non-Artube target it is not reached at all.
+   *  1. Mount the preloader, opaque and full-bleed, while theirs is still up. Both are on screen
+   *     together for a few frames, so there is never a moment with neither, whatever happens next.
    *  2. Wait for that frame to actually be PAINTED — mounting only queues it. Dismissing theirs
    *     before the paint is precisely the flash of bare background this ordering exists to avoid.
    *     Two `requestAnimationFrame`s: the first callback runs before the frame it belongs to is
@@ -182,6 +191,7 @@ export class LoadingScene extends Scene {
    */
   private async takeOverFromExternalOverlay(): Promise<void> {
     if (!hasExternalOverlay()) return;
+    await externalOverlayHold();
     createCSSPreloader(this.hostElement(), this._config);
     await this.nextPaint();
     releaseExternalOverlay();

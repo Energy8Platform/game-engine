@@ -12,8 +12,10 @@ export {
 export {
   adoptExternalOverlay,
   advanceExternalOverlay,
+  externalOverlayHold,
   releaseExternalOverlay,
   hasExternalOverlay,
+  DEFAULT_EXTERNAL_MIN_DISPLAY_MS,
 } from './ExternalOverlay';
 export { buildLogoSVG, LOADER_BAR_MAX_WIDTH } from './logo';
 export { VARIANTS, DEFAULT_VARIANT_NAME } from './variants';

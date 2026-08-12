@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   adoptExternalOverlay,
   advanceExternalOverlay,
+  externalOverlayHold,
   releaseExternalOverlay,
   hasExternalOverlay,
   createCSSPreloader,
@@ -90,60 +91,16 @@ describe('adopting a game-supplied overlay', () => {
   });
 });
 
-/**
- * The trap this design had to clear, settled by watching it rather than reasoning about it.
- *
- * Artube's loader crossfades from its dark first phase to the green branded one over 500ms, and
- * that crossfade is triggered by the FIRST progress above zero. Live, the entire gap the overlay
- * covers was 375ms: the crossfade began and the hand-over dismissed the loader 39ms later, so the
- * player saw an aborted transition instead of either screen. Starting it sooner cannot help — it
- * is a 500ms animation in a 375ms window.
- *
- * So the first value is held back. A boot that finishes inside the delay stays on the first phase,
- * whole and clean; a boot still running past it gets the branded phase and a moving bar, which is
- * the point of using their loader in the first place.
- */
-describe('the first progress waits for the crossfade to be worth starting', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('says nothing at all when the boot finishes inside the delay', () => {
+describe('progress goes out as it arrives', () => {
+  it('reports every milestone, monotonic and clamped, as a 0–100 percentage', () => {
     const overlay = spyOverlay();
     adoptExternalOverlay(overlay);
 
+    // The first non-zero value is what starts Artube's partner→branded crossfade. Sending it at
+    // once is the whole reason their branded phase is ever seen; the floor below is what gives the
+    // animation room to finish. (An earlier design delayed this by 800ms instead — see the
+    // minimum-display suite for why that is now redundant.)
     advanceExternalOverlay(0.35);
-    advanceExternalOverlay(0.7);
-    advanceExternalOverlay(0.85);
-    vi.advanceTimersByTime(400); // a 400ms boot: hand-over here
-    releaseExternalOverlay();
-    vi.advanceTimersByTime(5000); // and nothing may arrive late
-
-    expect(overlay.calls).toEqual(['show', 'hide']);
-  });
-
-  it('releases the LATEST milestone once the delay is up, not the first one', () => {
-    const overlay = spyOverlay();
-    adoptExternalOverlay(overlay);
-
-    advanceExternalOverlay(0.35);
-    advanceExternalOverlay(0.7);
-    advanceExternalOverlay(0.85);
-    vi.advanceTimersByTime(900);
-
-    // 35 would understate how far a boot slow enough to reach this point actually got.
-    expect(overlay.calls).toEqual(['show', 'progress:85']);
-  });
-
-  it('lets later milestones straight through once it has started', () => {
-    const overlay = spyOverlay();
-    adoptExternalOverlay(overlay);
-
-    advanceExternalOverlay(0.35);
-    vi.advanceTimersByTime(900);
     advanceExternalOverlay(0.7);
     advanceExternalOverlay(0.7); // repeated milestone: nothing to say
     advanceExternalOverlay(0.5); // a later step reporting less must not walk the bar backwards
@@ -152,31 +109,135 @@ describe('the first progress waits for the crossfade to be worth starting', () =
 
     expect(overlay.calls).toEqual(['show', 'progress:35', 'progress:70', 'progress:100']);
   });
+});
 
-  it('when it does speak, the first value is above zero — or no crossfade happens', () => {
-    const overlay = spyOverlay();
-    adoptExternalOverlay(overlay);
-    advanceExternalOverlay(0.35);
-    vi.advanceTimersByTime(900);
-
-    const first = overlay.calls.find((c) => c.startsWith('progress:'));
-    expect(Number(first!.slice('progress:'.length))).toBeGreaterThan(0);
+/**
+ * The overlay's minimum time on screen — the fix for a partner's branding flashing past.
+ *
+ * Measured live before this existed: adopted at ~15ms, dismissed at ~844ms. Under a second, and
+ * their two-phase screen never reached its second phase at all. `externalOverlayHold()` is what the
+ * hand-over awaits before it mounts anything of ours, so their screen keeps the window whole.
+ *
+ * It also absorbs the problem the old 800ms reveal delay existed for. Artube's crossfade to the
+ * branded phase runs 500ms and is triggered by the first progress above zero; live, it once started
+ * at 375ms and was cut 39ms later, leaving a half-formed gradient and a bar that never filled. With
+ * a floor of 1500ms a crossfade that starts at a boot milestone always has room — and if one
+ * somehow starts late, the floor stretches to cover it rather than cutting it.
+ */
+describe('the overlay keeps the screen for a minimum time', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('a fresh adoption gets a fresh delay', () => {
+  /** Resolve-or-not, without hanging the test on a promise that is supposed to still be pending. */
+  function settle(p: Promise<void>): { done: () => boolean } {
+    let done = false;
+    void p.then(() => {
+      done = true;
+    });
+    return { done: () => done };
+  }
+
+  it('fills the bar before waiting — the boot is done, only the wait is left', async () => {
+    const overlay = spyOverlay();
+    adoptExternalOverlay(overlay);
+    advanceExternalOverlay(0.85); // the last boot milestone
+
+    void externalOverlayHold();
+    // Otherwise their bar is frozen at 85% for the whole hold and then the screen is taken away
+    // with it still short. The fill runs INTO the window the hold guarantees.
+    expect(overlay.calls).toEqual(['show', 'progress:85', 'progress:100']);
+  });
+
+  it('holds a fast hand-over back to the default 1500ms', async () => {
     adoptExternalOverlay(spyOverlay());
-    advanceExternalOverlay(0.5);
-    vi.advanceTimersByTime(900);
+
+    vi.advanceTimersByTime(400); // a 400ms boot — the whole gap, live
+    const hold = settle(externalOverlayHold());
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(hold.done()).toBe(false); // 1400ms in
+    await vi.advanceTimersByTimeAsync(100);
+    expect(hold.done()).toBe(true); // 1500ms
+  });
+
+  it('takes the game’s own number when it has one', async () => {
+    adoptExternalOverlay(spyOverlay(), 3000);
+    const hold = settle(externalOverlayHold());
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(hold.done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1400);
+    expect(hold.done()).toBe(true);
+  });
+
+  it('costs a slow boot nothing — the hand-over is already past the floor', async () => {
+    adoptExternalOverlay(spyOverlay());
+    vi.advanceTimersByTime(4000);
+    const hold = settle(externalOverlayHold());
+    await Promise.resolve();
+    expect(hold.done()).toBe(true);
+  });
+
+  it('is not reached at all with no overlay adopted', async () => {
+    const hold = settle(externalOverlayHold());
+    await Promise.resolve();
+    expect(hold.done()).toBe(true);
+  });
+
+  it('stretches so a crossfade that started late can still finish', async () => {
+    adoptExternalOverlay(spyOverlay());
+    // A boot slow enough that its first milestone lands near the floor: 1300 + 500 > 1500, so
+    // dismissing at 1500 would cut the crossfade — exactly the artefact that was rejected.
+    vi.advanceTimersByTime(1300);
+    advanceExternalOverlay(0.35);
+
+    const hold = settle(externalOverlayHold());
+    await vi.advanceTimersByTimeAsync(200); // 1500ms: the plain minimum is up
+    expect(hold.done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(300); // 1800ms: 500ms after the crossfade started
+    expect(hold.done()).toBe(true);
+  });
+
+  it('does not stretch for a crossfade with room to spare', async () => {
+    adoptExternalOverlay(spyOverlay());
+    vi.advanceTimersByTime(300);
+    advanceExternalOverlay(0.35); // done by 800ms, well inside the floor
+    const hold = settle(externalOverlayHold());
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(hold.done()).toBe(true);
+  });
+
+  it('a release settles a pending hold at once — a failed boot waits for nothing', async () => {
+    const overlay = spyOverlay();
+    adoptExternalOverlay(overlay);
+    const hold = settle(externalOverlayHold());
+
+    // The boot-error path (GameApplication.start's catch, createSlotGame's fatal). Courtesy time
+    // for a partner's brand must never come between a player and an error they need to see.
+    releaseExternalOverlay();
+    await Promise.resolve();
+    expect(hold.done()).toBe(true);
+    expect(overlay.calls).toEqual(['show', 'hide']);
+
+    // And nothing may fire late onto an overlay that is already gone.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(overlay.calls).toEqual(['show', 'hide']);
+  });
+
+  it('a fresh adoption gets a fresh floor', async () => {
+    adoptExternalOverlay(spyOverlay());
+    await vi.advanceTimersByTimeAsync(2000);
     releaseExternalOverlay();
 
-    const second = spyOverlay();
-    adoptExternalOverlay(second);
-    advanceExternalOverlay(0.5);
-    vi.advanceTimersByTime(400);
-    // The clock the delay measures is per-overlay; the previous run must not have spent it.
-    expect(second.calls).toEqual(['show']);
-    vi.advanceTimersByTime(500);
-    expect(second.calls).toEqual(['show', 'progress:50']);
+    adoptExternalOverlay(spyOverlay());
+    const hold = settle(externalOverlayHold());
+    await vi.advanceTimersByTimeAsync(1400);
+    // The previous overlay's time on screen is not this one's.
+    expect(hold.done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(hold.done()).toBe(true);
   });
 });
 
@@ -198,19 +259,15 @@ describe('releasing it', () => {
   });
 
   it('re-adoption after release starts a fresh progress run', () => {
-    vi.useFakeTimers();
     const first = spyOverlay();
     adoptExternalOverlay(first);
     advanceExternalOverlay(0.8);
-    vi.advanceTimersByTime(900);
     releaseExternalOverlay();
 
     const second = spyOverlay();
     adoptExternalOverlay(second);
     advanceExternalOverlay(0.1); // would be "backwards" against the previous run's 0.8
-    vi.advanceTimersByTime(900);
     expect(second.calls).toEqual(['show', 'progress:10']);
-    vi.useRealTimers();
   });
 });
 
@@ -230,15 +287,12 @@ describe('the built-in CSS preloader is untouched by any of this', () => {
   });
 
   it('sends the preloader progress to the preloader, never to the overlay', () => {
-    vi.useFakeTimers();
     const overlay = spyOverlay();
     adoptExternalOverlay(overlay);
     createCSSPreloader(container, {});
     setCSSPreloaderProgress(0.5);
-    vi.advanceTimersByTime(2000); // even past the overlay's own reveal delay
     // Asset-load progress belongs to OUR bar. The overlay's numbers are boot milestones only.
     expect(overlay.calls).toEqual(['show']);
-    vi.useRealTimers();
   });
 
   it('removing the preloader does not dismiss the overlay (different lifetimes)', async () => {
@@ -266,11 +320,8 @@ describe('a throwing overlay cannot break the boot or strand itself on screen', 
 
   it('swallows a throw from updateProgress — progress is cosmetic, loading is not', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.useFakeTimers();
     adoptExternalOverlay(spyOverlay({ updateProgress: true }));
-    advanceExternalOverlay(0.3);
-    expect(() => vi.advanceTimersByTime(900)).not.toThrow();
-    vi.useRealTimers();
+    expect(() => advanceExternalOverlay(0.3)).not.toThrow();
   });
 
   it('swallows a throw from hideLoader so teardown always completes', () => {

@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   adoptExternalOverlay,
+  advanceExternalOverlay,
   releaseExternalOverlay,
   removeCSSPreloader,
   createCSSPreloader,
@@ -22,6 +23,11 @@ import {
 import { LoadingScene } from '../src/loading/LoadingScene';
 
 const PRELOADER_ID = '__ge-css-preloader__';
+/**
+ * The powered-by splash plus the brand floor, which every start waits out on every target — the
+ * one gate that is NOT the tap. Mirrors `platform-core/src/loading/splash.ts`.
+ */
+const BRAND_GATE_MS = 3000;
 
 let container: HTMLElement;
 
@@ -57,6 +63,7 @@ function witness() {
   let preloaderAtHide: boolean | null = null;
   let brandAtHide: boolean | null = null;
   let framesBeforeHide = 0;
+  let hiddenAt = 0;
   let frames = 0;
   const tick = () => {
     frames++;
@@ -75,6 +82,10 @@ function witness() {
     get framesBeforeHide() {
       return framesBeforeHide;
     },
+    /** Wall-clock instant the overlay was dismissed — the minimum-display assertions read this. */
+    get hiddenAt() {
+      return hiddenAt;
+    },
     overlay: {
       showLoader: () => void log.push('show'),
       updateProgress: (v: number) => void log.push(`progress:${v}`),
@@ -83,6 +94,7 @@ function witness() {
         preloaderAtHide = document.getElementById(PRELOADER_ID) !== null;
         brandAtHide = document.querySelector('#ge-vm-loader-rect') !== null;
         framesBeforeHide = frames;
+        hiddenAt = Date.now();
       },
     },
   };
@@ -102,7 +114,7 @@ afterEach(async () => {
 describe('LoadingScene hands over from a game-supplied overlay', () => {
   it('mounts the engine’s loading screen BEFORE dismissing the overlay', async () => {
     const w = witness();
-    adoptExternalOverlay(w.overlay);
+    adoptExternalOverlay(w.overlay, 0);
 
     const scene = new LoadingScene();
     await scene.onEnter({ engine: fakeEngine(container), targetScene: 'game' });
@@ -114,7 +126,7 @@ describe('LoadingScene hands over from a game-supplied overlay', () => {
 
   it('waits for a painted frame — not just for the element to be inserted', async () => {
     const w = witness();
-    adoptExternalOverlay(w.overlay);
+    adoptExternalOverlay(w.overlay, 0);
 
     const scene = new LoadingScene();
     await scene.onEnter({ engine: fakeEngine(container), targetScene: 'game' });
@@ -126,7 +138,7 @@ describe('LoadingScene hands over from a game-supplied overlay', () => {
 
   it('gives the overlay back its ownership — the engine no longer holds it', async () => {
     const w = witness();
-    adoptExternalOverlay(w.overlay);
+    adoptExternalOverlay(w.overlay, 0);
 
     const scene = new LoadingScene();
     await scene.onEnter({ engine: fakeEngine(container), targetScene: 'game' });
@@ -138,7 +150,7 @@ describe('LoadingScene hands over from a game-supplied overlay', () => {
 
   it('hands over to the game’s OWN branded screen, already rendered', async () => {
     const w = witness();
-    adoptExternalOverlay(w.overlay);
+    adoptExternalOverlay(w.overlay, 0);
 
     const scene = new LoadingScene();
     // The game's loading config is honoured on this path like any other — it is the engine's
@@ -153,7 +165,7 @@ describe('LoadingScene hands over from a game-supplied overlay', () => {
 
   it('measures minDisplayTime from the hand-over, not from before it', async () => {
     const w = witness();
-    adoptExternalOverlay(w.overlay);
+    adoptExternalOverlay(w.overlay, 0);
 
     const scene = new LoadingScene();
     const started = Date.now();
@@ -166,6 +178,119 @@ describe('LoadingScene hands over from a game-supplied overlay', () => {
     // hand-over would let a slow boot swallow it whole.
     expect(Date.now() - started).toBeGreaterThanOrEqual(110);
   });
+});
+
+/**
+ * The overlay's own minimum. The gap it covers can be a few hundred milliseconds, which shows a
+ * partner's branding to nobody — so the hand-over waits before it takes the screen, rather than
+ * dismissing the overlay the instant the engine is ready.
+ */
+describe('the hand-over waits out the overlay’s minimum display time', () => {
+  it('does not dismiss the overlay before its minimum has elapsed', async () => {
+    const w = witness();
+    const adoptedAt = Date.now();
+    adoptExternalOverlay(w.overlay, 300);
+
+    const scene = new LoadingScene();
+    await scene.onEnter({
+      engine: fakeEngine(container, { minDisplayTime: 0 }),
+      targetScene: 'game',
+    });
+
+    expect(w.hiddenAt - adoptedAt).toBeGreaterThanOrEqual(295);
+    // And the seam still holds: waiting must not have cost the ordering guarantee.
+    expect(w.preloaderAtHide).toBe(true);
+  });
+
+  it('mounts nothing of ours while their screen is still owed the time', async () => {
+    const w = witness();
+    adoptExternalOverlay(w.overlay, 300);
+
+    const scene = new LoadingScene();
+    const done = scene.onEnter({
+      engine: fakeEngine(container, { minDisplayTime: 0 }),
+      targetScene: 'game',
+    });
+
+    // Waiting BEFORE mounting is what keeps the two timelines from overlapping — our powered-by
+    // splash and brand floor start when the player can see them, not behind someone else's screen.
+    await new Promise((r) => setTimeout(r, 120));
+    expect(document.getElementById(PRELOADER_ID)).toBeNull();
+    expect(w.log).toEqual(['show']);
+
+    await done;
+    expect(w.log).toContain('hide');
+  });
+
+  it('holds long enough for a late phase crossfade to finish', async () => {
+    const w = witness();
+    const adoptedAt = Date.now();
+    adoptExternalOverlay(w.overlay, 100);
+    // Their partner→branded crossfade runs 500ms and starts on the first progress above zero. One
+    // that starts near the floor must not be cut: a half-formed gradient over a bar that never
+    // fills is the artefact this integration hit once and rejected.
+    advanceExternalOverlay(0.35);
+
+    const scene = new LoadingScene();
+    await scene.onEnter({
+      engine: fakeEngine(container, { minDisplayTime: 0 }),
+      targetScene: 'game',
+    });
+
+    expect(w.log).toContain('progress:35');
+    expect(w.hiddenAt - adoptedAt).toBeGreaterThanOrEqual(490);
+  }, 10000);
+});
+
+/**
+ * `tapToStart` must mean the same thing here as on every other target. The external overlay has no
+ * part in it: by the time the gate is reached it has been dismissed, and the player is looking at
+ * the engine's own loading screen.
+ */
+describe('the tap gate on the external-overlay path', () => {
+  const tapText = () => document.body.textContent?.includes('TAP TO START') ?? false;
+
+  it('with tapToStart:false the game is entered with no input at all', async () => {
+    const w = witness();
+    adoptExternalOverlay(w.overlay, 0);
+
+    let entered = false;
+    const engine = fakeEngine(container, { tapToStart: false, minDisplayTime: 0 });
+    engine.scenes.goto = async () => {
+      entered = true;
+    };
+
+    const scene = new LoadingScene();
+    await scene.onEnter({ engine, targetScene: 'game' });
+
+    // No pointerdown was ever dispatched.
+    expect(entered).toBe(true);
+    expect(tapText()).toBe(false);
+  }, 15000);
+
+  it('with tapToStart:true it still waits for a pointerdown', async () => {
+    const w = witness();
+    adoptExternalOverlay(w.overlay, 0);
+
+    let entered = false;
+    const engine = fakeEngine(container, { tapToStart: true, minDisplayTime: 0 });
+    engine.scenes.goto = async () => {
+      entered = true;
+    };
+
+    const scene = new LoadingScene();
+    const done = scene.onEnter({ engine, targetScene: 'game' });
+
+    // Past the powered-by splash and the brand floor, which gate BOTH settings — so what is left
+    // holding the boot here can only be the tap.
+    await new Promise((r) => setTimeout(r, BRAND_GATE_MS + 200));
+    expect(entered).toBe(false);
+    expect(tapText()).toBe(true);
+
+    document.getElementById(PRELOADER_ID)!.dispatchEvent(new Event('pointerdown'));
+    await done;
+    expect(entered).toBe(true);
+  }, 15000);
 });
 
 describe('with no external overlay the scene behaves exactly as before', () => {

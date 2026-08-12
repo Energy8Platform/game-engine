@@ -87,6 +87,20 @@ export interface LoadingScreenConfig {
    */
   externalOverlay?: ExternalLoadingOverlay;
   /**
+   * How long {@link externalOverlay} is guaranteed on screen, in ms, measured from the boot's very
+   * first step. Default 1500.
+   *
+   * The gap this overlay covers is short — a warm boot hands over in a few hundred milliseconds —
+   * and a partner's branding that flashes past in under a second has not been shown. The floor also
+   * gives a two-phase overlay (Artube's) room to reach its second phase and settle there instead of
+   * being cut mid-crossfade. It costs a slow boot nothing: the hand-over happens later than this
+   * anyway.
+   *
+   * Distinct from {@link minDisplayTime}, which is the minimum for the engine's OWN loading screen
+   * and is measured from the hand-over. A game that sets both is asking for the sum.
+   */
+  externalOverlayMinDisplayTime?: number;
+  /**
    * Which visual identity the CSS preloader renders. Defaults to `'energy8'`;
    * an unknown value falls back to the default. Ignored when `cssPreloaderHTML`
    * is set (custom HTML bypasses the variant).

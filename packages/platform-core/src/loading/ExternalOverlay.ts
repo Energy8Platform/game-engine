@@ -9,10 +9,17 @@
  * otherwise a blank page.
  *
  * ── Where it stops ──────────────────────────────────────────────────────────
- * It stops the moment the engine's own loading screen has painted its first
- * frame. From there the player gets the engine's brand, the engine's progress
- * bar and the engine's tap-to-start — exactly as on every other target. The
- * external overlay covers the gap; it does not replace the loading screen.
+ * It stops once BOTH are true: the engine's own loading screen has painted its
+ * first frame, and the overlay has had its guaranteed time on screen
+ * ({@link DEFAULT_EXTERNAL_MIN_DISPLAY_MS}, `loading.externalOverlayMinDisplayTime`).
+ * The gap alone is often only a few hundred milliseconds, which is not long
+ * enough for a partner's branding to register — let alone for their two-phase
+ * screen to reach its second phase.
+ *
+ * From there the player gets the engine's brand, the engine's progress bar and
+ * the engine's tap-to-start — exactly as on every other target. The external
+ * overlay covers the gap; it does not replace the loading screen, and it has no
+ * say in the tap gate: by then the player is looking at OUR screen.
  *
  * (This inverts an earlier design in which the external overlay REPLACED the
  * CSS preloader for the whole boot. Handing over at the first frame keeps the
@@ -36,38 +43,48 @@ import type { ExternalLoadingOverlay } from '../types';
 let adopted: ExternalLoadingOverlay | null = null;
 /** Last value pushed, so a repeated milestone cannot walk the bar backwards. */
 let lastProgress = 0;
-/** When the overlay was adopted — the origin the reveal delay below is measured from. */
+/** When the overlay was adopted — the origin the minimum display time is measured from. */
 let adoptedAt = 0;
-/** Highest progress reported while the reveal was still held back. */
-let pending = 0;
-let revealTimer: ReturnType<typeof setTimeout> | null = null;
+/** How long this overlay is owed on screen; see {@link DEFAULT_EXTERNAL_MIN_DISPLAY_MS}. */
+let minDisplayMs = 0;
+/** When the first progress went out, i.e. when their phase crossfade started. 0 = not yet. */
+let crossfadeStartedAt = 0;
+/** The one pending timer: the hand-over waiting out the floor below. */
+let holdTimer: ReturnType<typeof setTimeout> | null = null;
+let holdResolve: (() => void) | null = null;
 
 /**
- * How long an overlay must have been on screen before the FIRST progress value
- * is allowed through.
+ * How long a game-supplied overlay is guaranteed on screen, measured from
+ * adoption (which is the first thing the boot does, so in practice from the
+ * page's first paint).
  *
- * This exists because of a real, measured failure. Artube's loader is two-phase:
- * a dark screen carrying (by default) their own wordmark, crossfading over 500ms
- * into the green branded screen with the progress bar — and that crossfade is
- * triggered by the first `updateProgress` above zero. On a warm local boot the
- * whole gap this overlay covers was 375ms end to end: the crossfade started at
- * 375ms and the hand-over dismissed the loader 39ms later, so the branded phase
- * never resolved and the player saw an aborted transition instead of either
- * screen (evidence: `.superpowers/sdd/2026-08-10-artube-integration/`).
+ * Without a floor the overlay lives exactly as long as the gap it covers, and
+ * that gap is short: a warm local boot handed over at ~500ms and dismissed
+ * their screen at ~840ms. A partner's branding that flashes past in under a
+ * second has not been shown. 1500ms is the user's number, and it is also the
+ * smallest one that fits their two-phase screen whole — a 500ms crossfade into
+ * the branded phase plus time to read it — with room for the 300ms dismissal
+ * fade on top.
  *
- * Starting the crossfade EARLIER does not fix that — it is a 500ms animation in
- * a 375ms window. So: hold the first value back, and let a boot that finishes
- * quickly stay on the first phase, whole and clean, all the way to the
- * hand-over. A boot still going at this mark is one where the branded phase has
- * time to resolve and a moving bar is worth having, so from there progress
- * flows straight through.
- *
- * 800ms = their 500ms crossfade plus a 300ms margin (which is also exactly the
- * length of their dismissal fade — the other animation that must not collide
- * with it). It is a judgement call about someone else's animation timings, not
- * a derived constant; if their loader's transitions change, this moves with it.
+ * Overridable per game: `loading.externalOverlayMinDisplayTime`.
  */
-const REVEAL_DELAY_MS = 800;
+export const DEFAULT_EXTERNAL_MIN_DISPLAY_MS = 1500;
+
+/**
+ * Artube's partner→branded crossfade, `transition: opacity 0.5s ease` in the
+ * markup their Vite plugin injects (vendored verbatim in
+ * `@energy8platform/artube-server/vite`). It is triggered by the first
+ * `updateProgress` above zero.
+ *
+ * The floor below is extended to cover it because a crossfade that starts and
+ * then gets cut is worse than one that never starts: the player sees a
+ * half-formed gradient and a bar that never fills — the three-screens-at-once
+ * artefact this integration hit once and rejected (evidence:
+ * `rejected-immediate-progress-01-Lartube_P_C.png`). Extending the floor is
+ * bounded by construction: only the FIRST progress starts it, and every
+ * progress value comes from a boot milestone that precedes the hand-over.
+ */
+const PHASE_CROSSFADE_MS = 500;
 
 /**
  * Call into the game's overlay without letting it break the boot. A third-party
@@ -100,22 +117,26 @@ export function hasExternalOverlay(): boolean {
  * `showLoader()` is Artube's "reveal the progress affordance"; it does not
  * switch their two-phase screen to the branded phase — only progress does, see
  * {@link advanceExternalOverlay}.
+ *
+ * @param minDisplayMillis how long the overlay is owed on screen before the
+ * hand-over may dismiss it (`loading.externalOverlayMinDisplayTime`); defaults
+ * to {@link DEFAULT_EXTERNAL_MIN_DISPLAY_MS}. Adoption is where the clock
+ * starts, so it is taken here rather than read at the hand-over.
  */
-export function adoptExternalOverlay(overlay: ExternalLoadingOverlay): void {
+export function adoptExternalOverlay(
+  overlay: ExternalLoadingOverlay,
+  minDisplayMillis?: number,
+): void {
   if (adopted) return; // idempotent: boot step 0 and step 2 both reach here
   adopted = overlay;
   lastProgress = 0;
-  pending = 0;
+  crossfadeStartedAt = 0;
+  minDisplayMs =
+    typeof minDisplayMillis === 'number' && Number.isFinite(minDisplayMillis)
+      ? Math.max(0, minDisplayMillis)
+      : DEFAULT_EXTERNAL_MIN_DISPLAY_MS;
   adoptedAt = Date.now();
   guard('showLoader', () => overlay.showLoader());
-}
-
-/** Push a value through to the overlay, in the 0–100 percentage it documents. */
-function send(fraction: number): void {
-  if (!adopted || fraction <= lastProgress) return;
-  lastProgress = fraction;
-  const overlay = adopted;
-  guard('updateProgress', () => overlay.updateProgress(fraction * 100));
 }
 
 /**
@@ -125,40 +146,80 @@ function send(fraction: number): void {
  * the engine's own loading screen, which by then has taken over. This is the
  * pre-first-frame boot: bundle up, Pixi up, SDK handshake done.
  *
- * Sending it is deliberate, not decorative — and so is holding the first value
- * back for {@link REVEAL_DELAY_MS}, which is where the subtlety lives. Artube's
- * loader crossfades to its branded phase on the first progress above zero; on a
- * boot short enough that the crossfade cannot finish, starting it at all is
- * worse than not starting it. Read the constant's comment before changing this.
+ * Sending it is deliberate, not decorative: Artube's loader only crossfades to
+ * its BRANDED phase on the first value above zero, so without progress the
+ * player never sees the half of their screen the integration exists to show.
+ * Values go out as they arrive — the guarantee that the crossfade has room to
+ * finish is the dismissal floor ({@link externalOverlayHold}), not a delay
+ * here. An earlier design held the first value back for 800ms instead; the
+ * floor makes that redundant, and one timer on this overlay is the whole point.
  *
  * Values are clamped to 0..1, kept monotonic, and converted to the PERCENTAGE
  * (0–100) that `ILoaderViewController.updateProgress` documents.
  */
 export function advanceExternalOverlay(fraction: number): void {
-  if (!adopted) return;
+  const overlay = adopted;
+  if (!overlay) return;
   const clamped = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
-  if (clamped <= Math.max(lastProgress, pending)) return;
+  if (clamped <= lastProgress) return;
+  lastProgress = clamped;
+  // The first non-zero value is what starts their partner→branded crossfade, so
+  // it is also what the floor has to cover.
+  if (clamped > 0 && crossfadeStartedAt === 0) crossfadeStartedAt = Date.now();
+  guard('updateProgress', () => overlay.updateProgress(clamped * 100));
+}
 
-  const waited = Date.now() - adoptedAt;
-  if (waited >= REVEAL_DELAY_MS) {
-    send(clamped);
-    return;
-  }
+/**
+ * Milliseconds still owed to the overlay before the hand-over may dismiss it:
+ * the minimum display time, extended when needed so a phase crossfade that has
+ * started can finish. Zero once both are satisfied — and zero when there is no
+ * overlay, so nothing on a normal target ever waits.
+ */
+function remainingHoldMs(): number {
+  if (!adopted) return 0;
+  const now = Date.now();
+  const floor = Math.max(
+    adoptedAt + minDisplayMs,
+    crossfadeStartedAt === 0 ? 0 : crossfadeStartedAt + PHASE_CROSSFADE_MS,
+  );
+  return Math.max(0, floor - now);
+}
 
-  // Too early to start their crossfade. Remember the value; if the boot is still
-  // running when the delay is up, the LATEST one goes out then — a stale early
-  // milestone would understate how far the boot actually got.
-  pending = clamped;
-  if (revealTimer === null) {
-    revealTimer = setTimeout(() => {
-      revealTimer = null;
-      const value = pending;
-      pending = 0;
-      // `adopted` may be null by now: a boot that finished inside the delay
-      // handed over and released, which is exactly the case this defers for.
-      send(value);
-    }, REVEAL_DELAY_MS - waited);
-  }
+/**
+ * Wait until the overlay has had its guaranteed time on screen. The hand-over
+ * awaits this BEFORE it mounts the engine's own loading screen, so the two
+ * timelines do not overlap: their screen is whole and undisturbed for the whole
+ * window, then ours mounts, paints, and only then takes over.
+ *
+ * Resolves immediately when no overlay is adopted (every non-Artube target) or
+ * when the floor has already passed (any boot slower than it, which is the
+ * normal case in production — this costs nothing there).
+ *
+ * NOT part of the failure path on purpose: {@link releaseExternalOverlay} is
+ * synchronous and immediate, so a boot that throws takes the overlay down at
+ * once instead of stranding the player behind a courtesy delay. A release also
+ * settles a wait already in progress.
+ */
+export function externalOverlayHold(): Promise<void> {
+  // Reaching here means the boot is done and the only thing left is the wait, so the bar is
+  // finished too. Without this it freezes at the last boot milestone (0.85 live) and their screen
+  // is taken away with the bar still short — a bar that never fills, which is the same artefact in
+  // a different costume. Only when a bar is actually on screen: if no progress ever went out the
+  // player is still on the first phase, and starting a crossfade at the hand-over is precisely
+  // what must not happen.
+  if (crossfadeStartedAt !== 0) advanceExternalOverlay(1);
+  const remaining = remainingHoldMs();
+  if (remaining <= 0) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      if (holdTimer !== null) clearTimeout(holdTimer);
+      holdTimer = null;
+      holdResolve = null;
+      resolve();
+    };
+    holdResolve = finish;
+    holdTimer = setTimeout(finish, remaining);
+  });
 }
 
 /**
@@ -172,19 +233,17 @@ export function advanceExternalOverlay(fraction: number): void {
  * game's overlay directly.
  */
 export function releaseExternalOverlay(): boolean {
-  // Drop a deferred first progress even if there is nothing to release: a timer
-  // that fired after the hand-over would start a crossfade on an overlay already
-  // fading out, and would keep the process alive in Node-side tests.
-  if (revealTimer !== null) {
-    clearTimeout(revealTimer);
-    revealTimer = null;
-  }
-  pending = 0;
+  // Settle a hand-over that is still waiting out the floor, even if there is
+  // nothing to release. This is the failure path: a boot that threw must not
+  // leave a timer holding the process open (Node-side tests) or a promise that
+  // resolves into a teardown that already happened.
+  if (holdResolve) holdResolve();
 
   const overlay = adopted;
   if (!overlay) return false;
   adopted = null;
   lastProgress = 0;
+  crossfadeStartedAt = 0;
   guard('hideLoader', () => overlay.hideLoader());
   return true;
 }

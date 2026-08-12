@@ -15,9 +15,11 @@ export function genMainTs(a: Answers): string {
   // the backend runs separately (\`artube-server --spin ./game.spin --sandbox --port 8080\`).
   artube: { load: () => import('@energy8platform/artube-bridge') },
   // Artube's loader covers the gap this game cannot paint — bundle download, Pixi init, the SDK
-  // handshake — and the engine dismisses it the moment ITS loading screen has painted. Nothing
-  // else is set here on purpose: from that frame on, loading looks the same as on every other
-  // target, so any loading options this game wants belong outside this branch.
+  // handshake — and the engine dismisses it once ITS loading screen has painted AND Artube's has
+  // had its minimum time on screen (\`externalOverlayMinDisplayTime\`, 1500ms by default; the raw
+  // gap can be under half a second). Nothing else is set here on purpose: from that frame on,
+  // loading looks the same as on every other target, so any loading options this game wants
+  // belong OUTSIDE this branch — set here they would apply on Artube only.
   ...(artubeLoader ? { loading: { externalOverlay: artubeLoader } } : {}),\n`
     : '';
   // Artube ships its own branded loading screen; `artubePartnerLoader` (vite.config.ts) injects it

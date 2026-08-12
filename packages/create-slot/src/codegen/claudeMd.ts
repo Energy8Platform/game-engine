@@ -69,10 +69,14 @@ other target, where the markup is absent — and passes the controller as \`load
 That overlay covers ONLY the gap the game cannot paint: bundle download, Pixi init, the SDK
 handshake. The engine reports boot milestones into Artube's bar (which is also what makes their
 loader crossfade from the dark partner phase to the green branded one — that transition fires on
-the first progress above zero), then mounts its own loading screen, waits for its FIRST FRAME to be
-painted, and only then dismisses Artube's. From that frame on, loading is identical
-to every other target: this game's brand, bar, tap-to-start and \`minDisplayTime\`. Set loading
-options OUTSIDE the Artube branch — they apply on all targets, Artube included.
+the first progress above zero), waits until Artube's screen has had its minimum time
+(\`loading.externalOverlayMinDisplayTime\`, default 1500 ms — the raw gap is often only a few
+hundred, which shows a partner's brand to nobody and cuts their 500 ms crossfade in half), then
+mounts its own loading screen, waits for its FIRST FRAME to be painted, and only then dismisses
+Artube's. From that frame on, loading is identical to every other target: this game's brand, bar,
+tap-to-start and \`minDisplayTime\` (which is measured from the hand-over, so a game setting both
+gets the sum). Set loading options OUTSIDE the Artube branch — they apply on all targets, Artube
+included, and options set inside it apply only there.
 
 The dismissal also happens on every failure path, so a boot that throws cannot leave Artube's
 screen stranded over a dead game.

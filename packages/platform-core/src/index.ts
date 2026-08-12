@@ -42,8 +42,10 @@ export {
   removeCSSPreloader,
   adoptExternalOverlay,
   advanceExternalOverlay,
+  externalOverlayHold,
   releaseExternalOverlay,
   hasExternalOverlay,
+  DEFAULT_EXTERNAL_MIN_DISPLAY_MS,
   buildLogoSVG,
   LOADER_BAR_MAX_WIDTH,
 } from './loading';

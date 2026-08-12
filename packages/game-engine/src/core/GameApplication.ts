@@ -167,8 +167,12 @@ export class GameApplication extends EventEmitter<GameEngineEvents> {
       //    so it paints before this bundle is even fetched — and until the engine has adopted it,
       //    the catch below has no way to take it down. A bad `container` selector (step 1) would
       //    otherwise strand it on screen forever. It needs no container of ours.
+      //    Adoption is also where its minimum display time starts counting, which is why the
+      //    config value is handed over here rather than read at the hand-over: this is the
+      //    earliest moment the engine runs, and the overlay has been on screen since before it.
       const external = this.config.loading?.externalOverlay;
-      if (external) adoptExternalOverlay(external);
+      if (external)
+        adoptExternalOverlay(external, this.config.loading?.externalOverlayMinDisplayTime);
 
       // 1. Resolve container element
       this._container = this.resolveContainer();

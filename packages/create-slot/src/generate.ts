@@ -55,11 +55,13 @@ function artubeReadme(a: Answers): string {
   \`artubePartnerLoader()\` (vite.config.ts) injects it into \`index.html\`, so it is painted before
   the game bundle is even fetched, and \`src/main.ts\` hands the engine its controller as
   \`loading.externalOverlay\`. It covers exactly the gap nothing of this game can paint — bundle
-  download, Pixi init, the SDK handshake — and the engine dismisses it the moment ITS OWN loading
-  screen has painted its first frame. From there the player gets this game's loading screen, bar
-  and tap-to-start, exactly as on every other target. In order: Artube's dark partner screen →
-  Artube's green branded screen with the bar filling as the game boots → this game's loading
-  screen → the game.
+  download, Pixi init, the SDK handshake — and the engine dismisses it once ITS OWN loading screen
+  has painted its first frame AND Artube's has had its minimum time on screen
+  (\`loading.externalOverlayMinDisplayTime\`, default 1500 ms; the raw gap can be under half a
+  second, too fast for a partner's brand to register). From there the player gets this game's
+  loading screen, bar and tap-to-start, exactly as on every other target. In order: Artube's dark
+  partner screen → Artube's green branded screen with the bar filling as the game boots → this
+  game's loading screen → the game.
 
 ### Nothing to install from Artube
 
