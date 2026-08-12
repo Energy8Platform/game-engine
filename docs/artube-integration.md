@@ -1,0 +1,339 @@
+# Как запустить существующий слот на Artube
+
+Практический гайд для студии, у которой уже есть работающая игра на
+`@energy8platform/game-engine` (математика в `src/game/script.spin`) и которую
+нужно завести на Artube. Детали — в README пакетов
+[`@energy8platform/artube-server`](../packages/artube-server/README.md) и
+[`@energy8platform/artube-bridge`](../packages/artube-bridge/README.md); здесь
+только порядок шагов и то, что реально кусается.
+
+> **Статус.** Всё, что ниже, проверено против публичного sandbox Artube.
+> `artube-bridge` и `artube-server` **ещё не опубликованы** в registry —
+> см. «[Чего ещё нет](#чего-ещё-нет)» в конце. Это не черновик, но и не
+> «поставил и забыл».
+
+---
+
+## 1. Чем Artube отличается от Stake
+
+У Stake браузер сам ходит в RGS: `stake-bridge` делает REST-вызовы, а
+пер-игровой `BookAdapter` режет книгу на сегменты. У Artube **браузеру доступа
+к Games API нет вообще**. Отсюда единственное архитектурное следствие, из
+которого растёт всё остальное:
+
+**у игры появляется бэкенд.**
+
+```
+браузер                          один origin                    платформа
+┌──────────────────────┐   /api/ws   ┌──────────────────────┐  wss  ┌──────────┐
+│ игра + artube-bridge │────────────▶│ artube-server        │──────▶│ GamesAPI │
+│ (только протокол)    │             │ + e8-server (.spin)  │       └──────────┘
+└──────────────────────┘             └──────────────────────┘
+```
+
+- `artube-bridge` — тонкий фронтовый слой: разбирает launch-URL, переводит
+  сообщения `CasinoGameSDK` в WS-формат бэкенда и обратно. **Никакого
+  пер-игрового артефакта** (аналога `BookAdapter`) не существует.
+- `artube-server` — бэкенд игры: держит WS с GamesAPI, открывает и закрывает
+  раунды, крутит математику через подпроцесс `e8-server`.
+- Фронт и бэкенд Artube отдаёт **с одного домена**, разделяя по пути:
+  `/api/**` → бэкенд, остальное → статика. Мост берёт `apiBase` из origin
+  страницы, CORS в этой схеме просто нет, а бэкенд на другом домене —
+  неподдерживаемая конфигурация.
+
+Код игры об этом расщеплении не знает: он по-прежнему говорит только с
+`CasinoGameSDK`.
+
+---
+
+## 2. Что даёт скаффолд, и что придётся дописать руками
+
+`npm create @energy8platform/slot@latest my-game -- --artube` генерирует Artube-цель
+целиком. Для **существующей** игры это ровно тот список, который надо
+воспроизвести вручную — пять правок:
+
+**1. Зависимости.** Минимальные версии — `game-engine` ≥ `0.35.0` (опция
+`artube` появилась там) и `platform-core` ≥ `0.31.0`. Плюс `game-sdk` ≥ `2.9.0`:
+это жёсткое требование обеих половин, на более старом пине `npm install`
+упадёт с `ERESOLVE`.
+
+```jsonc
+"dependencies":    { "@energy8platform/artube-bridge": "^0.1.0" },
+"devDependencies": { "@energy8platform/artube-server": "^0.1.0" }
+```
+
+**2. `vite.config.ts`** — ветка Artube. Импорт **динамический и внутри ветки**:
+статический сломает сборку любой не-Artube цели.
+
+```ts
+const isArtube = process.env.BUILD_TARGET === 'artube';
+
+export default async () => {
+  const artube = isArtube ? await import('@energy8platform/artube-server/vite') : null;
+  return defineGameConfig({
+    // DevBridge выключен: dev идёт против настоящего бэкенда, а не оффлайн-математики
+    devBridge: !isStake && !isHarness && !isArtube,
+    vite: {
+      ...(isArtube ? { build: { outDir: 'dist-artube' } } : {}),
+      plugins: [
+        ...(artube ? [
+          artube.artubePlugin({ spinPath: './src/game/script.spin' }),
+          artube.artubePartnerLoader(),
+        ] : []),
+      ],
+    },
+  });
+};
+```
+
+**3. `src/main.ts`** — опция `artube` на `createSlotGame` и контроллер загрузчика.
+Загрузчик импортируется **статически** (свой leaf-entry `/loader`, не тянет мост
+в бандл) — иначе обычный `vite build` этой же игры его не разрешит.
+
+```ts
+import { createArtubeLoader } from '@energy8platform/artube-bridge/loader';
+
+const artubeLoader = createArtubeLoader(); // null везде, кроме Artube-сборки
+
+createSlotGame({
+  // …
+  artube: { load: () => import('@energy8platform/artube-bridge') },
+  ...(artubeLoader ? { loading: { externalOverlay: artubeLoader } } : {}),
+});
+```
+
+`load` передаёт игра, а не хост: голый `import('@energy8platform/artube-bridge')`
+внутри `/host` бандлеры резолвят статически, и он ломал бы сборку игр, которые
+этот пакет не ставили.
+
+**4. Скрипты.**
+
+```jsonc
+"dev:artube":    "BUILD_TARGET=artube vite",
+"build:artube":  "rm -rf dist-artube dist-artube-server && BUILD_TARGET=artube vite build",
+"bundle:artube": "rm -f my-game-artube.zip && npm run build:artube && cd dist-artube && zip -r ../my-game-artube.zip ."
+```
+
+**5. `.gitignore`:** `dist-artube` и `dist-artube-server`. Обе директории —
+артефакты сборки, не исходники.
+
+---
+
+## 3. Локальная разработка
+
+```bash
+npm run dev:artube
+```
+
+Одна команда. Vite-плагин сам поднимает бэкенд игры дочерним процессом (скан
+свободного порта от 8080), дожидается ответа `/livez` и настраивает прокси
+`/api` (включая WS) на него — форма ровно как в проде. Второй терминал не нужен.
+
+```
+[artube] starting the game backend on :8080 (GameId=game1, sandbox)
+{"level":"info","message":"artube-server listening","context":{"game_id":"game1","port":8080}}
+[artube] backend ready on :8080 — /api is proxied to it
+  ➜  Local:   http://localhost:5173/
+```
+
+Escape hatch, если бэкенд хочется запускать из IDE с брейкпойнтами:
+`ARTUBE_BACKEND=http://localhost:8080 npm run dev:artube` — плагин тогда только
+проксирует и ничего не запускает.
+
+**Launch URL обязан нести `sessionId`** — по нему хост и опознаёт Artube:
+
+```
+http://localhost:5173?sessionId=019ff502-1aa1-7f43-939d-d8385d6345ea&lng=en-us&gameId=game1
+```
+
+- `sessionId` — единственный несущий параметр. Пустой (`?sessionId=`) → хост
+  **отказывается стартовать**: «Invalid game session…». Это защита от
+  проваливания в оффлайн-мост и бесплатных спинов, а не придирка.
+- `gameId` в URL игнорируется намеренно: id игры берётся из `model.spec.id`,
+  потому что URL пришёл от игрока.
+- `lng` — см. [грабли](#7-грабли).
+
+Две проверки, каждая из которых уже ловила реальную проблему:
+
+```bash
+curl -s http://localhost:5173/ | grep dev-bridge     # НЕ должно быть /@dev-bridge-entry.js
+curl -s http://localhost:5173/api/version            # → {"gameId":"game1","commit":"dev"}
+```
+
+И запускайте dev-сервер с `--strictPort`: без него Vite молча уезжает на
+соседний порт, и вы «проверяете» страницу, которую launch-URL никогда не
+открывал.
+
+---
+
+## 4. Sandbox Artube
+
+Публичный, без VPN и заявок. Два адреса:
+
+| | |
+|---|---|
+| Sandbox UI / Swagger (подготовка данных) | `https://sandbox-api-dev.artube-888.live/sandbox-swagger/` |
+| Sandbox GamesAPI (WS, куда ходит бэкенд) | `wss://gamesapi-sandbox.artube-888.live/v1/ws` |
+
+Сессия берётся из UI: **▶ Generate Data** (валюты, интеграция, игрок, кошелёк,
+игра — идемпотентно) → **🔗 Create Session**, кнопка кладёт `sessionId` в буфер.
+
+- **`GameId` = `game1`** — это `publicGameId`, с которым создаётся любой
+  публичный sandbox-тенант. Плагин подставляет его сам в sandbox-режиме.
+- **`GamesApiKey` в sandbox не нужен**: у sandbox-интеграции ключ пустой, и
+  `--sandbox` снимает требование. Единственное исключение — сгенерированный
+  `dist-artube-server/index.js`, который зовёт `loadConfigFromEnv()` без опций и
+  требует **непустой** ключ; для смоук-теста артефакта передайте что угодно.
+- **Данные живут ~24 часа.** Вчерашняя сессия сегодня мертва — это by design,
+  а не регрессия: пересоздайте её теми же двумя кнопками. Pipeline'ы UI лежат в
+  `localStorage`, так что это пара кликов.
+
+Бет-лестницу задаёт платформа: `INIT.config.betLevels` — это ровно
+`allowed_bets` сессии, а `defaultBetIndex` — **индекс** в ней. Если Artube-запуск
+вернул пустой `betLevels`, хост откажется стартовать, а не подставит лестницу из
+спеки.
+
+---
+
+## 5. Сборка и поставка
+
+```bash
+npm run build:artube
+```
+
+Пишет **два** артефакта:
+
+```
+dist-artube/            фронтенд (index.html + assets/…)
+dist-artube-server/     деплоимый бэкенд:
+  Dockerfile            копия Dockerfile.template из artube-server, байт в байт
+  index.js              сгенерированная точка входа, обычный JS — без сборки в образе
+  package.json          одна зависимость: @energy8platform/artube-server
+  game.spin             математика этой игры, байт в байт
+  README.md             что с этим делать
+```
+
+Смысл второго — математика лежит в клиентском репозитории, а исполняет её образ.
+Плагин уже знает путь к `.spin` (он же отдаёт его dev-бэкенду), поэтому это
+единственное место, где фронт и бэк не разъедутся по версии математики.
+
+Что делает студия:
+
+1. **Фронт** — задеплоить `dist-artube/`. ⚠️ **CI Artube деплоит папку `dist`.**
+   Игру, собранную через `build:artube`, надо явно перенацелить: поменять
+   artifact path в джобе или добавить шаг копирования. Это плата за то, что
+   цели (`dist`, `dist-stake`, `dist-artube`) не делят одну папку и не могут
+   молча отгрузить чужие байты. Отдельная папка — часть онбординга, учтите её.
+2. **Бэкенд** — либо `docker build` директории как есть, либо закоммитить её
+   содержимое в серверный репозиторий, который собирает платформа (Dockerfile
+   лежит в корне — именно там его ищет пайплайн).
+
+   ```bash
+   cd dist-artube-server
+   docker build --build-arg GIT_HASH=$(git rev-parse HEAD) -t my-game-server .
+   docker run -p 8080:80 -e GameId=… -e GamesApiUrl=wss://… -e GamesApiKey=… my-game-server
+   ```
+
+   `GameId` / `GamesApiUrl` / `GamesApiKey` — **runtime**-окружение, в образ не
+   зашиваются: один образ едет по всем средам. Контейнер слушает **порт 80**
+   (`EXPOSE 80`), пробы `/livez` и `/healthz` живут **вне** `/api` — так их ищет
+   Kubernetes.
+3. `dist-artube-server/` **не редактировать** — она стирается и пишется заново
+   каждой сборкой. Править надо игру.
+
+> `docker build` этого артефакта **ни разу не запускался** (см.
+> «[Чего ещё нет](#чего-ещё-нет)»). Проверено другое: `index.js` из этой
+> директории поднимается и проводит настоящие спины на sandbox вне контейнера,
+> а сам `Dockerfile` побайтово равен отревьюенному шаблону.
+
+---
+
+## 6. Экран загрузки
+
+У Artube свой брендированный двухфазный лоадер. Его код **вендорится в наши
+пакеты** (`artube-server/vite` — Vite-плагин, `artube-bridge/loader` —
+браузерный контроллер), поэтому у игры **нет** зависимости от приватного
+GitLab-registry Artube: ни `.npmrc`, ни токена. Подробности и процедура
+пере-вендоринга новой версии — в [`vendored-artube-loader.md`](vendored-artube-loader.md).
+
+`artubePartnerLoader()` вставляет разметку прямо в `index.html`, поэтому лоадер
+нарисован ещё до того, как скачан бандл игры — свойство, которого не может быть
+ни у одного JS-препрелоадера. Он закрывает ровно тот промежуток, который игра
+нарисовать не в силах (бандл, инициализация Pixi, handshake SDK), а движок
+снимает его, когда **его собственный** loading-экран нарисовал первый кадр **и**
+лоадер Artube отвисел свой минимум (`loading.externalOverlayMinDisplayTime`, по
+умолчанию 1500 мс — без него на локалхосте бренд мелькает за 300 мс). Дальше всё
+как на любой другой цели.
+
+`createArtubeLoader()` возвращает `null`, если разметки на странице нет, — то
+есть на всех остальных целях. Не заменяйте его на прямой
+`new LoaderViewController()`: он кидает `Loader elements not found on page!`.
+
+---
+
+## 7. Грабли
+
+**`GameId` — это не id игры внутри `.spin`.** `GameId` — `publicGameId`
+платформы (в sandbox буквально `game1`), а `e8-server` регистрирует игру под
+id из самого `.spin`. Первый же запуск бэкенда когда-то умирал с
+`engine GetConfig: unknown game "game1"`. Сейчас сервер разводит эти
+пространства имён сам и пишет в лог
+`engine game id differs from the platform GameId` — это информация, не ошибка.
+Но: движок грузит **всю директорию** рядом с `.spin`, а не один файл. Если в
+папке лежит несколько `.spin` и ни один не совпал по id — будет исключение.
+
+**Бинарник движка приезжает через postinstall `platform-core` — и сборка без
+сети падает громко.** `e8-server` качает postinstall-скрипт `platform-core`, и
+он **намеренно не фатальный**: сборка без доступа к GitHub Releases или с
+`--ignore-scripts` тихо его пропускает, образ собирается и умирает на первом
+спине игрока. Поэтому `Dockerfile.template` сразу после `npm install --omit=dev`
+проверяет бинарник тем же алгоритмом, что и runtime, и **валит сборку** с
+`[artube-server] no usable e8-server binary found`. Для air-gapped сборки
+запеките свой бинарник и укажите `E8_SERVER_BINARY` — **как `ENV`, не `ARG`**:
+`--build-arg` без объявленного `ARG` это молчаливый no-op, а объявленный `ARG`
+не доживает до рантайма.
+
+**`SessionInfo.balance` отстаёт от раунда, `last_round` — нет.** Сразу после
+спина игра честно показывала `$999,998.00`, а `SessionInfo` дважды с интервалом
+в минуту отдавал `999999`; правильное значение приехало позже. Это поведение
+sandbox, не баг стека. Проверяя, что раунд лёг, **сравнивайте `last_round`, а
+не `balance`** — иначе легко решить, что деньги пропали.
+
+**`lng` против `lang`.** Лаунчер прислал `lng=en-us`, а `parseArtubeUrl` читает
+`lang` и падает на дефолт `'en'`. На английском это ни на что не влияет; на
+`lng=ru-ru` игра молча стартует по-английски, без единой ошибки. Мы **не** учили
+мост понимать оба написания: какое из них нормативное — вопрос к Artube, а
+принять оба значит благословить неправильное. Заодно локаль сессии приходит и с
+бэкенда (`init.config.locales` вернул `["en-us"]`). **Открытый вопрос.**
+
+**Любой `npm install` сносит ручные симлинки на воркспейс-пакеты.** Пока
+Artube-пакеты не опубликованы, разработка идёт на симлинках в
+`node_modules/@energy8platform`, и `npm install` их подрезает. Обходной путь при
+работе с зависимостями — `npm install --package-lock-only` (не трогает
+`node_modules`). И не забывайте про `resolve.dedupe` для `pixi.js` и
+`@energy8platform/shell`: одинаковая версия ≠ один модуль, символическая ссылка
+резолвится в реальный путь и в странице оказываются два Pixi.
+
+**Кривой `.spin` печатает свою ошибку парсинга ~30 раз** перед итоговым
+сообщением плагина: `spawnEngine` перебирает порты при любом раннем выходе
+`e8-server`. Известно, не чинилось — читайте последние строки.
+
+---
+
+## Чего ещё нет
+
+Честный список — чтобы это не обнаружилось в проде:
+
+- **`artube-bridge` и `artube-server` не опубликованы.** Скаффолд с `--artube`
+  сегодня **не поставится**: пины `^0.1.0` не резолвятся ни из какого registry.
+  По той же причине `docker build` эмитнутого артефакта упадёт на `npm install`
+  с `E404`. Временный обход — `npm pack --workspace @energy8platform/artube-server`
+  и `artubePlugin({ serverSpec: 'file:./energy8platform-artube-server-0.1.0.tgz' })`,
+  положив тарбол рядом с `package.json`. После публикации в плагине не меняется
+  ничего: дефолтный пин уже указывает на опубликованную версию.
+- **`docker build` не запускался ни разу** — Docker-демона в среде разработки не
+  было. Корректность самого образа исполнением не доказана.
+- **`lng` vs `lang`** — открытый вопрос к Artube (см. выше).
+- **Demo-режим** (`currency: null` → `DemoWallet`) вживую не прогонялся, только
+  юнит-тесты: sandbox-сессия была настоящей.
+- **Всё проверялось против sandbox**, боевую платформу мы не трогали.
