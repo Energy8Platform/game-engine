@@ -8,10 +8,10 @@ import { generate } from './generate';
 // Dependency versions written into a scaffolded game's package.json. Keep in lock-step with the
 // published @energy8platform/* versions (a create-slot test asserts these match the workspace).
 const PUBLISHED: Parameters<typeof generate>[2] = {
-  'platform-core': '^0.30.10',
-  'game-engine': '^0.34.0',
+  'platform-core': '^0.31.0',
+  'game-engine': '^0.35.0',
   'stake-kit': '^0.6.4',
-  'stake-bridge': '^0.6.3',
+  'stake-bridge': '^0.6.4',
   'stake-math-tools': '^0.9.3',
   harness: '^0.3.1',
   // UNPUBLISHED at the time of writing: `--artube` scaffolds cannot `npm install` until
