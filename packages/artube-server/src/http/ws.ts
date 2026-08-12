@@ -15,6 +15,7 @@ import {
 } from '../round/orchestrator.js';
 import { resumeRound } from '../round/resume.js';
 import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
+import { GamesApiError } from '../games-api/errors.js';
 import { buildInit, isDemoSession, toSessionContext } from '../session/init.js';
 import { createDemoApi } from '../session/demo.js';
 import type { SessionContext } from '../session/types.js';
@@ -57,12 +58,15 @@ export async function handleConnection(
   };
 
   const fail = (err: unknown, id?: string) => {
-    // Код берём у любой ошибки, которая его несёт (`GamesApiError` и наши
-    // собственные вроде `RoundNoLongerOpenError`): фронту нужен повод
-    // отличить "раунд уже закрыт" от неизвестной поломки сервера.
+    // Код берём только у тех ошибок, чей `code` — код нашего протокола:
+    // ответ платформы (`GamesApiError`) и наши собственные вроде
+    // `RoundNoLongerOpenError`. Утиная проверка на `typeof err.code ===
+    // 'string'` пропустила бы во фронт системные ошибки Node — `ECONNRESET`,
+    // `ABORT_ERR`, `ENOENT` тоже несут строковый `code`, — и игра приняла бы
+    // их за коды платформы.
     const code =
-      typeof (err as { code?: unknown })?.code === 'string'
-        ? (err as { code: string }).code
+      err instanceof GamesApiError || err instanceof RoundNoLongerOpenError
+        ? err.code
         : 'InternalServerError';
     const message = err instanceof Error ? err.message : String(err);
     log.error('request failed', err, { code });
