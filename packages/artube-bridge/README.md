@@ -75,8 +75,8 @@ override only — production is same-origin, see below).
 
 Pair it with the **Artube build target** (`BUILD_TARGET=artube`, i.e.
 `npm run dev:artube` / `npm run build:artube` in a scaffolded game): that
-build has no DevBridge compiled in, which is the structural half of the
-security gate below. `dev:artube` serves only the frontend — the game's
+target never bootstraps the offline DevBridge, which is the structural half
+of the security gate below. `dev:artube` serves only the frontend — the game's
 backend runs as a second process
 (`artube-server --spin ./game.spin --sandbox --port 8080`), and the dev
 server proxies `/api` to it so the bridge's same-origin assumption holds in
@@ -142,8 +142,9 @@ open-redirect is possible — but the fall-through is identical.
 
 What URL classification alone cannot catch: a `sessionId` removed
 *entirely* is indistinguishable from a dev launch. That half is structural —
-the Artube build target compiles no DevBridge into the bundle, so there is
-nothing to fall through to.
+the Artube target never bootstraps the offline DevBridge (the Vite plugin
+that injects it is off for `BUILD_TARGET=artube`, in dev as well as in a
+build), so no local math exists to answer a play.
 
 ## `new ArtubeBridge(options)`
 

@@ -8,7 +8,7 @@ Generated with `npm create @energy8platform/slot`. Built on @energy8platform gam
 - Edit `src/game.spec.ts` (symbols/paytable/bet levels/actions) and `src/game/script.spin` (math).
 - Swap placeholder art in `public/assets/` (see NAMING.md) and wire it in `src/slot/symbols.ts`.
 
-## Verify
+${artube}## Verify
 - `npm run typecheck`
 - `npm run smoke` — proves spec → export artifacts
 

@@ -31,6 +31,19 @@ function substituteTree(dir: string, vars: Record<string, string>): void {
   }
 }
 
+/** The README's Artube block (empty for a non-Artube game) — see `${artube}` in template/README.md. */
+function artubeReadme(a: Answers): string {
+  if (!a.artube) return '';
+  return `## Artube
+- \`npm run dev:artube\` — the Artube target (no DevBridge). The backend is a SECOND process:
+  \`artube-server --spin ./game.spin --sandbox --port 8080\` (the dev server proxies \`/api\` to it).
+- \`npm run build:artube\` — the Artube bundle → \`dist/\` (what the client repo's CI deploys). Set
+  \`BUILD_TARGET=artube\` in CI and the stock \`npm run build\` produces the same bundle.
+- Enabled in \`src/main.ts\` via \`createSlotGame({ artube: {} })\`; the host does the rest.
+
+`;
+}
+
 export async function generate(a: Answers, targetDir: string, versions: DepVersions): Promise<void> {
   validate(a);
   mkdirSync(targetDir, { recursive: true });
@@ -38,8 +51,8 @@ export async function generate(a: Answers, targetDir: string, versions: DepVersi
   cpSync(TEMPLATE_DIR, targetDir, { recursive: true });
   // _gitignore → .gitignore
   if (existsSync(join(targetDir, '_gitignore'))) renameSync(join(targetDir, '_gitignore'), join(targetDir, '.gitignore'));
-  // 2) substitute ${id}/${title}
-  substituteTree(targetDir, { id: a.id, title: a.title });
+  // 2) substitute ${id}/${title}/${artube}
+  substituteTree(targetDir, { id: a.id, title: a.title, artube: artubeReadme(a) });
   // 3) codegen files
   mkdirSync(join(targetDir, 'src/game'), { recursive: true });
   mkdirSync(join(targetDir, 'src/scenes'), { recursive: true });

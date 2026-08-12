@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { applyDefaults, type Answers, type Mechanic } from './answers';
 
-/** Ask the 5 questions interactively, applying defaults for blank answers. */
+/** Ask the questions interactively, applying defaults for blank answers. */
 export async function prompt(seed: Partial<Answers>): Promise<Answers> {
   const rl = createInterface({ input: stdin, output: stdout });
   try {
@@ -13,7 +13,8 @@ export async function prompt(seed: Partial<Answers>): Promise<Answers> {
     const gridStr = (await rl.question('Grid colsxrows [default for mechanic]: ')).trim();
     const grid = seed.grid ?? (gridStr ? { cols: Number(gridStr.split('x')[0]), rows: Number(gridStr.split('x')[1]) } : undefined);
     const stakeAns = seed.stake ?? ((await rl.question('Stake integration? (Y/n): ')).trim().toLowerCase() !== 'n');
-    return applyDefaults({ id, title, mechanic, grid, stake: stakeAns });
+    const artubeAns = seed.artube ?? ((await rl.question('Artube integration? (y/N): ')).trim().toLowerCase() === 'y');
+    return applyDefaults({ id, title, mechanic, grid, stake: stakeAns, artube: artubeAns });
   } finally {
     rl.close();
   }

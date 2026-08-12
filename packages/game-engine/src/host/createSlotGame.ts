@@ -115,7 +115,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // "is this Artube?" check, and would silently fall through to the offline/dev bridge — the
     // free-play hole. 'artube' = a real launch (load the bridge); 'offline' = no marker at all, a
     // genuine dev launch. A marker removed ENTIRELY is indistinguishable from dev here; that half is
-    // structural — the BUILD_TARGET=artube bundle has no DevBridge to fall through to.
+    // structural — the BUILD_TARGET=artube target never injects the DevBridge bootstrapper, so no
+    // offline math exists to answer a play.
     const launch = classifyArtubeLaunch(location.href);
     if (launch === 'blocked') {
       fatal('Invalid game session. Please relaunch the game from the lobby.');

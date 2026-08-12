@@ -5,6 +5,8 @@ export interface Answers {
   mechanic: Mechanic;
   grid: { cols: number; rows: number };
   stake: boolean;
+  /** Generate the Artube target (build/dev scripts + the host's `artube` option + the bridge dep). */
+  artube: boolean;
   cascades?: boolean;
 }
 
@@ -43,6 +45,8 @@ export function parseFlags(argv: string[]): Partial<Answers> & { dir?: string } 
     else if (a === '--no-cascades') out.cascades = false;
     else if (a === '--stake') out.stake = true;
     else if (a === '--no-stake') out.stake = false;
+    else if (a === '--artube') out.artube = true;
+    else if (a === '--no-artube') out.artube = false;
     else if (a === '--dir') (out as { dir?: string }).dir = args[++i];
   }
   return out;
@@ -56,6 +60,9 @@ export function applyDefaults(partial: Partial<Answers>): Answers {
     mechanic,
     grid: partial.grid ?? DEFAULT_GRID[mechanic],
     stake: partial.stake ?? true,
+    // Off by default: Artube needs a companion backend repo (@energy8platform/artube-server), so
+    // it's an explicit choice, not something a game inherits by being scaffolded.
+    artube: partial.artube ?? false,
     cascades: partial.cascades ?? (mechanic !== 'lines'),
   };
 }

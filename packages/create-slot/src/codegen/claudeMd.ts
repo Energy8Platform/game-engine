@@ -4,10 +4,45 @@ import type { Answers } from '../answers';
  *  project is wired, what to edit, and what the framework already handles. */
 export function genClaudeMd(a: Answers): string {
   const cascade = a.cascades === true;
+  const artubeCommands = a.artube
+    ? `npm run dev:artube    # the Artube target (no DevBridge) — needs the backend running too, see below
+npm run build:artube   # the Artube frontend build → dist/ (what the client-repo CI deploys)
+npm run bundle:artube  # build:artube + a zip of dist/ for manual upload
+`
+    : '';
+  const artubeSection = a.artube
+    ? `
+## Artube
+
+\`createSlotGame({ artube: {} })\` in \`src/main.ts\` is the whole game-side wiring: the host detects
+the launch (\`?sessionId=…\`), REFUSES a launch that claims a session but carries a blank one (that
+would otherwise fall through to the offline bridge and pay out for free), lazy-loads
+\`@energy8platform/artube-bridge\`, and drives the same play loop as everywhere else. There is no
+per-game adapter on Artube — the game's BACKEND owns the round shape.
+
+Artube is a two-repo integration: this repo is the *client*, and the backend
+(\`@energy8platform/artube-server\`) lives in its own repo. \`npm run dev:artube\` starts ONLY the
+frontend; run the backend in a second terminal —
+
+\`\`\`bash
+artube-server --spin ./game.spin --sandbox --port 8080   # GameId must be set in the environment
+\`\`\`
+
+— and the dev server proxies \`/api\` (HTTP + WS) to it, so dev has the same single-origin shape as
+production (\`ARTUBE_BACKEND\` overrides the target). Neither the Artube dev server nor the Artube
+build bootstraps a DevBridge: on Artube the math runs on the backend, never in the browser.
+
+**Deployment:** the platform's CI runs \`npm run build\` and deploys the \`dist\` folder, so the Artube
+build writes to \`dist\` (not a \`dist-artube\` the pipeline would never look at) and
+\`build:artube\` wipes it first so an Energy8 build can't leak into an Artube deploy. Either point the
+pipeline at \`npm run build:artube\` or set \`BUILD_TARGET=artube\` as a CI variable — with that set,
+the platform's stock \`npm run build\` produces the Artube bundle unchanged.
+`
+    : '';
   return `# CLAUDE.md
 
 Guidance for Claude Code (claude.ai/code) working in this repository — a slot game built on the
-Energy8 \`@energy8platform/game-engine\` framework, targeting Stake Engine.
+Energy8 \`@energy8platform/game-engine\` framework, targeting Stake Engine${a.artube ? ' and Artube' : ''}.
 
 ## What this project is
 
@@ -57,7 +92,8 @@ npm run stake          # the Stake dev harness — iframe wrapper + dev-RGS back
 npm run build:stake    # the Stake frontend build → dist-stake/ (base './', no DevBridge)
 npm run math:pool      # Stage A — honest large simulation (the pool); see math.config.ts
 npm run math:curate    # Stage B — compress the pool into the publishable stake-math/ bundle
-\`\`\`
+${artubeCommands}\`\`\`
+${artubeSection}
 
 ## Math pipeline
 
@@ -72,7 +108,7 @@ Segment-drain of bonuses, \`roundId\` forwarding, free-spins counter (with retri
 unfinished round, win/balance HUD timing, social-mode vocabulary, the legal disclaimer, currency
 formatting, jurisdiction → feature restrictions, the insufficient-funds guard, the play-error modal
 + reconnect overlay, autoplay, the bet ladder + default bet from \`/wallet/authenticate\`, the
-open-redirect \`rgs_url\` guard, spacebar handling, pause on tab-blur (ticker + music), and
+open-redirect \`rgs_url\` guard${a.artube ? ' (and the Artube blank-`sessionId` guard)' : ''}, spacebar handling, pause on tab-blur (ticker + music), and
 double-tap-to-skip (opt out with \`createSlotGame({ skipGesture: false })\`). Write player-facing
 copy normally — it is socialized automatically in social mode.
 

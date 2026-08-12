@@ -2,7 +2,7 @@ import type { Answers } from '../answers';
 
 export interface DepVersions {
   'platform-core': string; 'game-engine': string; 'stake-kit': string; 'stake-bridge': string;
-  'stake-math-tools': string; 'harness': string;
+  'stake-math-tools': string; 'harness': string; 'artube-bridge': string;
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
@@ -26,6 +26,16 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     scripts['stake:bundle'] =
       `rm -rf dist-stake stake-math ${a.id}-stake.zip stake-math.zip && npm run build:stake && npm run math && cd dist-stake && zip -r ../${a.id}-stake.zip . && cd ../stake-math && zip -r ../stake-math.zip . && cd .. && echo 'Stake artifacts: ${a.id}-stake.zip + stake-math.zip'`;
   }
+  if (a.artube) {
+    // Artube's CI builds with `npm run build` and deploys `dist/` — so the Artube build TARGETS
+    // `dist` (see vite.config.ts). Wipe it first: the Energy8 build writes there too, and a stale
+    // mix of the two is exactly what must never reach the CDN. Set BUILD_TARGET=artube as a CI
+    // variable and the platform's own `npm run build` produces the Artube bundle unchanged.
+    scripts['dev:artube'] = 'BUILD_TARGET=artube vite';
+    scripts['build:artube'] = 'rm -rf dist && BUILD_TARGET=artube vite build';
+    scripts['bundle:artube'] =
+      `rm -f ${a.id}-artube.zip && npm run build:artube && cd dist && zip -r ../${a.id}-artube.zip . && cd .. && echo 'Artube artifact: dist/ (what the client-repo CI deploys) + ${a.id}-artube.zip'`;
+  }
   const pkg = {
     name: a.id,
     private: true,
@@ -36,6 +46,8 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       '@energy8platform/game-engine': v['game-engine'],
       '@energy8platform/harness': v['harness'],
       ...(a.stake ? { '@energy8platform/stake-kit': v['stake-kit'], '@energy8platform/stake-bridge': v['stake-bridge'] } : { '@energy8platform/stake-kit': v['stake-kit'] }),
+      // The host lazy-imports the bridge, but the bundler still has to resolve it at build time.
+      ...(a.artube ? { '@energy8platform/artube-bridge': v['artube-bridge'] } : {}),
       'pixi.js': '^8.16.0',
       '@pixi/sound': '^6.0.0',
       '@esotericsoftware/spine-pixi-v8': '~4.2.0',

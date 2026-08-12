@@ -3,6 +3,13 @@ import type { Answers } from '../answers';
 export function genMainTs(a: Answers): string {
   const stakeImport = a.stake ? `import adapter from './stake/adapter';\n` : '';
   const stakeOpt = a.stake ? `  stake: { adapter },\n` : '';
+  // Artube needs no per-game artifact: the game's backend (artube-server) owns the round shape, so
+  // `{}` IS the opt-in. The host detects the launch, refuses a malformed one and loads the bridge.
+  const artubeOpt = a.artube
+    ? `  // Artube: enabled by the launch URL (?sessionId=…). Build with \`npm run build:artube\`;
+  // the backend runs separately (\`artube-server --spin ./game.spin --sandbox --port 8080\`).
+  artube: {},\n`
+    : '';
   return `import { createSlotGame } from '@energy8platform/game-engine/host';
 import { ScaleMode } from '@energy8platform/game-engine';
 import { model } from './game.spec';
@@ -26,7 +33,7 @@ createSlotGame({
   fonts: ['400 24px "Inter"'],
   textureDefaults: true,
   dev: (import.meta as any).env?.DEV ?? false,
-${stakeOpt}  shell: {
+${stakeOpt}${artubeOpt}  shell: {
     // Per-game localisation map (english-as-key). Fill other languages in src/i18n.ts.
     i18n,
     // buy/ante cards + currency derive from the spec + initData.

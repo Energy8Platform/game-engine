@@ -14,6 +14,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   'stake-bridge': '^0.6.3',
   'stake-math-tools': '^0.9.3',
   harness: '^0.3.1',
+  'artube-bridge': '^0.1.0',
 };
 
 async function main(): Promise<void> {
