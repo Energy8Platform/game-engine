@@ -1,4 +1,5 @@
 import { type Diagnostic, error } from '../diagnostics';
+import { isPlainObject } from '../schema/validate';
 import type { PluginManifest } from './types';
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
@@ -16,8 +17,8 @@ export function definePlugin(manifest: PluginManifest): PluginManifest {
 export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
   const out: Diagnostic[] = [];
 
-  // Defensive: manifest may be null or missing
-  if (!manifest || typeof manifest !== 'object') {
+  // Defensive: manifest may be null, missing, or not a plain object
+  if (!isPlainObject(manifest)) {
     return [
       error('manifest/invalid', 'A plugin manifest must be a plain object.', {
         fix: 'Check that the manifest export is a valid object.',
@@ -47,6 +48,18 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
   }
 
   for (const [pointId, point] of Object.entries(manifest.points ?? {})) {
+    // Defensive: point may be null or not a plain object
+    if (!isPlainObject(point)) {
+      out.push(
+        error('manifest/bad-point-schema', `Point "${pointId}" has no usable schema.`, {
+          pluginId,
+          pointId,
+          fix: 'Declare a schema object (an empty `{}` is legal — a point may take no settings).',
+        }),
+      );
+      continue;
+    }
+
     if (!point.doc) {
       out.push(
         error('manifest/missing-doc', `Point "${pointId}" has no documentation.`, {
@@ -57,7 +70,8 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
       );
     }
 
-    if (typeof point.schema !== 'object' || point.schema === null || Array.isArray(point.schema)) {
+    // Check schema specifically - must be a plain object
+    if (!isPlainObject(point.schema)) {
       out.push(
         error('manifest/bad-point-schema', `Point "${pointId}" has no usable schema.`, {
           pluginId,
@@ -83,6 +97,18 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
 
     const seen = new Set<string>();
     for (const contribution of list) {
+      // Defensive: contribution may be null or not a plain object
+      if (!isPlainObject(contribution)) {
+        out.push(
+          error('manifest/bad-contribution', `Contribution in "${pointId}" is not a valid contribution object.`, {
+            pluginId,
+            pointId,
+            fix: 'Ensure all contributions are plain objects with an id, doc, and create function.',
+          }),
+        );
+        continue;
+      }
+
       if (seen.has(contribution.id)) {
         out.push(
           error('manifest/duplicate-contribution', `Two contributions to "${pointId}" share the id "${contribution.id}".`, {

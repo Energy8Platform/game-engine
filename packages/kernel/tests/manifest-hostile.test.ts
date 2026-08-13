@@ -58,4 +58,61 @@ describe('checkManifestShape - hostile input (never throws)', () => {
     // Symbol id is not a string, so it's treated as missing
     expect(result.some((d) => d.code === 'manifest/missing-id')).toBe(true);
   });
+
+  it('does not throw on a null entry inside points, and keeps earlier diagnostics', () => {
+    const d = checkManifestShape({
+      id: '',
+      version: 'nope',
+      engine: '',
+      points: { p: null as never },
+    } as never);
+    expect(d.length).toBeGreaterThanOrEqual(4);
+    expect(d.some((x) => x.code === 'manifest/bad-point-schema' && x.pointId === 'p')).toBe(true);
+  });
+
+  it('does not throw on a null element inside a contributes array', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { p: [null] as never },
+    } as never);
+    expect(d.length).toBeGreaterThan(0);
+    expect(d.every((x) => x.severity === 'error')).toBe(true);
+  });
+
+  it('does not throw on a string element inside a contributes array', () => {
+    expect(() =>
+      checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        contributes: { p: ['nope'] as never },
+      } as never),
+    ).not.toThrow();
+  });
+
+  it('rejects non-plain objects as a point schema', () => {
+    for (const bad of [new Map(), new Set(), new Date(), [] as never]) {
+      const d = checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        points: { p: { phase: 'runtime', arity: 'many', schema: bad as never, doc: 'x' } },
+      });
+      expect(d.some((x) => x.code === 'manifest/bad-point-schema')).toBe(true);
+    }
+  });
+
+  it('accepts an empty and a null-prototype schema', () => {
+    for (const ok of [{}, Object.create(null) as Record<string, never>]) {
+      const d = checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        points: { p: { phase: 'runtime', arity: 'many', schema: ok, doc: 'x' } },
+      });
+      expect(d).toEqual([]);
+    }
+  });
 });

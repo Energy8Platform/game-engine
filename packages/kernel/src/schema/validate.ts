@@ -24,7 +24,7 @@ function typeName(v: unknown): string {
 /** True for values whose structure this module is willing to copy: plain objects and arrays.
  *  A Date, a RegExp, a Map or a class instance is NOT plain — rebuilding it from its entries
  *  would destroy it, so it is passed through by reference instead. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
