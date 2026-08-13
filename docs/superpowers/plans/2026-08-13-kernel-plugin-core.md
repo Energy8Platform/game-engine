@@ -259,8 +259,15 @@ Expected: both succeed; `packages/kernel/dist/index.esm.js` and `dist/index.d.ts
 
 - [ ] **Step 10: Commit**
 
+Stage the six source files by name. Do NOT `git add packages/kernel` wholesale and do NOT use
+`git add -f`: this repo deliberately gitignores `package-lock.json`, `dist/` and `node_modules/`,
+and a force-add drags all three into the commit.
+
 ```bash
-git add packages/kernel package-lock.json
+git add packages/kernel/package.json packages/kernel/tsconfig.json \
+        packages/kernel/rollup.config.mjs packages/kernel/vitest.config.ts \
+        packages/kernel/src/index.ts packages/kernel/tests/skeleton.test.ts
+git status --short   # confirm: nothing from dist/ or node_modules/ is staged
 git commit -m "feat(kernel): package skeleton for @energy8engine/kernel"
 ```
 
