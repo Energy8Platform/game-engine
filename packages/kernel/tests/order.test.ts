@@ -49,20 +49,44 @@ describe('orderPlugins', () => {
 });
 
 describe('orderPlugins survives hostile input', () => {
-  it('never throws on malformed input', () => {
-    const cases: unknown[] = [
-      [],
-      [null],
-      [undefined],
-      ['a string'],
-      [{ id: 'a' }],
-      [{ id: '', version: '1.0.0', engine: '*' }],
-      [{ id: 'a', version: '1.0.0', engine: '*', dependsOn: null }],
-      [{ id: 'a', version: '1.0.0', engine: '*', dependsOn: 'b' }],
-    ];
-    for (const input of cases) {
-      expect(() => orderPlugins(input as never)).not.toThrow();
-    }
+  it('reports a duplicate id and stays order-insensitive', () => {
+    const dupA = { id: 'dup', version: '1.0.0', engine: '*', dependsOn: { other: '*' } };
+    const dupB = { id: 'dup', version: '1.0.0', engine: '*' };
+    const other = p('other');
+    const forward = orderPlugins([dupA, dupB, other]);
+    const backward = orderPlugins([other, dupB, dupA]);
+    expect(forward.order).toEqual(backward.order);
+    expect(forward.diagnostics.some((d) => d.code === 'resolve/duplicate-plugin-id')).toBe(true);
+    expect(backward.diagnostics.some((d) => d.code === 'resolve/duplicate-plugin-id')).toBe(true);
+  });
+
+  it('says what it actually knows about an un-orderable set', () => {
+    const { order, diagnostics } = orderPlugins([
+      p('a', { b: '*' }),
+      p('b', { a: '*' }),
+      p('c', { d: '*' }),
+      p('d', { c: '*' }),
+      p('solo'),
+    ]);
+    expect(order).toEqual(['solo']);
+    expect(diagnostics[0].message).not.toContain('depend on each other');
+    for (const id of ['a', 'b', 'c', 'd']) expect(diagnostics[0].message).toContain(id);
+  });
+
+  it('ignores a non-object dependsOn without inventing dependencies', () => {
+    expect(orderPlugins([{ id: 'a', version: '1.0.0', engine: '*', dependsOn: 'b' } as never]).diagnostics).toEqual([]);
+    expect(orderPlugins([{ id: 'a', version: '1.0.0', engine: '*', dependsOn: ['b', 'c'] } as never]).diagnostics).toEqual([]);
+  });
+
+  it('still orders a manifest that lacks version or engine', () => {
+    const { order } = orderPlugins([{ id: 'b', dependsOn: { a: '*' } } as never, { id: 'a' } as never]);
+    expect(order).toEqual(['a', 'b']);
+  });
+
+  it('drops an unusable manifest with a diagnostic, not in silence', () => {
+    const { order, diagnostics } = orderPlugins([null as never, { id: '' } as never, p('ok')]);
+    expect(order).toEqual(['ok']);
+    expect(diagnostics.length).toBeGreaterThanOrEqual(1);
   });
 
   it('reports a plugin that depends on itself as a cycle', () => {
@@ -76,10 +100,5 @@ describe('orderPlugins survives hostile input', () => {
     const backward = orderPlugins([p('c', { b: '*' }), p('b', { a: '*' }), p('a')]).order;
     expect(forward).toEqual(backward);
     expect(forward).toEqual(['a', 'b', 'c']);
-  });
-
-  it('does not lose a plugin when two share an id', () => {
-    const { order } = orderPlugins([p('dup'), p('dup'), p('other')]);
-    expect(order).toContain('other');
   });
 });
