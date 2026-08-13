@@ -69,9 +69,12 @@ export function isDefaultMatcher(matcher: Matcher | undefined | null): boolean {
 export function describeMatcher(matcher: Matcher | undefined | null): string {
   if (!matcher) return 'always';
 
+  // urlParam/buildTarget are typed as string but a manifest author can hand this a Symbol (or any
+  // other value) at runtime; String() renders it without throwing, unlike the template literal's own
+  // implicit coercion. `matches()` never has this problem — it only ever compares these with `===`.
   const parts: string[] = [];
-  if (matcher.urlParam !== undefined) parts.push(`when ?${matcher.urlParam} is present`);
-  if (matcher.buildTarget !== undefined) parts.push(`when the build target is "${matcher.buildTarget}"`);
+  if (matcher.urlParam !== undefined) parts.push(`when ?${String(matcher.urlParam)} is present`);
+  if (matcher.buildTarget !== undefined) parts.push(`when the build target is "${String(matcher.buildTarget)}"`);
   if (matcher.match !== undefined) parts.push('when a custom rule matches');
   if (parts.length === 0 && matcher.default === true) return 'when nothing else matches';
 

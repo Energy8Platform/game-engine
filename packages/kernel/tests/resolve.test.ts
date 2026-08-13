@@ -532,6 +532,39 @@ describe('toSnapshot', () => {
     expect(snapshot.contributions[0].schema).not.toBe(snapshot.contributions[1].schema);
     expect(snapshot.contributions[0].schema.enabled).not.toBe(snapshot.contributions[1].schema.enabled);
   });
+
+  it('does alias the live plan past cloneValue’s depth cap — documented, not a silent bug (fix round 1)', () => {
+    // The doc comment on PlanSnapshot claims cloneValue's cap, not an unqualified "never shared by
+    // reference". Pinned here so nobody "fixes" toSnapshot into an unbounded recursion later, and so
+    // the comment's claim is something this suite actually checks rather than only asserts in prose.
+    type DeepField = { kind: 'object'; fields: { child: DeepField | { kind: 'text'; default: string } } };
+    function buildDeepSchema(depth: number): DeepField | { kind: 'text'; default: string } {
+      let field: DeepField | { kind: 'text'; default: string } = { kind: 'text', default: 'leaf' };
+      for (let i = 0; i < depth; i++) field = { kind: 'object', fields: { child: field } };
+      return field;
+    }
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { p: { phase: 'runtime', arity: 'many', schema: { root: buildDeepSchema(40) as never }, doc: 'd' } },
+    };
+    const { plan } = resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL });
+    const snapshot = toSnapshot(plan);
+
+    expect(snapshot.points.p.schema.root).not.toBe(plan.points.p.schema.root); // shallow levels: copied
+    let live: unknown = plan.points.p.schema.root;
+    let snap: unknown = snapshot.points.p.schema.root;
+    let aliasedSomewhere = false;
+    for (let i = 0; i < 40 && !aliasedSomewhere; i++) {
+      if (live === snap) aliasedSomewhere = true;
+      const liveField = live as DeepField;
+      const snapField = snap as DeepField;
+      live = liveField.fields ? liveField.fields.child : undefined;
+      snap = snapField.fields ? snapField.fields.child : undefined;
+    }
+    expect(aliasedSomewhere).toBe(true); // deep enough that cloneValue's cap is reached
+  });
 });
 
 describe('resolvePlan survives hostile input — top-level shape', () => {
@@ -973,5 +1006,517 @@ describe('resolvePlan determinism', () => {
 
     const [first, ...rest] = results;
     for (const r of rest) expect(r).toBe(first);
+  });
+
+  it('produces a byte-identical DIAGNOSTICS ARRAY across permutations when the project has several diagnostics of different kinds (fix round 1)', () => {
+    // The test above resolves to zero diagnostics, so it cannot catch a diagnostics ARRAY that is
+    // still ordered by push order (a pure function of manifest declaration order) even though its
+    // CONTENTS as a set are already permutation-independent. This project is built to produce five
+    // diagnostics of five different kinds, so a comparator bug shows up as a different array even
+    // though every element in it is identical.
+    const badVersion: PluginManifest = { id: 'bad-version', version: 'not-semver', engine: '^0.1.0' };
+    const badField: PluginManifest = {
+      id: 'bad-field',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { pt: { phase: 'runtime', arity: 'many', schema: { x: null as never }, doc: 'd' } },
+    };
+    const orphanContribution: PluginManifest = {
+      id: 'orphan',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { 'nowhere.point': [{ id: 'x', doc: 'd', create: noop }] },
+    };
+    const badHook: PluginManifest = { id: 'bad-hook', version: '1.0.0', engine: '^0.1.0', hooks: ['unknownHook'] };
+    const ghostOnly = { version: '^1.0.0' }; // references a plugin id with no matching manifest below
+
+    const project: ProjectDoc = {
+      plugins: {
+        'bad-version': { version: '*' },
+        'bad-field': { version: '*' },
+        orphan: { version: '*' },
+        'bad-hook': { version: '*' },
+        'ghost-plugin': ghostOnly,
+      },
+    };
+
+    const orders = [
+      [badVersion, badField, orphanContribution, badHook],
+      [badHook, orphanContribution, badField, badVersion],
+      [orphanContribution, badVersion, badHook, badField],
+      [badField, badHook, badVersion, orphanContribution],
+    ];
+
+    const results = orders.map((ms) => {
+      const { plan, diagnostics } = resolvePlan({ project, manifests: ms, launch, kernelVersion: KERNEL, hookIds: ['onSpin'] });
+      return { serialized: JSON.stringify({ snapshot: toSnapshot(plan), diagnostics }), count: diagnostics.length };
+    });
+
+    // Sanity: this scenario really does produce more than one diagnostic, of more than one kind —
+    // otherwise the test would pass trivially, exactly the failure mode being fixed.
+    expect(results[0].count).toBeGreaterThan(1);
+    const firstDiagnostics = JSON.parse(results[0].serialized).diagnostics as Array<{ code: string }>;
+    expect(new Set(firstDiagnostics.map((d) => d.code)).size).toBeGreaterThan(1);
+
+    for (const r of results) expect(r.serialized).toBe(results[0].serialized);
+  });
+
+  it('sorts by severity, then code, then plugin/point/contribution/path, then message', () => {
+    // Direct unit check of the comparator's tie-break order, independent of the permutation test
+    // above (which proves invariance but not which order was chosen).
+    const a: PluginManifest = { id: 'a', version: 'nope', engine: '^0.1.0' }; // manifest/bad-version
+    const z: PluginManifest = { id: 'z', version: 'nope', engine: '^0.1.0' }; // manifest/bad-version
+    const { diagnostics } = resolvePlan({
+      project: { plugins: { a: { version: '*' }, z: { version: '*' } } },
+      manifests: [z, a], // deliberately reversed
+      launch,
+      kernelVersion: KERNEL,
+    });
+    const badVersions = diagnostics.filter((d) => d.code === 'manifest/bad-version');
+    expect(badVersions.map((d) => d.pluginId)).toEqual(['a', 'z']); // alphabetical by pluginId, not push order
+  });
+});
+
+describe('CRITICAL fix round 1 — a null schema field must not crash resolvePlan', () => {
+  it('does not throw for a null field in a point schema, and reports manifest/bad-field-schema', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { pt: { phase: 'runtime', arity: 'many', schema: { speed: null as never }, doc: 'd' } },
+    };
+    expect(() =>
+      resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(diagnostics.some((d) => d.code === 'manifest/bad-field-schema' && d.path === 'speed')).toBe(true);
+    expect(plan.points.pt).toBeDefined();
+  });
+
+  it('does not throw for a null field in a contribution schema', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { pt: { phase: 'runtime', arity: 'many', schema: {}, doc: 'd' } },
+      contributes: { pt: [{ id: 'c', schema: { speed: null as never }, doc: 'd', create: noop }] },
+    };
+    expect(() =>
+      resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+    const { plan } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    // The manifest boundary AND schema/validate.ts both catch it; the contribution still resolves
+    // (with the bad field settled to a safe '' value) rather than being dropped from the plan.
+    expect(plan.contributions[0].settings.speed).toBe('');
+  });
+
+  it('does not throw for a null field in manifest.settings, reachable with no contribution at all', () => {
+    const manifest: PluginManifest = { id: 'x', version: '1.0.0', engine: '^0.1.0', settings: { speed: null as never } };
+    expect(() =>
+      resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.plugins[0].settings.speed).toBe('');
+    expect(diagnostics.some((d) => d.code === 'manifest/bad-field-schema' && d.pluginId === 'x')).toBe(true);
+  });
+
+  it('does not throw for a null field nested inside an object field', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: {
+        pt: {
+          phase: 'runtime',
+          arity: 'many',
+          schema: { motion: { kind: 'object', fields: { speed: null as never } } },
+          doc: 'd',
+        },
+      },
+    };
+    expect(() =>
+      resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+  });
+
+  it('does not throw for a null list.of once a project supplies a value for that list', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      settings: { stops: { kind: 'list', of: null as never } },
+    };
+    expect(() =>
+      resolvePlan({
+        project: { plugins: { x: { version: '*', settings: { stops: [1, 2] } } } },
+        manifests: [manifest],
+        launch,
+        kernelVersion: KERNEL,
+      }),
+    ).not.toThrow();
+    const { plan } = resolvePlan({
+      project: { plugins: { x: { version: '*', settings: { stops: [1, 2] } } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.plugins[0].settings.stops).toEqual(['', '']);
+  });
+});
+
+describe('IMPORTANT fix round 1 — arity "one" activation must not mix up two same-id contributions', () => {
+  it('activates the correct one of two contributions sharing an id within one plugin, and labels each correctly', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    // A manifest bug (checkManifestShape flags it as manifest/duplicate-contribution) that must
+    // still resolve CORRECTLY rather than picking the wrong activateWhen for one of the two.
+    const twoSame: PluginManifest = {
+      id: 'twoSame',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        sp: [
+          { id: 'same', activateWhen: { default: true }, doc: 'd1', create: noop },
+          { id: 'same', activateWhen: { buildTarget: 'stake' }, doc: 'd2', create: noop },
+        ],
+      },
+    };
+    const { plan } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, twoSame: { version: '*' } } },
+      manifests: [host, twoSame],
+      launch: { url: 'https://g/play', buildTarget: 'stake' },
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions).toHaveLength(2);
+    expect(plan.contributions[0].activationLabel).toBe('when nothing else matches');
+    expect(plan.contributions[1].activationLabel).toBe('when the build target is "stake"');
+    // Exactly the buildTarget-matching one is active — not both, not neither, not the default one.
+    expect(plan.contributions[0].active).toBe(false);
+    expect(plan.contributions[1].active).toBe(true);
+  });
+
+  it('falls back to the default one of the two when the launch does not match the other', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const twoSame: PluginManifest = {
+      id: 'twoSame',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        sp: [
+          { id: 'same', activateWhen: { default: true }, doc: 'd1', create: noop },
+          { id: 'same', activateWhen: { buildTarget: 'stake' }, doc: 'd2', create: noop },
+        ],
+      },
+    };
+    const { plan } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, twoSame: { version: '*' } } },
+      manifests: [host, twoSame],
+      launch: { url: 'https://g/play' }, // no buildTarget — the second contribution cannot match
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions[0].active).toBe(true); // the default one
+    expect(plan.contributions[1].active).toBe(false);
+  });
+});
+
+describe('IMPORTANT fix round 1 — match/predicate-threw is tagged with which contribution threw', () => {
+  it('tags two throwing predicates from two different plugins with their own identity, not the point only', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const p1: PluginManifest = {
+      id: 'p1',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        sp: [
+          {
+            id: 'p1',
+            activateWhen: {
+              match: () => {
+                throw new Error('boom1');
+              },
+            },
+            doc: 'x',
+            create: noop,
+          },
+        ],
+      },
+    };
+    const p2: PluginManifest = {
+      id: 'p2',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        sp: [
+          {
+            id: 'p2',
+            activateWhen: {
+              match: () => {
+                throw new Error('boom2');
+              },
+            },
+            doc: 'x',
+            create: noop,
+          },
+        ],
+      },
+    };
+    const { diagnostics } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, p1: { version: '*' }, p2: { version: '*' } } },
+      manifests: [host, p1, p2],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    const thrown = diagnostics.filter((d) => d.code === 'match/predicate-threw');
+    expect(thrown).toHaveLength(2);
+    expect(thrown).toContainEqual(expect.objectContaining({ pluginId: 'p1', pointId: 'sp', contributionId: 'p1' }));
+    expect(thrown).toContainEqual(expect.objectContaining({ pluginId: 'p2', pointId: 'sp', contributionId: 'p2' }));
+  });
+});
+
+describe('IMPORTANT fix round 1 — contribution key collisions across plugins are reported', () => {
+  it('reports resolve/contribution-key-collision when two plugins produce the same key, naming both', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'many', schema: {}, doc: 'x' } },
+    };
+    const a: PluginManifest = {
+      id: 'a',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { sp: [{ id: 'shared', doc: 'x', create: noop }] },
+    };
+    const b: PluginManifest = {
+      id: 'b',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { sp: [{ id: 'shared', doc: 'x', create: noop }] },
+    };
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, a: { version: '*' }, b: { version: '*' } } },
+      manifests: [host, a, b],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    // Both contributions still resolve and function (the key is only ambiguous for project.json
+    // addressing, not for the plan itself) — but the collision is now visible as a diagnostic.
+    expect(plan.contributions.map((c) => c.key)).toEqual(['sp:shared', 'sp:shared']);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'resolve/contribution-key-collision',
+        pluginId: 'b',
+        pointId: 'sp',
+        contributionId: 'shared',
+      }),
+    );
+  });
+
+  it('does not report a collision for the ordinary case of one plugin, one contribution, one key', () => {
+    const { diagnostics } = resolvePlan({ project: project(), manifests: [reelSystem()], launch, kernelVersion: KERNEL });
+    expect(diagnostics.filter((d) => d.code === 'resolve/contribution-key-collision')).toEqual([]);
+  });
+
+  it('does not report a collision for the SAME plugin declaring a duplicate id to itself (manifest/duplicate-contribution owns that case)', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'many', schema: {}, doc: 'x' } },
+      contributes: {
+        sp: [
+          { id: 'same', doc: 'd1', create: noop },
+          { id: 'same', doc: 'd2', create: noop },
+        ],
+      },
+    };
+    const { diagnostics } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(diagnostics.filter((d) => d.code === 'resolve/contribution-key-collision')).toEqual([]);
+    expect(diagnostics.some((d) => d.code === 'manifest/duplicate-contribution')).toBe(true);
+  });
+});
+
+describe('MINOR fix round 1 — activationLabel must not claim "always" for a contribution that can never win', () => {
+  it('labels a contribution with no activateWhen on an arity "one" point as never, not always', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const noRule: PluginManifest = {
+      id: 'noRule',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { sp: [{ id: 'noRule', doc: 'x', create: noop }] }, // no activateWhen at all
+    };
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, noRule: { version: '*' } } },
+      manifests: [host, noRule],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions[0].activationLabel).not.toBe('always');
+    expect(plan.contributions[0].activationLabel).toContain('never');
+    expect(plan.contributions[0].active).toBe(false);
+    expect(diagnostics.some((d) => d.code === 'resolve/no-activation')).toBe(true);
+  });
+
+  it('keeps "always" for a no-activateWhen contribution on an arity "many" point, where it is true', () => {
+    const { plan } = resolvePlan({ project: project(), manifests: [reelSystem()], launch, kernelVersion: KERNEL });
+    expect(plan.contributions[0].activationLabel).toBe('always');
+    expect(plan.contributions[0].active).toBe(true);
+  });
+});
+
+describe('MINOR fix round 1 — non-string hook entries are refused with a diagnostic, not silently keyed', () => {
+  it('refuses null, a number, an object, and a Symbol; still registers the real hook alongside them', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      hooks: [null as never, 42 as never, {} as never, Symbol('bad') as never, 'realHook'],
+    };
+    expect(() =>
+      resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.hooks).toEqual({ realHook: ['x'] });
+    const badHooks = diagnostics.filter((d) => d.code === 'resolve/bad-hook');
+    expect(badHooks).toHaveLength(4);
+    expect(badHooks.every((d) => d.pluginId === 'x')).toBe(true);
+  });
+
+  it('refuses an empty string as a hook id', () => {
+    const manifest: PluginManifest = { id: 'x', version: '1.0.0', engine: '^0.1.0', hooks: [''] };
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.hooks).toEqual({});
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'resolve/bad-hook' });
+  });
+});
+
+describe('MINOR fix round 1 — String() consistency: hostile non-string data must not crash a template literal', () => {
+  it('does not throw when manifest.version, manifest.engine, or kernelVersion is a Symbol', () => {
+    const bySymbolVersion: PluginManifest = { id: 'a', version: Symbol('v') as never, engine: '^0.1.0' };
+    const bySymbolEngine: PluginManifest = { id: 'b', version: '1.0.0', engine: Symbol('e') as never };
+    for (const [manifests, kv] of [
+      [[bySymbolVersion], KERNEL],
+      [[bySymbolEngine], KERNEL],
+      [[{ id: 'c', version: '1.0.0', engine: '^0.1.0' } as PluginManifest], Symbol('kv') as never],
+    ] as const) {
+      const project: ProjectDoc = { plugins: Object.fromEntries(manifests.map((m) => [m.id, { version: '*' }])) };
+      expect(() => resolvePlan({ project, manifests, launch, kernelVersion: kv })).not.toThrow();
+    }
+  });
+
+  it('does not throw when a dependency version or an entry.version is a Symbol', () => {
+    const core: PluginManifest = { id: 'core', version: Symbol('sym') as never, engine: '^0.1.0' };
+    const dep: PluginManifest = { id: 'dep', version: '1.0.0', engine: '^0.1.0', dependsOn: { core: '^1.0.0' } };
+    expect(() =>
+      resolvePlan({
+        project: { plugins: { core: { version: '*' }, dep: { version: '*' } } },
+        manifests: [core, dep],
+        launch,
+        kernelVersion: KERNEL,
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      resolvePlan({
+        project: { plugins: { '@e8/reel-system': { version: Symbol('v') as never } } },
+        manifests: [reelSystem()],
+        launch,
+        kernelVersion: KERNEL,
+      }),
+    ).not.toThrow();
+  });
+
+  it('does not throw when a contribution id is a Symbol', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { p: { phase: 'runtime', arity: 'many', schema: {}, doc: 'd' } },
+      contributes: { p: [{ id: Symbol('weird') as never, doc: 'd', create: noop }] },
+    };
+    expect(() =>
+      resolvePlan({ project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+    const { plan } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions[0].id).toBe('Symbol(weird)');
+    expect(plan.contributions[0].key).toBe('p:Symbol(weird)');
+  });
+
+  it('does not throw when activateWhen.buildTarget or .urlParam is a Symbol', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const weird: PluginManifest = {
+      id: 'weird',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { sp: [{ id: 'weird', activateWhen: { buildTarget: Symbol('bt') as never }, doc: 'x', create: noop }] },
+    };
+    expect(() =>
+      resolvePlan({
+        project: { plugins: { host: { version: '*' }, weird: { version: '*' } } },
+        manifests: [host, weird],
+        launch,
+        kernelVersion: KERNEL,
+      }),
+    ).not.toThrow();
   });
 });

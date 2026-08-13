@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Diagnostic } from '@/diagnostics';
 import type { FieldSchema, Schema } from '@/schema/types';
 import { defaultOf, validate } from '@/schema/validate';
 
@@ -162,5 +163,72 @@ describe('cloneValue safety', () => {
     const first = validate({}, schema);
     (first.value.stops as { a: number }[])[0].a = 999;
     expect((validate({}, schema).value.stops as { a: number }[])[0].a).toBe(1);
+  });
+});
+
+describe('a non-object schema field never throws (fix round 1: was TypeError reading .kind)', () => {
+  it('defaultOf(null) returns a safe value instead of throwing', () => {
+    expect(() => defaultOf(null as unknown as FieldSchema)).not.toThrow();
+    expect(defaultOf(null as unknown as FieldSchema)).toBe('');
+  });
+
+  it('defaultOf(undefined) returns a safe value instead of throwing', () => {
+    expect(() => defaultOf(undefined as unknown as FieldSchema)).not.toThrow();
+    expect(defaultOf(undefined as unknown as FieldSchema)).toBe('');
+  });
+
+  it('defaultOf reports schema/bad-field when given a diagnostics sink and a path', () => {
+    const diagnostics: Diagnostic[] = [];
+    defaultOf(null as unknown as FieldSchema, 0, diagnostics, 'speed');
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'schema/bad-field', path: 'speed' });
+  });
+
+  it('validate() reports schema/bad-field, not a throw, for a null field with a value supplied', () => {
+    expect(() => validate({ speed: 1 }, { speed: null as unknown as FieldSchema })).not.toThrow();
+    const { value, diagnostics } = validate({ speed: 1 }, { speed: null as unknown as FieldSchema });
+    expect(value.speed).toBe('');
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'schema/bad-field', path: 'speed' });
+  });
+
+  it('validate() reports schema/bad-field for a null field with no value supplied either', () => {
+    const { value, diagnostics } = validate({}, { speed: null as unknown as FieldSchema });
+    expect(value.speed).toBe('');
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'schema/bad-field', path: 'speed' });
+  });
+
+  it('does not throw for a field that is a string, an array, or an object with no kind', () => {
+    for (const bad of ['garbage', [1, 2, 3], {}, { notKind: 1 }] as unknown as FieldSchema[]) {
+      expect(() => validate({ x: 1 }, { x: bad })).not.toThrow();
+      expect(validate({ x: 1 }, { x: bad }).diagnostics.some((d) => d.code === 'schema/bad-field')).toBe(true);
+    }
+  });
+
+  it('catches a null field nested inside an object field (fix round 1 case: nested in object.fields)', () => {
+    const schema: Schema = { motion: { kind: 'object', fields: { speed: null as unknown as FieldSchema } } };
+    expect(() => validate({ motion: { speed: 1 } }, schema)).not.toThrow();
+    const { value, diagnostics } = validate({ motion: { speed: 1 } }, schema);
+    expect(value).toEqual({ motion: { speed: '' } });
+    expect(diagnostics.some((d) => d.code === 'schema/bad-field' && d.path === 'motion.speed')).toBe(true);
+  });
+
+  it('catches a null field.fields itself, not only a null field nested inside it', () => {
+    const schema: Schema = { motion: { kind: 'object', fields: null as unknown as Schema } };
+    expect(() => validate({ motion: { speed: 1 } }, schema)).not.toThrow();
+    expect(() => defaultOf(schema.motion)).not.toThrow();
+    expect(validate({}, schema).value).toEqual({ motion: {} });
+  });
+
+  it('catches a null list.of once a value is supplied for that list (fix round 1 case)', () => {
+    const schema: Schema = { stops: { kind: 'list', of: null as unknown as FieldSchema } };
+    expect(() => validate({ stops: [1, 2] }, schema)).not.toThrow();
+    const { value, diagnostics } = validate({ stops: [1, 2] }, schema);
+    expect(value.stops).toEqual(['', '']);
+    expect(diagnostics.filter((d) => d.code === 'schema/bad-field')).toHaveLength(2);
+  });
+
+  it('a null list.of does not itself throw when no value is supplied (defaultOf never reads .of)', () => {
+    const schema: Schema = { stops: { kind: 'list', of: null as unknown as FieldSchema } };
+    expect(() => validate({}, schema)).not.toThrow();
+    expect(validate({}, schema).value.stops).toEqual([]);
   });
 });

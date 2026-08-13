@@ -200,6 +200,13 @@ describe('matchers survive hostile input — describeMatcher edge cases', () => 
     expect(desc).toContain('when a custom rule matches');
   });
 
+  it('does not throw on a Symbol urlParam or buildTarget (fix round 1: was TypeError)', () => {
+    expect(() => describeMatcher({ urlParam: Symbol('a') as never })).not.toThrow();
+    expect(describeMatcher({ urlParam: Symbol('a') as never })).toBe('when ?Symbol(a) is present');
+    expect(() => describeMatcher({ buildTarget: Symbol('stake') as never })).not.toThrow();
+    expect(describeMatcher({ buildTarget: Symbol('stake') as never })).toBe('when the build target is "Symbol(stake)"');
+  });
+
   it('handles isDefaultMatcher with null, undefined, and {}', () => {
     expect(isDefaultMatcher(null as any)).toBe(false);
     expect(isDefaultMatcher(undefined)).toBe(false);

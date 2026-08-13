@@ -116,3 +116,108 @@ describe('checkManifestShape - hostile input (never throws)', () => {
     }
   });
 });
+
+describe('checkManifestShape catches a bad field WITHIN an otherwise-usable schema (fix round 1)', () => {
+  it('reports a null field in a point schema', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { p: { phase: 'runtime', arity: 'many', schema: { speed: null as never }, doc: 'd' } },
+    });
+    expect(d).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-field-schema', pluginId: 'x', pointId: 'p', path: 'speed' }),
+    ]);
+  });
+
+  it('reports a null field in a contribution schema', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        p: [{ id: 'c', doc: 'd', create: async () => () => null, schema: { speed: null as never } }],
+      },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-field-schema' && x.contributionId === 'c' && x.path === 'speed')).toBe(true);
+  });
+
+  it('reports a null field in plugin-level settings, with no contribution involved at all', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      settings: { speed: null as never },
+    });
+    expect(d).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-field-schema', pluginId: 'x', path: 'speed' }),
+    ]);
+  });
+
+  it('reports a null field nested inside an object field', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: {
+        p: {
+          phase: 'runtime',
+          arity: 'many',
+          schema: { motion: { kind: 'object', fields: { speed: null as never } } },
+          doc: 'd',
+        },
+      },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-field-schema' && x.path === 'speed')).toBe(true);
+  });
+
+  it('reports a null list.of item type', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: {
+        p: { phase: 'runtime', arity: 'many', schema: { stops: { kind: 'list', of: null as never } }, doc: 'd' },
+      },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-field-schema' && x.path === 'stops[]')).toBe(true);
+  });
+
+  it('does not loop forever on a cyclic schema, and reports nothing past the depth cap', () => {
+    const cyclic: Record<string, unknown> = { kind: 'object', fields: {} };
+    (cyclic.fields as Record<string, unknown>).child = cyclic;
+    expect(() =>
+      checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        points: { p: { phase: 'runtime', arity: 'many', schema: { root: cyclic as never }, doc: 'd' } },
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts a Symbol version and a Symbol contribution id without throwing, and still reports them', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: Symbol('bad') as never,
+      engine: '^0.1.0',
+      contributes: { p: [{ id: Symbol('c') as never, doc: 'd', create: async () => () => null }] },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-version' && x.message.includes('Symbol(bad)'))).toBe(true);
+    // no manifest/missing-doc for the contribution — it has a doc — but nothing here should throw,
+    // and the duplicate-contribution Set keying must not crash on the Symbol id either.
+    expect(() =>
+      checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        contributes: {
+          p: [
+            { id: Symbol('c') as never, doc: 'd', create: async () => () => null },
+            { id: Symbol('c') as never, doc: 'd', create: async () => () => null },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+});

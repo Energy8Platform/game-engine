@@ -61,6 +61,30 @@ function sameSchema(a: unknown, b: unknown): boolean {
   }
 }
 
+/** Plain ordinal (code-unit) comparison — not `localeCompare`, which is locale- and
+ *  Intl-implementation-dependent. "Same input → identical diagnostics" must hold regardless of the
+ *  runtime's locale, so the tie-break itself must not be able to vary with it. */
+function compareOrdinal(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Total order over diagnostics, so the returned ARRAY — not just its contents as a set — is a pure
+ *  function of the resolved plan, independent of which step happened to push a given diagnostic
+ *  first. Severity/code group the same kind of problem together; the rest breaks ties in the order a
+ *  person would naturally narrow one down (which plugin, which point, which contribution, which
+ *  field, and only then the prose). */
+function compareDiagnostics(a: Diagnostic, b: Diagnostic): number {
+  return (
+    compareOrdinal(a.severity, b.severity) ||
+    compareOrdinal(a.code, b.code) ||
+    compareOrdinal(a.pluginId ?? '', b.pluginId ?? '') ||
+    compareOrdinal(a.pointId ?? '', b.pointId ?? '') ||
+    compareOrdinal(a.contributionId ?? '', b.contributionId ?? '') ||
+    compareOrdinal(a.path ?? '', b.path ?? '') ||
+    compareOrdinal(a.message, b.message)
+  );
+}
+
 /**
  * Turn a project's choices plus the installed manifests into a plan.
  *
@@ -123,7 +147,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       diagnostics.push(
         error(
           'resolve/version-mismatch',
-          `"${pluginId}" is installed at ${manifest.version}, which does not satisfy ${entry.version ?? '<missing>'}.`,
+          `"${pluginId}" is installed at ${String(manifest.version)}, which does not satisfy ${entry.version === undefined ? '<missing>' : String(entry.version)}.`,
           { pluginId, fix: `Change the range in project.json, or install a matching version.` },
         ),
       );
@@ -133,7 +157,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       diagnostics.push(
         error(
           'resolve/engine-mismatch',
-          `"${pluginId}" needs kernel ${manifest.engine}, but this kernel is ${kernelVersion}.`,
+          `"${pluginId}" needs kernel ${String(manifest.engine)}, but this kernel is ${String(kernelVersion)}.`,
           { pluginId, fix: 'Upgrade the kernel, or use a build of the plugin that fits it.' },
         ),
       );
@@ -166,7 +190,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
         diagnostics.push(
           error(
             'resolve/dependency-version',
-            `"${manifest.id}" needs "${depId}" ${String(range)}, but ${dep.version} is installed.`,
+            `"${manifest.id}" needs "${depId}" ${String(range)}, but ${String(dep.version)} is installed.`,
             { pluginId: manifest.id },
           ),
         );
@@ -221,6 +245,21 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
 
   // ── 5. Contributions ──────────────────────────────────────────────────────
   const contributions: ResolvedContribution[] = [];
+  // activateWhen is captured here, per contribution, rather than re-derived in step 6 by looking the
+  // id back up in the raw manifest. Two contributions from the same plugin to the same point CAN
+  // share an id — checkManifestShape already flags that as manifest/duplicate-contribution but does
+  // not stop resolution over it — and a re-lookup keyed by (pluginId, pointId, contributionId) would
+  // then have Array#find return its FIRST match for BOTH resolved entries, silently pairing the
+  // second contribution with the first one's activateWhen. Keying by the exact ResolvedContribution
+  // object instead is correct by construction: each is built and paired with its own activateWhen
+  // exactly once, so there is nothing left to look up incorrectly.
+  const activateWhenOf = new Map<ResolvedContribution, Contribution['activateWhen']>();
+  // The first plugin to produce a given `${pointId}:${contributionId}` key owns it; a second plugin
+  // landing on the same key is a real authoring collision project.json cannot address unambiguously
+  // (see resolve/contribution-key-collision below) — this is tracked across the whole loop, not
+  // reset per manifest, since the collision is by definition between two DIFFERENT manifests.
+  const keyOwner = new Map<string, string>();
+
   for (const manifest of ordered) {
     const entry = projectEntries.get(manifest.id) ?? EMPTY_ENTRY;
     for (const [pointId, list] of Object.entries(manifest.contributes ?? {})) {
@@ -240,8 +279,26 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       for (const contribution of list as Contribution[]) {
         if (!isPlainObject(contribution)) continue; // checkManifestShape already reported manifest/bad-contribution
 
-        const key = `${pointId}:${contribution.id}`;
-        const tag = { pluginId: manifest.id, pointId, contributionId: contribution.id };
+        // A hostile id (missing, a Symbol, a number) must not reach a template literal unguarded:
+        // implicit coercion throws on a Symbol where String() does not. Normalizing once here means
+        // every downstream read of ResolvedContribution.id — including every .join() below — is
+        // already safe, rather than needing its own guard.
+        const contributionId = typeof contribution.id === 'string' ? contribution.id : String(contribution.id);
+        const key = `${pointId}:${contributionId}`;
+        const tag = { pluginId: manifest.id, pointId, contributionId };
+
+        const owner = keyOwner.get(key);
+        if (owner === undefined) {
+          keyOwner.set(key, manifest.id);
+        } else if (owner !== manifest.id) {
+          diagnostics.push(
+            error(
+              'resolve/contribution-key-collision',
+              `"${owner}" and "${manifest.id}" both contribute "${contributionId}" to "${pointId}", so project.json cannot address them separately as "${key}".`,
+              { ...tag, fix: 'Give one of the two contributions a different id.' },
+            ),
+          );
+        }
 
         const merged = mergeSchemas(point.schema, contribution.schema, tag);
         diagnostics.push(...merged.diagnostics);
@@ -251,19 +308,30 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
         const validated = validate(raw, merged.schema);
         diagnostics.push(...validated.diagnostics.map((d) => ({ ...d, ...tag })));
 
-        contributions.push({
+        // A point with arity 'one' activates by matching or by a `default: true` fallback; neither
+        // path can ever pick a contribution with NO activateWhen at all (matches() requires at least
+        // one condition, isDefaultMatcher() requires `default: true`). describeMatcher(undefined)
+        // says 'always', which is true for an arity:'many' point but false — misleadingly so — here.
+        const activationLabel =
+          point.arity === 'one' && contribution.activateWhen === undefined
+            ? 'never — a point with arity "one" needs an activateWhen, and this contribution declares none'
+            : describeMatcher(contribution.activateWhen);
+
+        const resolved: ResolvedContribution = {
           key,
           pluginId: manifest.id,
           pointId,
-          id: contribution.id,
+          id: contributionId,
           enabled: chosen?.enabled !== false,
           active: false, // decided in step 6
-          activationLabel: describeMatcher(contribution.activateWhen),
+          activationLabel,
           schema: merged.schema,
           settings: validated.value,
           doc: contribution.doc,
           create: contribution.create,
-        });
+        };
+        activateWhenOf.set(resolved, contribution.activateWhen);
+        contributions.push(resolved);
       }
     }
   }
@@ -278,12 +346,19 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       continue;
     }
 
-    const manifestOf = (c: ResolvedContribution) =>
-      admittedById
-        .get(c.pluginId)
-        ?.contributes?.[pointId]?.find((x): x is Contribution => isPlainObject(x) && x.id === c.id);
+    // matches() is handed a LOCAL sink and the result re-tagged with this exact candidate's
+    // pluginId/pointId/contributionId, rather than passing `diagnostics` straight through — every
+    // other diagnostic built in this function is tagged, and with two candidates on the same point
+    // both holding a `match` predicate, an untagged match/predicate-threw diagnostic could not say
+    // which one broke.
+    const matchesTagged = (c: ResolvedContribution): boolean => {
+      const local: Diagnostic[] = [];
+      const ok = matches(activateWhenOf.get(c), launch, local);
+      diagnostics.push(...local.map((d) => ({ ...d, pluginId: c.pluginId, pointId, contributionId: c.id })));
+      return ok;
+    };
 
-    const matched = candidates.filter((c) => matches(manifestOf(c)?.activateWhen, launch, diagnostics));
+    const matched = candidates.filter(matchesTagged);
     if (matched.length === 1) {
       matched[0].active = true;
       continue;
@@ -299,7 +374,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       continue;
     }
 
-    const fallbacks = candidates.filter((c) => isDefaultMatcher(manifestOf(c)?.activateWhen));
+    const fallbacks = candidates.filter((c) => isDefaultMatcher(activateWhenOf.get(c)));
     if (fallbacks.length === 1) {
       fallbacks[0].active = true;
       continue;
@@ -341,11 +416,24 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
   for (const manifest of ordered) {
     const declaredHooks = Array.isArray(manifest.hooks) ? manifest.hooks : [];
     for (const hook of declaredHooks) {
+      // A non-string hook (null, a number, an object) would otherwise become a garbage object key
+      // (`hooks[42]` → the key '42') with nothing to say why — or, for a Symbol specifically, throw
+      // in the template literal below. Refused with a diagnostic instead, the same posture as every
+      // other malformed-manifest-data case in this function.
+      if (typeof hook !== 'string' || hook.length === 0) {
+        diagnostics.push(
+          error('resolve/bad-hook', `"${manifest.id}" declares a hook that is not a usable string: ${String(hook)}.`, {
+            pluginId: manifest.id,
+            fix: 'Hook ids must be non-empty strings.',
+          }),
+        );
+        continue;
+      }
       if (knownHooks && !knownHooks.includes(hook)) {
         diagnostics.push(
           error('resolve/unknown-hook', `"${manifest.id}" declares hook "${hook}", which does not exist.`, {
             pluginId: manifest.id,
-            fix: `Known hooks: ${knownHooks.join(', ')}.`,
+            fix: `Known hooks: ${knownHooks.map(String).join(', ')}.`,
           }),
         );
         continue;
@@ -353,6 +441,15 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       (hooks[hook] ??= []).push(manifest.id);
     }
   }
+
+  // ── 8. Deterministic order ────────────────────────────────────────────────
+  // The plan and the diagnostic MULTISET are already independent of input order by this point, but
+  // the ARRAY order is not: it is push order, which tracks manifest declaration order. Two runs of
+  // the same project with its manifests supplied in a different order can therefore still produce a
+  // different diagnostics ARRAY even though every other observable is identical — and for an IDE
+  // rendering this as a list, discovery order is a worse default than a stable one anyway. Sorted
+  // once, immediately before returning, rather than keeping every push site order-aware.
+  diagnostics.sort(compareDiagnostics);
 
   return { plan: { plugins, points, contributions, order: ordering.order, hooks }, diagnostics };
 }

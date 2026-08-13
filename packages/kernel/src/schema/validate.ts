@@ -30,6 +30,17 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return proto === Object.prototype || proto === null;
 }
 
+/** True for a value that is at least shaped like a `FieldSchema` — a plain object carrying a
+ *  string `kind`. This is deliberately shallow (it does not check `kind` is one of the known
+ *  variants): its only job is to make it safe to read `field.kind` and friends. A manifest author
+ *  writing `schema: { speed: null }`, or a `list`/`object` field whose `of`/`fields` is likewise
+ *  malformed, must degrade to a diagnostic here rather than crash — `checkManifestShape` reports
+ *  the same shape at the manifest boundary, but this is the guard that keeps `defaultOf` and
+ *  `validateField` never-throwing regardless of whether that boundary check ran. */
+export function isUsableField(field: unknown): field is FieldSchema {
+  return isPlainObject(field) && typeof (field as { kind?: unknown }).kind === 'string';
+}
+
 /** Structural copy of a default value.
  *
  *  Defaults live on a shared Schema object, so handing a caller a reference into one would let a
@@ -54,6 +65,17 @@ export function cloneValue<T>(value: T, depth = 0): T {
 
 /** The value a field falls back to: its declared default, or the zero value of its kind. */
 export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnostic[], path?: string): unknown {
+  // A field that is not even shaped like a FieldSchema (null, a string, an array, an object with
+  // no `kind`) cannot be defaulted meaningfully. Report it where there is somewhere to report it,
+  // and fall back to the same '' every unrecognized kind already falls back to below — but do so
+  // BEFORE any `field.kind` read, since that is exactly what a null/undefined field would crash on.
+  if (!isUsableField(field)) {
+    if (diagnostics && path !== undefined) {
+      diagnostics.push(error('schema/bad-field', `Schema field "${path}" is not a usable field definition.`, { path }));
+    }
+    return '';
+  }
+
   if (depth >= MAX_SCHEMA_DEPTH) {
     // Stop descending to prevent unbounded recursion from cycles.
     if (diagnostics && path !== undefined) {
@@ -66,7 +88,7 @@ export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnosti
 
   if (field.kind === 'object') {
     const out: Record<string, unknown> = {};
-    for (const [key, sub] of Object.entries(field.fields)) out[key] = defaultOf(sub, depth + 1, diagnostics, path ? `${path}.${key}` : key);
+    for (const [key, sub] of Object.entries(field.fields ?? {})) out[key] = defaultOf(sub, depth + 1, diagnostics, path ? `${path}.${key}` : key);
     return out;
   }
   if (field.kind === 'list') return field.default ? cloneValue(field.default, depth) : [];
@@ -84,6 +106,11 @@ export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnosti
 export function validate(input: unknown, schema: Schema, base = '', depth = 0): ValidateResult {
   const diagnostics: Diagnostic[] = [];
   const source = isRecord(input) ? input : {};
+  // `schema` is typed as required, but a hostile call site can still hand this a null/non-object
+  // value — most reachably `field.fields` on a malformed `object`-kind field (`fields: null`).
+  // Normalizing once here, rather than at every call site, is what keeps that reachable without a
+  // throw regardless of which of the two Object.entries(schema) branches below runs.
+  const safeSchema: Schema = isPlainObject(schema) ? schema : {};
 
   if (depth >= MAX_SCHEMA_DEPTH) {
     diagnostics.push(
@@ -92,8 +119,8 @@ export function validate(input: unknown, schema: Schema, base = '', depth = 0): 
       }),
     );
     const value: Record<string, unknown> = {};
-    for (const [key] of Object.entries(schema)) {
-      value[key] = defaultOf(schema[key], depth);
+    for (const [key] of Object.entries(safeSchema)) {
+      value[key] = defaultOf(safeSchema[key], depth);
     }
     return { value, diagnostics };
   }
@@ -107,13 +134,13 @@ export function validate(input: unknown, schema: Schema, base = '', depth = 0): 
   }
 
   const value: Record<string, unknown> = {};
-  for (const [key, field] of Object.entries(schema)) {
+  for (const [key, field] of Object.entries(safeSchema)) {
     const path = base ? `${base}.${key}` : key;
     value[key] = key in source ? validateField(source[key], field, path, diagnostics, depth) : defaultOf(field, depth, diagnostics, path);
   }
 
   for (const key of Object.keys(source)) {
-    if (key in schema) continue;
+    if (key in safeSchema) continue;
     diagnostics.push(
       warning('schema/unknown-field', `Unknown setting "${key}" — it will be ignored.`, {
         path: base ? `${base}.${key}` : key,
@@ -126,6 +153,15 @@ export function validate(input: unknown, schema: Schema, base = '', depth = 0): 
 }
 
 function validateField(raw: unknown, field: FieldSchema, path: string, out: Diagnostic[], depth = 0): unknown {
+  // Same guard as defaultOf, checked first: field.kind is read unconditionally a few lines down
+  // (the switch), so a null/malformed field must be caught before that, not inside defaultOf's own
+  // fallback path (which would double-report — defaultOf calls below assume `field` already passed
+  // this check).
+  if (!isUsableField(field)) {
+    out.push(error('schema/bad-field', `Schema field "${path}" is not a usable field definition.`, { path }));
+    return '';
+  }
+
   if (raw === undefined || raw === null) return defaultOf(field, depth, out, path);
 
   if (depth >= MAX_SCHEMA_DEPTH) {
