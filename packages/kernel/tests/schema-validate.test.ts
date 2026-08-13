@@ -1,0 +1,107 @@
+import { describe, expect, it } from 'vitest';
+import type { Schema } from '@/schema/types';
+import { defaultOf, validate } from '@/schema/validate';
+
+const FEATURE: Schema = {
+  enabled: { kind: 'boolean', default: true },
+  priority: { kind: 'number', default: 0, min: 0, max: 100 },
+  label: { kind: 'text', default: 'Wild' },
+  direction: {
+    kind: 'enum',
+    default: 'vertical',
+    options: [
+      { value: 'vertical', label: 'Vertical' },
+      { value: 'horizontal', label: 'Horizontal' },
+    ],
+  },
+  texture: { kind: 'asset', accept: 'image' },
+};
+
+describe('validate', () => {
+  it('fills every missing field from its default', () => {
+    const { value, diagnostics } = validate({}, FEATURE);
+    expect(value).toEqual({
+      enabled: true,
+      priority: 0,
+      label: 'Wild',
+      direction: 'vertical',
+      texture: '',
+    });
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('keeps values that are already valid', () => {
+    const { value, diagnostics } = validate({ priority: 42, label: 'Sticky' }, FEATURE);
+    expect(value.priority).toBe(42);
+    expect(value.label).toBe('Sticky');
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('reports a type mismatch and falls back to the default', () => {
+    const { value, diagnostics } = validate({ priority: 'high' }, FEATURE);
+    expect(value.priority).toBe(0);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'schema/type-mismatch',
+      path: 'priority',
+    });
+  });
+
+  it('clamps a number outside its range and warns', () => {
+    const { value, diagnostics } = validate({ priority: 500 }, FEATURE);
+    expect(value.priority).toBe(100);
+    expect(diagnostics[0]).toMatchObject({ severity: 'warning', code: 'schema/out-of-range' });
+  });
+
+  it('rejects an enum value outside its options', () => {
+    const { value, diagnostics } = validate({ direction: 'diagonal' }, FEATURE);
+    expect(value.direction).toBe('vertical');
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'schema/not-an-option' });
+    expect(diagnostics[0].message).toContain('vertical, horizontal');
+  });
+
+  it('warns about an unknown field and drops it', () => {
+    const { value, diagnostics } = validate({ nonsense: 1 }, FEATURE);
+    expect(value).not.toHaveProperty('nonsense');
+    expect(diagnostics[0]).toMatchObject({ severity: 'warning', code: 'schema/unknown-field' });
+  });
+
+  it('treats every domain string kind as a plain string', () => {
+    const { value, diagnostics } = validate({ texture: 'symbols/wild.png' }, FEATURE);
+    expect(value.texture).toBe('symbols/wild.png');
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('validates nested objects and prefixes the diagnostic path', () => {
+    const schema: Schema = {
+      motion: { kind: 'object', fields: { speed: { kind: 'number', default: 1 } } },
+    };
+    const { value, diagnostics } = validate({ motion: { speed: 'fast' } }, schema);
+    expect(value).toEqual({ motion: { speed: 1 } });
+    expect(diagnostics[0].path).toBe('motion.speed');
+  });
+
+  it('validates every item of a list and indexes the path', () => {
+    const schema: Schema = { stops: { kind: 'list', of: { kind: 'number', default: 0 } } };
+    const { value, diagnostics } = validate({ stops: [1, 'two', 3] }, schema);
+    expect(value).toEqual({ stops: [1, 0, 3] });
+    expect(diagnostics[0].path).toBe('stops[1]');
+  });
+
+  it('reports a non-object input instead of throwing', () => {
+    const { value, diagnostics } = validate('not an object', FEATURE);
+    expect(value.enabled).toBe(true);
+    expect(diagnostics.some((d) => d.code === 'schema/not-an-object')).toBe(true);
+  });
+});
+
+describe('defaultOf', () => {
+  it('builds a default object from nested fields', () => {
+    expect(defaultOf({ kind: 'object', fields: { a: { kind: 'number', default: 7 } } })).toEqual({ a: 7 });
+  });
+
+  it('falls back to the first option for an enum with no default', () => {
+    expect(defaultOf({ kind: 'enum', options: [{ value: 'x', label: 'X' }] })).toBe('x');
+  });
+});
