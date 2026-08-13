@@ -41,7 +41,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
  *  is to copy what is in contract and to neither crash nor destroy what is not: non-plain values
  *  pass through by reference, and recursion stops at MAX_SCHEMA_DEPTH.
  */
-function cloneValue<T>(value: T, depth = 0): T {
+export function cloneValue<T>(value: T, depth = 0): T {
   if (depth >= MAX_SCHEMA_DEPTH) return value;
   if (Array.isArray(value)) return value.map((item) => cloneValue(item, depth + 1)) as unknown as T;
   if (isPlainObject(value)) {
