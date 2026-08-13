@@ -44,4 +44,29 @@ describe('mergeSchemas', () => {
     expect(Object.keys(POINT)).toEqual(['enabled', 'priority']);
     expect(Object.keys(own)).toEqual(['holdSpins']);
   });
+
+  it('does not throw when the point schema is missing', () => {
+    const own: Schema = { holdSpins: { kind: 'number', default: 3 } };
+    expect(() => mergeSchemas(undefined as unknown as Schema, own, CTX)).not.toThrow();
+    const { schema, diagnostics } = mergeSchemas(null as unknown as Schema, own, CTX);
+    expect(Object.keys(schema)).toEqual(['holdSpins']);
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('does not mistake an inherited Object.prototype name for a point field', () => {
+    const own: Schema = { toString: { kind: 'text', default: 'x' } };
+    const { schema, diagnostics } = mergeSchemas(POINT, own, CTX);
+    expect(diagnostics).toEqual([]);
+    expect(schema.toString).toEqual(own.toString);
+  });
+
+  it('shares field objects with its inputs by design, and says so', () => {
+    const own: Schema = { holdSpins: { kind: 'number', default: 3 } };
+    const { schema } = mergeSchemas(POINT, own, CTX);
+    // The record is fresh...
+    expect(schema).not.toBe(POINT);
+    // ...but the field objects are shared on purpose: schemas are immutable declarations.
+    expect(schema.priority).toBe(POINT.priority);
+    expect(schema.holdSpins).toBe(own.holdSpins);
+  });
 });

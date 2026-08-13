@@ -19,6 +19,12 @@ export interface MergeResult {
  * would let a single plugin quietly change the meaning of a setting shared by every other
  * contribution to the same point — the IDE would render one control whose behaviour depends on
  * which contribution is selected.
+ *
+ * IMMUTABILITY CONTRACT: the returned record is a fresh object, but its FIELDS are the very
+ * FieldSchema objects the point and the contribution declared — deliberately, because a schema is
+ * a declaration authored once in a manifest, not per-caller state. Never mutate a field reached
+ * through the result: every sibling contribution to the same point holds the same objects. Change
+ * the manifest instead. (Settings VALUES are a different matter — `validate` deep-copies those.)
  */
 export function mergeSchemas(
   point: Schema,
@@ -26,10 +32,11 @@ export function mergeSchemas(
   ctx: MergeContext,
 ): MergeResult {
   const diagnostics: Diagnostic[] = [];
-  const schema: Schema = { ...point };
+  const safePoint = point ?? {};
+  const schema: Schema = { ...safePoint };
 
   for (const [key, field] of Object.entries(contribution ?? {})) {
-    if (key in point) {
+    if (Object.hasOwn(safePoint, key)) {
       diagnostics.push(
         error('schema/field-conflict', `Field "${key}" is already defined by point "${ctx.pointId}".`, {
           ...ctx,
