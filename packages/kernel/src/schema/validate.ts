@@ -1,5 +1,5 @@
 import { type Diagnostic, error, warning } from '../diagnostics';
-import type { FieldSchema, Schema } from './types';
+import type { EnumOption, FieldSchema, Schema } from './types';
 
 export interface ValidateResult {
   /** Every key of the schema, always present: valid input, or the field's default. */
@@ -63,6 +63,23 @@ export function cloneValue<T>(value: T, depth = 0): T {
   return value;
 }
 
+/**
+ * An `enum` field's usable options: a real array, filtered down to elements shaped like
+ * `{ value: string }`.
+ *
+ * `options` is typed as required on every `enum` field, but nothing enforces that at the manifest
+ * boundary. `{ kind: 'enum' }` with no `options` at all, `options: null`, or `options: 'abc'` all
+ * reach here as ordinary manifest data — most plausibly from a plain typo (`option:` for
+ * `options:`) in a point schema, a contribution schema, or `manifest.settings`. A non-array
+ * `options` is silently treated as an empty option set here (the caller decides whether that is
+ * worth a diagnostic); an unusable ELEMENT inside a genuine array (`options: [null]`) is dropped
+ * rather than crashing every other option alongside it. Never throws for any input.
+ */
+function enumOptionsOf(options: unknown): EnumOption[] {
+  if (!Array.isArray(options)) return [];
+  return options.filter((o): o is EnumOption => isPlainObject(o) && typeof o.value === 'string');
+}
+
 /** The value a field falls back to: its declared default, or the zero value of its kind. */
 export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnostic[], path?: string): unknown {
   // A field that is not even shaped like a FieldSchema (null, a string, an array, an object with
@@ -95,7 +112,21 @@ export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnosti
   if (field.default !== undefined) return cloneValue(field.default, depth);
   if (field.kind === 'number') return 0;
   if (field.kind === 'boolean') return false;
-  if (field.kind === 'enum') return field.options[0]?.value ?? '';
+  if (field.kind === 'enum') {
+    // A non-array `options` (absent, null, a string, ...) is reported here — never thrown on — when
+    // there is somewhere to report it. `checkManifestShape` reports the identical condition at the
+    // manifest boundary (see `checkSchemaFields` in manifest/define.ts); this is the guard that keeps
+    // this function never-throwing regardless of whether that boundary check ran.
+    if (!Array.isArray(field.options) && diagnostics && path !== undefined) {
+      diagnostics.push(
+        error('schema/bad-enum-options', `Enum field "${path}" has no usable "options" array.`, {
+          path,
+          fix: 'Add `options: [{ value: "...", label: "..." }, ...]` to the field.',
+        }),
+      );
+    }
+    return enumOptionsOf(field.options)[0]?.value ?? '';
+  }
   return '';
 }
 
@@ -200,7 +231,21 @@ function validateField(raw: unknown, field: FieldSchema, path: string, out: Diag
     }
 
     case 'enum': {
-      const allowed = field.options.map((o) => o.value);
+      // A non-array `options` is reported here, once, as its own diagnostic — distinct from
+      // schema/not-an-option below, which is about the VALUE being wrong, not the options list
+      // itself being unusable. The fallback to defaultOf() below deliberately omits `out`/`path`
+      // (the same idiom `validate()` uses at MAX_SCHEMA_DEPTH): defaultOf's own enum branch would
+      // otherwise re-detect this exact non-array `options` and push a second, duplicate diagnostic.
+      if (!Array.isArray(field.options)) {
+        out.push(
+          error('schema/bad-enum-options', `Enum field "${path}" has no usable "options" array.`, {
+            path,
+            fix: 'Add `options: [{ value: "...", label: "..." }, ...]` to the field.',
+          }),
+        );
+        return defaultOf(field, depth);
+      }
+      const allowed = enumOptionsOf(field.options).map((o) => o.value);
       if (typeof raw !== 'string' || !allowed.includes(raw)) {
         out.push(
           error('schema/not-an-option', `"${String(raw)}" is not one of: ${allowed.join(', ')}.`, {

@@ -40,7 +40,26 @@ function checkSchemaFields(
         out.push(error(code, `Field "${key}"'s list item type is not a usable field definition.`, { ...tag, path: `${key}[]` }));
       } else if (field.of.kind === 'object') {
         checkSchemaFields(field.of.fields, out, tag, code, depth + 1);
+      } else if (field.of.kind === 'enum' && !Array.isArray(field.of.options)) {
+        out.push(
+          error('manifest/bad-enum-options', `Field "${key}"'s list item type is an enum with no usable "options" array.`, {
+            ...tag,
+            path: `${key}[]`,
+          }),
+        );
       }
+    } else if (field.kind === 'enum' && !Array.isArray(field.options)) {
+      // `schema/validate.ts` already tolerates a non-array `options` at runtime (never throws,
+      // degrades to an empty option set) — this is the boundary check that turns the same condition
+      // into a diagnostic a plugin author sees immediately, the same division of labour
+      // `isUsableField` already has with `defaultOf`/`validateField`. Most plausibly reached from a
+      // plain typo: `option:` for `options:`.
+      out.push(
+        error('manifest/bad-enum-options', `Field "${key}" is an enum with no usable "options" array.`, {
+          ...tag,
+          path: key,
+        }),
+      );
     }
   }
 }

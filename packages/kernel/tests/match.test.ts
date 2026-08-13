@@ -156,6 +156,32 @@ describe('matchers survive hostile input — throwing predicate', () => {
     expect(() => matches({ match: () => { throw new Error('x'); } }, ctx({ url: 'https://x/p' }))).not.toThrow();
     expect(matches({ match: () => { throw new Error('x'); } }, ctx({ url: 'https://x/p' }))).toBe(false);
   });
+
+  // Task 11 hardening (c): this module's own `err instanceof Error ? err.message : String(err)` —
+  // the third copy of a bug already fixed, and shared via `describeError`, in runtime/activate.ts and
+  // runtime/hooks.ts — threw `TypeError: Cannot convert object to primitive value` for a predicate
+  // that throws a null-prototype value (String(err) has no toString/valueOf/Symbol.toPrimitive to
+  // fall back to), which made `matches()` itself throw instead of reporting a diagnostic. Confirmed
+  // against the pre-fix source, not assumed.
+  it('does not throw when the predicate throws a null-prototype value, and still reports a diagnostic', () => {
+    const out: Diagnostic[] = [];
+    const hostile = Object.create(null) as never;
+    expect(() => matches({ match: () => { throw hostile; } }, ctx({ url: 'https://x/p' }), out)).not.toThrow();
+    expect(matches({ match: () => { throw hostile; } }, ctx({ url: 'https://x/p' }), out)).toBe(false);
+    expect(out.some((d) => d.code === 'match/predicate-threw')).toBe(true);
+  });
+
+  it('does not throw when the predicate throws a plain object whose Symbol.toStringTag getter itself throws', () => {
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('get boom');
+      },
+    };
+    const out: Diagnostic[] = [];
+    expect(() => matches({ match: () => { throw hostile; } }, ctx({ url: 'https://x/p' }), out)).not.toThrow();
+    expect(out[0]).toMatchObject({ severity: 'error', code: 'match/predicate-threw' });
+    expect(typeof out[0].message).toBe('string');
+  });
 });
 
 describe('matchers survive hostile input — truthy non-booleans', () => {

@@ -221,3 +221,93 @@ describe('checkManifestShape catches a bad field WITHIN an otherwise-usable sche
     ).not.toThrow();
   });
 });
+
+describe('Task 11 hardening (a) — an enum field with malformed "options" is reported at the manifest boundary', () => {
+  it('reports manifest/bad-enum-options for a point schema enum with no options key at all', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { p: { phase: 'runtime', arity: 'many', schema: { direction: { kind: 'enum' } as never }, doc: 'd' } },
+    });
+    expect(d).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-enum-options', pluginId: 'x', pointId: 'p', path: 'direction' }),
+    ]);
+  });
+
+  it('reports it for options: null and options: "abc", in manifest.settings (no contribution involved)', () => {
+    for (const options of [null, 'abc']) {
+      const d = checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        settings: { direction: { kind: 'enum', options } as never },
+      });
+      expect(d.some((x) => x.code === 'manifest/bad-enum-options' && x.path === 'direction' && x.pluginId === 'x')).toBe(true);
+    }
+  });
+
+  it('reports nothing for a genuine (even empty, even bad-element) options array — it is not malformed', () => {
+    for (const options of [[], [null]]) {
+      const d = checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        settings: { direction: { kind: 'enum', options } as never },
+      });
+      expect(d).toEqual([]);
+    }
+  });
+
+  it('reports it for an enum used as a list item type', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      settings: { tags: { kind: 'list', of: { kind: 'enum' } as never } },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-enum-options' && x.path === 'tags[]')).toBe(true);
+  });
+
+  it('reports it for an enum nested inside an object field', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      settings: { motion: { kind: 'object', fields: { direction: { kind: 'enum' } as never } } },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-enum-options' && x.path === 'direction')).toBe(true);
+  });
+
+  it('reports it for a contribution schema, tagged with the contribution id', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        p: [{ id: 'c', doc: 'd', create: async () => () => null, schema: { direction: { kind: 'enum' } as never } }],
+      },
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-enum-options' && x.contributionId === 'c' && x.path === 'direction')).toBe(true);
+  });
+
+  it('does not loop forever on a cyclic schema alongside a malformed enum', () => {
+    const cyclic: Record<string, unknown> = { kind: 'object', fields: {} };
+    (cyclic.fields as Record<string, unknown>).child = cyclic;
+    expect(() =>
+      checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        points: {
+          p: {
+            phase: 'runtime',
+            arity: 'many',
+            schema: { root: cyclic as never, direction: { kind: 'enum' } as never },
+            doc: 'd',
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+});

@@ -1520,3 +1520,117 @@ describe('MINOR fix round 1 — String() consistency: hostile non-string data mu
     ).not.toThrow();
   });
 });
+
+describe('Task 11 hardening (a) — an enum field with malformed options never throws through resolvePlan', () => {
+  const malformedShapes: Array<[string, unknown]> = [
+    ['no options key at all (e.g. a option: typo)', undefined],
+    ['options: null', null],
+    ["options: 'abc'", 'abc'],
+    ['options: []', []],
+    ['options: [null]', [null]],
+  ];
+
+  for (const [label, options] of malformedShapes) {
+    it(`does not throw end to end when a point schema has an enum field with ${label}`, () => {
+      const manifest: PluginManifest = {
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        points: {
+          p: {
+            phase: 'runtime',
+            arity: 'many',
+            schema: { direction: { kind: 'enum', options } as never },
+            doc: 'd',
+          },
+        },
+        // defaults supplies an actual value, so resolution reaches validateField's enum branch
+        // (field.options.map(...) in the pre-fix source) and not only defaultOf's.
+        contributes: { p: [{ id: 'c', doc: 'd', create: noop, defaults: { direction: 'vertical' } }] },
+      };
+      const input = { project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL };
+      expect(() => resolvePlan(input)).not.toThrow();
+
+      const { plan, diagnostics } = resolvePlan(input);
+      expect(plan.contributions[0].settings.direction).toBe('');
+      expect(diagnostics.length).toBeGreaterThan(0);
+    });
+  }
+
+  it('surfaces manifest/bad-enum-options from the boundary check, reachable through resolvePlan', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { p: { phase: 'runtime', arity: 'many', schema: { direction: { kind: 'enum' } as never }, doc: 'd' } },
+    };
+    const { diagnostics } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(diagnostics.some((d) => d.code === 'manifest/bad-enum-options' && d.path === 'direction')).toBe(true);
+  });
+});
+
+describe('Task 11 hardening (b) — a prototype-shaped hook id does not throw in resolvePlan', () => {
+  // Pre-fix, `resolvePlan` built `plan.hooks` as `(hooks[hook] ??= []).push(manifest.id)` on an
+  // ordinary `{}`. For hook = '__proto__' (or 'constructor', or 'toString'), `hooks[hook]` reads back
+  // an INHERITED value instead of `undefined`, so `??=` never assigns and `.push` throws
+  // `TypeError: ... .push is not a function` — confirmed against the pre-fix source, not assumed.
+  it('registers hooks named __proto__, constructor and toString as genuine own entries, alongside an ordinary one', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      hooks: ['__proto__', 'constructor', 'toString', 'normalHook'],
+    };
+    const input = { project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL };
+    expect(() => resolvePlan(input)).not.toThrow();
+
+    const { plan, diagnostics } = resolvePlan(input);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(Object.hasOwn(plan.hooks, '__proto__')).toBe(true);
+    expect(Object.hasOwn(plan.hooks, 'constructor')).toBe(true);
+    expect(Object.hasOwn(plan.hooks, 'toString')).toBe(true);
+    expect(plan.hooks['__proto__']).toEqual(['x']);
+    expect(plan.hooks.constructor).toEqual(['x']);
+    expect(plan.hooks.toString).toEqual(['x']);
+    expect(plan.hooks.normalHook).toEqual(['x']);
+  });
+
+  it('accumulates the same prototype-shaped hook id declared by two different plugins, in order', () => {
+    const a: PluginManifest = { id: 'a', version: '1.0.0', engine: '^0.1.0', hooks: ['__proto__'] };
+    const b: PluginManifest = { id: 'b', version: '1.0.0', engine: '^0.1.0', hooks: ['__proto__'] };
+    const input = {
+      project: { plugins: { a: { version: '*' }, b: { version: '*' } } },
+      manifests: [a, b],
+      launch,
+      kernelVersion: KERNEL,
+    };
+    expect(() => resolvePlan(input)).not.toThrow();
+    expect(resolvePlan(input).plan.hooks['__proto__']).toEqual(['a', 'b']);
+  });
+
+  it('toSnapshot still JSON-round-trips a plan whose hooks used prototype-shaped ids, as genuine own properties', () => {
+    const manifest: PluginManifest = { id: 'x', version: '1.0.0', engine: '^0.1.0', hooks: ['__proto__', 'constructor'] };
+    const { plan } = resolvePlan({
+      project: { plugins: { x: { version: '*' } } },
+      manifests: [manifest],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    const snap = toSnapshot(plan);
+    expect(() => JSON.stringify(snap)).not.toThrow();
+    // Not compared via `toEqual({ __proto__: [...] })`: that object LITERAL would itself set the
+    // prototype instead of creating an own property (the exact trap this fix avoids), so a round trip
+    // must be read back with hasOwn/bracket access instead — the same technique
+    // runtime/hooks.test.ts's declaredFromPlan coverage already uses for the identical reason.
+    const roundTripped = JSON.parse(JSON.stringify(snap)) as { hooks: Record<string, string[]> };
+    expect(Object.hasOwn(roundTripped.hooks, '__proto__')).toBe(true);
+    expect(Object.hasOwn(roundTripped.hooks, 'constructor')).toBe(true);
+    expect(roundTripped.hooks['__proto__']).toEqual(['x']);
+    expect(roundTripped.hooks['constructor']).toEqual(['x']);
+  });
+});

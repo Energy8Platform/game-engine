@@ -411,7 +411,22 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
   }
 
   // ── 7. Hooks ──────────────────────────────────────────────────────────────
-  const hooks: Record<string, string[]> = {};
+  // A hook id is manifest data — a plugin can declare a hook literally named '__proto__',
+  // 'constructor' or 'toString'. On an ordinary `{}`, `(hooks[hook] ??= []).push(...)` for any of
+  // those three reads back an INHERITED value (Object.prototype's own __proto__ setter/getter, or
+  // the Object constructor, or Function.prototype.toString) instead of `undefined`, so `??=` never
+  // assigns and the following `.push` throws `TypeError: ... .push is not a function` — confirmed by
+  // running it, not assumed. `runtime/hooks.ts` sidesteps this the same class of bug by keying a Map
+  // instead of a plain object; a Map is not an option here because `plan.hooks` must stay a plain
+  // JSON-serializable record (it travels inside `PlanSnapshot`, see resolve/snapshot.ts). A
+  // null-prototype object is: it has no inherited `__proto__`/`constructor`/`toString` to shadow an
+  // own property, so every hook id becomes a genuine own property and `??=` behaves exactly as
+  // written. It is also already this package's own definition of "plain" — `schema/validate.ts`'s
+  // `isPlainObject` explicitly accepts `Object.getPrototypeOf(value) === null` alongside
+  // `Object.prototype` — and `JSON.stringify`/`Object.entries`/`Object.fromEntries` (the operations
+  // `toSnapshot` and `declaredFromPlan` actually perform on this record) all work identically on a
+  // null-prototype object, so nothing downstream needs to change.
+  const hooks: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
   const knownHooks = Array.isArray(input?.hookIds) ? input.hookIds : undefined;
   for (const manifest of ordered) {
     const declaredHooks = Array.isArray(manifest.hooks) ? manifest.hooks : [];

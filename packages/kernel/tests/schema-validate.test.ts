@@ -232,3 +232,97 @@ describe('a non-object schema field never throws (fix round 1: was TypeError rea
     expect(validate({}, schema).value.stops).toEqual([]);
   });
 });
+
+// Task 11 hardening (a): an `enum` field with malformed `options` throws in the pre-fix source —
+// `defaultOf` did `field.options[0]?.value` (throws for `undefined`/`null`, since indexing happens
+// before the `?.`) and `validateField` did `field.options.map(...)` (throws for `undefined`, `null`,
+// a string, and — one level deeper — for `[null]`, since `.map` succeeds but `null.value` does not).
+// Reachable from a plain typo (`option:` for `options:`) in any point schema, contribution schema,
+// or `manifest.settings`. Confirmed against the pre-fix source, not assumed.
+describe('an enum field with malformed options never throws (Task 11 hardening a)', () => {
+  const malformedShapes: Array<[string, unknown]> = [
+    ['no options key at all', undefined],
+    ['options: null', null],
+    ["options: 'abc'", 'abc'],
+    ['options: []', []],
+    ['options: [null]', [null]],
+  ];
+
+  describe('defaultOf', () => {
+    for (const [label, options] of malformedShapes) {
+      it(`does not throw and returns '' for ${label}`, () => {
+        const field = { kind: 'enum', options } as unknown as FieldSchema;
+        expect(() => defaultOf(field)).not.toThrow();
+        expect(defaultOf(field)).toBe('');
+      });
+    }
+
+    it('reports schema/bad-enum-options, given a sink, when options is not an array at all', () => {
+      for (const options of [undefined, null, 'abc']) {
+        const diagnostics: Diagnostic[] = [];
+        const field = { kind: 'enum', options } as unknown as FieldSchema;
+        defaultOf(field, 0, diagnostics, 'direction');
+        expect(diagnostics).toEqual([
+          expect.objectContaining({ severity: 'error', code: 'schema/bad-enum-options', path: 'direction' }),
+        ]);
+      }
+    });
+
+    it('reports nothing for a genuine (even empty, even bad-element) options array — it is not malformed', () => {
+      for (const options of [[], [null]]) {
+        const diagnostics: Diagnostic[] = [];
+        defaultOf({ kind: 'enum', options } as unknown as FieldSchema, 0, diagnostics, 'direction');
+        expect(diagnostics).toEqual([]);
+      }
+    });
+  });
+
+  describe('validate', () => {
+    for (const [label, options] of malformedShapes) {
+      it(`does not throw validating a supplied value against ${label}`, () => {
+        const schema: Schema = { direction: { kind: 'enum', options } as unknown as FieldSchema };
+        expect(() => validate({ direction: 'vertical' }, schema)).not.toThrow();
+        const { value, diagnostics } = validate({ direction: 'vertical' }, schema);
+        expect(value.direction).toBe(''); // nothing can match a broken/empty option set
+        expect(diagnostics.length).toBeGreaterThan(0);
+      });
+
+      it(`does not throw defaulting ${label} when no value is supplied`, () => {
+        const schema: Schema = { direction: { kind: 'enum', options } as unknown as FieldSchema };
+        expect(() => validate({}, schema)).not.toThrow();
+        expect(validate({}, schema).value.direction).toBe('');
+      });
+    }
+
+    it('reports schema/bad-enum-options exactly once — the defaultOf() fallback must not duplicate it', () => {
+      const schema: Schema = { direction: { kind: 'enum' } as unknown as FieldSchema };
+      const { diagnostics } = validate({ direction: 'vertical' }, schema);
+      expect(diagnostics.filter((d) => d.code === 'schema/bad-enum-options')).toHaveLength(1);
+    });
+
+    it('drops an unusable element from an options array instead of throwing, and still validates the good ones', () => {
+      const schema: Schema = {
+        direction: { kind: 'enum', options: [null, { value: 'vertical', label: 'Vertical' }] } as unknown as FieldSchema,
+      };
+      expect(() => validate({ direction: 'vertical' }, schema)).not.toThrow();
+      expect(validate({ direction: 'vertical' }, schema).value.direction).toBe('vertical');
+      expect(validate({ direction: 'sideways' }, schema).diagnostics[0]).toMatchObject({ code: 'schema/not-an-option' });
+    });
+
+    it('is unaffected for a well-formed enum (no regression)', () => {
+      const schema: Schema = {
+        direction: {
+          kind: 'enum',
+          default: 'vertical',
+          options: [
+            { value: 'vertical', label: 'Vertical' },
+            { value: 'horizontal', label: 'Horizontal' },
+          ],
+        },
+      };
+      expect(validate({ direction: 'horizontal' }, schema).value.direction).toBe('horizontal');
+      expect(validate({ direction: 'horizontal' }, schema).diagnostics).toEqual([]);
+      expect(validate({ direction: 'diagonal' }, schema).diagnostics[0]).toMatchObject({ code: 'schema/not-an-option' });
+    });
+  });
+});

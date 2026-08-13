@@ -1,5 +1,5 @@
 import type { LaunchContext, Matcher } from './types';
-import { error } from '../diagnostics';
+import { describeError, error } from '../diagnostics';
 import type { Diagnostic } from '../diagnostics';
 
 function decodeSafe(encoded: string): string {
@@ -45,9 +45,12 @@ export function matches(matcher: Matcher | undefined | null, ctx: LaunchContext,
       // Treat any truthy value as true, not just boolean true
       conditions.push(!!result);
     } catch (err) {
-      // If the predicate throws, report it and treat it as no match
+      // If the predicate throws, report it and treat it as no match. describeError is total — unlike
+      // this module's own former `err instanceof Error ? err.message : String(err)`, which threw its
+      // own TypeError for a null-prototype value (String(err) has nothing to coerce with) and was the
+      // third copy of a bug already fixed, and shared, in runtime/activate.ts and runtime/hooks.ts.
       if (out) {
-        out.push(error('match/predicate-threw', `A matcher's custom rule threw: ${err instanceof Error ? err.message : String(err)}`, {
+        out.push(error('match/predicate-threw', `A matcher's custom rule threw: ${describeError(err)}`, {
           fix: 'Fix the match() predicate, or express the rule with urlParam/buildTarget instead.',
         }));
       }
