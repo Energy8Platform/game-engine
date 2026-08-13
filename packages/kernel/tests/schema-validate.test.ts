@@ -137,3 +137,30 @@ describe('schema depth', () => {
     expect(diagnostics.some((d) => d.code === 'schema/too-deep')).toBe(true);
   });
 });
+
+describe('cloneValue safety', () => {
+  it('does not throw on a circular value inside a default', () => {
+    const circular: Record<string, unknown> = { a: 1 };
+    circular.self = circular;
+    const field = { kind: 'list', of: { kind: 'text' }, default: [circular] } as FieldSchema;
+    expect(() => defaultOf(field)).not.toThrow();
+    expect(() => validate({}, { thing: field })).not.toThrow();
+  });
+
+  it('passes a non-plain object through instead of destroying it', () => {
+    const when = new Date('2020-01-01T00:00:00.000Z');
+    const field = { kind: 'list', of: { kind: 'text' }, default: [when] } as FieldSchema;
+    const [copied] = defaultOf(field) as Date[];
+    expect(copied).toBeInstanceOf(Date);
+    expect(copied.toISOString()).toBe('2020-01-01T00:00:00.000Z');
+  });
+
+  it('still gives each caller its own copy of plain nested data', () => {
+    const schema: Schema = {
+      stops: { kind: 'list', of: { kind: 'object', fields: { a: { kind: 'number', default: 1 } } }, default: [{ a: 1 }] },
+    };
+    const first = validate({}, schema);
+    (first.value.stops as { a: number }[])[0].a = 999;
+    expect((validate({}, schema).value.stops as { a: number }[])[0].a).toBe(1);
+  });
+});

@@ -21,14 +21,32 @@ function typeName(v: unknown): string {
   return `a ${typeof v}`;
 }
 
-/** Structural copy of a default value. Defaults live on a shared Schema object, so handing a
- *  caller a reference into one would let a mutation of resolved settings corrupt every other
- *  contribution's defaults. */
-function cloneValue<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(cloneValue) as unknown as T;
-  if (value && typeof value === 'object') {
+/** True for values whose structure this module is willing to copy: plain objects and arrays.
+ *  A Date, a RegExp, a Map or a class instance is NOT plain — rebuilding it from its entries
+ *  would destroy it, so it is passed through by reference instead. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** Structural copy of a default value.
+ *
+ *  Defaults live on a shared Schema object, so handing a caller a reference into one would let a
+ *  mutation of resolved settings corrupt every other contribution's defaults.
+ *
+ *  CONTRACT: schema defaults must be JSON-shaped data. `Schema` travels inside `PlanSnapshot`,
+ *  which the IDE and the agent read over RPC and which is required to survive a JSON round trip —
+ *  so a Date, a Map or a cycle in a default is already outside the contract. This function's job
+ *  is to copy what is in contract and to neither crash nor destroy what is not: non-plain values
+ *  pass through by reference, and recursion stops at MAX_SCHEMA_DEPTH.
+ */
+function cloneValue<T>(value: T, depth = 0): T {
+  if (depth >= MAX_SCHEMA_DEPTH) return value;
+  if (Array.isArray(value)) return value.map((item) => cloneValue(item, depth + 1)) as unknown as T;
+  if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = cloneValue(v);
+    for (const [k, v] of Object.entries(value)) out[k] = cloneValue(v, depth + 1);
     return out as T;
   }
   return value;
@@ -51,8 +69,8 @@ export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnosti
     for (const [key, sub] of Object.entries(field.fields)) out[key] = defaultOf(sub, depth + 1, diagnostics, path ? `${path}.${key}` : key);
     return out;
   }
-  if (field.kind === 'list') return field.default ? cloneValue(field.default) : [];
-  if (field.default !== undefined) return cloneValue(field.default);
+  if (field.kind === 'list') return field.default ? cloneValue(field.default, depth) : [];
+  if (field.default !== undefined) return cloneValue(field.default, depth);
   if (field.kind === 'number') return 0;
   if (field.kind === 'boolean') return false;
   if (field.kind === 'enum') return field.options[0]?.value ?? '';
