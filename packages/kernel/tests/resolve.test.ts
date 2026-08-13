@@ -716,6 +716,33 @@ describe('resolvePlan survives hostile input — malformed manifest internals', 
     expect(plan.hooks).toEqual({});
   });
 
+  it('does not throw when an arity: "one" point looks up activateWhen through a contributes list that has a leading null', () => {
+    // Distinct from the step-5 element guard above: this exercises manifestOf()'s raw re-lookup
+    // into manifest.contributes[pointId], a SEPARATE Array#find over the SAME hostile list.
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const p: PluginManifest = {
+      id: 'p',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { sp: [null as never, { id: 'p', activateWhen: { default: true }, doc: 'x', create: noop }] },
+    };
+    expect(() =>
+      resolvePlan({ project: { plugins: { host: { version: '*' }, p: { version: '*' } } }, manifests: [host, p], launch, kernelVersion: KERNEL }),
+    ).not.toThrow();
+    const { plan } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, p: { version: '*' } } },
+      manifests: [host, p],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions.filter((c) => c.active).map((c) => c.id)).toEqual(['p']);
+  });
+
   it('does not throw when hookIds is not an array', () => {
     const withHook: PluginManifest = { id: 'h', version: '1.0.0', engine: '^0.1.0', hooks: ['onSpin'] };
     expect(() =>
