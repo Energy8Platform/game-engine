@@ -8,8 +8,8 @@
 
 export type Version = [number, number, number];
 
-const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
-const RANGE = /^(\^|~|>=)?(\d+)\.(\d+)\.(\d+)$/;
+const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const RANGE = /^(\^|~|>=)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export function parseVersion(v: string): Version | null {
   if (typeof v !== 'string') return null;
@@ -46,9 +46,21 @@ export function satisfies(version: string, range: string): boolean {
       // Patch-level changes only.
       return v[0] === target[0] && v[1] === target[1] && compare(v, target) >= 0;
     case '^':
-      // Minor and patch, except below 1.0.0 where npm treats the minor as the breaking digit.
+      // Allows changes that do not bump the leftmost non-zero element.
+      // Major (if > 0), minor (if major is 0), or patch (if both major and minor are 0) is the breaking digit.
       if (compare(v, target) < 0) return false;
-      return target[0] === 0 ? v[0] === 0 && v[1] === target[1] : v[0] === target[0];
+      if (target[0] === 0) {
+        if (target[1] === 0) {
+          // Patch is the breaking digit: must match exactly
+          return v[0] === 0 && v[1] === 0 && v[2] === target[2];
+        } else {
+          // Minor is the breaking digit: must match, patch can vary
+          return v[0] === 0 && v[1] === target[1];
+        }
+      } else {
+        // Major is the breaking digit: must match, minor and patch can vary
+        return v[0] === target[0];
+      }
     default:
       return false;
   }
