@@ -1,7 +1,13 @@
-import { type Diagnostic, error } from '../diagnostics';
+import { type Diagnostic, describeError, error } from '../diagnostics';
 import { isPlainObject } from '../schema/validate';
 
 export type HookFn = (payload: unknown) => void | Promise<void>;
+
+/** Deepest chain of nested `emit()` calls on one bus (a handler of hook A emitting hook B whose own
+ *  handler emits hook A, and so on). A chain this deep is a cycle between plugins, not a design —
+ *  mirrors `MAX_SCHEMA_DEPTH`'s role in `schema/validate.ts`: the cap turns a stack overflow that
+ *  reports nothing into a diagnostic that names the hook. */
+export const MAX_HOOK_DEPTH = 16;
 
 export interface HookBus {
   /** The hook ids this bus accepts. */
@@ -17,14 +23,6 @@ export interface HookBusOptions {
   ids: readonly string[];
   /** Plugin id → the hooks that plugin declared in its manifest. */
   declared: Record<string, readonly string[]>;
-}
-
-/** `err instanceof Error ? err.message : String(err)`. `String()`, not a template literal or `+`:
- *  a handler is free to throw anything, including a Symbol, and a template literal's implicit
- *  ToString throws on exactly that where `String()` does not (same rule `manifest/define.ts` and
- *  `resolve/resolve.ts` apply to untrusted manifest data — a handler's thrown value is no different). */
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -68,6 +66,12 @@ export function createHookBus(opts: HookBusOptions): HookBus {
   // '__proto__' et al. on a plain object.
   const handlers = new Map<string, { pluginId: string; fn: HookFn }[]>();
 
+  // Re-entrancy bookkeeping for `emit()`, explained in full where it is used below.
+  let depth = 0;
+  let overflow: Diagnostic[] = [];
+
+  const fixForUnknown = ids.length > 0 ? `Known hooks: ${ids.join(', ')}.` : 'This bus has no known hooks at all — check how it was constructed.';
+
   return {
     // A copy, not the live array: `ids` also backs every `on()` membership check below, so handing
     // out the reference itself would let a caller that merely wants to list the known hooks (the IDE,
@@ -81,7 +85,7 @@ export function createHookBus(opts: HookBusOptions): HookBus {
       if (hookName === undefined || !ids.includes(hookName)) {
         return error('hooks/unknown', `There is no hook called "${String(hook)}".`, {
           pluginId: pluginName,
-          fix: `Known hooks: ${ids.join(', ')}.`,
+          fix: fixForUnknown,
         });
       }
       if (pluginName === undefined || !(declared.get(pluginName) ?? []).includes(hookName)) {
@@ -108,33 +112,79 @@ export function createHookBus(opts: HookBusOptions): HookBus {
     },
 
     async emit(hook, payload) {
-      const diagnostics: Diagnostic[] = [];
-      const list = handlers.get(hook);
-      if (!list) return diagnostics;
+      // Re-entrancy guard. Two hooks whose handlers emit each other (a's `bootstrap` handler emits
+      // `dispose`, b's `dispose` handler emits `bootstrap`) is a plausible accidental coupling between
+      // two unrelated plugins, not an attack — and it recurses the JS call stack, not the heap: each
+      // `emit()` call here reaches its first `await` only AFTER synchronously calling the next
+      // handler, so a chain of handlers that emit synchronously (or `void`-fire without awaiting, the
+      // common shape for "notify and move on") never yields to the event loop and blows the stack in
+      // one synchronous burst — confirmed by running it, not assumed: an unbounded version of exactly
+      // this two-hook cycle threw `RangeError: Maximum call stack size exceeded` a few thousand frames
+      // in. Depth is tracked per BUS INSTANCE, not per hook, because the cycle that actually bites is
+      // cross-hook — a same-hook-only guard would miss it.
+      depth++;
+      try {
+        const diagnostics: Diagnostic[] = [];
 
-      // Snapshot the LENGTH, not the list itself: `list` is the very array `on()` pushes onto, and a
-      // handler is free to call `on()` again for THIS hook while this loop is running — a plugin
-      // registering a follow-up handler from inside its own bootstrap hook, say. The default array
-      // iterator re-reads `.length` on every step, so iterating the live array would run a handler
-      // added mid-emit within the SAME pass — and if that handler's own execution registers another
-      // one, nothing would bound how long this loop runs. Freezing `len` up front means a handler
-      // added during emit is queued for the NEXT emit() call instead: this pass runs exactly the
-      // handlers that existed when it started, full stop, regardless of what any of them do while
-      // they run.
-      const len = list.length;
-      for (let i = 0; i < len; i++) {
-        const { pluginId, fn } = list[i];
-        try {
-          await fn(payload);
-        } catch (err) {
-          diagnostics.push(
-            error('hooks/handler-failed', `"${pluginId}" failed in hook "${String(hook)}": ${messageOf(err)}`, {
-              pluginId,
-            }),
+        if (depth > MAX_HOOK_DEPTH) {
+          // Recorded in the shared `overflow` bucket, not just returned here, because THIS call is
+          // reachable only from deep inside another handler's own synchronous call chain — often via a
+          // `void`-fired, never-awaited `emit()` (see the depth comment above), which means whatever
+          // this call resolves with is discarded by its caller and never seen again. `overflow` is how
+          // the diagnostic reaches somewhere anyone is actually listening: the outermost call below.
+          overflow.push(
+            error(
+              'hooks/recursion-limit',
+              `Hook "${String(hook)}" recursed past ${MAX_HOOK_DEPTH} nested emit() calls — this usually means two hooks are triggering each other.`,
+              { fix: 'Break the cycle: avoid emitting a hook from directly inside another handler chain for a hook.' },
+            ),
           );
+          return diagnostics;
         }
+
+        const list = handlers.get(hook);
+        if (list) {
+          // A snapshot of the ARRAY, not just its length: `list` is the very array `on()` pushes onto.
+          // A length-only snapshot is correct only as long as nothing can ever REMOVE a handler — true
+          // today (there is no `off()`), but that invariant would then live entirely in the reader's
+          // head, not in this loop. A shrink would make the destructure below throw (it sits outside
+          // the try), and any future reordering could double-run one handler while skipping another.
+          // Copying the array costs the same as recording its length and is correct regardless: this
+          // pass runs exactly the handlers present when it started, full stop — including a handler
+          // registered mid-emit (queued for the NEXT emit() instead of running in this one, since it
+          // is appended to `list` after the snapshot was already taken).
+          const snapshot = [...list];
+          for (const { pluginId, fn } of snapshot) {
+            try {
+              await fn(payload);
+            } catch (err) {
+              diagnostics.push(
+                error('hooks/handler-failed', `"${pluginId}" failed in hook "${String(hook)}": ${describeError(err)}`, {
+                  pluginId,
+                }),
+              );
+            }
+          }
+        }
+
+        // `depth === 1` identifies the call that STARTED this particular chain (the outermost one
+        // currently unwinding) — draining `overflow` here, rather than at every depth, reports each
+        // recursion-limit hit exactly once instead of once per frame still on the way out. This is an
+        // approximation, not a precise per-chain tracker (unreachable without an AsyncLocalStorage-like
+        // mechanism, which is a Node builtin this package does not depend on): two logically unrelated
+        // `emit()` calls that happen to overlap in time on the SAME bus share one counter. `overflow`
+        // is drained by whichever call happens to return `depth` to 0 rather than by the call that is
+        // conceptually "responsible" for it in that scenario. Good enough for the case this guards
+        // against — a genuine synchronous cross-hook cycle — without pulling in a dependency for it.
+        if (depth === 1 && overflow.length > 0) {
+          diagnostics.push(...overflow);
+          overflow = [];
+        }
+
+        return diagnostics;
+      } finally {
+        depth--;
       }
-      return diagnostics;
     },
   };
 }

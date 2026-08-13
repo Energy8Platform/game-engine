@@ -1,4 +1,4 @@
-import { type Diagnostic, error } from '../diagnostics';
+import { type Diagnostic, describeError, error } from '../diagnostics';
 import type { Factory } from '../manifest/types';
 import { cloneValue, isPlainObject } from '../schema/validate';
 import type { ResolvedContribution, ResolvedPlan } from '../resolve/types';
@@ -13,10 +13,6 @@ export interface Activated<T> {
 export interface ActivateResult<T> {
   instances: Activated<T>[];
   diagnostics: Diagnostic[];
-}
-
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function typeName(v: unknown): string {
@@ -97,7 +93,7 @@ export async function activatePoint<T = unknown>(plan: ResolvedPlan, pointId: st
     // Proxy, not merely a wrong value) — optional chaining only guards null/undefined `plan`, not a
     // throwing getter on a non-null one.
     diagnostics.push(
-      error('activate/invalid-plan', `Could not read plan.contributions: ${messageOf(err)}`, {
+      error('activate/invalid-plan', `Could not read plan.contributions: ${describeError(err)}`, {
         fix: 'Pass the ResolvedPlan returned by resolvePlan().',
       }),
     );
@@ -129,7 +125,7 @@ export async function activatePoint<T = unknown>(plan: ResolvedPlan, pointId: st
       return c.pointId === pointId && c.active === true;
     } catch (err) {
       diagnostics.push(
-        error('activate/bad-contribution', `A contribution in the plan could not be read: ${messageOf(err)}`, {
+        error('activate/bad-contribution', `A contribution in the plan could not be read: ${describeError(err)}`, {
           ...safeTag(c),
           fix: 'Check the plan for a contribution whose fields are not plain values.',
         }),
@@ -153,7 +149,7 @@ export async function activatePoint<T = unknown>(plan: ResolvedPlan, pointId: st
       loaded = await contribution.create();
     } catch (err) {
       diagnostics.push(
-        error('activate/load-failed', `Could not load "${safeKey(contribution)}": ${messageOf(err)}`, {
+        error('activate/load-failed', `Could not load "${safeKey(contribution)}": ${describeError(err)}`, {
           ...safeTag(contribution),
           fix: 'Check the create() import path in the plugin manifest.',
         }),
@@ -188,7 +184,7 @@ export async function activatePoint<T = unknown>(plan: ResolvedPlan, pointId: st
       });
     } catch (err) {
       diagnostics.push(
-        error('activate/factory-failed', `"${safeKey(contribution)}" failed to start: ${messageOf(err)}`, tag),
+        error('activate/factory-failed', `"${safeKey(contribution)}" failed to start: ${describeError(err)}`, tag),
       );
     }
   }

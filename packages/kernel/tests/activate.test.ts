@@ -510,6 +510,28 @@ describe('activatePoint hostile factory execution', () => {
     expect(diagnostics[0].message).toContain('undefined');
   });
 
+  // Fix round 1 (shared with hooks.ts's Task 10 review): the previous message-building idiom,
+  // `err instanceof Error ? err.message : String(err)`, throws `TypeError: Cannot convert object to
+  // primitive value` for a value with no toString/valueOf/Symbol.toPrimitive anywhere on its chain —
+  // a null-prototype object is exactly that. Confirmed against the pre-fix source: this made
+  // activatePoint() itself REJECT instead of isolating the failing contribution, the one guarantee
+  // this whole describe block exists to hold. Fixed by routing through diagnostics.ts's
+  // `describeError`, now shared with runtime/hooks.ts instead of duplicated.
+  it('isolates a factory that throws a null-prototype value', async () => {
+    const plan = planFor([
+      {
+        id: 'a',
+        doc: 'd',
+        create: async () => () => {
+          throw Object.create(null);
+        },
+      },
+    ]);
+    const { instances, diagnostics } = await activatePoint<string>(plan, 'reel.feature');
+    expect(instances).toEqual([]);
+    expect(diagnostics[0].code).toBe('activate/factory-failed');
+  });
+
   // Explicitly NOT given a timeout — see the task brief. This test proves, rather than assumes, what
   // actually happens: it races the outer activatePoint() promise against a short real delay and
   // checks it has not settled. It does not await the hung factory itself, so it cannot hang the run.

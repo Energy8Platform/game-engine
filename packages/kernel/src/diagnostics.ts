@@ -33,3 +33,28 @@ export function warning(code: string, message: string, rest: Partial<Diagnostic>
 export function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
   return diagnostics.some((d) => d.severity === 'error');
 }
+
+/**
+ * Describe an unknown thrown/rejected value for a diagnostic message. Never throws itself — which
+ * `err instanceof Error ? err.message : String(err)` (this package's original idiom, duplicated
+ * verbatim in `runtime/activate.ts` and `runtime/hooks.ts`) is NOT: `String(err)` throws
+ * `TypeError: Cannot convert object to primitive value` for a value with no `toString`/`valueOf`/
+ * `Symbol.toPrimitive` anywhere on its chain — most plainly `Object.create(null)` — and `err
+ * instanceof Error` can itself throw first, against a Proxy whose `getPrototypeOf` trap throws.
+ * Both call sites hand a plugin's own thrown value to this function, so both need the same total
+ * one, not two copies that can independently rot out of sync with each other.
+ */
+export function describeError(err: unknown): string {
+  try {
+    if (err instanceof Error && typeof err.message === 'string') return err.message;
+  } catch {
+    // `err instanceof Error` itself threw (an exotic Proxy) — fall through to String().
+  }
+  try {
+    return String(err);
+  } catch {
+    // No toString/valueOf/Symbol.toPrimitive on err's chain (e.g. Object.create(null)).
+    // Object.prototype.toString.call never needs those — it reads err's internal slot/tag directly.
+    return Object.prototype.toString.call(err);
+  }
+}

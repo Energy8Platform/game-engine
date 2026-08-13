@@ -100,8 +100,13 @@ describe('createHookBus — hostile construction: ids', () => {
   it('ids: [] means nothing is known — every on() is refused, every emit() is a no-op', async () => {
     const b = createHookBus({ ids: [], declared: { a: ['bootstrap'] } });
     expect(b.ids()).toEqual([]);
-    expect(b.on('a', 'bootstrap', vi.fn())).toMatchObject({ code: 'hooks/unknown' });
     expect(await b.emit('bootstrap')).toEqual([]);
+    // Minor fix round 1: `Known hooks: ${ids.join(', ')}.` on an empty list rendered the useless
+    // "Known hooks: .", not "there are none" — the actual, more useful state of the bus.
+    const diagnostic = b.on('a', 'bootstrap', vi.fn());
+    expect(diagnostic).toMatchObject({ code: 'hooks/unknown' });
+    expect(diagnostic?.fix).not.toBe('Known hooks: .');
+    expect(diagnostic?.fix?.toLowerCase()).toContain('no known hooks');
   });
 
   it('ids(): returns a copy — mutating the returned array cannot corrupt the bus\'s own closed list', () => {
@@ -354,6 +359,26 @@ describe('createHookBus — handler failure isolation, exotic throw/reject shape
     expect(diagnostics[0].message).toContain('[object Object]');
   });
 
+  // Fix round 1: `String(err)` — the previous message-building idiom — throws
+  // `TypeError: Cannot convert object to primitive value` for a value with no toString/valueOf/
+  // Symbol.toPrimitive anywhere on its chain, which a null-prototype object is. Confirmed against
+  // the pre-fix source: this exact case made emit() REJECT and abandon every handler after the
+  // thrower, rather than isolating it — the two guarantees this describe block exists to hold.
+  it('does not reject when a handler throws a null-prototype value, and still runs the handlers after it', async () => {
+    const b = bus();
+    const calls: string[] = [];
+    b.on('a', 'bootstrap', () => void calls.push('before'));
+    b.on('a', 'bootstrap', () => {
+      throw Object.create(null);
+    });
+    b.on('a', 'bootstrap', () => void calls.push('after'));
+
+    const diagnostics = await b.emit('bootstrap');
+    expect(calls).toEqual(['before', 'after']);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ code: 'hooks/handler-failed' });
+  });
+
   // Explicitly NOT given a timeout — see the task brief, and activate.ts's identical documented
   // stance for a hung factory. This races the outer emit() promise against a short real delay and
   // checks it has not settled; it does not await the hung handler itself, so it cannot hang the run.
@@ -398,10 +423,71 @@ describe('createHookBus — a handler registers another handler mid-emit', () =>
 
     await b.emit('bootstrap');
     // Only the originally registered call ran. It queued a second one (ran < 1000), which queues a
-    // third on ITS turn, and so on — but each is queued for a FUTURE emit(), because the loop bound
-    // (`len`) is captured once, before the loop starts, from the length `list` had when this emit()
-    // was called (1) — not re-read as the array grows during the pass.
+    // third on ITS turn, and so on — but each is queued for a FUTURE emit(), because emit() iterates a
+    // SNAPSHOT of the handler array taken once, before the loop starts, not the live array `on()` keeps
+    // appending to.
     expect(ran).toBe(1);
+  });
+
+  it('runs exactly the handlers present when emit started, even under mutation — a handler AFTER the mutating one still runs', async () => {
+    const b = bus();
+    const calls: string[] = [];
+    b.on('a', 'bootstrap', () => {
+      calls.push('first');
+      b.on('a', 'bootstrap', () => void calls.push('late'));
+    });
+    b.on('b', 'bootstrap', () => void calls.push('second'));
+
+    await b.emit('bootstrap');
+    // Proves the snapshot approach isn't merely "stop as soon as something changes": 'second' was
+    // already registered before emit() started, same as 'first', and both run; only 'late' (appended
+    // to the live array during this pass) is excluded.
+    expect(calls).toEqual(['first', 'second']);
+  });
+});
+
+// ── Cross-hook emit cycles (re-entrancy) ────────────────────────────────────
+//
+// Two plugins whose hooks trigger each other — a's `bootstrap` handler emits `dispose`, b's
+// `dispose` handler emits `bootstrap` — is a plausible accidental coupling, not an attack. Each
+// `emit()` call below reaches its first `await` only after synchronously calling the next handler, so
+// an unbounded version of this recurses the actual JS call stack (not just "loops a lot") and throws
+// `RangeError: Maximum call stack size exceeded` — confirmed by running it, not assumed, before this
+// guard existed. Worse, because the recursive `emit()` calls here are fire-and-forget (`void`, the
+// natural way to "notify and move on"), the frame that would catch that RangeError is several async
+// calls removed from anyone awaiting it — so without the depth guard, the RangeError is not merely
+// uncaught, it makes the TOP-level `emit()` resolve with `diagnostics: []`, silently. Confirmed by
+// running the unbounded version of the exact scenario below.
+
+describe('createHookBus — cross-hook emit cycles', () => {
+  it('bounds a cross-hook emit cycle instead of overflowing the stack, and reports it at the top level', async () => {
+    const b = createHookBus({ ids: ['x', 'y'], declared: { p: ['x', 'y'] } });
+    b.on('p', 'x', () => {
+      void b.emit('y');
+    });
+    b.on('p', 'y', () => {
+      void b.emit('x');
+    });
+    const diagnostics = await b.emit('x');
+    expect(diagnostics.some((d) => d.code === 'hooks/recursion-limit')).toBe(true);
+  });
+
+  it('does not falsely flag ordinary bounded nesting (one hook emitting a different hook a few levels deep, then stopping)', async () => {
+    const b = createHookBus({ ids: ['x', 'y', 'z'], declared: { p: ['x', 'y', 'z'] } });
+    const calls: string[] = [];
+    b.on('p', 'x', async () => {
+      calls.push('x');
+      await b.emit('y');
+    });
+    b.on('p', 'y', async () => {
+      calls.push('y');
+      await b.emit('z');
+    });
+    b.on('p', 'z', () => void calls.push('z'));
+
+    const diagnostics = await b.emit('x');
+    expect(calls).toEqual(['x', 'y', 'z']);
+    expect(diagnostics).toEqual([]);
   });
 });
 
