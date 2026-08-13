@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { describeMatcher, isDefaultMatcher, matches } from '@/resolve/match';
 import type { LaunchContext } from '@/resolve/types';
+import type { Diagnostic } from '@/diagnostics';
 
 const ctx = (over: Partial<LaunchContext> = {}): LaunchContext => ({
   url: 'https://game.example/play',
@@ -73,93 +74,144 @@ describe('describeMatcher', () => {
   });
 });
 
-describe('matchers survive hostile input', () => {
-  it('never throws on any combination of junk', () => {
-    // matches with null and undefined matcher
+describe('matchers survive hostile input — null/undefined inputs', () => {
+  it('handles null and undefined matchers', () => {
     expect(matches(null as any, ctx())).toBe(false);
     expect(matches(undefined, ctx())).toBe(false);
+  });
 
-    // matches with null ctx url
+  it('handles null ctx url', () => {
     expect(matches({ urlParam: 'test' }, { url: null as any, buildTarget: undefined })).toBe(false);
+  });
+});
 
-    // matches with empty url string
+describe('matchers survive hostile input — malformed URLs', () => {
+  it('handles empty url string', () => {
     expect(matches({ urlParam: 'test' }, ctx({ url: '' }))).toBe(false);
+  });
 
-    // matches with non-url string
+  it('handles non-url string', () => {
     expect(matches({ urlParam: 'test' }, ctx({ url: 'not a url' }))).toBe(false);
+  });
 
-    // matches with query only (no path)
+  it('handles query-only URL (no path)', () => {
     expect(matches({ urlParam: 'a' }, ctx({ url: '?a=1' }))).toBe(true);
+  });
 
-    // matches with trailing ? (no params)
+  it('handles trailing ? (no params)', () => {
     expect(matches({ urlParam: 'a' }, ctx({ url: 'https://x/p?' }))).toBe(false);
+  });
+});
 
-    // matcher with throwing match predicate
-    expect(matches(
-      { match: () => { throw new Error('kaboom'); } },
-      ctx()
-    )).toBe(false);
-
-    // matcher match returns truthy non-boolean (1)
-    expect(matches({ match: () => 1 as any }, ctx())).toBe(true);
-
-    // matcher match returns truthy non-boolean ('yes')
-    expect(matches({ match: () => 'yes' as any }, ctx())).toBe(true);
-
-    // matcher match returns undefined
-    expect(matches({ match: () => undefined }, ctx())).toBe(false);
-
-    // urlParam matching must be exact, not prefix: 'ses' should not match 'sessionId'
-    expect(matches({ urlParam: 'ses' }, ctx({ url: 'https://g/play?sessionId=1' }))).toBe(false);
-
-    // urlParam matching exact match when substring appears
-    expect(matches({ urlParam: 'sessionId' }, ctx({ url: 'https://g/play?sessionId=1' }))).toBe(true);
-
-    // URL-encoded params
-    expect(matches({ urlParam: 'a b' }, ctx({ url: 'https://x/p?a%20b=1' }))).toBe(false);
-
-    // repeated params
-    expect(matches({ urlParam: 'a' }, ctx({ url: 'https://x/p?a=1&a=2' }))).toBe(true);
-
-    // fragment containing a ? must not count as param
+describe('matchers survive hostile input — fragments', () => {
+  it('ignores parameters in URL fragment', () => {
     expect(matches({ urlParam: 'fake' }, ctx({ url: 'https://x/p#/route?fake=1' }))).toBe(false);
+  });
+});
 
-    // isDefaultMatcher with null, undefined, {}
+describe('matchers survive hostile input — parameter matching exactness', () => {
+  it('must not match by prefix (ses does not match sessionId)', () => {
+    expect(matches({ urlParam: 'ses' }, ctx({ url: 'https://g/play?sessionId=1' }))).toBe(false);
+  });
+
+  it('matches exact parameter name', () => {
+    expect(matches({ urlParam: 'sessionId' }, ctx({ url: 'https://g/play?sessionId=1' }))).toBe(true);
+  });
+
+  it('handles repeated params', () => {
+    expect(matches({ urlParam: 'a' }, ctx({ url: 'https://x/p?a=1&a=2' }))).toBe(true);
+  });
+});
+
+describe('matchers survive hostile input — percent encoding', () => {
+  it('matches a percent-encoded param by its logical name or its raw one', () => {
+    const testCtx = ctx({ url: 'https://x/p?a%20b=1' });
+    expect(matches({ urlParam: 'a b' }, testCtx)).toBe(true);
+    expect(matches({ urlParam: 'a%20b' }, testCtx)).toBe(true);
+  });
+
+  it('survives a malformed escape rather than throwing', () => {
+    const testCtx = ctx({ url: 'https://x/p?a%ZZ=1' });
+    expect(() => matches({ urlParam: 'a%ZZ' }, testCtx)).not.toThrow();
+    expect(matches({ urlParam: 'a%ZZ' }, testCtx)).toBe(true);
+  });
+
+  it('leaves a plus sign literal (not as space)', () => {
+    const testCtx = ctx({ url: 'https://x/p?a+b=1' });
+    expect(matches({ urlParam: 'a+b' }, testCtx)).toBe(true);
+    expect(matches({ urlParam: 'a b' }, testCtx)).toBe(false);
+  });
+});
+
+describe('matchers survive hostile input — throwing predicate', () => {
+  it('reports a throwing predicate when given a sink', () => {
+    const out: Diagnostic[] = [];
+    const result = matches({ match: () => { throw new Error('typo'); } }, ctx({ url: 'https://x/p' }), out);
+    expect(result).toBe(false);
+    expect(out[0]).toMatchObject({ severity: 'error', code: 'match/predicate-threw' });
+    expect(out[0].message).toContain('typo');
+  });
+
+  it('still returns false with no sink, and does not throw', () => {
+    expect(() => matches({ match: () => { throw new Error('x'); } }, ctx({ url: 'https://x/p' }))).not.toThrow();
+    expect(matches({ match: () => { throw new Error('x'); } }, ctx({ url: 'https://x/p' }))).toBe(false);
+  });
+});
+
+describe('matchers survive hostile input — truthy non-booleans', () => {
+  it('treats match returning truthy non-boolean (1) as true', () => {
+    expect(matches({ match: () => 1 as any }, ctx())).toBe(true);
+  });
+
+  it('treats match returning truthy non-boolean ("yes") as true', () => {
+    expect(matches({ match: () => 'yes' as any }, ctx())).toBe(true);
+  });
+
+  it('treats match returning undefined as false', () => {
+    expect(matches({ match: () => undefined }, ctx())).toBe(false);
+  });
+});
+
+describe('matchers survive hostile input — AND semantics', () => {
+  it('requires all conditions to hold when multiple declared', () => {
+    const m = { urlParam: 'sessionId', buildTarget: 'artube' };
+    expect(matches(m, ctx({ url: 'https://g/play?sessionId=1', buildTarget: 'artube' }))).toBe(true);
+    expect(matches(m, ctx({ url: 'https://g/play?sessionId=1', buildTarget: 'stake' }))).toBe(false);
+  });
+});
+
+describe('matchers survive hostile input — describeMatcher edge cases', () => {
+  it('handles null, undefined, and empty object', () => {
+    expect(describeMatcher(null as any)).toBe('always');
+    expect(describeMatcher(undefined)).toBe('always');
+    expect(describeMatcher({})).toBe('always');
+  });
+
+  it('handles matcher with all conditions at once', () => {
+    const allConditions = {
+      urlParam: 'a',
+      buildTarget: 'stake',
+      match: () => true,
+      default: true,
+    };
+    const desc = describeMatcher(allConditions);
+    expect(desc).toContain('when ?a is present');
+    expect(desc).toContain('when the build target is "stake"');
+    expect(desc).toContain('when a custom rule matches');
+  });
+
+  it('handles isDefaultMatcher with null, undefined, and {}', () => {
     expect(isDefaultMatcher(null as any)).toBe(false);
     expect(isDefaultMatcher(undefined)).toBe(false);
     expect(isDefaultMatcher({})).toBe(false);
+  });
 
-    // isDefaultMatcher with every condition at once
+  it('handles isDefaultMatcher with all conditions at once', () => {
     expect(isDefaultMatcher({
       default: true,
       urlParam: 'a',
       buildTarget: 'stake',
       match: () => true,
     })).toBe(false);
-
-    // describeMatcher with null, undefined, {}
-    expect(describeMatcher(null as any)).toBe('always');
-    expect(describeMatcher(undefined)).toBe('always');
-    expect(describeMatcher({})).toBe('always');
-
-    // describeMatcher with every condition at once
-    expect(describeMatcher({
-      urlParam: 'a',
-      buildTarget: 'stake',
-      match: () => true,
-      default: true,
-    })).toContain('when ?a is present');
-    expect(describeMatcher({
-      urlParam: 'a',
-      buildTarget: 'stake',
-      match: () => true,
-      default: true,
-    })).toContain('when the build target is "stake"');
-    expect(describeMatcher({
-      urlParam: 'a',
-      buildTarget: 'stake',
-      match: () => true,
-      default: true,
-    })).toContain('when a custom rule matches');
   });
 });

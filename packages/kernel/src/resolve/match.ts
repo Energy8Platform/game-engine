@@ -1,4 +1,15 @@
 import type { LaunchContext, Matcher } from './types';
+import { error } from '../diagnostics';
+import type { Diagnostic } from '../diagnostics';
+
+function decodeSafe(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    // Malformed escape sequence; return the raw string
+    return encoded;
+  }
+}
 
 function hasUrlParam(url: string, param: string): boolean {
   if (!url || typeof url !== 'string') return false;
@@ -10,13 +21,15 @@ function hasUrlParam(url: string, param: string): boolean {
   if (query < 0) return false;
   const search = beforeFragment.slice(query + 1);
   for (const pair of search.split('&')) {
-    if (pair === param || pair.startsWith(`${param}=`)) return true;
+    const paramName = pair.split('=')[0];
+    // Match if either the raw or the decoded name matches the param
+    if (paramName === param || decodeSafe(paramName) === param) return true;
   }
   return false;
 }
 
 /** True when every condition the matcher declares holds. A pure `default` matcher never matches. */
-export function matches(matcher: Matcher | undefined | null, ctx: LaunchContext): boolean {
+export function matches(matcher: Matcher | undefined | null, ctx: LaunchContext, out?: Diagnostic[]): boolean {
   if (!matcher) return false;
 
   const conditions: boolean[] = [];
@@ -31,8 +44,13 @@ export function matches(matcher: Matcher | undefined | null, ctx: LaunchContext)
       const result = matcher.match(ctx);
       // Treat any truthy value as true, not just boolean true
       conditions.push(!!result);
-    } catch {
-      // If the predicate throws, treat it as no match
+    } catch (err) {
+      // If the predicate throws, report it and treat it as no match
+      if (out) {
+        out.push(error('match/predicate-threw', `A matcher's custom rule threw: ${err instanceof Error ? err.message : String(err)}`, {
+          fix: 'Fix the match() predicate, or express the rule with urlParam/buildTarget instead.',
+        }));
+      }
       conditions.push(false);
     }
   }
