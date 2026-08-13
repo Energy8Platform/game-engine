@@ -809,6 +809,7 @@ git commit -m "feat(kernel): merge point and contribution schemas"
 **Files:**
 - Create: `packages/kernel/src/manifest/types.ts`
 - Create: `packages/kernel/src/manifest/define.ts`
+- Create: `packages/kernel/src/resolve/types.ts` (the `LaunchContext` + `Matcher` half only; Task 8 appends the rest)
 - Test: `packages/kernel/tests/manifest.test.ts`
 
 **Interfaces:**
@@ -2530,7 +2531,9 @@ describe('activatePoint', () => {
   });
 
   it('reports a module that resolves to something other than a factory', async () => {
-    const plan = planFor([{ id: 'weird', doc: 'Not a factory.', create: async () => ({ nope: 1 }) as never }]);
+    const plan = planFor([
+      { id: 'weird', doc: 'Not a factory.', create: async () => ({ nope: 1 }) as unknown as never },
+    ]);
     const { instances, diagnostics } = await activatePoint(plan, 'reel.feature');
     expect(instances).toEqual([]);
     expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'activate/not-a-factory' });
@@ -2890,7 +2893,8 @@ git commit -m "feat(kernel): closed hook bus with declaration enforcement"
 ### Task 11: Purity guard, public barrel, README
 
 **Files:**
-- Modify: `packages/kernel/src/index.ts`
+- Modify: `packages/kernel/src/index.ts` (replaced entirely)
+- Modify: `packages/kernel/tests/skeleton.test.ts` (replaced entirely)
 - Create: `packages/kernel/README.md`
 - Test: `packages/kernel/tests/purity.test.ts`
 
