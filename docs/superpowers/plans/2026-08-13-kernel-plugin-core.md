@@ -656,6 +656,25 @@ function validateField(raw: unknown, field: FieldSchema, path: string, out: Diag
 }
 ```
 
+> **The shipped implementation goes further than this step, and deliberately.** Review found two
+> real defects in the code above, both since fixed in `5da142c..dd5f7db`:
+>
+> 1. `[...field.default]` is a SHALLOW copy. Defaults live on a `Schema` object shared by every
+>    contribution to a point, so a list default containing objects handed every caller the same
+>    element references — mutating one resolved settings value corrupted the stored default and
+>    every other caller's value. Fixed with a `cloneValue` helper applied to both the list and the
+>    scalar default paths.
+> 2. `defaultOf`'s `object` branch recursed unbounded, so a self-referential `FieldSchema` threw
+>    `RangeError` — violating the unconditional "nothing here throws on bad input". Fixed with
+>    `MAX_SCHEMA_DEPTH = 32`, threaded as an optional trailing `depth` through `defaultOf`,
+>    `validate` and `validateField`, emitting a `schema/too-deep` diagnostic at the cap.
+>
+> `cloneValue` deep-copies only plain arrays and plain objects (prototype `Object.prototype` or
+> `null`) and passes everything else through by reference, under the same depth cap. The contract
+> it documents: **schema defaults must be JSON-shaped**, because `Schema` travels inside
+> `PlanSnapshot`, which Task 8 requires to survive a JSON round trip. Read `schema/validate.ts` as
+> shipped, not this step, if you are reproducing the package.
+
 - [ ] **Step 6: Run the test to verify it passes**
 
 ```bash
