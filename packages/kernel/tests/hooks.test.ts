@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHookBus, declaredFromPlan } from '@/runtime/hooks';
+import { describeError } from '@/diagnostics';
 
 const IDS = ['bootstrap', 'dispose'] as const;
 
@@ -379,6 +380,31 @@ describe('createHookBus — handler failure isolation, exotic throw/reject shape
     expect(diagnostics[0]).toMatchObject({ code: 'hooks/handler-failed' });
   });
 
+  // Fix round 2: round 1's `describeError` fallback chain ended at
+  // `Object.prototype.toString.call(err)`, reasoned to be a safe dead end — it is not. That call
+  // performs its own `[[Get]]` of `err[Symbol.toStringTag]`, so a PLAIN object (no Proxy required)
+  // with a throwing getter for that symbol reopens the exact same bug: confirmed against the
+  // pre-fix source, this made emit() reject and abandon 'after', same as the null-prototype case.
+  it('does not reject when a handler throws a plain object whose Symbol.toStringTag getter throws, and still runs the handlers after it', async () => {
+    const b = bus();
+    const calls: string[] = [];
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('get boom');
+      },
+    };
+    b.on('a', 'bootstrap', () => void calls.push('before'));
+    b.on('a', 'bootstrap', () => {
+      throw hostile;
+    });
+    b.on('a', 'bootstrap', () => void calls.push('after'));
+
+    const diagnostics = await b.emit('bootstrap');
+    expect(calls).toEqual(['before', 'after']);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ code: 'hooks/handler-failed' });
+  });
+
   // Explicitly NOT given a timeout — see the task brief, and activate.ts's identical documented
   // stance for a hung factory. This races the outer emit() promise against a short real delay and
   // checks it has not settled; it does not await the hung handler itself, so it cannot hang the run.
@@ -488,6 +514,45 @@ describe('createHookBus — cross-hook emit cycles', () => {
     const diagnostics = await b.emit('x');
     expect(calls).toEqual(['x', 'y', 'z']);
     expect(diagnostics).toEqual([]);
+  });
+
+  // Fix round 2: round 1's `depth` counter spanned an emit() call's whole async lifetime (entry to
+  // its final return), not just synchronous nesting — so 17+ UNRELATED, non-recursive, concurrently
+  // in-flight top-level emit() calls (nothing nested in anything) tripped the same cap a genuine
+  // cycle does, because none of them had returned (and so decremented `depth`) by the time the 17th
+  // started. Confirmed against the pre-fix source: of 25 concurrent shallow emits, only 16 ran; the
+  // other 9 were each refused with a hooks/recursion-limit diagnostic blaming a recursion that never
+  // happened. `void`-fired, never-awaited emit() — this bus's own natural "notify and move on" shape
+  // — is exactly what produces overlapping in-flight calls like this.
+  it('does not refuse unrelated concurrent emits', async () => {
+    const ids = Array.from({ length: 25 }, (_, i) => `h${i}`);
+    const b = createHookBus({ ids, declared: { p: ids } });
+    const ran: string[] = [];
+    for (const id of ids) {
+      b.on('p', id, async () => {
+        await Promise.resolve();
+        ran.push(id);
+      });
+    }
+    const results = await Promise.all(ids.map((id) => b.emit(id)));
+    expect(ran).toHaveLength(25);
+    expect(results.flat()).toEqual([]);
+  });
+});
+
+// ── describeError (diagnostics.ts, exercised here because emit() depends on it) ────────────────────
+
+describe('describeError', () => {
+  // Fix round 2: a direct unit test of the shared helper itself, not only of emit()'s use of it —
+  // pins the guarantee at its source rather than only observing it secondhand through a handler.
+  it('describes a value whose Symbol.toStringTag getter throws, without throwing itself', () => {
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('boom');
+      },
+    };
+    expect(() => describeError(hostile)).not.toThrow();
+    expect(typeof describeError(hostile)).toBe('string');
   });
 });
 

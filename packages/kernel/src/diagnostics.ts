@@ -43,6 +43,13 @@ export function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
  * instanceof Error` can itself throw first, against a Proxy whose `getPrototypeOf` trap throws.
  * Both call sites hand a plugin's own thrown value to this function, so both need the same total
  * one, not two copies that can independently rot out of sync with each other.
+ *
+ * Fix round 2: `Object.prototype.toString.call(err)` — the previous last-resort fallback — is not
+ * actually a dead end either. It performs its own `[[Get]]` of `err[Symbol.toStringTag]` to decide
+ * what to print, and a PLAIN object (no Proxy required) with a throwing getter for that symbol
+ * breaks it too — confirmed by running `{ get [Symbol.toStringTag]() { throw new Error('boom'); } }`
+ * through it. Wrapped in its own try, with a fourth level — a constant that touches nothing on
+ * `err` at all — below it, so there is truly nowhere left to throw from.
  */
 export function describeError(err: unknown): string {
   try {
@@ -53,8 +60,14 @@ export function describeError(err: unknown): string {
   try {
     return String(err);
   } catch {
-    // No toString/valueOf/Symbol.toPrimitive on err's chain (e.g. Object.create(null)).
-    // Object.prototype.toString.call never needs those — it reads err's internal slot/tag directly.
-    return Object.prototype.toString.call(err);
+    // No toString/valueOf/Symbol.toPrimitive on err's chain (e.g. Object.create(null)) — fall
+    // through to Object.prototype.toString.call, which does not need any of those.
   }
+  try {
+    return Object.prototype.toString.call(err);
+  } catch {
+    // Even this can throw: it reads err[Symbol.toStringTag], and a plain object can define that as
+    // a getter that throws. Nothing left to try that still reads anything off `err`.
+  }
+  return 'a value that cannot be described';
 }

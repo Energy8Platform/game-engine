@@ -532,6 +532,31 @@ describe('activatePoint hostile factory execution', () => {
     expect(diagnostics[0].code).toBe('activate/factory-failed');
   });
 
+  // Fix round 2: round 1's `describeError` fallback chain ended at
+  // `Object.prototype.toString.call(err)`, reasoned to be a safe dead end — it is not, since that
+  // call itself performs a `[[Get]]` of `err[Symbol.toStringTag]`. A PLAIN object (no Proxy needed)
+  // with a throwing getter for that symbol reopens the same bug. Confirmed against the pre-fix
+  // source: `instances`/`diagnostics` both came back `undefined` — `activatePoint()` rejected
+  // outright rather than returning its documented `{ instances, diagnostics }` shape at all.
+  it('isolates a factory that throws a plain object whose Symbol.toStringTag getter throws', async () => {
+    const plan = planFor([
+      {
+        id: 'a',
+        doc: 'd',
+        create: async () => () => {
+          throw {
+            get [Symbol.toStringTag]() {
+              throw new Error('get boom');
+            },
+          };
+        },
+      },
+    ]);
+    const { instances, diagnostics } = await activatePoint<string>(plan, 'reel.feature');
+    expect(instances).toEqual([]);
+    expect(diagnostics[0].code).toBe('activate/factory-failed');
+  });
+
   // Explicitly NOT given a timeout — see the task brief. This test proves, rather than assumes, what
   // actually happens: it races the outer activatePoint() promise against a short real delay and
   // checks it has not settled. It does not await the hung factory itself, so it cannot hang the run.
