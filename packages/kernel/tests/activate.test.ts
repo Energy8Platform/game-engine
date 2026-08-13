@@ -206,6 +206,150 @@ describe('activatePoint hostile plan/pointId input (never rejects)', () => {
   });
 });
 
+// ── Fix round 1: throwing property accessors must not reject activatePoint ──────────────────────
+//
+// Everything above defends against the WRONG SHAPE (null, missing, non-array). None of it defends
+// against a right-shaped value whose property access itself throws — an IDE that wraps a live plan
+// in a Proxy to instrument or lazily hydrate it is exactly the audience for this package, and every
+// read `activatePoint` performs before reaching a plugin's own create()/factory is a candidate.
+describe('activatePoint fix round 1 — throwing property accessors never reject', () => {
+  it('does not reject when plan.contributions is a throwing accessor', async () => {
+    const plan = {} as ResolvedPlan;
+    Object.defineProperty(plan, 'contributions', {
+      get(): never {
+        throw new Error('boom');
+      },
+    });
+    const { instances, diagnostics } = await activatePoint(plan, 'p');
+    expect(instances).toEqual([]);
+    expect(diagnostics.some((d) => d.code === 'activate/invalid-plan')).toBe(true);
+  });
+
+  it('does not let a broken UNRELATED contribution abort another point', async () => {
+    const healthy = {
+      key: 'p:ok',
+      pluginId: 'x',
+      pointId: 'p',
+      id: 'ok',
+      enabled: true,
+      active: true,
+      activationLabel: 'always',
+      schema: {},
+      settings: {},
+      doc: 'd',
+      create: async () => () => 'made',
+    };
+    const rotten: Record<string, unknown> = { key: 'other:bad', pluginId: 'y', id: 'bad', active: true };
+    Object.defineProperty(rotten, 'pointId', {
+      get(): never {
+        throw new Error('boom');
+      },
+    });
+    const plan = { contributions: [rotten, healthy] } as unknown as ResolvedPlan;
+    const { instances, diagnostics } = await activatePoint<string>(plan, 'p');
+    expect(instances.map((i) => i.value)).toEqual(['made']);
+    expect(diagnostics.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('tags the diagnostic for that unrelated contribution as activate/bad-contribution, recovering what it safely can', async () => {
+    const rotten: Record<string, unknown> = { key: 'other:bad', pluginId: 'y', id: 'bad', active: true };
+    Object.defineProperty(rotten, 'pointId', {
+      get(): never {
+        throw new Error('boom');
+      },
+    });
+    const plan = { contributions: [rotten] } as unknown as ResolvedPlan;
+    const { instances, diagnostics } = await activatePoint(plan, 'p');
+    expect(instances).toEqual([]);
+    expect(diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'activate/bad-contribution',
+      pluginId: 'y',
+      contributionId: 'bad',
+    });
+  });
+
+  it('does not reject when a matching contribution has a throwing pluginId', async () => {
+    const rotten: Record<string, unknown> = {
+      key: 'p:bad',
+      pointId: 'p',
+      id: 'bad',
+      active: true,
+      create: async () => () => 'x',
+    };
+    Object.defineProperty(rotten, 'pluginId', {
+      get(): never {
+        throw new Error('boom');
+      },
+    });
+    const plan = { contributions: [rotten] } as unknown as ResolvedPlan;
+    await expect(activatePoint(plan, 'p')).resolves.toBeDefined();
+  });
+
+  it('reports a throwing pluginId as its own load-failed diagnostic', async () => {
+    const rotten: Record<string, unknown> = {
+      key: 'p:bad',
+      pointId: 'p',
+      id: 'bad',
+      active: true,
+      create: async () => () => 'x',
+    };
+    Object.defineProperty(rotten, 'pluginId', {
+      get(): never {
+        throw new Error('boom');
+      },
+    });
+    const plan = { contributions: [rotten] } as unknown as ResolvedPlan;
+    const { instances, diagnostics } = await activatePoint(plan, 'p');
+    expect(instances).toEqual([]);
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'activate/load-failed', contributionId: 'bad' });
+  });
+
+  // Found while fixing the three cases above, same class, not named in the review: `contribution.key`
+  // is read directly (outside any guard) in the not-a-factory message and in the factory-failed
+  // catch's own message. A throwing `.key` at either site would reject exactly like the named cases.
+  it('does not reject when a would-be not-a-factory contribution has a throwing key', async () => {
+    const rotten: Record<string, unknown> = {
+      pluginId: 'x',
+      pointId: 'p',
+      id: 'bad',
+      active: true,
+      create: async () => ({}) as unknown as never, // resolves to something that is not a factory
+    };
+    Object.defineProperty(rotten, 'key', {
+      get(): never {
+        throw new Error('key boom');
+      },
+    });
+    const plan = { contributions: [rotten] } as unknown as ResolvedPlan;
+    const { instances, diagnostics } = await activatePoint(plan, 'p');
+    expect(instances).toEqual([]);
+    expect(diagnostics[0]).toMatchObject({ code: 'activate/not-a-factory' });
+  });
+
+  it('does not reject when a contribution whose factory throws also has a throwing key', async () => {
+    const rotten: Record<string, unknown> = {
+      pluginId: 'x',
+      pointId: 'p',
+      id: 'bad',
+      active: true,
+      settings: {},
+      create: async () => () => {
+        throw new Error('factory boom');
+      },
+    };
+    Object.defineProperty(rotten, 'key', {
+      get(): never {
+        throw new Error('key boom');
+      },
+    });
+    const plan = { contributions: [rotten] } as unknown as ResolvedPlan;
+    const { instances, diagnostics } = await activatePoint(plan, 'p');
+    expect(instances).toEqual([]);
+    expect(diagnostics[0]).toMatchObject({ code: 'activate/factory-failed' });
+  });
+});
+
 // ── Hostile input: what create() resolves to ─────────────────────────────────────────────────────
 describe('activatePoint hostile create()/factory shapes', () => {
   it('reports create missing entirely', async () => {
