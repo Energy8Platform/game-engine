@@ -24,8 +24,8 @@ export function orderPlugins(manifests: readonly PluginManifest[]): OrderResult 
     return { order: [], diagnostics };
   }
 
-  // Group items by id. First pass collects items and validates ids.
-  const byIdGroups = new Map<string, PluginManifest[]>();
+  // Iterate once, accepting the first manifest for each id. Emit diagnostics for duplicates.
+  const byId = new Map<string, PluginManifest>();
   for (const item of manifests) {
     // Skip non-objects and null
     if (!item || typeof item !== 'object') {
@@ -43,25 +43,10 @@ export function orderPlugins(manifests: readonly PluginManifest[]): OrderResult 
     }
 
     const id = item.id;
-    if (!byIdGroups.has(id)) {
-      byIdGroups.set(id, []);
-    }
-    byIdGroups.get(id)!.push(item as PluginManifest);
-  }
-
-  // Resolve duplicates by picking the one with the most dependencies (most information).
-  // This makes the choice deterministic and independent of input order.
-  const byId = new Map<string, PluginManifest>();
-  for (const [id, group] of byIdGroups) {
-    if (group.length === 1) {
-      byId.set(id, group[0]);
+    if (!byId.has(id)) {
+      byId.set(id, item as PluginManifest);
     } else {
-      // Sort by number of dependencies (descending), pick first
-      const winner = group.sort(
-        (a, b) => Object.keys(b.dependsOn ?? {}).length - Object.keys(a.dependsOn ?? {}).length,
-      )[0];
-      byId.set(id, winner);
-      // Emit a diagnostic for the collision (one per id, not per duplicate)
+      // Duplicate id: keep the first one, emit diagnostic
       diagnostics.push(
         error('resolve/duplicate-plugin-id', `Plugin id "${id}" is declared by more than one manifest; only the first is used.`, {
           pluginId: id,

@@ -49,15 +49,37 @@ describe('orderPlugins', () => {
 });
 
 describe('orderPlugins survives hostile input', () => {
-  it('reports a duplicate id and stays order-insensitive', () => {
+  it('keeps the first duplicate by position regardless of other duplicates', () => {
     const dupA = { id: 'dup', version: '1.0.0', engine: '*', dependsOn: { other: '*' } };
     const dupB = { id: 'dup', version: '1.0.0', engine: '*' };
     const other = p('other');
-    const forward = orderPlugins([dupA, dupB, other]);
-    const backward = orderPlugins([other, dupB, dupA]);
-    expect(forward.order).toEqual(backward.order);
+
+    // dupA is first in both cases (different positions for dupB)
+    const case1 = orderPlugins([dupA, dupB, other]);
+    const case2 = orderPlugins([dupA, other, dupB]);
+
+    expect(case1.order).toEqual(case2.order);
+    expect(case1.order).toContain('dup');
+    expect(case1.order).toContain('other');
+    expect(case1.diagnostics.some((d) => d.code === 'resolve/duplicate-plugin-id')).toBe(true);
+  });
+
+  it('keeps the first duplicate even when duplicates tie on dependency count', () => {
+    const a = { id: 'dup', version: '1.0.0', engine: '*', dependsOn: { x: '*' } };
+    const b = { id: 'dup', version: '1.0.0', engine: '*', dependsOn: { y: '*' } };
+    const x = p('x');
+
+    const forward = orderPlugins([a, b, x]);
+    const backward = orderPlugins([x, b, a]);
+
+    // a is first in forward (uses a's deps), b is first in backward (uses b's deps)
+    expect(forward.order).toEqual(['x', 'dup']);
+    expect(backward.order).toEqual(['dup', 'x']);
+
+    // Both report duplicate, backward also reports missing-dependency
     expect(forward.diagnostics.some((d) => d.code === 'resolve/duplicate-plugin-id')).toBe(true);
     expect(backward.diagnostics.some((d) => d.code === 'resolve/duplicate-plugin-id')).toBe(true);
+    expect(backward.diagnostics.some((d) => d.code === 'resolve/missing-dependency')).toBe(true);
   });
 
   it('says what it actually knows about an un-orderable set', () => {
