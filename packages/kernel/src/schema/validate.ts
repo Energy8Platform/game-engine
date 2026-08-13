@@ -7,6 +7,10 @@ export interface ValidateResult {
   diagnostics: Diagnostic[];
 }
 
+/** Deepest nesting `defaultOf`/`validate` will walk. A schema this deep is a construction bug —
+ *  almost certainly a cycle — and the cap turns unbounded recursion into a diagnostic. */
+export const MAX_SCHEMA_DEPTH = 32;
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -17,15 +21,38 @@ function typeName(v: unknown): string {
   return `a ${typeof v}`;
 }
 
+/** Structural copy of a default value. Defaults live on a shared Schema object, so handing a
+ *  caller a reference into one would let a mutation of resolved settings corrupt every other
+ *  contribution's defaults. */
+function cloneValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(cloneValue) as unknown as T;
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = cloneValue(v);
+    return out as T;
+  }
+  return value;
+}
+
 /** The value a field falls back to: its declared default, or the zero value of its kind. */
-export function defaultOf(field: FieldSchema): unknown {
+export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnostic[], path?: string): unknown {
+  if (depth >= MAX_SCHEMA_DEPTH) {
+    // Stop descending to prevent unbounded recursion from cycles.
+    if (diagnostics && path !== undefined) {
+      diagnostics.push(error('schema/too-deep', `Schema nesting exceeds ${MAX_SCHEMA_DEPTH} levels — this is usually a cycle.`, { path }));
+    }
+    if (field.kind === 'object') return {};
+    if (field.kind === 'list') return [];
+    return '';
+  }
+
   if (field.kind === 'object') {
     const out: Record<string, unknown> = {};
-    for (const [key, sub] of Object.entries(field.fields)) out[key] = defaultOf(sub);
+    for (const [key, sub] of Object.entries(field.fields)) out[key] = defaultOf(sub, depth + 1, diagnostics, path ? `${path}.${key}` : key);
     return out;
   }
-  if (field.kind === 'list') return field.default ? [...field.default] : [];
-  if (field.default !== undefined) return field.default;
+  if (field.kind === 'list') return field.default ? cloneValue(field.default) : [];
+  if (field.default !== undefined) return cloneValue(field.default);
   if (field.kind === 'number') return 0;
   if (field.kind === 'boolean') return false;
   if (field.kind === 'enum') return field.options[0]?.value ?? '';
@@ -36,9 +63,22 @@ export function defaultOf(field: FieldSchema): unknown {
  * Validate a settings object against a schema. Never throws: bad input yields the field's default
  * plus a diagnostic, so a mistyped setting degrades one control instead of failing a whole game.
  */
-export function validate(input: unknown, schema: Schema, base = ''): ValidateResult {
+export function validate(input: unknown, schema: Schema, base = '', depth = 0): ValidateResult {
   const diagnostics: Diagnostic[] = [];
   const source = isRecord(input) ? input : {};
+
+  if (depth >= MAX_SCHEMA_DEPTH) {
+    diagnostics.push(
+      error('schema/too-deep', `Schema nesting exceeds ${MAX_SCHEMA_DEPTH} levels — this is usually a cycle.`, {
+        path: base || undefined,
+      }),
+    );
+    const value: Record<string, unknown> = {};
+    for (const [key] of Object.entries(schema)) {
+      value[key] = defaultOf(schema[key], depth);
+    }
+    return { value, diagnostics };
+  }
 
   if (input !== undefined && input !== null && !isRecord(input)) {
     diagnostics.push(
@@ -51,7 +91,7 @@ export function validate(input: unknown, schema: Schema, base = ''): ValidateRes
   const value: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(schema)) {
     const path = base ? `${base}.${key}` : key;
-    value[key] = key in source ? validateField(source[key], field, path, diagnostics) : defaultOf(field);
+    value[key] = key in source ? validateField(source[key], field, path, diagnostics, depth) : defaultOf(field, depth, diagnostics, path);
   }
 
   for (const key of Object.keys(source)) {
@@ -67,14 +107,19 @@ export function validate(input: unknown, schema: Schema, base = ''): ValidateRes
   return { value, diagnostics };
 }
 
-function validateField(raw: unknown, field: FieldSchema, path: string, out: Diagnostic[]): unknown {
-  if (raw === undefined || raw === null) return defaultOf(field);
+function validateField(raw: unknown, field: FieldSchema, path: string, out: Diagnostic[], depth = 0): unknown {
+  if (raw === undefined || raw === null) return defaultOf(field, depth, out, path);
+
+  if (depth >= MAX_SCHEMA_DEPTH) {
+    out.push(error('schema/too-deep', `Schema nesting exceeds ${MAX_SCHEMA_DEPTH} levels — this is usually a cycle.`, { path }));
+    return defaultOf(field, depth);
+  }
 
   switch (field.kind) {
     case 'number': {
       if (typeof raw !== 'number' || Number.isNaN(raw)) {
         out.push(error('schema/type-mismatch', `Expected a number, got ${typeName(raw)}.`, { path }));
-        return defaultOf(field);
+        return defaultOf(field, depth, out, path);
       }
       let n = raw;
       if (field.min !== undefined && n < field.min) {
@@ -95,7 +140,7 @@ function validateField(raw: unknown, field: FieldSchema, path: string, out: Diag
     case 'boolean': {
       if (typeof raw !== 'boolean') {
         out.push(error('schema/type-mismatch', `Expected true or false, got ${typeName(raw)}.`, { path }));
-        return defaultOf(field);
+        return defaultOf(field, depth, out, path);
       }
       return raw;
     }
@@ -109,13 +154,13 @@ function validateField(raw: unknown, field: FieldSchema, path: string, out: Diag
             fix: `Use one of: ${allowed.join(', ')}.`,
           }),
         );
-        return defaultOf(field);
+        return defaultOf(field, depth, out, path);
       }
       return raw;
     }
 
     case 'object': {
-      const nested = validate(raw, field.fields, path);
+      const nested = validate(raw, field.fields, path, depth + 1);
       out.push(...nested.diagnostics);
       return nested.value;
     }
@@ -123,16 +168,16 @@ function validateField(raw: unknown, field: FieldSchema, path: string, out: Diag
     case 'list': {
       if (!Array.isArray(raw)) {
         out.push(error('schema/type-mismatch', `Expected a list, got ${typeName(raw)}.`, { path }));
-        return defaultOf(field);
+        return defaultOf(field, depth, out, path);
       }
-      return raw.map((item, i) => validateField(item, field.of, `${path}[${i}]`, out));
+      return raw.map((item, i) => validateField(item, field.of, `${path}[${i}]`, out, depth + 1));
     }
 
     default: {
       // Every remaining kind is a plain string here; its meaning belongs to a higher layer.
       if (typeof raw !== 'string') {
         out.push(error('schema/type-mismatch', `Expected a string, got ${typeName(raw)}.`, { path }));
-        return defaultOf(field);
+        return defaultOf(field, depth, out, path);
       }
       return raw;
     }

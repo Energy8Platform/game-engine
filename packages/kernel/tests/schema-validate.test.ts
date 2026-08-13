@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Schema } from '@/schema/types';
+import type { FieldSchema, Schema } from '@/schema/types';
 import { defaultOf, validate } from '@/schema/validate';
 
 const FEATURE: Schema = {
@@ -103,5 +103,37 @@ describe('defaultOf', () => {
 
   it('falls back to the first option for an enum with no default', () => {
     expect(defaultOf({ kind: 'enum', options: [{ value: 'x', label: 'X' }] })).toBe('x');
+  });
+});
+
+describe('defaults are never shared', () => {
+  it('gives each caller its own copy of a list default containing objects', () => {
+    const schema: Schema = {
+      stops: { kind: 'list', of: { kind: 'object', fields: { a: { kind: 'number', default: 1 } } }, default: [{ a: 1 }] },
+    };
+    const first = validate({}, schema);
+    const second = validate({}, schema);
+    (first.value.stops as { a: number }[])[0].a = 999;
+    expect((second.value.stops as { a: number }[])[0].a).toBe(1);
+    expect((schema.stops as { default: { a: number }[] }).default[0].a).toBe(1);
+  });
+
+  it('gives each caller its own copy of a nested list default', () => {
+    const schema: Schema = {
+      grid: { kind: 'list', of: { kind: 'list', of: { kind: 'number', default: 0 } }, default: [[1, 2]] },
+    };
+    const first = validate({}, schema);
+    (first.value.grid as number[][])[0].push(3);
+    expect((validate({}, schema).value.grid as number[][])[0]).toEqual([1, 2]);
+  });
+});
+
+describe('schema depth', () => {
+  it('reports a cyclic schema instead of overflowing the stack', () => {
+    const cyclic = { kind: 'object', fields: {} } as unknown as FieldSchema & { fields: Schema };
+    cyclic.fields.child = cyclic;
+    expect(() => defaultOf(cyclic)).not.toThrow();
+    const { diagnostics } = validate({ root: {} }, { root: cyclic });
+    expect(diagnostics.some((d) => d.code === 'schema/too-deep')).toBe(true);
   });
 });
