@@ -3,8 +3,8 @@
  *
  * These kinds are deliberately DOMAIN-aware rather than generic JSON Schema types: `asset` becomes
  * an asset picker in the IDE, `symbol` a list drawn from the game spec, `spinPath` a picker over
- * the spin schema. That difference is what separates "configured through the UI" from "a form of
- * fifteen text inputs". Conversion to JSON Schema, for the marketplace and the agent, comes later.
+ * the spin schema. That difference is what separates configuration through the UI from a form of
+ * fifteen text inputs. Conversion to JSON Schema, for the marketplace and the agent, comes later.
  */
 
 export interface FieldBase {

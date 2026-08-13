@@ -40,7 +40,7 @@ function usableId(manifest: unknown): manifest is { id: string } {
 function projectPlugins(project: unknown, diagnostics: Diagnostic[]): Record<string, unknown> {
   if (!isPlainObject(project) || !isPlainObject((project as { plugins?: unknown }).plugins)) {
     diagnostics.push(
-      error('resolve/invalid-project', 'The project document must be an object with a "plugins" object.', {
+      error('resolve/invalid-project', 'The project data must be an object with a "plugins" object.', {
         fix: 'Provide { plugins: { "plugin-id": { version: "^1.0.0" } } }.',
       }),
     );
