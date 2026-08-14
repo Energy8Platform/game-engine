@@ -38,36 +38,66 @@ describe('детект запуска на Artube', () => {
 });
 
 /**
- * `apiBase` = КАТАЛОГ страницы запуска, а не её origin.
+ * `apiBase` = путь страницы запуска, ПЕРЕВЕШЕННЫЙ ПОД `/api`.
  *
- * Реальный деплой Artube монтирует игру под пер-игровым префиксом пути
- * (`https://dev.artube-888.live/artube-o7df8qem5k/`), и бэкенд той же игры
- * живёт под ТЕМ ЖЕ префиксом. Вывод из origin выбрасывал префикс и уводил
- * сокет на чужой (несуществующий) `/api/ws` в корне домена — см.
- * `docs/artube-integration.md`.
+ * Снято с живого стенда, а не выведено из общих соображений:
+ *
+ * ```
+ * страница   https://dev.artube-888.live/artube-o7df8qem5k/?sessionId=…&gameId=…
+ * бэкенд     wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws?sessionId=…
+ * ```
+ *
+ * Фронт — бакет CDN под `/<slug>/`; бэкенд — маршрут прокси `/api/<slug>/**`,
+ * и наш собственный `/api/ws` остаётся на конце (удвоенное `api` настоящее).
+ * Две прошлых версии брали origin (0.1.0) и каталог страницы (0.1.1) — обе
+ * попадали туда, где бэкенда нет. См. `docs/artube-integration.md`.
  */
-describe('apiBase выводится из каталога страницы запуска', () => {
+describe('apiBase = путь страницы, перевешенный под /api', () => {
   const apiBaseOf = (href: string) => parseArtubeUrl(href).apiBase;
 
-  it('пер-игровой префикс пути со слэшем на конце — тот самый прод-случай', () => {
+  it('пер-игровой префикс пути — тот самый прод-случай, снятый со стенда', () => {
     expect(
       apiBaseOf(
         'https://dev.artube-888.live/artube-o7df8qem5k/' +
           '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160&gameId=artube-o7df8qem5k',
       ),
-    ).toBe('https://dev.artube-888.live/artube-o7df8qem5k');
+    ).toBe('https://dev.artube-888.live/api/artube-o7df8qem5k');
   });
 
-  it('корень домена (локальный дев и пер-игровой поддомен) — просто origin', () => {
+  it('мост из этого собирает ровно живой адрес сокета', () => {
+    // Тот же расчёт, что в конструкторе ArtubeBridge: base + '/api/ws'.
+    const p = parseArtubeUrl(
+      'https://dev.artube-888.live/artube-o7df8qem5k/' +
+        '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160&gameId=artube-o7df8qem5k',
+    );
+    expect(`${p.apiBase.replace(/^http/, 'ws')}/api/ws?sessionId=${p.sessionId}`).toBe(
+      'wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws' +
+        '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160',
+    );
+  });
+
+  it('корень — просто origin: перевешивать нечего, `/api/api/ws` не появляется', () => {
+    // Дев (вайт отдаёт игру в корне и проксирует `/api`) и гипотетический
+    // прод в корне пер-игрового поддомена — одна и та же форма.
     expect(apiBaseOf('http://localhost:5175/?sessionId=s')).toBe('http://localhost:5175');
     expect(apiBaseOf('https://example-game.artube-888.live/?sessionId=s')).toBe(
       'https://example-game.artube-888.live',
     );
   });
 
+  it('префикс берётся из ПУТИ, а не из ?gameId=', () => {
+    // gameId пишет автор ссылки, и игрок правит его свободно; путь — это то,
+    // откуда CDN отдал сам код игры. Подменённый gameId адрес не двигает.
+    expect(
+      apiBaseOf('https://host/artube-xxx/?sessionId=s&gameId=artube-someone-elses'),
+    ).toBe('https://host/api/artube-xxx');
+    // И наоборот: gameId нет вовсе — вывод не меняется.
+    expect(apiBaseOf('https://host/artube-xxx/?sessionId=s')).toBe('https://host/api/artube-xxx');
+  });
+
   it('URL заканчивается файлом (index.html) — файл отбрасывается', () => {
     expect(apiBaseOf('https://host/artube-xxx/index.html?sessionId=s')).toBe(
-      'https://host/artube-xxx',
+      'https://host/api/artube-xxx',
     );
     expect(apiBaseOf('https://host/index.html?sessionId=s')).toBe('https://host');
   });
@@ -75,48 +105,48 @@ describe('apiBase выводится из каталога страницы за
   it('префикс без слэша на конце — последний сегмент всё равно каталог', () => {
     // Сервер на такой адрес обычно отвечает 301 на вариант со слэшем, но
     // полагаться на редирект нельзя: сюда мы можем попасть и до него.
-    expect(apiBaseOf('https://host/artube-xxx?sessionId=s')).toBe('https://host/artube-xxx');
+    expect(apiBaseOf('https://host/artube-xxx?sessionId=s')).toBe('https://host/api/artube-xxx');
   });
 
   it('вложенный префикс сохраняется целиком', () => {
     expect(apiBaseOf('https://host/games/artube-xxx/?sessionId=s')).toBe(
-      'https://host/games/artube-xxx',
+      'https://host/api/games/artube-xxx',
     );
     expect(apiBaseOf('https://host/games/artube-xxx/index.html?sessionId=s')).toBe(
-      'https://host/games/artube-xxx',
+      'https://host/api/games/artube-xxx',
     );
   });
 
   it('query и фрагмент в вывод не попадают', () => {
     expect(apiBaseOf('https://host/artube-xxx/?sessionId=s&lang=ru&device=mobile#anchor')).toBe(
-      'https://host/artube-xxx',
+      'https://host/api/artube-xxx',
     );
   });
 
   it('нестандартный порт — часть адреса бэкенда', () => {
     expect(apiBaseOf('http://127.0.0.1:8080/artube-xxx/?sessionId=s')).toBe(
-      'http://127.0.0.1:8080/artube-xxx',
+      'http://127.0.0.1:8080/api/artube-xxx',
     );
   });
 
   it('каталог с точкой в имени распознаётся по слэшу на конце', () => {
     expect(apiBaseOf('https://host/artube-xxx/v1.2/?sessionId=s')).toBe(
-      'https://host/artube-xxx/v1.2',
+      'https://host/api/artube-xxx/v1.2',
     );
   });
 
   it('Location (а не строка) разбирается так же — это то, что даёт браузер', () => {
     const location = { href: 'https://host/artube-xxx/?sessionId=s' } as Location;
-    expect(parseArtubeUrl(location).apiBase).toBe('https://host/artube-xxx');
+    expect(parseArtubeUrl(location).apiBase).toBe('https://host/api/artube-xxx');
   });
 
-  it('вывод идёт от КАТАЛОГА страницы, а не от корня префикса', () => {
+  it('вывод идёт от КАТАЛОГА страницы, а не от первого её сегмента', () => {
     // Допущение, на котором стоит вывод: index.html лежит в корне того самого
-    // каталога, под которым проксируется `/api` — это и есть то, что кладёт
-    // сборка (`base: './'`, один index.html в корне артефакта). Страница на
-    // уровень глубже дала бы и `apiBase` на уровень глубже.
+    // пути, который платформа перевешивает под `/api` — это и есть то, что
+    // кладёт сборка (`base: './'`, один index.html в корне артефакта).
+    // Страница на уровень глубже даёт и `apiBase` на уровень глубже.
     expect(apiBaseOf('https://host/artube-xxx/game/index.html?sessionId=s')).toBe(
-      'https://host/artube-xxx/game',
+      'https://host/api/artube-xxx/game',
     );
   });
 });

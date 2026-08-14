@@ -7,8 +7,8 @@
  * Элемент `<base>` НЕ двигает адрес бэкенда.
  *
  * `<base href>` переопределяет разрешение относительных ссылок В ДОКУМЕНТЕ —
- * им уводят ассеты на CDN. Бэкенд же смонтирован под путём, по которому
- * открыта САМА страница, поэтому вывод идёт от `location`, а не от
+ * им уводят ассеты на CDN. Бэкенд же смонтирован относительно адреса, по
+ * которому открыта САМА страница, поэтому вывод идёт от `location`, а не от
  * `document.baseURI`: иначе игра с ассетами на CDN искала бы `/api/ws` на
  * CDN.
  *
@@ -25,10 +25,10 @@ afterEach(() => {
 });
 
 describe('<base> в документе', () => {
-  it('без <base> каталог страницы даёт префиксный apiBase', () => {
+  it('без <base> путь страницы даёт префиксный apiBase', () => {
     expect(document.baseURI).toBe('https://dev.artube-888.live/artube-o7df8qem5k/?sessionId=s1');
     expect(parseArtubeUrl(document.location).apiBase).toBe(
-      'https://dev.artube-888.live/artube-o7df8qem5k',
+      'https://dev.artube-888.live/api/artube-o7df8qem5k',
     );
   });
 
@@ -39,7 +39,7 @@ describe('<base> в документе', () => {
 
     expect(document.baseURI).toBe('https://cdn.example.com/assets/');
     expect(parseArtubeUrl(document.location).apiBase).toBe(
-      'https://dev.artube-888.live/artube-o7df8qem5k',
+      'https://dev.artube-888.live/api/artube-o7df8qem5k',
     );
   });
 });

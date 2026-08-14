@@ -426,9 +426,10 @@ describe('ArtubeBridge', () => {
 });
 
 /**
- * Адрес сокета: `${apiBase}/api/ws`, где `apiBase` — каталог страницы запуска
- * (см. `detect.test.ts`). Здесь проверяется вторая половина: что мост
- * действительно строит на нём адрес и переводит схему http→ws.
+ * Адрес сокета: `${apiBase}/api/ws`, где `apiBase` — путь страницы запуска,
+ * перевешенный под `/api` (см. `detect.test.ts`). Здесь проверяется вторая
+ * половина: что мост действительно строит на нём адрес и переводит схему
+ * http→ws.
  */
 describe('адрес сокета', () => {
   const socketUrl = (opts: Record<string, unknown>): string => {
@@ -441,7 +442,7 @@ describe('адрес сокета', () => {
     return url;
   };
 
-  it('прод: пер-игровой префикс пути попадает в адрес сокета', () => {
+  it('прод: сокет уезжает на /api/<префикс>/api/ws — адрес снят с живого стенда', () => {
     expect(
       socketUrl({
         url:
@@ -449,7 +450,7 @@ describe('адрес сокета', () => {
           '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160&gameId=artube-o7df8qem5k',
       }),
     ).toBe(
-      'wss://dev.artube-888.live/artube-o7df8qem5k/api/ws' +
+      'wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws' +
         '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160',
     );
   });
@@ -477,7 +478,7 @@ describe('адрес сокета', () => {
 
   it('sessionId уезжает закодированным', () => {
     expect(socketUrl({ url: 'https://host/artube-x/?sessionId=a%2Fb%3Fc' })).toBe(
-      'wss://host/artube-x/api/ws?sessionId=a%2Fb%3Fc',
+      'wss://host/api/artube-x/api/ws?sessionId=a%2Fb%3Fc',
     );
   });
 });

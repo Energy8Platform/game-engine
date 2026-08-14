@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/artube-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Drop-in host-side wrapper that lets a game built against @energy8platform/game-sdk run on Artube",
   "author": "Energy8 Platform",
   "license": "MIT",
