@@ -1,4 +1,4 @@
-import { type Diagnostic, error, warning } from '../diagnostics';
+import { type Diagnostic, describeError, error, warning } from '../diagnostics';
 import { checkManifestShape } from '../manifest/define';
 import type { Contribution, PluginManifest } from '../manifest/types';
 import { mergeSchemas } from '../schema/merge';
@@ -147,7 +147,10 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       diagnostics.push(
         error(
           'resolve/version-mismatch',
-          `"${pluginId}" is installed at ${String(manifest.version)}, which does not satisfy ${entry.version === undefined ? '<missing>' : String(entry.version)}.`,
+          // describeError, not String(): manifest.version/entry.version are untrusted data (manifest
+          // and project.json respectively) that can reach here as anything, including a null-prototype
+          // value or a throwing Symbol.toStringTag getter — both of which String() throws on.
+          `"${pluginId}" is installed at ${describeError(manifest.version)}, which does not satisfy ${entry.version === undefined ? '<missing>' : describeError(entry.version)}.`,
           { pluginId, fix: `Change the range in project.json, or install a matching version.` },
         ),
       );
@@ -157,7 +160,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       diagnostics.push(
         error(
           'resolve/engine-mismatch',
-          `"${pluginId}" needs kernel ${String(manifest.engine)}, but this kernel is ${String(kernelVersion)}.`,
+          `"${pluginId}" needs kernel ${describeError(manifest.engine)}, but this kernel is ${describeError(kernelVersion)}.`,
           { pluginId, fix: 'Upgrade the kernel, or use a build of the plugin that fits it.' },
         ),
       );
@@ -190,7 +193,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
         diagnostics.push(
           error(
             'resolve/dependency-version',
-            `"${manifest.id}" needs "${depId}" ${String(range)}, but ${String(dep.version)} is installed.`,
+            `"${manifest.id}" needs "${depId}" ${describeError(range)}, but ${describeError(dep.version)} is installed.`,
             { pluginId: manifest.id },
           ),
         );
@@ -279,11 +282,13 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       for (const contribution of list as Contribution[]) {
         if (!isPlainObject(contribution)) continue; // checkManifestShape already reported manifest/bad-contribution
 
-        // A hostile id (missing, a Symbol, a number) must not reach a template literal unguarded:
-        // implicit coercion throws on a Symbol where String() does not. Normalizing once here means
-        // every downstream read of ResolvedContribution.id — including every .join() below — is
-        // already safe, rather than needing its own guard.
-        const contributionId = typeof contribution.id === 'string' ? contribution.id : String(contribution.id);
+        // A hostile id (missing, a Symbol, a null-prototype object, a number) must not reach a
+        // template literal unguarded: implicit coercion throws on a Symbol, and String() throws in
+        // turn on a null-prototype value or a throwing Symbol.toStringTag getter — describeError is
+        // the one of the three that is actually total. Normalizing once here means every downstream
+        // read of ResolvedContribution.id — including every .join() below — is already safe, rather
+        // than needing its own guard.
+        const contributionId = typeof contribution.id === 'string' ? contribution.id : describeError(contribution.id);
         const key = `${pointId}:${contributionId}`;
         const tag = { pluginId: manifest.id, pointId, contributionId };
 
@@ -437,7 +442,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
       // other malformed-manifest-data case in this function.
       if (typeof hook !== 'string' || hook.length === 0) {
         diagnostics.push(
-          error('resolve/bad-hook', `"${manifest.id}" declares a hook that is not a usable string: ${String(hook)}.`, {
+          error('resolve/bad-hook', `"${manifest.id}" declares a hook that is not a usable string: ${describeError(hook)}.`, {
             pluginId: manifest.id,
             fix: 'Hook ids must be non-empty strings.',
           }),

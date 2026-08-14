@@ -233,6 +233,25 @@ describe('matchers survive hostile input — describeMatcher edge cases', () => 
     expect(describeMatcher({ buildTarget: Symbol('stake') as never })).toBe('when the build target is "Symbol(stake)"');
   });
 
+  // Task 11 review round 1: `String()` — the fix round 1 idiom above — is itself not total. It threw
+  // for a null-prototype value (nothing to coerce with) and, separately, for a plain object with a
+  // throwing `Symbol.toStringTag` getter — the exact two hostile shapes `describeError` exists to
+  // survive. Confirmed against the pre-fix source: `describeMatcher({ urlParam: Object.create(null) })`
+  // itself threw, and so did `resolvePlan` through it (every contribution to an `arity:'one'` point
+  // with an `activateWhen` gets `describeMatcher`d unconditionally, winner or loser).
+  it('describes a matcher whose fields cannot be stringified, instead of throwing', () => {
+    expect(() => describeMatcher({ urlParam: Object.create(null) as unknown as string })).not.toThrow();
+    expect(typeof describeMatcher({ urlParam: Object.create(null) as unknown as string })).toBe('string');
+
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('boom');
+      },
+    } as unknown as string;
+    expect(() => describeMatcher({ buildTarget: hostile })).not.toThrow();
+    expect(typeof describeMatcher({ buildTarget: hostile })).toBe('string');
+  });
+
   it('handles isDefaultMatcher with null, undefined, and {}', () => {
     expect(isDefaultMatcher(null as any)).toBe(false);
     expect(isDefaultMatcher(undefined)).toBe(false);

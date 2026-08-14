@@ -95,14 +95,18 @@ export function createHookBus(opts: HookBusOptions): HookBus {
       const hookName = typeof hook === 'string' ? hook : undefined;
       const pluginName = typeof pluginId === 'string' ? pluginId : undefined;
 
+      // hook/pluginId are `on()`'s own raw parameters — unlike `hookName`/`pluginName`, TypeScript
+      // types them as `string` but nothing enforces that at runtime, so the branches below that fire
+      // for a NON-string value must describe it with `describeError`, not `String()`: a null-prototype
+      // value or a throwing `Symbol.toStringTag` getter makes `String()` throw in turn.
       if (hookName === undefined || !ids.includes(hookName)) {
-        return error('hooks/unknown', `There is no hook called "${String(hook)}".`, {
+        return error('hooks/unknown', `There is no hook called "${describeError(hook)}".`, {
           pluginId: pluginName,
           fix: fixForUnknown,
         });
       }
       if (pluginName === undefined || !(declared.get(pluginName) ?? []).includes(hookName)) {
-        return error('hooks/undeclared', `"${String(pluginId)}" uses hook "${hookName}" without declaring it.`, {
+        return error('hooks/undeclared', `"${describeError(pluginId)}" uses hook "${hookName}" without declaring it.`, {
           pluginId: pluginName,
           fix: `Add \`hooks: ['${hookName}']\` to the plugin manifest.`,
         });
@@ -156,7 +160,9 @@ export function createHookBus(opts: HookBusOptions): HookBus {
         overflow.push(
           error(
             'hooks/recursion-limit',
-            `Hook "${String(hook)}" recursed past ${MAX_HOOK_DEPTH} nested emit() calls — this usually means two hooks are triggering each other.`,
+            // `hook` is `emit()`'s own raw parameter, not narrowed the way `on()` narrows `hookName` —
+            // describeError(), not String(), for the same reason as `on()`'s messages above.
+            `Hook "${describeError(hook)}" recursed past ${MAX_HOOK_DEPTH} nested emit() calls — this usually means two hooks are triggering each other.`,
             { fix: 'Break the cycle: avoid emitting a hook from directly inside another handler chain for a hook.' },
           ),
         );
@@ -194,8 +200,11 @@ export function createHookBus(opts: HookBusOptions): HookBus {
             }
             await result;
           } catch (err) {
+            // `pluginId` here is the one `on()` stored for this handler — already a real string by
+            // construction (`on()` refuses to register one that isn't) — but `hook` is still `emit()`'s
+            // own raw, unnarrowed parameter, so it gets the same describeError() treatment as above.
             diagnostics.push(
-              error('hooks/handler-failed', `"${pluginId}" failed in hook "${String(hook)}": ${describeError(err)}`, {
+              error('hooks/handler-failed', `"${pluginId}" failed in hook "${describeError(hook)}": ${describeError(err)}`, {
                 pluginId,
               }),
             );

@@ -213,6 +213,16 @@ describe('createHookBus — on() hostile pluginId', () => {
     expect(diagnostic).toMatchObject({ code: 'hooks/undeclared' });
     expect(diagnostic?.message).toContain('Symbol(plugin)');
   });
+
+  // Task 11 review round 1: a Symbol didn't throw building this message (String(Symbol(...)) is
+  // fine), but String() itself is not total — it throws for a null-prototype value, which a Symbol
+  // test alone does not catch. describeError does.
+  it('pluginId: a null-prototype value does not throw building the "undeclared" message', () => {
+    const b = bus();
+    const hostile = Object.create(null);
+    expect(() => b.on(hostile as never, 'bootstrap', vi.fn())).not.toThrow();
+    expect(b.on(hostile as never, 'bootstrap', vi.fn())).toMatchObject({ code: 'hooks/undeclared' });
+  });
 });
 
 describe('createHookBus — on() hostile hook', () => {
@@ -229,6 +239,15 @@ describe('createHookBus — on() hostile hook', () => {
     const diagnostic = b.on('a', sym as never, vi.fn());
     expect(diagnostic).toMatchObject({ code: 'hooks/unknown' });
     expect(diagnostic?.message).toContain('Symbol(hook)');
+  });
+
+  // Task 11 review round 1: same gap as the pluginId case above — String() throws for a
+  // null-prototype value even though it survives a Symbol.
+  it('hook: a null-prototype value does not throw building the "unknown hook" message', () => {
+    const b = bus();
+    const hostile = Object.create(null);
+    expect(() => b.on('a', hostile as never, vi.fn())).not.toThrow();
+    expect(b.on('a', hostile as never, vi.fn())).toMatchObject({ code: 'hooks/unknown' });
   });
 
   it('hook: "" is refused as unknown, not silently accepted', () => {
@@ -537,6 +556,38 @@ describe('createHookBus — cross-hook emit cycles', () => {
     const results = await Promise.all(ids.map((id) => b.emit(id)));
     expect(ran).toHaveLength(25);
     expect(results.flat()).toEqual([]);
+  });
+
+  // Task 11 review round 1: the recursion-limit diagnostic's own message built `String(hook)` on
+  // `emit()`'s raw, unnarrowed parameter. Reaching it with a hostile hook value requires a void-fired
+  // nested emit() — this bus's own established "notify and move on" shape, and exactly how deep
+  // synchronous recursion is built elsewhere in this file — that carries a hostile hook once already
+  // past MAX_HOOK_DEPTH. Because `emit()` is async, `String(hook)` throwing there does not surface as
+  // a synchronous exception to any caller; it turns the void-fired call's own promise into an
+  // UNHANDLED REJECTION instead — which is what this test actually detects, via Node's own
+  // `unhandledRejection` event, rather than a plain `.not.toThrow()` (which would pass trivially for
+  // an async function regardless of whether this bug were still present). Confirmed reachable against
+  // a plain-JS mirror of the pre-fix logic before writing this: the hostile call's rejection was
+  // exactly what crashed the reproduction script.
+  it('does not produce an unhandled rejection when a void-fired nested emit() carries a hostile hook id, deep in synchronous recursion', async () => {
+    const b = createHookBus({ ids: ['x'], declared: { p: ['x'] } });
+    const hostileHook = Object.create(null);
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      b.on('p', 'x', () => {
+        void b.emit('x');
+        void b.emit(hostileHook as never);
+      });
+      const diagnostics = await b.emit('x');
+      expect(diagnostics.some((d) => d.code === 'hooks/recursion-limit')).toBe(true);
+      // Let any fire-and-forgotten promise rejections actually surface before asserting on them.
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(rejections).toEqual([]);
   });
 });
 

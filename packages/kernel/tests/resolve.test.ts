@@ -1634,3 +1634,120 @@ describe('Task 11 hardening (b) — a prototype-shaped hook id does not throw in
     expect(roundTripped.hooks['constructor']).toEqual(['x']);
   });
 });
+
+// Task 11 review round 1: `String()` — reused throughout resolve.ts to describe untrusted manifest/
+// project data in diagnostic messages — is not total. It throws for a null-prototype value and for a
+// value with a throwing `Symbol.toStringTag` getter, the same two hostile shapes `describeError`
+// exists to survive. `describeMatcher(contribution.activateWhen)` runs unconditionally in step 5, for
+// EVERY contribution to an `arity:'one'` point that declares one — not a rare branch — so this made
+// `resolvePlan` itself throw. Confirmed against the pre-fix source before fixing, not assumed.
+describe('Task 11 review round 1 — describeError, not String(): resolvePlan must not crash on unstringifiable data', () => {
+  it('resolves a plan whose activateWhen carries an unstringifiable urlParam, instead of throwing', () => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const weird: PluginManifest = {
+      id: 'weird',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: {
+        sp: [{ id: 'weird', activateWhen: { urlParam: Object.create(null) as never }, doc: 'x', create: noop }],
+      },
+    };
+    const input = {
+      project: { plugins: { host: { version: '*' }, weird: { version: '*' } } },
+      manifests: [host, weird],
+      launch,
+      kernelVersion: KERNEL,
+    };
+    expect(() => resolvePlan(input)).not.toThrow();
+    const { plan } = resolvePlan(input);
+    // Not matched (the urlParam is absent from `launch.url`), so it falls through to activationLabel
+    // via describeMatcher — the exact call that threw pre-fix — without resolution itself aborting.
+    expect(typeof plan.contributions[0].activationLabel).toBe('string');
+  });
+
+  it('reports resolve/version-mismatch without throwing when manifest.version or the project range is unstringifiable', () => {
+    const manifest: PluginManifest = { id: 'x', version: Object.create(null) as never, engine: '^0.1.0' };
+    const input1 = { project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL };
+    expect(() => resolvePlan(input1)).not.toThrow();
+
+    const ok: PluginManifest = { id: 'y', version: '1.0.0', engine: '^0.1.0' };
+    const input2 = {
+      project: { plugins: { y: { version: Object.create(null) as never } } },
+      manifests: [ok],
+      launch,
+      kernelVersion: KERNEL,
+    };
+    expect(() => resolvePlan(input2)).not.toThrow();
+  });
+
+  it('reports resolve/engine-mismatch without throwing when manifest.engine or kernelVersion is unstringifiable', () => {
+    const manifest: PluginManifest = { id: 'x', version: '1.0.0', engine: Object.create(null) as never };
+    const input1 = { project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL };
+    expect(() => resolvePlan(input1)).not.toThrow();
+
+    const ok: PluginManifest = { id: 'y', version: '1.0.0', engine: '^0.1.0' };
+    const input2 = {
+      project: { plugins: { y: { version: '*' } } },
+      manifests: [ok],
+      launch,
+      kernelVersion: Object.create(null) as never,
+    };
+    expect(() => resolvePlan(input2)).not.toThrow();
+  });
+
+  it('reports resolve/dependency-version without throwing when the range or the dependency version is unstringifiable', () => {
+    const core: PluginManifest = { id: 'core', version: Object.create(null) as never, engine: '^0.1.0' };
+    const dep: PluginManifest = { id: 'dep', version: '1.0.0', engine: '^0.1.0', dependsOn: { core: '^1.0.0' } };
+    expect(() =>
+      resolvePlan({
+        project: { plugins: { core: { version: '*' }, dep: { version: '*' } } },
+        manifests: [core, dep],
+        launch,
+        kernelVersion: KERNEL,
+      }),
+    ).not.toThrow();
+
+    const core2: PluginManifest = { id: 'core2', version: '1.0.0', engine: '^0.1.0' };
+    const dep2: PluginManifest = {
+      id: 'dep2',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      dependsOn: { core2: Object.create(null) as never },
+    };
+    expect(() =>
+      resolvePlan({
+        project: { plugins: { core2: { version: '*' }, dep2: { version: '*' } } },
+        manifests: [core2, dep2],
+        launch,
+        kernelVersion: KERNEL,
+      }),
+    ).not.toThrow();
+  });
+
+  it('reports resolve/bad-hook without throwing when the hook id is unstringifiable', () => {
+    const manifest: PluginManifest = { id: 'x', version: '1.0.0', engine: '^0.1.0', hooks: [Object.create(null) as never] };
+    const input = { project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL };
+    expect(() => resolvePlan(input)).not.toThrow();
+    const { diagnostics } = resolvePlan(input);
+    expect(diagnostics.some((d) => d.code === 'resolve/bad-hook')).toBe(true);
+  });
+
+  it('does not throw when a contribution id is unstringifiable (null-prototype, not just a Symbol)', () => {
+    const manifest: PluginManifest = {
+      id: 'x',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { p: { phase: 'runtime', arity: 'many', schema: {}, doc: 'd' } },
+      contributes: { p: [{ id: Object.create(null) as never, doc: 'd', create: noop }] },
+    };
+    const input = { project: { plugins: { x: { version: '*' } } }, manifests: [manifest], launch, kernelVersion: KERNEL };
+    expect(() => resolvePlan(input)).not.toThrow();
+    const { plan } = resolvePlan(input);
+    expect(typeof plan.contributions[0].id).toBe('string');
+  });
+});

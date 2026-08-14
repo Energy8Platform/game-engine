@@ -169,8 +169,13 @@ The recursion this guarantee has to bound is capped rather than left to overflow
 `MAX_SCHEMA_DEPTH` (32) for nested `object`/`list` schema fields, `MAX_HOOK_DEPTH` (16) for
 synchronously re-entrant `emit()` calls. `isPlainObject`, `isUsableField` and `cloneValue` are the
 shared guards that make the schema and manifest code paths safe against hostile shapes (`null`,
-an array where an object was expected, a value with no `toString`); `describeError` is the total
-describer every catch block uses to turn an unknown thrown value into a message string.
+an array where an object was expected, a Proxy whose own `getPrototypeOf` trap throws); every
+diagnostic message that has to describe an untrusted value — a caught exception, but just as often
+a plain manifest field like a version or a hook id that turned out not to be a real string — goes
+through the one total describer, `describeError`, rather than a bare `String()`. `String()` looks
+total and is not: it throws for a null-prototype value and again for a value with a throwing
+`Symbol.toStringTag` getter, so every one of those call sites is a real, if narrow, way for this
+contract to be false. `describeError` is what actually is.
 
 Two things are **deliberately** not covered, by design rather than by omission:
 

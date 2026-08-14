@@ -1,4 +1,4 @@
-import { type Diagnostic, error } from '../diagnostics';
+import { type Diagnostic, describeError, error } from '../diagnostics';
 import { isPlainObject, isUsableField, MAX_SCHEMA_DEPTH } from '../schema/validate';
 import type { PluginManifest } from './types';
 
@@ -86,12 +86,14 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
   if (!manifest.id || typeof manifest.id !== 'string') {
     out.push(error('manifest/missing-id', 'A plugin manifest needs an id.', { fix: `Add \`id: '@scope/name'\`.` }));
   }
-  // String(), not the raw value or `?? ''`: RegExp#test and a template literal both call the engine's
-  // internal ToString on their argument, which THROWS for a Symbol (`manifest.version` is untrusted
-  // manifest data, so this is reachable). String() is ToString's non-throwing cousin — same text for
-  // every value that was already safe (including `undefined`, which stringifies to "undefined" either
-  // way), and no crash for the one value shape that was not.
-  const versionText = String(manifest.version);
+  // describeError(), not the raw value, `?? ''`, or String(): RegExp#test and a template literal both
+  // call the engine's internal ToString on their argument, which THROWS for a Symbol (`manifest.version`
+  // is untrusted manifest data, so this is reachable). String() is not the fix either — it throws in
+  // turn for a null-prototype value and for a value with a throwing `Symbol.toStringTag` getter, both
+  // equally reachable here. describeError is the one of the three that is actually total: same text as
+  // String() for every value that was already safe (including `undefined`, which stringifies to
+  // "undefined" either way), and no crash for the value shapes that were not.
+  const versionText = describeError(manifest.version);
   if (!SEMVER.test(versionText)) {
     out.push(
       error('manifest/bad-version', `Version "${versionText}" is not semver (major.minor.patch).`, {
@@ -179,8 +181,10 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
       }
 
       // Same reasoning as manifest.version above: contribution.id is untrusted manifest data, and a
-      // Symbol id would otherwise throw inside the very first template literal that names it.
-      const contributionId = typeof contribution.id === 'string' ? contribution.id : String(contribution.id);
+      // Symbol id would otherwise throw inside the very first template literal that names it — as
+      // would a null-prototype id or one with a throwing Symbol.toStringTag getter, which is why this
+      // is describeError() rather than String().
+      const contributionId = typeof contribution.id === 'string' ? contribution.id : describeError(contribution.id);
 
       if (seen.has(contributionId)) {
         out.push(

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Diagnostic } from '@/diagnostics';
 import type { FieldSchema, Schema } from '@/schema/types';
-import { defaultOf, validate } from '@/schema/validate';
+import { defaultOf, isPlainObject, validate } from '@/schema/validate';
 
 const FEATURE: Schema = {
   enabled: { kind: 'boolean', default: true },
@@ -324,5 +324,57 @@ describe('an enum field with malformed options never throws (Task 11 hardening a
       expect(validate({ direction: 'horizontal' }, schema).diagnostics).toEqual([]);
       expect(validate({ direction: 'diagonal' }, schema).diagnostics[0]).toMatchObject({ code: 'schema/not-an-option' });
     });
+  });
+});
+
+// Task 11 review round 1: `schema/not-an-option`'s message built `String(raw)` on the untrusted
+// settings value being validated. `raw` reaches this from project.json — or, since `validate()` is
+// itself a public export, from a hand-built input passed directly to it — so a null-prototype value
+// or a value with a throwing Symbol.toStringTag getter reaches it exactly like everywhere else this
+// bug class showed up. It is now describeError(), which is total.
+describe('an enum field reports a not-an-option value that cannot be stringified, instead of throwing (Task 11 review round 1)', () => {
+  const schema: Schema = {
+    direction: {
+      kind: 'enum',
+      options: [{ value: 'vertical', label: 'Vertical' }],
+    },
+  };
+
+  it('does not throw for a null-prototype settings value', () => {
+    const raw = Object.create(null);
+    expect(() => validate({ direction: raw }, schema)).not.toThrow();
+    const { value, diagnostics } = validate({ direction: raw }, schema);
+    expect(value.direction).toBe('vertical'); // falls back to the default
+    expect(diagnostics[0]).toMatchObject({ code: 'schema/not-an-option' });
+  });
+
+  it('does not throw for a settings value whose Symbol.toStringTag getter itself throws', () => {
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('boom');
+      },
+    };
+    expect(() => validate({ direction: hostile }, schema)).not.toThrow();
+  });
+});
+
+// Task 11 review round 1 (Minor): `isPlainObject` reads `Object.getPrototypeOf(value)` unguarded, so
+// a Proxy whose `getPrototypeOf` trap itself throws makes it throw — reachable through
+// `resolvePlan -> checkManifestShape -> checkSchemaFields -> isUsableField -> isPlainObject`. This
+// module is now a public export the README calls "the shared hostile-input guard"; a guard advertised
+// by name should not itself be a throw site.
+describe('isPlainObject does not throw on a Proxy that hides its own prototype (Task 11 review round 1)', () => {
+  it('treats a Proxy with a throwing getPrototypeOf trap as not plain, rather than throwing', () => {
+    const hostile = new Proxy({}, { getPrototypeOf() { throw new Error('boom'); } });
+    expect(() => isPlainObject(hostile)).not.toThrow();
+    expect(isPlainObject(hostile)).toBe(false);
+  });
+
+  it('is unaffected for an ordinary plain object and an ordinary null-prototype object (no regression)', () => {
+    expect(isPlainObject({})).toBe(true);
+    expect(isPlainObject(Object.create(null))).toBe(true);
+    expect(isPlainObject([])).toBe(false);
+    expect(isPlainObject(new Date())).toBe(false);
+    expect(isPlainObject(null)).toBe(false);
   });
 });

@@ -73,11 +73,14 @@ export function describeMatcher(matcher: Matcher | undefined | null): string {
   if (!matcher) return 'always';
 
   // urlParam/buildTarget are typed as string but a manifest author can hand this a Symbol (or any
-  // other value) at runtime; String() renders it without throwing, unlike the template literal's own
-  // implicit coercion. `matches()` never has this problem — it only ever compares these with `===`.
+  // other value) at runtime; a template literal's own implicit coercion throws on a Symbol. `String()`
+  // is not the fix either — it throws on a null-prototype value and again on a value with a throwing
+  // `Symbol.toStringTag` getter, the exact hostile shapes `describeError` exists to survive. Reused
+  // here for the identical reason it exists in the first place: total, not "usually fine".
+  // `matches()` never has this problem — it only ever compares these with `===`.
   const parts: string[] = [];
-  if (matcher.urlParam !== undefined) parts.push(`when ?${String(matcher.urlParam)} is present`);
-  if (matcher.buildTarget !== undefined) parts.push(`when the build target is "${String(matcher.buildTarget)}"`);
+  if (matcher.urlParam !== undefined) parts.push(`when ?${describeError(matcher.urlParam)} is present`);
+  if (matcher.buildTarget !== undefined) parts.push(`when the build target is "${describeError(matcher.buildTarget)}"`);
   if (matcher.match !== undefined) parts.push('when a custom rule matches');
   if (parts.length === 0 && matcher.default === true) return 'when nothing else matches';
 

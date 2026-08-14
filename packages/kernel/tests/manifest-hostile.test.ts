@@ -311,3 +311,46 @@ describe('Task 11 hardening (a) — an enum field with malformed "options" is re
     ).not.toThrow();
   });
 });
+
+// Task 11 review round 1: checkManifestShape's `String(manifest.version)` and
+// `String(contribution.id)` fallbacks handled a Symbol (see the "Symbol version and Symbol
+// contribution id" test above) but not a null-prototype value or a value with a throwing
+// Symbol.toStringTag getter — both of which make String() itself throw, same as everywhere else this
+// bug class showed up. Both are now describeError(), which is total.
+describe('Task 11 review round 1 — describeError, not String(): a null-prototype value must not crash checkManifestShape', () => {
+  it('does not throw, and still reports manifest/bad-version, for a null-prototype version', () => {
+    const d = checkManifestShape({
+      id: 'x',
+      version: Object.create(null) as never,
+      engine: '^0.1.0',
+    });
+    expect(d.some((x) => x.code === 'manifest/bad-version')).toBe(true);
+  });
+
+  it('does not throw for a version whose Symbol.toStringTag getter itself throws', () => {
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('boom');
+      },
+    };
+    expect(() =>
+      checkManifestShape({ id: 'x', version: hostile as never, engine: '^0.1.0' }),
+    ).not.toThrow();
+  });
+
+  it('does not throw for a null-prototype contribution id, and still deduplicates it against itself', () => {
+    expect(() =>
+      checkManifestShape({
+        id: 'x',
+        version: '1.0.0',
+        engine: '^0.1.0',
+        contributes: {
+          p: [
+            { id: Object.create(null) as never, doc: 'd', create: async () => () => null },
+            { id: Object.create(null) as never, doc: 'd', create: async () => () => null },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+});

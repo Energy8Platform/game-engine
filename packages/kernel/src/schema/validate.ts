@@ -1,4 +1,4 @@
-import { type Diagnostic, error, warning } from '../diagnostics';
+import { type Diagnostic, describeError, error, warning } from '../diagnostics';
 import type { EnumOption, FieldSchema, Schema } from './types';
 
 export interface ValidateResult {
@@ -23,11 +23,22 @@ function typeName(v: unknown): string {
 
 /** True for values whose structure this module is willing to copy: plain objects and arrays.
  *  A Date, a RegExp, a Map or a class instance is NOT plain — rebuilding it from its entries
- *  would destroy it, so it is passed through by reference instead. */
+ *  would destroy it, so it is passed through by reference instead.
+ *
+ *  `Object.getPrototypeOf` is wrapped in its own try: this function is now a public export — the
+ *  README brands it "the shared hostile-input guard" — reachable with any value at all, including a
+ *  Proxy whose `getPrototypeOf` trap itself throws. Such a Proxy cannot be verified as plain, so it
+ *  is conservatively treated as not plain, the same "can't tell, so say no" posture `checkSchemaFields`
+ *  and `isUsableField` already take for a shape they cannot otherwise account for. A guard advertised
+ *  as the thing that keeps the rest of this package from throwing must not itself be a throw site. */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
 }
 
 /** True for a value that is at least shaped like a `FieldSchema` — a plain object carrying a
@@ -247,8 +258,11 @@ function validateField(raw: unknown, field: FieldSchema, path: string, out: Diag
       }
       const allowed = enumOptionsOf(field.options).map((o) => o.value);
       if (typeof raw !== 'string' || !allowed.includes(raw)) {
+        // describeError, not String(): `raw` is an untrusted settings value (from project.json or a
+        // hand-built input to this exported `validate()`), so it can be a null-prototype value or a
+        // value with a throwing Symbol.toStringTag getter — both of which make String() itself throw.
         out.push(
-          error('schema/not-an-option', `"${String(raw)}" is not one of: ${allowed.join(', ')}.`, {
+          error('schema/not-an-option', `"${describeError(raw)}" is not one of: ${allowed.join(', ')}.`, {
             path,
             fix: `Use one of: ${allowed.join(', ')}.`,
           }),
