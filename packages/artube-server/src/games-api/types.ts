@@ -151,9 +151,22 @@ export interface CloseRoundRequest {
   round_state: string;
 }
 
+/**
+ * Ответ на CloseRound — и на AutocloseRound (дока: тип ответа тот же).
+ *
+ * `win` и `is_platform_max_win_reached` объявлены обязательными
+ * (`close-round.md`) ровно так же, как у `PlayRoundResponse`, и значат ровно то
+ * же самое. Не моделировать их означало, что максвин, сорванный в КОНЦЕ
+ * фри-спинов — единственное место, где слот его реально срывает, — не мог
+ * доехать до игрока никогда: сложный раунд заканчивается здесь, а не в
+ * PlayRound.
+ */
 export interface CloseRoundResponse {
   balance: number;
+  /** Сумма выигрыша, посчитанная платформой, — уже усечённая максвином. */
+  win: number;
   free_round_campaign?: CampaignProgress | null;
+  is_platform_max_win_reached: boolean;
 }
 
 /** Тело то же, что у CloseRound; ответ — только баланс. */

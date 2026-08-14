@@ -18,7 +18,7 @@ import type {
   OpenRoundRequest, OpenRoundResponse,
   UpdateRoundStateRequest, UpdateRoundStateResponse,
   CloseRoundRequest, CloseRoundResponse,
-  AutocloseRoundRequest,
+  AutocloseRoundRequest, CampaignProgress,
 } from '../games-api/types.js';
 import type { PlayRequest, SegmentDelivery, SessionContext } from '../session/types.js';
 
@@ -125,15 +125,34 @@ export function roundBetAmount(state: RoundStateV1, ctx: SessionContext): number
   return Number.isFinite(fromSession) ? fromSession : 0;
 }
 
+/**
+ * Всё, что о сегменте знает не движок, а платформа.
+ *
+ * Объектом, а не хвостом позиционных аргументов: `maxWinReached` был последним
+ * из трёх подряд булевых/числовых параметров, и захардкоженный `false` на
+ * закрытии сложного раунда прожил там незамеченным ровно потому, что в вызове
+ * выглядел как ещё одна запятая. Именованное поле нельзя проставить «не глядя».
+ */
+export interface Settlement {
+  /** Баланс из ответа платформы; `null` — она его в этом ответе не называла. */
+  balanceAfter: number | null;
+  /** true, пока выигрыш ещё не зачислен (сложный раунд не закрыт). */
+  creditPending: boolean;
+  /** Платформа усекла выигрыш лимитом максвина. Ответ без флага читаем как «нет». */
+  maxWinReached?: boolean;
+  /** Реально зачисленная сумма; `null` — платформа её в этом ответе не называла. */
+  winAmount?: number | null;
+  /** Прогресс кампании фри-раундов из ответа платформы. */
+  frc?: CampaignProgress | null;
+}
+
 export function toDelivery(
   segment: Segment,
   roundId: string,
   betAmount: number,
-  balanceAfter: number | null,
-  creditPending: boolean,
-  maxWinReached: boolean,
+  settlement: Settlement,
 ): SegmentDelivery {
-  return {
+  const delivery: SegmentDelivery = {
     roundId,
     action: segment.action,
     data: segment.data,
@@ -143,10 +162,13 @@ export function toDelivery(
     nextActions: segment.nextActions,
     spinsRemaining: segment.spinsRemaining,
     spinsPlayed: segment.spinsPlayed,
-    balanceAfter,
-    creditPending,
-    maxWinReached,
+    balanceAfter: settlement.balanceAfter,
+    creditPending: settlement.creditPending,
+    maxWinReached: settlement.maxWinReached === true,
+    winAmount: settlement.winAmount ?? null,
   };
+  if (settlement.frc !== undefined) delivery.frc = settlement.frc;
+  return delivery;
 }
 
 /**
@@ -223,10 +245,13 @@ async function finishSimple(
     round_state_version: ROUND_STATE_VERSION,
     round_state: encodeRoundState(settled),
   });
-  const delivery = toDelivery(
-    segment, res.round_id, betAmount, res.balance, false, res.is_platform_max_win_reached,
-  );
-  delivery.frc = res.free_round_campaign ?? null;
+  const delivery = toDelivery(segment, res.round_id, betAmount, {
+    balanceAfter: res.balance,
+    creditPending: false,
+    maxWinReached: res.is_platform_max_win_reached,
+    winAmount: res.win,
+    frc: res.free_round_campaign ?? null,
+  });
   return { delivery, round: null };
 }
 
@@ -256,7 +281,10 @@ async function openComplex(
     round_state: encodeRoundState(state),
   });
   return {
-    delivery: toDelivery(first, res.round_id, betAmount, res.balance, true, false),
+    delivery: toDelivery(first, res.round_id, betAmount, {
+      balanceAfter: res.balance,
+      creditPending: true,
+    }),
     round: {
       roundId: res.round_id,
       roundVersion: res.round_version,
@@ -337,7 +365,10 @@ export async function advanceRound(
       round_state: encodeRoundState(state),
     });
     return {
-      delivery: toDelivery(segment, round.roundId, betAmount, null, true, false),
+      delivery: toDelivery(segment, round.roundId, betAmount, {
+        balanceAfter: null,
+        creditPending: true,
+      }),
       round: { ...round, roundVersion: res.round_version, state, delivered: segment },
     };
   }
@@ -361,7 +392,16 @@ export async function advanceRound(
     round_state_version: ROUND_STATE_VERSION,
     round_state: encodeRoundState(finalState),
   });
-  const delivery = toDelivery(segment, round.roundId, betAmount, res.balance, false, false);
-  delivery.frc = res.free_round_campaign ?? null;
+  // Максвин, сорванный ЗДЕСЬ, — единственный, который слот срывает по-настоящему:
+  // фри-спины и бонусы заканчиваются закрытием сложного раунда, а не PlayRound.
+  // Раньше на этом месте стоял захардкоженный `false`, и такой максвин не мог
+  // доехать до игрока никаким путём.
+  const delivery = toDelivery(segment, round.roundId, betAmount, {
+    balanceAfter: res.balance,
+    creditPending: false,
+    maxWinReached: res.is_platform_max_win_reached,
+    winAmount: res.win,
+    frc: res.free_round_campaign ?? null,
+  });
   return { delivery, round: null };
 }

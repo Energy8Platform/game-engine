@@ -9,7 +9,9 @@
 
 import { ROUND_STATE_VERSION, decodeRoundState, encodeRoundState, type RoundStateV1 } from './roundState.js';
 import { playToEnd, replayRound, stepRound, ScriptMismatchError, type Segment } from './engineRound.js';
-import { roundBetAmount, toDelivery, type ActiveRound, type RoundDeps } from './orchestrator.js';
+import {
+  roundBetAmount, toDelivery, type ActiveRound, type RoundDeps, type Settlement,
+} from './orchestrator.js';
 import type { SegmentDelivery, SessionContext } from '../session/types.js';
 import type { LastRound } from '../games-api/types.js';
 
@@ -46,7 +48,7 @@ async function closeWith(
   lastRound: LastRound,
   state: RoundStateV1,
   winX: number,
-): Promise<number> {
+): Promise<Settlement> {
   const res = await deps.api.closeRound({
     session_id: ctx.sessionId,
     round_id: lastRound.round_id,
@@ -56,7 +58,16 @@ async function closeWith(
     round_state_version: ROUND_STATE_VERSION,
     round_state: encodeRoundState({ ...state, totalWinX: winX }),
   });
-  return res.balance;
+  // Возвращаем весь расчёт платформы, а не только баланс: раунд, который
+  // доигрывается на восстановлении, — ровно тот, в конце которого слот и
+  // срывает максвин, и терять здесь флаг значило бы терять его насовсем.
+  return {
+    balanceAfter: res.balance,
+    creditPending: false,
+    maxWinReached: res.is_platform_max_win_reached,
+    winAmount: res.win,
+    frc: res.free_round_campaign ?? null,
+  };
 }
 
 /**
@@ -122,9 +133,9 @@ export async function resumeRound(
     if (!(err instanceof ScriptMismatchError)) throw err;
     // Курсор не двигаем: ничего нового не сыграли, отдаём накопленное как
     // есть — то, что уже было подтверждено до разрыва.
-    const balance = await closeWith(deps, ctx, lastRound, state, state.totalWinX);
+    const settlement = await closeWith(deps, ctx, lastRound, state, state.totalWinX);
     return {
-      delivery: toDelivery(recoveredSegment(state), lastRound.round_id, betAmount, balance, false, false),
+      delivery: toDelivery(recoveredSegment(state), lastRound.round_id, betAmount, settlement),
       round: null,
       recovered: true,
     };
@@ -136,16 +147,19 @@ export async function resumeRound(
     // Раунд доигран: подтверждать в нём больше нечего, курсор встаёт на
     // конец лога (entry + все действия).
     const finalState: RoundStateV1 = { ...nextState, cursor: actions.length + 1 };
-    const balance = await closeWith(deps, ctx, lastRound, finalState, segment.totalWinX);
+    const settlement = await closeWith(deps, ctx, lastRound, finalState, segment.totalWinX);
     return {
-      delivery: toDelivery(segment, lastRound.round_id, betAmount, balance, false, false),
+      delivery: toDelivery(segment, lastRound.round_id, betAmount, settlement),
       round: null,
       recovered: false,
     };
   }
 
   return {
-    delivery: toDelivery(segment, lastRound.round_id, betAmount, null, true, false),
+    delivery: toDelivery(segment, lastRound.round_id, betAmount, {
+      balanceAfter: null,
+      creditPending: true,
+    }),
     round: {
       roundId: lastRound.round_id,
       roundVersion: lastRound.round_version,

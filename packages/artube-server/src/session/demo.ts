@@ -45,12 +45,16 @@ export function createDemoApi(startingBalance: number, betAmountOf: (index: numb
       return { round_version: 0 };
     },
     async closeRound(req) {
-      balance += req.win_multiplier * openBet;
-      return { balance, free_round_campaign: null };
+      const win = req.win_multiplier * openBet;
+      balance += win;
+      return {
+        balance, win, free_round_campaign: null, is_platform_max_win_reached: false,
+      };
     },
     async autocloseRound(req) {
-      balance += req.win_multiplier * openBet;
-      return { balance };
+      const win = req.win_multiplier * openBet;
+      balance += win;
+      return { balance, win, is_platform_max_win_reached: false };
     },
   };
 }
