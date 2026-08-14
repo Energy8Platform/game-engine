@@ -21,6 +21,25 @@ import type { AutocloseRequestEvent } from '../games-api/types.js';
  */
 const SHUTDOWN_GRACE_MS = 3000;
 
+/**
+ * Совпадает ли путь запроса с маршрутом `/api/**` — точно или под ПРЕФИКСОМ.
+ *
+ * Игра деплоится под пер-игровым префиксом пути
+ * (`https://dev.artube-888.live/artube-o7df8qem5k/`), и `/api/**` этой игры
+ * живёт под тем же префиксом. Снимет ли reverse proxy платформы префикс
+ * перед тем, как отдать запрос нам, — её конфигурация, а не наш выбор;
+ * жёсткое равенство пути превращало бы «не сняли» в молчаливый 404 на
+ * живом сервере, который локально проходит все тесты. Принимаем оба вида.
+ *
+ * Границей служит ведущий `/` самого маршрута: `/xapi/version` маршрутом не
+ * становится. Аутентификация от этого не слабеет — доступ к сессии даёт
+ * `sessionId`, а не путь. Пробы Kubernetes (`/livez`, `/healthz`) специально
+ * остаются точными: их платформа зовёт прямо в под, без прокси.
+ */
+function isApiRoute(pathname: string, route: string): boolean {
+  return pathname === route || pathname.endsWith(route);
+}
+
 export class ArtubeServer {
   private http: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -102,7 +121,7 @@ export class ArtubeServer {
         const ready = this.api?.connected === true;
         return respond(res, ready ? 200 : 503, { ok: ready });
       }
-      if (url.pathname === '/api/version') {
+      if (isApiRoute(url.pathname, '/api/version')) {
         return respond(res, 200, {
           gameId: this.config.gameId,
           commit: process.env.GIT_HASH ?? 'dev',
@@ -120,7 +139,7 @@ export class ArtubeServer {
       // Выключение уже началось — новых игроков на закрывающийся под не пускаем.
       if (this.closing) return socket.destroy();
       const url = new URL(req.url ?? '/', 'http://localhost');
-      if (url.pathname !== '/api/ws') return socket.destroy();
+      if (!isApiRoute(url.pathname, '/api/ws')) return socket.destroy();
       const sessionId = url.searchParams.get('sessionId');
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
         // Подписчик на 'error' обязан существовать с самого момента приёма

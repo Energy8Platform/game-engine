@@ -90,6 +90,37 @@ describe('HTTP-слой', () => {
     const closed = new Promise<number>((resolve) => socket.on('close', (code) => resolve(code)));
     expect(await closed).toBe(1008);
   });
+
+  /**
+   * Игра деплоится под ПЕР-ИГРОВЫМ ПРЕФИКСОМ ПУТИ
+   * (`https://dev.artube-888.live/artube-o7df8qem5k/`), и её `/api/**` идёт
+   * туда же. Снимет ли reverse proxy префикс перед бэкендом — конфигурация
+   * платформы, а не наш выбор; жёсткое равенство пути делало бы половину
+   * этих конфигураций молчаливым 404 на живом сервере. Принимаем обе.
+   */
+  describe('маршруты /api под пер-игровым префиксом пути', () => {
+    it('версия отвечает и на непрокинутом префиксе', async () => {
+      const res = await fetch(`http://127.0.0.1:${server.port}/artube-o7df8qem5k/api/version`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toHaveProperty('gameId', 'feature-game');
+    });
+
+    it('сокет поднимается и на непрокинутом префиксе', async () => {
+      const c = connect(`${base}/artube-o7df8qem5k/api/ws?sessionId=sess-prefix`);
+      c.socket.on('error', () => {});
+      await c.open;
+      expect(await c.waitFor('init')).toHaveProperty('balance');
+      c.socket.close();
+    });
+
+    it('похожий, но чужой путь по-прежнему не маршрут', async () => {
+      expect((await fetch(`http://127.0.0.1:${server.port}/xapi/version`)).status).toBe(404);
+      const { socket } = connect(`${base}/notapi/ws?sessionId=sess-prefix`);
+      const closed = new Promise<number>((resolve) => socket.on('close', () => resolve(1)));
+      socket.on('error', () => {});
+      expect(await closed).toBe(1);
+    });
+  });
 });
 
 describe('WS-цикл раунда', () => {
