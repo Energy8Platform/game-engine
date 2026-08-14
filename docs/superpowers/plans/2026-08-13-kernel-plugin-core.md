@@ -3234,6 +3234,38 @@ git push -u origin feat/kernel
 - `packages/kernel/package.json` has no `dependencies` and no `peerDependencies`.
 - Every public symbol is reachable from `@energy8engine/kernel` and documented in the README.
 
+## Carried forward — known, accepted, not blocking
+
+The whole-branch review signed off on merge with these nine residuals. None blocks phase 2; the first
+two are the ones most likely to bite when real plugins land.
+
+1. **Phase-blindness of the no-activation error.** A `build`- or `editor`-phase `arity:'one'` point
+   with nothing contributing now hard-errors during a *runtime* resolve, and the caller cannot filter
+   a diagnostic `resolvePlan` has already emitted. Phase 2 declares `build.target`; expect to want a
+   phase filter on `resolvePlan` or on `activatePoint`.
+2. **`toSnapshot` still throws on hostile ELEMENTS** — `[null]` inside `plugins`/`contributions`,
+   `{p: null}` inside `points` — while the same commit hardened per-entry `hooks` values and the
+   README says every function is total. Reachable only from a hand-built plan, never from
+   `resolvePlan`'s own output.
+3. **`DIAGNOSTIC_CODES`' "stale" assertion is dead.** The scan walks `diagnostics.ts`, where the list
+   itself lives, so a declared-but-never-emitted code always counts as found. The direction that
+   matters — a newly emitted code that was never registered — genuinely fails. One-line fix: build
+   the found-set from files other than the declaration.
+4. **`manifest/enabled-collision` misses plugin-level settings.** `PluginEntry.enabled` collides with
+   a `manifest.settings` field named `enabled` exactly as the contribution-level pair does, silently.
+5. **`phase`/`arity` validation compares described text**, so `['many']` or `new String('many')`
+   passes and keeps the original mis-branch. Unreachable from JSON — manifests are TS modules.
+6. **Cyclic schema defaults** survive into the snapshot and make the *caller's* `JSON.stringify`
+   throw with no diagnostic. Touches §5.2(3). `checkSchemaFields` already walks every field, so a
+   `manifest/unserializable-default` diagnostic is nearly free. Log against phase 3, when schemas
+   start arriving from disk.
+7. **`validate(new Date(), schema)`** now reads "Expected an object of settings, got an object."
+   Newly reachable since `isRecord` was unified into `isPlainObject`.
+8. **Spec §5.2(1)'s canonical example names `enabled`** as the shared point field — the same name the
+   kernel now warns about. Update the spec text or note the divergence.
+9. **Five `it(...)` titles still say "fix round 1"**, and `prettier --check` fails on kernel `src`
+   (pre-existing; the package has no `lint` script and no CI gates it).
+
 ## What phase 2 will need from this
 
 Phase 2 wraps the existing framework into six plugins. It consumes exactly:
