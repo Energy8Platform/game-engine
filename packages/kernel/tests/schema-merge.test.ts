@@ -45,6 +45,18 @@ describe('mergeSchemas', () => {
     expect(Object.keys(own)).toEqual(['holdSpins']);
   });
 
+  // `ctx` is typed as required, but resolvePlan is this function's only caller today, and a
+  // hand-built or future call site is not guaranteed to supply it. Pre-fix, the field-conflict branch
+  // read `ctx.pointId` unguarded and threw `TypeError: Cannot read properties of undefined`.
+  it('does not throw when ctx is omitted and a field conflicts, and still reports the conflict', () => {
+    const own: Schema = { priority: { kind: 'text', default: 'high' } };
+    expect(() => mergeSchemas(POINT, own, undefined as never)).not.toThrow();
+    const { schema, diagnostics } = mergeSchemas(POINT, own, undefined as never);
+    expect(schema.priority).toEqual(POINT.priority);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'schema/field-conflict', path: 'priority' });
+  });
+
   it('does not throw when the point schema is missing', () => {
     const own: Schema = { holdSpins: { kind: 'number', default: 3 } };
     expect(() => mergeSchemas(undefined as unknown as Schema, own, CTX)).not.toThrow();

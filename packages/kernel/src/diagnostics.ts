@@ -30,8 +30,18 @@ export function warning(code: string, message: string, rest: Partial<Diagnostic>
   return { ...rest, severity: 'warning', code, message };
 }
 
+/**
+ * `diagnostics` is typed as required, but this is the function callers reach for right after
+ * `resolvePlan` — a null/undefined plan or a diagnostics field that is not an array (a stale object,
+ * a JSON round trip that lost its shape) must degrade to `false`, not throw `.some is not a function`
+ * on whatever `diagnostics` actually was. `d?.severity` — not `d.severity` — for the same reason: a
+ * hostile ELEMENT (`null`, a primitive) must not itself throw reading `.severity` off it. This module
+ * intentionally does not import `isPlainObject` from `schema/validate.ts` to make that check: that
+ * file imports `error`/`warning` from here, and diagnostics.ts is meant to stay the dependency-free
+ * base of the package, not grow a cycle back into schema/validate.ts for one property read.
+ */
 export function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
-  return diagnostics.some((d) => d.severity === 'error');
+  return Array.isArray(diagnostics) && diagnostics.some((d) => d?.severity === 'error');
 }
 
 /**

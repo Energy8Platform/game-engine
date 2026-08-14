@@ -68,6 +68,25 @@ export function isDefaultMatcher(matcher: Matcher | undefined | null): boolean {
   return matcher.urlParam === undefined && matcher.buildTarget === undefined && matcher.match === undefined;
 }
 
+/**
+ * True when a matcher can never win activation on an `arity: 'one'` point: `matches()` requires at
+ * least one evaluable condition (`urlParam`/`buildTarget`/`match`) to ever return true, and
+ * `isDefaultMatcher()` requires `default: true` with no other condition. A matcher meeting neither
+ * bar — an empty `{}`, a typo'd key (`defualt: true`), or an explicit `default: false` — can never be
+ * picked by resolve.ts's step 6, no matter what launch it is asked about.
+ *
+ * This is NOT a replacement for `describeMatcher`, and does not change its behaviour: `describeMatcher`
+ * has no notion of a point's arity, and its generic "always" is the CORRECT description of, say, `{}`
+ * on an `arity: 'many'` point, where every enabled contribution really does always activate. The
+ * distinction only exists on an `arity: 'one'` point, so only resolve.ts's activationLabel — which
+ * already knows the point's arity — needs it.
+ */
+export function isUnreachableMatcher(matcher: Matcher | undefined | null): boolean {
+  if (!matcher) return true;
+  const hasCondition = matcher.urlParam !== undefined || matcher.buildTarget !== undefined || matcher.match !== undefined;
+  return !hasCondition && !isDefaultMatcher(matcher);
+}
+
 /** One sentence the IDE shows so a person can see when a contribution takes over. */
 export function describeMatcher(matcher: Matcher | undefined | null): string {
   if (!matcher) return 'always';

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { resolvePlan } from '@/resolve/resolve';
 import { toSnapshot } from '@/resolve/snapshot';
-import type { ProjectDoc } from '@/resolve/types';
+import type { ProjectDoc, ResolvedPlan } from '@/resolve/types';
 import type { Contribution, PluginManifest } from '@/manifest/types';
 
 const noop: Contribution['create'] = async () => () => null;
 
+// The point schema's boolean field is named `autoTrigger`, not `enabled`: a field named `enabled`
+// collides with ContributionSettings.enabled, the STRUCTURAL per-contribution on/off switch in
+// project.json's own shape (see the manifest/enabled-collision tests) — using it here would trip that
+// warning on every single test in this file that resolves a manifest built from this fixture.
 function reelSystem(over: Partial<PluginManifest> = {}): PluginManifest {
   return {
     id: '@e8/reel-system',
@@ -15,7 +19,7 @@ function reelSystem(over: Partial<PluginManifest> = {}): PluginManifest {
       'reel.feature': {
         phase: 'runtime',
         arity: 'many',
-        schema: { enabled: { kind: 'boolean', default: true }, priority: { kind: 'number', default: 0 } },
+        schema: { autoTrigger: { kind: 'boolean', default: true }, priority: { kind: 'number', default: 0 } },
         doc: 'A behaviour layered onto the reels.',
       },
     },
@@ -55,8 +59,8 @@ describe('resolvePlan', () => {
 
     const c = plan.contributions[0];
     expect(c.key).toBe('reel.feature:expandingWild');
-    expect(Object.keys(c.schema)).toEqual(['enabled', 'priority', 'holdSpins']);
-    expect(c.settings).toEqual({ enabled: true, priority: 0, holdSpins: 1 });
+    expect(Object.keys(c.schema)).toEqual(['autoTrigger', 'priority', 'holdSpins']);
+    expect(c.settings).toEqual({ autoTrigger: true, priority: 0, holdSpins: 1 });
     expect(c.active).toBe(true);
   });
 
@@ -551,7 +555,7 @@ describe('toSnapshot', () => {
     const { plan } = resolvePlan({ project: project(), manifests: [manifest], launch, kernelVersion: KERNEL });
     const snapshot = toSnapshot(plan);
     expect(snapshot.contributions[0].schema).not.toBe(snapshot.contributions[1].schema);
-    expect(snapshot.contributions[0].schema.enabled).not.toBe(snapshot.contributions[1].schema.enabled);
+    expect(snapshot.contributions[0].schema.autoTrigger).not.toBe(snapshot.contributions[1].schema.autoTrigger);
   });
 
   it('does alias the live plan past cloneValue’s depth cap — documented, not a silent bug (fix round 1)', () => {
@@ -585,6 +589,41 @@ describe('toSnapshot', () => {
       snap = snapField.fields ? snapField.fields.child : undefined;
     }
     expect(aliasedSomewhere).toBe(true); // deep enough that cloneValue's cap is reached
+  });
+});
+
+// toSnapshot is documented (and typed) to take the ResolvedPlan resolvePlan produces, but — same as
+// activatePoint on the identical type — nothing stops a caller from handing it something else. Pre-fix
+// this read `plan.plugins.map` and friends bare, so each of these threw a plain TypeError instead of
+// degrading gracefully the way every other "total" function in this package does.
+describe('toSnapshot survives a plan that is not the shape resolvePlan produces', () => {
+  it('does not throw for plan: null, and returns an empty-shaped snapshot', () => {
+    expect(() => toSnapshot(null as unknown as ResolvedPlan)).not.toThrow();
+    const snapshot = toSnapshot(null as unknown as ResolvedPlan);
+    expect(snapshot).toEqual({ plugins: [], points: {}, contributions: [], order: [], hooks: {} });
+  });
+
+  it('does not throw for plan: {}, and returns an empty-shaped snapshot', () => {
+    expect(() => toSnapshot({} as unknown as ResolvedPlan)).not.toThrow();
+    const snapshot = toSnapshot({} as unknown as ResolvedPlan);
+    expect(snapshot).toEqual({ plugins: [], points: {}, contributions: [], order: [], hooks: {} });
+  });
+
+  it('does not throw for a plan missing only "hooks", and fills in an empty one', () => {
+    const { plan } = resolvePlan({ project: project(), manifests: [reelSystem()], launch, kernelVersion: KERNEL });
+    const { hooks: _hooks, ...withoutHooks } = plan;
+    expect(() => toSnapshot(withoutHooks as unknown as ResolvedPlan)).not.toThrow();
+    const snapshot = toSnapshot(withoutHooks as unknown as ResolvedPlan);
+    expect(snapshot.hooks).toEqual({});
+    // The rest of a well-formed plan still snapshots normally — only the missing field degrades.
+    expect(snapshot.contributions).toHaveLength(1);
+  });
+
+  it('does not throw when a hook entry\'s value is not an array', () => {
+    const { plan } = resolvePlan({ project: project(), manifests: [reelSystem()], launch, kernelVersion: KERNEL });
+    const hostile = { ...plan, hooks: { onSpin: 'not-an-array' } } as unknown as ResolvedPlan;
+    expect(() => toSnapshot(hostile)).not.toThrow();
+    expect(toSnapshot(hostile).hooks).toEqual({ onSpin: [] });
   });
 });
 
@@ -836,20 +875,28 @@ describe('resolvePlan survives hostile input — malformed manifest internals', 
   });
 });
 
-describe('resolvePlan survives hostile input — contribution create is not activation-time', () => {
-  it('resolves fine when create is missing', () => {
+describe('resolvePlan reports a bad create(), but still resolves the contribution rather than dropping it', () => {
+  it('reports manifest/bad-create when create is missing', () => {
     const manifest = reelSystem();
     delete (manifest.contributes!['reel.feature'][0] as { create?: unknown }).create;
     const { plan, diagnostics } = resolvePlan({ project: project(), manifests: [manifest], launch, kernelVersion: KERNEL });
-    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'manifest/bad-create',
+        pluginId: '@e8/reel-system',
+        pointId: 'reel.feature',
+        contributionId: 'expandingWild',
+      }),
+    );
     expect(plan.contributions[0].create).toBeUndefined();
   });
 
-  it('resolves fine when create is not a function', () => {
+  it('reports manifest/bad-create when create is not a function', () => {
     const manifest = reelSystem();
     (manifest.contributes!['reel.feature'][0] as { create: unknown }).create = 'not-a-function';
     const { plan, diagnostics } = resolvePlan({ project: project(), manifests: [manifest], launch, kernelVersion: KERNEL });
-    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ severity: 'error', code: 'manifest/bad-create' }));
     expect(plan.contributions[0].create).toBe('not-a-function');
   });
 });
@@ -973,7 +1020,7 @@ describe('resolvePlan determinism', () => {
         'reel.feature': {
           phase: 'runtime',
           arity: 'many',
-          schema: { enabled: { kind: 'boolean', default: true } },
+          schema: { autoTrigger: { kind: 'boolean', default: true } }, // not "enabled" — see reelSystem()'s comment above
           doc: 'Reel behaviours.',
         },
         'session.provider': { phase: 'runtime', arity: 'one', schema: {}, doc: 'Where rounds come from.' },
@@ -1422,6 +1469,40 @@ describe('MINOR fix round 1 — activationLabel must not claim "always" for a co
     const { plan } = resolvePlan({ project: project(), manifests: [reelSystem()], launch, kernelVersion: KERNEL });
     expect(plan.contributions[0].activationLabel).toBe('always');
     expect(plan.contributions[0].active).toBe(true);
+  });
+
+  // Verified pre-fix: {}, a typo'd key, and an explicit `default: false` all reached describeMatcher's
+  // generic fallthrough ("always") on an arity:'one' point, even though none of the three can ever win
+  // activation (matches() needs an evaluable condition; isDefaultMatcher() needs `default: true`). The
+  // guard above only special-cased `activateWhen === undefined` — these three are the same bug for
+  // every OTHER shape of "no evaluable condition, and not the default".
+  it.each([
+    ['an empty object', {}],
+    ['a typo\'d default key ("defualt")', { defualt: true } as never],
+    ['an explicit default: false', { default: false }],
+  ])('labels a matcher that can never win (%s) as never, not always', (_label, activateWhen) => {
+    const host: PluginManifest = {
+      id: 'host',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      points: { sp: { phase: 'runtime', arity: 'one', schema: {}, doc: 'x' } },
+    };
+    const candidate: PluginManifest = {
+      id: 'candidate',
+      version: '1.0.0',
+      engine: '^0.1.0',
+      contributes: { sp: [{ id: 'candidate', activateWhen, doc: 'x', create: noop }] },
+    };
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { host: { version: '*' }, candidate: { version: '*' } } },
+      manifests: [host, candidate],
+      launch,
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions[0].activationLabel).not.toBe('always');
+    expect(plan.contributions[0].activationLabel).toContain('never');
+    expect(plan.contributions[0].active).toBe(false);
+    expect(diagnostics.some((d) => d.code === 'resolve/no-activation')).toBe(true);
   });
 });
 

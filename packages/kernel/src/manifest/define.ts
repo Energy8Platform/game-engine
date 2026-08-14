@@ -1,8 +1,17 @@
-import { type Diagnostic, describeError, error } from '../diagnostics';
+import { type Diagnostic, describeError, error, warning } from '../diagnostics';
 import { isPlainObject, isUsableField, MAX_SCHEMA_DEPTH } from '../schema/validate';
-import type { PluginManifest } from './types';
+import type { Arity, Phase, PluginManifest } from './types';
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
+
+// The runtime mirror of the `Phase`/`Arity` union types: `PointDef` types them, but a type is erased
+// at runtime and enforces nothing against a manifest built from data (JSON, a hand-written literal
+// with a typo, a value that drifted). Without this, a bad or missing `phase`/`arity` reached
+// resolvePlan unchecked — a capitalization typo like `arity: 'Many'` fell through resolve.ts's arity
+// check into the arity-ONE branch, which deactivated every contribution and reported only a
+// misleading resolve/no-activation, never naming the real problem.
+const VALID_PHASES: readonly Phase[] = ['runtime', 'build', 'editor'];
+const VALID_ARITIES: readonly Arity[] = ['one', 'many'];
 
 /** Identity helper. Exists so plugin authors get inference and autocomplete on the manifest shape. */
 export function definePlugin(manifest: PluginManifest): PluginManifest {
@@ -139,6 +148,33 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
       );
     }
 
+    // describeError(), not the raw value: a hostile phase/arity (a Symbol, a null-prototype value)
+    // must not throw inside the message below, for the same reason manifest.version is describeError'd
+    // above. Comparing the DESCRIBED text against VALID_PHASES/VALID_ARITIES is safe regardless of the
+    // original value's type, and a missing phase/arity (`undefined`) is refused the same way a wrong
+    // one is — spec §5.2(4) says a point belongs to exactly one phase; "unspecified" is not a phase.
+    const phaseText = describeError(point.phase);
+    if (!VALID_PHASES.includes(phaseText as Phase)) {
+      out.push(
+        error(
+          'manifest/bad-phase',
+          `Point "${pointId}" has phase "${phaseText}", which is not one of: ${VALID_PHASES.join(', ')}.`,
+          { pluginId, pointId, fix: `Set phase to one of: ${VALID_PHASES.join(', ')}.` },
+        ),
+      );
+    }
+
+    const arityText = describeError(point.arity);
+    if (!VALID_ARITIES.includes(arityText as Arity)) {
+      out.push(
+        error(
+          'manifest/bad-arity',
+          `Point "${pointId}" has arity "${arityText}", which is not one of: ${VALID_ARITIES.join(', ')}.`,
+          { pluginId, pointId, fix: `Set arity to one of: ${VALID_ARITIES.join(', ')}.` },
+        ),
+      );
+    }
+
     // Check schema specifically - must be a plain object
     if (!isPlainObject(point.schema)) {
       out.push(
@@ -150,6 +186,20 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
       );
     } else {
       checkSchemaFields(point.schema, out, { pluginId, pointId }, 'manifest/bad-field-schema');
+      if (Object.hasOwn(point.schema, 'enabled')) {
+        out.push(
+          warning(
+            'manifest/enabled-collision',
+            `Point "${pointId}"'s schema declares a field named "enabled", which collides with the structural per-contribution "enabled" flag project.json already uses to switch a contribution on or off.`,
+            {
+              pluginId,
+              pointId,
+              path: 'enabled',
+              fix: 'Rename this field (e.g. to "autoTrigger") — "enabled" already means something else.',
+            },
+          ),
+        );
+      }
     }
   }
 
@@ -208,6 +258,26 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
         );
       }
 
+      // `create` is the one EXECUTABLE requirement on a Contribution — everything else here is
+      // metadata. Pre-fix, a missing or non-function `create` passed both this check and resolvePlan
+      // with zero diagnostics, appeared in the plan and the snapshot as an ordinary valid entry, and
+      // only failed once `activatePoint` actually tried to call it. `doc` (prose) was validated above;
+      // the thing that actually has to run was not.
+      if (typeof contribution.create !== 'function') {
+        out.push(
+          error(
+            'manifest/bad-create',
+            `Contribution "${contributionId}" has no create() function.`,
+            {
+              pluginId,
+              pointId,
+              contributionId,
+              fix: "Add `create: () => import('./yourModule')` (or an equivalent lazy factory loader).",
+            },
+          ),
+        );
+      }
+
       if (contribution.schema !== undefined) {
         checkSchemaFields(
           contribution.schema,
@@ -215,6 +285,21 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
           { pluginId, pointId, contributionId },
           'manifest/bad-field-schema',
         );
+        if (isPlainObject(contribution.schema) && Object.hasOwn(contribution.schema, 'enabled')) {
+          out.push(
+            warning(
+              'manifest/enabled-collision',
+              `Contribution "${contributionId}"'s schema declares a field named "enabled", which collides with the structural per-contribution "enabled" flag project.json already uses to switch a contribution on or off.`,
+              {
+                pluginId,
+                pointId,
+                contributionId,
+                path: 'enabled',
+                fix: 'Rename this field (e.g. to "autoTrigger") — "enabled" already means something else.',
+              },
+            ),
+          );
+        }
       }
     }
   }

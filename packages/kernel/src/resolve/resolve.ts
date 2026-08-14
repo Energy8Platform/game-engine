@@ -3,7 +3,7 @@ import { checkManifestShape } from '../manifest/define';
 import type { Contribution, PluginManifest } from '../manifest/types';
 import { mergeSchemas } from '../schema/merge';
 import { isPlainObject, validate } from '../schema/validate';
-import { describeMatcher, isDefaultMatcher, matches } from './match';
+import { describeMatcher, isDefaultMatcher, isUnreachableMatcher, matches } from './match';
 import { orderPlugins } from './order';
 import { satisfies } from './semver';
 import type {
@@ -314,12 +314,14 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
         diagnostics.push(...validated.diagnostics.map((d) => ({ ...d, ...tag })));
 
         // A point with arity 'one' activates by matching or by a `default: true` fallback; neither
-        // path can ever pick a contribution with NO activateWhen at all (matches() requires at least
-        // one condition, isDefaultMatcher() requires `default: true`). describeMatcher(undefined)
-        // says 'always', which is true for an arity:'many' point but false — misleadingly so — here.
+        // path can ever pick a contribution whose activateWhen has no evaluable condition at all —
+        // that covers not just `activateWhen: undefined` but also `{}`, a typo'd key, or an explicit
+        // `default: false` (isUnreachableMatcher, see resolve/match.ts). describeMatcher would say
+        // 'always' for every one of those, which is true for an arity:'many' point but false —
+        // misleadingly so — here.
         const activationLabel =
-          point.arity === 'one' && contribution.activateWhen === undefined
-            ? 'never — a point with arity "one" needs an activateWhen, and this contribution declares none'
+          point.arity === 'one' && isUnreachableMatcher(contribution.activateWhen)
+            ? 'never — a point with arity "one" only activates a contribution whose activateWhen has an evaluable condition or is the default, and this one has neither'
             : describeMatcher(contribution.activateWhen);
 
         const resolved: ResolvedContribution = {

@@ -32,11 +32,15 @@ export default definePlugin({
   engine: '^0.1.0',
 
   // A new extension point. The kernel owns no list of points — plugins open them.
+  //
+  // Field names to avoid: `enabled` collides with ContributionSettings.enabled, the structural
+  // on/off switch project.json already puts on every contribution at this same key — the two would
+  // do opposite, and opposingly silent, things (see "The enabled collision" below).
   points: {
     'reel.feature': {
       phase: 'runtime',
       arity: 'many',
-      schema: { enabled: { kind: 'boolean', default: true } },
+      schema: { autoTrigger: { kind: 'boolean', default: true } },
       doc: 'A behaviour layered onto the reels.',
     },
   },
@@ -103,6 +107,15 @@ A contribution's settings form is the **point's schema plus its own**, computed 
 inside `resolvePlan`. A contribution may add fields; it may not redefine one the point owns,
 because the IDE would then render a control whose meaning changed depending on which contribution
 is selected — that collision is reported as a `schema/field-conflict` diagnostic, not thrown.
+
+**The `enabled` collision.** Do not name a schema field `enabled`. `ContributionSettings.enabled` is
+the *structural* switch project.json already puts on every contribution (`{ "enabled": false }`,
+sitting next to `settings`, not inside it) — a schema field of the same name lives one level deeper,
+inside `settings`, and the two do opposite things without any error to say so: the structural flag
+deactivates the whole contribution, while the schema field is just one more setting whose own default
+is whatever the schema says. `checkManifestShape` reports a schema field named `enabled` as a
+`manifest/enabled-collision` warning (not an error — the name is legal) precisely because the ambiguity
+is real but not fatal; prefer a specific name instead (`autoTrigger`, `startsOn`, …).
 
 ## Launch matching
 
@@ -224,6 +237,12 @@ into the plain-JSON `PlanSnapshot` the IDE and the agent read over RPC. Types: `
 hook bus from a project's declared hooks; `declaredFromPlan` inverts `plan.hooks` into the shape
 `createHookBus` wants. `MAX_HOOK_DEPTH` is the synchronous re-entrancy cap described above. Types:
 `Activated`, `ActivateResult`, `HookBus`, `HookBusOptions`, `HookFn`.
+
+Neither `activatePoint` nor `activateOne` filters by a point's `phase` — a `ResolvedPlan` mixes
+`runtime`/`build`/`editor` points freely, and calling either for a point outside the caller's own
+phase (a build-phase `build.target` from inside a browser bundle, say) will happily try to instantiate
+it. Filtering `plan.points` down to the phase(s) that make sense for the current context, before
+activating anything, is the caller's job.
 
 **`KERNEL_VERSION`** — the kernel's own version. Plugin manifests declare the range they need via
 `engine`, checked by `resolvePlan` with the same `satisfies` used for everything else.

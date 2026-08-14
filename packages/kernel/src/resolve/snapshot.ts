@@ -1,4 +1,4 @@
-import { cloneValue } from '../schema/validate';
+import { cloneValue, isPlainObject } from '../schema/validate';
 import type { ResolvedContribution, ResolvedPlan } from './types';
 
 /** A ResolvedContribution minus its factory — plain JSON. */
@@ -27,25 +27,44 @@ export type PlanSnapshot = Omit<ResolvedPlan, 'contributions'> & {
   contributions: ContributionSnapshot[];
 };
 
+/**
+ * `plan` is typed as the `ResolvedPlan` `resolvePlan` produces, but — like `activatePoint` — nothing
+ * stops a caller from handing this something else: `null`, `{}`, or a plan missing one field (a stale
+ * object, a JSON round trip, a hand-built test double). This used to read `plan.plugins.map` and
+ * friends bare, which is exactly the incoherence `activatePoint` was hardened against on the very same
+ * `ResolvedPlan` type: every top-level field is now read defensively, reusing `isPlainObject`/
+ * `Array.isArray` — the package's own guards — rather than a new predicate.
+ */
 export function toSnapshot(plan: ResolvedPlan): PlanSnapshot {
+  const rawPlan: unknown = plan;
+  const safePlan: Partial<ResolvedPlan> = isPlainObject(rawPlan) ? (rawPlan as Partial<ResolvedPlan>) : {};
+
+  const plugins: ResolvedPlan['plugins'] = Array.isArray(safePlan.plugins) ? safePlan.plugins : [];
+  const points: ResolvedPlan['points'] = isPlainObject(safePlan.points) ? (safePlan.points as ResolvedPlan['points']) : {};
+  const contributions: ResolvedPlan['contributions'] = Array.isArray(safePlan.contributions) ? safePlan.contributions : [];
+  const order: ResolvedPlan['order'] = Array.isArray(safePlan.order) ? safePlan.order : [];
+  const hooks: ResolvedPlan['hooks'] = isPlainObject(safePlan.hooks) ? (safePlan.hooks as ResolvedPlan['hooks']) : {};
+
   return {
-    plugins: plan.plugins.map((p) => ({
+    plugins: plugins.map((p) => ({
       id: p.id,
       version: p.version,
       settings: cloneValue(p.settings),
     })),
     points: Object.fromEntries(
-      Object.entries(plan.points).map(([pointId, point]) => [
+      Object.entries(points).map(([pointId, point]) => [
         pointId,
         { ...point, schema: cloneValue(point.schema) },
       ]),
     ),
-    contributions: plan.contributions.map(({ create: _create, schema, settings, ...rest }) => ({
+    contributions: contributions.map(({ create: _create, schema, settings, ...rest }) => ({
       ...rest,
       schema: cloneValue(schema),
       settings: cloneValue(settings),
     })),
-    order: [...plan.order],
-    hooks: Object.fromEntries(Object.entries(plan.hooks).map(([hook, ids]) => [hook, [...ids]])),
+    order: [...order],
+    hooks: Object.fromEntries(
+      Object.entries(hooks).map(([hook, ids]) => [hook, Array.isArray(ids) ? [...ids] : []]),
+    ),
   };
 }

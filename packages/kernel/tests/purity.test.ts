@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { KERNEL_VERSION } from '@/index';
 
 const ROOT = join(__dirname, '..');
 const SRC = join(ROOT, 'src');
@@ -18,6 +19,17 @@ describe('kernel purity', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
     expect(pkg.dependencies).toBeUndefined();
     expect(pkg.peerDependencies).toBeUndefined();
+  });
+
+  // KERNEL_VERSION (src/index.ts) is the admission gate for every plugin: resolvePlan compares it
+  // against each manifest's declared `engine` range and rejects the plugin outright on a mismatch
+  // (resolve/engine-mismatch). Nothing connects it to package.json's own "version" — a release that
+  // bumps one and misses the other would silently reject every plugin at once, or silently stop
+  // enforcing a real engine bump. This is the one place both are already read, so it is the one place
+  // that can catch the two drifting apart.
+  it('keeps KERNEL_VERSION in sync with package.json\'s version', () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    expect(KERNEL_VERSION).toBe(pkg.version);
   });
 
   it('imports nothing outside its own source tree', () => {

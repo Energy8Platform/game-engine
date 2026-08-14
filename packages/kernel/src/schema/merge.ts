@@ -1,4 +1,5 @@
 import { type Diagnostic, error } from '../diagnostics';
+import { isPlainObject } from './validate';
 import type { Schema } from './types';
 
 export interface MergeContext {
@@ -33,13 +34,19 @@ export function mergeSchemas(
 ): MergeResult {
   const diagnostics: Diagnostic[] = [];
   const safePoint = point ?? {};
+  // `ctx` is typed as required, but resolvePlan is this function's only caller today and a future or
+  // hand-built one is not guaranteed to pass it — a missing/non-object `ctx` must degrade the
+  // diagnostic's tags to `undefined` (still a valid, if less specific, Diagnostic), not throw reading
+  // `ctx.pointId` inside the message below. Reuses `isPlainObject`, the package's one "is this a
+  // usable record?" predicate, rather than inventing a second one here.
+  const safeCtx: Partial<MergeContext> = isPlainObject(ctx) ? (ctx as unknown as Partial<MergeContext>) : {};
   const schema: Schema = { ...safePoint };
 
   for (const [key, field] of Object.entries(contribution ?? {})) {
     if (Object.hasOwn(safePoint, key)) {
       diagnostics.push(
-        error('schema/field-conflict', `Field "${key}" is already defined by point "${ctx.pointId}".`, {
-          ...ctx,
+        error('schema/field-conflict', `Field "${key}" is already defined by point "${safeCtx.pointId}".`, {
+          ...safeCtx,
           path: key,
           fix: `Rename the contribution's field, or drop it and use the point's.`,
         }),

@@ -38,6 +38,45 @@ describe('checkManifestShape', () => {
     expect(d[0]).toMatchObject({ severity: 'error', code: 'manifest/missing-engine' });
   });
 
+  it('rejects a point whose phase is not one of runtime/build/editor', () => {
+    const d = checkManifestShape(
+      base({ points: { p: { phase: 'buildtime' as never, arity: 'many', schema: {}, doc: 'x' } } }),
+    );
+    expect(d).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-phase', pointId: 'p' }),
+    ]);
+  });
+
+  it('rejects a point with a capitalized or otherwise-wrong arity, distinctly from phase', () => {
+    const d = checkManifestShape(
+      base({ points: { p: { phase: 'runtime', arity: 'Many' as never, schema: {}, doc: 'x' } } }),
+    );
+    expect(d).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-arity', pointId: 'p' }),
+    ]);
+  });
+
+  it('rejects a point missing phase or arity entirely, the same as a wrong value', () => {
+    const missingPhase = checkManifestShape(
+      base({ points: { p: { arity: 'many', schema: {}, doc: 'x' } as never } }),
+    );
+    expect(missingPhase.some((d) => d.code === 'manifest/bad-phase' && d.pointId === 'p')).toBe(true);
+
+    const missingArity = checkManifestShape(
+      base({ points: { p: { phase: 'runtime', schema: {}, doc: 'x' } as never } }),
+    );
+    expect(missingArity.some((d) => d.code === 'manifest/bad-arity' && d.pointId === 'p')).toBe(true);
+  });
+
+  it('accepts every valid phase and every valid arity without complaint', () => {
+    for (const phase of ['runtime', 'build', 'editor'] as const) {
+      for (const arity of ['one', 'many'] as const) {
+        const d = checkManifestShape(base({ points: { p: { phase, arity, schema: {}, doc: 'x' } } }));
+        expect(d).toEqual([]);
+      }
+    }
+  });
+
   it('rejects a point declared without documentation', () => {
     const d = checkManifestShape(
       base({ points: { 'reel.feature': { phase: 'runtime', arity: 'many', schema: {}, doc: '' } } }),
@@ -68,6 +107,73 @@ describe('checkManifestShape', () => {
       base({ contributes: { 'reel.feature': [{ id: 'wild', doc: '', create: async () => () => null }] } }),
     );
     expect(d[0]).toMatchObject({ severity: 'error', code: 'manifest/missing-doc', contributionId: 'wild' });
+  });
+
+  it('rejects a contribution with no create() function — missing, or not a function', () => {
+    const missing = checkManifestShape(
+      base({ contributes: { 'reel.feature': [{ id: 'wild', doc: 'x' } as never] } }),
+    );
+    expect(missing).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-create', contributionId: 'wild' }),
+    ]);
+
+    const notAFunction = checkManifestShape(
+      base({ contributes: { 'reel.feature': [{ id: 'wild', doc: 'x', create: 'nope' as never }] } }),
+    );
+    expect(notAFunction).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'manifest/bad-create', contributionId: 'wild' }),
+    ]);
+  });
+
+  it('accepts a contribution whose create() is a real function', () => {
+    const d = checkManifestShape(
+      base({ contributes: { 'reel.feature': [{ id: 'wild', doc: 'x', create: async () => () => null }] } }),
+    );
+    expect(d).toEqual([]);
+  });
+
+  it('warns, rather than errors, when a point or a contribution schema declares a field named "enabled"', () => {
+    const pointLevel = checkManifestShape(
+      base({ points: { 'reel.feature': { phase: 'runtime', arity: 'many', schema: { enabled: { kind: 'boolean' } }, doc: 'x' } } }),
+    );
+    expect(pointLevel).toEqual([
+      expect.objectContaining({ severity: 'warning', code: 'manifest/enabled-collision', pointId: 'reel.feature' }),
+    ]);
+
+    const contributionLevel = checkManifestShape(
+      base({
+        points: { 'reel.feature': { phase: 'runtime', arity: 'many', schema: {}, doc: 'x' } },
+        contributes: {
+          'reel.feature': [
+            { id: 'wild', doc: 'x', create: async () => () => null, schema: { enabled: { kind: 'boolean' } } },
+          ],
+        },
+      }),
+    );
+    expect(contributionLevel).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'manifest/enabled-collision',
+        pointId: 'reel.feature',
+        contributionId: 'wild',
+      }),
+    ]);
+  });
+
+  it('does not warn about "enabled" nested inside an object field — only the top-level key collides', () => {
+    const d = checkManifestShape(
+      base({
+        points: {
+          p: {
+            phase: 'runtime',
+            arity: 'many',
+            schema: { motion: { kind: 'object', fields: { enabled: { kind: 'boolean' } } } },
+            doc: 'x',
+          },
+        },
+      }),
+    );
+    expect(d.filter((x) => x.code === 'manifest/enabled-collision')).toEqual([]);
   });
 
   it('collects every problem rather than stopping at the first', () => {

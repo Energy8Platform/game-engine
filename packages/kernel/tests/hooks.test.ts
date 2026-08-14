@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHookBus, declaredFromPlan } from '@/runtime/hooks';
-import { describeError } from '@/diagnostics';
+import { describeError, hasErrors } from '@/diagnostics';
+import type { Diagnostic } from '@/diagnostics';
 
 const IDS = ['bootstrap', 'dispose'] as const;
 
@@ -604,6 +605,39 @@ describe('describeError', () => {
     };
     expect(() => describeError(hostile)).not.toThrow();
     expect(typeof describeError(hostile)).toBe('string');
+  });
+});
+
+// ── hasErrors (diagnostics.ts) ───────────────────────────────────────────────
+
+describe('hasErrors', () => {
+  it('is true when the list contains at least one error, alongside warnings', () => {
+    const diagnostics: Diagnostic[] = [
+      { severity: 'warning', code: 'w', message: 'w' },
+      { severity: 'error', code: 'e', message: 'e' },
+    ];
+    expect(hasErrors(diagnostics)).toBe(true);
+  });
+
+  it('is false for an empty list or a list of only warnings', () => {
+    expect(hasErrors([])).toBe(false);
+    expect(hasErrors([{ severity: 'warning', code: 'w', message: 'w' }])).toBe(false);
+  });
+
+  // `diagnostics` is typed as required, but this is the function callers reach for immediately after
+  // resolvePlan — a stale value, or a JSON round trip that lost its shape, must degrade to `false`,
+  // not throw `.some is not a function`.
+  it('does not throw for diagnostics: null or a non-array value, and returns false', () => {
+    expect(() => hasErrors(null as unknown as Diagnostic[])).not.toThrow();
+    expect(hasErrors(null as unknown as Diagnostic[])).toBe(false);
+    expect(() => hasErrors('x' as unknown as Diagnostic[])).not.toThrow();
+    expect(hasErrors('x' as unknown as Diagnostic[])).toBe(false);
+  });
+
+  it('does not throw for a list containing a hostile (null) element', () => {
+    const diagnostics = [null, { severity: 'error', code: 'e', message: 'e' }] as unknown as Diagnostic[];
+    expect(() => hasErrors(diagnostics)).not.toThrow();
+    expect(hasErrors(diagnostics)).toBe(true);
   });
 });
 
