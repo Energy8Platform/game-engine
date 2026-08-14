@@ -281,7 +281,7 @@ describe('resolvePlan — arity "one"', () => {
     expect(diagnostics[0].message).toContain('artube');
   });
 
-  it('reports no candidate at all', () => {
+  it('reports when the only candidate does not match the launch', () => {
     const { diagnostics } = resolvePlan({
       project: { plugins: { host: { version: '*' }, stake: { version: '*' } } },
       manifests: [host, provider('stake', { buildTarget: 'stake' })],
@@ -289,6 +289,27 @@ describe('resolvePlan — arity "one"', () => {
       kernelVersion: KERNEL,
     });
     expect(diagnostics[0]).toMatchObject({ severity: 'error', code: 'resolve/no-activation' });
+  });
+
+  // The case above still has ONE declared candidate — it just doesn't match this launch. This is the
+  // genuinely different case: the point is declared (by `host`) but no installed plugin contributes to
+  // it at all, e.g. a project that never installed `shell-html` for `ui.shell`. Pre-fix, none of the
+  // three branches under `arity === 'one'` fired for `declared.length === 0`, so this resolved with
+  // `diagnostics: []` and `activateOne` silently returning `{ instance: null }` — the white-screen case
+  // spec §9 and acceptance criterion 4 exist to prevent.
+  it('reports no activation when nothing contributes to the point at all', () => {
+    const { plan, diagnostics } = resolvePlan({
+      project: { plugins: { host: { version: '*' } } },
+      manifests: [host],
+      launch: { url: 'https://g/play' },
+      kernelVersion: KERNEL,
+    });
+    expect(plan.contributions).toEqual([]);
+    expect(diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'resolve/no-activation',
+      pointId: 'session.provider',
+    });
   });
 
   it('records a human sentence describing when each candidate activates', () => {

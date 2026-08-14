@@ -412,6 +412,19 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
           { pointId, fix: 'Enable one of these contributions in project.json.' },
         ),
       );
+    } else {
+      // Nothing contributes to this point at all — not "disabled", not "doesn't match this launch",
+      // just absent. This is the white-screen case the spec (§9) exists to prevent: a host can
+      // declare a required arity:'one' point (`ui.shell`, `session.provider`, ...) and, if the
+      // plugin that was meant to fill it is simply missing from project.json, every branch above
+      // stays silent because each of them only fires once at least one contribution was declared.
+      diagnostics.push(
+        error(
+          'resolve/no-activation',
+          `Point "${pointId}" needs exactly one contribution, but nothing contributes to it.`,
+          { pointId, fix: `Install a plugin that contributes to "${pointId}".` },
+        ),
+      );
     }
   }
 
