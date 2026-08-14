@@ -133,6 +133,21 @@ describe('HTTP-слой', () => {
       expect(await closed).toBe(1);
     });
 
+    it('пробы отвечают и через префикс — оператору незачем гадать, что значит 404', async () => {
+      // Kubernetes зовёт пробы прямо в под, без префикса, и этот путь остаётся
+      // точным. Но через платформенный прокси тот же `/livez` возвращал наш
+      // собственный `{"error":"not found"}` — сигнал, неотличимый от «под
+      // не отвечает» ровно в тот момент, когда это важнее всего.
+      const http = `http://127.0.0.1:${server.port}`;
+      for (const prefix of ['', '/api/artube-o7df8qem5k', '/artube-o7df8qem5k']) {
+        expect((await fetch(`${http}${prefix}/livez`)).status).toBe(200);
+        expect((await fetch(`${http}${prefix}/healthz`)).status).toBe(200);
+      }
+      // Хвост — граница по `/`, как и у остальных маршрутов.
+      expect((await fetch(`${http}/xlivez`)).status).toBe(404);
+      expect((await fetch(`${http}/api/artube-o7df8qem5k/xhealthz`)).status).toBe(404);
+    });
+
     it('похожий, но чужой путь по-прежнему не маршрут', async () => {
       expect((await fetch(`http://127.0.0.1:${server.port}/xapi/version`)).status).toBe(404);
       expect(

@@ -22,7 +22,7 @@ import type { AutocloseRequestEvent } from '../games-api/types.js';
 const SHUTDOWN_GRACE_MS = 3000;
 
 /**
- * Совпадает ли путь запроса с маршрутом `/api/**` — точно или под ПРЕФИКСОМ.
+ * Совпадает ли путь запроса с маршрутом — точно или под ПРЕФИКСОМ.
  *
  * Бэкенд игры смонтирован платформой под `/api/<slug>` (снято с живого
  * стенда: `wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws` — внешнее
@@ -43,10 +43,18 @@ const SHUTDOWN_GRACE_MS = 3000;
  *
  * Границей служит ведущий `/` самого маршрута: `/xapi/version` маршрутом не
  * становится. Аутентификация от этого не слабеет — доступ к сессии даёт
- * `sessionId`, а не путь. Пробы Kubernetes (`/livez`, `/healthz`) специально
- * остаются точными: их платформа зовёт прямо в под, без прокси.
+ * `sessionId`, а не путь.
+ *
+ * Пробы `/livez` и `/healthz` живут вне `/api` (так их конфигурирует
+ * платформа) и точно так же принимаются под префиксом. Kubernetes зовёт их
+ * прямо в под, и тот путь остаётся точным — но через платформенный прокси тот
+ * же `/livez` возвращал наш собственный `{"error":"not found"}`, сигнал,
+ * неотличимый от «под не отвечает» ровно тогда, когда это важнее всего.
+ * Оговорка та же, что и у `/api/version`: под HPA за префиксом стоит НЕ
+ * конкретный под, а любой из живых, поэтому снаружи это ответ про какой-то
+ * под сервиса, а не про тот, который вы имели в виду.
  */
-function isApiRoute(pathname: string, route: string): boolean {
+function isRoute(pathname: string, route: string): boolean {
   return pathname === route || pathname.endsWith(route);
 }
 
@@ -137,12 +145,12 @@ export class ArtubeServer {
     this.http = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost');
       // Пробы Kubernetes живут вне /api — так их конфигурирует платформа.
-      if (url.pathname === '/livez') return respond(res, 200, { ok: true });
-      if (url.pathname === '/healthz') {
+      if (isRoute(url.pathname, '/livez')) return respond(res, 200, { ok: true });
+      if (isRoute(url.pathname, '/healthz')) {
         const ready = this.api?.connected === true;
         return respond(res, ready ? 200 : 503, { ok: ready });
       }
-      if (isApiRoute(url.pathname, '/api/version')) {
+      if (isRoute(url.pathname, '/api/version')) {
         return respond(res, 200, {
           gameId: this.config.gameId,
           commit: process.env.GIT_HASH ?? 'dev',
@@ -160,7 +168,7 @@ export class ArtubeServer {
       // Выключение уже началось — новых игроков на закрывающийся под не пускаем.
       if (this.closing) return socket.destroy();
       const url = new URL(req.url ?? '/', 'http://localhost');
-      if (!isApiRoute(url.pathname, '/api/ws')) return socket.destroy();
+      if (!isRoute(url.pathname, '/api/ws')) return socket.destroy();
       const sessionId = url.searchParams.get('sessionId');
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
         // Подписчик на 'error' обязан существовать с самого момента приёма

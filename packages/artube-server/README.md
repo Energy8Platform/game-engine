@@ -247,7 +247,13 @@ is an escape hatch to stage the upgrade rather than a long-term fix.
 - Every player/platform-facing HTTP and WS route lives under `/api`
   (`/api/ws`, `/api/version`); `/livez` and `/healthz` sit outside `/api`
   because that's where the platform's Kubernetes liveness/readiness probes
-  look for them.
+  look for them. Kubernetes calls the probes straight into the pod with no
+  prefix, and every route — probes included — is also accepted under the
+  platform's per-game path prefix (`…/api/<slug>/livez`), so reaching for one
+  through the proxy during an incident answers instead of 404ing. Through the
+  proxy you get *a* pod of the service, not a specific one: under HPA the
+  service has several, and `/healthz` there says nothing about the pod your
+  player is on.
 - `GIT_HASH` is passed as `--build-arg GIT_HASH=$(git rev-parse HEAD)` (or
   equivalent CI variable) and shows up at `/api/version`.
 - `npm install --omit=dev` must reach GitHub Releases (or have
