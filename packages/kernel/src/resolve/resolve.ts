@@ -453,7 +453,13 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
         diagnostics.push(
           error('resolve/unknown-hook', `"${manifest.id}" declares hook "${hook}", which does not exist.`, {
             pluginId: manifest.id,
-            fix: `Known hooks: ${knownHooks.map(String).join(', ')}.`,
+            // `.map(String)` — not `.map((h) => describeError(h))` — was the bug: `knownHooks` is
+            // `input.hookIds`, a public ResolveInput field only checked to be an array, never that
+            // its elements are strings, so a hostile element here reached String() point-free. A text
+            // sweep for the literal substring `String(` misses this shape entirely, because the call
+            // is `String)`, not `String(...)` — found by sweeping every `.map(`/`.forEach(`/etc. call
+            // in src for a bare coercion function passed by reference, not by grepping for `String(`.
+            fix: `Known hooks: ${knownHooks.map((h) => describeError(h)).join(', ')}.`,
           }),
         );
         continue;

@@ -1751,3 +1751,42 @@ describe('Task 11 review round 1 — describeError, not String(): resolvePlan mu
     expect(typeof plan.contributions[0].id).toBe('string');
   });
 });
+
+// Task 11 review round 2: `knownHooks.map(String)` — point-free, so a text search for the literal
+// substring `String(` misses it entirely (the call reads `String)`, not `String(...)`). `knownHooks`
+// is `input.hookIds`, a public ResolveInput field checked only to be an array — never that its
+// elements are strings — so a hostile element reaches this exact point-free String() call while
+// building the resolve/unknown-hook diagnostic's `fix` text. Now `.map((h) => describeError(h))`.
+describe('Task 11 review round 2 — describeError, not point-free String(): resolve/unknown-hook must not crash on an unstringifiable candidate', () => {
+  it('describes unknown-hook candidates that cannot be stringified', () => {
+    const rogue: PluginManifest = { id: 'rogue', version: '1.0.0', engine: '^0.1.0', hooks: ['onMadeUp'] };
+    const input = {
+      project: { plugins: { rogue: { version: '*' } } },
+      manifests: [rogue],
+      launch,
+      kernelVersion: KERNEL,
+      hookIds: ['realHook', Object.create(null) as string],
+    };
+    expect(() => resolvePlan(input)).not.toThrow();
+    const { diagnostics } = resolvePlan(input);
+    expect(diagnostics.some((d) => d.code === 'resolve/unknown-hook')).toBe(true);
+  });
+
+  it('does not throw when a knownHooks candidate has a throwing Symbol.toStringTag getter', () => {
+    const rogue: PluginManifest = { id: 'rogue', version: '1.0.0', engine: '^0.1.0', hooks: ['onMadeUp'] };
+    const hostile = {
+      get [Symbol.toStringTag]() {
+        throw new Error('boom');
+      },
+    };
+    const input = {
+      project: { plugins: { rogue: { version: '*' } } },
+      manifests: [rogue],
+      launch,
+      kernelVersion: KERNEL,
+      hookIds: ['realHook', hostile as unknown as string],
+    };
+    expect(() => resolvePlan(input)).not.toThrow();
+    expect(resolvePlan(input).diagnostics.some((d) => d.code === 'resolve/unknown-hook')).toBe(true);
+  });
+});
