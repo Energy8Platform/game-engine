@@ -38,7 +38,11 @@ export interface SegmentDelivery {
   nextActions: string[];
   spinsRemaining: number;
   spinsPlayed: number;
-  /** Баланс из ответа платформы; `null`, пока раунд не рассчитан. */
+  /**
+   * Баланс из ответа платформы; `null` — платформа его в этом ответе не
+   * называла (UpdateRoundState баланса не возвращает). НЕ признак незакрытого
+   * раунда: у открывающего сегмента баланс есть, ставка уже списана.
+   */
   balanceAfter: number | null;
   /** true, пока выигрыш ещё не зачислен (сложный раунд не закрыт). */
   creditPending: boolean;

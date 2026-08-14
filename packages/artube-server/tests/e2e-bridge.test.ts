@@ -89,8 +89,13 @@ describe('сервер и мост вместе, сквозь настоящий
     expect(spin.totalWin).toBe(0);
     expect(spin.session.spinsRemaining).toBe(3);
     expect(spin.session.betAmount).toBe(BET);
-    // Ставка списана платформой на OpenRound, выигрыш ещё не зачислен.
+    // Ставка списана платформой на OpenRound, выигрыш ещё не зачислен — и
+    // игра обязана увидеть ровно тот же баланс, что и платформа. Именно здесь
+    // жил баг: `creditPending` читали как «баланс неизвестен», игрок доигрывал
+    // фичу до конца с балансом ДО списания.
     expect(platform.balance).toBe(100 - BET);
+    expect(spin.balanceAfter).toBe(100 - BET);
+    expect((await game.getBalance()).balance).toBe(100 - BET);
 
     game.playAck(spin);
     await settle();

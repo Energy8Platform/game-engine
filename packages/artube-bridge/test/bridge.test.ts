@@ -159,6 +159,36 @@ describe('ArtubeBridge', () => {
     expect(play!.payload.nextActions).toEqual(['free_spin']);
   });
 
+  it('баланс открывшегося раунда принимается, хотя выигрыш ещё не зачислен', async () => {
+    // Открывающий сегмент сложного раунда несёт И реальный баланс (ставка
+    // списана на OpenRound), И `creditPending`. Флаги независимы: баланс
+    // обязан обновиться, а раунд — остаться незакрытым.
+    backend.play.mockResolvedValue(
+      result({ balanceAfter: 99, creditPending: true, nextActions: ['free_spin'], spinsRemaining: 8 }),
+    );
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    channel.sendToHost('PLAY_REQUEST', { action: 'buy_bonus', bet: 1 });
+    await flush();
+    const play = sent.find((m) => m.type === 'PLAY_RESULT');
+    expect(play!.payload.balanceAfter).toBe(99);
+    expect(play!.payload.creditPending).toBe(true);
+    expect(play!.payload.session.completed).toBe(false);
+
+    // getBalance отвечает тем же числом — кеш моста обновился.
+    sent.length = 0;
+    channel.sendToHost('GET_BALANCE', {});
+    await flush();
+    expect(sent.find((m) => m.type === 'BALANCE_UPDATE')!.payload.balance).toBe(99);
+
+    // Незакрытый раунд по-прежнему предлагается к восстановлению: снимок
+    // держит `creditPending`, а не «нет баланса».
+    sent.length = 0;
+    channel.sendToHost('GET_STATE', {});
+    await flush();
+    expect(sent.find((m) => m.type === 'STATE_RESPONSE')!.payload.session).not.toBeNull();
+  });
+
   it('PLAY_RESULT_ACK игры превращается в ack бэкенду', async () => {
     backend.play.mockResolvedValue(result({ creditPending: true, balanceAfter: null }));
     channel.sendToHost('GAME_READY', {});

@@ -202,7 +202,8 @@ describe('WS-цикл раунда', () => {
     const first = await c.waitFor('result');
     expect(first.id).toBe('p0');
     expect(first.creditPending).toBe(true);
-    expect(first.balanceAfter).toBeNull();
+    // Ставка списана на OpenRound (100 − 1), выигрыш ещё не зачислен.
+    expect(first.balanceAfter).toBe(99);
     expect(first.nextActions).toEqual(['free_spin']);
 
     c.socket.send(JSON.stringify({ t: 'ack', roundId: first.roundId, cursor: 1 }));

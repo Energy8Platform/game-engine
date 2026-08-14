@@ -79,13 +79,29 @@ describe('оркестратор — сложный раунд', () => {
     expect(sent).not.toHaveProperty('win_multiplier');
   });
 
-  it('первый сегмент отдаётся с creditPending и без баланса раунда', async () => {
+  it('первый сегмент отдаётся с creditPending и балансом после списания ставки', async () => {
     const api = fakeApi();
     const { delivery } = await startRound(deps(api), ctx, { id: 'p1', action: 'spin', betIndex: 2 });
     expect(delivery.creditPending).toBe(true);
     expect(delivery.action).toBe('spin');
     expect(delivery.winX).toBe(0);
     expect(delivery.nextActions).toEqual(['free_spin']);
+    // OpenRound уже списал ставку и назвал новый баланс — отдаём его.
+    expect(delivery.balanceAfter).toBe(95);
+  });
+
+  it('покупка бонуса показывает списание сразу, а не в конце фичи', async () => {
+    // Регрессия: игрок покупал фичу, получал 8 фриспинов и не видел, что за
+    // них заплатил, — `balanceAfter` был null до самого CloseRound. Два флага
+    // означают разное: выигрыш действительно не зачислен (`creditPending`),
+    // но баланс после списания платформа назвала здесь и сейчас.
+    const api = fakeApi();
+    const { delivery } = await startRound(
+      deps(api), ctx, { id: 'p22', action: 'buy_bonus', betIndex: 2 },
+    );
+    expect(api.openRound.mock.calls[0][0].price_multiplier).toBe(5);
+    expect(delivery.balanceAfter).toBe(95); // из OpenRoundResponse, не наш расчёт
+    expect(delivery.creditPending).toBe(true);
   });
 
   it('подтверждение сегмента двигает курсор через UpdateRoundState', async () => {
@@ -171,13 +187,13 @@ describe('оркестратор — сложный раунд', () => {
     expect(closed.status).toBe('completed');
   });
 
-  it('баланс появляется только на финальном сегменте', async () => {
+  it('баланс называют только те RPC, которые двигают деньги', async () => {
     const api = fakeApi();
     const deliveries = await playWhole(api);
-    expect(deliveries.slice(0, 3).map((d) => d.balanceAfter)).toEqual([null, null, null]);
-    expect(deliveries.slice(0, 3).every((d) => d.creditPending)).toBe(true);
-    expect(deliveries[3].balanceAfter).toBe(98);
-    expect(deliveries[3].creditPending).toBe(false);
+    // OpenRound списал ставку → 95; середина идёт через UpdateRoundState, у
+    // которого поля `balance` нет вовсе → null; CloseRound зачислил → 98.
+    expect(deliveries.map((d) => d.balanceAfter)).toEqual([95, null, null, 98]);
+    expect(deliveries.map((d) => d.creditPending)).toEqual([true, true, true, false]);
   });
 
   it('CloseRound везёт round_version из последнего UpdateRoundState', async () => {

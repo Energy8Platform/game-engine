@@ -169,9 +169,14 @@ async function finishSimple(
 }
 
 /**
- * Раунд из нескольких сегментов: OpenRound списывает ставку, выигрыш
- * зачислится только на CloseRound. До тех пор сегменты уезжают во фронт
- * с `creditPending`, а баланс раунда остаётся неизвестным.
+ * Раунд из нескольких сегментов: OpenRound списывает ставку и ОБЯЗАН вернуть
+ * новый баланс после списания (`open-round.md`) — его и отдаём.
+ *
+ * `creditPending` и «баланс неизвестен» — разные утверждения, и путать их
+ * дорого: выигрыш действительно зачислится только на CloseRound, но ставка
+ * списана уже здесь, и платформа только что назвала результат. Отдавая
+ * `null`, мы заставляли фронт показывать баланс ДО списания весь бонус —
+ * игрок покупал фичу и не видел, что за неё заплатил.
  */
 async function openComplex(
   deps: RoundDeps,
@@ -189,7 +194,7 @@ async function openComplex(
     round_state: encodeRoundState(state),
   });
   return {
-    delivery: toDelivery(first, res.round_id, betAmount, null, true, false),
+    delivery: toDelivery(first, res.round_id, betAmount, res.balance, true, false),
     round: {
       roundId: res.round_id,
       roundVersion: res.round_version,
@@ -229,8 +234,10 @@ export async function acknowledgeSegment(
 }
 
 /**
- * Следующий сегмент открытого раунда — ровно один шаг движка. На финальном
- * шлём CloseRound, и только он приносит настоящий баланс.
+ * Следующий сегмент открытого раунда — ровно один шаг движка. Промежуточный
+ * едет без баланса не потому, что тот неизвестен, а потому, что
+ * UpdateRoundState его не возвращает вовсе: денег на этом шаге не двигают.
+ * На финальном шлём CloseRound — он и приносит баланс с зачисленным выигрышем.
  */
 export async function advanceRound(
   deps: RoundDeps,
