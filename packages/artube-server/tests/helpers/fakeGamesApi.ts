@@ -17,6 +17,18 @@ export interface FakeGamesApi {
   send(socket: WebSocket, envelope: unknown): void;
   /** Оборвать текущее соединение, эмулируя сетевой сбой. */
   drop(): void;
+  /**
+   * Прислать `GoAway` на текущее соединение — и НЕ закрывать его.
+   *
+   * Разделено с закрытием намеренно: дока требует, чтобы клиент дождался
+   * закрытия со стороны сервера, а проверить это можно, только оставив
+   * соединение открытым и посмотрев, не закроет ли его клиент сам.
+   */
+  goAway(payload: Record<string, unknown>): void;
+  /** Закрыть текущее соединение — так, как это делает платформа вслед за GoAway. */
+  closeCurrent(code?: number): void;
+  /** Открыто ли соединение с клиентом прямо сейчас. */
+  readonly open: boolean;
   close(): Promise<void>;
 }
 
@@ -40,6 +52,21 @@ export async function startFakeGamesApi(opts: FakeGamesApiOptions = {}): Promise
     },
     drop() {
       current?.terminate();
+    },
+    goAway(payload) {
+      if (!current) throw new Error('fake games api: клиент ещё не подключился');
+      api.send(current, {
+        proto: 1, schema: 1, chan: 'control', type: 'GoAway',
+        id: `goaway-${api.connections}`, corr_id: null, op_seq: 99,
+        timestamp: new Date().toISOString(),
+        payload,
+      });
+    },
+    closeCurrent(code = 1001) {
+      current?.close(code, 'going away');
+    },
+    get open() {
+      return current?.readyState === 1; // WebSocket.OPEN
     },
     close() {
       return new Promise((resolve) => wss.close(() => resolve()));

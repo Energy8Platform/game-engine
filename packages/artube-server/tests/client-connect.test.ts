@@ -150,66 +150,6 @@ describe('GamesApiClient — соединение', () => {
     expect(client.connected).toBe(false);
   });
 
-  it('на GoAway не переподключается', async () => {
-    api = await startFakeGamesApi({
-      onMessage: (env, socket, self) => {
-        if (env.type !== 'Hello') return;
-        self.send(socket, {
-          proto: 1, schema: 1, chan: 'control', type: 'GoAway',
-          id: 'goaway-1', corr_id: null, op_seq: 2,
-          timestamp: new Date().toISOString(),
-          payload: { reason: 'shutdown' },
-        });
-        setTimeout(() => socket.close(), 10);
-      },
-    });
-    client = new GamesApiClient({
-      url: api.url, apiKey: 'k', gameId: 'g', baseReconnectDelayMs: 10,
-    });
-    const goAway = new Promise<string>((resolve) => client.on('goAway', (r: string) => resolve(r)));
-    await client.connect();
-    expect(await goAway).toBe('shutdown');
-    // Проверяем сразу по резолву goAway — до того, как сервер сам закроет
-    // сокет 10ms спустя. Раньше здесь неявно "спасал" эту проверку только
-    // последующий обрыв соединения (readyState !== OPEN), из-за чего тест
-    // не отличал "GoAway корректно остановил клиент" от "клиент считает
-    // себя подключённым до следующего обрыва".
-    expect(client.connected).toBe(false);
-    expect(api.connections).toBe(1);
-    // И остаётся так после того, как сервер закроет сокет и окно реконнекта
-    // истечёт — подтверждаем, что реконнект не запускается отложенно.
-    await new Promise((r) => setTimeout(r, 100));
-    expect(api.connections).toBe(1);
-    expect(client.connected).toBe(false);
-  });
-
-  it('GoAway раньше Welcome не даёт истёкшему hello-timeout задним числом поднять коннект', async () => {
-    // Без Welcome (autoWelcome: false) GoAway обязательно приходит раньше
-    // helloTimeoutMs. Если обработчик GoAway не гасит таймер дедлайна, тот
-    // всё равно сработает и вызовет finish(), помечая клиент ready.
-    api = await startFakeGamesApi({
-      autoWelcome: false,
-      onMessage: (env, socket, self) => {
-        if (env.type !== 'Hello') return;
-        self.send(socket, {
-          proto: 1, schema: 1, chan: 'control', type: 'GoAway',
-          id: 'goaway-2', corr_id: null, op_seq: 2,
-          timestamp: new Date().toISOString(),
-          payload: { reason: 'shutdown' },
-        });
-      },
-    });
-    client = new GamesApiClient({
-      url: api.url, apiKey: 'k', gameId: 'g', helloTimeoutMs: 30, baseReconnectDelayMs: 10,
-    });
-    const goAway = new Promise<string>((resolve) => client.on('goAway', (r: string) => resolve(r)));
-    await client.connect();
-    expect(await goAway).toBe('shutdown');
-    expect(client.connected).toBe(false);
-    // Ждём дольше, чем helloTimeoutMs, чтобы дать дедлайну шанс сработать,
-    // если бы он не был погашен обработчиком GoAway.
-    await new Promise((r) => setTimeout(r, 80));
-    expect(client.connected).toBe(false);
-    expect(api.connections).toBe(1);
-  });
+  // Поведение по `GoAway` живёт в отдельном файле — `tests/goaway.test.ts`:
+  // это не обрыв связи, а плановая смена коннекта со своим расписанием.
 });

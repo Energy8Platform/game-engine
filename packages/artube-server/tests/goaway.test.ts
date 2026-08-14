@@ -1,0 +1,318 @@
+/**
+ * `GoAway` — конец ЭТОГО коннекта, а не конец жизни клиента.
+ *
+ * Дока (`games-api-integration/control-requests/goaway.md`) не оставляет здесь
+ * свободы: «Клиент не должен обрывать WebSocket-соединение самостоятельно. При
+ * получении `GoAway` клиент должен корректно завершить текущие операции и
+ * дождаться закрытия соединения со стороны сервера, после чего инициировать
+ * переподключение согласно значению `retry_after_ms`». `retry_after_ms` там —
+ * обязательное поле рядом с `reason`, а все перечисленные причины временные:
+ * техобслуживание (1 800 000 мс), обновление сервера (300 000), перегрузка
+ * (60 000). Причины «больше не подключайся» в доке нет ни одной.
+ *
+ * Живой стенд показал цену противоположного прочтения: под получил
+ * `GoAway{reason: IdleTimeout}` — платформа просто переработала простаивающий
+ * коннект — и остался стоять навсегда глухим, отвечая `InternalServerError:
+ * no connection to Games API` на каждый вызов сессии.
+ */
+
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  GamesApiClient, resolveGoAwayDelayMs, MAX_RECONNECT_DELAY_MS,
+} from '../src/games-api/client';
+import { startFakeGamesApi, type FakeGamesApi } from './helpers/fakeGamesApi';
+import { sessionInfoResponder } from './helpers/fakePlatform';
+
+let api: FakeGamesApi;
+let client: GamesApiClient;
+
+afterEach(async () => {
+  client?.close();
+  await api?.close();
+});
+
+/**
+ * Считает Hello, пришедшие от клиента, и даёт дождаться n-го.
+ *
+ * Синхронизироваться по событию `connected` тут нельзя: сервер шлёт Welcome
+ * сразу при коннекте, ещё до того, как прочитает Hello, — и тест успел бы
+ * прислать GoAway раньше, чем сервер вообще увидел первое Hello.
+ */
+function helloWatcher() {
+  let count = 0;
+  const waiters = new Map<number, () => void>();
+  return {
+    observe(env: any) {
+      if (env.type !== 'Hello') return;
+      count += 1;
+      waiters.get(count)?.();
+    },
+    nth(n: number, timeoutMs = 5000): Promise<void> {
+      if (count >= n) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`Hello #${n} не пришёл за ${timeoutMs}ms (пришло ${count})`)),
+          timeoutMs,
+        );
+        waiters.set(n, () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) throw new Error('условие не наступило вовремя');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+describe('GoAway → переподключение', () => {
+  it('переподключается после GoAway и ждёт ровно столько, сколько попросила платформа', async () => {
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({ onMessage: hellos.observe });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 10, minReconnectDelayMs: 5,
+    });
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'IdleTimeout', retry_after_ms: 300 });
+    // Уходящий коннект перестаёт принимать новые вызовы сразу.
+    await waitUntil(() => !client.connected);
+
+    api.closeCurrent();
+    const closedAt = Date.now();
+    await hellos.nth(2);
+    const waited = Date.now() - closedAt;
+
+    expect(api.connections).toBe(2);
+    // Отсчёт идёт от закрытия со стороны сервера — так формулирует дока.
+    expect(waited).toBeGreaterThanOrEqual(250);
+    expect(waited).toBeLessThan(2500);
+
+    // Переподключение — полное рукопожатие заново, с нуля по op_seq.
+    const sent = api.received.filter((e) => e.type === 'Hello');
+    expect(sent).toHaveLength(2);
+    expect(sent[1].op_seq).toBe(1);
+    await waitUntil(() => client.connected);
+  });
+
+  it('не закрывает соединение сам — ждёт закрытия со стороны сервера', async () => {
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({ onMessage: hellos.observe });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 10, minReconnectDelayMs: 5,
+    });
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'Server update in progress', retry_after_ms: 20 });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Дока: «Клиент не должен обрывать WebSocket-соединение самостоятельно».
+    expect(api.open).toBe(true);
+    // И не бежит подключаться вторым коннектом, пока первый ещё жив.
+    expect(api.connections).toBe(1);
+
+    // Закрывает сервер — вот теперь наша очередь.
+    api.closeCurrent();
+    await hellos.nth(2);
+    expect(api.connections).toBe(2);
+  });
+
+  it('после переподключения вызовы снова проходят — клиент не остаётся глухим', async () => {
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({
+      onMessage: (env, socket, self) => {
+        hellos.observe(env);
+        sessionInfoResponder()(env, socket, self);
+      },
+    });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 10, minReconnectDelayMs: 5,
+    });
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'IdleTimeout', retry_after_ms: 20 });
+    api.closeCurrent();
+    await hellos.nth(2);
+    await waitUntil(() => client.connected);
+
+    const info = await client.sessionInfo({ session_id: 's-1', player_connection_info: {} });
+    expect(info.balance).toBe(100);
+  });
+
+  it('пока коннекта нет, вызовы падают сразу, а не копятся в очереди', async () => {
+    // Поведение, доставшееся от прежней реализации, и его надо сохранить:
+    // отсутствие коннекта — быстрый и предсказуемый отказ, а не зависание.
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({ onMessage: hellos.observe });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 10_000, minReconnectDelayMs: 10_000,
+    });
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'Server overload', retry_after_ms: 60_000 });
+    await waitUntil(() => !client.connected);
+    const started = Date.now();
+    await expect(
+      client.sessionInfo({ session_id: 's-1', player_connection_info: {} }),
+    ).rejects.toMatchObject({ code: 'InternalServerError' });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('close() после GoAway останавливает клиент окончательно — переподключения не будет', async () => {
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({ onMessage: hellos.observe });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 5, minReconnectDelayMs: 5,
+    });
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'IdleTimeout', retry_after_ms: 5 });
+    client.close();
+    api.closeCurrent();
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(api.connections).toBe(1);
+    expect(client.connected).toBe(false);
+  });
+
+  it('сервер прислал GoAway и не закрывает — по истечении отведённого срока рвём сами', async () => {
+    // Дока обещает закрытие со стороны сервера. Обещание, которое платформа
+    // не сдержала, не должно превращаться в вечную немоту — ровно в неё
+    // упирался живой под. Ждём столько, сколько велено, и только потом рвём.
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({ onMessage: hellos.observe });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 5, minReconnectDelayMs: 5, goAwayCloseGraceMs: 150,
+    });
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'IdleTimeout', retry_after_ms: 10 });
+    // Внутри отведённого срока молчим и ждём сервер.
+    await new Promise((r) => setTimeout(r, 80));
+    expect(api.open).toBe(true);
+
+    await hellos.nth(2);
+    expect(api.connections).toBe(2);
+  });
+
+  it('GoAway раньше Welcome не даёт истёкшему hello-timeout задним числом поднять коннект', async () => {
+    // Без Welcome (autoWelcome: false) GoAway обязательно приходит раньше
+    // helloTimeoutMs. Если обработчик GoAway не гасит таймер дедлайна, тот
+    // всё равно сработает и вызовет finish(), пометив клиент ready — на
+    // коннекте, который уже уходит.
+    api = await startFakeGamesApi({
+      autoWelcome: false,
+      onMessage: (env, socket, self) => {
+        if (env.type !== 'Hello') return;
+        self.send(socket, {
+          proto: 1, schema: 1, chan: 'control', type: 'GoAway',
+          id: 'goaway-2', corr_id: null, op_seq: 2,
+          timestamp: new Date().toISOString(),
+          payload: { reason: 'shutdown', retry_after_ms: 10_000 },
+        });
+      },
+    });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      helloTimeoutMs: 30, baseReconnectDelayMs: 10, minReconnectDelayMs: 10,
+    });
+    const goAway = new Promise<string>((resolve) => client.on('goAway', (r: string) => resolve(r)));
+    await client.connect();
+    expect(await goAway).toBe('shutdown');
+    expect(client.connected).toBe(false);
+    // Ждём дольше, чем helloTimeoutMs, чтобы дать дедлайну шанс сработать.
+    // Переподключение при этом ещё далеко: retry_after_ms — 10 секунд.
+    await new Promise((r) => setTimeout(r, 80));
+    expect(client.connected).toBe(false);
+    expect(api.connections).toBe(1);
+  });
+
+  it('событие goAway доносит и причину, и задержку — операторy видно, что произошло', async () => {
+    const hellos = helloWatcher();
+    api = await startFakeGamesApi({ onMessage: hellos.observe });
+    client = new GamesApiClient({
+      url: api.url, apiKey: 'k', gameId: 'g',
+      baseReconnectDelayMs: 10, minReconnectDelayMs: 10,
+    });
+    const seen: unknown[][] = [];
+    client.on('goAway', (...args: unknown[]) => seen.push(args));
+    await client.connect();
+    await hellos.nth(1);
+
+    api.goAway({ reason: 'IdleTimeout', retry_after_ms: 4321 });
+    await waitUntil(() => seen.length > 0);
+    expect(seen[0][0]).toBe('IdleTimeout');
+    expect(seen[0][1]).toBe(4321);
+  });
+});
+
+describe('GoAway → задержка переподключения', () => {
+  const min = 1000;
+  const fallback = 1000;
+
+  it('берёт retry_after_ms платформы как есть', () => {
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 60_000 }, { min, fallback })).toBe(60_000);
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 1_800_000 }, { min, fallback })).toBe(1_800_000);
+  });
+
+  it('без retry_after_ms (или с мусором вместо него) — падает на собственную задержку', () => {
+    // Поле объявлено обязательным, но «обязательное» — обещание платформы, а
+    // не гарантия. Ни горячего цикла, ни вечного простоя из этого выйти
+    // не должно.
+    for (const payload of [
+      undefined,
+      {},
+      { retry_after_ms: null },
+      { retry_after_ms: 'soon' },
+      { retry_after_ms: Number.NaN },
+      { retry_after_ms: Number.POSITIVE_INFINITY },
+      { retry_after_ms: -5000 },
+      { retry_after_ms: 0 },
+    ]) {
+      expect(resolveGoAwayDelayMs(payload as any, { min, fallback })).toBe(fallback);
+    }
+  });
+
+  it('слишком маленькое значение поднимается до нижней границы — горячего цикла не будет', () => {
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 1 }, { min, fallback })).toBe(min);
+  });
+
+  it('бессмысленно большое значение прижимается к самому большому из доки', () => {
+    // Дока сама называет максимум: техобслуживание — 1 800 000 мс.
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 10 ** 12 }, { min, fallback }))
+      .toBe(MAX_RECONNECT_DELAY_MS);
+  });
+
+  it('серия коротких GoAway подряд разводит попытки экспоненциально', () => {
+    // Единственная граница против платформы, которая нас намеренно не пускает:
+    // не список «терминальных» причин (в доке их нет), а растущая пауза.
+    // `streak` — сколько таких GoAway было ДО этого, поэтому одиночный
+    // (streak: 0) идёт ровно по расписанию платформы.
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 60_000 }, { min, fallback, streak: 0 }))
+      .toBe(60_000);
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 60_000 }, { min, fallback, streak: 1 }))
+      .toBe(120_000);
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 60_000 }, { min, fallback, streak: 2 }))
+      .toBe(240_000);
+    expect(resolveGoAwayDelayMs({ retry_after_ms: 60_000 }, { min, fallback, streak: 40 }))
+      .toBe(MAX_RECONNECT_DELAY_MS);
+  });
+});
