@@ -35,10 +35,89 @@ describe('детект запуска на Artube', () => {
     expect(params.lang).toBe('en');
     expect(params.device).toBe('desktop');
   });
+});
 
-  it('бэкенд всегда на том же origin — так требует дока', () => {
-    const params = parseArtubeUrl('https://example-game.artube-888.live/play?sessionId=s');
-    expect(params.apiBase).toBe('https://example-game.artube-888.live');
+/**
+ * `apiBase` = КАТАЛОГ страницы запуска, а не её origin.
+ *
+ * Реальный деплой Artube монтирует игру под пер-игровым префиксом пути
+ * (`https://dev.artube-888.live/artube-o7df8qem5k/`), и бэкенд той же игры
+ * живёт под ТЕМ ЖЕ префиксом. Вывод из origin выбрасывал префикс и уводил
+ * сокет на чужой (несуществующий) `/api/ws` в корне домена — см.
+ * `docs/artube-integration.md`.
+ */
+describe('apiBase выводится из каталога страницы запуска', () => {
+  const apiBaseOf = (href: string) => parseArtubeUrl(href).apiBase;
+
+  it('пер-игровой префикс пути со слэшем на конце — тот самый прод-случай', () => {
+    expect(
+      apiBaseOf(
+        'https://dev.artube-888.live/artube-o7df8qem5k/' +
+          '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160&gameId=artube-o7df8qem5k',
+      ),
+    ).toBe('https://dev.artube-888.live/artube-o7df8qem5k');
+  });
+
+  it('корень домена (локальный дев и пер-игровой поддомен) — просто origin', () => {
+    expect(apiBaseOf('http://localhost:5175/?sessionId=s')).toBe('http://localhost:5175');
+    expect(apiBaseOf('https://example-game.artube-888.live/?sessionId=s')).toBe(
+      'https://example-game.artube-888.live',
+    );
+  });
+
+  it('URL заканчивается файлом (index.html) — файл отбрасывается', () => {
+    expect(apiBaseOf('https://host/artube-xxx/index.html?sessionId=s')).toBe(
+      'https://host/artube-xxx',
+    );
+    expect(apiBaseOf('https://host/index.html?sessionId=s')).toBe('https://host');
+  });
+
+  it('префикс без слэша на конце — последний сегмент всё равно каталог', () => {
+    // Сервер на такой адрес обычно отвечает 301 на вариант со слэшем, но
+    // полагаться на редирект нельзя: сюда мы можем попасть и до него.
+    expect(apiBaseOf('https://host/artube-xxx?sessionId=s')).toBe('https://host/artube-xxx');
+  });
+
+  it('вложенный префикс сохраняется целиком', () => {
+    expect(apiBaseOf('https://host/games/artube-xxx/?sessionId=s')).toBe(
+      'https://host/games/artube-xxx',
+    );
+    expect(apiBaseOf('https://host/games/artube-xxx/index.html?sessionId=s')).toBe(
+      'https://host/games/artube-xxx',
+    );
+  });
+
+  it('query и фрагмент в вывод не попадают', () => {
+    expect(apiBaseOf('https://host/artube-xxx/?sessionId=s&lang=ru&device=mobile#anchor')).toBe(
+      'https://host/artube-xxx',
+    );
+  });
+
+  it('нестандартный порт — часть адреса бэкенда', () => {
+    expect(apiBaseOf('http://127.0.0.1:8080/artube-xxx/?sessionId=s')).toBe(
+      'http://127.0.0.1:8080/artube-xxx',
+    );
+  });
+
+  it('каталог с точкой в имени распознаётся по слэшу на конце', () => {
+    expect(apiBaseOf('https://host/artube-xxx/v1.2/?sessionId=s')).toBe(
+      'https://host/artube-xxx/v1.2',
+    );
+  });
+
+  it('Location (а не строка) разбирается так же — это то, что даёт браузер', () => {
+    const location = { href: 'https://host/artube-xxx/?sessionId=s' } as Location;
+    expect(parseArtubeUrl(location).apiBase).toBe('https://host/artube-xxx');
+  });
+
+  it('вывод идёт от КАТАЛОГА страницы, а не от корня префикса', () => {
+    // Допущение, на котором стоит вывод: index.html лежит в корне того самого
+    // каталога, под которым проксируется `/api` — это и есть то, что кладёт
+    // сборка (`base: './'`, один index.html в корне артефакта). Страница на
+    // уровень глубже дала бы и `apiBase` на уровень глубже.
+    expect(apiBaseOf('https://host/artube-xxx/game/index.html?sessionId=s')).toBe(
+      'https://host/artube-xxx/game',
+    );
   });
 });
 

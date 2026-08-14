@@ -63,7 +63,11 @@ export type ServerMessage =
 export interface ArtubeBridgeOptions {
   /** Мост живёт в одном бандле с игрой и общается через MemoryChannel. */
   devMode?: boolean;
-  /** Origin бэкенда; по умолчанию берётся из URL запуска (тот же домен). */
+  /**
+   * База адресов бэкенда (мост дописывает `/api/ws`); по умолчанию — каталог
+   * страницы запуска, см. `ArtubeUrlParams.apiBase`. Переопределять только
+   * для локальной разработки против бэкенда на другом порту.
+   */
   apiBase?: string;
   /** Переопределение URL запуска; по умолчанию `window.location.href`. */
   url?: string | URL | Location;

@@ -7,6 +7,8 @@ const backend = vi.hoisted(() => ({
   ack: vi.fn(),
   on: vi.fn(),
   close: vi.fn(),
+  /** Адреса, с которыми мост собрал клиента — см. describe «адрес сокета». */
+  urls: [] as string[],
 }));
 
 vi.mock('../src/client', async (importOriginal) => {
@@ -14,7 +16,9 @@ vi.mock('../src/client', async (importOriginal) => {
   return {
     ...actual,
     ArtubeClient: class {
-      constructor(_url: string) {}
+      constructor(url: string) {
+        backend.urls.push(url);
+      }
       connect = backend.connect;
       play = backend.play;
       ack = backend.ack;
@@ -418,5 +422,62 @@ describe('ArtubeBridge', () => {
     await flush();
     const getBalance = sent.find((m) => m.type === 'BALANCE_UPDATE');
     expect(getBalance!.payload.balance).toBe(52);
+  });
+});
+
+/**
+ * Адрес сокета: `${apiBase}/api/ws`, где `apiBase` — каталог страницы запуска
+ * (см. `detect.test.ts`). Здесь проверяется вторая половина: что мост
+ * действительно строит на нём адрес и переводит схему http→ws.
+ */
+describe('адрес сокета', () => {
+  const socketUrl = (opts: Record<string, unknown>): string => {
+    backend.urls.length = 0;
+    backend.connect.mockReset().mockResolvedValue(INIT);
+    installWindow();
+    const b = new ArtubeBridge({ devMode: true, gameId: 'my-game', ...opts });
+    const url = backend.urls[0];
+    b.destroy();
+    return url;
+  };
+
+  it('прод: пер-игровой префикс пути попадает в адрес сокета', () => {
+    expect(
+      socketUrl({
+        url:
+          'https://dev.artube-888.live/artube-o7df8qem5k/' +
+          '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160&gameId=artube-o7df8qem5k',
+      }),
+    ).toBe(
+      'wss://dev.artube-888.live/artube-o7df8qem5k/api/ws' +
+        '?sessionId=8f3daf8d-02f2-4d5d-b3f9-1f80fbcaa160',
+    );
+  });
+
+  it('дев: игра в корне — сокет в корне, http→ws', () => {
+    expect(socketUrl({ url: 'http://localhost:5175/?sessionId=s1' })).toBe(
+      'ws://localhost:5175/api/ws?sessionId=s1',
+    );
+  });
+
+  it('явный apiBase перебивает вывод из URL (дев против чужого порта)', () => {
+    expect(
+      socketUrl({
+        url: 'https://dev.artube-888.live/artube-o7df8qem5k/?sessionId=s1',
+        apiBase: 'http://localhost:8080',
+      }),
+    ).toBe('ws://localhost:8080/api/ws?sessionId=s1');
+  });
+
+  it('явный apiBase может сам нести префикс пути', () => {
+    expect(
+      socketUrl({ url: 'http://localhost:5173/?sessionId=s1', apiBase: 'http://localhost:8080/g1' }),
+    ).toBe('ws://localhost:8080/g1/api/ws?sessionId=s1');
+  });
+
+  it('sessionId уезжает закодированным', () => {
+    expect(socketUrl({ url: 'https://host/artube-x/?sessionId=a%2Fb%3Fc' })).toBe(
+      'wss://host/artube-x/api/ws?sessionId=a%2Fb%3Fc',
+    );
   });
 });
