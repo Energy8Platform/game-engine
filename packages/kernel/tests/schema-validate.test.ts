@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Diagnostic } from '@/diagnostics';
+import { typeName } from '@/diagnostics';
+import { STRING_KINDS } from '@/schema/types';
 import type { FieldSchema, Schema } from '@/schema/types';
 import { defaultOf, isPlainObject, validate } from '@/schema/validate';
 
@@ -95,6 +97,72 @@ describe('validate', () => {
     expect(value.enabled).toBe(true);
     expect(diagnostics.some((d) => d.code === 'schema/not-an-object')).toBe(true);
   });
+
+  // typeName (diagnostics.ts) is what builds the "got ..." half of every schema/type-mismatch and
+  // schema/not-an-object message. Exercised here through validate()'s actual output, not only as a
+  // unit, so the fix is pinned exactly where a reader would notice it: the message text.
+  it('says "an object", not "a object", for an object value', () => {
+    const { diagnostics } = validate({ priority: {} }, FEATURE);
+    expect(diagnostics[0].message).toBe('Expected a number, got an object.');
+  });
+
+  it('reports NaN as "NaN", not "a number" — indistinguishable from a valid one otherwise', () => {
+    const { diagnostics } = validate({ priority: NaN }, FEATURE);
+    expect(diagnostics[0].message).toBe('Expected a number, got NaN.');
+  });
+});
+
+describe('typeName', () => {
+  it('uses "an" before a vowel sound and "a" everywhere else', () => {
+    expect(typeName({})).toBe('an object');
+    expect(typeName(undefined)).toBe('an undefined');
+    expect(typeName('x')).toBe('a string');
+    expect(typeName(1)).toBe('a number');
+    expect(typeName(true)).toBe('a boolean');
+    expect(typeName(() => {})).toBe('a function');
+  });
+
+  it('reports null and arrays as themselves, not by typeof', () => {
+    expect(typeName(null)).toBe('null');
+    expect(typeName([1, 2])).toBe('an array');
+  });
+
+  it('reports NaN as "NaN" rather than "a number"', () => {
+    expect(typeName(NaN)).toBe('NaN');
+  });
+});
+
+// STRING_KINDS has no consumer inside src/ — `validateField`'s `default` switch case treats every
+// kind it does not otherwise recognize (number/boolean/enum/object/list) as a plain string, so
+// STRING_KINDS itself is documentation for a HIGHER layer ("these are the kinds whose domain meaning
+// — a real asset path, a real symbol — the kernel does not resolve"), not a list `validate` branches
+// on. Only `asset` had ever been given a value in a test before this; this exercises every kind the
+// list actually names, so a kind added to STRING_KINDS without ever being validated does not go
+// unnoticed.
+describe('STRING_KINDS', () => {
+  it('validates every listed kind as a plain string, keeping the value as-is', () => {
+    for (const kind of STRING_KINDS) {
+      const schema: Schema = { field: { kind } as FieldSchema };
+      const { value, diagnostics } = validate({ field: 'some-value' }, schema);
+      expect(value.field).toBe('some-value');
+      expect(diagnostics).toEqual([]);
+    }
+  });
+
+  it('rejects a non-string with schema/type-mismatch for every listed kind', () => {
+    for (const kind of STRING_KINDS) {
+      const schema: Schema = { field: { kind } as FieldSchema };
+      const { value, diagnostics } = validate({ field: 42 }, schema);
+      expect(value.field).toBe(''); // falls back to the kind's zero default
+      expect(diagnostics[0]).toMatchObject({ code: 'schema/type-mismatch', path: 'field' });
+    }
+  });
+
+  it('defaults every listed kind to the empty string when no value and no default are given', () => {
+    for (const kind of STRING_KINDS) {
+      expect(defaultOf({ kind } as FieldSchema)).toBe('');
+    }
+  });
 });
 
 describe('defaultOf', () => {
@@ -166,7 +234,7 @@ describe('cloneValue safety', () => {
   });
 });
 
-describe('a non-object schema field never throws (fix round 1: was TypeError reading .kind)', () => {
+describe('a non-object schema field never throws (previously a TypeError reading .kind)', () => {
   it('defaultOf(null) returns a safe value instead of throwing', () => {
     expect(() => defaultOf(null as unknown as FieldSchema)).not.toThrow();
     expect(defaultOf(null as unknown as FieldSchema)).toBe('');
@@ -239,7 +307,7 @@ describe('a non-object schema field never throws (fix round 1: was TypeError rea
 // a string, and — one level deeper — for `[null]`, since `.map` succeeds but `null.value` does not).
 // Reachable from a plain typo (`option:` for `options:`) in any point schema, contribution schema,
 // or `manifest.settings`. Confirmed against the pre-fix source, not assumed.
-describe('an enum field with malformed options never throws (Task 11 hardening a)', () => {
+describe('an enum field with malformed options never throws', () => {
   const malformedShapes: Array<[string, unknown]> = [
     ['no options key at all', undefined],
     ['options: null', null],
@@ -332,7 +400,7 @@ describe('an enum field with malformed options never throws (Task 11 hardening a
 // itself a public export, from a hand-built input passed directly to it — so a null-prototype value
 // or a value with a throwing Symbol.toStringTag getter reaches it exactly like everywhere else this
 // bug class showed up. It is now describeError(), which is total.
-describe('an enum field reports a not-an-option value that cannot be stringified, instead of throwing (Task 11 review round 1)', () => {
+describe('an enum field reports a not-an-option value that cannot be stringified, instead of throwing', () => {
   const schema: Schema = {
     direction: {
       kind: 'enum',
@@ -363,7 +431,7 @@ describe('an enum field reports a not-an-option value that cannot be stringified
 // `resolvePlan -> checkManifestShape -> checkSchemaFields -> isUsableField -> isPlainObject`. This
 // module is now a public export the README calls "the shared hostile-input guard"; a guard advertised
 // by name should not itself be a throw site.
-describe('isPlainObject does not throw on a Proxy that hides its own prototype (Task 11 review round 1)', () => {
+describe('isPlainObject does not throw on a Proxy that hides its own prototype', () => {
   it('treats a Proxy with a throwing getPrototypeOf trap as not plain, rather than throwing', () => {
     const hostile = new Proxy({}, { getPrototypeOf() { throw new Error('boom'); } });
     expect(() => isPlainObject(hostile)).not.toThrow();

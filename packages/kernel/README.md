@@ -207,8 +207,10 @@ Two things are **deliberately** not covered, by design rather than by omission:
 Everything below is exported from the package's single entry point, `@energy8engine/kernel`.
 
 **Diagnostics** — `error`, `warning` build a `Diagnostic`; `hasErrors` checks a list for one;
-`describeError` totally describes an unknown thrown/rejected value. Types: `Diagnostic`,
-`Severity`.
+`describeError` totally describes an unknown thrown/rejected value. `DIAGNOSTIC_CODES` lists every
+code the package emits — `Diagnostic.code` is what tests and the IDE are meant to match on, and this
+is that vocabulary, kept honest by a grep test over every `error()`/`warning()` call site in `src/`.
+Types: `Diagnostic`, `Severity`.
 
 **Schema** — `validate` checks a settings object against a `Schema` and fills in defaults;
 `defaultOf` computes one field's default; `mergeSchemas` combines a point's schema with a

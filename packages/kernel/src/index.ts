@@ -13,7 +13,7 @@
 export const KERNEL_VERSION = '0.1.0';
 
 // Diagnostics
-export { describeError, error, hasErrors, warning } from './diagnostics';
+export { DIAGNOSTIC_CODES, describeError, error, hasErrors, warning } from './diagnostics';
 export type { Diagnostic, Severity } from './diagnostics';
 
 // Schema

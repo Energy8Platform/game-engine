@@ -277,7 +277,7 @@ export function resolvePlan(input: ResolveInput): ResolveOutput {
         );
         continue;
       }
-      if (!Array.isArray(list)) continue; // checkManifestShape already reported manifest/bad-contributions
+      if (!Array.isArray(list)) continue; // checkManifestShape already reported manifest/bad-contribution-list
 
       for (const contribution of list as Contribution[]) {
         if (!isPlainObject(contribution)) continue; // checkManifestShape already reported manifest/bad-contribution

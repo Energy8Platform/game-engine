@@ -1,4 +1,4 @@
-import { type Diagnostic, describeError, error } from '../diagnostics';
+import { type Diagnostic, describeError, error, typeName } from '../diagnostics';
 import type { Factory } from '../manifest/types';
 import { cloneValue, isPlainObject } from '../schema/validate';
 import type { ResolvedContribution, ResolvedPlan } from '../resolve/types';
@@ -13,12 +13,6 @@ export interface Activated<T> {
 export interface ActivateResult<T> {
   instances: Activated<T>[];
   diagnostics: Diagnostic[];
-}
-
-function typeName(v: unknown): string {
-  if (v === null) return 'null';
-  if (Array.isArray(v)) return 'an array';
-  return `a ${typeof v}`;
 }
 
 /**

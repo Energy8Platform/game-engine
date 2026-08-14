@@ -41,11 +41,14 @@ describe('kernel package', () => {
     }
   });
 
-  // The barrel's non-function value exports: a constant array and the two recursion caps that back
+  // The barrel's non-function value exports: two constant arrays and the two recursion caps that back
   // the README's "never throws" contract (schema/object nesting and synchronous hook re-entrancy).
   it('exposes every non-function value export', () => {
     expect(kernel.STRING_KINDS).toEqual(['text', 'color', 'asset', 'symbol', 'spinPath', 'nodeRef', 'sound']);
     expect(kernel.MAX_SCHEMA_DEPTH).toBe(32);
     expect(kernel.MAX_HOOK_DEPTH).toBe(16);
+    expect(Array.isArray(kernel.DIAGNOSTIC_CODES)).toBe(true);
+    expect(kernel.DIAGNOSTIC_CODES.length).toBeGreaterThan(0);
+    expect(kernel.DIAGNOSTIC_CODES).toContain('resolve/no-activation');
   });
 });

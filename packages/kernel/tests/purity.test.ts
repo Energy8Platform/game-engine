@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { KERNEL_VERSION } from '@/index';
+import { DIAGNOSTIC_CODES, KERNEL_VERSION } from '@/index';
 
 const ROOT = join(__dirname, '..');
 const SRC = join(ROOT, 'src');
@@ -56,5 +56,27 @@ describe('kernel purity', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // DIAGNOSTIC_CODES (diagnostics.ts) claims to list every code this package emits. A hand-maintained
+  // list drifts the moment someone adds, renames, or removes a code in one place and not the other —
+  // this grep is what keeps that claim true instead of aspirational. It matches any quoted
+  // "domain/kebab-code"-shaped string literal anywhere under src/**, which — verified by inspection —
+  // is exactly the diagnostic codes and nothing else (no import specifier matches: those all start
+  // with "." or a package name with no "/kebab-case" second segment shaped like this).
+  it('lists every diagnostic code src/** actually emits, and nothing it does not', () => {
+    const CODE_LITERAL = /['"]([a-z][a-z0-9]*\/[a-z][a-z0-9-]*)['"]/g;
+    const found = new Set<string>();
+    for (const file of sourceFiles(SRC)) {
+      const body = readFileSync(file, 'utf8');
+      for (const match of body.matchAll(CODE_LITERAL)) found.add(match[1]);
+    }
+
+    const declared = new Set(DIAGNOSTIC_CODES);
+    const undeclared = [...found].filter((code) => !declared.has(code)).sort();
+    const stale = [...declared].filter((code) => !found.has(code)).sort();
+
+    expect(undeclared).toEqual([]); // a code src/** emits but DIAGNOSTIC_CODES does not list
+    expect(stale).toEqual([]); // a code DIAGNOSTIC_CODES lists but src/** no longer emits
   });
 });

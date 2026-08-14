@@ -45,7 +45,7 @@ describe('checkManifestShape - hostile input (never throws)', () => {
       contributes: { p: {} },
     } as any);
     expect(result).toBeInstanceOf(Array);
-    expect(result[0]?.code).toBe('manifest/bad-contributions');
+    expect(result[0]?.code).toBe('manifest/bad-contribution-list');
   });
 
   it('handles id as a Symbol gracefully', () => {
@@ -117,7 +117,7 @@ describe('checkManifestShape - hostile input (never throws)', () => {
   });
 });
 
-describe('checkManifestShape catches a bad field WITHIN an otherwise-usable schema (fix round 1)', () => {
+describe('checkManifestShape catches a bad field WITHIN an otherwise-usable schema', () => {
   it('reports a null field in a point schema', () => {
     const d = checkManifestShape({
       id: 'x',
@@ -222,7 +222,7 @@ describe('checkManifestShape catches a bad field WITHIN an otherwise-usable sche
   });
 });
 
-describe('Task 11 hardening (a) — an enum field with malformed "options" is reported at the manifest boundary', () => {
+describe('an enum field with malformed "options" is reported at the manifest boundary', () => {
   it('reports manifest/bad-enum-options for a point schema enum with no options key at all', () => {
     const d = checkManifestShape({
       id: 'x',
@@ -317,7 +317,7 @@ describe('Task 11 hardening (a) — an enum field with malformed "options" is re
 // contribution id" test above) but not a null-prototype value or a value with a throwing
 // Symbol.toStringTag getter — both of which make String() itself throw, same as everywhere else this
 // bug class showed up. Both are now describeError(), which is total.
-describe('Task 11 review round 1 — describeError, not String(): a null-prototype value must not crash checkManifestShape', () => {
+describe('describeError, not String(): a null-prototype value must not crash checkManifestShape', () => {
   it('does not throw, and still reports manifest/bad-version, for a null-prototype version', () => {
     const d = checkManifestShape({
       id: 'x',

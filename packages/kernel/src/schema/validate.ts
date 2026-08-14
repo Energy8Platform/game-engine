@@ -1,4 +1,4 @@
-import { type Diagnostic, describeError, error, warning } from '../diagnostics';
+import { type Diagnostic, describeError, error, typeName, warning } from '../diagnostics';
 import type { EnumOption, FieldSchema, Schema } from './types';
 
 export interface ValidateResult {
@@ -10,16 +10,6 @@ export interface ValidateResult {
 /** Deepest nesting `defaultOf`/`validate` will walk. A schema this deep is a construction bug —
  *  almost certainly a cycle — and the cap turns unbounded recursion into a diagnostic. */
 export const MAX_SCHEMA_DEPTH = 32;
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function typeName(v: unknown): string {
-  if (v === null) return 'null';
-  if (Array.isArray(v)) return 'an array';
-  return `a ${typeof v}`;
-}
 
 /** True for values whose structure this module is willing to copy: plain objects and arrays.
  *  A Date, a RegExp, a Map or a class instance is NOT plain — rebuilding it from its entries
@@ -147,7 +137,12 @@ export function defaultOf(field: FieldSchema, depth = 0, diagnostics?: Diagnosti
  */
 export function validate(input: unknown, schema: Schema, base = '', depth = 0): ValidateResult {
   const diagnostics: Diagnostic[] = [];
-  const source = isRecord(input) ? input : {};
+  // isPlainObject, not a private isRecord — the same "two answers to 'is this a usable record?'"
+  // question `manifest/define.ts` was already unified on. The observable difference: a Date, a Map or
+  // a class instance used as a settings object previously passed as a silent record (every schema key
+  // simply missing, so it fell back to defaults with no diagnostic); it now correctly reports
+  // schema/not-an-object below, the same as any other non-plain value.
+  const source = isPlainObject(input) ? input : {};
   // `schema` is typed as required, but a hostile call site can still hand this a null/non-object
   // value — most reachably `field.fields` on a malformed `object`-kind field (`fields: null`).
   // Normalizing once here, rather than at every call site, is what keeps that reachable without a
@@ -167,7 +162,7 @@ export function validate(input: unknown, schema: Schema, base = '', depth = 0): 
     return { value, diagnostics };
   }
 
-  if (input !== undefined && input !== null && !isRecord(input)) {
+  if (input !== undefined && input !== null && !isPlainObject(input)) {
     diagnostics.push(
       error('schema/not-an-object', `Expected an object of settings, got ${typeName(input)}.`, {
         path: base || undefined,

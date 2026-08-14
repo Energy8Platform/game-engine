@@ -22,6 +22,82 @@ export interface Diagnostic {
   fix?: string;
 }
 
+/**
+ * Every diagnostic code this package emits, across every module. `Diagnostic.code`'s own doc says
+ * tests and the IDE match on this, not on prose — this is the vocabulary that promise is made
+ * against, and previously nothing exported it: an IDE wanting to render a friendlier message per code,
+ * or a test wanting to assert a specific failure, had no list to work from but this file's comments.
+ *
+ * `tests/purity.test.ts` greps every `error(...)`/`warning(...)` call site under `src/**` and asserts
+ * its literal code appears here, so a code added, renamed, or removed in one place without the other
+ * fails that test — the kind of check that stays true rather than rotting into aspirational doc.
+ */
+export const DIAGNOSTIC_CODES = [
+  // activate/* — runtime/activate.ts
+  'activate/bad-contribution',
+  'activate/factory-failed',
+  'activate/invalid-plan',
+  'activate/load-failed',
+  'activate/not-a-factory',
+
+  // hooks/* — runtime/hooks.ts
+  'hooks/handler-failed',
+  'hooks/not-a-function',
+  'hooks/recursion-limit',
+  'hooks/undeclared',
+  'hooks/unknown',
+
+  // manifest/* — manifest/define.ts
+  'manifest/bad-arity',
+  'manifest/bad-contribution',
+  'manifest/bad-contribution-list',
+  'manifest/bad-create',
+  'manifest/bad-enum-options',
+  'manifest/bad-field-schema',
+  'manifest/bad-phase',
+  'manifest/bad-point-schema',
+  'manifest/bad-version',
+  'manifest/duplicate-contribution',
+  'manifest/enabled-collision',
+  'manifest/invalid',
+  'manifest/missing-doc',
+  'manifest/missing-engine',
+  'manifest/missing-id',
+
+  // match/* — resolve/match.ts
+  'match/predicate-threw',
+
+  // resolve/* — resolve/resolve.ts, resolve/order.ts
+  'resolve/ambiguous-activation',
+  'resolve/bad-hook',
+  'resolve/contribution-key-collision',
+  'resolve/dependency-cycle',
+  'resolve/dependency-version',
+  'resolve/duplicate-plugin-id',
+  'resolve/engine-mismatch',
+  'resolve/invalid-manifest',
+  'resolve/invalid-project',
+  'resolve/missing-dependency',
+  'resolve/no-activation',
+  'resolve/not-in-project',
+  'resolve/plugin-not-found',
+  'resolve/point-conflict',
+  'resolve/unknown-hook',
+  'resolve/unknown-point',
+  'resolve/version-mismatch',
+
+  // schema/* — schema/validate.ts, schema/merge.ts
+  'schema/bad-enum-options',
+  'schema/bad-field',
+  'schema/field-conflict',
+  'schema/not-an-object',
+  'schema/not-an-option',
+  'schema/out-of-range',
+  'schema/too-deep',
+  'schema/type-mismatch',
+  'schema/unknown-field',
+] as const;
+
 export function error(code: string, message: string, rest: Partial<Diagnostic> = {}): Diagnostic {
   return { ...rest, severity: 'error', code, message };
 }
@@ -80,4 +156,24 @@ export function describeError(err: unknown): string {
     // a getter that throws. Nothing left to try that still reads anything off `err`.
   }
   return 'a value that cannot be described';
+}
+
+/**
+ * Describe a value's type for a "wrong type" diagnostic message, e.g. `Expected a number, got
+ * ${typeName(raw)}.`. Was byte-identical in `schema/validate.ts` and `runtime/activate.ts` — the same
+ * shape of duplication that produced `describeError` above, unified here for the same reason: two
+ * copies of a message-formatting helper can independently rot out of sync with each other.
+ *
+ * Two things this used to get wrong, both silent (no test pinned either string):
+ *  - `` `a ${typeof v}` `` reads "a object" and "a undefined" — wrong article before a vowel sound.
+ *  - `NaN` has `typeof` `'number'`, so a NaN value reported itself as "a number" — indistinguishable
+ *    from a perfectly valid number in the resulting message. It now reports itself as `NaN`, the same
+ *    way `null` already reports itself as `null` rather than "a object".
+ */
+export function typeName(v: unknown): string {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'an array';
+  if (typeof v === 'number' && Number.isNaN(v)) return 'NaN';
+  const word = typeof v;
+  return `${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word}`;
 }

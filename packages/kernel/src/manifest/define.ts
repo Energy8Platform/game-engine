@@ -204,10 +204,13 @@ export function checkManifestShape(manifest: PluginManifest): Diagnostic[] {
   }
 
   for (const [pointId, list] of Object.entries(manifest.contributes ?? {})) {
-    // Defensive: list may not be iterable
+    // Defensive: list may not be iterable. Named manifest/bad-contribution-LIST, deliberately not
+    // manifest/bad-contributionS (a former one-character difference from the ELEMENT-shaped code just
+    // below) — the two report unrelated conditions (the whole list vs. one entry in it) and should not
+    // be distinguishable only by a reader noticing a missing "s".
     if (!Array.isArray(list)) {
       out.push(
-        error('manifest/bad-contributions', `Contributions to "${pointId}" must be an array.`, {
+        error('manifest/bad-contribution-list', `Contributions to "${pointId}" must be an array.`, {
           pluginId,
           pointId,
           fix: 'Change it to an array of contribution objects.',

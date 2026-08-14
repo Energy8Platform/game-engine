@@ -212,7 +212,7 @@ describe('activatePoint hostile plan/pointId input (never rejects)', () => {
 // against a right-shaped value whose property access itself throws — an IDE that wraps a live plan
 // in a Proxy to instrument or lazily hydrate it is exactly the audience for this package, and every
 // read `activatePoint` performs before reaching a plugin's own create()/factory is a candidate.
-describe('activatePoint fix round 1 — throwing property accessors never reject', () => {
+describe('activatePoint — throwing property accessors never reject', () => {
   it('does not reject when plan.contributions is a throwing accessor', async () => {
     const plan = {} as ResolvedPlan;
     Object.defineProperty(plan, 'contributions', {

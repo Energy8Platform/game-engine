@@ -810,8 +810,10 @@ describe('resolvePlan survives hostile input — malformed manifest internals', 
   });
 
   it('does not throw when an arity: "one" point looks up activateWhen through a contributes list that has a leading null', () => {
-    // Distinct from the step-5 element guard above: this exercises manifestOf()'s raw re-lookup
-    // into manifest.contributes[pointId], a SEPARATE Array#find over the SAME hostile list.
+    // Exercises step 5's construction loop over a contributes list with a leading null:
+    // `isPlainObject(contribution)` skips it, and the survivor's `activateWhen` is captured directly
+    // into `activateWhenOf` at construction time (see resolve.ts) rather than being looked back up by
+    // id later — so a hostile sibling earlier in the same list has nothing to corrupt.
     const host: PluginManifest = {
       id: 'host',
       version: '1.0.0',
@@ -1145,7 +1147,7 @@ describe('resolvePlan determinism', () => {
   });
 });
 
-describe('CRITICAL fix round 1 — a null schema field must not crash resolvePlan', () => {
+describe('a null schema field must not crash resolvePlan', () => {
   it('does not throw for a null field in a point schema, and reports manifest/bad-field-schema', () => {
     const manifest: PluginManifest = {
       id: 'x',
@@ -1247,7 +1249,7 @@ describe('CRITICAL fix round 1 — a null schema field must not crash resolvePla
   });
 });
 
-describe('IMPORTANT fix round 1 — arity "one" activation must not mix up two same-id contributions', () => {
+describe('arity "one" activation must not mix up two same-id contributions', () => {
   it('activates the correct one of two contributions sharing an id within one plugin, and labels each correctly', () => {
     const host: PluginManifest = {
       id: 'host',
@@ -1311,7 +1313,7 @@ describe('IMPORTANT fix round 1 — arity "one" activation must not mix up two s
   });
 });
 
-describe('IMPORTANT fix round 1 — match/predicate-threw is tagged with which contribution threw', () => {
+describe('match/predicate-threw is tagged with which contribution threw', () => {
   it('tags two throwing predicates from two different plugins with their own identity, not the point only', () => {
     const host: PluginManifest = {
       id: 'host',
@@ -1370,7 +1372,7 @@ describe('IMPORTANT fix round 1 — match/predicate-threw is tagged with which c
   });
 });
 
-describe('IMPORTANT fix round 1 — contribution key collisions across plugins are reported', () => {
+describe('contribution key collisions across plugins are reported', () => {
   it('reports resolve/contribution-key-collision when two plugins produce the same key, naming both', () => {
     const host: PluginManifest = {
       id: 'host',
@@ -1439,7 +1441,7 @@ describe('IMPORTANT fix round 1 — contribution key collisions across plugins a
   });
 });
 
-describe('MINOR fix round 1 — activationLabel must not claim "always" for a contribution that can never win', () => {
+describe('activationLabel must not claim "always" for a contribution that can never win', () => {
   it('labels a contribution with no activateWhen on an arity "one" point as never, not always', () => {
     const host: PluginManifest = {
       id: 'host',
@@ -1506,7 +1508,7 @@ describe('MINOR fix round 1 — activationLabel must not claim "always" for a co
   });
 });
 
-describe('MINOR fix round 1 — non-string hook entries are refused with a diagnostic, not silently keyed', () => {
+describe('non-string hook entries are refused with a diagnostic, not silently keyed', () => {
   it('refuses null, a number, an object, and a Symbol; still registers the real hook alongside them', () => {
     const manifest: PluginManifest = {
       id: 'x',
@@ -1542,7 +1544,7 @@ describe('MINOR fix round 1 — non-string hook entries are refused with a diagn
   });
 });
 
-describe('MINOR fix round 1 — String() consistency: hostile non-string data must not crash a template literal', () => {
+describe('String() consistency: hostile non-string data must not crash a template literal', () => {
   it('does not throw when manifest.version, manifest.engine, or kernelVersion is a Symbol', () => {
     const bySymbolVersion: PluginManifest = { id: 'a', version: Symbol('v') as never, engine: '^0.1.0' };
     const bySymbolEngine: PluginManifest = { id: 'b', version: '1.0.0', engine: Symbol('e') as never };
@@ -1623,7 +1625,7 @@ describe('MINOR fix round 1 — String() consistency: hostile non-string data mu
   });
 });
 
-describe('Task 11 hardening (a) — an enum field with malformed options never throws through resolvePlan', () => {
+describe('an enum field with malformed options never throws through resolvePlan', () => {
   const malformedShapes: Array<[string, unknown]> = [
     ['no options key at all (e.g. a option: typo)', undefined],
     ['options: null', null],
@@ -1676,7 +1678,7 @@ describe('Task 11 hardening (a) — an enum field with malformed options never t
   });
 });
 
-describe('Task 11 hardening (b) — a prototype-shaped hook id does not throw in resolvePlan', () => {
+describe('a prototype-shaped hook id does not throw in resolvePlan', () => {
   // Pre-fix, `resolvePlan` built `plan.hooks` as `(hooks[hook] ??= []).push(manifest.id)` on an
   // ordinary `{}`. For hook = '__proto__' (or 'constructor', or 'toString'), `hooks[hook]` reads back
   // an INHERITED value instead of `undefined`, so `??=` never assigns and `.push` throws
@@ -1743,7 +1745,7 @@ describe('Task 11 hardening (b) — a prototype-shaped hook id does not throw in
 // exists to survive. `describeMatcher(contribution.activateWhen)` runs unconditionally in step 5, for
 // EVERY contribution to an `arity:'one'` point that declares one — not a rare branch — so this made
 // `resolvePlan` itself throw. Confirmed against the pre-fix source before fixing, not assumed.
-describe('Task 11 review round 1 — describeError, not String(): resolvePlan must not crash on unstringifiable data', () => {
+describe('describeError, not String(): resolvePlan must not crash on unstringifiable data', () => {
   it('resolves a plan whose activateWhen carries an unstringifiable urlParam, instead of throwing', () => {
     const host: PluginManifest = {
       id: 'host',
@@ -1859,7 +1861,7 @@ describe('Task 11 review round 1 — describeError, not String(): resolvePlan mu
 // is `input.hookIds`, a public ResolveInput field checked only to be an array — never that its
 // elements are strings — so a hostile element reaches this exact point-free String() call while
 // building the resolve/unknown-hook diagnostic's `fix` text. Now `.map((h) => describeError(h))`.
-describe('Task 11 review round 2 — describeError, not point-free String(): resolve/unknown-hook must not crash on an unstringifiable candidate', () => {
+describe('describeError, not point-free String(): resolve/unknown-hook must not crash on an unstringifiable candidate', () => {
   it('describes unknown-hook candidates that cannot be stringified', () => {
     const rogue: PluginManifest = { id: 'rogue', version: '1.0.0', engine: '^0.1.0', hooks: ['onMadeUp'] };
     const input = {
