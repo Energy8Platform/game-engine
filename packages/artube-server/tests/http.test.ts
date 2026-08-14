@@ -92,29 +92,52 @@ describe('HTTP-слой', () => {
   });
 
   /**
-   * Игра деплоится под ПЕР-ИГРОВЫМ ПРЕФИКСОМ ПУТИ
-   * (`https://dev.artube-888.live/artube-o7df8qem5k/`), и её `/api/**` идёт
-   * туда же. Снимет ли reverse proxy префикс перед бэкендом — конфигурация
-   * платформы, а не наш выбор; жёсткое равенство пути делало бы половину
-   * этих конфигураций молчаливым 404 на живом сервере. Принимаем обе.
+   * Бэкенд игры смонтирован платформой под `/api/<slug>`, и наш собственный
+   * `/api/**` остаётся на конце (снято с живого стенда:
+   * `wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws`). Сколько из
+   * этого reverse proxy срежет перед нами — её конфигурация, снаружи не
+   * наблюдаемая; вариантов три, и мы обязаны отвечать на все, иначе
+   * «не срезала» = молчаливый 404 на живом сервере при зелёных тестах.
    */
-  describe('маршруты /api под пер-игровым префиксом пути', () => {
-    it('версия отвечает и на непрокинутом префиксе', async () => {
-      const res = await fetch(`http://127.0.0.1:${server.port}/artube-o7df8qem5k/api/version`);
-      expect(res.status).toBe(200);
-      expect(await res.json()).toHaveProperty('gameId', 'feature-game');
-    });
+  describe('маршруты /api под платформенным префиксом', () => {
+    const prefixes = [
+      ['', 'прокси срезала префикс целиком'],
+      ['/api/artube-o7df8qem5k', 'прокси не срезала ничего — форма живого стенда'],
+      ['/artube-o7df8qem5k', 'прокси срезала только внешнее /api'],
+    ] as const;
 
-    it('сокет поднимается и на непрокинутом префиксе', async () => {
-      const c = connect(`${base}/artube-o7df8qem5k/api/ws?sessionId=sess-prefix`);
-      c.socket.on('error', () => {});
-      await c.open;
-      expect(await c.waitFor('init')).toHaveProperty('balance');
-      c.socket.close();
+    for (const [prefix, why] of prefixes) {
+      it(`версия отвечает: ${why}`, async () => {
+        const res = await fetch(`http://127.0.0.1:${server.port}${prefix}/api/version`);
+        expect(res.status).toBe(200);
+        expect(await res.json()).toHaveProperty('gameId', 'feature-game');
+      });
+
+      it(`сокет поднимается: ${why}`, async () => {
+        const c = connect(`${base}${prefix}/api/ws?sessionId=sess-prefix${prefix.length}`);
+        c.socket.on('error', () => {});
+        await c.open;
+        expect(await c.waitFor('init')).toHaveProperty('balance');
+        c.socket.close();
+      });
+    }
+
+    it('маршруты не путаются между собой под префиксом', async () => {
+      // `/api/version` под префиксом не должен становиться сокетом и наоборот:
+      // хвост различает их так же, как в корне.
+      const { socket } = connect(
+        `${base}/api/artube-o7df8qem5k/api/version?sessionId=sess-mixup`,
+      );
+      const closed = new Promise<number>((resolve) => socket.on('close', () => resolve(1)));
+      socket.on('error', () => {});
+      expect(await closed).toBe(1);
     });
 
     it('похожий, но чужой путь по-прежнему не маршрут', async () => {
       expect((await fetch(`http://127.0.0.1:${server.port}/xapi/version`)).status).toBe(404);
+      expect(
+        (await fetch(`http://127.0.0.1:${server.port}/api/artube-o7df8qem5k/xapi/version`)).status,
+      ).toBe(404);
       const { socket } = connect(`${base}/notapi/ws?sessionId=sess-prefix`);
       const closed = new Promise<number>((resolve) => socket.on('close', () => resolve(1)));
       socket.on('error', () => {});

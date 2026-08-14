@@ -173,3 +173,57 @@ describe('сервер и мост вместе, сквозь настоящий
     expect(platform.countOf('CloseRoundRequest')).toBe(1);
   }, 60_000);
 });
+
+/**
+ * Стык, который ломался дважды: адрес сокета мост ВЫВОДИТ из URL страницы, а
+ * сервер решает, его ли это маршрут. Обе половины покрыты юнит-тестами по
+ * отдельности — и обе редакции бага были в них зелёными, потому что каждая
+ * сторона проверялась против собственного представления о форме адреса.
+ *
+ * Здесь `apiBase` НЕ передаётся: адрес считается из URL страницы и уезжает в
+ * настоящий сервер. Форма деплоя проверяется на том же сервере, что и
+ * дев-форма, потому что одна сборка обязана покрывать обе.
+ *
+ * ЧЕГО ЭТОТ ТЕСТ НЕ ЛОВИТ — и это важнее того, что он ловит. Наш сервер
+ * намеренно сверяет маршруты по хвосту пути (он не знает, сколько срежет
+ * прокси), поэтому он ответит и на неверно выведенный префикс: обе прошлые
+ * редакции вывода проходят этот тест зелёными. Здесь проверяется, что мост и
+ * сервер СОГЛАСОВАНЫ и что адрес вообще собирается и доезжает; что он
+ * совпадает с тем, который принимает прокси ПЛАТФОРМЫ, не может показать ни
+ * один локальный тест — точную строку фиксируют юнит-тесты
+ * `artube-bridge/test/detect.test.ts`, а её правильность устанавливается
+ * только запросом к живому стенду (см.
+ * `.superpowers/sdd/2026-08-10-artube-integration/apibase-prefix-fix.md`).
+ */
+describe('вывод адреса сокета доезжает до настоящего сервера', () => {
+  const bootAt = async (pageUrl: string) => {
+    installBrowserGlobals();
+    const fresh = new ArtubeBridge({
+      devMode: true,
+      url: pageUrl,
+      gameId: 'feature-game',
+      // apiBase намеренно отсутствует — проверяем именно вывод.
+    });
+    await fresh.ready();
+    bridge = fresh;
+    const game = new CasinoGameSDK({ devMode: true });
+    sdk = game;
+    return game;
+  };
+
+  it('дев: страница в корне → голый /api/ws', async () => {
+    const game = await bootAt(`http://127.0.0.1:${server.port}/?sessionId=${SESSION}`);
+    expect((await game.ready()).balance).toBe(100);
+  }, 30_000);
+
+  it('прод: страница под /<slug>/ → /api/<slug>/api/ws', async () => {
+    // Ровно форма живого стенда:
+    //   https://dev.artube-888.live/artube-o7df8qem5k/?sessionId=…
+    //   wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws?sessionId=…
+    const game = await bootAt(
+      `http://127.0.0.1:${server.port}/artube-o7df8qem5k/?sessionId=${SESSION}` +
+        `&gameId=artube-o7df8qem5k`,
+    );
+    expect((await game.ready()).balance).toBe(100);
+  }, 30_000);
+});
