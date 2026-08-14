@@ -3,7 +3,7 @@ import { statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
-import { GamesApiClient } from '../games-api/client.js';
+import { GamesApiClient, type ReconnectAttempt } from '../games-api/client.js';
 import { startEngine, resolveEngineGameId, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
 import { createAutocloseHandler } from './autoclose.js';
@@ -127,12 +127,37 @@ export class ArtubeServer {
     await this.api.connect();
     this.api.on('goAway', (reason: string, retryAfterMs: number) =>
       log.warn('games api asked to go away', { reason, retry_after_ms: retryAfterMs }));
+    // Единственный признак жизни, пока платформы нет. Получасовое окно
+    // техобслуживания — это полчаса, за которые под обязан быть отличим от
+    // зависшего: молчание тут неотличимо от того самого бага с `GoAway`.
+    // Своего ограничителя частоты этим строкам не нужно — частоту задаёт
+    // бэкофф клиента: шесть строк за первую минуту, дальше по одной в минуту.
+    let outageSince: number | null = null;
+    this.api.on('reconnecting', (attempt: ReconnectAttempt) => {
+      outageSince ??= Date.now();
+      log.warn('no connection to games api, retrying', {
+        attempt: attempt.attempt,
+        delay_ms: attempt.delayMs,
+        // Пауза по расписанию платформы (`GoAway`) — это не авария связи, и
+        // читать её как аварию не надо.
+        planned: attempt.planned,
+        down_ms: Date.now() - outageSince,
+      });
+    });
+    this.api.on('reconnectAbandoned', (attempts: number) =>
+      log.error('gave up reconnecting to games api', undefined, { attempts }));
     // Переподключение — это НОВЫЙ коннект, и сессии на нём платформа считает
     // неинициализированными. Дока: «переподключиться и заново выполнить полную
     // последовательность подключения (Hello → Welcome → SessionInfoRequest →
     // SessionInfoResponse) ПЕРЕД продолжением работы с раундами». Игрок для
     // этого ничего делать не должен — проходим по живым сессиям сами.
-    this.api.on('connected', () => void this.reinitSessions(log));
+    this.api.on('connected', () => {
+      if (outageSince !== null) {
+        log.info('games api connection restored', { down_ms: Date.now() - outageSince });
+        outageSince = null;
+      }
+      void this.reinitSessions(log);
+    });
     // Брошенный раунд: события приходят на подовый коннект, не на конкретное
     // WS-соединение (того обычно уже нет) — подписка живёт здесь, один раз.
     // Обработчик создаём тоже один раз: он держит защёлку от параллельных
@@ -148,7 +173,18 @@ export class ArtubeServer {
       if (isRoute(url.pathname, '/livez')) return respond(res, 200, { ok: true });
       if (isRoute(url.pathname, '/healthz')) {
         const ready = this.api?.connected === true;
-        return respond(res, ready ? 200 : 503, { ok: ready });
+        if (ready) return respond(res, 200, { ok: true });
+        // Код ответа прежний — 503 честно означает «под потерял готовность».
+        // Тело отвечает на следующий вопрос оператора: под ещё ищет платформу
+        // или уже никогда её не найдёт. Раньше это было неразличимо, и цена
+        // ошибки — рестарт пода, который починился бы сам. На здоровом поде
+        // этих полей нет: счётчик попыток прошлой аварии там уже ничего не
+        // значит.
+        return respond(res, 503, {
+          ok: false,
+          retrying: this.api?.retrying === true,
+          attempts: this.api?.attempts ?? 0,
+        });
       }
       if (isRoute(url.pathname, '/api/version')) {
         return respond(res, 200, {

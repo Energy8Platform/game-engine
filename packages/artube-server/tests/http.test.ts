@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -76,7 +76,28 @@ describe('HTTP-слой', () => {
   it('отвечает на health-пробы Kubernetes', async () => {
     const http = `http://127.0.0.1:${server.port}`;
     expect((await fetch(`${http}/livez`)).status).toBe(200);
-    expect((await fetch(`${http}/healthz`)).status).toBe(200);
+    const health = await fetch(`${http}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ ok: true });
+  });
+
+  it('без коннекта к платформе /healthz говорит, ищет ли под её ещё', async () => {
+    // 503 сам по себе не отвечает на вопрос, ради которого в него смотрят во
+    // время аварии: под ещё переподключается или замолчал навсегда? Полчаса
+    // техобслуживания выглядят точь-в-точь как под, который надо рестартовать.
+    const client = (server as any).api;
+    const spies = [
+      vi.spyOn(client, 'connected', 'get').mockReturnValue(false),
+      vi.spyOn(client, 'retrying', 'get').mockReturnValue(true),
+      vi.spyOn(client, 'attempts', 'get').mockReturnValue(7),
+    ];
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/healthz`);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ ok: false, retrying: true, attempts: 7 });
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
   });
 
   it('версия отдаётся под префиксом /api', async () => {
