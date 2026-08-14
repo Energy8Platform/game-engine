@@ -332,10 +332,13 @@ describe('восстановление после ошибок сессии/ра
     await s.listen(0);
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-mid`);
     await c.open;
-    await c.waitFor('init');
+    // Явные сроки, а не дефолтные 5 секунд: восстановление добавляет к раунду
+    // полный переигрыш в движке, и на загруженном прогоне всего пакета это
+    // упиралось в дефолт — тест мигал, ничего не говоря о самом поведении.
+    await c.waitFor('init', 15_000);
 
     c.socket.send(JSON.stringify({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 }));
-    const spin = await c.waitFor('result');
+    const spin = await c.waitFor('result', 15_000);
     expect(spin.nextActions).toEqual(['free_spin']);
 
     c.socket.send(JSON.stringify({ t: 'play', id: 'p1', action: 'free_spin', betIndex: 0 }));
@@ -343,7 +346,7 @@ describe('восстановление после ошибок сессии/ра
       const started = Date.now();
       const tick = setInterval(() => {
         if (c.messages.filter((m) => m.t === 'result').length >= 2) { clearInterval(tick); resolve(); }
-        else if (Date.now() - started > 8000) {
+        else if (Date.now() - started > 15_000) {
           clearInterval(tick);
           reject(new Error(`нет второго result; пришло ${JSON.stringify(c.messages)}`));
         }
