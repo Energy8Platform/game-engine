@@ -294,6 +294,62 @@ describe('восстановление после ошибок сессии/ра
     await flaky.close();
   }, 40_000);
 
+  it('SessionIsNotInitialized ПОСРЕДИ раунда: повтор играет тот же сегмент, а не спотыкается о движок', async () => {
+    // Это ровно то, что видит каждая живая сессия после переподключения к
+    // Games API: сессия на новом коннекте не инициализирована, и первое же
+    // мидраундовое действие получает `SessionIsNotInitialized`.
+    //
+    // Тонкость — в движке. `advanceRound` СНАЧАЛА играет сегмент и только
+    // потом идёт в платформу: к моменту ошибки движок уже на шаг впереди
+    // лога действий (лог пишется вместе с успешной RPC). Слепой повтор
+    // упирается в строгую проверку `ensureOpen` («движок впереди
+    // round_state») и отдаёт игроку InternalServerError — раунд после этого
+    // заклинен до перезагрузки страницы, потому что впереди движок остаётся
+    // навсегда.
+    const flaky = await startFakeGamesApi({
+      onMessage: respondOnceThenRecover(
+        'UpdateRoundStateRequest', 'SessionIsNotInitialized', 'Call SessionInfoRequest first.',
+      ),
+    });
+    const s = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: flaky.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await s.listen(0);
+    const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-mid`);
+    await c.open;
+    await c.waitFor('init');
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p0', action: 'spin', betIndex: 0 }));
+    const spin = await c.waitFor('result');
+    expect(spin.nextActions).toEqual(['free_spin']);
+
+    c.socket.send(JSON.stringify({ t: 'play', id: 'p1', action: 'free_spin', betIndex: 0 }));
+    await new Promise<void>((resolve, reject) => {
+      const started = Date.now();
+      const tick = setInterval(() => {
+        if (c.messages.filter((m) => m.t === 'result').length >= 2) { clearInterval(tick); resolve(); }
+        else if (Date.now() - started > 8000) {
+          clearInterval(tick);
+          reject(new Error(`нет второго result; пришло ${JSON.stringify(c.messages)}`));
+        }
+      }, 10);
+    });
+    const fs = c.messages.filter((m) => m.t === 'result').at(-1);
+    expect(fs.id).toBe('p1');
+    expect(fs.spinsPlayed).toBe(2); // именно СЛЕДУЮЩИЙ сегмент, не через один
+    expect(c.messages.some((m) => m.t === 'error')).toBe(false);
+
+    // Ни одной лишней денежной RPC: восстановление трогает только движок и
+    // идемпотентный UpdateRoundState.
+    expect(flaky.received.filter((e) => e.type === 'OpenRoundRequest')).toHaveLength(1);
+    expect(flaky.received.filter((e) => e.type === 'PlayRoundRequest')).toHaveLength(0);
+    expect(flaky.received.filter((e) => e.type === 'UpdateRoundStateRequest')).toHaveLength(2);
+
+    c.socket.close();
+    await s.close();
+    await flaky.close();
+  }, 40_000);
+
   it('SessionIsNotInitialized, упорствующая и после повтора — уходит во фронт как error, без зависания', async () => {
     const alwaysFailing = await startFakeGamesApi({
       onMessage: (env, socket, self) => {

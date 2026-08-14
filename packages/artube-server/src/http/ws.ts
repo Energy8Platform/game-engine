@@ -14,6 +14,7 @@ import {
   type ActiveRound, type RoundDeps,
 } from '../round/orchestrator.js';
 import { resumeRound } from '../round/resume.js';
+import { replayRound } from '../round/engineRound.js';
 import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
 import { GamesApiError } from '../games-api/errors.js';
 import { buildInit, isDemoSession, toSessionContext } from '../session/init.js';
@@ -219,6 +220,18 @@ export async function handleConnection(
             return recovered.round
               ? { settled: false, round: recovered.round }
               : { settled: true, outcome: { delivery: recovered.delivery, round: null } };
+          },
+          resync: async (activeRound) => {
+            // Переигрываем раунд из его же лога действий под НОВЫМ `eid`:
+            // движок детерминирован, а старый экземпляр (тот, что успел
+            // сыграть лишний сегмент) остаётся брошенным мусором в памяти
+            // движка до TTL сессии. Переиспользовать его нельзя — `StartRound`
+            // отказывает по существующему `eid`, а доверять его позиции
+            // нечему: она и есть то расхождение, которое мы чиним.
+            await replayRound(
+              deps.engine, deps.gameId, activeRound.state, activeRound.state.actions.length,
+            );
+            return activeRound;
           },
         },
         (activeRound) =>

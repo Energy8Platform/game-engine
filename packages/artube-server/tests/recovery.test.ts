@@ -30,6 +30,7 @@ function deps(resume: ResumeResult = { settled: false, round: round(5) }) {
   return {
     sessionInfo: vi.fn(async () => ({}) as any),
     resume: vi.fn(async () => resume),
+    resync: vi.fn(async (r: ActiveRound) => r),
   };
 }
 
@@ -56,6 +57,34 @@ describe('восстановление сессии', () => {
     expect(d.sessionInfo).toHaveBeenCalledTimes(1);
     expect(calls).toBe(2);
     expect(d.resume).not.toHaveBeenCalled(); // resume() чинит раунд, здесь чинить нечего
+    expect(d.resync).not.toHaveBeenCalled(); // раунда нет — синхронизировать нечего
+  });
+
+  it('SessionIsNotInitialized посреди раунда: движок возвращается к round_state перед повтором', async () => {
+    // Провалившаяся попытка успела сыграть сегмент в движке, а в `round_state`
+    // он не попал: без resync повтор упирается в «движок впереди round_state»
+    // и раунд заклинивает навсегда. Это ровно то, что видит каждая живая
+    // сессия на первом же действии после переподключения к Games API.
+    const d = deps();
+    const live = round(1);
+    const order: string[] = [];
+    d.resync.mockImplementation(async (r: ActiveRound) => {
+      order.push('resync');
+      return r;
+    });
+    let calls = 0;
+    const run = vi.fn(async (current: ActiveRound | null) => {
+      order.push('run');
+      if (++calls === 1) {
+        throw new GamesApiError({ code: 'SessionIsNotInitialized', message: 'call SessionInfo first' });
+      }
+      return outcome(current);
+    });
+    const result = await withSessionRecovery(d, run, live);
+    expect(order).toEqual(['run', 'resync', 'run']);
+    expect(d.resync).toHaveBeenCalledWith(live);
+    expect(result.round).toBe(live); // тот же раунд, а не новый
+    expect(d.resume).not.toHaveBeenCalled();
   });
 
   it('InvalidRoundOperation чинит раунд из SessionInfo и повторяет', async () => {

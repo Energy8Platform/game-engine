@@ -46,6 +46,17 @@ export interface RecoveryDeps {
   sessionInfo(): Promise<SessionInfoResponse>;
   /** Восстановить состояние раунда из свежего SessionInfo. */
   resume(info: SessionInfoResponse): Promise<ResumeResult>;
+  /**
+   * Вернуть раунд в движке ровно к тому, что описывает его собственный
+   * `round_state`, — перед повтором действия.
+   *
+   * Нужно потому, что `advanceRound` СНАЧАЛА играет сегмент и только потом
+   * идёт в платформу: к моменту ошибки движок уже на шаг впереди лога
+   * действий (лог уезжает вместе с успешной RPC). Слепой повтор упирается в
+   * строгую проверку `ensureOpen` («движок впереди round_state») — и раунд
+   * остаётся заклиненным навсегда, потому что впереди движок так и остаётся.
+   */
+  resync(round: ActiveRound): Promise<ActiveRound>;
 }
 
 /**
@@ -76,8 +87,12 @@ export async function withSessionRecovery(
     if (!(err instanceof GamesApiError) || !RECOVERABLE.has(err.code)) throw err;
     const info = await deps.sessionInfo();
     // SessionIsNotInitialized: платформа лишь ждала SessionInfo — раунд, с
-    // которым мы уже были, не мог от этого протухнуть, повторяем как есть.
-    if (err.code === 'SessionIsNotInitialized') return run(round);
+    // которым мы уже были, не мог от этого протухнуть, повторяем его же.
+    // Единственное, что нужно поправить перед повтором, — движок: провалившаяся
+    // попытка успела сыграть в нём сегмент, которого нет в `round_state`.
+    if (err.code === 'SessionIsNotInitialized') {
+      return run(round ? await deps.resync(round) : null);
+    }
     // InvalidRoundOperation: курсор/версия раунда — платформенные, идём с ними.
     const resumed = await deps.resume(info);
     if (resumed.settled) return resumed.outcome;
