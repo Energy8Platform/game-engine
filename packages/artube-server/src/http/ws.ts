@@ -1,9 +1,15 @@
 /**
  * WS-соединение с фронтом.
  *
- * Всё, что живёт на соединении — `ctx` и `current`, — восстанавливается из
- * SessionInfo при переподключении: пода это состояние не переживает и
- * пережить не должно.
+ * Всё, что живёт на соединении — `ctx`, `current` и режим кошелька, —
+ * восстанавливается из SessionInfo при переподключении: пода это состояние не
+ * переживает и пережить не должно.
+ *
+ * Демо соединение обслуживает локально (`createDemoApi`), а узнаёт о нём двумя
+ * путями: `currency: null` в SessionInfo — платформа объявила это сразу; отказ
+ * `OperationNotAllowed`/«demo user» на первой раундовой RPC — объявила в
+ * ответ на попытку. Второй путь существует потому, что отсутствие `currency`
+ * не различает демо и реальные деньги (см. `session/init.ts`).
  */
 
 import type { WebSocket } from 'ws';
@@ -16,10 +22,12 @@ import {
 import { resumeRound } from '../round/resume.js';
 import { replayRound } from '../round/engineRound.js';
 import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
-import { GamesApiError } from '../games-api/errors.js';
-import { buildInit, detectDemo, demoStartingBalance, toSessionContext } from '../session/init.js';
+import { GamesApiError, isDemoUserRejection } from '../games-api/errors.js';
+import {
+  buildInit, classifyCurrency, demoStartingBalance, toSessionContext, type CurrencyOnWire,
+} from '../session/init.js';
 import { createDemoApi, type DemoApi } from '../session/demo.js';
-import type { SessionContext } from '../session/types.js';
+import type { PlayRequest, SessionContext } from '../session/types.js';
 import { parseClientMessage, type ServerMessage } from './wire.js';
 import type { Logger } from './log.js';
 
@@ -52,6 +60,22 @@ export async function handleConnection(
   let demo = false;
   /** Кошелёк демо-сессии; `null` — реальные деньги считает платформа. */
   let demoApi: DemoApi | null = null;
+  /**
+   * Чем засеять кошелёк, если платформа объявит сессию демо уже на ходу.
+   * Снято на коннекте и до тех пор верно, пока ни одна раундовая RPC не
+   * прошла: денег на этой сессии никто не двигал.
+   */
+  let demoSeedBalance = 0;
+  /** В какой форме приехала `currency` — для лога, когда вердикт придёт отказом. */
+  let currencyOnWire: CurrencyOnWire = 'absent';
+  /**
+   * Платформа хоть раз ПРИНЯЛА нашу раундовую RPC на этом соединении.
+   *
+   * После этого её вердикт «демо» противоречил бы ей же, а подмена кошелька
+   * стала бы небезопасной сразу дважды: настоящие деньги уже двигались, и
+   * снятый на коннекте `demoSeedBalance` уже устарел.
+   */
+  let platformSettled = false;
 
   const roundDeps: RoundDeps = {
     api: deps.api,
@@ -74,6 +98,72 @@ export async function handleConnection(
     const message = err instanceof Error ? err.message : String(err);
     log.error('request failed', err, { code });
     send({ t: 'error', id, code, message });
+  };
+
+  /**
+   * Перевести соединение на локальный кошелёк — и уже не возвращать обратно.
+   *
+   * Раундовые RPC демо-сессии платформа отвергает все до одной, поэтому
+   * переключение обязано пережить действие, на котором случилось: иначе
+   * КАЖДЫЙ следующий спин снова стучался бы в платформу, снова получал бы
+   * отказ и снова переключался — лишний round trip на каждое действие игрока
+   * вместо одного на соединение.
+   *
+   * Дальше соединения оно не живёт: `demo`, `ctx` и раунд — состояние
+   * соединения, пода они не переживают и не должны. Реконнект перечитает
+   * SessionInfo и, если валюты там снова нет, потратит на переоткрытие ровно
+   * один отказ — цена, которую эта асимметрия и покупает.
+   */
+  const switchToDemoWallet = (): DemoApi => {
+    demo = true;
+    demoApi = createDemoApi(demoSeedBalance, (index) => ctx.allowedBets[index] ?? 0);
+    roundDeps.api = demoApi;
+    return demoApi;
+  };
+
+  /**
+   * Вход в раунд — с единственной попыткой понять, что сессия всё-таки демо.
+   *
+   * `currency` эту разницу не различает: отсутствие поля одинаково объясняется
+   * и демо-сессией, и реальной сессией на валюте, которую сериализатор
+   * выбросил как дефолтную (см. `classifyCurrency`). Поэтому мы идём в
+   * платформу как за реальные деньги — и слушаем её ответ. `OperationNotAllowed`
+   * с «demo user» и есть её вердикт о сессии: однозначный, в отличие от поля.
+   *
+   * Почему это безопасно повторить и почему только здесь:
+   *
+   *  - Отказ пришёл на `PlayRound`/`OpenRound` — единственные RPC, которые
+   *    делает `startRound`. Обе отвергнуты, значит на платформе не открыт ни
+   *    раунд, ни транзакция: двойного списания повтору взяться неоткуда.
+   *  - `advanceRound` этой обёртки НЕ получает намеренно. Там раунд уже открыт
+   *    платформой (ставка списана по-настоящему), и досчитать его локальным
+   *    кошельком значило бы зачислить выигрыш в бутафорию, оставив реальный
+   *    раунд висеть открытым. Такой отказ обязан дойти до игрока ошибкой.
+   *  - `platformSettled` закрывает и второй случай: если платформа хоть раз
+   *    приняла нашу раундовую RPC, «демо» от неё — противоречие ей же, а не
+   *    описание сессии.
+   *
+   * Повтор идёт заново через `startRound`, не через `resync`: тот чинит раунд,
+   * который платформа ЕЩЁ считает своим, возвращая движок к его `round_state`.
+   * Здесь у платформы нет ничего, и повтор строит свежий `RoundStateV1` — новый
+   * `eid`, новый сид, пустой лог действий. Инвариант позиции держится сам
+   * собой: `spins_played` = 1 = `1 + actions.length`. Раунд, сыгранный в
+   * движке до отказа, остаётся под старым `eid` брошенным мусором до TTL
+   * сессии — ровно как у `replayRound`, и ровно так же ничего не стоит.
+   */
+  const openRoundWithDemoFallback = async (req: PlayRequest) => {
+    try {
+      return await startRound(roundDeps, ctx, req);
+    } catch (err) {
+      if (demo || platformSettled || !isDemoUserRejection(err)) throw err;
+      const wallet = switchToDemoWallet();
+      log.warn('платформа объявила сессию демо отказом на раундовой RPC; переходим на локальный кошелёк', {
+        currency_on_wire: currencyOnWire,
+        platform_message: err instanceof Error ? err.message : String(err),
+        demo_balance: wallet.balance,
+      });
+      return startRound(roundDeps, ctx, req);
+    }
   };
 
   /**
@@ -102,11 +192,7 @@ export async function handleConnection(
       ctx = toSessionContext(sessionId, info);
       // Баланс демо ведёт кошелёк, а не платформа: её число для демо-сессии
       // статично и переиграло бы всё, что игрок наиграл на этом соединении.
-      send({
-        t: 'init',
-        ...buildInit(info, demoApi ? { demoBalance: demoApi.balance } : {}),
-        resume: null,
-      });
+      send({ t: 'init', ...buildInit(info, { wallet: demoApi }), resume: null });
     } catch (err) {
       // Перечитать не вышло — соединение всё равно расклинено, а баланс
       // приедет со следующим `balance`-событием платформы или реконнектом.
@@ -120,33 +206,41 @@ export async function handleConnection(
       player_connection_info: {},
     });
     ctx = toSessionContext(sessionId, info);
-    const detection = detectDemo(info);
-    demo = detection.demo;
-    if (detection.deviates) {
+    const verdict = classifyCurrency(info);
+    demo = verdict.demo;
+    currencyOnWire = verdict.wire;
+    demoSeedBalance = demoStartingBalance(info, deps.startingDemoBalance);
+    if (verdict.deviates) {
       // Не глушим отклонение молчаливым дефолтом: платформа шлёт не то, что
       // обещает её же спека, и следующий человек должен увидеть это в логе, а
       // не выводить заново из `OperationNotAllowed` на каждом спине.
       log.warn(
-        'SessionInfoResponse.currency не соответствует доке платформы; сессия обслуживается как демо',
-        { currency_on_wire: detection.wire, expected: 'ISO 4217 string, либо null для демо' },
+        'SessionInfoResponse.currency не соответствует доке платформы; сессия обслуживается как реальные деньги',
+        {
+          currency_on_wire: verdict.wire,
+          expected: 'ISO 4217 string, либо null для демо',
+          // Обратное предположение молчаливо разорило бы реального игрока;
+          // это — один отказ платформы, после которого мы переключимся сами.
+          on_demo_rejection: 'сессия перейдёт на локальный кошелёк',
+        },
       );
     }
     if (demo) {
       // Games API отвечает OperationNotAllowed на раундовые RPC демо-сессии —
       // подменяем источник раундов локальной заглушкой без сети.
-      demoApi = createDemoApi(
-        demoStartingBalance(info, deps.startingDemoBalance),
-        (index) => ctx.allowedBets[index] ?? 0,
-      );
-      roundDeps.api = demoApi;
+      switchToDemoWallet();
     }
     // В демо кадр обязан называть баланс кошелька: разойдись они, игрок увидел
     // бы одну сумму на загрузке и другую сразу после первого спина.
-    const init = buildInit(info, demoApi ? { demoBalance: demoApi.balance } : {});
+    const init = buildInit(info, { wallet: demoApi });
 
     // Незакрытый раунд возвращаем игроку туда, где он остановился.
     let resume = null;
     if (!demo && info.last_round && !info.last_round.finished_at) {
+      // Открытый раунд у платформы — доказательство денежной сессии само по
+      // себе: демо-сессии она раунды не открывает. Переключаться на кошелёк
+      // после этого нельзя ни при каком отказе.
+      platformSettled = true;
       const outcome = await resumeRound(roundDeps, ctx, info.last_round);
       if (outcome) {
         resume = outcome.delivery;
@@ -216,6 +310,9 @@ export async function handleConnection(
       // `SessionIsNotInitialized` и `InvalidRoundOperation` чинятся
       // перечитыванием состояния, а не слепым ретраем — withSessionRecovery
       // переинициализирует сессию/раунд и повторяет попытку ровно один раз.
+      //
+      // Вход в раунд отдельно обёрнут `openRoundWithDemoFallback`: только там
+      // отказ «это демо-пользователь» безопасно переиграть локально.
       const outcome = await withSessionRecovery(
         {
           sessionInfo: async () => {
@@ -258,10 +355,12 @@ export async function handleConnection(
         (activeRound) =>
           activeRound
             ? advanceRound(roundDeps, ctx, activeRound, msg)
-            : startRound(roundDeps, ctx, msg),
+            : openRoundWithDemoFallback(msg),
         current,
       );
       current = outcome.round;
+      // Платформа приняла раундовую RPC — сессия денежная, доказано делом.
+      if (!demo) platformSettled = true;
       send({ t: 'result', id: msg.id, ...outcome.delivery });
     } catch (err) {
       fail(err, msg.t === 'play' ? msg.id : undefined);

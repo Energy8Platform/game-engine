@@ -38,55 +38,86 @@ export interface InitPayload {
 /** Что реально приехало в `currency` — три из четырёх вариантов дока не обещает. */
 export type CurrencyOnWire = 'code' | 'null' | 'absent' | 'invalid';
 
-export interface DemoDetection {
-  /** Обслуживать сессию локально: раундовые RPC платформе запрещены. */
+export interface CurrencyVerdict {
+  /**
+   * Платформа ОБЪЯВИЛА сессию демо (`currency: null`) — единственный признак
+   * демо, который можно прочитать из SessionInfo. Не путать с итоговым
+   * режимом соединения: платформа может объявить сессию демо и позже, отказом
+   * на раундовой RPC (см. `isDemoUserRejection`), и тогда режим переключается
+   * уже на ходу.
+   */
   demo: boolean;
   wire: CurrencyOnWire;
-  /** Канонический ISO-код или `null` (демо) — дальше по коду валюта уже одна. */
+  /** Канонический ISO-код, либо `null` — кода нет (демо или его не прислали). */
   code: string | null;
   /** Провод разошёлся с докой платформы; вызывающий обязан сказать это вслух. */
   deviates: boolean;
 }
 
 /**
- * Демо ли это.
+ * Что означает `currency` из SessionInfo.
  *
- * Дока платформы противоречит сама себе и живому проводу сразу в двух местах:
- * `session-info.md` объявляет `currency` ОБЯЗАТЕЛЬНОЙ строкой (ISO 4217) и
- * `null` не упоминает вовсе, `demo-mode.md` называет `null` признаком демо, а
- * настоящая платформа прислала `SessionInfoResponse`, в котором поля `currency`
- * НЕТ. Строгое `=== null` такую сессию демо не считало: игра шла в PlayRound
- * реальными деньгами и получала `OperationNotAllowed` на каждом спине.
+ * | на проводе | `wire` | `demo` | `deviates` |
+ * | --- | --- | --- | --- |
+ * | `"USD"` | `code` | `false` | нет |
+ * | `null` | `null` | **`true`** | нет — это обещает `demo-mode.md:42` |
+ * | ключа нет | `absent` | `false` | да |
+ * | `""`, не строка | `invalid` | `false` | да |
  *
- * Поэтому реальные деньги — только явный непустой ISO-код. Всё остальное
- * (`null`, отсутствие поля, пустая строка, не-строка) — демо. Направление
- * выбрано не симметрией, а ценой ошибки: демо-игрок, отправленный в денежные
- * RPC, не может сыграть ни одного спина — игра сломана целиком; обратная
- * ошибка (реальный игрок на локальном кошельке) хуже, но требует, чтобы
- * платформа не прислала валюту реальному игроку, а единственный
- * задокументированный не-строковый случай — как раз демо.
+ * Демо — ТОЛЬКО явный `null`. Отсутствующее поле демо не означает, хотя
+ * однажды именно так и было: живая платформа прислала `SessionInfoResponse`
+ * без ключа `currency`, и её же отказ `OperationNotAllowed` подтвердил, что
+ * сессия была демо. Прочитать из этого правило «нет ключа ⇒ демо» нельзя,
+ * потому что ровно та же картина получается у РЕАЛЬНОЙ сессии: сериализатор,
+ * выбрасывающий поля с дефолтным значением (protobuf JSON, `.NET`
+ * `DefaultIgnoreCondition`), выбросит `currency` и у реального игрока, если
+ * валюта — enum, чей нулевой элемент USD. Ровно на это и указал игрок: «с
+ * другой любой валютой работает, а с дефолтной USD видимо нет». Один
+ * наблюдавшийся ответ одинаково хорошо объясняется обеими гипотезами, так что
+ * само поле их и не различает.
  *
- * Ошибка платформы от собственного контракта не молчит: `deviates` доводит её
- * до лога.
+ * Поэтому отсутствие поля читаем как реальные деньги — асимметрично и
+ * намеренно, по цене ошибки:
+ *
+ *  - принять реального игрока за демо — молчаливо и непоправимо: он ставит и
+ *    выигрывает на бутафорском кошельке, платформа не видит ни одной
+ *    транзакции, и никто этого не замечает;
+ *  - принять демо-игрока за реального — один отказанный round trip, после
+ *    которого платформа сама называет сессию демо, и соединение переключается
+ *    на локальный кошелёк (см. `http/ws.ts`). Игрок видит обычный спин.
+ *
+ * Отклонение от доки при этом реально в обеих гипотезах: `deviates` доводит
+ * его до лога.
  */
-export function detectDemo(info: SessionInfoResponse): DemoDetection {
+export function classifyCurrency(info: SessionInfoResponse): CurrencyVerdict {
   const currency = info.currency;
   if (typeof currency === 'string' && currency.trim() !== '') {
     return { demo: false, wire: 'code', code: currency, deviates: false };
   }
-  const wire: CurrencyOnWire =
-    currency === null ? 'null' : currency === undefined ? 'absent' : 'invalid';
   // `null` дока обещает (demo-mode.md) — это не отклонение.
-  return { demo: true, wire, code: null, deviates: wire !== 'null' };
+  if (currency === null) return { demo: true, wire: 'null', code: null, deviates: false };
+  const wire: CurrencyOnWire = currency === undefined ? 'absent' : 'invalid';
+  return { demo: false, wire, code: null, deviates: true };
 }
 
-/** Games API отвечает `OperationNotAllowed` на любые раундовые RPC демо-сессии. */
+/**
+ * Объявила ли платформа сессию демо в самом SessionInfo.
+ *
+ * Не единственный путь в демо: вердикт платформы может приехать и отказом на
+ * раундовой RPC. Это только то, что читается из `currency`.
+ */
 export function isDemoSession(info: SessionInfoResponse): boolean {
-  return detectDemo(info).demo;
+  return classifyCurrency(info).demo;
 }
 
 /**
  * Стартовый виртуальный баланс демо-сессии.
+ *
+ * Зовётся только там, где демо назвала сама платформа — `currency: null` в
+ * SessionInfo или отказ `OperationNotAllowed` на раундовой RPC. Для сессии,
+ * которую мы лишь ПРЕДПОЛАГАЕМ реальной (валюта не приехала), локальный
+ * кошелёк не заводится вовсе, так что подменить деньги реальному игроку этот
+ * путь не может.
  *
  * Платформа присылает демо-игроку баланс наравне с реальным (в живом кадре —
  * 999999), и он единственный, кто соразмерен её же `allowed_bets`: настроенный
@@ -108,24 +139,25 @@ export function demoStartingBalance(info: SessionInfoResponse, fallback: number)
 
 export interface BuildInitOptions {
   /**
-   * Баланс, которым РЕАЛЬНО стартует локальный демо-кошелёк. Передаётся в
-   * демо и только в демо: init обязан назвать то же число, что и кошелёк,
+   * Локальный кошелёк, если соединение обслуживает демо. Одно поле на оба
+   * следствия — `demo: true` и баланс кошелька — потому что расходиться им
+   * нельзя: init обязан назвать то же число, с которого кошелёк стартует,
    * иначе игрок видит одну сумму на загрузке и другую после первого спина.
    */
-  demoBalance?: number;
+  wallet?: { readonly balance: number } | null;
 }
 
 export function buildInit(info: SessionInfoResponse, opts: BuildInitOptions = {}): InitPayload {
   const s = info.game_settings;
   const maxWin = s.platform_max_win;
-  const detection = detectDemo(info);
+  const verdict = classifyCurrency(info);
   return {
-    // Нормализуем на границе провода: в СВОЁМ кадре демо — всегда явный
-    // `null`, а не выброшенное `JSON.stringify`-ем поле. Иначе фронт получал бы
-    // ту же неразличимость «нет ключа / null», на которой сломались мы.
-    currency: detection.code,
-    balance: opts.demoBalance ?? info.balance,
-    demo: detection.demo,
+    // Нормализуем на границе провода: в СВОЁМ кадре нет разницы «ключа нет /
+    // null», на которой сломались мы, — `null` значит ровно «кода валюты нет».
+    // Признак демо здесь отдельным полем `demo`, а не формой валюты.
+    currency: verdict.code,
+    balance: opts.wallet ? opts.wallet.balance : info.balance,
+    demo: opts.wallet ? true : verdict.demo,
     config: {
       betLevels: s.allowed_bets,
       defaultBetIndex: s.default_bet_index,
@@ -163,7 +195,7 @@ export function toSessionContext(sessionId: string, info: SessionInfoResponse): 
   const active = campaign && !campaign.is_complete && campaign.rounds_left > 0;
   return {
     sessionId,
-    currency: detectDemo(info).code,
+    currency: classifyCurrency(info).code,
     allowedBets: info.game_settings.allowed_bets,
     frcId: active ? campaign!.campaign_id : undefined,
   };

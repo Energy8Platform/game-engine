@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/artube-server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Game backend that runs an @energy8platform/game-sdk slot on the Artube platform",
   "author": "Energy8 Platform",
   "license": "MIT",

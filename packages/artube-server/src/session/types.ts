@@ -4,7 +4,11 @@ import type { CampaignProgress } from '../games-api/types.js';
 
 export interface SessionContext {
   sessionId: string;
-  /** `null` — демо-сессия: раундовые RPC платформе запрещены. */
+  /**
+   * ISO-код игрока, либо `null` — кода в SessionInfo не было. Признаком демо
+   * НЕ является: платформа шлёт ответы без `currency` и на реальных сессиях
+   * (см. `classifyCurrency`), а режим кошелька держит соединение.
+   */
   currency: string | null;
   /** Массив допустимых ставок из SessionInfo; индекс в нём — то, что едет наружу. */
   allowedBets: number[];
