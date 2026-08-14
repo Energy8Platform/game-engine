@@ -17,8 +17,8 @@ import { resumeRound } from '../round/resume.js';
 import { replayRound } from '../round/engineRound.js';
 import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
 import { GamesApiError } from '../games-api/errors.js';
-import { buildInit, isDemoSession, toSessionContext } from '../session/init.js';
-import { createDemoApi } from '../session/demo.js';
+import { buildInit, detectDemo, demoStartingBalance, toSessionContext } from '../session/init.js';
+import { createDemoApi, type DemoApi } from '../session/demo.js';
 import type { SessionContext } from '../session/types.js';
 import { parseClientMessage, type ServerMessage } from './wire.js';
 import type { Logger } from './log.js';
@@ -50,6 +50,8 @@ export async function handleConnection(
   let ctx: SessionContext;
   let current: ActiveRound | null = null;
   let demo = false;
+  /** Кошелёк демо-сессии; `null` — реальные деньги считает платформа. */
+  let demoApi: DemoApi | null = null;
 
   const roundDeps: RoundDeps = {
     api: deps.api,
@@ -98,7 +100,13 @@ export async function handleConnection(
         player_connection_info: {},
       });
       ctx = toSessionContext(sessionId, info);
-      send({ t: 'init', ...buildInit(info), resume: null });
+      // Баланс демо ведёт кошелёк, а не платформа: её число для демо-сессии
+      // статично и переиграло бы всё, что игрок наиграл на этом соединении.
+      send({
+        t: 'init',
+        ...buildInit(info, demoApi ? { demoBalance: demoApi.balance } : {}),
+        resume: null,
+      });
     } catch (err) {
       // Перечитать не вышло — соединение всё равно расклинено, а баланс
       // приедет со следующим `balance`-событием платформы или реконнектом.
@@ -112,16 +120,29 @@ export async function handleConnection(
       player_connection_info: {},
     });
     ctx = toSessionContext(sessionId, info);
-    demo = isDemoSession(info);
+    const detection = detectDemo(info);
+    demo = detection.demo;
+    if (detection.deviates) {
+      // Не глушим отклонение молчаливым дефолтом: платформа шлёт не то, что
+      // обещает её же спека, и следующий человек должен увидеть это в логе, а
+      // не выводить заново из `OperationNotAllowed` на каждом спине.
+      log.warn(
+        'SessionInfoResponse.currency не соответствует доке платформы; сессия обслуживается как демо',
+        { currency_on_wire: detection.wire, expected: 'ISO 4217 string, либо null для демо' },
+      );
+    }
     if (demo) {
       // Games API отвечает OperationNotAllowed на раундовые RPC демо-сессии —
       // подменяем источник раундов локальной заглушкой без сети.
-      roundDeps.api = createDemoApi(
-        deps.startingDemoBalance,
+      demoApi = createDemoApi(
+        demoStartingBalance(info, deps.startingDemoBalance),
         (index) => ctx.allowedBets[index] ?? 0,
       );
+      roundDeps.api = demoApi;
     }
-    const init = buildInit(info);
+    // В демо кадр обязан называть баланс кошелька: разойдись они, игрок увидел
+    // бы одну сумму на загрузке и другую сразу после первого спина.
+    const init = buildInit(info, demoApi ? { demoBalance: demoApi.balance } : {});
 
     // Незакрытый раунд возвращаем игроку туда, где он остановился.
     let resume = null;

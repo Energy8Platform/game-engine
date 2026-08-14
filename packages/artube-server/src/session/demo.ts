@@ -8,13 +8,26 @@
 import { randomUUID } from 'node:crypto';
 import type { RoundApi } from '../round/orchestrator.js';
 
-export function createDemoApi(startingBalance: number, betAmountOf: (index: number) => number): RoundApi {
+/**
+ * Локальная заглушка раундов + её кошелёк. `balance` торчит наружу, потому что
+ * кошелёк — единственный источник правды о деньгах демо-сессии: init обязан
+ * назвать ровно то число, с которого кошелёк стартует, иначе игрок видит одну
+ * сумму на загрузке и другую после первого спина.
+ */
+export interface DemoApi extends RoundApi {
+  readonly balance: number;
+}
+
+export function createDemoApi(startingBalance: number, betAmountOf: (index: number) => number): DemoApi {
   let balance = startingBalance;
   // Ставку открытого раунда помним до закрытия: CloseRoundRequest несёт
   // только множитель выигрыша, без индекса ставки.
   let openBet = 0;
 
   return {
+    get balance() {
+      return balance;
+    },
     async playRound(req) {
       const bet = betAmountOf(req.bet_index);
       const win = bet * req.win_multiplier;

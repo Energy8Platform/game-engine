@@ -63,8 +63,17 @@ export interface FreeRoundCampaign {
 
 export interface SessionInfoResponse {
   security_hash: string;
-  /** `null` означает демо-сессию — раундовые RPC для неё запрещены. */
-  currency: string | null;
+  /**
+   * `null` означает демо-сессию — раундовые RPC для неё запрещены.
+   *
+   * Необязательное, вопреки доке. `session-info.md` объявляет поле
+   * обязательной строкой, `demo-mode.md` — `null` для демо, а живая платформа
+   * прислала ответ, в котором ключа `currency` нет вовсе. Типы здесь описывают
+   * ПРОВОД, а не обещание: рантайм-валидации у нас нет, и `string | null`
+   * означало лишь, что TypeScript уверял в невозможности случая, который уже
+   * произошёл. Читать только через `detectDemo` (`session/init.ts`).
+   */
+  currency?: string | null;
   balance: number;
   gamification_token?: string;
   last_round?: LastRound | null;
