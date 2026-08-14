@@ -194,6 +194,39 @@ precisely that the game refuses to start, not that no bridge exists.
 | `demoBalance` | `number` | the backend's starting demo balance | Starting virtual balance for demo sessions — see below. |
 | `debug` | `boolean` | `false` | Verbose logging. |
 
+## Balance pushes: which ones reach the game
+
+The platform pushes a `BalanceChangedEvent` (`{session_id, balance, reason}`)
+whenever the player's balance moves. It carries no sequence, no timestamp and
+no round id, so nothing in it says whether its number is fresher or staler
+than the one the bridge already applied — but its `reason` says whether the
+bridge *needs* it at all.
+
+| `reason` | Forwarded as `BALANCE_UPDATE`? | Why |
+|---|---|---|
+| `round_bet`, `round_win` | no | The round response already reported this money, authoritatively and in step with the game's animation. |
+| `bonus`, `correction` | yes | Out-of-band money; no round response carries it. This is what the event exists for. |
+| anything else | yes, plus one `console.warn` per distinct reason | An unshown balance change is worse than one shown at an awkward moment. A warning (deduped, so a renamed `round_win` can't flood the console) says the wire has drifted from the docs. |
+
+Suppressing the round-caused reasons loses nothing, because every balance
+movement inside a round comes back through `PLAY_RESULT.balanceAfter`:
+`PlayRound` returns the balance after bet *and* win for a simple round;
+`OpenRound` returns it after the bet is debited and `CloseRound` after the win
+is credited for a multi-segment one; the mid-round `UpdateRoundState` returns
+no balance precisely because it moves no money. (A platform-driven autoclose
+settles a round without any round response — but that fires when the player's
+connection is already gone, and a returning player is met by a fresh `init`,
+which sets `init.balance` and pushes a `BALANCE_UPDATE` of its own.)
+
+A suppressed event does **not** update the bridge's internal balance either,
+so `GET_BALANCE` keeps answering the round's number. Applying it "internally
+only" would re-import the same race through the back door: the platform
+announces the bet and the win as two separate events, and a late `round_bet`
+would write the pre-win balance over the settled one.
+
+While a demo session's `DemoWallet` is active, every push is ignored outright
+regardless of reason — see below.
+
 ## Demo mode
 
 Artube's Games API has no concept of a demo session that supports round
@@ -238,7 +271,8 @@ every point that number reaches the game, not only the common one:
   to its starting value);
 - a `balanceChanged` event pushed unprompted by the backend over the wire
   (ignored outright while `demoWallet` is set, rather than forwarded as a
-  `BALANCE_UPDATE`).
+  `BALANCE_UPDATE`) — *whatever* its `reason`, including the `bonus` and
+  `correction` a live session would forward.
 
 That is deliberate — the wallet, not the connection-scoped backend
 stand-in, is what survives a mid-session WS reconnect, so it is the only

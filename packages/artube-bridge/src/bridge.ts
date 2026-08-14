@@ -76,6 +76,19 @@ function currencyCodeOf(currency: string | null | undefined): string {
   return currency ? currency.toUpperCase() : 'FUN';
 }
 
+/**
+ * Причины `BalanceChangedEvent`, описывающие движение денег ВНУТРИ раунда
+ * (`balance-changed.md`). Игре их не пересылаем: ровно эти же деньги нам
+ * авторитетно называет ответ раунда — см. {@link ArtubeBridge.onBalanceChanged}.
+ */
+const ROUND_CAUSED_REASONS: ReadonlySet<string> = new Set(['round_bet', 'round_win']);
+
+/**
+ * Причины, ради которых событие вообще существует: деньги, пришедшие ВНЕ
+ * раунда. Ни один ответ раунда о них не расскажет — только этот push.
+ */
+const OUT_OF_BAND_REASONS: ReadonlySet<string> = new Set(['bonus', 'correction']);
+
 export class ArtubeBridge {
   private readonly bridge: Bridge;
   private readonly client: ArtubeClient;
@@ -100,6 +113,8 @@ export class ArtubeBridge {
   private lastDelivered: PlayResultPayload | null = null;
   /** Демо-баланс: заведён, только когда `init.demo` — платформа его не считает. */
   private demoWallet: DemoWallet | null = null;
+  /** Незнакомые причины `BalanceChangedEvent`, о которых уже написали в консоль. */
+  private readonly warnedBalanceReasons = new Set<string>();
 
   constructor(private readonly options: ArtubeBridgeOptions = {}) {
     const url = parseArtubeUrl(options.url ?? window.location.href);
@@ -111,14 +126,9 @@ export class ArtubeBridge {
     this.client = new ArtubeClient(`${base}/api/ws?sessionId=${encodeURIComponent(url.sessionId)}`);
     this.bridge = new Bridge({ devMode: options.devMode ?? true, debug: options.debug });
 
-    this.client.on('balance', (p: { balance: number }) => {
-      // Демо-баланс ведёт кошелёк — серверный пуш здесь не источник правды
-      // (per-connection заглушка), и его число может не совпадать с тем,
-      // что видел игрок.
-      if (this.demoWallet) return;
-      this.balance = p.balance;
-      this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: p.balance });
-    });
+    this.client.on('balance', (p: { balance: number; reason?: string }) =>
+      this.onBalanceChanged(p),
+    );
     this.client.on('sessionClosed', (p: { reason: string }) => {
       this.bridge.send('ERROR', { code: 'SessionClosed', message: p.reason });
     });
@@ -248,6 +258,81 @@ export class ArtubeBridge {
   /** Игрок досмотрел сегмент — бэкенд двигает курсор в состоянии платформы. */
   private onAck(payload: PlayResultAckPayload): void {
     if (payload.roundId === this.currentRoundId) this.client.ack(payload.roundId, this.cursor);
+  }
+
+  /**
+   * `BalanceChangedEvent` платформы. Событие несёт только `{session_id,
+   * balance, reason}` — ни последовательности, ни времени, ни раунда, — так
+   * что сказать, свежее ли его число того, что мы уже применили, нельзя в
+   * принципе. Зато по `reason` можно сказать другое: нужно ли оно нам вообще.
+   *
+   * `round_bet`/`round_win` объявляют движение денег ВНУТРИ раунда, а его нам
+   * авторитетно называет ответ раунда, и дырок в этом пути нет:
+   *  - простой раунд — `PlayRound` возвращает баланс после ставки И выигрыша;
+   *  - сложный — `OpenRound` возвращает баланс после списания ставки
+   *    (artube-server 0.4.1), `CloseRound` — после зачисления выигрыша;
+   *  - промежуточные сегменты (`UpdateRoundState`) баланса не возвращают
+   *    ровно потому, что денег не двигают: у их ответа поля баланса нет;
+   *  - раунд, доигранный на восстановлении, закрывается тем же `CloseRound`.
+   * То есть каждое изменение баланса внутри раунда доезжает до игры в
+   * `PLAY_RESULT.balanceAfter` — и доезжает тогда, когда игра готова его
+   * показать. Событие же приходит по расписанию платформы, обычно посреди
+   * анимации выигрыша: это и есть та «кривизна» обновления баланса, ради
+   * которой всё написано. Пересылать его — значит показывать игроку одно и
+   * то же движение денег дважды, второй раз не вовремя.
+   *
+   * (Единственное движение внутри раунда, которое не возвращается ответом
+   * раунда, — платформенное автозакрытие: там раунд закрывает СЕРВЕР по
+   * `AutocloseRequestEvent`. Но оно по построению случается тогда, когда
+   * соединения игрока уже нет (см. `artube-server`'s `http/autoclose.ts`), а
+   * вернувшегося игрока встречает свежий `init` — {@link onReconnectInit}
+   * ставит его `init.balance` и шлёт `BALANCE_UPDATE`. Сверка на этот случай
+   * уже есть, и она остаётся.)
+   *
+   * `bonus`/`correction` — наоборот, единственный канал: их не несёт никакой
+   * ответ раунда. Их пересылаем сразу, ради них событие и существует.
+   *
+   * Незнакомую причину тоже пересылаем: не показать реальное изменение
+   * баланса хуже, чем показать его в неудачный момент, а молча съесть
+   * незнакомую причину — это ровно «не показать». В консоль о ней пишем: это
+   * значит, что провод разошёлся с докой.
+   *
+   * Подавленное событие НЕ трогает и `this.balance`. Применить его «только
+   * внутрь», чтобы `GET_BALANCE` не отвечал устаревшим, — соблазн, но это
+   * вернуло бы ту же гонку с другой стороны: ставку и выигрыш платформа
+   * объявляет ДВУМЯ событиями, и опоздавший `round_bet` записал бы баланс ДО
+   * выигрыша поверх уже посчитанного. Внутри раунда источник правды — ответ
+   * раунда, он же держит `this.balance` свежим (см. {@link onPlay}), и
+   * устаревшим этот кеш от подавления не становится.
+   *
+   * Демо разбираем первым: там баланс ведёт кошелёк, а серверный пуш
+   * (per-connection заглушка) не источник правды вовсе — его число может не
+   * совпадать с тем, что видел игрок, при любой причине.
+   */
+  private onBalanceChanged(p: { balance: number; reason?: string }): void {
+    if (this.demoWallet) return;
+    // Причину нормализуем здесь же, на границе провода, как и код валюты:
+    // `Round_Win` — та же самая причина, а принять её за незнакомую значит
+    // вернуть дёргающийся баланс.
+    const reason = (p.reason ?? '').trim().toLowerCase();
+    if (ROUND_CAUSED_REASONS.has(reason)) return;
+    if (!OUT_OF_BAND_REASONS.has(reason)) this.warnUnknownBalanceReason(p.reason);
+    this.balance = p.balance;
+    this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: p.balance });
+  }
+
+  /**
+   * По разу на причину: если платформа переименует `round_win`, предупреждение
+   * иначе печаталось бы на каждый спин и утонуло бы в собственном шуме.
+   */
+  private warnUnknownBalanceReason(reason: string | undefined): void {
+    const key = reason ?? '';
+    if (this.warnedBalanceReasons.has(key)) return;
+    this.warnedBalanceReasons.add(key);
+    console.warn(
+      `[artube-bridge] unknown BalanceChangedEvent reason ${JSON.stringify(reason)} — ` +
+        'forwarding it to the game as an out-of-band balance change',
+    );
   }
 
   /** Текущий баланс — то же значение, что несёт последний BALANCE_UPDATE/PLAY_RESULT. */

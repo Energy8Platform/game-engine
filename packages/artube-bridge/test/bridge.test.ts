@@ -444,7 +444,11 @@ describe('ArtubeBridge', () => {
       .filter(([event]: [string]) => event === 'balance')
       .pop()?.[1];
     expect(balanceCb).toBeDefined();
-    balanceCb({ balance: 12345, reason: 'external adjustment' });
+    // Причина здесь — `correction`, то есть ровно та, которую вне демо мост
+    // обязан переслать (см. describe ниже). Так проверка ловит именно
+    // старшинство кошелька, а не случайно проходит потому, что причину и так
+    // подавили бы.
+    balanceCb({ balance: 12345, reason: 'correction' });
     await flush();
 
     expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
@@ -452,6 +456,114 @@ describe('ArtubeBridge', () => {
     await flush();
     const getBalance = sent.find((m) => m.type === 'BALANCE_UPDATE');
     expect(getBalance!.payload.balance).toBe(52);
+  });
+
+  /**
+   * Пуш баланса разбирается по `reason` (`balance-changed.md`): движение денег
+   * внутри раунда игре уже принёс ответ раунда — и принёс вовремя, — а пуш
+   * приходит по расписанию платформы, посреди анимации выигрыша. Пересылаем
+   * только то, чего ответ раунда рассказать не может.
+   */
+  describe('пуш баланса разбирается по причине', () => {
+    const balanceCb = () =>
+      backend.on.mock.calls.filter(([event]: [string]) => event === 'balance').pop()?.[1];
+
+    /** Открывает сложный раунд: ставка списана (99), выигрыш ещё не зачислен. */
+    const openRound = async (): Promise<void> => {
+      backend.play.mockResolvedValue(
+        result({ balanceAfter: 99, creditPending: true, nextActions: ['free_spin'], spinsRemaining: 8 }),
+      );
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+      channel.sendToHost('PLAY_REQUEST', { action: 'buy_bonus', bet: 1 });
+      await flush();
+      sent.length = 0;
+    };
+
+    const getBalance = async (): Promise<number> => {
+      channel.sendToHost('GET_BALANCE', {});
+      await flush();
+      return sent.filter((m) => m.type === 'BALANCE_UPDATE').pop()!.payload.balance;
+    };
+
+    it('round_win в идущем раунде до игры не доезжает', async () => {
+      await openRound();
+      balanceCb()({ balance: 150, reason: 'round_win' });
+      await flush();
+      expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
+    });
+
+    it('round_bet тоже не доезжает — ставку назвал ответ OpenRound', async () => {
+      await openRound();
+      balanceCb()({ balance: 42, reason: 'round_bet' });
+      await flush();
+      expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
+    });
+
+    it('подавленный пуш не трогает и собственный баланс моста', async () => {
+      // Ставку и выигрыш платформа объявляет двумя событиями; опоздавший
+      // `round_bet` записал бы баланс ДО выигрыша поверх уже посчитанного.
+      // Внутри раунда правду держит ответ раунда — GET_BALANCE отвечает им.
+      await openRound();
+      balanceCb()({ balance: 150, reason: 'round_win' });
+      balanceCb()({ balance: 42, reason: 'round_bet' });
+      await flush();
+      expect(await getBalance()).toBe(99);
+    });
+
+    it('correction доезжает сразу — другого канала у неё нет', async () => {
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+      sent.length = 0;
+      balanceCb()({ balance: 250, reason: 'correction' });
+      await flush();
+      expect(sent.find((m) => m.type === 'BALANCE_UPDATE')!.payload.balance).toBe(250);
+      expect(await getBalance()).toBe(250);
+    });
+
+    it('bonus доезжает и посреди идущего раунда', async () => {
+      await openRound();
+      balanceCb()({ balance: 199, reason: 'bonus' });
+      await flush();
+      expect(sent.find((m) => m.type === 'BALANCE_UPDATE')!.payload.balance).toBe(199);
+      expect(await getBalance()).toBe(199);
+    });
+
+    it('регистр и пробелы в причине не превращают её в незнакомую', async () => {
+      await openRound();
+      balanceCb()({ balance: 150, reason: ' Round_Win ' });
+      await flush();
+      expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
+    });
+
+    it('незнакомая причина пересылается, но пишется в консоль по разу на причину', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await openRound();
+        balanceCb()({ balance: 300, reason: 'jackpot_payout' });
+        balanceCb()({ balance: 301, reason: 'jackpot_payout' });
+        await flush();
+        expect(sent.filter((m) => m.type === 'BALANCE_UPDATE').map((m) => m.payload.balance)).toEqual(
+          [300, 301],
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0])).toContain('jackpot_payout');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('пуш без причины пересылается — недоказанно избыточное не глотаем', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await openRound();
+        balanceCb()({ balance: 300 });
+        await flush();
+        expect(sent.find((m) => m.type === 'BALANCE_UPDATE')!.payload.balance).toBe(300);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });
 

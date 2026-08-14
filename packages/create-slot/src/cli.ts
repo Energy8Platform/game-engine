@@ -15,7 +15,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   'stake-math-tools': '^0.9.3',
   harness: '^0.3.1',
   // test/versions.test.ts fails the moment these drift from the workspace's own versions.
-  'artube-bridge': '^0.1.2',
+  'artube-bridge': '^0.1.3',
   'artube-server': '^0.5.0',
 };
 
