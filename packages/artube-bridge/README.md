@@ -24,7 +24,7 @@ pre-generated "book" into segments. Artube inverts both of those:
 |---|---|---|
 | Who calls the platform API | the browser (`StakeBridge` itself) | **only the game's backend** — the browser has no access |
 | Round math / segment splitting | per-game `BookAdapter` in the frontend | the backend (`artube-server`); the bridge just forwards |
-| Transport | HTTPS REST to Stake's RGS | same-origin WebSocket to the game's own backend (`<game prefix>/api/ws`) |
+| Transport | HTTPS REST to Stake's RGS | same-origin WebSocket to the game's own backend (`/api/<slug>/api/ws`) |
 | Per-game artifact | `BookAdapter` (required) | **none** |
 
 Because the backend already knows the round shape, `artube-bridge` has no
@@ -92,11 +92,12 @@ same-origin shape as production. It does not change the production artifact —
 the DevBridge bootstrapper comes from a `apply: 'serve'` Vite plugin, so no
 build has ever carried one.
 
-The one thing dev and production do **not** share is where the game is
-mounted. The dev server serves it at `/`, so the proxy path is a bare `/api`;
-production mounts it under a per-game path prefix, so the same route is
-`<prefix>/api`. The bridge derives that from the page it is running on rather
-than hard-coding either (see below), which is what lets one build cover both.
+The one thing dev and production do **not** share is the mount point. The dev
+server serves the game at `/`, so the backend route is a bare `/api`;
+production serves the game at `/<slug>/` and mounts its backend on a separate
+route at `/api/<slug>/`. The bridge derives that from the page it is running
+on rather than hard-coding either (see below), which is what lets one build
+cover both.
 
 `dev:artube` is **one command**: the `artubePlugin` from
 `@energy8platform/artube-server/vite` starts the game's backend as a child of
@@ -170,8 +171,9 @@ no extra iframe, communication happens over the same in-memory channel
 whose session marker was stripped fails the "is this Artube?" check and
 would otherwise **silently fall through to the offline/dev bridge, letting
 the player spin for free**. Artube's own attack surface is smaller than
-Stake's — `apiBase` comes from the launch page's own address, so no
-`rgs_url`-style open-redirect is possible — but the fall-through is identical.
+Stake's — `apiBase` comes from the launch page's own *path*, not from any
+query parameter, so no `rgs_url`-style open-redirect is possible — but the
+fall-through is identical.
 
 What URL classification alone cannot catch: a `sessionId` removed
 *entirely* is indistinguishable from a dev launch. In a production build
@@ -187,7 +189,7 @@ precisely that the game refuses to start, not that no bridge exists.
 |---|---|---|---|
 | `devMode` | `boolean` | `true` | Run in-process via `MemoryChannel`. |
 | `url` | `string \| URL \| Location` | `window.location.href` | Source for the `sessionId`/`lang`/`device` query params. |
-| `apiBase` | `string` | the launch page's own directory (origin + path up to the last `/`) | Base address of the game's backend; the bridge appends `/api/ws`. Only override this for local dev against a backend on a different port — in production it must be derived (see below). |
+| `apiBase` | `string` | the launch page's own path, re-rooted under `/api` (just the origin at the root) | Base address of the game's backend; the bridge appends `/api/ws`. Overrides the derivation completely — use it for local dev against a backend on a different port, or to state the address outright if a deployment ever mounts things differently (see below). |
 | `gameId` | `string` | `'artube-game'` | Surfaced on `PLAY_RESULT.gameId`. |
 | `demoBalance` | `number` | the backend's starting demo balance | Starting virtual balance for demo sessions — see below. |
 | `debug` | `boolean` | `false` | Verbose logging. |
@@ -246,54 +248,71 @@ The demo wallet is purely a UX convenience — it is never sent to the
 backend or persisted anywhere. A page refresh loses it, same as any other
 purely client-side state.
 
-## Deployment requirement: the backend sits beside the page
+## Deployment requirement: the backend sits on the same host as the page
 
 `ArtubeBridge` connects over `${apiBase}/api/ws?sessionId=…`, and by default
-derives `apiBase` from **the launch page's own directory** — its origin plus
-the path up to the last `/`. This is not configuration convenience; it is
-required. Artube serves the game's frontend and its backend under one
-address, splitting them only by path (`/api/**` → backend, everything else →
-the static frontend), so there is no CORS story because there is no
-cross-origin request. Deploying the backend anywhere else breaks the default
-`apiBase` and is not a supported production configuration.
+derives `apiBase` from **the launch page's own path, re-rooted under `/api`**.
+This is not configuration convenience; it is required. Artube serves the
+game's frontend and its backend from one host, splitting them by path, so
+there is no CORS story because there is no cross-origin request. Deploying
+the backend anywhere else breaks the default `apiBase` and is not a supported
+production configuration.
 
-**The one address is not necessarily the origin root.** A real deployment
-mounts each game under a per-game path prefix:
+**Same host, different paths.** The frontend is a CDN bucket mounted at
+`/<slug>/`; the backend of the same game is a *separate* proxy route at
+`/api/<slug>/**`, with the service's own `/api/ws` still on the end. The
+doubled `api` is real — the outer one is the platform's backend mount point,
+the inner one is ours:
 
 ```
-page     https://dev.artube-888.live/artube-o7df8qem5k/?sessionId=…
-apiBase  https://dev.artube-888.live/artube-o7df8qem5k
-socket   wss://dev.artube-888.live/artube-o7df8qem5k/api/ws?sessionId=…
+page     https://dev.artube-888.live/artube-o7df8qem5k/?sessionId=…&gameId=…
+apiBase  https://dev.artube-888.live/api/artube-o7df8qem5k
+socket   wss://dev.artube-888.live/api/artube-o7df8qem5k/api/ws?sessionId=…
 ```
 
-Deriving `apiBase` from `url.origin` instead would throw the prefix away and
-aim the socket at `wss://dev.artube-888.live/api/ws`, which belongs to no
-game. Taking the page's directory covers both shapes with one rule: under a
-per-game **subdomain** (`https://example-game.artube-888.live/`) the
-directory *is* the origin and you get exactly the `/api/**` the platform docs
-describe; under a per-game **path prefix** you get `<prefix>/api/**`.
+At the root there is nothing to re-root, so `apiBase` is just the origin —
+which is what makes one build cover both the deployed shape and local dev
+(where Vite serves the game at `/` and proxies `/api` to the backend), as
+well as a root-mounted production deployment if one ever appears.
+
+The prefix comes from the **path**, not from `?gameId=`, even though the
+launch URL carries the identifier twice. The path is where the CDN actually
+served the code from — you cannot change it in the address bar and still have
+the same page. `gameId` is written by whoever composed the link and is freely
+editable by the player without touching the loaded code; deriving the socket
+address from it would let a player aim the bridge at another game's backend
+with a query-string edit.
 
 What the derivation handles:
 
 | launch URL | `apiBase` |
 |---|---|
-| `https://h/artube-x/?sessionId=…` | `https://h/artube-x` |
-| `https://h/artube-x/index.html?sessionId=…` | `https://h/artube-x` |
-| `https://h/artube-x?sessionId=…` (no trailing slash) | `https://h/artube-x` |
-| `https://h/games/artube-x/?sessionId=…` | `https://h/games/artube-x` |
-| `http://localhost:5173/?sessionId=…` (dev) | `http://localhost:5173` |
+| `https://h/artube-x/?sessionId=…` | `https://h/api/artube-x` |
+| `https://h/artube-x/index.html?sessionId=…` | `https://h/api/artube-x` |
+| `https://h/artube-x?sessionId=…` (no trailing slash) | `https://h/api/artube-x` |
+| `https://h/games/artube-x/?sessionId=…` | `https://h/api/games/artube-x` |
+| `https://h/artube-x/?sessionId=…&lang=ru#a` (query, fragment) | `https://h/api/artube-x` |
+| `http://localhost:5173/?sessionId=…` (dev, root-mounted) | `http://localhost:5173` |
 
 A final path segment counts as a *file* (and is dropped) only when it
 contains a dot, which is what keeps the no-trailing-slash case from
-collapsing to the origin. The derivation reads `location`, never
+collapsing to the root. The derivation reads `location`, never
 `document.baseURI`: a `<base href>` retargets relative links inside the
 document (that is how assets get moved to a CDN) but the backend is mounted
-under the path the page itself was opened at. The build emits no `<base>`
-anyway — it ships `base: './'`, i.e. relative asset URLs.
+relative to the address the page itself was opened at. The build emits no
+`<base>` anyway — it ships `base: './'`, i.e. relative asset URLs.
+
+> Getting this wrong is cheap and **silent**: on that host any path shaped
+> `/<anything>/api/*` answers the WebSocket upgrade with `101` and then says
+> nothing forever, so a misaimed socket hangs the game on the loading screen
+> instead of failing loudly. Two releases got it wrong before this one —
+> `0.1.0` used the page origin (a clean `404`), `0.1.1` used the page
+> directory (the silent `101`). Both passed every local test, because at the
+> dev root all three rules agree.
 
 See [`@energy8platform/artube-server`](../artube-server)'s README for the
 backend side of this contract (`Dockerfile.template`, `/api` prefix,
 `/livez`/`/healthz` outside of it) — and note that `npm run build:artube`
-emits that backend for you, in `dist-artube-server/`. The server accepts its
-`/api/**` routes both bare and under a path prefix, so it does not matter
-whether the platform's reverse proxy strips the prefix before forwarding.
+emits that backend for you, in `dist-artube-server/`. The server matches its
+`/api/**` routes by path *suffix*, so it answers whether the platform's
+reverse proxy strips the whole prefix, none of it, or just the outer `/api`.

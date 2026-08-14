@@ -139,7 +139,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     }
     // Security gate, the Artube counterpart of the Stake one above. Artube's only launch marker is
     // `sessionId`, and unlike Stake there is no attacker-suppliable server address to validate
-    // (`apiBase` is the launch URL's own origin). What IS reachable is stripping the session: a URL
+    // (`apiBase` is derived from the launch URL's own PATH, never from a query param — see
+    // ArtubeUrlParams.apiBase). What IS reachable is stripping the session: a URL
     // that carries `sessionId` with an empty/blank value claims a session it doesn't have, fails the
     // "is this Artube?" check, and would silently fall through to the offline/dev bridge — the
     // free-play hole. 'artube' = a real launch (load the bridge); 'offline' = no marker at all, a
@@ -166,7 +167,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           devMode: true,
           gameId: opts.model.spec.id,
           url: location.href,
-          // Same-origin in production; both fields are dev/demo escape hatches (see ArtubeIntegration).
+          // Derived from the launch path in production; both fields are escape hatches (see ArtubeIntegration).
           ...(opts.artube.apiBase ? { apiBase: opts.artube.apiBase } : {}),
           ...(opts.artube.demoBalance != null ? { demoBalance: opts.artube.demoBalance } : {}),
         });
