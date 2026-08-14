@@ -2,6 +2,7 @@ export {
   GamesApiClient, ANNOUNCED_CONTRACTS, resolveGoAwayDelayMs, reconnectBackoffMs,
   MAX_RECONNECT_DELAY_MS, MAX_BACKOFF_DELAY_MS,
   type GamesApiClientOptions, type GoAwayPayload, type ReconnectAttempt,
+  type ConnectionError,
 } from './client.js';
 export { GamesApiError, IDEMPOTENT_TYPES, isRetryable, isDemoUserRejection } from './errors.js';
 export {

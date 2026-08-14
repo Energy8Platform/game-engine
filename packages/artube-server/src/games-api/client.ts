@@ -26,7 +26,7 @@ import {
   type Channel,
   type Envelope,
 } from './envelope.js';
-import { GamesApiError, IDEMPOTENT_TYPES, isRetryable } from './errors.js';
+import { GamesApiError, IDEMPOTENT_TYPES, isRetryable, readErrorPayload } from './errors.js';
 import type {
   SessionInfoRequest, SessionInfoResponse,
   PlayRoundRequest, PlayRoundResponse,
@@ -227,11 +227,24 @@ export interface ReconnectAttempt {
   planned: boolean;
 }
 
+/**
+ * `Error`, не относящийся ни к одному нашему запросу.
+ *
+ * Дока (`connection.md`) знает ровно один такой случай и он же самый дорогой:
+ * при провале аутентификации API присылает `Error (auth failed)`, и игра
+ * обязана перейти в состояние FAILED.
+ */
+export interface ConnectionError {
+  code: string;
+  message: string;
+}
+
 type ClientEvent =
   | 'connected'
   | 'disconnected'
   | 'reconnecting'
   | 'reconnectAbandoned'
+  | 'connectionError'
   | 'goAway'
   | 'balanceChanged'
   | 'sessionClosed'
@@ -262,7 +275,9 @@ export class GamesApiClient {
   private goAwayStreak = 0;
   private socketOpenedAt = 0;
   /** Страховка на случай, если обещанное докой закрытие со стороны сервера не придёт. */
-  private goAwayCloseTimer: NodeJS.Timeout | null = null;
+  private closeGraceTimer: NodeJS.Timeout | null = null;
+  /** Последний `Error`, не относившийся ни к одному запросу. */
+  private lastError: ConnectionError | null = null;
   /** Разбудить паузу перед очередной попыткой досрочно — этим `close()` рвёт цикл. */
   private wakeReconnect: (() => void) | null = null;
 
@@ -288,6 +303,15 @@ export class GamesApiClient {
     return this.reconnectAttempts;
   }
 
+  /**
+   * Последний отказ уровня коннекта, если он был. Снимается состоявшимся
+   * коннектом: на здоровом поде его нет, а пока он есть — он и есть ответ на
+   * вопрос «почему под не готов».
+   */
+  get lastConnectionError(): ConnectionError | null {
+    return this.lastError;
+  }
+
   on(event: ClientEvent, cb: (...args: any[]) => void): void {
     if (!this.handlers.has(event)) this.handlers.set(event, new Set());
     this.handlers.get(event)!.add(cb);
@@ -309,7 +333,7 @@ export class GamesApiClient {
   close(): void {
     this.stopped = true;
     this.ready = false;
-    this.clearGoAwayCloseGrace();
+    this.clearCloseGrace();
     this.goAwayDelayMs = null;
     // Цикл переподключения может спать до минуты. Ждать этого не надо ни
     // выключению пода, ни тесту: будим паузу, она сразу видит `stopped`.
@@ -386,9 +410,24 @@ export class GamesApiClient {
   }
 
   protected onEnvelope(env: Envelope): void {
+    // `Error` без `corr_id` не отвечает ни на один наш запрос — это отказ
+    // всему коннекту. Раньше он проваливался сквозь обе ветки (`onEvent`
+    // отсеивает не-`events`) и исчезал бесследно: неверный `GamesApiKey`
+    // давал под, который открыл сокет, получил этот отказ, был объявлен
+    // готовым по пятисекундному дедлайну Hello и отвечал на `/healthz` 200,
+    // пока каждый запрос игрока умирал по 15-секундному таймауту RPC.
+    if (env.type === 'Error' && !env.corr_id) return this.onConnectionError(env.payload);
     if (env.chan !== 'rpc' || !env.corr_id) return this.onEvent(env);
     const waiter = this.pending.get(env.corr_id);
-    if (!waiter) return;
+    if (!waiter) {
+      // Ответ на запрос, который уже отдали таймаутом. Само по себе не авария
+      // (RPC давно провалилась и вызывающий об этом знает), но полное молчание
+      // здесь однажды уже прятало настоящую проблему.
+      if (this.opts.debug) {
+        console.error(`[artube] ${env.type} с неизвестным corr_id ${env.corr_id}`);
+      }
+      return;
+    }
     this.pending.delete(env.corr_id);
     clearTimeout(waiter.timer);
     if (env.type === 'Error') {
@@ -416,6 +455,36 @@ export class GamesApiClient {
       waiter.reject(GamesApiError.internal(reason));
     }
     this.pending.clear();
+  }
+
+  /**
+   * Отказ, адресованный не запросу, а самому коннекту.
+   *
+   * Единственный описанный докой случай — провал аутентификации: «Ошибка
+   * аутентификации → API присылает `Error (auth failed)` → игра переходит в
+   * FAILED» (`connection.md`). Никакого способа отличить его от прочих
+   * неадресованных отказов провод не даёт, и это к лучшему: коннект, на
+   * котором нам отказали и не сказали, кому именно, рабочим считать нельзя.
+   *
+   * Что делаем:
+   *  - `ready = false` — под перестаёт быть готовым, и `/healthz` отвечает 503
+   *    вместо прежних 200 при каждом запросе игрока, умирающем по таймауту.
+   *    Отдельного понятия здоровья не заводим: это то же самое «connected vs
+   *    retrying», что и при обрыве связи;
+   *  - `lastError` — чтобы 503 назвал ПРИЧИНУ. «Под не готов» и «у пода
+   *    неверный ключ» требуют разных действий оператора;
+   *  - `armCloseGrace()` — сервер, отказавший в аутентификации, обычно
+   *    закрывает соединение сам (и тогда работает обычное переподключение).
+   *    Если не закроет, закроем мы: иначе под навсегда застрял бы в «не готов»
+   *    и не попытался бы подключиться ни разу.
+   */
+  protected onConnectionError(payload: unknown): void {
+    const { code, message } = readErrorPayload(payload as ErrorPayload);
+    const error: ConnectionError = { code, message };
+    this.lastError = error;
+    this.ready = false;
+    this.emit('connectionError', error);
+    this.armCloseGrace();
   }
 
   /**
@@ -447,31 +516,36 @@ export class GamesApiClient {
     this.ready = false;
     this.goAwayDelayMs = delay;
     this.emit('goAway', reason, delay);
-    this.armGoAwayCloseGrace();
+    this.armCloseGrace();
   }
 
-  /** Сервер обещал закрыть соединение сам. Ждём — но не бесконечно. */
-  private armGoAwayCloseGrace(): void {
-    this.clearGoAwayCloseGrace();
+  /**
+   * Сервер закроет это соединение сам — после `GoAway` он это обещал, после
+   * отказа в аутентификации так делает. Ждём — но не бесконечно: коннект, на
+   * котором нам уже отказали, новых вызовов не принимает, а `close` может не
+   * прийти никогда, и тогда переподключение не начнётся вовсе.
+   */
+  private armCloseGrace(): void {
+    this.clearCloseGrace();
     const socket = this.socket;
     if (!socket) return;
     const timer = setTimeout(() => {
-      this.goAwayCloseTimer = null;
+      this.closeGraceTimer = null;
       if (this.stopped || socket !== this.socket) return;
       if (socket.readyState === WebSocket.CLOSED) return;
       if (this.opts.debug) {
-        console.error('[artube] GoAway: сервер не закрыл соединение, закрываем сами');
+        console.error('[artube] сервер не закрыл соединение, закрываем сами');
       }
       socket.terminate();
     }, this.opts.goAwayCloseGraceMs ?? DEFAULT_GOAWAY_CLOSE_GRACE_MS);
     timer.unref?.();
-    this.goAwayCloseTimer = timer;
+    this.closeGraceTimer = timer;
   }
 
-  private clearGoAwayCloseGrace(): void {
-    if (!this.goAwayCloseTimer) return;
-    clearTimeout(this.goAwayCloseTimer);
-    this.goAwayCloseTimer = null;
+  private clearCloseGrace(): void {
+    if (!this.closeGraceTimer) return;
+    clearTimeout(this.closeGraceTimer);
+    this.closeGraceTimer = null;
   }
 
   private openSocket(): Promise<void> {
@@ -493,6 +567,8 @@ export class GamesApiClient {
         settled = true;
         clearTimeout(timer);
         this.ready = true;
+        // Коннект состоялся — прошлый отказ больше ничего не описывает.
+        this.lastError = null;
         // Счётчик попыток обнуляет не сам факт коннекта, а его ЖИЗНЬ: см.
         // `STABLE_CONNECTION_MS` в `scheduleReconnect`. Обнулять здесь значило
         // бы, что платформа, принимающая коннект и роняющая его через
@@ -536,6 +612,19 @@ export class GamesApiClient {
             return;
           }
         }
+        // Отказ уровня коннекта закрывает и попытку подключения — по той же
+        // причине, что и `GoAway`: иначе пятисекундный дедлайн Hello объявил
+        // бы готовым сокет, в котором нам только что отказали, и провал
+        // аутентификации выглядел бы как здоровый под. Резолв, а не реджект:
+        // под обязан подняться и сказать о себе правду в `/healthz`, а не
+        // упасть в CrashLoopBackOff, где никаких логов уже не прочесть.
+        if (env.type === 'Error' && !env.corr_id) {
+          settled = true;
+          clearTimeout(timer);
+          this.onEnvelope(env);
+          resolve();
+          return;
+        }
         this.onEnvelope(env);
       });
 
@@ -549,7 +638,7 @@ export class GamesApiClient {
 
       socket.on('close', () => {
         clearTimeout(timer);
-        this.clearGoAwayCloseGrace();
+        this.clearCloseGrace();
         this.ready = false;
         this.onDisconnected('socket closed');
         this.emit('disconnected');

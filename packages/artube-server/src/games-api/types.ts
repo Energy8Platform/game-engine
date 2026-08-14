@@ -193,8 +193,18 @@ export interface AutocloseRequestEvent {
   round_id: string;
 }
 
+/**
+ * Тело `Error`. Дока противоречит сама себе: `error-responses.md`,
+ * `error-handling.md` и `api-overview.md` называют поля `code`/`message`/
+ * `details`, а `envelope.md` — `error_code`/`error_message`/`error_details`.
+ * Наблюдённого `Error` с провода нет ни одного, а провод уже однажды доказал,
+ * что своей спеке не следует (`currency`), поэтому описываем ОБЕ формы.
+ */
 export interface ErrorPayload {
-  code: string;
-  message: string;
+  code?: string;
+  message?: string;
   details?: { retry_after_ms?: number; [key: string]: unknown };
+  error_code?: string;
+  error_message?: string;
+  error_details?: { retry_after_ms?: number; [key: string]: unknown };
 }

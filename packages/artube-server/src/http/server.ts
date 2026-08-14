@@ -3,7 +3,9 @@ import { statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
-import { GamesApiClient, type ReconnectAttempt } from '../games-api/client.js';
+import {
+  GamesApiClient, type ConnectionError, type ReconnectAttempt,
+} from '../games-api/client.js';
 import { startEngine, resolveEngineGameId, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
 import { readConnectionInfo } from './connectionInfo.js';
@@ -159,6 +161,19 @@ export class ArtubeServer {
     });
     this.api.on('reconnectAbandoned', (attempts: number) =>
       log.error('gave up reconnecting to games api', undefined, { attempts }));
+    // `Error` без `corr_id` — отказ всему коннекту, и дока знает ровно один
+    // такой случай: провал аутентификации. Он обязан быть виден, иначе под с
+    // неверным ключом молча отвечает 200 на `/healthz`, а каждый запрос игрока
+    // умирает по 15-секундному таймауту RPC. `connected` при этом уже false —
+    // отдельного понятия здоровья не заводим.
+    this.api.on('connectionError', (error: ConnectionError) =>
+      log.error('games api rejected the connection', undefined, {
+        code: error.code,
+        platform_message: error.message,
+        // Единственная догадка, которую здесь стоит высказать вслух: именно
+        // так выглядит неверный ключ, и именно это проверяют первым.
+        hint: 'проверьте GamesApiKey и GameId этого пода',
+      }));
     // Переподключение — это НОВЫЙ коннект, и сессии на нём платформа считает
     // неинициализированными. Дока: «переподключиться и заново выполнить полную
     // последовательность подключения (Hello → Welcome → SessionInfoRequest →
@@ -193,11 +208,18 @@ export class ArtubeServer {
         // ошибки — рестарт пода, который починился бы сам. На здоровом поде
         // этих полей нет: счётчик попыток прошлой аварии там уже ничего не
         // значит.
-        return respond(res, 503, {
+        const body: Record<string, unknown> = {
           ok: false,
           retrying: this.api?.retrying === true,
           attempts: this.api?.attempts ?? 0,
-        });
+        };
+        // Отказ уровня коннекта отличается от «связи ещё нет» тем, что связь
+        // как раз БЫЛА: платформа нас приняла и отвергла. Чаще всего это
+        // неверный `GamesApiKey`, и без этой строки под с неверным ключом
+        // выглядел как под, у которого моргает сеть.
+        const error = this.api?.lastConnectionError;
+        if (error) body.error = error;
+        return respond(res, 503, body);
       }
       if (isRoute(url.pathname, '/api/version')) {
         return respond(res, 200, {

@@ -74,6 +74,44 @@ describe('GamesApiClient — RPC', () => {
     });
   });
 
+  it('вторая документированная форма Error читается так же', async () => {
+    // Дока противоречит сама себе: `error-responses.md` называет поля
+    // `code`/`message`, `envelope.md` — `error_code`/`error_message`. Ни одного
+    // живого `Error` мы не наблюдали, а `code` — единственное, на что смотрят
+    // `isRetryable`, `isDemoUserRejection` и список восстановимых кодов: прочти
+    // мы его из неверного поля, все они молча пошли бы не в ту сторону.
+    api = await startFakeGamesApi({
+      onMessage: (env, socket, self) => {
+        if (env.type === 'PlayRoundRequest') {
+          respond(self, socket, env, 'Error', {
+            error_code: 'BackPressureRejected',
+            error_message: 'slow down',
+            error_details: { retry_after_ms: 7 },
+          });
+        }
+      },
+    });
+    client = new GamesApiClient({ url: api.url, apiKey: 'k', gameId: 'g' });
+    await client.connect();
+    await expect(client.rpc('PlayRoundRequest', {})).rejects.toMatchObject({
+      code: 'BackPressureRejected',
+      message: 'slow down',
+    });
+  });
+
+  it('Error без узнаваемого кода не превращается в код "undefined"', async () => {
+    api = await startFakeGamesApi({
+      onMessage: (env, socket, self) => {
+        if (env.type === 'PlayRoundRequest') respond(self, socket, env, 'Error', {});
+      },
+    });
+    client = new GamesApiClient({ url: api.url, apiKey: 'k', gameId: 'g' });
+    await client.connect();
+    await expect(client.rpc('PlayRoundRequest', {})).rejects.toMatchObject({
+      code: 'UnknownError',
+    });
+  });
+
   it('ретраит BackPressureRejected по retry_after_ms и отдаёт результат', async () => {
     let attempts = 0;
     api = await startFakeGamesApi({

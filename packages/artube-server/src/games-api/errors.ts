@@ -8,15 +8,44 @@
 
 import type { ErrorPayload } from './types.js';
 
+/**
+ * Достать код и текст из тела `Error`, в какой бы из двух документированных
+ * форм оно ни приехало (`code`/`message` против `error_code`/`error_message` —
+ * дока называет обе, см. `ErrorPayload`).
+ *
+ * Не косметика: `code` — единственное, на что смотрят `isRetryable`,
+ * `isDemoUserRejection` и список восстановимых кодов. Прочитай мы его из
+ * неверного поля, `err.code` был бы `undefined`, `super(undefined)` сделал бы
+ * сообщением строку `"undefined"`, и КАЖДАЯ из этих развилок молча пошла бы не
+ * в ту сторону — включая ту, что переводит сессию на локальный кошелёк.
+ */
+export function readErrorPayload(payload: ErrorPayload | undefined | null): {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+} {
+  const p = payload ?? {};
+  const code = p.code ?? p.error_code;
+  const message = p.message ?? p.error_message;
+  return {
+    // Пустой код хуже выдуманного: на нём разъезжаются все ветки разом, а
+    // `UnknownError` хотя бы честно называет то, что произошло.
+    code: typeof code === 'string' && code !== '' ? code : 'UnknownError',
+    message: typeof message === 'string' && message !== '' ? message : (code ?? 'UnknownError'),
+    details: p.details ?? p.error_details,
+  };
+}
+
 export class GamesApiError extends Error {
   readonly code: string;
   readonly details?: Record<string, unknown>;
 
   constructor(payload: ErrorPayload) {
-    super(payload.message || payload.code);
+    const parsed = readErrorPayload(payload);
+    super(parsed.message);
     this.name = 'GamesApiError';
-    this.code = payload.code;
-    this.details = payload.details;
+    this.code = parsed.code;
+    this.details = parsed.details;
   }
 
   /** Задержка перед повтором, если платформа её продиктовала. */
