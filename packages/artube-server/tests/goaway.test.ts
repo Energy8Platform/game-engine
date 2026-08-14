@@ -17,11 +17,17 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { WebSocket } from 'ws';
 import {
   GamesApiClient, resolveGoAwayDelayMs, MAX_RECONNECT_DELAY_MS,
 } from '../src/games-api/client';
 import { startFakeGamesApi, type FakeGamesApi } from './helpers/fakeGamesApi';
-import { sessionInfoResponder } from './helpers/fakePlatform';
+import { sessionInfoResponder, startFakePlatform, type FakePlatform } from './helpers/fakePlatform';
+import { createArtubeServer, type ArtubeServer } from '../src/index';
+
+const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 let api: FakeGamesApi;
 let client: GamesApiClient;
@@ -315,4 +321,85 @@ describe('GoAway → задержка переподключения', () => {
     expect(resolveGoAwayDelayMs({ retry_after_ms: 60_000 }, { min, fallback, streak: 40 }))
       .toBe(MAX_RECONNECT_DELAY_MS);
   });
+});
+
+describe('GoAway → сессия игрока переживает переподключение', () => {
+  let platform: FakePlatform;
+  let server: ArtubeServer;
+
+  afterEach(async () => {
+    await server?.close();
+    await platform?.close();
+  });
+
+  /** Открыть WS к нашему серверу и собирать входящие сообщения. */
+  function connect(base: string, sessionId: string) {
+    const socket = new WebSocket(`${base}/api/ws?sessionId=${sessionId}`);
+    const messages: any[] = [];
+    socket.on('error', () => {});
+    socket.on('message', (d) => messages.push(JSON.parse(d.toString())));
+    const nth = (t: string, n: number, timeoutMs = 8000) =>
+      new Promise<any>((resolve, reject) => {
+        const started = Date.now();
+        const tick = setInterval(() => {
+          const found = messages.filter((m) => m.t === t);
+          if (found.length >= n) { clearInterval(tick); resolve(found[n - 1]); }
+          else if (Date.now() - started > timeoutMs) {
+            clearInterval(tick);
+            reject(new Error(`нет ${t}#${n}; пришло ${JSON.stringify(messages)}`));
+          }
+        }, 10);
+      });
+    return {
+      socket, messages, nth,
+      waitFor: (t: string, timeoutMs?: number) => nth(t, 1, timeoutMs),
+      send: (msg: unknown) => socket.send(JSON.stringify(msg)),
+    };
+  }
+
+  it('раунд игрока доигрывается после GoAway — от игрока не требуется ничего', async () => {
+    // Платформа ведёт себя как настоящая: на новом коннекте сессия считается
+    // неинициализированной, пока на НЁМ не пройдёт SessionInfo (дока:
+    // «переподключиться и заново выполнить полную последовательность
+    // подключения (Hello → Welcome → SessionInfoRequest → SessionInfoResponse)
+    // перед продолжением работы с раундами»).
+    platform = await startFakePlatform({ allowedBets: [0.5, 2], requireSessionInit: true });
+    server = createArtubeServer({
+      gameId: 'feature-game', gamesApiUrl: platform.url, apiKey: 'k', spinPath: fixtures,
+    });
+    await server.listen(0);
+    const c = connect(`ws://127.0.0.1:${server.port}`, 'sess-goaway');
+    await c.waitFor('init');
+
+    c.send({ t: 'play', id: 'p0', action: 'spin', betIndex: 1 });
+    const spin = await c.waitFor('result');
+    expect(spin.creditPending).toBe(true);
+    c.send({ t: 'ack', roundId: spin.roundId, cursor: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Платформа переработала коннект прямо посреди раунда.
+    const mark = platform.api.received.length;
+    platform.goAway({ reason: 'IdleTimeout', retry_after_ms: 30 });
+    platform.closeCurrent();
+
+    // Игрок ничего не делает — а сессия обязана снова стать рабочей: новый
+    // коннект, новое Hello и SessionInfo по живой сессии.
+    await waitUntil(() => {
+      const after = platform.api.received.slice(mark);
+      return after.some((e) => e.type === 'Hello')
+        && after.some((e) => e.type === 'SessionInfoRequest');
+    }, 8000);
+
+    // И раунд доигрывается тем же соединением игрока, без ошибок.
+    c.send({ t: 'play', id: 'p1', action: 'free_spin', betIndex: 1 });
+    const next = await c.nth('result', 2);
+    expect(next.id).toBe('p1');
+    expect(next.spinsPlayed).toBe(2);
+    expect(c.messages.some((m) => m.t === 'error')).toBe(false);
+
+    // Деньги за раунд по-прежнему двигались ровно один раз.
+    expect(platform.countOf('OpenRoundRequest')).toBe(1);
+    expect(platform.countOf('PlayRoundRequest')).toBe(0);
+    c.socket.close();
+  }, 40_000);
 });

@@ -254,6 +254,33 @@ is an escape hatch to stage the upgrade rather than a long-term fix.
   `E8_SERVER_BINARY` baked in) to install the `e8-server` engine binary —
   see "Engine binary" above.
 
+## The connection to Games API
+
+One pod holds **one** WebSocket to Games API, multiplexing every session on
+it. The server never tears that socket down on its own — the doc forbids it —
+and reconnects on any loss.
+
+`GoAway` ends *that connection*, not the client. The platform sends it to
+recycle an idle connection (`IdleTimeout`), before maintenance, during an
+update, under overload — and always with a `retry_after_ms` saying when to
+come back. On receiving it the server stops issuing new RPCs (calls fail fast
+with `InternalServerError` rather than queueing behind a socket that is about
+to close), lets in-flight ones finish, waits for the platform to close the
+socket, and then reconnects after the delay the platform asked for. There is
+no reason the server treats as terminal: the doc lists none, and a message
+that carries "come back in N ms" cannot mean "never come back". What bounds
+it instead is the delay itself — never under `minReconnectDelayMs` (1s), never
+over 30 minutes (the largest value the doc itself uses), and doubling while
+`GoAway` after `GoAway` arrives on connections that do not survive a minute.
+
+A reconnect is a full re-handshake: Hello/Welcome again, `op_seq` from 1, and
+every session uninitialised platform-side. The server re-runs `SessionInfo`
+for its live sessions itself, as the doc prescribes, so a player mid-round
+needs to do nothing — no reload, no re-launch — for their next spin to work.
+`/healthz` reports 503 for as long as there is no connection, which is honest:
+readiness is exactly what the pod has lost. Existing player sockets survive
+it; new ones route elsewhere until the connection is back.
+
 ## Running against the sandbox
 
 For local development and integration testing without a real platform

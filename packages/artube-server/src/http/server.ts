@@ -7,7 +7,7 @@ import { GamesApiClient } from '../games-api/client.js';
 import { startEngine, resolveEngineGameId, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
 import { createAutocloseHandler } from './autoclose.js';
-import { createLogger } from './log.js';
+import { createLogger, type Logger } from './log.js';
 import type { ServerMessage } from './wire.js';
 import type { ArtubeServerConfig } from '../config.js';
 import type { AutocloseRequestEvent } from '../games-api/types.js';
@@ -57,6 +57,10 @@ export class ArtubeServer {
   private engine: EngineClient | null = null;
   private actualPort = 0;
   private closing = false;
+  /** Защёлка от параллельных проходов по живым сессиям при реконнект-шторме. */
+  private reinitialising = false;
+  /** Коннект сменился, пока проход шёл: список надо обойти ещё раз, уже на новом. */
+  private reinitPending = false;
   /**
    * Живые WS-соединения этого пода, по одному на сессию — `wss.close()` сам
    * их не закрывает, а второй коннект той же сессии вытесняет первый.
@@ -113,7 +117,14 @@ export class ArtubeServer {
       gameId: this.config.gameId,
     });
     await this.api.connect();
-    this.api.on('goAway', (reason: string) => log.warn('games api asked to go away', { reason }));
+    this.api.on('goAway', (reason: string, retryAfterMs: number) =>
+      log.warn('games api asked to go away', { reason, retry_after_ms: retryAfterMs }));
+    // Переподключение — это НОВЫЙ коннект, и сессии на нём платформа считает
+    // неинициализированными. Дока: «переподключиться и заново выполнить полную
+    // последовательность подключения (Hello → Welcome → SessionInfoRequest →
+    // SessionInfoResponse) ПЕРЕД продолжением работы с раундами». Игрок для
+    // этого ничего делать не должен — проходим по живым сессиям сами.
+    this.api.on('connected', () => void this.reinitSessions(log));
     // Брошенный раунд: события приходят на подовый коннект, не на конкретное
     // WS-соединение (того обычно уже нет) — подписка живёт здесь, один раз.
     // Обработчик создаём тоже один раз: он держит защёлку от параллельных
@@ -209,6 +220,57 @@ export class ArtubeServer {
       if (!this.http) return resolve();
       this.http.close(() => resolve());
     });
+  }
+
+  /**
+   * Заново инициализировать на свежем коннекте сессии, которые в этот момент
+   * играют на поде.
+   *
+   * Без этого сессия становится рабочей только с ОШИБКИ: первое действие
+   * игрока получает `SessionIsNotInitialized`, и лишь восстановление
+   * (`withSessionRecovery`) чинит её повтором. Здесь мы делаем ровно то, что
+   * дока предписывает делать после переподключения, — и до того, как игрок
+   * что-нибудь нажмёт.
+   *
+   * Последовательно и молча к ошибкам: пачка SessionInfo в тот момент, когда
+   * платформа только вернулась, — ровно та нагрузка, от которой она
+   * защищается `BackPressureRejected`, а не успевший переинициализироваться
+   * игрок всё равно доедет через `withSessionRecovery`.
+   */
+  private async reinitSessions(log: Logger): Promise<void> {
+    // Реконнект-шторм не должен запускать несколько проходов сразу — но и
+    // терять смену коннекта нельзя: проход, начатый на прежнем коннекте,
+    // ничего не говорит о сессиях на новом.
+    if (this.reinitialising) {
+      this.reinitPending = true;
+      return;
+    }
+    this.reinitialising = true;
+    try {
+      do {
+        this.reinitPending = false;
+        const sessions = [...this.clients.keys()];
+        if (sessions.length === 0) continue;
+        log.info('re-initialising live sessions on a fresh Games API connection', {
+          sessions: sessions.length,
+        });
+        for (const sessionId of sessions) {
+          // Игрок мог уйти, пока мы шли по списку.
+          if (!this.clients.has(sessionId) || this.closing) continue;
+          try {
+            await this.api?.sessionInfo({ session_id: sessionId, player_connection_info: {} });
+          } catch (err) {
+            // Не фатально: следующий запрос игрока починит сессию через
+            // withSessionRecovery. Логируем, чтобы это не осталось незаметным.
+            log.warn('failed to re-initialise a session after reconnect', {
+              session_id: sessionId, error: String(err),
+            });
+          }
+        }
+      } while (this.reinitPending && !this.closing);
+    } finally {
+      this.reinitialising = false;
+    }
   }
 
   private async closeClients(): Promise<void> {

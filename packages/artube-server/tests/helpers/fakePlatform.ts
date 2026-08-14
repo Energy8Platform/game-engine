@@ -42,6 +42,10 @@ export interface FakePlatform {
   received(type: string): any[];
   /** Отправить событие платформы на коннект сервера. */
   emitEvent(type: string, payload: unknown): void;
+  /** Прислать `GoAway` (соединение при этом остаётся открытым — см. fakeGamesApi). */
+  goAway(payload: Record<string, unknown>): void;
+  /** Закрыть текущий коннект так, как это делает платформа вслед за GoAway. */
+  closeCurrent(code?: number): void;
   close(): Promise<void>;
 }
 
@@ -60,6 +64,15 @@ export interface FakePlatformOptions {
    * (или намеренно промолчал), штатная ветка пропускается.
    */
   intercept?: (env: any, ctl: ReplyCtl) => boolean;
+  /**
+   * Требовать `SessionInfoRequest` первым RPC на КАЖДОМ коннекте, отвечая на
+   * всё остальное `SessionIsNotInitialized` — так ведёт себя платформа
+   * (api-overview: «вызвать SessionInfoRequest первым RPC запросом»).
+   *
+   * По умолчанию выключено: это ужесточение важно ровно там, где тест
+   * проверяет переподключение, а не в каждом тесте раунда.
+   */
+  requireSessionInit?: boolean;
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -115,8 +128,13 @@ export async function startFakePlatform(
         timestamp: new Date().toISOString(), payload,
       });
     },
+    goAway: (payload) => platform.api.goAway(payload),
+    closeCurrent: (code) => platform.api.closeCurrent(code),
     close: () => platform.api.close(),
   };
+
+  /** Сессии, инициализированные на конкретном коннекте: у платформы это пер-коннектное состояние. */
+  const initialised = new Map<WebSocket, Set<string>>();
 
   const api = await startFakeGamesApi({
     onMessage: (env, sock) => {
@@ -136,6 +154,16 @@ export async function startFakePlatform(
 
       const bet = (index: number) => platform.allowedBets[index] ?? 0;
       const session: string = env.payload?.session_id;
+
+      if (opts.requireSessionInit && env.chan === 'rpc' && session) {
+        let known = initialised.get(sock);
+        if (!known) initialised.set(sock, (known = new Set()));
+        if (env.type === 'SessionInfoRequest') known.add(session);
+        else if (!known.has(session)) {
+          return fail('SessionIsNotInitialized', 'Call SessionInfoRequest first.');
+        }
+      }
+
       const openRound = () => bySession.get(session) ?? null;
       const store = (round: StoredRound) => {
         bySession.set(session, round);
