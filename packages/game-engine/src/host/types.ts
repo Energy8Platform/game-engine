@@ -79,10 +79,12 @@ export interface ArtubeIntegration {
   /** Starting virtual balance for a DEMO session (the platform doesn't keep one — the bridge does,
    *  client-side). Default: the backend's own configured demo balance. Ignored for real sessions. */
   demoBalance?: number;
-  /** Origin of the game's backend. Default (and the only supported PRODUCTION value) is the launch
-   *  URL's own origin: Artube serves frontend and backend on one domain, split by path (`/api/**`).
-   *  Override only for local dev against a backend on another port — prefer proxying `/api` from the
-   *  dev server (what the `BUILD_TARGET=artube` target does) so dev matches production. */
+  /** Base address of the game's backend; the bridge appends `/api/ws`. Default (and the only
+   *  supported PRODUCTION value) is the launch page's own DIRECTORY — origin plus the path up to the
+   *  last `/`. Artube serves frontend and backend at one address split by path (`/api/**`), and that
+   *  address is a per-game path prefix (`https://host/artube-xxx/`) as often as it is a domain root,
+   *  so the origin alone is not it. Override only for local dev against a backend on another port —
+   *  prefer proxying `/api` from the dev server (what `BUILD_TARGET=artube` does) so dev matches. */
   apiBase?: string;
 }
 

@@ -47,14 +47,26 @@
 ## Архитектура
 
 ```
-Браузер (один домен игры — фронт и бэк за одним reverse proxy)
+Браузер (один адрес игры — фронт и бэк за одним reverse proxy)
  │   ArtubeBridge ←── MemoryChannel ──→ CasinoGameSDK ← код игры не меняется
- │        │  WS  /api/ws?sessionId=…  (same-origin, без CORS)
+ │        │  WS  <адрес игры>/api/ws?sessionId=…  (same-origin, без CORS)
  ▼        ▼
 artube-server — без памяти между запросами, любой под обслуживает любой запрос
  ├─ games-api client  — WSS к Artube Games API (X-Api-Key / X-Game-ID)
  └─ engine client     — gRPC к e8-server (дочерний процесс, --sessions memory)
 ```
+
+> **Поправка (2026-08-14).** Изначально здесь было сказано «один **домен**
+> игры», и из этого мост выводил `apiBase` как `url.origin`. Это верно только
+> относительно адреса самой игры, а не корня домена: реальный деплой монтирует
+> игру под пер-игровым **префиксом пути**
+> (`https://dev.artube-888.live/artube-o7df8qem5k/`), и её `/api/**` живёт под
+> тем же префиксом. Вывод из origin префикс выбрасывал — мост уходил на
+> `wss://dev.artube-888.live/api/ws`, не принадлежащий никакой игре, и ломался
+> на КАЖДОМ настоящем деплое, работая при этом в деве (там игра в корне).
+> Исправлено в `artube-bridge@0.1.1`: `apiBase` = каталог страницы запуска
+> (origin + путь по последний `/`). Подробности — `docs/artube-integration.md`,
+> раздел «Адрес игры — это не корень домена».
 
 ### Где живёт состояние
 
@@ -174,7 +186,7 @@ async function playSegment(ctx: RoundContext, req: PlayRequest): Promise<PlayRes
 const isArtube = isArtubeLaunch(location.href);   // ?sessionId=…
 if (isArtube) {
   const { ArtubeBridge } = await import('@energy8platform/artube-bridge');
-  new ArtubeBridge({ devMode: true });            // WS на /api/ws, same-origin
+  new ArtubeBridge({ devMode: true });            // WS на <адрес игры>/api/ws
 }
 const sdk = new CasinoGameSDK({ devMode: isArtube || isStake });
 ```

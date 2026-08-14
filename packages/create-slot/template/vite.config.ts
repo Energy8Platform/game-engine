@@ -13,9 +13,16 @@ const isArtube = target === 'artube';
 // DEV (`apply: 'serve'`) — `npm run dev:artube` is ONE command. The plugin starts the game's own
 // backend (`@energy8platform/artube-server`) as a child of the dev server — on a free port it picks
 // itself, waiting until the backend actually serves — and points the `/api` proxy at it. In
-// production Artube serves the game and its backend on ONE origin split by path (`/api/**` →
-// backend) and the bridge derives its API base from the page's origin, so proxying `/api` keeps dev
-// the same shape.
+// production Artube serves the game and its backend at ONE address split by path (`/api/**` →
+// backend), so proxying `/api` keeps dev the same shape.
+//
+// Where dev and production DIFFER is where the game is mounted, and it is the one thing not to
+// hard-code. The dev server serves the game at `/`, so the proxy above is a bare `/api`; production
+// mounts each game under a per-game PATH PREFIX (`https://dev.artube-888.live/artube-o7df8qem5k/`),
+// where the same route is `<prefix>/api`. `artube-bridge` derives the backend address from the
+// directory of the page it is running on — the root in dev, the prefix in production — so one build
+// covers both. (Deriving it from the page's *origin* is exactly the bug that made the bridge work in
+// dev and fail on every real deployment; fixed in artube-bridge@0.1.1.)
 //
 // BUILD (`apply: 'build'`) — `npm run build:artube` emits `dist-artube-server/`: the deployable
 // backend, with THIS game's `.spin` copied into it byte-for-byte, a plain-JS entry point, a
