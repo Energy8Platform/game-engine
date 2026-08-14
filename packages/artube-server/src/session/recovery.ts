@@ -76,6 +76,17 @@ export class RoundNoLongerOpenError extends Error {
 
 const RECOVERABLE = new Set(['SessionIsNotInitialized', 'InvalidRoundOperation']);
 
+/**
+ * Мы послали идентификатор кампании, который платформа больше не признаёт.
+ *
+ * Штатно этого не бывает: остаток кампании приезжает в ответе на каждый
+ * фри-раунд и снимает `frcId` (`applyCampaignProgress`). Но кампанию можно
+ * потерять и путём, которого мы не видим, — истёк `valid_to`, оператор её
+ * отменил, раунды доиграла соседняя вкладка. Тогда об этом сообщает только
+ * отказ, и без реакции на него соединение заклинивало бы навсегда.
+ */
+const FRC_STALE = new Set(['FrcAlreadyCompleted', 'FrcNotFound']);
+
 export async function withSessionRecovery(
   deps: RecoveryDeps,
   run: (round: ActiveRound | null) => Promise<PlayOutcome>,
@@ -84,6 +95,15 @@ export async function withSessionRecovery(
   try {
     return await run(round);
   } catch (err) {
+    // Кампании нет — перечитываем сессию, чтобы `frcId` ушёл из контекста, и
+    // отдаём ошибку игроку. Повторять НЕ имеем права: спин без кампании стоит
+    // денег, а игрок в этот момент считает, что играет бесплатным раундом.
+    // Раунд не открылся (RPC отвергнута), так что следующий спин — обычный
+    // платный — пройдёт с чистого листа.
+    if (err instanceof GamesApiError && FRC_STALE.has(err.code)) {
+      await deps.sessionInfo();
+      throw err;
+    }
     if (!(err instanceof GamesApiError) || !RECOVERABLE.has(err.code)) throw err;
     const info = await deps.sessionInfo();
     // SessionIsNotInitialized: платформа лишь ждала SessionInfo — раунд, с

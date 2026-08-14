@@ -52,14 +52,57 @@ export interface ActiveRound {
   delivered: Segment | null;
 }
 
+/**
+ * Игрок доплачивает за это действие сверх ставки — покупка фичи.
+ *
+ * Граница именно на «дороже обычного раунда», а не на «дороже нуля»: дока
+ * (`play-round.md`) описывает `price_multiplier` как `1` для обычного раунда,
+ * `> 1` только при доплате и `0` для бесплатного. Действие дешевле единицы
+ * (анте вполоборота и подобное) доплатой не является.
+ */
+export function isPaidAction(deps: RoundDeps, action: string): boolean {
+  return (deps.costMultipliers[action] ?? 1) > 1;
+}
+
+/**
+ * Покупка фичи во время активной кампании фри-раундов.
+ *
+ * Дока называет это отдельной проверкой НА СТОРОНЕ БЭКЕНДА ИГРЫ:
+ * «Попытка сделать покупку фичи в рамках FRC, так как они не разрешены»
+ * (`free-rounds-campaign-backend-integration.md`). Платформа её не делает —
+ * значит делаем мы, и делаем отказом, а не догадкой про цену: см. `startRound`.
+ */
+export class FeatureBuyDuringCampaignError extends Error {
+  readonly code = 'FrcFeatureBuyNotAllowed';
+
+  constructor(action: string, campaignId: string) {
+    super(
+      `action "${action}" is a feature buy and is not allowed while free round campaign ${campaignId} is active`,
+    );
+    this.name = 'FeatureBuyDuringCampaignError';
+  }
+}
+
+/**
+ * Что уходит в `price_multiplier` платформы.
+ *
+ * Ноль означает ровно одно — «этот раунд игрок не оплачивает», то есть
+ * бесплатный раунд кампании. Он НЕ означает «идёт кампания»: платное действие
+ * остаётся платным и внутри кампании, и обнулять ему цену — это отдать
+ * купленный за 100× бонус даром.
+ *
+ * До платного действия внутри кампании дело вообще не должно доходить (его
+ * отвергает `startRound`), но цену считает эта функция, и молчаливый ноль здесь
+ * был бы вторым шансом ошибиться деньгами.
+ */
 export function resolvePriceMultiplier(
   deps: RoundDeps,
   action: string,
   frcActive: boolean,
 ): number {
-  // Фри-раунд игрок не оплачивает — дока требует ровно 0.
-  if (frcActive) return 0;
-  return deps.costMultipliers[action] ?? 1;
+  const cost = deps.costMultipliers[action] ?? 1;
+  if (frcActive && !isPaidAction(deps, action)) return 0;
+  return cost;
 }
 
 /**
@@ -118,6 +161,25 @@ export async function startRound(
   const betAmount = ctx.allowedBets[req.betIndex];
   if (betAmount === undefined) {
     throw new Error(`bet_index ${req.betIndex} вне allowed_bets`);
+  }
+
+  // Покупка фичи внутри кампании фри-раундов — отказ, а не сделка.
+  //
+  // Дока вменяет эту проверку игровому бэкенду прямым текстом
+  // («Попытка сделать покупку фичи в рамках FRC, так как они не разрешены»),
+  // и обе альтернативы отказу двигают деньги в неверную сторону:
+  //
+  //  - `price_multiplier: 0` (то, что было) — оператор дарит бонус,
+  //    купленный за 50–100 ставок, ценой одного фри-спина;
+  //  - `price_multiplier: 100` рядом с `free_round_campaign_id` — комбинация,
+  //    которой в спеке нет вовсе (`play-round.md`: 0 — бесплатный раунд, > 1 —
+  //    доплата; `open-round.md` вдобавок валидирует `price_multiplier > 0`).
+  //    Что платформа спишет и сожжёт ли при этом фри-раунд — наша догадка о
+  //    чужом кошельке, а игрок в этот момент считает, что играет бесплатно.
+  //
+  // Отказ стоит одной ошибки во фронте и ничего не двигает.
+  if (ctx.frcId && isPaidAction(deps, req.action)) {
+    throw new FeatureBuyDuringCampaignError(req.action, ctx.frcId);
   }
 
   const state: RoundStateV1 = {

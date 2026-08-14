@@ -5,7 +5,7 @@
  * платформенное, мы только переименовываем поля в camelCase.
  */
 
-import type { SessionInfoResponse } from '../games-api/types.js';
+import type { CampaignProgress, SessionInfoResponse } from '../games-api/types.js';
 import type { SessionContext } from './types.js';
 
 export interface FrcInfo {
@@ -14,6 +14,17 @@ export interface FrcInfo {
   roundsTotal: number;
   totalWin: number;
   isComplete: boolean;
+  /**
+   * Ставка, НА КОТОРОЙ идут фри-раунды, — она задана кампанией, а не игроком
+   * (`free-rounds-campaign.md`: «Параметры ставки и количество спинов уже
+   * определены»). Пока её здесь не было, посчитать сумму выигрыша фри-раунда
+   * было не из чего: фронт умножает множитель на выбранную игроком ставку, и
+   * при несовпадении показывает не то число, которым платформа двигает баланс.
+   */
+  bet?: number;
+  /** Окно, в котором кампанию можно отыграть; после `validTo` она сгорает. */
+  validFrom?: string;
+  validTo?: string;
 }
 
 export interface InitConfig {
@@ -182,6 +193,9 @@ export function buildInit(info: SessionInfoResponse, opts: BuildInitOptions = {}
           roundsTotal: info.free_round_campaign.rounds_total,
           totalWin: info.free_round_campaign.total_win,
           isComplete: info.free_round_campaign.is_complete,
+          bet: info.free_round_campaign.bet,
+          validFrom: info.free_round_campaign.valid_from,
+          validTo: info.free_round_campaign.valid_to,
         }
       : null,
     gamificationToken: info.gamification_token,
@@ -199,4 +213,35 @@ export function toSessionContext(sessionId: string, info: SessionInfoResponse): 
     allowedBets: info.game_settings.allowed_bets,
     frcId: active ? campaign!.campaign_id : undefined,
   };
+}
+
+/** Кампания отыграна до конца — по счётчику или по флагу платформы. */
+export function isCampaignExhausted(progress: CampaignProgress): boolean {
+  return progress.is_complete || progress.rounds_left <= 0;
+}
+
+/**
+ * Записать в контекст то, что платформа сказала о кампании В ОТВЕТЕ НА РАУНД.
+ *
+ * Платформа сообщает остаток кампании в ответе на КАЖДЫЙ фри-раунд
+ * (`PlayRoundResponse.free_round_campaign`, `CloseRoundResponse.free_round_campaign`),
+ * и это единственный момент, когда мы узнаём, что раунды кончились: `frcId`
+ * снимался только с SessionInfo, то есть только на новом соединении.
+ *
+ * Не записать его стоило игроку всей сессии. `frcId` ставился один раз на
+ * коннекте и не снимался никогда, поэтому после последнего фри-раунда мы
+ * продолжали слать `free_round_campaign_id` завершённой кампании на каждом
+ * спине; платформа отвечала `FrcAlreadyCompleted`, восстановление такой код не
+ * знает — и следующий спин делал ровно то же самое. Каждый спин до
+ * перезагрузки страницы.
+ *
+ * Чистая функция, возвращающая НОВЫЙ контекст: `ctx` в `ws.ts` переприсваивается
+ * целиком (его же перечитывает восстановление), и мутация разъехалась бы с ним.
+ */
+export function applyCampaignProgress(
+  ctx: SessionContext,
+  progress: CampaignProgress | null | undefined,
+): SessionContext {
+  if (!ctx.frcId || !progress || !isCampaignExhausted(progress)) return ctx;
+  return { ...ctx, frcId: undefined };
 }

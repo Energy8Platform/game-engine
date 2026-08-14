@@ -16,7 +16,7 @@ import type { WebSocket } from 'ws';
 import type { GamesApiClient } from '../games-api/client.js';
 import type { EngineClient } from '../engine/index.js';
 import {
-  startRound, advanceRound, acknowledgeSegment,
+  startRound, advanceRound, acknowledgeSegment, FeatureBuyDuringCampaignError,
   type ActiveRound, type RoundDeps,
 } from '../round/orchestrator.js';
 import { resumeRound } from '../round/resume.js';
@@ -24,7 +24,8 @@ import { replayRound } from '../round/engineRound.js';
 import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
 import { GamesApiError, isDemoUserRejection } from '../games-api/errors.js';
 import {
-  buildInit, classifyCurrency, demoStartingBalance, toSessionContext, type CurrencyOnWire,
+  applyCampaignProgress, buildInit, classifyCurrency, demoStartingBalance, toSessionContext,
+  type CurrencyOnWire,
 } from '../session/init.js';
 import { createDemoApi, type DemoApi } from '../session/demo.js';
 import type { PlayRequest, SessionContext } from '../session/types.js';
@@ -92,7 +93,9 @@ export async function handleConnection(
     // `ABORT_ERR`, `ENOENT` тоже несут строковый `code`, — и игра приняла бы
     // их за коды платформы.
     const code =
-      err instanceof GamesApiError || err instanceof RoundNoLongerOpenError
+      err instanceof GamesApiError
+      || err instanceof RoundNoLongerOpenError
+      || err instanceof FeatureBuyDuringCampaignError
         ? err.code
         : 'InternalServerError';
     const message = err instanceof Error ? err.message : String(err);
@@ -361,6 +364,17 @@ export async function handleConnection(
       current = outcome.round;
       // Платформа приняла раундовую RPC — сессия денежная, доказано делом.
       if (!demo) platformSettled = true;
+      // Остаток кампании платформа называет в ответе на КАЖДЫЙ фри-раунд, и
+      // это единственное место, где мы узнаём, что раунды кончились. Не
+      // записать его значило слать завершённую кампанию до перезагрузки
+      // страницы и получать `FrcAlreadyCompleted` на каждый спин.
+      const before = ctx.frcId;
+      ctx = applyCampaignProgress(ctx, outcome.delivery.frc);
+      if (before && !ctx.frcId) {
+        log.info('free round campaign completed', {
+          campaign_id: before, total_win: outcome.delivery.frc?.total_win,
+        });
+      }
       send({ t: 'result', id: msg.id, ...outcome.delivery });
     } catch (err) {
       fail(err, msg.t === 'play' ? msg.id : undefined);
