@@ -29,6 +29,7 @@ import {
 } from '../session/init.js';
 import { createDemoApi, type DemoApi } from '../session/demo.js';
 import type { PlayRequest, SessionContext } from '../session/types.js';
+import type { PlayerConnectionInfo } from '../games-api/types.js';
 import { parseClientMessage, type ServerMessage } from './wire.js';
 import type { Logger } from './log.js';
 
@@ -38,6 +39,13 @@ export interface WsDeps {
   gameId: string;
   costMultipliers: Record<string, number>;
   startingDemoBalance: number;
+  /**
+   * Что известно об игроке с его же HTTP-апгрейда — адрес, браузер,
+   * идентификатор этого соединения. Платформа определяет по нему регион
+   * (GeoIP), поэтому пустой объект здесь означал, что лицензионный контроль
+   * решает по адресу нашего пода, а не игрока.
+   */
+  connection?: PlayerConnectionInfo;
   log: Logger;
 }
 
@@ -48,6 +56,10 @@ export async function handleConnection(
 ): Promise<void> {
   const log = deps.log.child({ session_id: sessionId });
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
+  // Одно и то же на все SessionInfo этого соединения: платформа обязана видеть
+  // один `player_connection_id` за одно соединение, а адрес и браузер за его
+  // время не меняются.
+  const connection: PlayerConnectionInfo = deps.connection ?? {};
 
   // Синхронно, до первого await: `ws` рапортует протокольный брак кадра
   // событием 'error' на сокете, и EventEmitter без подписчика перебрасывает
@@ -190,7 +202,7 @@ export async function handleConnection(
     try {
       const info = await deps.api.sessionInfo({
         session_id: sessionId,
-        player_connection_info: {},
+        player_connection_info: connection,
       });
       ctx = toSessionContext(sessionId, info);
       // Баланс демо ведёт кошелёк, а не платформа: её число для демо-сессии
@@ -206,7 +218,7 @@ export async function handleConnection(
   try {
     const info = await deps.api.sessionInfo({
       session_id: sessionId,
-      player_connection_info: {},
+      player_connection_info: connection,
     });
     ctx = toSessionContext(sessionId, info);
     const verdict = classifyCurrency(info);
@@ -320,7 +332,7 @@ export async function handleConnection(
         {
           sessionInfo: async () => {
             const info = await deps.api.sessionInfo({
-              session_id: sessionId, player_connection_info: {},
+              session_id: sessionId, player_connection_info: connection,
             });
             // Смысл перечитывания — синхронизироваться с платформой: ставки
             // и фри-раунд могли поменяться, повтор обязан идти со свежими

@@ -6,11 +6,12 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { GamesApiClient, type ReconnectAttempt } from '../games-api/client.js';
 import { startEngine, resolveEngineGameId, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
+import { readConnectionInfo } from './connectionInfo.js';
 import { createAutocloseHandler } from './autoclose.js';
 import { createLogger, type Logger } from './log.js';
 import type { ServerMessage } from './wire.js';
 import type { ArtubeServerConfig } from '../config.js';
-import type { AutocloseRequestEvent } from '../games-api/types.js';
+import type { AutocloseRequestEvent, PlayerConnectionInfo } from '../games-api/types.js';
 
 /**
  * Сколько ждём штатного close-хендшейка живых WS-клиентов при выключении,
@@ -58,6 +59,12 @@ function isRoute(pathname: string, route: string): boolean {
   return pathname === route || pathname.endsWith(route);
 }
 
+/** Живое соединение игрока вместе с тем, что известно о нём самом. */
+interface ClientConnection {
+  ws: WebSocket;
+  connection: PlayerConnectionInfo;
+}
+
 export class ArtubeServer {
   private http: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -78,8 +85,14 @@ export class ArtubeServer {
    * "реконнект": один писатель на сессию в рамках пода, а поверх подов
    * настоящей защитой денег остаётся `round_version` платформы (мьютекс в
    * процессе обещал бы гарантию, которую не может дать между подами).
+   *
+   * Вместе с сокетом лежит `player_connection_info` этого соединения: его
+   * негде взять больше нигде (единственный источник — HTTP-апгрейд), а
+   * переинициализация сессий после реконнекта к платформе обязана слать то же
+   * самое, что слало само соединение, — иначе GeoIP на этом запросе увидел бы
+   * наш под.
    */
-  private readonly clients = new Map<string, WebSocket>();
+  private readonly clients = new Map<string, ClientConnection>();
   /**
    * Все принятые сокеты этого пода — реестр выключения, а не сессий.
    *
@@ -225,15 +238,18 @@ export class ArtubeServer {
         // `session_closed` и закрывается, новое становится единственным.
         // Иначе два соединения одной сессии независимо двигали бы один раунд.
         const previous = this.clients.get(sessionId);
-        if (previous && previous !== ws) {
+        if (previous && previous.ws !== ws) {
           log.info('session superseded by a new connection', { session_id: sessionId });
-          closeSocket(previous, 'superseded by a new connection');
+          closeSocket(previous.ws, 'superseded by a new connection');
         }
-        this.clients.set(sessionId, ws);
+        // Снимается ровно здесь и больше нигде: `req` — единственное место во
+        // всём стеке, где адрес игрока и его браузер вообще существуют.
+        const connection = readConnectionInfo(req);
+        this.clients.set(sessionId, { ws, connection });
         // Удаляем только своё: `close` вытесненного сокета приходит уже после
         // того, как в реестре лежит новый, и безусловный delete снёс бы его.
         ws.on('close', () => {
-          if (this.clients.get(sessionId) === ws) this.clients.delete(sessionId);
+          if (this.clients.get(sessionId)?.ws === ws) this.clients.delete(sessionId);
         });
         void handleConnection(ws, sessionId, {
           api: this.api!,
@@ -241,6 +257,7 @@ export class ArtubeServer {
           gameId: engineGameId,
           costMultipliers,
           startingDemoBalance: this.config.startingDemoBalance ?? 1000,
+          connection,
           log,
         });
       });
@@ -300,9 +317,16 @@ export class ArtubeServer {
         });
         for (const sessionId of sessions) {
           // Игрок мог уйти, пока мы шли по списку.
-          if (!this.clients.has(sessionId) || this.closing) continue;
+          const client = this.clients.get(sessionId);
+          if (!client || this.closing) continue;
           try {
-            await this.api?.sessionInfo({ session_id: sessionId, player_connection_info: {} });
+            // Тот же `player_connection_info`, что шлёт само соединение: этот
+            // запрос — про того же игрока, и подставлять сюда пустой объект
+            // значило бы решать его регион по адресу пода.
+            await this.api?.sessionInfo({
+              session_id: sessionId,
+              player_connection_info: client.connection,
+            });
           } catch (err) {
             // Не фатально: следующий запрос игрока починит сессию через
             // withSessionRecovery. Логируем, чтобы это не осталось незаметным.

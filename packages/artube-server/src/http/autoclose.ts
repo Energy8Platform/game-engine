@@ -67,6 +67,11 @@ export async function handleAutocloseRequest(
 ): Promise<void> {
   const log = deps.log.child({ session_id: event.session_id, round_id: event.round_id });
   try {
+    // Пусто намеренно, и это единственное оставшееся такое место: событие
+    // приходит на подовый коннект тогда, когда соединения игрока уже нет, а
+    // значит нет и его адреса. Подставить сюда что-нибудь — значит скормить
+    // GeoIP платформы адрес нашего пода; поля объявлены опциональными как раз
+    // для этого случая.
     const info = await deps.api.sessionInfo({
       session_id: event.session_id,
       player_connection_info: {},
