@@ -11,6 +11,11 @@
  * `retry_after_ms`». Терминальных причин дока не называет ни одной, а
  * `retry_after_ms` — обязательное поле: сообщение, которое диктует, когда
  * вернуться, не может значить «не возвращайся».
+ *
+ * По той же причине не заканчивается и переподключение после обычного обрыва:
+ * ограничена растущая пауза (`MAX_BACKOFF_DELAY_MS`), а не число попыток.
+ * «Перестать искать платформу, но продолжать работать» — не исход, а немота с
+ * зелёным `/livez`.
  */
 
 import { WebSocket } from 'ws';
@@ -57,6 +62,23 @@ export interface GamesApiClientOptions {
   /** Сколько ждём Welcome, прежде чем считать коннект готовым. Дока: 5 секунд. */
   helloTimeoutMs?: number;
   rpcTimeoutMs?: number;
+  /**
+   * Предел числа попыток переподключения. По умолчанию — БЕЗ предела.
+   *
+   * Для игрового бэкенда нет состояния, в котором «перестать искать платформу,
+   * но продолжать работать» — правильный исход: под остаётся жив, отвечает
+   * `/healthz` 503 и не делает ничего полезного, но выглядит здоровым. Ровно в
+   * эту немоту упирался живой под по другому маршруту (`GoAway` как
+   * терминальный), и конечный бюджет попыток — второй путь туда же: пять
+   * попыток по `1000 * 2 ** n` — это 31 секунда, а сама платформа в `GoAway`
+   * называет окна в 300 000 и 1 800 000 мс.
+   *
+   * Опция оставлена как ЯВНОЕ согласие звать конечное число раз — тестам и
+   * встраивающим, которым нужен предсказуемый конец. Исчерпание конечного
+   * бюджета не оставляет клиент в подвешенном состоянии: он останавливается
+   * как от `close()` (`stopped`, `connected === false`) и сообщает об этом
+   * событием `reconnectAbandoned`, чтобы «сдался» было отличимо от «ещё ищет».
+   */
   maxReconnectAttempts?: number;
   baseReconnectDelayMs?: number;
   /**
@@ -94,15 +116,46 @@ export interface GoAwayPayload {
  */
 export const MAX_RECONNECT_DELAY_MS = 1_800_000;
 
+/**
+ * Потолок СОБСТВЕННОГО бэкоффа — паузы, которую клиент назначает себе сам,
+ * когда платформа недоступна и никакого расписания нам не давала.
+ *
+ * Не путать с `MAX_RECONNECT_DELAY_MS`: тот ограничивает то, что попросила
+ * платформа в `GoAway`, и должен вмещать её самое длинное окно (30 минут).
+ * Здесь наоборот — нас никто не ждёт в конкретную минуту, и цену задаёт
+ * ошибка в обе стороны:
+ *
+ *  - слишком маленький потолок = долбим платформу, которую намеренно
+ *    выключили на техобслуживание;
+ *  - слишком большой = платформа вернулась, а под спит. Потолок в 1 800 000
+ *    (окно техобслуживания) означал бы, что после получаса недоступности мы
+ *    молчим ещё до получаса ПОСЛЕ того, как всё поднялось.
+ *
+ * 60 000 мс — не выдуманное число: это самая короткая пауза, которую называет
+ * сама дока (`goaway.md`, «Перегрузка сервера»: `retry_after_ms: 60000`). То
+ * есть темп «раз в минуту на под» платформа объявляет приемлемым ровно в тот
+ * момент, когда ей тяжелее всего. Против получасового окна это ~30 попыток
+ * вместо пяти, а вернувшуюся платформу мы замечаем максимум через минуту.
+ */
+export const MAX_BACKOFF_DELAY_MS = 60_000;
+
 const DEFAULT_MIN_RECONNECT_DELAY_MS = 1000;
+const DEFAULT_BASE_RECONNECT_DELAY_MS = 1000;
 const DEFAULT_GOAWAY_CLOSE_GRACE_MS = 30_000;
 
 /**
- * Коннект, проживший меньше этого до `GoAway`, считаем отказом, а не плановой
- * переработкой: `IdleTimeout` и техобслуживание приходят на коннект, который
- * жил минутами, а «не пущу» — сразу за рукопожатием.
+ * Сколько коннект должен прожить, чтобы считаться состоявшимся.
+ *
+ * Одно и то же окно решает две задачи, потому что вопрос один и тот же —
+ * «это была рабочая связь или нас не пустили?»:
+ *  - `GoAway` на коннекте моложе окна — отказ, а не плановая переработка
+ *    (`IdleTimeout` и техобслуживание приходят на коннект, живший минутами,
+ *    а «не пущу» — сразу за рукопожатием);
+ *  - обрыв коннекта моложе окна не обнуляет бэкофф: платформа, которая
+ *    принимает коннект и роняет его через секунду, иначе получала бы от нас
+ *    ровно `baseReconnectDelayMs` вечно.
  */
-const GOAWAY_STREAK_WINDOW_MS = 60_000;
+const STABLE_CONNECTION_MS = 60_000;
 
 /**
  * Пауза перед переподключением по `GoAway`.
@@ -129,9 +182,56 @@ export function resolveGoAwayDelayMs(
   return Math.min(Math.max(escalated, opts.min), MAX_RECONNECT_DELAY_MS);
 }
 
+/**
+ * Пауза перед очередной попыткой переподключения, когда расписания от
+ * платформы нет (обычный обрыв связи, а не `GoAway`).
+ *
+ * Экспонента с потолком: `base * 2 ** attempt`, не выше `MAX_BACKOFF_DELAY_MS`.
+ * Растёт она ради платформы, которая лежит, а упирается в потолок ради нас —
+ * бесконечное удвоение превращает недоступность в четверть часа сна после
+ * того, как всё починилось.
+ *
+ * Поверх — «равный джиттер» (`[nominal/2, nominal]`). Связь теряют не по
+ * одному: под HPA у сервиса несколько реплик, и рестарт пода Games API рвёт их
+ * коннекты в одну и ту же миллисекунду. Без джиттера весь деплой стучится
+ * ровно в одни и те же секунды и синхронно устраивает шторм `SessionInfo`,
+ * когда платформа только встала. Половина паузы остаётся жёсткой — джиттер
+ * разводит попытки, но не может обнулить задержку.
+ *
+ * `base` нормализуется: ноль, отрицательное значение или мусор — это горячий
+ * цикл коннектов, а не «подключайся быстрее».
+ */
+export function reconnectBackoffMs(
+  attempt: number,
+  opts: { base?: number; cap?: number; jitter?: () => number },
+): number {
+  const base =
+    typeof opts.base === 'number' && Number.isFinite(opts.base) && opts.base > 0
+      ? opts.base
+      : DEFAULT_BASE_RECONNECT_DELAY_MS;
+  const cap = opts.cap ?? MAX_BACKOFF_DELAY_MS;
+  // Показатель прижат: `2 ** 1024` — уже Infinity, а `Infinity * 0` — NaN.
+  const steps = Math.min(Math.max(Math.floor(attempt), 0), 30);
+  const nominal = Math.min(base * 2 ** steps, cap);
+  const rand = Math.min(Math.max(opts.jitter?.() ?? Math.random(), 0), 1);
+  return Math.round((nominal * (1 + rand)) / 2);
+}
+
+/** Что сообщает событие `reconnecting` — по одному на каждую попытку. */
+export interface ReconnectAttempt {
+  /** Номер попытки с последнего состоявшегося коннекта, с 1. */
+  attempt: number;
+  /** Пауза перед этой попыткой, мс. */
+  delayMs: number;
+  /** Паузу назначила платформа в `GoAway` (а не наш бэкофф). */
+  planned: boolean;
+}
+
 type ClientEvent =
   | 'connected'
   | 'disconnected'
+  | 'reconnecting'
+  | 'reconnectAbandoned'
   | 'goAway'
   | 'balanceChanged'
   | 'sessionClosed'
@@ -163,11 +263,29 @@ export class GamesApiClient {
   private socketOpenedAt = 0;
   /** Страховка на случай, если обещанное докой закрытие со стороны сервера не придёт. */
   private goAwayCloseTimer: NodeJS.Timeout | null = null;
+  /** Разбудить паузу перед очередной попыткой досрочно — этим `close()` рвёт цикл. */
+  private wakeReconnect: (() => void) | null = null;
 
   constructor(protected readonly opts: GamesApiClientOptions) {}
 
   get connected(): boolean {
     return this.ready && this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Идёт ли прямо сейчас цикл переподключения.
+   *
+   * Ради оператора: `connected === false` само по себе не отличает «ищем
+   * платформу» от «клиент выключен» — а это ровно та разница, за которой во
+   * время аварии лезут в первую очередь.
+   */
+  get retrying(): boolean {
+    return this.reconnecting;
+  }
+
+  /** Сколько попыток сделано с последнего состоявшегося коннекта. */
+  get attempts(): number {
+    return this.reconnectAttempts;
   }
 
   on(event: ClientEvent, cb: (...args: any[]) => void): void {
@@ -193,6 +311,9 @@ export class GamesApiClient {
     this.ready = false;
     this.clearGoAwayCloseGrace();
     this.goAwayDelayMs = null;
+    // Цикл переподключения может спать до минуты. Ждать этого не надо ни
+    // выключению пода, ни тесту: будим паузу, она сразу видит `stopped`.
+    this.wakeReconnect?.();
     this.socket?.close();
     this.socket = null;
   }
@@ -316,7 +437,7 @@ export class GamesApiClient {
     // Считаем ПРЕДЫДУЩИЕ короткие коннекты: одиночный `GoAway` — норма
     // платформы и идёт ровно по её расписанию, а разводить попытки начинаем
     // только когда коннект за коннектом обрываются сразу за рукопожатием.
-    const short = Date.now() - this.socketOpenedAt < GOAWAY_STREAK_WINDOW_MS;
+    const short = Date.now() - this.socketOpenedAt < STABLE_CONNECTION_MS;
     const delay = resolveGoAwayDelayMs(payload, {
       min: this.opts.minReconnectDelayMs ?? DEFAULT_MIN_RECONNECT_DELAY_MS,
       fallback: this.opts.baseReconnectDelayMs ?? DEFAULT_MIN_RECONNECT_DELAY_MS,
@@ -325,9 +446,6 @@ export class GamesApiClient {
     this.goAwayStreak = short ? this.goAwayStreak + 1 : 0;
     this.ready = false;
     this.goAwayDelayMs = delay;
-    // Плановая смена коннекта — не сбой связи и не должна тратить бюджет
-    // попыток, который мог быть частично сожжён предыдущими обрывами.
-    this.reconnectAttempts = 0;
     this.emit('goAway', reason, delay);
     this.armGoAwayCloseGrace();
   }
@@ -375,7 +493,10 @@ export class GamesApiClient {
         settled = true;
         clearTimeout(timer);
         this.ready = true;
-        this.reconnectAttempts = 0;
+        // Счётчик попыток обнуляет не сам факт коннекта, а его ЖИЗНЬ: см.
+        // `STABLE_CONNECTION_MS` в `scheduleReconnect`. Обнулять здесь значило
+        // бы, что платформа, принимающая коннект и роняющая его через
+        // секунду, вечно получает от нас попытку раз в `baseReconnectDelayMs`.
         this.emit('connected');
         resolve();
       };
@@ -445,6 +566,30 @@ export class GamesApiClient {
     });
   }
 
+  /**
+   * Цикл переподключения. По умолчанию БЕЗ предела по числу попыток:
+   * ограничена растущая пауза, а не право пытаться.
+   *
+   * Конечный бюджет — это состояние «платформу больше не ищем, но под живой и
+   * с виду здоровый», а такого правильного исхода для игрового бэкенда не
+   * существует. Прежние пять попыток по `1000 * 2 ** n` — 31 секунда: короче
+   * любого окна, которое платформа сама себе выписывает в `GoAway`
+   * (обновление 300 000 мс, техобслуживание 1 800 000).
+   *
+   * Что вместо предела не даёт циклу стать горячим:
+   *  - каждая итерация ждёт настоящий таймер, а пауза растёт до
+   *    `MAX_BACKOFF_DELAY_MS` — не чаще попытки в минуту на под даже при
+   *    мгновенно падающих коннектах;
+   *  - `base` нормализуется в `reconnectBackoffMs`, так что `0` не превращает
+   *    паузу в ноль;
+   *  - коннект, не проживший `STABLE_CONNECTION_MS`, не обнуляет счётчик —
+   *    иначе платформа, роняющая коннект сразу после Welcome, держала бы нас
+   *    на стартовой паузе бесконечно;
+   *  - защёлка `reconnecting` по-прежнему не даёт неудачной попытке породить
+   *    соседний цикл (её `close` зовёт этот же метод);
+   *  - `close()` будит паузу и цикл выходит сразу, а таймер паузы `unref`нут —
+   *    висящее переподключение не держит процесс живым.
+   */
   private async scheduleReconnect(): Promise<void> {
     // Every openSocket() attempt made *inside* this loop also has its own
     // `close` handler, which — on failure — fires this same method again.
@@ -454,18 +599,33 @@ export class GamesApiClient {
     if (this.reconnecting) return;
     this.reconnecting = true;
     try {
-      const max = this.opts.maxReconnectAttempts ?? 5;
-      const base = this.opts.baseReconnectDelayMs ?? 1000;
+      // Сюда попадают только по закрытию коннекта, который БЫЛ живым:
+      // закрытия неудачных попыток внутри цикла отсекает защёлка выше.
+      // Прожил достаточно — авария новая, и разводить её надо с начала.
+      if (Date.now() - this.socketOpenedAt >= STABLE_CONNECTION_MS) this.reconnectAttempts = 0;
+      const max = this.opts.maxReconnectAttempts ?? Number.POSITIVE_INFINITY;
+      const base = this.opts.baseReconnectDelayMs;
       while (!this.stopped && this.reconnectAttempts < max) {
         // Переподключение после `GoAway` идёт по расписанию платформы, а не
         // по нашему бэкоффу, и только на первую попытку: `retry_after_ms`
         // относится к ЭТОМУ закрытию. Не удалась — дальше это обычный сбой
-        // связи со своей растущей задержкой.
+        // связи со своей растущей задержкой. Потолок бэкоффа к назначенной
+        // платформой паузе не применяется: её границы — в
+        // `resolveGoAwayDelayMs`, и получасовое окно техобслуживания мы обязаны
+        // выждать целиком.
         const planned = this.goAwayDelayMs;
         this.goAwayDelayMs = null;
-        const delay = planned ?? base * 2 ** this.reconnectAttempts;
+        const delay = planned ?? reconnectBackoffMs(this.reconnectAttempts, { base });
         this.reconnectAttempts += 1;
-        await new Promise((r) => setTimeout(r, delay));
+        // Единственный признак жизни для оператора, пока платформы нет. Своего
+        // ограничителя частоты ему не нужно: частоту задаёт сам бэкофф — шесть
+        // строк за первую минуту аварии и по одной в минуту дальше.
+        this.emit('reconnecting', {
+          attempt: this.reconnectAttempts,
+          delayMs: delay,
+          planned: planned !== null,
+        } satisfies ReconnectAttempt);
+        await this.sleepBeforeAttempt(delay);
         if (this.stopped) return;
         try {
           await this.openSocket();
@@ -474,8 +634,31 @@ export class GamesApiClient {
           // следующая попытка с большей задержкой
         }
       }
+      // Досюда доходят только с конечным `maxReconnectAttempts`, который надо
+      // передать явно. Не оставляем клиент в подвешенном состоянии: он
+      // выключен так же, как от `close()`, и об этом сказано вслух.
+      if (!this.stopped) {
+        this.stopped = true;
+        this.ready = false;
+        this.emit('reconnectAbandoned', this.reconnectAttempts);
+      }
     } finally {
       this.reconnecting = false;
     }
+  }
+
+  /** Пауза перед попыткой: просыпается сама или досрочно — от `close()`. */
+  private sleepBeforeAttempt(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.wakeReconnect = null;
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      // Ожидание переподключения не должно само по себе держать процесс живым.
+      timer.unref?.();
+      this.wakeReconnect = done;
+    });
   }
 }
