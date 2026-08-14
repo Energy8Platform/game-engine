@@ -279,6 +279,29 @@ it instead is the delay itself — never under `minReconnectDelayMs` (1s), never
 over 30 minutes (the largest value the doc itself uses), and doubling while
 `GoAway` after `GoAway` arrives on connections that do not survive a minute.
 
+**Reconnecting has no attempt limit.** The delay is what is bounded, not the
+right to try: exponential from `baseReconnectDelayMs` (1s), capped at **60
+seconds** — the shortest pause the doc itself nominates (`Server overload`), so
+one attempt per minute per pod is a rate the platform declares acceptable at
+its worst moment. A blip is recovered in seconds; a 30-minute maintenance
+window costs ~30 attempts instead of outliving the retry budget, and the pod
+notices the platform returning within a minute. Half a nominal delay of jitter
+keeps a whole deployment's replicas — which all lose the connection in the same
+millisecond — from retrying in lockstep. A connection that does not survive a
+minute does not reset the backoff, so a platform that accepts and immediately
+drops us gets exponentially less traffic rather than one attempt per second.
+`maxReconnectAttempts` still exists as an explicit opt-in bound (tests,
+embedders); passing a finite value now ends in a loud, visible stop
+(`reconnectAbandoned`, client stopped) rather than a silent one.
+
+While there is no connection, every attempt is logged
+(`no connection to games api, retrying`, with `attempt`, `delay_ms`, `down_ms`)
+— the backoff is what rate-limits those lines: about six in the first minute of
+an outage, one a minute after that, and `games api connection restored` with
+the total downtime when it comes back. `/healthz` answers 503 throughout, and
+its body carries `retrying` and `attempts` so an operator can tell a pod that
+is still trying from one that is wedged.
+
 A reconnect is a full re-handshake: Hello/Welcome again, `op_seq` from 1, and
 every session uninitialised platform-side. The server re-runs `SessionInfo`
 for its live sessions itself, as the doc prescribes, so a player mid-round
