@@ -74,7 +74,33 @@ export class RoundNoLongerOpenError extends Error {
   }
 }
 
-const RECOVERABLE = new Set(['SessionIsNotInitialized', 'InvalidRoundOperation']);
+/**
+ * Ошибки, которые чинятся перечитыванием состояния, а не показом игроку.
+ *
+ * `SessionInvalid` попал сюда по классификации самой платформы: её
+ * `error-handling.md` кладёт его в «🟡 Временные ошибки (восстанавливаемые)»,
+ * рядом с `SessionIsNotInitialized` и `BackPressureRejected`, а
+ * `error-responses.md` называет действие «переподключиться». Для игрового
+ * бэкенда «переподключиться» — это и есть `SessionInfoRequest`: сессия
+ * становится живой на коннекте ровно им, ничего другого «переподключить» здесь
+ * нельзя. Сообщение платформы («The session is invalid **or cannot be
+ * retrieved**») описывает не приговор идентификатору, а неудачу поиска.
+ *
+ * Что это стоит, если сессия всё-таки мертва: один лишний SessionInfo, который
+ * отвергнут тем же кодом, — и тот же `SessionInvalid` уезжает игроку, как
+ * уезжал раньше. Что это даёт, если платформа просто не достала сессию: игрок
+ * доигрывает вместо ошибки, после которой у него не было ничего, кроме
+ * перезагрузки страницы.
+ *
+ * Повтор безопасен по той же причине, что и у соседей по списку: платформа
+ * ОТВЕРГЛА запрос, не найдя сессию, — значит ни раунд не открыт, ни транзакция
+ * не проведена, и повторять нечего дважды. Идём при этом ветвью
+ * `InvalidRoundOperation`, а не `SessionIsNotInitialized`: она перечитывает
+ * раунд у платформы и умеет отказаться доигрывать закрытый (см.
+ * `RoundNoLongerOpenError`), то есть из двух восстановлений — денежно
+ * осторожное.
+ */
+const RECOVERABLE = new Set(['SessionIsNotInitialized', 'InvalidRoundOperation', 'SessionInvalid']);
 
 /**
  * Мы послали идентификатор кампании, который платформа больше не признаёт.
@@ -113,7 +139,9 @@ export async function withSessionRecovery(
     if (err.code === 'SessionIsNotInitialized') {
       return run(round ? await deps.resync(round) : null);
     }
-    // InvalidRoundOperation: курсор/версия раунда — платформенные, идём с ними.
+    // InvalidRoundOperation и SessionInvalid: курсор/версия раунда —
+    // платформенные, идём с ними (а после SessionInvalid у нас вообще нет
+    // оснований верить своей памяти о раунде).
     const resumed = await deps.resume(info);
     if (resumed.settled) return resumed.outcome;
     // Раунда у платформы больше нет, а мы в нём были: значит клиентское

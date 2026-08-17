@@ -374,8 +374,8 @@ export async function handleConnection(
       // Демо: движок крутится, платформу не трогаем — она отвечает
       // OperationNotAllowed на раундовые RPC демо-сессии.
       //
-      // `SessionIsNotInitialized` и `InvalidRoundOperation` чинятся
-      // перечитыванием состояния, а не слепым ретраем — withSessionRecovery
+      // `SessionIsNotInitialized`, `InvalidRoundOperation` и `SessionInvalid`
+      // чинятся перечитыванием состояния, а не слепым ретраем — withSessionRecovery
       // переинициализирует сессию/раунд и повторяет попытку ровно один раз.
       //
       // Вход в раунд отдельно обёрнут `openRoundWithDemoFallback`: только там

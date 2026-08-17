@@ -153,6 +153,41 @@ describe('восстановление сессии', () => {
     expect(calls).toBe(2);
   });
 
+  it('SessionInvalid идёт денежно осторожной ветвью: раунд перечитывается у платформы', async () => {
+    // Платформа сама кладёт этот код в «временные, восстанавливаемые»
+    // (`error-handling.md`), а действием называет «переподключиться» — то есть
+    // SessionInfo. Ветвь выбрана та же, что у InvalidRoundOperation, а не
+    // слепой повтор: после отказа «сессия не найдена» верить своей памяти о
+    // раунде не на чем, и правду знает только платформа.
+    const d = deps({ settled: false, round: round(7) });
+    const seen: Array<ActiveRound | null> = [];
+    let calls = 0;
+    const run = vi.fn(async (current: ActiveRound | null) => {
+      seen.push(current);
+      if (++calls === 1) {
+        throw new GamesApiError({
+          code: 'SessionInvalid', message: 'The session is invalid or cannot be retrieved',
+        });
+      }
+      return outcome(current);
+    });
+    await withSessionRecovery(d, run, round(1));
+    expect(d.sessionInfo).toHaveBeenCalledTimes(1);
+    expect(d.resume).toHaveBeenCalledTimes(1);
+    expect(seen[1]!.roundVersion).toBe(7); // повтор с версией от платформы
+  });
+
+  it('SessionInvalid, а раунда у платформы нет и мы в нём были — действие не переигрывается', async () => {
+    const d = deps({ settled: false, round: null });
+    const run = vi.fn(async () => {
+      throw new GamesApiError({ code: 'SessionInvalid', message: 'invalid' });
+    });
+    await expect(withSessionRecovery(d, run, round(3))).rejects.toMatchObject({
+      code: 'RoundAlreadySettled',
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it('повторяет ровно один раз', async () => {
     const d = deps();
     const run = vi.fn(async () => {
