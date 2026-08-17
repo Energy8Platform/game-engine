@@ -4,7 +4,7 @@
  * через полный `ArtubeServer` + `startFakeGamesApi`, а не напрямую через
  * `round/resume.ts` (та математика уже покрыта `resume.test.ts`).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createArtubeServer, type ArtubeServer } from '../src/index';
@@ -36,6 +36,30 @@ const gameSettings = {
   available_auto_spin_counts: [10], rtp_options: [],
   rtp_settings: { is_visible: false }, locales: ['EN'],
 };
+
+/**
+ * Всё, что надо погасить после теста, гасится хуком, а не последними строками
+ * тела теста.
+ *
+ * Разница видна только на упавшем тесте — и ровно там она и важна: до этого
+ * `await server.close()` стоял ПОСЛЕ ассертов, так что первый же провал
+ * оставлял слушающий сервер и живой `e8-server` до конца процесса. Один такой
+ * брошенный движок держит порт из окна поиска бессрочно и портит следующие
+ * прогоны, а не только свой.
+ */
+const openable: Array<{ close(): unknown }> = [];
+
+function track<T extends { close(): unknown }>(resource: T): T {
+  openable.push(resource);
+  return resource;
+}
+
+afterEach(async () => {
+  // В обратном порядке: сервер отпускает коннект к платформе раньше, чем
+  // исчезает сама платформа.
+  for (const resource of openable.reverse()) await resource.close();
+  openable.length = 0;
+});
 
 async function waitUntil(pred: () => boolean, timeoutMs = 5000): Promise<void> {
   const started = Date.now();
@@ -87,7 +111,7 @@ describe('автозакрытие брошенного раунда (AutocloseR
   it('доигрывает раунд от лица игрока и шлёт AutocloseRoundRequest с честным итогом', async () => {
     let podSocket: WebSocket | null = null;
     const state = abandonedRoundState();
-    const api = await startFakeGamesApi({
+    const api = track(await startFakeGamesApi({
       onMessage: (env, socket, self) => {
         podSocket = socket;
         const reply = (type: string, payload: unknown) =>
@@ -110,12 +134,12 @@ describe('автозакрытие брошенного раунда (AutocloseR
         }
         if (env.type === 'AutocloseRoundRequest') reply('CloseRoundResponse', { balance: 155 });
       },
-    });
+    }));
 
-    const server: ArtubeServer = createArtubeServer({
+    const server: ArtubeServer = track(createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
-    });
-    await server.listen(0);
+    }));
+    await server.listen(0, '127.0.0.1');
 
     await waitUntil(() => podSocket !== null);
     pushAutocloseEvent(api, podSocket!, 'sess-auto', 'round-auto');
@@ -126,20 +150,17 @@ describe('автозакрытие брошенного раунда (AutocloseR
     // feature.spin: entry (0) + 3 фриспина (1 + 1 + 1) = честный итог 3, не откат ставки.
     expect(sent.payload.win_multiplier).toBe(3);
     expect(sent.payload.status).toBe('completed');
-
-    await server.close();
-    await api.close();
   }, 40_000);
 
   it('дубль события не превращается во вторую денежную RPC', async () => {
     // Копия события может прийти от кого угодно: ретрай платформы, реконнект
     // подового коннекта, просто две отправки. `AutocloseRoundRequest` двигает
     // деньги и повторяться не имеет права ни при каком раскладе.
-    const platform = await startFakePlatform({ allowedBets: [2] });
-    const server: ArtubeServer = createArtubeServer({
+    const platform = track(await startFakePlatform({ allowedBets: [2] }));
+    const server: ArtubeServer = track(createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: platform.url, apiKey: 'k', spinPath: fixtures,
-    });
-    await server.listen(0);
+    }));
+    await server.listen(0, '127.0.0.1');
 
     // Настоящий брошенный раунд: игрок открыл его и ушёл.
     const client = new WsClient(`ws://127.0.0.1:${server.port}/api/ws?sessionId=sess-dup`);
@@ -155,15 +176,12 @@ describe('автозакрытие брошенного раунда (AutocloseR
     await waitUntil(() => platform.roundOf('sess-dup')!.finished_at !== null);
     await new Promise((r) => setTimeout(r, 300)); // дать второму проходу шанс успеть
     expect(platform.countOf('AutocloseRoundRequest')).toBe(1);
-
-    await server.close();
-    await platform.close();
   }, 40_000);
 
   it('раунд уже завершён на платформе — AutocloseRoundRequest не отправляется', async () => {
     let podSocket: WebSocket | null = null;
     const state = abandonedRoundState();
-    const api = await startFakeGamesApi({
+    const api = track(await startFakeGamesApi({
       onMessage: (env, socket, self) => {
         podSocket = socket;
         const reply = (type: string, payload: unknown) =>
@@ -186,12 +204,12 @@ describe('автозакрытие брошенного раунда (AutocloseR
         }
         if (env.type === 'AutocloseRoundRequest') reply('CloseRoundResponse', { balance: 999 });
       },
-    });
+    }));
 
-    const server: ArtubeServer = createArtubeServer({
+    const server: ArtubeServer = track(createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
-    });
-    await server.listen(0);
+    }));
+    await server.listen(0, '127.0.0.1');
 
     await waitUntil(() => podSocket !== null);
     pushAutocloseEvent(api, podSocket!, 'sess-done', 'round-done');
@@ -200,8 +218,5 @@ describe('автозакрытие брошенного раунда (AutocloseR
     // затем убедиться, что за это время ничего не улетело.
     await new Promise((r) => setTimeout(r, 500));
     expect(api.received.some((e) => e.type === 'AutocloseRoundRequest')).toBe(false);
-
-    await server.close();
-    await api.close();
   }, 40_000);
 });

@@ -85,6 +85,11 @@ describe('GoAway → переподключение', () => {
       url: api.url, apiKey: 'k', gameId: 'g',
       baseReconnectDelayMs: 10, minReconnectDelayMs: 5,
     });
+    // Расписание, по которому клиент решил ждать, — наблюдаемое: по одному
+    // событию на попытку, с назначенной паузой и признаком «это план
+    // платформы, а не наш бэкофф».
+    const scheduled: Array<{ delayMs: number; planned: boolean }> = [];
+    client.on('reconnecting', (a) => scheduled.push({ delayMs: a.delayMs, planned: a.planned }));
     await client.connect();
     await hellos.nth(1);
 
@@ -98,9 +103,20 @@ describe('GoAway → переподключение', () => {
     const waited = Date.now() - closedAt;
 
     expect(api.connections).toBe(2);
-    // Отсчёт идёт от закрытия со стороны сервера — так формулирует дока.
+    // Пауза взята РОВНО из `retry_after_ms` и помечена как расписание
+    // платформы, а не как наш бэкофф (он здесь — 10 мс, то есть перепутать
+    // одно с другим невозможно). Это и есть «ждёт столько, сколько попросили»,
+    // проверенное точно.
+    //
+    // Верхней границы по стенным часам тут больше нет намеренно: она мерила не
+    // решение клиента, а то, дали ли процессу процессорное время. При 300 мс
+    // номинала прежние `< 2500` не отличали даже 300 от нашей секунды по
+    // умолчанию — зато исправно краснели на загруженной машине.
+    expect(scheduled).toEqual([{ delayMs: 300, planned: true }]);
+    // А это — про настоящее время, и нижняя граница starvation'ом не ломается:
+    // сколько бы процесс ни голодал, раньше срока он не проснётся. Проверяем
+    // именно то, что паузу выждали, а не только записали в лог.
     expect(waited).toBeGreaterThanOrEqual(250);
-    expect(waited).toBeLessThan(2500);
 
     // Переподключение — полное рукопожатие заново, с нуля по op_seq.
     const sent = api.received.filter((e) => e.type === 'Hello');
@@ -367,7 +383,7 @@ describe('GoAway → сессия игрока переживает перепо
     server = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: platform.url, apiKey: 'k', spinPath: fixtures,
     });
-    await server.listen(0);
+    await server.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${server.port}`, 'sess-goaway');
     await c.waitFor('init');
 

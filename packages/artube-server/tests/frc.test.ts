@@ -83,13 +83,33 @@ function connect(url: string) {
   const socket = new WebSocket(url);
   const messages: any[] = [];
   socket.on('message', (d) => messages.push(JSON.parse(d.toString())));
-  const next = (t: string, after = 0, timeoutMs = 5000) =>
+  /**
+   * Дождаться СЛЕДУЮЩЕГО кадра типа `t`. Кадр `error` тоже разрешает ожидание —
+   * иначе тест на отказ висел бы до таймаута вместо внятного сравнения.
+   *
+   * Курсор — не удобство, а условие корректности. Раньше выбиралось
+   * `found[after]` из ВСЕХ подходящих кадров с начала соединения, то есть
+   * каждый вызов должен был знать, сколько кадров (включая `error`) тест уже
+   * прочитал, и передать это числом. Стоило сбиться — и ожидание
+   * возвращалось мгновенно, отдавая старый кадр: `next('result')` после
+   * проверки отказа отдавал тот самый `error`, и следующая строка читала
+   * `plays()[0]` раньше, чем на платформу вообще ушёл `PlayRoundRequest`.
+   * Успевал он уйти к этому моменту или нет, решала загрузка машины.
+   */
+  let cursor = 0;
+  const next = (t: string, timeoutMs = 5000) =>
     new Promise<any>((resolve, reject) => {
       const started = Date.now();
       const tick = setInterval(() => {
-        const found = messages.filter((m) => m.t === t || m.t === 'error');
-        if (found.length > after) { clearInterval(tick); resolve(found[after]); }
-        else if (Date.now() - started > timeoutMs) { clearInterval(tick); reject(new Error(`no ${t}`)); }
+        const at = messages.findIndex((m, i) => i >= cursor && (m.t === t || m.t === 'error'));
+        if (at !== -1) {
+          cursor = at + 1;
+          clearInterval(tick);
+          resolve(messages[at]);
+        } else if (Date.now() - started > timeoutMs) {
+          clearInterval(tick);
+          reject(new Error(`no ${t} after frame #${cursor}; got ${JSON.stringify(messages)}`));
+        }
       }, 10);
     });
   return { socket, messages, next };
@@ -104,7 +124,7 @@ describe('кампания фри-раундов — исходящие кадр
     server = createArtubeServer({
       gameId: 'one-shot-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
     });
-    await server.listen(0);
+    await server.listen(0, '127.0.0.1');
   }, 40_000);
 
   afterAll(async () => {
@@ -124,7 +144,9 @@ describe('кампания фри-раундов — исходящие кадр
 
     for (let i = 0; i < 3; i += 1) {
       client.socket.send(JSON.stringify({ t: 'play', id: `p${i}`, action: 'one_shot', betIndex: 0 }));
-      await client.next('result', i);
+      // Курсор двигает сам `next`: индекс здесь означал бы, что тест
+      // пересчитывает прочитанное вручную — ровно то, на чём он и мигал.
+      await client.next('result');
     }
     client.socket.close();
 

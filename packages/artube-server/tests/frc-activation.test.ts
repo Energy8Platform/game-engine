@@ -127,14 +127,33 @@ function connect(url: string) {
   const socket = new WebSocket(url);
   const messages: any[] = [];
   socket.on('message', (d) => messages.push(JSON.parse(d.toString())));
-  /** Дождаться n-го кадра типа `t`; кадр `error` тоже разрешает ожидание. */
-  const next = (t: string, after = 0, timeoutMs = 5000) =>
+  /**
+   * Дождаться СЛЕДУЮЩЕГО кадра типа `t`. Кадр `error` тоже разрешает ожидание —
+   * иначе тест на отказ висел бы до таймаута вместо внятного сравнения.
+   *
+   * Курсор — не удобство, а условие корректности. Раньше выбиралось
+   * `found[after]` из ВСЕХ подходящих кадров с начала соединения, то есть
+   * каждый вызов должен был знать, сколько кадров (включая `error`) тест уже
+   * прочитал, и передать это числом. Стоило сбиться — и ожидание
+   * возвращалось мгновенно, отдавая старый кадр: `next('result')` после
+   * проверки отказа отдавал тот самый `error`, и следующая строка читала
+   * `plays()[0]` раньше, чем на платформу вообще ушёл `PlayRoundRequest`.
+   * Успевал он уйти к этому моменту или нет, решала загрузка машины.
+   */
+  let cursor = 0;
+  const next = (t: string, timeoutMs = 5000) =>
     new Promise<any>((resolve, reject) => {
       const started = Date.now();
       const tick = setInterval(() => {
-        const found = messages.filter((m) => m.t === t || m.t === 'error');
-        if (found.length > after) { clearInterval(tick); resolve(found[after]); }
-        else if (Date.now() - started > timeoutMs) { clearInterval(tick); reject(new Error(`no ${t}`)); }
+        const at = messages.findIndex((m, i) => i >= cursor && (m.t === t || m.t === 'error'));
+        if (at !== -1) {
+          cursor = at + 1;
+          clearInterval(tick);
+          resolve(messages[at]);
+        } else if (Date.now() - started > timeoutMs) {
+          clearInterval(tick);
+          reject(new Error(`no ${t} after frame #${cursor}; got ${JSON.stringify(messages)}`));
+        }
       }, 10);
     });
   const open = new Promise<void>((r) => socket.on('open', () => r()));
@@ -153,7 +172,7 @@ describe('кампания фри-раундов — активация и от�
     server = createArtubeServer({
       gameId: 'one-shot-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
     });
-    await server.listen(0);
+    await server.listen(0, '127.0.0.1');
   }, 40_000);
 
   afterAll(async () => {
@@ -167,7 +186,21 @@ describe('кампания фри-раундов — активация и от�
   });
 
   /** Все `PlayRound`, ушедшие на платформу, в порядке отправки. */
-  const plays = () => api.received.filter((e) => e.type === 'PlayRoundRequest').map((e) => e.payload);
+  /**
+   * `PlayRoundRequest`, ушедшие на платформу ПО ЭТОЙ сессии.
+   *
+   * Фильтр по сессии — не косметика: сервер и фейковый Games API на весь
+   * файл одни, а `beforeEach` только обнуляет список. Раунд предыдущего
+   * теста доводится до денежной RPC уже после того, как игрок закрыл сокет
+   * (в этом и смысл `creditPending`), так что запрос чужой сессии успевал
+   * лечь в список после обнуления и превращал соседний тест в красный с
+   * `expected 2 to be 3`. Сессии у тестов разные — этого достаточно, чтобы
+   * каждый смотрел только на свой провод.
+   */
+  const plays = (sessionId: string) =>
+    api.received
+      .filter((e) => e.type === 'PlayRoundRequest' && e.payload.session_id === sessionId)
+      .map((e) => e.payload);
 
   const session = (name: string) => `ws://127.0.0.1:${server.port}/api/ws?sessionId=${name}`;
 
@@ -192,10 +225,10 @@ describe('кампания фри-раундов — активация и от�
     // Это и есть та ошибка, из-за которой всё писалось: раньше здесь уезжал
     // `free_round_campaign_id` и `price_multiplier: 0` — игрок молча сжигал
     // подаренный раунд на спине, который заказывал за свои деньги.
-    expect(plays()).toHaveLength(1);
-    expect(plays()[0].free_round_campaign_id).toBeUndefined();
-    expect(plays()[0].price_multiplier).toBe(1);
-    expect(plays()[0].bet_index).toBe(2);
+    expect(plays('sess-offered')).toHaveLength(1);
+    expect(plays('sess-offered')[0].free_round_campaign_id).toBeUndefined();
+    expect(plays('sess-offered')[0].price_multiplier).toBe(1);
+    expect(plays('sess-offered')[0].bet_index).toBe(2);
     // И раунды кампании не тронуты.
     expect(campaign.state.roundsLeft('sess-offered')).toBe(5);
   }, 20_000);
@@ -214,9 +247,9 @@ describe('кампания фри-раундов — активация и от�
     await client.next('result');
     client.socket.close();
 
-    expect(plays()[0].free_round_campaign_id).toBe(CAMPAIGN);
-    expect(plays()[0].price_multiplier).toBe(0);
-    expect(plays()[0].bet_index).toBe(CAMPAIGN_BET_INDEX);
+    expect(plays('sess-active')[0].free_round_campaign_id).toBe(CAMPAIGN);
+    expect(plays('sess-active')[0].price_multiplier).toBe(0);
+    expect(plays('sess-active')[0].bet_index).toBe(CAMPAIGN_BET_INDEX);
   }, 20_000);
 
   it('спин активной кампании с чужой ставкой отвергается и не уезжает вовсе', async () => {
@@ -236,7 +269,7 @@ describe('кампания фри-раундов — активация и от�
     // Ни одной денежной RPC: раунд не открыт, фри-раунд не сожжён. Приведение
     // ставки к `campaign.bet` вместо отказа прошло бы молча — и разошлось бы с
     // тем числом, которым фронт считает выигрыш для показа.
-    expect(plays()).toHaveLength(0);
+    expect(plays('sess-mismatch')).toHaveLength(0);
     expect(campaign.state.roundsLeft('sess-mismatch')).toBe(3);
   }, 20_000);
 
@@ -256,8 +289,8 @@ describe('кампания фри-раундов — активация и от�
     client.send({ t: 'play', id: 'p0', action: 'one_shot', betIndex: 0 });
     await client.next('result');
     client.socket.close();
-    expect(plays()[0].free_round_campaign_id).toBeUndefined();
-    expect(plays()[0].price_multiplier).toBe(1);
+    expect(plays('sess-badbet')[0].free_round_campaign_id).toBeUndefined();
+    expect(plays('sess-badbet')[0].price_multiplier).toBe(1);
   }, 20_000);
 
   it('отказ держится до конца соединения: кампания не уезжает и не активируется', async () => {
@@ -277,8 +310,8 @@ describe('кампания фри-раундов — активация и от�
     await client.next('result');
     client.socket.close();
 
-    expect(plays()[0].free_round_campaign_id).toBeUndefined();
-    expect(plays()[0].price_multiplier).toBe(1);
+    expect(plays('sess-declined')[0].free_round_campaign_id).toBeUndefined();
+    expect(plays('sess-declined')[0].price_multiplier).toBe(1);
     expect(campaign.state.roundsLeft('sess-declined')).toBe(5);
   }, 20_000);
 
@@ -297,7 +330,7 @@ describe('кампания фри-раундов — активация и от�
     // Идентификатор приходит из браузера игрока: активировать можно только ту
     // кампанию, которую вернул SessionInfo.
     client.send({ t: 'frc_activate', id: 'a3', campaignId: 'someone-elses-campaign' });
-    expect(await client.next('error', 1)).toMatchObject({ id: 'a3', code: 'FrcNotFound' });
+    expect(await client.next('error')).toMatchObject({ id: 'a3', code: 'FrcNotFound' });
     client.socket.close();
   }, 20_000);
 
@@ -322,11 +355,13 @@ describe('кампания фри-раундов — активация и от�
 
     for (let i = 0; i < 3; i += 1) {
       client.send({ t: 'play', id: `p${i}`, action: 'one_shot', betIndex: CAMPAIGN_BET_INDEX });
-      await client.next('result', i);
+      // Курсор двигает сам `next`: индекс здесь означал бы, что тест
+      // пересчитывает прочитанное вручную — ровно то, на чём он и мигал.
+      await client.next('result');
     }
     client.socket.close();
 
-    const sent = plays();
+    const sent = plays('sess-done');
     expect(sent).toHaveLength(3);
     expect(sent[0].free_round_campaign_id).toBe(CAMPAIGN);
     expect(sent[1].free_round_campaign_id).toBe(CAMPAIGN);
@@ -372,7 +407,7 @@ describe('кампания фри-раундов — активация и от�
     await again.next('result');
     again.socket.close();
 
-    const sent = plays();
+    const sent = plays('sess-recon');
     expect(sent).toHaveLength(2);
     expect(sent[0].free_round_campaign_id).toBe(CAMPAIGN);
     expect(sent[1].free_round_campaign_id).toBeUndefined();

@@ -42,17 +42,32 @@ function connect(url: string) {
   const socket = new WebSocket(url);
   const messages: any[] = [];
   socket.on('message', (d) => messages.push(JSON.parse(d.toString())));
-  const waitFor = (t: string, timeoutMs = 5000) =>
+  /**
+   * Дождаться N-го сообщения этого типа.
+   *
+   * Считать обязательно: `waitFor` ищет ПЕРВОЕ подходящее сообщение, поэтому
+   * второй вызов для того же типа возвращается мгновенно — со старым
+   * сообщением, которое пришло ещё до отправленного только что запроса. Тест на
+   * финальном сегменте так и мигал: `waitFor('result')` отдавал результат
+   * предыдущего спина, и следующая же строка проверяла, что результатов уже
+   * два. Успевал второй прийти к этому моменту или нет — решала загрузка
+   * машины, а не поведение сервера.
+   */
+  const nth = (t: string, n: number, timeoutMs = 5000) =>
     new Promise<any>((resolve, reject) => {
       const started = Date.now();
       const tick = setInterval(() => {
-        const found = messages.find((m) => m.t === t);
-        if (found) { clearInterval(tick); resolve(found); }
-        else if (Date.now() - started > timeoutMs) { clearInterval(tick); reject(new Error(`no ${t}`)); }
+        const found = messages.filter((m) => m.t === t);
+        if (found.length >= n) { clearInterval(tick); resolve(found[n - 1]); }
+        else if (Date.now() - started > timeoutMs) {
+          clearInterval(tick);
+          reject(new Error(`no ${t}#${n}; got ${JSON.stringify(messages)}`));
+        }
       }, 10);
     });
+  const waitFor = (t: string, timeoutMs = 5000) => nth(t, 1, timeoutMs);
   const open = new Promise<void>((resolve) => socket.on('open', () => resolve()));
-  return { socket, messages, waitFor, open };
+  return { socket, messages, waitFor, nth, open };
 }
 
 beforeAll(async () => {
@@ -63,7 +78,7 @@ beforeAll(async () => {
     apiKey: 'k',
     spinPath: fixtures,
   });
-  await server.listen(0);
+  await server.listen(0, '127.0.0.1');
   base = `ws://127.0.0.1:${server.port}`;
 }, 40_000);
 
@@ -251,7 +266,7 @@ describe('WS-цикл раунда', () => {
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: failing.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-3`);
     await c.open;
     await c.waitFor('init');
@@ -268,7 +283,7 @@ describe('WS-цикл раунда', () => {
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: demoApi.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-demo`);
     await c.open;
     const init = await c.waitFor('init');
@@ -311,7 +326,7 @@ describe('восстановление после ошибок сессии/ра
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: flaky.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-1`);
     await c.open;
     await c.waitFor('init');
@@ -351,7 +366,7 @@ describe('восстановление после ошибок сессии/ра
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: flaky.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-mid`);
     await c.open;
     // Явные сроки, а не дефолтные 5 секунд: восстановление добавляет к раунду
@@ -408,7 +423,7 @@ describe('восстановление после ошибок сессии/ра
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: alwaysFailing.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-2`);
     await c.open;
     await c.waitFor('init');
@@ -433,7 +448,7 @@ describe('восстановление после ошибок сессии/ра
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: flaky.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-3`);
     await c.open;
     await c.waitFor('init');
@@ -513,7 +528,7 @@ describe('восстановление после ошибок сессии/ра
     const s = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
     });
-    await s.listen(0);
+    await s.listen(0, '127.0.0.1');
     const c = connect(`ws://127.0.0.1:${s.port}/api/ws?sessionId=sess-recover-final`);
     await c.open;
     await c.waitFor('init');
@@ -526,18 +541,19 @@ describe('восстановление после ошибок сессии/ра
     await new Promise((r) => setTimeout(r, 20));
 
     c.socket.send(JSON.stringify({ t: 'play', id: 'p1', action: 'free_spin', betIndex: 0 }));
-    const fs1 = await c.waitFor('result');
+    // Сроки явные и щедрые: до этого ожидание третьего результата было
+    // открытым циклом БЕЗ таймаута, то есть терпело до 40-секундного бюджета
+    // самого теста. Ограничить его пятью секундами по умолчанию значило бы
+    // обменять одно мигание на другое — восстановление здесь переигрывает
+    // раунд в движке целиком.
+    const fs1 = await c.nth('result', 2, 15_000);
+    // И ровно два: фантомного третьего результата на этом шаге быть не должно.
     expect(c.messages.filter((m) => m.t === 'result')).toHaveLength(2);
     c.socket.send(JSON.stringify({ t: 'ack', roundId: fs1.roundId, cursor: 2 }));
     await new Promise((r) => setTimeout(r, 20));
 
     c.socket.send(JSON.stringify({ t: 'play', id: 'p2', action: 'free_spin', betIndex: 0 }));
-    await new Promise<void>((resolve) => {
-      const tick = setInterval(() => {
-        if (c.messages.filter((m) => m.t === 'result').length >= 3) { clearInterval(tick); resolve(); }
-      }, 10);
-    });
-    const fs2 = c.messages.filter((m) => m.t === 'result').at(-1);
+    const fs2 = await c.nth('result', 3, 15_000);
     c.socket.send(JSON.stringify({ t: 'ack', roundId: fs2.roundId, cursor: 3 }));
     await new Promise((r) => setTimeout(r, 20));
 
@@ -579,7 +595,7 @@ describe('graceful shutdown', () => {
     const shutdownServer = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: shutdownApi.url, apiKey: 'k', spinPath: fixtures,
     });
-    await shutdownServer.listen(0);
+    await shutdownServer.listen(0, '127.0.0.1');
 
     const c = connect(`ws://127.0.0.1:${shutdownServer.port}/api/ws?sessionId=sess-shutdown`);
     await c.open;
