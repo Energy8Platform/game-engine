@@ -106,8 +106,9 @@ export function clientIp(
  * `player_connection_id` генерируем сами: дока определяет его как
  * «идентификатор подключения игрока между клиентом и бэкендом игры», то есть
  * это ИМЕННО наш идентификатор, и никто другой его не выдаёт. Он же — половина
- * механизма `NewConnectionEvent` (вторая половина, подписчик на событие, пока
- * не реализована — см. F5 в аудите).
+ * механизма `NewConnectionEvent`; вторая половина, подписчик, живёт в
+ * `http/ws.ts` (`makeNewConnectionHandler`) и сравнивает объявленный
+ * платформой id именно с этим значением.
  */
 export function readConnectionInfo(req: IncomingMessage): PlayerConnectionInfo {
   const info: PlayerConnectionInfo = { player_connection_id: randomUUID() };

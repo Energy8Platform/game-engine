@@ -57,7 +57,18 @@ export async function handleConnection(
   deps: WsDeps,
 ): Promise<void> {
   const log = deps.log.child({ session_id: sessionId });
-  const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
+  /**
+   * Мы сами закрыли это соединение — писать в него больше нечего.
+   *
+   * Нужен потому, что закрыть его может СОБЫТИЕ платформы, прилетевшее
+   * посреди инициализации: без флага следующая же строка отправляла бы `init`
+   * в закрывающийся сокет, и `ws` рапортовал бы это ошибкой на ровном месте.
+   */
+  let stopped = false;
+  const send = (msg: ServerMessage) => {
+    if (stopped) return;
+    socket.send(JSON.stringify(msg));
+  };
   // Одно и то же на все SessionInfo этого соединения: платформа обязана видеть
   // один `player_connection_id` за одно соединение, а адрес и браузер за его
   // время не меняются.
@@ -248,6 +259,22 @@ export async function handleConnection(
       log.warn('failed to refresh session after a settled round', { error: String(err) });
     }
   };
+
+  // Подписка ДО первого SessionInfo — намеренно: именно наш запрос и рождает
+  // первое `NewConnectionEvent` этой сессии, и именно оно калибрует проверку
+  // ниже. Подпишись мы после `await`, событие приходило бы в пустоту.
+  const onNewConnection = makeNewConnectionHandler({
+    sessionId,
+    ownConnectionId: connection.player_connection_id,
+    log,
+    close: (reason) => {
+      send({ t: 'session_closed', reason });
+      stopped = true;
+      socket.close(1000, reason);
+    },
+  });
+  deps.api.on('newConnection', onNewConnection);
+  socket.on('close', () => deps.api.off('newConnection', onNewConnection));
 
   try {
     const info = await readSession();
@@ -455,4 +482,77 @@ export async function handleConnection(
   socket.on('message', (raw) => {
     queue = queue.then(() => onMessage(raw.toString()));
   });
+}
+
+interface NewConnectionEvent {
+  session_id?: unknown;
+  new_connection_id?: unknown;
+}
+
+interface NewConnectionDeps {
+  sessionId: string;
+  /** `player_connection_id`, который мы выдали ЭТОМУ соединению. */
+  ownConnectionId: string | undefined;
+  log: Logger;
+  close(reason: string): void;
+}
+
+/**
+ * `NewConnectionEvent`: та же сессия открылась ещё раз — обычно вторая
+ * вкладка, реконнект, чей прежний сокет ещё не умер, или перезапуск игры.
+ *
+ * Дока (`new-connection-event.md`) просит ровно одно: сравнить
+ * `new_connection_id` с текущим соединением «между фронтендом и сервером игры»
+ * и, если не совпало, закрыть своё. Одно соединение на сессию у нас уже есть —
+ * но только В ПРЕДЕЛАХ ПОДА (реестр `clients` в `http/server.ts`). Две вкладки
+ * за HPA попадают на разные поды, и там наш реестр не знает ничего: это
+ * единственный механизм, которым про чужой под можно узнать вообще. Дока
+ * называет обработку опциональной для `stateless` игр — мы не stateless,
+ * `ActiveRound` живёт в памяти пода.
+ *
+ * **Почему одного сравнения мало.** `new_connection_id` сопоставим с нашим
+ * `player_connection_id` только если платформа возвращает именно его —
+ * прочитать это из доки можно (другого источника идентификатора «соединения
+ * между игроком и бэкендом игры» у платформы нет, его выдаём мы в
+ * `SessionInfoRequest`), но проверить против живой платформы — нельзя, и в
+ * захваченных кадрах этого события нет ни одного. Цена ошибки при этом резко
+ * несимметрична:
+ *
+ *  - платформа шлёт НАШ идентификатор → сравнение работает, всё честно;
+ *  - платформа генерирует идентификатор сама → он не совпадёт НИКОГДА, первое
+ *    же событие после нашего собственного `SessionInfoRequest` рвало бы сокет
+ *    каждому игроку сразу после `init`. Игра мертва для всех и сразу.
+ *
+ * Поэтому закрываем только после того, как платформа доказала на этой же
+ * сессии, что идентификаторы общие: первое событие несёт НАШ id (его рождает
+ * наш же `SessionInfoRequest`), и после этого чужой id означает именно чужое
+ * соединение. Без доказательства — только строка в логе с обоими значениями,
+ * то есть ровно сегодняшнее поведение плюс возможность увидеть на первой же
+ * живой сессии, как платформа себя ведёт. Худший исход этой осторожности —
+ * «как сейчас»; худший исход её отсутствия — мёртвая игра.
+ */
+export function makeNewConnectionHandler(deps: NewConnectionDeps): (event: unknown) => void {
+  let idsAreOurs = false;
+  return (event: unknown) => {
+    const { session_id: session, new_connection_id: announced } = (event ?? {}) as NewConnectionEvent;
+    if (session !== deps.sessionId) return;
+    if (typeof announced !== 'string' || announced === '') return;
+    if (!deps.ownConnectionId) return;
+    if (announced === deps.ownConnectionId) {
+      idsAreOurs = true;
+      return;
+    }
+    if (!idsAreOurs) {
+      deps.log.warn(
+        'платформа объявила новое соединение с идентификатором, которого мы не выдавали — '
+        + 'не закрываем: сравнивать не с чем',
+        { announced_connection_id: announced, own_connection_id: deps.ownConnectionId },
+      );
+      return;
+    }
+    deps.log.info('сессия перешла на другое соединение — закрываем это', {
+      announced_connection_id: announced, own_connection_id: deps.ownConnectionId,
+    });
+    deps.close('superseded by a new connection');
+  };
 }
