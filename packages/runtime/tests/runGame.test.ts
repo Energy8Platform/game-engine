@@ -32,14 +32,48 @@ describe('runGame', () => {
     const createSession = vi.fn(async () => ({ kind: 'session' }));
     const result = await runGame({
       ...base(),
-      // no provider contributes, so the arity:'one' point has nothing — the kernel errors
-      project: { plugins: { '@e8/host': { version: '*' } } },
-      manifests: [hostPlugin],
+      // session.provider still resolves to an eligible, ACTIVE contributor — session-dev, same as
+      // base(). The error instead comes from '@e8/ghost', a plugin the project references but
+      // never installs (no matching manifest). Deliberately NOT an empty-point error: a project
+      // that also leaves session.provider unfilled would pass this test even with the hasErrors
+      // gate deleted, since activateOne would then independently return null and mask the gate's
+      // absence — proved by mutation, see task-5-report.md's Fix round 1.
+      project: {
+        plugins: {
+          '@e8/host': { version: '*' },
+          '@e8/session-dev': { version: '*' },
+          '@e8/ghost': { version: '*' },
+        },
+      },
       createSession,
     });
-    expect(result.diagnostics.some((d) => d.severity === 'error')).toBe(true);
+    expect(result.diagnostics.some((d) => d.severity === 'error' && d.code === 'resolve/plugin-not-found')).toBe(
+      true,
+    );
     expect(createSession).not.toHaveBeenCalled();
     expect(result.session).toBeNull();
+  });
+
+  it('installs the provider before it runs the handshake', async () => {
+    // Pins the order directly, rather than relying on a test name: a runGame that ran the
+    // handshake first and installed second would still make every OTHER test in this file pass.
+    const order: string[] = [];
+    const result = await runGame({
+      ...base(),
+      loadDevBridge: async () =>
+        class {
+          start() {
+            order.push('installed');
+          }
+          stop() {}
+        },
+      createSession: async () => {
+        order.push('handshake');
+        return { kind: 'session' };
+      },
+    });
+    expect(order).toEqual(['installed', 'handshake']);
+    expect(result.session).toEqual({ kind: 'session' });
   });
 
   it('never rejects, whatever the project looks like', async () => {
@@ -48,13 +82,20 @@ describe('runGame', () => {
     }
   });
 
-  it('never rejects even when the input itself is missing, not just its project', async () => {
-    // A caller can violate RunGameInput's type at the JS boundary the same way a project's own
-    // data can be malformed. `resolvePlan` treats its own `input` parameter this defensively
-    // (`input?.field` throughout); `runGame` must too, or `rawInput.project` throws before
-    // resolution ever gets a chance to turn the problem into a diagnostic.
-    for (const bad of [undefined, null]) {
-      await expect(runGame(bad as never)).resolves.toBeDefined();
+  it('never rejects, whatever it is handed', async () => {
+    const hostile: unknown[] = [
+      undefined, null, 'nope', 42, [], {},
+      { project: null }, { project: 'x' }, { project: { plugins: null } },
+      { ...base(), manifests: null }, { ...base(), manifests: [null] },
+      { ...base(), manifests: [{ get id() { throw new Error('getter boom'); } }] },
+      { ...base(), url: undefined }, { ...base(), url: Symbol('u') },
+      { ...base(), createSession: () => { throw new Error('sync'); } },
+      { ...base(), createSession: async () => { throw new Error('async'); } },
+      { ...base(), createSession: 'not a function' },
+      { ...base(), createSession: () => { throw Object.create(null); } },
+    ];
+    for (const input of hostile) {
+      await expect(runGame(input as never)).resolves.toBeDefined();
     }
   });
 
@@ -82,5 +123,14 @@ describe('runGame', () => {
     });
     expect(result.session).toBeNull();
     expect(result.diagnostics.some((d) => d.code === 'activate/factory-failed')).toBe(true);
+  });
+
+  it('reports a handshake that failed, instead of throwing', async () => {
+    const result = await runGame({
+      ...base(),
+      createSession: async () => { throw new Error('rgs unreachable'); },
+    });
+    expect(result.session).toBeNull();
+    expect(result.diagnostics.some((d) => d.code === 'runtime/handshake-failed')).toBe(true);
   });
 });
