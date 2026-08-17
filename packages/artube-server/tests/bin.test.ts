@@ -83,7 +83,16 @@ describe('bin/artube-server, вызванный так, как это делае
         });
       });
     } finally {
+      // Дождаться, пока CLI действительно выйдет, а не просто послать сигнал.
+      // Выключение у него асинхронное (`server.close()` гасит движок), и если
+      // воркер уходит первым, каналы stdio закрываются у CLI под руками — он
+      // умирает на полпути, а ВНУК (`e8-server`) остаётся жить и держит порт из
+      // окна поиска до перезагрузки машины. Именно такие сироты и нашлись
+      // здесь трёхдневными.
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
       child.kill('SIGTERM');
+      await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 5000))]);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
       rmSync(linkDir, { recursive: true, force: true });
     }
   }, 40_000);
