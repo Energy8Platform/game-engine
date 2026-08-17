@@ -83,14 +83,32 @@ message HealthRequest {}
 message HealthResponse { bool ok = 1; uint32 games_loaded = 2; string sessions_backend = 3; }
 `;
 
+/**
+ * Путь к .proto на диске, один на процесс.
+ *
+ * `loadSync` умеет только файл, а не строку, поэтому копию приходится
+ * выкладывать во временный каталог. Раньше — на КАЖДЫЙ вызов: к моменту, когда
+ * этот файл читали, в `/var/folders` лежало 5660 каталогов `artube-proto-*`.
+ * Сам по себе мусор безвреден, но пакет тестов создаёт клиента десятки раз за
+ * прогон, и это лишняя работа файловой системы там, где параллельные процессы
+ * и без неё дерутся за диск.
+ */
+let protoPath: string | null = null;
+
+function ensureProtoFile(): string {
+  if (protoPath) return protoPath;
+  const dir = mkdtempSync(join(tmpdir(), 'artube-proto-'));
+  protoPath = join(dir, 'engine.proto');
+  writeFileSync(protoPath, ENGINE_PROTO);
+  return protoPath;
+}
+
 /** Собрать gRPC-клиент к уже запущенному серверу на 127.0.0.1:port. */
 export function createGrpcClient(port: number): any {
   const req = createRequire(import.meta.url);
   const grpcJs = req('@grpc/grpc-js');
   const loader = req('@grpc/proto-loader');
-  const dir = mkdtempSync(join(tmpdir(), 'artube-proto-'));
-  writeFileSync(join(dir, 'engine.proto'), ENGINE_PROTO);
-  const def = loader.loadSync(join(dir, 'engine.proto'), {
+  const def = loader.loadSync(ensureProtoFile(), {
     keepCase: true,
     longs: Number,
     defaults: true,

@@ -114,40 +114,110 @@ export class EngineClient {
 
   close(): void {
     this.child?.kill();
+    // Канал grpc-js переживает смерть ребёнка и продолжает переподключаться к
+    // мёртвому порту с собственным бэкоффом. Внутри процесса-воркера это
+    // живой сокет и таймеры после `afterAll` — ровно та утечка за пределы
+    // теста, из-за которой соседи начинают зависеть от того, кто закрылся
+    // раньше.
+    this.grpc?.close?.();
   }
 }
 
-/** Поднять движок и дождаться, пока он загрузит игры. */
+/** Сколько всего ждём готовности движка, включая повторные попытки. */
+const READY_TIMEOUT_MS = 20_000;
+/** Пауза между опросами `ListGames`, пока движок грузит игры. */
+const READY_POLL_MS = 100;
+/**
+ * Сколько РАЗНЫХ портов пробуем, если ребёнок умирает уже после того, как
+ * `spawnEngine` счёл его живым.
+ *
+ * Это не то же самое, что `MAX_SPAWN_ATTEMPTS`: там повтор идёт по смерти
+ * внутри окна `SPAWN_CHECK_MS`, здесь — по смерти ПОСЛЕ него. Ребёнок
+ * печатает список игр раньше, чем занимает порт, поэтому на загруженной машине
+ * проигравший гонку за bind вполне успевает пережить окно, и раньше это была
+ * не повторная попытка, а `exited early` в лицо тесту.
+ */
+const MAX_PORT_RETRIES = 4;
+
+/** Готов ли движок, или ребёнок умер, или вышло время. */
+type Readiness = 'ready' | 'died' | 'timeout';
+
+/**
+ * Поднять движок и дождаться, пока он загрузит игры.
+ *
+ * Готовность и смерть ребёнка — одна и та же гонка, и решается она в одном
+ * месте: пока движок не отвечает на `ListGames`, он либо ещё грузится, либо уже
+ * не поднимется. Смерть — это почти всегда проигранная гонка за порт (её
+ * оставляет открытой любой probe-then-bind), поэтому она ведёт к следующему
+ * порту, а не к ошибке.
+ */
 export async function startEngine(opts: {
   gamesDir: string;
   binPath?: string;
   port?: number;
 }): Promise<EngineClient> {
-  const { port, child } = await spawnEngine(opts);
-  const grpc = createGrpcClient(port);
-  const client = new EngineClient(grpc, child);
-  for (let i = 0; i < 100; i++) {
-    // A failed spawn (e.g. ENOENT on a bad binPath) or a binary that exits
-    // immediately (e.g. bad CLI args) never becomes reachable over gRPC —
-    // waiting out the full 20s timeout below would still be "correct" but
-    // is a needlessly slow, uninformative way to report it. Fail fast with
-    // the concrete reason instead.
-    const spawnErr = spawnFailureOf(child);
-    if (spawnErr) {
-      throw new Error(`[artube] e8-server failed to start (${child.spawnfile}): ${spawnErr.message}`);
-    }
-    if (child.exitCode !== null) {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  let from = opts.port;
+  let lastDeath = '';
+
+  for (let attempt = 0; attempt <= MAX_PORT_RETRIES; attempt++) {
+    // ENOENT и прочие «бинарь вообще не запустился» отсекает сам spawnEngine —
+    // до всякого gRPC и с названием бинаря в сообщении.
+    const { port, child } = await spawnEngine({ ...opts, port: from });
+    const grpc = createGrpcClient(port);
+    const client = new EngineClient(grpc, child);
+    const outcome = await waitUntilReady(client, child, deadline);
+    if (outcome === 'ready') return client;
+
+    // Больше не наш: канал закрываем сами, иначе grpc-js продолжит стучаться в
+    // мёртвый порт до конца процесса.
+    client.close();
+    if (outcome === 'timeout') {
       throw new Error(
-        `[artube] e8-server exited early (${child.spawnfile}), code ${child.exitCode}`,
+        `[artube] e8-server не поднялся за ${READY_TIMEOUT_MS / 1000} секунд` +
+          (lastDeath ? ` (последняя смерть: ${lastDeath})` : ''),
       );
+    }
+    lastDeath = deathReason(child);
+    // Порт, на котором он только что умер, пробовать снова смысла нет.
+    from = port + 1;
+  }
+
+  throw new Error(
+    `[artube] e8-server умирал на ${MAX_PORT_RETRIES + 1} портах подряд: ${lastDeath}`,
+  );
+}
+
+function deathReason(child: ChildProcess): string {
+  const spawnErr = spawnFailureOf(child);
+  if (spawnErr) return `${child.spawnfile}: ${spawnErr.message}`;
+  return `${child.spawnfile} exited with code ${child.exitCode}, signal ${child.signalCode}`;
+}
+
+/**
+ * Ждать, пока движок ответит на `ListGames`, — и следить за ребёнком.
+ *
+ * Успешный `ListGames` сам по себе НЕ доказывает, что ответил наш движок:
+ * ребёнок мог проиграть гонку за bind и умереть, а на том же порту слушает
+ * победитель — с чужим каталогом игр. Поэтому живость ребёнка проверяется и
+ * после удачного ответа: «ответил кто-то» и «ответил наш» — разные вещи, и
+ * молчаливая подмена каталога игр была бы худшим из возможных исходов.
+ */
+async function waitUntilReady(
+  client: EngineClient,
+  child: ChildProcess,
+  deadline: number,
+): Promise<Readiness> {
+  while (Date.now() < deadline) {
+    if (spawnFailureOf(child) || child.exitCode !== null || child.signalCode !== null) {
+      return 'died';
     }
     try {
       await client.listGames();
-      return client;
+      return child.exitCode === null && child.signalCode === null ? 'ready' : 'died';
     } catch {
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, READY_POLL_MS));
     }
   }
-  child.kill();
-  throw new Error('[artube] e8-server не поднялся за 20 секунд');
+  return 'timeout';
 }

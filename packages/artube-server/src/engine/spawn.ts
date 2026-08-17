@@ -12,7 +12,34 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
-export const DEFAULT_ENGINE_PORT = 50251;
+/**
+ * Порт gRPC движка по умолчанию.
+ *
+ * Намеренно НИЖЕ эфемерного диапазона любой ОС (Linux 32768+, macOS и Windows
+ * 49152+). Прежнее значение, 50251, лежало внутри него, и это не косметика:
+ * эфемерные порты ядро выдаёт КАЖДОМУ `listen(0)`, а `::` и `0.0.0.0` на одном
+ * порту сосуществуют без всякого EADDRINUSE. То есть фейковый Games API теста
+ * (`new WebSocketServer({ port: 0 })`, а это всегда `::`) мог получить ровно
+ * тот порт, на котором уже слушает движок соседнего теста, — и `ws://127.0.0.1`
+ * уходил В ДВИЖОК, потому что при выборе слушателя точное совпадение семейства
+ * адресов (IPv4) выигрывает у `::`. Тест видел от «своего» Games API
+ * `Parse Error: Expected HTTP/` или молчаливое закрытие — про поведение,
+ * которое он проверял, это не говорило ничего.
+ */
+export const DEFAULT_ENGINE_PORT = 20251;
+
+/**
+ * Ширина окна, внутри которого ищется свободный порт, и разброс стартовой
+ * точки поиска.
+ *
+ * Разброс нужен ровно против того, чем этот файл жил раньше: когда все
+ * процессы начинают скан с одного и того же порта, они и претендуют на один и
+ * тот же — гонка «проверил → занял» из редкой становится нормой. Со случайной
+ * стартовой точкой параллельные процессы расходятся по окну сами, а цикл
+ * повторов остаётся страховкой, а не основным механизмом.
+ */
+const PORT_WINDOW = 64;
+const PORT_FANOUT = 32;
 
 function executable(path: string): boolean {
   try {
@@ -61,21 +88,33 @@ export function resolveEngineBinary(explicit?: string): string {
   return `e8-server${ext}`;
 }
 
+/**
+ * Свободен ли порт для ДВИЖКА.
+ *
+ * Проба идёт по тому же адресу, который занимает сам `e8-server` — `0.0.0.0`,
+ * а не `127.0.0.1`. Разница не теоретическая: на BSD/macOS bind на
+ * `127.0.0.1:P` проходит, пока другой процесс держит `0.0.0.0:P` (SO_REUSEADDR
+ * разрешает занять более узкий адрес), поэтому проба по локалхосту объявляла
+ * свободным порт, на котором уже слушал движок. Весь пакет тестов начинал скан
+ * с одного порта, и на замерах ~88% попыток спавна (≈300 из ≈340 за прогон)
+ * умирали на гонке за bind: цикл повторов это прятал, но каждая такая смерть
+ * была ещё и монеткой против окна `SPAWN_CHECK_MS`.
+ *
+ * Проба по IPv4-wildcard ровно так же строга, как bind ребёнка: «свободен»
+ * теперь значит свободен — в том числе и для узла, который держит `::`
+ * (bind `0.0.0.0` поверх `::` тоже даёт EADDRINUSE).
+ */
 export function isPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = createServer();
     probe.once('error', () => resolve(false));
     probe.once('listening', () => probe.close(() => resolve(true)));
-    probe.listen(port, '127.0.0.1');
+    probe.listen(port, '0.0.0.0');
   });
 }
 
-// Wider than a single process ever needs alone: several test files probe
-// from the same `start` at once, so a wide window means each of them is
-// likely to land on a *different* free port on its very first probe instead
-// of relying on `spawnEngine`'s retry loop to fan them out one collision at
-// a time.
-export async function findFreePort(start: number, range = 64): Promise<number> {
+/** Первый свободный порт, начиная с `start`. Скан вверх, без обёртки. */
+export async function findFreePort(start: number, range = PORT_WINDOW): Promise<number> {
   for (let p = start; p < start + range; p++) {
     if (await isPortFree(p)) return p;
   }
@@ -113,16 +152,15 @@ const SPAWN_CHECK_MS = 400;
  * One initial attempt + this many retries on the next port, bounding the
  * search so a run of colliding processes can't retry forever.
  *
- * Sized for vitest's default parallel-file execution, not just a single
- * process: every test file that calls `startEngine` races the same
- * `DEFAULT_ENGINE_PORT` starting point concurrently, so the number of
- * attempts any one of them needs to land on a free port grows with how many
- * spawn at once (each collision only advances *that* process's own `from`
- * pointer, not a shared one). Seven engine-spawning test files at 6 attempts
- * was already too tight — this leaves headroom for the suite to keep
- * growing without going back to hand-pinned ports.
+ * Used to be 24, sized for a collision storm that was itself a bug: the
+ * loopback probe could not see an engine already listening on `0.0.0.0`, so
+ * every process started from the same port and nearly every spawn lost the
+ * race (see `isPortFree`). With an honest probe and a randomised starting
+ * point, losing the race needs two processes to probe the *same* port in the
+ * same instant — and losing it eight times in a row is no longer a case worth
+ * waiting 10 seconds for; it's a case worth reporting.
  */
-const MAX_SPAWN_ATTEMPTS = 24;
+const MAX_SPAWN_ATTEMPTS = 8;
 
 /**
  * Race the child's own 'error'/'exit' events against a short timer. Resolves
@@ -155,6 +193,50 @@ function waitForEarlyDeath(
 }
 
 /**
+ * Убить движок вместе с процессом, который его завёл.
+ *
+ * Ребёнок не входит в жизненный цикл ноды сам по себе: процесс, который не
+ * дошёл до `EngineClient.close()` — упавший хук в тесте, необработанное
+ * исключение, `process.exit()` — оставляет `e8-server` жить, и его
+ * переподчиняет init. Это не косметика:
+ *
+ *  - брошенный движок бессрочно держит порт из окна поиска, то есть портит не
+ *    только свой прогон, но и все последующие (в этом репозитории нашлись
+ *    трёхдневные сироты на 50251..50256);
+ *  - он отвечает на gRPC тем же каталогом игр, что и живой, — значит
+ *    подключиться к сироте с прошлого прогона и получить его кэш раундов
+ *    ничему не противоречит. Именно так «пять зелёных прогонов» превращаются в
+ *    красный на шестом.
+ *
+ * `process.on('exit')` покрывает нормальный выход, `process.exit()` и
+ * необработанное исключение. Штатное завершение ПО СИГНАЛУ он не покрывает:
+ * нода на SIGTERM/SIGINT без своего обработчика 'exit'-хуки не запускает.
+ * Ставить их здесь нельзя — библиотека, перехватывающая Ctrl-C у хоста, лечит
+ * не то; в продакшне оба сигнала уже ловит `bin/artube-server.ts` и звёт
+ * `server.close()`. То, что остаётся (сирота после сигнала воркеру тестов),
+ * теперь безвредно: честная проба порт сироты ВИДИТ и берёт другой, а окно
+ * портов не пересекается с динамическим диапазоном — перехватить чужое
+ * соединение сирота не может.
+ */
+const liveChildren = new Set<ChildProcess>();
+let reaperInstalled = false;
+
+function reapWithParent(child: ChildProcess): void {
+  liveChildren.add(child);
+  child.once('exit', () => liveChildren.delete(child));
+  if (reaperInstalled) return;
+  reaperInstalled = true;
+  // Один слушатель на процесс, а не на ребёнка: девять живых движков в одном
+  // файле тестов (http.test.ts) иначе дали бы MaxListenersExceededWarning —
+  // предупреждение об утечке в коде, который её как раз и закрывает.
+  process.on('exit', () => {
+    for (const c of liveChildren) {
+      if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+    }
+  });
+}
+
+/**
  * Spawn `e8-server`, tolerating the inherent probe-then-bind race: another
  * process can grab the port `findFreePort` just declared free before this
  * child gets to bind it. Same shape as `spinPlugin`'s `startServer()` (see
@@ -174,7 +256,11 @@ export async function spawnEngine(opts: {
 }): Promise<SpawnedEngine> {
   const bin = resolveEngineBinary(opts.binPath);
   const basePort = opts.port ?? DEFAULT_ENGINE_PORT;
-  let from = basePort;
+  // Явный порт значит «начни ровно здесь» (так `startEngine` уводит поиск с
+  // порта, который только что не удался). Порт по умолчанию значит
+  // «где-нибудь в окне» — см. PORT_FANOUT.
+  let from =
+    opts.port === undefined ? basePort + Math.floor(Math.random() * PORT_FANOUT) : basePort;
   let lastFailure: Error | undefined;
 
   for (let attempt = 1; attempt <= MAX_SPAWN_ATTEMPTS; attempt++) {
@@ -197,6 +283,7 @@ export async function spawnEngine(opts: {
     // loop reads it back via `spawnFailureOf` and rejects with a clear
     // message naming the binary that failed, rather than crashing.
     child.on('error', (err) => spawnFailures.set(child, err));
+    reapWithParent(child);
 
     const early = await waitForEarlyDeath(child, SPAWN_CHECK_MS);
     if (!early) return { port, child }; // survived the window — looks started
