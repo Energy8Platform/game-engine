@@ -1,0 +1,40 @@
+{
+  "name": "@energy8engine/runtime",
+  "version": "0.1.0",
+  "description": "Runtime host for Energy8 games — turns a resolved plugin plan into a live session.",
+  "type": "module",
+  "main": "./dist/index.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.esm.js", "types": "./dist/index.d.ts" },
+    "./vite": { "import": "./dist/vite.esm.js", "types": "./dist/vite.d.ts" }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "rollup -c rollup.config.mjs",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@energy8engine/kernel": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@energy8platform/platform-core": "*",
+    "@energy8platform/stake-bridge": "*"
+  },
+  "peerDependenciesMeta": {
+    "@energy8platform/platform-core": { "optional": true },
+    "@energy8platform/stake-bridge": { "optional": true }
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.0",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "license": "MIT"
+}
