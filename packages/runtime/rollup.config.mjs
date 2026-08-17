@@ -27,4 +27,16 @@ export default defineConfig([
     output: { file: 'dist/index.d.ts', format: 'esm' },
     plugins: [dts()],
   },
+  {
+    input: 'src/vite/projectPlugin.ts',
+    external,
+    output: { file: 'dist/vite.esm.js', format: 'esm', sourcemap: true },
+    plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false, sourceMap: true })],
+  },
+  {
+    input: 'src/vite/projectPlugin.ts',
+    external,
+    output: { file: 'dist/vite.d.ts', format: 'esm' },
+    plugins: [dts()],
+  },
 ]);
