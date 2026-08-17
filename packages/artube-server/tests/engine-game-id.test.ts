@@ -89,7 +89,7 @@ describe('сервер стартует, когда GameId платформы н
       apiKey: '',
       spinPath: join(soloDir, 'game.spin'),
     });
-    await server.listen(0);
+    await server.listen(0, '127.0.0.1');
   }, 40_000);
 
   afterAll(async () => {

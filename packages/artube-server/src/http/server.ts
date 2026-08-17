@@ -112,7 +112,17 @@ export class ArtubeServer {
     return this.actualPort;
   }
 
-  async listen(port = this.config.port ?? 80): Promise<void> {
+  /**
+   * @param host Интерфейс для bind. По умолчанию — все (так под и должен
+   *   слушать в кластере). Явный адрес нужен тому, кто потом сам себя и
+   *   набирает: `listen(0)` занимает IPv6-wildcard, а ядро выдаёт динамический
+   *   порт с оглядкой на конфликты только по запрошенному адресу — то есть не
+   *   видит чужих слушателей на `127.0.0.1` и спокойно отдаёт их порт. Дальше
+   *   входящее соединение на `127.0.0.1` достаётся более специфичному
+   *   слушателю, то есть ЧУЖОМУ серверу. `listen(0, '127.0.0.1')` снимает и то
+   *   и другое: занятый порт ядро не выдаст, а loopback-трафик придёт нам.
+   */
+  async listen(port = this.config.port ?? 80, host?: string): Promise<void> {
     const log = createLogger('artube-server', { game_id: this.config.gameId });
 
     const gamesDir = statSync(this.config.spinPath).isDirectory()
@@ -285,9 +295,9 @@ export class ArtubeServer {
       });
     });
 
-    await new Promise<void>((resolve) => this.http!.listen(port, () => resolve()));
+    await new Promise<void>((resolve) => this.http!.listen({ port, host }, () => resolve()));
     this.actualPort = (this.http!.address() as AddressInfo).port;
-    log.info('artube-server listening', { port: this.actualPort });
+    log.info('artube-server listening', { port: this.actualPort, host: host ?? '*' });
   }
 
   async close(): Promise<void> {

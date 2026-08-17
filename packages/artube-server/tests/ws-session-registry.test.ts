@@ -24,7 +24,7 @@ beforeAll(async () => {
   server = createArtubeServer({
     gameId: 'feature-game', gamesApiUrl: platform.url, apiKey: 'k', spinPath: fixtures,
   });
-  await server.listen(0);
+  await server.listen(0, '127.0.0.1');
   base = `ws://127.0.0.1:${server.port}`;
 }, 40_000);
 

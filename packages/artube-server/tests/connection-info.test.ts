@@ -64,7 +64,7 @@ describe('player_connection_info на проводе', () => {
     server = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: api.url, apiKey: 'k', spinPath: fixtures,
     });
-    await server.listen(0);
+    await server.listen(0, '127.0.0.1');
   }, 40_000);
 
   afterAll(async () => {

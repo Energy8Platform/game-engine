@@ -32,7 +32,7 @@ beforeEach(async () => {
   server = createArtubeServer({
     gameId: 'feature-game', gamesApiUrl: platform.url, apiKey: 'k', spinPath: fixtures,
   });
-  await server.listen(0);
+  await server.listen(0, '127.0.0.1');
   url = `ws://127.0.0.1:${server.port}/api/ws?sessionId=${SESSION}`;
 }, 40_000);
 

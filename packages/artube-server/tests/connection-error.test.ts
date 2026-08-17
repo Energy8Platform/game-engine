@@ -106,7 +106,7 @@ describe('отказ уровня коннекта', () => {
     server = createArtubeServer({
       gameId: 'feature-game', gamesApiUrl: api.url, apiKey: 'wrong', spinPath: fixtures,
     });
-    await server.listen(0);
+    await server.listen(0, '127.0.0.1');
 
     const res = await fetch(`http://127.0.0.1:${server.port}/healthz`);
     expect(res.status).toBe(503);

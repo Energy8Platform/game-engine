@@ -38,8 +38,35 @@ export interface FakeGamesApiOptions {
   onMessage?: (env: any, socket: WebSocket, api: FakeGamesApi) => void;
 }
 
+/**
+ * Слушаем РОВНО тот адрес, который потом набираем, — `127.0.0.1`, а не `::`.
+ *
+ * `{ port: 0 }` без хоста заставляет `ws` занять IPv6-wildcard, и это не
+ * косметика: динамический порт ядро выдаёт с оглядкой на конфликты по ТОМУ
+ * адресу, который просят. На `::` оно не видит чужих слушателей, сидящих на
+ * `127.0.0.1` (у разработчика их десятки: хелперы редактора, language server,
+ * докер), и спокойно отдаёт нам их порт. Слушатель при этом остаётся их —
+ * при входящем соединении точное совпадение адреса выигрывает у wildcard,
+ * поэтому `ws://127.0.0.1:<наш порт>` уходил ЧУЖОМУ серверу.
+ *
+ * Так выглядели все три наблюдавшихся мигания, и ни одно не говорило о
+ * проверяемом поведении: `Server sent no subprotocol` (чужой сервер поднял
+ * WS, но про наш сабпротокол не знает), `socket closed before the connection
+ * settled` (поднял и закрыл) и `no connection to Games API` спустя ровно 5014
+ * мс (не ответил вообще — дедлайн Hello).
+ *
+ * С `host: '127.0.0.1'` ядро проверяет конфликты по тому же адресу и занятый
+ * порт просто не выдаёт, а более специфичный bind забирает loopback-трафик
+ * себе, даже если кто-то потом займёт `0.0.0.0` на том же порту.
+ */
+export const TEST_HOST = '127.0.0.1';
+
 export async function startFakeGamesApi(opts: FakeGamesApiOptions = {}): Promise<FakeGamesApi> {
-  const wss = new WebSocketServer({ port: 0, handleProtocols: () => 'json' });
+  const wss = new WebSocketServer({
+    port: 0,
+    host: TEST_HOST,
+    handleProtocols: () => 'json',
+  });
   let current: WebSocket | null = null;
 
   const api: FakeGamesApi = {
@@ -94,6 +121,6 @@ export async function startFakeGamesApi(opts: FakeGamesApiOptions = {}): Promise
 
   await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
   const { port } = wss.address() as AddressInfo;
-  api.url = `ws://127.0.0.1:${port}/v1/ws`;
+  api.url = `ws://${TEST_HOST}:${port}/v1/ws`;
   return api;
 }
