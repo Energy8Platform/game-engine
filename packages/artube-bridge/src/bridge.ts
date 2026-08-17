@@ -263,6 +263,9 @@ export class ArtubeBridge {
         // Платформенные данные, которые игра показывает на экране правил.
         artube: {
           defaultBetIndex: init.config.defaultBetIndex,
+          // Точность валюты: сколько знаков игра округляет и показывает. Без неё
+          // игра хардкодит два знака и врёт на всём, что не сотые.
+          currencyMinimalUnit: init.config.currencyMinimalUnit,
           autoSpinCounts: init.config.autoSpinCounts,
           locales: init.config.locales,
           rtp: init.config.rtp,

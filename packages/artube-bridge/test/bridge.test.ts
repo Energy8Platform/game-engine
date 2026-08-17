@@ -98,6 +98,15 @@ describe('ArtubeBridge', () => {
     expect(init!.payload.device).toBe('mobile');
   });
 
+  it('точность валюты доезжает до игры — иначе она округляет по своему усмотрению', async () => {
+    // Сервер её присылает, а бридж раньше выбрасывал: игра оставалась с двумя
+    // знаками по умолчанию и врала на любой валюте, у которой шаг не сотые.
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    const init = sent.find((m) => m.type === 'INIT');
+    expect(init!.payload.config.artube.currencyMinimalUnit).toBe(0.01);
+  });
+
   it('код валюты нормализуется в ISO-регистр — GamesAPI шлёт его строчными', async () => {
     // Живая песочница отдаёт `"usd"`; по такому коду lookupCurrency промахивается
     // и игрок видит «1 000 000.00 usd» вместо «$1 000 000.00».
