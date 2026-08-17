@@ -32,8 +32,14 @@ export function projectPlugin(options: ProjectPluginOptions = {}) {
       if (!options.root) root = config.root;
     },
 
-    resolveId(id: string): string | null {
-      return id === VIRTUAL_ID ? RESOLVED_ID : null;
+    resolveId(id: string, importer?: string): string | null {
+      if (id === VIRTUAL_ID) return RESOLVED_ID;
+      // A relative specifier written INTO the virtual module has no real file to resolve against —
+      // its importer is the synthetic id, not a path. Anchor it to the project root instead.
+      if (importer === RESOLVED_ID && (id.startsWith('./') || id.startsWith('../'))) {
+        return join(root, id);
+      }
+      return null;
     },
 
     async load(id: string): Promise<string | null> {
@@ -47,17 +53,29 @@ export function projectPlugin(options: ProjectPluginOptions = {}) {
         throw new Error(`e8:project — could not read ${file} at ${path}`);
       }
 
-      let project: { plugins?: Record<string, unknown> };
+      let parsed: unknown;
       try {
-        project = JSON.parse(raw) as { plugins?: Record<string, unknown> };
+        parsed = JSON.parse(raw);
       } catch (err) {
         throw new Error(
           `e8:project — ${file} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
 
-      const ids = Object.keys(project.plugins ?? {});
-      const imports = ids.map((specifier, i) => `import m${i} from '${specifier}';`).join('\n');
+      // Validate that the project is a plain object.
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`e8:project — ${file} must be a JSON object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}`);
+      }
+
+      const project = parsed as Record<string, unknown>;
+
+      // Validate that plugins, if present, is a plain object.
+      if (project.plugins !== undefined && (typeof project.plugins !== 'object' || project.plugins === null || Array.isArray(project.plugins))) {
+        throw new Error(`e8:project — "plugins" in ${file} must be an object if present`);
+      }
+
+      const ids = Object.keys((project.plugins as Record<string, unknown>) ?? {});
+      const imports = ids.map((specifier, i) => `import m${i} from ${JSON.stringify(specifier)};`).join('\n');
       const list = ids.map((_, i) => `m${i}`).join(', ');
 
       return [
