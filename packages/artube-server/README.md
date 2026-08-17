@@ -310,6 +310,41 @@ needs to do nothing — no reload, no re-launch — for their next spin to work.
 readiness is exactly what the pod has lost. Existing player sockets survive
 it; new ones route elsewhere until the connection is back.
 
+The `Welcome` that closes the handshake is read, not just counted: if the
+platform names a `use.max_schema` other than the 1 we announce, the pod logs
+`games api negotiated a different protocol schema`. Nothing is renegotiated —
+the envelope is schema 1 by construction — but a `Hello` that was rejected or
+arrived late is otherwise indistinguishable from one that was accepted, since
+the platform answers neither.
+
+### One session, one connection
+
+A session may only have one live player socket. Within a pod the registry
+enforces it directly: a second connection for the same `sessionId` supersedes
+the first, which gets a `session_closed` frame and a clean close. Across pods
+the platform's `NewConnectionEvent` is the only channel that exists, and the
+server now acts on it — an announced connection id that is not the one this
+socket was issued closes this socket the same way. The guard is deliberate:
+that comparison only means anything if the platform echoes the
+`player_connection_id` we send, so a connection is closed only after the
+platform has echoed one of ours on that session. Until then the event is
+logged with both ids and nothing is torn down; a platform that minted its own
+ids would otherwise close every player's socket the moment it connected.
+
+### `SessionInfoResponse` is checked against the doc
+
+Every response is run through `checkSessionInfo` before anything reads it.
+Two fields are treated as fatal — `game_settings` and a usable `allowed_bets`
+— because without the bet ladder there is no price for a spin and nothing to
+serve; the connection fails with `InvalidSessionInfo` naming the field.
+Everything else is a logged deviation (`SessionInfoResponse расходится с докой
+платформы`, with the field, what was wrong and what we did instead) and the
+session plays on: a missing `rtp_settings` is a rules-screen toggle and used
+to kill a live money session with a `TypeError`. This exists because the wire
+has repeatedly disagreed with its own spec (`currency` absent where declared
+mandatory, two contradictory `Error` shapes); the point is to name the
+deviation where it enters rather than several frames later.
+
 ## Running against the sandbox
 
 For local development and integration testing without a real platform
