@@ -12,6 +12,26 @@ export interface DevBridgeCtor {
   new (config: Record<string, unknown>): DevBridgeLike;
 }
 
+/** What the game hands `session-stake` through the `stake.adapter` point. */
+export interface StakeAdapterBundle {
+  /** The game's `BookAdapter`. Typed as unknown so this package never imports stake-bridge. */
+  adapter: unknown;
+  /** Spec mode name → Stake mode name. */
+  modeMap: Record<string, string>;
+  /** The game id Stake knows this game by. */
+  gameId: string;
+}
+
+/** A constructor shaped like stake-bridge's `StakeBridge`. Structural, for the same peer reason. */
+export interface StakeBridgeLike {
+  ready(): Promise<void>;
+  destroy?(): void;
+}
+
+export interface StakeBridgeCtor {
+  new (options: Record<string, unknown>): StakeBridgeLike;
+}
+
 /**
  * What a session provider is, and — more importantly — what it is not.
  *
@@ -38,6 +58,13 @@ export interface SessionContext {
    * installed would fail to build.
    */
   loadDevBridge?: () => Promise<DevBridgeCtor>;
+  /** How `session-stake` reaches StakeBridge. Same optional-peer reasoning as `loadDevBridge`. */
+  loadStakeBridge?: () => Promise<StakeBridgeCtor>;
+  /**
+   * The resolved plan, so a provider can activate a point of its own. `session-stake` needs it to
+   * reach `stake.adapter`; `session-dev` ignores it.
+   */
+  plan?: import('@energy8engine/kernel').ResolvedPlan;
 }
 
 /** What a provider hands back after installing itself. */
