@@ -20,8 +20,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Plugin } from 'vite';
 
-/** стартовый порт gRPC, если не задан явно и нет E8_SERVER_PORT */
-export const DEFAULT_SPIN_PORT = 50151;
+/**
+ * Стартовый порт gRPC, если не задан явно и нет E8_SERVER_PORT.
+ *
+ * Держим его НИЖЕ эфемерного диапазона (на macOS это 49152..65535,
+ * `sysctl net.inet.ip.portrange`). Прежнее значение 50151 лежало внутри него,
+ * а значит ядро могло выдать этот порт любому `listen(0)` в системе за миг до
+ * того, как мы попробуем его занять: проба говорила «свободен», а bind падал —
+ * и e8-server не поднимался по причине, которую в логе не видно. Точно та же
+ * правка сделана для порта движка в artube-server (50251 → 20251).
+ */
+export const DEFAULT_SPIN_PORT = 20151;
 /** сколько портов подряд пробуем от стартового, прежде чем сдаться */
 const PORT_SCAN_RANGE = 20;
 /** сколько раз перезапускаем поиск, если сервер не поднялся на выбранном порту */
@@ -97,7 +106,7 @@ export interface SpinPluginOptions {
   /** id игры из декларации game "..." (default: первая загруженная) */
   gameId?: string;
   /**
-   * Стартовый порт gRPC (default: E8_SERVER_PORT → 50151). Если занят —
+   * Стартовый порт gRPC (default: E8_SERVER_PORT → 20151). Если занят —
    * берётся следующий свободный, кроме случая `external`, где порт точный.
    */
   port?: number;

@@ -25,7 +25,7 @@ export interface GameConfig {
 
   /**
    * Starting gRPC port for the spin dev server (default: `E8_SERVER_PORT`
-   * → 50151). If the port is taken — e.g. another game's `npm run dev` is
+   * → 20151). If the port is taken — e.g. another game's `npm run dev` is
    * already up — the next free one is used instead.
    */
   spinPort?: number;
