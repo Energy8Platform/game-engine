@@ -2,13 +2,17 @@ import { defineConfig } from 'rollup';
 import typescript from '@rollup/plugin-typescript';
 import dts from 'rollup-plugin-dts';
 
-const external = [
-  '@energy8engine/kernel',
-  '@energy8platform/platform-core',
-  '@energy8platform/stake-bridge',
-  'node:fs',
-  'node:path',
-];
+// A predicate, not a fixed list: platform-core and stake-bridge are reached only through their
+// subpaths ('@energy8platform/platform-core/dev-bridge', '.../stake-bridge/...'), never their bare
+// package names. An exact-match list would miss those subpaths — Rollup would then fall through to
+// its default "can't resolve, so warn and treat as external" behaviour, which happens to be safe
+// today only because no resolver plugin is configured. Add one later (@rollup/plugin-node-resolve)
+// and an unmatched subpath gets resolved and INLINED into the runtime bundle, silently defeating the
+// entire reason platform-core/stake-bridge stay behind a dynamic import: they are optional peers.
+const external = (id) =>
+  id === '@energy8engine/kernel' ||
+  id.startsWith('@energy8platform/') ||
+  id.startsWith('node:');
 
 export default defineConfig([
   {

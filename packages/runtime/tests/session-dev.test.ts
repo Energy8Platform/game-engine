@@ -65,9 +65,11 @@ describe('session-dev in a plan', () => {
     expect(dev.settings.label).toBe('Local mock host');
   });
 
-  it('installs a DevBridge and hands back a disposer', async () => {
+  it('installs a DevBridge with the full settings, starts it, and hands back a disposer', async () => {
+    const made = vi.fn();
     const started = vi.fn();
     const stopped = vi.fn();
+    const order: string[] = [];
     // The provider reaches DevBridge through a dynamic import; the test injects a fake through the
     // documented `loadDevBridge` seam rather than mocking a module path.
     const { plan } = resolvePlan({
@@ -85,14 +87,19 @@ describe('session-dev in a plan', () => {
 
     const installed: InstalledSession = await instance!.value({
       url: LAUNCH.url,
-      settings: { balance: 500, currency: 'EUR', networkDelay: 0, debug: false, label: '' },
+      settings: { balance: 500, currency: 'EUR', networkDelay: 250, debug: true, label: 'x' },
       loadDevBridge: async () => class {
-        constructor(public cfg: unknown) { started(cfg); }
-        start() {}
+        constructor(cfg: unknown) { made(cfg); order.push('construct'); }
+        start() { started(); order.push('start'); }
         stop() { stopped(); }
       },
     } as never);
-    expect(started).toHaveBeenCalledWith(expect.objectContaining({ balance: 500, currency: 'EUR' }));
+    // Exact object, not objectContaining — dev.ts passes exactly these four fields to DevBridge
+    // (label is a display-only setting, never forwarded), and a mutation that dropped or swapped
+    // one of them must fail this assertion rather than slide through a subset match.
+    expect(made).toHaveBeenCalledWith({ balance: 500, currency: 'EUR', networkDelay: 250, debug: true });
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['construct', 'start']);
 
     await installed.dispose?.();
     expect(stopped).toHaveBeenCalled();
