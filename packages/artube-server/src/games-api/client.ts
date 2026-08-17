@@ -636,7 +636,7 @@ export class GamesApiClient {
         }
       });
 
-      socket.on('close', () => {
+      socket.on('close', (code: number, reason: Buffer) => {
         clearTimeout(timer);
         this.clearCloseGrace();
         this.ready = false;
@@ -648,7 +648,18 @@ export class GamesApiClient {
         // scheduleReconnect()'s loop on a `catch` that never runs.
         if (!settled) {
           settled = true;
-          reject(new Error('socket closed before the connection settled'));
+          // Код и причина — не украшение. Без них это сообщение сообщает ровно
+          // ноль: 1006 (закрытие без кадра, то есть оборванный TCP) и 1001 от
+          // самой платформы требуют разных действий, а `url` отвечает на
+          // вопрос «а туда ли мы вообще подключались» — на него однажды уже
+          // пришлось отвечать вручную, когда порт из динамического диапазона
+          // достался чужому серверу.
+          reject(
+            new Error(
+              `socket closed before the connection settled (${this.opts.url}, ` +
+                `code ${code}${reason?.length ? `, reason ${reason.toString()}` : ''})`,
+            ),
+          );
         }
         if (!this.stopped) void this.scheduleReconnect();
       });
