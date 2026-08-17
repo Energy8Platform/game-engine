@@ -222,6 +222,19 @@ describe('чтение currency из SessionInfo', () => {
     expect(result.balanceAfter).toBe(42);
   });
 
+  it('валюту не назвали — играем в USD за реальные деньги, а не в демо', async () => {
+    // Поле пропадает из ответа у ДЕФОЛТНОЙ валюты (сериализатор выбрасывает
+    // значения, равные дефолтному), и наблюдение это подтверждает: на любой
+    // явно заданной валюте всё работало, ломалось только здесь.
+    const s = await openSession(info());
+    const { result } = await s.play();
+
+    expect(s.init.demo).toBe(false);
+    expect(s.init.currency).toBe('USD');
+    expect(s.api.playRound).toHaveBeenCalledTimes(1);
+    expect(result.balanceAfter).toBe(42);
+  });
+
   it('в собственном кадре демо — отдельное поле, а валюта явный null', async () => {
     const { init } = await openSession(info({ currency: null }));
 
@@ -233,7 +246,7 @@ describe('чтение currency из SessionInfo', () => {
   it('пустая строка и не-строка — тоже не признак демо, а отклонение', () => {
     expect(isDemoSession(info({ currency: '' }))).toBe(false);
     expect(classifyCurrency(info({ currency: '' }))).toMatchObject({
-      demo: false, wire: 'invalid', code: null, deviates: true,
+      demo: false, wire: 'invalid', code: 'USD', deviates: true,
     });
     expect(classifyCurrency(info({ currency: 7 as unknown as string }))).toMatchObject({
       demo: false, wire: 'invalid', deviates: true,
@@ -247,8 +260,10 @@ describe('чтение currency из SessionInfo', () => {
     expect(classifyCurrency(info({ currency: null }))).toMatchObject({
       demo: true, wire: 'null', code: null, deviates: false,
     });
+    // Валюту не назвали — это USD, а не отсутствие валюты: поле пропадает у
+    // дефолтного значения, и на любой явно заданной валюте всё работало.
     expect(classifyCurrency(info())).toMatchObject({
-      demo: false, wire: 'absent', code: null, deviates: true,
+      demo: false, wire: 'absent', code: 'USD', deviates: true,
     });
   });
 });

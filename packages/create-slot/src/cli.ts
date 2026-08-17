@@ -16,7 +16,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   harness: '^0.3.1',
   // test/versions.test.ts fails the moment these drift from the workspace's own versions.
   'artube-bridge': '^0.2.0',
-  'artube-server': '^0.3.0',
+  'artube-server': '^0.3.1',
 };
 
 async function main(): Promise<void> {
