@@ -1024,7 +1024,7 @@ export const sessionStakePlugin: PluginManifest = definePlugin({
 });
 ```
 
-Note the two `throw`s. They are deliberate and they do not break the never-throws contract: this is a *provider's factory body*, which `activatePoint` already isolates into an `activate/factory-failed` diagnostic. The kernel's guarantee is that resolution and activation never throw — not that plugin code never does.
+Note the two `throw`s, and note where their containment actually lives — the first draft of this plan got it wrong. `activatePoint` does **not** call `install`: `provider()` hands the kernel a trivial `() => install` passthrough, so the kernel only ever invokes that, and it cannot fail. Whoever calls the provider owns the try/catch, and that is `runGame` (Task 5), which turns a throw here into an `activate/factory-failed` diagnostic. A provider invoked directly, outside `runGame`, gets the raw error. The throws are still correctly placed — the kernel's guarantee is that resolution and activation never throw, not that plugin code never does — but Task 5's review must confirm `runGame` really does the wrapping, because nothing before it does.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
