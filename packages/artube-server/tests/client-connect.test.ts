@@ -52,6 +52,49 @@ describe('GamesApiClient — соединение', () => {
     expect(client.connected).toBe(true);
   });
 
+  it('Welcome с другой схемой — расхождение, о котором сообщают, а не молчат', async () => {
+    // `hello.md`: невалидный или опоздавший `Hello` не даёт ни ошибки, ни
+    // ответа — сервер просто решает, что игра работает на актуальной схеме.
+    // Единственный наблюдаемый снаружи признак этого — `use.max_schema` в
+    // `Welcome`, и до этого мы его выбрасывали.
+    api = await startFakeGamesApi({
+      autoWelcome: false,
+      onMessage: (env, socket, self) => {
+        if (env.type !== 'Hello') return;
+        self.send(socket, {
+          proto: 1, schema: 1, chan: 'control', type: 'Welcome',
+          id: 'welcome-1', corr_id: null, op_seq: 1,
+          timestamp: new Date().toISOString(),
+          payload: { use: { max_schema: 2, contracts: { PlayRoundRequest: 1 } } },
+        });
+      },
+    });
+    client = new GamesApiClient({ url: api.url, apiKey: 'k', gameId: 'g', helloTimeoutMs: 2000 });
+    // Ждать нечего: `Welcome` разбирается и объявляется в том же обработчике,
+    // который резолвит `connect()`, — после этого `await` всё уже случилось.
+    let seen: any;
+    client.on('schemaMismatch', (m: unknown) => {
+      seen = m;
+    });
+    await client.connect();
+
+    expect(seen).toBeDefined();
+    expect(seen.announced).toBe(1);
+    expect(seen.server).toBe(2);
+    expect(seen.contracts).toEqual({ PlayRoundRequest: 1 });
+  });
+
+  it('Welcome с нашей же схемой ничего не сообщает', async () => {
+    api = await startFakeGamesApi();
+    client = new GamesApiClient({ url: api.url, apiKey: 'k', gameId: 'g' });
+    let mismatched = false;
+    client.on('schemaMismatch', () => {
+      mismatched = true;
+    });
+    await client.connect();
+    expect(mismatched).toBe(false);
+  });
+
   it('поднимается и без Welcome — по дедлайну в 5 секунд', async () => {
     api = await startFakeGamesApi({ autoWelcome: false });
     client = new GamesApiClient({ url: api.url, apiKey: 'k', gameId: 'g', helloTimeoutMs: 50 });

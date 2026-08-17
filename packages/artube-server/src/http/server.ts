@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
-  GamesApiClient, type ConnectionError, type ReconnectAttempt,
+  GamesApiClient, type ConnectionError, type ReconnectAttempt, type SchemaMismatch,
 } from '../games-api/client.js';
 import { startEngine, resolveEngineGameId, type EngineClient } from '../engine/index.js';
 import { handleConnection } from './ws.js';
@@ -171,6 +171,19 @@ export class ArtubeServer {
     });
     this.api.on('reconnectAbandoned', (attempts: number) =>
       log.error('gave up reconnecting to games api', undefined, { attempts }));
+    // Платформа согласовала не ту схему, которую мы объявили. Сами ничего не
+    // переключаем (конверт — schema 1 константой), но молчать здесь нельзя:
+    // по `hello.md` невалидный или опоздавший `Hello` не даёт ни ошибки, ни
+    // ответа — сервер просто начинает считать, что игра работает на актуальной
+    // схеме. Эта строка — единственный признак, по которому такое вообще
+    // отличимо снаружи.
+    this.api.on('schemaMismatch', (mismatch: SchemaMismatch) =>
+      log.warn('games api negotiated a different protocol schema', {
+        announced_max_schema: mismatch.announced,
+        server_max_schema: mismatch.server,
+        server_contracts: mismatch.contracts,
+        hint: 'наш Hello мог быть отвергнут или опоздать — см. ANNOUNCED_CONTRACTS',
+      }));
     // `Error` без `corr_id` — отказ всему коннекту, и дока знает ровно один
     // такой случай: провал аутентификации. Он обязан быть виден, иначе под с
     // неверным ключом молча отвечает 200 на `/healthz`, а каждый запрос игрока

@@ -37,11 +37,25 @@ import type {
   ErrorPayload,
 } from './types.js';
 
+/** Схема протокола, которую мы объявляем в `Hello` и ожидаем обратно в `Welcome`. */
+export const ANNOUNCED_MAX_SCHEMA = 1;
+
 /**
  * Все типы, которые Games API может прислать на этом коннекте. Дока
  * предупреждает: неанонсированный контракт исключается из согласованного
  * набора и просто не доставляется — поэтому список включает не только
  * Request-типы, но и Response, `Error` и события.
+ *
+ * **Форма спорная, и оставлена намеренно.** `hello.md` описывает `contracts`
+ * как ОБЪЕКТ диапазонов `{min,max}` и только при `max_schema` ≥ 2, а
+ * `versioning.md` называет схему 1 «legacy mode without contracts» — то есть
+ * массив здесь и не того типа, и не для той схемы. Менять его не за что:
+ * интеграция живая и работает, выигрыша нет ни одного, а цена ошибки — «часть
+ * типов сообщений перестала доставляться», причём молча. Правится это вместе
+ * с переходом на схему 2, где `contracts` вообще начинает что-то значить.
+ * Проверить снаружи, читает ли платформа этот список или игнорирует, нельзя:
+ * ответа на плохой `Hello` дока не предусматривает (`hello.md`). Что
+ * наблюдаемо — это `Welcome`, и его мы теперь читаем (см. `onWelcome`).
  */
 export const ANNOUNCED_CONTRACTS: string[] = [
   'SessionInfoRequest', 'SessionInfoResponse',
@@ -239,12 +253,21 @@ export interface ConnectionError {
   message: string;
 }
 
+/** Платформа согласовала не ту схему протокола, которую мы объявили в `Hello`. */
+export interface SchemaMismatch {
+  announced: number;
+  server: number;
+  /** `use.contracts` — появляется только при схеме ≥ 2. */
+  contracts?: unknown;
+}
+
 type ClientEvent =
   | 'connected'
   | 'disconnected'
   | 'reconnecting'
   | 'reconnectAbandoned'
   | 'connectionError'
+  | 'schemaMismatch'
   | 'goAway'
   | 'balanceChanged'
   | 'sessionClosed'
@@ -488,6 +511,38 @@ export class GamesApiClient {
   }
 
   /**
+   * `Welcome` — не просто «можно работать»: в нём платформа НАЗЫВАЕТ схему,
+   * по которой будет говорить на этом коннекте (`welcome.md`: `use.max_schema`,
+   * обязательное поле).
+   *
+   * Читать его стоит ровно из-за одной оговорки в `hello.md`: если `Hello` не
+   * получен и не провалидирован за 5 секунд, сервер считает, что игра
+   * использует АКТУАЛЬНУЮ `max_schema`. То есть отвергнутый (например, за
+   * спорную форму `contracts` — см. `ANNOUNCED_CONTRACTS`) или опоздавший
+   * `Hello` не даёт ни ошибки, ни ответа: коннект просто начинает жить по
+   * другой схеме, чем мы объявили. Единственный наблюдаемый признак этого —
+   * `use.max_schema` в `Welcome`, и до сих пор мы его выбрасывали.
+   *
+   * Сами ничего не переключаем: наш конверт (`envelope.ts`) — schema 1
+   * константой, и «подстроиться» здесь означало бы говорить на схеме, кода для
+   * которой нет. Задача этого метода — сделать расхождение видимым, а не
+   * угадывать. `use.contracts` кладём рядом, когда он есть: при схеме ≥ 2 это
+   * согласованный набор, и его отсутствие/усечение объясняет молчание
+   * платформы по какому-нибудь типу лучше любого другого сигнала.
+   */
+  protected onWelcome(payload: unknown): void {
+    const use = (payload as { use?: unknown } | undefined)?.use;
+    if (typeof use !== 'object' || use === null) return;
+    const { max_schema: schema, contracts } = use as { max_schema?: unknown; contracts?: unknown };
+    if (typeof schema !== 'number' || schema === ANNOUNCED_MAX_SCHEMA) return;
+    this.emit('schemaMismatch', {
+      announced: ANNOUNCED_MAX_SCHEMA,
+      server: schema,
+      contracts: contracts === undefined ? undefined : contracts,
+    });
+  }
+
+  /**
    * `GoAway`: этот коннект уходит. Не закрываем его — ждём закрытия со
    * стороны сервера, как требует дока, и планируем переподключение через
    * `retry_after_ms`.
@@ -594,7 +649,10 @@ export class GamesApiClient {
           return;
         }
         if (env.chan === 'control') {
-          if (env.type === 'Welcome') return finish();
+          if (env.type === 'Welcome') {
+            this.onWelcome(env.payload);
+            return finish();
+          }
           if (env.type === 'GoAway') {
             // Settle this attempt as "done" right now so neither a pending
             // hello-timeout nor a not-yet-processed Welcome can call finish()
