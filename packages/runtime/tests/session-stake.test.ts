@@ -111,9 +111,94 @@ describe('session-stake selection', () => {
         destroy() {}
       },
     } as never);
-    expect(made).toHaveBeenCalledWith(
-      expect.objectContaining({ devMode: true, gameId: 'my-slot', modeMap: { base: 'BASE' } }),
-    );
+    // Exact object, not objectContaining — a regression that dropped bundle.adapter, computed the
+    // wrong protocol, or forwarded the wrong url must fail this assertion, not slide through a
+    // subset match.
+    expect(made).toHaveBeenCalledWith({
+      devMode: true,
+      protocol: 'https',
+      adapter: { name: 'fake' },
+      modeMap: { base: 'BASE' },
+      gameId: 'my-slot',
+      url: 'https://game.example/play?sessionID=abc',
+    });
     await installed.dispose?.();
+  });
+
+  it('derives the protocol from the launch url, case-insensitively', async () => {
+    const made = vi.fn();
+    const { plan } = resolvePlan({
+      project: ALL,
+      manifests,
+      launch: { url: 'https://game.example/play', buildTarget: 'stake' },
+      kernelVersion: '0.1.0',
+    });
+    const { instance } = await activateOne<SessionProvider>(plan, POINT_SESSION_PROVIDER);
+    // Upper-case scheme: URL schemes are case-insensitive per RFC 3986, and a naive
+    // ctx.url.startsWith('http://') would misclassify this as https.
+    const installed = await instance!.value({
+      url: 'HTTP://game.example/play?sessionID=abc',
+      buildTarget: 'stake',
+      settings: { label: '' },
+      plan,
+      loadStakeBridge: async () => class {
+        constructor(public opts: unknown) { made(opts); }
+        async ready() {}
+        destroy() {}
+      },
+    } as never);
+    expect(made).toHaveBeenCalledWith(expect.objectContaining({ protocol: 'http' }));
+    await installed.dispose?.();
+  });
+
+  it('does not resolve until the bridge is ready', async () => {
+    const order: string[] = [];
+    const { plan } = resolvePlan({
+      project: ALL,
+      manifests,
+      launch: { url: 'https://game.example/play', buildTarget: 'stake' },
+      kernelVersion: '0.1.0',
+    });
+    const { instance } = await activateOne<SessionProvider>(plan, POINT_SESSION_PROVIDER);
+    const installed = await instance!.value({
+      url: 'https://game.example/play',
+      buildTarget: 'stake',
+      settings: { label: '' },
+      plan,
+      loadStakeBridge: async () => class {
+        async ready() {
+          await new Promise((r) => setTimeout(r, 5));
+          order.push('ready');
+        }
+        destroy() {}
+      },
+    } as never);
+    order.push('installed');
+    expect(order).toEqual(['ready', 'installed']);
+    expect(installed.dispose).toBeTypeOf('function');
+  });
+
+  it('surfaces a bridge that fails to become ready', async () => {
+    const { plan } = resolvePlan({
+      project: ALL,
+      manifests,
+      launch: { url: 'https://game.example/play', buildTarget: 'stake' },
+      kernelVersion: '0.1.0',
+    });
+    const { instance } = await activateOne<SessionProvider>(plan, POINT_SESSION_PROVIDER);
+    await expect(
+      instance!.value({
+        url: 'https://game.example/play',
+        buildTarget: 'stake',
+        settings: { label: '' },
+        plan,
+        loadStakeBridge: async () => class {
+          async ready() {
+            throw new Error('rgs unreachable');
+          }
+          destroy() {}
+        },
+      } as never),
+    ).rejects.toThrow('rgs unreachable');
   });
 });

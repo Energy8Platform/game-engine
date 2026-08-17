@@ -34,6 +34,12 @@ async function defaultLoadStakeBridge(): Promise<StakeBridgeCtor> {
   return (mod as unknown as { StakeBridge: StakeBridgeCtor }).StakeBridge;
 }
 
+// These throw rather than returning a diagnostic, and that is deliberate — but note WHERE the
+// containment lives. `activatePoint` does not call this function; `provider()` hands the kernel a
+// trivial `() => install` passthrough, so the kernel only ever sees that. Whoever invokes the
+// provider owns the try/catch, and that is `runGame`, which turns a throw here into an
+// `activate/factory-failed` diagnostic. A provider called directly, outside runGame, gets the raw
+// error.
 const install: SessionProvider = async (ctx: SessionContext): Promise<InstalledSession> => {
   if (!ctx.plan) {
     throw new Error('session-stake needs the resolved plan to reach stake.adapter');
@@ -50,7 +56,9 @@ const install: SessionProvider = async (ctx: SessionContext): Promise<InstalledS
   const StakeBridge = await load();
   const bridge = new StakeBridge({
     devMode: true,
-    protocol: ctx.url.startsWith('http://') ? 'http' : 'https',
+    // Case-insensitive: URL schemes are case-insensitive per RFC 3986, and a plain
+    // ctx.url.startsWith('http://') would misclassify an 'HTTP://…' launch url as https.
+    protocol: /^http:\/\//i.test(ctx.url) ? 'http' : 'https',
     adapter: bundle.adapter,
     modeMap: bundle.modeMap,
     gameId: bundle.gameId,
