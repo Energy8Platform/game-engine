@@ -110,7 +110,7 @@
 
 ```jsonc
 "dependencies":    { "@energy8platform/artube-bridge": "^0.2.0" },
-"devDependencies": { "@energy8platform/artube-server": "^0.6.0" }
+"devDependencies": { "@energy8platform/artube-server": "^0.3.0" }
 ```
 
 `0.1.2` — минимум для прода: в `0.1.0`/`0.1.1` мост выводил адрес бэкенда
