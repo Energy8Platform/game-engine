@@ -17,6 +17,14 @@
  * `lastDelivered` — кеш снимка для `GET_STATE`; живёт, пока раунд не
  * закрыт (`creditPending`), и обнуляется в момент расчёта.
  *
+ * Кампания фри-раундов доезжает до игры НЕ через SDK, а прямыми методами моста
+ * (`campaign`, `onCampaignChange`, `activateCampaign`, `declineCampaign`).
+ * Причина та же, по которой их нет в `CasinoGameSDK`: анонсера в его протоколе
+ * не существует, а придумывать под это своё сообщение значило бы обязать
+ * понимать его и все остальные хосты. Игра получает мост из
+ * `createSlotGame(...)`'s handle (`artubeBridge`), рисует анонсер и счётчик
+ * сама и сама же ставит ставку кампании — своих пикселей у моста нет.
+ *
  * Реконнект: `ArtubeClient` эмитит `'init'` для каждого инита, пришедшего
  * ПОСЛЕ первого (см. doc-comment client.ts). Если это случилось ДО того, как
  * игра прислала свой первый `GAME_READY`, мост просто запоминает свежий
@@ -46,7 +54,7 @@ import type {
 import { ArtubeClient, ArtubeBackendError } from './client';
 import { parseArtubeUrl } from './detect';
 import { DemoWallet } from './demo';
-import type { ArtubeBridgeOptions, ServerInit, ServerResult } from './types';
+import type { ArtubeBridgeOptions, ServerFrc, ServerInit, ServerResult } from './types';
 
 /**
  * Индекс ставки в `allowed_bets`. Игра выбирает ставку суммой, наружу
@@ -113,6 +121,9 @@ export class ArtubeBridge {
   private lastDelivered: PlayResultPayload | null = null;
   /** Демо-баланс: заведён, только когда `init.demo` — платформа его не считает. */
   private demoWallet: DemoWallet | null = null;
+  /** Кампания фри-раундов, как её сейчас видит бэкенд; `null` — её нет. */
+  private frc: ServerFrc | null = null;
+  private readonly frcListeners = new Set<(frc: ServerFrc | null) => void>();
   /** Незнакомые причины `BalanceChangedEvent`, о которых уже написали в консоль. */
   private readonly warnedBalanceReasons = new Set<string>();
 
@@ -134,11 +145,15 @@ export class ArtubeBridge {
     });
     // A reconnect's init — see class doc-comment for the two cases this covers.
     this.client.on('init', (init: ServerInit) => this.onReconnectInit(init));
+    // Кампания изменилась сама — сейчас это ровно один случай: её отыграли до
+    // конца, и бэкенд прислал итог вслед за последним результатом.
+    this.client.on('frc', (frc: ServerFrc) => this.setCampaign(frc));
 
     this.bootPromise = this.client.connect().then(
       (init) => {
         this.init = init;
         this.balance = init.balance;
+        this.frc = init.frc;
         // В демо баланс ведём здесь: платформа его не считает.
         if (init.demo) {
           this.demoWallet = new DemoWallet(this.options.demoBalance ?? init.balance);
@@ -170,6 +185,65 @@ export class ArtubeBridge {
   destroy(): void {
     this.client.close();
     this.bridge.destroy();
+    this.frcListeners.clear();
+  }
+
+  /**
+   * Кампания фри-раундов, как её сейчас видит бэкенд; `null` — её нет.
+   *
+   * Всё, что нужно анонсеру и счётчику: `status`, `roundsLeft`/`roundsTotal`,
+   * `totalWin`, ставка (`bet` и её `betIndex` в `betLevels`) и окно
+   * `validFrom`/`validTo`. Рисует это ИГРА — у моста своих пикселей нет.
+   *
+   * Читать после `ready()`. Значение обновляется на активации, отказе, каждом
+   * фри-раунде, завершении кампании и реконнекте.
+   */
+  get campaign(): ServerFrc | null {
+    return this.frc;
+  }
+
+  /**
+   * Подписка на изменения кампании. Возвращает функцию отписки.
+   *
+   * Зовётся на активации/отказе, на каждом обновлении счётчиков, на
+   * завершении (`status: 'completed'` — момент показать итог и вернуть ставку
+   * игрока) и на реконнекте, где кампания снова приезжает `offered`.
+   */
+  onCampaignChange(cb: (frc: ServerFrc | null) => void): () => void {
+    this.frcListeners.add(cb);
+    return () => this.frcListeners.delete(cb);
+  }
+
+  /**
+   * Игрок нажал Start в анонсере: с этого момента спины бесплатны и идут на
+   * ставке кампании. Игра обязана ПОСТАВИТЬ эту ставку (`campaign.bet`) и
+   * заблокировать её выбор — спин с другой ставкой бэкенд отвергнет
+   * (`FrcBetMismatch`), а не подгонит молча.
+   *
+   * `campaignId` по умолчанию — текущая кампания; передавать его отдельно есть
+   * смысл только если игра хранит идентификатор у себя.
+   */
+  async activateCampaign(campaignId?: string): Promise<ServerFrc> {
+    const id = campaignId ?? this.frc?.campaignId;
+    if (!id) throw new ArtubeBackendError('FrcNotFound', 'no free round campaign on this session');
+    return this.setCampaign(await this.client.activateCampaign(id));
+  }
+
+  /**
+   * Игрок выбрал обычную игру. До реконнекта кампанию активировать уже нельзя,
+   * поэтому это ответ игрока, а не закрытие окна: анонсер, который можно
+   * открыть снова, звать это на закрытие не должен.
+   */
+  async declineCampaign(campaignId?: string): Promise<ServerFrc> {
+    const id = campaignId ?? this.frc?.campaignId;
+    if (!id) throw new ArtubeBackendError('FrcNotFound', 'no free round campaign on this session');
+    return this.setCampaign(await this.client.declineCampaign(id));
+  }
+
+  private setCampaign(frc: ServerFrc | null): ServerFrc {
+    this.frc = frc;
+    for (const cb of this.frcListeners) cb(frc);
+    return frc as ServerFrc;
   }
 
   private async onGameReady(id?: string): Promise<void> {
@@ -246,6 +320,17 @@ export class ArtubeBridge {
       // Keep GET_STATE's snapshot in step: nothing to resume once settled.
       this.lastDelivered = delivered.creditPending ? delivered : null;
       this.bridge.send('PLAY_RESULT', delivered, id);
+      // Счётчик кампании платформа обновляет в ответе на КАЖДЫЙ фри-раунд —
+      // складываем его в снимок ПОСЛЕ отправки результата, чтобы игра
+      // перерисовала «осталось N» вслед за сегментом, а не поперёк него.
+      // Статус остаётся нашим: завершение объявляет отдельный кадр `frc`.
+      if (result.frc && this.frc) {
+        this.setCampaign({
+          ...this.frc,
+          roundsLeft: result.frc.rounds_left,
+          totalWin: result.frc.total_win,
+        });
+      }
     } catch (err) {
       this.bridge.send<PlayErrorPayload>(
         'PLAY_ERROR',
@@ -369,6 +454,12 @@ export class ArtubeBridge {
   private onReconnectInit(init: ServerInit): void {
     this.init = init;
     this.balance = this.demoWallet ? this.demoWallet.balance : init.balance;
+    // Кампания на новом соединении приезжает `offered` заново, даже если игрок
+    // только что её отыгрывал: дока требует, чтобы после переподключения он
+    // снова мог активировать её либо отказаться. Игра узнаёт об этом здесь —
+    // это и есть та «критическая фаза» реконнекта посреди активной кампании, и
+    // молчание оставило бы её с заблокированной ставкой без самой кампании.
+    this.setCampaign(init.frc);
     if (!this.initSent) return;
 
     this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance });

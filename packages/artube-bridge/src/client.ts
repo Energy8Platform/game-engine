@@ -37,7 +37,7 @@
  * адресата.
  */
 
-import type { ServerInit, ServerMessage, ServerResult } from './types';
+import type { ServerFrc, ServerInit, ServerMessage, ServerResult } from './types';
 
 export class ArtubeBackendError extends Error {
   constructor(
@@ -80,7 +80,7 @@ export function describeEndpoint(url: string): string {
 /** Same tail on both connection failures: what to check, in one line. */
 const CHECK_HINT = 'is the game backend running, and is /api routed to it?';
 
-type ClientEvent = 'balance' | 'sessionClosed' | 'connection' | 'init';
+type ClientEvent = 'balance' | 'sessionClosed' | 'connection' | 'init' | 'frc';
 
 export interface PlayArgs {
   action: string;
@@ -95,6 +95,14 @@ export class ArtubeClient {
   private readonly pending = new Map<
     string,
     { resolve: (r: ServerResult) => void; reject: (e: Error) => void }
+  >();
+  /**
+   * Ожидающие ответа `frc_activate`/`frc_decline`. Отдельной картой от
+   * `pending`: там ждут `ServerResult`, а разрешает эти запросы кадр `frc`.
+   */
+  private readonly pendingFrc = new Map<
+    string,
+    { resolve: (r: ServerFrc) => void; reject: (e: Error) => void }
   >();
   private readonly handlers = new Map<ClientEvent, Set<(arg: any) => void>>();
   private counter = 0;
@@ -205,6 +213,38 @@ export class ArtubeClient {
     this.socket?.send(JSON.stringify({ t: 'ack', roundId, cursor }));
   }
 
+  /**
+   * Игрок нажал Start в анонсере. Резолвится состоянием кампании (`active`) —
+   * с этого момента спины бесплатны и идут на `bet`/`betIndex` кампании.
+   *
+   * Отбивается `ArtubeBackendError` с кодом бэкенда: `FrcBetNotAllowed`
+   * (ставки кампании нет в лестнице), `FrcAlreadyActivated`, `FrcDeclined`,
+   * `FrcNotFound`, `FrcAlreadyCompleted`.
+   */
+  activateCampaign(campaignId: string): Promise<ServerFrc> {
+    return this.sendFrc('frc_activate', campaignId);
+  }
+
+  /**
+   * Игрок выбрал обычную игру. Это ОТВЕТ игрока, а не закрытие окна: до
+   * реконнекта кампанию активировать уже нельзя, так что для анонсера,
+   * который можно открыть повторно, звать это на закрытие не надо.
+   */
+  declineCampaign(campaignId: string): Promise<ServerFrc> {
+    return this.sendFrc('frc_decline', campaignId);
+  }
+
+  private sendFrc(t: 'frc_activate' | 'frc_decline', campaignId: string): Promise<ServerFrc> {
+    return new Promise<ServerFrc>((resolve, reject) => {
+      if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        return reject(new ArtubeBackendError('InternalServerError', 'no backend connection'));
+      }
+      const id = `f${++this.counter}`;
+      this.pendingFrc.set(id, { resolve, reject });
+      this.socket.send(JSON.stringify({ t, id, campaignId }));
+    });
+  }
+
   close(): void {
     this.closed = true;
     this.socket?.close();
@@ -251,6 +291,16 @@ export class ArtubeClient {
       }
       return;
     }
+    if (msg.t === 'frc') {
+      // С `id` — ответ на активацию/отказ. Без него — кампания изменилась сама
+      // (отыграна до конца), и узнать об этом можно только из события.
+      const waiter = msg.id ? this.pendingFrc.get(msg.id) : undefined;
+      if (waiter) {
+        this.pendingFrc.delete(msg.id!);
+        waiter.resolve(msg);
+      }
+      return this.emit('frc', msg);
+    }
     if (msg.t === 'error') {
       const error = new ArtubeBackendError(msg.code, msg.message);
       if (msg.id) {
@@ -258,6 +308,11 @@ export class ArtubeClient {
         if (waiter) {
           this.pending.delete(msg.id);
           waiter.reject(error);
+        }
+        const frcWaiter = this.pendingFrc.get(msg.id);
+        if (frcWaiter) {
+          this.pendingFrc.delete(msg.id);
+          frcWaiter.reject(error);
         }
         return;
       }
@@ -281,6 +336,12 @@ export class ArtubeClient {
       waiter.reject(new ArtubeBackendError('InternalServerError', reason));
     }
     this.pending.clear();
+    // Активация тоже висит на соединении: оставленный промис заморозил бы
+    // анонсер до перезагрузки страницы. Реконнект предложит кампанию заново.
+    for (const [, waiter] of this.pendingFrc) {
+      waiter.reject(new ArtubeBackendError('InternalServerError', reason));
+    }
+    this.pendingFrc.clear();
   }
 
   private scheduleReconnect(): void {

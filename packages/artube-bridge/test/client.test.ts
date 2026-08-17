@@ -127,6 +127,84 @@ describe('ArtubeClient', () => {
     await expect(pending).rejects.toBeInstanceOf(ArtubeBackendError);
   });
 
+  describe('кампания фри-раундов', () => {
+    const FRC = {
+      campaignId: 'camp-1', roundsLeft: 5, roundsTotal: 5, totalWin: 0,
+      isComplete: false, bet: 1, betIndex: 1,
+    };
+
+    it('активация уходит кадром frc_activate и резолвится состоянием кампании', async () => {
+      const seen: any[] = [];
+      const url = await startBackend((msg, socket) => {
+        seen.push(msg);
+        if (msg.t !== 'frc_activate') return;
+        socket.send(JSON.stringify({ t: 'frc', id: msg.id, ...FRC, status: 'active' }));
+      });
+      client = new ArtubeClient(url);
+      await client.connect();
+      const frc = await client.activateCampaign('camp-1');
+
+      expect(frc.status).toBe('active');
+      expect(frc.betIndex).toBe(1);
+      expect(seen.at(-1)).toMatchObject({ t: 'frc_activate', campaignId: 'camp-1' });
+    });
+
+    it('отказ уходит кадром frc_decline', async () => {
+      const seen: any[] = [];
+      const url = await startBackend((msg, socket) => {
+        seen.push(msg);
+        if (msg.t !== 'frc_decline') return;
+        socket.send(JSON.stringify({ t: 'frc', id: msg.id, ...FRC, status: 'declined' }));
+      });
+      client = new ArtubeClient(url);
+      await client.connect();
+      expect((await client.declineCampaign('camp-1')).status).toBe('declined');
+      expect(seen.at(-1)).toMatchObject({ t: 'frc_decline', campaignId: 'camp-1' });
+    });
+
+    it('отказ бэкенда отбивает активацию кодом, а не висит', async () => {
+      const url = await startBackend((msg, socket) => {
+        if (msg.t !== 'frc_activate') return;
+        socket.send(JSON.stringify({
+          t: 'error', id: msg.id, code: 'FrcBetNotAllowed', message: 'bet is not in allowed_bets',
+        }));
+      });
+      client = new ArtubeClient(url);
+      await client.connect();
+      await expect(client.activateCampaign('camp-1')).rejects.toMatchObject({
+        name: 'ArtubeBackendError', code: 'FrcBetNotAllowed',
+      });
+    });
+
+    it('кадр frc без id — это завершение кампании, приходит подписчику', async () => {
+      const url = await startBackend((msg, socket) => {
+        if (msg.t !== 'play') return;
+        socket.send(JSON.stringify({
+          t: 'frc', ...FRC, status: 'completed', roundsLeft: 0, totalWin: 12, isComplete: true,
+        }));
+      });
+      client = new ArtubeClient(url);
+      const seen: any[] = [];
+      client.on('frc', (p: any) => seen.push(p));
+      await client.connect();
+      void client.play({ action: 'spin', betIndex: 1 }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({ status: 'completed', roundsLeft: 0, totalWin: 12 });
+    });
+
+    it('обрыв связи отбивает висящую активацию', async () => {
+      const url = await startBackend(() => {});
+      client = new ArtubeClient(url);
+      await client.connect();
+      const pending = client.activateCampaign('camp-1');
+      wss.clients.forEach((c) => c.terminate());
+      // Иначе анонсер остался бы с бесконечным спиннером на кнопке Start.
+      await expect(pending).rejects.toBeInstanceOf(ArtubeBackendError);
+    });
+  });
+
   /** Помогает поднять сервер, отдающий разные init на первое и последующие соединения. */
   async function startResumeBackend() {
     let firstSocket: any;

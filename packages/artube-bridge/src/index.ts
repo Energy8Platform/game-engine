@@ -49,4 +49,5 @@ export {
 } from './loader';
 export type {
   ArtubeBridgeOptions, ServerInit, ServerResult, ServerInitConfig,
+  ServerFrc, ServerFrcStatus,
 } from './types';
