@@ -218,11 +218,16 @@ export function buildInit(info: SessionInfoResponse, opts: BuildInitOptions = {}
       betLevels: s.allowed_bets,
       defaultBetIndex: s.default_bet_index,
       currencyMinimalUnit: s.currency_minimal_unit,
-      autoSpinCounts: s.available_auto_spin_counts,
-      locales: s.locales,
+      // Дефолты ровно тех полей, отсутствие которых `checkSessionInfo`
+      // называет отклонением, а не поводом уронить сессию: это настройки
+      // ПОКАЗА, и до этих строк они роняли соединение обычным `TypeError`
+      // («cannot read is_visible of undefined»). Значения совпадают с тем, что
+      // обещает `effect` в отклонении, — читать их надо парой.
+      autoSpinCounts: s.available_auto_spin_counts ?? [],
+      locales: s.locales ?? [],
       // Дока: значение rtp в rtp_options перезаписывается сервером и для
       // показа не годится — показываем только rtp_settings.
-      rtp: { isVisible: s.rtp_settings.is_visible, shownRtp: s.rtp_settings.shown_rtp },
+      rtp: { isVisible: s.rtp_settings?.is_visible === true, shownRtp: s.rtp_settings?.shown_rtp },
       platformMaxWin: maxWin
         ? {
             isVisible: maxWin.is_visible,

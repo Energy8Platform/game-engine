@@ -29,8 +29,9 @@ import {
   toSessionContext, type CurrencyOnWire,
 } from '../session/init.js';
 import { createDemoApi, type DemoApi } from '../session/demo.js';
+import { checkSessionInfo, SessionInfoContractError } from '../session/contract.js';
 import type { PlayRequest, SessionContext } from '../session/types.js';
-import type { PlayerConnectionInfo } from '../games-api/types.js';
+import type { PlayerConnectionInfo, SessionInfoResponse } from '../games-api/types.js';
 import { parseClientMessage, type ServerMessage } from './wire.js';
 import type { Logger } from './log.js';
 
@@ -61,6 +62,34 @@ export async function handleConnection(
   // один `player_connection_id` за одно соединение, а адрес и браузер за его
   // время не меняются.
   const connection: PlayerConnectionInfo = deps.connection ?? {};
+
+  /**
+   * Прочитать сессию у платформы — единственная дверь для всех трёх мест,
+   * которые это делают (коннект, восстановление, расклинивание закрытого
+   * раунда).
+   *
+   * Одна дверь, потому что за ней стоит сверка ответа с докой платформы: она
+   * обязана срабатывать на КАЖДОМ ответе, а не только на первом. Провод уже
+   * трижды расходился со спекой (см. `session/contract.ts`), и цена в обе
+   * стороны разная: непригодный ответ бросает с именем поля, отклонение —
+   * пишется в лог, и соединение живёт дальше.
+   */
+  const deviationsSeen = new Set<string>();
+  const readSession = async (): Promise<SessionInfoResponse> => {
+    const info = await deps.api.sessionInfo({
+      session_id: sessionId,
+      player_connection_info: connection,
+    });
+    const deviations = checkSessionInfo(info);
+    // Одно и то же расхождение на каждом перечитывании — это шум: платформа не
+    // чинится оттого, что мы повторим строку.
+    const key = deviations.map((d) => `${d.field}:${d.problem}`).join('|');
+    if (deviations.length > 0 && !deviationsSeen.has(key)) {
+      deviationsSeen.add(key);
+      log.warn('SessionInfoResponse расходится с докой платформы', { deviations });
+    }
+    return info;
+  };
 
   // Синхронно, до первого await: `ws` рапортует протокольный брак кадра
   // событием 'error' на сокете, и EventEmitter без подписчика перебрасывает
@@ -109,6 +138,7 @@ export async function handleConnection(
       err instanceof GamesApiError
       || err instanceof RoundNoLongerOpenError
       || err instanceof FrcError
+      || err instanceof SessionInfoContractError
         ? err.code
         : 'InternalServerError';
     const message = err instanceof Error ? err.message : String(err);
@@ -201,10 +231,7 @@ export async function handleConnection(
   const forgetSettledRound = async (): Promise<void> => {
     current = null;
     try {
-      const info = await deps.api.sessionInfo({
-        session_id: sessionId,
-        player_connection_info: connection,
-      });
+      const info = await readSession();
       // Решение игрока о кампании соединение переживает — перечитывание
       // сессии освежает платформенные счётчики, а не спрашивает заново.
       ctx = toSessionContext(sessionId, info, ctx.frc);
@@ -223,10 +250,7 @@ export async function handleConnection(
   };
 
   try {
-    const info = await deps.api.sessionInfo({
-      session_id: sessionId,
-      player_connection_info: connection,
-    });
+    const info = await readSession();
     ctx = toSessionContext(sessionId, info);
     const verdict = classifyCurrency(info);
     demo = verdict.demo;
@@ -359,9 +383,7 @@ export async function handleConnection(
       const outcome = await withSessionRecovery(
         {
           sessionInfo: async () => {
-            const info = await deps.api.sessionInfo({
-              session_id: sessionId, player_connection_info: connection,
-            });
+            const info = await readSession();
             // Смысл перечитывания — синхронизироваться с платформой: ставки
             // и фри-раунд могли поменяться, повтор обязан идти со свежими
             // значениями, а не с теми, что были на коннекте. Решение игрока о
