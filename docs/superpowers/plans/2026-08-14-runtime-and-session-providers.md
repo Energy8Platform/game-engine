@@ -45,8 +45,7 @@ packages/runtime/
 ├── README.md
 ├── src/
 │   ├── index.ts               public barrel
-│   ├── points.ts              POINTS + HOOK_IDS — the vocabulary the kernel deliberately lacks
-│   ├── hostPlugin.ts          the built-in plugin that DECLARES session.provider and build.target
+│   ├── points.ts              point ids, HOOK_IDS, and the host plugin that declares them
 │   ├── session/
 │   │   ├── types.ts           SessionProvider, SessionContext, InstalledSession
 │   │   ├── dev.ts             session-dev — installs a DevBridge
@@ -181,20 +180,13 @@ export default defineConfig([
     output: { file: 'dist/index.d.ts', format: 'esm' },
     plugins: [dts()],
   },
-  {
-    input: 'src/vite/projectPlugin.ts',
-    external,
-    output: { file: 'dist/vite.esm.js', format: 'esm', sourcemap: true },
-    plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false, sourceMap: true })],
-  },
-  {
-    input: 'src/vite/projectPlugin.ts',
-    external,
-    output: { file: 'dist/vite.d.ts', format: 'esm' },
-    plugins: [dts()],
-  },
 ]);
 ```
+
+Only the two index entries for now. `src/vite/projectPlugin.ts` does not exist until Task 6, and a
+rollup input that does not exist is a hard build error — Task 6 adds its two entries when it creates
+the file. The `./vite` key stays in `package.json` because it names a build artifact, not a source
+file, and npm does not check that it exists yet.
 
 - [ ] **Step 5: Write `packages/runtime/vitest.config.ts`**
 
@@ -268,7 +260,7 @@ npm run typecheck --workspace @energy8engine/runtime
 npm run build --workspace @energy8engine/runtime
 ```
 
-Expected: both succeed; `dist/index.esm.js`, `dist/index.d.ts`, `dist/vite.esm.js`, `dist/vite.d.ts` exist.
+Expected: both succeed; `dist/index.esm.js` and `dist/index.d.ts` exist. The `dist/vite.*` pair arrives in Task 6.
 
 - [ ] **Step 10: Commit**
 
@@ -288,7 +280,6 @@ git commit -m "feat(runtime): package skeleton for @energy8engine/runtime"
 
 **Files:**
 - Create: `packages/runtime/src/points.ts`
-- Create: `packages/runtime/src/hostPlugin.ts`
 - Test: `packages/runtime/tests/points.test.ts`
 
 **Interfaces:**
@@ -434,18 +425,7 @@ export const hostPlugin: PluginManifest = {
 } satisfies PluginManifest;
 ```
 
-- [ ] **Step 4: Write `packages/runtime/src/hostPlugin.ts`**
-
-```ts
-/**
- * Re-export so a consumer can `import { hostPlugin } from '@energy8engine/runtime/hostPlugin'`
- * without pulling the whole barrel. The definition lives beside the point ids it declares.
- */
-export { hostPlugin, HOOK_IDS, POINT_BUILD_TARGET, POINT_SESSION_PROVIDER } from './points';
-export type { HookId } from './points';
-```
-
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm test --workspace @energy8engine/runtime
@@ -453,10 +433,10 @@ npm test --workspace @energy8engine/runtime
 
 Expected: PASS — 6 new tests in `points.test.ts`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add packages/runtime/src/points.ts packages/runtime/src/hostPlugin.ts packages/runtime/tests/points.test.ts
+git add packages/runtime/src/points.ts packages/runtime/tests/points.test.ts
 git status --short
 git commit -m "feat(runtime): the point vocabulary and the host plugin that declares it"
 ```
@@ -1390,7 +1370,27 @@ npm test --workspace @energy8engine/runtime
 
 Expected: FAIL — cannot resolve `@/vite/projectPlugin`.
 
-- [ ] **Step 3: Write `packages/runtime/src/vite/projectPlugin.ts`**
+- [ ] **Step 3: Add the vite entries to `packages/runtime/rollup.config.mjs`**
+
+Task 1 deliberately left them out — the input file did not exist. Append these two configs to the
+exported array, after the two index entries:
+
+```js
+  {
+    input: 'src/vite/projectPlugin.ts',
+    external,
+    output: { file: 'dist/vite.esm.js', format: 'esm', sourcemap: true },
+    plugins: [typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false, sourceMap: true })],
+  },
+  {
+    input: 'src/vite/projectPlugin.ts',
+    external,
+    output: { file: 'dist/vite.d.ts', format: 'esm' },
+    plugins: [dts()],
+  },
+```
+
+- [ ] **Step 4: Write `packages/runtime/src/vite/projectPlugin.ts`**
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -1467,7 +1467,7 @@ export function projectPlugin(options: ProjectPluginOptions = {}) {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 5: Run the test to verify it passes**
 
 ```bash
 npm test --workspace @energy8engine/runtime
@@ -1475,10 +1475,10 @@ npm test --workspace @energy8engine/runtime
 
 Expected: PASS — 6 new tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add packages/runtime/src/vite/projectPlugin.ts packages/runtime/tests/projectPlugin.test.ts
+git add packages/runtime/rollup.config.mjs packages/runtime/src/vite/projectPlugin.ts packages/runtime/tests/projectPlugin.test.ts
 git status --short
 git commit -m "feat(runtime): the vite plugin that turns project.json into a bundled module"
 ```
