@@ -20,7 +20,15 @@ import type {
   CloseRoundRequest, CloseRoundResponse,
   AutocloseRoundRequest, CampaignProgress,
 } from '../games-api/types.js';
+import {
+  activeCampaignId, FeatureBuyDuringCampaignError, FrcBetMismatchError,
+} from '../session/frc.js';
 import type { PlayRequest, SegmentDelivery, SessionContext } from '../session/types.js';
+
+// Оба отказа объявлены в `session/frc.ts` вместе с остальным жизненным циклом
+// кампании; здесь только точка их применения. Ре-экспорт — чтобы у
+// импортировавших `FeatureBuyDuringCampaignError` отсюда ничего не сломалось.
+export { FeatureBuyDuringCampaignError, FrcBetMismatchError };
 
 /** Узкий структурный интерфейс: в тестах подменяется заглушкой. */
 export interface RoundApi {
@@ -62,25 +70,6 @@ export interface ActiveRound {
  */
 export function isPaidAction(deps: RoundDeps, action: string): boolean {
   return (deps.costMultipliers[action] ?? 1) > 1;
-}
-
-/**
- * Покупка фичи во время активной кампании фри-раундов.
- *
- * Дока называет это отдельной проверкой НА СТОРОНЕ БЭКЕНДА ИГРЫ:
- * «Попытка сделать покупку фичи в рамках FRC, так как они не разрешены»
- * (`free-rounds-campaign-backend-integration.md`). Платформа её не делает —
- * значит делаем мы, и делаем отказом, а не догадкой про цену: см. `startRound`.
- */
-export class FeatureBuyDuringCampaignError extends Error {
-  readonly code = 'FrcFeatureBuyNotAllowed';
-
-  constructor(action: string, campaignId: string) {
-    super(
-      `action "${action}" is a feature buy and is not allowed while free round campaign ${campaignId} is active`,
-    );
-    this.name = 'FeatureBuyDuringCampaignError';
-  }
 }
 
 /**
@@ -185,6 +174,11 @@ export async function startRound(
     throw new Error(`bet_index ${req.betIndex} вне allowed_bets`);
   }
 
+  // Кампания — это только АКТИВНАЯ кампания. Предложенная, отклонённая и
+  // отыгранная не значат здесь ничего: игрок платит за свой спин сам, покупает
+  // что хочет и ставит сколько хочет.
+  const frcId = activeCampaignId(ctx.frc);
+
   // Покупка фичи внутри кампании фри-раундов — отказ, а не сделка.
   //
   // Дока вменяет эту проверку игровому бэкенду прямым текстом
@@ -199,9 +193,18 @@ export async function startRound(
   //    Что платформа спишет и сожжёт ли при этом фри-раунд — наша догадка о
   //    чужом кошельке, а игрок в этот момент считает, что играет бесплатно.
   //
-  // Отказ стоит одной ошибки во фронте и ничего не двигает.
-  if (ctx.frcId && isPaidAction(deps, req.action)) {
-    throw new FeatureBuyDuringCampaignError(req.action, ctx.frcId);
+  // Отказ стоит одной ошибки во фронте и ничего не двигает. Проверяется РАНЬШЕ
+  // ставки: покупка запрещена при любой ставке, и отказ по ставке назвал бы
+  // игроку не ту причину.
+  if (frcId && isPaidAction(deps, req.action)) {
+    throw new FeatureBuyDuringCampaignError(req.action, frcId);
+  }
+
+  // Фри-раунд идёт на ставке кампании — чужая ставка здесь не «поправимое
+  // значение», а невалидное состояние; почему отказ, а не приведение, разобрано
+  // в `FrcBetMismatchError`.
+  if (frcId && ctx.frc!.betIndex !== req.betIndex) {
+    throw new FrcBetMismatchError(frcId, ctx.frc!.betIndex ?? -1, req.betIndex);
   }
 
   const state: RoundStateV1 = {
@@ -214,11 +217,11 @@ export async function startRound(
     // Фиксируем сумму ставки на всё время раунда: список allowed_bets
     // платформа вправе поменять, пока раунд идёт.
     bet: betAmount,
-    priceMultiplier: resolvePriceMultiplier(deps, req.action, Boolean(ctx.frcId)),
+    priceMultiplier: resolvePriceMultiplier(deps, req.action, Boolean(frcId)),
     cursor: 0,
     totalWinX: 0,
     actions: [],
-    frcId: ctx.frcId,
+    frcId,
   };
 
   const first = await openEntry(deps.engine, deps.gameId, state);
@@ -241,7 +244,7 @@ async function finishSimple(
     price_multiplier: state.priceMultiplier,
     bet_index: state.betIndex,
     win_multiplier: segment.totalWinX,
-    free_round_campaign_id: ctx.frcId,
+    free_round_campaign_id: activeCampaignId(ctx.frc),
     round_state_version: ROUND_STATE_VERSION,
     round_state: encodeRoundState(settled),
   });
@@ -276,7 +279,7 @@ async function openComplex(
     session_id: ctx.sessionId,
     price_multiplier: state.priceMultiplier,
     bet_index: state.betIndex,
-    free_round_campaign_id: ctx.frcId,
+    free_round_campaign_id: activeCampaignId(ctx.frc),
     round_state_version: ROUND_STATE_VERSION,
     round_state: encodeRoundState(state),
   });

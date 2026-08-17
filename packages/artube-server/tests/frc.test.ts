@@ -16,6 +16,7 @@ import { startFakeGamesApi, type FakeGamesApi } from './helpers/fakeGamesApi';
 import { startEngine, type EngineClient } from '../src/engine';
 import { startRound, resolvePriceMultiplier, type RoundDeps } from '../src/round/orchestrator';
 import { applyCampaignProgress } from '../src/session/init';
+import { activeCampaignId, type FrcState } from '../src/session/frc';
 import type { SessionContext } from '../src/session/types';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -114,7 +115,12 @@ describe('кампания фри-раундов — исходящие кадр
   it('отыгранная кампания перестаёт уезжать на платформу, и следующий спин проходит', async () => {
     const client = connect(`ws://127.0.0.1:${server.port}/api/ws?sessionId=sess-frc`);
     await new Promise<void>((r) => client.socket.on('open', () => r()));
-    await client.next('init');
+    const init = await client.next('init');
+
+    // Кампания приезжает предложенной; фри-раунды начинаются с ответа игрока.
+    expect(init.frc.status).toBe('offered');
+    client.socket.send(JSON.stringify({ t: 'frc_activate', id: 'a1', campaignId: CAMPAIGN }));
+    expect((await client.next('frc')).status).toBe('active');
 
     for (let i = 0; i < 3; i += 1) {
       client.socket.send(JSON.stringify({ t: 'play', id: `p${i}`, action: 'one_shot', betIndex: 0 }));
@@ -153,8 +159,12 @@ describe('кампания фри-раундов — цена действия',
 
   afterAll(() => engine?.close());
 
+  const active: FrcState = {
+    status: 'active', campaignId: CAMPAIGN, bet: 1, betIndex: 0,
+    roundsLeft: 5, roundsTotal: 5, totalWin: 0,
+  };
   const ctx: SessionContext = {
-    sessionId: 'sess-1', currency: 'USD', allowedBets: [1], frcId: CAMPAIGN,
+    sessionId: 'sess-1', currency: 'USD', allowedBets: [1], frc: active,
   };
 
   function fakeApi() {
@@ -206,30 +216,105 @@ describe('кампания фри-раундов — цена действия',
     expect(resolvePriceMultiplier(d, 'buy_bonus', true)).toBe(5);
     expect(resolvePriceMultiplier(d, 'spin', true)).toBe(0);
   });
+
+  /**
+   * Покупка запрещена ВО ВРЕМЯ кампании, а не при её наличии. Отказ срабатывал
+   * от одного лишь существования кампании: игрок, который свои фри-раунды даже
+   * не просил, не мог купить бонус — и узнать, почему, было неоткуда, потому
+   * что интерфейс о кампании не говорил ни слова.
+   */
+  for (const status of ['offered', 'declined', 'completed'] as const) {
+    it(`покупка фичи разрешена, пока кампания ${status}`, async () => {
+      const api = fakeApi();
+      const idle: SessionContext = { ...ctx, frc: { ...active, status } };
+      await startRound(deps(api), idle, { id: 'p1', action: 'buy_bonus', betIndex: 0 });
+
+      expect(api.openRound).toHaveBeenCalledTimes(1);
+      const sent = api.openRound.mock.calls[0][0];
+      // Полная цена и НИ СЛОВА о кампании: игрок платит за бонус сам.
+      expect(sent.price_multiplier).toBe(5);
+      expect(sent.free_round_campaign_id).toBeUndefined();
+    });
+  }
+
+  it('не активированная кампания не навязывает свою ставку', async () => {
+    const api = fakeApi();
+    const offered: SessionContext = {
+      ...ctx,
+      allowedBets: [0.5, 1, 2],
+      frc: { ...active, status: 'offered' },
+    };
+    // Ставка кампании — индекс 0; игрок крутит на индексе 2 за свои деньги.
+    await startRound(deps(api), offered, { id: 'p1', action: 'spin', betIndex: 2 });
+    const sent = api.openRound.mock.calls[0][0];
+    expect(sent.bet_index).toBe(2);
+    expect(sent.price_multiplier).toBe(1);
+    expect(sent.free_round_campaign_id).toBeUndefined();
+  });
+
+  it('активная кампания с чужой ставкой не уезжает на платформу', async () => {
+    const api = fakeApi();
+    await expect(
+      startRound(deps(api), { ...ctx, allowedBets: [1, 2] }, { id: 'p1', action: 'spin', betIndex: 1 }),
+    ).rejects.toMatchObject({ code: 'FrcBetMismatch' });
+    expect(api.openRound).not.toHaveBeenCalled();
+    expect(api.playRound).not.toHaveBeenCalled();
+  });
+
+  it('покупка внутри кампании отвергается покупкой, а не ставкой', async () => {
+    const api = fakeApi();
+    // Обе проверки срабатывают на этом запросе (ставка тоже чужая). Игроку
+    // важна причина, по которой действие невозможно в принципе.
+    await expect(
+      startRound(
+        deps(api),
+        { ...ctx, allowedBets: [1, 2] },
+        { id: 'p1', action: 'buy_bonus', betIndex: 1 },
+      ),
+    ).rejects.toMatchObject({ code: 'FrcFeatureBuyNotAllowed' });
+  });
 });
 
 describe('applyCampaignProgress', () => {
   const ctx: SessionContext = {
-    sessionId: 's', currency: 'USD', allowedBets: [1], frcId: CAMPAIGN,
+    sessionId: 's', currency: 'USD', allowedBets: [1],
+    frc: {
+      status: 'active', campaignId: CAMPAIGN, bet: 1, betIndex: 0,
+      roundsLeft: 5, roundsTotal: 5, totalWin: 0,
+    },
   };
 
   it('снимает кампанию по флагу платформы', () => {
     const next = applyCampaignProgress(ctx, { rounds_left: 3, total_win: 5, is_complete: true });
-    expect(next.frcId).toBeUndefined();
+    expect(activeCampaignId(next.frc)).toBeUndefined();
+    expect(next.frc!.status).toBe('completed');
   });
 
   it('снимает кампанию и по обнулившемуся счётчику — флаг может отстать', () => {
     const next = applyCampaignProgress(ctx, { rounds_left: 0, total_win: 5, is_complete: false });
-    expect(next.frcId).toBeUndefined();
+    expect(activeCampaignId(next.frc)).toBeUndefined();
+    expect(next.frc!.status).toBe('completed');
   });
 
-  it('не трогает контекст, пока раунды остались', () => {
+  it('пока раунды остались, кампания активна, а счётчики освежаются', () => {
     const next = applyCampaignProgress(ctx, { rounds_left: 2, total_win: 5, is_complete: false });
-    expect(next).toBe(ctx);
+    expect(activeCampaignId(next.frc)).toBe(CAMPAIGN);
+    // Счётчики платформы — то, чем фронт рисует «осталось 2 из 5»; держать их
+    // устаревшими значило бы врать в повторном `init` того же соединения.
+    expect(next.frc!.roundsLeft).toBe(2);
+    expect(next.frc!.totalWin).toBe(5);
   });
 
   it('ответ без блока кампании ничего не меняет', () => {
     expect(applyCampaignProgress(ctx, null)).toBe(ctx);
     expect(applyCampaignProgress(ctx, undefined)).toBe(ctx);
+  });
+
+  it('не активированная кампания прогрессом не двигается', () => {
+    // Спин игрока, который кампанию не активировал, не относится к ней вовсе:
+    // платформа и не пришлёт блок, но если пришлёт — трогать нечего.
+    const offered: SessionContext = { ...ctx, frc: { ...ctx.frc!, status: 'offered' } };
+    expect(applyCampaignProgress(offered, { rounds_left: 4, total_win: 0, is_complete: false }))
+      .toBe(offered);
   });
 });

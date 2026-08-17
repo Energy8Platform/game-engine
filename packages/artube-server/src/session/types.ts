@@ -1,6 +1,7 @@
 /** Контракт между HTTP-слоем и оркестратором. Ничего из этого не переживает запрос. */
 
 import type { CampaignProgress } from '../games-api/types.js';
+import type { FrcState } from './frc.js';
 
 export interface SessionContext {
   sessionId: string;
@@ -12,8 +13,15 @@ export interface SessionContext {
   currency: string | null;
   /** Массив допустимых ставок из SessionInfo; индекс в нём — то, что едет наружу. */
   allowedBets: number[];
-  /** Активная кампания фри-раундов, если есть. */
-  frcId?: string;
+  /**
+   * Кампания фри-раундов И решение игрока о ней на этом соединении.
+   *
+   * Одним полем, а не «кампания» + «активна ли»: наружу уезжает
+   * `free_round_campaign_id`, и держать признак активности отдельно от самой
+   * кампании значило бы завести два поля, которые обязаны сходиться. Что
+   * именно вправе уехать, отвечает `activeCampaignId(ctx.frc)`.
+   */
+  frc?: FrcState;
 }
 
 export interface PlayRequest {

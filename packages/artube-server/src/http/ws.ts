@@ -16,16 +16,17 @@ import type { WebSocket } from 'ws';
 import type { GamesApiClient } from '../games-api/client.js';
 import type { EngineClient } from '../engine/index.js';
 import {
-  startRound, advanceRound, acknowledgeSegment, FeatureBuyDuringCampaignError,
+  startRound, advanceRound, acknowledgeSegment,
   type ActiveRound, type RoundDeps,
 } from '../round/orchestrator.js';
 import { resumeRound } from '../round/resume.js';
 import { replayRound } from '../round/engineRound.js';
 import { withSessionRecovery, RoundNoLongerOpenError } from '../session/recovery.js';
 import { GamesApiError, isDemoUserRejection } from '../games-api/errors.js';
+import { activateCampaign, declineCampaign, FrcError } from '../session/frc.js';
 import {
-  applyCampaignProgress, buildInit, classifyCurrency, demoStartingBalance, toSessionContext,
-  type CurrencyOnWire,
+  applyCampaignProgress, buildInit, classifyCurrency, demoStartingBalance, toFrcInfo,
+  toSessionContext, type CurrencyOnWire,
 } from '../session/init.js';
 import { createDemoApi, type DemoApi } from '../session/demo.js';
 import type { PlayRequest, SessionContext } from '../session/types.js';
@@ -107,7 +108,7 @@ export async function handleConnection(
     const code =
       err instanceof GamesApiError
       || err instanceof RoundNoLongerOpenError
-      || err instanceof FeatureBuyDuringCampaignError
+      || err instanceof FrcError
         ? err.code
         : 'InternalServerError';
     const message = err instanceof Error ? err.message : String(err);
@@ -204,10 +205,16 @@ export async function handleConnection(
         session_id: sessionId,
         player_connection_info: connection,
       });
-      ctx = toSessionContext(sessionId, info);
+      // Решение игрока о кампании соединение переживает — перечитывание
+      // сессии освежает платформенные счётчики, а не спрашивает заново.
+      ctx = toSessionContext(sessionId, info, ctx.frc);
       // Баланс демо ведёт кошелёк, а не платформа: её число для демо-сессии
       // статично и переиграло бы всё, что игрок наиграл на этом соединении.
-      send({ t: 'init', ...buildInit(info, { wallet: demoApi }), resume: null });
+      send({
+        t: 'init',
+        ...buildInit(info, { wallet: demoApi, frc: ctx.frc }),
+        resume: null,
+      });
     } catch (err) {
       // Перечитать не вышло — соединение всё равно расклинено, а баланс
       // приедет со следующим `balance`-событием платформы или реконнектом.
@@ -247,7 +254,11 @@ export async function handleConnection(
     }
     // В демо кадр обязан называть баланс кошелька: разойдись они, игрок увидел
     // бы одну сумму на загрузке и другую сразу после первого спина.
-    const init = buildInit(info, { wallet: demoApi });
+    //
+    // Кампания едет здесь ПРЕДЛОЖЕННОЙ (`toSessionContext` без предыдущего
+    // состояния): новое соединение обязано предложить её заново, даже если
+    // игрок только что её отыгрывал, — `free-rounds-campaign-backend-integration.md:47`.
+    const init = buildInit(info, { wallet: demoApi, frc: ctx.frc });
 
     // Незакрытый раунд возвращаем игроку туда, где он остановился.
     let resume = null;
@@ -319,6 +330,23 @@ export async function handleConnection(
         }
         return;
       }
+      // Ответ игрока анонсеру. Ни одной RPC к платформе: у неё нет поля, в
+      // которое это можно было бы записать (см. `session/frc.ts`), — согласие
+      // живёт в состоянии соединения и только в нём.
+      if (msg.t === 'frc_activate' || msg.t === 'frc_decline') {
+        const frc =
+          msg.t === 'frc_activate'
+            ? activateCampaign(ctx.frc, msg.campaignId)
+            : declineCampaign(ctx.frc, msg.campaignId);
+        ctx = { ...ctx, frc };
+        log.info(`free round campaign ${frc.status}`, {
+          campaign_id: frc.campaignId,
+          rounds_left: frc.roundsLeft,
+          bet_index: frc.betIndex,
+        });
+        send({ t: 'frc', id: msg.id, ...toFrcInfo(frc) });
+        return;
+      }
       // Демо: движок крутится, платформу не трогаем — она отвечает
       // OperationNotAllowed на раундовые RPC демо-сессии.
       //
@@ -336,8 +364,11 @@ export async function handleConnection(
             });
             // Смысл перечитывания — синхронизироваться с платформой: ставки
             // и фри-раунд могли поменяться, повтор обязан идти со свежими
-            // значениями, а не с теми, что были на коннекте.
-            ctx = toSessionContext(sessionId, info);
+            // значениями, а не с теми, что были на коннекте. Решение игрока о
+            // кампании при этом переносим: сбросить его здесь значило бы, что
+            // первое же восстановление посреди активной кампании отправляет
+            // следующий спин платным.
+            ctx = toSessionContext(sessionId, info, ctx.frc);
             return info;
           },
           resume: async (info) => {
@@ -380,16 +411,22 @@ export async function handleConnection(
       // это единственное место, где мы узнаём, что раунды кончились. Не
       // записать его значило слать завершённую кампанию до перезагрузки
       // страницы и получать `FrcAlreadyCompleted` на каждый спин.
-      const before = ctx.frcId;
+      const wasActive = ctx.frc?.status === 'active';
       ctx = applyCampaignProgress(ctx, outcome.delivery.frc);
-      if (before && !ctx.frcId) {
+      const finished = wasActive && ctx.frc?.status === 'completed';
+      if (finished) {
         log.info('free round campaign completed', {
-          campaign_id: before, total_win: outcome.delivery.frc?.total_win,
+          campaign_id: ctx.frc!.campaignId, total_win: ctx.frc!.totalWin,
         });
       }
       send({ t: 'result', id: msg.id, ...outcome.delivery });
+      // Итог кампании — отдельным кадром и ПОСЛЕ результата: игрок сначала
+      // досматривает последний фри-раунд, и только потом видит попап с общей
+      // суммой. `result.frc` того же спина несёт лишь счётчики, а фронту для
+      // возврата в обычный режим нужен статус.
+      if (finished) send({ t: 'frc', ...toFrcInfo(ctx.frc!) });
     } catch (err) {
-      fail(err, msg.t === 'play' ? msg.id : undefined);
+      fail(err, msg.t === 'ack' ? undefined : msg.id);
       if (err instanceof RoundNoLongerOpenError) await forgetSettledRound();
     }
   };

@@ -6,10 +6,22 @@
  */
 
 import type { CampaignProgress, SessionInfoResponse } from '../games-api/types.js';
+import { applyProgress, frcFromSession, type FrcState, type FrcStatus } from './frc.js';
 import type { SessionContext } from './types.js';
 
+/**
+ * Кампания в том виде, в каком её видит фронт, — и в `init`, и в отдельном
+ * кадре `frc`. Одна форма на оба, чтобы у игры был один код отрисовки анонсера
+ * и счётчика, а не два слегка разных.
+ */
 export interface FrcInfo {
   campaignId: string;
+  /**
+   * Состояние кампании на ЭТОМ соединении — то самое `is_frc_active` из доки
+   * фронта, только полем со всеми четырьмя значениями: у платформы такого
+   * поля нет, его ведёт игровой бэкенд (`frontend:82-84`).
+   */
+  status: FrcStatus;
   roundsLeft: number;
   roundsTotal: number;
   totalWin: number;
@@ -22,9 +34,32 @@ export interface FrcInfo {
    * при несовпадении показывает не то число, которым платформа двигает баланс.
    */
   bet?: number;
+  /**
+   * Индекс `bet` в `betLevels`; `null` — ставки кампании в лестнице нет, и
+   * активировать её нельзя (`frontend:101`). Фронту это тот самый шаг «найти
+   * индекс ставки в `allowed_bets`», который дока вменяет ему (`:91`), —
+   * посчитанный там, где лестница и кампания уже лежат рядом.
+   */
+  betIndex: number | null;
   /** Окно, в котором кампанию можно отыграть; после `validTo` она сгорает. */
   validFrom?: string;
   validTo?: string;
+}
+
+/** Кампания наружу. `isComplete` оставлен ради совместимости с 0.5.0. */
+export function toFrcInfo(frc: FrcState): FrcInfo {
+  return {
+    campaignId: frc.campaignId,
+    status: frc.status,
+    roundsLeft: frc.roundsLeft,
+    roundsTotal: frc.roundsTotal,
+    totalWin: frc.totalWin,
+    isComplete: frc.status === 'completed',
+    bet: frc.bet,
+    betIndex: frc.betIndex,
+    validFrom: frc.validFrom,
+    validTo: frc.validTo,
+  };
 }
 
 export interface InitConfig {
@@ -156,6 +191,16 @@ export interface BuildInitOptions {
    * иначе игрок видит одну сумму на загрузке и другую после первого спина.
    */
   wallet?: { readonly balance: number } | null;
+  /**
+   * Кампания вместе с решением игрока — берётся из контекста соединения, а не
+   * пересобирается из SessionInfo.
+   *
+   * Разница видна там, где `init` шлётся ПОВТОРНО посреди живого соединения
+   * (`forgetSettledRound`): собери мы кампанию заново из ответа платформы, она
+   * приехала бы «предложенной» игроку, который её уже активировал, и фронт
+   * показал бы анонсер поверх идущих фри-раундов.
+   */
+  frc?: FrcState | null;
 }
 
 export function buildInit(info: SessionInfoResponse, opts: BuildInitOptions = {}): InitPayload {
@@ -186,62 +231,44 @@ export function buildInit(info: SessionInfoResponse, opts: BuildInitOptions = {}
           }
         : null,
     },
-    frc: info.free_round_campaign
-      ? {
-          campaignId: info.free_round_campaign.campaign_id,
-          roundsLeft: info.free_round_campaign.rounds_left,
-          roundsTotal: info.free_round_campaign.rounds_total,
-          totalWin: info.free_round_campaign.total_win,
-          isComplete: info.free_round_campaign.is_complete,
-          bet: info.free_round_campaign.bet,
-          validFrom: info.free_round_campaign.valid_from,
-          validTo: info.free_round_campaign.valid_to,
-        }
-      : null,
+    frc: opts.frc ? toFrcInfo(opts.frc) : null,
     gamificationToken: info.gamification_token,
   };
 }
 
-export function toSessionContext(sessionId: string, info: SessionInfoResponse): SessionContext {
-  const campaign = info.free_round_campaign;
-  // Кампанию считаем активной только пока есть неизрасходованные раунды:
-  // иначе платформа ответит FrcAlreadyCompleted на первый же спин.
-  const active = campaign && !campaign.is_complete && campaign.rounds_left > 0;
+/**
+ * Контекст соединения из свежего SessionInfo.
+ *
+ * `previous` — решение игрока о кампании, если оно на этом соединении уже
+ * было; передаётся только при ПЕРЕЧИТЫВАНИИ сессии внутри живого соединения.
+ * Новое соединение зовёт это без него и предлагает кампанию заново — ровно
+ * так, как требует дока (см. `frcFromSession`).
+ */
+export function toSessionContext(
+  sessionId: string,
+  info: SessionInfoResponse,
+  previous?: FrcState | null,
+): SessionContext {
   return {
     sessionId,
     currency: classifyCurrency(info).code,
     allowedBets: info.game_settings.allowed_bets,
-    frcId: active ? campaign!.campaign_id : undefined,
+    frc: frcFromSession(info, previous),
   };
-}
-
-/** Кампания отыграна до конца — по счётчику или по флагу платформы. */
-export function isCampaignExhausted(progress: CampaignProgress): boolean {
-  return progress.is_complete || progress.rounds_left <= 0;
 }
 
 /**
  * Записать в контекст то, что платформа сказала о кампании В ОТВЕТЕ НА РАУНД.
  *
- * Платформа сообщает остаток кампании в ответе на КАЖДЫЙ фри-раунд
- * (`PlayRoundResponse.free_round_campaign`, `CloseRoundResponse.free_round_campaign`),
- * и это единственный момент, когда мы узнаём, что раунды кончились: `frcId`
- * снимался только с SessionInfo, то есть только на новом соединении.
- *
- * Не записать его стоило игроку всей сессии. `frcId` ставился один раз на
- * коннекте и не снимался никогда, поэтому после последнего фри-раунда мы
- * продолжали слать `free_round_campaign_id` завершённой кампании на каждом
- * спине; платформа отвечала `FrcAlreadyCompleted`, восстановление такой код не
- * знает — и следующий спин делал ровно то же самое. Каждый спин до
- * перезагрузки страницы.
- *
- * Чистая функция, возвращающая НОВЫЙ контекст: `ctx` в `ws.ts` переприсваивается
- * целиком (его же перечитывает восстановление), и мутация разъехалась бы с ним.
+ * Тонкая обёртка над `applyProgress`: сама логика (и то, почему её отсутствие
+ * стоило игроку всей сессии) живёт в `session/frc.ts`. Здесь — только форма
+ * возврата: чистая функция, отдающая НОВЫЙ контекст, потому что `ctx` в
+ * `ws.ts` переприсваивается целиком и мутация разъехалась бы с ним.
  */
 export function applyCampaignProgress(
   ctx: SessionContext,
   progress: CampaignProgress | null | undefined,
 ): SessionContext {
-  if (!ctx.frcId || !progress || !isCampaignExhausted(progress)) return ctx;
-  return { ...ctx, frcId: undefined };
+  const frc = applyProgress(ctx.frc, progress);
+  return frc === ctx.frc ? ctx : { ...ctx, frc };
 }
