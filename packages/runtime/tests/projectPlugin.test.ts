@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { projectPlugin } from '@/vite/projectPlugin';
 
@@ -122,5 +123,34 @@ describe('projectPlugin', () => {
     expect(lines.some(l => l.startsWith('import m1'))).toBe(true);
     expect(lines.some(l => l.startsWith('export const manifests'))).toBe(true);
     expect(lines.some(l => l.startsWith('export const project'))).toBe(true);
+  });
+
+  it('emits a module that actually loads, with manifests in the project key order', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'e8-emit-'));
+    // Three real, resolvable plugin files. Bare specifiers cannot be resolved from a temp dir,
+    // so use relative ones — which is also the shape a project's own plugin takes.
+    mkdirSync(join(dir, 'plugins'), { recursive: true });
+    writeFileSync(join(dir, 'plugins', 'a.mjs'), 'export default { id: "plugin-a" };');
+    writeFileSync(join(dir, 'plugins', 'b.mjs'), 'export default { id: "plugin-b" };');
+    writeFileSync(join(dir, 'plugins', 'c.mjs'), 'export default { id: "plugin-c" };');
+    writeFileSync(
+      join(dir, 'project.json'),
+      JSON.stringify({
+        plugins: {
+          './plugins/b.mjs': { version: '*' },
+          './plugins/a.mjs': { version: '*' },
+          './plugins/c.mjs': { version: '*' },
+        },
+      }),
+    );
+
+    const code = await projectPlugin({ root: dir }).load('\0virtual:e8-project');
+    // The emitted module uses relative specifiers, so write it where they resolve.
+    const modPath = join(dir, 'emitted.mjs');
+    writeFileSync(modPath, code!);
+
+    const mod = await import(pathToFileURL(modPath).href) as { manifests: Array<{ id: string }>; project: { plugins: Record<string, unknown> } };
+    expect(mod.manifests.map((m) => m.id)).toEqual(['plugin-b', 'plugin-a', 'plugin-c']);
+    expect(Object.keys(mod.project.plugins)).toEqual(['./plugins/b.mjs', './plugins/a.mjs', './plugins/c.mjs']);
   });
 });
