@@ -143,6 +143,57 @@ describe('ArtubeBridge', () => {
     expect(backend.play).toHaveBeenCalledWith({ action: 'spin', betIndex: 1, params: undefined });
   });
 
+  it('баланс до зачисления уезжает ОТДЕЛЬНО и раньше результата', async () => {
+    // Живой случай: 10 на счету, ставка 1, выигрыш 0.22. Платформа простого
+    // раунда возвращает одно число — 9.22, где ставка и выигрыш уже свёрнуты.
+    // Хост различает списание и зачисление по направлению (`host/balanceGate`),
+    // так что свёрнутое движение вниз он красит сразу, вместе с выигрышем,
+    // до анимации. Поэтому баланс после списания отдаём сами и первым.
+    backend.play.mockResolvedValue(
+      result({ winX: 0.22, totalWinX: 0.22, betAmount: 1, balanceAfter: 9.22 }),
+    );
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    sent.length = 0;
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+
+    const iBalance = sent.findIndex((m) => m.type === 'BALANCE_UPDATE');
+    const iResult = sent.findIndex((m) => m.type === 'PLAY_RESULT');
+    expect(iBalance).toBeGreaterThanOrEqual(0);
+    expect(iBalance).toBeLessThan(iResult);
+    expect(sent[iBalance].payload.balance).toBe(9);
+    // Итоговое число по-прежнему едет в результате — ворота придержат его до
+    // конца анимации, потому что теперь это движение ВВЕРХ.
+    expect(sent[iResult].payload.balanceAfter).toBe(9.22);
+  });
+
+  it('проигрышный спин лишнего кадра баланса не порождает', async () => {
+    backend.play.mockResolvedValue(
+      result({ winX: 0, totalWinX: 0, betAmount: 1, balanceAfter: 9 }),
+    );
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    sent.length = 0;
+    channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+    await flush();
+
+    expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
+  });
+
+  it('сегмент с creditPending баланс не разворачивает — выигрыш ещё не зачислен', async () => {
+    backend.play.mockResolvedValue(
+      result({ winX: 5, totalWinX: 5, betAmount: 1, balanceAfter: 9, creditPending: true }),
+    );
+    channel.sendToHost('GAME_READY', {});
+    await flush();
+    sent.length = 0;
+    channel.sendToHost('PLAY_REQUEST', { action: 'buy_bonus', bet: 1 });
+    await flush();
+
+    expect(sent.find((m) => m.type === 'BALANCE_UPDATE')).toBeUndefined();
+  });
+
   it('множители превращаются в суммы для показа', async () => {
     backend.play.mockResolvedValue(result({ winX: 2, totalWinX: 3, betAmount: 5 }));
     channel.sendToHost('GAME_READY', {});

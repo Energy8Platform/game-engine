@@ -322,6 +322,7 @@ export class ArtubeBridge {
       const delivered = this.toPlayResult(result);
       // Keep GET_STATE's snapshot in step: nothing to resume once settled.
       this.lastDelivered = delivered.creditPending ? delivered : null;
+      this.emitPreCreditBalance(result);
       this.bridge.send('PLAY_RESULT', delivered, id);
       // Счётчик кампании платформа обновляет в ответе на КАЖДЫЙ фри-раунд —
       // складываем его в снимок ПОСЛЕ отправки результата, чтобы игра
@@ -341,6 +342,37 @@ export class ArtubeBridge {
         id,
       );
     }
+  }
+
+  /**
+   * Баланс ПОСЛЕ ставки, но ДО зачисления выигрыша — отдельным кадром, перед
+   * результатом.
+   *
+   * Нужен потому, что при простом раунде платформа возвращает одно число, в
+   * котором ставка и выигрыш уже свёрнуты: при балансе 10 и ставке 1 выигрышный
+   * на 0.22 спин даёт сразу 9.22. Хост различает списание и зачисление по
+   * направлению движения (`host/balanceGate.ts`), и такое суммарное движение
+   * вниз читает как ставку — то есть красит немедленно, вместе с выигрышем,
+   * ещё до анимации. Игрок видит итог раньше, чем узнаёт, за что.
+   *
+   * Разворачиваем свёртку сами: `balanceAfter - выигрыш` — это баланс после
+   * списания. Он уходит первым и красится сразу (движение вниз), а
+   * `balanceAfter` из `PLAY_RESULT` оказывается движением ВВЕРХ и потому ждёт
+   * конца анимации. Ровно то поведение, которое ворота и описывают.
+   *
+   * Сегмент с `creditPending` не трогаем: там выигрыш ещё не зачислен, вычитать
+   * из баланса нечего. Внутренние сегменты раунда баланса не несут вовсе.
+   */
+  private emitPreCreditBalance(result: ServerResult): void {
+    if (result.creditPending || this.balance === null) return;
+    const win = result.totalWinX * result.betAmount;
+    if (win <= 0) return;
+    const unit = this.init?.config.currencyMinimalUnit;
+    // Округляем к минимальной единице валюты: 9.22 - 0.22 в double даёт хвост,
+    // а это число едет прямо в читалку баланса.
+    const step = typeof unit === 'number' && unit > 0 ? unit : 0.01;
+    const before = Math.round((this.balance - win) / step) * step;
+    this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: before });
   }
 
   /** Игрок досмотрел сегмент — бэкенд двигает курсор в состоянии платформы. */
