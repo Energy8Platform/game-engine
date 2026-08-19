@@ -231,6 +231,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
 
   const { runRound } = await import('./runRound');
   const { createBalanceGate } = await import('./balanceGate');
+  const { attachSettingsStore } = await import('./settingsStore');
   const { createFreeSpinsCounter } = await import('./freeSpinsCounter');
   const { resolvePlayError } = await import('./playError');
 
@@ -375,6 +376,18 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // The game may swap in its own shell (a custom renderer over the same core) via shellFactory;
     // default is the built-in Pixi shell. The host drives whichever it gets through the Shell contract.
     shell = (opts.shellFactory ?? createPixiShell)(pixiShellCfg);
+    // Opt-in, per game, and BEFORE `currentTurbo` is seeded from `shell.state.turbo` below — the
+    // restored level has to be in place by the time the host reads it, or the first spin would run
+    // at the default speed while the bar shows the remembered one. `features.turbo` is passed as the
+    // ceiling so a jurisdiction that capped turbo still wins over whatever is in storage.
+    if (opts.persistSettings) {
+      const p = opts.persistSettings === true ? {} : opts.persistSettings;
+      attachSettingsStore(shell, {
+        key: p.key ?? opts.model.spec.id,
+        storage: p.storage,
+        maxTurbo: pixiShellCfg.features.turbo,
+      });
+    }
     // Scope the bar to the slot scene: show only when a SlotSceneController scene is current
     // (hidden over the intro / non-slot scenes). Applies in BOTH base and replay modes.
     shell.setVisible(!!gameScene());

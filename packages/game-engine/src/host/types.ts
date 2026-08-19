@@ -7,6 +7,7 @@ import type { AudioConfig, ScaleMode, Orientation, SceneConstructor } from '../t
 import type { BookAdapter, AdapterModule, StakeBridge } from '@energy8platform/stake-bridge';
 import type { GameApplication } from '../core';
 import type { SlotShellOptions } from './shellConfig';
+import type { PersistSettingsOptions } from './settingsStore';
 import type {
   SlotSpinResultBase,
   SlotResultNormalizer,
@@ -148,6 +149,12 @@ export interface CreateSlotGameOptions<T extends SlotSpinResultBase = SlotSpinRe
    *  renderer can ignore `app`/`parent` and mount elsewhere (a DOM overlay, another canvas).
    *  Default: the built-in Pixi shell (`createPixiShell`). */
   shellFactory?: ShellFactory;
+  /** Remember the player's turbo level and menu values (sound, music, sfx, custom rows) in
+   *  `localStorage`, scoped to this game. Off by default — a game that doesn't ask touches no
+   *  storage at all. `true` keys on the game id; pass an object to set the key or supply the
+   *  store. Restored values are still subject to jurisdiction limits, and unreadable or tampered
+   *  storage degrades to "don't persist" rather than failing the boot. */
+  persistSettings?: boolean | PersistSettingsOptions;
   /** Double-tap on the play area to skip the current spin animation. Default `true`. Set `false`
    *  to disable the gesture (e.g. games where a tap means something else). */
   skipGesture?: boolean;

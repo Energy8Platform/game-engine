@@ -29,6 +29,8 @@ export type {
   OverlayShowOptions, AutoplaySceneState,
 } from './sceneController';
 // Progressive (cascade/tumble) WIN readout — the gate behind `api.shell.reportWin`.
+export { attachSettingsStore, readSettings, settingsKey } from './settingsStore';
+export type { PersistSettingsOptions, StoredSettings } from './settingsStore';
 export { createWinReporter } from './winReporter';
 export type { WinReporter, WinReportOptions } from './winReporter';
 // Social-casino word-swap. The shell auto-socializes all gameInfo/buyBonus text in social mode;
