@@ -225,8 +225,13 @@ function paytableSection(model: GameModel, t: (s: string) => string = (s) => s):
   return { type: 'paytable', rows };
 }
 
-/** Build a "wins" illustration section sized to the grid; `kind` follows the spec mechanic hint. */
-function winsSection(model: GameModel): GameInfoSection {
+/** Build a "wins" illustration section sized to the grid; `kind` follows the spec mechanic hint.
+ *
+ *  Every mechanic that has an illustration names itself. An unrecognised one renders NOTHING
+ *  rather than borrowing `anywhere`'s picture: the section exists to show the player how wins
+ *  form, and a drawing of the wrong mechanic teaches them something false. Silence is the honest
+ *  answer — the rest of the info screen (paytable, modes, controls) still renders. */
+function winsSection(model: GameModel): GameInfoSection | null {
   const { cols, rows } = model.spec.grid;
   const grid = { cols, rows };
   switch (model.spec.mechanic) {
@@ -234,8 +239,10 @@ function winsSection(model: GameModel): GameInfoSection {
       return { type: 'wins', kind: 'cluster', minCount: 5, grid } as GameInfoSection;
     case 'ways':
       return { type: 'wins', kind: 'ways', grid } as GameInfoSection;
-    default:
+    case 'anywhere':
       return { type: 'wins', kind: 'anywhere', minCount: 3, grid } as GameInfoSection;
+    default:
+      return null;
   }
 }
 
@@ -290,7 +297,8 @@ export function defaultGameInfo(
   tDisclaimer: (s: string) => string = t,
 ): GameInfoContent {
   const sections: GameInfoSection[] = [];
-  sections.push(winsSection(model));
+  const wins = winsSection(model);
+  if (wins) sections.push(wins);
   const pay = paytableSection(model, t);
   if (pay) sections.push(pay);
   const modes = modesSection(model, t);

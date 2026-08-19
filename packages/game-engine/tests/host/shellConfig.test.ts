@@ -259,7 +259,10 @@ describe('buildShellConfig (runtime ctx)', () => {
     const authorPaytable: GameInfoSection = { type: 'paytable', title: 'MY PAYS', rows: [{ symbol: { text: 'A' }, wins: [{ count: '3', multiplier: 9 }] }] };
     const authorModes: GameInfoSection = { type: 'modes', title: 'MODES', modes: [{ title: 'Base' }] };
     const override: GameInfoContent = { sections: [authorPaytable, authorModes] };
-    const c = buildShellConfig({ gameInfo: override }, model, { balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.'] });
+    // `ways` on purpose: this test is about merging, and it uses the derived `wins` section as its
+    // "everything else survives" witness — so the model must be one that HAS a wins illustration.
+    const waysModel = { ...model, spec: { ...model.spec, mechanic: 'ways' } };
+    const c = buildShellConfig({ gameInfo: override }, waysModel, { balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.'] });
     const sections = c.gameInfo.sections ?? [];
     // the author's paytable replaced the derived one (same type)
     const pay = sections.filter((s) => s.type === 'paytable');
@@ -386,6 +389,33 @@ describe('stakeForAction (host affordability guard)', () => {
 });
 
 describe('mergeGameInfo', () => {
+  it('рисует иллюстрацию выигрышей только той механике, которая себя назвала', () => {
+    const winsOf = (mechanic?: string) => {
+      const m = { ...model, spec: { ...model.spec, ...(mechanic ? { mechanic } : {}) } };
+      if (!mechanic) delete (m.spec as { mechanic?: string }).mechanic;
+      return (buildShellConfig({}, m, { balance: 0, mode: 'base' }).gameInfo.sections ?? [])
+        .filter((s) => s.type === 'wins');
+    };
+
+    expect(winsOf('anywhere')).toMatchObject([{ kind: 'anywhere', minCount: 3 }]);
+    expect(winsOf('cluster')).toMatchObject([{ kind: 'cluster', minCount: 5 }]);
+    expect(winsOf('ways')).toMatchObject([{ kind: 'ways' }]);
+    // `mechanic` — необязательная свободная строка, так что сюда попадает и не
+    // заданная, и любая незнакомая. Рисовать им чужую картинку значило бы учить
+    // игрока неправде — не рисуем ничего.
+    expect(winsOf('lines')).toEqual([]);
+    expect(winsOf()).toEqual([]);
+  });
+
+  it('остальной экран правил остаётся, даже когда иллюстрации выигрышей нет', () => {
+    const sections = buildShellConfig({}, model, {
+      balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.'],
+    }).gameInfo.sections ?? [];
+    expect(sections.some((s) => s.type === 'wins')).toBe(false);
+    expect(sections.some((s) => s.type === 'paytable')).toBe(true);
+    expect(sections.some((s) => s.type === 'controls')).toBe(true);
+  });
+
   it('keys wins sections by kind so different mechanics coexist', () => {
     const derived: GameInfoContent = { sections: [{ type: 'wins', kind: 'anywhere', minCount: 3, grid: { cols: 5, rows: 3 } } as GameInfoSection] };
     const override: GameInfoContent = { sections: [{ type: 'wins', kind: 'cluster', minCount: 5, grid: { cols: 5, rows: 3 } } as GameInfoSection] };
