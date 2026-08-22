@@ -9,7 +9,22 @@ export interface TweenOpts {
   onComplete?: () => void;
 }
 
-/** Tween 0→1 on the Pixi ticker. Returns a canceler. Skips to the end when motion is reduced. */
+/**
+ * Tween 0→1 on the Pixi ticker. Returns a canceler. Skips to the end when motion is reduced.
+ *
+ * CONTRACT — when motion is reduced (or `duration <= 0`) this tween does NOT animate: it applies
+ * the final value and calls `onComplete` SYNCHRONOUSLY, before returning. Callers depend on that
+ * (`PixiRenderer.destroy` resolves its teardown promise from `onComplete`, and must not wait on a
+ * ticker that may already be stopped), so it must stay synchronous.
+ *
+ * The consequence for callers: `onComplete` is NOT an async boundary. An `onComplete` that starts
+ * another tween is then direct recursion with no unwind — tween → onComplete → tween → … until
+ * `RangeError: Maximum call stack size exceeded`. That shipped once: the CTA pulse loop
+ * (`widgets.ts` startPulse) restarted itself from `onComplete`, so every player running the OS
+ * "reduce motion" setting crashed the instant the buy-bonus panel painted its hovered CTA. Any
+ * looping animation must therefore check `prefersReducedMotion()` and not loop — which is also
+ * what reduced motion is asking for.
+ */
 export function tween(ticker: Ticker, opts: TweenOpts): () => void {
   const ease = opts.ease ?? easeOutCubic;
   if (prefersReducedMotion() || opts.duration <= 0) {

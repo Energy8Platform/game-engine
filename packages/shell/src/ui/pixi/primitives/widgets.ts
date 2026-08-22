@@ -4,6 +4,7 @@ import type { IconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
 import { makeText, setText, NUM_FONT_FAMILY, NUM_FONT_SCALE } from '../text';
 import { tween, type TweenOpts } from '../motion-pixi';
+import { prefersReducedMotion } from '@/core/motion';
 import { FlexBox, type Sizable } from './flex';
 
 // Shared interactive primitives, ported from the DOM shell's CSS rules. Each widget reproduces
@@ -620,6 +621,14 @@ export class BuyBonusBadge extends Container implements Sizable {
 
   private startPulse(): void {
     if (this.pulseCancel) return;
+    // A pulse is exactly the kind of looping decoration "reduce motion" asks us to drop — and
+    // under it `tween` has nothing to animate anyway: it snaps to the end and calls `onComplete`
+    // SYNCHRONOUSLY (see its contract), which this loop would answer by starting another one, and
+    // another, with no unwind — `RangeError: Maximum call stack size exceeded`. That was a live
+    // Stake crash: with the OS "reduce motion" setting on, opening the buy-bonus panel painted its
+    // hovered CTA and killed the game, so the player could never buy. Now the button simply sits
+    // still at scale 1.
+    if (prefersReducedMotion()) return;
     // both the label (anchor 0.5) and the icon (pivot centred) scale around their centre
     const loop = (): void => {
       this.pulseCancel = tween(this.ticker, {
