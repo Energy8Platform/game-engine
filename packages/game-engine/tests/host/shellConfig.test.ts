@@ -66,6 +66,27 @@ describe('toBonusOptions', () => {
     expect(opts.find((o) => o.id === 'ante')!.thumbnail).toBe('/assets/ante.png'); // passed as-is
     expect('thumbnail' in opts.find((o) => o.id === 'buy_bonus')!).toBe(false); // unset → key absent
   });
+
+  it('forwards `groupedBy` so same-priced variants share one card; omits it when unset', () => {
+    // Four Ante characters: one action each (own title/art/volatility, same cost), one shared key.
+    const groupModel = {
+      spec: {
+        ...model.spec,
+        actions: {
+          spin: { role: 'base' },
+          ante_warrior: { role: 'feature', cost: 1.5, title: 'WARRIOR', description: 'wilds', groupedBy: 'ante', volatility: 2 },
+          ante_mage: { role: 'feature', cost: 1.5, title: 'MAGE', description: 'multipliers', groupedBy: 'ante', volatility: 4 },
+          buy_bonus: { role: 'buy', cost: 100, title: 'BUY BONUS', description: 'buy spins' }, // ungrouped
+        },
+      },
+    } as unknown as GameModel;
+    const opts = toBonusOptions(groupModel);
+    expect(opts.map((o) => o.id)).toEqual(['ante_warrior', 'ante_mage', 'buy_bonus']);
+    expect(opts.map((o) => o.groupedBy)).toEqual(['ante', 'ante', undefined]);
+    expect('groupedBy' in opts.find((o) => o.id === 'buy_bonus')!).toBe(false); // unset → key absent
+    // The id the host receives on activate is the ACTION key, so it knows which Ante to run.
+    expect(opts.find((o) => o.groupedBy === 'ante')!.id).toBe('ante_warrior');
+  });
 });
 
 describe('bet ladder + default bet from /wallet/authenticate', () => {

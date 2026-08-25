@@ -201,6 +201,9 @@ export function toBonusOptions(model: GameModel, t: (s: string) => string = (s) 
       // Hero art (SSOT) → card thumbnail. Passed verbatim: the shell loads it as-is, so no URL
       // resolver is needed (matches a static buyBonus `thumbnail`). Keeps i18n/price/accent/social.
       ...(action.art ? { thumbnail: action.art } : {}),
+      // Variant grouping (SSOT): actions sharing the key share one card in the pixi shell, flipped
+      // through with arrows. Each stays its own action, so the id on activate/buy is unambiguous.
+      ...(action.groupedBy ? { groupedBy: action.groupedBy } : {}),
     });
   }
   return out;

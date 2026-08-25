@@ -30,6 +30,12 @@ export interface ActionSpec {
   /** Volatility rating (1–5 lightning bolts) shown on the buy/feature card in the shell's Buy bonus
    *  overlay. Forwarded to `BonusOption.volatility` by `toBonusOptions`. */
   volatility?: 1 | 2 | 3 | 4 | 5;
+  /** Buy/feature actions sharing a `groupedBy` key occupy ONE card in the shell's Buy bonus overlay
+   *  and are flipped through with arrows — e.g. four same-priced Ante characters, one action each,
+   *  differing in title, art and volatility. The card sits where the group's FIRST action appears
+   *  in `actions`. Forwarded to `BonusOption.groupedBy` by `toBonusOptions`; the carousel itself is
+   *  a pixi-shell affordance (the DOM shell keeps a card per action). */
+  groupedBy?: string;
   /** Target RTP for THIS mode (0..1), e.g. 0.96. Single source of truth: seeds the math
    *  pipeline's `targetRTP` AND the Game Info per-mode table. `math.config` keeps only optimizer
    *  tuning (CV / hit-rate / nRowsOut / tolerances), never the RTP. */
