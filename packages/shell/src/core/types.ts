@@ -40,6 +40,11 @@ export interface BonusOption {
   priceMultiplier: number;
   /** Per-option accent override. Falls back to the type default (bonus → purple, feature → gold). */
   accentColor?: string;
+  /** Options sharing a `groupedBy` key occupy ONE card slot and are flipped through with arrows —
+   *  e.g. four same-priced Ante variants that each swap the character, its art and its volatility.
+   *  Pixi shell only; the DOM shell ignores the key and keeps a card per option. Options with a
+   *  `custom` renderer are never grouped. */
+  groupedBy?: string;
   /** Override the card UI. Return the card's inner content; the shell keeps the grid wrapper,
    *  accent vars and live re-pricing, and runs the normal buy flow when you call `ctx.select()`.
    *  Core uses `unknown`; each renderer re-exports a typed alias (ui/html → HTMLElement,

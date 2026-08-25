@@ -163,7 +163,12 @@ const shell: PixiGameShell = createPixiShell({
     turbo: 2,
     autoplay: {},
     buyBonus: [
-      { id: 'ante', type: 'feature', title: 'Ante Bet', description: '+25% to trigger frequency', priceMultiplier: 1.25, volatility: 2 },
+      // One slot, four characters: same price, different ability + volatility. `groupedBy` folds
+      // them into a single card the player flips through with the arrows (pixi shell only).
+      { id: 'ante-warrior', type: 'feature', groupedBy: 'ante', title: 'Warrior Ante', description: '+25% to trigger frequency, wilds hit harder', priceMultiplier: 1.25, volatility: 2 },
+      { id: 'ante-mage', type: 'feature', groupedBy: 'ante', title: 'Mage Ante', description: '+25% to trigger frequency, random multipliers on every spin', priceMultiplier: 1.25, volatility: 4 },
+      { id: 'ante-archer', type: 'feature', groupedBy: 'ante', title: 'Archer Ante', description: '+25% to trigger frequency, extra scatter on reel 5', priceMultiplier: 1.25, volatility: 3 },
+      { id: 'ante-priest', type: 'feature', groupedBy: 'ante', title: 'Priest Ante', description: '+25% to trigger frequency, one respin after every dead spin', priceMultiplier: 1.25, volatility: 1 },
       { id: 'boost', type: 'feature', title: 'Reel Boost', description: 'Boosted reels for the next 5 spins', priceMultiplier: 5, volatility: 3 },
       { id: 'fs', type: 'bonus', title: 'Buy Free Spins', description: '10 free spins, instant', priceMultiplier: 100, volatility: 5 },
       { id: 'superfs', type: 'bonus', title: 'Super Free Spins', description: '15 free spins with a guaranteed wild', priceMultiplier: 250, volatility: 4 },

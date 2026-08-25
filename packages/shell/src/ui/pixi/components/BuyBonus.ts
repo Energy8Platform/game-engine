@@ -1,6 +1,7 @@
 import { Assets, Container, Graphics, Rectangle, Sprite, Text, Texture, type FederatedPointerEvent } from 'pixi.js';
 import type { PixiComponentContext, ShellLayer } from '../context';
 import type { BonusOption } from '@/core/types';
+import { groupBonusSlots } from '@/core/bonusGroups';
 import { betDir } from '@/core/keyboard';
 import { effectiveAccent, contrastText } from '@/core/colors';
 import { makeText } from '../text';
@@ -23,11 +24,15 @@ export function openBuyBonus(host: PixiComponentContext): ShellLayer | null {
   return new BuyBonusOverlay(host, bonuses);
 }
 
-/** Pairing of a rendered CardView with its bonus data (affordability included). */
+/** Pairing of a rendered CardView with its bonus data (affordability included). One entry per
+ *  OPTION — the members of a `groupedBy` slot each get an entry pointing at the shared group card,
+ *  so keyboard navigation walks every option even though they occupy one slot. */
 interface CardEntry {
   view: CardView;
   bonus: BonusOption;
   affordable: boolean;
+  /** Set on members of a grouped slot; flipping it brings this member's card to the front. */
+  group?: GroupCard;
 }
 
 class BuyBonusOverlay extends Container implements ShellLayer {
@@ -51,6 +56,9 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private cardEntries: CardEntry[] = [];
   /** Keyboard focus index into the affordable subset of cardEntries. -1 = none. */
   private focusIndex = -1;
+  /** Which member each `groupedBy` slot is showing, kept across rebuilds (bet steps, resizes) so a
+   *  flipped-to variant doesn't snap back to the first one under the player. */
+  private groupIndex = new Map<string, number>();
   /** true when cards are stacked vertically (mobile, or a short landscape popout). */
   private stack = false;
   // Drag-scroll state. The drag is handled on the (unmasked) overlay, not the masked strip — a mask
@@ -169,7 +177,9 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const top = this.headerH + 6;
     const areaH = this.h - top - this.footerH - 6;
     const gap = 14;
-    const n = Math.max(1, this.bonuses.length);
+    // Grouped options share ONE slot (a carousel card), so the width fit counts SLOTS, not options.
+    const slots = groupBonusSlots(this.bonuses);
+    const n = Math.max(1, slots.length);
     // The whole card is laid out in `em`; pick the largest em that fits BOTH dimensions of the
     // available area, so the card is always fully visible (no horizontal clip, CTA never under the
     // footer). emH keeps the card height within the band between header and footer; emW makes the
@@ -182,16 +192,45 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const em = stack ? Math.min(12, emW) : clamp(4, Math.min(emH, emW), 12);
     const cardW = Math.min(18 * em, this.w - 48);
 
-    const cards = this.bonuses.map((b) => this.buildCard(b, cardW, em, stack, areaH));
+    const cards: CardView[] = [];
+    this.cardEntries = [];
+    for (const slot of slots) {
+      if (slot.length === 1) {
+        const view = this.buildCard(slot[0], cardW, em, stack, areaH);
+        cards.push(view);
+        this.cardEntries.push({ view, bonus: slot[0], affordable: this.isAffordable(slot[0]) });
+        continue;
+      }
+      // Carousel slot: every member is built (the slot sizes to the tallest and flipping costs
+      // nothing), but only the current one is visible.
+      const key = slot[0].groupedBy as string;
+      // Flipping the card also moves keyboard focus onto the shown member: one cursor, not two
+      // (otherwise the next rebuild would snap the card back to whatever the focus still pointed at).
+      const group: GroupCard = new GroupCard((i) => {
+        this.groupIndex.set(key, i);
+        this.focusShownMember(group, i);
+      });
+      const members = slot.map(
+        (b, i) =>
+          this.buildCard(b, cardW, em, stack, areaH, {
+            index: i,
+            count: slot.length,
+            prevLabel: `bb-nav-prev:${key}`,
+            nextLabel: `bb-nav-next:${key}`,
+            onStep: (dir) => {
+              if (this.dragged) return; // a scroll gesture, not a tap
+              group.step(dir);
+            },
+          }) as BonusCard,
+      );
+      group.setCards(members, this.groupIndex.get(key) ?? 0);
+      cards.push(group);
+      for (let i = 0; i < slot.length; i++) {
+        this.cardEntries.push({ view: members[i], bonus: slot[i], affordable: this.isAffordable(slot[i]), group });
+      }
+    }
     const cardH = Math.max(...cards.map((c) => c.height));
     for (const c of cards) c.setHeight(cardH);
-
-    // Rebuild card entries for keyboard navigation
-    this.cardEntries = this.bonuses.map((b, i) => ({
-      view: cards[i],
-      bonus: b,
-      affordable: this.isAffordable(b),
-    }));
     // Restore or init keyboard focus on the first affordable card
     const affordable = this.cardEntries.filter((e) => e.affordable);
     if (affordable.length > 0) {
@@ -230,7 +269,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   }
 
   // ── one card ──────────────────────────────────────────────────────────────
-  private buildCard(bonus: BonusOption, cardW: number, em: number, stack: boolean, areaH: number): CardView {
+  private buildCard(bonus: BonusOption, cardW: number, em: number, stack: boolean, areaH: number, nav?: CardNav): CardView {
     const accent = effectiveAccent(bonus);
     const ink = contrastText(accent);
     const price = bonus.priceMultiplier * this.host.state.bet;
@@ -264,6 +303,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
       enabled,
       ctaLabel: this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'),
       onSelect: select,
+      nav,
     });
     void stack;
     void areaH;
@@ -392,12 +432,12 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     const r = 1.3 * em;
     card.addChild(
       footerButton(this.host, this.host.t('Cancel'), 'ghost', half, ctaH, 0, y, () => this.removeConfirm(), undefined, r, 0),
-      footerButton(this.host, this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'), accent, half, ctaH, half, y, () => {
+      labelled('bb-confirm-ok', footerButton(this.host, this.host.t(bonus.type === 'feature' ? 'Activate' : 'Buy'), accent, half, ctaH, half, y, () => {
         if (!this.isAffordable(bonus)) return;
         if (bonus.type === 'feature') this.host.actions.activateFeature(bonus);
         else this.host.actions.selectBuyBonus(bonus.id);
         this.host.closeLayer();
-      }, ink, 0, r),
+      }, ink, 0, r)),
     );
     card.position.set((this.w - cardW) / 2, (this.h - cardH) / 2);
     layer.addChild(card);
@@ -430,14 +470,26 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     this.buildFooter();
   }
 
+  /** Move keyboard focus onto the member a carousel slot just flipped to. Skipped when that member
+   *  can't be bought at the current bet — focus only ever sits on affordable cards. */
+  private focusShownMember(group: GroupCard, index: number): void {
+    const card = group.cardAt(index);
+    const at = this.cardEntries.filter((ce) => ce.affordable).findIndex((ce) => ce.group === group && ce.view === card);
+    if (at < 0) return;
+    this.focusIndex = at;
+    this.applyFocusRing();
+  }
+
   /** Apply or clear the focus ring on affordable cards. */
   private applyFocusRing(): void {
     const affordable = this.cardEntries.filter((ce) => ce.affordable);
     for (let i = 0; i < affordable.length; i++) {
-      const view = affordable[i].view;
-      if (view instanceof BonusCard) {
-        view.setFocused(i === this.focusIndex);
-      }
+      const entry = affordable[i];
+      const focused = i === this.focusIndex;
+      // Focusing a member of a carousel slot brings it to the front — the keyboard walks options,
+      // and the card follows.
+      if (focused && entry.group) entry.group.showCard(entry.view);
+      if (entry.view instanceof BonusCard) entry.view.setFocused(focused);
     }
   }
 
@@ -550,6 +602,68 @@ class CustomCard implements CardView {
   }
 }
 
+/** One slot shared by several options (`groupedBy`) — e.g. four same-priced Ante characters. Every
+ *  member card is built (the slot sizes to the tallest, and flipping is then just a visibility
+ *  swap, so the card never resizes under the player); one is visible at a time. */
+class GroupCard implements CardView {
+  readonly node = new Container();
+  height = 0;
+  private cards: BonusCard[] = [];
+  private index = 0;
+  /** Reports the shown member back to the overlay, which keeps it across rebuilds. */
+  private onIndex: (index: number) => void;
+
+  constructor(onIndex: (index: number) => void) {
+    this.onIndex = onIndex;
+  }
+
+  setCards(cards: BonusCard[], index: number): void {
+    this.cards = cards;
+    for (const c of cards) this.node.addChild(c.node);
+    this.height = Math.max(...cards.map((c) => c.height));
+    this.show(index, false); // restoring a remembered position is not a player action
+  }
+
+  /** Flip to member `i`, wrapping around in both directions. */
+  show(i: number, notify = true): void {
+    const n = this.cards.length;
+    if (n === 0) return;
+    this.index = ((i % n) + n) % n;
+    for (let k = 0; k < n; k++) this.cards[k].node.visible = k === this.index;
+    if (notify) this.onIndex(this.index);
+  }
+
+  step(dir: 1 | -1): void {
+    this.show(this.index + dir);
+  }
+
+  cardAt(index: number): CardView | undefined {
+    return this.cards[index];
+  }
+
+  /** Bring a specific member's card to the front (keyboard focus landing on that option). */
+  showCard(card: CardView): void {
+    const i = this.cards.findIndex((c) => c === card);
+    if (i >= 0 && i !== this.index) this.show(i);
+  }
+
+  setHeight(total: number): void {
+    this.height = total;
+    for (const c of this.cards) c.setHeight(total);
+  }
+}
+
+/** Carousel chrome for a card that shares its slot with other options (`groupedBy`): arrows either
+ *  side of the title and a dot per member under the description. */
+interface CardNav {
+  /** This member's position in the slot (drives which dot is lit). */
+  index: number;
+  count: number;
+  prevLabel: string;
+  nextLabel: string;
+  onStep: (dir: 1 | -1) => void;
+}
+
 interface BonusCardOpts {
   host: PixiComponentContext;
   bonus: BonusOption;
@@ -561,6 +675,7 @@ interface BonusCardOpts {
   enabled: boolean;
   ctaLabel: string;
   onSelect: () => void;
+  nav?: CardNav;
 }
 
 class BonusCard implements CardView {
@@ -587,9 +702,22 @@ class BonusCard implements CardView {
 
     const top = new Container();
     let y = 1.25 * em;
-    const title = makeText(bonus.title, { size: 1.3 * em, weight: '800', color: titleColor, letterSpacing: 1.3 * em * 0.04, upper: true, align: 'center', wrapWidth: innerW });
+    // With arrows the title has to clear them on both sides, or a long name wraps under the glyphs.
+    const arrowSz = 1.5 * em;
+    const arrowPad = 0.45 * em;
+    const titleW = opts.nav ? innerW - 2 * (arrowSz + 2 * arrowPad) : innerW;
+    const title = makeText(bonus.title, { size: 1.3 * em, weight: '800', color: titleColor, letterSpacing: 1.3 * em * 0.04, upper: true, align: 'center', wrapWidth: titleW });
     title.position.set((cardW - title.width) / 2, y);
     top.addChild(title);
+    if (opts.nav) {
+      const boxSz = arrowSz + 2 * arrowPad;
+      const rowY = y + (title.height - boxSz) / 2;
+      const prev = arrowButton(opts.nav.prevLabel, -1, arrowSz, arrowPad, accent, opts.nav.onStep);
+      const next = arrowButton(opts.nav.nextLabel, 1, arrowSz, arrowPad, accent, opts.nav.onStep);
+      prev.position.set(0.6 * em, rowY);
+      next.position.set(cardW - 0.6 * em - boxSz, rowY);
+      top.addChild(prev, next);
+    }
     y += title.height + 0.75 * em;
     const thumb = thumbNode(host, bonus, accent, 6.2 * em);
     thumb.position.set((cardW - 6.2 * em) / 2, y);
@@ -599,6 +727,13 @@ class BonusCard implements CardView {
     desc.position.set((cardW - desc.width) / 2, y);
     top.addChild(desc);
     y += desc.height;
+    if (opts.nav) {
+      y += 0.7 * em;
+      const dots = dotRow(opts.nav.count, opts.nav.index, accent, 0.24 * em, 0.5 * em);
+      dots.position.set((cardW - dots.width) / 2, y);
+      top.addChild(dots);
+      y += 0.48 * em;
+    }
     this.topH = y;
 
     // bottom block: volatility + price
@@ -615,8 +750,9 @@ class BonusCard implements CardView {
     by += priceText.height;
     this.bottomH = by;
 
-    this.cta = ctaButton(host, opts.ctaLabel, accent, opts.ink, cardW, this.ctaH, opts.enabled, opts.onSelect, 1.4 * em);
+    this.cta = labelled(`bb-cta:${bonus.id}`, ctaButton(host, opts.ctaLabel, accent, opts.ink, cardW, this.ctaH, opts.enabled, opts.onSelect, 1.4 * em));
 
+    this.node.label = `bb-card:${bonus.id}`;
     this.node.addChild(this.bg, top, this.bottomBlock, this.cta);
     if (opts.enabled) {
       this.node.eventMode = 'static';
@@ -672,6 +808,46 @@ class BonusCard implements CardView {
 }
 
 // ── shared card bits ─────────────────────────────────────────────────────────
+
+/** Tag a node so the shell (and its tests) can find it in the display tree. */
+function labelled<T extends Container>(label: string, node: T): T {
+  node.label = label;
+  return node;
+}
+
+/** One carousel arrow. `stopPropagation` keeps the tap off the card underneath, which would
+ *  otherwise open the confirm dialog for the member being flipped away from. */
+function arrowButton(label: string, dir: 1 | -1, size: number, pad: number, accent: string, onStep: (dir: 1 | -1) => void): Container {
+  const b = new Container();
+  b.label = label;
+  const glyph = makeIcon('chevronRight', size, '#ffffff');
+  if (dir === -1) glyph.spin = Math.PI; // no chevronLeft in the set — the glyph spins about its centre
+  glyph.position.set(pad, pad);
+  b.addChild(rectHit(size + pad * 2, size + pad * 2), glyph);
+  b.eventMode = 'static';
+  b.cursor = 'pointer';
+  b.on('pointerover', () => glyph.setColor(accent));
+  b.on('pointerout', () => glyph.setColor('#ffffff'));
+  b.on('pointertap', (e: FederatedPointerEvent) => {
+    e.stopPropagation();
+    onStep(dir);
+  });
+  return b;
+}
+
+/** Position indicator for a carousel slot: one dot per member, the current one in the accent. */
+function dotRow(count: number, index: number, accent: string, r: number, gap: number): Container {
+  const c = new Container();
+  for (let i = 0; i < count; i++) {
+    const dot = new Graphics();
+    const on = i === index;
+    dot.circle(r, r, r).fill(on ? accent : 'rgba(255,255,255,.28)');
+    dot.position.set(i * (2 * r + gap), 0);
+    c.addChild(dot);
+  }
+  return c;
+}
+
 function thumbNode(host: PixiComponentContext, bonus: BonusOption, accent: string, h: number): Container {
   const c = new Container();
   c.addChild(rectHit(h, h, 0)); // size anchor (transparent)

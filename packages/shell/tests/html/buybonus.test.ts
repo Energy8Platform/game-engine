@@ -40,6 +40,19 @@ describe('BuyBonus overlay', () => {
     expect(q(mount, '[data-ge="bonus-card-bonus"]')!.textContent).toContain('€200');
   });
 
+  it('ignores `groupedBy` — the carousel slot is a pixi-shell affordance, the DOM keeps a card per option', () => {
+    const grouped: BonusOption[] = [
+      { id: 'warrior', type: 'feature', groupedBy: 'ante', title: 'Warrior', description: 'Wilds hit harder', priceMultiplier: 25, volatility: 2 },
+      { id: 'mage', type: 'feature', groupedBy: 'ante', title: 'Mage', description: 'Random multipliers', priceMultiplier: 25, volatility: 4 },
+      { id: 'bonus', type: 'bonus', title: 'Buy Free Spins', description: '10 spins', priceMultiplier: 100, volatility: 5 },
+    ];
+    createGameShell(cfg(mount, { features: { turbo: 0, autoplay: null, buyBonus: grouped } }));
+    q(mount, '[data-ge="buybonus"]')!.click();
+    expect(qa(mount, '[data-ge^="bonus-card-"]').length).toBe(3);
+    expect(q(mount, '[data-ge="bonus-card-warrior"]')).toBeTruthy();
+    expect(q(mount, '[data-ge="bonus-card-mage"]')).toBeTruthy();
+  });
+
   it('clicking a card opens the confirmation modal (does not buy directly)', () => {
     const shell = createGameShell(cfg(mount));
     const spy = vi.fn(); shell.on('buyBonusSelect', spy);
