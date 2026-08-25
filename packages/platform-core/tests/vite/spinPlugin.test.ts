@@ -119,3 +119,44 @@ describe.skipIf(!bin)('spinPlugin port autodiscovery', () => {
     }
   }, 30_000);
 });
+
+describe.skipIf(!bin)('spinPlugin currency conversion', () => {
+  // Движок отдаёт win/total_win В МНОЖИТЕЛЯХ СТАВКИ — конвертация в валюту
+  // целиком на toLegacy. history.win и session.totalWin её делали, а
+  // верхнеуровневый totalWin — нет (на bet≠1 клиент кредитовал множители).
+  it('reports totalWin in currency, consistent with history and session', async () => {
+    const server = await createServer({
+      configFile: false,
+      root: __dirname,
+      logLevel: 'silent',
+      plugins: [
+        spinPlugin({
+          spinPath: resolve(__dirname, 'fixtures/payer.spin'),
+          gameId: 'payer-game',
+          port: 50191,
+        }),
+      ],
+      server: { port: 0 },
+    });
+    started.push(server);
+    await server.listen();
+    const address = server.httpServer!.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+
+    // база платит 2.0 множителя при ставке 10 ⇒ 20 в валюте
+    const entry = await play(port, { action: 'spin', bet: 10, roundId: 'pay-r1' });
+    expect(entry.totalWin).toBe(20);
+    expect(entry.session.history[0].win).toBe(20);
+
+    // 3 фриспина по 1.0 множителя ⇒ по 10 в валюте
+    let last: any = entry;
+    for (let i = 0; i < 3; i++) {
+      last = await play(port, { action: 'free_spin', roundId: 'pay-r1' });
+    }
+    expect(last.session.completed).toBe(true);
+    // закрывающий спин: раунд целиком = 2.0 + 3×1.0 = 5.0 множителя ⇒ 50
+    expect(last.totalWin).toBe(50);
+    expect(last.totalWin).toBe(last.session.totalWin);
+    expect(last.session.history.map((h: any) => h.win)).toEqual([20, 10, 10, 10]);
+  }, 30_000);
+});

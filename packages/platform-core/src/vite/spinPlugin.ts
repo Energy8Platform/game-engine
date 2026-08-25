@@ -252,7 +252,9 @@ export function spinPlugin(opts: SpinPluginOptions = {}): Plugin {
       if (activeRoundId === roundId) activeRoundId = null;
     }
     return {
-      totalWin: r.round_complete && r.spins_played > 1 ? r.total_win : r.win,
+      // движок считает в множителях ставки — в валюту переводим здесь же,
+      // как для history.win и session.totalWin ниже
+      totalWin: (r.round_complete && r.spins_played > 1 ? r.total_win : r.win) * meta.bet,
       data,
       nextActions: r.next_actions,
       session: hadSession
