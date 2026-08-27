@@ -7,7 +7,7 @@
 //
 // Design notes are in docs/reels-analysis-and-design.md.
 
-import type { CellFrameStyle } from '../grid/SymbolCell';
+import type { CellData, CellFrameStyle } from '../grid/SymbolCell';
 import { resolveGeometry, type CellSizeSpec, type ResolvedGeometry } from '../grid/geometry';
 
 export type { CellSizeSpec, ResolvedGeometry };
@@ -30,6 +30,20 @@ export type EasingName =
   | 'easeInSine'
   | 'easeOutSine'
   | 'easeInOutSine';
+
+/**
+ * A value that is either flat across the board, or per-reel: an array indexed by REEL INDEX
+ * (holes fall back to the scalar default). Used for anticipation timings so a game can make
+ * each successive reel slower than the last.
+ */
+export type PerReel<T> = T | (T | undefined)[];
+
+/** Resolve a `PerReel<T>` for one reel. `undefined` (or a hole in the array) yields `fallback`. */
+export function perReelValue<T>(value: PerReel<T> | undefined, reel: number, fallback: T): T {
+  if (value === undefined) return fallback;
+  if (Array.isArray(value)) return (value[reel] as T | undefined) ?? fallback;
+  return value;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid
@@ -127,11 +141,27 @@ export interface MotionConfig {
   slamStop: boolean;
   /** Symbols visible on a reel tape while spinning (swap/strip). */
   symbolsPerReel: number;
+  /** `cascade-drop`: ms between consecutive cells of ONE reel (top→bottom). Default 24. */
+  cellStagger: number;
+  /** `cascade-drop`: multiplier on `stopStagger` for the per-reel offset. Default 0.4. */
+  reelStaggerFactor: number;
+  /** `cascade-drop`: fall duration as a fraction of `spinUp`. Default 0.6. */
+  dropFallFactor: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Anticipation
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** What a game-supplied `AnticipationConfig.decide` may return instead of a bare reel list. */
+export interface AnticipationOverride {
+  /** Reels to anticipate, in the order the progression should ramp. Empty = no anticipation. */
+  reels: number[];
+  /** Speed factor (lower = slower). Scalar, or per-reel indexed by reel index. */
+  slowdown?: PerReel<number>;
+  /** Extra hold before landing. Scalar, or per-reel indexed by reel index. */
+  holdMs?: PerReel<number>;
+}
 
 export interface AnticipationConfig {
   enabled: boolean;
@@ -145,6 +175,21 @@ export interface AnticipationConfig {
   slowdownFactor: number;
   /** Extra hold (ms) before the final anticipation reel lands (300–500 typical). */
   holdMs: number;
+  /**
+   * Game-supplied decision, REPLACING the built-in `triggerSymbols`/`threshold` counting.
+   * Return the reels to anticipate (or an `AnticipationOverride`); `null` / `[]` = no anticipation.
+   * Use this when the trigger is not expressible as "N of symbol X landed" — e.g. "the round is
+   * still alive on every reel so far", or "reel 3 missed its symbol, so let 4 and 5 stop normally".
+   */
+  decide?: ((targetGrid: CellData[][]) => number[] | AnticipationOverride | null) | null;
+  /**
+   * Ramp the slowdown across successive anticipated reels: reel #i of the decision gets
+   * `slowdownFactor * progressiveSlowdown ** i`. 1 = flat (default); < 1 = each reel slower
+   * than the last.
+   */
+  progressiveSlowdown: number;
+  /** Extra hold (ms) added per successive anticipated reel: reel #i gets `holdMs + i * this`. */
+  progressiveHoldMs: number;
   /** Optional grid zoom while anticipating (magnum-opus uses 1.3×). */
   zoom: { enabled: boolean; scale: number; ms: number };
 }
@@ -419,6 +464,9 @@ export const DEFAULT_REEL_CONFIG: ReelSystemConfig = {
     intensity: 'full',
     slamStop: true,
     symbolsPerReel: 6,
+    cellStagger: 24,
+    reelStaggerFactor: 0.4,
+    dropFallFactor: 0.6,
   },
   anticipation: {
     enabled: false,
@@ -427,6 +475,9 @@ export const DEFAULT_REEL_CONFIG: ReelSystemConfig = {
     reels: 'trailing',
     slowdownFactor: 0.3,
     holdMs: 400,
+    decide: null,
+    progressiveSlowdown: 1,
+    progressiveHoldMs: 0,
     zoom: { enabled: false, scale: 1.15, ms: 600 },
   },
   cascade: {
@@ -555,10 +606,26 @@ export function resolveReelConfig(partial?: DeepPartial<ReelSystemConfig>): Reel
   return mergeReelConfig(DEFAULT_REEL_CONFIG, partial);
 }
 
+/** True only for `{}`-shaped objects — a class instance or a Date is NOT one. */
+function isCloneableRecord(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v) as object | null;
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Deep-clone a config. Hand-rolled rather than `structuredClone` because a config may carry
+ * functions (`anticipation.decide`), which `structuredClone` refuses to copy. Functions and
+ * anything that is not a plain object/array pass through by reference.
+ */
 function structuredCloneSafe<T>(v: T): T {
-  // structuredClone is available in modern browsers + Node 17+; fall back to JSON for safety.
-  if (typeof structuredClone === 'function') return structuredClone(v);
-  return JSON.parse(JSON.stringify(v)) as T;
+  if (Array.isArray(v)) return v.map((item) => structuredCloneSafe(item)) as unknown as T;
+  if (isCloneableRecord(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) out[k] = structuredCloneSafe(val);
+    return out as T;
+  }
+  return v;
 }
 
 /** Effective per-reel row counts (resolves Megaways `rowsPerReel`, else uniform `rows`). */

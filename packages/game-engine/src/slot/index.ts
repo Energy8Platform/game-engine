@@ -23,6 +23,7 @@ export {
   effectiveRowsPerReel,
   resolveGridGeometry,
   waysCount,
+  perReelValue,
 } from './config/ReelSystemConfig';
 export type {
   ReelSystemConfig,
@@ -39,6 +40,8 @@ export type {
   SquashConfig,
   BlurConfig,
   AnticipationConfig,
+  AnticipationOverride,
+  PerReel,
   CascadeConfig,
   WinConfig,
   FeaturesConfig,

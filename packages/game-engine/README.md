@@ -428,6 +428,50 @@ await reels.spin(targetBoard, { turbo });
 await reels.cascade(cascadeSteps, { turbo });   // tumble/avalanche steps
 ```
 
+### Driving the spin from the game
+
+`spin()` is not a black box — the schedule it runs is public data, it signals every landing, and it
+will hand a reel back to you unlanded if you mean to bring it in yourself.
+
+```typescript
+// The schedule spin() WOULD run — same anticipation decision, same numbers. Schedule landing
+// sounds / camera moves against this instead of re-deriving the engine's formula.
+const plan = reels.planSpin(targetBoard, { turbo });
+plan.forEach((p) => console.log(p.reel, p.stopTime, p.slowdown, p.anticipated, p.deferred));
+
+await reels.spin(targetBoard, {
+  turbo,
+  onPlan: (plan) => scheduleAudio(plan),          // the plan actually being executed
+  onReelStop: (reel, p) => sfx.play('reel-stop'), // the frame a reel lands
+  onCellSeated: (reel, row) => sfx.play('thud'),  // per-cell arrival (the `cascade-drop` impact)
+
+  // Drive anticipation yourself — an explicit list WINS over the configured decision.
+  anticipateReels: [3, 4],
+  anticipateSlowdown: [, , , 0.5, 0.25],          // scalar, or indexed BY REEL
+  anticipateHoldMs: 300,
+
+  // Reels that spin for real, then go DARK instead of showing their result: the engine disposes
+  // of the tape and leaves those cells hidden and unseated. You own their data and visibility
+  // from that point (a slam stop will not reveal them either).
+  deferReveal: [3, 4],
+});
+```
+
+For a trigger that isn't "N of symbol X landed", give the config its own predicate — it replaces
+the built-in counting entirely:
+
+```typescript
+reels.update({
+  anticipation: {
+    enabled: true,
+    // e.g. "the round is still alive on every reel so far"; return null / [] for no anticipation
+    decide: (target) => (stillAlive(target) ? { reels: [2, 3, 4], holdMs: 400 } : null),
+    progressiveSlowdown: 0.7,  // each successive anticipated reel 30% slower than the last
+    progressiveHoldMs: 150,    // …and held 150ms longer
+  },
+});
+```
+
 ### Config Shape
 
 `resolveReelConfig(partial)` deep-merges your overrides onto `DEFAULT_REEL_CONFIG`:
@@ -435,8 +479,8 @@ await reels.cascade(cascadeSteps, { turbo });   // tumble/avalanche steps
 | Section | Key knobs |
 | --- | --- |
 | `grid` | `cols`, `rows`, `rowsPerReel[]` (Megaways / variable heights), `cellSize`, `gap`, `evaluation` (`lines`/`ways`/`anywhere`/`cluster`/`megaways`/`infinity`), `mask` |
-| `motion` | `style` (`swap`/`strip`/`cascade-drop`), `spinUp`, `hold`, `stopStagger`, `stopMode` (`sequential`/`sync`/`random`), `stopOrder`, `settle`, `squash`, `blur`, `turboFactor`, `intensity`, `slamStop` |
-| `anticipation` | `enabled`, `triggerSymbols`, `threshold` (N−1), `reels` (`trailing`/indices), `slowdownFactor`, `holdMs`, `zoom` |
+| `motion` | `style` (`swap`/`strip`/`cascade-drop`), `spinUp`, `hold`, `stopStagger`, `stopMode` (`sequential`/`sync`/`random`), `stopOrder`, `settle`, `squash`, `blur`, `turboFactor`, `intensity`, `slamStop`, `cellStagger` + `reelStaggerFactor` + `dropFallFactor` (`cascade-drop` pacing) |
+| `anticipation` | `enabled`, `triggerSymbols`, `threshold` (N−1), `reels` (`trailing`/indices), `slowdownFactor`, `holdMs`, `decide` (game-supplied predicate), `progressiveSlowdown` + `progressiveHoldMs` (ramp per reel), `zoom` |
 | `cascade` | `enabled`, `gravity`, `timings`, `easings`, `perStepDecel`, `dimNonWinners`, `multiplier` (`mode` add/mul, `cap`, `persistInFreeSpins`) |
 | `win` | `highlightScale`, `glow`, `frameShake` |
 | `features` | per-mechanic config (see below) |

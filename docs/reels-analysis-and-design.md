@@ -81,9 +81,12 @@ ReelSystemConfig
 ├── motion:      { style:'swap'|'strip'|'cascade-drop',
 │                  spinUp, hold, stopStagger, stopMode:'sequential'|'sync'|'random', stopOrder,
 │                  settle:{amp,ms,easing}, squash?:{x,y,ms}, blur?:{enabled,alpha,streaks},
-│                  turboFactor, intensity:'full'|'reduced'|'minimal', slamStop }
+│                  turboFactor, intensity:'full'|'reduced'|'minimal', slamStop,
+│                  cellStagger, reelStaggerFactor, dropFallFactor  ← темп 'cascade-drop' }
 ├── anticipation:{ enabled, triggerSymbols[], threshold(N-1), reels:'trailing'|number[],
-│                  slowdownFactor, holdMs, zoom?:{scale,ms}, sfxHook?, vfxHook? }
+│                  slowdownFactor, holdMs, zoom?:{scale,ms}, sfxHook?, vfxHook?,
+│                  decide?(targetGrid)  ← предикат игры вместо счёта символов,
+│                  progressiveSlowdown, progressiveHoldMs  ← рампа по барабанам }
 ├── cascade:     { enabled, gravity(survivors slide), timings{reveal,highlight,remove,drop,refill,wait},
 │                  perStepDecel, easings{...}, dimNonWinners?, multiplier?:{start,step,mode,cap,persistFS} }
 ├── win:         { highlightScale, dimAlpha, glow?, frameShake?:{amp,ms,onlyOn[]} }
@@ -91,7 +94,34 @@ ReelSystemConfig
                    (каждая — опциональный конфиг + hook; фаза 1 = ядро + каркас хуков)
 ```
 
-API: `createReelSystem(config) → { grid, spin(data,opts), cascade(step,opts), applyFeatures(...), resize(), skip() }`. Обратная совместимость: старые `ReelGrid/ReelSpinController/CascadeController` остаются, новая система — слой поверх.
+API: `createReelSystem(config) → { grid, spin(data,opts), planSpin(data,opts), cascade(step,opts), applyFeatures(...), resize(), skip() }`. Обратная совместимость: старые `ReelGrid/ReelSpinController/CascadeController` остаются, новая система — слой поверх.
+
+### 4.1 Швы для игры (запрос `pantheon-break`)
+
+Движок рисует свою анимацию, но игра должна уметь построить свою **не воюя** с существующей.
+Четыре шва, каждый полезен отдельно:
+
+1. **Расписание — публичные данные.** `planSpin(target, opts)` возвращает тот же `ReelStopPlan[]`,
+   что выполнит `spin(target, opts)` (то же решение по антипации, те же числа), а `spin`'s `onPlan`
+   отдаёт его же на старте. Плюс сигналы посадки: `onReelStop(reel, plan)` — кадр остановки
+   барабана, `onCellSeated(reel, row, data)` — кадр прилёта ячейки (в `cascade-drop` — момент
+   удара, до squash). Игре больше не надо повторять формулу `plan()` в своём `setTimeout`.
+2. **Темп `cascade-drop` — конфиг, не литерал.** `cellStagger` (мс между соседними ячейками
+   одного барабана, было `24`), `reelStaggerFactor` (множитель `stopStagger` для сдвига барабана,
+   было `0.4`) и `dropFallFactor` (длительность падения как доля `spinUp`, было `0.6`). Раньше
+   единственным рычагом был `slowdown`, который растягивал и паузу, и само падение.
+3. **Антипацию решает игра.** `SpinRunOpts.anticipateReels/Slowdown/HoldMs` теперь **уважаются**
+   (явный список бьёт решение из конфига) — раньше `ReelSystem.spin()` их молча перезатирал.
+   `AnticipationConfig.decide(targetGrid)` заменяет счёт символов предикатом игры («раунд ещё жив
+   на всех барабанах», «на 3-м символ не выпал → 4 и 5 останавливаем как обычно»).
+   `progressiveSlowdown` / `progressiveHoldMs` дают прогрессивную рампу по барабанам; и то и
+   другое можно задать по-барабанно массивом (`PerReel<number>`, индекс = номер барабана).
+4. **Посадку можно удержать.** `deferReveal: number[]` — барабан крутится по-настоящему, лента
+   уничтожается как обычно, но реальные ячейки остаются **скрытыми и незасеянными**: данными и
+   видимостью с этого момента владеет игра (slam-stop их тоже не раскроет). Это снимает
+   необходимость накрывать вывод движка непрозрачной панелью. Оговорка: стиль `swap` крутит ленту
+   *через* реальные ячейки, поэтому для настоящего удержания ему нужен свой `SpinData.strip`;
+   у `strip` и `cascade-drop` такой оговорки нет.
 
 ## 5. Playground (`examples/reel-lab`)
 

@@ -7,15 +7,21 @@ import { Tween } from '../../animation';
 import { easingByName } from '../anim/easing-map';
 import type { ReelGrid } from '../grid/ReelGrid';
 import type { CellData } from '../grid/SymbolCell';
-import type { AnticipationConfig } from '../config/ReelSystemConfig';
+import type { AnticipationConfig, AnticipationOverride, PerReel } from '../config/ReelSystemConfig';
 
 export interface AnticipationDecision {
   active: boolean;
-  /** Reel indices that should spin slower / longer. */
+  /** Reel indices that should spin slower / longer, in the order the ramp applies. */
   reels: number[];
-  slowdown: number;
-  holdMs: number;
+  /** Speed factor. A scalar when flat; a per-reel array when the decision ramps (see
+   *  `progressiveSlowdown` / a game-supplied `decide`). Resolve with `perReelValue`. */
+  slowdown: PerReel<number>;
+  /** Extra hold before landing. Scalar or per-reel array, same as `slowdown`. */
+  holdMs: PerReel<number>;
 }
+
+/** Fresh "nothing to anticipate" decision (fresh, so callers may mutate `reels` freely). */
+const none = (): AnticipationDecision => ({ active: false, reels: [], slowdown: 1, holdMs: 0 });
 
 export class AnticipationController {
   private _cfg: AnticipationConfig;
@@ -39,20 +45,22 @@ export class AnticipationController {
    * is flagged for the slow treatment (this mirrors "searching for the last scatter").
    */
   decide(targetGrid: CellData[][]): AnticipationDecision {
-    if (!this._cfg.enabled) return { active: false, reels: [], slowdown: 1, holdMs: 0 };
+    if (!this._cfg.enabled) return none();
+
+    // A game-supplied predicate replaces the symbol counting entirely.
+    if (this._cfg.decide) {
+      const custom = this._cfg.decide(targetGrid);
+      if (!custom) return none();
+      const o: AnticipationOverride = Array.isArray(custom) ? { reels: custom } : custom;
+      if (!o.reels?.length) return none();
+      return this.build(o.reels.slice(), o.slowdown, o.holdMs);
+    }
 
     if (Array.isArray(this._cfg.reels)) {
       // explicit reel list — arm only if the threshold is met somewhere on the board
       const total = targetGrid.reduce((sum, reel) => sum + this.countOnReel(reel), 0);
-      const active = total >= this._cfg.threshold;
-      return active
-        ? {
-            active,
-            reels: this._cfg.reels.slice(),
-            slowdown: this._cfg.slowdownFactor,
-            holdMs: this._cfg.holdMs,
-          }
-        : { active: false, reels: [], slowdown: 1, holdMs: 0 };
+      if (total < this._cfg.threshold) return none();
+      return this.build(this._cfg.reels.slice());
     }
 
     // 'trailing': find the reel where the cumulative count hits the threshold
@@ -65,12 +73,49 @@ export class AnticipationController {
         break;
       }
     }
-    if (armReel < 0) return { active: false, reels: [], slowdown: 1, holdMs: 0 };
+    if (armReel < 0) return none();
 
     const reels: number[] = [];
     for (let c = armReel + 1; c < targetGrid.length; c++) reels.push(c);
-    if (reels.length === 0) return { active: false, reels: [], slowdown: 1, holdMs: 0 };
-    return { active: true, reels, slowdown: this._cfg.slowdownFactor, holdMs: this._cfg.holdMs };
+    if (reels.length === 0) return none();
+    return this.build(reels);
+  }
+
+  /** Assemble a decision, applying the configured progression unless the caller pinned values. */
+  private build(
+    reels: number[],
+    slowdown?: PerReel<number>,
+    holdMs?: PerReel<number>,
+  ): AnticipationDecision {
+    return {
+      active: true,
+      reels,
+      slowdown:
+        slowdown ??
+        this.ramp(reels, this._cfg.slowdownFactor, (base, i) =>
+          i === 0 ? base : base * Math.pow(this._cfg.progressiveSlowdown, i),
+        ),
+      holdMs:
+        holdMs ??
+        this.ramp(reels, this._cfg.holdMs, (base, i) => base + this._cfg.progressiveHoldMs * i),
+    };
+  }
+
+  /**
+   * A flat scalar when the progression is a no-op, else an array INDEXED BY REEL so the engine can
+   * read a per-reel value straight out of `plan()`.
+   */
+  private ramp(
+    reels: number[],
+    base: number,
+    at: (base: number, i: number) => number,
+  ): PerReel<number> {
+    if (at(base, 1) === base) return base;
+    const out: (number | undefined)[] = [];
+    reels.forEach((reel, i) => {
+      out[reel] = at(base, i);
+    });
+    return out;
   }
 
   /** Optionally zoom the grid in while anticipating, then settle back. Returns a reset fn. */

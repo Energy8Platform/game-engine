@@ -190,6 +190,32 @@ export const SCHEMA: Section[] = [
         max: 24,
         step: 1,
       },
+      // `cascade-drop` pacing — the gap between cells of one reel, and how far each reel
+      // trails the one before it (both were hardcoded literals before).
+      {
+        kind: 'range',
+        path: 'motion.cellStagger',
+        label: 'Cell stagger (ms)',
+        min: 0,
+        max: 700,
+        step: 5,
+      },
+      {
+        kind: 'range',
+        path: 'motion.reelStaggerFactor',
+        label: 'Reel stagger ×',
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: 'range',
+        path: 'motion.dropFallFactor',
+        label: 'Drop fall ×',
+        min: 0.1,
+        max: 3,
+        step: 0.05,
+      },
     ],
   },
   {
@@ -219,6 +245,23 @@ export const SCHEMA: Section[] = [
         min: 0,
         max: 1200,
         step: 50,
+      },
+      // ramp the treatment across successive anticipated reels (1 / 0 = flat)
+      {
+        kind: 'range',
+        path: 'anticipation.progressiveSlowdown',
+        label: 'Slowdown ramp ×/reel',
+        min: 0.3,
+        max: 1,
+        step: 0.05,
+      },
+      {
+        kind: 'range',
+        path: 'anticipation.progressiveHoldMs',
+        label: 'Hold ramp (ms/reel)',
+        min: 0,
+        max: 600,
+        step: 25,
       },
       { kind: 'toggle', path: 'anticipation.zoom.enabled', label: 'Reel zoom' },
       {

@@ -17,7 +17,9 @@ import type { SymbolResolver } from '../grid/SymbolView';
 import {
   DEFAULT_REEL_CONFIG,
   INTENSITY_SCALE,
+  perReelValue,
   type MotionConfig,
+  type PerReel,
   type WinConfig,
 } from '../config/ReelSystemConfig';
 
@@ -32,8 +34,27 @@ export interface SpinRunOpts {
   turbo?: boolean;
   /** Reels to slow for anticipation (computed by the ReelSystem from config + targetGrid). */
   anticipateReels?: number[];
-  anticipateSlowdown?: number;
-  anticipateHoldMs?: number;
+  /** Speed factor for anticipated reels (lower = slower). Scalar, or per-reel indexed by reel. */
+  anticipateSlowdown?: PerReel<number>;
+  /** Extra hold (ms) for anticipated reels. Scalar, or per-reel indexed by reel. */
+  anticipateHoldMs?: PerReel<number>;
+  /**
+   * Reels whose tape runs normally but whose landing is NOT handed back. The engine stops and
+   * disposes of the tape as usual and leaves the real cells hidden and unseated; the caller owns
+   * their data and visibility from that point (and `skip()` will not reveal them either).
+   */
+  deferReveal?: number[];
+
+  // ── lifecycle ────────────────────────────────────────────────────────────
+  /** The resolved schedule, handed over before the first frame runs. Schedule against THESE
+   *  numbers rather than re-deriving `plan()`'s formula. */
+  onPlan?: (plan: ReelStopPlan[]) => void;
+  /** Fires on the frame a reel lands — after its cells are seated, before settle/squash/shake.
+   *  For a deferred reel it still fires (the reel DID stop); nothing was seated. */
+  onReelStop?: (reel: number, plan: ReelStopPlan) => void;
+  /** Fires as each cell takes its landing symbol. In `cascade-drop` this is the per-cell impact
+   *  frame (after the fall, before the squash) — the hook for a per-cell sound or shake. */
+  onCellSeated?: (reel: number, row: number, data: CellData) => void;
 }
 
 export interface ReelStopPlan {
@@ -43,6 +64,10 @@ export interface ReelStopPlan {
   landing: CellData[];
   settle: { amp: number; ms: number };
   anticipated: boolean;
+  /** Time-stretch applied to this reel's tape (>= 1, longer = slower). 1 when not anticipated. */
+  slowdown: number;
+  /** True when `deferReveal` withheld this reel's landing (see `SpinRunOpts.deferReveal`). */
+  deferred: boolean;
 }
 
 export class SpinEngine {
@@ -53,6 +78,7 @@ export class SpinEngine {
   private _killed = false;
   private _shaking = false;
   private _temp: Container[] = [];
+  private _deferred = new Set<number>();
 
   constructor(grid: ReelGrid, resolve: SymbolResolver, cfg: MotionConfig, win?: WinConfig) {
     this._grid = grid;
@@ -102,6 +128,7 @@ export class SpinEngine {
     const cols = this._grid.cols;
     const order = (reel: number) => (this._cfg.stopOrder === 'rtl' ? cols - 1 - reel : reel);
     const anticipate = new Set(opts?.anticipateReels ?? []);
+    const defer = new Set(opts?.deferReveal ?? []);
     const out: ReelStopPlan[] = [];
     for (let reel = 0; reel < cols; reel++) {
       const idx = order(reel);
@@ -116,7 +143,8 @@ export class SpinEngine {
       else stopTime = (this._cfg.spinUp + this._cfg.hold + idx * this._cfg.stopStagger) * f;
 
       const isAnticipated = anticipate.has(reel);
-      if (isAnticipated) stopTime += (opts?.anticipateHoldMs ?? 0) * f;
+      if (isAnticipated) stopTime += perReelValue(opts?.anticipateHoldMs, reel, 0) * f;
+      const speed = isAnticipated ? perReelValue(opts?.anticipateSlowdown, reel, 1) : 1;
 
       out.push({
         reel,
@@ -124,6 +152,8 @@ export class SpinEngine {
         landing: data.targetGrid[reel] ?? [],
         settle: { amp: this._cfg.settle.amp, ms: this._cfg.settle.ms * f },
         anticipated: isAnticipated,
+        slowdown: Math.max(1, 1 / (speed || 1)),
+        deferred: defer.has(reel),
       });
     }
     return out;
@@ -134,6 +164,9 @@ export class SpinEngine {
     this._killed = false;
     this._temp = [];
     const plan = this.plan(data, opts);
+    // remembered for skip(): a deferred reel's cells belong to the caller, not to us
+    this._deferred = new Set(plan.filter((p) => p.deferred).map((p) => p.reel));
+    opts?.onPlan?.(plan);
     const f = this.scale(opts);
     await Promise.all(plan.map((p) => this._runReel(p, data, opts, f)));
     this._cleanupTemp();
@@ -157,9 +190,9 @@ export class SpinEngine {
     }
   }
 
-  /** Anticipation time-stretch factor for a reel (>=1, longer = slower). */
-  private slowOf(p: ReelStopPlan, opts?: SpinRunOpts): number {
-    return p.anticipated ? Math.max(1, 1 / (opts?.anticipateSlowdown ?? 1)) : 1;
+  /** Anticipation time-stretch factor for a reel (>=1, longer = slower). Resolved in `plan()`. */
+  private slowOf(p: ReelStopPlan): number {
+    return p.slowdown;
   }
 
   // ── swap: cycle symbols quickly in the real cells, then land ──────────────
@@ -176,7 +209,7 @@ export class SpinEngine {
     const blur = this._applyBlur(cells, true);
     const tickMs = 1000 / 30;
     // anticipation makes the reel spin longer before it lands
-    const ticks = Math.max(6, Math.floor((p.stopTime * this.slowOf(p, opts)) / tickMs));
+    const ticks = Math.max(6, Math.floor((p.stopTime * this.slowOf(p)) / tickMs));
     for (let i = 0; i < ticks; i++) {
       if (this._killed) break;
       for (let r = 0; r < cells.length; r++)
@@ -184,7 +217,24 @@ export class SpinEngine {
       await Tween.delay(tickMs);
     }
     blur?.();
-    for (let r = 0; r < cells.length; r++) cells[r].setData(p.landing[r] ?? { symbol: null });
+    if (p.deferred) {
+      // the caller owns this reel's result — go dark and unseated instead of handing it back.
+      // NB 'swap' cycles the tape THROUGH the real cells, so a deferred reel only truly withholds
+      // its result when `SpinData.strip` supplies filler for it; otherwise the tape is built from
+      // the landing symbols. 'strip' and 'cascade-drop' have no such caveat.
+      cells.forEach((c) => {
+        c.setData({ symbol: null });
+        c.visible = false;
+      });
+      opts?.onReelStop?.(p.reel, p);
+      return;
+    }
+    for (let r = 0; r < cells.length; r++) {
+      const cell = p.landing[r] ?? { symbol: null };
+      cells[r].setData(cell);
+      opts?.onCellSeated?.(p.reel, r, cell);
+    }
+    opts?.onReelStop?.(p.reel, p);
     await this._settle(p.reel, p.settle, f);
     await this._frameShake(p.landing);
   }
@@ -228,7 +278,7 @@ export class SpinEngine {
     this._temp.push(tape);
     const clearBlur = this._applyBlur([tape], true);
 
-    const slow = this.slowOf(p, opts);
+    const slow = this.slowOf(p);
     // overshoot/settle honour the configured settle (amp in px, easing)
     const overshoot = p.settle.amp || step * 0.18;
     await Tween.to(
@@ -248,11 +298,20 @@ export class SpinEngine {
       Math.max(120, p.settle.ms),
       easingByName(this._cfg.settle.easing),
     );
-    // hand the result back to the real cells
-    for (let r = 0; r < rows; r++) realCells[r].setData(p.landing[r] ?? { symbol: null });
-    realCells.forEach((c) => (c.visible = true));
+    // hand the result back to the real cells — unless the caller deferred the reveal, in which
+    // case the tape simply goes away and the reel is left dark, unseated and owned by the caller
+    if (!p.deferred) {
+      for (let r = 0; r < rows; r++) {
+        const cell = p.landing[r] ?? { symbol: null };
+        realCells[r].setData(cell);
+        opts?.onCellSeated?.(p.reel, r, cell);
+      }
+      realCells.forEach((c) => (c.visible = true));
+    }
     tape.destroy();
     this._temp = this._temp.filter((t) => t !== tape);
+    opts?.onReelStop?.(p.reel, p);
+    if (p.deferred) return;
     // squash the real cells on impact when enabled
     if (this._cfg.squash.enabled) await Promise.all(realCells.map((c) => this._squashCell(c, f)));
     await this._frameShake(p.landing);
@@ -261,27 +320,41 @@ export class SpinEngine {
   // ── cascade-drop: symbols drop in from above with stagger + bounce + squash ─
   private async _runDrop(p: ReelStopPlan, opts: SpinRunOpts | undefined, f: number): Promise<void> {
     const rows = this._grid.rowsOf(p.reel);
+    if (p.deferred) {
+      // nothing to drop — the caller brings this reel in itself
+      for (let r = 0; r < rows; r++) this._grid.getCell(p.reel, r).visible = false;
+      opts?.onReelStop?.(p.reel, p);
+      return;
+    }
     const step = this._grid.cellPosition(p.reel, 1).y - this._grid.cellPosition(p.reel, 0).y;
-    const slow = this.slowOf(p, opts); // anticipation drops the reel in more slowly
+    const slow = this.slowOf(p); // anticipation drops the reel in more slowly
     await Promise.all(
       Array.from({ length: rows }, (_, r) => r).map(async (r) => {
         if (this._killed) return;
         const cell = this._grid.getCell(p.reel, r);
         const to = this._grid.cellPosition(p.reel, r);
-        cell.setData(p.landing[r] ?? { symbol: null });
+        const data = p.landing[r] ?? { symbol: null };
+        cell.setData(data);
         cell.position.set(to.x, to.y - step * (rows + 1));
         cell.alpha = 1;
-        const delay = (p.reel * this._cfg.stopStagger * 0.4 + r * 24) * f * slow;
+        const delay =
+          (p.reel * this._cfg.stopStagger * this._cfg.reelStaggerFactor +
+            r * this._cfg.cellStagger) *
+          f *
+          slow;
         if (delay) await Tween.delay(delay);
         await Tween.to(
           cell,
           { 'position.y': to.y },
-          this._cfg.spinUp * 0.6 * f * slow,
+          this._cfg.spinUp * this._cfg.dropFallFactor * f * slow,
           easingByName(this._cfg.settle.easing),
         );
+        // the impact frame — fired before the squash so a game can sync its own hit feedback
+        opts?.onCellSeated?.(p.reel, r, data);
         await this._squashCell(cell, f);
       }),
     );
+    opts?.onReelStop?.(p.reel, p);
     await this._frameShake(p.landing);
   }
 
@@ -369,12 +442,16 @@ export class SpinEngine {
     Tween.killTweensOf(this._grid);
     this._grid.x = 0; // undo any in-flight frame shake
     for (let c = 0; c < this._grid.cols; c++) {
+      // a deferred reel's visibility belongs to the caller — a slam stop must not reveal it
+      const deferred = this._deferred.has(c);
       for (let r = 0; r < this._grid.rowsOf(c); r++) {
         const cell = this._grid.getCell(c, r);
         if (cell.destroyed) continue;
         Tween.killTweensOf(cell);
-        cell.visible = true;
-        cell.alpha = 1;
+        if (!deferred) {
+          cell.visible = true;
+          cell.alpha = 1;
+        }
         cell.filters = [];
         cell.scale.set(1);
       }

@@ -9,8 +9,16 @@ import { Tween } from '../../animation';
 import { ReelGrid } from '../grid/ReelGrid';
 import type { CellData } from '../grid/SymbolCell';
 import type { SymbolResolver } from '../grid/SymbolView';
-import { SpinEngine, type SpinData, type SpinRunOpts } from '../motion/SpinEngine';
-import { AnticipationController } from '../motion/AnticipationController';
+import {
+  SpinEngine,
+  type ReelStopPlan,
+  type SpinData,
+  type SpinRunOpts,
+} from '../motion/SpinEngine';
+import {
+  AnticipationController,
+  type AnticipationDecision,
+} from '../motion/AnticipationController';
 import { TumbleController, type TumbleStep } from '../cascade/TumbleController';
 import { ReelStepController, type ReelStepData } from '../cascade/ReelStepController';
 import { FEATURES, FEATURE_LIST, type FeatureContext, type ReelFeature } from '../features';
@@ -65,6 +73,14 @@ export interface ReelSystem {
   /** Replace the whole config. */
   setConfig(config: ReelSystemConfig): void;
   spin(target: CellData[][], opts?: SpinRunOpts): Promise<void>;
+  /**
+   * The schedule `spin(target, opts)` WOULD run, without running it — same anticipation decision,
+   * same numbers. Schedule landing sounds / camera moves against this instead of re-deriving the
+   * engine's formula. (`spin`'s `onPlan` hands you the same array once the spin is under way.)
+   */
+  planSpin(target: CellData[][], opts?: SpinRunOpts): ReelStopPlan[];
+  /** The anticipation decision `spin(target, opts)` would use (run options override the config). */
+  anticipationFor(target: CellData[][], opts?: SpinRunOpts): AnticipationDecision;
   /** Run a cascade chain. With `freeSpins` + `cascade.multiplier.persistInFreeSpins`, the multiplier
    *  carries over instead of resetting. Generic in the step type, so `onStep` hands back the game's
    *  own step (with its per-step win) rather than the bare TumbleStep. */
@@ -191,6 +207,36 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
     return { grid, resolve, cfg: config, fx, board, freeSpins, log };
   }
 
+  /**
+   * Which reels get the anticipation treatment for this spin. An explicit `anticipateReels` on the
+   * run options WINS over the configured decision — passing it is how a game drives anticipation
+   * from its own logic. Omit it and the configured `AnticipationController` decides.
+   */
+  function resolveAnticipation(target: CellData[][], runOpts?: SpinRunOpts): AnticipationDecision {
+    const explicit = runOpts?.anticipateReels;
+    if (!explicit) return anticipation.decide(target);
+    if (!explicit.length) return { active: false, reels: [], slowdown: 1, holdMs: 0 };
+    return {
+      active: true,
+      reels: explicit.slice(),
+      slowdown: runOpts?.anticipateSlowdown ?? config.anticipation.slowdownFactor,
+      holdMs: runOpts?.anticipateHoldMs ?? config.anticipation.holdMs,
+    };
+  }
+
+  /** Fold a resolved decision back onto the caller's run options (everything else passes through). */
+  function mergeAnticipation(
+    runOpts: SpinRunOpts | undefined,
+    decision: AnticipationDecision,
+  ): SpinRunOpts {
+    return {
+      ...runOpts,
+      anticipateReels: decision.active ? decision.reels : undefined,
+      anticipateSlowdown: decision.slowdown,
+      anticipateHoldMs: decision.holdMs,
+    };
+  }
+
   buildGrid();
 
   const api: ReelSystem = {
@@ -237,20 +283,24 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
       api.setConfig(mergeReelConfig(config, partial));
     },
 
+    anticipationFor(target, runOpts) {
+      return resolveAnticipation(target, runOpts);
+    },
+
+    planSpin(target, runOpts) {
+      const decision = resolveAnticipation(target, runOpts);
+      return spin.plan({ targetGrid: target }, mergeAnticipation(runOpts, decision));
+    },
+
     async spin(target, runOpts) {
       const data: SpinData = { targetGrid: target };
-      const decision = anticipation.decide(target);
+      const decision = resolveAnticipation(target, runOpts);
       let resetZoom: (() => Promise<void>) | null = null;
       if (decision.active) {
         log?.(`Anticipation on reels [${decision.reels.join(', ')}]`);
         resetZoom = await anticipation.zoomIn(grid);
       }
-      await spin.run(data, {
-        ...runOpts,
-        anticipateReels: decision.active ? decision.reels : undefined,
-        anticipateSlowdown: decision.slowdown,
-        anticipateHoldMs: decision.holdMs,
-      });
+      await spin.run(data, mergeAnticipation(runOpts, decision));
       if (resetZoom) await resetZoom();
       board = target;
     },

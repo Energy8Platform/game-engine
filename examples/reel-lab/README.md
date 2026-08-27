@@ -20,8 +20,10 @@ npm run dev --workspace reel-lab-example                  # → http://localhost
   reel mask. The header shows the live ways-to-win count.
 - **Motion** — style (`swap` / `strip` / `cascade-drop`), spin-up, hold, stop stagger, stop mode
   (sequential / sync / random) + order, settle bounce, squash-on-land, motion blur, turbo factor,
-  intensity, slam stop, tape length.
-- **Anticipation** — trailing-reel slow-down threshold, slowdown factor, hold, optional reel zoom.
+  intensity, slam stop, tape length, and the `cascade-drop` pacing: cell stagger (gap between
+  consecutive cells of one reel), reel stagger factor, drop fall factor.
+- **Anticipation** — trailing-reel slow-down threshold, slowdown factor, hold, the per-reel ramp
+  (slowdown ramp ×/reel and hold ramp ms/reel), optional reel zoom.
 - **Cascade / Tumble** — gravity, dim non-winners, per-step deceleration, timings, and a climbing
   win multiplier (additive / multiplicative).
 - **Win presentation** — highlight scale, glow, frame shake.

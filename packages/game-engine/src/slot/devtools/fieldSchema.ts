@@ -134,6 +134,9 @@ export const REEL_FIELD_SCHEMA: Section[] = [
       { kind: 'select', path: 'motion.intensity', label: 'Intensity', options: ['full', 'reduced', 'minimal'] },
       { kind: 'toggle', path: 'motion.slamStop', label: 'Slam stop' },
       { kind: 'range', path: 'motion.symbolsPerReel', label: 'Tape length', min: 3, max: 24, step: 1 },
+      { kind: 'range', path: 'motion.cellStagger', label: 'Cell stagger (ms)', min: 0, max: 700, step: 5 },
+      { kind: 'range', path: 'motion.reelStaggerFactor', label: 'Reel stagger ×', min: 0, max: 3, step: 0.05 },
+      { kind: 'range', path: 'motion.dropFallFactor', label: 'Drop fall ×', min: 0.1, max: 3, step: 0.05 },
     ],
   },
   {
@@ -144,6 +147,8 @@ export const REEL_FIELD_SCHEMA: Section[] = [
       { kind: 'range', path: 'anticipation.threshold', label: 'Threshold (N−1)', min: 1, max: 6, step: 1 },
       { kind: 'range', path: 'anticipation.slowdownFactor', label: 'Slowdown', min: 0.1, max: 1, step: 0.05 },
       { kind: 'range', path: 'anticipation.holdMs', label: 'Hold (ms)', min: 0, max: 1200, step: 50 },
+      { kind: 'range', path: 'anticipation.progressiveSlowdown', label: 'Slowdown ramp ×/reel', min: 0.3, max: 1, step: 0.05 },
+      { kind: 'range', path: 'anticipation.progressiveHoldMs', label: 'Hold ramp (ms/reel)', min: 0, max: 600, step: 25 },
       { kind: 'toggle', path: 'anticipation.zoom.enabled', label: 'Reel zoom' },
       { kind: 'range', path: 'anticipation.zoom.scale', label: 'Zoom scale', min: 1, max: 1.6, step: 0.05 },
       { kind: 'range', path: 'anticipation.zoom.ms', label: 'Zoom (ms)', min: 200, max: 1200, step: 50 },
