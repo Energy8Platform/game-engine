@@ -5,6 +5,11 @@
  * drains fully before the next auto-spin), updating the shell's autoplay readout each spin and
  * halting on Stop, on an unaffordable spin, or on a play error.
  *
+ * Two ways a run ends, and they differ in what the player is left looking at: `stop()` clears the
+ * counter (the player pressed STOP, or the budget ran out — the run is over), while `halt()` keeps
+ * it (a lost connection cut the run short; the spins are still owed, and the shell shows them so
+ * the player can resume).
+ *
  * Sequential by construction: it awaits each round (incl. its bonus drain) before the next, so
  * there is never more than one round in flight. Pure over injected deps — unit-testable.
  */
@@ -20,10 +25,18 @@ export interface AutoplayDeps {
 }
 
 export interface Autoplay {
-  /** Begin an autoplay run of `count` rounds (no-op if already running or count ≤ 0). */
+  /** Begin an autoplay run of `count` rounds (no-op if already running or count ≤ 0). Also how a
+   *  halted run RESUMES: the shell sends the preserved count back (`start(remaining)`). */
   start(count: number): void;
-  /** Stop the run; the in-flight round (if any) finishes, then the loop exits. */
+  /** Stop the run and clear the counter — the player pressed STOP, or the budget ran out. */
   stop(): void;
+  /**
+   * Halt the run but KEEP the counter: the run was cut short by something that isn't the player and
+   * isn't the budget — a lost connection, a failed round. The player then sees how many spins were
+   * left and can resume them (`start(remaining)`), which is what a certification lab means by
+   * "autoplay stops, and after reconnection the counter is displayed correctly".
+   */
+  halt(): void;
   readonly active: boolean;
   readonly remaining: number;
 }
@@ -40,6 +53,12 @@ export function createAutoplayLoop(deps: AutoplayDeps): Autoplay {
     deps.onState({ active: false, remaining: 0 });
   };
 
+  const halt = (): void => {
+    if (!active) return; // nothing running — nothing to preserve
+    active = false;
+    deps.onState({ active: false, remaining });
+  };
+
   async function loop(): Promise<void> {
     if (running) return;
     running = true;
@@ -53,7 +72,9 @@ export function createAutoplayLoop(deps: AutoplayDeps): Autoplay {
         try {
           await deps.playRound(action);
         } catch {
-          stop(); // a play error already surfaced its own modal — just halt the run
+          // The round failed (the host surfaces its own message, if any is due). Halt rather than
+          // stop: a connection blip must not eat the spins the player still has coming.
+          halt();
           return;
         }
       }
@@ -72,6 +93,7 @@ export function createAutoplayLoop(deps: AutoplayDeps): Autoplay {
       void loop();
     },
     stop,
+    halt,
     get active() { return active; },
     get remaining() { return remaining; },
   };

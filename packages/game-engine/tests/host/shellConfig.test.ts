@@ -502,6 +502,30 @@ describe('applyJurisdiction (Stake jurisdiction → shell features)', () => {
     expect(f.buyBonus).toBe(false);
   });
 
+  // Замечание Artube: «Spacebar to Spin … is not available on mobile devices» — а секция Hotkeys
+  // показывалась на мобильном клиенте. Платформа сама называет устройство в launch-URL (и Stake, и
+  // Artube кладут его в initData.device) — это и есть самый честный ответ на вопрос «есть ли клавиши».
+  it('мобильный запуск гасит клавиатуру целиком', () => {
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base', device: 'mobile' });
+    expect(c.features.hotkeys).toBe(false);
+  });
+
+  it('мобильный запуск перебивает даже явное hotkeys: true от игры', () => {
+    const c = buildShellConfig(
+      { features: { turbo: 0, hotkeys: true, spacebar: true, autoplay: {}, buyBonus: [] } },
+      model,
+      { balance: 0, mode: 'base', device: 'mobile' },
+    );
+    expect(c.features.hotkeys).toBe(false);
+  });
+
+  it('на десктопе решение остаётся за шеллом — хост не навязывает своего', () => {
+    // Не `true`: шелл сам померит клиента (core/device.ts). Хост говорит, только когда знает точно.
+    const c = buildShellConfig({}, model, { balance: 0, mode: 'base', device: 'desktop' });
+    expect(c.features.hotkeys).toBeUndefined();
+    expect(buildShellConfig({}, model, { balance: 0, mode: 'base' }).features.hotkeys).toBeUndefined();
+  });
+
   it('a jurisdiction restriction wins over the author features (via buildShellConfig)', () => {
     const c = buildShellConfig(
       { features: { turbo: 3, spacebar: true, autoplay: {}, buyBonus: [] } },

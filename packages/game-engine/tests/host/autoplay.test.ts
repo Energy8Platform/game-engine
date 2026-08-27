@@ -56,6 +56,85 @@ describe('createAutoplayLoop', () => {
     expect(plays).toHaveLength(1);
   });
 
+  // ── Обрыв связи (замечание Artube: «autoplay stops, and after reconnection the counter is
+  //    displayed correctly») ─────────────────────────────────────────────────────────────────
+  describe('halt(): прогон прерван не игроком', () => {
+    it('останавливает прогон, но СОХРАНЯЕТ остаток для показа', async () => {
+      let resolveRound!: () => void;
+      const { deps, plays, states } = harness({
+        playRound: (a) => { plays.push(a); return new Promise<void>((r) => { resolveRound = r; }); },
+      });
+      const a = createAutoplayLoop(deps);
+      a.start(5);
+      await vi.waitFor(() => expect(plays.length).toBe(1)); // 1 в полёте, 4 в остатке
+      a.halt();
+      resolveRound();
+      await vi.waitFor(() => expect(a.active).toBe(false));
+
+      expect(plays).toHaveLength(1); // следующий авто-спин не стартовал
+      expect(a.remaining).toBe(4);
+      // Именно это видит игрок после реконнекта: прогон стоит, счётчик цел.
+      expect(states.at(-1)).toEqual({ active: false, remaining: 4 });
+    });
+
+    it('прерванный прогон продолжается с того же места', async () => {
+      const plays: string[] = [];
+      const states: Array<{ active: boolean; remaining: number }> = [];
+      let release!: () => void;
+      const a = createAutoplayLoop({
+        resolveAction: () => 'spin',
+        canAfford: () => true,
+        // Первый раунд висит (в нём и рвётся связь), остальные проходят.
+        playRound: (act) => {
+          plays.push(act);
+          return plays.length === 1 ? new Promise<void>((r) => { release = r; }) : Promise.resolve();
+        },
+        onState: (s) => { states.push({ ...s }); },
+      });
+      a.start(5);
+      await vi.waitFor(() => expect(plays.length).toBe(1));
+      a.halt();
+      release();
+      await vi.waitFor(() => expect(a.active).toBe(false));
+      expect(a.remaining).toBe(4);
+
+      a.start(a.remaining); // так шелл возобновляет прогон нажатием на диск
+      await vi.waitFor(() => expect(a.active).toBe(false));
+      expect(plays).toHaveLength(5); // 1 до обрыва + 4 после — ровно заказанные игроком
+      expect(states.at(-1)).toEqual({ active: false, remaining: 0 });
+    });
+
+    it('stop() поверх halt() убирает счётчик — игрок отказался от остатка', async () => {
+      const { deps, states } = harness();
+      const a = createAutoplayLoop(deps);
+      a.start(5);
+      a.halt();
+      await vi.waitFor(() => expect(a.active).toBe(false));
+      expect(a.remaining).toBeGreaterThan(0);
+
+      a.stop();
+      expect(a.remaining).toBe(0);
+      expect(states.at(-1)).toEqual({ active: false, remaining: 0 });
+    });
+
+    it('halt() без активного прогона ничего не трогает', () => {
+      const { deps, states } = harness();
+      const a = createAutoplayLoop(deps);
+      a.halt();
+      expect(states).toEqual([]);
+    });
+
+    it('ошибка спина тоже сохраняет остаток (модалку показывает хост)', async () => {
+      const { deps, states } = harness({
+        playRound: async () => { throw new Error('connection lost'); },
+      });
+      const a = createAutoplayLoop(deps);
+      a.start(5);
+      await vi.waitFor(() => expect(a.active).toBe(false));
+      expect(states.at(-1)).toEqual({ active: false, remaining: 4 });
+    });
+  });
+
   it('start() is a no-op while already running or for count ≤ 0', async () => {
     const { deps, plays } = harness();
     const a = createAutoplayLoop(deps);

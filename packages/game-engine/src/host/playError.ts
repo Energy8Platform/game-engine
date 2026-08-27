@@ -16,7 +16,22 @@ export interface PlayErrorView {
   body: string;
   /** Offer a Reload action (the round can only be recovered by reloading). */
   reload: boolean;
+  /**
+   * The LINK failed, not the round: the bridge is already reconnecting, and the connection overlay
+   * (driven by `connectionStateChanged`) owns the screen. Such a failure gets NO modal of its own —
+   * a "reload the page" screen over a blip the bridge heals by itself is exactly the wrong answer,
+   * and it was the one the player used to get, because every autoplay round is a play in flight.
+   */
+  connection?: boolean;
 }
+
+/**
+ * Codes that mean "the connection died", per bridge:
+ *  - `ConnectionLost` / `ConnectionFailed` — Artube's WS client (a pending play on a dropped
+ *    socket, or a play attempted while the socket is down);
+ *  - `ERR_NET` — Stake's RGS client, after its retries are exhausted on a network-level failure.
+ */
+const CONNECTION_CODES = new Set(['ConnectionLost', 'ConnectionFailed', 'ERR_NET']);
 
 /** Pull a Stake/SDK error code off an unknown thrown value. */
 export function errorCode(err: unknown): string | undefined {
@@ -27,6 +42,14 @@ export function errorCode(err: unknown): string | undefined {
 export function resolvePlayError(err: unknown): PlayErrorView {
   const code = errorCode(err);
   const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  if (code && CONNECTION_CODES.has(code)) {
+    return {
+      title: 'Connection lost',
+      body: 'Lost connection to the game server. Trying to reconnect…',
+      reload: false,
+      connection: true,
+    };
+  }
   switch (code) {
     case 'ACTIVE_SESSION_EXISTS':
       return {

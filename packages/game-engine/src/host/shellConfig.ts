@@ -66,6 +66,11 @@ export interface ShellRuntime {
   /** Jurisdiction flags from initData (`config.jurisdiction`). Restrict shell features — applied
    *  OVER the author's features so a jurisdiction restriction always wins. */
   jurisdiction?: JurisdictionRestrictions;
+  /** The client the platform launched us on (`initData.device`; both bridges read it off the launch
+   *  URL). `'mobile'` turns the whole keyboard surface off — the shortcuts and the Hotkeys section
+   *  that documents them. Left unset the shell measures the client itself (shell's core/device.ts);
+   *  the host only speaks when the platform told it outright. */
+  device?: 'desktop' | 'mobile' | string;
   /** Bet ladder from `/wallet/authenticate` (`initData.config.betLevels`, major units). Stake ladders
    *  are CURRENCY-SPECIFIC (us_/non_us_/social_), so this overrides the spec's static `betLevels` on a
    *  Stake launch; falls back to the spec on dev/devBridge. */
@@ -492,6 +497,10 @@ export function buildShellConfig(
     ...(opts.features ?? {}),
   } as ShellFeatures;
   applyJurisdiction(features, runtime.jurisdiction);
+  // A phone has no keys to press: no Spacebar-to-spin, and no keycap chart advertising it. Applied
+  // after the author's features for the same reason a jurisdiction restriction is — the platform
+  // knows what it launched us on, and a game can't opt out of the hardware.
+  if (runtime.device === 'mobile') features.hotkeys = false;
   return {
     language: runtime.language ?? 'en',
     isSocial,

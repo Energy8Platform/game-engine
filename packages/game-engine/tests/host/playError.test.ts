@@ -30,6 +30,24 @@ describe('resolvePlayError', () => {
     expect(v.reload).toBe(true);
   });
 
+  // Artube's client rejects a play whose socket died with `ConnectionLost`, Stake's RGS with
+  // `ERR_NET`. Both mean "the LINK failed, the round didn't" — the bridge is already reconnecting,
+  // so the player must see "Reconnecting…", never a "reload the page" screen.
+  it.each(['ConnectionLost', 'ConnectionFailed', 'ERR_NET'])(
+    '%s → a connection failure: no modal of its own, no reload',
+    (code) => {
+      const v = resolvePlayError(new FakeSDKError(code, 'connection lost'));
+      expect(v.connection).toBe(true);
+      expect(v.reload).toBe(false);
+    },
+  );
+
+  it('a round error is NOT a connection failure', () => {
+    expect(resolvePlayError(new FakeSDKError('ACTIVE_SESSION_EXISTS', 'x')).connection).toBeFalsy();
+    expect(resolvePlayError(new FakeSDKError('WEIRD_CODE', 'x')).connection).toBeFalsy();
+    expect(resolvePlayError(new FakeSDKError('INSUFFICIENT_FUNDS', 'x')).connection).toBeFalsy();
+  });
+
   it('errorCode pulls a string code, else undefined', () => {
     expect(errorCode(new FakeSDKError('X', 'm'))).toBe('X');
     expect(errorCode(new Error('plain'))).toBeUndefined();

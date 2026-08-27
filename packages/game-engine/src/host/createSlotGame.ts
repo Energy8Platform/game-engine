@@ -9,6 +9,7 @@ import { releaseExternalOverlay } from '@energy8platform/platform-core/loading';
 import type { SlotSpinResultBase } from '@energy8platform/platform-core/slot-result';
 import type { ShellMode } from '@energy8platform/shell/pixi';
 import type { SceneApi, SlotSceneController, RenderContext } from './sceneController';
+import type { ConnectionState } from './connectionRecovery';
 import type { FreeSpinsView } from './freeSpinsCounter';
 
 /**
@@ -282,6 +283,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
        *  per session; demo sessions are 'FUN'); Stake sends full meta on `config.currency` instead. */
       currency?: string;
       lang?: string;
+      /** The client the platform launched us on. Both bridges read it off the launch URL
+       *  (Stake's `device=`, Artube's `device=`); absent on dev/devBridge launches. */
+      device?: string;
     } | null;
     const config = initData?.config;
     // A reload mid-round is just another entry: authenticate answers with BOTH the currency's
@@ -324,6 +328,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       social: config?.socialMode,
       disclaimerLines: config?.disclaimerLines,
       jurisdiction: config?.jurisdiction,
+      // Decides whether the shell offers a keyboard at all — see buildShellConfig.
+      device: initData?.device,
       // Currency-specific ladder + per-currency default from /wallet/authenticate (Stake) or the
       // backend's `allowed_bets` (Artube); absent on dev/devBridge → buildShellConfig falls back to
       // the spec.
@@ -490,32 +496,39 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         return currentTurbo;
       },
     });
-    // Play-error + connection handling. A play rejection is classified into a player-facing modal
-    // (ACTIVE_SESSION_EXISTS → Reload, etc.) instead of a misleading reconnect overlay; the reconnect
-    // overlay is suppressed while a play-error modal owns the screen.
+    // Play-error + connection handling. A play rejection is classified (playError.ts): a failed
+    // ROUND gets a player-facing modal (ACTIVE_SESSION_EXISTS → Reload, etc.), a failed LINK gets
+    // none — the reconnect overlay owns that screen (connectionRecovery.ts). Either way the failure
+    // halts an autoplay run WITHOUT clearing its counter. The overlay stays suppressed while a
+    // play-error modal owns the screen.
     let playErrorOpen = false;
     let stopAutoplay: () => void = () => {}; // wired to the autoplay loop once it's created (below)
+    let haltAutoplay: () => void = () => {}; // ditto — stops the run but KEEPS its counter
+    const reload = () => {
+      try {
+        window.location.reload();
+      } catch {
+        /* non-browser */
+      }
+    };
     const showPlayError = (err: unknown): void => {
-      stopAutoplay(); // a play error halts an autoplay run (the .catch swallows, so stop explicitly)
       const v = resolvePlayError(err);
+      // Halt, don't stop: the spins the player still has coming outlive the failure, so the bar can
+      // show them (and offer to resume). The .catch in playRound swallows the rejection, so the
+      // autoplay loop can't see it — this is what ends the run.
+      haltAutoplay();
+      // A failed LINK is not a failed round. The bridge is already reconnecting and the connection
+      // overlay owns the screen; a modal here is exactly the "reload the page" screen that showed
+      // up on every network blip — and only in autoplay, since only autoplay always has a play in
+      // flight when the socket dies.
+      if (v.connection) return;
       playErrorOpen = true;
       shell!.openModal({
         availableClose: !v.reload,
         title: shell!.t(v.title),
         body: shell!.t(v.body),
         actions: v.reload
-          ? [
-              {
-                title: shell!.t('Reload'),
-                on: () => {
-                  try {
-                    window.location.reload();
-                  } catch {
-                    /* non-browser */
-                  }
-                },
-              },
-            ]
+          ? [{ title: shell!.t('Reload'), on: reload }]
           : [
               {
                 title: shell!.t('OK'),
@@ -526,18 +539,35 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
             ],
       });
     };
-    ps?.on('connectionStateChanged', (s: { status: string }) => {
-      if (s.status === 'restored') {
-        if (!playErrorOpen) shell!.closeModal();
-        return;
-      }
-      if (playErrorOpen) return; // a play-error modal owns the screen — don't mask it with "reconnecting"
-      shell!.openModal({
-        availableClose: false,
-        title: shell!.t('Reconnecting…'),
-        body: shell!.t('Lost connection to the game server. Trying to reconnect…'),
-      });
+    // Connection loss/return. Assigned below, once `resumeDrain` exists: a restored link finishes
+    // the round the drop interrupted, and it must not reach the drain before it is defined.
+    let recoverRound: (
+      snapshot: import('@energy8platform/platform-core').PlayResultData,
+    ) => Promise<void> = async () => {};
+    const { createConnectionRecovery } = await import('./connectionRecovery');
+    const connection = createConnectionRecovery({
+      haltAutoplay: () => haltAutoplay(),
+      showReconnecting: () =>
+        shell!.openModal({
+          availableClose: false,
+          title: shell!.t('Reconnecting…'),
+          body: shell!.t('Lost connection to the game server. Trying to reconnect…'),
+        }),
+      // The bridge stopped retrying: say so instead of leaving "Reconnecting…" up for good.
+      showGone: () =>
+        shell!.openModal({
+          availableClose: false,
+          title: shell!.t('Connection lost'),
+          body: shell!.t('Could not reconnect to the game server. Please reload the game.'),
+          actions: [{ title: shell!.t('Reload'), on: reload }],
+        }),
+      dismiss: () => shell!.closeModal(),
+      getState: async () => (await ps?.getState()) ?? null,
+      drain: (snapshot) => recoverRound(snapshot),
+      onError: showPlayError,
+      isBlocked: () => playErrorOpen,
     });
+    ps?.on('connectionStateChanged', (s: ConnectionState) => void connection.onState(s));
 
     // Skip state: `currentSegmentAbort` is the controller for the segment presently animating;
     // `presenting` is true for the whole play→drain window (gates the double-tap detector so taps
@@ -740,82 +770,27 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         });
     };
 
-    /**
-     * Drain a recovered open round to completion and settle it. Plays EVERY remaining segment from
-     * the bonus start (Continue animates each; Finish fast-forwards without animation), reaching the
-     * final ack so /wallet/end-round credits the win — fixing the old resume that presented one
-     * snapshot and never settled. The original trigger is gone on reload, so the FS counter here uses
-     * the bridge's session counts; FS mode is entered/exited around the drain.
-     */
-    const resumeDrain = async (
-      firstRaw: import('@energy8platform/platform-core').PlayResultData,
-      animate: boolean,
-    ): Promise<void> => {
-      const scene = gameScene();
-      if (!scene || !ps) return;
-      // A recovered drain isn't skippable (no live skip gesture wired to it), so it gets a stable,
-      // never-aborted signal to satisfy onSpin's RenderContext. ctx carries the round identity (built
-      // once from the trigger action) — recovery drains a single flat bonus using the bridge session
-      // counts; the full per-level nesting is a LIVE-play concern (playRound).
-      const ctx: RenderContext = {
-        ...makeContext((firstRaw as { action?: string }).action ?? 'spin'),
-        signal: new AbortController().signal,
-      };
-      const fsView = (raw: unknown, totalWin: number) => {
-        const s = (raw as { session?: { spinsPlayed?: number; spinsRemaining?: number } }).session;
-        if (!s) return null;
-        // The bridge session counts ALL segments incl. the trigger (segment 0); the free-spins
-        // counter is over FREE spins only, so drop the one trigger segment → 1/10, not 2/11.
-        const played = s.spinsPlayed ?? 0;
-        const current = Math.max(0, played - 1);
-        const total = Math.max(0, played + (s.spinsRemaining ?? 0) - 1);
-        return { current, total, totalWin };
-      };
-      let raw = firstRaw;
-      let r = enrichRoundMeta(opts.normalize(raw), raw);
-      let inBonus = false;
-      let prevWin = 0; // cumulative win up to the previous segment — WIN readout shows the delta
-      const applySegment = async (): Promise<void> => {
-        // A recovered open round with remaining segments is a bonus → show bonus mode + counter.
-        if (!inBonus && !r.complete) {
-          inBonus = true;
-          shell!.setMode(bonusShellMode);
-        }
-        shell!.setWin(0, { animate: false }); // clear WIN before this segment animates (see playRound)
-        if (animate) winReporter.open(); // a fast-forward drain doesn't present → no reports expected
-        if (animate) await scene.onSpin(r, ctx);
-        if (inBonus) {
-          const v = fsView(raw, r.totalWin);
-          if (v) applyBonusReadout(r, v, ctx.mode);
-        }
-        winReporter.close();
-        shell!.setWin(r.totalWin - prevWin); // THIS spin's win, not the cumulative bonus total
-        prevWin = r.totalWin;
-        ps!.playAck(raw); // settles via /wallet/end-round on the FINAL segment
-      };
-      shell!.setBusy(true); // block input while the recovered round drains
-      try {
-        await applySegment();
-        while (!r.complete && r.nextActions && r.nextActions.length > 0) {
-          raw = (await ps.play({
-            action: r.nextActions[0],
-            bet: ctx.bet,
-            roundId: r.roundId,
-          })) as import('@energy8platform/platform-core').PlayResultData;
-          r = enrichRoundMeta(opts.normalize(raw), raw);
-          await applySegment();
-        }
-        if (inBonus) {
-          shell!.setMode('base');
-          // Same as playRound: on return to base the WIN readout must show the round's cumulative
-          // total (r is the final drained segment), not the last segment's per-spin delta.
-          shell!.setWin(r.totalWin);
-        }
-      } finally {
-        winReporter.close(); // also closes the window when a drained segment threw
-        shell!.setBusy(false);
-      }
-    };
+    // Drain a recovered open round (reload / dropped connection) to settlement — see resumeDrain.ts.
+    // `scene` folds in the old `!ps` guard: with no session there is nothing to play or ack.
+    const { createResumeDrain } = await import('./resumeDrain');
+    const resumeDrain = createResumeDrain<T>({
+      scene: () => (ps ? gameScene() : undefined),
+      play: (req) => ps!.play(req),
+      ack: (raw) => ps!.playAck(raw),
+      normalize: opts.normalize,
+      context: makeContext,
+      setWin: (amount, o) => shell!.setWin(amount, o),
+      setMode: (m) => shell!.setMode(m),
+      setBusy: (b) => shell!.setBusy(b),
+      winReporter,
+      applyBonusReadout,
+      bonusMode: bonusShellMode,
+    });
+    // A round interrupted by a dropped connection is finished the same way a round interrupted by a
+    // reload is — animated, through to settlement — except nothing asks the player first: it is
+    // their own round, and an extra confirmation screen is what the reconnect flow is meant to
+    // avoid. (The reload path keeps its Continue/Finish offer: there, the player has been away.)
+    recoverRound = (snapshot) => resumeDrain(snapshot, true);
 
     if (mode === 'base') {
       let activeFeature: string | null = null;
@@ -843,6 +818,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       shell.on('spin', () => {
         const action = activeFeature ?? 'spin';
         if (!ensureAffordable(action)) return;
+        // Spinning by hand retires whatever a halted run left on the counter — the player moved on.
+        // (No-op unless a run was halted: `stop()` returns early when there is nothing to clear.)
+        stopAutoplay();
         void playRound(action);
       });
       shell.on('betChange', (bet: number) => {
@@ -851,6 +829,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       });
       shell.on('buyBonusSelect', ({ id }: { id: string }) => {
         if (!ensureAffordable(id)) return;
+        stopAutoplay(); // as with a manual spin: a bought bonus retires a halted run's counter
         void playRound(id);
       });
 
@@ -867,6 +846,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         },
       });
       stopAutoplay = () => autoplay.stop();
+      haltAutoplay = () => autoplay.halt();
       shell.on('autoplayStart', (o: { remaining?: number }) => autoplay.start(o?.remaining ?? 0));
       shell.on('autoplayStop', () => autoplay.stop());
 
