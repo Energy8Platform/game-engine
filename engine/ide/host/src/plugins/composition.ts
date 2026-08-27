@@ -16,6 +16,7 @@ declare module 'cordis' {
 
 export interface CompositionService {
   snapshot(): Promise<Snapshot>;
+  update(id: string, config: unknown): Promise<Diagnostic[]>;
 }
 
 export interface CompositionConfig {
@@ -91,6 +92,45 @@ export function apply(ctx: Context, config: CompositionConfig) {
       }
 
       return { rows, diagnostics };
+    },
+
+    async update(id, next) {
+      const entry = [...ctx.loader.entries()].find((entry) => entry.id === id);
+      if (!entry) {
+        return [diagnostic('error', id, 'composition', `no entry with id "${id}"`)];
+      }
+      const before = entry.options.config;
+      try {
+        await ctx.loader.update(id, { config: next });
+        // `ctx.loader.update()` kicks off the effect teardown/reapply cycle
+        // but does not itself wait for it — `Entry.update()` calls
+        // `_patchContext()` without awaiting it. Without this, the caller
+        // can observe a state where the old effect has been torn down but
+        // the new one hasn't been (re-)applied yet.
+        await entry.fiber?.await();
+        return [];
+      } catch (error) {
+        // Measured, not assumed: on a rejected `ctx.loader.update()`, the
+        // loader has NOT rolled `entry.options.config` back — it was already
+        // overwritten with the invalid value before validation ran (cordis's
+        // `resolveConfig()` throws before the write-to-disk listener fires,
+        // but after `Entry.update()` mutates `options.config`). The live
+        // fiber never received the bad value (it never got that far), so the
+        // running plugin is unaffected — but without this explicit call, the
+        // *bookkeeping* (and, on the next successful edit, the file) would
+        // stay on the rejected value. This restores both.
+        await ctx.loader.update(id, { config: before });
+        await entry.fiber?.await();
+        return [
+          diagnostic(
+            'error',
+            id,
+            'config',
+            error instanceof Error ? error.message : String(error),
+            'fix the value and try again',
+          ),
+        ];
+      }
     },
   };
 

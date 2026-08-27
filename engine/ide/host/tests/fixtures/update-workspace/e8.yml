@@ -1,0 +1,4 @@
+- id: probe1
+  name: probe-plugin
+  config:
+    speed: 12
