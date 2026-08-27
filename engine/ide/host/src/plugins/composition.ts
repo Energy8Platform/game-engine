@@ -16,6 +16,19 @@ declare module 'cordis' {
 
 export interface CompositionService {
   snapshot(): Promise<Snapshot>;
+  /**
+   * Restarts entry `id`'s plugin in place with `config`: tears down its
+   * effects, re-applies it with the new value, and writes the value back
+   * into e8.yml. An empty result means "applied to the running graph" —
+   * NOT "durable on disk". The actual file write is an unowned,
+   * uncancellable `setTimeout(0)` debounce inside `@cordisjs/plugin-include`
+   * with no public signal for when it lands; `update()`'s promise resolves
+   * once the in-memory graph has settled, before that write necessarily
+   * completes. A change made moments before the host process exits can be
+   * lost. Draining that queue on shutdown, if ever needed, belongs to
+   * whichever code owns host shutdown — this service has no primitive to
+   * wait for it.
+   */
   update(id: string, config: unknown): Promise<Diagnostic[]>;
 }
 
@@ -119,9 +132,17 @@ export function apply(ctx: Context, config: CompositionConfig) {
         // running plugin is unaffected — but without this explicit call, the
         // *bookkeeping* (and, on the next successful edit, the file) would
         // stay on the rejected value. This restores both.
-        await ctx.loader.update(id, { config: before });
-        await entry.fiber?.await();
-        return [
+        //
+        // The rollback itself can fail too (rare — `before` was valid a
+        // moment ago — but not impossible, e.g. a concurrent edit racing
+        // this one). `fiber.await()` rethrows a stored error, and nothing
+        // upstream of this service is allowed to see an exception: a host
+        // service reporting failure as data is the whole contract. So the
+        // rollback gets its own try/catch, and a failed rollback is
+        // reported as its own diagnostic alongside the original one — the
+        // caller must be able to learn the value is now in an unknown
+        // state, which is exactly the case where staying silent is worst.
+        const diagnostics = [
           diagnostic(
             'error',
             id,
@@ -130,6 +151,23 @@ export function apply(ctx: Context, config: CompositionConfig) {
             'fix the value and try again',
           ),
         ];
+        try {
+          await ctx.loader.update(id, { config: before });
+          await entry.fiber?.await();
+        } catch (rollbackError) {
+          diagnostics.push(
+            diagnostic(
+              'error',
+              id,
+              'config',
+              `rollback to the previous config also failed: ${
+                rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+              }`,
+              'the plugin may now be in an unknown state — inspect and fix its config directly',
+            ),
+          );
+        }
+        return diagnostics;
       }
     },
   };
