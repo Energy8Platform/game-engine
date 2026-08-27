@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
 import { parseManifest } from '@energy8engine/contracts';
 import { readPackageJson } from '../resolvePackage';
@@ -36,9 +36,26 @@ export function apply(ctx: Context, config: ClientAssetsConfig) {
       return;
     }
 
+    // `manifest.client.entry` is an unvalidated string straight out of a
+    // package's package.json — `path.join`/`path.resolve` happily walk `..`
+    // segments right out of `pkg.dir`. Contain the read to the package
+    // directory: compare against `packageRoot + sep`, not a bare
+    // `startsWith(packageRoot)`, so a sibling directory that merely shares
+    // `pkg.dir` as a name prefix (e.g. `.../probe-plugin-evil/...` against
+    // `.../probe-plugin`) can't slip through.
+    const packageRoot = resolve(pkg.dir);
+    const entryPath = resolve(packageRoot, manifest.client.entry);
+    if (entryPath !== packageRoot && !entryPath.startsWith(packageRoot + sep)) {
+      res.status = 404;
+      res.json({
+        error: `"${entry.options.name}" declares e8.client.entry "${manifest.client.entry}" which escapes its package directory`,
+      });
+      return;
+    }
+
     let source: string;
     try {
-      source = readFileSync(join(pkg.dir, manifest.client.entry), 'utf8');
+      source = readFileSync(entryPath, 'utf8');
     } catch (error) {
       res.status = 404;
       res.json({

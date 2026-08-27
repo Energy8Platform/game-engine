@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createIdeHost, type IdeHost } from '../src/index';
@@ -34,5 +36,108 @@ describe('plugin client assets', () => {
   it('404s for an id that has no matching entry at all', async () => {
     const res = await fetch(`${host.url}/plugin-client/not-a-real-id`);
     expect(res.status).toBe(404);
+  });
+});
+
+/**
+ * Failure modes that need a plugin package deliberately built to trigger
+ * them — not something the checked-in, read-only `fixtures/composition`
+ * fixture can express. Same pattern `update.test.ts` and `rpc.test.ts`
+ * settled on: a fresh `mkdtempSync` directory per test, written to directly
+ * (nothing checked in is touched), and never `rmSync`'d back out — see
+ * `update.test.ts`'s comment block on `TEMPLATE_FILE` for why cleanup is
+ * deliberately skipped (it races `@cordisjs/plugin-include`'s unowned,
+ * uncancellable `setTimeout(0)` write).
+ *
+ * Both plugin packages here are synthesized on disk (not symlinked from a
+ * repo devDependency like `probe-plugin`), since their whole point is to
+ * declare an `e8.client.entry` the happy-path fixture doesn't have a
+ * reason to.
+ */
+describe('plugin client assets — failure modes needing a hostile-ish manifest', () => {
+  let securityHost: IdeHost;
+
+  beforeEach(async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-assets-'));
+    const nodeModules = join(workspace, 'node_modules');
+    mkdirSync(nodeModules);
+
+    // A plugin that declares a client half whose file was never written —
+    // e.g. a build step failed, or the manifest just lies.
+    const missingDir = join(nodeModules, 'missing-entry-plugin');
+    mkdirSync(missingDir);
+    writeFileSync(
+      join(missingDir, 'package.json'),
+      JSON.stringify({
+        name: 'missing-entry-plugin',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { client: { entry: './client.js' } },
+      }),
+    );
+    writeFileSync(
+      join(missingDir, 'index.js'),
+      "export const name = 'missing-entry-plugin';\nexport function apply() {}\n",
+    );
+
+    // A plugin whose declared entry walks out of its own package directory
+    // into a *sibling* directory that merely shares its name as a prefix
+    // (`traversal-plugin-evil` vs. `traversal-plugin`) — the case a bare
+    // `path.startsWith(packageRoot)` check would wrongly allow through,
+    // per the fix in client-assets.ts.
+    const evilDir = join(nodeModules, 'traversal-plugin-evil');
+    mkdirSync(evilDir);
+    writeFileSync(join(evilDir, 'secret.js'), "export const secret = 'leaked';\n");
+
+    const traversalDir = join(nodeModules, 'traversal-plugin');
+    mkdirSync(traversalDir);
+    writeFileSync(
+      join(traversalDir, 'package.json'),
+      JSON.stringify({
+        name: 'traversal-plugin',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { client: { entry: '../traversal-plugin-evil/secret.js' } },
+      }),
+    );
+    writeFileSync(
+      join(traversalDir, 'index.js'),
+      "export const name = 'traversal-plugin';\nexport function apply() {}\n",
+    );
+
+    writeFileSync(
+      join(workspace, 'e8.yml'),
+      '- id: missing1\n  name: missing-entry-plugin\n- id: traversal1\n  name: traversal-plugin\n',
+    );
+
+    securityHost = await createIdeHost({ cwd: workspace, port: 0 });
+  });
+
+  afterEach(async () => {
+    await securityHost.stop();
+    // No rmSync of the temp workspace — see the describe-block comment above.
+  });
+
+  it('404s, as readable data, when the declared entry is missing on disk', async () => {
+    const snapshot = await securityHost.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'missing-entry-plugin')!;
+    const res = await fetch(`${securityHost.url}/plugin-client/${row.id}`);
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain('missing-entry-plugin');
+    expect(body.error).toContain('missing on disk');
+  });
+
+  it('404s instead of reading outside the package directory', async () => {
+    const snapshot = await securityHost.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'traversal-plugin')!;
+    const res = await fetch(`${securityHost.url}/plugin-client/${row.id}`);
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).not.toContain('leaked');
   });
 });
