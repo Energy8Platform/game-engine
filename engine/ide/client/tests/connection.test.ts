@@ -79,8 +79,39 @@ describe('connection', () => {
 
     expect(socket.sent).toHaveLength(0);
     expect(ctx.connection.diagnostics).toHaveLength(1);
-    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'warning', plugin: 'a:probe1' });
+    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'a:probe1', where: 'connection' });
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('collapses repeated not-connected failures into a single diagnostic and notifies once', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const listener = vi.fn();
+    ctx.connection.subscribe(listener);
+
+    // Simulates a range input's onChange firing many times per second
+    // (dragging a knob) while the socket is still closed.
+    ctx.connection.update('a:probe1', { speed: 1 });
+    ctx.connection.update('a:probe1', { speed: 2 });
+    ctx.connection.update('a:probe1', { speed: 3 });
+
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'a:probe1', where: 'connection' });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns a send failure into a diagnostic instead of throwing', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    socket.open();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular; // JSON.stringify throws synchronously on this
+
+    expect(() => ctx.connection.update('a:probe1', circular)).not.toThrow();
+
+    expect(socket.sent).toHaveLength(0);
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'a:probe1', where: 'connection' });
   });
 
   it('ignores a well-formed but unrecognised frame instead of throwing', async () => {
