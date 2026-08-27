@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -109,9 +109,39 @@ describe('plugin client assets — failure modes needing a hostile-ish manifest'
       "export const name = 'traversal-plugin';\nexport function apply() {}\n",
     );
 
+    // A plugin whose declared entry is a symlink *inside* its own package
+    // directory that points at a file outside it — the vector the lexical
+    // `path.resolve` containment check misses entirely, since `resolve()`
+    // never touches the filesystem: the symlink's path string is fully
+    // inside `pkg.dir`, only its *target* escapes. Any npm tarball may
+    // legally contain symlinks, so this is the shape a real hostile package
+    // would ship (e.g. pointing at `/etc/passwd` or a `.env`), not just a
+    // test contrivance.
+    const outsideSecret = join(workspace, 'symlink-secret.js');
+    writeFileSync(outsideSecret, "export const secret = 'SYMLINK_LEAKED';\n");
+
+    const symlinkDir = join(nodeModules, 'symlink-plugin');
+    mkdirSync(symlinkDir);
+    writeFileSync(
+      join(symlinkDir, 'package.json'),
+      JSON.stringify({
+        name: 'symlink-plugin',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { client: { entry: './link.js' } },
+      }),
+    );
+    writeFileSync(
+      join(symlinkDir, 'index.js'),
+      "export const name = 'symlink-plugin';\nexport function apply() {}\n",
+    );
+    symlinkSync(outsideSecret, join(symlinkDir, 'link.js'));
+
     writeFileSync(
       join(workspace, 'e8.yml'),
-      '- id: missing1\n  name: missing-entry-plugin\n- id: traversal1\n  name: traversal-plugin\n',
+      '- id: missing1\n  name: missing-entry-plugin\n- id: traversal1\n  name: traversal-plugin\n- id: symlink1\n  name: symlink-plugin\n',
     );
 
     securityHost = await createIdeHost({ cwd: workspace, port: 0 });
@@ -139,5 +169,14 @@ describe('plugin client assets — failure modes needing a hostile-ish manifest'
     expect(res.status).toBe(404);
     const body = await res.text();
     expect(body).not.toContain('leaked');
+  });
+
+  it('404s instead of following a symlink out of the package directory', async () => {
+    const snapshot = await securityHost.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'symlink-plugin')!;
+    const res = await fetch(`${securityHost.url}/plugin-client/${row.id}`);
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).not.toContain('SYMLINK_LEAKED');
   });
 });
