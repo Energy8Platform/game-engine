@@ -151,6 +151,7 @@ export const REEL_FIELD_SCHEMA: Section[] = [
       { kind: 'range', path: 'anticipation.holdMs', label: 'Hold (ms)', min: 0, max: 1200, step: 50 },
       { kind: 'range', path: 'anticipation.progressiveSlowdown', label: 'Slowdown ramp ×/reel', min: 0.3, max: 1, step: 0.05 },
       { kind: 'range', path: 'anticipation.progressiveHoldMs', label: 'Hold ramp (ms/reel)', min: 0, max: 600, step: 25 },
+      { kind: 'range', path: 'anticipation.progressiveCellStagger', label: 'Cell ramp ×/cell', min: 1, max: 2.5, step: 0.05 },
       { kind: 'toggle', path: 'anticipation.zoom.enabled', label: 'Reel zoom' },
       { kind: 'range', path: 'anticipation.zoom.scale', label: 'Zoom scale', min: 1, max: 1.6, step: 0.05 },
       { kind: 'range', path: 'anticipation.zoom.ms', label: 'Zoom (ms)', min: 200, max: 1200, step: 50 },

@@ -466,6 +466,7 @@ the whole reel has landed. Three knobs shape it:
 | Knob | Effect |
 | --- | --- |
 | `cellStagger` | ms between consecutive cells of one reel |
+| `anticipation.progressiveCellStagger` | how that gap GROWS from cell to cell inside an anticipated reel — the gap before cell #i is `cellStagger * <reel slowdown> * ramp ** i`. 1 (default) keeps the reel evenly spaced |
 | `dropOrder` | `'top-down'` (default) deals the reel like cards; `'bottom-up'` fills it the way gravity would — the lowest cell lands first and the rest stack on it |
 | `dropSequence` | `'parallel'` (default) starts each reel at `reel * stopStagger * reelStaggerFactor`, so reels can overlap; `'chained'` queues every reel behind the previous one; `'chained-when-anticipated'` keeps the un-armed reels parallel and chains only from the first anticipated reel |
 
@@ -483,11 +484,24 @@ motion: {
 },
 anticipation: {
   enabled: true, triggerSymbols: ['SCATTER'], threshold: 2, reels: 'trailing',
-  slowdownFactor: 0.75,      // the first armed reel, already slower
-  progressiveSlowdown: 0.8,  // …and each one after it slower again
-  progressiveHoldMs: 120,    // plus a growing beat before it starts
+  slowdownFactor: 0.75,          // the first armed reel, already slower
+  progressiveSlowdown: 0.8,      // …and each one after it slower again
+  progressiveHoldMs: 120,        // plus a growing beat before it starts
+  progressiveCellStagger: 1.5,   // …and its symbols drip ever wider apart
 },
 ```
+
+The three ramps stack on different axes. On a 5×4 board at the numbers above, the un-armed reels
+keep an even 120ms between symbols, and the hunt reels drip:
+
+| reel | gaps between its four symbols |
+| --- | --- |
+| 2 (first armed) | 160 → 240 → 360ms |
+| 3 | 200 → 300 → 450ms |
+| 4 | 250 → 375 → 563ms |
+
+`progressiveSlowdown` widens the gap reel by reel, `progressiveCellStagger` widens it cell by cell,
+and `progressiveHoldMs` adds a growing beat before each reel starts at all.
 
 > `slowdownFactor` is the lever that actually slows a reel; leaving it at `1` means no slow-down
 > however the rest is set. `progressiveHoldMs` is **milliseconds** added per reel, not a ratio —
@@ -516,7 +530,7 @@ reels.update({
 | --- | --- |
 | `grid` | `cols`, `rows`, `rowsPerReel[]` (Megaways / variable heights), `cellSize`, `gap`, `evaluation` (`lines`/`ways`/`anywhere`/`cluster`/`megaways`/`infinity`), `mask` |
 | `motion` | `style` (`swap`/`strip`/`cascade-drop`), `spinUp`, `hold`, `stopStagger`, `stopMode` (`sequential`/`sync`/`random`), `stopOrder`, `settle`, `squash`, `blur`, `turboFactor`, `intensity`, `slamStop`, `cellStagger` + `reelStaggerFactor` + `dropFallFactor` + `dropOrder` + `dropSequence` (`cascade-drop` pacing) |
-| `anticipation` | `enabled`, `triggerSymbols`, `threshold` (N−1), `reels` (`trailing`/indices), `slowdownFactor`, `holdMs`, `decide` (game-supplied predicate), `progressiveSlowdown` + `progressiveHoldMs` (ramp per reel), `zoom` |
+| `anticipation` | `enabled`, `triggerSymbols`, `threshold` (N−1), `reels` (`trailing`/indices), `slowdownFactor`, `holdMs`, `decide` (game-supplied predicate), `progressiveSlowdown` + `progressiveHoldMs` + `progressiveCellStagger` (ramps), `zoom` |
 | `cascade` | `enabled`, `gravity`, `timings`, `easings`, `perStepDecel`, `dimNonWinners`, `multiplier` (`mode` add/mul, `cap`, `persistInFreeSpins`) |
 | `win` | `highlightScale`, `glow`, `frameShake` |
 | `features` | per-mechanic config (see below) |

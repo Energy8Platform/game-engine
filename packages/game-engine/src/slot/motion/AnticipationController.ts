@@ -18,10 +18,18 @@ export interface AnticipationDecision {
   slowdown: PerReel<number>;
   /** Extra hold before landing. Scalar or per-reel array, same as `slowdown`. */
   holdMs: PerReel<number>;
+  /** `cascade-drop`: growth of the gap between successive cells inside the reel (1 = even). */
+  cellStaggerRamp: PerReel<number>;
 }
 
 /** Fresh "nothing to anticipate" decision (fresh, so callers may mutate `reels` freely). */
-const none = (): AnticipationDecision => ({ active: false, reels: [], slowdown: 1, holdMs: 0 });
+const none = (): AnticipationDecision => ({
+  active: false,
+  reels: [],
+  slowdown: 1,
+  holdMs: 0,
+  cellStaggerRamp: 1,
+});
 
 export class AnticipationController {
   private _cfg: AnticipationConfig;
@@ -53,7 +61,7 @@ export class AnticipationController {
       if (!custom) return none();
       const o: AnticipationOverride = Array.isArray(custom) ? { reels: custom } : custom;
       if (!o.reels?.length) return none();
-      return this.build(o.reels.slice(), o.slowdown, o.holdMs);
+      return this.build(o.reels.slice(), o.slowdown, o.holdMs, o.cellStaggerRamp);
     }
 
     if (Array.isArray(this._cfg.reels)) {
@@ -86,10 +94,12 @@ export class AnticipationController {
     reels: number[],
     slowdown?: PerReel<number>,
     holdMs?: PerReel<number>,
+    cellStaggerRamp?: PerReel<number>,
   ): AnticipationDecision {
     return {
       active: true,
       reels,
+      cellStaggerRamp: cellStaggerRamp ?? this._cfg.progressiveCellStagger,
       slowdown:
         slowdown ??
         this.ramp(reels, this._cfg.slowdownFactor, (base, i) =>

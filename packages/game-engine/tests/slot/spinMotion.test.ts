@@ -311,6 +311,50 @@ describe('cascade-drop fill direction and reel sequencing', () => {
     sys.destroy();
   });
 
+  it('progressiveCellStagger drips the cells of an anticipated reel, ever wider', () => {
+    // 4 rows so the ramp has room to show; gaps read in landing order
+    const gaps = (ramp: number, reel: number): number[] => {
+      const sys = createReelSystem({
+        resolve,
+        config: {
+          grid: { cols: 5, rows: 4 },
+          motion: fast({
+            style: 'cascade-drop',
+            spinUp: 300,
+            stopStagger: 200,
+            cellStagger: 120,
+            dropOrder: 'bottom-up',
+            dropSequence: 'chained-when-anticipated',
+          }),
+          anticipation: { ...armed, progressiveCellStagger: ramp },
+        },
+      });
+      const board4: CellData[][] = Array.from({ length: 5 }, (_, c) =>
+        Array.from({ length: 4 }, (_, r) => ({ symbol: c < 2 && r === 0 ? 'scatter' : 'x' })),
+      );
+      const t = sys
+        .planSpin(board4)
+        [reel].cellStopTimes!.slice()
+        .sort((a, b) => a - b);
+      sys.destroy();
+      return t.slice(1).map((v, i) => Math.round(v - t[i]));
+    };
+
+    // default ramp of 1 keeps a reel evenly spaced — the schedule before this knob existed
+    expect(gaps(1, 2)).toEqual([160, 160, 160]);
+    expect(gaps(1, 4)).toEqual([250, 250, 250]);
+
+    // a ramp widens the gap cell by cell WITHIN the reel…
+    expect(gaps(1.5, 2)).toEqual([160, 240, 360]);
+    // …and compounds with progressiveSlowdown, so a later reel drips wider still
+    expect(gaps(1.5, 3)).toEqual([200, 300, 450]);
+    expect(gaps(1.5, 4)).toEqual([250, 375, 563]);
+
+    // un-armed reels are untouched either way
+    expect(gaps(1.5, 0)).toEqual([120, 120, 120]);
+    expect(gaps(1.5, 1)).toEqual([120, 120, 120]);
+  });
+
   it('anticipation.holdMs now delays a cascade-drop reel (it used to be ignored)', () => {
     const withHold = dropSys({}, { ...armed, holdMs: 400 });
     const without = dropSys({}, { ...armed, holdMs: 0 });

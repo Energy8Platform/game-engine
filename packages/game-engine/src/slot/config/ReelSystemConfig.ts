@@ -184,6 +184,8 @@ export interface AnticipationOverride {
   slowdown?: PerReel<number>;
   /** Extra hold before landing. Scalar, or per-reel indexed by reel index. */
   holdMs?: PerReel<number>;
+  /** Growth of the gap between successive cells within a reel. Scalar, or per-reel. */
+  cellStaggerRamp?: PerReel<number>;
 }
 
 export interface AnticipationConfig {
@@ -213,6 +215,16 @@ export interface AnticipationConfig {
   progressiveSlowdown: number;
   /** Extra hold (ms) added per successive anticipated reel: reel #i gets `holdMs + i * this`. */
   progressiveHoldMs: number;
+  /**
+   * `cascade-drop`: how the gap between SUCCESSIVE CELLS grows inside an anticipated reel. The
+   * gap before cell #i is `cellStagger * <reel slowdown> * progressiveCellStagger ** i`, so 1
+   * (the default) keeps the reel's cells evenly spaced and > 1 makes each symbol land later than
+   * the last — the drip that turns a reel into a countdown.
+   *
+   * It compounds with `progressiveSlowdown`: that widens the base gap reel by reel, this widens
+   * it cell by cell, so a later reel drips both slower AND with a steeper ramp.
+   */
+  progressiveCellStagger: number;
   /** Optional grid zoom while anticipating (magnum-opus uses 1.3×). */
   zoom: { enabled: boolean; scale: number; ms: number };
 }
@@ -503,6 +515,7 @@ export const DEFAULT_REEL_CONFIG: ReelSystemConfig = {
     decide: null,
     progressiveSlowdown: 1,
     progressiveHoldMs: 0,
+    progressiveCellStagger: 1,
     zoom: { enabled: false, scale: 1.15, ms: 600 },
   },
   cascade: {

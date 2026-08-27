@@ -39,6 +39,12 @@ export interface SpinRunOpts {
   /** Extra hold (ms) for anticipated reels. Scalar, or per-reel indexed by reel. */
   anticipateHoldMs?: PerReel<number>;
   /**
+   * `cascade-drop`: growth of the gap between successive cells inside an anticipated reel — the
+   * gap before cell #i is `cellStagger * <reel slowdown> * ramp ** i`. 1 keeps the reel evenly
+   * spaced. Scalar, or per-reel indexed by reel.
+   */
+  anticipateCellStaggerRamp?: PerReel<number>;
+  /**
    * Reels whose tape runs normally but whose landing is NOT handed back. The engine stops and
    * disposes of the tape as usual and leaves the real cells hidden and unseated; the caller owns
    * their data and visibility from that point (and `skip()` will not reveal them either).
@@ -137,6 +143,7 @@ export class SpinEngine {
     const anticipate = new Set(opts?.anticipateReels ?? []);
     const defer = new Set(opts?.deferReveal ?? []);
     const holds: number[] = [];
+    const ramps: number[] = [];
     const out: ReelStopPlan[] = [];
     for (let reel = 0; reel < cols; reel++) {
       const idx = order(reel);
@@ -154,6 +161,7 @@ export class SpinEngine {
       const hold = isAnticipated ? perReelValue(opts?.anticipateHoldMs, reel, 0) * f : 0;
       stopTime += hold;
       holds[reel] = hold;
+      ramps[reel] = isAnticipated ? perReelValue(opts?.anticipateCellStaggerRamp, reel, 1) : 1;
       const speed = isAnticipated ? perReelValue(opts?.anticipateSlowdown, reel, 1) : 1;
 
       out.push({
@@ -166,7 +174,7 @@ export class SpinEngine {
         deferred: defer.has(reel),
       });
     }
-    if (this._cfg.style === 'cascade-drop') this._planDrop(out, holds, f, order);
+    if (this._cfg.style === 'cascade-drop') this._planDrop(out, holds, ramps, f, order);
     return out;
   }
 
@@ -179,6 +187,7 @@ export class SpinEngine {
   private _planDrop(
     out: ReelStopPlan[],
     holds: number[],
+    ramps: number[],
     f: number,
     order: (reel: number) => number,
   ): void {
@@ -205,10 +214,15 @@ export class SpinEngine {
       const chained = chainFrom >= 0 && position > 0 && position >= chainFrom;
       const start = (chained ? previousEnd + gap : position * gap) + (holds[p.reel] ?? 0);
 
+      // The gap before cell #i is `cellStagger * scale * ramp**i` — accumulate rather than
+      // multiply, so a ramp of 1 stays exactly the old evenly-spaced schedule.
+      const ramp = ramps[p.reel] ?? 1;
       const cells: number[] = [];
+      let offset = 0;
       for (let i = 0; i < rows; i++) {
         const row = bottomUp ? rows - 1 - i : i;
-        cells[row] = start + i * this._cfg.cellStagger * scale + fall;
+        cells[row] = start + offset + fall;
+        offset += this._cfg.cellStagger * scale * Math.pow(ramp, i);
       }
       p.cellStopTimes = cells;
       p.stopTime = cells.length ? Math.max(...cells) : start;

@@ -88,7 +88,8 @@ ReelSystemConfig
 ├── anticipation:{ enabled, triggerSymbols[], threshold(N-1), reels:'trailing'|number[],
 │                  slowdownFactor, holdMs, zoom?:{scale,ms}, sfxHook?, vfxHook?,
 │                  decide?(targetGrid)  ← предикат игры вместо счёта символов,
-│                  progressiveSlowdown, progressiveHoldMs  ← рампа по барабанам }
+│                  progressiveSlowdown, progressiveHoldMs,  ← рампы по барабанам
+│                  progressiveCellStagger }                  ← рампа по ячейкам внутри барабана
 ├── cascade:     { enabled, gravity(survivors slide), timings{reveal,highlight,remove,drop,refill,wait},
 │                  perStepDecel, easings{...}, dimNonWinners?, multiplier?:{start,step,mode,cap,persistFS} }
 ├── win:         { highlightScale, dimAlpha, glow?, frameShake?:{amp,ms,onlyOn[]} }
@@ -127,6 +128,14 @@ API: `createReelSystem(config) → { grid, spin(data,opts), planSpin(data,opts),
    остаются параллельными, цепочка включается с первого взведённого) и работающий
    `anticipation.holdMs` (в drop-стиле он раньше игнорировался, потому что `_runDrop` не смотрел
    на `stopTime`). Заодно `stopOrder: 'rtl'` теперь разворачивает и падение.
+
+   Три рампы антипации работают по разным осям и складываются:
+   `progressiveSlowdown` раздвигает шаг **от барабана к барабану**, `progressiveCellStagger` —
+   **от символа к символу внутри барабана** (шаг перед ячейкой #i равен
+   `cellStagger * slowdown * ramp**i`), `progressiveHoldMs` добавляет растущую паузу **перед**
+   стартом барабана. На 5×4 при `slowdownFactor 0.75 / progressiveSlowdown 0.8 /
+   progressiveCellStagger 1.5` невзведённые барабаны держат ровные 120мс, а взведённые капают
+   160→240→360, 200→300→450 и 250→375→563мс.
 5. **Посадку можно удержать.** `deferReveal: number[]` — барабан крутится по-настоящему, лента
    уничтожается как обычно, но реальные ячейки остаются **скрытыми и незасеянными**: данными и
    видимостью с этого момента владеет игра (slam-stop их тоже не раскроет). Это снимает

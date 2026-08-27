@@ -215,12 +215,15 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
   function resolveAnticipation(target: CellData[][], runOpts?: SpinRunOpts): AnticipationDecision {
     const explicit = runOpts?.anticipateReels;
     if (!explicit) return anticipation.decide(target);
-    if (!explicit.length) return { active: false, reels: [], slowdown: 1, holdMs: 0 };
+    if (!explicit.length)
+      return { active: false, reels: [], slowdown: 1, holdMs: 0, cellStaggerRamp: 1 };
     return {
       active: true,
       reels: explicit.slice(),
       slowdown: runOpts?.anticipateSlowdown ?? config.anticipation.slowdownFactor,
       holdMs: runOpts?.anticipateHoldMs ?? config.anticipation.holdMs,
+      cellStaggerRamp:
+        runOpts?.anticipateCellStaggerRamp ?? config.anticipation.progressiveCellStagger,
     };
   }
 
@@ -234,6 +237,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
       anticipateReels: decision.active ? decision.reels : undefined,
       anticipateSlowdown: decision.slowdown,
       anticipateHoldMs: decision.holdMs,
+      anticipateCellStaggerRamp: decision.cellStaggerRamp,
     };
   }
 

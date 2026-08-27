@@ -275,6 +275,14 @@ export const SCHEMA: Section[] = [
         max: 600,
         step: 25,
       },
+      {
+        kind: 'range',
+        path: 'anticipation.progressiveCellStagger',
+        label: 'Cell ramp ×/cell',
+        min: 1,
+        max: 2.5,
+        step: 0.05,
+      },
       { kind: 'toggle', path: 'anticipation.zoom.enabled', label: 'Reel zoom' },
       {
         kind: 'range',
