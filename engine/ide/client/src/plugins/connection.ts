@@ -26,20 +26,32 @@ declare module 'cordis' {
 
 export interface ConnectionService {
   snapshot: Snapshot | null;
+  /**
+   * Host-authored diagnostics (from the latest `snapshot`/`diagnostics`
+   * message) concatenated with client-authored ones (from `report()`).
+   * The two have different provenance and different lifetimes — see
+   * `report()`'s doc comment — but this property hides the split so every
+   * existing reader (the composition screen, these tests) keeps working
+   * against one flat array.
+   */
   diagnostics: Diagnostic[];
   subscribe(listener: () => void): () => void;
   update(id: string, config: unknown): void;
   /**
-   * Record a diagnostic and notify subscribers — the public counterpart of
-   * `update()`'s own internal send-failure path, for any other plugin
-   * (`modules`, so far) that needs to surface a failure through the same
-   * array the composition screen already renders. Reuses the identity-based
-   * dedupe below: an identical repeat (same `plugin` + `where` + `message`)
-   * replaces the earlier entry instead of appending a duplicate, while a
-   * distinct failure — a different row, or a different reason for the same
-   * row — stays alongside it. Assigning `diagnostics` directly instead of
-   * calling this was considered and rejected: it writes the field without
-   * notifying subscribers, so nothing reacts to it.
+   * Record a *client*-authored diagnostic and notify subscribers — the
+   * public counterpart of `update()`'s own internal send-failure path, for
+   * any other plugin (`modules`, so far) that needs to surface a failure
+   * through the same array the composition screen already renders. Reuses
+   * the identity-based dedupe below: an identical repeat (same `plugin` +
+   * `where` + `message`) replaces the earlier entry instead of appending a
+   * duplicate, while a distinct failure — a different row, or a different
+   * reason for the same row — stays alongside it. Assigning `diagnostics`
+   * directly instead of calling this was considered and rejected: it writes
+   * the field without notifying subscribers, so nothing reacts to it.
+   *
+   * Diagnostics reported here survive the next host `snapshot`/`diagnostics`
+   * message — see the split between host- and client-authored diagnostics
+   * on `diagnostics` below for why.
    */
   report(diagnostic: Diagnostic): void;
 }
@@ -60,9 +72,27 @@ export function apply(ctx: Context, config: ConnectionConfig) {
   const listeners = new Set<() => void>();
   const socket = (config.socketFactory ?? ((url) => new WebSocket(url) as WebSocketLike))(config.url);
 
+  // Two sources, two lifetimes. Host-authored diagnostics (a `snapshot` or
+  // `diagnostics` server message) are wholesale-replaced by the next
+  // message — the host is describing the current state of the world, and a
+  // message that omits a formerly-reported diagnostic means the host
+  // considers it resolved. Client-authored diagnostics (`report()`, below)
+  // describe something wrong in *this* browser tab — a send failure, or
+  // (since Task 10) a broken plugin client half — that has nothing to do
+  // with whatever the host just pushed, and must survive an unrelated
+  // snapshot arriving. A single shared array was tried first and rejected:
+  // the socket handler's wholesale replace on every message would wipe a
+  // still-unresolved client-authored diagnostic the moment the developer
+  // touched an unrelated composition row, with nothing left to explain why
+  // a plugin stayed broken.
+  let hostDiagnostics: Diagnostic[] = [];
+  let clientDiagnostics: Diagnostic[] = [];
+
   const service: ConnectionService = {
     snapshot: null,
-    diagnostics: [],
+    get diagnostics() {
+      return [...hostDiagnostics, ...clientDiagnostics];
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -74,7 +104,7 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       // same place every other failure already lands — connection.diagnostics
       // — so the composition screen that already renders that array shows
       // "not connected" without new plumbing. Both failure modes below feed
-      // the same `reportSendFailure`, which collapses repeats of the exact
+      // the same `service.report`, which collapses repeats of the exact
       // same failure (a range input's onChange can fire tens of times a
       // second while the socket is down) into one diagnostic and one
       // notification, while keeping distinct failures — a different row, or
@@ -136,9 +166,9 @@ export function apply(ctx: Context, config: ConnectionConfig) {
      */
     report(next) {
       const sameIdentity = (d: Diagnostic) => d.plugin === next.plugin && d.where === next.where && d.message === next.message;
-      const existing = service.diagnostics.find(sameIdentity);
+      const existing = clientDiagnostics.find(sameIdentity);
       if (existing && diagnosticsEqual(existing, next)) return;
-      service.diagnostics = [...service.diagnostics.filter((d) => !sameIdentity(d)), next];
+      clientDiagnostics = [...clientDiagnostics.filter((d) => !sameIdentity(d)), next];
       for (const listener of listeners) listener();
     },
   };
@@ -162,9 +192,9 @@ export function apply(ctx: Context, config: ConnectionConfig) {
     }
     if (message.type === 'snapshot') {
       service.snapshot = message.snapshot;
-      service.diagnostics = message.snapshot.diagnostics;
+      hostDiagnostics = message.snapshot.diagnostics;
     } else {
-      service.diagnostics = message.diagnostics;
+      hostDiagnostics = message.diagnostics;
     }
     for (const listener of listeners) listener();
   });

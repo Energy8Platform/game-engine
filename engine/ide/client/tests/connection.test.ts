@@ -67,6 +67,33 @@ describe('connection', () => {
     expect(ctx.connection.snapshot).toEqual(SNAPSHOT);
   });
 
+  // Fix round 1 (Task 10): a client-authored diagnostic (from `report()` —
+  // a send failure, or since Task 10 a broken plugin client half) has
+  // nothing to do with whatever the host just pushed, and must not vanish
+  // the moment an unrelated host message arrives.
+  it('keeps a client-authored diagnostic when an unrelated host message replaces the host ones', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    socket.open();
+
+    const clientDiagnostic = { severity: 'error' as const, plugin: 'a:probe1', where: 'client', message: 'boom' };
+    ctx.connection.report(clientDiagnostic);
+    expect(ctx.connection.diagnostics).toEqual([clientDiagnostic]);
+
+    socket.receive({
+      type: 'diagnostics',
+      diagnostics: [{ severity: 'error', plugin: 'a:probe2', where: 'config', message: 'host says no' }],
+    });
+
+    // Both present — host's alongside client's, not one replacing the other.
+    expect(ctx.connection.diagnostics).toHaveLength(2);
+    expect(ctx.connection.diagnostics.map((d) => d.plugin).sort()).toEqual(['a:probe1', 'a:probe2']);
+
+    // A second, unrelated host message replaces only the host's diagnostic.
+    socket.receive({ type: 'diagnostics', diagnostics: [] });
+    expect(ctx.connection.diagnostics).toEqual([clientDiagnostic]);
+  });
+
   it('does not send while the socket is not open, and records a diagnostic instead', async () => {
     const socket = new FakeSocket();
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });

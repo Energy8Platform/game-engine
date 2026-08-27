@@ -89,23 +89,46 @@ describe('modules', () => {
     expect(ctx.connection.diagnostics[0].message).toContain('boom');
   });
 
-  // A broken client half fails the same way every time it's imported. Since
-  // reporting the failure now goes through `connection.report()` — which
-  // notifies subscribers, and this plugin's own sync loop is one of them —
-  // un-claiming the id on failure (as the brief's code does) would let that
-  // very notification re-trigger the same import, forever. Once an id is
-  // claimed it stays claimed, success or failure.
-  it('does not retry a failed import when a later snapshot repeats the same row', async () => {
-    const importModule = vi.fn(async () => {
-      throw new Error('boom');
-    });
-    const { push } = await harness(importModule);
+  // Fix round 1: a permanently-poisoned row (never releasing the claimed
+  // id) was rejected — it would mean a developer who fixes a broken client
+  // half never sees it load, short of a full page reload, even once the
+  // host pushes a fresh snapshot. The id is released on failure instead.
+  //
+  // That release does let the first failure retrigger itself once, for
+  // free: `ctx.connection.report()` notifies subscribers, including this
+  // plugin's own sync loop, so the very first failure's notification causes
+  // one immediate extra attempt. It does not cascade further — the second
+  // consecutive failure produces a byte-identical `Diagnostic`, which
+  // `report()`'s own identity dedupe recognises and swallows without
+  // notifying, so the self-triggered retry is bounded at exactly one wasted
+  // fetch. This test pins both halves of that behaviour: the bounded
+  // self-retry (call #2, no snapshot needed), and the real fix — a later,
+  // *explicit* snapshot still gets its own attempt instead of the row
+  // being stuck.
+  it('retries a failed import when a later snapshot repeats the same row', async () => {
+    const importModule = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('boom')) // the push below
+      .mockRejectedValueOnce(new Error('boom')) // the bounded self-retry from report()'s notify
+      .mockResolvedValue({ apply() {} }); // the explicit second push, after the fix
+    const { ctx, push } = await harness(importModule);
 
     push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
-    await vi.waitFor(() => expect(importModule).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(importModule).toHaveBeenCalledTimes(2));
+    expect(ctx.modules.loaded()).toEqual([]);
 
     push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(importModule).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(ctx.modules.loaded()).toEqual(['a:probe1']));
+    expect(importModule).toHaveBeenCalledTimes(3);
+  });
+
+  it('treats a client half with no apply export as loaded, not a failure', async () => {
+    const importModule = vi.fn(async () => ({}));
+    const { ctx, push } = await harness(importModule);
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
+    await vi.waitFor(() => expect(ctx.modules.loaded()).toEqual(['a:probe1']));
+
+    expect(ctx.connection.diagnostics).toHaveLength(0);
   });
 });

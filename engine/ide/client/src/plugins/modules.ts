@@ -22,14 +22,24 @@ export const inject = ['connection', 'slots'];
 
 export function apply(ctx: Context, config: ModulesConfig) {
   // Entry ids for which an import has been *started* — claimed before the
-  // await, never released. Distinct from `applied` below: a row that fails
-  // to import stays in `attempted` forever (so it is never retried) but
-  // never enters `applied` (so `loaded()` keeps meaning what its docstring
-  // says). Un-claiming on failure was tried first, matching the plan's own
-  // code, and rejected: `ctx.connection.report()` notifies subscribers —
-  // including this plugin's own `sync`, subscribed below — so un-claiming
-  // would let that very notification re-trigger the same import, forever,
-  // for a client half that fails the same way every time.
+  // await so a second snapshot mentioning the same row can't begin a
+  // duplicate import while the first is still in flight. Released again on
+  // failure, so a later snapshot (the developer fixes the client half, the
+  // host pushes a new one) gets a fresh attempt instead of the row being
+  // stuck broken until a full page reload.
+  //
+  // Releasing it does let a failure retrigger itself once, on its own:
+  // `ctx.connection.report()` notifies subscribers, including this
+  // plugin's own `sync` below, so the notification from the *first*
+  // failure causes one immediate extra attempt before this function even
+  // returns. That does not cascade further — a second consecutive failure
+  // produces a byte-identical `Diagnostic`, and `report()`'s own identity
+  // dedupe (same plugin+where+message) recognises the repeat and returns
+  // before notifying — so the self-triggered retry is bounded at exactly
+  // one wasted fetch, not unbounded. Verified by mutation testing (delete
+  // this release and rerun modules.test.ts: the "retries a failed import"
+  // test starts failing because the second, explicit snapshot no longer
+  // gets a turn).
   const attempted = new Set<string>();
   const applied = new Set<string>();
   const importModule = config.importModule ?? ((url: string) => import(/* @vite-ignore */ url));
@@ -59,6 +69,7 @@ export function apply(ctx: Context, config: ModulesConfig) {
           applied.add(row.id);
         })
         .catch((error: unknown) => {
+          attempted.delete(row.id);
           ctx.connection.report(
             diagnostic(
               'error',
