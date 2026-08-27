@@ -48,6 +48,12 @@ export interface CompositionConfig {
 
 async function schemaOf(ctx: Context, name: string): Promise<unknown | null> {
   try {
+    // `ctx.loader.import(name)` resolves a bare specifier with a plain
+    // `import(name)` called from inside @cordisjs/plugin-loader's own file, not
+    // from `config.cwd` — so it only finds a package hoisted to this monorepo's
+    // ROOT node_modules. A name collision with any other package here silently
+    // loses that hoist: this returns null (caught below) and the entry's fiber
+    // state shows up null in the snapshot, with no "cannot resolve" diagnostic.
     const plugin = ctx.loader.unwrapExports(await ctx.loader.import(name));
     const Config = (plugin as { Config?: { toJSON?: () => unknown } } | undefined)?.Config;
     if (typeof Config?.toJSON !== 'function') return null;
