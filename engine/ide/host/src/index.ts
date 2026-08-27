@@ -6,6 +6,7 @@ import { Context } from 'cordis';
 import Loader from '@cordisjs/plugin-loader';
 import Server from '@cordisjs/plugin-server';
 import * as yaml from 'js-yaml';
+import * as clientAssets from './plugins/client-assets';
 import * as composition from './plugins/composition';
 import * as rpc from './plugins/rpc';
 
@@ -51,6 +52,7 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
 
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
     await ctx.plugin(rpc);
+    await ctx.plugin(clientAssets, { cwd: options.cwd });
     await ctx.loader.await();
 
     ctx.server.get('/api/health', async (_req, res) => {
