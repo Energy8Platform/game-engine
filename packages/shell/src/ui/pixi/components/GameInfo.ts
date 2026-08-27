@@ -37,10 +37,15 @@ export function openGameInfo(host: PixiComponentContext): ShellLayer {
 
 function buildBody(host: PixiComponentContext, width: number): Container {
   const col = new FlexBox({ direction: 'column', align: 'stretch', gap: 12 });
-  const rawSections = host.config.gameInfo.sections ?? [];
-  // Auto-inject a hotkeys section unless the game already provides one or features.hotkeys === false.
+  const allSections = host.config.gameInfo.sections ?? [];
+  // Auto-inject a hotkeys section unless the game already provides one. With hotkeys off — a
+  // jurisdiction that forbids them, or a touchscreen that has no keys at all (see core/device.ts) —
+  // there is no keyboard surface to document, and a game-supplied section is dropped along with the
+  // auto-injected one: a keycap chart for keys the player cannot press is a promise the game breaks.
+  const keys = host.config.features.hotkeys !== false;
+  const rawSections = keys ? allSections : allSections.filter((s) => s.type !== 'hotkeys');
   const sectionsWithHotkeys: GameInfoSection[] = [...rawSections];
-  if (host.config.features.hotkeys !== false && !rawSections.some((s) => s.type === 'hotkeys')) {
+  if (keys && !rawSections.some((s) => s.type === 'hotkeys')) {
     sectionsWithHotkeys.push({ type: 'hotkeys', order: HOTKEYS_DEFAULT_ORDER });
   }
   const sections = sectionsWithHotkeys;

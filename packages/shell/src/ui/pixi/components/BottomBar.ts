@@ -13,9 +13,19 @@ import {
   FsHero,
   divider,
 } from '../primitives/widgets';
+import type { SpinAutoplayMode } from '../primitives/widgets';
 import type { IconName } from '../icons';
 
 // ── design constants (mirror the DOM `.ge-bar-panel` / mobile rules) ──────────
+/** Which of the disc's three faces the autoplay state calls for — see `SpinAutoplayMode`. A run
+ *  that halted with spins still owed (`!active && remaining > 0`) keeps its counter on the disc. */
+function autoplayDiscMode(state: {
+  autoplay: { active: boolean; remaining: number };
+}): SpinAutoplayMode {
+  if (state.autoplay.active) return 'running';
+  return state.autoplay.remaining > 0 ? 'paused' : 'off';
+}
+
 const BAR_H = 68; // continuous dark panel height
 const SPIN = 84; // hero disc — pops above/below the bar
 const SPIN_POP = (SPIN - BAR_H) / 2; // 8 — how far the disc sticks out top/bottom
@@ -296,8 +306,9 @@ export class BottomBar extends Container {
         ticker: this.host.ticker,
         onSpin: () => this.host.actions.spin(),
         onStop: () => this.stopAutoplay(),
+        onResume: () => this.resumeAutoplay(),
       });
-      if (state.autoplay.active) this.spin.setAutoplay(true, state.autoplay.remaining);
+      this.spin.setAutoplay(autoplayDiscMode(state), state.autoplay.remaining);
       if (state.busy) this.spin.setBusy(true);
       spinWrap.add(this.spin);
     } else if (showFsBlocks) {
@@ -373,8 +384,9 @@ export class BottomBar extends Container {
         ticker: this.host.ticker,
         onSpin: () => this.host.actions.spin(),
         onStop: () => this.stopAutoplay(),
+        onResume: () => this.resumeAutoplay(),
       });
-      if (state.autoplay.active) this.spin.setAutoplay(true, state.autoplay.remaining);
+      this.spin.setAutoplay(autoplayDiscMode(state), state.autoplay.remaining);
       if (state.busy) this.spin.setBusy(true);
       hero = this.spin;
     } else if (showFsBlocks) {
@@ -569,12 +581,19 @@ export class BottomBar extends Container {
   private onTurbo(): void {
     this.host.actions.cycleTurbo();
   }
+  /** Same button, three jobs: stop a running run, retire a halted run's leftover count (freeing the
+   *  disc for a manual spin again), or open the picker. Mirrors the DOM bar's `onAutoplay`. */
   private onAutoplay(): void {
-    if (this.host.state.autoplay.active) this.stopAutoplay();
+    const { active, remaining } = this.host.state.autoplay;
+    if (active || remaining > 0) this.stopAutoplay();
     else this.host.actions.openAutoplayPicker();
   }
   private stopAutoplay(): void {
     this.host.actions.stopAutoplay();
+  }
+  /** Halted run, tapped: play out the spins it still owes. */
+  private resumeAutoplay(): void {
+    this.host.actions.startAutoplay(this.host.state.autoplay.remaining);
   }
   private betLocked(): boolean {
     return this.host.state.busy || this.host.state.autoplay.active;

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createGameShell, removeGameShell } from '@/ui/html';
 import type { ShellConfig, GameInfoSection } from '@/core/types';
 
@@ -112,6 +112,41 @@ describe('Hotkeys section — DOM shell', () => {
     const modal = q(mount, '[data-ge="info-modal"]')!;
     const hotkeys = q(modal, '[data-ge="info-hotkeys"]')!;
     expect(hotkeys.textContent).toContain('Buy bonus');
+  });
+
+  // ── Тач-клиент (замечание Artube «Spacebar to Spin … not available on mobile devices») ──
+  describe('на тач-клиенте клавиатурной секции нет', () => {
+    /** Подменить ответ matchMedia: jsdom его не реализует вовсе. */
+    const asTouchDevice = (touch: boolean) => {
+      (window as unknown as { matchMedia: unknown }).matchMedia = (q: string) => ({
+        matches: touch && q === '(pointer: coarse) and (hover: none)',
+      });
+    };
+    afterEach(() => {
+      delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+    });
+
+    it('без явной настройки секция не показывается на тачскрине', () => {
+      asTouchDevice(true);
+      const shell = createGameShell(cfg(mount, [{ type: 'controls' }]));
+      shell.openInfo();
+      expect(q(q(mount, '[data-ge="info-modal"]')!, '[data-ge="info-hotkeys"]')).toBeNull();
+    });
+
+    it('на том же экране с мышью — показывается', () => {
+      asTouchDevice(false);
+      const shell = createGameShell(cfg(mount, [{ type: 'controls' }]));
+      shell.openInfo();
+      expect(q(q(mount, '[data-ge="info-modal"]')!, '[data-ge="info-hotkeys"]')).toBeTruthy();
+    });
+
+    it('секция, заданная самой игрой, тоже уходит — клавиш всё равно нет', () => {
+      const shell = createGameShell(
+        cfg(mount, [{ type: 'controls' }, { type: 'hotkeys' }], { hotkeys: false }),
+      );
+      shell.openInfo();
+      expect(q(q(mount, '[data-ge="info-modal"]')!, '[data-ge="info-hotkeys"]')).toBeNull();
+    });
   });
 
   it('does NOT inject a Hotkeys block when features.hotkeys === false', () => {

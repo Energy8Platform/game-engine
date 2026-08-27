@@ -225,19 +225,31 @@ function betLocked(host: ShellHost): boolean {
   return host.state.busy || host.state.autoplay.active;
 }
 
-/** SPIN disc — rotates while busy; becomes a STOP + countdown while autoplay runs. */
+/**
+ * SPIN disc — rotates while busy; becomes a STOP + countdown while autoplay runs; becomes an
+ * autoplay glyph + the SAME countdown when a run was halted with spins still owed (a lost
+ * connection), where a tap resumes it. That third state is what a certification lab means by "after
+ * reconnection the counter is displayed correctly": the run stopped, but the spins the player asked
+ * for are still on screen and one tap away, instead of silently reset to zero.
+ */
 function spinButton(host: ShellHost): HTMLButtonElement {
   const { state } = host;
   const sp = document.createElement('button');
   sp.className = 'ge-shell-spin';
   sp.dataset.ge = 'spin';
+  const rem = state.autoplay.remaining;
+  const count = Number.isFinite(rem) ? String(rem) : '∞';
   if (state.autoplay.active) {
     sp.classList.add('ge-stop');
-    const rem = state.autoplay.remaining;
-    const label = Number.isFinite(rem) ? String(rem) : '∞';
-    sp.innerHTML = `<span class="ge-spin-stop">${icon('stop')}</span><span class="ge-spin-count">${label}</span>`;
+    sp.innerHTML = `<span class="ge-spin-stop">${icon('stop')}</span><span class="ge-spin-count">${count}</span>`;
     sp.addEventListener('click', () => {
       if (!sp.disabled) host.actions.stopAutoplay();
+    });
+  } else if (rem > 0) {
+    sp.classList.add('ge-auto-paused');
+    sp.innerHTML = `<span class="ge-spin-auto">${icon('autoplay')}</span><span class="ge-spin-count">${count}</span>`;
+    sp.addEventListener('click', () => {
+      if (!sp.disabled) host.actions.startAutoplay(rem);
     });
   } else {
     sp.innerHTML = icon('spin');
@@ -257,8 +269,11 @@ function autoButton(host: ShellHost): HTMLButtonElement {
   return b;
 }
 
+/** Same button, three jobs: stop a running run, retire a halted run's leftover count (which frees
+ *  the disc for a manual spin again), or open the picker. */
 function onAutoplay(host: ShellHost): void {
-  if (host.state.autoplay.active) host.actions.stopAutoplay();
+  const { active, remaining } = host.state.autoplay;
+  if (active || remaining > 0) host.actions.stopAutoplay();
   else host.actions.openAutoplayPicker();
 }
 

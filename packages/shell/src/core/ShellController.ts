@@ -5,6 +5,7 @@ import { formatCurrency } from './format';
 import { createI18n, type I18n } from './i18n';
 import { KeyboardController, type KeyboardHost } from './keyboard';
 import { DEFAULT_MENU, rangeBounds, seedMenuValues, type MenuItem, type MenuRangeItem } from './menu';
+import { keyboardCapable } from './device';
 import { PACKAGE_VERSION } from './version';
 import type {
   ShellConfig,
@@ -46,7 +47,10 @@ export function resolveConfig(config: ShellConfig): ResolvedShellConfig {
     win: config.win,
     mode: config.mode,
     gameInfo: config.gameInfo,
-    features: config.features,
+    // `hotkeys` unset means "decide for me": a touchscreen has no keys to press, so the shell
+    // neither binds them nor advertises them there. A host that knows better — the platform's own
+    // `device` field, a jurisdiction rule — says so outright and that wins. See core/device.ts.
+    features: { ...config.features, hotkeys: config.features.hotkeys ?? keyboardCapable() },
     theme: config.theme,
     onBonusBuy: config.onBonusBuy,
     volumes: config.volumes,
@@ -145,7 +149,11 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
         this.renderer.renderBar();
       },
       toggleAutoplay: () => {
-        if (this.state.autoplay.active) a.stopAutoplay();
+        // A halted run (stopped, but with spins still owed after a lost connection) counts as
+        // "autoplay is on screen": the toggle retires its leftover count, exactly as it stops a
+        // running one. Resuming those spins is the disc's job, not this one's.
+        const { active, remaining } = this.state.autoplay;
+        if (active || remaining > 0) a.stopAutoplay();
         else this.openAutoplayPicker();
       },
       startAutoplay: (remaining) => {

@@ -362,7 +362,19 @@ export interface SpinDiscOpts {
   ticker: Ticker;
   onSpin: () => void;
   onStop: () => void;
+  /** Tapped in the halted-autoplay state — resume the run with the count still on the disc. */
+  onResume?: () => void;
 }
+
+/**
+ * What the disc is showing:
+ *  - `off` — an ordinary SPIN disc;
+ *  - `running` — STOP glyph over the live countdown;
+ *  - `paused` — a run halted with spins still owed (a lost connection). The count stays put and a
+ *    tap resumes; clearing it is the autoplay button's job. Certification asks for exactly this:
+ *    the run stops, and after reconnection the counter is still there and still correct.
+ */
+export type SpinAutoplayMode = 'off' | 'running' | 'paused';
 
 export class SpinDisc extends Container implements Sizable {
   private size: number;
@@ -375,13 +387,14 @@ export class SpinDisc extends Container implements Sizable {
   private glyph: IconView;
   private dim = new Graphics();
   private countText?: Text;
-  private mode: 'spin' | 'stop' = 'spin';
+  private mode: 'spin' | 'stop' | 'resume' = 'spin';
   private _busy = false;
   private _disabled = false;
   private hovering = false;
   private rotTick?: (t: Ticker) => void;
   private onSpin: () => void;
   private onStop: () => void;
+  private onResume: () => void;
 
   constructor(opts: SpinDiscOpts) {
     super();
@@ -391,6 +404,7 @@ export class SpinDisc extends Container implements Sizable {
     this.ticker = opts.ticker;
     this.onSpin = opts.onSpin;
     this.onStop = opts.onStop;
+    this.onResume = opts.onResume ?? opts.onSpin;
     this.disc = new Graphics();
     this.glyph = makeIcon('spin', this.glyphSize, this.tokens.btnInk);
     this.glyph.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
@@ -409,6 +423,7 @@ export class SpinDisc extends Container implements Sizable {
     attachPress(this, 0.94, () => {
       if (this._disabled) return;
       if (this.mode === 'stop') this.onStop();
+      else if (this.mode === 'resume') this.onResume();
       else this.onSpin();
     });
   }
@@ -420,8 +435,10 @@ export class SpinDisc extends Container implements Sizable {
     drawDisc(this.disc, this.size, this.tokens.btn, 4);
     const glyphColor = hot ? this.tokens.accent : this.tokens.btnInk;
     this.glyph.setColor(glyphColor);
-    // the count sits ON the solid (btnInk) STOP square, so it must be light to read
-    if (this.countText) this.countText.style.fill = '#ffffff';
+    // the count sits ON the solid (btnInk) STOP square, so it must be light to read; halted, it
+    // sits on the bare disc instead and takes the disc's own ink.
+    if (this.countText)
+      this.countText.style.fill = this.mode === 'resume' ? this.tokens.btnInk : '#ffffff';
     // Disabled (mid-spin / can't spin): darken OPAQUELY (≈ filter:grayscale(.4) brightness(.62))
     // with a dark veil over the disc — not alpha, which would let the bright board show through and
     // read as a translucent/missing button (what looked "transparent" while spinning).
@@ -431,31 +448,44 @@ export class SpinDisc extends Container implements Sizable {
     }
   }
 
-  /** STOP glyph + remaining-count, when autoplay runs. */
-  setAutoplay(active: boolean, remaining: number): void {
-    if (active) {
-      this.mode = 'stop';
-      this.stopRotation();
-      // STOP glyph at the disc's full size (like SPIN); the count is centred on top of it.
-      this.glyph.visible = false;
-      this.stopGlyph();
-      if (!this.countText) {
-        this.countText = makeText('', { size: 22, weight: '800', color: '#ffffff', align: 'center', family: NUM_FONT_FAMILY });
-        this.addChild(this.countText); // added after the STOP glyph → renders on top of it
-      }
-      const label = Number.isFinite(remaining) ? String(remaining) : '∞';
-      setText(this.countText, label);
-      this.countText.position.set((this.size - this.countText.width) / 2, (this.size - this.countText.height) / 2);
-    } else {
+  /** STOP glyph + remaining-count while autoplay runs; auto glyph + the same count once it halts. */
+  setAutoplay(mode: SpinAutoplayMode, remaining: number): void {
+    if (mode === 'off') {
       this.mode = 'spin';
       this.glyph.visible = true;
       this.removeStopGlyph();
+      this.removeAutoGlyph();
       if (this.countText) {
         this.removeChild(this.countText);
         this.countText.destroy();
         this.countText = undefined;
       }
+      this.paint();
+      return;
     }
+    const running = mode === 'running';
+    this.mode = running ? 'stop' : 'resume';
+    this.stopRotation();
+    this.glyph.visible = false;
+    // Running: a solid STOP square at the disc's full size (like SPIN), count centred on top of it.
+    // Halted: the auto glyph, smaller and lifted, with the count under it — no dark square, because
+    // nothing is running to stop, and a white count would have nothing to read against.
+    if (running) {
+      this.removeAutoGlyph();
+      this.stopGlyph();
+    } else {
+      this.removeStopGlyph();
+      this.autoGlyph();
+    }
+    if (!this.countText) {
+      this.countText = makeText('', { size: 22, weight: '800', color: '#ffffff', align: 'center', family: NUM_FONT_FAMILY });
+      this.addChild(this.countText); // added after the glyph → renders on top of it
+    }
+    setText(this.countText, Number.isFinite(remaining) ? String(remaining) : '∞');
+    const cy = running
+      ? (this.size - this.countText.height) / 2
+      : this.size * 0.56; // sits under the lifted auto glyph
+    this.countText.position.set((this.size - this.countText.width) / 2, cy);
     this.paint();
   }
 
@@ -472,6 +502,22 @@ export class SpinDisc extends Container implements Sizable {
       this.removeChild(this.stopGlyphView);
       this.stopGlyphView.destroy();
       this.stopGlyphView = undefined;
+    }
+  }
+
+  private autoGlyphView?: IconView;
+  private autoGlyph(): void {
+    if (this.autoGlyphView) return;
+    const size = this.glyphSize * 0.42;
+    this.autoGlyphView = makeIcon('autoplay', size, this.tokens.btnInk);
+    this.autoGlyphView.position.set((this.size - size) / 2, this.size * 0.2);
+    this.addChild(this.autoGlyphView);
+  }
+  private removeAutoGlyph(): void {
+    if (this.autoGlyphView) {
+      this.removeChild(this.autoGlyphView);
+      this.autoGlyphView.destroy();
+      this.autoGlyphView = undefined;
     }
   }
 

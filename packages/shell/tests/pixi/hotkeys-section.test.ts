@@ -121,6 +121,15 @@ describe('Hotkeys section — Pixi shell', () => {
     expect(labels.some((l) => l.toUpperCase() === 'HOTKEYS')).toBe(false);
   });
 
+  it('секция, заданную самой игрой, тоже прячем, когда клавиш нет', () => {
+    // Мастер-выключатель обязан гасить ВСЮ клавиатурную поверхность: раскладка клавиш,
+    // которых у игрока нет, — обещание, которое игра не выполнит.
+    const host = makeHost({ hotkeys: false }, [{ type: 'controls' }, { type: 'hotkeys' }]);
+    const overlay = openGameInfo(host);
+    overlay.resize?.(800, 600);
+    expect(collectLabels(overlay).some((l) => l.toUpperCase() === 'HOTKEYS')).toBe(false);
+  });
+
   it('does not double-inject when game already supplies a hotkeys section', () => {
     const host = makeHost({}, [{ type: 'controls' }, { type: 'hotkeys' }]);
     const overlay = openGameInfo(host);

@@ -101,6 +101,72 @@ describe('BottomBar base mode', () => {
     expect(auto().classList.contains('ge-active')).toBe(true);
   });
 
+  // ── Прерванный прогон автоплея ────────────────────────────────────────────────────────────
+  // Замечание Artube: «If connection is lost during autoplay, autoplay stops, and after
+  // reconnection the counter is displayed correctly». Хост в этом случае зовёт setAutoplay с
+  // active:false и НЕНУЛЕВЫМ остатком — это и есть «прогон стоит, счётчик цел».
+  describe('прогон прерван: счётчик остался', () => {
+    const spin = () => q(mount, '[data-ge="spin"]') as HTMLButtonElement;
+
+    it('диск показывает остаток, а не возвращается к обычному SPIN', () => {
+      const shell = createGameShell(cfg(mount));
+      shell.setAutoplay({ active: false, remaining: 4 });
+      expect(spin().textContent).toContain('4');
+      expect(spin().querySelector('.ge-spin-auto svg')).toBeTruthy(); // глиф авто, а не SPIN
+      expect(spin().classList.contains('ge-stop')).toBe(false); // это не «идёт прогон»
+    });
+
+    it('тап по диску возобновляет прогон с сохранённого остатка', () => {
+      const shell = createGameShell(cfg(mount));
+      const started = vi.fn();
+      const spun = vi.fn();
+      shell.on('autoplayStart', started);
+      shell.on('spin', spun);
+      shell.setAutoplay({ active: false, remaining: 4 });
+      spin().click();
+      expect(started).toHaveBeenCalledWith({ active: true, remaining: 4 });
+      expect(spun).not.toHaveBeenCalled(); // не одиночный спин
+    });
+
+    it('кнопка авто снимает остаток — дальше диск снова обычный SPIN', () => {
+      const shell = createGameShell(cfg(mount));
+      const stopped = vi.fn();
+      const spun = vi.fn();
+      shell.on('autoplayStop', stopped);
+      shell.on('spin', spun);
+      shell.setAutoplay({ active: false, remaining: 4 });
+      (q(mount, '[data-ge="autoplay"]') as HTMLButtonElement).click();
+      expect(stopped).toHaveBeenCalled();
+
+      shell.setAutoplay({ active: false, remaining: 0 }); // так ответит хост
+      spin().click();
+      expect(spun).toHaveBeenCalledOnce();
+    });
+
+    it('ставка не заперта: прогон-то стоит', () => {
+      const shell = createGameShell(cfg(mount));
+      shell.setAutoplay({ active: false, remaining: 4 });
+      expect((q(mount, '[data-ge="bet-up"]') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('во время доигрывания прерванного раунда диск заперт', () => {
+      const shell = createGameShell(cfg(mount));
+      shell.setAutoplay({ active: false, remaining: 4 });
+      shell.setBusy(true);
+      expect(spin().disabled).toBe(true);
+    });
+
+    it('нулевой остаток — обычный диск SPIN', () => {
+      const shell = createGameShell(cfg(mount));
+      const spun = vi.fn();
+      shell.on('spin', spun);
+      shell.setAutoplay({ active: false, remaining: 0 });
+      expect(spin().textContent).not.toContain('0');
+      spin().click();
+      expect(spun).toHaveBeenCalledOnce();
+    });
+  });
+
   it('disables the stepper at the bet range boundary', () => {
     const shell = createGameShell(cfg(mount)); // availableBets [1,2,5], starts at 2 (middle)
     const up = () => q(mount, '[data-ge="bet-up"]') as HTMLButtonElement;

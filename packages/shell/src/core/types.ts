@@ -156,8 +156,13 @@ export interface AutoplayConfig {
 
 export interface ShellFeatures {
   turbo: 0 | 1 | 2 | 3;
-  /** Master keyboard-shortcut switch. Defaults to `true`; set `false` to disable ALL hotkeys
-   *  (overrides `spacebar` and any future hotkey). */
+  /** Master keyboard-shortcut switch: `false` disables ALL hotkeys (overrides `spacebar` and any
+   *  future hotkey) AND hides the Hotkeys section of Game Info, including one the game supplied
+   *  itself — a keycap chart for keys that do nothing is worse than no chart.
+   *
+   *  Left unset, the shell measures the client (`core/device.ts`): a touchscreen has no keys to
+   *  press, so it gets neither the shortcuts nor the chart. Set it explicitly when you know better
+   *  than the media query — which is what the host does with the platform's `device` field. */
   hotkeys?: boolean;
   /** Spacebar starts a spin in base mode. Defaults to `true`; set `false` to disable the
    *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */

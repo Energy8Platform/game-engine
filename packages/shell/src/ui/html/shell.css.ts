@@ -57,6 +57,11 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
 /* the STOP glyph is a solid dark square, so the autoplay count is always pure white to read on it. */
 #${SHELL_ROOT_ID} .ge-spin-count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   font-size:22px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; color:#fff; }
+/* autoplay halted with spins still owed (a lost connection): the run is stopped, so no STOP square —
+   the auto glyph sits above the leftover count, both in the disc's own ink, and a tap resumes. */
+#${SHELL_ROOT_ID} .ge-shell-spin.ge-auto-paused { flex-direction:column; gap:1px; position:relative; }
+#${SHELL_ROOT_ID} .ge-auto-paused .ge-spin-auto { display:flex; font-size:.46em; line-height:0; }
+#${SHELL_ROOT_ID} .ge-auto-paused .ge-spin-count { position:static; inset:auto; color:inherit; font-size:20px; }
 
 /* BUY BONUS — round accent badge, 2-line label, text pulses + accent glow on hover */
 #${SHELL_ROOT_ID} .ge-shell-buybonus { pointer-events:auto; cursor:pointer; box-sizing:border-box;
