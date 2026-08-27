@@ -133,7 +133,7 @@ engine/
 ```ts
 export const Config: z<Config> = z.object({
   direction: z.union(['up', 'down']).default('up'),
-  holdSpins: z.number().min(0).max(10).default(1).extra({ applies: 'restart' }),
+  holdSpins: z.number().min(0).max(10).default(1).extra('extra', { applies: 'restart' }),
 })
 ```
 
