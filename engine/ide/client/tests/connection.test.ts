@@ -12,6 +12,8 @@ const SNAPSHOT: Snapshot = {
 class FakeSocket implements WebSocketLike {
   sent: string[] = [];
   listeners: Record<string, ((event: any) => void)[]> = {};
+  // 0 = CONNECTING, matching a real WebSocket before its 'open' event fires.
+  readyState = 0;
   addEventListener(type: string, listener: (event: any) => void) {
     (this.listeners[type] ??= []).push(listener);
   }
@@ -23,6 +25,7 @@ class FakeSocket implements WebSocketLike {
     for (const listener of this.listeners.message ?? []) listener({ data: JSON.stringify(message) });
   }
   open() {
+    this.readyState = 1; // OPEN
     for (const listener of this.listeners.open ?? []) listener({});
   }
 }
@@ -62,5 +65,35 @@ describe('connection', () => {
 
     expect(ctx.connection.diagnostics).toHaveLength(1);
     expect(ctx.connection.snapshot).toEqual(SNAPSHOT);
+  });
+
+  it('does not send while the socket is not open, and records a diagnostic instead', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const listener = vi.fn();
+    ctx.connection.subscribe(listener);
+
+    // Socket never opened — readyState stays CONNECTING(0), as it would be
+    // for a real WebSocket before the host accepts the connection.
+    ctx.connection.update('a:probe1', { speed: 3 });
+
+    expect(socket.sent).toHaveLength(0);
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'warning', plugin: 'a:probe1' });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a well-formed but unrecognised frame instead of throwing', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const listener = vi.fn();
+    ctx.connection.subscribe(listener);
+    socket.open();
+
+    expect(() => socket.receive({ type: 'bogus' } as unknown as ServerMessage)).not.toThrow();
+
+    expect(ctx.connection.snapshot).toBeNull();
+    expect(ctx.connection.diagnostics).toHaveLength(0);
+    expect(listener).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,22 @@
 import type { Context } from 'cordis';
-import type { ClientMessage, Diagnostic, ServerMessage, Snapshot } from '@energy8engine/contracts';
+import { type ClientMessage, type Diagnostic, diagnostic, type ServerMessage, type Snapshot } from '@energy8engine/contracts';
 
-/** The slice of WebSocket we use — so tests can hand us a fake. */
+/**
+ * The slice of WebSocket we use — so tests can hand us a fake.
+ *
+ * `readyState` matches the WHATWG-standardised numeric values a real
+ * `WebSocket` exposes (`CONNECTING=0`, `OPEN=1`, `CLOSING=2`, `CLOSED=3`) —
+ * `update()` below checks it against `1` before sending, the same guard
+ * the host's own `rpc.ts` applies before every `socket.send(...)`.
+ */
 export interface WebSocketLike {
+  readyState: number;
   addEventListener(type: string, listener: (event: any) => void): void;
   send(data: string): void;
   close(): void;
 }
+
+const WEBSOCKET_OPEN = 1;
 
 declare module 'cordis' {
   interface Context {
@@ -40,6 +50,34 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       return () => listeners.delete(listener);
     },
     update(id, next) {
+      // A real WebSocket throws InvalidStateError synchronously out of
+      // send() when it isn't OPEN yet (still CONNECTING) — or, past that,
+      // once it's CLOSING/CLOSED. update() must never throw: it's called
+      // directly from UI code (a React input handler in a later task) that
+      // has no way to know a try/catch is required here. Instead, failure
+      // becomes data in the same place every other failure already lands —
+      // connection.diagnostics — so the composition screen that already
+      // renders that array shows "not connected" without new plumbing.
+      //
+      // Queuing the edit for replay on reconnect was considered and
+      // rejected: the host is the source of truth, and the snapshot that
+      // arrives on reconnect could already contradict a queued edit made
+      // against stale state. Dropping it silently was rejected too — the
+      // user acted and nothing would show for it.
+      if (socket.readyState !== WEBSOCKET_OPEN) {
+        service.diagnostics = [
+          ...service.diagnostics,
+          diagnostic(
+            'warning',
+            id,
+            'connection',
+            'not connected to the host — the change was not sent',
+            'wait for the connection to reopen, then try again',
+          ),
+        ];
+        for (const listener of listeners) listener();
+        return;
+      }
       const message: ClientMessage = { type: 'update', id, config: next };
       socket.send(JSON.stringify(message));
     },
