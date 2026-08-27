@@ -21,8 +21,17 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await host.stop();
+  // Restore first, stop second — and stopping must not be able to block the
+  // restore. Test 3 lands a real write on `e8.yml`; `host.stop()` is
+  // `await ctx.fiber.dispose()` with no guard around it, and cordis's
+  // teardown calls each disposable synchronously with nothing catching a
+  // throw, so a throwing plugin dispose would otherwise propagate straight
+  // out and skip the write-back, leaving a tracked file dirty. The restore
+  // runs unconditionally first; `host?.stop()` is then best-effort (`host`
+  // is also optional here so a `beforeAll` failure before assignment can't
+  // throw a second error on top of whatever already failed).
   writeFileSync(COMPOSITION, original);
+  await host?.stop().catch(() => {});
 });
 
 test('a third-party plugin brings its own UI without the shell being rebuilt', async ({ page }) => {
