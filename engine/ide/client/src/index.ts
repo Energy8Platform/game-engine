@@ -9,3 +9,5 @@ export * from './plugins/connection';
 // consumer actually uses.
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
 export type { ModulesService, ModulesConfig } from './plugins/modules';
+export * from './schema-form/SchemaForm';
+export * from './schema-form/fields';

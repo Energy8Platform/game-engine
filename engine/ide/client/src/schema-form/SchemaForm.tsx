@@ -1,0 +1,55 @@
+import Schema from 'schemastery';
+import { Field, label, needsRestart, type SchemaNode } from './fields';
+
+export interface SchemaFormProps {
+  /**
+   * The raw `toJSON()` output from `CompositionRow.schema` — schemastery's
+   * deduped `{ uid, refs }` reference graph, not the flat `{ type, dict,
+   * meta }` tree `fields.tsx` walks. Rebuilding it with `new Schema(json)`
+   * restores the flat shape (`.dict`, `.meta`, `.list`) that reading it
+   * directly would leave `undefined`.
+   */
+  schema: unknown;
+  value: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+}
+
+/**
+ * Rebuilds the reference-graph JSON into a schemastery `Schema` instance.
+ * A row can legitimately carry `schema: null`, and a schema authored by a
+ * plugin nobody has ever seen can be malformed — both must render nothing
+ * rather than throw.
+ */
+function rebuild(schema: unknown): SchemaNode | null {
+  if (schema == null) return null;
+  try {
+    return new Schema(schema as never) as unknown as SchemaNode;
+  } catch {
+    return null;
+  }
+}
+
+export function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
+  const node = rebuild(schema);
+  if (!node?.dict) return null;
+
+  return (
+    <div className="e8-schema-form">
+      {Object.entries(node.dict).map(([key, child]) => {
+        const id = `field-${key}`;
+        return (
+          <div className="e8-field" key={key}>
+            <label htmlFor={id}>{label(child, key)}</label>
+            <Field
+              id={id}
+              node={child}
+              value={value[key]}
+              onChange={(next) => onChange({ ...value, [key]: next })}
+            />
+            {needsRestart(child) ? <span className="e8-badge">перезапуск</span> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
