@@ -6,6 +6,7 @@ import { Context } from 'cordis';
 import Loader from '@cordisjs/plugin-loader';
 import Server from '@cordisjs/plugin-server';
 import * as yaml from 'js-yaml';
+import * as composition from './plugins/composition';
 
 export interface IdeHostOptions {
   /** Project directory; its e8.yml is the composition. */
@@ -44,6 +45,8 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     await ctx.plugin(Loader);
 
     const diagnostics = await loadComposition(ctx, options.cwd);
+
+    await ctx.plugin(composition, { cwd: options.cwd, bootDiagnostics: diagnostics });
 
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
     await ctx.loader.await();
