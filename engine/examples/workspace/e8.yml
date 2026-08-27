@@ -1,5 +1,5 @@
 - id: probe1
-  name: probe-plugin
+  name: e8-example-probe
   config:
     speed: 12
     direction: up

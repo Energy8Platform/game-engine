@@ -3,5 +3,5 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "dependencies": { "probe-plugin": "*" }
+  "dependencies": { "e8-example-probe": "*" }
 }

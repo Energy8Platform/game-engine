@@ -1,5 +1,5 @@
 {
-  "name": "probe-plugin",
+  "name": "e8-example-probe",
   "version": "0.0.0",
   "type": "module",
   "main": "src/index.ts",
