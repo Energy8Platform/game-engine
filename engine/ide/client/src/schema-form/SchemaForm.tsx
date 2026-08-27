@@ -33,9 +33,18 @@ export function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
   const node = rebuild(schema);
   if (!node?.dict) return null;
 
+  // A dict entry can point at a uid that isn't in the graph's `refs` (a
+  // dangling reference from a truncated or hand-edited schema) — rebuilding
+  // then leaves that entry `undefined` rather than dropping the key. Reading
+  // it as a live SchemaNode further down (`label()` etc.) would throw, so
+  // filter those out here and render every entry that actually resolved.
+  const fields = Object.entries(node.dict).filter(
+    (entry): entry is [string, SchemaNode] => entry[1] != null,
+  );
+
   return (
     <div className="e8-schema-form">
-      {Object.entries(node.dict).map(([key, child]) => {
+      {fields.map(([key, child]) => {
         const id = `field-${key}`;
         return (
           <div className="e8-field" key={key}>
