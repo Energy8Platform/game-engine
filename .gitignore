@@ -33,3 +33,7 @@ idea.md
 
 # npm registry auth (contains a private-registry token — never commit)
 .npmrc
+
+# Playwright run artifacts
+/engine/apps/web/test-results/
+/engine/apps/web/playwright-report/
