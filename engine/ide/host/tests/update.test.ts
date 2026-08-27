@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -49,32 +49,45 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // Grab the `Include` subtree that owns the pending-write bookkeeping
-  // *before* disposing the host, so we can still reach it afterward.
-  const includeTree = [...host.ctx.loader.entries()].find((e) => e.options.name === 'probe-plugin')
-    ?.parent?.tree as { writeTask?: unknown } | undefined;
-
   await host.stop();
-
-  // `host.stop()` does not cancel `@cordisjs/plugin-include`'s pending
-  // write timer (see the comment on composition.update()'s interface:
-  // `ctx.loader.update()` resolving does not mean the write has landed, and
-  // there is no public signal for when it does). Deleting the temp
-  // directory while that timer is still armed makes its write throw ENOENT
-  // as an unhandled rejection once it fires — measured directly. Rather
-  // than guess how long to wait (the failure mode this whole per-test-temp-
-  // directory setup replaced), poll the library's own `writeTask` field
-  // until it clears, which is the actual condition, not an assumed
-  // duration. This is test-cleanup-only introspection into a private field,
-  // never production code reaching into it.
-  if (includeTree) {
-    await vi.waitFor(() => {
-      if (includeTree.writeTask) throw new Error('write still pending');
-    });
-  }
-
-  rmSync(workspace, { recursive: true, force: true });
 });
+// The above is the *only* teardown — deliberately no `rmSync` of
+// `workspace`. See below for why.
+//
+// Three things were tried here, in order, and each was measured, not
+// assumed:
+//
+//   1. A fixed-duration guard delay before restoring a *shared* fixture.
+//      Empirical guess about latency; a stale write landed after the
+//      restore and corrupted the checked-in template on disk.
+//   2. Per-test disposable directories (kept — see beforeEach above), with
+//      an `afterEach` that polled `@cordisjs/plugin-include`'s private
+//      `writeTask` field before removing the directory. `writeTask` clears
+//      when the write's `setTimeout` *fires*, not when the `writeFile()` +
+//      `rename()` it kicks off actually land — so the poll narrowed the
+//      race to one syscall pair instead of closing it, and depended on an
+//      unexported implementation field with a silent-forever failure mode
+//      if the library ever renamed it.
+//   3. Deleting (2)'s poll and moving cleanup to a best-effort, try/catch
+//      per-directory `rmSync` loop in `afterAll`. Measured: this fails
+//      *every* run (20/20), not intermittently — `rmSync` itself always
+//      succeeds (nothing to catch), and the unhandled rejection comes from
+//      a *separate* promise chain: `Include.writeFile()`'s own
+//      `setTimeout(fn, 0)` callback calls `this._writeFile(config)`
+//      without awaiting or catching it, so when that write's `open()`
+//      lands after `afterAll` has already removed the directory, the
+//      rejection has no handler anywhere in reach — no `try/catch` around
+//      our own `rmSync` call can intercept a rejection from a promise we
+//      never hold a reference to. `afterAll` runs immediately after the
+//      last test's own pending write, with no other test's setup to
+//      incidentally buy it time, which is why this is *worse* than (1) or
+//      (2): near-guaranteed, not occasional.
+//
+// So: no attempt at synchronous removal at all. A stray directory under the
+// OS temp root is not a defect — the OS reclaims it — and unlike (1)-(3),
+// leaving it alone cannot itself produce a race or an unhandled rejection,
+// because nothing ever competes with the library's own write for the
+// directory's existence.
 
 async function probeId(host: IdeHost): Promise<string> {
   const snapshot = await host.ctx.composition.snapshot();
