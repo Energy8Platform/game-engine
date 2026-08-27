@@ -104,6 +104,12 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
  * Validating the file ourselves before ever calling `ctx.loader.create()`
  * sidesteps the buggy codepath entirely instead of trying to catch its
  * fallout.
+ *
+ * One more rule lives here, independent of the crash: **a composition with
+ * no entries registers no include entry.** An empty file (`undefined`) and
+ * an explicit `[]` are the same composition and must produce the same graph
+ * — see the `length === 0` branch below for why we don't let the two
+ * equivalent spellings diverge.
  */
 async function loadComposition(ctx: Context, cwd: string): Promise<Diagnostic[]> {
   const filename = join(cwd, COMPOSITION_FILENAME);
@@ -128,17 +134,31 @@ async function loadComposition(ctx: Context, cwd: string): Promise<Diagnostic[]>
     // `yaml.load()` returns `undefined` only for a genuinely empty (or
     // whitespace-only) file — as opposed to a file that spells out `null`,
     // which is an explicit, and still invalid, value. We read this as "a
-    // project with no plugins yet", a legitimate state, not an error. But we
-    // still can't hand it to `ctx.loader.create()`: plugin-include would
-    // independently re-read and re-parse the same file, land on the same
-    // `undefined`, and crash on the exact `this.data is not iterable` bug
-    // this function exists to avoid. So we treat it as an empty composition
-    // by skipping the include entry entirely rather than creating one.
-    return [];
+    // project with no plugins yet", a legitimate state, not an error: treat
+    // it as an empty composition, same as an explicit `[]` (see below).
+    data = [];
   }
 
   const diagnostics = validateComposition(data, filename);
   if (diagnostics.length > 0) return diagnostics;
+
+  if ((data as unknown[]).length === 0) {
+    // A composition with no entries registers no include entry — an empty
+    // file and an explicit `[]` are the same composition and must produce
+    // the same graph (`ctx.loader.entries()`), not one with a
+    // `@cordisjs/plugin-include` row and one without. We could call
+    // `ctx.loader.create()` here too — plugin-include does not choke on a
+    // *literal* `[]` it reads back off disk, only on `undefined`/non-array
+    // documents (the crash `loadComposition` exists to dodge) — but doing so
+    // would make the graph depend on which of the two equivalent spellings
+    // the file happens to use. Skipping the entry for both keeps "no
+    // entries" meaning one thing. (Consequence, not ours to solve here: the
+    // first entry ever added to an empty project has no existing include
+    // subtree to write into — Slice 0 only edits configs of entries that
+    // already exist, and e8.yml itself is replaced wholesale in a later
+    // plan.)
+    return [];
+  }
 
   await ctx.loader.create({
     name: '@cordisjs/plugin-include',

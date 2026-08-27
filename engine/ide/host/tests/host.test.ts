@@ -10,6 +10,7 @@ const MAPPING_E8YML_WORKSPACE = join(__dirname, 'fixtures', 'mapping-e8yml');
 const NON_OBJECT_ENTRY_E8YML_WORKSPACE = join(__dirname, 'fixtures', 'non-object-entry-e8yml');
 const MISSING_NAME_E8YML_WORKSPACE = join(__dirname, 'fixtures', 'missing-name-e8yml');
 const EMPTY_E8YML_WORKSPACE = join(__dirname, 'fixtures', 'empty-e8yml');
+const NONEMPTY_WORKSPACE = join(__dirname, 'fixtures', 'nonempty-workspace');
 
 let host: IdeHost | undefined;
 afterEach(async () => {
@@ -136,6 +137,26 @@ describe('createIdeHost — boot diagnostics', () => {
       expect(host.diagnostics).toEqual([]);
     });
   });
+
+  it('gives an empty file and an explicit [] the same diagnostics and the same loader graph', async () => {
+    const emptyFileHost = await createIdeHost({ cwd: EMPTY_E8YML_WORKSPACE, port: 0 });
+    const emptyArrayHost = await createIdeHost({ cwd: WORKSPACE, port: 0 }); // WORKSPACE's e8.yml is `[]`
+    try {
+      expect(emptyFileHost.diagnostics).toEqual([]);
+      expect(emptyArrayHost.diagnostics).toEqual([]);
+
+      const emptyFileEntries = [...emptyFileHost.ctx.loader.entries()];
+      const emptyArrayEntries = [...emptyArrayHost.ctx.loader.entries()];
+
+      // pin the actual count on both sides — an absent `@cordisjs/plugin-include`
+      // row on one and present on the other would still pass a "no error" check
+      expect(emptyFileEntries).toHaveLength(0);
+      expect(emptyArrayEntries).toHaveLength(0);
+    } finally {
+      await emptyFileHost.stop();
+      await emptyArrayHost.stop();
+    }
+  });
 });
 
 describe('createIdeHost — boot failure cleanup', () => {
@@ -143,8 +164,12 @@ describe('createIdeHost — boot failure cleanup', () => {
     host = await createIdeHost({ cwd: WORKSPACE, port: 0 });
     const takenPort = Number(new URL(host.url).port);
 
+    // NONEMPTY_WORKSPACE (not WORKSPACE's `[]`) so the failed attempt
+    // actually registers an include entry — since round 3, an empty
+    // composition registers no entry at all, and this spy needs one to tear
+    // down in order to prove anything.
     const stopSpy = vi.spyOn(EntryGroup.prototype, 'stop');
-    await expect(createIdeHost({ cwd: WORKSPACE, port: takenPort })).rejects.toThrow(
+    await expect(createIdeHost({ cwd: NONEMPTY_WORKSPACE, port: takenPort })).rejects.toThrow(
       'No open ports available',
     );
 
