@@ -11,8 +11,15 @@ export const name = 'probe';
 
 export const Config: Schema<Config> = Schema.object({
   speed: Schema.number().min(1).max(20).step(1).default(8).description('скорость барабана'),
-  direction: Schema.union(['up', 'down'] as const).default('up').description('направление заполнения'),
-  holdSpins: Schema.number().min(0).max(10).default(1).description('удержаний').extra('extra', { applies: 'restart' }),
+  direction: Schema.union(['up', 'down'] as const)
+    .default('up')
+    .description('направление заполнения'),
+  holdSpins: Schema.number()
+    .min(0)
+    .max(10)
+    .default(1)
+    .description('удержаний')
+    .extra('extra', { applies: 'restart' }),
 });
 
 export interface ProbeService {
@@ -25,5 +32,7 @@ export function apply(ctx: Context, config: Config) {
     return () => console.info('probe down');
   }, 'probe-effect');
 
-  ctx.provide('probe', { describe: () => `${config.direction} @ ${config.speed}` } satisfies ProbeService);
+  ctx.provide('probe', {
+    describe: () => `${config.direction} @ ${config.speed}`,
+  } satisfies ProbeService);
 }

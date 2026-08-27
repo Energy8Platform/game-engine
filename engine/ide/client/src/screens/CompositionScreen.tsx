@@ -21,7 +21,8 @@ function useDiagnostics(ctx: Context): Diagnostic[] {
   const cache = useRef<Diagnostic[]>(ctx.connection.diagnostics);
   return useSyncExternalStore(ctx.connection.subscribe, () => {
     const next = ctx.connection.diagnostics;
-    const same = next.length === cache.current.length && next.every((d, i) => d === cache.current[i]);
+    const same =
+      next.length === cache.current.length && next.every((d, i) => d === cache.current[i]);
     if (!same) cache.current = next;
     return cache.current;
   });
@@ -59,7 +60,10 @@ const STATE_LABEL: Record<number, string> = {
  * not reach `getDerivedStateFromError`/`componentDidCatch` and will not be
  * caught or reported here.
  */
-class CardBoundary extends Component<{ ctx: Context; cardKey: string; children: ReactNode }, { failed: boolean }> {
+class CardBoundary extends Component<
+  { ctx: Context; cardKey: string; children: ReactNode },
+  { failed: boolean }
+> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
@@ -87,6 +91,15 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
 
   const rows = snapshot?.rows ?? [];
 
+  // `Diagnostic.plugin` carries the composition entry id (see its doc
+  // comment) — the row header shows `row.name` (the package name), so
+  // without this resolution a real failure would print its raw entry id
+  // above a row labelled by package name and a human couldn't connect the
+  // two. Falls back to the raw id for diagnostics that aren't about any
+  // one entry (a malformed e8.yml, a card's slot key, …) — those don't
+  // match a row by construction.
+  const pluginLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
+
   return (
     <main className="e8-composition">
       <h1>Состав</h1>
@@ -95,7 +108,8 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
         <ul className="e8-diagnostics">
           {diagnostics.map((d, index) => (
             <li key={index} data-severity={d.severity}>
-              <strong className="e8-severity">{d.severity}</strong> {d.plugin} · {d.where}: {d.message}
+              <strong className="e8-severity">{d.severity}</strong> {pluginLabel(d.plugin)} ·{' '}
+              {d.where}: {d.message}
               {d.fix ? ` — ${d.fix}` : ''}
             </li>
           ))}
@@ -111,10 +125,13 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
           <section className="e8-row" key={row.id}>
             <header>
               <strong>{row.name}</strong>
-              <span className="e8-state">{row.state === null ? '—' : (STATE_LABEL[row.state] ?? row.state)}</span>
+              <span className="e8-state">
+                {row.state === null ? '—' : (STATE_LABEL[row.state] ?? row.state)}
+              </span>
               {row.hot ? <span className="e8-badge">горячий</span> : null}
             </header>
             <SchemaForm
+              rowId={row.id}
               schema={row.schema}
               value={(row.config ?? {}) as Record<string, unknown>}
               onChange={(next) => ctx.connection.update(row.id, next)}

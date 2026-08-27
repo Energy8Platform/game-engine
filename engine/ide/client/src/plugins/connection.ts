@@ -1,5 +1,11 @@
 import type { Context } from 'cordis';
-import { type ClientMessage, type Diagnostic, diagnostic, type ServerMessage, type Snapshot } from '@energy8engine/contracts';
+import {
+  type ClientMessage,
+  type Diagnostic,
+  diagnostic,
+  type ServerMessage,
+  type Snapshot,
+} from '@energy8engine/contracts';
 
 /**
  * The slice of WebSocket we use — so tests can hand us a fake.
@@ -65,12 +71,20 @@ export const name = 'connection';
 
 /** Structural equality for the fields that make two `Diagnostic`s the same failure. */
 function diagnosticsEqual(a: Diagnostic, b: Diagnostic): boolean {
-  return a.severity === b.severity && a.plugin === b.plugin && a.where === b.where && a.message === b.message && a.fix === b.fix;
+  return (
+    a.severity === b.severity &&
+    a.plugin === b.plugin &&
+    a.where === b.where &&
+    a.message === b.message &&
+    a.fix === b.fix
+  );
 }
 
 export function apply(ctx: Context, config: ConnectionConfig) {
   const listeners = new Set<() => void>();
-  const socket = (config.socketFactory ?? ((url) => new WebSocket(url) as WebSocketLike))(config.url);
+  const socket = (config.socketFactory ?? ((url) => new WebSocket(url) as WebSocketLike))(
+    config.url,
+  );
 
   // Two sources, two lifetimes. Host-authored diagnostics (a `snapshot` or
   // `diagnostics` server message) are wholesale-replaced by the next
@@ -165,7 +179,8 @@ export function apply(ctx: Context, config: ConnectionConfig) {
      * different failure reason for the same row stands alongside.
      */
     report(next) {
-      const sameIdentity = (d: Diagnostic) => d.plugin === next.plugin && d.where === next.where && d.message === next.message;
+      const sameIdentity = (d: Diagnostic) =>
+        d.plugin === next.plugin && d.where === next.where && d.message === next.message;
       const existing = clientDiagnostics.find(sameIdentity);
       if (existing && diagnosticsEqual(existing, next)) return;
       clientDiagnostics = [...clientDiagnostics.filter((d) => !sameIdentity(d)), next];
@@ -183,7 +198,10 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       // turning one bad frame from the host into an unhandled exception
       // inside a socket event handler nothing here can catch.
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-      if ((parsed as { type?: unknown }).type !== 'snapshot' && (parsed as { type?: unknown }).type !== 'diagnostics') {
+      if (
+        (parsed as { type?: unknown }).type !== 'snapshot' &&
+        (parsed as { type?: unknown }).type !== 'diagnostics'
+      ) {
         return;
       }
       message = parsed as ServerMessage;

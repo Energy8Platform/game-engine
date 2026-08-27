@@ -5,7 +5,11 @@ import type { ServerMessage } from '@energy8engine/contracts';
 import { CompositionScreen, createIdeClient } from '../src/index';
 
 const SCHEMA = JSON.parse(
-  JSON.stringify(Schema.object({ speed: Schema.number().min(1).max(20).default(8).description('reel speed') }).toJSON()),
+  JSON.stringify(
+    Schema.object({
+      speed: Schema.number().min(1).max(20).default(8).description('reel speed'),
+    }).toJSON(),
+  ),
 );
 
 async function harness() {
@@ -46,7 +50,18 @@ describe('CompositionScreen', () => {
     push({
       type: 'snapshot',
       snapshot: {
-        rows: [{ id: 'a:probe1', name: 'probe-plugin', disabled: false, state: 2, config: { speed: 8 }, schema: SCHEMA, hot: true, clientUrl: null }],
+        rows: [
+          {
+            id: 'a:probe1',
+            name: 'probe-plugin',
+            disabled: false,
+            state: 2,
+            config: { speed: 8 },
+            schema: SCHEMA,
+            hot: true,
+            clientUrl: null,
+          },
+        ],
         diagnostics: [],
       },
     });
@@ -59,7 +74,18 @@ describe('CompositionScreen', () => {
     push({
       type: 'snapshot',
       snapshot: {
-        rows: [{ id: 'a:probe1', name: 'probe-plugin', disabled: false, state: 2, config: { speed: 8 }, schema: SCHEMA, hot: true, clientUrl: null }],
+        rows: [
+          {
+            id: 'a:probe1',
+            name: 'probe-plugin',
+            disabled: false,
+            state: 2,
+            config: { speed: 8 },
+            schema: SCHEMA,
+            hot: true,
+            clientUrl: null,
+          },
+        ],
         diagnostics: [],
       },
     });
@@ -72,9 +98,63 @@ describe('CompositionScreen', () => {
     render(<CompositionScreen ctx={ctx} />);
     push({
       type: 'snapshot',
-      snapshot: { rows: [], diagnostics: [{ severity: 'error', plugin: 'x', where: 'package', message: 'cannot resolve package "x"' }] },
+      snapshot: {
+        rows: [],
+        diagnostics: [
+          {
+            severity: 'error',
+            plugin: 'x',
+            where: 'package',
+            message: 'cannot resolve package "x"',
+          },
+        ],
+      },
     });
     expect(screen.getByText(/cannot resolve package/)).toBeTruthy();
+  });
+
+  it("resolves a diagnostic naming an entry to that entry's package name, not its raw id", async () => {
+    const { ctx, push } = await harness();
+    render(<CompositionScreen ctx={ctx} />);
+    push({
+      type: 'snapshot',
+      snapshot: {
+        rows: [
+          {
+            id: 'a:probe1',
+            name: 'e8-example-probe',
+            disabled: false,
+            state: 3,
+            config: {},
+            schema: null,
+            hot: false,
+            clientUrl: null,
+          },
+        ],
+        diagnostics: [{ severity: 'error', plugin: 'a:probe1', where: 'apply', message: 'boom' }],
+      },
+    });
+    // The diagnostic carries the entry id ("a:probe1"); the row header
+    // carries the package name ("e8-example-probe") — the list must print
+    // the same name the row is labelled with, not the raw id, so a human
+    // can connect the two.
+    expect(screen.getByText(/e8-example-probe · apply: boom/)).toBeTruthy();
+    expect(screen.queryByText(/a:probe1 · apply/)).toBeNull();
+  });
+
+  it('falls back to the raw id for a diagnostic that does not name any entry', async () => {
+    const { ctx, push } = await harness();
+    render(<CompositionScreen ctx={ctx} />);
+    push({
+      type: 'snapshot',
+      snapshot: {
+        rows: [],
+        diagnostics: [
+          { severity: 'error', plugin: 'composition', where: 'e8.yml', message: 'not valid yaml' },
+        ],
+      },
+    });
+    expect(screen.getByText(/composition · e8\.yml: not valid yaml/)).toBeTruthy();
   });
 
   it('renders cards plugins contributed to composition.card', async () => {
@@ -101,7 +181,18 @@ describe('CompositionScreen', () => {
       push({
         type: 'snapshot',
         snapshot: {
-          rows: [{ id: 'a:probe1', name: 'probe-plugin', disabled: false, state: 2, config: { speed: 8 }, schema: SCHEMA, hot: true, clientUrl: null }],
+          rows: [
+            {
+              id: 'a:probe1',
+              name: 'probe-plugin',
+              disabled: false,
+              state: 2,
+              config: { speed: 8 },
+              schema: SCHEMA,
+              hot: true,
+              clientUrl: null,
+            },
+          ],
           diagnostics: [],
         },
       });

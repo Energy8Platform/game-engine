@@ -29,7 +29,7 @@ export function apply(ctx: Context, config: ClientAssetsConfig) {
     }
 
     const pkg = readPackageJson(config.cwd, entry.options.name);
-    const manifest = pkg ? parseManifest(pkg.json, entry.options.name).manifest : null;
+    const manifest = pkg ? parseManifest(pkg.json, entry.id).manifest : null;
     if (!pkg || !manifest?.client) {
       res.status = 404;
       res.json({ error: `"${entry.options.name}" has no client half` });

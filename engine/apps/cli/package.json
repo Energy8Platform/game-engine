@@ -1,6 +1,7 @@
 {
   "name": "@energy8engine/e8",
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "bin": { "e8": "./bin/e8.mjs" },
   "scripts": { "typecheck": "tsc --noEmit" },

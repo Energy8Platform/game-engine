@@ -44,7 +44,11 @@ export function Field({ id, node, value, onChange }: FieldProps) {
   const options = constants(node);
   if (options) {
     return (
-      <select id={id} value={String(current ?? '')} onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}>
+      <select
+        id={id}
+        value={String(current ?? '')}
+        onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
+      >
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -136,7 +140,8 @@ function NumberField({ id, node, value, onChange }: FieldProps) {
 
 /** Read-only stand-in for a field kind the form does not know how to edit. */
 function UnsupportedField({ id, node, value }: { id: string; node: SchemaNode; value: unknown }) {
-  const display = value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const display =
+    value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
   return (
     <span className="e8-unsupported">
       <input id={id} type="text" value={display} readOnly aria-readonly="true" />

@@ -46,17 +46,50 @@ export interface CompositionConfig {
   bootDiagnostics?: Diagnostic[];
 }
 
-async function schemaOf(ctx: Context, name: string): Promise<unknown | null> {
+/**
+ * Result of trying to read a plugin's `Config` schema. `schema: null` alone
+ * is ambiguous by construction — a plugin can legitimately declare no
+ * `Config` at all — so a failed *import* carries its own diagnostic
+ * alongside the same `schema: null`, instead of being indistinguishable
+ * from the legitimate case. Without this, an import failure (the root-hoist
+ * trap documented below is exactly this) renders as an empty form with
+ * nothing saying why — the white-rectangle outcome the spec's §8 exists to
+ * forbid.
+ */
+interface SchemaResult {
+  schema: unknown | null;
+  diagnostic: Diagnostic | null;
+}
+
+async function schemaOf(ctx: Context, entryId: string, name: string): Promise<SchemaResult> {
+  let plugin: unknown;
   try {
     // `ctx.loader.import(name)` resolves a bare specifier with a plain
     // `import(name)` called from inside @cordisjs/plugin-loader's own file, not
     // from `config.cwd` — so it only finds a package hoisted to this monorepo's
     // ROOT node_modules. A name collision with any other package here silently
-    // loses that hoist: this returns null (caught below) and the entry's fiber
-    // state shows up null in the snapshot, with no "cannot resolve" diagnostic.
-    const plugin = ctx.loader.unwrapExports(await ctx.loader.import(name));
-    const Config = (plugin as { Config?: { toJSON?: () => unknown } } | undefined)?.Config;
-    if (typeof Config?.toJSON !== 'function') return null;
+    // loses that hoist: the import throws (MODULE_NOT_FOUND) or resolves to an
+    // unrelated package — either way this is the "import itself failed" branch
+    // below, not the "declares no Config" one.
+    plugin = ctx.loader.unwrapExports(await ctx.loader.import(name));
+  } catch (error) {
+    return {
+      schema: null,
+      diagnostic: diagnostic(
+        'error',
+        entryId,
+        'schema',
+        `failed to import "${name}" while reading its config schema: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        `check that "${name}" resolves from this workspace and that its module loads without throwing`,
+      ),
+    };
+  }
+
+  const Config = (plugin as { Config?: { toJSON?: () => unknown } } | undefined)?.Config;
+  if (typeof Config?.toJSON !== 'function') return { schema: null, diagnostic: null };
+  try {
     // Deliberately the raw toJSON() output — schemastery's own deduped
     // { uid, refs } graph — and not a live `new Schema(...)` instance.
     // Snapshot exists to cross a socket; a class instance in that position
@@ -65,9 +98,9 @@ async function schemaOf(ctx: Context, name: string): Promise<unknown | null> {
     // toJSON() fires again). Every reader, in-process or over the wire,
     // rebuilds with `new Schema(json)` before touching `.dict`/`.meta` — see
     // CompositionRow.schema's doc comment.
-    return Config.toJSON();
+    return { schema: Config.toJSON(), diagnostic: null };
   } catch {
-    return null;
+    return { schema: null, diagnostic: null };
   }
 }
 
@@ -155,7 +188,10 @@ export function apply(ctx: Context, config: CompositionConfig) {
     if (fiber.state !== 3 /* FiberState.FAILED */) return;
     fiber.await().catch((error: unknown) => {
       if (error && typeof error === 'object') knownPluginFailures.add(error);
-      failures.set(entryId, error instanceof Error ? error.message : String(error ?? 'plugin failed'));
+      failures.set(
+        entryId,
+        error instanceof Error ? error.message : String(error ?? 'plugin failed'),
+      );
     });
   });
 
@@ -179,15 +215,30 @@ export function apply(ctx: Context, config: CompositionConfig) {
           );
         }
 
-        const parsed = pkg ? parseManifest(pkg.json, pkgName) : { manifest: null, diagnostics: [] };
+        // Pass the entry id, not `pkgName` — `Diagnostic.plugin` is the
+        // entry's stable identity (see its doc comment); two entries can
+        // share a package name, and the screen resolves this id back to a
+        // row name for display.
+        const parsed = pkg
+          ? parseManifest(pkg.json, entry.id)
+          : { manifest: null, diagnostics: [] };
         diagnostics.push(...parsed.diagnostics);
 
         const failure = failures.get(entry.id);
         if (failure) {
           diagnostics.push(
-            diagnostic('error', entry.id, 'apply', failure, 'fix the plugin, then reload the composition'),
+            diagnostic(
+              'error',
+              entry.id,
+              'apply',
+              failure,
+              'fix the plugin, then reload the composition',
+            ),
           );
         }
+
+        const schemaResult = await schemaOf(ctx, entry.id, pkgName);
+        if (schemaResult.diagnostic) diagnostics.push(schemaResult.diagnostic);
 
         rows.push({
           id: entry.id,
@@ -195,7 +246,7 @@ export function apply(ctx: Context, config: CompositionConfig) {
           disabled: entry.disabled,
           state: entry.fiber?.state ?? null,
           config: entry.options.config ?? {},
-          schema: await schemaOf(ctx, pkgName),
+          schema: schemaResult.schema,
           hot: parsed.manifest?.hot ?? false,
           clientUrl: parsed.manifest?.client ? `/plugin-client/${entry.id}` : null,
         });

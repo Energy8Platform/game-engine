@@ -4,7 +4,16 @@ import { createIdeClient, type WebSocketLike } from '../src/index';
 
 const SNAPSHOT: Snapshot = {
   rows: [
-    { id: 'a:probe1', name: 'probe-plugin', disabled: false, state: 2, config: { speed: 8 }, schema: null, hot: true, clientUrl: null },
+    {
+      id: 'a:probe1',
+      name: 'probe-plugin',
+      disabled: false,
+      state: 2,
+      config: { speed: 8 },
+      schema: null,
+      hot: true,
+      clientUrl: null,
+    },
   ],
   diagnostics: [],
 };
@@ -22,7 +31,8 @@ class FakeSocket implements WebSocketLike {
   }
   close() {}
   receive(message: ServerMessage) {
-    for (const listener of this.listeners.message ?? []) listener({ data: JSON.stringify(message) });
+    for (const listener of this.listeners.message ?? [])
+      listener({ data: JSON.stringify(message) });
   }
   open() {
     this.readyState = 1; // OPEN
@@ -50,7 +60,11 @@ describe('connection', () => {
     socket.open();
     ctx.connection.update('a:probe1', { speed: 3 });
 
-    expect(JSON.parse(socket.sent[0])).toEqual({ type: 'update', id: 'a:probe1', config: { speed: 3 } });
+    expect(JSON.parse(socket.sent[0])).toEqual({
+      type: 'update',
+      id: 'a:probe1',
+      config: { speed: 3 },
+    });
   });
 
   it('keeps diagnostics from the host without dropping the snapshot', async () => {
@@ -76,18 +90,28 @@ describe('connection', () => {
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
     socket.open();
 
-    const clientDiagnostic = { severity: 'error' as const, plugin: 'a:probe1', where: 'client', message: 'boom' };
+    const clientDiagnostic = {
+      severity: 'error' as const,
+      plugin: 'a:probe1',
+      where: 'client',
+      message: 'boom',
+    };
     ctx.connection.report(clientDiagnostic);
     expect(ctx.connection.diagnostics).toEqual([clientDiagnostic]);
 
     socket.receive({
       type: 'diagnostics',
-      diagnostics: [{ severity: 'error', plugin: 'a:probe2', where: 'config', message: 'host says no' }],
+      diagnostics: [
+        { severity: 'error', plugin: 'a:probe2', where: 'config', message: 'host says no' },
+      ],
     });
 
     // Both present — host's alongside client's, not one replacing the other.
     expect(ctx.connection.diagnostics).toHaveLength(2);
-    expect(ctx.connection.diagnostics.map((d) => d.plugin).sort()).toEqual(['a:probe1', 'a:probe2']);
+    expect(ctx.connection.diagnostics.map((d) => d.plugin).sort()).toEqual([
+      'a:probe1',
+      'a:probe2',
+    ]);
 
     // A second, unrelated host message replaces only the host's diagnostic.
     socket.receive({ type: 'diagnostics', diagnostics: [] });
@@ -106,7 +130,11 @@ describe('connection', () => {
 
     expect(socket.sent).toHaveLength(0);
     expect(ctx.connection.diagnostics).toHaveLength(1);
-    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'a:probe1', where: 'connection' });
+    expect(ctx.connection.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'a:probe1',
+      where: 'connection',
+    });
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
@@ -123,11 +151,15 @@ describe('connection', () => {
     ctx.connection.update('a:probe1', { speed: 3 });
 
     expect(ctx.connection.diagnostics).toHaveLength(1);
-    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'a:probe1', where: 'connection' });
+    expect(ctx.connection.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'a:probe1',
+      where: 'connection',
+    });
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps distinct rows\' not-connected failures separate instead of collapsing them', async () => {
+  it("keeps distinct rows' not-connected failures separate instead of collapsing them", async () => {
     const socket = new FakeSocket();
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
     const listener = vi.fn();
@@ -140,7 +172,10 @@ describe('connection', () => {
     ctx.connection.update('a:probe2', { speed: 1 });
 
     expect(ctx.connection.diagnostics).toHaveLength(2);
-    expect(ctx.connection.diagnostics.map((d) => d.plugin).sort()).toEqual(['a:probe1', 'a:probe2']);
+    expect(ctx.connection.diagnostics.map((d) => d.plugin).sort()).toEqual([
+      'a:probe1',
+      'a:probe2',
+    ]);
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
@@ -160,7 +195,9 @@ describe('connection', () => {
     ctx.connection.update('a:probe1', circular);
 
     expect(ctx.connection.diagnostics).toHaveLength(2);
-    expect(ctx.connection.diagnostics.every((d) => d.plugin === 'a:probe1' && d.where === 'connection')).toBe(true);
+    expect(
+      ctx.connection.diagnostics.every((d) => d.plugin === 'a:probe1' && d.where === 'connection'),
+    ).toBe(true);
     const messages = ctx.connection.diagnostics.map((d) => d.message);
     expect(new Set(messages).size).toBe(2);
   });
@@ -176,7 +213,11 @@ describe('connection', () => {
 
     expect(socket.sent).toHaveLength(0);
     expect(ctx.connection.diagnostics).toHaveLength(1);
-    expect(ctx.connection.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'a:probe1', where: 'connection' });
+    expect(ctx.connection.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'a:probe1',
+      where: 'connection',
+    });
   });
 
   it('ignores a well-formed but unrecognised frame instead of throwing', async () => {

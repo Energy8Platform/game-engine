@@ -32,8 +32,7 @@ export interface Snapshot {
 
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
-  | { type: 'snapshot'; snapshot: Snapshot }
-  | { type: 'diagnostics'; diagnostics: Diagnostic[] };
+  { type: 'snapshot'; snapshot: Snapshot } | { type: 'diagnostics'; diagnostics: Diagnostic[] };
 
 /** Browser to host. */
 export type ClientMessage = { type: 'update'; id: string; config: unknown };

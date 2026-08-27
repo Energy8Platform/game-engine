@@ -90,7 +90,11 @@ describe('createIdeHost — boot diagnostics', () => {
       expect(res.status).toBe(200);
 
       expect(host.diagnostics).toHaveLength(1);
-      expect(host.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'composition', where: 'e8.yml' });
+      expect(host.diagnostics[0]).toMatchObject({
+        severity: 'error',
+        plugin: 'composition',
+        where: 'e8.yml',
+      });
       expect(host.diagnostics[0].message).toContain('array');
     });
   });

@@ -39,6 +39,19 @@ export interface IdeHost {
 export const COMPOSITION_FILE = './e8.yml';
 const COMPOSITION_FILENAME = 'e8.yml';
 
+/**
+ * Boots an IDE host for the project at `options.cwd`: loads its e8.yml
+ * composition, starts the plugin loader and HTTP/WS server, and returns a
+ * handle to both.
+ *
+ * Side effect worth knowing about before embedding this: booting installs a
+ * process-wide `process.on('unhandledRejection')` listener (once per
+ * process, shared across every host) so that a plugin whose `apply()`
+ * throws degrades to a row-level diagnostic instead of crashing the host —
+ * see the doc comment on `ensureUnhandledRejectionGuard` in
+ * `plugins/composition.ts` for the full mechanics. The listener is never
+ * removed and is not scoped to any one `IdeHost` instance or its `stop()`.
+ */
 export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
   const ctx = new Context();
   ctx.baseUrl = pathToFileURL(options.cwd).href + '/';

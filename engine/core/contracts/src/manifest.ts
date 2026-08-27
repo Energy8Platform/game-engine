@@ -21,7 +21,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function parseManifest(
   pkg: unknown,
-  pkgName: string,
+  /**
+   * The identity to stamp on any diagnostic this returns — see
+   * `Diagnostic.plugin`'s doc comment. Callers pass the composition entry
+   * id where one exists (`composition.ts`'s snapshot loop) so a manifest
+   * problem traces back to the same row as every other diagnostic about
+   * that entry; not the package name, which two entries can share.
+   */
+  pluginId: string,
 ): { manifest: E8Manifest | null; diagnostics: Diagnostic[] } {
   if (!isRecord(pkg) || pkg.e8 === undefined) return { manifest: null, diagnostics: [] };
 
@@ -30,7 +37,13 @@ export function parseManifest(
     return {
       manifest: null,
       diagnostics: [
-        diagnostic('warning', pkgName, 'e8', 'the "e8" field must be an object', 'remove it or make it an object'),
+        diagnostic(
+          'warning',
+          pluginId,
+          'e8',
+          'the "e8" field must be an object',
+          'remove it or make it an object',
+        ),
       ],
     };
   }
@@ -44,7 +57,7 @@ export function parseManifest(
       diagnostics.push(
         diagnostic(
           'warning',
-          pkgName,
+          pluginId,
           'e8.client.entry',
           'the client half needs a module path in "entry"',
           'add e8.client.entry, e.g. "./client.js"',

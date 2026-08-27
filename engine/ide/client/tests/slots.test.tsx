@@ -34,7 +34,9 @@ describe('slots', () => {
 
   it('is reversible — unregistering removes it', async () => {
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
-    const dispose = ctx.slots.register({ name: 'composition.card', key: 'reels' }, () => <span>x</span>);
+    const dispose = ctx.slots.register({ name: 'composition.card', key: 'reels' }, () => (
+      <span>x</span>
+    ));
     expect(ctx.slots.list('composition.card')).toHaveLength(1);
     dispose();
     expect(ctx.slots.list('composition.card')).toHaveLength(0);
@@ -67,8 +69,12 @@ describe('slots', () => {
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
     // Two registrations under the SAME name+key — the second replaces the
     // first in the map, but both disposers close over the same `id`.
-    const disposeFirst = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>first</span>);
-    const disposeSecond = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>second</span>);
+    const disposeFirst = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => (
+      <span>first</span>
+    ));
+    const disposeSecond = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => (
+      <span>second</span>
+    ));
 
     render(<Host ctx={ctx} />);
     expect(await screen.findByText('second')).toBeTruthy();
@@ -93,6 +99,8 @@ describe('slots', () => {
     const { unmount } = render(<Host ctx={ctx} />);
     unmount();
     // Registering after unmount must not touch unmounted React state.
-    expect(() => ctx.slots.register({ name: 'composition.card', key: 'late' }, () => null)).not.toThrow();
+    expect(() =>
+      ctx.slots.register({ name: 'composition.card', key: 'late' }, () => null),
+    ).not.toThrow();
   });
 });

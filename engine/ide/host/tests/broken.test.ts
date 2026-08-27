@@ -45,6 +45,25 @@ describe('a broken plugin', () => {
       port: 0,
     });
     const snapshot = await host.ctx.composition.snapshot();
-    expect(snapshot.diagnostics.some((d) => d.message.includes('no-such-plugin-anywhere'))).toBe(true);
+    expect(snapshot.diagnostics.some((d) => d.message.includes('no-such-plugin-anywhere'))).toBe(
+      true,
+    );
+  });
+
+  it('reports a module that fails to import as a diagnostic, not a silent empty row', async () => {
+    host = await createIdeHost({
+      cwd: workspace('- id: i1\n  name: import-broken-plugin\n'),
+      port: 0,
+    });
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'import-broken-plugin')!;
+    // The white-rectangle outcome this test exists to forbid: an import
+    // failure must not look identical to a plugin that legitimately
+    // declares no Config. `schema` is `null` either way — the diagnostic is
+    // what tells them apart.
+    expect(row.schema).toBeNull();
+    const failure = snapshot.diagnostics.find((d) => d.plugin === row.id && d.where === 'schema');
+    expect(failure?.severity).toBe('error');
+    expect(failure?.message).toContain('fails to import on purpose');
   });
 });

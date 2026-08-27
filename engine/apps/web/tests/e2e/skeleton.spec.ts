@@ -40,7 +40,7 @@ test('a third-party plugin brings its own UI without the shell being rebuilt', a
   await expect(page.getByText('Эта карточка пришла из плагина, а не из оболочки.')).toBeVisible();
 });
 
-test('the restart cost of a field is visible before it is clicked', async ({ page }) => {
+test('a field the plugin declared restart-requiring shows the restart badge', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('перезапуск')).toBeVisible();
 });

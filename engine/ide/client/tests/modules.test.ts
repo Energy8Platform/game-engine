@@ -5,7 +5,16 @@ import { createIdeClient } from '../src/index';
 function snapshotWith(clientUrl: string | null): Snapshot {
   return {
     rows: [
-      { id: 'a:probe1', name: 'probe-plugin', disabled: false, state: 2, config: {}, schema: null, hot: true, clientUrl },
+      {
+        id: 'a:probe1',
+        name: 'probe-plugin',
+        disabled: false,
+        state: 2,
+        config: {},
+        schema: null,
+        hot: true,
+        clientUrl,
+      },
     ],
     diagnostics: [],
   };
@@ -27,7 +36,11 @@ async function harness(importModule: (url: string) => Promise<unknown>) {
     send() {},
     close() {},
   };
-  const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, importModule });
+  const ctx = await createIdeClient({
+    url: 'ws://x/ide',
+    socketFactory: () => socket,
+    importModule,
+  });
   const push = (message: ServerMessage) => {
     for (const listener of listeners) listener({ data: JSON.stringify(message) });
   };

@@ -3,7 +3,10 @@ import { parseManifest } from '../src/index';
 
 describe('parseManifest', () => {
   it('returns null for a package with no e8 field, without complaining', () => {
-    expect(parseManifest({ name: 'lodash' }, 'lodash')).toEqual({ manifest: null, diagnostics: [] });
+    expect(parseManifest({ name: 'lodash' }, 'lodash')).toEqual({
+      manifest: null,
+      diagnostics: [],
+    });
   });
 
   it('reads the client half and the hot flag', () => {
@@ -12,7 +15,10 @@ describe('parseManifest', () => {
       'probe-plugin',
     );
     expect(diagnostics).toEqual([]);
-    expect(manifest).toEqual({ client: { entry: './client.js', inject: ['ui-composition'] }, hot: true });
+    expect(manifest).toEqual({
+      client: { entry: './client.js', inject: ['ui-composition'] },
+      hot: true,
+    });
   });
 
   it('defaults hot to false and inject to empty', () => {

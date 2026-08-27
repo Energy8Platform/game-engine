@@ -1,6 +1,7 @@
 {
   "name": "e8-example-probe",
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -9,6 +10,7 @@
     "./package.json": "./package.json"
   },
   "e8": { "client": { "entry": "./src/client.js" }, "hot": true },
+  "scripts": { "typecheck": "tsc --noEmit" },
   "dependencies": { "schemastery": "3.18.0" },
   "peerDependencies": { "cordis": "4.0.0-rc.8", "react": "^18.2.0" },
   "license": "MIT"

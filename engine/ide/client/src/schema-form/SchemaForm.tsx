@@ -3,6 +3,16 @@ import { Field, label, needsRestart, type SchemaNode } from './fields';
 
 export interface SchemaFormProps {
   /**
+   * The row this form belongs to (`CompositionRow.id`). Mixed into every
+   * field's DOM id so two rows whose schemas both declare a field of the
+   * same name (e.g. two plugins each with a `speed`) don't collide —
+   * without this, both would render `id="field-speed"`, the second
+   * `<label>` would steal focus onto the first row's `<input>`, and
+   * Playwright's `getByLabel` (what the e2e suite uses) would go ambiguous
+   * under strict mode.
+   */
+  rowId: string;
+  /**
    * The raw `toJSON()` output from `CompositionRow.schema` — schemastery's
    * deduped `{ uid, refs }` reference graph, not the flat `{ type, dict,
    * meta }` tree `fields.tsx` walks. Rebuilding it with `new Schema(json)`
@@ -29,7 +39,7 @@ function rebuild(schema: unknown): SchemaNode | null {
   }
 }
 
-export function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
+export function SchemaForm({ rowId, schema, value, onChange }: SchemaFormProps) {
   const node = rebuild(schema);
   if (!node?.dict) return null;
 
@@ -45,7 +55,7 @@ export function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
   return (
     <div className="e8-schema-form">
       {fields.map(([key, child]) => {
-        const id = `field-${key}`;
+        const id = `field-${rowId}-${key}`;
         return (
           <div className="e8-field" key={key}>
             <label htmlFor={id}>{label(child, key)}</label>
@@ -55,6 +65,13 @@ export function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
               value={value[key]}
               onChange={(next) => onChange({ ...value, [key]: next })}
             />
+            {/* This badge reflects what the plugin declared via
+                `extra: { applies: 'restart' }` — not a difference in host
+                behaviour. The host currently tears down and re-applies the
+                fiber for every edit, flagged field or not (see
+                `composition.ts`'s `update()`), so the badge marks the
+                plugin author's stated intent, not a distinct code path
+                today. */}
             {needsRestart(child) ? <span className="e8-badge">перезапуск</span> : null}
           </div>
         );
