@@ -40,6 +40,17 @@ ctx.loader.import(name)              // импорт модуля плагина
 ctx.loader.unwrapExports(mod)        // достаёт объект плагина из модуля
 ```
 
+**Поправки, измеренные при исполнении Task 5** (перекрывают строки выше):
+
+- `ctx.loader.update()` **не дожидается** полного цикла переподнятия. Чтобы увидеть применённый
+  конфиг, нужен явный `await entry.fiber?.await()` — публичный API, не хак.
+- После отказа валидации loader **не** откатывает значение в памяти: `entry.options.config`
+  продолжает держать плохое значение, пока откат не сделан явно.
+- Запись состава на диск делает `@cordisjs/plugin-include` через **ненаблюдаемый и неотменяемый
+  `setTimeout(0)`**. Дождаться её нечем: тесты обязаны опрашивать файл (`vi.waitFor` /
+  `expect.poll`), а не читать его сразу после `update()`. Продуктовое следствие: правка,
+  сделанная за миг до остановки хоста, может не доехать до диска.
+
 - Внутри `apply(ctx, config)` сервис регистрируется **`ctx.provide(name, value)`**. `ctx.set(...)` без предварительного `provide` бросает `cannot set property "x" without provide`.
 - `ctx.effect(fn, label)` — реверсивный эффект; `fiber.getEffects()` возвращает `{ label, children }[]`.
 - `FiberState`: `PENDING 0, LOADING 1, ACTIVE 2, FAILED 3, DISPOSED 4, UNLOADING 5`.
