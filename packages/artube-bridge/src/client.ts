@@ -80,6 +80,18 @@ export function describeEndpoint(url: string): string {
 /** Same tail on both connection failures: what to check, in one line. */
 const CHECK_HINT = 'is the game backend running, and is /api routed to it?';
 
+/**
+ * Код всякого провала, причина которого — соединение, а не раунд: висевший
+ * `play` на оборванном сокете, `play` по сокету, который уже не OPEN.
+ *
+ * Отдельный код, а не общий `InternalServerError`, потому что на нём стоит
+ * развилка UX: связь, которая моргнула, лечится реконнектом (игре надо
+ * показать «Переподключаемся…» и доиграть раунд), а настоящая ошибка раунда —
+ * перезагрузкой. Пока обе приезжали одним кодом, игра выбирала худшее из двух
+ * и требовала перезагрузить страницу на каждом сетевом всплеске.
+ */
+const CONNECTION_LOST = 'ConnectionLost';
+
 type ClientEvent = 'balance' | 'sessionClosed' | 'connection' | 'init' | 'frc';
 
 export interface PlayArgs {
@@ -200,7 +212,7 @@ export class ArtubeClient {
   play(args: PlayArgs): Promise<ServerResult> {
     return new Promise<ServerResult>((resolve, reject) => {
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-        return reject(new ArtubeBackendError('InternalServerError', 'no backend connection'));
+        return reject(new ArtubeBackendError(CONNECTION_LOST, 'no backend connection'));
       }
       const id = `p${++this.counter}`;
       this.pending.set(id, { resolve, reject });
@@ -237,7 +249,7 @@ export class ArtubeClient {
   private sendFrc(t: 'frc_activate' | 'frc_decline', campaignId: string): Promise<ServerFrc> {
     return new Promise<ServerFrc>((resolve, reject) => {
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-        return reject(new ArtubeBackendError('InternalServerError', 'no backend connection'));
+        return reject(new ArtubeBackendError(CONNECTION_LOST, 'no backend connection'));
       }
       const id = `f${++this.counter}`;
       this.pendingFrc.set(id, { resolve, reject });
@@ -333,13 +345,13 @@ export class ArtubeClient {
 
   private failPending(reason: string): void {
     for (const [, waiter] of this.pending) {
-      waiter.reject(new ArtubeBackendError('InternalServerError', reason));
+      waiter.reject(new ArtubeBackendError(CONNECTION_LOST, reason));
     }
     this.pending.clear();
     // Активация тоже висит на соединении: оставленный промис заморозил бы
     // анонсер до перезагрузки страницы. Реконнект предложит кампанию заново.
     for (const [, waiter] of this.pendingFrc) {
-      waiter.reject(new ArtubeBackendError('InternalServerError', reason));
+      waiter.reject(new ArtubeBackendError(CONNECTION_LOST, reason));
     }
     this.pendingFrc.clear();
   }
@@ -365,6 +377,11 @@ export class ArtubeClient {
           // next attempt, longer delay
         }
       }
+      // Потолок попыток исчерпан. Молчать здесь нельзя: подписчик видел
+      // `connected: false` и ждёт пары к нему, а её уже не будет — экран
+      // «Переподключаемся…» висел бы вечно. `gone` и говорит, что ждать
+      // нечего: связь не вернётся сама, дальше только перезагрузка.
+      if (!this.closed) this.emit('connection', { connected: false, gone: true });
     } finally {
       this.reconnecting = false;
     }

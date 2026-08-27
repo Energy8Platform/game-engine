@@ -483,6 +483,98 @@ describe('ArtubeBridge', () => {
     expect(sent.find((m) => m.type === 'STATE_RESPONSE')!.payload.session).toBeNull();
   });
 
+  describe('связь: обрыв и возврат', () => {
+    /** Колбэк, которым клиент сообщает мосту об изменении связи. */
+    const connectionCb = () =>
+      backend.on.mock.calls.filter(([event]: [string]) => event === 'connection').pop()?.[1];
+    const initCb = () =>
+      backend.on.mock.calls.filter(([event]: [string]) => event === 'init').pop()?.[1];
+
+    it('обрыв едет игре как CONNECTION_STATE lost, возврат — restored', async () => {
+      // До этой пары игра об обрыве не узнавала вовсе: единственным признаком
+      // был отбитый play, и она показывала экран «перезагрузите страницу» там,
+      // где связь через секунду возвращалась сама.
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+      sent = [];
+
+      connectionCb()!({ connected: false });
+      await flush();
+      expect(sent.filter((m) => m.type === 'CONNECTION_STATE').map((m) => m.payload)).toMatchObject([
+        { status: 'lost', code: 'ConnectionLost' },
+      ]);
+
+      sent = [];
+      initCb()!({ ...INIT, balance: 120 });
+      await flush();
+      expect(sent.filter((m) => m.type === 'CONNECTION_STATE').map((m) => m.payload)).toEqual([
+        { status: 'restored' },
+      ]);
+    });
+
+    it('restored объявляется ПОСЛЕ того, как снимок раунда обновлён', async () => {
+      // Игра на restored идёт за getState(), чтобы доиграть прерванный раунд.
+      // Объяви мы возврат связи раньше обновления курсора и снимка — она
+      // получила бы состояние оборванного соединения.
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+      sent = [];
+
+      connectionCb()!({ connected: false });
+      await flush();
+      sent = []; // дальше смотрим только на кадры самого возврата связи
+      initCb()!({
+        ...INIT,
+        resume: result({ action: 'free_spin', creditPending: true, balanceAfter: null, spinsPlayed: 2 }),
+      });
+      await flush();
+
+      const types = sent.map((m) => m.type);
+      expect(types.indexOf('CONNECTION_STATE')).toBeGreaterThan(types.indexOf('BALANCE_UPDATE'));
+      channel.sendToHost('GET_STATE', {});
+      await flush();
+      expect(sent.find((m) => m.type === 'STATE_RESPONSE')!.payload.session).not.toBeNull();
+    });
+
+    it('каждая неудачная попытка реконнекта не объявляется заново', async () => {
+      // Клиент шлёт `connected: false` на КАЖДЫЙ закрытый сокет, в том числе
+      // на каждую провалившуюся попытку. Игре нужен один переход, а не поток.
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+      sent = [];
+
+      connectionCb()!({ connected: false });
+      connectionCb()!({ connected: false });
+      connectionCb()!({ connected: false });
+      await flush();
+      expect(sent.filter((m) => m.type === 'CONNECTION_STATE')).toHaveLength(1);
+    });
+
+    it('исчерпанный реконнект приезжает отдельным кодом', async () => {
+      // Это уже не «сейчас вернёмся»: ждать нечего, и игра обязана сказать об
+      // этом игроку, а не оставить его с вечным «Переподключаемся…».
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+      sent = [];
+
+      connectionCb()!({ connected: false });
+      connectionCb()!({ connected: false, gone: true });
+      await flush();
+      expect(sent.filter((m) => m.type === 'CONNECTION_STATE').map((m) => m.payload.code)).toEqual([
+        'ConnectionLost',
+        'ConnectionGone',
+      ]);
+    });
+
+    it('до старта игры о связи не сообщаем', async () => {
+      // Игра ещё не получила INIT: экран принадлежит загрузчику, и кадр
+      // CONNECTION_STATE ему не адресован (провал старта — отдельный путь).
+      connectionCb()!({ connected: false });
+      await flush();
+      expect(sent.filter((m) => m.type === 'CONNECTION_STATE')).toHaveLength(0);
+    });
+  });
+
   it('в демо серверный push balance (balanceChanged) игнорируется', async () => {
     backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null, balance: 1000 });
     backend.play.mockResolvedValue(result({ balanceAfter: 900, winX: 3, totalWinX: 3, betAmount: 1 }));

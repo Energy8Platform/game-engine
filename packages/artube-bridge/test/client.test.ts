@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 import type { AddressInfo } from 'node:net';
 import { ArtubeClient, ArtubeBackendError } from '../src/client';
@@ -118,13 +118,48 @@ describe('ArtubeClient', () => {
     expect(closedReason).toBe('timeout');
   });
 
-  it('обрыв связи отбивает висящие play', async () => {
+  it('обрыв связи отбивает висящие play кодом ConnectionLost', async () => {
     const url = await startBackend(() => {});
     client = new ArtubeClient(url);
     await client.connect();
     const pending = client.play({ action: 'spin', betIndex: 0 });
     wss.clients.forEach((c) => c.terminate());
-    await expect(pending).rejects.toBeInstanceOf(ArtubeBackendError);
+    // Код именно этот, а не общий InternalServerError: по нему хост отличает
+    // «связь моргнула, сейчас переподключимся» от настоящей ошибки раунда — и
+    // не показывает экран с Reload там, где надо показать «Переподключаемся…».
+    await expect(pending).rejects.toMatchObject({
+      name: 'ArtubeBackendError',
+      code: 'ConnectionLost',
+    });
+  });
+
+  it('play без живого сокета отбивается тем же ConnectionLost', async () => {
+    const url = await startBackend(() => {});
+    client = new ArtubeClient(url, 10_000); // реконнект не успеет вмешаться в тест
+    await client.connect();
+    wss.clients.forEach((c) => c.terminate());
+    await new Promise((r) => setTimeout(r, 20)); // сокет уже не OPEN, реконнект ещё ждёт бэкофф
+    await expect(client.play({ action: 'spin', betIndex: 0 })).rejects.toMatchObject({
+      code: 'ConnectionLost',
+    });
+  });
+
+  it('исчерпанный реконнект объявляется отдельно от обычного обрыва', async () => {
+    const url = await startBackend(() => {});
+    client = new ArtubeClient(url, 1); // бэкофф 1,2,4,8,16 мс — весь цикл за ~31 мс
+    await client.connect();
+    const seen: Array<{ connected: boolean; gone?: boolean }> = [];
+    client.on('connection', (p: { connected: boolean; gone?: boolean }) => seen.push(p));
+    // Бэкенд уходит совсем: слушать больше некому, и живой сокет рвётся —
+    // подняться реконнекту будет некуда.
+    wss.close(); // порт перестаёт слушать сразу — реконнекту будет некуда прийти
+    wss.clients.forEach((c) => c.terminate());
+
+    // Без этого сигнала игра осталась бы с вечным «Переподключаемся…» на экране.
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual({ connected: false, gone: true }), {
+      timeout: 2000,
+    });
+    expect(seen.filter((p) => p.gone).length).toBe(1); // ровно один раз
   });
 
   describe('кампания фри-раундов', () => {

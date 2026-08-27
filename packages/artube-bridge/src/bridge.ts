@@ -34,6 +34,17 @@
  * НЕ пересылает `INIT` повторно и не толкает `PLAY_RESULT` — только что
  * объяснённые причины ровно те же: игра сама узнает при следующем
  * `getState()`/подтверждении своего текущего сегмента.
+ *
+ * Связь: мост объявляет игре `CONNECTION_STATE` — `lost`, когда сокет упал, и
+ * `restored`, когда реконнект принёс новый `init`. Пара нужна затем, что без
+ * неё единственным следом обрыва был отбитый `play`, и игра принимала сетевой
+ * всплеск за ошибку раунда — показывала экран «перезагрузите страницу» там,
+ * где связь возвращалась сама. `restored` шлётся ПОСЛЕ обновления курсора и
+ * снимка раунда: игра на нём идёт за `getState()`, и он обязан ответить
+ * состоянием нового соединения, а не остатками оборванного. Исчерпанный
+ * реконнект (`gone`) — уже не «сейчас вернёмся»: он едет кодом
+ * `ConnectionGone`, чтобы игра сказала игроку правду, а не оставила его с
+ * вечным «Переподключаемся…».
  */
 
 import { Bridge } from '@energy8platform/game-sdk';
@@ -50,6 +61,7 @@ import type {
   StateResponsePayload,
   GameConfigData,
   SessionData,
+  ConnectionStatePayload,
 } from '@energy8platform/game-sdk/protocol';
 import { ArtubeClient, ArtubeBackendError } from './client';
 import { parseArtubeUrl } from './detect';
@@ -126,6 +138,10 @@ export class ArtubeBridge {
   private readonly frcListeners = new Set<(frc: ServerFrc | null) => void>();
   /** Незнакомые причины `BalanceChangedEvent`, о которых уже написали в консоль. */
   private readonly warnedBalanceReasons = new Set<string>();
+  /** Объявлен ли игре обрыв. Держит пару lost/restored ровной: без него каждая
+   *  провалившаяся попытка реконнекта слала бы игре ещё один `lost`, а
+   *  `restored` мог бы приехать без предшествующего `lost` вовсе. */
+  private linkLost = false;
 
   constructor(private readonly options: ArtubeBridgeOptions = {}) {
     const url = parseArtubeUrl(options.url ?? window.location.href);
@@ -143,6 +159,9 @@ export class ArtubeBridge {
     this.client.on('sessionClosed', (p: { reason: string }) => {
       this.bridge.send('ERROR', { code: 'SessionClosed', message: p.reason });
     });
+    this.client.on('connection', (p: { connected: boolean; gone?: boolean }) =>
+      this.onConnectionChange(p),
+    );
     // A reconnect's init — see class doc-comment for the two cases this covers.
     this.client.on('init', (init: ServerInit) => this.onReconnectInit(init));
     // Кампания изменилась сама — сейчас это ровно один случай: её отыграли до
@@ -486,6 +505,44 @@ export class ArtubeBridge {
    * переживает, эта заглушка — нет, поэтому в демо баланс остаётся
    * кошельковым: платформенный `init.balance` сюда не подставляем.
    */
+  /**
+   * Клиент сообщил о смене состояния сокета.
+   *
+   * `connected: true` здесь НЕ становится `restored`: открытый сокет ещё не
+   * значит восстановленное состояние — платформенный `init` с курсором и
+   * снимком раунда приходит следом, и объявлять возврат до него значит
+   * позвать игру за `getState()` раньше, чем ему есть что ответить. Возврат
+   * объявляет {@link onReconnectInit}.
+   */
+  private onConnectionChange(p: { connected: boolean; gone?: boolean }): void {
+    if (p.connected) return;
+    if (p.gone) {
+      this.sendConnectionState({
+        status: 'lost',
+        code: 'ConnectionGone',
+        message: 'the connection to the game backend could not be restored',
+      });
+      return;
+    }
+    if (this.linkLost) return; // уже объявлено — попытки реконнекта не спамим
+    this.linkLost = true;
+    this.sendConnectionState({
+      status: 'lost',
+      code: 'ConnectionLost',
+      message: 'lost the connection to the game backend',
+    });
+  }
+
+  /**
+   * До первого `INIT` игра ещё не на экране — там своя история загрузки, и
+   * кадр о связи ей не адресован (провал самого старта едет отдельным путём,
+   * см. `bootPromise`).
+   */
+  private sendConnectionState(state: ConnectionStatePayload): void {
+    if (!this.initSent) return;
+    this.bridge.send<ConnectionStatePayload>('CONNECTION_STATE', state);
+  }
+
   private onReconnectInit(init: ServerInit): void {
     this.init = init;
     this.balance = this.demoWallet ? this.demoWallet.balance : init.balance;
@@ -495,6 +552,8 @@ export class ArtubeBridge {
     // это и есть та «критическая фаза» реконнекта посреди активной кампании, и
     // молчание оставило бы её с заблокированной ставкой без самой кампании.
     this.setCampaign(init.frc);
+    const wasLost = this.linkLost;
+    this.linkLost = false;
     if (!this.initSent) return;
 
     this.bridge.send<BalanceUpdatePayload>('BALANCE_UPDATE', { balance: this.balance });
@@ -511,6 +570,9 @@ export class ArtubeBridge {
       this.cursor = 0;
       this.lastDelivered = null;
     }
+    // Последним действием — курсор и снимок раунда выше уже свежие, и
+    // `getState()`, за которым игра пойдёт на этом кадре, ответит правдой.
+    if (wasLost) this.sendConnectionState({ status: 'restored' });
   }
 
   private toPlayResult(result: ServerResult): PlayResultPayload {
