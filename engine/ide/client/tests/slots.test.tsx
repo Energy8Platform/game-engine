@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
 import { createIdeClient, useSlot } from '../src/index';
@@ -60,6 +60,31 @@ describe('slots', () => {
     const dispose = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => null);
     dispose();
     expect(() => dispose()).not.toThrow();
+    expect(ctx.slots.list('composition.card')).toHaveLength(0);
+  });
+
+  it('a stale disposer from a replaced registration does not evict the replacement', async () => {
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    // Two registrations under the SAME name+key — the second replaces the
+    // first in the map, but both disposers close over the same `id`.
+    const disposeFirst = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>first</span>);
+    const disposeSecond = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>second</span>);
+
+    render(<Host ctx={ctx} />);
+    expect(await screen.findByText('second')).toBeTruthy();
+
+    // disposeFirst is stale: its registration was already replaced. Calling
+    // it must not remove the live replacement that disposeSecond owns.
+    // `act()` because this call notifies the mounted Host's subscription
+    // synchronously, outside any testing-library event helper.
+    act(() => disposeFirst());
+
+    expect(ctx.slots.list('composition.card')).toHaveLength(1);
+    expect(screen.getByText('second')).toBeTruthy();
+    expect(screen.queryByText('first')).toBeNull();
+
+    // The real owner still works.
+    act(() => disposeSecond());
     expect(ctx.slots.list('composition.card')).toHaveLength(0);
   });
 
