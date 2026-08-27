@@ -1,0 +1,10 @@
+{
+  "name": "@energy8engine/contracts",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "devDependencies": { "typescript": "^5.6.0", "vitest": "^2.0.0" },
+  "license": "MIT"
+}
