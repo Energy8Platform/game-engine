@@ -84,4 +84,39 @@ describe('CompositionScreen', () => {
     push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
     expect(screen.getByText('extra card')).toBeTruthy();
   });
+
+  it('reports a card that throws while rendering instead of taking down the screen', async () => {
+    // React logs the caught error to console.error as part of its normal
+    // error-boundary contract (twice, in dev builds) — expected noise from
+    // deliberately throwing here, not a real failure. Silenced so the test
+    // output stays readable; restored after the assertions.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { ctx, push } = await harness();
+      ctx.slots.register({ name: 'composition.card', key: 'boom' }, () => {
+        throw new Error('nope');
+      });
+      ctx.slots.register({ name: 'composition.card', key: 'ok' }, () => <span>ok card</span>);
+      render(<CompositionScreen ctx={ctx} />);
+      push({
+        type: 'snapshot',
+        snapshot: {
+          rows: [{ id: 'a:probe1', name: 'probe-plugin', disabled: false, state: 2, config: { speed: 8 }, schema: SCHEMA, hot: true, clientUrl: null }],
+          diagnostics: [],
+        },
+      });
+
+      // The rest of the screen survives: the row list, and a sibling card
+      // registered under a different slot key.
+      expect(screen.getByText('probe-plugin')).toBeTruthy();
+      expect(screen.getByText('ok card')).toBeTruthy();
+
+      // The crash itself is not swallowed — it shows up in the same
+      // diagnostics list as every other failure, naming the card's slot key.
+      expect(screen.getByText(/boom/)).toBeTruthy();
+      expect(screen.getByText(/nope/)).toBeTruthy();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 });

@@ -1,7 +1,7 @@
 import { Component, useRef, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { Context } from 'cordis';
-import type { Diagnostic } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { useSlot } from '../plugins/slots';
 
@@ -45,11 +45,34 @@ const STATE_LABEL: Record<number, string> = {
  * re-renders this boundary's siblings independently (each `card.key` gets
  * its own subtree), so containment only needs to happen per-card, not
  * screen-wide.
+ *
+ * Survivable is not the same as legible: swallowing the error and rendering
+ * nothing would hide a broken card from the very screen whose job is to
+ * surface plugin failures. `componentDidCatch` reports it through the same
+ * `ctx.connection.report` path every other diagnostic on this screen uses,
+ * named by the card's slot key, so a crashed card shows up next to a
+ * cannot-resolve-package failure instead of just quietly vanishing.
+ *
+ * This only catches errors thrown while React is rendering the card's
+ * subtree (the React error-boundary contract) — an error thrown later, from
+ * an event handler inside the card or from async work it kicked off, does
+ * not reach `getDerivedStateFromError`/`componentDidCatch` and will not be
+ * caught or reported here.
  */
-class CardBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class CardBoundary extends Component<{ ctx: Context; cardKey: string; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    this.props.ctx.connection.report(
+      diagnostic(
+        'error',
+        this.props.cardKey,
+        'composition.card',
+        `card crashed while rendering: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
   }
   render() {
     if (this.state.failed) return null;
@@ -101,7 +124,7 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
       )}
 
       {cards.map((card) => (
-        <CardBoundary key={card.key}>
+        <CardBoundary key={card.key} ctx={ctx} cardKey={card.key}>
           <card.component />
         </CardBoundary>
       ))}
