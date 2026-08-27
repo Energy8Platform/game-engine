@@ -10,6 +10,7 @@ dist/
 !engine/apps/cli/bin/e8.mjs
 !engine/ide/host/tests/fixtures/probe-plugin/index.js
 !engine/ide/host/tests/fixtures/probe-plugin/client.js
+!engine/ide/host/tests/fixtures/broken-plugin/index.js
 .DS_Store
 package-lock.json
 

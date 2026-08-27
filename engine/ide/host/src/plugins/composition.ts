@@ -68,7 +68,91 @@ async function schemaOf(ctx: Context, name: string): Promise<unknown | null> {
 export const name = 'composition';
 export const inject = ['loader'];
 
+/**
+ * Errors this module has already turned into a `Diagnostic` (see the
+ * `internal/status` listener in `apply()` below), tracked by object
+ * identity. Read by the `unhandledRejection` guard below — see its doc
+ * comment for why a *second* channel is needed at all.
+ */
+const knownPluginFailures = new WeakSet<object>();
+
+/**
+ * A plugin whose `apply()` throws must not take the host process with it —
+ * but by default it does. `@cordisjs/plugin-loader`'s `Entry.init()` (see
+ * node_modules/@cordisjs/plugin-loader/lib/index.js:388) ends with
+ * `this.fiber?.await().finally(() => {...})`, called with no `.catch` and
+ * never awaited by its own caller. `Fiber#await()` (node_modules/cordis/lib/index.js,
+ * the public method backing `fiber.await()`) rethrows the fiber's stored
+ * error once it settles FAILED, so that call's Promise rejects — and
+ * nothing in the library ever attaches a handler to it.
+ *
+ * This is the same failure shape already documented on `loadComposition()`
+ * in `../index.ts` for a broken e8.yml — but that fix works by never
+ * calling `ctx.loader.create()` for the bad input in the first place, which
+ * isn't available here: whether a *given* plugin's `apply()` throws can only
+ * be known by actually trying it, so the entry always gets created. Nor can
+ * this module's own `fiber.await()` call below (used to read the error —
+ * see the `internal/status` listener) intercept the library's rejection:
+ * each call to `await()` is a fresh invocation returning an independent
+ * Promise, and by the time our listener runs, cordis has already cleared
+ * `fiber.inertia`, so *our* call resolves/rejects synchronously against the
+ * already-settled fiber. The library's call, in contrast, was made much
+ * earlier (from `Entry.init()`, right after the entry is created) and was
+ * still genuinely `await`-ing `fiber.inertia` when the failure landed — a
+ * different Promise object entirely. Verified empirically: with no guard, a
+ * plugin whose `apply()` throws produces a process-level
+ * `unhandledRejection` for the exact same error a `fiber.await().catch()`
+ * elsewhere already observed and reported.
+ *
+ * So the only way to stop it from reaching the process as fatal is to
+ * recognize it after the fact, at the `process` level. This listener does
+ * only that: rejections whose `reason` is an error this module already
+ * turned into a `Diagnostic` (tracked by identity in `knownPluginFailures`)
+ * are swallowed — they are not new information, the human already sees
+ * them as a red row. Anything else is rethrown so a genuinely unrelated bug
+ * still surfaces as loudly as it would without this guard.
+ *
+ * Registered once for the whole process (idempotent — tests construct many
+ * hosts), not per host instance: the failure it's dodging is a `process`-
+ * wide event by construction, so there's nothing host-scoped to hang its
+ * lifetime off of, and installing it repeatedly would just accumulate
+ * duplicate listeners for no benefit.
+ */
+let unhandledRejectionGuardInstalled = false;
+function ensureUnhandledRejectionGuard(): void {
+  if (unhandledRejectionGuardInstalled) return;
+  unhandledRejectionGuardInstalled = true;
+  process.on('unhandledRejection', (reason) => {
+    if (typeof reason === 'object' && reason !== null && knownPluginFailures.has(reason)) return;
+    throw reason;
+  });
+}
+
 export function apply(ctx: Context, config: CompositionConfig) {
+  ensureUnhandledRejectionGuard();
+
+  // A plugin that throws in apply must not take the host with it: remember
+  // the failure, keep serving, and let it reach the human as a diagnostic.
+  // `Fiber#await()` is the public, documented way to learn a FAILED fiber's
+  // error (it rethrows what would otherwise sit on the private `_error`
+  // field) — see the doc comment above for why this module also needs the
+  // `unhandledRejection` guard on top of this.
+  const failures = new Map<string, string>();
+
+  ctx.on('internal/status', (fiber) => {
+    const entryId = fiber.entry?.id;
+    if (!entryId) return;
+    if (fiber.state === 2 /* FiberState.ACTIVE */) {
+      failures.delete(entryId);
+      return;
+    }
+    if (fiber.state !== 3 /* FiberState.FAILED */) return;
+    fiber.await().catch((error: unknown) => {
+      if (error && typeof error === 'object') knownPluginFailures.add(error);
+      failures.set(entryId, error instanceof Error ? error.message : String(error ?? 'plugin failed'));
+    });
+  });
+
   const service: CompositionService = {
     async snapshot() {
       const rows: CompositionRow[] = [];
@@ -91,6 +175,13 @@ export function apply(ctx: Context, config: CompositionConfig) {
 
         const parsed = pkg ? parseManifest(pkg.json, pkgName) : { manifest: null, diagnostics: [] };
         diagnostics.push(...parsed.diagnostics);
+
+        const failure = failures.get(entry.id);
+        if (failure) {
+          diagnostics.push(
+            diagnostic('error', entry.id, 'apply', failure, 'fix the plugin, then reload the composition'),
+          );
+        }
 
         rows.push({
           id: entry.id,
