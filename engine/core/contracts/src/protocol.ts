@@ -10,7 +10,14 @@ export interface CompositionRow {
   /** cordis FiberState: 2 is ACTIVE, 3 is FAILED. */
   state: number | null;
   config: unknown;
-  /** schemastery schema serialised with toJSON(), or null when the plugin declares none. */
+  /**
+   * A schemastery schema's raw `toJSON()` output — its own deduped
+   * `{ uid, refs }` graph, not a flat `{ type, dict, meta }` object — or
+   * null when the plugin declares no Config. A reader must rebuild it with
+   * `new Schema(json)` (from the `schemastery` package) before reading
+   * `.type`/`.dict`/`.meta`; reading those fields directly off this value
+   * will find them undefined.
+   */
   schema: unknown | null;
   /** Whether a config change restarts the plugin in place. */
   hot: boolean;

@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import Schema from 'schemastery';
 import { createIdeHost, type IdeHost } from '../src/index';
 
 const WORKSPACE = join(__dirname, 'fixtures', 'composition');
@@ -26,8 +27,29 @@ describe('composition.snapshot', () => {
   it('carries the plugin schema as JSON the browser can rebuild', async () => {
     const snapshot = await host.ctx.composition.snapshot();
     const row = snapshot.rows.find((r) => r.name === 'probe-plugin')!;
-    expect((row.schema as any).type).toBe('object');
-    expect((row.schema as any).dict.speed.meta.min).toBe(1);
+    // `row.schema` itself must be plain JSON — not a live schemastery
+    // instance — since Snapshot exists to cross a socket; a class instance
+    // in transit degrades silently (its own toJSON() fires again on the
+    // next JSON.stringify, which is not what a naive reader expects).
+    expect(typeof row.schema).toBe('object');
+    const rebuilt = new Schema(row.schema as any);
+    expect(rebuilt.type).toBe('object');
+    expect(rebuilt.dict!.speed.meta.min).toBe(1);
+  });
+
+  it('keeps the schema readable after crossing the wire — JSON round trip, then rebuild', async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'probe-plugin')!;
+
+    // Simulate the actual socket boundary: serialise the whole snapshot the
+    // way the host would send it, and parse it back the way the browser
+    // would receive it, before ever touching `.dict`.
+    const wired = JSON.parse(JSON.stringify(snapshot));
+    const wiredRow = wired.rows.find((r: any) => r.name === 'probe-plugin');
+    const rebuilt = new Schema(wiredRow.schema);
+
+    expect(rebuilt.dict!.speed.meta.min).toBe(1);
+    expect(rebuilt.dict!.speed.meta.description).toBe('reel speed');
   });
 
   it('carries the manifest facts the IDE acts on', async () => {

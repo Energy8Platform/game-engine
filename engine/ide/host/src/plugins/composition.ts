@@ -6,7 +6,6 @@ import {
   diagnostic,
   parseManifest,
 } from '@energy8engine/contracts';
-import Schema from 'schemastery';
 import { readPackageJson } from '../resolvePackage';
 
 declare module 'cordis' {
@@ -38,11 +37,15 @@ async function schemaOf(ctx: Context, name: string): Promise<unknown | null> {
     const plugin = ctx.loader.unwrapExports(await ctx.loader.import(name));
     const Config = (plugin as { Config?: { toJSON?: () => unknown } } | undefined)?.Config;
     if (typeof Config?.toJSON !== 'function') return null;
-    // toJSON() dedupes nested schemas into a { uid, refs } graph rather than
-    // inlining them (schemastery's own wire format) — rebuilding it through
-    // `new Schema(...)` is what turns it back into a schema whose nested
-    // fields (e.g. `.dict.speed.meta.min`) are reachable by property access.
-    return new Schema(Config.toJSON() as any);
+    // Deliberately the raw toJSON() output — schemastery's own deduped
+    // { uid, refs } graph — and not a live `new Schema(...)` instance.
+    // Snapshot exists to cross a socket; a class instance in that position
+    // is a category error (it happens to work in-process, then degrades
+    // silently once actually JSON.stringify'd for the wire, since its own
+    // toJSON() fires again). Every reader, in-process or over the wire,
+    // rebuilds with `new Schema(json)` before touching `.dict`/`.meta` — see
+    // CompositionRow.schema's doc comment.
+    return Config.toJSON();
   } catch {
     return null;
   }
