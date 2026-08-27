@@ -82,7 +82,9 @@ ReelSystemConfig
 │                  spinUp, hold, stopStagger, stopMode:'sequential'|'sync'|'random', stopOrder,
 │                  settle:{amp,ms,easing}, squash?:{x,y,ms}, blur?:{enabled,alpha,streaks},
 │                  turboFactor, intensity:'full'|'reduced'|'minimal', slamStop,
-│                  cellStagger, reelStaggerFactor, dropFallFactor  ← темп 'cascade-drop' }
+│                  cellStagger, reelStaggerFactor, dropFallFactor,  ← темп 'cascade-drop'
+│                  dropOrder:'top-down'|'bottom-up',                ← направление заполнения
+│                  dropSequence:'parallel'|'chained'|'chained-when-anticipated' }
 ├── anticipation:{ enabled, triggerSymbols[], threshold(N-1), reels:'trailing'|number[],
 │                  slowdownFactor, holdMs, zoom?:{scale,ms}, sfxHook?, vfxHook?,
 │                  decide?(targetGrid)  ← предикат игры вместо счёта символов,
@@ -116,7 +118,16 @@ API: `createReelSystem(config) → { grid, spin(data,opts), planSpin(data,opts),
    на всех барабанах», «на 3-м символ не выпал → 4 и 5 останавливаем как обычно»).
    `progressiveSlowdown` / `progressiveHoldMs` дают прогрессивную рампу по барабанам; и то и
    другое можно задать по-барабанно массивом (`PerReel<number>`, индекс = номер барабана).
-4. **Посадку можно удержать.** `deferReveal: number[]` — барабан крутится по-настоящему, лента
+4. **Темп `cascade-drop` — расписание, а не формула на месте.** `plan()` теперь считает для
+   drop-стиля `cellStopTimes[row]` (момент посадки каждой ячейки) и `stopTime` (момент, когда
+   барабан долетел целиком), а `_runDrop` только исполняет эти числа. Отсюда три вещи, которых
+   раньше не было: `dropOrder: 'bottom-up'` (заполнение снизу вверх, как под гравитацией, вместо
+   раздачи «карточками» сверху), `dropSequence` (`'chained'` — следующий барабан стартует только
+   после посадки последней ячейки предыдущего; `'chained-when-anticipated'` — обычные барабаны
+   остаются параллельными, цепочка включается с первого взведённого) и работающий
+   `anticipation.holdMs` (в drop-стиле он раньше игнорировался, потому что `_runDrop` не смотрел
+   на `stopTime`). Заодно `stopOrder: 'rtl'` теперь разворачивает и падение.
+5. **Посадку можно удержать.** `deferReveal: number[]` — барабан крутится по-настоящему, лента
    уничтожается как обычно, но реальные ячейки остаются **скрытыми и незасеянными**: данными и
    видимостью с этого момента владеет игра (slam-stop их тоже не раскроет). Это снимает
    необходимость накрывать вывод движка непрозрачной панелью. Оговорка: стиль `swap` крутит ленту

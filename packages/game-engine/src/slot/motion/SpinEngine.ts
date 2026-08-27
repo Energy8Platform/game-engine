@@ -68,6 +68,13 @@ export interface ReelStopPlan {
   slowdown: number;
   /** True when `deferReveal` withheld this reel's landing (see `SpinRunOpts.deferReveal`). */
   deferred: boolean;
+  /**
+   * `cascade-drop` only: ms from spin start at which each cell of this reel seats, INDEXED BY ROW.
+   * The reel's fill direction lives in these numbers (`motion.dropOrder` decides which row is the
+   * smallest), as does its place in the chain (`motion.dropSequence`). `stopTime` is the largest
+   * of them — the frame the whole reel has landed.
+   */
+  cellStopTimes?: number[];
 }
 
 export class SpinEngine {
@@ -129,6 +136,7 @@ export class SpinEngine {
     const order = (reel: number) => (this._cfg.stopOrder === 'rtl' ? cols - 1 - reel : reel);
     const anticipate = new Set(opts?.anticipateReels ?? []);
     const defer = new Set(opts?.deferReveal ?? []);
+    const holds: number[] = [];
     const out: ReelStopPlan[] = [];
     for (let reel = 0; reel < cols; reel++) {
       const idx = order(reel);
@@ -143,7 +151,9 @@ export class SpinEngine {
       else stopTime = (this._cfg.spinUp + this._cfg.hold + idx * this._cfg.stopStagger) * f;
 
       const isAnticipated = anticipate.has(reel);
-      if (isAnticipated) stopTime += perReelValue(opts?.anticipateHoldMs, reel, 0) * f;
+      const hold = isAnticipated ? perReelValue(opts?.anticipateHoldMs, reel, 0) * f : 0;
+      stopTime += hold;
+      holds[reel] = hold;
       const speed = isAnticipated ? perReelValue(opts?.anticipateSlowdown, reel, 1) : 1;
 
       out.push({
@@ -156,7 +166,54 @@ export class SpinEngine {
         deferred: defer.has(reel),
       });
     }
+    if (this._cfg.style === 'cascade-drop') this._planDrop(out, holds, f, order);
     return out;
+  }
+
+  /**
+   * `cascade-drop` lays its reels out on a different clock from the tape styles: a reel is a
+   * sequence of per-cell arrivals, not one deceleration. Overwrite `stopTime` with the moment the
+   * reel has fully landed and fill in `cellStopTimes`, so `plan()` stays the single source of truth
+   * for WHEN anything happens — `_runDrop` below only executes these numbers.
+   */
+  private _planDrop(
+    out: ReelStopPlan[],
+    holds: number[],
+    f: number,
+    order: (reel: number) => number,
+  ): void {
+    const bottomUp = this._cfg.dropOrder === 'bottom-up';
+    // walk the reels in STOP order, so `stopOrder: 'rtl'` reverses the drop as well
+    const byPosition: number[] = [];
+    for (let reel = 0; reel < out.length; reel++) byPosition[order(reel)] = reel;
+    // the position from which reels stop overlapping and start queueing behind each other
+    const chainFrom =
+      this._cfg.dropSequence === 'chained'
+        ? 0
+        : this._cfg.dropSequence === 'chained-when-anticipated'
+          ? byPosition.findIndex((reel) => out[reel].anticipated)
+          : -1;
+
+    let previousEnd = 0;
+    for (let position = 0; position < byPosition.length; position++) {
+      const p = out[byPosition[position]];
+      const rows = this._grid.rowsOf(p.reel);
+      const scale = f * p.slowdown;
+      const gap = this._cfg.stopStagger * this._cfg.reelStaggerFactor * scale;
+      const fall = this._cfg.spinUp * this._cfg.dropFallFactor * scale;
+      // by formula while reels may overlap; queued behind the previous reel once the chain starts
+      const chained = chainFrom >= 0 && position > 0 && position >= chainFrom;
+      const start = (chained ? previousEnd + gap : position * gap) + (holds[p.reel] ?? 0);
+
+      const cells: number[] = [];
+      for (let i = 0; i < rows; i++) {
+        const row = bottomUp ? rows - 1 - i : i;
+        cells[row] = start + i * this._cfg.cellStagger * scale + fall;
+      }
+      p.cellStopTimes = cells;
+      p.stopTime = cells.length ? Math.max(...cells) : start;
+      previousEnd = p.stopTime;
+    }
   }
 
   /** Execute the spin for every reel concurrently. */
@@ -328,6 +385,8 @@ export class SpinEngine {
     }
     const step = this._grid.cellPosition(p.reel, 1).y - this._grid.cellPosition(p.reel, 0).y;
     const slow = this.slowOf(p); // anticipation drops the reel in more slowly
+    const fall = this._cfg.spinUp * this._cfg.dropFallFactor * f * slow;
+    const schedule = p.cellStopTimes ?? [];
     await Promise.all(
       Array.from({ length: rows }, (_, r) => r).map(async (r) => {
         if (this._killed) return;
@@ -337,18 +396,10 @@ export class SpinEngine {
         cell.setData(data);
         cell.position.set(to.x, to.y - step * (rows + 1));
         cell.alpha = 1;
-        const delay =
-          (p.reel * this._cfg.stopStagger * this._cfg.reelStaggerFactor +
-            r * this._cfg.cellStagger) *
-          f *
-          slow;
+        // the plan says WHEN this cell seats; back off the fall to get when it must let go
+        const delay = Math.max(0, (schedule[r] ?? fall) - fall);
         if (delay) await Tween.delay(delay);
-        await Tween.to(
-          cell,
-          { 'position.y': to.y },
-          this._cfg.spinUp * this._cfg.dropFallFactor * f * slow,
-          easingByName(this._cfg.settle.easing),
-        );
+        await Tween.to(cell, { 'position.y': to.y }, fall, easingByName(this._cfg.settle.easing));
         // the impact frame — fired before the squash so a game can sync its own hit feedback
         opts?.onCellSeated?.(p.reel, r, data);
         await this._squashCell(cell, f);

@@ -33,6 +33,8 @@ export type {
   MotionStyle,
   StopMode,
   StopOrder,
+  DropOrder,
+  DropSequence,
   Intensity,
   GridConfig,
   MotionConfig,

@@ -92,6 +92,10 @@ export type MotionStyle =
   | 'cascade-drop'; // symbols drop in from above (tumble-style boards)
 
 export type StopMode = 'sequential' | 'sync' | 'random';
+/** `cascade-drop` fill direction within one reel. */
+export type DropOrder = 'top-down' | 'bottom-up';
+/** How `cascade-drop` spaces reels: by formula, or one strictly after the other. */
+export type DropSequence = 'parallel' | 'chained' | 'chained-when-anticipated';
 export type StopOrder = 'ltr' | 'rtl';
 export type Intensity = 'full' | 'reduced' | 'minimal';
 
@@ -147,6 +151,25 @@ export interface MotionConfig {
   reelStaggerFactor: number;
   /** `cascade-drop`: fall duration as a fraction of `spinUp`. Default 0.6. */
   dropFallFactor: number;
+  /**
+   * `cascade-drop`: which cell of a reel lands first. `'top-down'` (default, the engine's original
+   * behaviour) deals the reel like cards from the top; `'bottom-up'` fills it the way gravity
+   * would — the lowest cell arrives first and the rest stack on top of it.
+   */
+  dropOrder: DropOrder;
+  /**
+   * `cascade-drop`: how reels are spaced.
+   * - `'parallel'` (default) starts every reel at its own formula offset —
+   *   `reel * stopStagger * reelStaggerFactor` — so a reel can open while the previous one is
+   *   still dropping. Fast, and what a normal spin wants.
+   * - `'chained'` starts a reel only once the previous one has seated its LAST cell, plus that
+   *   same offset as the gap. One reel at a time, always — correct, but it makes every spin as
+   *   long as the sum of its reels.
+   * - `'chained-when-anticipated'` runs the un-armed reels in parallel and switches to the chain
+   *   from the first ANTICIPATED reel onwards. The base spin keeps its stop window; the hunt for
+   *   the last scatter goes strictly reel by reel, each slower than the last.
+   */
+  dropSequence: DropSequence;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -467,6 +490,8 @@ export const DEFAULT_REEL_CONFIG: ReelSystemConfig = {
     cellStagger: 24,
     reelStaggerFactor: 0.4,
     dropFallFactor: 0.6,
+    dropOrder: 'top-down',
+    dropSequence: 'parallel',
   },
   anticipation: {
     enabled: false,

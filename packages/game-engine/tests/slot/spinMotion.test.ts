@@ -221,6 +221,119 @@ describe('cascade-drop stagger is configurable', () => {
   });
 });
 
+describe('cascade-drop fill direction and reel sequencing', () => {
+  const dropSys = (motion: Partial<MotionConfig>, anticipation = {}) =>
+    createReelSystem({
+      resolve,
+      config: {
+        grid: { cols: 5, rows: 3 },
+        motion: fast({
+          style: 'cascade-drop',
+          spinUp: 300,
+          stopStagger: 200,
+          cellStagger: 120,
+          ...motion,
+        }),
+        anticipation,
+      },
+    });
+  /** A board with one scatter on reel 0 and one on reel 1 → arms reels 2, 3, 4. */
+  const twoScatters: CellData[][] = Array.from({ length: 5 }, (_, c) =>
+    Array.from({ length: 3 }, (_, r) => ({ symbol: c < 2 && r === 0 ? 'scatter' : `c${c}r${r}` })),
+  );
+  const armed = {
+    enabled: true,
+    triggerSymbols: ['scatter'],
+    threshold: 2,
+    reels: 'trailing' as const,
+    slowdownFactor: 0.75,
+    progressiveSlowdown: 0.8,
+    holdMs: 0,
+  };
+
+  it("'top-down' (the default) seats the top row first", () => {
+    const sys = dropSys({});
+    const cells = sys.planSpin(board())[0].cellStopTimes!;
+    expect(cells[0]).toBeLessThan(cells[1]);
+    expect(cells[1]).toBeLessThan(cells[2]);
+    sys.destroy();
+  });
+
+  it("'bottom-up' seats the lowest row first, the way gravity would fill it", async () => {
+    const sys = dropSys({ dropOrder: 'bottom-up' });
+    const cells = sys.planSpin(board())[0].cellStopTimes!;
+    expect(cells[2]).toBeLessThan(cells[1]);
+    expect(cells[1]).toBeLessThan(cells[0]);
+    // …and the run really lands them in that order
+    const seated: number[] = [];
+    await pump(sys.spin(board(), { onCellSeated: (reel, row) => reel === 0 && seated.push(row) }));
+    expect(seated).toEqual([2, 1, 0]);
+    sys.destroy();
+  });
+
+  it("'parallel' (the default) lets a reel open while the previous one is still dropping", () => {
+    const sys = dropSys({});
+    const plan = sys.planSpin(board());
+    // reel gap is 200 * 1 = 200ms, but a reel spans 2 * 120 = 240ms of cells
+    expect(plan[1].cellStopTimes![0]).toBeLessThan(plan[0].stopTime);
+    sys.destroy();
+  });
+
+  it("'chained' queues every reel behind the one before it", () => {
+    const sys = dropSys({ dropSequence: 'chained' });
+    const plan = sys.planSpin(board());
+    for (let c = 1; c < 5; c++)
+      expect(Math.min(...plan[c].cellStopTimes!)).toBeGreaterThan(plan[c - 1].stopTime);
+    sys.destroy();
+  });
+
+  it("'chained-when-anticipated' keeps the base spin fast and chains only the hunt", () => {
+    const sys = dropSys({ dropSequence: 'chained-when-anticipated' }, armed);
+
+    // no anticipation → identical to 'parallel', so the stop window is untouched
+    const quiet = sys.planSpin(board());
+    const parallel = dropSys({}, armed);
+    expect(quiet.map((p) => p.cellStopTimes)).toEqual(
+      parallel.planSpin(board()).map((p) => p.cellStopTimes),
+    );
+    parallel.destroy();
+
+    // two scatters → reels 0,1 still overlap; 2,3,4 queue up, each slower than the last
+    const hunt = sys.planSpin(twoScatters);
+    expect(hunt[1].cellStopTimes![0]).toBeLessThan(hunt[0].stopTime); // un-armed: unchanged
+    for (let c = 2; c < 5; c++)
+      expect(Math.min(...hunt[c].cellStopTimes!)).toBeGreaterThan(hunt[c - 1].stopTime);
+    // span between the reel's first and last cell — the widening per-cell gap, order-agnostic
+    const cellGap = (c: number) =>
+      Math.max(...hunt[c].cellStopTimes!) - Math.min(...hunt[c].cellStopTimes!);
+    expect(cellGap(3)).toBeGreaterThan(cellGap(2));
+    expect(cellGap(4)).toBeGreaterThan(cellGap(3));
+    sys.destroy();
+  });
+
+  it('anticipation.holdMs now delays a cascade-drop reel (it used to be ignored)', () => {
+    const withHold = dropSys({}, { ...armed, holdMs: 400 });
+    const without = dropSys({}, { ...armed, holdMs: 0 });
+    const a = withHold.planSpin(twoScatters)[2].cellStopTimes![0];
+    const b = without.planSpin(twoScatters)[2].cellStopTimes![0];
+    expect(a - b).toBeCloseTo(400, 6);
+    withHold.destroy();
+    without.destroy();
+  });
+
+  it("stopOrder 'rtl' reverses the drop as well as the stops", () => {
+    const sys = dropSys({ stopOrder: 'rtl' });
+    const plan = sys.planSpin(board());
+    expect(plan[4].stopTime).toBeLessThan(plan[0].stopTime);
+    sys.destroy();
+  });
+
+  it('defaults preserve the engine s original drop', () => {
+    expect(DEFAULT_REEL_CONFIG.motion.dropOrder).toBe('top-down');
+    expect(DEFAULT_REEL_CONFIG.motion.dropSequence).toBe('parallel');
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. anticipation: run options honoured + game-supplied predicate
 // ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +508,81 @@ describe('deferReveal withholds a reel s landing', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // the config may now carry a function, so cloning must survive one
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// the composition the four seams exist for: an escalating scatter hunt
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('scenario: the 2nd scatter arms a progressively slower per-cell drop', () => {
+  it('each armed reel drops its cells one by one, slower than the reel before it', async () => {
+    // one scatter on reel 0 and one on reel 1 → the running count hits 2 on reel 1, so reels
+    // 2..4 are armed. Reel 2 (the first armed one) still runs at the base speed; 3 and 4 ramp.
+    const target: CellData[][] = Array.from({ length: 5 }, (_, c) =>
+      Array.from({ length: 3 }, (_, r) => ({
+        symbol: c < 2 && r === 0 ? 'scatter' : `c${c}r${r}`,
+      })),
+    );
+    const sys = createReelSystem({
+      resolve,
+      config: {
+        grid: { cols: 5, rows: 3 },
+        motion: {
+          style: 'cascade-drop',
+          spinUp: 300,
+          hold: 0,
+          stopStagger: 300,
+          cellStagger: 200, // one cell every 200ms…
+          reelStaggerFactor: 1, // …and one reel every 300ms
+          dropFallFactor: 0.6,
+          settle: { amp: 0, ms: 1 },
+        },
+        anticipation: {
+          enabled: true,
+          triggerSymbols: ['scatter'],
+          threshold: 2,
+          reels: 'trailing',
+          slowdownFactor: 1,
+          progressiveSlowdown: 0.7, // each armed reel 30% slower than the one before
+          holdMs: 0,
+        },
+      },
+    });
+    expect(sys.anticipationFor(target).reels).toEqual([2, 3, 4]);
+
+    const at: number[][] = Array.from({ length: 5 }, () => []);
+    const t0 = clock.t;
+    await pump(
+      sys.spin(target, {
+        onCellSeated: (reel, row) => {
+          at[reel][row] = clock.t - t0;
+        },
+      }),
+    );
+
+    // every reel seated its 3 cells one at a time
+    for (const rows of at) expect(rows).toHaveLength(3);
+    // un-armed reels keep the configured 200ms cell gap
+    expectAbout(at[0][1] - at[0][0], 200);
+    expectAbout(at[1][2] - at[1][1], 200);
+    // the armed reels widen it: 200 / 0.7 then 200 / 0.7²
+    expectAbout(at[2][1] - at[2][0], 200);
+    expectAbout(at[3][1] - at[3][0], 200 / 0.7);
+    expectAbout(at[4][1] - at[4][0], 200 / 0.7 / 0.7);
+    // …and the tension is monotone: each reel takes longer than the last
+    const span = at.map((rows) => rows[2] - rows[0]);
+    for (let c = 1; c < span.length; c++) expect(span[c]).toBeGreaterThanOrEqual(span[c - 1]);
+    // Reels start in order, but a reel's offset is a FORMULA (reel * stopStagger *
+    // reelStaggerFactor * slowdown), not "wait for the previous reel to finish". Here reel 1
+    // opens at 512 while reel 0 is still dropping (it finishes at 608), because
+    // stopStagger * reelStaggerFactor (300) is under (rows - 1) * cellStagger (400).
+    for (let c = 1; c < 5; c++) expect(at[c][0]).toBeGreaterThan(at[c - 1][0]);
+    expect(at[1][0]).toBeLessThan(at[0][2]); // overlapping, by the numbers above
+    // Once the ramp inflates the offsets, the reels do separate on their own.
+    expect(at[3][0]).toBeGreaterThan(at[2][2]);
+    expect(at[4][0]).toBeGreaterThan(at[3][2]);
+    sys.destroy();
+  });
+});
 
 describe('a function-valued config survives merge + setConfig', () => {
   it('keeps `anticipation.decide` by reference through resolve / update', () => {

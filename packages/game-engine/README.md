@@ -457,6 +457,42 @@ await reels.spin(targetBoard, {
 });
 ```
 
+#### Pacing a `cascade-drop` board
+
+A drop reel is a sequence of per-cell arrivals, so `planSpin` gives it a per-cell schedule:
+`plan[reel].cellStopTimes[row]` is the ms at which that cell seats, and `stopTime` is the moment
+the whole reel has landed. Three knobs shape it:
+
+| Knob | Effect |
+| --- | --- |
+| `cellStagger` | ms between consecutive cells of one reel |
+| `dropOrder` | `'top-down'` (default) deals the reel like cards; `'bottom-up'` fills it the way gravity would — the lowest cell lands first and the rest stack on it |
+| `dropSequence` | `'parallel'` (default) starts each reel at `reel * stopStagger * reelStaggerFactor`, so reels can overlap; `'chained'` queues every reel behind the previous one; `'chained-when-anticipated'` keeps the un-armed reels parallel and chains only from the first anticipated reel |
+
+`'chained-when-anticipated'` is the one a scatter hunt wants: the base spin keeps its stop window,
+and once anticipation arms, the board goes strictly reel by reel, each slower than the last.
+
+```typescript
+motion: {
+  style: 'cascade-drop',
+  spinUp: 300, stopStagger: 200, reelStaggerFactor: 1,
+  cellStagger: 120,
+  dropOrder: 'bottom-up',
+  dropSequence: 'chained-when-anticipated',
+  squash: { enabled: true },
+},
+anticipation: {
+  enabled: true, triggerSymbols: ['SCATTER'], threshold: 2, reels: 'trailing',
+  slowdownFactor: 0.75,      // the first armed reel, already slower
+  progressiveSlowdown: 0.8,  // …and each one after it slower again
+  progressiveHoldMs: 120,    // plus a growing beat before it starts
+},
+```
+
+> `slowdownFactor` is the lever that actually slows a reel; leaving it at `1` means no slow-down
+> however the rest is set. `progressiveHoldMs` is **milliseconds** added per reel, not a ratio —
+> the ratio knob is `progressiveSlowdown`.
+
 For a trigger that isn't "N of symbol X landed", give the config its own predicate — it replaces
 the built-in counting entirely:
 
@@ -479,7 +515,7 @@ reels.update({
 | Section | Key knobs |
 | --- | --- |
 | `grid` | `cols`, `rows`, `rowsPerReel[]` (Megaways / variable heights), `cellSize`, `gap`, `evaluation` (`lines`/`ways`/`anywhere`/`cluster`/`megaways`/`infinity`), `mask` |
-| `motion` | `style` (`swap`/`strip`/`cascade-drop`), `spinUp`, `hold`, `stopStagger`, `stopMode` (`sequential`/`sync`/`random`), `stopOrder`, `settle`, `squash`, `blur`, `turboFactor`, `intensity`, `slamStop`, `cellStagger` + `reelStaggerFactor` + `dropFallFactor` (`cascade-drop` pacing) |
+| `motion` | `style` (`swap`/`strip`/`cascade-drop`), `spinUp`, `hold`, `stopStagger`, `stopMode` (`sequential`/`sync`/`random`), `stopOrder`, `settle`, `squash`, `blur`, `turboFactor`, `intensity`, `slamStop`, `cellStagger` + `reelStaggerFactor` + `dropFallFactor` + `dropOrder` + `dropSequence` (`cascade-drop` pacing) |
 | `anticipation` | `enabled`, `triggerSymbols`, `threshold` (N−1), `reels` (`trailing`/indices), `slowdownFactor`, `holdMs`, `decide` (game-supplied predicate), `progressiveSlowdown` + `progressiveHoldMs` (ramp per reel), `zoom` |
 | `cascade` | `enabled`, `gravity`, `timings`, `easings`, `perStepDecel`, `dimNonWinners`, `multiplier` (`mode` add/mul, `cap`, `persistInFreeSpins`) |
 | `win` | `highlightScale`, `glow`, `frameShake` |

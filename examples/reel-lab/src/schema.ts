@@ -216,6 +216,18 @@ export const SCHEMA: Section[] = [
         max: 3,
         step: 0.05,
       },
+      {
+        kind: 'select',
+        path: 'motion.dropOrder',
+        label: 'Drop order',
+        options: ['top-down', 'bottom-up'],
+      },
+      {
+        kind: 'select',
+        path: 'motion.dropSequence',
+        label: 'Drop sequence',
+        options: ['parallel', 'chained', 'chained-when-anticipated'],
+      },
     ],
   },
   {

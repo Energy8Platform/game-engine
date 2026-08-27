@@ -137,6 +137,8 @@ export const REEL_FIELD_SCHEMA: Section[] = [
       { kind: 'range', path: 'motion.cellStagger', label: 'Cell stagger (ms)', min: 0, max: 700, step: 5 },
       { kind: 'range', path: 'motion.reelStaggerFactor', label: 'Reel stagger ×', min: 0, max: 3, step: 0.05 },
       { kind: 'range', path: 'motion.dropFallFactor', label: 'Drop fall ×', min: 0.1, max: 3, step: 0.05 },
+      { kind: 'select', path: 'motion.dropOrder', label: 'Drop order', options: ['top-down', 'bottom-up'] },
+      { kind: 'select', path: 'motion.dropSequence', label: 'Drop sequence', options: ['parallel', 'chained', 'chained-when-anticipated'] },
     ],
   },
   {
