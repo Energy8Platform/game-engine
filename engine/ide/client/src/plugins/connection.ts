@@ -61,13 +61,13 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       // same place every other failure already lands — connection.diagnostics
       // — so the composition screen that already renders that array shows
       // "not connected" without new plumbing. Both failure modes below feed
-      // the same `reportSendFailure`, which keeps at most one `where:
-      // 'connection'` diagnostic at a time: a range input's onChange can
-      // fire tens of times a second while the socket is down, and without
-      // collapsing, every one of those calls would both pile up an
-      // identical diagnostic and re-notify every subscriber. A genuinely
-      // different failure (a different reason, a different plugin) still
-      // replaces the slot and still notifies — only true duplicates collapse.
+      // the same `reportSendFailure`, which collapses repeats of the exact
+      // same failure (a range input's onChange can fire tens of times a
+      // second while the socket is down) into one diagnostic and one
+      // notification, while keeping distinct failures — a different row, or
+      // a different reason for the same row — as separate entries. See
+      // `reportSendFailure`'s own comment for why identity, not just
+      // `where`, is the dedupe key.
       //
       // Queuing the edit for replay on reconnect was considered and
       // rejected: the host is the source of truth, and the snapshot that
@@ -110,16 +110,23 @@ export function apply(ctx: Context, config: ConnectionConfig) {
   };
 
   /**
-   * Records a failed `update()` as a `where: 'connection'` diagnostic,
-   * replacing any earlier one there instead of appending — so repeated
-   * identical failures (the drag-a-knob case) collapse into a single entry
-   * with a single notification, while a genuinely different failure still
-   * replaces it and still notifies.
+   * Records a failed `update()` as a diagnostic, replacing any earlier
+   * diagnostic with the same *identity* — `plugin` + `where` + `message` —
+   * instead of appending, so repeated identical failures (the drag-a-knob
+   * case) collapse into a single entry with a single notification. Keying
+   * on `where === 'connection'` alone was tried first and rejected: it
+   * collapsed unrelated failures too — row A's stale diagnostic would be
+   * silently discarded the moment row B failed, and a `JSON.stringify`
+   * failure would erase a not-connected failure (or vice versa) for the
+   * same row, even though neither condition had actually resolved. Keying
+   * on identity means only a byte-identical repeat collapses; a different
+   * row or a different failure reason for the same row stands alongside.
    */
   function reportSendFailure(next: Diagnostic) {
-    const existing = service.diagnostics.find((d) => d.where === 'connection');
+    const sameIdentity = (d: Diagnostic) => d.plugin === next.plugin && d.where === next.where && d.message === next.message;
+    const existing = service.diagnostics.find(sameIdentity);
     if (existing && diagnosticsEqual(existing, next)) return;
-    service.diagnostics = [...service.diagnostics.filter((d) => d.where !== 'connection'), next];
+    service.diagnostics = [...service.diagnostics.filter((d) => !sameIdentity(d)), next];
     for (const listener of listeners) listener();
   }
 

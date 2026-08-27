@@ -100,6 +100,44 @@ describe('connection', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps distinct rows\' not-connected failures separate instead of collapsing them', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const listener = vi.fn();
+    ctx.connection.subscribe(listener);
+
+    // Two different rows fail against the same closed socket. Neither
+    // failure has resolved, so both must still be visible afterwards —
+    // row B failing must not silently erase row A's diagnostic.
+    ctx.connection.update('a:probe1', { speed: 1 });
+    ctx.connection.update('a:probe2', { speed: 1 });
+
+    expect(ctx.connection.diagnostics).toHaveLength(2);
+    expect(ctx.connection.diagnostics.map((d) => d.plugin).sort()).toEqual(['a:probe1', 'a:probe2']);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a send-exception and a not-connected failure for the same row side by side', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+
+    // Not connected first — this is the not-open branch.
+    ctx.connection.update('a:probe1', { speed: 1 });
+    // Then, once open, a value the transport can't serialise — the
+    // try/catch-around-send branch. Both carry where: 'connection' for the
+    // same row but are different failure reasons (different message), so
+    // neither should erase the other.
+    socket.open();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    ctx.connection.update('a:probe1', circular);
+
+    expect(ctx.connection.diagnostics).toHaveLength(2);
+    expect(ctx.connection.diagnostics.every((d) => d.plugin === 'a:probe1' && d.where === 'connection')).toBe(true);
+    const messages = ctx.connection.diagnostics.map((d) => d.message);
+    expect(new Set(messages).size).toBe(2);
+  });
+
   it('turns a send failure into a diagnostic instead of throwing', async () => {
     const socket = new FakeSocket();
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
