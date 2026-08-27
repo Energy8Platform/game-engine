@@ -29,6 +29,19 @@ export interface ConnectionService {
   diagnostics: Diagnostic[];
   subscribe(listener: () => void): () => void;
   update(id: string, config: unknown): void;
+  /**
+   * Record a diagnostic and notify subscribers — the public counterpart of
+   * `update()`'s own internal send-failure path, for any other plugin
+   * (`modules`, so far) that needs to surface a failure through the same
+   * array the composition screen already renders. Reuses the identity-based
+   * dedupe below: an identical repeat (same `plugin` + `where` + `message`)
+   * replaces the earlier entry instead of appending a duplicate, while a
+   * distinct failure — a different row, or a different reason for the same
+   * row — stays alongside it. Assigning `diagnostics` directly instead of
+   * calling this was considered and rejected: it writes the field without
+   * notifying subscribers, so nothing reacts to it.
+   */
+  report(diagnostic: Diagnostic): void;
 }
 
 export interface ConnectionConfig {
@@ -66,7 +79,7 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       // second while the socket is down) into one diagnostic and one
       // notification, while keeping distinct failures — a different row, or
       // a different reason for the same row — as separate entries. See
-      // `reportSendFailure`'s own comment for why identity, not just
+      // `service.report`'s own comment for why identity, not just
       // `where`, is the dedupe key.
       //
       // Queuing the edit for replay on reconnect was considered and
@@ -75,7 +88,7 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       // against stale state. Dropping it silently was rejected too — the
       // user acted and nothing would show for it.
       if (socket.readyState !== WEBSOCKET_OPEN) {
-        reportSendFailure(
+        service.report(
           diagnostic(
             'error',
             id,
@@ -96,7 +109,7 @@ export function apply(ctx: Context, config: ConnectionConfig) {
         // fix started from.
         socket.send(JSON.stringify(message));
       } catch (error) {
-        reportSendFailure(
+        service.report(
           diagnostic(
             'error',
             id,
@@ -107,28 +120,28 @@ export function apply(ctx: Context, config: ConnectionConfig) {
         );
       }
     },
+    /**
+     * Records a diagnostic, replacing any earlier diagnostic with the same
+     * *identity* — `plugin` + `where` + `message` — instead of appending, so
+     * repeated identical failures (the drag-a-knob case, or a `modules`
+     * import that fails the same way on every retry) collapse into a single
+     * entry with a single notification. Keying on `where === 'connection'`
+     * alone was tried first and rejected: it collapsed unrelated failures
+     * too — row A's stale diagnostic would be silently discarded the moment
+     * row B failed, and a `JSON.stringify` failure would erase a
+     * not-connected failure (or vice versa) for the same row, even though
+     * neither condition had actually resolved. Keying on identity means
+     * only a byte-identical repeat collapses; a different row or a
+     * different failure reason for the same row stands alongside.
+     */
+    report(next) {
+      const sameIdentity = (d: Diagnostic) => d.plugin === next.plugin && d.where === next.where && d.message === next.message;
+      const existing = service.diagnostics.find(sameIdentity);
+      if (existing && diagnosticsEqual(existing, next)) return;
+      service.diagnostics = [...service.diagnostics.filter((d) => !sameIdentity(d)), next];
+      for (const listener of listeners) listener();
+    },
   };
-
-  /**
-   * Records a failed `update()` as a diagnostic, replacing any earlier
-   * diagnostic with the same *identity* — `plugin` + `where` + `message` —
-   * instead of appending, so repeated identical failures (the drag-a-knob
-   * case) collapse into a single entry with a single notification. Keying
-   * on `where === 'connection'` alone was tried first and rejected: it
-   * collapsed unrelated failures too — row A's stale diagnostic would be
-   * silently discarded the moment row B failed, and a `JSON.stringify`
-   * failure would erase a not-connected failure (or vice versa) for the
-   * same row, even though neither condition had actually resolved. Keying
-   * on identity means only a byte-identical repeat collapses; a different
-   * row or a different failure reason for the same row stands alongside.
-   */
-  function reportSendFailure(next: Diagnostic) {
-    const sameIdentity = (d: Diagnostic) => d.plugin === next.plugin && d.where === next.where && d.message === next.message;
-    const existing = service.diagnostics.find(sameIdentity);
-    if (existing && diagnosticsEqual(existing, next)) return;
-    service.diagnostics = [...service.diagnostics.filter((d) => !sameIdentity(d)), next];
-    for (const listener of listeners) listener();
-  }
 
   socket.addEventListener('message', (event: { data: string }) => {
     let message: ServerMessage;

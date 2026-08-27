@@ -2,6 +2,8 @@ import { Context } from 'cordis';
 import * as connection from './plugins/connection';
 import type { ConnectionConfig } from './plugins/connection';
 import * as slots from './plugins/slots';
+import * as modules from './plugins/modules';
+import type { ModulesConfig } from './plugins/modules';
 
 /**
  * Boot the browser-side cordis application.
@@ -14,9 +16,10 @@ import * as slots from './plugins/slots';
  * this function would otherwise return. Awaiting each fiber here means
  * every caller gets a `Context` with both services already provided.
  */
-export async function createIdeClient(config: ConnectionConfig): Promise<Context> {
+export async function createIdeClient(config: ConnectionConfig & ModulesConfig): Promise<Context> {
   const ctx = new Context();
   await ctx.plugin(connection, config);
   await ctx.plugin(slots);
+  await ctx.plugin(modules, config);
   return ctx;
 }
