@@ -117,8 +117,23 @@ describe('SchemaForm', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders nothing for a malformed schema, without throwing', () => {
+  it('renders nothing when the rebuilt schema has no usable dict, without throwing', () => {
+    // `new Schema({ nope: true })` does not throw — it rebuilds to an
+    // instance with `dict: undefined`. This exercises the pre-existing
+    // `!node?.dict` guard in SchemaForm, not the try/catch around
+    // `new Schema(...)` — see the next test for that.
     const { container } = render(<SchemaForm schema={{ nope: true }} value={{}} onChange={() => {}} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders nothing when rebuilding the schema itself throws, without propagating the error', () => {
+    // A graph whose ref actually resolves to `null` makes `new Schema(...)`
+    // throw (`Cannot read properties of null (reading 'refs')`), unlike
+    // `{ nope: true }` above. This is what the try/catch in `rebuild()`
+    // exists for.
+    const { container } = render(
+      <SchemaForm schema={{ uid: 1, refs: { 1: null } }} value={{}} onChange={() => {}} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 
