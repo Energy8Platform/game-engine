@@ -1,0 +1,20 @@
+{
+  "name": "@energy8engine/ide-client",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@energy8engine/contracts": "*", "cordis": "4.0.0-rc.8", "schemastery": "3.18.0" },
+  "peerDependencies": { "react": "^18.2.0" },
+  "devDependencies": {
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.3.0",
+    "jsdom": "^25.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "license": "MIT"
+}
