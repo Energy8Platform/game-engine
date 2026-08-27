@@ -11,8 +11,15 @@
     "@cordisjs/plugin-server": "1.7.0",
     "@energy8engine/contracts": "*",
     "cordis": "4.0.0-rc.8",
+    "js-yaml": "^4.1.0",
     "schemastery": "3.18.0"
   },
-  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.6.0", "vitest": "^2.0.0", "ws": "^8.19.0" },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0",
+    "ws": "^8.19.0"
+  },
   "license": "MIT"
 }
