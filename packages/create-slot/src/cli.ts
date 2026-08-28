@@ -12,7 +12,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   'game-engine': '^0.42.0',
   'stake-kit': '^0.6.4',
   'stake-bridge': '^0.6.4',
-  'stake-math-tools': '^0.9.3',
+  'stake-math-tools': '^0.10.0',
   harness: '^0.3.1',
   // test/versions.test.ts fails the moment these drift from the workspace's own versions.
   'artube-bridge': '^0.4.0',
