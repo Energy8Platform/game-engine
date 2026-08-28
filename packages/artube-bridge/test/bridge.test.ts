@@ -124,15 +124,48 @@ describe('ArtubeBridge', () => {
     expect(sent.find((m) => m.type === 'PLAY_RESULT')!.payload.currency).toBe('USD');
   });
 
-  it('демо-сессия (currency: null) остаётся FUN', async () => {
-    backend.connect.mockResolvedValue({ ...INIT, demo: true, currency: null });
-    bridge.destroy();
-    sent.length = 0;
-    bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game' });
-    await bridge.ready();
-    channel.sendToHost('GAME_READY', {});
-    await flush();
-    expect(sent.find((m) => m.type === 'INIT')!.payload.currency).toBe('FUN');
+  // ── Демо-режим (замечание Artube: «используется индикатор DEMO вместо FUN») ──
+  describe('демо-сессия помечена словом DEMO', () => {
+    /** Поднять мост заново на своём init — INIT игре отдаётся один раз за жизнь. */
+    async function reboot(init: Record<string, unknown>) {
+      backend.connect.mockResolvedValue({ ...INIT, ...init });
+      bridge.destroy();
+      installWindow();
+      sent = [];
+      const { MemoryChannel } = await import('@energy8platform/game-sdk');
+      channel = MemoryChannel.getGlobal();
+      channel.onGuest((m: any) => sent.push({ type: m.type, payload: m.payload }));
+      bridge = new ArtubeBridge({ devMode: true, url: URL_LIVE, gameId: 'my-game' });
+      await bridge.ready();
+      channel.sendToHost('GAME_READY', {});
+      await flush();
+    }
+    const initCurrency = () => sent.find((m) => m.type === 'INIT')!.payload.currency;
+
+    it('демо без кода валюты — DEMO, а не FUN', async () => {
+      await reboot({ demo: true, currency: null });
+      expect(initCurrency()).toBe('DEMO');
+    });
+
+    it('демо С кодом валюты — тоже DEMO', async () => {
+      // Так выглядит демо на локальном кошельке: `buildInit` ставит demo: true, а код валюты
+      // остаётся платформенным. Пока метка выводилась из «кода нет», такая сессия шла игроку
+      // как реальные деньги — без индикатора вообще.
+      await reboot({ demo: true, currency: 'USD' });
+      expect(initCurrency()).toBe('DEMO');
+    });
+
+    it('метка доезжает и до результата спина, не только до INIT', async () => {
+      await reboot({ demo: true, currency: null });
+      channel.sendToHost('PLAY_REQUEST', { action: 'spin', bet: 1 });
+      await flush();
+      expect(sent.find((m) => m.type === 'PLAY_RESULT')!.payload.currency).toBe('DEMO');
+    });
+
+    it('реальные деньги демо-меткой не подписываем', async () => {
+      await reboot({ demo: false, currency: 'eur' });
+      expect(initCurrency()).toBe('EUR');
+    });
   });
 
   it('PLAY_REQUEST переводится в индекс ставки', async () => {
