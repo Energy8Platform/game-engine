@@ -35,5 +35,6 @@ export type { PopoverPlacement, Rect as PopoverRect } from './popover';
 export { resolveTheme, SCHEMES, DEFAULT_ACCENT } from './theme';
 export type { ShellTokens } from './theme';
 export { createI18n, socialize, normalizeLang } from './i18n';
+export { DISCLAIMER_LINES } from './locales';
 export type { Lang, I18n, I18nOptions } from './i18n';
 export { PACKAGE_VERSION } from './version';
