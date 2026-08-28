@@ -1,10 +1,32 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { parseFlags } from '../src/cli';
+import { poolCompressionDisabled } from '../src/pipeline/pool';
 import { formatGoReport } from '../src/pipeline/report';
 
 describe('parseFlags', () => {
   it('parses --config/--mode', () => {
     expect(parseFlags(['--config', './math.config.ts', '--mode', 'BASE'])).toEqual({ config: './math.config.ts', mode: 'BASE' });
+  });
+
+  it('parses --jobs as a number (curate stage concurrency)', () => {
+    expect(parseFlags(['--config', './math.config.ts', '--jobs', '4']).jobs).toBe(4);
+  });
+
+  it('leaves --jobs unset when absent so the default stays sequential', () => {
+    expect(parseFlags(['--config', './math.config.ts']).jobs).toBeUndefined();
+  });
+});
+
+describe('poolCompressionDisabled', () => {
+  afterEach(() => { delete process.env.POOL_ZSTD_LEVEL; });
+
+  it('is off by default (the pool is still archived as .zst)', () => {
+    expect(poolCompressionDisabled()).toBe(false);
+  });
+
+  it('is on at POOL_ZSTD_LEVEL=0', () => {
+    process.env.POOL_ZSTD_LEVEL = '0';
+    expect(poolCompressionDisabled()).toBe(true);
   });
 });
 

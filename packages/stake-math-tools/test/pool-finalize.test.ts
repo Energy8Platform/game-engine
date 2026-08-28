@@ -50,7 +50,18 @@ beforeEach(() => {
   writeFileSync(dumpPath, makeFixture());
 });
 
-afterEach(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+afterEach(() => {
+  delete process.env.POOL_ZSTD_LEVEL;
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+});
+
+/** The BASE entry of the pool index.json. */
+function readIndexEntry(): { name: string; cost: number; events: string; weights: string } {
+  const idx = JSON.parse(readFileSync(join(poolDir, 'index.json'), 'utf-8')) as {
+    modes: { name: string; cost: number; events: string; weights: string }[];
+  };
+  return idx.modes.find((m) => m.name === 'BASE')!;
+}
 
 describe('finalizePool', () => {
   it('writes a 1-weight lookUpTable (sim,weight,payoutCents) from the raw dump', async () => {
@@ -71,14 +82,40 @@ describe('finalizePool', () => {
     expect(lines[99]).toBe('99,1,490000');
   });
 
-  it('writes a pool index.json pointing at the .zst + lookUpTable', async () => {
+  it.skipIf(!hasZstd)('writes a pool index.json pointing at the .zst + lookUpTable', async () => {
     await finalizePool(mode, { poolDir, dumpPath });
-    const idx = JSON.parse(readFileSync(join(poolDir, 'index.json'), 'utf-8')) as {
-      modes: { name: string; cost: number; events: string; weights: string }[];
-    };
-    const base = idx.modes.find((m) => m.name === 'BASE')!;
+    const base = readIndexEntry();
     expect(base.events).toBe('books_BASE.jsonl.zst');
     expect(base.weights).toBe('lookUpTable_BASE_0.csv');
+  });
+
+  it('names the file that actually exists in index.json when the books stay raw', async () => {
+    // Compression off → the pool keeps books_BASE.jsonl, so index.json must say so.
+    // A hardcoded `.zst` here points curate (and any consumer of the pool) at a
+    // file that was never written.
+    process.env.POOL_ZSTD_LEVEL = '0';
+    const res = await finalizePool(mode, { poolDir, dumpPath });
+    expect(res.compressed).toBe(false);
+    expect(readIndexEntry().events).toBe('books_BASE.jsonl');
+  });
+
+  it('keeps the pool raw when POOL_ZSTD_LEVEL=0 (the pool is a temp artifact, not an archive)', async () => {
+    // zstd -12 -T0 on a 59 GB pool is ~10 minutes of wall clock for a file that
+    // curate reads once and deletes. Opting out must leave the dump readable.
+    process.env.POOL_ZSTD_LEVEL = '0';
+    const res = await finalizePool(mode, { poolDir, dumpPath });
+    expect(res.compressed).toBe(false);
+    expect(existsSync(dumpPath)).toBe(true);
+    expect(existsSync(join(poolDir, 'books_BASE.jsonl.zst'))).toBe(false);
+    expect(res.rows).toBe(100);
+  });
+
+  it('still curates from an uncompressed pool', async () => {
+    process.env.POOL_ZSTD_LEVEL = '0';
+    await finalizePool(mode, { poolDir, dumpPath });
+    const outDir = join(dir, 'out');
+    const result = await curateMode(mode, { poolDir, outDir });
+    expect(result.rows.length).toBeGreaterThan(0);
   });
 
   it.skipIf(!hasZstd)('compresses books to .zst (-19) and removes the raw dump', async () => {

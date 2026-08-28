@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createReadStream } from 'node:fs';
+import { createGunzip } from 'node:zlib';
 import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { optimizeLookupTable } from '../optimize-lookup.js';
@@ -28,6 +29,8 @@ import { computeMetrics } from '../metrics.js';
 import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
 import type { LookupRow, OptimizeParams, OptimizeResult } from '../types.js';
 import type { ResolvedMode, CurateEventsTransform } from '../mathConfig';
+import { readLut, writeLut } from './lut-io.js';
+import { mapWithConcurrency } from './concurrency.js';
 
 export interface CurateOptions {
   /** Directory holding the raw `books_<MODE>.jsonl` pool dump. */
@@ -60,27 +63,16 @@ export function roundToRow(line: string, sim: number, capMaxWin: number): Lookup
   return { sim, weight: 1, payoutCents };
 }
 
-/** Stream the raw pool dump (`books_<MODE>.jsonl`) into a 1-weight LUT. */
-async function readPoolDump(path: string, capMaxWin: number): Promise<LookupRow[]> {
+/** Stream a pool dump line stream (raw / `.gz` / `.zst`) into a 1-weight LUT. */
+async function readPoolDump(
+  rl: ReturnType<typeof createInterface>,
+  capMaxWin: number,
+): Promise<LookupRow[]> {
   const rows: LookupRow[] = [];
   let sim = 0;
-  const rl = createInterface({ input: createReadStream(path, { encoding: 'utf-8' }) });
   for await (const line of rl) {
     const row = roundToRow(line, sim, capMaxWin);
     if (row) { rows.push(row); sim++; }
-  }
-  return rows;
-}
-
-/** Stream a pre-built pool lookUpTable (`sim,weight,payoutCents`) into LookupRows. Line-at-a-time
- *  so a multi-million-row CSV never lands in memory as one giant string. */
-async function readPoolLut(path: string): Promise<LookupRow[]> {
-  const rows: LookupRow[] = [];
-  const rl = createInterface({ input: createReadStream(path, { encoding: 'utf-8' }) });
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    const [sim, weight, payoutCents] = line.split(',').map(Number);
-    rows.push({ sim, weight, payoutCents });
   }
   return rows;
 }
@@ -93,11 +85,11 @@ async function readPoolLut(path: string): Promise<LookupRow[]> {
  */
 async function readPoolRows(poolDir: string, mode: string, capMaxWin: number): Promise<LookupRow[]> {
   const lutPath = join(poolDir, `lookUpTable_${mode}_0.csv`);
-  if (existsSync(lutPath)) return readPoolLut(lutPath);
-  const rawPath = join(poolDir, `books_${mode}.jsonl`);
-  if (existsSync(rawPath)) return readPoolDump(rawPath, capMaxWin);
+  if (existsSync(lutPath)) return readLut(lutPath);
+  const rl = poolDumpLineStream(poolDir, mode);
+  if (rl) return readPoolDump(rl, capMaxWin);
   throw new Error(
-    `pool not found for ${mode}: expected lookUpTable_${mode}_0.csv or books_${mode}.jsonl in ${poolDir} — run \`e8-math pool\` (or \`all\`) first`,
+    `pool not found for ${mode}: expected lookUpTable_${mode}_0.csv or books_${mode}.jsonl[.gz|.zst] in ${poolDir} — run \`e8-math pool\` (or \`all\`) first`,
   );
 }
 
@@ -132,12 +124,18 @@ function deriveCriteria(
   return events.some((e) => e.type === 'free_spin') ? 'freegame' : 'basegame';
 }
 
-/** A line stream over the pool's per-round dump for one mode: prefers the raw `.jsonl`, else
- *  decompresses `.jsonl.zst` via `zstd -dc`. Returns null when neither exists. */
+/** A line stream over the pool's per-round dump for one mode. Prefers the raw `.jsonl`, then
+ *  `.jsonl.gz` (the engine's `books --out x.jsonl.gz`, inflated in-process), then `.jsonl.zst`
+ *  (needs the external `zstd`). Returns null when the mode has no dump at all. */
 function poolDumpLineStream(poolDir: string, mode: string): ReturnType<typeof createInterface> | null {
   const rawPath = join(poolDir, `books_${mode}.jsonl`);
   if (existsSync(rawPath)) {
     return createInterface({ input: createReadStream(rawPath, { encoding: 'utf-8' }) });
+  }
+  const gzPath = join(poolDir, `books_${mode}.jsonl.gz`);
+  if (existsSync(gzPath)) {
+    // zlib in-process: no external binary, and the multi-GB pool never lands on disk inflated.
+    return createInterface({ input: createReadStream(gzPath).pipe(createGunzip()) });
   }
   const zstPath = join(poolDir, `books_${mode}.jsonl.zst`);
   if (existsSync(zstPath)) {
@@ -167,13 +165,6 @@ function resolveOptimizeParams(curate: ResolvedMode['curate'], source: LookupRow
     nRowsOut,
     capMaxWin: curate.capMaxWin,
   };
-}
-
-function writeLut(rows: LookupRow[], path: string): void {
-  if (existsSync(path)) unlinkSync(path);
-  const fd = openSync(path, 'w');
-  for (const r of rows) writeSync(fd, `${r.sim},${r.weight},${r.payoutCents}\n`);
-  closeSync(fd);
 }
 
 /**
@@ -206,6 +197,8 @@ interface EventsSizeStats {
   maxEventsBytesBookId: number;
   /** How many books exceed `STAKE_EVENTS_MAX_BYTES`. */
   booksOverEventsLimit: number;
+  /** False when the pool holds no round dump at all — every book is written event-less. */
+  dumpFound: boolean;
 }
 
 async function streamWriteEvents(
@@ -236,7 +229,7 @@ async function streamWriteEvents(
   // Per-output-row location of its serialized book line in the temp file (null until written).
   const slot: ({ off: number; len: number } | null)[] = new Array(rows.length).fill(null);
 
-  const stats: EventsSizeStats = { maxEventsBytes: 0, maxEventsBytesBookId: -1, booksOverEventsLimit: 0 };
+  const stats: EventsSizeStats = { maxEventsBytes: 0, maxEventsBytesBookId: -1, booksOverEventsLimit: 0, dumpFound: false };
 
   const tmpFd = openSync(tmpPath, 'w');
   let tmpOff = 0;
@@ -278,6 +271,7 @@ async function streamWriteEvents(
   // Pass 1: stream the pool dump once, serializing each selected round as it's read. `sim` counts
   // non-blank lines (the canonical sim id the LUT/events are positionally validated against).
   const rl = simToOut.size > 0 ? poolDumpLineStream(poolDir, mode) : null;
+  stats.dumpFound = rl !== null;
   if (rl) {
     let sim = 0;
     for await (const line of rl) {
@@ -297,8 +291,25 @@ async function streamWriteEvents(
     }
   }
 
-  // Pass 2: fill any row that never matched a dump line — padding rows (sim < 0) and, gracefully,
-  // selected sims absent from the dump (no dump available, or truncated) — with empty events.
+  // A curated row's `sim` IS the dump's line index, so every selected sim must have been found.
+  // Whatever is still in `simToOut` is a round the pool does not contain — the pool and the
+  // lookUpTable describe different runs, or the dump is short. Those rows would otherwise ship as
+  // books with an empty `events` array: valid JSON, accepted by every check we run, and dead on
+  // screen. Padding rows never get here (they carry sim < 0 and were skipped when the map was built).
+  if (rl && simToOut.size > 0) {
+    const affected = [...simToOut.values()].reduce((n, idxs) => n + idxs.length, 0);
+    closeSync(tmpFd);
+    if (existsSync(tmpPath)) unlinkSync(tmpPath);
+    throw new Error(
+      `[${mode}] pool is missing ${simToOut.size} of the ${originalSims.filter((s) => s >= 0).length} ` +
+        `rounds the lookUpTable selected (${affected} curated row(s) affected) — ` +
+        `books_${mode}.jsonl[.gz|.zst] does not describe the same run as lookUpTable_${mode}_0.csv. ` +
+        `Re-run the pool stage, or curate against the dump that produced this LUT.`,
+    );
+  }
+
+  // Pass 2: fill the rows that legitimately have no dump line — synthetic padding rows (sim < 0),
+  // and every row when the pool carries no dump at all (curate off a bare LUT).
   for (let i = 0; i < rows.length; i++) {
     if (slot[i] === null) appendBook(i, []);
   }
@@ -389,6 +400,13 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   result.stakeReport.maxEventsBytes = eventsSize.maxEventsBytes;
   result.stakeReport.maxEventsBytesBookId = eventsSize.maxEventsBytesBookId;
   result.stakeReport.booksOverEventsLimit = eventsSize.booksOverEventsLimit;
+  if (!eventsSize.dumpFound) {
+    result.warnings.push(
+      `no round dump in the pool — books_${mode.mode}.jsonl was written without events ` +
+        `(every book has an empty \`events\` array). Fine while tuning weights off the ` +
+        `lookUpTable; NOT publishable. Run \`e8-math pool\` to restore the dump.`,
+    );
+  }
   if (eventsSize.booksOverEventsLimit > 0) {
     result.warnings.push(
       `${eventsSize.booksOverEventsLimit} book(s) exceed Stake's ${STAKE_EVENTS_MAX_BYTES}-byte events ` +
@@ -398,4 +416,38 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   }
 
   return result;
+}
+
+/** One mode's curate outcome, tagged so reports stay attributable after a parallel run. */
+export interface CuratedMode {
+  mode: string;
+  result: OptimizeResult;
+}
+
+export interface CurateModesOptions extends CurateOptions {
+  /** Modes curated at once. Default 1 — see the note on memory below. */
+  jobs?: number;
+}
+
+/**
+ * Curate several modes, up to `jobs` at a time, returning their reports in the
+ * order the modes were given (not the order they finished).
+ *
+ * Modes share nothing but `outDir`, and the one thing they all write —
+ * `index.json` — is upserted with a synchronous read-modify-write, so a task
+ * switch can never land inside it.
+ *
+ * `jobs` defaults to 1 because the cost is memory, not CPU: each in-flight mode
+ * holds its entire source LUT plus the optimizer's working copies (a 6M-round
+ * BASE is several hundred MB), so the useful setting depends on the game and
+ * the machine rather than on the core count.
+ */
+export async function curateModes(
+  modes: readonly ResolvedMode[],
+  opts: CurateModesOptions,
+): Promise<CuratedMode[]> {
+  return mapWithConcurrency(modes, opts.jobs ?? 1, async (m) => ({
+    mode: m.mode,
+    result: await curateMode(m, opts),
+  }));
 }
