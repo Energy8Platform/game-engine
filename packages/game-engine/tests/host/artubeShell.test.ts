@@ -194,6 +194,32 @@ describe('createSlotGame: what an Artube INIT drives on the shell', () => {
     expect(shellConfig!.currency.symbol).toBe('₽');
   });
 
+  it('в демо-сессии рядом с деньгами стоит DEMO, а не символ валюты', async () => {
+    // Мост подписывает демо-сессию словом DEMO (замечание Artube: «the DEMO indicator is
+    // displayed»). Такой валюты нет в таблице символов, и это ровно то, что нужно: шелл пишет
+    // слово как есть — «1 000.00 DEMO», — а не подставляет чей-то знак.
+    launchAt(ARTUBE);
+    await boot(artubeInitData({ betLevels: [1, 2], defaultBetIndex: 0, currency: 'DEMO' }));
+    expect(shellConfig!.currency.symbol).toBe('DEMO');
+    expect(shellConfig!.currency.position).toBe('right');
+  });
+
+  it('на Artube правила несут обязательный дисклеймер — без марки Stake', async () => {
+    // Платформа своих строк не присылает (это делает только мост Stake), а показать дисклеймер
+    // игра обязана: «Disclaimer Availability». Берётся канонический текст шелла.
+    launchAt(ARTUBE);
+    await boot(artubeInitData({ betLevels: [1, 2], defaultBetIndex: 0 }));
+    const sections = shellConfig!.gameInfo!.sections ?? [];
+    const disclaimer = sections.at(-1) as { title?: string; html?: string }; // всегда последняя
+    expect(disclaimer.title).toBe('DISCLAIMER');
+    expect((disclaimer.html!.match(/<p>/g) ?? []).length).toBe(5);
+    // Сессия русская (lang=ru в launch-URL) — и юридический текст приезжает по-русски, а не
+    // английским блоком: «the disclaimer is translated and displayed in each language».
+    expect(disclaimer.html).toMatch(/[А-Яа-я]/);
+    expect(disclaimer.html).not.toMatch(/Malfunction voids/);
+    expect(disclaimer.html).not.toMatch(/stake/i);
+  });
+
   it('a non-Artube launch keeps the spec currency (the override is gated on the launch)', async () => {
     launchAt(DEV);
     // Same initData shape, but this is not an Artube launch — the spec's EUR must win.

@@ -280,7 +280,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
        *  and the Artube bridge fill it the same way, so the resumed-bet path below is shared. */
       session?: { betAmount?: number };
       /** Session currency CODE. The Artube bridge's only currency surface (the platform picks it
-       *  per session; demo sessions are 'FUN'); Stake sends full meta on `config.currency` instead. */
+       *  per session; a demo session is labelled 'DEMO'); Stake sends full meta on
+       *  `config.currency` instead. */
       currency?: string;
       lang?: string;
       /** The client the platform launched us on. Both bridges read it off the launch URL
@@ -307,9 +308,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // is absent and we only have the spec's currency CODE — resolve it through the SAME table
     // (stake-bridge's lookupCurrency) so e.g. 'EUR' renders as '€', not the literal text "EUR".
     // stake-bridge ships with every scaffold; if it's somehow absent we degrade to the code.
-    // On Artube the session currency is the PLATFORM's (per player, and 'FUN' for demo sessions) and
-    // arrives as a bare code on initData — there is no meta object. It outranks the spec's static
-    // code, which would otherwise show every Artube player the spec's currency symbol.
+    // On Artube the session currency is the PLATFORM's (per player, and the word 'DEMO' for a demo
+    // session — see artube-bridge's displayCurrency) and arrives as a bare code on initData — there
+    // is no meta object. It outranks the spec's static code, which would otherwise show every
+    // Artube player the spec's currency symbol.
     const currencyCode = (isArtubeNow ? initData?.currency : undefined) || opts.model.spec.currency;
     let currencyMeta = config?.currency;
     if (!currencyMeta?.symbol && currencyCode) {

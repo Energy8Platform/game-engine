@@ -269,11 +269,41 @@ describe('buildShellConfig (runtime ctx)', () => {
     expect(sections.some((s) => s.type === 'custom' && s.title === 'MAX WIN')).toBe(false);
   });
 
-  it('omits the disclaimer section gracefully when no lines (non-stake/dev)', () => {
-    const sections = buildShellConfig({}, model, { balance: 0, mode: 'base' }).gameInfo.sections ?? [];
-    expect(sections.some((s) => s.type === 'custom' && s.title === 'DISCLAIMER')).toBe(false);
-    // still non-empty: base info derived from the spec
-    expect(sections.length).toBeGreaterThan(0);
+  // ── Дисклеймер без Stake (замечание Artube: «Disclaimer Availability») ────────────────────
+  // Раньше эта секция была ровно тем, что мост Stake прислал в INIT, — на Artube и на дев-запуске
+  // её не было вообще. Обязательный юридический текст платформо-независим: одинаковые пять строк
+  // показываются везде, и только Stake добавляет к ним свою брендовую.
+  const disclaimerOf = (c: { gameInfo: { sections?: GameInfoSection[] } }): string =>
+    ((c.gameInfo.sections ?? []).find(
+      (s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER',
+    ) as { html?: string } | undefined)?.html ?? '';
+
+  it('без строк от платформы показывается канонический дисклеймер — без чужого бренда', () => {
+    const html = disclaimerOf(buildShellConfig({}, model, { balance: 0, mode: 'base' }));
+    expect(html).toContain('Malfunction voids all wins and plays.');
+    expect(html).toMatch(/Remote Game Server/); // расчёт выигрышей — обязательный пункт
+    expect(html).not.toMatch(/stake/i); // TM Stake Engine на не-Stake запуске неуместен
+    expect((html.match(/<p>/g) ?? []).length).toBe(5);
+  });
+
+  it('строки платформы важнее дефолта — на Stake приезжает и брендовая строка', () => {
+    const html = disclaimerOf(
+      buildShellConfig({}, model, {
+        balance: 0,
+        mode: 'base',
+        disclaimerLines: ['Malfunction voids all wins.', 'TM and © 2026 Stake Engine.'],
+      }),
+    );
+    expect(html).toContain('TM and © 2026 Stake Engine.');
+    expect((html.match(/<p>/g) ?? []).length).toBe(2); // ровно то, что прислал мост
+  });
+
+  it('дефолтный дисклеймер переводится на язык сессии', () => {
+    // Требование лаборатории: «if multiple languages are supported, the disclaimer is translated
+    // and displayed in each language». Ключи перевода — те же строки (shell's DISCLAIMER_LINES).
+    const html = disclaimerOf(buildShellConfig({}, model, { balance: 0, mode: 'base', language: 'ru' }));
+    expect(html).not.toContain('Malfunction voids all wins and plays.');
+    expect(html).toMatch(/[А-Яа-я]/);
   });
 
   it('MERGES opts.gameInfo over the derived set: replaces same-type, adds new types, keeps the rest', () => {
