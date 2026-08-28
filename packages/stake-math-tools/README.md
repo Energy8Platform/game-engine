@@ -380,6 +380,65 @@ bit-for-bit via `(rng.server_seed, rng.client_seed, spins[0].nonce)`.
 `stake-math-tools ≤ 0.8.x`. Porting: see
 [docs/lua-to-spin-migration.md](../../docs/lua-to-spin-migration.md).
 
+## Pipeline throughput
+
+On a real game the math itself is a rounding error next to the I/O around it:
+serializing 14M rounds, compressing them, reading them back and throwing 95% away
+dominates the wall clock. Three knobs matter.
+
+**`--jobs N` — curate several modes at once.** Modes are independent from `pool`
+onward, so the curate stage runs up to `N` of them concurrently; reports still
+print in config order, and the artifacts are identical either way.
+
+```bash
+e8-math curate --config ./math.config.ts --jobs 4
+```
+
+The default is 1 because the limit is memory, not CPU: each in-flight mode holds
+its whole source LUT plus the optimizer's working copies (several hundred MB for
+a 6M-round BASE). Raise it as far as the machine allows — the win is capped by
+the heaviest mode either way. In `all`, the pool stage stays sequential: the
+engine's workers already saturate the CPU, so running modes side by side there
+measures ~1.0×.
+
+**`POOL_ZSTD_LEVEL=0` — keep the intermediate pool raw.** The pool is temporary:
+curate reads it once and it is deleted; only the curated books are published. But
+`zstd -T0` does not parallelize a single stream (~100 MB/s), so archiving a 50+ GB
+pool costs ~10 minutes for a file nobody keeps.
+
+```bash
+POOL_ZSTD_LEVEL=0 e8-math all --config ./math.config.ts   # pool stays .jsonl
+```
+
+The default (12) is unchanged, and `index.json` names whichever file was actually
+written. Level 19 remains available when the pool matters as an archive.
+
+**Gzipped pools are read directly.** curate accepts `books_<MODE>.jsonl`,
+`books_<MODE>.jsonl.gz` and `books_<MODE>.jsonl.zst`, in that order. The engine's
+`e8 books --out pool/books_BASE.jsonl.gz` writes the compressed pool in one pass,
+and `.gz` is inflated in-process (`zlib`) — no external binary, and a multi-GB
+pool never lands on disk inflated.
+
+**The pool and the lookUpTable must describe the same run.** A curated row's `sim`
+is the dump's line index, so the two files are coupled positionally. curate fails
+if a selected round has no line in the dump:
+
+```
+[BASE] pool is missing 30 of the 40 rounds the lookUpTable selected (30 curated
+row(s) affected) — books_BASE.jsonl[.gz|.zst] does not describe the same run as
+lookUpTable_BASE_0.csv.
+```
+
+Without that check those rows ship as books with an empty `events` array — valid
+JSON, accepted by every size and tolerance check, and dead on screen. A damaged
+archive cannot slip through either: a truncated or non-gzip `.gz` raises
+`unexpected end of file` / `incorrect header check` rather than yielding a short
+read, and concatenated gzip members are read in full.
+
+Curating off a bare lookUpTable, with no dump in the pool at all, still works —
+useful while tuning weights — but every book comes out event-less, so the result
+carries a warning saying exactly that.
+
 ## Scripts
 
 ```bash
