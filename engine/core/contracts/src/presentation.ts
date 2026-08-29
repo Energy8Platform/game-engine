@@ -4,6 +4,19 @@
  * executes it. This is a contract, not a plugin surface: it is deliberately
  * not extensible here (a `board.step` registry for third-party steps is a
  * later plan).
+ *
+ * Two different numbers are both, informally, "the total" — do not confuse
+ * them, because the next implementer meets both within one function:
+ *   - The spin result's `win`/`totalWin` is what the host credits to the
+ *     player's balance. The play loop reports it straight from the math
+ *     engine's result. No presentation step carries it — crediting is not a
+ *     presentation concern, and no step in this file means "pay the
+ *     player."
+ *   - `RevealWinsStep.total` is a different number: the amount that *one
+ *     reveal* accounts for (a classic spin's `base_win`, or one cascade
+ *     round's `win`) — what the player watches add up as that reveal
+ *     plays. It is not the credited total, and in a multi-round cascade it
+ *     is only one round's share of it.
  */
 
 /** A full grid snapshot, `board[col][row]` holding a symbol id. */
@@ -15,11 +28,18 @@ export interface Cell {
   row: number;
 }
 
-/** One winning line as the player reads it, not how it was scored. */
+/**
+ * One winning line as the player reads it, not how it was scored. Field
+ * names match the math engine's measured result shape (`symbol`, `count`,
+ * `win`, `positions`) on purpose, so nothing has to translate between them.
+ */
 export interface RevealedLine {
   line: number;
-  symbols: number;
-  amount: number;
+  symbol: number;
+  count: number;
+  win: number;
+  /** The cells that light up for this line. */
+  positions: Cell[];
 }
 
 /** The reels land showing exactly this grid. */
@@ -31,6 +51,13 @@ export interface SpinToStep {
 /** The winning lines light up, each carrying what it paid. */
 export interface RevealWinsStep {
   kind: 'revealWins';
+  /**
+   * The amount this reveal accounts for — a classic spin's `base_win`, or
+   * one cascade round's `win`. Not the credited total; see the module doc
+   * comment above.
+   */
+  total: number;
+  /** Empty when the math gives no per-line breakdown for this reveal. */
   lines: RevealedLine[];
 }
 
@@ -93,8 +120,11 @@ function isRevealedLine(value: unknown): value is RevealedLine {
   return (
     isRecord(value) &&
     isFiniteNumber(value.line) &&
-    isFiniteNumber(value.symbols) &&
-    isFiniteNumber(value.amount)
+    isFiniteNumber(value.symbol) &&
+    isFiniteNumber(value.count) &&
+    isFiniteNumber(value.win) &&
+    Array.isArray(value.positions) &&
+    value.positions.every(isCell)
   );
 }
 
@@ -106,7 +136,11 @@ export function isPresentationStep(value: unknown): value is PresentationStep {
     case 'spinTo':
       return isBoard(value.board);
     case 'revealWins':
-      return Array.isArray(value.lines) && value.lines.every(isRevealedLine);
+      return (
+        isFiniteNumber(value.total) &&
+        Array.isArray(value.lines) &&
+        value.lines.every(isRevealedLine)
+      );
     case 'remove':
       return Array.isArray(value.cells) && value.cells.every(isCell);
     case 'refill':
