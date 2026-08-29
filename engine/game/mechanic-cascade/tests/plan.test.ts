@@ -13,6 +13,21 @@ const CHAIN = {
   ],
 };
 
+// A round that clears cells without paying for them, followed by the
+// terminal check. `win > 0` and `removed.length > 0` agree on every round
+// in CHAIN — both true together or both false together — so no test built
+// only from CHAIN can tell a single `win > 0` gate apart from a gate that
+// also continues on `removed.length > 0`. This fixture pins both halves at
+// once: the chain must still `remove`+`refill` (the round DID clear), but
+// must not fabricate a `revealWins` for money that was never won.
+const CLEARS_WITHOUT_PAYING = {
+  ...CHAIN,
+  cascade_history: [
+    { grid: [[1, 2, 3]], removed: [{ col: 0, row: 0 }], win: 0 },
+    { grid: [[7, 2, 3]], removed: [], win: 0 },
+  ],
+};
+
 describe('cascade', () => {
   it('spins to the first board, then reveals and collapses each paying round', () => {
     expect(plan(CHAIN).map((s) => s.kind)).toEqual([
@@ -45,6 +60,12 @@ describe('cascade', () => {
   it('stops at the first round that cleared nothing', () => {
     const one = { ...CHAIN, cascade_history: [{ grid: [[1]], removed: [], win: 0 }] };
     expect(plan(one).map((s) => s.kind)).toEqual(['spinTo']);
+  });
+
+  it('removes cells a round cleared without paying, but does not fabricate a reveal for them', () => {
+    expect(plan(CLEARS_WITHOUT_PAYING).map((s) => s.kind)).toEqual(['spinTo', 'remove', 'refill']);
+    const removes = plan(CLEARS_WITHOUT_PAYING).filter((s) => s.kind === 'remove');
+    expect(removes).toEqual([{ kind: 'remove', cells: [{ col: 0, row: 0 }] }]);
   });
 
   it('declares that it needs the chain', () => {
