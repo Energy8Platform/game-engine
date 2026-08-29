@@ -8,6 +8,13 @@
 -- classic mechanic ignores cascade_history; cascade mechanic ignores lines
 -- (beyond round 0) and walks cascade_history instead. Same game, same
 -- script, two playable shapes — switched from the IDE's composition screen.
+--
+-- The mechanic renders, the math pays: `win` (== `data.win`, the amount the
+-- server credits) accumulates EVERY cascade round, so it will not equal
+-- sum(lines[].win) whenever the tumble pays more than once. `base_win` is
+-- the round-0-only total — sum(lines[].win) === base_win, always. A
+-- `classic` presentation reveals `lines` + `base_win`; whichever mechanic is
+-- rendering, `win` is what actually got paid.
 
 record Vars {
   max_win_reached: bool
@@ -39,7 +46,10 @@ record CascadeStep {
 enum SpinData tag stage {
   base_game {
     grid: [[int]]
+    -- credited amount (cascade-inclusive) — NOT sum(lines[].win); see header.
     win: float
+    -- round-0-only total; sum(lines[].win) === base_win.
+    base_win: float
     lines: [LineWin]
     cascade_history: [CascadeStep]
   }
@@ -230,6 +240,7 @@ fn execute(c: ctx, v: Vars) -> outcome {
   }
 
   let round_lines = lines_out(c, r0_n, r0_row, r0_sym, r0_count, r0_win)
+  let base_win = total_of(r0_n, r0_win)
 
   return outcome {
     win: total_win,
@@ -237,6 +248,7 @@ fn execute(c: ctx, v: Vars) -> outcome {
     data: SpinData.base_game {
       grid: initial_grid,
       win: total_win,
+      base_win: base_win,
       lines: round_lines,
       cascade_history: steps,
     },

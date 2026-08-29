@@ -252,6 +252,7 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     return {
       win: r.win,
       totalWin: r.total_win,
+      bet: r.bet,
       stage: data.stage,
       data,
       vars: r.vars_json ? JSON.parse(r.vars_json) : {},

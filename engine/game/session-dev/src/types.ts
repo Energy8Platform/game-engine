@@ -30,18 +30,33 @@ export interface SpinRequest {
  * convenience; it is also still present inside `data` itself, since we parse
  * data_json as-is rather than stripping it.
  *
+ * **The mechanic renders, the math pays.** `win` / `totalWin` (and
+ * `data.win`, which is the same figure) are the CASCADE-INCLUSIVE amount
+ * e8-server actually credits — every cascade round's win summed in. They
+ * are deliberately **not** the sum of `data.lines[].win`, because
+ * `data.lines` only describes round 0 of the cascade (the picture a
+ * `classic`, non-cascading presentation would reveal). The figure that DOES
+ * equal `sum(data.lines[].win)` is `data.base_win` — assert against that one
+ * when checking the lines/win relationship, never against `win`/`data.win`.
+ * Switching mechanics is only ever a presentation choice; what gets credited
+ * does not change with it.
+ *
  * Measured example (the `first-slot` fixture, a winning 5x3 lines spin with
- * one extra cascade round):
+ * one extra cascade round — round 0 pays 0.5 as `base_win`/`lines[0].win`;
+ * round 1's extra 1.0 only shows up in `cascade_history` and in the
+ * cascade-inclusive `win`/`data.win` of 1.5):
  *
  * ```json
  * {
  *   "win": 1.5,
  *   "totalWin": 1.5,
+ *   "bet": 1,
  *   "stage": "base_game",
  *   "data": {
  *     "bet": 1,
  *     "grid": [[5,6,5],[6,6,5],[5,6,3],[6,5,5],[5,3,6]],
  *     "win": 1.5,
+ *     "base_win": 0.5,
  *     "lines": [
  *       { "line": 1, "symbol": 6, "count": 3, "win": 0.5,
  *         "positions": [{"col":0,"row":1},{"col":1,"row":1},{"col":2,"row":1}] }
@@ -61,7 +76,7 @@ export interface SpinRequest {
  *   "roundComplete": true,
  *   "spinsRemaining": 0,
  *   "spinsPlayed": 1,
- *   "scriptSha256": "1d2ea1d5a31d6f1870a40b0c82981590406444ce232f939a3a7e2e35a4698737",
+ *   "scriptSha256": "d04d38591d4a4074e4dc68ce0e0db03838a526354eec8ee6aa6ed057bbe7bd8f",
  *   "roundId": "session-dev-1"
  * }
  * ```
@@ -72,12 +87,19 @@ export interface SpinRequest {
  * extra keys in `data`.
  */
 export interface SpinResult {
-  /** this spin's win, as a bet multiplier (RoundResponse.win). */
+  /** this spin's win, as a bet multiplier (RoundResponse.win). Cascade-
+   *  inclusive credited amount — see the type doc; not sum(data.lines[].win). */
   win: number;
   /** cumulative win for the round so far (RoundResponse.total_win); equals
    *  `win` for a single-spin round like `first-slot`, where every action is
    *  `round_complete` on the first response. */
   totalWin: number;
+  /** the bet this round was started with (RoundResponse.bet). e8-server
+   *  echoes it back rather than requiring the caller to remember it — the
+   *  case that matters is a `Step` call on a round this handle did not
+   *  itself start (not implemented by this task's `play()`, which always
+   *  starts a fresh round; see the task-1 report's concerns section). */
+  bet: number;
   /** the SpinData enum's tag for this response (lifted from `data.stage`). */
   stage: string;
   /** the parsed `SpinData` enum instance — per-game shape, see the type doc. */
