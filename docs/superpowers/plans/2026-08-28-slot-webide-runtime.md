@@ -552,19 +552,87 @@ git commit -m "feat(mechanic-cascade): a spin is a chain that collapses"
 - Test: `engine/game/runtime/tests/{boot,mechanics}.test.ts`
 
 **Interfaces:**
-- Produces: `createGame(config): Promise<GameApp>` где `GameApp = { ctx, diagnostics, stop() }`; сервис `ctx.mechanics` с `register(mechanic)` (реверсивный эффект) и `forStage(stage)`.
+- Consumes: `SpinMechanic`, `checkShape`, `Diagnostic` from `@energy8engine/contracts`; cordis.
+- Produces: `createGame(config): Promise<GameApp>` where `GameApp = { ctx, diagnostics, stop() }`;
+  the service `ctx.mechanics` with `register(mechanic): () => void`, `forStage(stage): SpinMechanic | null`,
+  and `bind(stage, mechanicId): void`.
 
-Игра — cordis-приложение, как хост и клиент IDE. Здесь заводится контекст и первый реестр; рендерер и поле приходят следующими задачами.
+Игра — cordis-приложение, как хост и клиент IDE. Механика **выбирается на стадию**: это и есть ручка,
+которую IDE будет крутить. Две механики на одну стадию — диагностика, а не молчаливый выбор первой.
 
-- [ ] **Step 1: Написать падающий тест** — тесты на: контекст поднимается и гасится; механика регистрируется и находится по стадии; регистрация реверсивна (после `dispose` плагина механика исчезает); две механики на одну стадию — диагностика, а не молчаливый выбор.
-- [ ] **Step 2: Запустить и убедиться, что падает** — FAIL.
-- [ ] **Step 3: Реализовать.**
-- [ ] **Step 4: Запустить и убедиться, что проходит.**
+- [ ] **Step 1: Написать падающий тест**
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { createGame } from '../src/index';
+
+const CLASSIC = { id: 'classic', expects: { fields: { grid: 'grid' } }, plan: () => [] } as const;
+const CASCADE = { id: 'cascade', expects: { fields: { cascade_history: 'list' } }, plan: () => [] } as const;
+
+describe('the mechanic registry', () => {
+  it('finds the mechanic bound to a stage', async () => {
+    const game = await createGame({});
+    game.ctx.mechanics.register(CLASSIC);
+    game.ctx.mechanics.bind('base_game', 'classic');
+    expect(game.ctx.mechanics.forStage('base_game')?.id).toBe('classic');
+    await game.stop();
+  });
+
+  it('returns null for a stage nothing is bound to, rather than guessing', async () => {
+    const game = await createGame({});
+    game.ctx.mechanics.register(CLASSIC);
+    expect(game.ctx.mechanics.forStage('free_spins')).toBeNull();
+    await game.stop();
+  });
+
+  it('reports binding a stage to a mechanic nobody registered', async () => {
+    const game = await createGame({});
+    game.ctx.mechanics.bind('base_game', 'nope');
+    expect(game.diagnostics.some((d) => d.message.includes('nope'))).toBe(true);
+    await game.stop();
+  });
+
+  it('lets a later bind replace an earlier one for the same stage', async () => {
+    const game = await createGame({});
+    game.ctx.mechanics.register(CLASSIC);
+    game.ctx.mechanics.register(CASCADE);
+    game.ctx.mechanics.bind('base_game', 'classic');
+    game.ctx.mechanics.bind('base_game', 'cascade');
+    expect(game.ctx.mechanics.forStage('base_game')?.id).toBe('cascade');
+    await game.stop();
+  });
+
+  it('unregisters cleanly — a disposed registration is gone', async () => {
+    const game = await createGame({});
+    const dispose = game.ctx.mechanics.register(CLASSIC);
+    game.ctx.mechanics.bind('base_game', 'classic');
+    dispose();
+    expect(game.ctx.mechanics.forStage('base_game')).toBeNull();
+    await game.stop();
+  });
+
+  it('reports a mechanic whose requirements the stage data does not meet', async () => {
+    const game = await createGame({});
+    game.ctx.mechanics.register(CASCADE);
+    game.ctx.mechanics.bind('base_game', 'cascade');
+    const problems = game.ctx.mechanics.check('base_game', { grid: [[1]] });
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain('cascade_history');
+    await game.stop();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить и убедиться, что падает** — FAIL, модуля нет.
+- [ ] **Step 3: Реализовать.** Реестр — обычный cordis-плагин: `ctx.provide('mechanics', service)`,
+  регистрация возвращает диспозер, всё внутри `ctx.effect`, чтобы выгрузка плагина снимала записи.
+  `check` — тонкая обёртка над `checkShape` из контрактов; своей проверки формы не писать.
+- [ ] **Step 4: Запустить и убедиться, что проходит** — PASS, 6 тестов.
 - [ ] **Step 5: Коммит**
 
 ```bash
 git add engine/game/runtime
-git commit -m "feat(game-runtime): the game is a cordis app with a mechanic registry"
+git commit -m "feat(game-runtime): the game is a cordis app with a per-stage mechanic registry"
 ```
 
 ---
@@ -577,18 +645,104 @@ git commit -m "feat(game-runtime): the game is a cordis app with a mechanic regi
 - Test: `engine/game/play-loop/tests/execute.test.ts`
 
 **Interfaces:**
-- Consumes: `PresentationPlan`, шов `board` (объявляется здесь, реализуется в Task 9).
-- Produces: `executePlan(plan, board): Promise<void>` — исполняет шаги по порядку, каждый ждёт предыдущего.
+- Consumes: `PresentationPlan`, `PresentationStep`, `Diagnostic`.
+- Produces: шов `board` (`BoardApi` — по методу на шаг словаря) и
+  `executePlan(plan, board): Promise<Diagnostic[]>`.
 
-Тестируется на **фейковом поле**, записывающем вызовы: это единственный способ проверить хореографию без pixi. Само поле проверяется отдельно в Task 9.
+Проверяется на **фейковом поле**, записывающем вызовы: хореографию иначе не проверить без pixi.
+Настоящее поле — Task 9, headless-проверка — Task 12.
 
-- [ ] **Step 1: Написать падающий тест** — порядок сохраняется; асинхронный шаг дожидается; шаг, которого поле не умеет, даёт диагностику и **не** прерывает остальные; `wait` действительно ждёт (через фейковые таймеры, не через сон).
-- [ ] **Step 2–4: RED → реализация → GREEN.**
+- [ ] **Step 1: Написать падающий тест**
+
+```ts
+import { describe, expect, it, vi } from 'vitest';
+import { executePlan } from '../src/index';
+
+function fakeBoard() {
+  const calls: string[] = [];
+  return {
+    calls,
+    spinTo: vi.fn(async () => { calls.push('spinTo'); }),
+    revealWins: vi.fn(async () => { calls.push('revealWins'); }),
+    remove: vi.fn(async () => { calls.push('remove'); }),
+    refill: vi.fn(async () => { calls.push('refill'); }),
+    setMultiplier: vi.fn(async () => { calls.push('setMultiplier'); }),
+    wait: vi.fn(async () => { calls.push('wait'); }),
+  };
+}
+
+describe('executePlan', () => {
+  it('runs the steps in order', async () => {
+    const board = fakeBoard();
+    await executePlan([
+      { kind: 'spinTo', board: [[1]] },
+      { kind: 'revealWins', total: 1, lines: [] },
+      { kind: 'remove', cells: [{ col: 0, row: 0 }] },
+    ], board);
+    expect(board.calls).toEqual(['spinTo', 'revealWins', 'remove']);
+  });
+
+  it('waits for a slow step before starting the next', async () => {
+    const board = fakeBoard();
+    let settled = false;
+    board.spinTo.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      settled = true;
+      board.calls.push('spinTo');
+    });
+    board.revealWins.mockImplementation(async () => {
+      expect(settled).toBe(true);
+      board.calls.push('revealWins');
+    });
+    await executePlan([{ kind: 'spinTo', board: [[1]] }, { kind: 'revealWins', total: 0, lines: [] }], board);
+    expect(board.calls).toEqual(['spinTo', 'revealWins']);
+  });
+
+  it('passes each step its own payload', async () => {
+    const board = fakeBoard();
+    await executePlan([{ kind: 'setMultiplier', value: 3 }], board);
+    expect(board.setMultiplier).toHaveBeenCalledWith({ kind: 'setMultiplier', value: 3 });
+  });
+
+  it('reports a step the board cannot perform and keeps going', async () => {
+    const board = fakeBoard() as any;
+    delete board.setMultiplier;
+    const problems = await executePlan([
+      { kind: 'setMultiplier', value: 2 },
+      { kind: 'refill', board: [[1]] },
+    ], board);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain('setMultiplier');
+    expect(board.calls).toEqual(['refill']);
+  });
+
+  it('reports a step that throws and still runs the rest', async () => {
+    const board = fakeBoard();
+    board.spinTo.mockRejectedValue(new Error('pixi died'));
+    const problems = await executePlan([
+      { kind: 'spinTo', board: [[1]] },
+      { kind: 'refill', board: [[2]] },
+    ], board);
+    expect(problems[0].message).toContain('pixi died');
+    expect(board.calls).toEqual(['refill']);
+  });
+
+  it('never throws, whatever the plan does', async () => {
+    const board = fakeBoard();
+    await expect(executePlan([{ kind: 'nonsense' } as any], board)).resolves.toBeInstanceOf(Array);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить и убедиться, что падает** — FAIL.
+- [ ] **Step 3: Реализовать.** Каждый шаг — `await board[step.kind](step)`; отсутствующий метод и
+  брошенное исключение становятся диагностикой, исполнение продолжается. Наружу не бросать никогда.
+- [ ] **Step 4: Запустить и убедиться, что проходит** — PASS, 6 тестов.
 - [ ] **Step 5: Коммит**
 
 ```bash
 git add engine/game/play-loop
-git commit -m "feat(play-loop): steps in, choreography out"
+git commit -m "feat(play-loop): steps in, choreography out, failures as data"
 ```
 
 ---
@@ -596,37 +750,51 @@ git commit -m "feat(play-loop): steps in, choreography out"
 ### Task 8: Шов `session` поверх `e8-server`
 
 **Files:**
-- Modify: `engine/game/session-dev/src/index.ts` (плагин поверх `e8server.ts` из Task 1)
+- Create: `engine/game/session-dev/src/index.ts` (плагин поверх `e8server.ts` из Task 1)
 - Test: `engine/game/session-dev/tests/plugin.test.ts`
 
-Здесь запуск сервера из Task 1 становится плагином: провайдер шва `session` с матчером `{ default: true }`, все отказы — диагностики, остановка сервера — реверсивный эффект.
+**Interfaces:**
+- Consumes: `startE8Server`, `SpinResult` (Task 1); cordis.
+- Produces: провайдер шва `session` — `ctx.session.play(params): Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }>`.
 
-- [ ] **Step 1: Написать падающий тест** — сервис появляется; спин отдаёт результат; недоступный бинарь даёт диагностику, а не исключение; при выгрузке плагина процесс сервера умирает.
+Запуск сервера из Task 1 становится плагином: остановка — реверсивный эффект, все отказы — данные.
+
+- [ ] **Step 1: Написать падающий тест** — сервис появляется после регистрации; спин отдаёт результат
+  измеренной формы; недоступный бинарь даёт диагностику вместо исключения; выгрузка плагина убивает
+  процесс сервера (проверять по факту, а не по вызову `stop`).
 - [ ] **Step 2–4: RED → реализация → GREEN.**
 - [ ] **Step 5: Коммит**
 
 ```bash
 git add engine/game/session-dev
-git commit -m "feat(session-dev): the math seam, as a plugin that fails as data"
+git commit -m "feat(session-dev): the math seam as a plugin that fails as data"
 ```
 
 ---
 
 ### Task 9: Поле — `renderer-pixi`, `stage`, `reels`
 
+> **Эта задача начинается с измерения, как Task 1.** Поверхность легаси-барабанов известна по
+> сигнатурам, но не по поведению; писать тесты против догадки здесь так же дорого, как было бы
+> против выдуманной формы спина.
+
 **Files:**
 - Create: `engine/game/renderer-pixi/**`, `engine/game/stage/**`, `engine/game/reels/**`
 - Test: соответствующие `tests/`
 
-**Interfaces:**
-- Produces: провайдер шва `renderer` (pixi `Application`), шов `stage`, и шов `board` — реализация словаря шагов поверх `createReelSystem`.
+- [ ] **Step 1: Спайк — примерить `createReelSystem`**
 
-**Легаси оборачивается, не переписывается.** `reels` импортирует `createReelSystem` из `@energy8platform/game-engine/slot` и отображает шаги словаря на его методы: `spinTo` → `spin(target)`, `remove`+`refill` → `cascade(steps)`, и так далее. Если шаг не ложится на существующий API — доложить, не форкать легаси.
+Собрать минимальный скрипт, который импортирует `createReelSystem` из
+`@energy8platform/game-engine/slot`, создаёт систему с подставным `resolve`, и по очереди вызывает
+`spin(target)`, `cascade(steps)`, `setBoard(board)`. Записать в отчёт: что каждый метод ждёт на входе,
+что возвращает, требует ли живого pixi-приложения, и можно ли его вызвать в jsdom.
 
-Тесты — без браузера: pixi инициализируется в jsdom плохо, поэтому `reels` тестируется через подставной `ReelSystem`, а настоящая отрисовка проверяется headless-петлёй в Task 12. Это осознанная граница: в тестах — контракт отображения, в headless — что оно живое.
+**Отсюда следует форма `BoardApi`.** Если какой-то шаг словаря не ложится на существующий API —
+доложить, не форкая легаси и не расширяя словарь.
 
-- [ ] **Step 1: Написать падающие тесты.**
-- [ ] **Step 2–4: RED → реализация → GREEN.**
+- [ ] **Step 2: Написать падающие тесты** против подставного `ReelSystem` — по одному на шаг словаря:
+  каждый вызывает тот метод легаси, который измерен на шаге 1, с теми аргументами.
+- [ ] **Step 3–4: RED → реализация → GREEN.**
 - [ ] **Step 5: Коммит**
 
 ```bash
@@ -642,10 +810,48 @@ git commit -m "feat(game): a board that speaks the step vocabulary, over the leg
 - Create: `engine/game/boot/**`
 - Test: `engine/game/boot/tests/boot.test.ts`
 
-Порядок старта и — важнее — что видит человек, когда состав игры сломан. Спека §8: на `error` игра не стартует и **показывает текст**, а не белый прямоугольник.
+Спека §8: на `error` игра не стартует и **показывает текст**, а не белый прямоугольник.
 
-- [ ] **Step 1: Написать падающий тест** — при диагностике уровня `error` рендерится читаемый экран с текстом и списком причин; при `warning` игра стартует; экран ошибок не требует pixi (это DOM), иначе сломанный рендерер нечем показать.
-- [ ] **Step 2–4: RED → реализация → GREEN.**
+- [ ] **Step 1: Написать падающий тест**
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { renderBootFailure } from '../src/index';
+
+describe('the boot failure screen', () => {
+  it('renders every diagnostic it was given', () => {
+    const root = document.createElement('div');
+    renderBootFailure(root, [
+      { severity: 'error', plugin: 'reels', where: 'config', message: 'speed must be a number' },
+      { severity: 'error', plugin: 'session', where: 'binary', message: 'e8-server not found' },
+    ]);
+    expect(root.textContent).toContain('speed must be a number');
+    expect(root.textContent).toContain('e8-server not found');
+  });
+
+  it('shows the fix hint when there is one', () => {
+    const root = document.createElement('div');
+    renderBootFailure(root, [
+      { severity: 'error', plugin: 'p', where: 'w', message: 'm', fix: 'install it' },
+    ]);
+    expect(root.textContent).toContain('install it');
+  });
+
+  it('needs no renderer — it is DOM, so a broken renderer can still be reported', () => {
+    const root = document.createElement('div');
+    expect(() => renderBootFailure(root, [])).not.toThrow();
+  });
+
+  it('says something even when handed an empty list', () => {
+    const root = document.createElement('div');
+    renderBootFailure(root, []);
+    expect(root.textContent?.length).toBeGreaterThan(0);
+  });
+});
+```
+
+- [ ] **Step 2–4: RED → реализация → GREEN.** Плюс плагин `boot`, который на `error`-диагностиках
+  показывает экран и не поднимает рендерер, а на `warning` — стартует.
 - [ ] **Step 5: Коммит**
 
 ```bash
@@ -657,17 +863,27 @@ git commit -m "feat(boot): a broken composition shows its reasons, not a white r
 
 ### Task 11: `e8 dev` — игра поднимается одной командой
 
+> **Начинается с измерения.** Vite в middleware-режиме внутри cordis-плагина — не переписанный
+> из памяти рецепт; уточнить API до тестов.
+
 **Files:**
 - Create: `engine/ide/host/src/plugins/dev-game.ts`
 - Modify: `engine/apps/cli/src/index.ts` (команда `dev`)
 - Create: `engine/examples/first-slot/e8.yml`
 - Test: `engine/ide/host/tests/dev-game.test.ts`
 
-**Один сервер, два потребителя.** `e8 dev` поднимает тот же cordis-хост (у него уже есть `plugin-server`), плюс плагин `dev-game`: vite в middleware-режиме отдаёт бандл игры, маршрут спина ходит в `session-dev`. Превью в IDE (Task 12) смотрит в этот же сервер — отдельного не заводим.
+**Один сервер, два потребителя.** `e8 dev` поднимает тот же cordis-хост (у него уже есть
+`plugin-server`), плюс `dev-game`: vite отдаёт бандл игры, маршрут спина ходит в `session`.
+Превью в IDE (Task 12) смотрит в этот же сервер.
 
-- [ ] **Step 1: Написать падающий тест** — `e8 dev` отвечает на корне HTML игры; маршрут спина возвращает результат; хост при этом по-прежнему отдаёт `/api/health` и состав.
-- [ ] **Step 2–4: RED → реализация → GREEN.**
-- [ ] **Step 5: Проверить руками** — `npx e8 dev` в `engine/examples/first-slot`, открыть в браузере, покрутить спин. Записать в отчёт, что видно.
+- [ ] **Step 1: Спайк** — поднять vite в middleware-режиме и отдать его через маршрут
+  `plugin-server`. Записать, как именно (`createServer({ server: { middlewareMode: true } })`,
+  как подключается к нашему http-серверу, как отдаётся `index.html`).
+- [ ] **Step 2: Написать падающие тесты** — корень отдаёт HTML игры; маршрут спина возвращает
+  результат измеренной формы; `/api/health` и состав по-прежнему работают.
+- [ ] **Step 3–4: RED → реализация → GREEN.**
+- [ ] **Step 5: Проверить руками** — `npx e8 dev` в `engine/examples/first-slot`, открыть, крутнуть
+  спин. Записать в отчёт, что видно, включая то, что не работает.
 - [ ] **Step 6: Коммит**
 
 ```bash
@@ -685,11 +901,16 @@ git commit -m "feat(cli): e8 dev — one command, one server, a game that spins"
 - Test: `engine/ide/client/tests/preview.test.tsx`
 - Test: `engine/apps/web/tests/e2e/runtime.spec.ts`
 
-Замыкание критерия №2 спеки: крутнул ручку — увидел, как изменилась игра. `ide-bridge` — плагин фазы editor, которого нет в продовой сборке: он слушает патч по WS и перезапускает нужный форк на месте.
+Замыкание критерия №2 спеки: крутнул ручку — увидел, как изменилась игра. `ide-bridge` — плагин фазы
+editor, которого нет в продовой сборке.
 
-- [ ] **Step 1: Написать падающий тест** — панель превью показывает iframe на адрес `dev-game`; правка настройки доезжает до игры без перезагрузки страницы IDE; плагин, объявивший `hot: false`, вызывает честную перезагрузку iframe.
+- [ ] **Step 1: Написать падающие тесты** — панель превью рисует iframe на адрес `dev-game`;
+  снапшот с изменённой настройкой доезжает до игры без перезагрузки страницы IDE; строка, объявившая
+  `hot: false`, вызывает честную перезагрузку iframe.
 - [ ] **Step 2–4: RED → реализация → GREEN.**
-- [ ] **Step 5: Приёмка в браузере** — Playwright: игра видна в превью, спин крутится, изменение скорости барабана меняет поведение игры **без** перезагрузки страницы.
+- [ ] **Step 5: Приёмка в браузере** — Playwright: игра видна в превью, спин крутится, **смена
+  механики стадии с `classic` на `cascade` меняет то, как играется тот же результат**. Это и есть
+  демонстрация, ради которой обе механики читают одну игру.
 - [ ] **Step 6: Коммит**
 
 ```bash
