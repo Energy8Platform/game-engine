@@ -380,41 +380,80 @@ git commit -m "feat(contracts): a mechanic declares the spin shape it needs"
 - Test: `engine/game/mechanic-classic/tests/plan.test.ts`
 
 **Interfaces:**
-- Consumes: `SpinMechanic`, `PresentationPlan`, `checkShape`; форма `SpinResult` из Task 1.
-- Produces: плагин, регистрирующий механику `classic` в реестр `spin.mechanic` (реестр появится в Task 6 — до тех пор экспортируется чистая функция `plan(stage)` и тестируется напрямую).
+- Consumes: `PresentationPlan`, `RevealedLine`, `SpinShapeRequirement` from `@energy8engine/contracts`.
+- Produces: `expects: SpinShapeRequirement` and `plan(data): PresentationPlan`, plus a cordis plugin
+  that registers them under the id `classic` (the registry itself lands in Task 6; until then the
+  plugin module exports `mechanic` and the tests call `plan` directly).
+
+`data` is the measured stage data: `{ grid, win, base_win, lines: [{line,symbol,count,win,positions}], cascade_history }`.
+`classic` reads `grid`, `base_win` and `lines`, and **ignores `cascade_history` entirely** — the same
+game switched to `cascade` renders the chain instead. It reveals `base_win`, never `win`: the
+credited total is the host's business and no step carries it.
 
 - [ ] **Step 1: Написать падающий тест**
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { plan, expects } from '../src/index';
+import { expects, plan } from '../src/index';
+
+const WON = {
+  grid: [[1, 2, 3], [4, 5, 6], [7, 8, 9], [1, 2, 3], [4, 5, 6]],
+  win: 1.5,
+  base_win: 0.5,
+  lines: [{ line: 0, symbol: 1, count: 3, win: 0.5, positions: [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }] }],
+  cascade_history: [{ grid: [[1]], removed: [{ col: 0, row: 0 }], win: 0.5 }],
+};
+
+const LOST = { ...WON, win: 0, base_win: 0, lines: [], cascade_history: [] };
 
 describe('classic', () => {
-  it('spins to the final board, then reveals the wins', () => {
-    const steps = plan({ grid: [[1, 2, 3], [4, 5, 6]], win: 1.5, lines: [{ line: 0, symbols: 3, amount: 1.5 }] });
-    expect(steps.map((s) => s.kind)).toEqual(['spinTo', 'revealWins']);
-    expect(steps[0]).toEqual({ kind: 'spinTo', board: [[1, 2, 3], [4, 5, 6]] });
+  it('spins to the board, then reveals the base-game lines', () => {
+    expect(plan(WON).map((s) => s.kind)).toEqual(['spinTo', 'revealWins']);
   });
 
-  it('spins to the board and reveals nothing when the spin lost', () => {
-    const steps = plan({ grid: [[1, 2, 3]], win: 0, lines: [] });
-    expect(steps.map((s) => s.kind)).toEqual(['spinTo']);
+  it('spins to the grid it was given', () => {
+    expect(plan(WON)[0]).toEqual({ kind: 'spinTo', board: WON.grid });
   });
 
-  it('declares the fields it needs', () => {
-    expect(expects.fields.grid).toBe('grid');
+  it('reveals base_win, not the credited win', () => {
+    const reveal = plan(WON)[1] as { total: number };
+    expect(reveal.total).toBe(0.5);
+  });
+
+  it('passes the lines through unchanged, positions and all', () => {
+    const reveal = plan(WON)[1] as { lines: unknown[] };
+    expect(reveal.lines).toEqual(WON.lines);
+  });
+
+  it('stops after the spin when nothing won', () => {
+    expect(plan(LOST).map((s) => s.kind)).toEqual(['spinTo']);
+  });
+
+  it('ignores cascade_history even when the math produced one', () => {
+    expect(JSON.stringify(plan(WON))).not.toContain('cascade_history');
+    expect(plan(WON)).toHaveLength(2);
+  });
+
+  it('declares the fields it needs and not the ones it does not', () => {
+    expect(expects.fields).toEqual({ grid: 'grid', base_win: 'number', lines: 'list' });
   });
 });
 ```
 
-- [ ] **Step 2: Запустить и убедиться, что падает** — FAIL.
-- [ ] **Step 3: Реализовать** — `plan()` возвращает `[spinTo, revealWins?]`, `expects` объявляет `grid` и `win`.
-- [ ] **Step 4: Запустить и убедиться, что проходит** — PASS, 3 теста.
+- [ ] **Step 2: Запустить и убедиться, что падает**
+
+Run: `npm install && npm test --workspace @energy8engine/mechanic-classic`
+Expected: FAIL — модуля нет.
+
+- [ ] **Step 3: Реализовать** — `plan()` возвращает `[spinTo]` либо `[spinTo, revealWins]`; `revealWins.total` берётся из `base_win`, `lines` передаются как есть.
+
+- [ ] **Step 4: Запустить и убедиться, что проходит** — PASS, 7 тестов.
+
 - [ ] **Step 5: Коммит**
 
 ```bash
 git add engine/game/mechanic-classic
-git commit -m "feat(mechanic-classic): a spin is a board and the wins on it"
+git commit -m "feat(mechanic-classic): a spin is a board and the base-game lines on it"
 ```
 
 ---
@@ -426,46 +465,75 @@ git commit -m "feat(mechanic-classic): a spin is a board and the wins on it"
 - Create: `engine/game/mechanic-cascade/src/index.ts`
 - Test: `engine/game/mechanic-cascade/tests/plan.test.ts`
 
-Вторая механика — не украшение: если словарь шагов подогнан под одну, он развалится на второй, и лучше узнать это сейчас. Если какой-то шаг каскада не выражается словарём из Task 2 — **остановиться и доложить**, а не расширять словарь молча.
+Вторая механика — не украшение. Если словарь подогнан под одну, он развалится на второй, и лучше
+узнать это сейчас. **Если шаг каскада не выражается словарём — остановиться и доложить**, а не
+расширять словарь молча: он объявлен контрактом и в этом плане не растёт.
+
+Каскадный раунд из математики — `{ grid, removed, win }`, без разбивки по линиям. Поэтому его
+`revealWins` несёт `total` этого раунда и **пустой** `lines`: словарь это позволяет ровно для
+такого случая.
 
 - [ ] **Step 1: Написать падающий тест**
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { plan, expects } from '../src/index';
+import { expects, plan } from '../src/index';
 
-const twoSteps = {
-  steps: [
-    { grid: [[1, 2, 3]], removed: [{ col: 0, row: 0 }], win: 1 },
-    { grid: [[7, 2, 3]], removed: [], win: 0 },
+const CHAIN = {
+  grid: [[1, 2, 3]],
+  win: 1.5,
+  base_win: 0.5,
+  lines: [],
+  cascade_history: [
+    { grid: [[1, 2, 3]], removed: [{ col: 0, row: 0 }], win: 0.5 },
+    { grid: [[7, 2, 3]], removed: [{ col: 0, row: 1 }], win: 1.0 },
+    { grid: [[7, 8, 3]], removed: [], win: 0 },
   ],
 };
 
 describe('cascade', () => {
-  it('reveals, removes and refills for each step that won', () => {
-    expect(plan(twoSteps).map((s) => s.kind)).toEqual(['spinTo', 'revealWins', 'remove', 'refill']);
+  it('spins to the first board, then reveals and collapses each paying round', () => {
+    expect(plan(CHAIN).map((s) => s.kind)).toEqual([
+      'spinTo', 'revealWins', 'remove', 'refill',
+      'revealWins', 'remove', 'refill',
+    ]);
   });
 
-  it('stops at the first step with nothing to remove', () => {
-    const steps = plan({ steps: [{ grid: [[1]], removed: [], win: 0 }] });
-    expect(steps.map((s) => s.kind)).toEqual(['spinTo']);
+  it('spins to the first round board', () => {
+    expect(plan(CHAIN)[0]).toEqual({ kind: 'spinTo', board: CHAIN.cascade_history[0].grid });
   });
 
-  it('refills with the next step board, not the one it just cleared', () => {
-    const steps = plan(twoSteps);
-    const refill = steps.find((s) => s.kind === 'refill');
-    expect(refill).toEqual({ kind: 'refill', board: [[7, 2, 3]] });
+  it("reveals each round's own win, with no line breakdown to give", () => {
+    const reveals = plan(CHAIN).filter((s) => s.kind === 'revealWins') as { total: number; lines: unknown[] }[];
+    expect(reveals.map((r) => r.total)).toEqual([0.5, 1.0]);
+    expect(reveals.every((r) => r.lines.length === 0)).toBe(true);
   });
 
-  it('declares that it needs a list of steps', () => {
-    expect(expects.fields.steps).toBe('list');
+  it('removes the cells that round cleared', () => {
+    const removes = plan(CHAIN).filter((s) => s.kind === 'remove');
+    expect(removes[0]).toEqual({ kind: 'remove', cells: [{ col: 0, row: 0 }] });
+  });
+
+  it('refills with the NEXT round board, not the one just cleared', () => {
+    const refills = plan(CHAIN).filter((s) => s.kind === 'refill') as { board: number[][] }[];
+    expect(refills[0].board).toEqual(CHAIN.cascade_history[1].grid);
+    expect(refills[1].board).toEqual(CHAIN.cascade_history[2].grid);
+  });
+
+  it('stops at the first round that cleared nothing', () => {
+    const one = { ...CHAIN, cascade_history: [{ grid: [[1]], removed: [], win: 0 }] };
+    expect(plan(one).map((s) => s.kind)).toEqual(['spinTo']);
+  });
+
+  it('declares that it needs the chain', () => {
+    expect(expects.fields).toEqual({ cascade_history: 'list' });
   });
 });
 ```
 
 - [ ] **Step 2: Запустить и убедиться, что падает** — FAIL.
 - [ ] **Step 3: Реализовать.**
-- [ ] **Step 4: Запустить и убедиться, что проходит** — PASS, 4 теста.
+- [ ] **Step 4: Запустить и убедиться, что проходит** — PASS, 7 тестов.
 - [ ] **Step 5: Коммит**
 
 ```bash
