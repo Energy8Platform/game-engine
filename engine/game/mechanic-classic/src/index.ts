@@ -32,13 +32,21 @@ export const expects: SpinShapeRequirement = {
 
 /**
  * Spin to the given board, then reveal the base-game lines — skipped
- * entirely when nothing won, since a `revealWins` step for zero lines and
- * zero total would just be a wasted beat.
+ * entirely when nothing won.
+ *
+ * Gated on `base_win`, not `lines.length`: the contract documents
+ * `RevealWinsStep.lines` as legitimately empty "when the math gives no
+ * per-line breakdown for this reveal", so a nonzero `base_win` with no
+ * lines is a real win this mechanic must still reveal. The reverse —
+ * lines present while `base_win` is zero — is not a documented shape
+ * (each `RevealedLine` carries its own nonzero `win`), so `base_win` alone
+ * is the money-bearing field to gate on; OR-ing in `lines.length` would
+ * only paper over malformed data this contract makes no promise about.
  */
 export function plan(data: ClassicSpinData): PresentationPlan {
   const steps: PresentationPlan = [{ kind: 'spinTo', board: data.grid }];
 
-  if (data.lines.length > 0) {
+  if (data.base_win > 0) {
     steps.push({ kind: 'revealWins', total: data.base_win, lines: data.lines });
   }
 

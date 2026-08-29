@@ -11,6 +11,13 @@ const WON = {
 
 const LOST = { ...WON, win: 0, base_win: 0, lines: [], cascade_history: [] };
 
+// A real win with no per-line breakdown — a documented-legal shape per
+// `RevealWinsStep.lines`'s doc comment ("empty when the math gives no
+// per-line breakdown for this reveal"). `WON`/`LOST` alone cannot tell a
+// gate on `lines.length` apart from a gate on `base_win`, since both
+// signals agree on those two fixtures; this one forces the split.
+const WON_NO_BREAKDOWN = { ...WON, lines: [] };
+
 describe('classic', () => {
   it('spins to the board, then reveals the base-game lines', () => {
     expect(plan(WON).map((s) => s.kind)).toEqual(['spinTo', 'revealWins']);
@@ -32,6 +39,12 @@ describe('classic', () => {
 
   it('stops after the spin when nothing won', () => {
     expect(plan(LOST).map((s) => s.kind)).toEqual(['spinTo']);
+  });
+
+  it('still reveals a real win that has no per-line breakdown', () => {
+    expect(plan(WON_NO_BREAKDOWN).map((s) => s.kind)).toEqual(['spinTo', 'revealWins']);
+    const reveal = plan(WON_NO_BREAKDOWN)[1] as { total: number };
+    expect(reveal.total).toBe(0.5);
   });
 
   it('ignores cascade_history even when the math produced one', () => {
