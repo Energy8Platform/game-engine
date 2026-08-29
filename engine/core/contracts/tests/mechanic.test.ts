@@ -27,3 +27,21 @@ describe('checkShape', () => {
     expect(checkShape(req, {}, 'cascade', 'base_game')).toHaveLength(2);
   });
 });
+
+describe('checkShape — the `list` kind', () => {
+  it('accepts a non-empty array', () => {
+    const req = { fields: { lines: 'list' } } as const;
+    expect(checkShape(req, { lines: [1, 2] }, 'classic', 'base_game')).toEqual([]);
+  });
+
+  it('rejects a value that is not an array at all', () => {
+    const req = { fields: { lines: 'list' } } as const;
+    const [d] = checkShape(req, { lines: 'nope' }, 'classic', 'base_game');
+    expect(d.message).toContain('lines');
+  });
+
+  it('accepts an empty array — a losing spin legitimately has no lines to show', () => {
+    const req = { fields: { lines: 'list' } } as const;
+    expect(checkShape(req, { lines: [] }, 'classic', 'base_game')).toEqual([]);
+  });
+});

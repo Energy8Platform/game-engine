@@ -6,6 +6,19 @@ import type { PresentationPlan } from './presentation';
  * the measured math result actually produces (see the module doc below) —
  * do not add a fourth speculatively; let the mechanic that needs one force
  * the addition.
+ *
+ * `list` means "is an array" — any length, any element type. It does not
+ * require non-empty: a losing spin's `lines` and a non-cascading spin's
+ * `cascade_history` are legitimately `[]`, and rejecting that would raise
+ * a false alarm on a perfectly-shaped game that simply didn't win this
+ * particular sample. A game that structurally never produces the field at
+ * all is already caught by the separate "field absent from sample" check
+ * in `checkShape`, so an emptiness rule on top of that buys no extra
+ * diagnostic power — only false positives. One consequence worth knowing:
+ * a single sample cannot tell "this game never produces `cascade_history`"
+ * apart from "this spin did not cascade" when the sample itself is a
+ * non-cascading round — both look like `[]`. Telling those apart needs
+ * the game's declared `.spin` schema, not a sample; that's a later plan.
  */
 export type FieldKind = 'number' | 'grid' | 'list';
 
@@ -43,8 +56,8 @@ function isGrid(value: unknown): value is number[][] {
   );
 }
 
-function isNonEmptyList(value: unknown): value is unknown[] {
-  return Array.isArray(value) && value.length > 0;
+function isList(value: unknown): value is unknown[] {
+  return Array.isArray(value);
 }
 
 function matchesKind(kind: FieldKind, value: unknown): boolean {
@@ -54,7 +67,7 @@ function matchesKind(kind: FieldKind, value: unknown): boolean {
     case 'grid':
       return isGrid(value);
     case 'list':
-      return isNonEmptyList(value);
+      return isList(value);
   }
 }
 
@@ -67,6 +80,13 @@ function matchesKind(kind: FieldKind, value: unknown): boolean {
  *
  * Reports every mismatched field, not just the first, so the composition
  * screen shows the whole gap in one pass.
+ *
+ * A `list` field only checks "is this an array" (see `FieldKind`'s doc
+ * comment) — an empty array passes. That means this check can confirm a
+ * field is well-shaped, but a single sample can never prove a field is
+ * *always* absent for a game versus merely empty on this one spin; only
+ * the "field missing from the sample entirely" branch below makes that
+ * claim, and only about the one sample it was given.
  */
 export function checkShape(
   req: SpinShapeRequirement,
