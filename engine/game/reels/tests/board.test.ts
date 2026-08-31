@@ -8,9 +8,14 @@ import { boardFromReelSystem, type CellLike, type LegacyReelSystem } from '../sr
  * an object with `setState`/`setData`/`playWin`. No pixi, no ticker — the
  * point of the fake is that this suite never needs either.
  */
-function fakeReelSystem() {
+function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
   const calls: unknown[] = [];
   const cells = new Map<string, ReturnType<typeof makeCell>>();
+  // Plain mutable local, exposed through a GETTER on `reelSystem.board` below — faithful to the
+  // fact that in the REAL ReelSystem it changes ONLY when setBoard/spin/cascade/reelStep run,
+  // never as a side effect of `grid.getCell(...).setData(...)`. That gap is exactly what
+  // remove()'s re-sync exists to close.
+  let board = initialBoard;
 
   function makeCell(col: number, row: number): CellLike {
     return {
@@ -31,12 +36,16 @@ function fakeReelSystem() {
   const spin = vi.fn(async (target: unknown) => {
     calls.push(['spin', target]);
   });
-  const setBoard = vi.fn((target: unknown) => {
+  const setBoard = vi.fn((target: LegacyReelSystem['board']) => {
     calls.push(['setBoard', target]);
+    board = target;
   });
 
   const reelSystem: LegacyReelSystem = {
     grid: { getCell },
+    get board() {
+      return board;
+    },
     spin,
     setBoard,
   };
@@ -88,8 +97,14 @@ describe('boardFromReelSystem: refill', () => {
 });
 
 describe('boardFromReelSystem: remove', () => {
+  const threeByTwo = () => [
+    [{ symbol: 'a' }, { symbol: 'b' }],
+    [{ symbol: 'c' }, { symbol: 'd' }],
+    [{ symbol: 'e' }, { symbol: 'f' }],
+  ];
+
   it('marks each cell removed and clears its symbol, via grid.getCell', async () => {
-    const { reelSystem, getCell, cellAt } = fakeReelSystem();
+    const { reelSystem, getCell, cellAt } = fakeReelSystem(threeByTwo());
     const board = boardFromReelSystem(reelSystem);
 
     await board.remove({
@@ -108,13 +123,40 @@ describe('boardFromReelSystem: remove', () => {
     expect(cellAt(2, 0)!.setData).toHaveBeenCalledWith({ symbol: null });
   });
 
+  it('re-syncs reelSystem.board via setBoard with ONLY the removed cells nulled (fix: remove() used to leave it stale)', async () => {
+    const { reelSystem, setBoard } = fakeReelSystem(threeByTwo());
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.remove({
+      kind: 'remove',
+      cells: [
+        { col: 0, row: 1 },
+        { col: 2, row: 0 },
+      ],
+    });
+
+    expect(setBoard).toHaveBeenCalledTimes(1);
+    expect(setBoard).toHaveBeenCalledWith([
+      [{ symbol: 'a' }, { symbol: null }],
+      [{ symbol: 'c' }, { symbol: 'd' }],
+      [{ symbol: null }, { symbol: 'f' }],
+    ]);
+    // and reelSystem.board itself now reads the nulled snapshot back — not the stale one
+    expect(reelSystem.board).toEqual([
+      [{ symbol: 'a' }, { symbol: null }],
+      [{ symbol: 'c' }, { symbol: 'd' }],
+      [{ symbol: null }, { symbol: 'f' }],
+    ]);
+  });
+
   it('touches nothing when there are no cells to remove', async () => {
-    const { reelSystem, getCell } = fakeReelSystem();
+    const { reelSystem, getCell, setBoard } = fakeReelSystem(threeByTwo());
     const board = boardFromReelSystem(reelSystem);
 
     await board.remove({ kind: 'remove', cells: [] });
 
     expect(getCell).not.toHaveBeenCalled();
+    expect(setBoard).not.toHaveBeenCalled();
   });
 });
 

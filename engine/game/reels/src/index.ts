@@ -32,6 +32,14 @@
  *    a `SymbolCell`, which exposes `setState({winning|removed|fresh})` and
  *    `playWin()` directly — the same primitives `TumbleController` itself
  *    is built on, just driven one step at a time rather than bundled.
+ *    IMPORTANT gap this created (found in review, fixed here): touching a
+ *    cell through `grid.getCell(...).setData(...)` repaints the view but
+ *    does NOT reach `ReelSystem`'s own `board` closure — that only changes
+ *    inside `setBoard`/`spin`/`cascade`/`reelStep`. Left alone, `remove()`
+ *    would leave `reelSystem.board` (and `ctx.board`, which every built-in
+ *    feature reads) reporting the pre-removal symbols. `remove()` re-syncs
+ *    it with one `setBoard(...)` call at the end, over a snapshot of the
+ *    current board with just the removed cells nulled — see its comment.
  *  - `setMultiplier` has no counterpart on `ReelSystem` at all — its own
  *    `multiplier` getter is READ-ONLY (climbs only via `cascade`/
  *    `reelStep`). `MultiplierAccumulator` — a separate, headless legacy
@@ -86,6 +94,8 @@ export interface GridLike {
  */
 export interface LegacyReelSystem {
   readonly grid: GridLike;
+  /** Read by `remove()` to re-sync this after nulling cells directly — see its comment below. */
+  readonly board: CellData[][];
   spin(target: CellData[][]): Promise<void>;
   setBoard(target: CellData[][]): void;
 }
@@ -121,11 +131,23 @@ export function boardFromReelSystem(
     },
 
     async remove(step: RemoveStep) {
+      if (step.cells.length === 0) return;
       for (const { col, row } of step.cells) {
         const cell = reelSystem.grid.getCell(col, row);
         cell.setState({ removed: true });
         cell.setData({ symbol: null });
       }
+      // `SymbolCell.setData` only repaints the cell view — it does NOT reach the ReelSystem's
+      // own `board` closure (that's updated only by `setBoard`/`spin`/`cascade`/`reelStep`).
+      // Left alone, `reelSystem.board` — and `ctx.board` inside every built-in feature — would
+      // keep reporting the pre-removal symbols after this step. Re-sync it through the same
+      // measured-synchronous `setBoard` primitive `refill` already uses; re-applying the
+      // (mostly) unchanged board is idempotent, so this costs nothing visually.
+      const snapshot = reelSystem.board.map((col) => col.map((cell) => ({ ...cell })));
+      for (const { col, row } of step.cells) {
+        if (snapshot[col]?.[row]) snapshot[col][row] = { symbol: null };
+      }
+      reelSystem.setBoard(snapshot);
     },
 
     async refill(step: RefillStep) {
