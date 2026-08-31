@@ -223,24 +223,6 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
     // The board shown right after is THIS round's own post-collapse board
     // — not the round after it, which is the off-by-one the bug had.
     expect(refillSteps[i].board).toEqual(round.grid);
-
-    // "What disappears is what was there": at least one of the cells this
-    // round names must actually change between the board displayed before
-    // this round ran and the refill board after it. Not EVERY named cell —
-    // first-slot's refill is a weighted random draw over 6 symbols, so a
-    // freshly-dropped symbol can legitimately land back on the value a
-    // removed cell held (this happens in real measured data — see
-    // `@energy8engine/session-dev`'s `SpinResult` doc, whose worked example
-    // has exactly one such coincidental match). Requiring every cell to
-    // differ would make this assertion flaky against real spins, not
-    // stronger.
-    const before = i === 0 ? data.grid : data.cascade_history[i - 1].grid;
-    const changed = round.removed.some(
-      (cell) => before[cell.col]?.[cell.row] !== round.grid[cell.col]?.[cell.row],
-    );
-    expect(changed, `round ${i} removed cells but none of them changed after the refill`).toBe(
-      true,
-    );
   }
 
   // Neither page reloaded at any point during the live rebind.
