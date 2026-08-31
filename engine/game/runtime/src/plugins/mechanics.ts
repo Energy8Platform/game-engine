@@ -3,13 +3,13 @@
  *
  * A mechanic is registered under an id, and a stage is bound to exactly one
  * mechanic id at a time (`bind` overwrites, it never accumulates). The
- * registered object's shape deliberately follows what `mechanic-classic`
- * and `mechanic-cascade` export at their top level — `{ id, expects, plan }`
- * — not the `SpinMechanic` interface (`{ id, requires, present }`) those
- * same packages *also* export as their bundled `mechanic` value. The two
- * are structurally different (different field names for the same ideas),
- * and this registry's own fixtures use the `expects`/`plan` spelling, so
- * that is the shape it accepts.
+ * registered object is a `SpinMechanic` (`{ id, requires, present }`) from
+ * `@energy8engine/contracts` — the exact shape `mechanic-classic` and
+ * `mechanic-cascade` already bundle and export as `mechanic`, built for
+ * this registry on purpose (see the doc comment on each package's
+ * `mechanic` export, and Task 4's brief). Storing that type directly, and
+ * not some renamed local shape, is what lets Tasks 7 and 9 hand those
+ * exports straight to `register()` with no adapter in between.
  *
  * The rule that shapes every method here: failures are data. A stage bound
  * to an unregistered mechanic, or data checked against a mechanic whose
@@ -22,25 +22,12 @@ import {
   checkShape,
   diagnostic,
   type Diagnostic,
-  type SpinShapeRequirement,
+  type SpinMechanic,
 } from '@energy8engine/contracts';
-
-/**
- * What this registry stores: a mechanic's id, the shape it needs from a
- * stage's spin data (`expects`), and how it turns that data into a
- * presentation plan (`plan`). `plan`'s return value is opaque here — the
- * registry never calls it, only hands the mechanic back to whoever asked
- * for the stage's binding.
- */
-export interface Mechanic {
-  id: string;
-  expects: SpinShapeRequirement;
-  plan: (data: unknown) => unknown;
-}
 
 export interface MechanicsService {
   /** Registers a mechanic under its id. Returns a disposer that unregisters it again. */
-  register(mechanic: Mechanic): () => void;
+  register(mechanic: SpinMechanic): () => void;
   /**
    * Binds `stage` to the mechanic named `mechanicId`. A later call for the
    * same stage replaces the earlier one. Binding to an id nobody has
@@ -50,7 +37,7 @@ export interface MechanicsService {
    */
   bind(stage: string, mechanicId: string): void;
   /** The mechanic currently bound to `stage`, or `null` if none is (or its registration is gone). */
-  forStage(stage: string): Mechanic | null;
+  forStage(stage: string): SpinMechanic | null;
   /**
    * Checks `sample` against the shape the stage's bound mechanic declares
    * it needs. A thin wrapper over `checkShape` from the contracts package —
@@ -73,7 +60,7 @@ declare module 'cordis' {
 export const name = 'mechanics';
 
 export function apply(ctx: Context, config: MechanicsConfig) {
-  const mechanics = new Map<string, Mechanic>();
+  const mechanics = new Map<string, SpinMechanic>();
   const bindings = new Map<string, string>();
 
   const service: MechanicsService = {
@@ -109,6 +96,11 @@ export function apply(ctx: Context, config: MechanicsConfig) {
       ctx.effect(() => {
         bindings.set(stage, mechanicId);
         return () => {
+          // Same identity-guard shape as `register`'s, but currently
+          // unreachable: `bind` returns void, exposes no disposer, and the
+          // only thing that ever tears this effect down is the whole
+          // context disposing in `stop()` — after which nothing reads
+          // `bindings` again. Kept for parity, not because a test needs it.
           if (bindings.get(stage) === mechanicId) {
             bindings.delete(stage);
           }
@@ -135,7 +127,7 @@ export function apply(ctx: Context, config: MechanicsConfig) {
           ),
         ];
       }
-      return checkShape(mechanic.expects, sample, mechanic.id, stage);
+      return checkShape(mechanic.requires, sample, mechanic.id, stage);
     },
   };
 

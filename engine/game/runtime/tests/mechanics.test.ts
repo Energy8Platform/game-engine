@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../src/index';
 
-const CLASSIC = { id: 'classic', expects: { fields: { grid: 'grid' } }, plan: () => [] } as const;
-const CASCADE = { id: 'cascade', expects: { fields: { cascade_history: 'list' } }, plan: () => [] } as const;
+// `SpinMechanic` shape (`{ id, requires, present }`) from
+// `@energy8engine/contracts` — the exact bundle `mechanic-classic` and
+// `mechanic-cascade` already export as `mechanic`, so the registry accepts
+// those exports directly, with no adapter.
+const CLASSIC = {
+  id: 'classic',
+  requires: { fields: { grid: 'grid' } },
+  present: () => [],
+} as const;
+const CASCADE = {
+  id: 'cascade',
+  requires: { fields: { cascade_history: 'list' } },
+  present: () => [],
+} as const;
 
 describe('the mechanic registry', () => {
   it('finds the mechanic bound to a stage', async () => {
@@ -53,6 +65,34 @@ describe('the mechanic registry', () => {
     const problems = game.ctx.mechanics.check('base_game', { grid: [[1]] });
     expect(problems).toHaveLength(1);
     expect(problems[0].message).toContain('cascade_history');
+    await game.stop();
+  });
+
+  it('a stale disposer from a replaced registration does not evict the replacement', async () => {
+    const game = await createGame({});
+    // Two registrations under the SAME id — the second replaces the first
+    // in the map, but both disposers close over that same id.
+    const FIRST = { id: 'classic', requires: { fields: {} }, present: () => [] };
+    const SECOND = { id: 'classic', requires: { fields: {} }, present: () => [] };
+    const disposeFirst = game.ctx.mechanics.register(FIRST);
+    const disposeSecond = game.ctx.mechanics.register(SECOND);
+
+    // disposeFirst is stale: its registration was already replaced. Calling
+    // it must not remove the live replacement that disposeSecond owns.
+    disposeFirst();
+    game.ctx.mechanics.bind('base_game', 'classic');
+    expect(game.ctx.mechanics.forStage('base_game')).toBe(SECOND);
+
+    // The real owner still works.
+    disposeSecond();
+    expect(game.ctx.mechanics.forStage('base_game')).toBeNull();
+    await game.stop();
+  });
+
+  it('checking a stage nothing is bound to reports a diagnostic instead of a silent pass', async () => {
+    const game = await createGame({});
+    const problems = game.ctx.mechanics.check('base_game', { grid: [[1]] });
+    expect(problems.length).toBeGreaterThan(0);
     await game.stop();
   });
 });

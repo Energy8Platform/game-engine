@@ -8,7 +8,7 @@ import { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
 import * as mechanics from './plugins/mechanics';
 
-export type { Mechanic, MechanicsService, MechanicsConfig } from './plugins/mechanics';
+export type { MechanicsService, MechanicsConfig } from './plugins/mechanics';
 
 /** Placeholder for future boot config (e.g. a composition source) — kept empty rather than invented ahead of need. */
 export type GameConfig = Record<string, never>;
