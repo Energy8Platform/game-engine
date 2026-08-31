@@ -1,60 +1,115 @@
 import { describe, expect, it } from 'vitest';
 import { expects, plan } from '../src/index';
 
+/**
+ * A two-round chain modeled on the shape a real cascade actually produces
+ * (see `@energy8engine/session-dev`'s `SpinResult` doc for the measured
+ * example this mirrors): `data.grid` is the pre-cascade board the reels
+ * land on; each round's `removed` names cells on the board displayed WHEN
+ * that round runs (round 0 against `data.grid`, round 1 against round 0's
+ * own `grid`); each round's `grid` is that SAME round's post-collapse
+ * board. Every board below is a distinct value on purpose — a fixture
+ * where `data.grid` happened to equal `cascade_history[0].grid` (as the
+ * original, buggy fixture did) cannot tell a correct reading apart from
+ * one that is off by one round.
+ */
 const CHAIN = {
-  grid: [[1, 2, 3]],
+  grid: [[1, 2, 3]], // pre-cascade: the board the reels land on
   win: 1.5,
   base_win: 0.5,
   lines: [],
   cascade_history: [
-    { grid: [[1, 2, 3]], removed: [{ col: 0, row: 0 }], win: 0.5 },
-    { grid: [[7, 2, 3]], removed: [{ col: 0, row: 1 }], win: 1.0 },
-    { grid: [[7, 8, 3]], removed: [], win: 0 },
+    // round 0 clears the cell at (0,1) on `grid` above, then gravity
+    // drops (0,0)'s old value down into (0,1) and refills (0,0).
+    { grid: [[7, 1, 3]], removed: [{ col: 0, row: 1 }], win: 0.5 },
+    // round 1 clears the cell at (0,0) on round 0's OWN board [[7,1,3]]
+    // above (not on `data.grid`), then refills (0,0) again.
+    { grid: [[9, 1, 3]], removed: [{ col: 0, row: 0 }], win: 1.0 },
   ],
 };
 
 // A round that clears cells without paying for them, followed by the
 // terminal check. `win > 0` and `removed.length > 0` agree on every round
-// in CHAIN — both true together or both false together — so no test built
-// only from CHAIN can tell a single `win > 0` gate apart from a gate that
-// also continues on `removed.length > 0`. This fixture pins both halves at
-// once: the chain must still `remove`+`refill` (the round DID clear), but
-// must not fabricate a `revealWins` for money that was never won.
+// in CHAIN — both true together — so no test built only from CHAIN can
+// tell a single `win > 0` gate apart from a gate that also continues on
+// `removed.length > 0`. This fixture pins both halves at once: the chain
+// must still `remove`+`refill` (the round DID clear), but must not
+// fabricate a `revealWins` for money that was never won. `round1.grid` is
+// deliberately different from `round0.grid` so a refill-uses-the-wrong-
+// round bug would be visible here too, even though this game (first-slot)
+// never actually emits a terminal round like round 1.
 const CLEARS_WITHOUT_PAYING = {
-  ...CHAIN,
+  grid: [[4, 5, 6]],
+  win: 0,
+  base_win: 0,
+  lines: [],
   cascade_history: [
-    { grid: [[1, 2, 3]], removed: [{ col: 0, row: 0 }], win: 0 },
-    { grid: [[7, 2, 3]], removed: [], win: 0 },
+    { grid: [[8, 4, 6]], removed: [{ col: 0, row: 1 }], win: 0 },
+    { grid: [[1, 1, 1]], removed: [], win: 0 },
   ],
 };
 
+// A single-round chain — this game's most common winning shape (no second
+// cascade round at all). The bug this pins: the old (off-by-one)
+// implementation refilled a round from the NEXT array entry, so a chain
+// with no next entry never refilled — the exact "permanent hole in the
+// board" symptom the finding describes.
+const SINGLE_ROUND = {
+  grid: [[3, 9, 2]],
+  win: 2.0,
+  base_win: 2.0,
+  lines: [],
+  cascade_history: [{ grid: [[5, 3, 2]], removed: [{ col: 0, row: 0 }], win: 2.0 }],
+};
+
 describe('cascade', () => {
+  it('spins to the pre-cascade board (data.grid), not any round\'s post-collapse board', () => {
+    expect(plan(CHAIN)[0]).toEqual({ kind: 'spinTo', board: CHAIN.grid });
+  });
+
+  it('spins to data.grid even when the chain has no rounds at all', () => {
+    const noCascade = { ...CHAIN, cascade_history: [] };
+    expect(plan(noCascade)).toEqual([{ kind: 'spinTo', board: CHAIN.grid }]);
+  });
+
   it('spins to the first board, then reveals and collapses each paying round', () => {
     expect(plan(CHAIN).map((s) => s.kind)).toEqual([
-      'spinTo', 'revealWins', 'remove', 'refill',
-      'revealWins', 'remove', 'refill',
+      'spinTo',
+      'revealWins',
+      'remove',
+      'refill',
+      'revealWins',
+      'remove',
+      'refill',
     ]);
   });
 
-  it('spins to the first round board', () => {
-    expect(plan(CHAIN)[0]).toEqual({ kind: 'spinTo', board: CHAIN.cascade_history[0].grid });
-  });
-
   it("reveals each round's own win, with no line breakdown to give", () => {
-    const reveals = plan(CHAIN).filter((s) => s.kind === 'revealWins') as { total: number; lines: unknown[] }[];
+    const reveals = plan(CHAIN).filter((s) => s.kind === 'revealWins') as {
+      total: number;
+      lines: unknown[];
+    }[];
     expect(reveals.map((r) => r.total)).toEqual([0.5, 1.0]);
     expect(reveals.every((r) => r.lines.length === 0)).toBe(true);
   });
 
-  it('removes the cells that round cleared', () => {
-    const removes = plan(CHAIN).filter((s) => s.kind === 'remove');
-    expect(removes[0]).toEqual({ kind: 'remove', cells: [{ col: 0, row: 0 }] });
+  it('removes exactly the cells that round measured, in round order', () => {
+    const removes = plan(CHAIN).filter((s) => s.kind === 'remove') as { cells: unknown[] }[];
+    expect(removes[0]).toEqual({ kind: 'remove', cells: [{ col: 0, row: 1 }] });
+    expect(removes[1]).toEqual({ kind: 'remove', cells: [{ col: 0, row: 0 }] });
   });
 
-  it('refills with the NEXT round board, not the one just cleared', () => {
+  it("refills with THAT SAME round's own post-collapse board, not the round after it", () => {
     const refills = plan(CHAIN).filter((s) => s.kind === 'refill') as { board: number[][] }[];
-    expect(refills[0].board).toEqual(CHAIN.cascade_history[1].grid);
-    expect(refills[1].board).toEqual(CHAIN.cascade_history[2].grid);
+    expect(refills[0].board).toEqual(CHAIN.cascade_history[0].grid);
+    expect(refills[1].board).toEqual(CHAIN.cascade_history[1].grid);
+  });
+
+  it("refills a single-round chain — this game's most common winning shape must not be left with an unrefilled hole", () => {
+    const steps = plan(SINGLE_ROUND);
+    expect(steps.map((s) => s.kind)).toEqual(['spinTo', 'revealWins', 'remove', 'refill']);
+    const refill = steps.find((s) => s.kind === 'refill') as { board: number[][] };
+    expect(refill.board).toEqual(SINGLE_ROUND.cascade_history[0].grid);
   });
 
   it('stops at the first round that cleared nothing', () => {
@@ -63,12 +118,15 @@ describe('cascade', () => {
   });
 
   it('removes cells a round cleared without paying, but does not fabricate a reveal for them', () => {
-    expect(plan(CLEARS_WITHOUT_PAYING).map((s) => s.kind)).toEqual(['spinTo', 'remove', 'refill']);
-    const removes = plan(CLEARS_WITHOUT_PAYING).filter((s) => s.kind === 'remove');
-    expect(removes).toEqual([{ kind: 'remove', cells: [{ col: 0, row: 0 }] }]);
+    const steps = plan(CLEARS_WITHOUT_PAYING);
+    expect(steps.map((s) => s.kind)).toEqual(['spinTo', 'remove', 'refill']);
+    const removes = steps.filter((s) => s.kind === 'remove');
+    expect(removes).toEqual([{ kind: 'remove', cells: [{ col: 0, row: 1 }] }]);
+    const refill = steps.find((s) => s.kind === 'refill') as { board: number[][] };
+    expect(refill.board).toEqual(CLEARS_WITHOUT_PAYING.cascade_history[0].grid);
   });
 
-  it('declares that it needs the chain', () => {
-    expect(expects.fields).toEqual({ cascade_history: 'list' });
+  it('declares that it needs the pre-cascade board and the chain', () => {
+    expect(expects.fields).toEqual({ grid: 'grid', cascade_history: 'list' });
   });
 });
