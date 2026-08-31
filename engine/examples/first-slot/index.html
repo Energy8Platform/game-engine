@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>first-slot — e8 dev</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #10121a;
+        color: #e8e8f0;
+        font-family: system-ui, sans-serif;
+      }
+      #controls {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+      }
+      #mount {
+        line-height: 0;
+      }
+      #log {
+        margin: 0 1rem 1rem;
+        padding: 0.5rem 0.75rem;
+        background: #1a1d29;
+        border-radius: 6px;
+        font: 12px/1.5 ui-monospace, monospace;
+        white-space: pre-wrap;
+        max-height: 12rem;
+        overflow: auto;
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 1rem;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <button id="spin">Spin</button>
+      <label>
+        mechanic:
+        <select id="mechanic">
+          <option value="classic">classic</option>
+          <option value="cascade">cascade</option>
+        </select>
+      </label>
+      <span id="status"></span>
+    </div>
+    <div id="mount"></div>
+    <pre id="log"></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

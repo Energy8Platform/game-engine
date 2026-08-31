@@ -1,0 +1,7 @@
+# Composition entries for the IDE editor (probe plugins, panels, ...) — the
+# same format engine/examples/workspace/e8.yml uses. first-slot has none of
+# its own: it's the game `e8 dev` serves, not a set of editor plugins, so
+# this stays an empty composition (see createIdeHost's loadComposition doc
+# for why an empty file and an explicit `[]` must — and do — mean the
+# same thing).
+[]
