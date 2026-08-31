@@ -32,7 +32,7 @@
  * they just never run the gated `apply()`/callback.
  */
 import { Context } from 'cordis';
-import type { Diagnostic } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import * as boot from '@energy8engine/boot';
 import type { SessionConfig } from '@energy8engine/session-dev';
 import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
@@ -181,6 +181,35 @@ export async function createGame(config: GameConfig): Promise<GameApp> {
     // A later boot step throwing must not leak whatever already got
     // registered on `ctx` — nothing external holds a reference to it yet.
     await ctx.fiber.dispose();
-    throw error;
+
+    // Unreachable today only because every plugin `createGame` composes
+    // catches its own failures internally (`renderer.ts`, `stage.ts`,
+    // `reels.ts` all degrade to a diagnostic instead of throwing). It is
+    // still the one path a caller like `first-slot`'s `main.ts` relies on:
+    // it `await`s `createGame` at module top level with no `try` of its
+    // own, so a throw here would abort module evaluation and render
+    // nothing — precisely the white rectangle `boot` exists to prevent.
+    // Converting to a `Diagnostic` and rendering it through the same
+    // `boot.renderBootFailure` the normal path uses closes that gap: a
+    // plugin that starts throwing tomorrow still shows readable text
+    // today, not a blank mount.
+    const message = error instanceof Error ? error.message : String(error);
+    const failure = diagnostic(
+      'error',
+      'game-runtime',
+      'compose',
+      `composition failed: ${message}`,
+    );
+    diagnostics.push(failure);
+    if (config.mount) {
+      boot.renderBootFailure(config.mount, diagnostics);
+    }
+
+    return {
+      ctx,
+      diagnostics,
+      // `ctx` is already disposed above — nothing left to tear down.
+      stop: async () => {},
+    };
   }
 }
