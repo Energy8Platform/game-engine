@@ -12,18 +12,19 @@
  * changes only how the result is presented, not what data each reads.
  */
 import type {
+  ClassicStageData,
   PresentationPlan,
-  RevealedLine,
   SpinShapeRequirement,
   SpinMechanic,
 } from '@energy8engine/contracts';
 
-/** The measured stage data `classic` is handed; other fields (e.g. `cascade_history`) are ignored. */
-export interface ClassicSpinData {
-  grid: number[][];
-  base_win: number;
-  lines: RevealedLine[];
-}
+/**
+ * The measured stage data `classic` is handed; other fields (e.g.
+ * `cascade_history`) are ignored. This is `@energy8engine/contracts`'
+ * `ClassicStageData` — the normative field-naming convention this mechanic
+ * relies on — under the name tests and callers here already use.
+ */
+export type ClassicSpinData = ClassicStageData;
 
 /** `classic` needs the grid, the base-game payout, and the line breakdown — nothing else. */
 export const expects: SpinShapeRequirement = {

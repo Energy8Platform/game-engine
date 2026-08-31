@@ -31,7 +31,7 @@ import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/sl
 import { createGame } from '@energy8engine/game-runtime';
 import { executePlan } from '@energy8engine/play-loop';
 import * as ideBridge from '@energy8engine/ide-bridge';
-import type { PresentationPlan } from '@energy8engine/contracts';
+import type { Diagnostic, PresentationPlan, SpinResult } from '@energy8engine/contracts';
 
 const CELL = 96;
 const GRID = { cols: 5, rows: 3 };
@@ -136,17 +136,21 @@ spinBtn.addEventListener('click', async () => {
   statusEl.textContent = 'spinning…';
   try {
     const res = await fetch('/api/spin', { method: 'POST' });
-    const body = await res.json();
+    // `dev-game`'s route responds with the bare `SpinResult` (contracts'
+    // normative envelope for this crossing) on 2xx, or `{ diagnostics }`
+    // on a non-2xx — see dev-game.ts's own route handler.
+    const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
 
     if (!res.ok) {
-      log(`spin failed: ${JSON.stringify(body.diagnostics)}`);
+      log(`spin failed: ${JSON.stringify((body as { diagnostics: Diagnostic[] }).diagnostics)}`);
       statusEl.textContent = 'spin failed — see log';
       return;
     }
 
-    log(`win ${body.win} (total ${body.totalWin}), stage "${body.stage}"`);
-    lastSpin = { stage: body.stage, data: body.data };
-    await presentStage(body.stage, body.data);
+    const result = body as SpinResult;
+    log(`win ${result.win} (total ${result.totalWin}), stage "${result.stage}"`);
+    lastSpin = { stage: result.stage, data: result.data };
+    await presentStage(result.stage, result.data);
     statusEl.textContent = 'done';
   } catch (error) {
     log(`error: ${error instanceof Error ? error.message : String(error)}`);
@@ -169,13 +173,16 @@ spinBtn.addEventListener('click', async () => {
  */
 (window as unknown as { __e8: unknown }).__e8 = {
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
-  async spin(): Promise<{ result: unknown; steps: PresentationPlan }> {
+  async spin(): Promise<{ result: SpinResult; steps: PresentationPlan }> {
     const res = await fetch('/api/spin', { method: 'POST' });
-    const body = await res.json();
-    if (!res.ok) throw new Error(`spin failed: ${JSON.stringify(body.diagnostics)}`);
-    lastSpin = { stage: body.stage, data: body.data };
-    const steps = await presentStage(body.stage, body.data);
-    return { result: body, steps };
+    const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
+    if (!res.ok) {
+      throw new Error(`spin failed: ${JSON.stringify((body as { diagnostics: Diagnostic[] }).diagnostics)}`);
+    }
+    const result = body as SpinResult;
+    lastSpin = { stage: result.stage, data: result.data };
+    const steps = await presentStage(result.stage, result.data);
+    return { result, steps };
   },
   /** Re-presents arbitrary (or the last captured) stage data under whichever mechanic is currently bound — the same `data`, a possibly different mechanic. */
   async present(stage?: string, data?: Record<string, unknown>): Promise<PresentationPlan> {

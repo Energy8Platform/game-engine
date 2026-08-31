@@ -88,6 +88,7 @@
  */
 import type { Context } from 'cordis';
 import * as session from '@energy8engine/session-dev';
+import type { SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 
 export interface DevGameConfig {
@@ -155,15 +156,23 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       betLevel: body.betLevel ?? config.betLevel,
     });
 
-    if (diagnostics.length > 0) {
+    // `!result` is never actually reachable alongside an empty
+    // `diagnostics` — `SessionService.play()`'s own contract pairs them —
+    // but the return type doesn't encode that, and typing this crossing
+    // against `SpinResult` (see contracts/spin.ts, the normative source
+    // for this envelope) means the compiler catches a future change to
+    // that pairing instead of `res.json` silently accepting whatever it's
+    // handed.
+    if (diagnostics.length > 0 || !result) {
       res.status = 502;
       res.json({ diagnostics });
       return;
     }
 
     // Shipped unchanged — the measured SpinResult envelope, see
-    // session-dev's own type doc. The browser rebuilds nothing.
-    res.json(result);
+    // contracts/spin.ts. The browser rebuilds nothing.
+    const payload: SpinResult = result;
+    res.json(payload);
   });
 
   // Registered LAST, deliberately — see point 3 above. Everything this

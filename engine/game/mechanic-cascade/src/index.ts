@@ -49,34 +49,25 @@
  *     question with the field that question is actually about.
  */
 import type {
-  Board,
-  Cell,
+  CascadeStageData,
   PresentationPlan,
   SpinMechanic,
   SpinShapeRequirement,
 } from '@energy8engine/contracts';
 
-/**
- * One measured round of the chain: the cells it cleared (named on the
- * board displayed when it ran) and the board it left behind after its own
- * gravity + refill — see the module doc above for why `removed` and `grid`
- * are this round's own before/after, not a pointer to a neighbour.
- */
-export interface CascadeRound {
-  grid: Board;
-  removed: Cell[];
-  win: number;
-}
+// `CascadeRound` is `@energy8engine/contracts`' own type — re-exported
+// under this package's established name since the module doc above (and
+// its consumers) refer to it by that name.
+export type { CascadeRound } from '@energy8engine/contracts';
 
 /**
- * The measured stage data `cascade` is handed. `grid` is the pre-cascade
- * board the reels land on (round 0's `removed` is named against it); other
- * top-level fields (`base_win`, `lines`) are `classic`'s and are ignored.
+ * The measured stage data `cascade` is handed. This is
+ * `@energy8engine/contracts`' `CascadeStageData` — the normative
+ * field-naming convention this mechanic relies on — under the name tests
+ * and callers here already use. See that type's own doc for `grid`'s and
+ * `cascade_history`'s exact relationship (round-by-round before/after).
  */
-export interface CascadeSpinData {
-  grid: Board;
-  cascade_history: CascadeRound[];
-}
+export type CascadeSpinData = CascadeStageData;
 
 /** `cascade` needs the pre-cascade board to spin to, plus the chain. */
 export const expects: SpinShapeRequirement = {
