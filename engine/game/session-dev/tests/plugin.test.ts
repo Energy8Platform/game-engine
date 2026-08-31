@@ -97,6 +97,41 @@ describe('the session plugin', () => {
     expect(diagnostics[0].message).toContain('e8-server');
   });
 
+  it('a play() call the running server rejects yields a diagnostic, not a rejected promise', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+
+    // The server started fine (unlike the previous test) and `first-slot`
+    // is really loaded — `action` is the wrong lever here, not `gameId`:
+    // an unknown action against a game that IS loaded is what proves this
+    // is the "server started but rejected THIS call" path, not a repeat of
+    // the startup-failure path above. Confirmed by hand against a real
+    // e8-server before writing this assertion: StartRound resolves (no
+    // gRPC-level throw) with `error: 'unknown action "no-such-action"'` in
+    // the body, which `e8server.ts`'s `play()` turns into a rejected
+    // promise — exactly the shape `ctx.session.play()` must catch.
+    const { result, diagnostics } = await ctx.session.play({
+      gameId: 'first-slot',
+      action: 'no-such-action',
+      betLevel: 1.0,
+    });
+
+    expect(result).toBeUndefined();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].severity).toBe('error');
+    expect(diagnostics[0].message).toContain('no-such-action');
+
+    // The server itself is still up — this is a bad-request diagnostic, not
+    // a crash — so a follow-up call with a valid action still succeeds.
+    const second = await ctx.session.play({
+      gameId: 'first-slot',
+      action: 'spin',
+      betLevel: 1.0,
+    });
+    expect(second.diagnostics).toEqual([]);
+    expect(second.result).toBeDefined();
+  });
+
   it('unloading the plugin kills the real e8-server process — checked by pid, not by spying on stop()', async () => {
     ctx = new Context();
     await ctx.plugin(session, { gamesDir: GAME, port: 0 });
