@@ -19,6 +19,17 @@ import type { PresentationPlan } from './presentation';
  * apart from "this spin did not cascade" when the sample itself is a
  * non-cascading round — both look like `[]`. Telling those apart needs
  * the game's declared `.spin` schema, not a sample; that's a later plan.
+ *
+ * `grid` carries the exact same emptiness rule as `list`, for the exact
+ * same reason — it isn't called out separately below only because no
+ * shipped game happens to exercise it yet. `isGrid`'s `[].every(...)` is
+ * vacuously true, so `[]` (or a grid whose rows are themselves empty,
+ * `[[]]`) passes as a well-shaped grid. A 0×0 board is not a realistic
+ * spin result today, but the same argument as `list`'s applies: a mechanic
+ * that structurally never sees a grid at all is already caught by the
+ * "field missing from the sample entirely" branch in `checkShape`, so
+ * rejecting an empty one here would only manufacture a false alarm, never
+ * catch a real one.
  */
 export type FieldKind = 'number' | 'grid' | 'list';
 
