@@ -56,15 +56,35 @@ describe('dev-game — serving the bundle', () => {
     expect(text).toContain('dev-game fixture root');
   });
 
-  it('falls through to cordis’s own 404 for a request vite genuinely does not handle', async () => {
-    // Measured: vite's middlewares call `next()` (don't end the response)
-    // for a method it doesn't serve static content for, unlike a GET —
-    // which `appType: 'spa'`'s fallback answers for virtually any path.
-    // This is what actually exercises the catch-all route's `return
-    // next()` branch — every other case in this file's tests is handled
-    // by vite directly, so without this one, that branch is unreachable
-    // by the suite (found by mutation-checking dev-game.ts itself: deleting
-    // the `return next()` line did not fail any test until this one existed).
+  it('falls through to cordis’s own dispatch for a request vite genuinely does not handle', async () => {
+    // Corrected from an earlier, INACCURATE version of this test (caught in
+    // review): a `DELETE /` was claimed to exercise the catch-all route's
+    // `return next()` branch, and mutating that line away was claimed to
+    // fail no test until this one existed. Reproduced directly against the
+    // real vite + plugin-server pair: DELETE does not reach `next()` at all
+    // — vite's own middlewares answer it with a 404 THEY write and end
+    // themselves (`res._res.writableEnded`/`headersSent` are already true
+    // the moment the race in dev-game.ts resolves), so the code took the
+    // `headersSent` branch, never the one being described.
+    //
+    // `GET /%zz` (malformed percent-encoding) is a real shape — found by
+    // trying a battery of methods/paths against the real pair, confirmed
+    // stable across repeated runs — where vite's middlewares genuinely
+    // call `next()` without writing anything (vite can't decode the
+    // malformed URI internally and skips past it). This DOES prove the
+    // `if` condition itself is load-bearing: forcing it to always be `true`
+    // fails this test (asserting the wrong status). It does NOT, on its
+    // own, make the bare `return next();` STATEMENT mutation-detectable in
+    // isolation, and that narrower claim is not made here — verified by
+    // forcing the condition to always be `false` instead: nothing fails,
+    // anywhere in this file, because `Response._end()` is a no-op once
+    // `headersSent`, so cordis's own post-hoc 404/405 re-scan (independent
+    // of whatever this callback returns) reaches the identical 405 either
+    // way, for every case this suite can construct — this plugin's
+    // catch-all is always the last route registered, so there is nothing
+    // after it for `next()` to actually reach. That narrower gap is
+    // recorded, not fixed, the same way the `writableEnded`/`headersSent`
+    // OR-vs-AND gap two lines below already is.
     ctx = new Context();
     await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
     await ctx.plugin(devGame, {
@@ -75,10 +95,8 @@ describe('dev-game — serving the bundle', () => {
       port: 0,
     });
 
-    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/`, {
-      method: 'DELETE',
-    });
-    expect(res.status).not.toBe(200);
+    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/%zz`);
+    expect(res.status).toBe(405);
     expect(await res.text()).not.toContain('dev-game fixture root');
   });
 

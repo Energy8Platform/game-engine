@@ -34,7 +34,6 @@
 import { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
 import * as boot from '@energy8engine/boot';
-import * as session from '@energy8engine/session-dev';
 import type { SessionConfig } from '@energy8engine/session-dev';
 import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
 import { mechanic as cascadeMechanic } from '@energy8engine/mechanic-cascade';
@@ -114,6 +113,21 @@ export async function createGame(config: GameConfig): Promise<GameApp> {
     }
 
     if (config.session) {
+      // Dynamic, not a static top-level import — session-dev's own module
+      // graph reaches node:child_process/node:fs/node:net (it spawns the
+      // real e8-server binary), and a bundler targeting a browser has no
+      // way to know that's dead code for a caller who never sets
+      // config.session at all. A static import pulls it in regardless,
+      // and Vite's browser externalization of those node builtins throws
+      // the instant the import evaluates — aborting the whole module
+      // graph before createGame ever runs, session or no session (measured
+      // directly in engine/examples/first-slot's browser entry — see
+      // task-11-report.md). Gating the import behind the same condition
+      // that gates its use means a session-less caller (first-slot's own
+      // browser bundle: it reaches the math over its own `/api/spin`
+      // fetch, not through this seam at all) never asks a bundler to
+      // resolve session-dev in the first place.
+      const session = await import('@energy8engine/session-dev');
       await ctx.plugin(session, config.session);
       // `boot` needs to know about a dead session *before* ever attempting
       // a canvas. `session-dev` already computes the SPECIFIC reason
