@@ -172,7 +172,12 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
   // above a row labelled by package name and a human couldn't connect the
   // two. Falls back to the raw id for diagnostics that aren't about any
   // one entry (a malformed e8.yml, a card's slot key, …) — those don't
-  // match a row by construction.
+  // match a row by construction. This resolution must only ever run on
+  // composition-namespace diagnostics (`ctx.connection.diagnostics`, all
+  // host-authored today) — see `Diagnostic.plugin`'s doc comment for why a
+  // runtime-namespace diagnostic (a live game's `session`/`renderer-pixi`/
+  // mechanic id, …) landing in `diagnostics` here would risk resolving
+  // against an unrelated row that merely shares its id.
   const pluginLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
 
   return (
