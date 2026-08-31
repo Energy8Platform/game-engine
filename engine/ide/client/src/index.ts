@@ -11,4 +11,4 @@ export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plu
 export type { ModulesService, ModulesConfig } from './plugins/modules';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
-export { CompositionScreen } from './screens/CompositionScreen';
+export { CompositionScreen, Preview, computePreviewUrl } from './screens/CompositionScreen';

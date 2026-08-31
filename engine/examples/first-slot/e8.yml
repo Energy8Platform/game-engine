@@ -1,7 +1,13 @@
 # Composition entries for the IDE editor (probe plugins, panels, ...) — the
-# same format engine/examples/workspace/e8.yml uses. first-slot has none of
-# its own: it's the game `e8 dev` serves, not a set of editor plugins, so
-# this stays an empty composition (see createIdeHost's loadComposition doc
-# for why an empty file and an explicit `[]` must — and do — mean the
-# same thing).
-[]
+# same format engine/examples/workspace/e8.yml uses. `@energy8engine/ide-bridge`
+# is the one entry Task 12's SDD plan gives first-slot: registered here so
+# the composition screen renders a row with a `base_game` field (schema-driven,
+# same as `e8-example-probe`'s "скорость барабана"). The ide-host's own
+# `ctx.loader` composes this entry HOST-SIDE, where `ide-bridge` is an honest
+# no-op (see its own module doc) — its real job happens BROWSER-SIDE, composed
+# directly into the running game by src/main.ts, which listens on the SAME
+# `/ide` websocket this row's edits travel over and rebinds the mechanic live.
+- id: bridge1
+  name: '@energy8engine/ide-bridge'
+  config:
+    base_game: classic

@@ -3,10 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@energy8engine/contracts": "*",
     "@energy8engine/game-runtime": "*",
+    "@energy8engine/ide-bridge": "*",
     "@energy8engine/play-loop": "*",
     "@energy8platform/game-engine": "^0.41.0",
     "pixi.js": "^8.20.1"
