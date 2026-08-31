@@ -74,4 +74,46 @@ describe('executePlan', () => {
     const board = fakeBoard();
     await expect(executePlan([{ kind: 'nonsense' } as any], board)).resolves.toBeInstanceOf(Array);
   });
+
+  // Task 4: `board` is legitimately `undefined` at the one real caller
+  // (first-slot's main.ts passes `game.ctx.board`, which is `undefined`
+  // after a reels failure) — `executePlan` promises never to throw, and
+  // indexing an undefined board would break that promise on the very
+  // first step.
+  it('reports a missing board as a diagnostic instead of throwing', async () => {
+    const problems = await executePlan([{ kind: 'spinTo', board: [[1]] }], undefined);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].severity).toBe('error');
+    expect(problems[0].message).toContain('board');
+  });
+
+  it('does not report a missing board when the plan has nothing to run', async () => {
+    const problems = await executePlan([], undefined);
+    expect(problems).toEqual([]);
+  });
+
+  // Task 5: `isPresentationStep` wired in — a malformed plan entry (a
+  // mechanic's bug, not a board's) becomes a diagnostic instead of a
+  // TypeError from reading `.kind` off something that isn't a step at all.
+  it('reports a malformed step as a diagnostic instead of throwing, and keeps going', async () => {
+    const board = fakeBoard();
+    const problems = await executePlan(
+      [null as any, { kind: 'spinTo', board: [[1]] }],
+      board,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain('malformed');
+    expect(board.calls).toEqual(['spinTo']);
+  });
+
+  it('reports a step with a valid kind but the wrong shape as malformed, not a mistyped call', async () => {
+    const board = fakeBoard();
+    const problems = await executePlan(
+      [{ kind: 'spinTo', board: 'not-a-board' } as any],
+      board,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain('malformed');
+    expect(board.spinTo).not.toHaveBeenCalled();
+  });
 });

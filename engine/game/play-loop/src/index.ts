@@ -19,6 +19,7 @@
  */
 import {
   diagnostic,
+  isPresentationStep,
   type Diagnostic,
   type PresentationPlan,
   type PresentationStep,
@@ -53,16 +54,56 @@ type BoardMethod = (step: PresentationStep) => Promise<void>;
  * the board can't perform (no matching method) or one whose handler throws
  * or rejects is recorded as a `Diagnostic` and the remaining steps still
  * run.
+ *
+ * `board` is typed optional because it legitimately IS, at the one real
+ * caller: `first-slot`'s `main.ts` passes `game.ctx.board` straight
+ * through, and that's `undefined` whenever the reels plugin failed to
+ * build (see `game-runtime`'s `compose.test.ts` — that exact state is
+ * reachable, not hypothetical). A plan with steps and no board to run them
+ * on is exactly the kind of failure this function promises to report as
+ * data, not throw on.
  */
 export async function executePlan(
   plan: PresentationPlan,
-  board: BoardApi,
+  board: BoardApi | undefined,
 ): Promise<Diagnostic[]> {
+  if (!board) {
+    // A plan with nothing to run needs no board either — only report the
+    // failure when there was actually something for the (missing) board
+    // to have done.
+    if (plan.length === 0) return [];
+    return [
+      diagnostic(
+        'error',
+        'play-loop',
+        'board',
+        'cannot run a presentation plan: no board to run it on',
+      ),
+    ];
+  }
+
   const problems: Diagnostic[] = [];
 
   for (let index = 0; index < plan.length; index += 1) {
     const step = plan[index];
     const where = `plan[${index}]`;
+
+    // A mechanic's plan is data a THIRD party produced (Task 5's own
+    // vocabulary, but any mechanic — ours or a plugin's — can emit a
+    // malformed entry: `null`, a step missing `kind`, or `spinTo` whose
+    // `board` isn't actually a board). Reading `.kind` off a non-object
+    // step below would throw a TypeError before `executePlan` ever gets a
+    // chance to report it as a `Diagnostic` — checked BEFORE that read,
+    // not after, for exactly that reason. This is a different check than
+    // "does the board have a method for this kind" below: a step can name
+    // a real kind and still be shaped wrong.
+    if (!isPresentationStep(step)) {
+      problems.push(
+        diagnostic('error', 'play-loop', where, `malformed step in plan: ${JSON.stringify(step)}`),
+      );
+      continue;
+    }
+
     const method = (board as unknown as Record<string, BoardMethod | undefined>)[step.kind];
 
     if (typeof method !== 'function') {
