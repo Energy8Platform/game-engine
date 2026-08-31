@@ -11,6 +11,28 @@
  * `createIdeHost()` resolves; `e8 ide` does not, so an ordinary IDE session
  * never spawns an `e8-server` process it has no use for.
  *
+ * **The spec's separate-origin rule (§9) holds today only incidentally —
+ * do not read that as this plugin keeping the two apart on purpose.** The
+ * rule: the game preview must live on a different origin from the IDE
+ * itself, so a game a project author didn't write can't reach the IDE's
+ * own session/credentials in the browser. In this repo's current setup
+ * that separation exists because `engine/apps/web` runs its OWN vite dev
+ * server (a different process, a different port) for the IDE's React SPA,
+ * while THIS plugin's vite instance — reached through `createIdeHost`'s
+ * server, proxied from `apps/web`'s dev server — serves only the game.
+ * Two different servers, so two different origins, but nothing here
+ * enforces that on purpose. Collapse them into one and the rule silently
+ * stops holding: under `e8 dev` *alone* (no `apps/web` vite in front —
+ * exactly what `engine/apps/cli`'s `dev` command boots on its own, and
+ * what a real deployment of this plugin would look like) there is no IDE
+ * SPA served at all, because this plugin's own catch-all route (point 3
+ * below) claims `/` outright — `dev-game` was written assuming it owns
+ * the whole origin it's mounted on, precisely because nothing else was
+ * ever competing for `/` on that origin. The next person wiring a real
+ * preview-serving path (the cloud trajectory this spec's §9 describes)
+ * needs to keep the origins apart DELIBERATELY, not rely on this
+ * accidental two-process arrangement continuing to exist.
+ *
  * **Step 1's spike, measured against the real packages (not guessed —
  * see task-11-report.md for the full transcript):**
  *
