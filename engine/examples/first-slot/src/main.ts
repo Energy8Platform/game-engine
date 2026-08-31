@@ -31,7 +31,7 @@ import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/sl
 import { createGame } from '@energy8engine/game-runtime';
 import { executePlan } from '@energy8engine/play-loop';
 import * as ideBridge from '@energy8engine/ide-bridge';
-import type { PresentationStep } from '@energy8engine/contracts';
+import type { PresentationPlan } from '@energy8engine/contracts';
 
 const CELL = 96;
 const GRID = { cols: 5, rows: 3 };
@@ -104,11 +104,17 @@ mechanicSelect.addEventListener('change', () => {
  * (`window.__e8`, further down) go through, so a Playwright test observing
  * the latter is observing exactly what a real spin would have produced,
  * not a shortcut built just for the test.
+ *
+ * Returns the full `PresentationPlan`, not just each step's `kind` — a
+ * step's content (which board `spinTo`/`refill` name, which cells `remove`
+ * names) is exactly what a person watching the board actually sees, and a
+ * kind-only sequence cannot tell a correctly-refilled board apart from one
+ * with a permanent hole in it.
  */
 async function presentStage(
   stage: string,
   data: Record<string, unknown>,
-): Promise<PresentationStep['kind'][]> {
+): Promise<PresentationPlan> {
   const shapeProblems = game.ctx.mechanics.check(stage, data);
   if (shapeProblems.length > 0) {
     log(`mechanic can't read this stage's data: ${JSON.stringify(shapeProblems)}`);
@@ -120,7 +126,7 @@ async function presentStage(
   const plan = mechanic.present(data);
   const problems = await executePlan(plan, game.ctx.board);
   if (problems.length > 0) log(`presentation problems: ${JSON.stringify(problems)}`);
-  return plan.map((step) => step.kind);
+  return plan;
 }
 
 let lastSpin: { stage: string; data: Record<string, unknown> } | null = null;
@@ -162,17 +168,17 @@ spinBtn.addEventListener('click', async () => {
  * imports this file's test harness, either.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
-  /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the step KINDS the mechanic actually emitted. */
-  async spin(): Promise<{ result: unknown; stepKinds: string[] }> {
+  /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
+  async spin(): Promise<{ result: unknown; steps: PresentationPlan }> {
     const res = await fetch('/api/spin', { method: 'POST' });
     const body = await res.json();
     if (!res.ok) throw new Error(`spin failed: ${JSON.stringify(body.diagnostics)}`);
     lastSpin = { stage: body.stage, data: body.data };
-    const stepKinds = await presentStage(body.stage, body.data);
-    return { result: body, stepKinds };
+    const steps = await presentStage(body.stage, body.data);
+    return { result: body, steps };
   },
   /** Re-presents arbitrary (or the last captured) stage data under whichever mechanic is currently bound — the same `data`, a possibly different mechanic. */
-  async present(stage?: string, data?: Record<string, unknown>): Promise<string[]> {
+  async present(stage?: string, data?: Record<string, unknown>): Promise<PresentationPlan> {
     const target = stage && data ? { stage, data } : lastSpin;
     if (!target) throw new Error('no spin to present yet');
     return presentStage(target.stage, target.data);
