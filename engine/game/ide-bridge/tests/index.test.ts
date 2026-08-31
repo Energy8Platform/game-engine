@@ -38,6 +38,28 @@ import * as ideBridge from '../src/index';
  * fast, deterministic unit tests of ide-bridge's OWN logic.
  */
 
+/**
+ * A stateful fake of the one slice of `MechanicsService` this module reads
+ * (`bind`/`forStage`) — not just a `vi.fn()` recording calls. The dedupe
+ * fix (Task 6) compares an incoming id against `forStage(STAGE)?.id`, so a
+ * fake that doesn't actually update what `forStage` returns when `bind` is
+ * called would make every dedupe-related assertion below vacuous — it has
+ * to behave like the real registry for `mechanics.bind(...)` calls made
+ * DIRECTLY (bypassing `ideBridge.apply`'s own `bind` wrapper, the way
+ * `main.ts`'s local `<select>` handler does) to mean anything.
+ */
+function fakeMechanics() {
+  const bound = new Map<string, string>();
+  const bind = vi.fn((stage: string, mechanicId: string) => {
+    bound.set(stage, mechanicId);
+  });
+  const forStage = vi.fn((stage: string) => {
+    const id = bound.get(stage);
+    return id === undefined ? null : { id };
+  });
+  return { bind, forStage };
+}
+
 interface FakeSocket {
   addEventListener: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
@@ -96,8 +118,8 @@ describe('ide-bridge — host-side registration (no ctx.mechanics)', () => {
 describe('ide-bridge — composed into a running game (ctx.mechanics present)', () => {
   it('binds the configured mechanic at boot, synchronously', () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
 
     ideBridge.apply(ctx, {
       base_game: 'cascade',
@@ -110,8 +132,8 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('does not open a socket when no bridgeUrl is given and no browser location exists', () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
     const factory = vi.fn();
 
     ideBridge.apply(ctx, { base_game: 'classic', socketFactory: factory });
@@ -123,8 +145,8 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('rebinds live when a snapshot names this row with a new value', () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
@@ -144,8 +166,8 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('ignores a snapshot with no row for this package name', () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
@@ -161,8 +183,8 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('does not rebind when the incoming value equals the one already bound', () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
@@ -181,10 +203,48 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
     expect(bind).toHaveBeenCalledTimes(1); // boot only — both pushes repeat the already-bound value
   });
 
+  it('does not drop a broadcast that repeats a value this module itself last wrote, when a direct bind changed ground truth in between', () => {
+    // Reproduces the two-channel sequence from the task brief: a local
+    // `<select>` handler (`main.ts`) binds `STAGE` DIRECTLY through
+    // `ctx.mechanics.bind(...)`, bypassing this module's own `bind`
+    // wrapper entirely — so a `lastBound`-style cache that only tracks
+    // "what did *I* last write" goes stale the instant that happens.
+    ctx = new Context();
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      base_game: 'classic',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+    });
+    expect(forStage('base_game')).toEqual({ id: 'classic' }); // boot-time bind landed
+
+    // The local <select> bypass: changes ground truth without ide-bridge
+    // ever hearing about it.
+    bind('base_game', 'cascade');
+    expect(forStage('base_game')).toEqual({ id: 'cascade' });
+
+    // The IDE broadcasts a snapshot repeating 'classic' — the exact value
+    // this module itself wrote at boot. A `lastBound`-based dedupe would
+    // see this as a no-op repeat and skip it, leaving the game on
+    // 'cascade' while the IDE believes it set 'classic'. The fix compares
+    // against ground truth instead, so this must still apply.
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'classic' } }]),
+    );
+
+    expect(forStage('base_game')).toEqual({ id: 'classic' });
+    // boot ('classic') + direct bypass ('cascade') + this broadcast ('classic')
+    expect(bind).toHaveBeenCalledTimes(3);
+    expect(bind).toHaveBeenNthCalledWith(3, 'base_game', 'classic');
+  });
+
   it('ignores malformed or unrelated frames without throwing', () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
@@ -211,8 +271,8 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('closes the socket on dispose', async () => {
     ctx = new Context();
-    const bind = vi.fn();
-    ctx.provide('mechanics' as never, { bind } as never);
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {

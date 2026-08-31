@@ -82,6 +82,8 @@ export interface WebSocketLike {
 /** Duck-typed on purpose: importing `@energy8engine/game-runtime` just for this one method's type would be a real dependency for a type this module can state itself. */
 interface MechanicsBinder {
   bind(stage: string, mechanicId: string): void;
+  /** Ground truth for what `stage` is CURRENTLY bound to — see `bind()`'s own comment below for why this module reads it instead of remembering its own last write. */
+  forStage(stage: string): { id: string } | null;
 }
 
 /** This package's OWN name — how the live-update branch recognises its row inside a broadcast `Snapshot` (see the module doc, point 2). Slice 0 assumes at most one `ide-bridge` entry per project. */
@@ -115,10 +117,24 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     return;
   }
 
-  let lastBound: string | undefined;
+  // Skips a rebind that would be a no-op — cheap insurance against
+  // `mechanics.bind()` re-registering a `ctx.effect` on every broadcast
+  // snapshot (not just ones that actually touch `base_game`; `rpc.ts`
+  // broadcasts on ANY composition change). This used to remember "the
+  // value I MYSELF last wrote" in a local `lastBound` variable — wrong,
+  // because `main.ts`'s own local `<select>` handler binds `STAGE`
+  // directly (`game.ctx.mechanics.bind(...)`), bypassing this function
+  // entirely. That write updates ground truth without this module ever
+  // hearing about it, so a LATER broadcast repeating the value this
+  // module itself last wrote would compare equal to the stale `lastBound`
+  // and be skipped — silently dropping a legitimate IDE write instead of
+  // merely losing a race to it (a stronger bug than the accepted
+  // last-writer-wins). Reading `mechanics.forStage(STAGE)?.id` instead
+  // asks the mechanics registry itself what is CURRENTLY bound — the one
+  // source that is updated no matter which of the two writers changed it
+  // — so this module can never skip a write it did not itself make.
   const bind = (mechanicId: string) => {
-    if (mechanicId === lastBound) return;
-    lastBound = mechanicId;
+    if (mechanics.forStage(STAGE)?.id === mechanicId) return;
     mechanics.bind(STAGE, mechanicId);
   };
 
