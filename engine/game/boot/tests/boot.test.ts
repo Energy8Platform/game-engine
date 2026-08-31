@@ -108,4 +108,59 @@ describe('the boot plugin', () => {
     expect(resolved).toBe(true);
     await ctx.fiber.dispose();
   });
+
+  /**
+   * The commonest real failure is not "already broken before start()" —
+   * it's `start()` itself calling the renderer and the renderer failing
+   * once actually attempted (measured: this is what happens under jsdom,
+   * and is not guaranteed to be different in a real but WebGL-less
+   * browser). `diagnostics` was clean when `apply()` first checked it, so
+   * the pre-check alone would call `start()` and then say nothing further
+   * — exactly the "blank mount, no white rectangle, but no text either"
+   * gap this plugin exists to close. `start()` pushes onto the SAME
+   * `diagnostics` array `apply()` already holds a reference to (mirroring
+   * how `createGame` really wires this — see `runtime/src/index.ts`), so
+   * the fix is a second check after `start()` resolves, not a different
+   * code path.
+   */
+  it('renders the failure screen for an error start() itself discovers, even though diagnostics were clean going in', async () => {
+    const ctx = new Context();
+    const root = document.createElement('div');
+    const diagnostics: Diagnostic[] = [];
+    const start = vi.fn(async () => {
+      diagnostics.push({
+        severity: 'error',
+        plugin: 'renderer-pixi',
+        where: 'init',
+        message: 'boom-discovered-during-start',
+      });
+    });
+
+    await ctx.plugin(boot, { diagnostics, mount: root, start });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(root.textContent).toContain('boom-discovered-during-start');
+
+    await ctx.fiber.dispose();
+  });
+
+  it('does not render anything extra when start() adds only warnings', async () => {
+    const ctx = new Context();
+    const root = document.createElement('div');
+    const diagnostics: Diagnostic[] = [];
+    const start = vi.fn(async () => {
+      diagnostics.push({
+        severity: 'warning',
+        plugin: 'stage',
+        where: 'config',
+        message: 'using a default',
+      });
+    });
+
+    await ctx.plugin(boot, { diagnostics, mount: root, start });
+
+    expect(root.textContent).toBe('');
+
+    await ctx.fiber.dispose();
+  });
 });

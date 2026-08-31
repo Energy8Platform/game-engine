@@ -32,7 +32,7 @@
  * they just never run the gated `apply()`/callback.
  */
 import { Context } from 'cordis';
-import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
+import type { Diagnostic } from '@energy8engine/contracts';
 import * as boot from '@energy8engine/boot';
 import * as session from '@energy8engine/session-dev';
 import type { SessionConfig } from '@energy8engine/session-dev';
@@ -115,22 +115,17 @@ export async function createGame(config: GameConfig): Promise<GameApp> {
 
     if (config.session) {
       await ctx.plugin(session, config.session);
-      // `session-dev`'s own diagnostic for a startup failure is lazy — it
-      // only surfaces from a `play()` call (see that package's module
-      // doc). `boot` needs to know *before* ever attempting a canvas, so
-      // this reads the one thing `session-dev` DOES expose eagerly and
-      // already tests against: `pid` stays `null` exactly when startup
-      // failed.
-      if (ctx.session.pid === null) {
-        diagnostics.push(
-          diagnostic(
-            'error',
-            'session',
-            'e8-server',
-            'the math engine did not start',
-            'call ctx.session.play(...) for the detailed reason, or check gamesDir/binPath/PATH',
-          ),
-        );
+      // `boot` needs to know about a dead session *before* ever attempting
+      // a canvas. `session-dev` already computes the SPECIFIC reason
+      // (naming the binary, pointing at binPath/E8_SERVER_BINARY/gamesDir)
+      // and exposes it eagerly as `startupDiagnostic` for exactly this —
+      // pushing that straight through, not re-deriving a vaguer generic
+      // one from `pid === null` (the earlier version of this file did;
+      // the specific reason `session-dev` already computed was there for
+      // the taking, and re-deriving a worse one instead of using it wastes
+      // what `session-dev` measured).
+      if (ctx.session.startupDiagnostic) {
+        diagnostics.push(ctx.session.startupDiagnostic);
       }
     }
 

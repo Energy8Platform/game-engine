@@ -14,7 +14,12 @@
  * shows "the math engine did not start, here is the path it tried" and one
  * that shows a white rectangle. So `apply()` always resolves: a boot
  * failure is captured once, as a `Diagnostic`, and handed back from every
- * `play()` call from then on instead of a result. The same holds for a
+ * `play()` call from then on instead of a result — AND exposed eagerly, on
+ * the service itself, as `startupDiagnostic`, for a caller that needs the
+ * specific reason before ever calling `play()` at all (a composer deciding
+ * whether to proceed to the canvas-dependent rest of boot has exactly this
+ * need; re-deriving a vaguer diagnostic from `pid === null` instead of
+ * reading this one is the mistake to avoid). The same holds for a
  * `play()` call against a server that DID start but rejects this
  * particular request (e.g. an unknown `gameId`) — it also comes back as
  * `diagnostics`, never a rejected promise.
@@ -59,6 +64,16 @@ export interface SessionService {
    * trusting that a method was merely called.
    */
   readonly pid: number | null;
+  /**
+   * The specific reason startup failed, or `null` on a healthy start.
+   * Identical to what a `play()` call against this same service returns
+   * when `handle` never came up — exposed here too so a caller that needs
+   * to know *before* ever calling `play()` (e.g. `createGame`, which must
+   * not attempt a canvas after a dead session) gets the real reason
+   * (naming the binary, `binPath`/`E8_SERVER_BINARY`/`gamesDir`) instead of
+   * having to re-derive a vaguer one from `pid === null` alone.
+   */
+  readonly startupDiagnostic: Diagnostic | null;
 }
 
 export const name = 'session';
@@ -91,6 +106,7 @@ export async function apply(ctx: Context, config: SessionConfig) {
 
   const service: SessionService = {
     pid: handle?.pid ?? null,
+    startupDiagnostic,
     async play(req) {
       if (!handle) return { diagnostics: [startupDiagnostic!] };
       try {

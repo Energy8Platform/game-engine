@@ -43,6 +43,7 @@ describe('the session plugin', () => {
     await ctx.plugin(session, { gamesDir: GAME, port: 0 });
 
     expect(typeof ctx.session.play).toBe('function');
+    expect(ctx.session.startupDiagnostic).toBeNull();
   });
 
   it('plays a real spin through e8-server and returns the measured SpinResult shape, no diagnostics', async () => {
@@ -95,6 +96,14 @@ describe('the session plugin', () => {
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].severity).toBe('error');
     expect(diagnostics[0].message).toContain('e8-server');
+
+    // The same specific diagnostic is available eagerly, on the service
+    // itself, for a caller that needs to know *before* ever calling
+    // play() — a composer deciding whether to bring up a canvas is
+    // exactly this caller (see @energy8engine/game-runtime's createGame).
+    // It is the exact object play() returned above, not a re-derived one.
+    expect(ctx.session.startupDiagnostic).toBe(diagnostics[0]);
+    expect(ctx.session.startupDiagnostic!.message).toContain('/nonexistent/e8-server-binary');
   });
 
   it('a play() call the running server rejects yields a diagnostic, not a rejected promise', async () => {

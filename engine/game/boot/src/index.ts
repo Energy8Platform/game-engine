@@ -22,17 +22,17 @@
  * keeps this package renderer-agnostic in the same way `session-dev` is
  * math-engine-agnostic behind the `session` seam.
  *
- * One consequence worth stating plainly (see the task report's Concerns
- * section for the full write-up): this plugin makes its call ONCE, from
- * the diagnostics that exist at the moment it runs. If `start()` itself
- * goes on to produce a NEW error (e.g. the renderer fails to initialise
- * once actually tried), that failure lands in the shared diagnostics array
- * for the caller to see, but this plugin does not re-evaluate and show the
- * screen for it — the decision already happened. That is a real gap, not
- * an oversight; closing it would mean re-running this same decision after
- * `start()` settles, which no test asked for and which risks a screen that
- * flashes in over a game that mostly works. Left for the next task that
- * needs it.
+ * `start()` can itself discover a NEW `error` — the commonest real case is
+ * exactly this: nothing was wrong going in, `start()` calls `renderer-pixi`,
+ * and pixi fails once actually attempted (measured: this happens under both
+ * jsdom and a real WebGL-less browser, not just the latter). That is not a
+ * second, separate decision — it is the same "error → screen" rule this
+ * whole package exists for, just discovered a step later. So `apply()`
+ * re-checks `diagnostics` after `start()` returns and shows the screen then
+ * too if something new appeared. This is safe to do unconditionally:
+ * `createGame` deliberately never mounts anything into `mount` on success
+ * (see its own module doc), so there is nothing a late failure screen could
+ * overwrite or flash over.
  */
 import type { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
@@ -101,13 +101,23 @@ export interface BootConfig {
 
 export const name = 'boot';
 
-export async function apply(_ctx: Context, config: BootConfig): Promise<void> {
-  const hasError = config.diagnostics.some((d) => d.severity === 'error');
+function hasError(diagnostics: Diagnostic[]): boolean {
+  return diagnostics.some((d) => d.severity === 'error');
+}
 
-  if (hasError) {
+export async function apply(_ctx: Context, config: BootConfig): Promise<void> {
+  if (hasError(config.diagnostics)) {
     if (config.mount) renderBootFailure(config.mount, config.diagnostics);
     return;
   }
 
   await config.start();
+
+  // `start()` may have discovered a NEW error (e.g. the renderer failing
+  // once actually attempted, rather than beforehand) — the same rule
+  // applies to it, just checked again. See the module doc for why this is
+  // safe to do unconditionally.
+  if (hasError(config.diagnostics) && config.mount) {
+    renderBootFailure(config.mount, config.diagnostics);
+  }
 }

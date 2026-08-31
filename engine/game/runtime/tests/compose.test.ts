@@ -132,6 +132,25 @@ describe('createGame composes the whole e8-base bundle', () => {
     ).toBe(true);
   });
 
+  it('a renderer that only fails once start() actually tries it still shows the boot screen, not a blank mount', async () => {
+    // This is the fix for the finding: `boot`'s pre-check runs BEFORE
+    // start() ever calls `renderer-pixi`, so diagnostics were clean going
+    // in — the renderer only fails once `start()` actually attempts it
+    // (exactly what happens under jsdom). `boot` re-checks after `start()`
+    // resolves and must render the screen for this too, not leave `mount`
+    // blank.
+    const mount = document.createElement('div');
+
+    game = await createGame({ renderer: {}, mount });
+
+    expect(game.ctx.renderer).toBeUndefined();
+    const rendererDiagnostic = game.diagnostics.find(
+      (d) => d.severity === 'error' && d.plugin === 'renderer-pixi',
+    );
+    expect(rendererDiagnostic).toBeDefined();
+    expect(mount.textContent).toContain(rendererDiagnostic!.message);
+  });
+
   it('stage never mounts when the renderer it needs never came up — no throw, no service', async () => {
     game = await createGame({
       renderer: {},
@@ -164,10 +183,19 @@ describe('createGame composes the whole e8-base bundle', () => {
       renderer: {},
     });
 
-    // The session failure is recorded...
-    expect(game.diagnostics.some((d) => d.severity === 'error' && d.plugin === 'session')).toBe(
-      true,
+    // The session failure is recorded, and it is `session-dev`'s own
+    // SPECIFIC reason — not a generic placeholder re-derived from `pid
+    // === null`. `session-dev` already names the binary it tried and why
+    // it gave up; `createGame` must surface that verbatim, not throw it
+    // away for something vaguer.
+    const sessionDiagnostic = game.diagnostics.find(
+      (d) => d.severity === 'error' && d.plugin === 'session',
     );
+    expect(sessionDiagnostic).toBeDefined();
+    expect(sessionDiagnostic!.message).toContain('/nonexistent/e8-server-binary');
+    expect(sessionDiagnostic!.fix).toContain('E8_SERVER_BINARY');
+    expect(sessionDiagnostic).toBe(game.ctx.session.startupDiagnostic);
+
     // ...and because boot saw that error before ever calling start(), the
     // renderer was never even attempted — no renderer-pixi diagnostic
     // alongside the session one.
