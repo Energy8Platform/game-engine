@@ -10,7 +10,7 @@
  * standalone library that doesn't live inside platform-core.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { accessSync, constants as fsConstants, mkdtempSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -158,10 +158,24 @@ function grpcClient(port: number) {
   const grpcJs = req('@grpc/grpc-js');
   const loader = req('@grpc/proto-loader');
   const dir = mkdtempSync(join(tmpdir(), 'e8proto-'));
-  writeFileSync(join(dir, 'engine.proto'), ENGINE_PROTO);
-  const def = loader.loadSync(join(dir, 'engine.proto'), { keepCase: true, longs: Number, defaults: true });
-  const pkg = grpcJs.loadPackageDefinition(def) as any;
-  return new pkg.e8.Engine(`127.0.0.1:${port}`, grpcJs.credentials.createInsecure());
+  try {
+    writeFileSync(join(dir, 'engine.proto'), ENGINE_PROTO);
+    const def = loader.loadSync(join(dir, 'engine.proto'), {
+      keepCase: true,
+      longs: Number,
+      defaults: true,
+    });
+    const pkg = grpcJs.loadPackageDefinition(def) as any;
+    return new pkg.e8.Engine(`127.0.0.1:${port}`, grpcJs.credentials.createInsecure());
+  } finally {
+    // The dir only exists to hand loadSync a path to read — nothing keeps
+    // reading from it once loadPackageDefinition has parsed the result
+    // into memory, so it's removed right here rather than tied to this
+    // handle's later stop(): every startE8Server() call used to leave a
+    // /tmp/e8proto-* directory behind forever, whether or not stop() was
+    // ever reached.
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function call<T>(client: any, method: string, req: unknown): Promise<T> {
@@ -268,13 +282,27 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   async function stop(): Promise<void> {
     if (stopped) return;
     stopped = true;
+    // No counterpart before this fix: the gRPC client was never close()d,
+    // leaking its channel/connection for the life of the process.
+    client.close();
     if (exited) return;
     await new Promise<void>((resolve) => {
-      child.once('exit', () => resolve());
-      child.kill('SIGTERM');
-      setTimeout(() => {
+      // Neither cleared nor unref'd before this fix: a clean exit (the
+      // common case — the process usually does exit well within 2s of
+      // SIGTERM) still held the event loop open for the full 2s, because
+      // nothing ever cancelled the fallback SIGKILL timer once `exit`
+      // actually fired. `unref()` on top means even an UNcleared timer
+      // (e.g. a future bug re-introducing this) can't keep the process
+      // alive on its own.
+      const killTimer = setTimeout(() => {
         if (!exited) child.kill('SIGKILL');
       }, 2000);
+      killTimer.unref();
+      child.once('exit', () => {
+        clearTimeout(killTimer);
+        resolve();
+      });
+      child.kill('SIGTERM');
     });
   }
 

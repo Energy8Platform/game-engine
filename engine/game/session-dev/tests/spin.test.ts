@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startE8Server, type E8Handle, type SpinResult } from '../src/e8server';
 
@@ -60,6 +62,26 @@ describe('a real spin through e8-server', () => {
     const second = await startE8Server({ gamesDir: GAME, port });
     expect(second.port).toBe(port);
     await second.stop();
+  });
+
+  it('does not leave a proto tempdir behind', async () => {
+    // The gRPC client's proto is loaded from a mkdtempSync'd directory
+    // under os.tmpdir() (see grpcClient in e8server.ts) — it used to be
+    // removed nowhere, so every startE8Server() call left a
+    // /tmp/e8proto-* directory behind forever. The dir is cleaned up
+    // synchronously, right after the proto is loaded — well before
+    // startE8Server() even returns — so this doesn't need to wait on
+    // stop() at all; two full start/stop cycles must leave the same set
+    // of e8proto-* entries in tmpdir() as before either ran.
+    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('e8proto-'));
+
+    const a = await startE8Server({ gamesDir: GAME, port: 0 });
+    await a.stop();
+    const b = await startE8Server({ gamesDir: GAME, port: 0 });
+    await b.stop();
+
+    const after = readdirSync(tmpdir()).filter((name) => name.startsWith('e8proto-'));
+    expect(after).toEqual(before);
   });
 });
 
