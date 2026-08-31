@@ -1,0 +1,235 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MultiplierAccumulator } from '@energy8platform/game-engine/slot';
+import { boardFromReelSystem, type CellLike, type LegacyReelSystem } from '../src/index';
+
+/**
+ * A fake `LegacyReelSystem` recording exactly what was measured in Step 1:
+ * `spin`/`setBoard` take a `CellData[][]`, `grid.getCell(col,row)` returns
+ * an object with `setState`/`setData`/`playWin`. No pixi, no ticker — the
+ * point of the fake is that this suite never needs either.
+ */
+function fakeReelSystem() {
+  const calls: unknown[] = [];
+  const cells = new Map<string, ReturnType<typeof makeCell>>();
+
+  function makeCell(col: number, row: number): CellLike {
+    return {
+      setState: vi.fn((state) => calls.push(['setState', col, row, state])),
+      setData: vi.fn((data) => calls.push(['setData', col, row, data])),
+      playWin: vi.fn(async () => {
+        calls.push(['playWin', col, row]);
+      }),
+    };
+  }
+
+  const getCell = vi.fn((col: number, row: number) => {
+    const key = `${col}:${row}`;
+    if (!cells.has(key)) cells.set(key, makeCell(col, row));
+    return cells.get(key)!;
+  });
+
+  const spin = vi.fn(async (target: unknown) => {
+    calls.push(['spin', target]);
+  });
+  const setBoard = vi.fn((target: unknown) => {
+    calls.push(['setBoard', target]);
+  });
+
+  const reelSystem: LegacyReelSystem = {
+    grid: { getCell },
+    spin,
+    setBoard,
+  };
+
+  return {
+    reelSystem,
+    calls,
+    spin,
+    setBoard,
+    getCell,
+    cellAt: (c: number, r: number) => cells.get(`${c}:${r}`),
+  };
+}
+
+describe('boardFromReelSystem: spinTo', () => {
+  it('calls the measured reelSystem.spin with the board converted to CellData[][] (String(id) symbols)', async () => {
+    const { reelSystem, spin } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.spinTo({
+      kind: 'spinTo',
+      board: [
+        [1, 2],
+        [3, 4],
+      ],
+    });
+
+    expect(spin).toHaveBeenCalledTimes(1);
+    expect(spin).toHaveBeenCalledWith([
+      [{ symbol: '1' }, { symbol: '2' }],
+      [{ symbol: '3' }, { symbol: '4' }],
+    ]);
+  });
+});
+
+describe('boardFromReelSystem: refill', () => {
+  it('calls the measured reelSystem.setBoard with the same conversion as spinTo', async () => {
+    const { reelSystem, setBoard, spin } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.refill({ kind: 'refill', board: [[5]] });
+
+    expect(setBoard).toHaveBeenCalledTimes(1);
+    expect(setBoard).toHaveBeenCalledWith([[{ symbol: '5' }]]);
+    // refill must not be routed through spin() — Task 7's review flagged these as
+    // genuinely different legacy calls (initial land vs. post-cascade drop).
+    expect(spin).not.toHaveBeenCalled();
+  });
+});
+
+describe('boardFromReelSystem: remove', () => {
+  it('marks each cell removed and clears its symbol, via grid.getCell', async () => {
+    const { reelSystem, getCell, cellAt } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.remove({
+      kind: 'remove',
+      cells: [
+        { col: 0, row: 1 },
+        { col: 2, row: 0 },
+      ],
+    });
+
+    expect(getCell).toHaveBeenCalledWith(0, 1);
+    expect(getCell).toHaveBeenCalledWith(2, 0);
+    expect(cellAt(0, 1)!.setState).toHaveBeenCalledWith({ removed: true });
+    expect(cellAt(0, 1)!.setData).toHaveBeenCalledWith({ symbol: null });
+    expect(cellAt(2, 0)!.setState).toHaveBeenCalledWith({ removed: true });
+    expect(cellAt(2, 0)!.setData).toHaveBeenCalledWith({ symbol: null });
+  });
+
+  it('touches nothing when there are no cells to remove', async () => {
+    const { reelSystem, getCell } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.remove({ kind: 'remove', cells: [] });
+
+    expect(getCell).not.toHaveBeenCalled();
+  });
+});
+
+describe('boardFromReelSystem: revealWins', () => {
+  it('sets every position across every line winning and plays its win animation', async () => {
+    const { reelSystem, getCell, cellAt } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.revealWins({
+      kind: 'revealWins',
+      total: 8,
+      lines: [
+        {
+          line: 0,
+          symbol: 1,
+          count: 3,
+          win: 5,
+          positions: [
+            { col: 0, row: 0 },
+            { col: 1, row: 0 },
+          ],
+        },
+        { line: 1, symbol: 2, count: 2, win: 3, positions: [{ col: 0, row: 1 }] },
+      ],
+    });
+
+    // all three positions across BOTH lines were reached — a mutant that only
+    // looked at lines[0] would leave (0,1) untouched.
+    expect(getCell).toHaveBeenCalledTimes(3);
+    for (const [c, r] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ] as const) {
+      expect(cellAt(c, r)!.setState).toHaveBeenCalledWith({ winning: true });
+      expect(cellAt(c, r)!.playWin).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('resolves cleanly with an empty line list (a reveal with no per-line breakdown)', async () => {
+    const { reelSystem, getCell } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await expect(
+      board.revealWins({ kind: 'revealWins', total: 4, lines: [] }),
+    ).resolves.toBeUndefined();
+    expect(getCell).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve until every cell's playWin() has settled (executePlan awaits this before the next step)", async () => {
+    const { reelSystem, getCell } = fakeReelSystem();
+    let releasePlayWin: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releasePlayWin = resolve;
+    });
+    getCell.mockImplementation(() => ({
+      setState: vi.fn(),
+      setData: vi.fn(),
+      playWin: vi.fn(() => gate),
+    }));
+    const board = boardFromReelSystem(reelSystem);
+
+    let settled = false;
+    const result = board
+      .revealWins({
+        kind: 'revealWins',
+        total: 1,
+        lines: [{ line: 0, symbol: 1, count: 1, win: 1, positions: [{ col: 0, row: 0 }] }],
+      })
+      .then(() => {
+        settled = true;
+      });
+
+    // give the microtask queue every chance to settle `result` on its own — it must not,
+    // because `gate` (what `playWin()` returned) is still pending.
+    await Promise.race([result, new Promise((r) => setTimeout(r, 20))]);
+    expect(settled).toBe(false);
+
+    releasePlayWin();
+    await result;
+    expect(settled).toBe(true);
+  });
+});
+
+describe('boardFromReelSystem: setMultiplier', () => {
+  it('sets the value on the measured MultiplierAccumulator.set(value)', async () => {
+    const { reelSystem } = fakeReelSystem();
+    const acc = new MultiplierAccumulator({ policy: 'spin' });
+    const board = boardFromReelSystem(reelSystem, acc);
+
+    expect(acc.value).toBe(1);
+    await board.setMultiplier({ kind: 'setMultiplier', value: 7 });
+    expect(acc.value).toBe(7);
+  });
+});
+
+describe('boardFromReelSystem: wait', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not resolve before its ms have elapsed, and does resolve once they have', async () => {
+    vi.useFakeTimers();
+    const { reelSystem } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    let settled = false;
+    board.wait({ kind: 'wait', ms: 100 }).then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+  });
+});
