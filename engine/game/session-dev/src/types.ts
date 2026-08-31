@@ -137,6 +137,15 @@ export interface StartE8ServerOptions {
 export interface E8Handle {
   /** the port the server actually bound (resolves `port: 0` to a real number). */
   readonly port: number;
+  /**
+   * the OS pid of the spawned e8-server process. Always defined: this
+   * handle is only ever returned once the readiness poll has gotten a live
+   * `ListGames` response back from it, so the process necessarily exists by
+   * then. Exposed for the same reason `port` is — so a caller (chiefly a
+   * test) can confirm the process is actually there, or actually gone,
+   * instead of trusting that a method was merely called.
+   */
+  readonly pid: number;
   play(req: SpinRequest): Promise<SpinResult>;
   stop(): Promise<void>;
 }

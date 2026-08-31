@@ -278,7 +278,12 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     });
   }
 
-  return { port, play, stop };
+  // Non-null: we only get here after the readiness poll observed a live
+  // `ListGames` response from this exact child, so it necessarily has a pid
+  // (Node only leaves `pid` undefined when the process never spawned at
+  // all — the `exited`/'error' branch above, which returns before this
+  // point).
+  return { port, pid: child.pid!, play, stop };
 }
 
 export type { E8Handle, SpinRequest, SpinResult, StartE8ServerOptions } from './types';
