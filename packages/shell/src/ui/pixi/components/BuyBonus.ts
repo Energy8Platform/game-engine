@@ -10,6 +10,8 @@ import { navButton } from '../primitives/overlay';
 import { clamp } from '../primitives/overlay';
 import { attachHover } from '../primitives/widgets';
 import { roundedPath } from '../primitives/flex';
+import { ScrollAffordanceView } from '../primitives/scroll-affordance';
+import { scrollHint } from '@/core/scrollHint';
 
 /** Below this frame height (px), a wide/landscape popout (e.g. Popout S 400×225) stacks its cards
  *  vertically and scrolls — like mobile — so descriptions stay readable instead of shrinking to a
@@ -43,6 +45,10 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private header = new Container();
   private strip = new Container(); // cards live here (drag-scrollable when wide)
   private stripMask = new Graphics();
+  /** "the strip moves" — the drawn marks over the card band. Unmasked and outside `strip`, so a
+   *  drag moves the cards under it while the marks hold still. Public for the same reason
+   *  ScrollBox.affordance is: it is the only readable account of what a player sees here. */
+  readonly scrollCue: ScrollAffordanceView;
   private footer = new Container();
   private confirm?: Container;
   /** The bonus shown in the current confirm dialog (set by openConfirm, cleared by removeConfirm). */
@@ -80,7 +86,8 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     super();
     this.host = host;
     this.bonuses = bonuses;
-    this.addChild(this.veil, this.strip, this.header, this.footer);
+    this.scrollCue = new ScrollAffordanceView(host.ticker);
+    this.addChild(this.veil, this.strip, this.scrollCue, this.header, this.footer);
     this.veil.eventMode = 'static';
     this.strip.mask = this.stripMask;
     this.addChild(this.stripMask);
@@ -108,6 +115,7 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     this.dragX = Math.max(-this.dragMax, Math.min(0, this.dragBase + (cur - this.dragFrom)));
     if (this.dragAxis === 'x') this.strip.position.x = this.dragBaseX + this.dragX;
     else this.strip.position.y = this.dragBaseY + this.dragX;
+    this.syncScrollCue();
   };
   private onDragUp = (): void => {
     this.dragging = false;
@@ -126,6 +134,17 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     this.dragging = false;
     this.strip.eventMode = 'auto'; // visual-only; its children (cards) are still hit-tested in-band
     this.strip.position.set(baseX, baseY);
+    this.syncScrollCue();
+  }
+
+  /** Re-draw the band's scroll marks from the current drag state. `dragX` runs [-dragMax, 0] as the
+   *  strip is pulled, so the scroll position is its negation. */
+  private syncScrollCue(): void {
+    if (this.destroyed || this.scrollCue.destroyed) return;
+    this.scrollCue.update(
+      { x: 0, y: this.bandTop, w: this.w, h: this.bandH, axis: this.dragAxis },
+      scrollHint({ scrollTop: -this.dragX, scrollHeight: this.bandH + this.dragMax, clientHeight: this.bandH }),
+    );
   }
 
   resize(w: number, h: number): void {

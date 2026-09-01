@@ -168,6 +168,68 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
   transition:background .12s ease, color .12s ease; }
 #${SHELL_ROOT_ID} .ge-ov-nav:hover { background:var(--shell-plaque-glass); color:var(--shell-accent); }
 #${SHELL_ROOT_ID} .ge-ov-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
+
+/* ═══ scroll affordance — "there is more, and you can reach it" ═══════════════════════════════
+   A Stake popout is 400×225. Game info holds twelve screens there, buy-bonus stacks its cards, and
+   the menu popover hides its last row. All of them scrolled already; none of them said so, and
+   Stake rejected the build for it. macOS is the aggravating factor — its overlay scrollbars stay
+   invisible until something is ALREADY scrolling, so the one moment a player needs the hint is the
+   one moment the OS withholds it. Styling the scrollbar at all opts out of that behaviour.
+
+   Three layers, all keyed off data-scroll (written by attachScrollAffordance):
+     1. a persistent thumb — the standing "this scrolls" mark;
+     2. a mask fade at whichever edge hides content — the mask applies to the element's own box, so
+        it does NOT travel with the content the way a child gradient would;
+     3. a chevron, shown only in the start state and retired for good on the first scroll.
+   The end state deliberately gets no trailing fade: there is nothing left below to hint at. */
+/* Order matters here, and not for cascade reasons. Chromium honours the STANDARD scrollbar
+   properties when they are present and then ignores ::-webkit-scrollbar entirely — and on macOS the
+   standard properties leave the scrollbar in overlay mode, i.e. invisible until it is already
+   moving. Defining ::-webkit-scrollbar with a width is what switches that scroller to a classic,
+   always-painted, still-draggable scrollbar. So the standard properties are quarantined behind an
+   @supports that only Firefox (which has no ::-webkit-scrollbar) satisfies. */
+@supports not selector(::-webkit-scrollbar) {
+  #${SHELL_ROOT_ID} [data-scroll] { scrollbar-width:thin;
+    scrollbar-color:var(--shell-scrollbar,rgba(255,255,255,.34)) transparent; } }
+#${SHELL_ROOT_ID} [data-scroll]::-webkit-scrollbar { width:6px; height:6px; }
+#${SHELL_ROOT_ID} [data-scroll]::-webkit-scrollbar-track { background:transparent; }
+#${SHELL_ROOT_ID} [data-scroll]::-webkit-scrollbar-thumb { border-radius:999px;
+  background:var(--shell-scrollbar,rgba(255,255,255,.34)); }
+#${SHELL_ROOT_ID} [data-scroll]::-webkit-scrollbar-thumb:hover { background:var(--shell-accent); }
+/* Vertical fade. The stop pair is the same on both edges; only which edges are opaque changes.
+   mask-composite-free on purpose — a single multi-stop gradient handles the two-edge case. */
+#${SHELL_ROOT_ID} [data-scroll="start"]:not([data-scroll-axis="x"]) {
+  -webkit-mask-image:linear-gradient(to bottom, #000 calc(100% - 34px), transparent 100%);
+          mask-image:linear-gradient(to bottom, #000 calc(100% - 34px), transparent 100%); }
+#${SHELL_ROOT_ID} [data-scroll="mid"]:not([data-scroll-axis="x"]) {
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 34px), transparent 100%);
+          mask-image:linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 34px), transparent 100%); }
+#${SHELL_ROOT_ID} [data-scroll="end"]:not([data-scroll-axis="x"]) {
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 22px);
+          mask-image:linear-gradient(to bottom, transparent 0, #000 22px); }
+/* Horizontal fade — the buy-bonus card strip. */
+#${SHELL_ROOT_ID} [data-scroll="start"][data-scroll-axis="x"] {
+  -webkit-mask-image:linear-gradient(to right, #000 calc(100% - 30px), transparent 100%);
+          mask-image:linear-gradient(to right, #000 calc(100% - 30px), transparent 100%); }
+#${SHELL_ROOT_ID} [data-scroll="mid"][data-scroll-axis="x"] {
+  -webkit-mask-image:linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 30px), transparent 100%);
+          mask-image:linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 30px), transparent 100%); }
+#${SHELL_ROOT_ID} [data-scroll="end"][data-scroll-axis="x"] {
+  -webkit-mask-image:linear-gradient(to right, transparent 0, #000 20px);
+          mask-image:linear-gradient(to right, transparent 0, #000 20px); }
+/* The chevron. Its host is whatever box CONTAINS the scroller (overlay root / popover card), so it
+   holds still while the content moves under it. */
+#${SHELL_ROOT_ID} .ge-scroll-cue { position:absolute; left:0; top:0; z-index:2;
+  width:22px; height:22px; padding:3px; box-sizing:border-box;
+  display:flex; align-items:center; justify-content:center; pointer-events:none;
+  border-radius:50%; color:#fff; background:var(--shell-plaque-dark);
+  box-shadow:0 2px 10px rgba(0,0,0,.45); animation:ge-scroll-cue 1.6s ease-in-out infinite; }
+@keyframes ge-scroll-cue {
+  0%,100% { transform:translateY(0); opacity:.85; }
+  50%     { transform:translateY(4px); opacity:1; } }
+/* A player who has asked for stillness still needs the hint — keep the chevron, drop the bob. */
+@media (prefers-reduced-motion: reduce) {
+  #${SHELL_ROOT_ID} .ge-scroll-cue { animation:none; opacity:.95; } }
 #${SHELL_ROOT_ID} .ge-ov-body { max-width:800px; margin:0 auto; box-sizing:border-box;
   padding:clamp(6px,2vh,16px) clamp(16px,4vw,24px) clamp(16px,4vh,28px); }
 
@@ -529,7 +591,9 @@ export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
    card's font-size is the one knob (clamped for readability); everything inside is em-relative so
    the whole card scales as a unit. GameShell.fitModal() still transform-scales it down as a
    backstop for very short popouts. */
-#${SHELL_ROOT_ID} .ge-modal-card { font-size:clamp(11px, 2cqmin, 15px); width:100%; max-width:28em; box-sizing:border-box;
+/* position:relative is here for the scroll cue: the card is the cue's containing block, so a
+   capped, scrolling chip grid hints at its bottom edge rather than the screen's. */
+#${SHELL_ROOT_ID} .ge-modal-card { position:relative; font-size:clamp(11px, 2cqmin, 15px); width:100%; max-width:28em; box-sizing:border-box;
   overflow:hidden; transform-origin:center center; background:var(--shell-plaque-solid); border-radius:1.3em;
   display:flex; flex-direction:column; }
 /* ✕ pinned to the overlay corner (the screen), not the card */

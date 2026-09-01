@@ -1,5 +1,6 @@
 import type { ShellHost } from '@/core/renderer';
 import { createCardModal } from '../primitives';
+import { attachScrollAffordance } from '../scroll-affordance';
 
 interface Choice { id: string; label: string }
 
@@ -71,6 +72,9 @@ function buildSheet(opts: SheetOpts): Sheet {
     chips.push(chip); grid.appendChild(chip);
   }
   ui.body.appendChild(grid);
+  // A long bet ladder is capped at 50vh and scrolls; in a 225px popout that cap bites after two
+  // rows. The cue hangs off the card, which holds still while the grid moves.
+  attachScrollAffordance(grid, { cueHost: ui.card });
 
   function doConfirm(): void {
     opts.onConfirm(selected);

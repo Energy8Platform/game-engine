@@ -1,5 +1,6 @@
 import { icon } from './icons';
 import { placePopover, popoverWidth, POPOVER, type Rect } from '@/core/popover';
+import { attachScrollAffordance, type ScrollAffordance } from './scroll-affordance';
 
 /** Render a (possibly socialised) two-word label across two lines — the BUY BONUS badge.
  *  Shared so the bottom-bar button and the Game-info control legend break identically. */
@@ -53,9 +54,12 @@ export interface OverlayOpts {
   onBack?: () => void;
 }
 
-/** Full-screen overlay. Returns { root, body, scroll }; append content to body.
- *  The `scroll` element is the scrollable container (overflow-y: auto). */
-export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: HTMLDivElement; scroll: HTMLDivElement } {
+/** Full-screen overlay. Returns { root, body, scroll, affordance }; append content to body.
+ *  The `scroll` element is the scrollable container (overflow-y: auto); `affordance` marks it as
+ *  scrollable once it overflows — call `affordance.sync()` after filling or resizing the body. */
+export function createOverlay(opts: OverlayOpts): {
+  root: HTMLDivElement; body: HTMLDivElement; scroll: HTMLDivElement; affordance: ScrollAffordance;
+} {
   const root = document.createElement('div');
   root.className = 'ge-shell-overlay';
   const head = document.createElement('div');
@@ -82,7 +86,9 @@ export function createOverlay(opts: OverlayOpts): { root: HTMLDivElement; body: 
   const body = document.createElement('div'); body.className = 'ge-ov-body';
   scroll.appendChild(body);
   root.append(head, scroll);
-  return { root, body, scroll };
+  // The cue is hosted on `root`, not on `scroll`: `scroll` is the element that moves.
+  const affordance = attachScrollAffordance(scroll, { cueHost: root });
+  return { root, body, scroll, affordance };
 }
 
 export interface PopoverOpts {
@@ -126,6 +132,7 @@ export function createPopover(opts: PopoverOpts): {
   root: HTMLDivElement;
   card: HTMLDivElement;
   body: HTMLDivElement;
+  affordance: ScrollAffordance;
   position(): void;
 } {
   const root = document.createElement('div');
@@ -143,6 +150,9 @@ export function createPopover(opts: PopoverOpts): {
   // Clicks inside the card must not reach the dismiss layer.
   card.addEventListener('pointerdown', (e) => e.stopPropagation());
   root.addEventListener('pointerdown', opts.onClose);
+  // The card clamps itself to `maxHeight` in position(), so the body's overflow is only knowable
+  // after that runs — hence the sync at the end of position().
+  const affordance = attachScrollAffordance(body, { cueHost: card });
 
   const resolveEl = (v: HTMLElement | null | (() => HTMLElement | null) | undefined): HTMLElement | null =>
     typeof v === 'function' ? v() : (v ?? null);
@@ -222,6 +232,7 @@ export function createPopover(opts: PopoverOpts): {
       arrow.style.display = '';
       arrow.style.left = `${p.arrowX / s}px`;
     }
+    affordance.sync();
   };
-  return { root, card, body, position };
+  return { root, card, body, affordance, position };
 }

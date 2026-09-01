@@ -72,7 +72,7 @@ export class Overlay extends Container implements ShellLayer {
     this.host = host;
     this.opts = opts;
     this.tag = opts.tag;
-    this.scroll = new ScrollBox(host.canvas);
+    this.scroll = new ScrollBox(host.canvas, host.ticker);
     this.addChild(this.veil, this.scroll, this.header);
     this.veil.eventMode = 'static'; // swallow clicks to the game behind
     this.resize(host.screenW, host.screenH);
