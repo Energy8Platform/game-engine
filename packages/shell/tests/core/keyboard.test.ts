@@ -4,7 +4,7 @@ import { KeyboardController, type KeyboardHost } from '@/core/keyboard';
 
 function mockHost(over: Partial<KeyboardHost> = {}): KeyboardHost {
   return {
-    state: { mode: 'base', busy: false, autoplay: { active: false, remaining: 0 }, bet: 1, availableBets: [1,2], replay: false } as any,
+    state: { mode: 'base', busy: false, autoplay: { active: false, remaining: 0 }, bet: 1, availableBets: [1,2], replay: false, buyBonusEnabled: true } as any,
     hotkeysEnabled: true, spacebarEnabled: true, turboLevels: 1, autoplayEnabled: true, buyBonusEnabled: true,
     hasOpenLayer: () => false, routeToLayer: () => false,
     spin: vi.fn(), stepBet: vi.fn(), toggleAutoplay: vi.fn(), cycleTurbo: vi.fn(),
@@ -221,5 +221,53 @@ describe('KeyboardController onBlur', () => {
     vi.advanceTimersByTime(200);
     expect(h.spin).toHaveBeenCalledTimes(1); // no extra spin after blur
     c.detach(); vi.useRealTimers();
+  });
+});
+
+/**
+ * Shift+B must obey the same locks the bar's coin does.
+ *
+ * Reported from QA: "press spin and you can still manage to hit buy bonus." The coin itself was
+ * never the hole — both bars gate it on `busy || autoplay || !state.buyBonusEnabled` and re-apply
+ * that on every rebuild. The hotkey was the way in: it checked only the CONFIG flag
+ * (`features.buyBonus !== false`), the mode and replay, so it opened the overlay mid-round — and a
+ * bonus bought there is a second bet placed on top of a round already in flight.
+ */
+describe('KeyboardController Shift+B respects the same locks as the coin', () => {
+  const shiftB = () => document.dispatchEvent(key({ code: 'KeyB', shiftKey: true }));
+
+  it('opens the buy-bonus overlay when idle', () => {
+    const h = mockHost(); const c = new KeyboardController(h, document); c.attach();
+    shiftB();
+    expect(h.openBuyBonus).toHaveBeenCalledTimes(1); c.detach();
+  });
+
+  it('does NOT open it mid-round — the reported bug', () => {
+    const h = mockHost({
+      state: { mode: 'base', busy: true, autoplay: { active: false, remaining: 0 }, bet: 1, availableBets: [1, 2], replay: false, buyBonusEnabled: true } as any,
+    });
+    const c = new KeyboardController(h, document); c.attach();
+    shiftB();
+    expect(h.openBuyBonus).not.toHaveBeenCalled(); c.detach();
+  });
+
+  it('does NOT open it during an autoplay run', () => {
+    const h = mockHost({
+      state: { mode: 'base', busy: false, autoplay: { active: true, remaining: 5 }, bet: 1, availableBets: [1, 2], replay: false, buyBonusEnabled: true } as any,
+    });
+    const c = new KeyboardController(h, document); c.attach();
+    shiftB();
+    expect(h.openBuyBonus).not.toHaveBeenCalled(); c.detach();
+  });
+
+  it('honours the host turning buying off at runtime, not just the config flag', () => {
+    // setBuyBonusEnabled(false) is how a host says "not right now" (e.g. an open round on resume).
+    // The coin obeys it; the hotkey read the config flag instead and never saw it.
+    const h = mockHost({
+      state: { mode: 'base', busy: false, autoplay: { active: false, remaining: 0 }, bet: 1, availableBets: [1, 2], replay: false, buyBonusEnabled: false } as any,
+    });
+    const c = new KeyboardController(h, document); c.attach();
+    shiftB();
+    expect(h.openBuyBonus).not.toHaveBeenCalled(); c.detach();
   });
 });

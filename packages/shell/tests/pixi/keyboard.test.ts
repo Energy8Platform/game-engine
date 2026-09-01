@@ -4,7 +4,7 @@ import { KeyboardController, type KeyboardHost } from '@/core/keyboard';
 
 function mockHost(over: Partial<KeyboardHost> = {}): KeyboardHost {
   return {
-    state: { mode: 'base', busy: false, autoplay: { active: false, remaining: 0 }, bet: 1, availableBets: [1,2], replay: false } as any,
+    state: { mode: 'base', busy: false, autoplay: { active: false, remaining: 0 }, bet: 1, availableBets: [1,2], replay: false, buyBonusEnabled: true } as any,
     hotkeysEnabled: true, spacebarEnabled: true, turboLevels: 1, autoplayEnabled: true, buyBonusEnabled: true,
     hasOpenLayer: () => false, routeToLayer: () => false,
     spin: vi.fn(), stepBet: vi.fn(), toggleAutoplay: vi.fn(), cycleTurbo: vi.fn(),
