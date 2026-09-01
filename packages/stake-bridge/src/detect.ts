@@ -25,11 +25,26 @@ function hasSessionMarker(params: URLSearchParams): boolean {
 }
 
 /**
+ * Registrable domains whose hosts may serve the RGS. A value here admits the apex AND any
+ * subdomain of it — and NOTHING else, in particular nothing that merely ends in the same
+ * characters. Keep that distinction in mind before adding one: an entry is a promise that the
+ * whole domain is ours, because whoever holds it receives the player's session.
+ */
+const RGS_DOMAINS = ['stake-engine.com', 'engine.io'] as const;
+
+/** Loopback hosts for the dev harness, which serves the dev-RGS at `/__rgs`. */
+const RGS_LOOPBACK = ['localhost', '127.0.0.1'] as const;
+
+/**
  * Open-redirect guard for the `rgs_url` launch param. Stake passes it as a BARE hostname
  * (`rgs_url=rgsd.stake-engine.com`, no scheme — the bridge prepends `https://`), but a tampered
  * value (`evil.com`, `https://evil.com/x`) would otherwise become the API base and exfiltrate the
- * session. Accept ONLY `*.stake-engine.com` (the production RGS) and `localhost`/`127.0.0.1` (the
- * dev harness, which serves the dev-RGS at `/__rgs`). Everything else is rejected.
+ * session. Accept ONLY the {@link RGS_DOMAINS} and {@link RGS_LOOPBACK} hosts; everything else is
+ * rejected.
+ *
+ * The match is apex-or-dotted-suffix, never a bare `endsWith`. A bare suffix test on `engine.io`
+ * would also admit `stake-engine.io` and `evilengine.io` — names anyone can register, and ones
+ * that read as legitimate at a glance in a log.
  *
  * Handles both the bare-hostname form (optionally with `:port` and a path) and a scheme-prefixed
  * URL; in both cases only the HOST is whitelisted.
@@ -50,8 +65,8 @@ export function isValidRgsUrl(raw: string): boolean {
     host = hostPort.split(':')[0];
   }
   host = host.toLowerCase();
-  if (host === 'localhost' || host === '127.0.0.1') return true; // dev harness
-  return host === 'stake-engine.com' || host.endsWith('.stake-engine.com');
+  if ((RGS_LOOPBACK as readonly string[]).includes(host)) return true; // dev harness
+  return RGS_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
 /**
@@ -74,8 +89,8 @@ export function isStakeLaunch(input: string | URL | Location): boolean {
  * How the host should treat a launch URL:
  *  - `'stake'`   — a complete, valid Stake launch (valid `rgs_url` + session marker); load the bridge.
  *  - `'blocked'` — Stake session markers are present but the `rgs_url` is missing or tampered
- *    (blanked, or not a `*.stake-engine.com`/localhost host). The game MUST refuse to run: without
- *    this, the missing/invalid `rgs_url` would fall through to the offline/dev bridge and let the
+ *    (blanked, or not an allowed RGS host — see {@link RGS_DOMAINS}). The game MUST refuse to run:
+ *    without this, the missing/invalid `rgs_url` would fall through to the offline/dev bridge and let the
  *    player spin for free.
  *  - `'offline'` — no Stake session markers at all; a genuine dev / non-Stake launch (offline bridge).
  */

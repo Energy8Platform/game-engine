@@ -11,7 +11,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   'platform-core': '^0.33.0',
   'game-engine': '^0.43.0',
   'stake-kit': '^0.6.4',
-  'stake-bridge': '^0.6.4',
+  'stake-bridge': '^0.6.5',
   'stake-math-tools': '^0.10.0',
   harness: '^0.3.1',
   // test/versions.test.ts fails the moment these drift from the workspace's own versions.
