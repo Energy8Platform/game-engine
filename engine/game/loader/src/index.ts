@@ -122,10 +122,17 @@ export async function composeFromProject(ctx: Context, options: LoadOptions = {}
 
     try {
       const module = (await importModule(row.runtimeUrl)) as RuntimeHalf;
-      // Synchronous throws from `apply` land in this same try/catch as an
-      // import failure — the call is still inside the `try`, so nothing
-      // extra is needed to catch it.
-      module.apply?.(ctx, row.config);
+      // Awaited on purpose. A synchronous throw from `apply` lands in this
+      // same try/catch either way (the call is still inside the `try`),
+      // but an ASYNC `apply` — `renderer-pixi`'s among them, and every
+      // other row in `e8-base` could reasonably become one — returns a
+      // pending promise that a bare, un-awaited call lets float free. An
+      // unawaited rejection is not "no diagnostic": it is an unhandled
+      // promise rejection, invisible to this function's own try/catch and
+      // to anyone reading the screen. Measured directly: `boot1` failed
+      // exactly this way before both this fix and its own row config bug
+      // were corrected (see task-8-report.md).
+      await module.apply?.(ctx, row.config);
     } catch (error) {
       diagnostics.push(
         diagnostic(

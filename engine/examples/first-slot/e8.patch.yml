@@ -30,6 +30,12 @@ rows:
       design:
         width: 480
         height: 288
+  # NOT a typo: `reels1`'s own row `config` IS `CreateReelSystemOptions`
+  # (`@energy8platform/game-engine/slot`'s options for `createReelSystem`,
+  # `resolve` aside — see above) — and that type's OWN field for reel
+  # settings happens to also be named `config` (`ReelSystemConfig`, holding
+  # `grid` among others). The outer key is this row's config; the inner
+  # one is the reel system's. Two different things that share a name.
   - id: reels1
     config:
       config:

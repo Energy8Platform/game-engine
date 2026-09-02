@@ -112,6 +112,30 @@ describe('composeFromProject', () => {
     expect(diags).toHaveLength(1);
   });
 
+  it('apply() rejecting asynchronously becomes a diagnostic naming the row, not an unhandled rejection', async () => {
+    // The mutation this test exists to catch: dropping the `await` on
+    // `module.apply?.(ctx, row.config)` in `src/index.ts`. A synchronous
+    // throw lands in the surrounding try/catch either way — this needs an
+    // `apply` that returns a REJECTED PROMISE instead, which only an
+    // awaited call can ever observe. Left unawaited, this rejection
+    // becomes a genuine unhandled promise rejection outside vitest's
+    // control (not just a wrong assertion) — see this file's own
+    // "mutation, verified in both directions" note below for how that was
+    // actually observed, not just reasoned about.
+    const ctx = new Context();
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a')], diagnostics: [] }),
+      importModule: async () => ({
+        apply: async () => {
+          throw new Error('async nope');
+        },
+      }),
+    });
+    expect(diags).toHaveLength(1);
+    expect(diags[0].plugin).toBe('a');
+    expect(diags[0].message).toContain('async nope');
+  });
+
   it('carries the host project diagnostics through', async () => {
     const ctx = new Context();
     const diags = await composeFromProject(ctx, {
