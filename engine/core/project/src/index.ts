@@ -50,13 +50,18 @@ export function resolveComposition(input: {
     }
 
     for (const row of bundle.rows) {
-      if (rows.has(row.id)) {
+      const clash = rows.get(row.id);
+      if (clash !== undefined) {
+        // Name BOTH bundles. Someone debugging this is asking "where did my
+        // row go", and the bundle that lost is the half of the answer they
+        // do not already have.
+        const loser = clash.from.replace(/^bundle:/, '');
         diagnostics.push(
           diagnostic(
             'error',
             row.id,
             'profile',
-            `row "${row.id}" is placed by more than one bundle; "${bundleName}" wins`,
+            `row "${row.id}" is placed by both "${loser}" and "${bundleName}"; "${bundleName}" wins`,
             `give one of the bundles placing "${row.id}" a different row id`,
           ),
         );
@@ -70,27 +75,40 @@ export function resolveComposition(input: {
     }
   }
 
+  // Which layer removed a row, if one did. A later layer addressing that id
+  // without a `name` is a different mistake from addressing an id nothing
+  // ever placed, and the two deserve different sentences: the first person
+  // has a row they deleted themselves, the second has a typo.
+  const removedBy = new Map<string, string>();
+
   for (const { layer, rows: patchRows } of input.patches) {
     for (const patchRow of patchRows) {
       if (patchRow.remove === true) {
-        rows.delete(patchRow.id);
+        if (rows.delete(patchRow.id)) removedBy.set(patchRow.id, layer);
         continue;
       }
 
       const existing = rows.get(patchRow.id);
       if (existing === undefined && patchRow.name === undefined) {
+        const removedIn = removedBy.get(patchRow.id);
         diagnostics.push(
           diagnostic(
             'error',
             patchRow.id,
             layer,
-            `patch addresses row "${patchRow.id}", which no bundle placed, and gives no "name" to insert it`,
+            removedIn === undefined
+              ? `patch addresses row "${patchRow.id}", which no bundle placed, and gives no "name" to insert it`
+              : `patch addresses row "${patchRow.id}", which "${removedIn}" removed, and gives no "name" to insert it back`,
             `add a "name" to insert "${patchRow.id}" as a new row, or fix the id`,
           ),
         );
         continue;
       }
 
+      // No `removedBy.delete` here on purpose: once this row is back in
+      // `rows`, the branch above can no longer be reached for its id until
+      // another `remove`, and that overwrites the entry anyway. A delete
+      // would be a line that cannot change an outcome.
       rows.set(patchRow.id, {
         id: patchRow.id,
         name: patchRow.name ?? existing!.name,

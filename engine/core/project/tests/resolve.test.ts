@@ -97,4 +97,47 @@ describe('resolveComposition', () => {
     expect(composition.rows.find((r) => r.id === 'reels1')!.name).toBe('@e/other');
     expect(diagnostics.some((d) => d.message.includes('reels1'))).toBe(true);
   });
+
+  it('names BOTH bundles when two place the same id, and `from` follows the winner', () => {
+    const clash = { name: 'e8-clash', rows: [{ id: 'reels1', name: '@e/other' }] };
+    const { composition, diagnostics } = resolveComposition({
+      profile: { bundles: ['e8-base', 'e8-clash'] },
+      bundles: new Map([['e8-base', base], ['e8-clash', clash]]),
+      patches: [],
+    });
+    const reels = composition.rows.find((r) => r.id === 'reels1')!;
+    expect(reels.name).toBe('@e/other');
+    expect(reels.from).toBe('bundle:e8-clash');          // the winner, not the first placer
+    const message = diagnostics.find((d) => d.plugin === 'reels1')!.message;
+    expect(message).toContain('e8-base');                // the loser is named too
+    expect(message).toContain('e8-clash');
+  });
+
+  it('a row removed by one layer and re-added by a later one reports the re-adding layer', () => {
+    const { composition, diagnostics } = resolveComposition({
+      profile: { bundles: ['e8-base'] },
+      bundles: new Map([['e8-base', base]]),
+      patches: [
+        { layer: 'patch', rows: [{ id: 'reels1', remove: true }] },
+        { layer: 'cli', rows: [{ id: 'reels1', name: '@e/back', config: { a: 1 } }] },
+      ],
+    });
+    const reels = composition.rows.find((r) => r.id === 'reels1')!;
+    expect(reels).toMatchObject({ name: '@e/back', from: 'cli' });
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('addressing a row an earlier layer removed says so, instead of blaming a typo', () => {
+    const { diagnostics } = resolveComposition({
+      profile: { bundles: ['e8-base'] },
+      bundles: new Map([['e8-base', base]]),
+      patches: [
+        { layer: 'patch', rows: [{ id: 'reels1', remove: true }] },
+        { layer: 'cli', rows: [{ id: 'reels1', config: { a: 1 } }] },
+      ],
+    });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('"patch" removed');
+    expect(diagnostics[0].message).not.toContain('no bundle placed');
+  });
 });
