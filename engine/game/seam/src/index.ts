@@ -164,9 +164,20 @@ export function selectProvider(
     return { provider: null, diagnostics };
   }
 
+  if (forSeam.length > 0 && wellFormed.length === 0) {
+    // Every candidate registered for this seam was malformed — each
+    // already has its own "invalid matcher" diagnostic above, pushed in
+    // the loop that built `wellFormed`. Re-listing them again here under
+    // a generic "nothing matched" message would just be the same
+    // complaint twice; there is nothing more to add.
+    return { provider: null, diagnostics };
+  }
+
   // Nothing matched at all: list every well-formed candidate that was
   // considered for this seam, and its matcher, so a human can tell "not
-  // installed" apart from "installed, but the matcher didn't fire".
+  // installed" apart from "installed, but the matcher didn't fire". Any
+  // malformed candidate was already reported above and is deliberately
+  // left out of this listing — it was never a real contender.
   diagnostics.push(
     diagnostic(
       'error',
@@ -174,7 +185,7 @@ export function selectProvider(
       'seam',
       forSeam.length === 0
         ? `seam "${seam}" has no registered providers`
-        : `seam "${seam}" has no matching provider; candidates considered: ${forSeam
+        : `seam "${seam}" has no matching provider; candidates considered: ${wellFormed
             .map(describeCandidate)
             .join(', ')}`,
       forSeam.length === 0

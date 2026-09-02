@@ -1,34 +1,44 @@
 import { describe, expect, it } from 'vitest';
 import { selectProvider, type SeamCandidate } from '../src/index';
 
-const stake: SeamCandidate = { seam: 'session', provider: 'session-stake', matcher: { buildTarget: 'stake' } };
-const dev: SeamCandidate = { seam: 'session', provider: 'session-dev', matcher: { default: true } };
-const byParam: SeamCandidate = { seam: 'session', provider: 'session-url', matcher: { urlParam: 'sessionId' } };
+// Fixture names are picked so that NO provider name shares a substring with
+// ANY matcher value used in these tests (buildTarget/urlParam values, or
+// each other's provider names). That is deliberate: a test asserting
+// `message.toContain('kiosk')` must only be able to pass because the
+// matcher was genuinely rendered, never because some provider's own name
+// happens to contain the matcher's value (as `session-stake` /
+// `{ buildTarget: 'stake' }` did in an earlier draft of these fixtures —
+// caught by mutation-testing the diagnostic renderer, not by inspection).
+const alpha: SeamCandidate = { seam: 'session', provider: 'session-alpha', matcher: { buildTarget: 'kiosk' } };
+const beta: SeamCandidate = { seam: 'session', provider: 'session-beta', matcher: { default: true } };
+const gamma: SeamCandidate = { seam: 'session', provider: 'session-gamma', matcher: { urlParam: 'sessionToken' } };
 
 describe('selectProvider', () => {
   it('picks the single matching provider', () => {
-    const { provider, diagnostics } = selectProvider('session', [stake], { buildTarget: 'stake' });
-    expect(provider).toBe('session-stake');
+    const { provider, diagnostics } = selectProvider('session', [alpha], { buildTarget: 'kiosk' });
+    expect(provider).toBe('session-alpha');
     expect(diagnostics).toEqual([]);
   });
 
   it('a specific matcher beats { default: true }', () => {
-    const { provider, diagnostics } = selectProvider('session', [dev, stake], { buildTarget: 'stake' });
-    expect(provider).toBe('session-stake');
+    const { provider, diagnostics } = selectProvider('session', [beta, alpha], { buildTarget: 'kiosk' });
+    expect(provider).toBe('session-alpha');
     expect(diagnostics).toEqual([]);
   });
 
   it('falls back to the default when nothing specific matches', () => {
-    const { provider } = selectProvider('session', [dev, stake], { buildTarget: 'e8platform' });
-    expect(provider).toBe('session-dev');
+    const { provider } = selectProvider('session', [beta, alpha], { buildTarget: 'showroom' });
+    expect(provider).toBe('session-beta');
   });
 
   it('zero candidates lists what was considered, and why each was rejected', () => {
-    const { provider, diagnostics } = selectProvider('session', [stake], { buildTarget: 'e8platform' });
+    const { provider, diagnostics } = selectProvider('session', [alpha], { buildTarget: 'showroom' });
     expect(provider).toBeNull();
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].message).toContain('session-stake');
-    expect(diagnostics[0].message).toContain('stake');        // its matcher, not just its name
+    expect(diagnostics[0].message).toContain('session-alpha');
+    // Its matcher's VALUE, not just its name — 'kiosk' appears nowhere in
+    // 'session-alpha', so this can only pass if the matcher is rendered.
+    expect(diagnostics[0].message).toContain('kiosk');
   });
 
   it('an empty candidate list still names the seam', () => {
@@ -38,27 +48,31 @@ describe('selectProvider', () => {
   });
 
   it('two equally-specific candidates is a diagnostic naming BOTH', () => {
-    const other: SeamCandidate = { seam: 'session', provider: 'session-two', matcher: { buildTarget: 'stake' } };
-    const { provider, diagnostics } = selectProvider('session', [stake, other], { buildTarget: 'stake' });
+    const delta: SeamCandidate = { seam: 'session', provider: 'session-delta', matcher: { buildTarget: 'kiosk' } };
+    const { provider, diagnostics } = selectProvider('session', [alpha, delta], { buildTarget: 'kiosk' });
     expect(provider).toBeNull();
-    expect(diagnostics[0].message).toContain('session-stake');
-    expect(diagnostics[0].message).toContain('session-two');
+    // Neither name is a substring of the other, so each assertion below
+    // can only pass if that specific provider is actually listed.
+    expect(diagnostics[0].message).toContain('session-alpha');
+    expect(diagnostics[0].message).toContain('session-delta');
+    // And the matcher they're fighting over, not just the two names.
+    expect(diagnostics[0].message).toContain('kiosk');
   });
 
   it('two defaults are also ambiguous — "default" is not a tiebreak', () => {
-    const other: SeamCandidate = { seam: 'session', provider: 'session-two', matcher: { default: true } };
-    const { provider } = selectProvider('session', [dev, other], {});
+    const epsilon: SeamCandidate = { seam: 'session', provider: 'session-epsilon', matcher: { default: true } };
+    const { provider } = selectProvider('session', [beta, epsilon], {});
     expect(provider).toBeNull();
   });
 
   it('urlParam matcher reads the passed env, never a global location', () => {
-    const { provider } = selectProvider('session', [byParam, dev], { urlParams: { sessionId: 'abc' } });
-    expect(provider).toBe('session-url');
+    const { provider } = selectProvider('session', [gamma, beta], { urlParams: { sessionToken: 'abc' } });
+    expect(provider).toBe('session-gamma');
   });
 
   it('urlParam does not match when the param is absent', () => {
-    const { provider } = selectProvider('session', [byParam, dev], { urlParams: {} });
-    expect(provider).toBe('session-dev');
+    const { provider } = selectProvider('session', [gamma, beta], { urlParams: {} });
+    expect(provider).toBe('session-beta');
   });
 });
 
@@ -67,36 +81,55 @@ describe('selectProvider', () => {
 // matcher declaring zero of them (never matches) or two at once (ambiguous
 // — which one wins?). Naming this now, per the brief, rather than leaving
 // it to be discovered when someone writes one of these by accident.
+//
+// Same non-collision discipline as above: 'foyer'/'ticket'/'{}' don't
+// appear in any provider name here, and 'session-zeta'/'session-theta'
+// don't appear in each other or in 'session-alpha'.
 describe('selectProvider — malformed matchers', () => {
   it('a matcher with no discriminator set is illegal, not merely inert', () => {
-    const empty: SeamCandidate = { seam: 'session', provider: 'session-empty', matcher: {} };
-    const { provider, diagnostics } = selectProvider('session', [empty, stake], { buildTarget: 'stake' });
+    const zeta: SeamCandidate = { seam: 'session', provider: 'session-zeta', matcher: {} };
+    const { provider, diagnostics } = selectProvider('session', [zeta, alpha], { buildTarget: 'kiosk' });
     // The well-formed candidate still resolves...
-    expect(provider).toBe('session-stake');
-    // ...but the malformed one is named, not silently dropped.
+    expect(provider).toBe('session-alpha');
+    // ...but the malformed one is named, with its (empty) matcher shown,
+    // not silently dropped or folded into some generic message.
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].message).toContain('session-empty');
+    expect(diagnostics[0].message).toContain('session-zeta');
+    expect(diagnostics[0].message).toContain('{}');
+    // And it's specifically about the malformed candidate, not a listing
+    // that happens to also mention the one that resolved fine.
+    expect(diagnostics[0].message).not.toContain('session-alpha');
   });
 
   it('a matcher with both buildTarget and urlParam set is illegal — no silent "first wins"', () => {
-    const both: SeamCandidate = {
+    const theta: SeamCandidate = {
       seam: 'session',
-      provider: 'session-both',
-      matcher: { buildTarget: 'stake', urlParam: 'sessionId' },
+      provider: 'session-theta',
+      matcher: { buildTarget: 'foyer', urlParam: 'ticket' },
     };
-    const { provider, diagnostics } = selectProvider('session', [both], { buildTarget: 'stake' });
-    // Not treated as matching on buildTarget alone: it never wins.
+    const { provider, diagnostics } = selectProvider('session', [theta], { buildTarget: 'foyer' });
+    // Not treated as matching on buildTarget alone: it never wins, even
+    // though `env.buildTarget` equals the matcher's `buildTarget`.
     expect(provider).toBeNull();
-    expect(diagnostics.some((d) => d.message.includes('session-both'))).toBe(true);
+    // Exactly one diagnostic (the "invalid matcher" one) — no redundant
+    // second "nothing matched" diagnostic re-listing the same candidate,
+    // since it was never a real contender.
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('session-theta');
+    // BOTH halves of the illegal matcher are shown, not just the one that
+    // happened to match `env` — proof this is flagged as "declares two",
+    // not silently resolved by picking `buildTarget` and ignoring `urlParam`.
+    expect(diagnostics[0].message).toContain('foyer');
+    expect(diagnostics[0].message).toContain('ticket');
   });
 
   it('a malformed candidate does not block resolution among the well-formed ones', () => {
-    const both: SeamCandidate = {
+    const theta: SeamCandidate = {
       seam: 'session',
-      provider: 'session-both',
-      matcher: { buildTarget: 'stake', urlParam: 'sessionId' },
+      provider: 'session-theta',
+      matcher: { buildTarget: 'foyer', urlParam: 'ticket' },
     };
-    const { provider } = selectProvider('session', [both, dev], { buildTarget: 'e8platform' });
-    expect(provider).toBe('session-dev');
+    const { provider } = selectProvider('session', [theta, beta], { buildTarget: 'showroom' });
+    expect(provider).toBe('session-beta');
   });
 });
