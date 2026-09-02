@@ -21,9 +21,38 @@ describe('composeFromProject', () => {
   it('applies each row runtime half, in composition order', async () => {
     const ctx = new Context();
     const order: string[] = [];
+
+    // Row 'a' waits on a gate that opens only after several chained
+    // microtask turns — deliberately NOT tied to whether row 'b' has been
+    // imported yet, so a correct sequential loop (which never even calls
+    // importModule('b') until 'a' has resolved) cannot deadlock waiting for
+    // 'b' to open it. Row 'b' has no gate at all, so once its import is
+    // actually started it resolves — and applies — almost immediately.
+    //
+    // Under a correct sequential loop, 'b' is not asked for until 'a' has
+    // resolved, so the order comes out ['a', 'b'] no matter how many turns
+    // the gate takes. Under `Promise.all`, both imports start at once: 'b'
+    // has nothing to wait on and applies first, well before the gate can
+    // open, producing ['b', 'a'] instead. The two implementations diverge
+    // on a genuinely different, deterministic order — not a coincidence of
+    // scheduling that could go either way on a slower machine. No real
+    // timer is involved: the gate opens after a fixed number of chained
+    // `.then()` turns, never a `setTimeout`, so there is nothing here for a
+    // loaded CI box to race.
+    let openGateA: () => void = () => {};
+    const gateA = new Promise<void>((resolve) => {
+      openGateA = resolve;
+    });
+    let ticks: Promise<unknown> = Promise.resolve();
+    for (let i = 0; i < 5; i++) ticks = ticks.then(() => undefined);
+    void ticks.then(() => openGateA());
+
     const diags = await composeFromProject(ctx, {
       fetchFn: fakeFetch({ rows: [row('a'), row('b')], diagnostics: [] }),
-      importModule: async (url) => ({ apply: () => order.push(url) }),
+      importModule: async (url) => {
+        if (url.endsWith('/a')) await gateA;
+        return { apply: () => order.push(url) };
+      },
     });
     expect(order).toEqual(['/plugin-runtime/a', '/plugin-runtime/b']);
     expect(diags).toEqual([]);
