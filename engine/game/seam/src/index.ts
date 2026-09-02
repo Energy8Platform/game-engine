@@ -27,12 +27,17 @@
  * independently optional (that is the interface this package is required
  * to implement), so nothing in the type system stops a matcher declaring
  * zero of them (`{}` — can never match, since `matches()` below has no
- * discriminator to test) or two at once (`{ buildTarget, urlParam }` —
- * `matches()` would have to silently pick one and ignore the other, which
- * is worse than useless: it reads as "match on either", but only ever
- * checks the first). Both are illegal, and since the type can't rule them
- * out, a diagnostic does: `selectProvider` flags them and excludes them
- * from matching, rather than guessing what the author meant.
+ * discriminator to test), two of the specific ones at once
+ * (`{ buildTarget, urlParam }` — `matches()` would have to silently pick
+ * one and ignore the other, which is worse than useless: it reads as
+ * "match on either", but only ever checks the first), or a specific one
+ * together with `default: true` (`{ buildTarget, default: true }` — the
+ * two-phase resolution rule above has no phase where a candidate is both
+ * "only counts if buildTarget matches" and "always counts as the
+ * fallback"; the two meanings can't coexist on one candidate). All three
+ * shapes are illegal, and since the type can't rule any of them out, a
+ * diagnostic does: `selectProvider` flags them and excludes them from
+ * matching, rather than guessing what the author meant.
  */
 import { type Diagnostic, diagnostic } from '@energy8engine/contracts';
 
@@ -72,12 +77,28 @@ function specificity(matcher: SeamMatcher): number {
   return (matcher.buildTarget !== undefined ? 1 : 0) + (matcher.urlParam !== undefined ? 1 : 0);
 }
 
-/** Neither zero discriminators (matches nothing) nor two at once (ambiguous) is legal. */
+/** Which discriminator names a matcher sets, in declaration order — for diagnostics. */
+function setDiscriminators(matcher: SeamMatcher): string[] {
+  const names: string[] = [];
+  if (matcher.buildTarget !== undefined) names.push('buildTarget');
+  if (matcher.urlParam !== undefined) names.push('urlParam');
+  if (matcher.default === true) names.push('default');
+  return names;
+}
+
+/** Total discriminators set, counting `default: true` alongside the two specific ones. */
+function discriminatorCount(matcher: SeamMatcher): number {
+  return specificity(matcher) + (matcher.default === true ? 1 : 0);
+}
+
+/**
+ * Legal iff EXACTLY ONE discriminator is set. Zero (matches nothing), two
+ * specific ones at once (ambiguous which wins), or a specific one paired
+ * with `default: true` (the two-phase rule gives that combination no
+ * coherent meaning — see the module doc) are all malformed alike.
+ */
 function isMalformed(matcher: SeamMatcher): boolean {
-  const n = specificity(matcher);
-  if (n > 1) return true;
-  if (n === 0) return matcher.default !== true;
-  return false;
+  return discriminatorCount(matcher) !== 1;
 }
 
 function isSpecific(matcher: SeamMatcher): boolean {
@@ -112,9 +133,9 @@ export function selectProvider(
           seam,
           'seam',
           `provider "${candidate.provider}" for seam "${seam}" has an invalid matcher (${describeMatcher(candidate.matcher)}): ` +
-            (specificity(candidate.matcher) > 1
-              ? 'set both buildTarget and urlParam — a matcher must declare only one discriminator'
-              : 'sets none of buildTarget, urlParam, or default: true, so it can never match'),
+            (discriminatorCount(candidate.matcher) === 0
+              ? 'sets none of buildTarget, urlParam, or default: true, so it can never match'
+              : `sets ${setDiscriminators(candidate.matcher).join(' and ')} — a matcher must declare exactly one discriminator`),
           'declare exactly one of buildTarget, urlParam, or default: true',
         ),
       );

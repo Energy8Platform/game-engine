@@ -78,13 +78,17 @@ describe('selectProvider', () => {
 
 // A matcher must declare exactly one discriminator. `SeamMatcher`'s three
 // fields are each independently optional, so the type alone can't stop a
-// matcher declaring zero of them (never matches) or two at once (ambiguous
-// — which one wins?). Naming this now, per the brief, rather than leaving
-// it to be discovered when someone writes one of these by accident.
+// matcher declaring zero of them (never matches), two specific ones at once
+// (ambiguous — which one wins?), or a specific one paired with
+// `default: true` (the two-phase resolution rule gives that combination no
+// coherent meaning: is it "only when buildTarget matches" or "always as the
+// fallback"? it can't be both). Naming this now, per the brief, rather than
+// leaving it to be discovered when someone writes one of these by accident.
 //
-// Same non-collision discipline as above: 'foyer'/'ticket'/'{}' don't
-// appear in any provider name here, and 'session-zeta'/'session-theta'
-// don't appear in each other or in 'session-alpha'.
+// Same non-collision discipline as above: 'foyer'/'ticket'/'lobby'/
+// 'sessionRef'/'{}' don't appear in any provider name here, and
+// 'session-zeta'/'session-theta'/'session-iota'/'session-kappa' don't
+// appear in each other or in 'session-alpha'.
 describe('selectProvider — malformed matchers', () => {
   it('a matcher with no discriminator set is illegal, not merely inert', () => {
     const zeta: SeamCandidate = { seam: 'session', provider: 'session-zeta', matcher: {} };
@@ -131,5 +135,54 @@ describe('selectProvider — malformed matchers', () => {
     };
     const { provider } = selectProvider('session', [theta, beta], { buildTarget: 'showroom' });
     expect(provider).toBe('session-beta');
+  });
+
+  it('a matcher with buildTarget and default: true set is illegal — the two phases do not overlap', () => {
+    const iota: SeamCandidate = {
+      seam: 'session',
+      provider: 'session-iota',
+      matcher: { buildTarget: 'lobby', default: true },
+    };
+    // env matches the buildTarget half exactly, so a version of `matches()`
+    // that (wrongly) reads buildTarget first and ignores `default` here
+    // would report `session-iota` as a clean, unambiguous match.
+    const { provider, diagnostics } = selectProvider('session', [iota], { buildTarget: 'lobby' });
+    expect(provider).toBeNull();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('session-iota');
+    expect(diagnostics[0].message).toContain('lobby');
+  });
+
+  it('a matcher with urlParam and default: true set is illegal, symmetrically', () => {
+    const kappa: SeamCandidate = {
+      seam: 'session',
+      provider: 'session-kappa',
+      matcher: { urlParam: 'sessionRef', default: true },
+    };
+    const { provider, diagnostics } = selectProvider('session', [kappa], { urlParams: { sessionRef: 'abc' } });
+    expect(provider).toBeNull();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('session-kappa');
+    expect(diagnostics[0].message).toContain('sessionRef');
+  });
+
+  it('regression: buildTarget+default does not silently win over a real default candidate', () => {
+    // The exact shape reported against this module: a candidate combining
+    // a specific discriminator with `default: true`, alongside a proper
+    // `default: true` candidate. Before this was closed, `matches()` read
+    // only `buildTarget` on the malformed one, so with a matching
+    // buildTarget it silently "won" as if it were a clean specific match,
+    // and `default: true` on it was discarded without a diagnostic.
+    const iota: SeamCandidate = {
+      seam: 'session',
+      provider: 'session-iota',
+      matcher: { buildTarget: 'lobby', default: true },
+    };
+    const { provider, diagnostics } = selectProvider('session', [iota, beta], { buildTarget: 'lobby' });
+    // The malformed candidate is excluded; the genuine default wins instead.
+    expect(provider).toBe('session-beta');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('session-iota');
+    expect(diagnostics[0].message).toContain('lobby');
   });
 });
