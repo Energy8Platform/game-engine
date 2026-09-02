@@ -1,0 +1,6 @@
+rows:
+  - id: reels1
+    config:
+      grid:
+        cols: 5
+        rows: 3

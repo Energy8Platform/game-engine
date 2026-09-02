@@ -11,6 +11,7 @@
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
     "@cordisjs/plugin-server": "1.7.0",
     "@energy8engine/contracts": "*",
+    "@energy8engine/project": "*",
     "@energy8engine/session-dev": "*",
     "cordis": "4.0.0-rc.8",
     "js-yaml": "^4.1.0",

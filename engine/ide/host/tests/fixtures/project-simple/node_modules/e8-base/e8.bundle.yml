@@ -1,0 +1,6 @@
+name: e8-base
+rows:
+  - id: boot1
+    name: '@energy8engine/boot'
+  - id: reels1
+    name: '@energy8engine/reels'

@@ -8,6 +8,7 @@ import Server from '@cordisjs/plugin-server';
 import * as yaml from 'js-yaml';
 import * as clientAssets from './plugins/client-assets';
 import * as composition from './plugins/composition';
+import * as project from './plugins/project';
 import * as rpc from './plugins/rpc';
 
 export interface IdeHostOptions {
@@ -62,6 +63,10 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     const diagnostics = await loadComposition(ctx, options.cwd);
 
     await ctx.plugin(composition, { cwd: options.cwd, bootDiagnostics: diagnostics });
+    // The GAME's composition (e8.profile.yml + bundles + e8.patch.yml) is a
+    // different format from e8.yml above and lives on its own service —
+    // see plugins/project.ts's doc comment for why the two are not merged.
+    await ctx.plugin(project, { cwd: options.cwd });
 
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
     await ctx.plugin(rpc);

@@ -1,4 +1,12 @@
 node_modules/
+# Fixture bundles the project plugin resolves via `<cwd>/node_modules/<name>/e8.bundle.yml`
+# (see engine/ide/host/src/plugins/project.ts) — these are test data, not installed packages.
+!engine/ide/host/tests/fixtures/project-simple/node_modules/
+!engine/ide/host/tests/fixtures/project-simple/node_modules/e8-base/
+!engine/ide/host/tests/fixtures/project-simple/node_modules/e8-base/e8.bundle.yml
+!engine/ide/host/tests/fixtures/project-patched/node_modules/
+!engine/ide/host/tests/fixtures/project-patched/node_modules/e8-base/
+!engine/ide/host/tests/fixtures/project-patched/node_modules/e8-base/e8.bundle.yml
 dist/
 *.js
 *.cjs
