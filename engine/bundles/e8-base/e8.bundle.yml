@@ -1,0 +1,27 @@
+# The baseline row set every slot game composes from — the six packages
+# `createGame` (in `@energy8engine/game-runtime`) wires by hand today. Task
+# 9 deletes that hardcoded wiring and reads this file instead, through
+# `@energy8engine/project`'s `resolveComposition` (see
+# `engine/ide/host/src/plugins/project.ts`, which already resolves this
+# bundle for any project whose `e8.profile.yml` lists `e8-base`).
+#
+# Rows carry no `config` here on purpose — this is the TEMPLATE, not any
+# one game's settings. A project's own `e8.patch.yml` supplies the config
+# each row actually needs (renderer size, reel grid, stage-mechanic
+# binding, ...) by addressing these same row ids. See
+# `engine/examples/first-slot/e8.patch.yml` for the reference patch, and
+# task-8-report.md for which of `main.ts`'s current settings do — and do
+# not — have a home in that patch.
+rows:
+  - id: boot1
+    name: '@energy8engine/boot'
+  - id: renderer1
+    name: '@energy8engine/renderer-pixi'
+  - id: stage1
+    name: '@energy8engine/stage'
+  - id: reels1
+    name: '@energy8engine/reels'
+  - id: mechanics1
+    name: '@energy8engine/game-runtime'
+  - id: playloop1
+    name: '@energy8engine/play-loop'

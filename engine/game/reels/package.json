@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": { ".": "./src/index.ts", "./runtime": "./src/runtime.js" },
+  "e8": { "runtime": { "entry": "./src/runtime.js", "inject": [] }, "hot": false },
   "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
   "dependencies": {
     "@energy8engine/contracts": "*",

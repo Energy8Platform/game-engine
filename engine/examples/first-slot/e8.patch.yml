@@ -1,0 +1,42 @@
+# The delta on top of the `e8-base` bundle: everything `src/main.ts`
+# currently passes as a JS object straight into `createGame` — renderer
+# size, the reel grid, the stage's design resolution, and which mechanic
+# `base_game` is bound to. A patch row replaces its target row's `config`
+# WHOLESALE (not a merge) and addresses it by the id `e8-base`'s own
+# `e8.bundle.yml` assigns; none of these rows need a `name` here because
+# the bundle already placed them.
+#
+# Two things `main.ts` passes today have NO home in this file, on purpose
+# — see task-8-report.md for the full finding, this only names them:
+#
+#  - `reels.resolve` (a `SymbolResolver` function — first-slot's coloured-
+#    square placeholder art) — YAML cannot carry a function. `reels1`'s
+#    row below configures everything ELSE `createReelSystem` needs; the
+#    resolver itself stays wired by hand in `main.ts` until some future
+#    mechanism (a project-local plugin under `plugins/<name>/`, per the
+#    design doc, or an art-supplying service `reels1` reads off `ctx`)
+#    exists to hand it over declaratively.
+#  - `mount` (the live `#mount` DOM element `createGame` renders the boot
+#    failure screen into) — a page-level handle, not composition data;
+#    still `main.ts`'s own job, same as it is today.
+rows:
+  - id: renderer1
+    config:
+      width: 480
+      height: 288
+      background: '#10121a'
+  - id: stage1
+    config:
+      design:
+        width: 480
+        height: 288
+  - id: reels1
+    config:
+      config:
+        grid:
+          cols: 5
+          rows: 3
+  - id: mechanics1
+    config:
+      stages:
+        base_game: classic

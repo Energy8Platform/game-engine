@@ -1,0 +1,4 @@
+# Which bundles this project stacks, and in what order. `first-slot` is
+# the reference project for `e8-base` — one bundle, no local additions.
+bundles:
+  - e8-base

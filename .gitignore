@@ -13,6 +13,12 @@ dist/
 !engine/ide/host/tests/fixtures/dev-game-web/main.js
 !engine/ide/host/tests/fixtures/broken-plugin/index.js
 !engine/examples/probe-plugin/src/client.js
+!engine/game/boot/src/runtime.js
+!engine/game/renderer-pixi/src/runtime.js
+!engine/game/stage/src/runtime.js
+!engine/game/reels/src/runtime.js
+!engine/game/runtime/src/runtime.js
+!engine/game/play-loop/src/runtime.js
 .DS_Store
 package-lock.json
 
