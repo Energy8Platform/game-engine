@@ -915,7 +915,12 @@ git commit -m "e8-base becomes a bundle, and first-slot becomes a profile plus a
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { fakeFetch, row } from '../../loader/tests/helpers';   // see Приложение
+// Duplicated deliberately, not imported across the package boundary: each
+// engine package has its own vitest config and alias, and a relative climb
+// into another workspace's test directory resolves on one machine and not
+// the next. Twelve lines are cheaper than a shared test-utils package for
+// two callers — see Приложение for the canonical text.
+import { fakeFetch, row } from './helpers';
 
 // Stands in for the real network + dynamic import: each row resolves to a
 // half that marks the context, so the test observes composition ORDER and
@@ -961,6 +966,30 @@ describe('createGame composes from the project', () => {
 - [ ] **Шаг 3: Удалить статические импорты состава и делегировать загрузчику**
 
 Механики, `renderer-pixi`, `stage`, `reels`, `play-loop` больше не импортируются в `runtime/src/index.ts`. Ленивый импорт `session-dev` под `config.session` — **сохранить как есть**: причина, по которой он ленивый, никуда не делась.
+
+- [ ] **Шаг 3b: Выбирать провайдера шва через `selectProvider`, а не «какой нашёлся»**
+
+Задача 7 построила `@energy8engine/seam`; **здесь он подключается**, иначе это пакет, чей единственный потребитель — его собственные тесты. `createGame` собирает кандидатов на швы `renderer` и `session` из строк состава (матчер объявлен в манифесте строки) и выбирает провайдера через `selectProvider`. Диагностики выбора попадают в общий список игры.
+
+Дополнительный тест, обязательный:
+
+```ts
+it('a project offering two renderer providers boots with an ambiguity diagnostic, not a silent pick', async () => {
+  const mount = document.createElement('div');
+  const game = await createGame({
+    mount,
+    loader: {
+      fetchFn: fakeFetch({ rows: [row('renderer1'), row('renderer2')], diagnostics: [] }),
+      importModule: importHalf,
+    },
+  });
+  expect(game.ctx.renderer).toBeUndefined();
+  expect(game.diagnostics.some((d) => d.message.includes('renderer1') && d.message.includes('renderer2'))).toBe(true);
+  expect(mount.textContent).toMatch(/renderer/i);
+});
+```
+
+Молчаливый выбор первого подошедшего — худший из возможных исходов: игра запускается, выглядит рабочей и рендерит не тем, чем человек думает.
 
 - [ ] **Шаг 4: Прогнать все затронутые сюиты**
 
@@ -1167,7 +1196,7 @@ export function copyFixtureToTemp(name: string): string {
 | `project-broken-yaml` | `e8.profile.yml` с невалидным YAML | битый разбор → диагностика |
 | `project-wrong-shape` | `e8.profile.yml`, содержащий `bundles: 5` | неверная форма → диагностика |
 
-Бандл `e8-base` фикстуры находят по тому же пути, что и рантайм (`engine/bundles/<name>`), — отдельной копии бандла в фикстурах заводить не нужно.
+**Фикстуры самодостаточны.** Каждый каталог фикстуры несёт свой минимальный `bundles/<name>/e8.bundle.yml`. Хост ищет бандл **сначала рядом с проектом** (`<cwd>/bundles/<name>` и `<cwd>/node_modules/<name>`), и лишь затем — в `engine/bundles/<name>`. Порядок именно такой, потому что у настоящего проекта пользователя нашего репозитория под рукой нет, и фикстура, тайно зависящая от нашей раскладки каталогов, проверяла бы не то. Настоящий `e8-base` появляется только в задаче 8 — фикстуры задачи 4 не должны его ждать.
 
 ### `fakeFetch(body)` и `row(id)` — задача 6
 
