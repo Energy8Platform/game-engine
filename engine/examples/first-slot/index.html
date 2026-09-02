@@ -53,5 +53,55 @@
     <div id="mount"></div>
     <pre id="log"></pre>
     <script type="module" src="/src/main.ts"></script>
+    <!-- THROWAWAY (task 1 spike). Deleted in task 5. -->
+    <script type="module">
+      // THROWAWAY (task 1 spike): can this page dynamically import a module
+      // the HOST serves, while vite owns the same origin? Every attempt is
+      // recorded separately so a failure names which spelling failed.
+      window.__probeReport = { attempts: [], origin: location.origin };
+
+      async function attempt(label, specifier) {
+        const record = { label, specifier, ok: false, applied: null, error: null };
+        try {
+          const mod = await import(/* @vite-ignore */ specifier);
+          const probe = {};
+          mod.apply(probe);
+          record.applied = probe.__probeApplied;
+          record.ok = true;
+        } catch (error) {
+          record.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        }
+        window.__probeReport.attempts.push(record);
+        return record;
+      }
+
+      // 1. Extensionless, relative to whatever origin this document is on.
+      const relative = await attempt('relative', '/probe-runtime-half');
+      window.__probeResult = relative.applied;
+
+      // 2. Same route with an `.mjs` suffix — tells "vite/browser disliked
+      //    the extensionless path" apart from "the route never answered".
+      await attempt('relative.mjs', '/probe-runtime-half.mjs');
+
+      // 3. Absolute, cross-origin URL at the ide-host's own port. Only
+      //    meaningful when this document is NOT already on 5679 — that is
+      //    the 5680-proxy question.
+      await attempt('absolute-5679', `${location.protocol}//${location.hostname}:5679/probe-runtime-half.mjs`);
+
+      // Raw fetch of the same URL, so the report carries the network facts
+      // (status + content-type) next to the import outcome.
+      try {
+        const res = await fetch('/probe-runtime-half');
+        window.__probeReport.fetch = {
+          status: res.status,
+          contentType: res.headers.get('content-type'),
+          body: (await res.text()).slice(0, 120),
+        };
+      } catch (error) {
+        window.__probeReport.fetch = { error: String(error) };
+      }
+
+      window.__probeReport.done = true;
+    </script>
   </body>
 </html>
