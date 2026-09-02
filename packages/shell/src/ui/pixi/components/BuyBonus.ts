@@ -81,6 +81,9 @@ class BuyBonusOverlay extends Container implements ShellLayer {
   private dragFrom = 0;
   private dragBase = 0;
   private dragged = false; // a tap that actually moved → suppress the card select
+  // The wheel is a canvas listener, not a Pixi event: Pixi's federated events don't carry `wheel`.
+  private canvas?: HTMLCanvasElement;
+  private wheelHandler?: (e: WheelEvent) => void;
 
   constructor(host: PixiComponentContext, bonuses: BonusOption[]) {
     super();
@@ -97,6 +100,43 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     this.on('pointerup', this.onDragUp);
     this.on('pointerupoutside', this.onDragUp);
     this.resize(host.screenW, host.screenH);
+    // Stake asked for this band to be "scrollable, not only draggable": on a Popout S frame the
+    // cards stack past the bottom, and a drag was the only way to reach the last one. Every other
+    // scroll region in this shell (ScrollBox) already takes the wheel; this strip rolls its own
+    // scroll, so it needs its own listener.
+    if (host.canvas) {
+      this.canvas = host.canvas;
+      this.wheelHandler = (e: WheelEvent) => {
+        // Swallowed whether or not we scroll: on Stake the game is an iframe, and a wheel this
+        // overlay ignores scrolls the casino page behind it (same rule as ScrollBox).
+        e.preventDefault();
+        if (this.confirm) return; // the confirm card is on top — don't move the strip beneath it
+        // A mouse reports deltaY on either layout; a trackpad swipe across the horizontal row
+        // reports deltaX. Take whichever axis the gesture actually favoured.
+        this.scrollBy(Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY);
+      };
+      this.canvas.addEventListener('wheel', this.wheelHandler, { passive: false });
+    }
+  }
+
+  /** Move the card band `delta` px along its scroll axis, clamped to the drag's own range. The
+   *  wheel's entry point; the drag writes `dragX` straight from the pointer delta. */
+  private scrollBy(delta: number): void {
+    if (this.destroyed || this.dragMax <= 0) return;
+    const next = clamp(-this.dragMax, this.dragX - delta, 0);
+    if (next === this.dragX) return;
+    this.dragX = next;
+    if (this.dragAxis === 'x') this.strip.position.x = this.dragBaseX + this.dragX;
+    else this.strip.position.y = this.dragBaseY + this.dragX;
+    this.syncScrollCue();
+  }
+
+  /** Drop the canvas listener. Called from both onRemove (the normal close) and destroy, so a
+   *  layer torn down without onRemove can't leave a handler swallowing every wheel on the page. */
+  private detachWheel(): void {
+    if (this.canvas && this.wheelHandler) this.canvas.removeEventListener('wheel', this.wheelHandler);
+    this.wheelHandler = undefined;
+    this.canvas = undefined;
   }
 
   private onDragDown = (e: FederatedPointerEvent): void => {
@@ -593,7 +633,12 @@ class BuyBonusOverlay extends Container implements ShellLayer {
     /* cards already sized to the area */
   }
   onRemove(): void {
-    /* nothing extra */
+    this.detachWheel();
+  }
+
+  destroy(options?: Parameters<Container['destroy']>[0]): void {
+    this.detachWheel();
+    super.destroy(options);
   }
 }
 
