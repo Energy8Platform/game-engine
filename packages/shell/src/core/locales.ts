@@ -867,7 +867,7 @@ const BASE_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
 // Kept in a separate block (grouped per language, not interleaved) because these are long legal
 // sentences, MACHINE-TRANSLATED and pending native QA. The keys are the exact English source lines
 // the Stake bridge emits (see @energy8platform/stake-bridge `buildDisclaimer`). The copyright/brand
-// line ("TM and © {year} Stake Engine.") is deliberately omitted — it renders verbatim.
+// line ("TM and © {year} Engine.") is deliberately omitted — it renders verbatim.
 const D = {
   L1: 'Malfunction voids all wins and plays.',
   L2: 'A consistent internet connection is required. In the event of a disconnection, reload the game to finish any uncompleted rounds.',

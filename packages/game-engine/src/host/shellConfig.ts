@@ -61,7 +61,7 @@ export interface ShellRuntime {
   /** Social-casino mode from initData (`config.socialMode`); swaps shell vocabulary. */
   social?: boolean;
   /** Disclaimer lines the PLATFORM supplied (`initData.config.disclaimerLines` — in practice the
-   *  Stake bridge, which appends its own "TM and © {year} Stake Engine." to the mandated body).
+   *  Stake bridge, which appends its own "TM and © {year} Engine." to the mandated body).
    *  They outrank the default. When absent — Artube, dev, any other host — the shell's canonical
    *  `DISCLAIMER_LINES` are used: the same mandated wording, minus a mark that isn't theirs. The
    *  disclaimer is required legal copy, so there is no case where the section is simply missing. */
@@ -260,8 +260,8 @@ function winsSection(model: GameModel): GameInfoSection | null {
 /** Title of the legal disclaimer section — used to build it and to exempt it from socialization. */
 const DISCLAIMER_TITLE = 'DISCLAIMER';
 
-/** The copyright/brand line ("TM and © {year} Stake Engine.") is shown verbatim; the legal body
- *  lines localize. Detecting the brand keeps "Stake Engine" out of the translation lookup entirely. */
+/** The copyright/brand line ("TM and © {year} Engine.") is shown verbatim; the legal body
+ *  lines localize. Detecting the brand keeps " Engine" out of the translation lookup entirely. */
 function isBrandLine(line: string): boolean {
   return /stake\s+engine/i.test(line);
 }

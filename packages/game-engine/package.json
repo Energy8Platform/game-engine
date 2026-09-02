@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/game-engine",
-  "version": "0.43.2",
+  "version": "0.43.3",
   "description": "Universal casino game engine built on PixiJS v8 and @energy8platform/game-sdk",
   "type": "module",
   "main": "./dist/index.cjs.js",
@@ -94,7 +94,7 @@
   },
   "dependencies": {
     "@energy8platform/platform-core": ">=0.33.0",
-    "@energy8platform/shell": ">=0.11.1"
+    "@energy8platform/shell": ">=0.11.2"
   },
   "peerDependencies": {
     "@energy8platform/game-sdk": "^2.9.0",

@@ -124,7 +124,7 @@ describe('host-i18n: per-game i18n map', () => {
 describe('host-i18n: legal disclaimer localization', () => {
   const DISCLAIMER = [
     'Malfunction voids all wins and plays.',
-    'TM and © 2026 Stake Engine.',
+    'TM and © 2026 Engine.',
   ];
   const findDisclaimer = (c: ReturnType<typeof buildShellConfig>): string =>
     ((c.gameInfo.sections ?? []).find(
@@ -139,7 +139,7 @@ describe('host-i18n: legal disclaimer localization', () => {
     );
     const html = findDisclaimer(c);
     expect(html).toContain('Сбой аннулирует все выигрыши и игры.'); // body localized
-    expect(html).toContain('TM and © 2026 Stake Engine.'); // brand line untouched
+    expect(html).toContain('TM and © 2026 Engine.'); // brand line untouched
   });
 
   it('never socializes the legal body — en + social keeps a restricted word verbatim', () => {
@@ -163,7 +163,7 @@ describe('host-i18n: legal disclaimer localization', () => {
     const html = findDisclaimer(c);
     expect(html).toContain('Malfunction voids all wins and plays.'); // English source, not the ru translation
     expect(html).not.toContain('Сбой'); // the ru translation must NOT leak in social mode
-    expect(html).toContain('TM and © 2026 Stake Engine.');
+    expect(html).toContain('TM and © 2026 Engine.');
   });
 
   it('localizes the canonical body from shell LOCALES (ru) without a per-game map', () => {
@@ -174,7 +174,7 @@ describe('host-i18n: legal disclaimer localization', () => {
     );
     const html = findDisclaimer(c);
     expect(html).toContain('Сбой аннулирует все выигрыши и игры.'); // shipped LOCALES translation
-    expect(html).toContain('TM and © 2026 Stake Engine.'); // brand line still verbatim
+    expect(html).toContain('TM and © 2026 Engine.'); // brand line still verbatim
   });
 
   it('falls back to the source line when no translation exists', () => {

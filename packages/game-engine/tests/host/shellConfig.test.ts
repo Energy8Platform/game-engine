@@ -291,10 +291,10 @@ describe('buildShellConfig (runtime ctx)', () => {
       buildShellConfig({}, model, {
         balance: 0,
         mode: 'base',
-        disclaimerLines: ['Malfunction voids all wins.', 'TM and © 2026 Stake Engine.'],
+        disclaimerLines: ['Malfunction voids all wins.', 'TM and © 2026 Engine.'],
       }),
     );
-    expect(html).toContain('TM and © 2026 Stake Engine.');
+    expect(html).toContain('TM and © 2026 Engine.');
     expect((html.match(/<p>/g) ?? []).length).toBe(2); // ровно то, что прислал мост
   });
 
