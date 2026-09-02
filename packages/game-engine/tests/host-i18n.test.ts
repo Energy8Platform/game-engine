@@ -119,6 +119,25 @@ describe('host-i18n: per-game i18n map', () => {
     const card = buyBonus.find((o) => o.id === 'buy_bonus');
     expect(card?.title).toBe('GET BONUS');
   });
+
+  // Stake's rule for a social launch: English is the ONLY supported language. A social session can
+  // still arrive with `?lang=ru` on the URL, and a game that ships a Russian catalog would then
+  // render Russian copy that no social dictionary can rewrite — the restricted vocabulary would
+  // walk straight through. The game's own map has to lose to social, not just the shell's.
+  it('social outranks a non-English language AND the game i18n map', () => {
+    const c = buildShellConfig(
+      { i18n: RU_MESSAGES },
+      model,
+      { balance: 0, mode: 'base', language: 'ru', social: true },
+    );
+    const card = (c.features.buyBonus as Array<{ id: string; title: string; description: string }>)
+      .find((o) => o.id === 'buy_bonus');
+    expect(card?.title).toBe('GET BONUS');            // socialized English, not 'КУПИТЬ'
+    expect(card?.description).toBe('Skip to the bonus');
+    const paytable = (c.gameInfo.sections ?? []).find((s) => s.type === 'paytable') as
+      { rows: Array<{ symbol: { text?: string } }> } | undefined;
+    expect(paytable?.rows[0].symbol.text).toBe('CROWN'); // not 'КОРОНА'
+  });
 });
 
 describe('host-i18n: legal disclaimer localization', () => {

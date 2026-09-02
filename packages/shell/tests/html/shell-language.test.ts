@@ -51,6 +51,14 @@ describe('shell language', () => {
     expect(shell.t('Buy bonus')).toBe('Bonus kaufen');
   });
 
+  // The launch-time case, which is the one Stake exercises: a social session still carries the
+  // operator's `?lang=` on the URL. English is the only language a social build supports, so the
+  // requested locale has to lose at construction, not just on a later setLanguage.
+  it('social forces English when the shell is CREATED with a non-English language', () => {
+    const shell = createGameShell({ ...base(), language: 'de', isSocial: true });
+    expect(shell.t('Buy bonus')).toBe('Get bonus'); // socialized English, not 'Bonus kaufen'
+  });
+
   it('social forces English even after setLanguage', () => {
     const shell = createGameShell({ ...base(), language: 'en', isSocial: true });
     expect(shell.t('Buy bonus')).toBe('Get bonus');
