@@ -8,12 +8,34 @@ export interface E8ClientHalf {
   inject: string[];
 }
 
-/** The game half of a plugin, loaded into the running game at runtime. */
+/**
+ * The game half of a plugin, loaded into the running game at runtime.
+ *
+ * No `inject`, deliberately — the client half has one, this does not, and
+ * the asymmetry is real rather than an oversight. A CLIENT half is applied
+ * through cordis (`ctx.plugin()`), which honours `inject` by holding the
+ * plugin pending until the named services exist. A RUNTIME half is not:
+ * `composeFromProject` calls `module.apply?.(ctx, config)` directly, so
+ * nothing on this path would ever read an `inject` list. The field existed,
+ * was parsed, was typed, and was declared in six package.json files while
+ * being read by nothing — a promise of dependency ordering that the loader
+ * does not keep.
+ *
+ * What actually orders runtime rows is their ORDER in the resolved
+ * composition: bundles in profile order, then patch layers, applied one at
+ * a time with `await` (see `@energy8engine/loader`). A row that needs
+ * another row's service must either come after it in the composition, or
+ * reach it reactively with `ctx.inject([...], cb)` from inside its own
+ * `apply` — which is what `@energy8engine/reels`'s runtime half does.
+ *
+ * Honouring `inject` instead of removing it would mean the loader either
+ * topologically sorting rows or skipping rows whose injects are absent.
+ * Both are real designs with real trade-offs; neither is a thing to pick
+ * at the end of a plan.
+ */
 export interface E8RuntimeHalf {
   /** Module path inside the package, relative to its root. */
   entry: string;
-  /** Runtime services this half needs before it can register anything. */
-  inject: string[];
 }
 
 /**
@@ -124,10 +146,7 @@ export function parseManifest(
         ),
       );
     } else {
-      const inject = Array.isArray(runtime.inject)
-        ? runtime.inject.filter((v): v is string => typeof v === 'string')
-        : [];
-      manifest.runtime = { entry: runtime.entry, inject };
+      manifest.runtime = { entry: runtime.entry };
     }
   }
 

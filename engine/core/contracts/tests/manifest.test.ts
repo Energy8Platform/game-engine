@@ -42,19 +42,24 @@ describe('parseManifest', () => {
 
   it('reads the runtime half', () => {
     const { manifest, diagnostics } = parseManifest(
-      { e8: { runtime: { entry: './runtime.js', inject: ['session'] }, hot: true } },
+      { e8: { runtime: { entry: './runtime.js' }, hot: true } },
       'probe-plugin',
     );
     expect(diagnostics).toEqual([]);
-    expect(manifest).toEqual({
-      runtime: { entry: './runtime.js', inject: ['session'] },
-      hot: true,
-    });
+    expect(manifest).toEqual({ runtime: { entry: './runtime.js' }, hot: true });
   });
 
-  it('defaults runtime inject to empty', () => {
-    const { manifest } = parseManifest({ e8: { runtime: { entry: './r.js' } } }, 'p');
-    expect(manifest).toEqual({ runtime: { entry: './r.js', inject: [] }, hot: false });
+  it('ignores an inject list on the runtime half — a runtime half has no such thing', () => {
+    // The field was parsed, typed and declared in six package.json files
+    // while being read by nothing: a runtime half is applied by
+    // `composeFromProject` calling `apply()` directly, never through
+    // `ctx.plugin()`, so cordis's dependency gating never sees it. Rows
+    // are ordered by the composition. See `E8RuntimeHalf`'s doc comment.
+    const { manifest } = parseManifest(
+      { e8: { runtime: { entry: './r.js', inject: ['renderer'] } } },
+      'p',
+    );
+    expect(manifest).toEqual({ runtime: { entry: './r.js' }, hot: false });
   });
 
   it('warns and drops the runtime half when entry is missing', () => {

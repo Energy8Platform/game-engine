@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "exports": { ".": "./src/index.ts", "./runtime": "./src/runtime.ts" },
   "e8": {
-    "runtime": { "entry": "./src/runtime.ts", "inject": [] },
+    "runtime": { "entry": "./src/runtime.ts" },
     "seam": { "name": "renderer", "matcher": { "default": true } },
     "hot": false
   },
