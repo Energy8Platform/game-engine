@@ -25,8 +25,9 @@ export interface AutoplayDeps {
 }
 
 export interface Autoplay {
-  /** Begin an autoplay run of `count` rounds (no-op if already running or count ≤ 0). Also how a
-   *  halted run RESUMES: the shell sends the preserved count back (`start(remaining)`). */
+  /** Begin an autoplay run of `count` rounds (no-op if a run is already active, or count ≤ 0).
+   *  Also how a halted run RESUMES: the shell sends the preserved count back (`start(remaining)`),
+   *  and how a player restarts straight after STOP, while the stopped round is still playing out. */
   start(count: number): void;
   /** Stop the run and clear the counter — the player pressed STOP, or the budget ran out. */
   stop(): void;
@@ -86,11 +87,18 @@ export function createAutoplayLoop(deps: AutoplayDeps): Autoplay {
 
   return {
     start(count: number): void {
-      if (active || running || count <= 0) return;
+      if (active || count <= 0) return;
       active = true;
       remaining = count;
       deps.onState({ active: true, remaining });
-      void loop();
+      // `running` bars a SECOND loop, not a new run. After stop(), the round already in flight keeps
+      // animating and the loop stays parked on `await playRound`, so `running` is still true for as
+      // long as that takes — several seconds through a win. Bailing here made the restart a silent
+      // no-op, and silent is what hurt: ShellController.startAutoplay has already lit the disc with
+      // the chosen count, so the player saw autoplay running with a counter that never moved.
+      // The parked loop re-reads `active`/`remaining` on its next turn and simply carries on with
+      // the new budget — no second loop, nothing dropped.
+      if (!running) void loop();
     },
     stop,
     halt,
