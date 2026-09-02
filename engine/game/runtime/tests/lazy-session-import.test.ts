@@ -77,6 +77,10 @@ vi.mock('@energy8engine/session-dev', () => {
 });
 
 import { createGame, type GameApp } from '../src/index';
+import { fakeFetch } from './helpers';
+
+/** No rows, no host — this file is about an import that happens before any of that. */
+const noComposition = { fetchFn: fakeFetch({ rows: [], diagnostics: [] }) };
 
 let game: GameApp | undefined;
 afterEach(async () => {
@@ -95,12 +99,12 @@ describe('createGame — session-dev is imported lazily, not statically', () => 
   });
 
   it('does not resolve session-dev when config.session is not set', async () => {
-    game = await createGame({});
+    game = await createGame({ loader: noComposition });
     expect(moduleEvaluatedSpy).not.toHaveBeenCalled();
   });
 
   it('does resolve (and apply) session-dev once config.session is set — proves the mock is genuinely wired, not vacuously passing', async () => {
-    game = await createGame({ session: { gamesDir: '/tmp/unused', port: 0 } });
+    game = await createGame({ session: { gamesDir: '/tmp/unused', port: 0 }, loader: noComposition });
     expect(moduleEvaluatedSpy).toHaveBeenCalledTimes(1);
     expect(applySpy).toHaveBeenCalledTimes(1);
   });

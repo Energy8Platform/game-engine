@@ -55,6 +55,77 @@ describe('GET /api/composition', () => {
     expect(body.diagnostics.length).toBeGreaterThan(0);
   });
 
+  it("carries a row's seam declaration, so the browser can tell candidates apart before applying any", async () => {
+    // Only the host can read a package manifest, so `e8.seam` reaches the
+    // game the same way `runtimeUrl` does — attached per row. Without it
+    // the browser has no way to know two rows are competing to provide
+    // the same capability, and picking one silently is the failure the
+    // seam exists to prevent.
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-seam-'));
+    const nodeModules = join(workspace, 'node_modules');
+    mkdirSync(nodeModules);
+
+    const seamDir = join(nodeModules, 'seam-pkg');
+    mkdirSync(seamDir);
+    writeFileSync(
+      join(seamDir, 'package.json'),
+      JSON.stringify({
+        name: 'seam-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js' }, seam: { name: 'renderer', matcher: { default: true } } },
+      }),
+    );
+    writeFileSync(join(seamDir, 'index.js'), 'export function apply() {}\n');
+    writeFileSync(join(seamDir, 'runtime.js'), 'export function apply() {}\n');
+
+    // The same package shape with no `e8.seam` at all — a row that is not
+    // a candidate for anything, which is what most rows are.
+    const plainDir = join(nodeModules, 'plain-pkg');
+    mkdirSync(plainDir);
+    writeFileSync(
+      join(plainDir, 'package.json'),
+      JSON.stringify({
+        name: 'plain-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js' } },
+      }),
+    );
+    writeFileSync(join(plainDir, 'index.js'), 'export function apply() {}\n');
+    writeFileSync(join(plainDir, 'runtime.js'), 'export function apply() {}\n');
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-seam-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-seam-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'e8.bundle.yml'),
+      [
+        'name: e8-seam-fixture',
+        'rows:',
+        '  - id: renderer1',
+        '    name: seam-pkg',
+        '  - id: reels1',
+        '    name: plain-pkg',
+        '',
+      ].join('\n'),
+    );
+
+    host = await createIdeHost({ cwd: workspace, port: 0 });
+    const body = await (await fetch(`${host.url}/api/composition`)).json();
+
+    expect(body.rows.find((r: { id: string }) => r.id === 'renderer1').seam).toEqual({
+      name: 'renderer',
+      matcher: { default: true },
+    });
+    expect(body.rows.find((r: { id: string }) => r.id === 'reels1').seam).toBeUndefined();
+  });
+
   it('reloads from disk on every call, so an edit is reflected without restarting the host', async () => {
     // Same edit `project.test.ts`'s "reload() picks up an edited patch"
     // makes directly against `ctx.project.reload()` — this proves the HTTP

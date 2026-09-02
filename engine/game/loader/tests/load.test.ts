@@ -136,6 +136,65 @@ describe('composeFromProject', () => {
     expect(diags[0].message).toContain('async nope');
   });
 
+  it('applies only the rows the caller planned, and carries the plan diagnostics', async () => {
+    // The mutation this catches: ignoring `plan` and applying
+    // `composition.rows` anyway. A seam has exactly one provider, so a
+    // loader that quietly applies both candidates has already done the
+    // thing the seam exists to prevent — and the diagnostic explaining
+    // the choice would never reach the screen either.
+    const ctx = new Context();
+    const applied: string[] = [];
+
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a'), row('b')], diagnostics: [] }),
+      importModule: async (url) => ({ apply: () => applied.push(url) }),
+      plan: (rows) => ({
+        rows: rows.filter((r) => r.id === 'b'),
+        diagnostics: [{ severity: 'error', plugin: 'seam', where: 'plan', message: 'a lost' }],
+      }),
+    });
+
+    expect(applied).toEqual(['/plugin-runtime/b']);
+    expect(diags.map((d) => d.message)).toEqual(['a lost']);
+  });
+
+  it('awaits the plan, so what the caller brings up is in place before the first row applies', async () => {
+    // `plan` is where a caller composes what only IT can supply — the
+    // session, the mount, the art — and a row applied before that landed
+    // would read a context that isn't ready yet.
+    const ctx = new Context();
+    const order: string[] = [];
+
+    await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a')], diagnostics: [] }),
+      importModule: async () => ({ apply: () => order.push('row') }),
+      plan: async (rows) => {
+        await Promise.resolve();
+        order.push('plan');
+        return { rows, diagnostics: [] };
+      },
+    });
+
+    expect(order).toEqual(['plan', 'row']);
+  });
+
+  it('a plan that throws composes nothing and says so, rather than falling back to everything', async () => {
+    const ctx = new Context();
+    const applied: string[] = [];
+
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a')], diagnostics: [] }),
+      importModule: async () => ({ apply: () => applied.push('a') }),
+      plan: () => {
+        throw new Error('plan blew up');
+      },
+    });
+
+    expect(applied).toEqual([]);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toContain('plan blew up');
+  });
+
   it('carries the host project diagnostics through', async () => {
     const ctx = new Context();
     const diags = await composeFromProject(ctx, {

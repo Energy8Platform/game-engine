@@ -12,37 +12,65 @@
  * — the `SymbolResolver` that turns a symbol id into the actual pixi view
  * a player sees — is a JavaScript function, the one piece of a real game's
  * own art this framework cannot ask a `.yml` file to hold. See
- * task-8-report.md for the full finding; this only guards it at the seam.
+ * task-8-report.md for the full finding.
  *
- * Deliberately **not** `inject: ['renderer']`/`['stage']` — mirrors
- * `engine/game/runtime/src/plugins/reels.ts`'s reasoning: the board's
- * construction needs no live renderer (measured headless), only mounting
- * its view into the stage does, and that half is ordered through
- * `ctx.inject`, not a static dependency.
+ * So it arrives the other way a value can reach a row: off `ctx`, from an
+ * `assets` service somebody provided before this row applied. Today that
+ * somebody is the caller (`createGame({ provide: { assets: { resolve } } })`
+ * — the game's own page holds its art the same way it holds its `mount`);
+ * tomorrow it can be an `assets` ROW, with no change here, which is
+ * exactly the "art-supplying service `reels1` reads off `ctx`" that
+ * `engine/examples/first-slot/e8.patch.yml` already names as the way out.
+ * A `resolve` in the row's own config still wins, so a project that has
+ * some other channel to a function keeps working.
+ *
+ * The read goes through `ctx.reflect.get('assets', false)`, not
+ * `ctx.assets`: cordis throws on a plain property read of a registered
+ * service this plugin did not `inject`, and a static `inject: ['assets']`
+ * is worse than that — it would make a game with no art supplier hang
+ * silently on a board that never builds instead of saying so.
+ *
+ * Deliberately **not** `inject: ['renderer']`/`['stage']`: the board's
+ * construction needs no live renderer (measured headless — see
+ * task-10-report.md), only mounting its view into the stage does, and
+ * that half is ordered through `ctx.inject`, not a static dependency, so
+ * it runs whenever `stage` appears and simply never runs when it does
+ * not. A board nobody can see is still a board a headless play-through
+ * can drive.
  */
 import type { Context } from 'cordis';
 import { createReelsBoard, type ReelsBoard } from './index';
-import type { CreateReelSystemOptions } from '@energy8platform/game-engine/slot';
+import type { CreateReelSystemOptions, SymbolResolver } from '@energy8platform/game-engine/slot';
 import type { Stage } from '@energy8engine/stage';
+
+/** What this row needs from whoever supplies the game's art. */
+export interface AssetsService {
+  /** Turns a symbol id into the pixi view a player actually sees. */
+  resolve: SymbolResolver;
+}
 
 declare module 'cordis' {
   interface Context {
     board: ReelsBoard;
     stage: Stage;
+    assets: AssetsService;
   }
 }
 
 export const name = 'reels';
 
-/** `config` is `CreateReelSystemOptions` — `{ resolve, config: { grid }, ... }` — see the module doc on `resolve`. */
-export function apply(ctx: Context, config: CreateReelSystemOptions): void {
-  if (typeof config?.resolve !== 'function') {
+/** `config` is `CreateReelSystemOptions` minus `resolve` — `{ config: { grid }, ... }` — see the module doc on where `resolve` comes from. */
+export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): void {
+  const assets = ctx.reflect.get('assets', false) as AssetsService | undefined;
+  const resolve = config?.resolve ?? assets?.resolve;
+  if (typeof resolve !== 'function') {
     throw new Error(
-      'reels1 requires config.resolve (a SymbolResolver) — no bundle/patch row can supply a function; see task-8-report.md',
+      'reels1 needs a symbol resolver: provide an `assets` service with resolve(symbolId), ' +
+        'since no bundle/patch row can carry a function; see task-8-report.md',
     );
   }
 
-  const board = createReelsBoard(config);
+  const board = createReelsBoard({ ...config, resolve } as CreateReelSystemOptions);
   ctx.effect(() => () => board.destroy(), 'reels:board');
   ctx.provide('board', board);
 

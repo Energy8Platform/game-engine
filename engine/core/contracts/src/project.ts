@@ -4,6 +4,7 @@
  * then the home patch, then --patch) lives in `@energy8engine/project`, and
  * reading files lives in the host. These are the shapes those two agree on.
  */
+import type { E8SeamDeclaration } from './manifest';
 
 /** `e8.profile.yml` — which bundles stack, and in what order. */
 export interface Profile {
@@ -58,6 +59,15 @@ export interface GameCompositionRow extends ResolvedRow {
    * declares no runtime half at all.
    */
   runtimeUrl: string | null;
+  /**
+   * Present when the row's package declares `e8.seam` — it is a CANDIDATE
+   * to provide that capability, not the certain provider. The game picks
+   * between candidates through `@energy8engine/seam`'s `selectProvider`
+   * and applies only the winner, so two rows both offering `renderer` is
+   * a diagnostic rather than a silent first-one-wins. Computed by the
+   * host from the package manifest, the same way `runtimeUrl` is.
+   */
+  seam?: E8SeamDeclaration;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

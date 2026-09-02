@@ -131,7 +131,11 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     const rows = ctx.project.composition.rows.map((row) => {
       const pkg = readPackageJson(config.cwd, row.name);
       const manifest = pkg ? parseManifest(pkg.json, row.id).manifest : null;
-      return { ...row, runtimeUrl: resolveRuntimeUrl(row, manifest, pkg) };
+      // `seam` rides along for the same reason `runtimeUrl` does: only
+      // the host can read a package's manifest, and the browser has to
+      // know which rows are competing to provide a capability before it
+      // applies any of them (see `GameCompositionRow.seam`).
+      return { ...row, runtimeUrl: resolveRuntimeUrl(row, manifest, pkg), seam: manifest?.seam };
     });
     res.json({ rows, diagnostics: ctx.project.diagnostics });
   });

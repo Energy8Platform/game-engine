@@ -2,19 +2,32 @@
  * `first-slot`'s browser entry — what `e8 dev`'s `dev-game` plugin serves
  * through vite, and what Task 12's preview iframe points at (same server,
  * see `engine/ide/client/src/screens/CompositionScreen.tsx`'s `Preview`).
- * This is the minimal "open, click spin" harness the SDD plan's Task 11
- * needs, not a finished game shell: a real `createGame` (session-less — the
- * math session lives server-side, in `dev-game`'s own `ctx.session`,
- * reached over `POST /api/spin`) with a plain placeholder symbol resolver
- * standing in for real art, plus a `<select>` to switch `base_game` between
- * the two shipped mechanics — the plan's own demonstration that the same
- * spin plays differently depending on which one is bound (see the SDD
- * ledger's Ruling 2/3).
+ * This is the minimal "open, click spin" harness, not a finished game
+ * shell.
  *
- * `SpinResult` (from `POST /api/spin`) is shipped across unchanged — see
- * `session-dev`'s own type doc — and driven straight through
- * `ctx.mechanics`/`ctx.board`/`executePlan`, the same seam `createGame`'s
- * own test suite exercises against fakes.
+ * **What this file no longer does.** It used to hand `createGame` the
+ * renderer size, the stage's design resolution, the reel grid and the
+ * stage→mechanic binding as a JS object. All four now live in this
+ * project's own `e8.patch.yml`, on top of the `e8-base` bundle its
+ * `e8.profile.yml` stacks: `createGame` fetches that composition from the
+ * host and applies each row's runtime half. Changing the grid is an edit
+ * to a `.yml` file, and adding a plugin is a row — neither is a change to
+ * this file or to the engine.
+ *
+ * What is left is exactly what a project file cannot hold:
+ *  - `resolve`, a function: the placeholder art below. It travels as the
+ *    `assets` service, which `reels1`'s runtime half reads off `ctx` (see
+ *    `@energy8engine/reels`'s `src/runtime.ts`). A real game replaces this
+ *    with its own art and changes nothing else.
+ *  - `mount`, a live DOM element: this page's own `#mount`. It travels the
+ *    same way — `createGame` provides it as the `mount` service, the
+ *    renderer row attaches its canvas to it, and `createGame` draws the
+ *    failure screen on it when something went wrong.
+ *
+ * Everything the game then does — the registry, the board, executing a
+ * presentation plan — is reached through `game.ctx`, off services rows
+ * provided. There is no static import of a mechanic, a renderer, or the
+ * play loop here; that is the property this whole slice was built for.
  *
  * `@energy8engine/ide-bridge` (Task 12) is composed directly into
  * `game.ctx` below — the "hot fork to the game": it opens the SAME `/ide`
@@ -29,12 +42,19 @@
 import { Container, Graphics, Text } from 'pixi.js';
 import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/slot';
 import { createGame } from '@energy8engine/game-runtime';
-import { executePlan } from '@energy8engine/play-loop';
 import * as ideBridge from '@energy8engine/ide-bridge';
-import type { Diagnostic, PresentationPlan, SpinResult } from '@energy8engine/contracts';
+import type { PresentationPlan, SpinResult } from '@energy8engine/contracts';
+// Type-only, and fully erased: these two modules are what DECLARE the
+// `ctx.board` and `ctx.play` services this page reads off the composed
+// context. Importing their types is not importing them — nothing here
+// pulls `reels` or `play-loop` into the bundle, and neither package is
+// composed by this file. It is the page saying, in the type system, which
+// capabilities it expects the project's composition to have provided.
+import type {} from '@energy8engine/reels/runtime';
+import type {} from '@energy8engine/play-loop/runtime';
 
+/** Matches `e8.patch.yml`'s `reels1` grid — this file only uses it to size the placeholder art. */
 const CELL = 96;
-const GRID = { cols: 5, rows: 3 };
 const COLORS = [0xef4444, 0xf59e0b, 0xeab308, 0x22c55e, 0x38bdf8, 0xa78bfa];
 
 /** Colored square + symbol id — a stand-in for real art (see energy8-slots:generating-assets for that). */
@@ -65,26 +85,16 @@ function log(message: string): void {
 }
 
 const game = await createGame({
-  renderer: { width: GRID.cols * CELL, height: GRID.rows * CELL, background: '#10121a' },
-  stage: { design: { width: GRID.cols * CELL, height: GRID.rows * CELL } },
-  reels: { resolve, config: { grid: GRID } },
-  stages: { base_game: mechanicSelect.value },
   mount,
+  // The one value with no home in a `.yml` row: a function.
+  provide: { assets: { resolve } },
 });
 
 if (game.diagnostics.length > 0) {
   statusEl.textContent = 'composition has errors — see log';
   for (const d of game.diagnostics) log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`);
-}
-
-if (game.ctx.renderer) {
-  // Boot only renders a failure screen into `mount` on error — a
-  // successful start leaves it untouched (see @energy8engine/boot's
-  // module doc), so mounting the live canvas here never fights that.
-  mount.appendChild(game.ctx.renderer.app.canvas);
-  statusEl.textContent = 'ready';
 } else {
-  statusEl.textContent = 'no renderer — see log';
+  statusEl.textContent = 'ready';
 }
 
 // `ide-bridge`'s own boot-time bind uses `mechanicSelect.value` too, so the
@@ -105,6 +115,9 @@ mechanicSelect.addEventListener('change', () => {
  * the latter is observing exactly what a real spin would have produced,
  * not a shortcut built just for the test.
  *
+ * `ctx.play.execute` and `ctx.board` are both services rows provided
+ * (`playloop1` and `reels1`) — this file imports neither package.
+ *
  * Returns the full `PresentationPlan`, not just each step's `kind` — a
  * step's content (which board `spinTo`/`refill` name, which cells `remove`
  * names) is exactly what a person watching the board actually sees, and a
@@ -124,7 +137,7 @@ async function presentStage(
 
   const mechanic = game.ctx.mechanics.forStage(stage)!;
   const plan = mechanic.present(data);
-  const problems = await executePlan(plan, game.ctx.board);
+  const problems = await game.ctx.play.execute(plan, game.ctx.board);
   if (problems.length > 0) log(`presentation problems: ${JSON.stringify(problems)}`);
   return plan;
 }
@@ -139,10 +152,10 @@ spinBtn.addEventListener('click', async () => {
     // `dev-game`'s route responds with the bare `SpinResult` (contracts'
     // normative envelope for this crossing) on 2xx, or `{ diagnostics }`
     // on a non-2xx — see dev-game.ts's own route handler.
-    const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
+    const body: SpinResult | { diagnostics: unknown[] } = await res.json();
 
     if (!res.ok) {
-      log(`spin failed: ${JSON.stringify((body as { diagnostics: Diagnostic[] }).diagnostics)}`);
+      log(`spin failed: ${JSON.stringify((body as { diagnostics: unknown[] }).diagnostics)}`);
       statusEl.textContent = 'spin failed — see log';
       return;
     }
@@ -172,12 +185,16 @@ spinBtn.addEventListener('click', async () => {
  * imports this file's test harness, either.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
+  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". */
+  diagnostics: game.diagnostics,
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
   async spin(): Promise<{ result: SpinResult; steps: PresentationPlan }> {
     const res = await fetch('/api/spin', { method: 'POST' });
-    const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
+    const body: SpinResult | { diagnostics: unknown[] } = await res.json();
     if (!res.ok) {
-      throw new Error(`spin failed: ${JSON.stringify((body as { diagnostics: Diagnostic[] }).diagnostics)}`);
+      throw new Error(
+        `spin failed: ${JSON.stringify((body as { diagnostics: unknown[] }).diagnostics)}`,
+      );
     }
     const result = body as SpinResult;
     lastSpin = { stage: result.stage, data: result.data };

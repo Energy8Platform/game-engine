@@ -39,13 +39,14 @@
  * diagnostic does: `selectProvider` flags them and excludes them from
  * matching, rather than guessing what the author meant.
  */
-import { type Diagnostic, diagnostic } from '@energy8engine/contracts';
+import { type Diagnostic, diagnostic, type SeamMatcher } from '@energy8engine/contracts';
 
-export interface SeamMatcher {
-  buildTarget?: string;
-  urlParam?: string;
-  default?: true;
-}
+// Defined in `@energy8engine/contracts`, not here, since a matcher travels
+// from a package.json through the host and over the wire long before it
+// reaches this function — the shape is vocabulary, the RULE below is this
+// package's. Re-exported so callers keep importing it from the package
+// that interprets it.
+export type { SeamMatcher };
 
 export interface SeamCandidate {
   seam: string;

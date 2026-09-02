@@ -57,9 +57,18 @@
  *    failures of the rows that come after it.
  *  - One row failing does not stop the rest: the spec's isolation
  *    requirement, not an all-or-nothing app.
+ *  - The caller may narrow the row list first (`options.plan`) — a seam
+ *    has exactly one provider, and choosing between candidates is a rule
+ *    this file deliberately does not hold. See `LoadOptions.plan`.
  */
 import type { Context } from 'cordis';
 import { type Diagnostic, diagnostic, type GameCompositionRow } from '@energy8engine/contracts';
+
+/** What a `plan` step answers: which rows actually compose, and what deciding that produced. */
+export interface RowPlan {
+  rows: GameCompositionRow[];
+  diagnostics: Diagnostic[];
+}
 
 export interface LoadOptions {
   /** Base URL of the host. Defaults to the page origin. */
@@ -68,6 +77,24 @@ export interface LoadOptions {
   fetchFn?: typeof fetch;
   /** Injected for tests; defaults to a dynamic import. */
   importModule?: (url: string) => Promise<unknown>;
+  /**
+   * The caller's one chance to decide what actually composes, between
+   * "the host said these rows" and "the first row applies".
+   *
+   * It exists because not every row in a composition is meant to run: a
+   * seam is a capability with exactly ONE provider, so when two rows both
+   * offer `renderer`, applying both is precisely the wrong answer — and
+   * the rule that picks between them (`@energy8engine/seam`'s
+   * `selectProvider`, driven by an environment this file knows nothing
+   * about) is not this loader's to hold. This function stays a faithful
+   * applier of a row list; who narrows that list is the caller's problem,
+   * and its diagnostics travel back with everyone else's.
+   *
+   * Awaited, so the caller can also bring up whatever it provides itself
+   * (a session, a mount, art) BEFORE the first row applies, rather than
+   * racing rows that might read it.
+   */
+  plan?: (rows: GameCompositionRow[]) => RowPlan | Promise<RowPlan>;
 }
 
 interface CompositionResponse {
@@ -117,7 +144,32 @@ export async function composeFromProject(ctx: Context, options: LoadOptions = {}
   // resolve, …) travel through untouched; rows below only ever ADD to this.
   const diagnostics: Diagnostic[] = [...composition.diagnostics];
 
-  for (const row of composition.rows) {
+  // No `plan`: every row the host resolved applies, in the order it
+  // resolved them — the behaviour before this option existed.
+  let rows = composition.rows;
+  if (options.plan) {
+    try {
+      const planned = await options.plan(rows);
+      rows = planned.rows;
+      diagnostics.push(...planned.diagnostics);
+    } catch (error) {
+      // Same rule as a row's own `apply`: the caller's decision failing
+      // is data, not a reason for the game to go blank. Nothing composes
+      // in that case — a plan that threw has no answer about which rows
+      // were meant to.
+      rows = [];
+      diagnostics.push(
+        diagnostic(
+          'error',
+          'composition',
+          'plan',
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  for (const row of rows) {
     if (row.runtimeUrl === null) continue; // no runtime half — nothing to load, not a failure
 
     try {

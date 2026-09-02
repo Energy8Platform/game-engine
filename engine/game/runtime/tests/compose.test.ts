@@ -1,28 +1,34 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { Container } from 'pixi.js';
-import type { SymbolResolver } from '@energy8platform/game-engine/slot';
 import { createGame, type GameApp } from '../src/index';
+import { fakeFetch, row } from './helpers';
 
 /**
- * This suite proves COMPOSITION, not rendering — pixi does not initialise
- * usefully under jsdom (measured: `Application.init()` reaches real
- * canvas/WebGL work jsdom does not implement, and rejects). What IS proven
- * here, end to end, against the real pieces (not fakes): the math session
- * really starts against `e8-server` (same fixture `session-dev`'s own
- * suite uses), the registry really registers and binds both shipped
- * mechanics, `reels`' board really builds headlessly, and the
- * renderer/stage half — which DOES need a canvas — degrades to a
- * diagnostic instead of throwing or hanging. A live, spinning game is
- * Task 11's (by hand) and Task 12's (headless browser) to prove.
+ * What is left of `createGame`'s own job once the project decides the
+ * composition: handing the caller's live values to the rows, choosing one
+ * provider per seam, bringing up the caller's own session, and putting the
+ * reasons on screen when something failed. The rows themselves are fakes
+ * here — each real runtime half is proven in its own package's suite, and
+ * a game that actually spins is proven in a real browser (see
+ * task-9-report.md), not under jsdom, where pixi cannot initialise at all.
+ *
+ * The session is NOT a fake: `session-dev` spawns a real `e8-server`
+ * against the same fixture its own suite uses, because "the caller's
+ * session provider comes up before the first row applies" is a claim about
+ * real process startup, not about a stub.
  */
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
 
-const resolve: SymbolResolver = vi.fn((id: string) => {
-  const c = new Container() as unknown as { __symbol: string };
-  c.__symbol = id;
-  return c as any;
-});
+/** A row half that records what it was handed, and marks the context so a test can see it ran. */
+function recordingHalf(applied: string[]) {
+  return async (url: string) => ({
+    apply: (ctx: any, config: unknown) => {
+      const id = url.split('/').pop()!;
+      applied.push(id);
+      ctx[id] = { config };
+    },
+  });
+}
 
 let game: GameApp | undefined;
 afterEach(async () => {
@@ -33,146 +39,66 @@ afterEach(async () => {
   game = undefined;
 });
 
-describe('createGame composes the whole e8-base bundle', () => {
-  it('brings up session, mechanics and board — the pieces that need no canvas', async () => {
+describe('createGame — what only the caller can supply', () => {
+  it('hands the caller live values the project file cannot carry, before any row applies', async () => {
+    // The two values with no home in YAML: a function (the symbol
+    // resolver a real `reels1` reads off `assets`) and a live DOM element.
+    // Neither is special-cased by name — `createGame` provides whatever
+    // map it was given, and the row reads it back off `ctx`.
+    const resolve = vi.fn();
+    const mount = document.createElement('div');
+    let seen: { resolve: unknown; mount: unknown } | undefined;
+
     game = await createGame({
-      session: { gamesDir: GAME, port: 0 },
-      reels: { resolve, config: { grid: { cols: 5, rows: 3 } } },
-      stages: { base_game: 'classic' },
+      mount,
+      provide: { assets: { resolve } },
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1'), row('anything1')], diagnostics: [] }),
+        importModule: async () => ({
+          apply: (ctx: any) => {
+            seen = {
+              resolve: ctx.reflect.get('assets', false)?.resolve,
+              mount: ctx.reflect.get('mount', false),
+            };
+          },
+        }),
+      },
     });
 
-    expect(typeof game.ctx.session.play).toBe('function');
-    expect(typeof game.ctx.mechanics.register).toBe('function');
-    expect(game.ctx.board).toBeDefined();
-    expect(typeof game.ctx.board.spinTo).toBe('function');
+    expect(seen?.resolve).toBe(resolve);
+    expect(seen?.mount).toBe(mount);
   });
 
-  it('plays a real spin through the composed session, independent of any renderer', async () => {
+  it('brings up the caller session before the first row applies, and plays a real spin through it', async () => {
+    const order: string[] = [];
+
     game = await createGame({
       session: { gamesDir: GAME, port: 0 },
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1')], diagnostics: [] }),
+        importModule: async () => ({
+          apply: (ctx: any) => {
+            // Reads through `reflect` for the same reason every row does:
+            // a plain `ctx.session` throws inside a plugin that did not
+            // inject it.
+            order.push(ctx.reflect.get('session', false) ? 'session-was-ready' : 'session-missing');
+          },
+        }),
+      },
     });
+
+    expect(order).toEqual(['session-was-ready']);
 
     const { result, diagnostics } = await game.ctx.session.play({
       gameId: 'first-slot',
       action: 'spin',
       betLevel: 1.0,
     });
-
     expect(diagnostics).toEqual([]);
     expect(result?.stage).toBe('base_game');
   });
 
-  it('registers both shipped mechanics and binds stages from config', async () => {
-    game = await createGame({
-      stages: { base_game: 'classic', free_spins: 'cascade' },
-    });
-
-    expect(game.ctx.mechanics.forStage('base_game')?.id).toBe('classic');
-    expect(game.ctx.mechanics.forStage('free_spins')?.id).toBe('cascade');
-  });
-
-  it('reports binding a stage to a mechanic id nobody ships, same as the bare registry', async () => {
-    game = await createGame({ stages: { base_game: 'no-such-mechanic' } });
-
-    expect(
-      game.diagnostics.some(
-        (d) => d.severity === 'error' && d.message.includes('no-such-mechanic'),
-      ),
-    ).toBe(true);
-  });
-
-  it('the board builds headlessly with no renderer configured at all', async () => {
-    game = await createGame({
-      reels: { resolve, config: { grid: { cols: 3, rows: 3 } } },
-    });
-
-    expect(game.ctx.board).toBeDefined();
-    expect(game.ctx.renderer).toBeUndefined();
-    expect(game.diagnostics).toEqual([]);
-  });
-
-  it('a reels config that fails to build degrades to a diagnostic instead of crashing createGame', async () => {
-    // `resolve` is only ever called (by the legacy `SymbolCell.setData`)
-    // for a non-null initial symbol, so an initial `board` is what makes
-    // construction actually reach — and throw from — a broken `resolve`
-    // (measured directly; a `resolve` that throws with no initial `board`
-    // never gets called at all, since every cell starts empty).
-    game = await createGame({
-      reels: {
-        resolve: () => {
-          throw new Error('boom-from-resolve');
-        },
-        config: { grid: { cols: 1, rows: 1 } },
-        board: [[{ symbol: 'x' }]],
-      },
-    });
-
-    expect(game.ctx.board).toBeUndefined();
-    expect(
-      game.diagnostics.some(
-        (d) =>
-          d.severity === 'error' && d.plugin === 'reels' && d.message.includes('boom-from-resolve'),
-      ),
-    ).toBe(true);
-  });
-
-  it('a renderer attempted under jsdom degrades to a diagnostic instead of throwing or hanging', async () => {
-    // `renderer: {}` is what opts a caller into attempting a renderer at
-    // all — see `GameConfig.renderer`'s doc comment. `createGame` itself
-    // must not reject even though `Application.init()` underneath does.
-    await expect(
-      (async () => {
-        game = await createGame({ renderer: {} });
-      })(),
-    ).resolves.toBeUndefined();
-
-    expect(game!.ctx.renderer).toBeUndefined();
-    expect(
-      game!.diagnostics.some((d) => d.severity === 'error' && d.plugin === 'renderer-pixi'),
-    ).toBe(true);
-  });
-
-  it('a renderer that only fails once start() actually tries it still shows the boot screen, not a blank mount', async () => {
-    // This is the fix for the finding: `boot`'s pre-check runs BEFORE
-    // start() ever calls `renderer-pixi`, so diagnostics were clean going
-    // in — the renderer only fails once `start()` actually attempts it
-    // (exactly what happens under jsdom). `boot` re-checks after `start()`
-    // resolves and must render the screen for this too, not leave `mount`
-    // blank.
-    const mount = document.createElement('div');
-
-    game = await createGame({ renderer: {}, mount });
-
-    expect(game.ctx.renderer).toBeUndefined();
-    const rendererDiagnostic = game.diagnostics.find(
-      (d) => d.severity === 'error' && d.plugin === 'renderer-pixi',
-    );
-    expect(rendererDiagnostic).toBeDefined();
-    expect(mount.textContent).toContain(rendererDiagnostic!.message);
-  });
-
-  it('stage never mounts when the renderer it needs never came up — no throw, no service', async () => {
-    game = await createGame({
-      renderer: {},
-      stage: { design: { width: 1920, height: 1080 } },
-      reels: { resolve, config: { grid: { cols: 3, rows: 3 } } },
-    });
-
-    expect(game.ctx.renderer).toBeUndefined();
-    expect(game.ctx.stage).toBeUndefined();
-    // The board still exists — reels does not need the renderer either
-    // (see plugins/reels.ts) — it is just never mounted anywhere visible.
-    expect(game.ctx.board).toBeDefined();
-  });
-
-  it('does not attempt a renderer at all when neither `renderer` nor `mount` was asked for', async () => {
-    game = await createGame({});
-
-    expect(game.ctx.renderer).toBeUndefined();
-    expect(game.diagnostics).toEqual([]);
-  });
-
-  it('an unstartable session is known before boot ever tries the renderer — start() is skipped', async () => {
+  it("surfaces session-dev's own specific startup reason, not a vaguer one re-derived here", async () => {
     game = await createGame({
       session: {
         gamesDir: GAME,
@@ -180,14 +106,12 @@ describe('createGame composes the whole e8-base bundle', () => {
         binPath: '/nonexistent/e8-server-binary',
         readyTimeoutMs: 5_000,
       },
-      renderer: {},
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1')], diagnostics: [] }),
+        importModule: async () => ({}),
+      },
     });
 
-    // The session failure is recorded, and it is `session-dev`'s own
-    // SPECIFIC reason — not a generic placeholder re-derived from `pid
-    // === null`. `session-dev` already names the binary it tried and why
-    // it gave up; `createGame` must surface that verbatim, not throw it
-    // away for something vaguer.
     const sessionDiagnostic = game.diagnostics.find(
       (d) => d.severity === 'error' && d.plugin === 'session',
     );
@@ -195,11 +119,153 @@ describe('createGame composes the whole e8-base bundle', () => {
     expect(sessionDiagnostic!.message).toContain('/nonexistent/e8-server-binary');
     expect(sessionDiagnostic!.fix).toContain('E8_SERVER_BINARY');
     expect(sessionDiagnostic).toBe(game.ctx.session.startupDiagnostic);
+  });
+});
 
-    // ...and because boot saw that error before ever calling start(), the
-    // renderer was never even attempted — no renderer-pixi diagnostic
-    // alongside the session one.
-    expect(game.diagnostics.some((d) => d.plugin === 'renderer-pixi')).toBe(false);
-    expect(game.ctx.renderer).toBeUndefined();
+describe('createGame — the composition comes from the project, not from this module', () => {
+  it('composes nothing at all when the project resolves no rows — there is no hardcoded floor', async () => {
+    // The defect this whole task exists to remove: `createGame` used to
+    // import both mechanics, the renderer, the stage, the reels and the
+    // play loop and wire them in itself, so a game got them whether its
+    // project asked for them or not — and a third-party mechanic could
+    // not join without an edit to this repo. An empty composition must
+    // now produce an empty game.
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({ rows: [], diagnostics: [] }),
+        importModule: async () => ({}),
+      },
+    });
+
+    for (const service of ['mechanics', 'board', 'renderer', 'stage', 'play', 'boot']) {
+      expect(game.ctx.reflect.get(service, false)).toBeUndefined();
+    }
+  });
+});
+
+describe('createGame — choosing one provider per seam', () => {
+  it('prefers the candidate whose matcher fits this build over the default one', async () => {
+    // Both rows offer `renderer`; only one declares itself for this build
+    // target. The winner composes and the loser is never applied at all —
+    // "applied but ignored" would still have built a second renderer.
+    const applied: string[] = [];
+
+    game = await createGame({
+      buildTarget: 'stake',
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [
+            row('renderer1'),
+            { ...row('renderer2'), seam: { name: 'renderer', matcher: { buildTarget: 'stake' } } },
+          ],
+          diagnostics: [],
+        }),
+        importModule: recordingHalf(applied),
+      },
+    });
+
+    expect(applied).toEqual(['renderer2']);
+    expect(game.diagnostics).toEqual([]);
+  });
+
+  it('a row that declares no seam always composes — most rows are candidates for nothing', async () => {
+    const applied: string[] = [];
+
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('boot1'), row('renderer1'), row('reels1'), row('playloop1')],
+          diagnostics: [],
+        }),
+        importModule: recordingHalf(applied),
+      },
+    });
+
+    expect(applied).toEqual(['boot1', 'renderer1', 'reels1', 'playloop1']);
+    expect(game.diagnostics).toEqual([]);
+  });
+});
+
+describe('createGame — the failure screen', () => {
+  it('draws the reasons through the composed boot row when the composition got that far', async () => {
+    // `boot1` provides `ctx.boot`, and THAT is what should render — a
+    // project can replace the boot row with its own branded screen and
+    // this file never learns about it.
+    const mount = document.createElement('div');
+    const rendered: unknown[] = [];
+
+    game = await createGame({
+      mount,
+      loader: {
+        // No renderer row at all, so there is a real error to report.
+        fetchFn: fakeFetch({ rows: [row('boot1')], diagnostics: [] }),
+        importModule: async () => ({
+          apply: (ctx: any) => {
+            ctx.provide('boot', {
+              renderFailure: (root: HTMLElement, diagnostics: unknown[]) => {
+                rendered.push(...diagnostics);
+                root.textContent = 'the project own failure screen';
+              },
+            });
+          },
+        }),
+      },
+    });
+
+    expect(rendered).toEqual(game.diagnostics);
+    expect(mount.textContent).toBe('the project own failure screen');
+  });
+
+  it('falls back to its own copy when the composition never got as far as a boot row', async () => {
+    // The screen that reports "the composition failed" cannot depend on
+    // the composition having succeeded.
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: async () => {
+          throw new Error('the host was not there');
+        },
+      },
+    });
+
+    expect(mount.textContent).toContain('This game could not start');
+    expect(mount.textContent).toContain('the host was not there');
+  });
+
+  it('leaves the mount alone when nothing failed', async () => {
+    const mount = document.createElement('div');
+    mount.textContent = 'untouched';
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1')], diagnostics: [] }),
+        importModule: async () => ({ apply: () => {} }),
+      },
+    });
+
+    expect(game.diagnostics).toEqual([]);
+    expect(mount.textContent).toBe('untouched');
+  });
+
+  it('carries the host own project diagnostics through to the screen', async () => {
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1')],
+          diagnostics: [
+            { severity: 'error', plugin: 'project', where: 'e8.patch.yml', message: 'row addresses a plugin nothing placed' },
+          ],
+        }),
+        importModule: async () => ({ apply: () => {} }),
+      },
+    });
+
+    expect(mount.textContent).toContain('row addresses a plugin nothing placed');
   });
 });
