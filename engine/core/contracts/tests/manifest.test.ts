@@ -39,4 +39,35 @@ describe('parseManifest', () => {
     expect(manifest).toBeNull();
     expect(diagnostics[0].where).toBe('e8');
   });
+
+  it('reads the runtime half', () => {
+    const { manifest, diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './runtime.js', inject: ['session'] }, hot: true } },
+      'probe-plugin',
+    );
+    expect(diagnostics).toEqual([]);
+    expect(manifest).toEqual({
+      runtime: { entry: './runtime.js', inject: ['session'] },
+      hot: true,
+    });
+  });
+
+  it('defaults runtime inject to empty', () => {
+    const { manifest } = parseManifest({ e8: { runtime: { entry: './r.js' } } }, 'p');
+    expect(manifest).toEqual({ runtime: { entry: './r.js', inject: [] }, hot: false });
+  });
+
+  it('warns and drops the runtime half when entry is missing', () => {
+    const { manifest, diagnostics } = parseManifest({ e8: { runtime: {} } }, 'p');
+    expect(manifest).toEqual({ hot: false });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].severity).toBe('warning');
+    expect(diagnostics[0].where).toBe('e8.runtime.entry');
+  });
+
+  it('leaves runtime undefined and diagnostic-free when the field is absent', () => {
+    const { manifest, diagnostics } = parseManifest({ e8: { client: { entry: './c.js' } } }, 'p');
+    expect(manifest?.runtime).toBeUndefined();
+    expect(diagnostics).toEqual([]);
+  });
 });

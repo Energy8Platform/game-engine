@@ -8,9 +8,18 @@ export interface E8ClientHalf {
   inject: string[];
 }
 
+/** The game half of a plugin, loaded into the running game at runtime. */
+export interface E8RuntimeHalf {
+  /** Module path inside the package, relative to its root. */
+  entry: string;
+  /** Runtime services this half needs before it can register anything. */
+  inject: string[];
+}
+
 /** The `e8` field of a plugin's package.json. */
 export interface E8Manifest {
   client?: E8ClientHalf;
+  runtime?: E8RuntimeHalf;
   /** Whether a config change can restart this plugin in place. */
   hot: boolean;
 }
@@ -68,6 +77,26 @@ export function parseManifest(
         ? client.inject.filter((v): v is string => typeof v === 'string')
         : [];
       manifest.client = { entry: client.entry, inject };
+    }
+  }
+
+  if (raw.runtime !== undefined) {
+    const runtime = raw.runtime;
+    if (!isRecord(runtime) || typeof runtime.entry !== 'string') {
+      diagnostics.push(
+        diagnostic(
+          'warning',
+          pluginId,
+          'e8.runtime.entry',
+          'the runtime half needs a module path in "entry"',
+          'add e8.runtime.entry, e.g. "./runtime.js"',
+        ),
+      );
+    } else {
+      const inject = Array.isArray(runtime.inject)
+        ? runtime.inject.filter((v): v is string => typeof v === 'string')
+        : [];
+      manifest.runtime = { entry: runtime.entry, inject };
     }
   }
 
