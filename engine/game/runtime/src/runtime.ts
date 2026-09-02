@@ -18,15 +18,19 @@
  * its module doc: a plain call lets `mechanics.apply()`'s own
  * `ctx.provide('mechanics', ...)` land on THIS scope, which this file can
  * then read straight back) rather than re-deriving the registry's logic a
- * second time. That file's own `MechanicsConfig` wants a shared
- * `diagnostics` array (the pre-row-model convention); this row still
- * hands it a throwaway one and converts anything pushed onto it into a
- * thrown `Error`, so a bad `config.stages` entry becomes a row
- * `Diagnostic` through the loader's own catch, same contract every other
- * row in this bundle follows.
+ * second time.
+ *
+ * This row does not fail on a stage bound to a mechanic it does not ship.
+ * It used to — it handed the registry a throwaway diagnostics array and
+ * threw whatever landed there — and that made the composition's central
+ * promise read as broken: a third-party row registering `acme`, plus a
+ * patch binding `base_game` to it, WORKED (the binding resolves as soon
+ * as the other row lands, in either order) while this row was reported
+ * failed, so with a mount the failure screen painted over a game that was
+ * running fine. See `./plugins/mechanics.ts`'s `bind` for where that
+ * complaint moved to, and why bind time could never have answered it.
  */
 import type { Context } from 'cordis';
-import type { Diagnostic } from '@energy8engine/contracts';
 import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
 import { mechanic as cascadeMechanic } from '@energy8engine/mechanic-cascade';
 import * as mechanicsPlugin from './plugins/mechanics';
@@ -39,16 +43,16 @@ export interface MechanicsRowConfig {
 }
 
 export function apply(ctx: Context, config: MechanicsRowConfig = {}): void {
-  const diagnostics: Diagnostic[] = [];
-  mechanicsPlugin.apply(ctx, { diagnostics });
+  mechanicsPlugin.apply(ctx);
 
   ctx.mechanics.register(classicMechanic);
   ctx.mechanics.register(cascadeMechanic);
   for (const [stage, mechanicId] of Object.entries(config.stages ?? {})) {
+    // Binding a stage to a mechanic THIS row does not ship is the whole
+    // point of a per-stage registry: a third-party row registers `acme`
+    // and a patch binds `base_game` to it, in either order. So this does
+    // not fail when the id is not registered yet — it cannot know whether
+    // some other row is about to. See `plugins/mechanics.ts`'s `bind`.
     ctx.mechanics.bind(stage, mechanicId);
-  }
-
-  if (diagnostics.length > 0) {
-    throw new Error(diagnostics.map((d) => d.message).join('; '));
   }
 }

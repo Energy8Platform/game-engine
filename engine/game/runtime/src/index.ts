@@ -19,11 +19,13 @@
  *     through `config.provide` — a map of service name to value, placed on
  *     the context BEFORE the first row applies, so a row reads them the
  *     same way it reads any other row's service. `createGame` does not
- *     know which row wants which name; the caller names the capability
- *     (`assets`, `mount`, anything a third-party row asks for) and the row
- *     reads it. `mount` is the one value this file also uses itself — it
- *     is where the failure screen goes — so it has its own field, and is
- *     provided under the name `mount` for rows that want it too.
+ *     know which row wants which name: the caller names the capability
+ *     (`assets`, or whatever a third-party row asks for) and the row reads
+ *     it. One name IS special-cased — `mount`, the element the game owns
+ *     on the page, because this file also uses it itself for the failure
+ *     screen. It travels as `config.mount`, and the name is RESERVED:
+ *     providing `mount` through the map too is one diagnostic naming that
+ *     entry, not a second registration and not a dead composition.
  *
  *  2. **The seam choice.** A seam is a capability with exactly one
  *     provider. When a composition offers two `renderer` rows, applying
@@ -39,6 +41,11 @@
  *     renders (see `@energy8engine/boot/runtime`). Deciding WHEN to render
  *     needs the whole diagnostics list and the mount, and only the caller
  *     of `composeFromProject` holds both. So this file makes that call.
+ *     Note what that means for the mount: the screen REPLACES its
+ *     children, including a canvas `renderer1` may already have attached.
+ *     That is intended — a composition with an `error` in it is not a game
+ *     a player should be looking at, and half a game under an error
+ *     message is worse than the message alone.
  *
  * Failures are data throughout: `createGame` never throws. A composition
  * that fails returns a `GameApp` whose `diagnostics` say why, and — when
@@ -140,6 +147,44 @@ function isSeamCandidate(row: GameCompositionRow): row is SeamRow {
   return row.seam !== undefined;
 }
 
+/**
+ * Draws the reasons where a person can read them: through the composed
+ * `boot` row when the composition got that far, through this package's own
+ * copy of the same function when it did not.
+ *
+ * Both halves are load-bearing. The fallback exists because the screen
+ * reporting "the composition failed" cannot itself depend on the
+ * composition having succeeded. The try/catch exists because the composed
+ * one is a THIRD PARTY's code — replacing the boot row with a branded
+ * screen is a thing this design actively invites — and a failure screen
+ * that throws would propagate out of `createGame`, whose caller is
+ * routinely a module-top-level `await` with no `try` of its own. That
+ * leaves the page blank: the exact white rectangle this whole mechanism
+ * exists to prevent, reached through the one service we told people to
+ * swap. The diagnostic is pushed BEFORE the fallback runs, so the screen
+ * a person ends up looking at names the broken screen too.
+ */
+function renderFailure(ctx: Context, mount: HTMLElement, diagnostics: Diagnostic[]): void {
+  const boot = ctx.reflect.get('boot', false) as BootService | undefined;
+  if (boot) {
+    try {
+      boot.renderFailure(mount, diagnostics);
+      return;
+    } catch (error) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          'boot',
+          'renderFailure',
+          `the composed failure screen threw: ${error instanceof Error ? error.message : String(error)}`,
+          'fix the boot row, or remove it so the built-in screen is used',
+        ),
+      );
+    }
+  }
+  renderBootFailure(mount, diagnostics);
+}
+
 /** The page's own query string, for matchers that key off one. Empty anywhere there is no `location`. */
 function readUrlParams(): Record<string, string> {
   if (typeof location === 'undefined') return {};
@@ -167,7 +212,24 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
     // way to reach it.
     if (config.mount) ctx.provide('mount', config.mount);
     for (const [name, value] of Object.entries(config.provide ?? {})) {
-      ctx.provide(name, value);
+      try {
+        ctx.provide(name, value);
+      } catch (error) {
+        // One malformed entry costs one diagnostic naming it — not the
+        // whole game. The realistic case is a caller passing `mount` in
+        // this map as well as in its own field: cordis refuses a second
+        // registration of a name, and an unguarded `provide` here would
+        // abandon the composition before a single row had applied.
+        diagnostics.push(
+          diagnostic(
+            'error',
+            'game-runtime',
+            'provide',
+            `could not provide "${name}": ${error instanceof Error ? error.message : String(error)}`,
+            '"mount" is provided by createGame itself — pass the element as config.mount, not in provide',
+          ),
+        );
+      }
     }
 
     const env: SeamContext = {
@@ -266,12 +328,7 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
   }
 
   if (config.mount && diagnostics.some((d) => d.severity === 'error')) {
-    // The composed `boot` row's renderer when the composition got that
-    // far, this package's own copy of the same function when it did not.
-    // The fallback is the point: the screen that reports "the composition
-    // failed" cannot itself depend on the composition having succeeded.
-    const boot = ctx.reflect.get('boot', false) as BootService | undefined;
-    (boot?.renderFailure ?? renderBootFailure)(config.mount, diagnostics);
+    renderFailure(ctx, config.mount, diagnostics);
   }
 
   return {

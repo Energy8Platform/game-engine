@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { createGame, type GameApp } from '../src/index';
 import { fakeFetch, row } from './helpers';
+import * as mechanicsRow from '../src/runtime';
 
 /**
  * What is left of `createGame`'s own job once the project decides the
@@ -143,6 +144,75 @@ describe('createGame — the composition comes from the project, not from this m
   });
 });
 
+describe('createGame — a third-party mechanic', () => {
+  it('composes, binds and runs without the failure screen painting over it', async () => {
+    // The end-to-end shape of the plan's central claim: a mechanic this
+    // repo has never heard of, registered by somebody else's row, bound
+    // by the patch through the REAL `mechanics1` row. This used to end
+    // with a working game under a failure screen — the binding resolved
+    // and the row was still reported failed.
+    const mount = document.createElement('div');
+    mount.textContent = 'untouched';
+
+    const ACME = { id: 'acme', requires: { fields: {} }, present: () => [] };
+    const modules: Record<string, unknown> = {
+      renderer1: { apply: () => {} },
+      mechanics1: mechanicsRow,
+      acme1: {
+        apply: (ctx: any) => {
+          ctx.inject(['mechanics'], (scope: any) => scope.mechanics.register(ACME));
+        },
+      },
+    };
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [
+            row('renderer1'),
+            row('mechanics1', { stages: { base_game: 'acme' } }),
+            row('acme1'),
+          ],
+          diagnostics: [],
+        }),
+        importModule: async (url) => modules[url.split('/').pop()!],
+      },
+    });
+
+    expect(game.diagnostics).toEqual([]);
+    expect(game.ctx.mechanics.forStage('base_game')?.id).toBe('acme');
+    expect(mount.textContent).toBe('untouched');
+  });
+});
+
+describe('createGame — a malformed provide entry', () => {
+  it('costs one diagnostic naming that entry, not the whole composition', async () => {
+    // `mount` is reserved — createGame provides it itself. A caller
+    // passing it through the map too makes cordis refuse the second
+    // registration, and an unguarded provide would abandon the
+    // composition before a single row applied.
+    const applied: string[] = [];
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      provide: { mount, assets: { resolve: () => undefined } },
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1'), row('reels1')], diagnostics: [] }),
+        importModule: recordingHalf(applied),
+      },
+    });
+
+    expect(applied).toEqual(['renderer1', 'reels1']);
+    expect(game.diagnostics).toHaveLength(1);
+    expect(game.diagnostics[0].where).toBe('provide');
+    expect(game.diagnostics[0].message).toContain('mount');
+    // The entry that was fine still landed.
+    expect(game.ctx.reflect.get('assets', false)).toBeDefined();
+  });
+});
+
 describe('createGame — choosing one provider per seam', () => {
   it('prefers the candidate whose matcher fits this build over the default one', async () => {
     // Both rows offer `renderer`; only one declares itself for this build
@@ -214,6 +284,41 @@ describe('createGame — the failure screen', () => {
 
     expect(rendered).toEqual(game.diagnostics);
     expect(mount.textContent).toBe('the project own failure screen');
+  });
+
+  it('survives a composed failure screen that throws, and still shows text', async () => {
+    // The boot row is a THIRD PARTY's code — swapping it for a branded
+    // screen is something this design invites — so it can throw. If that
+    // propagates, `createGame` rejects, and a caller awaiting it at module
+    // top level (which `first-slot`'s own entry does) renders nothing at
+    // all: the white rectangle the whole mechanism exists to prevent,
+    // reached through the one service we told people to replace.
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('boot1')], diagnostics: [] }),
+        importModule: async () => ({
+          apply: (ctx: any) => {
+            ctx.provide('boot', {
+              renderFailure() {
+                throw new Error('screen-blew-up');
+              },
+            });
+          },
+        }),
+      },
+    });
+
+    // Visible text, from the built-in screen the broken one fell back to —
+    // and it names the broken screen as well as the original problem.
+    expect(mount.textContent).toContain('This game could not start');
+    expect(mount.textContent).toContain('screen-blew-up');
+    expect(mount.textContent).toContain('renderer');
+    expect(
+      game.diagnostics.some((d) => d.plugin === 'boot' && d.where === 'renderFailure'),
+    ).toBe(true);
   });
 
   it('falls back to its own copy when the composition never got as far as a boot row', async () => {

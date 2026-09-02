@@ -30,10 +30,21 @@ export interface MechanicsService {
   register(mechanic: SpinMechanic): () => void;
   /**
    * Binds `stage` to the mechanic named `mechanicId`. A later call for the
-   * same stage replaces the earlier one. Binding to an id nobody has
-   * registered (yet, or ever) is not an error thrown here — it is recorded
-   * as a `Diagnostic` on the game, and `forStage` simply keeps returning
-   * `null` for that stage until a matching mechanic registers.
+   * same stage replaces the earlier one.
+   *
+   * Binding to an id nobody has registered **yet** is not a failure, and
+   * is not reported as one: registration order across a composition is
+   * not knowable from inside this call. A third-party row that registers
+   * its mechanic from a `ctx.inject(['mechanics'], …)` callback lands
+   * AFTER the row that binds the stage to it, and the binding resolves
+   * the moment it does — `forStage` returns `null` until then and the
+   * real mechanic afterwards. Reporting that as an error at bind time
+   * (which this used to do) made a working third-party mechanic read as
+   * broken, and painted a failure screen over a game that was fine.
+   *
+   * The complaint belongs where the answer is unambiguous: `check`, which
+   * runs against real stage data before anything is presented and knows
+   * by then whether the binding ever resolved.
    */
   bind(stage: string, mechanicId: string): void;
   /** The mechanic currently bound to `stage`, or `null` if none is (or its registration is gone). */
@@ -46,10 +57,13 @@ export interface MechanicsService {
   check(stage: string, sample: Record<string, unknown>): Diagnostic[];
 }
 
-export interface MechanicsConfig {
-  /** Shared with the owning `GameApp`; diagnostics pushed here surface as `game.diagnostics`. */
-  diagnostics: Diagnostic[];
-}
+/**
+ * No settings. The shared `diagnostics` array this used to carry is gone
+ * with the bind-time complaint that was the only thing pushing onto it —
+ * see `bind`'s doc comment. Kept as a named type because it is part of
+ * this plugin's published shape.
+ */
+export interface MechanicsConfig {}
 
 declare module 'cordis' {
   interface Context {
@@ -59,7 +73,7 @@ declare module 'cordis' {
 
 export const name = 'mechanics';
 
-export function apply(ctx: Context, config: MechanicsConfig) {
+export function apply(ctx: Context, _config: MechanicsConfig = {}) {
   const mechanics = new Map<string, SpinMechanic>();
   const bindings = new Map<string, string>();
 
@@ -82,17 +96,9 @@ export function apply(ctx: Context, config: MechanicsConfig) {
     },
 
     bind(stage, mechanicId) {
-      if (!mechanics.has(mechanicId)) {
-        config.diagnostics.push(
-          diagnostic(
-            'error',
-            mechanicId,
-            stage,
-            `stage "${stage}" is bound to mechanic "${mechanicId}", but no mechanic with that id is registered`,
-            `register a mechanic with id "${mechanicId}", or bind "${stage}" to one that is already registered`,
-          ),
-        );
-      }
+      // No check that `mechanicId` is registered — see this method's doc
+      // on the interface above for why that check was a guess about
+      // composition order rather than a fact about the binding.
       ctx.effect(() => {
         bindings.set(stage, mechanicId);
         return () => {
@@ -117,14 +123,29 @@ export function apply(ctx: Context, config: MechanicsConfig) {
     check(stage, sample) {
       const mechanic = service.forStage(stage);
       if (!mechanic) {
+        // Two different situations, and a person debugging needs them
+        // apart: nothing was ever bound to this stage, or something was
+        // bound to an id that never registered (a typo in a patch row,
+        // most likely). This is where "never registered" becomes a fact
+        // rather than a guess — the composition is long since applied and
+        // real stage data is being presented right now.
+        const boundTo = bindings.get(stage);
         return [
-          diagnostic(
-            'error',
-            stage,
-            stage,
-            `cannot check stage "${stage}": no registered mechanic is bound to it`,
-            `bind "${stage}" to a registered mechanic before checking its data`,
-          ),
+          boundTo === undefined
+            ? diagnostic(
+                'error',
+                stage,
+                stage,
+                `cannot check stage "${stage}": nothing is bound to it`,
+                `bind "${stage}" to a registered mechanic before checking its data`,
+              )
+            : diagnostic(
+                'error',
+                boundTo,
+                stage,
+                `stage "${stage}" is bound to mechanic "${boundTo}", but no mechanic with that id ever registered`,
+                `register a mechanic with id "${boundTo}", or bind "${stage}" to one that is registered`,
+              ),
         ];
       }
       return checkShape(mechanic.requires, sample, mechanic.id, stage);
