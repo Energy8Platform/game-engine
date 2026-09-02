@@ -38,3 +38,7 @@ idea.md
 # Playwright run artifacts
 /engine/apps/web/test-results/
 /engine/apps/web/playwright-report/
+
+# Playwright acceptance test: writable copies of a project fixture. They sit
+# beside the original so the project's own relative paths still resolve.
+/engine/examples/e8-compose-*/
