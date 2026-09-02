@@ -561,6 +561,11 @@ git commit -m "The host reads the project: profile, bundles, patch"
   - `GET /api/composition` → `{ rows: ResolvedRow[], diagnostics: Diagnostic[] }`
   - `GET /plugin-runtime/:id` → тело модуля `e8.runtime.entry`, `content-type: application/javascript`
 
+**Два факта, измеренные спайком задачи 1 — не выводите их заново, но и не игнорируйте:**
+
+1. **Маршрут обязан терпеть `?import`.** `/* @vite-ignore */` **не** мешает vite переписывать спецификатор динамического импорта: он оборачивает его в `__vite__injectQuery(spec, 'import')`, дописывая `?import` к корне-относительным URL. Маршрут, сопоставляющий путь целиком со строкой запроса, будет 404-ить в браузере, проходя при этом все тесты на `fetch` без запроса. Добавьте тест именно с `?import`.
+2. **Добавьте `/plugin-runtime` в список прокси `engine/apps/web/vite.config.ts`**, рядом с уже существующим `/plugin-client`. Игра живёт на 5679, и origin документа в iframe превью — тоже 5679, поэтому обычный путь работает; но документ верхнего уровня на 5680 импортировать с 5679 не может (путь 404-ит, абсолютный URL режется CORS). `/plugin-client` работает сегодня ровно благодаря этой строке прокси. Заголовок `access-control-allow-origin: *` вместо этого не ставить: он раздаёт больше, чем требует задача.
+
 **Образец для подражания — `client-assets.ts`.** Прочитайте его целиком прежде, чем писать: там уже решены 404 на неизвестный id, 404 на пакет без нужной половины, и то, как из `package.json` достаётся путь входа. Ваш маршрут отличается ровно тем, что смотрит в `manifest.runtime`, а не в `manifest.client`, и что id берётся из `ctx.project.composition`, а не из `ctx.loader.entries()`.
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -584,6 +589,13 @@ it('serves a row runtime half as javascript', async () => {
   expect(res.status).toBe(200);
   expect(res.headers.get('content-type')).toContain('javascript');
   expect(await res.text()).toContain('export');
+});
+
+it('serves the same half when vite appends its ?import query', async () => {
+  // Measured in the task 1 spike: @vite-ignore does not prevent this.
+  const res = await fetch(`${host.url}/plugin-runtime/reels1?import`);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('content-type')).toContain('javascript');
 });
 
 it('404s an unknown row id', async () => {
