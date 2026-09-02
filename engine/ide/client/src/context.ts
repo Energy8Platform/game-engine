@@ -4,6 +4,8 @@ import type { ConnectionConfig } from './plugins/connection';
 import * as slots from './plugins/slots';
 import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
+import * as gameComposition from './plugins/game-composition';
+import type { GameCompositionConfig } from './plugins/game-composition';
 
 /**
  * Boot the browser-side cordis application.
@@ -16,10 +18,13 @@ import type { ModulesConfig } from './plugins/modules';
  * this function would otherwise return. Awaiting each fiber here means
  * every caller gets a `Context` with both services already provided.
  */
-export async function createIdeClient(config: ConnectionConfig & ModulesConfig): Promise<Context> {
+export async function createIdeClient(
+  config: ConnectionConfig & ModulesConfig & GameCompositionConfig,
+): Promise<Context> {
   const ctx = new Context();
   await ctx.plugin(connection, config);
   await ctx.plugin(slots);
   await ctx.plugin(modules, config);
+  await ctx.plugin(gameComposition, config);
   return ctx;
 }

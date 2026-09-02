@@ -222,23 +222,15 @@ test('removing the reels row from the patch takes the board off the screen', asy
     await page.reload();
     await settled(page);
 
-    // What a person sees now: the board is gone. Every quadrant of the
-    // canvas is the same flat background — there is no grid left to look
-    // at. NOT a check that the YAML contains `remove: true`, and not a
-    // check that a fetch returned different JSON: either would only prove
-    // the file was written, which was never in question.
-    //
-    // The branch is not hedging. Today the canvas survives the removal
-    // and comes back empty; once the next test's gap is closed the
-    // failure screen will replace the mount's children outright and there
-    // will be no canvas at all. Both are "the board is gone from the
-    // screen", and this test has to keep being true across that fix
-    // rather than pin the shape of a degradation it is not judging.
-    if ((await page.locator('canvas').count()) > 0) {
-      const withoutBoard = await canvasQuadrants(page);
-      expect(new Set(withoutBoard).size, 'the board should be gone from the canvas').toBe(1);
-      expect(withoutBoard[0]).not.toBe(withBoard[0]);
-    }
+    // What a person sees now: the board is gone — the surface it was
+    // drawn on is not on the page at all, because the failure screen
+    // replaced the mount's children. NOT a check that the YAML contains
+    // `remove: true`, and not a check that a fetch returned different
+    // JSON: either would only prove the file was written, which was never
+    // in question. The quadrant measurement above is what makes this
+    // assertion mean something — without it, "no canvas" would also be
+    // true of a game that had never drawn a board in the first place.
+    await expect(page.locator('canvas'), 'the board should be gone from the screen').toHaveCount(0);
 
     // And the game still RUNS. It did not hang, it did not blank the
     // page, and nothing escaped as an uncaught error: the composition
@@ -253,31 +245,18 @@ test('removing the reels row from the patch takes the board off the screen', asy
 });
 
 /**
- * The other half of the same criterion — and it **FAILS TODAY**. It is
- * left red on purpose: this is the acceptance test, and a test that
- * agrees with the code instead of judging it is worth nothing. Do not
- * weaken it, do not annotate it `test.fail()`; it goes green by itself
- * when the gap closes.
+ * The other half of the same criterion: the board going is not enough —
+ * the person has to be told which row went.
  *
- * What was promised: after the reels row is removed, a reason is visible
- * where the board used to be, naming `reels`. What actually happens
- * (measured — see `task-11-report.md`): the row really is gone from
- * `/api/composition` and the board really is gone from the canvas (the
- * test above proves both), but the page still reports `ready`,
- * `createGame` returns ZERO diagnostics, and `#mount` holds an empty
- * canvas and no text at all. A person is shown an empty rectangle with no
- * explanation.
- *
- * Why, precisely: removing a row is a LEGAL composition edit and nothing
- * in the composed graph objects to it. `@energy8engine/reels` declares no
- * seam, so `createGame`'s `REQUIRED_SEAMS` check never looks for it; no
- * other row `inject`s `board`, so cordis has nothing to wait for; and the
- * one component that genuinely needs the board — this project's own
- * `src/main.ts` — declares that need only as an erased `import type {}
- * from '@energy8engine/reels/runtime'`, which by construction cannot be
- * checked at runtime. The absent capability therefore surfaces nowhere
- * until something reads `ctx.board`, which first happens on a spin, and
- * reads `undefined`.
+ * Nothing in the ENGINE can say this, and that is not a shortcoming.
+ * Removing a row is a legal edit; `@energy8engine/reels` declares no
+ * seam, so `createGame`'s `REQUIRED_SEAMS` never looks for it; and a game
+ * that draws with something other than a reel board is a perfectly good
+ * game with no `board` service at all. "This game needs a board" is a
+ * property of THIS game, so `first-slot/src/main.ts` is where it is
+ * declared and where it is checked — see its `REQUIRES` list. The engine
+ * learning to enforce a row-declared capability is real design work and
+ * belongs in its own plan.
  */
 test('… and says which row went missing', async ({ page }) => {
   const dir = projectCopy();
@@ -308,24 +287,16 @@ test('… and says which row went missing', async ({ page }) => {
 });
 
 /**
- * The editor's side of the same claim — and it **FAILS TODAY**, for a
- * different reason from the one above, and a simpler one: the screen is
- * built but not wired.
+ * The editor's side of the same claim: a person opening the IDE can read
+ * what the profile resolved to, and which layer placed each row.
  *
- * `@energy8engine/ide-client`'s `CompositionScreen` renders exactly these
- * `data-testid="row-<id>"` sections, complete with the layer label, when
- * it is handed a `rows` prop — `ide/client/tests/composition-layers.test
- * .tsx` proves that in jsdom. But the running IDE never hands it one:
- * `engine/apps/web/src/App.tsx` renders `<CompositionScreen ctx={ctx} />`
- * and nothing else, and no client plugin fetches `/api/composition`. So
- * the whole game-composition half of the screen is unreachable from the
- * app a person actually opens. What is on that page instead is only the
- * EDITOR's own rows, from `e8.yml` over the `/ide` socket:
- * `@cordisjs/plugin-include` and `@energy8engine/ide-bridge`, plus the
- * game preview iframe.
- *
- * Left red for the same reason as the test above. It goes green the day
- * something feeds the screen the composition the host already serves.
+ * This is the one test in the file that goes through the real IDE app on
+ * 5680 rather than the game — `CompositionScreen` rendered by
+ * `apps/web/src/App.tsx`, fed by `@energy8engine/ide-client`'s
+ * `game-composition` plugin over vite's `/api` proxy to the host. Its
+ * jsdom sibling (`ide/client/tests/composition-layers.test.tsx`) proves
+ * the screen renders a `rows` prop; only this one proves anything ever
+ * hands it one.
  */
 test('the composition screen lists the rows the profile resolved to', async ({ page }) => {
   const dir = projectCopy();
@@ -340,10 +311,17 @@ test('the composition screen lists the rows the profile resolved to', async ({ p
         `acceptance criterion: the composition screen must list the resolved row ${id}`,
       ).toBeVisible();
     }
-    // And where each row came from: `e8-base` is the bundle this
-    // project's `e8.profile.yml` stacks. Nothing in the engine names
-    // these rows any more.
+    // And which layer placed each one — the two that exist in this
+    // project, read off the screen rather than off the files: `boot1`
+    // comes from the `e8-base` bundle the profile stacks and nothing
+    // overrides it, while `reels1` carries the patch's own grid. Asserting
+    // only the first would pass just as happily on a screen that printed
+    // the same label on every row.
     await expect(page.getByTestId('row-boot1')).toContainText('e8-base');
+    await expect(page.getByTestId('row-reels1')).toContainText('patch');
+    // The package name, too — the row is identified by what it actually
+    // composes, not only by its id.
+    await expect(page.getByTestId('row-reels1')).toContainText('@energy8engine/reels');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

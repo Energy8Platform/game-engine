@@ -29,6 +29,12 @@
  * provided. There is no static import of a mechanic, a renderer, or the
  * play loop here; that is the property this whole slice was built for.
  *
+ * The other side of that freedom is that a composition can legally leave
+ * out something this page needs, and nothing in the engine can know it
+ * did — so this file states its own requirements (`REQUIRES`, below) and
+ * says so on screen when one is missing, instead of booting to `ready`
+ * over an empty canvas.
+ *
  * `@energy8engine/ide-bridge` (Task 12) is composed directly into
  * `game.ctx` below — the "hot fork to the game": it opens the SAME `/ide`
  * websocket `engine/ide/client/src/plugins/connection.ts` speaks, listens
@@ -43,7 +49,12 @@ import { Container, Graphics, Text } from 'pixi.js';
 import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/slot';
 import { createGame } from '@energy8engine/game-runtime';
 import * as ideBridge from '@energy8engine/ide-bridge';
-import type { PresentationPlan, SpinResult } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type Diagnostic,
+  type PresentationPlan,
+  type SpinResult,
+} from '@energy8engine/contracts';
 // Type-only, and fully erased: these two modules are what DECLARE the
 // `ctx.board` and `ctx.play` services this page reads off the composed
 // context. Importing their types is not importing them — nothing here
@@ -90,9 +101,84 @@ const game = await createGame({
   provide: { assets: { resolve } },
 });
 
-if (game.diagnostics.length > 0) {
+/**
+ * What THIS page needs the composition to have provided. Not a rule the
+ * engine could hold: removing a row is a legal edit, and a game that
+ * reaches its own math over `fetch` and draws with something other than a
+ * reel board is a perfectly good game with neither of these services. So
+ * the requirement is stated where it is actually true — here, by the page
+ * that reads `ctx.board` and `ctx.play` further down.
+ *
+ * It is stated because of what happens otherwise, which was measured
+ * (task-11-report.md): delete `reels1` from `e8.patch.yml` and this page
+ * used to boot to `ready` with an empty canvas and no explanation
+ * anywhere — the white rectangle the whole `boot` design exists to
+ * prevent, reached by an edit the composition considers valid.
+ *
+ * `reflect.get(name, false)` rather than `ctx.board`: cordis throws on a
+ * property read of a REGISTERED service a plugin did not `inject`, and
+ * "nobody provided one" is the answer this needs, not an exception.
+ */
+const REQUIRES = [
+  {
+    service: 'board',
+    row: 'reels1',
+    pkg: '@energy8engine/reels',
+    what: 'a reel board to draw on',
+  },
+  {
+    service: 'play',
+    row: 'playloop1',
+    pkg: '@energy8engine/play-loop',
+    what: 'a play loop to run a presentation plan through',
+  },
+] as const;
+
+const missing = REQUIRES.filter(
+  (need) => game.ctx.reflect.get(need.service, false) === undefined,
+).map((need) =>
+  diagnostic(
+    'error',
+    'first-slot',
+    need.service,
+    `this game needs ${need.what}, and no row in the composition provides "${need.service}" — the "${need.row}" row (${need.pkg}) is not there`,
+    `restore the "${need.row}" row — the e8-base bundle places it, so look for a "remove: true" on it in e8.patch.yml`,
+  ),
+);
+
+const diagnostics = [...game.diagnostics, ...missing];
+
+/**
+ * Draws the reasons where a person is already looking — over the mount,
+ * replacing whatever the renderer row attached to it. `createGame` does
+ * this itself for the diagnostics IT collected; these are ours, found
+ * after it returned, so making them visible is ours to do too.
+ *
+ * Through the composed `boot` service, which is the point of `boot1`
+ * being a row: a project that ships a branded failure screen gets this
+ * one too. The fallback and the try/catch are the same two guards
+ * `createGame`'s own `renderFailure` carries, for the same two reasons —
+ * `boot1` can legally be dropped from a composition as well, and a
+ * failure screen that throws must not blank the page it was supposed to
+ * explain.
+ */
+if (missing.length > 0) {
+  const boot = game.ctx.reflect.get('boot', false) as
+    { renderFailure(root: HTMLElement, list: Diagnostic[]): void } | undefined;
+  try {
+    if (!boot) throw new Error('no boot row in this composition');
+    boot.renderFailure(mount, diagnostics);
+  } catch {
+    mount.textContent = [
+      'This game could not start',
+      ...diagnostics.map((d) => `${d.plugin} — ${d.where}: ${d.message}`),
+    ].join('\n');
+  }
+}
+
+if (diagnostics.length > 0) {
   statusEl.textContent = 'composition has errors — see log';
-  for (const d of game.diagnostics) log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`);
+  for (const d of diagnostics) log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`);
 } else {
   statusEl.textContent = 'ready';
 }
@@ -185,8 +271,8 @@ spinBtn.addEventListener('click', async () => {
  * imports this file's test harness, either.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
-  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". */
-  diagnostics: game.diagnostics,
+  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". Includes what THIS page found missing (see `REQUIRES`), not only what `createGame` collected. */
+  diagnostics,
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
   async spin(): Promise<{ result: SpinResult; steps: PresentationPlan }> {
     const res = await fetch('/api/spin', { method: 'POST' });

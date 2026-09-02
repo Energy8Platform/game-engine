@@ -9,6 +9,12 @@ export * from './plugins/connection';
 // consumer actually uses.
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
 export type { ModulesService, ModulesConfig } from './plugins/modules';
+export {
+  useGameComposition,
+  type GameCompositionService,
+  type GameCompositionState,
+  type GameCompositionConfig,
+} from './plugins/game-composition';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, Preview, computePreviewUrl } from './screens/CompositionScreen';
