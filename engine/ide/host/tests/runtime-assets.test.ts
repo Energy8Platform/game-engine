@@ -126,6 +126,123 @@ describe('GET /api/composition', () => {
     expect(body.rows.find((r: { id: string }) => r.id === 'reels1').seam).toBeUndefined();
   });
 
+  /**
+   * The three ways a row can end up with `runtimeUrl: null`, which used to
+   * be indistinguishable from the outside. Only ONE of them is legitimate,
+   * and the other two are the most likely first-run mistakes there are —
+   * so each case below asserts the DIAGNOSTIC, not just the null.
+   *
+   * A single workspace serves all three: three rows, three situations, one
+   * `/api/composition` call, so the assertions also prove the three do not
+   * bleed into each other (a per-row diagnostic naming the wrong row, or a
+   * blanket one covering all of them, fails here).
+   */
+  describe('a row whose runtime half cannot be loaded', () => {
+    let brokenHost: IdeHost;
+
+    beforeEach(async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-broken-'));
+      const nodeModules = join(workspace, 'node_modules');
+      mkdirSync(nodeModules);
+
+      // Legal and silent: a package with a CLIENT half and no game half.
+      const halfless = join(nodeModules, 'nohalf-pkg');
+      mkdirSync(halfless);
+      writeFileSync(
+        join(halfless, 'package.json'),
+        JSON.stringify({
+          name: 'nohalf-pkg',
+          version: '1.0.0',
+          type: 'module',
+          main: 'index.js',
+          exports: { '.': './index.js', './package.json': './package.json' },
+          e8: { client: { entry: './client.js' } },
+        }),
+      );
+      writeFileSync(join(halfless, 'index.js'), 'export function apply() {}\n');
+      writeFileSync(join(halfless, 'client.js'), 'export function apply() {}\n');
+
+      // An author mistake: `e8.runtime.entry` names a file nobody built.
+      const badEntry = join(nodeModules, 'badentry-pkg');
+      mkdirSync(badEntry);
+      writeFileSync(
+        join(badEntry, 'package.json'),
+        JSON.stringify({
+          name: 'badentry-pkg',
+          version: '1.0.0',
+          type: 'module',
+          main: 'index.js',
+          exports: { '.': './index.js', './package.json': './package.json' },
+          e8: { runtime: { entry: './dist/runtime.js' } },
+        }),
+      );
+      writeFileSync(join(badEntry, 'index.js'), 'export function apply() {}\n');
+
+      writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+      writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-broken-fixture\n');
+      const bundlesDir = join(workspace, 'bundles', 'e8-broken-fixture');
+      mkdirSync(bundlesDir, { recursive: true });
+      writeFileSync(
+        join(bundlesDir, 'e8.bundle.yml'),
+        [
+          'name: e8-broken-fixture',
+          'rows:',
+          // The typo case: nothing is installed under this name at all.
+          '  - id: typo1',
+          '    name: reeels-pkg',
+          '  - id: nohalf1',
+          '    name: nohalf-pkg',
+          '  - id: badentry1',
+          '    name: badentry-pkg',
+          '',
+        ].join('\n'),
+      );
+
+      brokenHost = await createIdeHost({ cwd: workspace, port: 0 });
+    });
+
+    afterEach(async () => {
+      await brokenHost.stop();
+    });
+
+    async function composition(): Promise<{
+      rows: { id: string; runtimeUrl: string | null }[];
+      diagnostics: { plugin: string; where: string; message: string; fix?: string }[];
+    }> {
+      return (await fetch(`${brokenHost.url}/api/composition`)).json();
+    }
+
+    it('a misspelled package name is a diagnostic naming the row and the package', async () => {
+      const body = await composition();
+      expect(body.rows.find((r) => r.id === 'typo1')!.runtimeUrl).toBeNull();
+
+      const found = body.diagnostics.filter((d) => d.plugin === 'typo1');
+      expect(found).toHaveLength(1);
+      // Both halves of the address a person needs: WHICH row, and which
+      // name on it did not resolve.
+      expect(found[0].message).toContain('typo1');
+      expect(found[0].message).toContain('reeels-pkg');
+      expect(found[0].fix).toContain('reeels-pkg');
+    });
+
+    it('a package that declares no runtime half stays silent — that is legal', async () => {
+      const body = await composition();
+      expect(body.rows.find((r) => r.id === 'nohalf1')!.runtimeUrl).toBeNull();
+      expect(body.diagnostics.filter((d) => d.plugin === 'nohalf1')).toEqual([]);
+    });
+
+    it('an entry that is not on disk is a diagnostic naming the row and the entry', async () => {
+      const body = await composition();
+      expect(body.rows.find((r) => r.id === 'badentry1')!.runtimeUrl).toBeNull();
+
+      const found = body.diagnostics.filter((d) => d.plugin === 'badentry1');
+      expect(found).toHaveLength(1);
+      expect(found[0].where).toBe('e8.runtime.entry');
+      expect(found[0].message).toContain('./dist/runtime.js');
+      expect(found[0].message).toContain('badentry-pkg');
+    });
+  });
+
   it('reloads from disk on every call, so an edit is reflected without restarting the host', async () => {
     // Same edit `project.test.ts`'s "reload() picks up an edited patch"
     // makes directly against `ctx.project.reload()` — this proves the HTTP

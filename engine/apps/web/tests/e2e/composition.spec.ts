@@ -155,6 +155,65 @@ const PATCH_WITHOUT_REELS = `rows:
 `;
 
 /**
+ * The fixture's own patch with `reels1`'s package NAME misspelled — the
+ * row is present, correctly configured, and points at a package that does
+ * not exist.
+ *
+ * This is the single most likely first-run mistake there is, and until
+ * this wave it was the quietest: the host resolved the package to
+ * `null`, dropped the fact, served `runtimeUrl: null`, and the loader
+ * skipped the row without a word — the same treatment a package that
+ * legitimately has no runtime half gets. Everything else in this patch is
+ * byte-identical to the fixture's, so anything that changes on screen is
+ * attributable to the one misspelled `name`.
+ */
+const PATCH_WITH_MISSPELLED_REELS = `rows:
+  - id: renderer1
+    config:
+      width: 480
+      height: 288
+      background: '#10121a'
+  - id: stage1
+    config:
+      design:
+        width: 480
+        height: 288
+  - id: reels1
+    name: '@energy8engine/reeels'
+    config:
+      config:
+        grid:
+          cols: 5
+          rows: 3
+  - id: mechanics1
+    config:
+      stages:
+        base_game: classic
+`;
+
+/** The fixture's own patch with the `mechanics1` row removed — see the `mechanics` test below. */
+const PATCH_WITHOUT_MECHANICS = `rows:
+  - id: renderer1
+    config:
+      width: 480
+      height: 288
+      background: '#10121a'
+  - id: stage1
+    config:
+      design:
+        width: 480
+        height: 288
+  - id: reels1
+    config:
+      config:
+        grid:
+          cols: 5
+          rows: 3
+  - id: mechanics1
+    remove: true
+`;
+
+/**
  * Waits for the game to have finished composing. `src/main.ts` writes
  * `#status` exactly once `createGame` has resolved, so an empty `#status`
  * means "still booting" — and asserting on the canvas before that point
@@ -280,6 +339,88 @@ test('… and says which row went missing', async ({ page }) => {
     await expect(page.locator('#mount')).toContainText('This game could not start');
     // And the half-built game is not left underneath the explanation.
     await expect(page.locator('canvas')).toHaveCount(0);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The row that IS there and whose package is not: a typo in `name`.
+ *
+ * This is the case the whole "failures are data" rule was failing on. The
+ * row resolves, the composition lists it, the IDE shows it as healthy —
+ * and the host, the ONE place that knows the package could not be
+ * resolved, threw that fact away and answered `runtimeUrl: null`, which
+ * the loader is right to skip in silence because that is also what a
+ * package with no runtime half looks like. Nothing downstream could
+ * re-derive it. Result: a blank board and not one word anywhere.
+ *
+ * Asserted on the screen, in the game's own mount — not on
+ * `/api/composition`'s JSON, which would only prove the host computed
+ * something. The two strings that matter are the two halves of the
+ * address a person needs to fix it: WHICH row, and which name on it did
+ * not resolve.
+ */
+test('a misspelled package name on a row says so, naming the row and the package', async ({
+  page,
+}) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(host.gameUrl);
+    await settled(page);
+    await expect(page.locator('canvas')).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('ready');
+
+    writeFileSync(join(dir, 'e8.patch.yml'), PATCH_WITH_MISSPELLED_REELS);
+    await page.reload();
+    await settled(page);
+
+    const mount = page.locator('#mount');
+    await expect(mount).toContainText('This game could not start');
+    await expect(
+      mount,
+      'the diagnostic must name the row whose name is wrong',
+    ).toContainText('reels1');
+    await expect(
+      mount,
+      'the diagnostic must name the package that could not be resolved',
+    ).toContainText('@energy8engine/reeels');
+
+    // And the page's own REQUIRES message no longer contradicts it. It
+    // used to assert the row "is not there", which is false here — the row
+    // is right there in the patch, and its package name is the problem.
+    await expect(mount).not.toContainText('is not there');
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * `mechanics` was missing from `first-slot`'s own `REQUIRES` list while
+ * `main.ts` read `ctx.mechanics` unguarded in two places. So removing
+ * `mechanics1` — a legal patch edit — booted the page to `ready` over a
+ * canvas that could never present anything, and threw on the first click.
+ */
+test('removing the mechanics row says so instead of booting to ready', async ({ page }) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(host.gameUrl);
+    await settled(page);
+    await expect(page.locator('#status')).toHaveText('ready');
+
+    writeFileSync(join(dir, 'e8.patch.yml'), PATCH_WITHOUT_MECHANICS);
+    await page.reload();
+    await settled(page);
+
+    await expect(
+      page.locator('#status'),
+      'a composition with no mechanic registry must not read as ready',
+    ).not.toHaveText('ready');
+    await expect(page.locator('#mount')).toContainText('mechanics1');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

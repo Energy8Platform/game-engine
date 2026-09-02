@@ -186,12 +186,19 @@ export async function composeFromProject(ctx: Context, options: LoadOptions = {}
       // were corrected (see task-8-report.md).
       await module.apply?.(ctx, row.config);
     } catch (error) {
+      // The URL is interpolated, not left to the caught error to mention:
+      // a native `import()` failure says something like "Failed to fetch
+      // dynamically imported module" and a throw out of `apply` says
+      // nothing about where the module came from at all. With the host now
+      // reporting the rows it could not resolve at all, this row-level
+      // diagnostic is often the only ADDRESS a person gets for a row that
+      // did resolve and then broke — and `row.runtimeUrl` is right here.
       diagnostics.push(
         diagnostic(
           'error',
           row.id,
           'runtime',
-          error instanceof Error ? error.message : String(error),
+          `${row.runtimeUrl}: ${error instanceof Error ? error.message : String(error)}`,
           'check the plugin runtime entry in its package.json',
         ),
       );

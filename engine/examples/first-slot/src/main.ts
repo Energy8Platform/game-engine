@@ -132,17 +132,36 @@ const REQUIRES = [
     pkg: '@energy8engine/play-loop',
     what: 'a play loop to run a presentation plan through',
   },
+  {
+    // Read unguarded by `presentStage` (`check`/`forStage`) and by the
+    // `<select>` handler (`bind`) below. It was missing from this list, so
+    // removing `mechanics1` from the patch left the page booting to
+    // `ready` over a canvas it could never present anything on, and
+    // throwing on the first click instead of saying what was absent.
+    service: 'mechanics',
+    row: 'mechanics1',
+    pkg: '@energy8engine/game-runtime',
+    what: 'a mechanic registry to turn a spin result into a presentation',
+  },
 ] as const;
 
 const missing = REQUIRES.filter(
   (need) => game.ctx.reflect.get(need.service, false) === undefined,
 ).map((need) =>
+  // What this check actually knows is that the SERVICE is absent — not
+  // why. "The row is not there" was one guess at the cause, and it is the
+  // wrong one whenever the row IS there and something else about it broke
+  // (a misspelled package `name`, an `e8.runtime.entry` that is not on
+  // disk, a half whose `apply` threw). The host now reports each of those
+  // with its own diagnostic, and this message must not contradict them:
+  // it states the symptom and points at the row, leaving the cause to the
+  // diagnostic that actually measured one.
   diagnostic(
     'error',
     'first-slot',
     need.service,
-    `this game needs ${need.what}, and no row in the composition provides "${need.service}" — the "${need.row}" row (${need.pkg}) is not there`,
-    `restore the "${need.row}" row — the e8-base bundle places it, so look for a "remove: true" on it in e8.patch.yml`,
+    `this game needs ${need.what}, and nothing in the composition provided "${need.service}" — the "${need.row}" row (${need.pkg}) is what normally does`,
+    `check the "${need.row}" row: it may have been removed in e8.patch.yml, or it may be listed but failing — any diagnostic above naming "${need.row}" says which`,
   ),
 );
 

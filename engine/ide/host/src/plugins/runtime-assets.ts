@@ -1,7 +1,13 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
-import { type E8Manifest, parseManifest, type ResolvedRow } from '@energy8engine/contracts';
+import {
+  type Diagnostic,
+  diagnostic,
+  type E8Manifest,
+  parseManifest,
+  type ResolvedRow,
+} from '@energy8engine/contracts';
 import { readPackageJson } from '../resolvePackage';
 
 export const name = 'runtime-assets';
@@ -17,6 +23,15 @@ export interface RuntimeAssetsConfig {
  * needs to know which ids exist; `GET /plugin-runtime/:id` hands over one
  * row's runtime half so the browser can dynamically `import()` it into the
  * running game.
+ *
+ * `/plugin-runtime/:id` is NOT "the fallback" — it is the NON-VITE path.
+ * It is what a host with no `dev-game` on it (`e8 ide`) serves a runtime
+ * half through, raw and untransformed, and it is the only path that could
+ * ever serve one without a vite instance in the process. Under `e8 dev` it
+ * is currently unexercised: `dev-game` is always composed there, so every
+ * `runtimeUrl` comes out `/@fs/<realpath>` and nothing asks for this
+ * route. It also carries the realpath containment check, which the
+ * `/@fs/` URL delegates to vite's own workspace-root confinement.
  *
  * The second route is `client-assets.ts` with two differences, not a fresh
  * design — read that file's doc comments for the full reasoning behind the
@@ -63,6 +78,10 @@ export interface RuntimeAssetsConfig {
  * set for the EDITOR's own rows (`composition.ts`, consumed by
  * `engine/ide/client/src/plugins/modules.ts`).
  *
+ * A `null` `runtimeUrl` means the row loads nothing, and it comes with a
+ * diagnostic in the SAME response whenever that is a mistake rather than
+ * a legal absence — see `resolveRuntimeUrl`.
+ *
  * `dev-game`'s presence is read reactively, not through a static
  * `inject` (which would make `runtime-assets` wait forever for a service
  * that never arrives under `e8 ide`): `ctx.inject(['devGameRoot'], ...)`
@@ -82,29 +101,72 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
   });
 
   /**
-   * `null` when the row's package has no runtime half at all — a
-   * legitimate, silent case (see `plugin-runtime/:id`'s identical check
-   * below), not an error this function reports.
+   * `url: null` used to be the whole answer, and it collapsed three
+   * different situations into the one that is legitimately silent:
+   *
+   *  1. the package resolved and declares no `e8.runtime` — a client-only
+   *     plugin has nothing to load into a game. Legal, and silent.
+   *  2. the package could not be resolved at all — a typo in a row's
+   *     `name`, which is the most likely first-run mistake there is.
+   *  3. the package declares an `entry` that is not on disk.
+   *
+   * 2 and 3 are author mistakes, and a row that silently contributes
+   * nothing is exactly the blank screen with nothing said that this whole
+   * design exists to prevent: the loader skips a `null` `runtimeUrl`
+   * without comment (`composeFromProject`'s own rule, correct for case 1),
+   * so nothing downstream could ever have re-derived the fact this
+   * function is the only one holding. So they come back as a `Diagnostic`
+   * alongside the (still `null`) url, and `/api/composition` merges them
+   * into the same `diagnostics` array `ctx.project.diagnostics` already
+   * travels in — which `composeFromProject` carries through untouched and
+   * `createGame` puts on the failure screen.
    */
-  function resolveRuntimeUrl(row: ResolvedRow, manifest: E8Manifest | null, pkg: { dir: string } | null): string | null {
-    if (!pkg || !manifest?.runtime) return null;
-
-    if (devGamePresent) {
-      const entryPath = resolve(pkg.dir, manifest.runtime.entry);
-      try {
-        // Real-pathed for the same reason `/plugin-runtime/:id` below
-        // resolves through symlinks before trusting a path — an npm
-        // workspace routinely symlinks the package directory itself.
-        return `/@fs/${realpathSync(entryPath)}`;
-      } catch {
-        // Missing on disk — not this route's job to explain why; a
-        // fetch of the (also `null`-safe) `/plugin-runtime/:id` fallback
-        // would report the same fact if something asked for it.
-        return null;
-      }
+  function resolveRuntimeUrl(
+    row: ResolvedRow,
+    manifest: E8Manifest | null,
+    pkg: { dir: string } | null,
+  ): { url: string | null; diagnostic?: Diagnostic } {
+    if (!pkg) {
+      return {
+        url: null,
+        diagnostic: diagnostic(
+          'error',
+          row.id,
+          'package',
+          `row "${row.id}" names the package "${row.name}", which could not be resolved from ${config.cwd}`,
+          `check "${row.name}" for a typo in e8.patch.yml or the bundle that places "${row.id}", or install it`,
+        ),
+      };
     }
 
-    return `/plugin-runtime/${row.id}`;
+    // Case 1 — the silent one. Reported nowhere, on purpose.
+    if (!manifest?.runtime) return { url: null };
+
+    const entryPath = resolve(pkg.dir, manifest.runtime.entry);
+    let realEntryPath: string;
+    try {
+      // Real-pathed for the same reason `/plugin-runtime/:id` below
+      // resolves through symlinks before trusting a path — an npm
+      // workspace routinely symlinks the package directory itself.
+      realEntryPath = realpathSync(entryPath);
+    } catch (error) {
+      return {
+        url: null,
+        diagnostic: diagnostic(
+          'error',
+          row.id,
+          'e8.runtime.entry',
+          `row "${row.id}" (${row.name}) declares e8.runtime.entry "${manifest.runtime.entry}", but ${entryPath} is not on disk: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          `fix "e8.runtime.entry" in ${row.name}'s package.json, or build the file it points at`,
+        ),
+      };
+    }
+
+    // Both branches need the entry to exist, so the check above is not
+    // conditional on `dev-game`; only which URL can serve it is.
+    return { url: devGamePresent ? `/@fs/${realEntryPath}` : `/plugin-runtime/${row.id}` };
   }
 
   ctx.server.get('/api/composition', async (_req, res) => {
@@ -128,16 +190,32 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     // for the id the browser already committed to asking for, which is a
     // reasonable reading of "the request that's in flight."
     await ctx.project.reload();
+    // Starts as the project's own (a malformed profile, a bundle that was
+    // not found, …) and gains one per row that could not be resolved —
+    // one array, because a person reading a failure screen is looking for
+    // "what is wrong with my game", not for which layer of the host
+    // noticed it.
+    const diagnostics: Diagnostic[] = [...ctx.project.diagnostics];
     const rows = ctx.project.composition.rows.map((row) => {
       const pkg = readPackageJson(config.cwd, row.name);
-      const manifest = pkg ? parseManifest(pkg.json, row.id).manifest : null;
+      // The manifest's OWN complaints (an `e8.runtime` with no string
+      // `entry`, say) travel too. They were being parsed and dropped on
+      // the same floor `resolveRuntimeUrl`'s were.
+      const parsed = pkg
+        ? parseManifest(pkg.json, row.id)
+        : { manifest: null, diagnostics: [] as Diagnostic[] };
+      diagnostics.push(...parsed.diagnostics);
+
+      const runtime = resolveRuntimeUrl(row, parsed.manifest, pkg);
+      if (runtime.diagnostic) diagnostics.push(runtime.diagnostic);
+
       // `seam` rides along for the same reason `runtimeUrl` does: only
       // the host can read a package's manifest, and the browser has to
       // know which rows are competing to provide a capability before it
       // applies any of them (see `GameCompositionRow.seam`).
-      return { ...row, runtimeUrl: resolveRuntimeUrl(row, manifest, pkg), seam: manifest?.seam };
+      return { ...row, runtimeUrl: runtime.url, seam: parsed.manifest?.seam };
     });
-    res.json({ rows, diagnostics: ctx.project.diagnostics });
+    res.json({ rows, diagnostics });
   });
 
   ctx.server.get('/plugin-runtime/:id', async (req, res) => {

@@ -99,7 +99,7 @@ describe('composeFromProject', () => {
     expect(diags[0].plugin).toBe('a');
   });
 
-  it('apply() throwing synchronously becomes a diagnostic', async () => {
+  it('apply() throwing synchronously becomes a diagnostic naming the row and the URL it loaded', async () => {
     const ctx = new Context();
     const diags = await composeFromProject(ctx, {
       fetchFn: fakeFetch({ rows: [row('a')], diagnostics: [] }),
@@ -110,6 +110,14 @@ describe('composeFromProject', () => {
       }),
     });
     expect(diags).toHaveLength(1);
+    expect(diags[0].plugin).toBe('a');
+    // The URL, not only the row id. A native `import()` failure says
+    // "Failed to fetch dynamically imported module" and names nothing; a
+    // throw out of `apply` names nothing either. This is often the only
+    // address a person gets for the row that broke, and the loader is the
+    // only place that holds it at the moment it fails.
+    expect(diags[0].message).toContain('/plugin-runtime/a');
+    expect(diags[0].message).toContain('nope');
   });
 
   it('apply() rejecting asynchronously becomes a diagnostic naming the row, not an unhandled rejection', async () => {
