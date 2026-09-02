@@ -10,6 +10,7 @@ import * as clientAssets from './plugins/client-assets';
 import * as composition from './plugins/composition';
 import * as project from './plugins/project';
 import * as rpc from './plugins/rpc';
+import * as runtimeAssets from './plugins/runtime-assets';
 
 export interface IdeHostOptions {
   /** Project directory; its e8.yml is the composition. */
@@ -71,6 +72,7 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
     await ctx.plugin(rpc);
     await ctx.plugin(clientAssets, { cwd: options.cwd });
+    await ctx.plugin(runtimeAssets, { cwd: options.cwd });
     await ctx.loader.await();
 
     ctx.server.get('/api/health', async (_req, res) => {

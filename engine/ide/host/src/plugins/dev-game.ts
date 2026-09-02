@@ -108,10 +108,6 @@
  * one case the rule always allows: reading back a service you provided on
  * yourself.
  */
-// THROWAWAY (task 1 spike) — `readFile`/`join` are only used by the probe
-// routes below. Deleted in task 5.
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { Context } from 'cordis';
 import * as session from '@energy8engine/session-dev';
 import type { SpinResult } from '@energy8engine/contracts';
@@ -199,25 +195,6 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // contracts/spin.ts. The browser rebuilds nothing.
     const payload: SpinResult = result;
     res.json(payload);
-  });
-
-  // THROWAWAY (task 1 spike). Deleted in task 5. Serves a plain ESM file
-  // from the project root over a host route, so the browser can try to
-  // `import()` it while vite owns the same origin.
-  ctx.server.get('/probe-runtime-half', async (_req, res) => {
-    const source = await readFile(join(config.root, 'probe-runtime-half.mjs'), 'utf8');
-    res.headers.set('content-type', 'text/javascript; charset=utf-8');
-    res.text(source);
-  });
-
-  // THROWAWAY (task 1 spike). Deleted in task 5. Same bytes, served with a
-  // path that ends in `.mjs` and with CORS headers, so the spike can tell
-  // apart "the extension mattered" from "the origin mattered".
-  ctx.server.get('/probe-runtime-half.mjs', async (_req, res) => {
-    const source = await readFile(join(config.root, 'probe-runtime-half.mjs'), 'utf8');
-    res.headers.set('content-type', 'text/javascript; charset=utf-8');
-    res.headers.set('access-control-allow-origin', '*');
-    res.text(source);
   });
 
   // Registered LAST, deliberately — see point 3 above. Everything this
