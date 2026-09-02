@@ -27,6 +27,14 @@ export interface RuntimeAssetsConfig {
  *     not `ctx.loader.entries()` (the HOST's own IDE-editor plugin graph)
  *     — two different id spaces that happen to share a shape.
  *
+ * One more divergence, deliberate, not an oversight: this route answers
+ * `content-type: application/javascript`, where `client-assets.ts` answers
+ * `text/javascript`. That is what the brief's interface for this route
+ * specifies verbatim — do not "fix" the two into agreement; that would
+ * quietly change what content-type the browser is told for one half or
+ * the other. Both are registered, valid JS MIME types; nothing here reads
+ * them and cares which one it gets.
+ *
  * Both routes are plain `ctx.server.get(path, handler)` registrations.
  * `@cordisjs/plugin-server` matches routes against `req.path`, which is
  * already stripped of the query string (see `Request`'s constructor in

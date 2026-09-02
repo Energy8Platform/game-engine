@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -121,8 +121,27 @@ describe('GET /plugin-runtime/:id', () => {
     );
     writeFileSync(join(clientOnlyDir, 'client.js'), 'export function apply() {}\n');
 
-    // A plugin whose declared runtime entry escapes its own package
-    // directory entirely — the exact shape the brief calls out.
+    // A plugin whose declared runtime entry is a SYMLINK, sitting inside
+    // its own package directory, whose TARGET escapes it — the vector a
+    // lexical `path.resolve` containment check misses entirely (the path
+    // string never leaves `pkg.dir`; only what it points at does). This is
+    // the same shape `assets.test.ts` builds for `/plugin-client`'s
+    // "symlink-plugin" case, not a fresh invention — a naive relative
+    // string like `../../../etc/passwd` is a WEAKER test than this one:
+    // from a `mkdtempSync` workspace nested several directories under the
+    // OS temp dir, three `..` segments land on a path that doesn't exist,
+    // so `realpathSync` throws ENOENT and the request 404s through the
+    // "missing on disk" branch — never actually reaching the containment
+    // comparison at all. Measured directly: with the containment check
+    // deleted outright, that version of this test still passed unchanged.
+    // A symlink whose target is a file that genuinely EXISTS outside the
+    // package root forces the request through `readFileSync` successfully
+    // unless the containment check itself stops it — so this test fails
+    // when the check is missing and passes when it is not, which is the
+    // property that actually matters here.
+    const secretOutsideThePackage = join(workspace, 'escapee-secret.js');
+    writeFileSync(secretOutsideThePackage, "export const secret = 'ESCAPED_SECRET';\n");
+
     const escapeeDir = join(nodeModules, 'escapee-pkg');
     mkdirSync(escapeeDir);
     writeFileSync(
@@ -133,13 +152,14 @@ describe('GET /plugin-runtime/:id', () => {
         type: 'module',
         main: 'index.js',
         exports: { '.': './index.js', './package.json': './package.json' },
-        e8: { runtime: { entry: '../../../etc/passwd' } },
+        e8: { runtime: { entry: './link.js' } },
       }),
     );
     writeFileSync(
       join(escapeeDir, 'index.js'),
       "export const name = 'escapee-pkg';\nexport function apply() {}\n",
     );
+    symlinkSync(secretOutsideThePackage, join(escapeeDir, 'link.js'));
 
     writeFileSync(join(workspace, 'e8.yml'), '[]\n');
     writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-runtime-fixture\n');
@@ -199,10 +219,16 @@ describe('GET /plugin-runtime/:id', () => {
     expect(body.error).toContain('clientonly-pkg');
   });
 
-  it('refuses to serve a path that escapes the package root', async () => {
+  it('refuses to serve a path that escapes the package root, even via a symlink', async () => {
     const res = await fetch(`${runtimeHost.url}/plugin-runtime/escapee1`);
     expect(res.status).toBe(404);
     const body = await res.text();
-    expect(body).not.toContain('root:');
+    // The file at the symlink's target genuinely exists and genuinely
+    // contains this string — a version of the route missing the
+    // containment check would serve it with a 200. Asserting the marker's
+    // absence (not just the status code) is what makes this test fail when
+    // the check is removed instead of passing by accident through some
+    // other 404 branch.
+    expect(body).not.toContain('ESCAPED_SECRET');
   });
 });
