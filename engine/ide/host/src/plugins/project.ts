@@ -18,6 +18,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Context } from 'cordis';
 import {
   type Diagnostic,
@@ -59,8 +60,15 @@ const BUNDLE_FILENAME = 'e8.bundle.yml';
  * from its own `node_modules`, not from wherever this repo happens to
  * live on disk — the repo fallback exists only so bundles shipped in THIS
  * repo work without also being npm-installed.
+ *
+ * This package is loaded as genuine ESM by the real CLI (`tsx/esm/api`,
+ * see `engine/apps/cli/bin/e8.mjs`), where `__dirname` does not exist —
+ * unlike vitest's own vite-node SSR transform, which shims it and would
+ * have hidden a `ReferenceError` here behind an all-green test run.
+ * `import.meta.url` is the ESM-native equivalent; `fileURLToPath` turns it
+ * back into the plain path `join()` wants.
  */
-const REPO_BUNDLES_DIR = join(__dirname, '../../../../bundles');
+const REPO_BUNDLES_DIR = fileURLToPath(new URL('../../../../bundles', import.meta.url));
 
 export const name = 'project';
 

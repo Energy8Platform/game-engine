@@ -11,7 +11,12 @@ if (command !== 'ide' && command !== 'dev') {
 }
 
 const cwd = process.cwd();
-const host = await createIdeHost({ cwd });
+// `PORT=0` lets a test (or a developer running two instances) bind an
+// ephemeral port instead of the fixed default — see
+// engine/ide/host/tests/cli-smoke.test.ts, which spawns this exact binary
+// and needs a port nothing else could be holding.
+const port = process.env.PORT ? Number(process.env.PORT) : undefined;
+const host = await createIdeHost({ cwd, port });
 
 if (command === 'dev') {
   // `e8 dev` boots the same host `e8 ide` does, plus `dev-game`: one
