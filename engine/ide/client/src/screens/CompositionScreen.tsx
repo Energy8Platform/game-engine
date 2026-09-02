@@ -1,7 +1,13 @@
 import { Component, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { Context } from 'cordis';
-import { diagnostic, type CompositionRow, type Diagnostic } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type CompositionRow,
+  type Diagnostic,
+  type GameDiagnostic,
+  type ResolvedRow,
+} from '@energy8engine/contracts';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { useSlot } from '../plugins/slots';
 
@@ -159,7 +165,15 @@ export function Preview({ ctx, url }: PreviewProps) {
   );
 }
 
-export function CompositionScreen({ ctx }: { ctx: Context }) {
+/**
+ * The IDE's own plugin graph — `ctx.connection`'s snapshot/diagnostics,
+ * unchanged from before Task 10. Split out of `CompositionScreen` so that
+ * component can render this half only when it actually has a `ctx` (a
+ * `useSyncExternalStore` call cannot be made conditional on `ctx` being
+ * present, so it has to live behind a component that's ONLY mounted when
+ * `ctx` exists, not behind an `if` inside one that always mounts).
+ */
+function EditorComposition({ ctx }: { ctx: Context }) {
   const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
   const diagnostics = useDiagnostics(ctx);
   const cards = useSlot(ctx, 'composition.card');
@@ -177,13 +191,13 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
   // host-authored today) — see `Diagnostic.plugin`'s doc comment for why a
   // runtime-namespace diagnostic (a live game's `session`/`renderer-pixi`/
   // mechanic id, …) landing in `diagnostics` here would risk resolving
-  // against an unrelated row that merely shares its id.
+  // against an unrelated row that merely shares its id. `GameComposition`,
+  // below, is the sibling that renders that other namespace, and it never
+  // calls this function.
   const pluginLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
 
   return (
-    <main className="e8-composition">
-      <h1>Состав</h1>
-
+    <>
       <Preview ctx={ctx} />
 
       {diagnostics.length > 0 && (
@@ -227,6 +241,94 @@ export function CompositionScreen({ ctx }: { ctx: Context }) {
           <card.component />
         </CardBoundary>
       ))}
+    </>
+  );
+}
+
+/** `bundle:e8-base` → `e8-base` (the bundle's own name); `patch`/`cli` are already the label to show. */
+function layerLabel(from: string): string {
+  return from.startsWith('bundle:') ? from.slice('bundle:'.length) : from;
+}
+
+export interface GameCompositionProps {
+  /** The GAME's resolved composition — one row per plugin, in layering order, each carrying which layer placed it. */
+  rows: ResolvedRow[];
+  /**
+   * Ids a bundle already placed, before the patch/cli layers applied — the
+   * only way to tell "the patch overrode this row" from "the patch added a
+   * new row that happens to share no earlier placement": `ResolvedRow.from`
+   * alone only says who placed the row LAST, not whether anyone placed it
+   * before.
+   */
+  bundleIds?: string[];
+  /**
+   * A live game's own diagnostics — namespace 2 of `Diagnostic.plugin`
+   * (`GameDiagnostic`; see its doc comment). Kept in a channel entirely
+   * separate from the composition rows above and rendered as-is: `plugin`
+   * here is a runtime seam/mechanic id, not a row id, so it is never looked
+   * up against `rows` the way `EditorComposition`'s `pluginLabel` looks up
+   * a composition diagnostic — a patch author can legally name a row
+   * `session`, and that row must not swallow a game diagnostic that merely
+   * happens to share the string `"session"`.
+   */
+  gameDiagnostics?: GameDiagnostic[];
+}
+
+/** The GAME's resolved composition (Task 10) — which layer (bundle/patch/cli) placed each row, and the running game's own diagnostics, kept apart from the editor's. */
+function GameComposition({ rows, bundleIds, gameDiagnostics }: GameCompositionProps) {
+  return (
+    <section className="e8-game-composition">
+      {gameDiagnostics && gameDiagnostics.length > 0 && (
+        <ul className="e8-game-diagnostics">
+          {gameDiagnostics.map((d, index) => (
+            <li key={index} data-testid={`game-diagnostic-${index}`} data-severity={d.severity}>
+              <strong className="e8-severity">{d.severity}</strong> {d.plugin} · {d.where}:{' '}
+              {d.message}
+              {d.fix ? ` — ${d.fix}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {rows.map((row) => {
+        const isBundlePlacement = row.from.startsWith('bundle:');
+        const overridden = !isBundlePlacement && (bundleIds ?? []).includes(row.id);
+        return (
+          <section className="e8-game-row" key={row.id} data-testid={`row-${row.id}`}>
+            <header>
+              <strong>{row.name}</strong>
+              <span className="e8-layer">{layerLabel(row.from)}</span>
+              {overridden ? <span className="e8-badge">overridden</span> : null}
+            </header>
+          </section>
+        );
+      })}
+    </section>
+  );
+}
+
+export interface CompositionScreenProps {
+  /** The IDE's own plugin graph — omit in a game-composition-only render (see `GameComposition`). */
+  ctx?: Context;
+  /** The GAME's resolved composition — omit when only the editor's own rows are being shown. */
+  rows?: ResolvedRow[];
+  bundleIds?: string[];
+  gameDiagnostics?: GameDiagnostic[];
+}
+
+export function CompositionScreen({
+  ctx,
+  rows,
+  bundleIds,
+  gameDiagnostics,
+}: CompositionScreenProps) {
+  return (
+    <main className="e8-composition">
+      <h1>Состав</h1>
+      {ctx ? <EditorComposition ctx={ctx} /> : null}
+      {rows ? (
+        <GameComposition rows={rows} bundleIds={bundleIds} gameDiagnostics={gameDiagnostics} />
+      ) : null}
     </main>
   );
 }
