@@ -35,7 +35,11 @@
  *     declares `e8.seam`) go through `@energy8engine/seam`'s
  *     `selectProvider`, and only the winner is composed. Zero or two
  *     matching candidates yields no provider and a diagnostic naming them
- *     and their matchers.
+ *     and their matchers. The winner also takes the losing candidate's
+ *     POSITION in the row order rather than keeping its own, so a patch
+ *     that ADDS a competing provider — which `resolveComposition` appends
+ *     last — still applies before the rows that read the seam. See the
+ *     `slotOf` map in `plan`.
  *
  *  3. **The failure screen.** `boot` no longer orchestrates anything — it
  *     renders (see `@energy8engine/boot/runtime`). Deciding WHEN to render
@@ -301,13 +305,61 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
         }
       }
 
-      return {
-        // A row that declares no seam always composes; a row that does
-        // composes only if it won. Losing is silent here — the diagnostic
-        // explaining why nothing won was already recorded above.
-        rows: rows.filter((row) => !isSeamCandidate(row) || winner.get(row.seam.name) === row.id),
-        diagnostics: planDiagnostics,
-      };
+      /**
+       * Where each seam's provider belongs in the row order: the FIRST
+       * position any candidate for that seam occupies.
+       *
+       * This is what makes the documented third-party story the working
+       * one. `resolveComposition` APPENDS a row a patch adds, so shipping
+       * `@acme/gl` with `e8.seam: { renderer, … }` and adding it as a row
+       * puts it LAST — after `stage1`, which reads `ctx.renderer`. A plain
+       * filter would then compose `boot1, stage1, …, renderer2`:
+       * `renderer1` dropped for losing, `stage1` applied against a context
+       * with no renderer on it, and a failure screen blaming `stage1` for
+       * a mistake nobody made. The only arrangement that worked was
+       * replacing `renderer1` in place, which abandons the competition the
+       * seam exists for.
+       *
+       * So a winner takes the losing candidate's SLOT rather than keeping
+       * its own: what a seam's position in the composition expresses is
+       * "the renderer goes here", and which package fills it is exactly
+       * the question the seam defers. Rows that declare no seam never
+       * move.
+       */
+      const slotOf = new Map<string, number>();
+      rows.forEach((row, index) => {
+        if (!isSeamCandidate(row)) return;
+        if (!slotOf.has(row.seam.name)) slotOf.set(row.seam.name, index);
+      });
+
+      const planned: GameCompositionRow[] = [];
+      rows.forEach((row, index) => {
+        if (!isSeamCandidate(row)) {
+          planned.push(row);
+          return;
+        }
+        // Every candidate is visited; only the one sitting in the seam's
+        // slot emits, and what it emits is the WINNER, not itself. Losing
+        // is silent — the diagnostic explaining why nothing won was
+        // already recorded above.
+        if (slotOf.get(row.seam.name) !== index) return;
+        const winningId = winner.get(row.seam.name);
+        // `undefined` when nothing won (zero or ambiguous candidates), and
+        // also when the winner is not a row at all — `config.session`'s
+        // local `session-dev` provider competes for the `session` seam
+        // without being in the composition. Both mean the slot stays
+        // empty, which is correct: `createGame` brings the session up
+        // itself, above.
+        const winningRow = rows.find(
+          (candidate) =>
+            isSeamCandidate(candidate) &&
+            candidate.seam.name === row.seam.name &&
+            candidate.id === winningId,
+        );
+        if (winningRow) planned.push(winningRow);
+      });
+
+      return { rows: planned, diagnostics: planDiagnostics };
     };
 
     diagnostics.push(...(await composeFromProject(ctx, { ...config.loader, plan })));

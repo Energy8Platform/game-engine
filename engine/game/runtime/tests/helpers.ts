@@ -64,6 +64,8 @@ export function fakeFetch(body: {
 declare module 'cordis' {
   interface Context {
     reels: { config: unknown };
-    renderer: { app: { canvas: HTMLCanvasElement } };
+    renderer: { app: { canvas: HTMLCanvasElement }; gl?: boolean };
+    /** What the fake `stage1` half below captured off `ctx.renderer` — see `compose-from-project.test.ts`. */
+    stageRenderer: { app: { canvas: HTMLCanvasElement }; gl?: boolean };
   }
 }
