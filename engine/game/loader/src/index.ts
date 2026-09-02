@@ -6,10 +6,23 @@
  * ever need. `composeFromProject` replaces that with two HTTP round trips
  * to the IDE host: `GET /api/composition` for the ordered row list (task
  * 4's `resolveComposition`, served by `engine/ide/host/src/plugins/
- * runtime-assets.ts`), then one `GET /plugin-runtime/:id` per row for the
- * JS that actually wires it up. A third-party mechanic package becomes
+ * runtime-assets.ts`), then one fetch of each row's own `runtimeUrl` for
+ * the JS that actually wires it up. A third-party mechanic package becomes
  * addable without touching this repo at all — it only has to land in the
  * project's composition.
+ *
+ * **This file does not build `/plugin-runtime/:id` itself** — it imports
+ * whatever `row.runtimeUrl` already says, same precedent `clientUrl`
+ * already set for the EDITOR's own rows (`engine/ide/client/src/plugins/
+ * modules.ts` imports `row.clientUrl` rather than constructing one). The
+ * host decides the URL because only the host knows whether a real vite
+ * dev server is sitting on this origin: a raw, byte-for-byte
+ * `/plugin-runtime/:id` response cannot resolve TypeScript syntax or a
+ * bare `import 'pixi.js'`, but `/@fs/<realpath>` served through `dev-game`'s
+ * own vite instance can (measured directly — see task-8-report.md's
+ * appended finding). A row whose `runtimeUrl` is `null` has no runtime
+ * half at all and is skipped — a legitimate, silent case, the same way a
+ * half with no `apply` export is (see below), not a failure.
  *
  * This is the runtime-half sibling of `engine/ide/client/src/plugins/
  * modules.ts`, which does the identical job for the EDITOR's client half.
@@ -46,7 +59,7 @@
  *    requirement, not an all-or-nothing app.
  */
 import type { Context } from 'cordis';
-import { type Diagnostic, diagnostic, type ResolvedRow } from '@energy8engine/contracts';
+import { type Diagnostic, diagnostic, type GameCompositionRow } from '@energy8engine/contracts';
 
 export interface LoadOptions {
   /** Base URL of the host. Defaults to the page origin. */
@@ -58,7 +71,7 @@ export interface LoadOptions {
 }
 
 interface CompositionResponse {
-  rows: ResolvedRow[];
+  rows: GameCompositionRow[];
   diagnostics: Diagnostic[];
 }
 
@@ -105,8 +118,10 @@ export async function composeFromProject(ctx: Context, options: LoadOptions = {}
   const diagnostics: Diagnostic[] = [...composition.diagnostics];
 
   for (const row of composition.rows) {
+    if (row.runtimeUrl === null) continue; // no runtime half — nothing to load, not a failure
+
     try {
-      const module = (await importModule(`/plugin-runtime/${row.id}`)) as RuntimeHalf;
+      const module = (await importModule(row.runtimeUrl)) as RuntimeHalf;
       // Synchronous throws from `apply` land in this same try/catch as an
       // import failure — the call is still inside the `try`, so nothing
       // extra is needed to catch it.

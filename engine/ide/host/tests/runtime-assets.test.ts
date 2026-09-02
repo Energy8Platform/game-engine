@@ -28,6 +28,18 @@ describe('GET /api/composition', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.rows.map((r: { id: string }) => r.id)).toEqual(['boot1', 'reels1']);
+    // No `dev-game` composed in this test (`e8 ide`-shaped host, not
+    // `e8 dev`) — `runtimeUrl` falls back to the raw route. Both rows
+    // resolve to the real `@energy8engine/boot`/`reels` packages (this
+    // fixture references them by their real names — see
+    // `fixtures/project-simple/bundles/e8-base/e8.bundle.yml`), and both
+    // now declare `e8.runtime`, so neither comes back `null`.
+    expect(body.rows.find((r: { id: string }) => r.id === 'boot1').runtimeUrl).toBe(
+      '/plugin-runtime/boot1',
+    );
+    expect(body.rows.find((r: { id: string }) => r.id === 'reels1').runtimeUrl).toBe(
+      '/plugin-runtime/reels1',
+    );
   });
 
   it('carries the project diagnostics with the composition', async () => {

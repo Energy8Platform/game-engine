@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": "./src/index.ts", "./runtime": "./src/runtime.js" },
-  "e8": { "runtime": { "entry": "./src/runtime.js", "inject": [] }, "hot": false },
+  "exports": { ".": "./src/index.ts", "./runtime": "./src/runtime.ts" },
+  "e8": { "runtime": { "entry": "./src/runtime.ts", "inject": [] }, "hot": false },
   "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
   "dependencies": {
     "@energy8engine/contracts": "*",
     "@energy8engine/play-loop": "*",
+    "@energy8engine/stage": "*",
     "@energy8platform/game-engine": "^0.41.0",
+    "cordis": "4.0.0-rc.8",
     "pixi.js": "^8.20.1"
   },
   "devDependencies": {

@@ -1,15 +1,15 @@
 import { Context } from 'cordis';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedRow } from '@energy8engine/contracts';
+import type { GameCompositionRow } from '@energy8engine/contracts';
 import { composeFromProject } from '../src/index';
 
-/** A minimal `ResolvedRow`, shaped like `resolveComposition` (task 4) would emit it. */
-function row(id: string): ResolvedRow {
-  return { id, name: `@e/${id}`, config: {}, from: 'patch' };
+/** A minimal `GameCompositionRow`, shaped like `runtime-assets.ts`'s `/api/composition` would emit it (no dev-game — the raw route). */
+function row(id: string): GameCompositionRow {
+  return { id, name: `@e/${id}`, config: {}, from: 'patch', runtimeUrl: `/plugin-runtime/${id}` };
 }
 
 /** A `fetchFn` that answers `GET /api/composition` with a fixed body, whatever URL it's asked for. */
-function fakeFetch(body: { rows: ResolvedRow[]; diagnostics: unknown[] }): typeof fetch {
+function fakeFetch(body: { rows: GameCompositionRow[]; diagnostics: unknown[] }): typeof fetch {
   return (async () =>
     ({
       ok: true,
@@ -64,6 +64,23 @@ describe('composeFromProject', () => {
       fetchFn: fakeFetch({ rows: [row('a')], diagnostics: [] }),
       importModule: async () => ({}),
     });
+    expect(diags).toEqual([]);
+  });
+
+  it('a row with no runtime half (runtimeUrl: null) is skipped, not a failure', async () => {
+    const ctx = new Context();
+    const imported: string[] = [];
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({
+        rows: [{ ...row('a'), runtimeUrl: null }],
+        diagnostics: [],
+      }),
+      importModule: async (url) => {
+        imported.push(url);
+        return { apply: () => {} };
+      },
+    });
+    expect(imported).toEqual([]);
     expect(diags).toEqual([]);
   });
 
@@ -124,7 +141,9 @@ describe('composeFromProject', () => {
     let seen: unknown;
     await composeFromProject(ctx, {
       fetchFn: fakeFetch({
-        rows: [{ id: 'a', name: '@e/a', config: { speed: 7 }, from: 'patch' }],
+        rows: [
+          { id: 'a', name: '@e/a', config: { speed: 7 }, from: 'patch', runtimeUrl: '/plugin-runtime/a' },
+        ],
         diagnostics: [],
       }),
       importModule: async () => ({

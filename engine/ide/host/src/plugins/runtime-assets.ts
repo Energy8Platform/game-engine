@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
-import { parseManifest } from '@energy8engine/contracts';
+import { type E8Manifest, parseManifest, type ResolvedRow } from '@energy8engine/contracts';
 import { readPackageJson } from '../resolvePackage';
 
 export const name = 'runtime-assets';
@@ -44,8 +44,69 @@ export interface RuntimeAssetsConfig {
  * handler with `req.params.id === 'reels1'` for free. No special-casing
  * needed here; the test for it exists to prove that fact stays true, not
  * to work around it.
+ *
+ * **`runtimeUrl`.** A raw byte-for-byte response (this file's whole
+ * reason to exist) cannot resolve TypeScript syntax or a bare
+ * `import 'pixi.js'` — measured directly: a real browser's native
+ * `import()` throws on the first one it hits. `dev-game` (`dev-game.ts`)
+ * owns a real vite instance on this same origin whenever it's composed,
+ * and vite already solves both problems for a file living in a sibling
+ * workspace package (`/@fs/<realpath>` — types stripped, bare specifiers
+ * rewritten to vite's optimized-deps URLs; measured directly, see
+ * task-8-report.md's appended finding). So each row in `/api/composition`'s
+ * response now carries `runtimeUrl`: `/@fs/<realpath of the entry>` when
+ * `dev-game` is present, `/plugin-runtime/<id>` (this file's own raw
+ * route, unchanged) when it is not — e.g. under `e8 ide`, which never
+ * spawns a vite instance for the game at all. `engine/game/loader/src/
+ * index.ts`'s `composeFromProject` imports whatever URL it's handed
+ * rather than constructing one — the same precedent `clientUrl` already
+ * set for the EDITOR's own rows (`composition.ts`, consumed by
+ * `engine/ide/client/src/plugins/modules.ts`).
+ *
+ * `dev-game`'s presence is read reactively, not through a static
+ * `inject` (which would make `runtime-assets` wait forever for a service
+ * that never arrives under `e8 ide`): `ctx.inject(['devGameRoot'], ...)`
+ * only ever fires if and when `dev-game` is later composed onto the same
+ * `ctx` tree (see `dev-game.ts`'s own `ctx.provide('devGameRoot', ...)` —
+ * `e8 dev`'s CLI command adds it to `host.ctx` right after `createIdeHost`
+ * returns, so it is normally in place well before the browser's first
+ * `/api/composition` fetch).
  */
 export function apply(ctx: Context, config: RuntimeAssetsConfig) {
+  // Set once `dev-game` (if ever) provides `devGameRoot` — see the module
+  // doc above. Read at request time by `resolveRuntimeUrl`, not captured
+  // eagerly, since `dev-game` is composed strictly after this plugin.
+  let devGamePresent = false;
+  ctx.inject(['devGameRoot'], () => {
+    devGamePresent = true;
+  });
+
+  /**
+   * `null` when the row's package has no runtime half at all — a
+   * legitimate, silent case (see `plugin-runtime/:id`'s identical check
+   * below), not an error this function reports.
+   */
+  function resolveRuntimeUrl(row: ResolvedRow, manifest: E8Manifest | null, pkg: { dir: string } | null): string | null {
+    if (!pkg || !manifest?.runtime) return null;
+
+    if (devGamePresent) {
+      const entryPath = resolve(pkg.dir, manifest.runtime.entry);
+      try {
+        // Real-pathed for the same reason `/plugin-runtime/:id` below
+        // resolves through symlinks before trusting a path — an npm
+        // workspace routinely symlinks the package directory itself.
+        return `/@fs/${realpathSync(entryPath)}`;
+      } catch {
+        // Missing on disk — not this route's job to explain why; a
+        // fetch of the (also `null`-safe) `/plugin-runtime/:id` fallback
+        // would report the same fact if something asked for it.
+        return null;
+      }
+    }
+
+    return `/plugin-runtime/${row.id}`;
+  }
+
   ctx.server.get('/api/composition', async (_req, res) => {
     // Re-resolve from disk before answering. `ctx.project` caches its last
     // resolution until something calls `reload()` — nothing did, before
@@ -67,7 +128,12 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     // for the id the browser already committed to asking for, which is a
     // reasonable reading of "the request that's in flight."
     await ctx.project.reload();
-    res.json({ rows: ctx.project.composition.rows, diagnostics: ctx.project.diagnostics });
+    const rows = ctx.project.composition.rows.map((row) => {
+      const pkg = readPackageJson(config.cwd, row.name);
+      const manifest = pkg ? parseManifest(pkg.json, row.id).manifest : null;
+      return { ...row, runtimeUrl: resolveRuntimeUrl(row, manifest, pkg) };
+    });
+    res.json({ rows, diagnostics: ctx.project.diagnostics });
   });
 
   ctx.server.get('/plugin-runtime/:id', async (req, res) => {

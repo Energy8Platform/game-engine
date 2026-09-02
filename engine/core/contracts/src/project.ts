@@ -37,6 +37,29 @@ export interface ResolvedComposition {
   rows: ResolvedRow[];
 }
 
+/**
+ * The wire shape `GET /api/composition` actually serves
+ * (`engine/ide/host/src/plugins/runtime-assets.ts`) — a `ResolvedRow` plus
+ * where to fetch its runtime half. `resolveComposition` above never
+ * produces this: it is a pure function with no `fs` access (see this
+ * file's module doc) and has no way to know whether a row's package
+ * declares `e8.runtime`, let alone whether a vite dev server is around to
+ * serve its TypeScript straight off disk. The host computes `runtimeUrl`
+ * per row AFTER calling `resolveComposition`, the same way `composition.ts`
+ * computes `CompositionRow.clientUrl` for the EDITOR's own rows
+ * (`protocol.ts`) — this is that same precedent for the GAME's rows.
+ */
+export interface GameCompositionRow extends ResolvedRow {
+  /**
+   * `/@fs/<realpath>` when `dev-game` is composed (served straight through
+   * its vite instance — TypeScript stripped, bare specifiers rewritten to
+   * resolvable URLs); `/plugin-runtime/<id>` otherwise (this package's own
+   * route, raw bytes, no transform); `null` when the row's package
+   * declares no runtime half at all.
+   */
+  runtimeUrl: string | null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -113,6 +113,25 @@ import * as session from '@energy8engine/session-dev';
 import type { SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 
+/**
+ * A marker service, not a real capability — its only reader is
+ * `runtime-assets.ts`'s `ctx.inject(['devGameRoot'], ...)`, which uses its
+ * mere presence to switch `/api/composition`'s `runtimeUrl` from the raw
+ * `/plugin-runtime/:id` route to `/@fs/<realpath>` served through THIS
+ * plugin's own vite instance. `root` is carried mainly for anyone
+ * debugging "why did runtimeUrl come out this way" — the URL itself is
+ * built from each entry's own realpath, not from this value.
+ */
+export interface DevGameRootService {
+  root: string;
+}
+
+declare module 'cordis' {
+  interface Context {
+    devGameRoot: DevGameRootService;
+  }
+}
+
 export interface DevGameConfig {
   /** Vite project root — serves the game's `index.html` and module graph from here. */
   root: string;
@@ -134,6 +153,14 @@ export const name = 'dev-game';
 export const inject = ['server'];
 
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
+  // Announces this plugin's presence to `runtime-assets.ts` — see
+  // `DevGameRootService`'s doc comment above. Provided first, before
+  // anything here can fail, so a later throw in this function still
+  // leaves the marker up for as long as `ctx` (this fiber) is alive; if
+  // this fiber is disposed the effect system tears the provision down
+  // with it, same as every other `ctx.provide` in this codebase.
+  ctx.provide('devGameRoot', { root: config.root });
+
   // A direct function call, not `ctx.plugin(session, ...)` — see the
   // module doc's last point for why: it keeps `ctx.session` readable on
   // THIS scope instead of landing it on an unreadable child.
