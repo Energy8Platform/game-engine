@@ -30,7 +30,17 @@ export interface ResolvedRow {
   id: string;
   name: string;
   config: Record<string, unknown>;
-  /** `bundle:<name>` | `patch` | `cli` */
+  /**
+   * `bundle:<name>` for a row a bundle placed, or the patch layer's own
+   * name (`patch`) for one a patch placed or overrode — whatever
+   * `resolveComposition` was handed as a layer name.
+   *
+   * There is exactly one patch layer today. A `cli` layer was listed here
+   * as a third possibility and had no producer: nothing constructs one,
+   * so nothing could ever read one back. It is not listed any more —
+   * `resolveComposition` takes whatever layers its caller passes, so
+   * adding one is a change to the caller, not to this vocabulary.
+   */
   from: string;
 }
 
@@ -76,18 +86,4 @@ export interface GameCompositionRow extends ResolvedRow {
    * host from the package manifest, the same way `runtimeUrl` is.
    */
   seam?: E8SeamDeclaration;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export function isResolvedRow(value: unknown): value is ResolvedRow {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    isRecord(value.config) &&
-    typeof value.from === 'string'
-  );
 }

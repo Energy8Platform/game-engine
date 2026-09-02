@@ -56,13 +56,40 @@ describe('game composition feeder', () => {
   });
 
   it('notifies subscribers once the answer lands', async () => {
-    const ctx = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    // The fetch is resolved BY HAND, so the subscription is guaranteed to
+    // be in place while the answer is still in flight. The previous
+    // version of this test raced that and papered the race over with
+    // `listener.mock.calls.length + (rows ? 1 : 0) > 0` — which, since the
+    // preceding `waitFor` guarantees `rows` is an array and `[]` is
+    // truthy, was `X + 1 > 0` for `X >= 0`: unconditionally true. Deleting
+    // the notify loop from `game-composition.tsx` left it green.
+    let deliver!: (res: Response) => void;
+    const inFlight = new Promise<Response>((resolvePromise) => {
+      deliver = resolvePromise;
+    });
+    const ctx = await harness((async (url: string) => {
+      if (!String(url).includes('/api/composition')) throw new Error(`unexpected fetch: ${url}`);
+      return inFlight;
+    }) as unknown as typeof fetch);
+
     const listener = vi.fn();
     ctx.gameComposition.subscribe(listener);
-    await vi.waitFor(() => expect(ctx.gameComposition.rows).not.toBeNull());
-    // Already settled before subscribing is the race this guards: either
-    // the listener fired, or the value was there when it subscribed.
-    expect(listener.mock.calls.length + (ctx.gameComposition.rows ? 1 : 0)).toBeGreaterThan(0);
+    // Nothing has been answered yet, so nothing can have been notified.
+    expect(ctx.gameComposition.rows).toBeNull();
+    expect(listener).not.toHaveBeenCalled();
+
+    deliver(
+      new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    // Once, not once-or-more: a service that notified on every await point
+    // would re-render the screen for no reason, and `toHaveBeenCalled`
+    // alone would not notice.
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(ctx.gameComposition.rows).toHaveLength(2);
   });
 
   it('a host that is not there is a diagnostic on screen, not a throw', async () => {
@@ -102,6 +129,21 @@ describe('game composition feeder', () => {
       throw new Error('nope');
     }) as unknown as typeof fetch);
     await vi.waitFor(() => expect(ctx.gameComposition.diagnostics).toHaveLength(1));
-    expect(ctx.connection.diagnostics).toEqual([]);
+
+    // A sentinel through the editor's own channel, so this assertion can
+    // actually fail. `expect(ctx.connection.diagnostics).toEqual([])` on
+    // its own could not: nothing in this harness ever pushes to those
+    // backing arrays, so it was green whatever `game-composition` did with
+    // its failure. Reporting one editor diagnostic and asserting the array
+    // holds exactly that one is the same claim, made falsifiable — route
+    // the fetch failure into `connection` and this test goes red.
+    const editorSide = {
+      severity: 'warning' as const,
+      plugin: 'editor-row',
+      where: 'test',
+      message: 'sentinel',
+    };
+    ctx.connection.report(editorSide);
+    expect(ctx.connection.diagnostics).toEqual([editorSide]);
   });
 });

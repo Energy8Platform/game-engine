@@ -69,7 +69,7 @@ import { renderBootFailure } from '@energy8engine/boot';
 import type { BootService } from '@energy8engine/boot/runtime';
 import type { SessionConfig } from '@energy8engine/session-dev';
 
-export type { MechanicsService, MechanicsConfig } from './plugins/mechanics';
+export type { MechanicsService } from './plugins/mechanics';
 
 /**
  * Seams a game is expected to have even when nothing offers one. A game

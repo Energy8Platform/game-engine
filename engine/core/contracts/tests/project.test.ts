@@ -1,17 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { isResolvedRow, type Profile, type ResolvedComposition } from '../src/project';
+import type { Profile, ResolvedComposition, ResolvedRow } from '../src/project';
 
+/**
+ * `isResolvedRow` used to live here with three tests against it. It had no
+ * non-test consumer — both real ones (the host serving `/api/composition`,
+ * the IDE client reading it back) cast instead, because at both of those
+ * points the value's provenance is already known. A guard nothing guards
+ * with is a shape assertion the type system already makes.
+ *
+ * What is left is what this file can honestly check about a vocabulary
+ * package: that the shapes compose the way the two sides agree they do.
+ */
 describe('project vocabulary', () => {
-  it('a resolved row remembers which layer put it there', () => {
-    const row = { id: 'reels1', name: '@energy8engine/reels', config: { grid: {} }, from: 'bundle:e8-base' };
-    expect(isResolvedRow(row)).toBe(true);
+  it('a resolved composition is a list of rows, each remembering its layer', () => {
+    const rows: ResolvedRow[] = [
+      { id: 'boot1', name: '@energy8engine/boot', config: {}, from: 'bundle:e8-base' },
+      { id: 'reels1', name: '@energy8engine/reels', config: { grid: {} }, from: 'patch' },
+    ];
+    const composition: ResolvedComposition = { rows };
+    expect(composition.rows.map((row) => row.from)).toEqual(['bundle:e8-base', 'patch']);
   });
 
-  it('a row without provenance is not a resolved row', () => {
-    expect(isResolvedRow({ id: 'reels1', name: '@energy8engine/reels', config: {} })).toBe(false);
-  });
-
-  it('rejects a row whose id is not a string', () => {
-    expect(isResolvedRow({ id: 1, name: 'x', config: {}, from: 'patch' })).toBe(false);
+  it('a profile is the ordered list of bundles that stack', () => {
+    const profile: Profile = { bundles: ['e8-base', 'acme-extras'] };
+    expect(profile.bundles).toEqual(['e8-base', 'acme-extras']);
   });
 });

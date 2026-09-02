@@ -11,11 +11,14 @@ import { CompositionScreen, useGameComposition } from '@energy8engine/ide-client
  * point of it taking them as separate props: the EDITOR's own plugin
  * graph off `ctx` (live, over the `/ide` socket), and the GAME's resolved
  * composition off `ctx.gameComposition` (fetched once from
- * `/api/composition` — see `game-composition.tsx`). `bundleIds` is not
- * passed: nothing derives it today, and a stale one would mislabel rows
- * as overridden.
+ * `/api/composition` — see `game-composition.tsx`).
+ *
+ * `diagnostics` from that same fetch are the PROJECT's — the host's own
+ * complaints about resolving those rows. They go in under the name that
+ * says so. They are not a running game's diagnostics; nothing forwards
+ * those here (see `GameCompositionProps.projectDiagnostics`).
  */
 export function App({ ctx }: { ctx: Context }) {
   const { rows, diagnostics } = useGameComposition(ctx);
-  return <CompositionScreen ctx={ctx} rows={rows ?? undefined} gameDiagnostics={diagnostics} />;
+  return <CompositionScreen ctx={ctx} rows={rows ?? undefined} projectDiagnostics={diagnostics} />;
 }

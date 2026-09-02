@@ -116,15 +116,16 @@ import { createServer as createViteServer, type ViteDevServer } from 'vite';
 /**
  * A marker service, not a real capability — its only reader is
  * `runtime-assets.ts`'s `ctx.inject(['devGameRoot'], ...)`, which uses its
- * mere presence to switch `/api/composition`'s `runtimeUrl` from the raw
+ * mere PRESENCE to switch `/api/composition`'s `runtimeUrl` from the raw
  * `/plugin-runtime/:id` route to `/@fs/<realpath>` served through THIS
- * plugin's own vite instance. `root` is carried mainly for anyone
- * debugging "why did runtimeUrl come out this way" — the URL itself is
- * built from each entry's own realpath, not from this value.
+ * plugin's own vite instance.
+ *
+ * Empty on purpose. It used to carry `root`, provided and never read: the
+ * `/@fs/` URL is built from each entry's own realpath, not from the vite
+ * root, so nothing could have used it. A field kept "for anyone debugging"
+ * reads as data something depends on.
  */
-export interface DevGameRootService {
-  root: string;
-}
+export interface DevGameRootService {}
 
 declare module 'cordis' {
   interface Context {
@@ -159,7 +160,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   // leaves the marker up for as long as `ctx` (this fiber) is alive; if
   // this fiber is disposed the effect system tears the provision down
   // with it, same as every other `ctx.provide` in this codebase.
-  ctx.provide('devGameRoot', { root: config.root });
+  ctx.provide('devGameRoot', {});
 
   // A direct function call, not `ctx.plugin(session, ...)` — see the
   // module doc's last point for why: it keeps `ctx.session` readable on

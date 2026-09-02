@@ -57,14 +57,6 @@ export interface MechanicsService {
   check(stage: string, sample: Record<string, unknown>): Diagnostic[];
 }
 
-/**
- * No settings. The shared `diagnostics` array this used to carry is gone
- * with the bind-time complaint that was the only thing pushing onto it —
- * see `bind`'s doc comment. Kept as a named type because it is part of
- * this plugin's published shape.
- */
-export interface MechanicsConfig {}
-
 declare module 'cordis' {
   interface Context {
     mechanics: MechanicsService;
@@ -73,7 +65,15 @@ declare module 'cordis' {
 
 export const name = 'mechanics';
 
-export function apply(ctx: Context, _config: MechanicsConfig = {}) {
+/**
+ * No settings, and no config parameter to hold them. There was an empty
+ * `MechanicsConfig` here, exported from the package index, with no
+ * producer and no reader — the shared `diagnostics` array it used to carry
+ * went with the bind-time complaint that was the only thing pushing onto
+ * it (see `bind`). An empty interface is not a published shape, it is a
+ * name; cordis passes a config argument this plugin simply ignores.
+ */
+export function apply(ctx: Context) {
   const mechanics = new Map<string, SpinMechanic>();
   const bindings = new Map<string, string>();
 

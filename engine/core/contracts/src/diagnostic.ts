@@ -22,8 +22,7 @@ export interface Diagnostic {
    *     describing what it *is* about instead (e.g. `'composition'` for
    *     the file itself). Display code resolves id → row name for the
    *     human, falling back to the raw value when it doesn't match any row
-   *     (see `CompositionScreen`'s `pluginLabel`). This is what
-   *     `CompositionDiagnostic`, below, names.
+   *     (see `CompositionScreen`'s `pluginLabel`).
    *  2. **A runtime seam or mechanic id** (e.g. `'session'`,
    *     `'renderer-pixi'`, `'stage'`, `'reels'`, `'play-loop'`, or a
    *     `SpinMechanic.id` like `'classic'`/`'cascade'`) — used by code
@@ -32,8 +31,7 @@ export interface Diagnostic {
    *     game's `ctx` has no composition graph to resolve an id against at
    *     all — there is no row for these to be about — so they name the
    *     seam or mechanic itself, the closest thing a game has to an
-   *     address for "who is reporting this". This is what `GameDiagnostic`,
-   *     below, names.
+   *     address for "who is reporting this".
    *
    * The two namespaces first meet on one screen in Task 10: the composition
    * screen renders the GAME's resolved rows (`ResolvedRow[]`, carrying
@@ -45,16 +43,27 @@ export interface Diagnostic {
    * runtime diagnostic as if it were about that unrelated row if the two
    * were ever resolved against the same id-keyed lookup.
    *
-   * The separation is enforced, not merely documented: `CompositionScreen`
-   * keeps the two in separate props/arrays (`ctx.connection.diagnostics`
-   * vs. `gameDiagnostics`) and only ever resolves the composition half
-   * (`pluginLabel`) against composition rows — a `GameDiagnostic` is
-   * rendered as-is, never looked up by id — the same way `connection.ts`
-   * already keeps its `hostDiagnostics` and `clientDiagnostics` apart
-   * instead of merging them into one array. `CompositionDiagnostic` and
-   * `GameDiagnostic`, below, name the two namespaces so a signature can say
-   * which one it means instead of leaving both as an unqualified
-   * `Diagnostic`.
+   * The separation is enforced by keeping the two in separate arrays that
+   * are resolved differently, not by the type system. There used to be a
+   * `CompositionDiagnostic`/`GameDiagnostic` pair here, tagged with an
+   * optional `namespace` literal, meant to let a signature say which one
+   * it meant. They are gone: an OPTIONAL tag that every producer omits
+   * (all of them build a plain `Diagnostic` through the factory below)
+   * discriminates nothing, so an unqualified `Diagnostic` was assignable
+   * to either slot and the pair bought no guarantee at all. What it did
+   * buy was a false one — the IDE's own panel was typed `GameDiagnostic[]`
+   * while being fed the HOST's composition-row diagnostics, and the label
+   * followed the type instead of the data.
+   *
+   * The rule the arrays actually keep: a diagnostic is resolved id → row
+   * name only against rows from its OWN namespace. `CompositionScreen`'s
+   * `EditorComposition` resolves `ctx.connection.diagnostics` against the
+   * editor's rows; its `GameComposition` resolves the project's
+   * diagnostics against the GAME's rows; neither ever resolves the
+   * other's, and a live game's runtime diagnostics have no rows to
+   * resolve against at all — the same way `connection.ts` already keeps
+   * its `hostDiagnostics` and `clientDiagnostics` apart instead of
+   * merging them into one array.
    */
   plugin: string;
   /** Where inside the plugin — a config path, a seam name, a file. */
@@ -62,27 +71,6 @@ export interface Diagnostic {
   message: string;
   /** What the human can do about it, when we know. */
   fix?: string;
-}
-
-/**
- * A `Diagnostic` from namespace 1 of `Diagnostic.plugin` — `plugin` is a
- * composition row id. The `namespace` tag is optional (existing producers,
- * all of which build a plain `Diagnostic` through the `diagnostic()`
- * factory below, need not set it) but its literal type still does real
- * work: a value explicitly typed `GameDiagnostic` cannot be assigned where
- * a `CompositionDiagnostic` is expected, and vice versa, because `'game'`
- * and `'composition'` don't overlap. This does not, by itself, stop an
- * untyped or widened `Diagnostic` from being handed to either slot — the
- * guarantee that actually matters lives in `CompositionScreen` keeping the
- * two arrays apart at runtime (see `Diagnostic.plugin`'s doc comment).
- */
-export interface CompositionDiagnostic extends Diagnostic {
-  readonly namespace?: 'composition';
-}
-
-/** A `Diagnostic` from namespace 2 of `Diagnostic.plugin` — `plugin` is a runtime seam or mechanic id. See `CompositionDiagnostic`'s doc comment for what the `namespace` tag does and does not guarantee. */
-export interface GameDiagnostic extends Diagnostic {
-  readonly namespace?: 'game';
 }
 
 export function diagnostic(

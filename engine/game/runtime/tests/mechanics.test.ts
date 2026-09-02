@@ -13,7 +13,8 @@ import * as mechanicsRow from '../src/runtime';
  */
 async function registry(): Promise<{ ctx: Context }> {
   const ctx = new Context();
-  await ctx.plugin(mechanicsPlugin, {});
+  // No config argument: this plugin has none (see its `apply`).
+  await ctx.plugin(mechanicsPlugin);
   return { ctx };
 }
 

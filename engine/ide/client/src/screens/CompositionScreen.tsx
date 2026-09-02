@@ -5,7 +5,6 @@ import {
   diagnostic,
   type CompositionRow,
   type Diagnostic,
-  type GameDiagnostic,
   type ResolvedRow,
 } from '@energy8engine/contracts';
 import { SchemaForm } from '../schema-form/SchemaForm';
@@ -187,13 +186,13 @@ function EditorComposition({ ctx }: { ctx: Context }) {
   // two. Falls back to the raw id for diagnostics that aren't about any
   // one entry (a malformed e8.yml, a card's slot key, …) — those don't
   // match a row by construction. This resolution must only ever run on
-  // composition-namespace diagnostics (`ctx.connection.diagnostics`, all
-  // host-authored today) — see `Diagnostic.plugin`'s doc comment for why a
-  // runtime-namespace diagnostic (a live game's `session`/`renderer-pixi`/
-  // mechanic id, …) landing in `diagnostics` here would risk resolving
-  // against an unrelated row that merely shares its id. `GameComposition`,
-  // below, is the sibling that renders that other namespace, and it never
-  // calls this function.
+  // the EDITOR's own diagnostics against the EDITOR's own rows — see
+  // `Diagnostic.plugin`'s doc comment for why a runtime-namespace
+  // diagnostic (a live game's `session`/`renderer-pixi`/mechanic id, …)
+  // landing in `diagnostics` here would risk resolving against an
+  // unrelated row that merely shares its id. `GameComposition`, below,
+  // does the same job with its own separate pair — the GAME's rows and the
+  // PROJECT's diagnostics — and the two pairs never cross.
   const pluginLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
 
   return (
@@ -245,7 +244,7 @@ function EditorComposition({ ctx }: { ctx: Context }) {
   );
 }
 
-/** `bundle:e8-base` → `e8-base` (the bundle's own name); `patch`/`cli` are already the label to show. */
+/** `bundle:e8-base` → `e8-base` (the bundle's own name); a patch layer's name is already the label to show. */
 function layerLabel(from: string): string {
   return from.startsWith('bundle:') ? from.slice('bundle:'.length) : from;
 }
@@ -254,35 +253,49 @@ export interface GameCompositionProps {
   /** The GAME's resolved composition — one row per plugin, in layering order, each carrying which layer placed it. */
   rows: ResolvedRow[];
   /**
-   * Ids a bundle already placed, before the patch/cli layers applied — the
-   * only way to tell "the patch overrode this row" from "the patch added a
-   * new row that happens to share no earlier placement": `ResolvedRow.from`
-   * alone only says who placed the row LAST, not whether anyone placed it
-   * before.
+   * The PROJECT's own diagnostics, as `GET /api/composition` serves them
+   * alongside `rows` — a malformed `e8.profile.yml`, a bundle that was not
+   * found, a row whose package could not be resolved. Namespace 1 of
+   * `Diagnostic.plugin`: every one carries a composition-row id, a bundle
+   * name, or a fixed sentinel like `profile`.
+   *
+   * These are about the very rows listed below, so this panel DOES resolve
+   * `plugin` → row name against its own `rows`, the same way
+   * `EditorComposition` resolves the editor's diagnostics against the
+   * editor's rows. It used to be forbidden to, on the grounds that the
+   * array held a running GAME's runtime seam/mechanic ids — but nothing
+   * has ever fed it those. The prop was named `gameDiagnostics` and typed
+   * `GameDiagnostic[]` after a channel that does not exist, and a
+   * diagnostic about `reels1` rendered as the bare string `reels1`
+   * directly above a row labelled `@energy8engine/reels`.
+   *
+   * **What this panel does not show:** a running game's own diagnostics.
+   * `createGame` collects those in the browser tab the game runs in and
+   * draws them on its own failure screen; nothing forwards them to the
+   * IDE. Building that channel is a real feature and is not this. If it is
+   * ever built, its diagnostics must NOT join this array — they carry
+   * runtime seam/mechanic ids, which have no rows to resolve against, and
+   * a patch author is free to name a row `session`.
    */
-  bundleIds?: string[];
-  /**
-   * A live game's own diagnostics — namespace 2 of `Diagnostic.plugin`
-   * (`GameDiagnostic`; see its doc comment). Kept in a channel entirely
-   * separate from the composition rows above and rendered as-is: `plugin`
-   * here is a runtime seam/mechanic id, not a row id, so it is never looked
-   * up against `rows` the way `EditorComposition`'s `pluginLabel` looks up
-   * a composition diagnostic — a patch author can legally name a row
-   * `session`, and that row must not swallow a game diagnostic that merely
-   * happens to share the string `"session"`.
-   */
-  gameDiagnostics?: GameDiagnostic[];
+  projectDiagnostics?: Diagnostic[];
 }
 
-/** The GAME's resolved composition (Task 10) — which layer (bundle/patch/cli) placed each row, and the running game's own diagnostics, kept apart from the editor's. */
-function GameComposition({ rows, bundleIds, gameDiagnostics }: GameCompositionProps) {
+/** The GAME's resolved composition — which layer placed each row, and what the host said went wrong while resolving them. */
+function GameComposition({ rows, projectDiagnostics }: GameCompositionProps) {
+  // Same job as `EditorComposition`'s `pluginLabel`, against the other
+  // namespace's rows: a person reads the row header as a package name, so
+  // a diagnostic printing a bare row id above it leaves them to connect
+  // the two themselves. Falls back to the raw value for the diagnostics
+  // that are about no single row — a bundle name, `profile`, `patch`.
+  const rowLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
+
   return (
     <section className="e8-game-composition">
-      {gameDiagnostics && gameDiagnostics.length > 0 && (
+      {projectDiagnostics && projectDiagnostics.length > 0 && (
         <ul className="e8-game-diagnostics">
-          {gameDiagnostics.map((d, index) => (
-            <li key={index} data-testid={`game-diagnostic-${index}`} data-severity={d.severity}>
-              <strong className="e8-severity">{d.severity}</strong> {d.plugin} · {d.where}:{' '}
+          {projectDiagnostics.map((d, index) => (
+            <li key={index} data-testid={`project-diagnostic-${index}`} data-severity={d.severity}>
+              <strong className="e8-severity">{d.severity}</strong> {rowLabel(d.plugin)} · {d.where}:{' '}
               {d.message}
               {d.fix ? ` — ${d.fix}` : ''}
             </li>
@@ -290,19 +303,14 @@ function GameComposition({ rows, bundleIds, gameDiagnostics }: GameCompositionPr
         </ul>
       )}
 
-      {rows.map((row) => {
-        const isBundlePlacement = row.from.startsWith('bundle:');
-        const overridden = !isBundlePlacement && (bundleIds ?? []).includes(row.id);
-        return (
-          <section className="e8-game-row" key={row.id} data-testid={`row-${row.id}`}>
-            <header>
-              <strong>{row.name}</strong>
-              <span className="e8-layer">{layerLabel(row.from)}</span>
-              {overridden ? <span className="e8-badge">overridden</span> : null}
-            </header>
-          </section>
-        );
-      })}
+      {rows.map((row) => (
+        <section className="e8-game-row" key={row.id} data-testid={`row-${row.id}`}>
+          <header>
+            <strong>{row.name}</strong>
+            <span className="e8-layer">{layerLabel(row.from)}</span>
+          </header>
+        </section>
+      ))}
     </section>
   );
 }
@@ -312,23 +320,16 @@ export interface CompositionScreenProps {
   ctx?: Context;
   /** The GAME's resolved composition — omit when only the editor's own rows are being shown. */
   rows?: ResolvedRow[];
-  bundleIds?: string[];
-  gameDiagnostics?: GameDiagnostic[];
+  /** See `GameCompositionProps.projectDiagnostics` — including what it deliberately does not carry. */
+  projectDiagnostics?: Diagnostic[];
 }
 
-export function CompositionScreen({
-  ctx,
-  rows,
-  bundleIds,
-  gameDiagnostics,
-}: CompositionScreenProps) {
+export function CompositionScreen({ ctx, rows, projectDiagnostics }: CompositionScreenProps) {
   return (
     <main className="e8-composition">
       <h1>Состав</h1>
       {ctx ? <EditorComposition ctx={ctx} /> : null}
-      {rows ? (
-        <GameComposition rows={rows} bundleIds={bundleIds} gameDiagnostics={gameDiagnostics} />
-      ) : null}
+      {rows ? <GameComposition rows={rows} projectDiagnostics={projectDiagnostics} /> : null}
     </main>
   );
 }

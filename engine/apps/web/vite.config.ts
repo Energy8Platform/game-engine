@@ -25,13 +25,13 @@ export default defineConfig({
     proxy: {
       '/api': HOST,
       '/plugin-client': HOST,
-      // The game runs on the host's own port (`HOST`, 5679), and the
-      // preview iframe shares that origin, so an ordinary same-origin
-      // `import()` there needs no proxy. This app's own top-level document
-      // lives on 5680 and cannot reach 5679 without one — see
-      // `plugin-client`'s identical need above, and `runtime-assets.ts`'s
-      // doc comment for what this route serves.
-      '/plugin-runtime': HOST,
+      // No `/plugin-runtime` proxy. Nothing on 5680 imports a runtime
+      // half: this document is the IDE, and the only thing that loads
+      // runtime halves is the GAME, which lives in the preview iframe on
+      // the host's own origin (5679) where the import is same-origin
+      // already. The proxy existed by symmetry with `/plugin-client`
+      // above, which the IDE genuinely does need — that one loads the
+      // EDITOR's client halves into this document.
       '/ide': { target: HOST, ws: true },
     },
   },

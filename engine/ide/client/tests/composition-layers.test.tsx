@@ -3,13 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { CompositionScreen } from '../src/index';
 
 /**
- * Task 10: the composition screen also renders the GAME's resolved
- * composition (`ResolvedRow[]`, each carrying `from` — which layer placed
- * it) alongside a live game's own diagnostics. The third case is the one
- * that matters: `Diagnostic.plugin` carries two disjoint namespaces (a
- * composition row id vs. a runtime seam/mechanic id — see diagnostic.ts),
- * and a patch author is free to write `id: session`, which collides with
- * the game's own `session` seam. The screen must keep the two apart.
+ * The composition screen renders the GAME's resolved composition
+ * (`ResolvedRow[]`, each carrying `from` — which layer placed it) plus the
+ * PROJECT diagnostics the host serves alongside it.
+ *
+ * The "overridden" badge and its `bundleIds` prop used to live here too.
+ * They are gone: `App.tsx` deliberately never passed `bundleIds` (nothing
+ * derives it, and a stale one mislabels rows), so the badge only ever
+ * appeared in this file's own render, which is coverage of a feature no
+ * person could see.
  */
 const rows = [
   { id: 'boot1', name: '@energy8engine/boot', config: {}, from: 'bundle:e8-base' },
@@ -23,25 +25,75 @@ describe('composition screen — layers', () => {
     expect(screen.getByTestId('row-reels1')).toHaveTextContent('patch');
   });
 
-  it('a row the patch overrode reads as overridden, not as newly added', () => {
-    render(<CompositionScreen rows={rows} bundleIds={['boot1', 'reels1']} />);
-    expect(screen.getByTestId('row-reels1')).toHaveTextContent(/overrid/i);
-  });
-
-  it('a game diagnostic never renders as an editor row name, even when ids collide', () => {
-    // The patch is free to name a row `session`; the game independently
-    // stamps `session` on its own seam diagnostics. These are two different
-    // namespaces and the screen must not conflate them.
+  /**
+   * The panel that lists rows by PACKAGE name is the one that has to
+   * resolve a diagnostic's row id, or a person reads `reels1` directly
+   * above `@energy8engine/reels` and is left to connect the two. This
+   * panel was forbidden from resolving on the grounds that its array held
+   * a running game's runtime ids — a channel that does not exist. What it
+   * actually holds is the host's project diagnostics, which are about
+   * exactly these rows.
+   */
+  it('resolves a project diagnostic to the package name of the row it is about', () => {
     render(
       <CompositionScreen
-        rows={[{ id: 'session', name: '@e/some-plugin', config: {}, from: 'patch' }]}
-        gameDiagnostics={[
-          { severity: 'error', plugin: 'session', where: 'start', message: 'e8-server not found' },
+        rows={rows}
+        projectDiagnostics={[
+          {
+            severity: 'error',
+            plugin: 'reels1',
+            where: 'package',
+            message: 'could not be resolved',
+          },
         ]}
       />,
     );
-    const diag = screen.getByTestId('game-diagnostic-0');
-    expect(diag).toHaveTextContent('e8-server not found');
-    expect(diag).not.toHaveTextContent('@e/some-plugin');
+    const diag = screen.getByTestId('project-diagnostic-0');
+    expect(diag).toHaveTextContent('@energy8engine/reels');
+    expect(diag).toHaveTextContent('could not be resolved');
+  });
+
+  it('leaves a diagnostic that is about no single row as it is', () => {
+    // A malformed profile, a bundle that was not found: `plugin` is a
+    // sentinel or a bundle name, matching no row by construction. The
+    // fallback must print it rather than blank it.
+    render(
+      <CompositionScreen
+        rows={rows}
+        projectDiagnostics={[
+          {
+            severity: 'error',
+            plugin: 'profile',
+            where: 'e8.profile.yml',
+            message: 'cannot read e8.profile.yml',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('project-diagnostic-0')).toHaveTextContent('profile');
+  });
+
+  /**
+   * The two panels resolve against two different row lists and must never
+   * cross. `EditorComposition` is only mounted when `ctx` is passed; this
+   * render passes none, so the editor's rows are absent entirely — and a
+   * project diagnostic naming an id must resolve against the GAME's rows,
+   * which is the only list it is about.
+   */
+  it('resolves against the game rows, never the editor rows', () => {
+    render(
+      <CompositionScreen
+        rows={[{ id: 'session', name: '@e/some-plugin', config: {}, from: 'patch' }]}
+        projectDiagnostics={[
+          {
+            severity: 'error',
+            plugin: 'session',
+            where: 'package',
+            message: 'could not be resolved',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('project-diagnostic-0')).toHaveTextContent('@e/some-plugin');
   });
 });

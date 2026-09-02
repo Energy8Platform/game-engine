@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Context } from 'cordis';
-import {
-  diagnostic,
-  type Diagnostic,
-  type GameDiagnostic,
-  type ResolvedRow,
-} from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type ResolvedRow } from '@energy8engine/contracts';
 
 /**
  * The feeder for the GAME half of the composition screen.
@@ -37,8 +32,8 @@ import {
  * `EditorComposition` resolves that array's `plugin` field against the
  * editor's own rows, and a diagnostic about the game's composition has no
  * business being labelled with an editor row that merely shares an id.
- * `GameComposition` renders `plugin` verbatim, which is the correct
- * treatment for both the host's project diagnostics and the one below.
+ * `GameComposition` resolves them against the GAME's rows instead, which
+ * is what they are actually about.
  */
 declare module 'cordis' {
   interface Context {
@@ -49,8 +44,15 @@ declare module 'cordis' {
 export interface GameCompositionState {
   /** `null` until the first fetch settles — "not asked yet", which the screen shows differently from "no rows". */
   rows: ResolvedRow[] | null;
-  /** The host's own project diagnostics, plus this plugin's if the fetch itself failed. */
-  diagnostics: GameDiagnostic[];
+  /**
+   * The host's own PROJECT diagnostics (`/api/composition`'s own
+   * `diagnostics`), plus this plugin's if the fetch itself failed. Every
+   * one carries a composition-row id, a bundle name, or a sentinel like
+   * `profile` — namespace 1 of `Diagnostic.plugin`. Not a running game's
+   * diagnostics: nothing forwards those to the IDE (see
+   * `GameCompositionProps.projectDiagnostics`).
+   */
+  diagnostics: Diagnostic[];
 }
 
 export interface GameCompositionService extends GameCompositionState {
@@ -101,7 +103,7 @@ export function apply(ctx: Context, config: GameCompositionConfig = {}) {
       if (!Array.isArray(body.rows)) throw new Error('the response has no "rows" array');
       service.rows = body.rows as ResolvedRow[];
       service.diagnostics = Array.isArray(body.diagnostics)
-        ? (body.diagnostics as GameDiagnostic[])
+        ? (body.diagnostics as Diagnostic[])
         : [];
     } catch (error) {
       // An empty row list, not `null`: the question was asked and
