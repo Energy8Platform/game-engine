@@ -53,13 +53,14 @@ const PATCH_FILENAME = 'e8.patch.yml';
 const BUNDLE_FILENAME = 'e8.bundle.yml';
 
 /**
- * Fallback bundle location when a bundle isn't installed next to the
- * project (`<cwd>/node_modules/<name>/e8.bundle.yml`, checked first — see
- * `loadBundle`): this repo's own `engine/bundles/<name>/e8.bundle.yml`.
- * `<cwd>` wins because a real user's project resolves its dependencies
- * from its own `node_modules`, not from wherever this repo happens to
- * live on disk — the repo fallback exists only so bundles shipped in THIS
- * repo work without also being npm-installed.
+ * Fallback bundle location when a bundle is neither self-contained under
+ * the project (`<cwd>/bundles/<name>/`) nor npm-installed
+ * (`<cwd>/node_modules/<name>/`) — see `loadBundle` for the full order:
+ * this repo's own `engine/bundles/<name>/e8.bundle.yml`. The two `<cwd>`
+ * locations win because a real user's project resolves its own
+ * dependencies from its own directory, not from wherever this repo
+ * happens to live on disk — the repo fallback exists only so bundles
+ * shipped in THIS repo work without also being npm-installed.
  *
  * This package is loaded as genuine ESM by the real CLI (`tsx/esm/api`,
  * see `engine/apps/cli/bin/e8.mjs`), where `__dirname` does not exist —
@@ -112,7 +113,19 @@ async function readProject(
   for (const bundleName of profile.bundles) {
     const bundleResult = await loadBundle(cwd, bundleName);
     diagnostics.push(...bundleResult.diagnostics);
-    if (bundleResult.bundle) bundles.set(bundleName, bundleResult.bundle);
+    if (bundleResult.found) {
+      // Found but broken (bad YAML, wrong shape) still counts as
+      // "present" to the resolver, as an empty-row stand-in — otherwise
+      // resolveComposition, seeing nothing in the map under this name,
+      // would ALSO report "not found", which is false: the file is
+      // there, it just didn't parse. The diagnostic already pushed above
+      // says the true thing; this only stops a false second one.
+      bundles.set(bundleName, bundleResult.bundle ?? { name: bundleName, rows: [] });
+    }
+    // Genuinely absent from every candidate location: leave it out of the
+    // map entirely. `resolveComposition` reports that case itself (it
+    // names the bundle) — adding our own diagnostic here would just say
+    // the same true thing twice.
   }
 
   const patchResult = await readPatch(cwd);
@@ -124,7 +137,10 @@ async function readProject(
     patches: [{ layer: 'patch', rows: patchResult.rows }],
   });
 
-  return { composition: resolved.composition, diagnostics: [...diagnostics, ...resolved.diagnostics] };
+  return {
+    composition: resolved.composition,
+    diagnostics: [...diagnostics, ...resolved.diagnostics],
+  };
 }
 
 /** Reads and shape-checks `<cwd>/e8.profile.yml`. Never throws. */
@@ -203,19 +219,22 @@ async function readProfile(
 }
 
 /**
- * Reads one bundle's `e8.bundle.yml`, checking next to the project first
- * (`<cwd>/node_modules/<name>/`), then this repo's own `engine/bundles/`.
- * A bundle absent from BOTH locations is not reported here — that is
- * exactly what `resolveComposition` already reports (it names the bundle,
- * see `@energy8engine/project`'s "the profile lists bundle ... but it was
- * not found"), and adding a second diagnostic for the same fact would just
- * say it twice.
+ * Reads one bundle's `e8.bundle.yml`, checking, in order:
+ *  1. `<cwd>/bundles/<name>/` — self-contained, project-authored bundles.
+ *  2. `<cwd>/node_modules/<name>/` — npm-installed bundles.
+ *  3. this repo's own `engine/bundles/<name>/`.
+ *
+ * `found: false` means the file was absent from all three; `found: true`
+ * with `bundle: null` means it was located but failed to parse or didn't
+ * match the expected shape (see `readProject`'s caller for why that
+ * distinction matters to the resolver).
  */
 async function loadBundle(
   cwd: string,
   bundleName: string,
-): Promise<{ bundle: Bundle | null; diagnostics: Diagnostic[] }> {
+): Promise<{ found: boolean; bundle: Bundle | null; diagnostics: Diagnostic[] }> {
   const candidates = [
+    join(cwd, 'bundles', bundleName, BUNDLE_FILENAME),
     join(cwd, 'node_modules', bundleName, BUNDLE_FILENAME),
     join(REPO_BUNDLES_DIR, bundleName, BUNDLE_FILENAME),
   ];
@@ -233,6 +252,7 @@ async function loadBundle(
       data = yaml.load(content);
     } catch (error) {
       return {
+        found: true,
         bundle: null,
         diagnostics: [
           diagnostic(
@@ -246,10 +266,10 @@ async function loadBundle(
       };
     }
 
-    return validateBundle(data, bundleName, filename);
+    return { found: true, ...validateBundle(data, bundleName, filename) };
   }
 
-  return { bundle: null, diagnostics: [] };
+  return { found: false, bundle: null, diagnostics: [] };
 }
 
 function validateBundle(

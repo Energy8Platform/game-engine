@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -69,6 +69,38 @@ describe('project plugin', () => {
     expect(host.ctx.project.composition.rows.find((r) => r.id === 'reels1')!.config).toEqual({
       grid: 9,
     });
+    await host.stop();
+  });
+
+  // `<cwd>/bundles/<name>` (the two fixtures above) is the self-contained,
+  // no-install-needed path; a real user's project resolves its OWN
+  // dependencies from node_modules, so that branch needs its own coverage
+  // — built at runtime rather than checked in, so this proves the branch
+  // actually works instead of asserting it by construction.
+  it('resolves a bundle installed under <cwd>/node_modules, not just <cwd>/bundles', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ide-host-project-node-modules-'));
+    writeFileSync(join(dir, 'e8.yml'), '[]\n');
+    writeFileSync(join(dir, 'e8.profile.yml'), 'bundles:\n  - e8-nm\n');
+    mkdirSync(join(dir, 'node_modules', 'e8-nm'), { recursive: true });
+    writeFileSync(
+      join(dir, 'node_modules', 'e8-nm', 'e8.bundle.yml'),
+      "name: e8-nm\nrows:\n  - id: nm1\n    name: '@energy8engine/boot'\n",
+    );
+
+    const host = await createIdeHost({ cwd: dir, port: 0 });
+    expect(host.ctx.project.composition.rows.map((r) => r.id)).toEqual(['nm1']);
+    await host.stop();
+  });
+
+  it('a bundle that fails to parse reports only that, not a false "not found" too', async () => {
+    const host = await createIdeHost({ cwd: fixture('project-broken-bundle'), port: 0 });
+    const messages = host.ctx.project.diagnostics.map((d) => d.message);
+    expect(messages.some((m) => m.includes('e8-broken') && m.includes('not valid YAML'))).toBe(
+      true,
+    );
+    // The false positive this test exists to catch: resolveComposition
+    // reporting "not found" for a bundle that WAS found, just broken.
+    expect(messages.some((m) => m.includes('was not found'))).toBe(false);
     await host.stop();
   });
 });
