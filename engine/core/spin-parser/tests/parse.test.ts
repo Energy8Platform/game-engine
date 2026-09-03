@@ -205,6 +205,89 @@ action buy { stage = base_game  cost = 5.0  feature { buy = 1 }  opens = spin co
   });
 });
 
+// The flat-record dialect (no `enum ... tag stage`): stage NAMES come from
+// the actions, stage SHAPE comes from the one record `data =` names. Real
+// corpus coverage lives in "the full real-world corpus" below; these are
+// isolated, so the derivation itself is pinned independent of any one
+// fixture file.
+describe('parseSpinSchema — the flat "data = Record" dialect', () => {
+  it('derives one stage per distinct action.stage, each pointing at the flat record', () => {
+    const src = `
+record Flat { win: float  roll: int }
+game "demo" {
+  bet_levels = [1.0]
+  max_win = 100.0
+  vars = Flat
+  data = Flat
+}
+action spin { stage = base_game  cost = 1.0 }
+action free_spin { stage = free_spins  cost = 1.0  session = true }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
+    const flatShape = { win: { kind: 'float' }, roll: { kind: 'int' } };
+    expect(schema!.stages).toEqual({ base_game: flatShape, free_spins: flatShape });
+    // Same object, not just equal — the derivation's cost: one record
+    // backs every stage, so nothing here can distinguish them by shape.
+    expect(schema!.stages.base_game).toBe(schema!.stages.free_spins);
+  });
+
+  it('two actions naming the same stage still produce exactly one entry', () => {
+    const src = `
+record Flat { win: float }
+game "demo" {
+  bet_levels = [1.0]
+  max_win = 100.0
+  vars = Flat
+  data = Flat
+}
+action spin { stage = base_game  cost = 1.0 }
+action respin { stage = base_game  cost = 1.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
+    expect(Object.keys(schema!.stages)).toEqual(['base_game']);
+  });
+
+  it('a flat record with no action declaring any stage is genuinely undecidable', () => {
+    // Critical distinction from the derivable case above: here there is no
+    // stage NAME anywhere in the file (no actions at all), so there is
+    // nothing to key `stages` by, and refusing is correct rather than
+    // guessing one.
+    const src = `
+record Flat { win: float }
+game "demo" {
+  bet_levels = [1.0]
+  max_win = 100.0
+  vars = Flat
+  data = Flat
+}
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema).not.toBeNull();
+    expect(schema!.stages).toEqual({});
+    expect(diagnostics.some((d) => d.message.includes('no action declares a stage'))).toBe(true);
+  });
+
+  it('data naming a record that was never declared is also undecidable, distinctly worded', () => {
+    // Actions DO declare stages here — the record itself is what's
+    // missing, a different reason than "no action declares a stage".
+    const src = `
+record Flat { win: float }
+game "demo" {
+  bet_levels = [1.0]
+  max_win = 100.0
+  vars = Flat
+  data = NeverDeclared
+}
+action spin { stage = base_game  cost = 1.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.stages).toEqual({});
+    expect(diagnostics.some((d) => d.message.includes('no record "NeverDeclared" to fall back to'))).toBe(true);
+  });
+});
+
 // Branches the first mutation pass didn't exercise — flagged by review
 // because 38 (well, 9) green tests survived mutating them to always
 // succeed. Each gets its own targeted test here.
@@ -273,33 +356,30 @@ action bonus { stage = base_game  cost = 1.0  opens = not_a_valid_opens_clause }
 // this is the corpus that actually does that job. Every file gets either
 // a clean parse or an explicitly named, listed reason it isn't one.
 describe('parseSpinSchema — the full real-world corpus', () => {
-  it('packages/platform-core/tests/game-spec/fixtures/logic.spin: flat Data record, no tagged-stage enum', () => {
-    // Known limitation, not a parser bug: this file's `data = D` points at
-    // a plain `record D`, not an `enum ... tag stage`. There is no static
-    // stage NAME to key `SpinSchema.stages` by in that form — see the
-    // report for the full accounting of which corpus files use which
-    // dialect.
+  it("packages/platform-core/tests/game-spec/fixtures/logic.spin: flat Data record, stages derived from actions' own stage names", () => {
+    // This file's `data = D` points at a plain `record D`, not an
+    // `enum ... tag stage` — but the stage NAME is still declared, by the
+    // action's own `stage = base_game`. `stages.base_game` is D's shape.
     const src = readFileSync(
       new URL('../../../../packages/platform-core/tests/game-spec/fixtures/logic.spin', import.meta.url),
       'utf8',
     );
     const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('spec-integration');
     expect(schema!.betLevels).toEqual([0.1, 1]);
     expect(schema!.maxWin).toBe(1000);
     expect(schema!.actions).toEqual([{ name: 'spin', stage: 'base_game', cost: 1 }]);
-    expect(schema!.stages).toEqual({});
-    expect(diagnostics).toEqual([
-      expect.objectContaining({ message: expect.stringContaining('enum D tag stage') }),
-    ]);
+    expect(schema!.stages).toEqual({ base_game: { w: { kind: 'float' }, sym_a: { kind: 'int' } } });
   });
 
-  it('packages/platform-core/tests/vite/fixtures/payer.spin: flat Data record, no tagged-stage enum', () => {
+  it("packages/platform-core/tests/vite/fixtures/payer.spin: flat Data record, stages derived from TWO actions' stage names sharing one shape", () => {
     const src = readFileSync(
       new URL('../../../../packages/platform-core/tests/vite/fixtures/payer.spin', import.meta.url),
       'utf8',
     );
     const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('payer-game');
     expect(schema!.actions).toEqual([
       {
@@ -308,10 +388,14 @@ describe('parseSpinSchema — the full real-world corpus', () => {
       },
       { name: 'free_spin', stage: 'free_spins', cost: 1, session: true, extendsVar: 'retrigger_spins' },
     ]);
-    expect(schema!.stages).toEqual({});
-    expect(diagnostics).toEqual([
-      expect.objectContaining({ message: expect.stringContaining('enum Data tag stage') }),
-    ]);
+    // Same object identity, not just equal shape — the flat dialect's cost:
+    // there is exactly one record for both stages, not two coincidentally
+    // matching ones.
+    expect(schema!.stages.base_game).toBe(schema!.stages.free_spins);
+    expect(schema!.stages).toEqual({
+      base_game: { stage: { kind: 'str' }, win: { kind: 'float' } },
+      free_spins: { stage: { kind: 'str' }, win: { kind: 'float' } },
+    });
   });
 
   it('packages/platform-core/tests/vite/fixtures/meter.spin: clean parse, and the only fixture exercising "globals"', () => {
@@ -326,12 +410,13 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     expect(schema!.globals).toEqual({ meter: { kind: 'int' } });
   });
 
-  it('packages/artube-server/tests/fixtures/rng.spin: flat Data record, no tagged-stage enum', () => {
+  it('packages/artube-server/tests/fixtures/rng.spin: flat Data record, stages derived from actions', () => {
     const src = readFileSync(
       new URL('../../../../packages/artube-server/tests/fixtures/rng.spin', import.meta.url),
       'utf8',
     );
     const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('rng-game');
     expect(schema!.actions).toEqual([
       {
@@ -340,30 +425,31 @@ describe('parseSpinSchema — the full real-world corpus', () => {
       },
       { name: 'free_spin', stage: 'free_spins', cost: 1, session: true },
     ]);
-    expect(diagnostics).toEqual([
-      expect.objectContaining({ message: expect.stringContaining('enum Data tag stage') }),
-    ]);
+    expect(schema!.stages).toEqual({
+      base_game: { stage: { kind: 'str' }, win: { kind: 'float' }, roll: { kind: 'int' } },
+      free_spins: { stage: { kind: 'str' }, win: { kind: 'float' }, roll: { kind: 'int' } },
+    });
   });
 
-  it('packages/artube-server/tests/fixtures/one-shot.spin: flat Data record, no tagged-stage enum', () => {
+  it('packages/artube-server/tests/fixtures/one-shot.spin: flat Data record, one action, one derived stage', () => {
     const src = readFileSync(
       new URL('../../../../packages/artube-server/tests/fixtures/one-shot.spin', import.meta.url),
       'utf8',
     );
     const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('one-shot-game');
     expect(schema!.actions).toEqual([{ name: 'one_shot', stage: 'base_game', cost: 1 }]);
-    expect(diagnostics).toEqual([
-      expect.objectContaining({ message: expect.stringContaining('enum Data tag stage') }),
-    ]);
+    expect(schema!.stages).toEqual({ base_game: { stage: { kind: 'str' }, win: { kind: 'float' } } });
   });
 
-  it('packages/artube-server/tests/fixtures/feature.spin: flat Data record, plus an inline "feature { }" clause', () => {
+  it('packages/artube-server/tests/fixtures/feature.spin: flat Data record, THREE distinct stages derived, one inline "feature { }" clause', () => {
     const src = readFileSync(
       new URL('../../../../packages/artube-server/tests/fixtures/feature.spin', import.meta.url),
       'utf8',
     );
     const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('feature-game');
     expect(schema!.actions).toEqual([
       {
@@ -377,9 +463,9 @@ describe('parseSpinSchema — the full real-world corpus', () => {
       },
       { name: 'free_spin', stage: 'free_spins', cost: 1, session: true, extendsVar: 'retrigger_spins' },
     ]);
-    expect(diagnostics).toEqual([
-      expect.objectContaining({ message: expect.stringContaining('enum Data tag stage') }),
-    ]);
+    expect(Object.keys(schema!.stages)).toEqual(['base_game', 'buy_bonus', 'free_spins']);
+    expect(schema!.stages.base_game).toEqual({ stage: { kind: 'str' }, win: { kind: 'float' } });
+    expect(schema!.stages.buy_bonus).toBe(schema!.stages.base_game);
   });
 
   it('kitsune-wrath/game/script.spin: a full real game, clean parse', () => {

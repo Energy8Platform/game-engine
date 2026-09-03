@@ -212,51 +212,97 @@ function parseRecords(source: string, diagnostics: Diagnostic[]): Record<string,
  * missing tagged enum is reported against the name the file itself chose,
  * not a hardcoded guess.
  *
- * Some real `.spin` files (the pre-tagged-enum dialect still used by
- * several fixtures under `packages/*`) skip this construct entirely and
- * point `data` straight at a flat `record` instead — there is no static
- * stage name to key `stages` by in that case, so this reports the absence
- * rather than guessing one (see the corpus test and the report for the
- * full accounting). A stage variant whose own fields fail to parse is
- * dropped per-field, same rule as `record`.
+ * **The flat-record dialect.** Several real `.spin` files (5 of 8 in this
+ * repo's corpus — every fixture under `packages/*`, none under `engine/`)
+ * skip the tagged enum entirely and point `data` straight at a plain
+ * `record` instead:
+ *
+ * ```spin
+ * record Data { stage: str  win: float }
+ * game "…" { data = Data }
+ * action spin      { stage = base_game   … }
+ * action buy_bonus { stage = buy_bonus   … }
+ * ```
+ *
+ * This is NOT missing information, just spread across two constructs
+ * instead of one: the stage NAMES are still declared, by every action's
+ * own `stage = ...`; what's missing is a PER-stage shape, because there is
+ * only the one flat record. So `stages` is derived — `{ for each distinct
+ * action.stage → the shape of the record data names }` — never guessed or
+ * fabricated: every key comes from an actual `action.stage`, every value
+ * from an actual declared record.
+ *
+ * **The cost of that derivation, which a consumer of `SpinSchema` WILL
+ * meet:** under this dialect every stage shares the exact same
+ * `RecordShape` object. A later `expects`-style check (task 4) can
+ * confirm a field exists on *some* stage this game has, but it CANNOT
+ * tell "this field is specific to `free_spins`" apart from "this field
+ * happens to be declared at all" — the flat form structurally does not
+ * distinguish them. A mechanic that only makes sense on one stage of a
+ * flat-dialect game will pass a shape check it should arguably fail. This
+ * is a real weakening of what the schema promises for these 5 files, not
+ * a bug to fix here — the source file itself doesn't distinguish
+ * per-stage shape, so nothing downstream of parsing can recover it.
+ *
+ * Only when NEITHER form resolves — no tagged enum matching `dataType`,
+ * AND (no record named `dataType` OR no action declares any stage at
+ * all) — is this genuinely undecidable, and reported as a diagnostic
+ * rather than guessed. A stage variant (tagged form) or the flat record
+ * (flat form) whose own fields fail to parse is dropped per-field, same
+ * rule as `record`.
  */
 function parseStages(
   source: string,
   diagnostics: Diagnostic[],
   dataTypeName: string,
+  records: Record<string, RecordShape>,
+  actionStageNames: string[],
 ): Record<string, RecordShape> {
   const stages: Record<string, RecordShape> = {};
   const enumBlocks = findBlocks(source, 'enum');
   const wantedHeader = new RegExp(`^${escapeRegExp(dataTypeName)}\\s+tag\\s+stage$`);
   const spinData = enumBlocks.find((b) => wantedHeader.test(b.header.trim()));
-  if (spinData === undefined) {
-    const found = enumBlocks.map((b) => `"enum ${b.header.trim()}"`).join(', ');
-    diagnostics.push(
-      diagnostic(
-        'error',
-        PLUGIN,
-        'file',
-        enumBlocks.length === 0
-          ? `no "enum ${dataTypeName} tag stage { ... }" block found`
-          : `no "enum ${dataTypeName} tag stage" block found (found: ${found})`,
-      ),
-    );
+
+  if (spinData !== undefined) {
+    // `findBlocks` needs a keyword to anchor on; stage variants have none,
+    // so walk the enum body directly for `name { ... }` groups instead.
+    const variantRe = /([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
+    let match: RegExpExecArray | null;
+    while ((match = variantRe.exec(spinData.body)) !== null) {
+      const name = match[1];
+      const braceStart = match.index + match[0].length - 1;
+      const braceEnd = matchingBrace(spinData.body, braceStart);
+      if (braceEnd === -1) continue;
+      const body = spinData.body.slice(braceStart + 1, braceEnd);
+      const variantLine = spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
+      stages[name] = parseFieldList(body, name, variantLine, diagnostics);
+      variantRe.lastIndex = braceEnd + 1;
+    }
     return stages;
   }
-  // `findBlocks` needs a keyword to anchor on; stage variants have none, so
-  // walk the enum body directly for `name { ... }` groups instead.
-  const variantRe = /([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
-  let match: RegExpExecArray | null;
-  while ((match = variantRe.exec(spinData.body)) !== null) {
-    const name = match[1];
-    const braceStart = match.index + match[0].length - 1;
-    const braceEnd = matchingBrace(spinData.body, braceStart);
-    if (braceEnd === -1) continue;
-    const body = spinData.body.slice(braceStart + 1, braceEnd);
-    const variantLine = spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
-    stages[name] = parseFieldList(body, name, variantLine, diagnostics);
-    variantRe.lastIndex = braceEnd + 1;
+
+  // No enum matches `dataType`. Fall back to the flat-record dialect: pair
+  // the ONE record `data =` names with every distinct stage the actions
+  // themselves declare (see the doc comment above for why this is
+  // derivation, not a guess — and its cost).
+  const flatShape = records[dataTypeName];
+  if (flatShape !== undefined && actionStageNames.length > 0) {
+    for (const stageName of actionStageNames) stages[stageName] = flatShape;
+    return stages;
   }
+
+  // Genuinely undecidable: no tagged enum, and no flat-record fallback
+  // possible either. Name exactly what's missing rather than guessing.
+  const found = enumBlocks.map((b) => `"enum ${b.header.trim()}"`).join(', ');
+  const enumPart =
+    enumBlocks.length === 0
+      ? `no "enum ${dataTypeName} tag stage { ... }" block found`
+      : `no "enum ${dataTypeName} tag stage" block found (found: ${found})`;
+  const fallbackPart =
+    flatShape === undefined
+      ? `no record "${dataTypeName}" to fall back to`
+      : 'no action declares a stage to derive one from';
+  diagnostics.push(diagnostic('error', PLUGIN, 'file', `${enumPart}, and ${fallbackPart}`));
   return stages;
 }
 
@@ -561,8 +607,9 @@ export function parseSpinSchema(source: string): { schema: SpinSchema | null; di
   if (game === null) return { schema: null, diagnostics };
 
   const records = parseRecords(clean, diagnostics);
-  const stages = parseStages(clean, diagnostics, game.dataName ?? 'SpinData');
   const actions = parseActions(clean, diagnostics);
+  const actionStageNames = [...new Set(actions.map((a) => a.stage))];
+  const stages = parseStages(clean, diagnostics, game.dataName ?? 'SpinData', records, actionStageNames);
 
   const vars = (game.varsName !== undefined && records[game.varsName]) || {};
   const globals = game.globalsName !== undefined ? records[game.globalsName] : undefined;

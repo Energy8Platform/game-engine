@@ -43,7 +43,21 @@ export interface SpinSchema {
   maxWin: number;
   vars: RecordShape;
   globals?: RecordShape;
-  /** From `enum SpinData tag stage { … }` — one entry per variant. */
+  /**
+   * From `enum SpinData tag stage { … }` — one entry per variant. Some real
+   * `.spin` files skip that construct and point `data =` at a flat
+   * `record` instead; the parser derives an entry per stage NAME an
+   * `action` actually declares in that case, but every derived entry
+   * shares the exact same `RecordShape` (there is only the one record to
+   * draw from — see `@energy8engine/spin-parser`'s `parseStages` for the
+   * full reasoning). **Consumer warning:** when every entry here is
+   * `===`-identical, a shape check against this map can confirm a field
+   * exists on SOME stage this game has, but cannot tell "this field is
+   * specific to `free_spins`" apart from "this field happens to be
+   * declared at all" — the source file itself doesn't distinguish
+   * per-stage shape in that dialect, so nothing built on top of this type
+   * can recover it either.
+   */
   stages: Record<string, RecordShape>;
   /** Every `record` declared, so a field of kind `record` can be followed. */
   records: Record<string, RecordShape>;
