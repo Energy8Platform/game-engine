@@ -22,7 +22,10 @@ import {
   checkShape,
   diagnostic,
   type Diagnostic,
+  type FieldKind,
+  type FieldType,
   type SpinMechanic,
+  type SpinSchema,
 } from '@energy8engine/contracts';
 
 export interface MechanicsService {
@@ -55,6 +58,15 @@ export interface MechanicsService {
    * this registry does not implement a second shape checker.
    */
   check(stage: string, sample: Record<string, unknown>): Diagnostic[];
+  /**
+   * Every stage currently bound to a mechanic that has actually
+   * registered, keyed by stage — the exact shape `checkAgainstSchema`
+   * takes as its second argument. A stage bound to an id nobody has
+   * registered YET (see `bind`'s doc above) is omitted here, not reported
+   * as `null`: that absence is not a failure at this point, and
+   * `checkAgainstSchema` has no slot for "maybe".
+   */
+  bindings(): Record<string, SpinMechanic>;
 }
 
 declare module 'cordis' {
@@ -150,7 +162,175 @@ export function apply(ctx: Context) {
       }
       return checkShape(mechanic.requires, sample, mechanic.id, stage);
     },
+
+    bindings() {
+      const result: Record<string, SpinMechanic> = {};
+      for (const [stage, mechanicId] of bindings) {
+        const mechanic = mechanics.get(mechanicId);
+        // A stage bound to an id nobody has registered yet is not this
+        // method's to report — see `bind`'s doc — so it's left out rather
+        // than filled in with a guess.
+        if (mechanic) result[stage] = mechanic;
+      }
+      return result;
+    },
   };
 
   ctx.provide('mechanics', service);
+}
+
+/**
+ * Unwraps `optional`, whose presence or absence a `FieldKind` requirement
+ * never distinguishes — a mechanic that needs a field either gets it or
+ * doesn't, and a math author marking a field `T?` does not itself say
+ * whether the mechanic tolerates it missing.
+ */
+function unwrapOptional(type: FieldType): FieldType {
+  return type.kind === 'optional' ? unwrapOptional(type.of) : type;
+}
+
+/**
+ * Does a schema field's declared `FieldType` satisfy a mechanic's
+ * `FieldKind` requirement? Mirrors `matchesKind` above (which checks a
+ * requirement against a measured VALUE) but against a declared TYPE
+ * instead — the two are kept separate rather than unified behind one
+ * function, since a value and a type are different things to pattern
+ * match on, and forcing them through one signature would only make both
+ * harder to read.
+ *
+ * `grid` requires two levels of list/array nesting (`[[int]]`, the shape
+ * `spin-parser` derives for a `grid: [[int]]` field) — a plain `list`
+ * doesn't qualify, and neither does a `list` of anything that isn't
+ * itself a list/array.
+ */
+function matchesFieldKind(kind: FieldKind, type: FieldType): boolean {
+  const declared = unwrapOptional(type);
+  switch (kind) {
+    case 'number':
+      return declared.kind === 'int' || declared.kind === 'float';
+    case 'list':
+      return declared.kind === 'list' || declared.kind === 'array';
+    case 'grid': {
+      if (declared.kind !== 'list' && declared.kind !== 'array') return false;
+      const inner = unwrapOptional(declared.of);
+      return inner.kind === 'list' || inner.kind === 'array';
+    }
+  }
+}
+
+/** A short, human-readable name for a declared `FieldType`, for a mismatch diagnostic's message. */
+function describeFieldType(type: FieldType): string {
+  switch (type.kind) {
+    case 'int':
+      return 'an int';
+    case 'float':
+      return 'a float';
+    case 'bool':
+      return 'a bool';
+    case 'str':
+      return 'a str';
+    case 'list':
+      return `a list of ${describeFieldType(type.of)}`;
+    case 'array':
+      return `a ${type.length}-element array of ${describeFieldType(type.of)}`;
+    case 'record':
+      return `a record "${type.name}"`;
+    case 'optional':
+      return `optionally ${describeFieldType(type.of)}`;
+  }
+}
+
+/**
+ * §7.1's pre-flight: checks every BOUND mechanic's `requires` against the
+ * math's own declared `SpinSchema`, before any spin has run — as opposed
+ * to `checkShape`/`MechanicsService.check` above, which check a mechanic's
+ * `requires` against a SAMPLE of real spin data, necessarily after one.
+ * Both are correct and both stay: this one catches a mismatch the moment
+ * a project composes an incompatible mechanic onto a stage; that one
+ * catches whatever this one structurally cannot (see `FieldKind`'s doc in
+ * `@energy8engine/contracts` — a `list` field only proves "is an array",
+ * so a game that never actually produces the field on some codepaths
+ * still needs a real sample to catch).
+ *
+ * `schema: null` — a project whose `.spin` failed to parse, or has none —
+ * performs NO check and reports NOTHING. The project's own diagnostic
+ * (from `@energy8engine/spin-parser`, surfaced by the IDE host's
+ * `ctx.spinSchema`) already says the `.spin` is broken; inventing a
+ * second complaint here, about a mechanic that cannot be judged without
+ * the very schema that failed to parse, would report the same root cause
+ * twice.
+ *
+ * **The flat-dialect caveat, inherited, not introduced here.** Under
+ * SpinML's flat `data = <Record>` dialect (five of the eight real `.spin`
+ * files in this repo — see `SpinSchema.stages`'s own doc comment) every
+ * stage's entry in `schema.stages` is the exact same `RecordShape` — the
+ * source file itself declares only one record for every stage, so this
+ * function is handed the same shape for all of them and has no way to
+ * recover which stage a field is "really" on. What that means in
+ * practice: a field present ANYWHERE in the flat record reads as present
+ * on every stage, so a diagnostic can go silent that a tagged-enum `.spin`
+ * (where each stage has its own declared shape) would have caught. This
+ * function does not paper over that — it stays literally true either way
+ * ("the schema for stage X does/doesn't have field Y"), it just cannot
+ * promise the field is EXCLUSIVE to the stage a message names. What it
+ * must not do, and does not do, is phrase a message as though the field
+ * were confirmed specific to that one stage — see the messages below,
+ * which say only that the named stage's schema does or doesn't carry the
+ * field, never that it carries it uniquely.
+ */
+export function checkAgainstSchema(
+  schema: SpinSchema | null,
+  bindings: Record<string, SpinMechanic>,
+): Diagnostic[] {
+  if (schema === null) return [];
+
+  const diagnostics: Diagnostic[] = [];
+  const stageNames = Object.keys(schema.stages);
+
+  for (const [stage, mechanic] of Object.entries(bindings)) {
+    const stageShape = schema.stages[stage];
+    if (!stageShape) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          mechanic.id,
+          stage,
+          `mechanic "${mechanic.id}" is bound to stage "${stage}", but the math's schema does not declare that stage — it declares: ${
+            stageNames.length > 0 ? stageNames.join(', ') : '(none)'
+          }`,
+          `bind "${stage}" to a mechanic meant for a declared stage, or add "${stage}" to the math`,
+        ),
+      );
+      continue;
+    }
+
+    for (const [field, kind] of Object.entries(mechanic.requires.fields)) {
+      const fieldType = stageShape[field];
+      if (!fieldType) {
+        diagnostics.push(
+          diagnostic(
+            'error',
+            mechanic.id,
+            stage,
+            `mechanic "${mechanic.id}" on stage "${stage}" expects field "${field}" (${kind}), but the math's schema does not declare it`,
+            `add "${field}" to the "${stage}" stage's data in .spin, or bind "${stage}" to a mechanic that does not need it`,
+          ),
+        );
+        continue;
+      }
+      if (!matchesFieldKind(kind, fieldType)) {
+        diagnostics.push(
+          diagnostic(
+            'error',
+            mechanic.id,
+            stage,
+            `mechanic "${mechanic.id}" on stage "${stage}" expects field "${field}" to be a ${kind}, but the math's schema types it as ${describeFieldType(fieldType)}`,
+            `fix the type of "${field}" in .spin, or bind "${stage}" to a different mechanic`,
+          ),
+        );
+      }
+    }
+  }
+
+  return diagnostics;
 }

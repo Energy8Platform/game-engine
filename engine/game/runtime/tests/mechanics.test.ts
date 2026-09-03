@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { Context } from 'cordis';
+import type { SpinSchema } from '@energy8engine/contracts';
+import { mechanic as cascadeMechanic } from '@energy8engine/mechanic-cascade';
+import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
+import { checkAgainstSchema } from '../src/plugins/mechanics';
 import * as mechanicsPlugin from '../src/plugins/mechanics';
 import * as mechanicsRow from '../src/runtime';
 
@@ -177,5 +181,89 @@ describe('the mechanics1 row', () => {
 
       await ctx.fiber.dispose();
     }
+  });
+});
+
+/**
+ * `checkAgainstSchema` — the pre-flight §7.1 promises: a mechanic's
+ * `requires` checked against the MATH'S DECLARED SCHEMA, before the first
+ * spin, not just against the data of one that already happened
+ * (`checkShape`, above, stays exactly that — a post-spin sample check).
+ *
+ * The real `cascade`/`classic` mechanic bundles are used here, not local
+ * stand-ins — the promise this exists to keep is specifically about
+ * `cascade`'s real `cascade_history` requirement, and a fixture with a
+ * different field name would prove nothing about it.
+ */
+describe('checkAgainstSchema', () => {
+  function schemaWithStages(stages: SpinSchema['stages']): SpinSchema {
+    return {
+      gameId: 'demo',
+      betLevels: [1],
+      maxWin: 100,
+      vars: {},
+      stages,
+      records: {},
+      actions: [],
+    };
+  }
+
+  const GRID_TYPE = {
+    kind: 'list',
+    of: { kind: 'list', of: { kind: 'int' } },
+  } as const;
+
+  const SCHEMA_WITHOUT_CASCADE = schemaWithStages({
+    base_game: { grid: GRID_TYPE },
+  });
+
+  const SCHEMA_WITH_CASCADE = schemaWithStages({
+    base_game: {
+      grid: GRID_TYPE,
+      cascade_history: { kind: 'list', of: { kind: 'record', name: 'CascadeStep' } },
+    },
+  });
+
+  const SCHEMA_CASCADE_IS_FLOAT = schemaWithStages({
+    base_game: {
+      grid: GRID_TYPE,
+      cascade_history: { kind: 'float' },
+    },
+  });
+
+  // Only `base_game` declared — used to prove a stage a binding names but
+  // the schema does not is caught, and the message names what IS there.
+  const SCHEMA = SCHEMA_WITH_CASCADE;
+
+  it('a mechanic whose required field is absent from the stage schema is a diagnostic at bind time', () => {
+    const diagnostics = checkAgainstSchema(SCHEMA_WITHOUT_CASCADE, { base_game: cascadeMechanic });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('cascade');
+    expect(diagnostics[0].message).toContain('cascade_history');
+    expect(diagnostics[0].message).toContain('base_game');
+  });
+
+  it('a mechanic whose fields are all present is silent', () => {
+    expect(checkAgainstSchema(SCHEMA_WITH_CASCADE, { base_game: cascadeMechanic })).toEqual([]);
+  });
+
+  it('a field present but of the wrong kind is named, with both kinds', () => {
+    // `cascade_history: float` where a list was required.
+    const [d] = checkAgainstSchema(SCHEMA_CASCADE_IS_FLOAT, { base_game: cascadeMechanic });
+    expect(d.message).toContain('cascade_history');
+    expect(d.message).toContain('list');
+    expect(d.message).toContain('float');
+  });
+
+  it('a stage the schema does not declare is a diagnostic naming the stages it does', () => {
+    const [d] = checkAgainstSchema(SCHEMA, { free_spins: classicMechanic });
+    expect(d.message).toContain('free_spins');
+    expect(d.message).toContain('base_game');
+  });
+
+  it('no schema means no check, and no complaint', () => {
+    // A project whose .spin could not be parsed already has ITS diagnostic;
+    // inventing a second one here would report the same problem twice.
+    expect(checkAgainstSchema(null, { base_game: cascadeMechanic })).toEqual([]);
   });
 });

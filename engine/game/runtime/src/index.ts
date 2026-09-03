@@ -62,12 +62,15 @@ import {
   type Diagnostic,
   type E8SeamDeclaration,
   type GameCompositionRow,
+  isSpinSchema,
+  type SpinSchema,
 } from '@energy8engine/contracts';
 import { composeFromProject, type LoadOptions, type RowPlan } from '@energy8engine/loader';
 import { selectProvider, type SeamCandidate, type SeamContext } from '@energy8engine/seam';
 import { renderBootFailure } from '@energy8engine/boot';
 import type { BootService } from '@energy8engine/boot/runtime';
 import type { SessionConfig } from '@energy8engine/session-dev';
+import { checkAgainstSchema } from './plugins/mechanics';
 
 export type { MechanicsService } from './plugins/mechanics';
 
@@ -195,6 +198,39 @@ function readUrlParams(): Record<string, string> {
   const params: Record<string, string> = {};
   for (const [key, value] of new URLSearchParams(location.search)) params[key] = value;
   return params;
+}
+
+/**
+ * Wraps the `fetchFn` handed to `composeFromProject` so this file can read
+ * `schema` off the SAME `/api/composition` response the loader already
+ * fetches for `rows`/`diagnostics`, instead of a second round trip to the
+ * same URL — the host puts `schema` in that response for exactly this
+ * reason (see `runtime-assets.ts`'s doc comment on `GET /api/composition`).
+ * `composeFromProject` calls `fetchFn` exactly once and only ever reads
+ * `res.ok` and `res.json()` off what comes back, so substituting a
+ * plain object shaped the same way, after reading the body ourselves,
+ * changes nothing it can observe.
+ *
+ * A response whose status was not ok is returned untouched — that is
+ * `composeFromProject`'s own failure to report, and this wrapper has
+ * nothing useful to say about a schema it never got a body for.
+ * `onSchema` runs after validating the raw wire value through
+ * `isSpinSchema`: `GameConfig.loader`'s `fetchFn` may be a test double
+ * whose body has no `schema` field at all (an old host, or a fixture that
+ * predates this), and that must read as "no schema", not as a crash.
+ */
+function withSchemaCapture(
+  fetchFn: typeof fetch,
+  onSchema: (schema: SpinSchema | null) => void,
+): typeof fetch {
+  return (async (...args: Parameters<typeof fetch>) => {
+    const res = await fetchFn(...args);
+    if (!res.ok) return res;
+    const body: unknown = await res.json();
+    const raw = typeof body === 'object' && body !== null ? (body as { schema?: unknown }).schema : undefined;
+    onSchema(isSpinSchema(raw) ? raw : null);
+    return { ok: true, status: res.status, statusText: res.statusText, json: async () => body } as unknown as Response;
+  }) as typeof fetch;
 }
 
 /**
@@ -362,7 +398,24 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
       return { rows: planned, diagnostics: planDiagnostics };
     };
 
-    diagnostics.push(...(await composeFromProject(ctx, { ...config.loader, plan })));
+    // Captured by `withSchemaCapture` below, off the composition fetch
+    // `composeFromProject` makes on its own — see that function's doc.
+    let spinSchema: SpinSchema | null = null;
+    const fetchFn = withSchemaCapture(config.loader?.fetchFn ?? fetch, (schema) => {
+      spinSchema = schema;
+    });
+
+    diagnostics.push(...(await composeFromProject(ctx, { ...config.loader, fetchFn, plan })));
+
+    // §7.1's pre-flight: a mechanic's `requires` checked against what the
+    // math's schema actually declares, before the first spin — not just
+    // against the sample of one that already ran. Only when a
+    // `mechanics1`-shaped row is actually part of this composition; a
+    // project with none has nothing bound to check.
+    const mechanics = ctx.reflect.get('mechanics', false);
+    if (mechanics) {
+      diagnostics.push(...checkAgainstSchema(spinSchema, mechanics.bindings()));
+    }
   } catch (error) {
     // `composeFromProject` catches its own failures, its rows', and the
     // plan's, so reaching here means something structural — providing a
