@@ -288,6 +288,100 @@ action spin { stage = base_game  cost = 1.0 }
   });
 });
 
+// Round 3 of review: "last write silently wins" was fixed where it was
+// reported (opens, round 2) but the same shape was still live wherever
+// something is KEYED BY A NAME an author can repeat, plus in the scanner
+// every block form shares (findBlocks) — which had nowhere to report to
+// at all. `actions` never had this problem: it's an array, so two
+// `action spin { }` blocks are just two entries. `records` and `stages`
+// are dictionaries (task 1's own vocabulary), so a repeated name is a
+// REAL collision, not two live entries — see `NamedCollection`'s doc for
+// the policy (keep the first, diagnose and drop the repeat).
+describe('parseSpinSchema — unterminated blocks and name collisions', () => {
+  it("an unterminated record is diagnosed by name — the reviewer's exact repro", () => {
+    const src = `
+record Broken { a: int
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 100.0 data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    // The record is gone from the schema — its brace never closed, so
+    // there is nothing trustworthy to keep — but it is NAMED on the way
+    // out, not silently absent.
+    expect(schema!.records).toEqual({});
+    expect(diagnostics.some((d) => d.message.includes('Broken') && d.message.includes('unterminated'))).toBe(true);
+    // Everything AFTER the broken record still parses — matchingBrace's
+    // own scan for "enum"/"game"/"action" starts fresh from each
+    // keyword's own brace, independent of "record"'s failure.
+    expect(schema!.gameId).toBe('demo');
+    expect(schema!.actions).toEqual([{ name: 'spin', stage: 'base_game', cost: 1 }]);
+  });
+
+  it('a keyword with no "{" at all is diagnosed, not silently skipped', () => {
+    // Distinct failure from "unterminated": here there is no brace to
+    // even start matching from.
+    const src = `
+record Vars { a: int }
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 100.0 vars = Vars data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+action stray
+`;
+    const { diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('"action" block has no "{"'))).toBe(true);
+  });
+
+  it('two records with the same name: the first is kept, the second is diagnosed by name', () => {
+    const src = `
+record Vars { a: int }
+record Vars { b: float }
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 100.0 vars = Vars data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.records).toEqual({ Vars: { a: { kind: 'int' } } });
+    expect(diagnostics.some((d) => d.message.includes('duplicate record "Vars"'))).toBe(true);
+  });
+
+  it('two stage variants with the same name in one enum: the first is kept, diagnosed by name and scope', () => {
+    const src = `
+enum SpinData tag stage {
+  base_game { x: int }
+  base_game { y: float }
+}
+game "demo" { bet_levels = [1.0] max_win = 100.0 data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.stages).toEqual({ base_game: { x: { kind: 'int' } } });
+    const d = diagnostics.find((d) => d.message.includes('duplicate stage variant "base_game"'))!;
+    expect(d.message).toContain('enum SpinData tag stage');
+  });
+
+  it('a tagged enum whose content is malformed reports why, instead of a silent empty "stages"', () => {
+    // The reviewer's case 4 ("a tagged enum whose variant bodies are
+    // unreadable returns stages: {} with no diagnostic"): the reachable
+    // form of this is the enum's OWN brace never closing (an inner
+    // variant can be shown never to fail independently of that — see the
+    // code comment on the inner `requireMatchingBrace` call for the proof
+    // and the report for the full account). Before this fix, `spinData`
+    // came back `undefined` with zero diagnostics of its own, and the
+    // caller had no way to tell "legitimately no stages" apart from
+    // "couldn't read them".
+    const src = `
+enum SpinData tag stage { base_game { x: int } broken { y: float
+game "demo" { bet_levels = [1.0] max_win = 100.0 data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.stages).toEqual({});
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics.some((d) => d.message.includes('unterminated'))).toBe(true);
+  });
+});
+
 // Branches the first mutation pass didn't exercise — flagged by review
 // because 38 (well, 9) green tests survived mutating them to always
 // succeed. Each gets its own targeted test here.

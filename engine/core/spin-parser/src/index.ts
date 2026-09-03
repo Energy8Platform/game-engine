@@ -13,6 +13,21 @@
  * its own**, with its own diagnostic, never taking the rest of the file
  * down with it. Silent loss is worse than a parse error: a schema that
  * looks complete gets trusted.
+ *
+ * That guarantee covers two failure shapes, each resolved in exactly ONE
+ * place so a new block kind or a new name-keyed collection inherits it by
+ * construction rather than by a future author remembering to reimplement
+ * it: an unterminated block (a `{` with no matching `}` — an ordinary
+ * missing-brace typo, not an exotic input) is diagnosed by `findBlocks`
+ * itself, the single function every block form goes through; a name an
+ * author repeated (two `record Vars`, two `base_game` variants in one
+ * enum) is diagnosed by `NamedCollection`, the single type every
+ * name-keyed accumulator is built on. `actions` needs neither — it's an
+ * array, so a repeated action name is just two entries, not a collision.
+ * Where attribution can still point at a NEIGHBOR rather than the exact
+ * culprit (garbage text with no field-name colon of its own, glued onto
+ * whichever field precedes it) the loss is still visible as SOME
+ * diagnostic on SOME field, never zero diagnostics — see `parseFieldList`.
  */
 import { type Diagnostic, diagnostic, type ActionDef, type FieldType, type RecordShape, type SpinSchema } from '@energy8engine/contracts';
 
@@ -42,27 +57,74 @@ function escapeRegExp(text: string): string {
  * each match's header (between the keyword and the opening brace) and body
  * (between the matched braces), plus the 1-based line the block starts on
  * (for diagnostics).
+ *
+ * `diagnostics` is REQUIRED, not optional — every one of this function's
+ * two silent-skip paths (no `{` at all after the keyword; a `{` that never
+ * finds its matching `}`) used to just `continue`, dropping the block
+ * without a trace. An unterminated block is an ordinary typo (one missing
+ * `}`), not an exotic input, and every block form (`record`, `enum`,
+ * `game`, `action`, the inline `feature { ... }`) flows through this one
+ * function, which is what made it the systemic instance of the "silent
+ * loss" defect rather than a one-off. Making the parameter required means
+ * a caller literally cannot compile without deciding where its
+ * diagnostics go — it does not, on its own, stop a future name-keyed
+ * collection from being built without this function at all; see
+ * `NamedCollection` below and the report for the honest boundary of what
+ * "structural" means here.
  */
 function findBlocks(
   source: string,
   keyword: string,
+  diagnostics: Diagnostic[],
 ): { header: string; body: string; line: number }[] {
   const results: { header: string; body: string; line: number }[] = [];
   const re = new RegExp(`\\b${escapeRegExp(keyword)}\\b`, 'g');
   let match: RegExpExecArray | null;
   while ((match = re.exec(source)) !== null) {
     const afterKeyword = match.index + match[0].length;
-    const braceStart = source.indexOf('{', afterKeyword);
-    if (braceStart === -1) continue;
-    const header = source.slice(afterKeyword, braceStart).trim();
-    const bodyEnd = matchingBrace(source, braceStart);
-    if (bodyEnd === -1) continue;
-    const body = source.slice(braceStart + 1, bodyEnd);
     const line = source.slice(0, match.index).split('\n').length;
+    const braceStart = source.indexOf('{', afterKeyword);
+    if (braceStart === -1) {
+      diagnostics.push(
+        diagnostic('error', PLUGIN, `line ${line}`, `"${keyword}" block has no "{" — nothing to parse`),
+      );
+      continue;
+    }
+    const header = source.slice(afterKeyword, braceStart).trim();
+    const label = header === '' ? `"${keyword}"` : `"${keyword} ${header}"`;
+    const bodyEnd = requireMatchingBrace(source, braceStart, label, line, diagnostics);
+    if (bodyEnd === null) continue;
+    const body = source.slice(braceStart + 1, bodyEnd);
     results.push({ header, body, line });
     re.lastIndex = bodyEnd + 1;
   }
   return results;
+}
+
+/**
+ * Finds the `}` matching the `{` at `braceStart`, diagnosing (and
+ * returning `null` instead of throwing or silently skipping) if the
+ * source ends before one closes. `label` names what was being scanned
+ * (e.g. `"record Broken"`, `stage variant "base_game"`) so the diagnostic
+ * points at what an author would actually recognize, not just a byte
+ * offset. Shared by `findBlocks` and the tagged-enum's own stage-variant
+ * scanner below (which can't go through `findBlocks` — a stage variant has
+ * no keyword to anchor on — but hits the exact same unterminated-brace
+ * failure mode and deserves the exact same diagnostic).
+ */
+function requireMatchingBrace(
+  source: string,
+  braceStart: number,
+  label: string,
+  line: number,
+  diagnostics: Diagnostic[],
+): number | null {
+  const end = matchingBrace(source, braceStart);
+  if (end === -1) {
+    diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, `${label}: unterminated block — no matching "}" found`));
+    return null;
+  }
+  return end;
 }
 
 /** Given the index of an opening `{`, returns the index of its matching `}`. */
@@ -191,17 +253,70 @@ function parseFieldList(
   return shape;
 }
 
+/**
+ * Builds a `Record<string, T>` where a duplicate name is impossible to
+ * insert silently. `records` (two `record Vars { ... }` blocks) and stage
+ * variants (two `base_game { ... }` inside one tagged enum) are both
+ * keyed by an author-chosen name that nothing stops an author from
+ * repeating — unlike `actions`, which is an array and so has no
+ * "overwrite" failure mode to begin with. The ONE place either of them
+ * resolves a collision is `.insert()`: the map itself is private, there
+ * is no `[name] = value` escape hatch on this type, so a caller can only
+ * add an entry through the method that diagnoses a collision. A THIRD
+ * name-keyed collection built later inherits the guarantee by using this
+ * type — see the report for how far that promise actually reaches (it is
+ * not enforced against a caller who reaches for a plain `{}` instead).
+ *
+ * Policy on a collision: keep the FIRST declaration, diagnose and drop
+ * the repeat. `SpinSchema.records`/`.stages` are dictionaries (task 1's
+ * vocabulary, already relied on elsewhere), not arrays — "keep both" is
+ * not a shape either of them can hold, so this is the one available rule,
+ * applied identically to both callers below rather than invented per-site.
+ */
+class NamedCollection<T> {
+  private readonly map: Record<string, T> = {};
+
+  /** @param kind e.g. `'record'`, `'stage variant'` — names the KIND of
+   *  thing colliding, in the diagnostic.
+   *  @param scope e.g. `''` (records are global) or `enum SpinData tag
+   *  stage` (a stage variant collides only within its own enum) — names
+   *  WHERE it collided. */
+  constructor(
+    private readonly kind: string,
+    private readonly scope: string,
+  ) {}
+
+  insert(name: string, value: T, line: number, diagnostics: Diagnostic[]): void {
+    if (name in this.map) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          PLUGIN,
+          `line ${line}`,
+          `duplicate ${this.kind} "${name}"${this.scope === '' ? '' : ` in ${this.scope}`} — keeping the first, dropping this one`,
+        ),
+      );
+      return;
+    }
+    this.map[name] = value;
+  }
+
+  build(): Record<string, T> {
+    return this.map;
+  }
+}
+
 function parseRecords(source: string, diagnostics: Diagnostic[]): Record<string, RecordShape> {
-  const records: Record<string, RecordShape> = {};
-  for (const { header, body, line } of findBlocks(source, 'record')) {
+  const records = new NamedCollection<RecordShape>('record', '');
+  for (const { header, body, line } of findBlocks(source, 'record', diagnostics)) {
     const name = header.trim();
     if (name === '') {
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'record block has no name'));
       continue;
     }
-    records[name] = parseFieldList(body, name, line, diagnostics);
+    records.insert(name, parseFieldList(body, name, line, diagnostics), line, diagnostics);
   }
-  return records;
+  return records.build();
 }
 
 /**
@@ -258,27 +373,48 @@ function parseStages(
   records: Record<string, RecordShape>,
   actionStageNames: string[],
 ): Record<string, RecordShape> {
-  const stages: Record<string, RecordShape> = {};
-  const enumBlocks = findBlocks(source, 'enum');
+  const enumBlocks = findBlocks(source, 'enum', diagnostics);
   const wantedHeader = new RegExp(`^${escapeRegExp(dataTypeName)}\\s+tag\\s+stage$`);
   const spinData = enumBlocks.find((b) => wantedHeader.test(b.header.trim()));
 
   if (spinData !== undefined) {
     // `findBlocks` needs a keyword to anchor on; stage variants have none,
-    // so walk the enum body directly for `name { ... }` groups instead.
+    // so walk the enum body directly for `name { ... }` groups instead —
+    // but through the SAME `requireMatchingBrace` findBlocks itself uses,
+    // so an unterminated variant is diagnosed exactly like an unterminated
+    // top-level block, not silently skipped (this used to be a second,
+    // uncovered copy of that exact defect, local to this loop). Two
+    // variants sharing a name go through `NamedCollection`, same rule as
+    // `records` — see its doc for why that's a rule, not a per-site guess.
+    const stages = new NamedCollection<RecordShape>('stage variant', `enum ${dataTypeName} tag stage`);
     const variantRe = /([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
     let match: RegExpExecArray | null;
     while ((match = variantRe.exec(spinData.body)) !== null) {
       const name = match[1];
       const braceStart = match.index + match[0].length - 1;
-      const braceEnd = matchingBrace(spinData.body, braceStart);
-      if (braceEnd === -1) continue;
-      const body = spinData.body.slice(braceStart + 1, braceEnd);
       const variantLine = spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
-      stages[name] = parseFieldList(body, name, variantLine, diagnostics);
+      // NOTE ON REACHABILITY: `requireMatchingBrace` can provably never
+      // return null here. `spinData.body` only ever exists because the
+      // OUTER `findBlocks` call above already ran `matchingBrace` on the
+      // enum's own `{` and found where it balances to exactly zero — which
+      // means the body itself is internally brace-balanced, and any `{`
+      // found within an already-balanced string is guaranteed to find its
+      // own `}` by (at latest) the string's own end. Verified empirically
+      // with adversarial nested-brace input too: it never returns
+      // "unterminated", it just occasionally attributes a stray inner `{`
+      // to the wrong field (as an unreadable-type diagnostic on THAT
+      // field) rather than to a missing brace — a real behavior, just a
+      // different one than this line exists to catch. Kept anyway: it
+      // costs nothing, it keeps this loop's shape identical to
+      // `findBlocks`'s (the reviewer's ask), and it is genuinely live
+      // defense if `spinData.body`'s derivation ever changes.
+      const braceEnd = requireMatchingBrace(spinData.body, braceStart, `stage variant "${name}"`, variantLine, diagnostics);
+      if (braceEnd === null) break; // unreachable today — see note above
+      const body = spinData.body.slice(braceStart + 1, braceEnd);
+      stages.insert(name, parseFieldList(body, name, variantLine, diagnostics), variantLine, diagnostics);
       variantRe.lastIndex = braceEnd + 1;
     }
-    return stages;
+    return stages.build();
   }
 
   // No enum matches `dataType`. Fall back to the flat-record dialect: pair
@@ -287,8 +423,14 @@ function parseStages(
   // derivation, not a guess — and its cost).
   const flatShape = records[dataTypeName];
   if (flatShape !== undefined && actionStageNames.length > 0) {
-    for (const stageName of actionStageNames) stages[stageName] = flatShape;
-    return stages;
+    // No `NamedCollection` needed here: every key comes from
+    // `actionStageNames` (already deduplicated — see the call site), and
+    // every one of them is assigned the exact SAME `flatShape` reference,
+    // so re-assigning a key that already has that identical value is not
+    // a collision between two different declarations, just idempotence.
+    const flatStages: Record<string, RecordShape> = {};
+    for (const stageName of actionStageNames) flatStages[stageName] = flatShape;
+    return flatStages;
   }
 
   // Genuinely undecidable: no tagged enum, and no flat-record fallback
@@ -303,7 +445,7 @@ function parseStages(
       ? `no record "${dataTypeName}" to fall back to`
       : 'no action declares a stage to derive one from';
   diagnostics.push(diagnostic('error', PLUGIN, 'file', `${enumPart}, and ${fallbackPart}`));
-  return stages;
+  return {};
 }
 
 interface Clause {
@@ -482,7 +624,7 @@ function parseGame(
   source: string,
   diagnostics: Diagnostic[],
 ): { gameId: string; betLevels: number[]; maxWin: number; varsName?: string; globalsName?: string; dataName?: string } | null {
-  const blocks = findBlocks(source, 'game');
+  const blocks = findBlocks(source, 'game', diagnostics);
   if (blocks.length === 0) {
     diagnostics.push(diagnostic('error', PLUGIN, 'file', 'no "game { ... }" block found'));
     return null;
@@ -526,8 +668,8 @@ function parseOpens(text: string): { action: string; countVar: string; when?: st
 }
 
 /** `feature { key = value ... }`, nested inside an `action` block's body. */
-function parseInlineFeature(body: string): Record<string, number> | undefined {
-  const featureBlocks = findBlocks(body, 'feature');
+function parseInlineFeature(body: string, diagnostics: Diagnostic[]): Record<string, number> | undefined {
+  const featureBlocks = findBlocks(body, 'feature', diagnostics);
   if (featureBlocks.length === 0) return undefined;
   const feature: Record<string, number> = {};
   for (const line of featureBlocks[0].body.split('\n')) {
@@ -541,7 +683,7 @@ const ACTION_KEYS = ['stage', 'cost', 'session', 'extends', 'opens', 'feature'];
 
 function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
   const actions: ActionDef[] = [];
-  for (const { header, body, line } of findBlocks(source, 'action')) {
+  for (const { header, body, line } of findBlocks(source, 'action', diagnostics)) {
     const name = header.trim();
     if (name === '') {
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'action block has no name'));
@@ -585,7 +727,7 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
       if (opens.length > 0) action.opens = opens;
     }
 
-    const feature = parseInlineFeature(body);
+    const feature = parseInlineFeature(body, diagnostics);
     if (feature !== undefined) action.feature = feature;
 
     actions.push(action);
