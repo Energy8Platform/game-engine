@@ -4,4 +4,5 @@ export * from './mechanic';
 export * from './presentation';
 export * from './protocol';
 export * from './spin';
+export * from './spin-schema';
 export * from './project';
