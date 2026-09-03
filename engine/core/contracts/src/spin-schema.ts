@@ -24,8 +24,16 @@ export interface ActionDef {
   extendsVar?: string;
   /** `ends when <Vars field>` — the bool that force-closes the session. */
   endsWhenVar?: string;
-  /** `opens = <action> count <Vars field>`. */
-  opens?: { action: string; countVar: string };
+  /**
+   * `opens = <action> count <Vars field> [when <condition>]` — a list, not
+   * a single entry: one action can open more than one follow-up action
+   * (kitsune-wrath's `spin` opens both `free_spin` unconditionally and
+   * `spirit_gate` guarded by a `when`). `when`, when present, is kept as
+   * the raw condition text rather than parsed into structure — every
+   * consumer this plan has needs only to show or re-evaluate it as an
+   * expression, never to take it apart.
+   */
+  opens?: { action: string; countVar: string; when?: string }[];
   feature?: Record<string, number>;
 }
 
@@ -87,8 +95,10 @@ function isStagesMap(value: unknown): value is Record<string, RecordShape> {
   return isPlainObject(value) && Object.values(value).every(isRecordShape);
 }
 
-function isOpens(value: unknown): value is { action: string; countVar: string } {
-  return isPlainObject(value) && isString(value.action) && isString(value.countVar);
+function isOpensEntry(value: unknown): value is { action: string; countVar: string; when?: string } {
+  if (!isPlainObject(value) || !isString(value.action) || !isString(value.countVar)) return false;
+  if (value.when !== undefined && !isString(value.when)) return false;
+  return true;
 }
 
 function isFeatureMap(value: unknown): value is Record<string, number> {
@@ -101,7 +111,7 @@ function isActionDef(value: unknown): value is ActionDef {
   if (value.session !== undefined && typeof value.session !== 'boolean') return false;
   if (value.extendsVar !== undefined && !isString(value.extendsVar)) return false;
   if (value.endsWhenVar !== undefined && !isString(value.endsWhenVar)) return false;
-  if (value.opens !== undefined && !isOpens(value.opens)) return false;
+  if (value.opens !== undefined && (!Array.isArray(value.opens) || !value.opens.every(isOpensEntry))) return false;
   if (value.feature !== undefined && !isFeatureMap(value.feature)) return false;
   return true;
 }
