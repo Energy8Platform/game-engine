@@ -7,9 +7,12 @@
  * Pure: a string in, a schema and diagnostics out. No `fs`, no cordis — the
  * host (a later task) reads the file and calls this. And it never throws:
  * a file it cannot make sense of yields `schema: null` plus a diagnostic
- * naming what was missing, and a single malformed block (say, one broken
- * `record`) drops only that block from the schema, with a diagnostic saying
- * so, rather than losing everything else that DID parse.
+ * naming what was missing. Below "no game block" (the only failure that
+ * aborts the whole parse), every declaration parses independently — a
+ * broken record, stage variant, field, action or clause is dropped **on
+ * its own**, with its own diagnostic, never taking the rest of the file
+ * down with it. Silent loss is worse than a parse error: a schema that
+ * looks complete gets trusted.
  */
 import { type Diagnostic, diagnostic, type ActionDef, type FieldType, type RecordShape, type SpinSchema } from '@energy8engine/contracts';
 
@@ -28,6 +31,10 @@ function stripComments(source: string): string {
     .join('\n');
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Finds every top-level `keyword ... { ... }` block by keyword, respecting
  * brace nesting so a block's own nested `{ }` (e.g. a stage variant inside
@@ -41,7 +48,7 @@ function findBlocks(
   keyword: string,
 ): { header: string; body: string; line: number }[] {
   const results: { header: string; body: string; line: number }[] = [];
-  const re = new RegExp(`\\b${keyword}\\b`, 'g');
+  const re = new RegExp(`\\b${escapeRegExp(keyword)}\\b`, 'g');
   let match: RegExpExecArray | null;
   while ((match = re.exec(source)) !== null) {
     const afterKeyword = match.index + match[0].length;
@@ -122,40 +129,65 @@ function topLevelSemicolon(text: string): number {
 }
 
 /**
- * Parses a `name: Type` field list, whitespace- or newline-separated
- * (`.spin` uses no commas between record/stage fields — see `first-slot`'s
- * `record CascadeStep { grid: [[int]] removed: [CellPos] win: float }`).
- * A field whose type fails to parse is dropped and reported; the rest of
- * the block still parses.
+ * Parses a `name: Type` field list. Each field is found independently by
+ * scanning for `identifier :` boundaries, so the amount of whitespace or
+ * how many fields share a line never matters — one field's value simply
+ * runs from its own colon to the START of the next field's name (or the
+ * end of the body).
+ *
+ * Two ways a field can fail, and both are diagnosed and dropped rather
+ * than silently vanishing (Critical C): a field whose type text doesn't
+ * parse (`broken: ` with nothing after the colon, or garbage that isn't
+ * any known type), and text that never became a field at all because it
+ * had no colon (a bare identifier, or other leading noise before the
+ * first real field). Every other field in the same block still parses —
+ * this never drops the whole block for one bad field.
  */
 function parseFieldList(
   body: string,
   blockName: string,
   line: number,
   diagnostics: Diagnostic[],
-): RecordShape | null {
+): RecordShape {
   const shape: RecordShape = {};
-  const fieldRe = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*((?:\[[^\]]*\]|[^\s?])+\??)/g;
+  const fieldRe = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g;
+  const boundaries: { name: string; start: number; end: number }[] = [];
   let match: RegExpExecArray | null;
-  let any = false;
   while ((match = fieldRe.exec(body)) !== null) {
-    any = true;
-    const [, name, typeText] = match;
-    const type = parseFieldType(typeText);
+    boundaries.push({ name: match[1], start: match.index, end: fieldRe.lastIndex });
+  }
+
+  const leading = body.slice(0, boundaries[0]?.start ?? body.length).trim();
+  if (leading !== '') {
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        `line ${line}`,
+        `block "${blockName}": unreadable declaration "${leading}" (expected "name: Type")`,
+      ),
+    );
+  }
+
+  for (let i = 0; i < boundaries.length; i++) {
+    const { name, end } = boundaries[i];
+    const valueEnd = boundaries[i + 1]?.start ?? body.length;
+    const typeText = body.slice(end, valueEnd).trim();
+    const type = typeText === '' ? null : parseFieldType(typeText);
     if (type === null) {
       diagnostics.push(
-        diagnostic('error', PLUGIN, `line ${line}`, `block "${blockName}": field "${name}" has an unreadable type "${typeText}"`),
+        diagnostic(
+          'error',
+          PLUGIN,
+          `line ${line}`,
+          `block "${blockName}": field "${name}" has an unreadable type "${typeText === '' ? '(empty)' : typeText}"`,
+        ),
       );
       continue;
     }
     shape[name] = type;
   }
-  if (!any && body.trim() !== '') {
-    diagnostics.push(
-      diagnostic('error', PLUGIN, `line ${line}`, `block "${blockName}": no readable "name: Type" fields`),
-    );
-    return null;
-  }
+
   return shape;
 }
 
@@ -167,24 +199,50 @@ function parseRecords(source: string, diagnostics: Diagnostic[]): Record<string,
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'record block has no name'));
       continue;
     }
-    const shape = parseFieldList(body, name, line, diagnostics);
-    if (shape === null) continue;
-    records[name] = shape;
+    records[name] = parseFieldList(body, name, line, diagnostics);
   }
   return records;
 }
 
 /**
- * `enum SpinData tag stage { variant { fields... } variant2 { ... } }` —
- * one nested block per stage variant. Only the first tagged enum (`.spin`
- * declares exactly one `SpinData`) is read; a stage variant whose own
- * fields fail to parse is dropped, same rule as `record`.
+ * `enum <dataType> tag stage { variant { fields... } variant2 { ... } }` —
+ * one nested block per stage variant. `dataType` is whatever the game
+ * block's own `data = ...` names (falling back to the conventional
+ * `SpinData` when the game block didn't say), so a differently-named or
+ * missing tagged enum is reported against the name the file itself chose,
+ * not a hardcoded guess.
+ *
+ * Some real `.spin` files (the pre-tagged-enum dialect still used by
+ * several fixtures under `packages/*`) skip this construct entirely and
+ * point `data` straight at a flat `record` instead — there is no static
+ * stage name to key `stages` by in that case, so this reports the absence
+ * rather than guessing one (see the corpus test and the report for the
+ * full accounting). A stage variant whose own fields fail to parse is
+ * dropped per-field, same rule as `record`.
  */
-function parseStages(source: string, diagnostics: Diagnostic[]): Record<string, RecordShape> {
+function parseStages(
+  source: string,
+  diagnostics: Diagnostic[],
+  dataTypeName: string,
+): Record<string, RecordShape> {
   const stages: Record<string, RecordShape> = {};
   const enumBlocks = findBlocks(source, 'enum');
-  const spinData = enumBlocks.find((b) => /^SpinData\s+tag\s+stage$/.test(b.header.trim()));
-  if (spinData === undefined) return stages;
+  const wantedHeader = new RegExp(`^${escapeRegExp(dataTypeName)}\\s+tag\\s+stage$`);
+  const spinData = enumBlocks.find((b) => wantedHeader.test(b.header.trim()));
+  if (spinData === undefined) {
+    const found = enumBlocks.map((b) => `"enum ${b.header.trim()}"`).join(', ');
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        'file',
+        enumBlocks.length === 0
+          ? `no "enum ${dataTypeName} tag stage { ... }" block found`
+          : `no "enum ${dataTypeName} tag stage" block found (found: ${found})`,
+      ),
+    );
+    return stages;
+  }
   // `findBlocks` needs a keyword to anchor on; stage variants have none, so
   // walk the enum body directly for `name { ... }` groups instead.
   const variantRe = /([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
@@ -196,32 +254,171 @@ function parseStages(source: string, diagnostics: Diagnostic[]): Record<string, 
     if (braceEnd === -1) continue;
     const body = spinData.body.slice(braceStart + 1, braceEnd);
     const variantLine = spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
-    const shape = parseFieldList(body, name, variantLine, diagnostics);
-    if (shape !== null) stages[name] = shape;
+    stages[name] = parseFieldList(body, name, variantLine, diagnostics);
     variantRe.lastIndex = braceEnd + 1;
   }
   return stages;
 }
 
+interface Clause {
+  key: string;
+  value: string;
+}
+
 /**
- * `key = value` clauses inside a block body. `.spin` writes these either
- * one per line (`game { ... }`'s usual style) or several to a line
- * separated by a double space (`action`'s usual style — see
- * `stage = base_game  cost = 1.0`), so a clause boundary is a newline OR a
- * run of 2+ spaces; a single space stays inside a clause's own value
- * (`opens = free_spin count free_spins_awarded` is one clause, not three).
+ * Replaces every nested `{ ... }` group's content (braces included) with
+ * spaces, same length, so a nested block never leaks into clause-boundary
+ * scanning. Needed for `action`'s inline `feature { buy = 1 }`: without
+ * this, `buy` (not a known clause key) creates no boundary of its own, so
+ * the whole `feature { ... }` group would otherwise glue itself onto
+ * whichever clause precedes it (e.g. `cost = 5.0  feature { buy = 1 }`
+ * would make "5.0  feature { buy = 1 }" the value read for `cost`,
+ * failing `Number(...)` and losing the entire action — a real bug this
+ * caught against `feature.spin`'s `buy_bonus`). Preserving length keeps
+ * every other offset in the body valid.
  */
-function parseAssignments(body: string): Map<string, string> {
-  const assignments = new Map<string, string>();
-  const clauses = body
-    .split(/\n|[ \t]{2,}/)
-    .map((c) => c.trim())
-    .filter((c) => c !== '');
-  for (const clause of clauses) {
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(clause);
-    if (match) assignments.set(match[1], match[2].trim());
+function blankNestedBraces(text: string): string {
+  let result = '';
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === '{') {
+      depth++;
+      result += ' ';
+    } else if (ch === '}') {
+      if (depth > 0) depth--;
+      result += ' ';
+    } else {
+      result += depth > 0 ? ' ' : ch;
+    }
   }
-  return assignments;
+  return result;
+}
+
+/** Walks left from a `{`'s index past whitespace, then past an identifier
+ *  if one is there — i.e. finds the start of `name` in `name { ... }`, not
+ *  just the brace itself. Needed so a nested block's own HEADER keyword
+ *  (e.g. `feature`) doesn't stay behind as trailing garbage on whichever
+ *  clause precedes it once the brace group itself is excluded. */
+function blockHeaderStart(text: string, braceStart: number): number {
+  let i = braceStart;
+  while (i > 0 && /\s/.test(text[i - 1])) i--;
+  let j = i;
+  while (j > 0 && /[A-Za-z0-9_]/.test(text[j - 1])) j--;
+  return j;
+}
+
+/** Every top-level `name { ... }` block's full span in `text`, header
+ *  keyword included (start of `name` through the matching `}`) — used to
+ *  stop a clause's value at the start of a nested block like
+ *  `feature { ... }` even when nothing inside that block, or its own
+ *  header, happens to look like a known clause key. */
+function findTopLevelBraceSpans(text: string): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '{') {
+      const end = matchingBrace(text, i);
+      if (end === -1) break;
+      spans.push({ start: blockHeaderStart(text, i), end });
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return spans;
+}
+
+/**
+ * Splits a block body into `key = value` clauses (plus, when requested,
+ * `ends when <var>`). A clause boundary is found generically — ANY
+ * `identifier =` (not `==`, see below), not just this block's own known
+ * keys — but only boundaries whose key is actually one of `keys` (or
+ * `ends when`) make it into the returned list. Scanning generically and
+ * filtering afterward, rather than scanning for just the known keys, is
+ * what makes an UNRECOGNIZED clause still terminate the value of
+ * whichever recognized clause precedes it, instead of leaking into it:
+ * kitsune-wrath's `spirit_gate_spin` has `session = true` immediately
+ * followed by a `group = spirit_gate` clause this vocabulary doesn't
+ * model (see the report) — without treating `group =` as a boundary too,
+ * `session`'s value becomes `"true\n  group = spirit_gate"`, which fails
+ * the `=== 'true'` check and silently drops the whole session flag.
+ *
+ * Three things this buys, all measured against real fixtures, not
+ * hypothesized:
+ *
+ * 1. **Whitespace independence.** `.spin` has no one convention for how
+ *    many clauses share a line — `game { ... }` usually writes one
+ *    `key = value` per line, `action` usually crowds several onto one
+ *    line with a double space, and `logic.spin` (a real fixture) crowds
+ *    two with a SINGLE space: `stage = base_game cost = 1.0`. A clause
+ *    boundary is "the next `identifier =`", never "N spaces" or "a
+ *    newline", so all three read the same way. (This is the fix for the
+ *    original whitespace-run splitter, which swallowed `logic.spin`'s
+ *    whole clause into one, losing `cost` and misreporting `stage` as
+ *    missing.)
+ * 2. **Safety against `when`'s own `==`.** A `when` condition can contain
+ *    text that looks like an assignment (kitsune-wrath's
+ *    `opens = spirit_gate count spirit_gate_open when spirit_gate_open == -1`
+ *    has `spirit_gate_open ==` right there). The boundary pattern requires
+ *    an `=` NOT itself followed by another `=`, so a `==` comparison is
+ *    never mistaken for a clause.
+ * 3. **Safety against a nested block's own clauses and header.** `feature`
+ *    is itself a known key when it appears as `feature = X` (`game`'s
+ *    convention), but `action`'s inline `feature { buy = 1 }` must not
+ *    let `buy = 1` register as a boundary, nor let the literal word
+ *    `feature` (with no `=` of its own — it's followed by `{`) leak onto
+ *    the preceding clause. Nested-brace CONTENT is blanked out before the
+ *    generic scan runs, and each nested block's full span — header
+ *    keyword included — is added back in as an anonymous, unreturned
+ *    boundary purely to terminate whatever precedes it (this is the fix
+ *    for a real, measured failure: `feature.spin`'s `buy_bonus` action
+ *    was lost entirely because `cost`'s value came out as
+ *    `"5.0  feature { buy = 1 }"`, which fails `Number(...)`).
+ *
+ * Returns every match, in order, WITHOUT deduplicating by key — an action
+ * can carry more than one `opens =` (see kitsune-wrath again), and losing
+ * all but the last would silently drop a real declaration.
+ */
+function findClauses(body: string, keys: string[], includeEndsWhen: boolean): Clause[] {
+  const flat = blankNestedBraces(body);
+  type Boundary = { key: string; start: number; end: number };
+  const boundaries: Boundary[] = [];
+
+  // Any `identifier =`, generically — not just this block's own known
+  // keys — so an unrecognized clause still terminates its neighbour's
+  // value. `(?!=)` excludes `==` (a `when` condition's comparison), never
+  // an assignment in this grammar.
+  const anyKeyPattern = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/g;
+  let match: RegExpExecArray | null;
+  while ((match = anyKeyPattern.exec(flat)) !== null) {
+    boundaries.push({ key: match[1], start: match.index, end: anyKeyPattern.lastIndex });
+  }
+  if (includeEndsWhen) {
+    const endsWhenPattern = /\bends\s+when\b/g;
+    while ((match = endsWhenPattern.exec(flat)) !== null) {
+      boundaries.push({ key: 'ends when', start: match.index, end: endsWhenPattern.lastIndex });
+    }
+  }
+
+  // Each nested block's full span (header keyword through its closing
+  // brace) goes in too, as a terminator-only marker (`\0brace` is never a
+  // real clause key, so it's filtered out below alongside any other
+  // unrecognized boundary) — see point 3 above.
+  for (const span of findTopLevelBraceSpans(body)) {
+    boundaries.push({ key: '\0brace', start: span.start, end: span.end });
+  }
+
+  boundaries.sort((a, b) => a.start - b.start);
+
+  const keySet = new Set(keys);
+  const clauses: Clause[] = [];
+  for (let i = 0; i < boundaries.length; i++) {
+    const b = boundaries[i];
+    if (!keySet.has(b.key) && !(includeEndsWhen && b.key === 'ends when')) continue;
+    const valueEnd = boundaries[i + 1]?.start ?? body.length;
+    clauses.push({ key: b.key, value: body.slice(b.end, valueEnd).trim() });
+  }
+  return clauses;
 }
 
 function parseNumberArray(text: string): number[] | null {
@@ -233,7 +430,12 @@ function parseNumberArray(text: string): number[] | null {
   return parts.every((n) => Number.isFinite(n)) ? parts : null;
 }
 
-function parseGame(source: string, diagnostics: Diagnostic[]): { gameId: string; betLevels: number[]; maxWin: number } | null {
+const GAME_KEYS = ['bet_levels', 'max_win', 'vars', 'feature', 'data', 'globals'];
+
+function parseGame(
+  source: string,
+  diagnostics: Diagnostic[],
+): { gameId: string; betLevels: number[]; maxWin: number; varsName?: string; globalsName?: string; dataName?: string } | null {
   const blocks = findBlocks(source, 'game');
   if (blocks.length === 0) {
     diagnostics.push(diagnostic('error', PLUGIN, 'file', 'no "game { ... }" block found'));
@@ -245,22 +447,36 @@ function parseGame(source: string, diagnostics: Diagnostic[]): { gameId: string;
     diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'game block has no quoted name'));
     return null;
   }
-  const assignments = parseAssignments(body);
-  const betLevelsText = assignments.get('bet_levels');
-  const maxWinText = assignments.get('max_win');
+  const clauses = findClauses(body, GAME_KEYS, false);
+  const get = (key: string) => clauses.find((c) => c.key === key)?.value;
+
+  const betLevelsText = get('bet_levels');
+  const maxWinText = get('max_win');
   const betLevels = betLevelsText === undefined ? null : parseNumberArray(betLevelsText);
   const maxWin = maxWinText === undefined ? NaN : Number(maxWinText);
   if (betLevels === null || !Number.isFinite(maxWin)) {
     diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'game block is missing "bet_levels" or "max_win"'));
     return null;
   }
-  return { gameId: nameMatch[1], betLevels, maxWin };
+  return {
+    gameId: nameMatch[1],
+    betLevels,
+    maxWin,
+    varsName: get('vars'),
+    globalsName: get('globals'),
+    dataName: get('data'),
+  };
 }
 
-/** `opens = <action> count <var>`. */
-function parseOpens(text: string): { action: string; countVar: string } | undefined {
-  const match = /^([A-Za-z_][A-Za-z0-9_]*)\s+count\s+([A-Za-z_][A-Za-z0-9_]*)$/.exec(text.trim());
-  return match === undefined || match === null ? undefined : { action: match[1], countVar: match[2] };
+/** `<action> count <var>`, optionally followed by `when <condition>` — the
+ *  condition is kept as raw text, never parsed into structure (per plan:
+ *  every consumer this needs only shows or re-evaluates it as an
+ *  expression). */
+function parseOpens(text: string): { action: string; countVar: string; when?: string } | undefined {
+  const match = /^([A-Za-z_][A-Za-z0-9_]*)\s+count\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+when\s+(.+))?$/.exec(text.trim());
+  if (match === null) return undefined;
+  const [, action, countVar, when] = match;
+  return when !== undefined && when.trim() !== '' ? { action, countVar, when: when.trim() } : { action, countVar };
 }
 
 /** `feature { key = value ... }`, nested inside an `action` block's body. */
@@ -275,6 +491,8 @@ function parseInlineFeature(body: string): Record<string, number> | undefined {
   return feature;
 }
 
+const ACTION_KEYS = ['stage', 'cost', 'session', 'extends', 'opens', 'feature'];
+
 function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
   const actions: ActionDef[] = [];
   for (const { header, body, line } of findBlocks(source, 'action')) {
@@ -283,28 +501,47 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'action block has no name'));
       continue;
     }
-    const assignments = parseAssignments(body);
-    const stage = assignments.get('stage');
-    const costText = assignments.get('cost');
+    const clauses = findClauses(body, ACTION_KEYS, true);
+    const get = (key: string) => clauses.find((c) => c.key === key)?.value;
+    const getAll = (key: string) => clauses.filter((c) => c.key === key).map((c) => c.value);
+
+    const stage = get('stage');
+    const costText = get('cost');
     const cost = costText === undefined ? NaN : Number(costText);
     if (stage === undefined || !Number.isFinite(cost)) {
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, `action "${name}" is missing "stage" or "cost"`));
       continue;
     }
     const action: ActionDef = { name, stage, cost };
-    const sessionText = assignments.get('session');
+
+    const sessionText = get('session');
     if (sessionText === 'true') action.session = true;
-    const extendsVar = assignments.get('extends');
+
+    const extendsVar = get('extends');
     if (extendsVar !== undefined) action.extendsVar = extendsVar;
-    const endsWhenMatch = /\bends\s+when\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(body);
-    if (endsWhenMatch) action.endsWhenVar = endsWhenMatch[1];
-    const opensText = assignments.get('opens');
-    if (opensText !== undefined) {
-      const opens = parseOpens(opensText);
-      if (opens !== undefined) action.opens = opens;
+
+    const endsWhenVar = get('ends when');
+    if (endsWhenVar !== undefined) action.endsWhenVar = endsWhenVar;
+
+    const opensTexts = getAll('opens');
+    if (opensTexts.length > 0) {
+      const opens: { action: string; countVar: string; when?: string }[] = [];
+      for (const text of opensTexts) {
+        const entry = parseOpens(text);
+        if (entry === undefined) {
+          diagnostics.push(
+            diagnostic('error', PLUGIN, `line ${line}`, `action "${name}": unreadable "opens" clause "${text}"`),
+          );
+          continue;
+        }
+        opens.push(entry);
+      }
+      if (opens.length > 0) action.opens = opens;
     }
+
     const feature = parseInlineFeature(body);
     if (feature !== undefined) action.feature = feature;
+
     actions.push(action);
   }
   return actions;
@@ -324,16 +561,11 @@ export function parseSpinSchema(source: string): { schema: SpinSchema | null; di
   if (game === null) return { schema: null, diagnostics };
 
   const records = parseRecords(clean, diagnostics);
-  const stages = parseStages(clean, diagnostics);
+  const stages = parseStages(clean, diagnostics, game.dataName ?? 'SpinData');
   const actions = parseActions(clean, diagnostics);
 
-  const varsBlock = findBlocks(clean, 'game')[0];
-  const gameAssignments = parseAssignments(varsBlock.body);
-  const varsRecordName = gameAssignments.get('vars');
-  const vars = (varsRecordName !== undefined && records[varsRecordName]) || {};
-
-  const globalsRecordName = gameAssignments.get('globals');
-  const globals = globalsRecordName !== undefined ? records[globalsRecordName] : undefined;
+  const vars = (game.varsName !== undefined && records[game.varsName]) || {};
+  const globals = game.globalsName !== undefined ? records[game.globalsName] : undefined;
 
   const schema: SpinSchema = {
     gameId: game.gameId,
