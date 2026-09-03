@@ -11,7 +11,7 @@ import {
 import { readPackageJson } from '../resolvePackage';
 
 export const name = 'runtime-assets';
-export const inject = ['server', 'project'];
+export const inject = ['server', 'project', 'spinSchema'];
 
 export interface RuntimeAssetsConfig {
   cwd: string;
@@ -20,9 +20,16 @@ export interface RuntimeAssetsConfig {
 /**
  * The wire between task 4's resolved GAME composition and the browser:
  * `GET /api/composition` hands over the row list (and diagnostics) task 6
- * needs to know which ids exist; `GET /plugin-runtime/:id` hands over one
- * row's runtime half so the browser can dynamically `import()` it into the
- * running game.
+ * needs to know which ids exist, plus (task 3 of "the math describes
+ * itself") the `SpinSchema` `ctx.spinSchema` read off `game/script.spin` —
+ * a mechanic's `expects` can be checked against it before the first spin
+ * rather than against the data of one that already happened. `schema`
+ * rides in THIS response rather than a route of its own on purpose: the
+ * check that consumes it runs in the browser at composition-build time,
+ * and a second network call is a second way to get the order wrong (see
+ * `plugins/schema.ts`'s sibling task-3 brief). `GET /plugin-runtime/:id`
+ * hands over one row's runtime half so the browser can dynamically
+ * `import()` it into the running game.
  *
  * `/plugin-runtime/:id` is NOT "the fallback" — it is the NON-VITE path.
  * It is what a host with no `dev-game` on it (`e8 ide`) serves a runtime
@@ -190,12 +197,17 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     // for the id the browser already committed to asking for, which is a
     // reasonable reading of "the request that's in flight."
     await ctx.project.reload();
+    // Same freshness rule as the composition itself, for the same reason:
+    // an edit to `game/script.spin` between page loads must not answer
+    // from a schema that predates it.
+    await ctx.spinSchema.reload();
     // Starts as the project's own (a malformed profile, a bundle that was
-    // not found, …) and gains one per row that could not be resolved —
-    // one array, because a person reading a failure screen is looking for
+    // not found, …) plus the schema's own (a missing or unparseable
+    // `.spin`), and gains one per row that could not be resolved — one
+    // array, because a person reading a failure screen is looking for
     // "what is wrong with my game", not for which layer of the host
     // noticed it.
-    const diagnostics: Diagnostic[] = [...ctx.project.diagnostics];
+    const diagnostics: Diagnostic[] = [...ctx.project.diagnostics, ...ctx.spinSchema.diagnostics];
     const rows = ctx.project.composition.rows.map((row) => {
       const pkg = readPackageJson(config.cwd, row.name);
       // The manifest's OWN complaints (an `e8.runtime` with no string
@@ -215,7 +227,11 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       // applies any of them (see `GameCompositionRow.seam`).
       return { ...row, runtimeUrl: runtime.url, seam: parsed.manifest?.seam };
     });
-    res.json({ rows, diagnostics });
+    // `schema` always rides here, even `null` — omitting the field on a
+    // parse failure would be indistinguishable from an old host that has
+    // never heard of a schema at all, and the browser needs to tell those
+    // two apart (see task-3-brief.md).
+    res.json({ rows, diagnostics, schema: ctx.spinSchema.schema });
   });
 
   ctx.server.get('/plugin-runtime/:id', async (req, res) => {

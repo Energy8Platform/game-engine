@@ -11,6 +11,7 @@ import * as composition from './plugins/composition';
 import * as project from './plugins/project';
 import * as rpc from './plugins/rpc';
 import * as runtimeAssets from './plugins/runtime-assets';
+import * as schema from './plugins/schema';
 
 export interface IdeHostOptions {
   /** Project directory; its e8.yml is the composition. */
@@ -68,6 +69,10 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     // different format from e8.yml above and lives on its own service —
     // see plugins/project.ts's doc comment for why the two are not merged.
     await ctx.plugin(project, { cwd: options.cwd });
+    // What the math promises about its own shape — read once here so
+    // `GET /api/composition` (runtime-assets.ts) can carry it alongside
+    // the rows; see plugins/schema.ts's doc comment.
+    await ctx.plugin(schema, { cwd: options.cwd });
 
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
     await ctx.plugin(rpc);
