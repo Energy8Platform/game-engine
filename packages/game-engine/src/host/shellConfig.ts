@@ -263,7 +263,7 @@ const DISCLAIMER_TITLE = 'DISCLAIMER';
 /** The copyright/brand line ("TM and © {year} Engine.") is shown verbatim; the legal body
  *  lines localize. Detecting the brand keeps " Engine" out of the translation lookup entirely. */
 function isBrandLine(line: string): boolean {
-  return /stake\s+engine/i.test(line);
+  return /engine/i.test(line);
 }
 
 /** A disclaimer section from initData's disclaimer lines; null when none supplied. The legal body is

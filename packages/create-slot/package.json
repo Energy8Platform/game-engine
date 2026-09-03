@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/create-slot",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "type": "module",
   "bin": {
     "create-slot": "dist/cli.js"

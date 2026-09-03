@@ -8,7 +8,7 @@
 // (rarest); bulk rows ("small" tier) get weight=W >> 1 calculated so the natural
 // cap probability is preserved.
 //
-// This is the canonical way Stake Engine expects lookup tables to be built: ETL
+// This is the canonical way Engine expects lookup tables to be built: ETL
 // (Expected Tail Liability) stays low because high-payout rows carry minimal
 // weight, and the "Within Liability Limits" check passes by construction.
 
@@ -686,7 +686,7 @@ export function buildTieredLookup(
   }
 
   // Phase 4c: diversification pass — maximize distinct payoutCents in output.
-  // Stake Engine rejects "Insufficient Unique Events" when too few distinct
+  // Engine rejects "Insufficient Unique Events" when too few distinct
   // payouts exist. Swap duplicate-payout rows in outSmallNonZero for source
   // rows carrying NEW (unseen) payout values, subject to the remaining RTP
   // drift budget.

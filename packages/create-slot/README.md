@@ -1,7 +1,7 @@
 # @energy8platform/create-slot
 
 Scaffolder for a new PixiJS slot game on the Energy8 `@energy8platform/game-engine` framework,
-ready to run locally, test in the Stake dev harness, generate its math, and build for Stake Engine.
+ready to run locally, test in the Stake dev harness, generate its math, and build for Engine.
 
 ```bash
 npm create @energy8platform/slot@latest my-game

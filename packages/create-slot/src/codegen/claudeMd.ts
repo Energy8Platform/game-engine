@@ -99,7 +99,7 @@ refuse to start.
   return `# CLAUDE.md
 
 Guidance for Claude Code (claude.ai/code) working in this repository — a slot game built on the
-Energy8 \`@energy8platform/game-engine\` framework, targeting Stake Engine${a.artube ? ' and Artube' : ''}.
+Energy8 \`@energy8platform/game-engine\` framework, targeting Engine${a.artube ? ' and Artube' : ''}.
 
 ## What this project is
 

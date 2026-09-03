@@ -282,7 +282,7 @@ describe('buildShellConfig (runtime ctx)', () => {
     const html = disclaimerOf(buildShellConfig({}, model, { balance: 0, mode: 'base' }));
     expect(html).toContain('Malfunction voids all wins and plays.');
     expect(html).toMatch(/Remote Game Server/); // расчёт выигрышей — обязательный пункт
-    expect(html).not.toMatch(/stake/i); // TM Stake Engine на не-Stake запуске неуместен
+    expect(html).not.toMatch(/stake/i); // TM Engine на не-Stake запуске неуместен
     expect((html.match(/<p>/g) ?? []).length).toBe(5);
   });
 

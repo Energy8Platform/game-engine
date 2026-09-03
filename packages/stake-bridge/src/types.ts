@@ -1,5 +1,5 @@
 /**
- * Public types for Stake Engine integration.
+ * Public types for Engine integration.
  *
  * The thick `StakeBridge` wrapper translates between Stake's RGS API
  * (single `Play()` returning a pre-generated "book" of all events) and

@@ -1,7 +1,7 @@
 {
   "name": "@energy8platform/stake-bridge",
-  "version": "0.6.5",
-  "description": "Drop-in host-side wrapper that lets a game built against @energy8platform/game-sdk run on Stake Engine",
+  "version": "0.6.6",
+  "description": "Drop-in host-side wrapper that lets a game built against @energy8platform/game-sdk run on Engine",
   "author": "Energy8 Platform",
   "license": "MIT",
   "type": "module",

@@ -38,13 +38,13 @@ function applyRules(text: string, rules: SocialRule[]): string {
 /**
  * Swap gambling vocabulary for social-casino wording:
  * PRE (defaults + overrides) → bridge dictionary (if loaded) → POST (defaults + overrides).
- * The "Stake Engine" brand is protected from the bet→play swap.
+ * The "Engine" brand is protected from the bet→play swap.
  */
 export function applySocialText(
   text: string,
   overrides?: { pre?: SocialRule[]; post?: SocialRule[] },
 ): string {
-  const BRAND = 'Stake Engine';
+  const BRAND = 'Engine';
   const SENTINEL = '￹';
   let s = text.split(BRAND).join(SENTINEL);
   s = applyRules(s, [...DEFAULT_PRE_REPLACEMENTS, ...(overrides?.pre ?? [])]);

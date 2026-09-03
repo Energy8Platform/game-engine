@@ -150,7 +150,7 @@ describe('host-i18n: legal disclaimer localization', () => {
       (s) => s.type === 'custom' && (s as { title?: string }).title === 'DISCLAIMER',
     ) as { html?: string } | undefined)?.html ?? '';
 
-  it('translates the legal body but leaves the "Stake Engine" brand line verbatim', () => {
+  it('translates the legal body but leaves the "Engine" brand line verbatim', () => {
     const c = buildShellConfig(
       { i18n: { ru: { 'Malfunction voids all wins and plays.': 'Сбой аннулирует все выигрыши и игры.' } } },
       model,

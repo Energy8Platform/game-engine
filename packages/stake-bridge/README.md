@@ -1,6 +1,6 @@
 # @energy8platform/stake-bridge
 
-Drop-in host-side wrapper that lets a game written against [`@energy8platform/game-sdk`](../game-sdk) run on [Stake Engine](https://stake-engine.com/docs) without modification.
+Drop-in host-side wrapper that lets a game written against [`@energy8platform/game-sdk`](../game-sdk) run on [Engine](https://stake-engine.com/docs) without modification.
 
 ## Why
 
@@ -251,7 +251,7 @@ infoScreen.append(...config.disclaimerLines!.map((line) => p(line)));
 //    The expected return is calculated over many plays.
 //    The game display is not representative of any physical device …
 //    Winnings are settled according to the amount received from the …
-//    TM and © 2026 Stake Engine.
+//    TM and © 2026 Engine.
 ```
 
 To override (e.g. localised wording or extra clauses), pass your own to `buildDisclaimer({ override })` before constructing the bridge, or replace the lines in `enrichConfig`. The seven approval points are documented in `src/disclaimer.ts`.
@@ -293,7 +293,7 @@ Money is in integer minor units × `1_000_000`. The bridge handles all conversio
 
 ## Building a lookup table (force matrix)
 
-For Stake Engine deployments that require a pre-built lookup table, use the
+For Engine deployments that require a pre-built lookup table, use the
 companion package [`@energy8platform/stake-math-tools`](../stake-math-tools)
 to compress raw simulation output into a target-RTP / target-volatility
 weighted table. It is a node-only dev-time tool, not bundled into the game.

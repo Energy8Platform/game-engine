@@ -1,10 +1,10 @@
 # @energy8platform/stake-math-tools
 
-Node-only dev-time utilities for building [Stake Engine](https://stake-engine.com/docs) **lookup tables (force matrices)** from raw simulation output. Compresses millions of source simulations into a small weighted table that passes Stake's publish-time validation gates (Liability Limits, Gaps in Hit Rate Table, Unique Events). Companion to [`@energy8platform/stake-bridge`](../stake-bridge).
+Node-only dev-time utilities for building [Engine](https://stake-engine.com/docs) **lookup tables (force matrices)** from raw simulation output. Compresses millions of source simulations into a small weighted table that passes Stake's publish-time validation gates (Liability Limits, Gaps in Hit Rate Table, Unique Events). Companion to [`@energy8platform/stake-bridge`](../stake-bridge).
 
 ## Why
 
-Stake Engine games ship a pre-built weighted lookup table: each row is `(sim_id, weight, payout_cents)` and the RGS samples a row at runtime to decide each round's outcome. The math team's job is to compress millions of raw simulations down to a much smaller weighted table whose aggregate distribution still hits the design's target **RTP / volatility / hit-rate** under a hard `capMaxWin` ceiling, **and** passes Stake's risk-management checks.
+Engine games ship a pre-built weighted lookup table: each row is `(sim_id, weight, payout_cents)` and the RGS samples a row at runtime to decide each round's outcome. The math team's job is to compress millions of raw simulations down to a much smaller weighted table whose aggregate distribution still hits the design's target **RTP / volatility / hit-rate** under a hard `capMaxWin` ceiling, **and** passes Stake's risk-management checks.
 
 This package does that compression in one call.
 
@@ -270,7 +270,7 @@ Determinism: same `(rows, params)` → bit-identical output.
 
 ## Hit-rate distribution table
 
-`result.stakeReport.hitRateDistribution` mirrors what Stake Engine shows in the publish UI. 16 payout-multiplier buckets:
+`result.stakeReport.hitRateDistribution` mirrors what Engine shows in the publish UI. 16 payout-multiplier buckets:
 
 ```
 [0, 0.1)   [0.1, 1)   [1, 2)   [2, 5)   [5, 10)   [10, 20)

@@ -884,7 +884,7 @@ const D = {
  * supported, the disclaimer is translated and displayed in each language").
  *
  * Brand-free by construction. Stake's own template ends with a seventh line — "TM and © {year}
- * Stake Engine." — and that one belongs to a Stake launch alone: it arrives with the Stake bridge's
+ * Engine." — and that one belongs to a Stake launch alone: it arrives with the Stake bridge's
  * `INIT.config.disclaimerLines`, which outrank this default, and renders verbatim (see the host's
  * `isBrandLine`). Every other platform gets the same mandated wording without someone else's mark.
  */

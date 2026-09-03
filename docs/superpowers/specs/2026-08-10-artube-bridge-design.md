@@ -7,12 +7,12 @@
 ## Задача
 
 Дать играм на `@energy8platform/game-sdk` возможность работать на платформе Artube —
-так же, как `@energy8platform/stake-bridge` даёт им работать на Stake Engine. Код игры
+так же, как `@energy8platform/stake-bridge` даёт им работать на Engine. Код игры
 при этом не меняется: он по-прежнему говорит только с `CasinoGameSDK`.
 
 ## Почему это не копия stake-bridge
 
-| | Stake Engine | Artube |
+| | Engine | Artube |
 |---|---|---|
 | Кто ходит в платформенное API | браузер (`stake-bridge` целиком во фронте) | **только бэкенд игры**; фронту доступ запрещён |
 | Транспорт | HTTPS REST (`/wallet/*`) | WSS, конверт-протокол, `op_seq` / `corr_id` |

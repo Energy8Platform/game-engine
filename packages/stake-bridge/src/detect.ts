@@ -1,5 +1,5 @@
 /**
- * Lightweight, non-throwing detection + validation for a Stake Engine launch.
+ * Lightweight, non-throwing detection + validation for a Engine launch.
  *
  * Lives in a leaf module (no RGSClient / StakeBridge imports) so the host can
  * import it to gate whether to lazy-load the heavy bridge — and to enforce the
