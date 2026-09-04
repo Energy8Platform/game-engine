@@ -4,7 +4,9 @@ import { loadMathConfig } from './pipeline/config';
 import { resolveModes } from './mathConfig';
 import { runSim } from './pipeline/sim';
 import { curateModes } from './pipeline/curate';
-import { finalizePool, poolCompressionDisabled } from './pipeline/pool';
+import {
+  finalizePool, normalizeDumpPath, poolCompressionDisabled, poolZstdRequested,
+} from './pipeline/pool';
 import { formatGoReport, formatCurateReport } from './pipeline/report';
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -30,17 +32,17 @@ export async function runCli(argv: string[]): Promise<void> {
   if (cmd === 'sim' || cmd === 'pool') {
     if (cmd === 'pool') mkdirSync(poolDir, { recursive: true });
     for (const m of modes) {
-      const dump = cmd === 'pool' ? resolve(poolDir, `books_${m.mode}.jsonl`) : undefined;
+      const dump = cmd === 'pool' ? resolve(poolDir, poolDumpName(m.mode)) : undefined;
       const out = await runSim(cfg, m, { dump });
       console.log(formatGoReport(m.mode, out));
       if (dump) {
-        // Compress the raw dump → books_<MODE>.jsonl.zst (-19) + lookUpTable, so the pool
-        // is a compact Stake-style library instead of an 80–90 GB raw .jsonl.
-        const fin = await finalizePool(m, { poolDir, dumpPath: dump });
-        const books = fin.compressed
-          ? `books_${m.mode}.jsonl.zst`
-          : `books_${m.mode}.jsonl${poolCompressionDisabled() ? ' (raw — POOL_ZSTD_LEVEL=0)' : ' (raw — zstd absent)'}`;
-        console.log(`  → ${poolDir}/${books} + lookUpTable_${m.mode}_0.csv (${fin.rows} rows)`);
+        // Build the lookUpTable and make sure the books are archived, so the pool is a
+        // compact Stake-style library instead of an 80–90 GB raw .jsonl.
+        const fin = await finalizePool(m, { poolDir, dumpPath: normalizeDumpPath(dump, m.mode) });
+        console.log(
+          `  → ${poolDir}/${fin.books}${rawNote(fin.compressed)} + ` +
+            `lookUpTable_${m.mode}_0.csv (${fin.rows} rows)`,
+        );
       }
     }
     return;
@@ -66,11 +68,11 @@ export async function runCli(argv: string[]): Promise<void> {
   mkdirSync(poolDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
   for (const m of modes) {
-    const dump = resolve(poolDir, `books_${m.mode}.jsonl`);
+    const dump = resolve(poolDir, poolDumpName(m.mode));
     const go = await runSim(cfg, m, { dump });
     console.log(formatGoReport(m.mode, go));
-    // Compress + LUT the pool, then curate reads the LUT (no multi-GB decompress).
-    const fin = await finalizePool(m, { poolDir, dumpPath: dump });
+    // Archive + LUT the pool, then curate reads the LUT (no multi-GB decompress).
+    const fin = await finalizePool(m, { poolDir, dumpPath: normalizeDumpPath(dump, m.mode) });
     if (!fin.compressed && !poolCompressionDisabled()) {
       process.stderr.write(`  [${m.mode}] pool kept raw (zstd absent)\n`);
     }
@@ -78,6 +80,24 @@ export async function runCli(argv: string[]): Promise<void> {
   const curated = await curateModes(modes, { poolDir, outDir, jobs: flags.jobs });
   for (const c of curated) console.log(formatCurateReport(c.mode, c.result));
   console.log(`\nDone. Stake artifacts in ${outDir}`);
+}
+
+/**
+ * The dump file we ask the engine to write for one mode.
+ *
+ * `.gz` by default: `e8 simulate -dump …/books_<MODE>.jsonl.gz` compresses as it
+ * writes, so the raw pool (tens of GB on a real game) never exists on disk and
+ * no separate compression pass runs. Setting POOL_ZSTD_LEVEL asks for the legacy
+ * path instead — raw dump, then zstd at that level (`0` = keep it raw).
+ */
+function poolDumpName(mode: string): string {
+  return `books_${mode}.jsonl${poolZstdRequested() ? '' : '.gz'}`;
+}
+
+/** Why the pool's books ended up uncompressed, for the console line. */
+function rawNote(compressed: boolean): string {
+  if (compressed) return '';
+  return poolCompressionDisabled() ? ' (raw — POOL_ZSTD_LEVEL=0)' : ' (raw — zstd absent)';
 }
 
 export interface CliFlags {

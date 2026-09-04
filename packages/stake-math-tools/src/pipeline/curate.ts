@@ -19,10 +19,7 @@ import {
   existsSync, mkdirSync, openSync, writeSync, readSync, closeSync, readFileSync,
   writeFileSync, unlinkSync,
 } from 'node:fs';
-import { createInterface } from 'node:readline';
-import { createReadStream } from 'node:fs';
-import { createGunzip } from 'node:zlib';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { optimizeLookupTable } from '../optimize-lookup.js';
 import { computeMetrics } from '../metrics.js';
@@ -30,6 +27,7 @@ import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
 import type { LookupRow, OptimizeParams, OptimizeResult } from '../types.js';
 import type { ResolvedMode, CurateEventsTransform } from '../mathConfig';
 import { readLut, writeLut } from './lut-io.js';
+import { poolDumpLineStream, type LineStream } from './dump-io.js';
 import { mapWithConcurrency } from './concurrency.js';
 
 export interface CurateOptions {
@@ -64,10 +62,7 @@ export function roundToRow(line: string, sim: number, capMaxWin: number): Lookup
 }
 
 /** Stream a pool dump line stream (raw / `.gz` / `.zst`) into a 1-weight LUT. */
-async function readPoolDump(
-  rl: ReturnType<typeof createInterface>,
-  capMaxWin: number,
-): Promise<LookupRow[]> {
+async function readPoolDump(rl: LineStream, capMaxWin: number): Promise<LookupRow[]> {
   const rows: LookupRow[] = [];
   let sim = 0;
   for await (const line of rl) {
@@ -122,27 +117,6 @@ function deriveCriteria(
   if (payoutCents <= 0) return '0';
   if (capCents > 0 && payoutCents >= capCents) return 'wincap';
   return events.some((e) => e.type === 'free_spin') ? 'freegame' : 'basegame';
-}
-
-/** A line stream over the pool's per-round dump for one mode. Prefers the raw `.jsonl`, then
- *  `.jsonl.gz` (the engine's `books --out x.jsonl.gz`, inflated in-process), then `.jsonl.zst`
- *  (needs the external `zstd`). Returns null when the mode has no dump at all. */
-function poolDumpLineStream(poolDir: string, mode: string): ReturnType<typeof createInterface> | null {
-  const rawPath = join(poolDir, `books_${mode}.jsonl`);
-  if (existsSync(rawPath)) {
-    return createInterface({ input: createReadStream(rawPath, { encoding: 'utf-8' }) });
-  }
-  const gzPath = join(poolDir, `books_${mode}.jsonl.gz`);
-  if (existsSync(gzPath)) {
-    // zlib in-process: no external binary, and the multi-GB pool never lands on disk inflated.
-    return createInterface({ input: createReadStream(gzPath).pipe(createGunzip()) });
-  }
-  const zstPath = join(poolDir, `books_${mode}.jsonl.zst`);
-  if (existsSync(zstPath)) {
-    const proc = spawn('zstd', ['-dc', '-q', zstPath], { stdio: ['ignore', 'pipe', 'inherit'] });
-    return createInterface({ input: proc.stdout! });
-  }
-  return null;
 }
 
 /**

@@ -1,17 +1,22 @@
 /**
- * Pool finalize step: raw Go `-dump` → compressed Stake-style library.
+ * Pool finalize step: the engine's `-dump` → a compressed Stake-style library.
  *
- * The Go binary dumps one `RoundDumpRecord` per line to `books_<MODE>.jsonl`.
- * For real games that raw dump is enormous (80–90 GB), so we do NOT keep it.
- * Mirroring the shipped kitsune-wrath / hot-ross library layout, `finalizePool`
- * turns the raw dump into the same shape Stake ships:
+ * The engine dumps one `RoundDumpRecord` per line. For real games that dump is
+ * enormous (80–90 GB raw), so we do NOT keep it raw. Mirroring the shipped
+ * kitsune-wrath / hot-ross library layout, `finalizePool` leaves the pool as:
  *
  *   <poolDir>/lookUpTable_<MODE>_0.csv   sim,weight=1,payoutCents (raw 1-weight)
- *   <poolDir>/books_<MODE>.jsonl.zst     the raw rounds, zstd -19 (raw removed)
+ *   <poolDir>/books_<MODE>.jsonl.gz      the rounds, gzipped BY THE ENGINE
  *   <poolDir>/index.json                 {modes:[{name,cost,events,weights}]} (upsert)
  *
+ * The dump normally arrives already compressed — `e8 simulate -dump x.jsonl.gz`
+ * gzips as it writes — so there is nothing left to do here but the lookUpTable.
+ * When the dump is raw (an engine without gz dumps, or POOL_ZSTD_LEVEL set on
+ * purpose) the old path still runs: `zstd` the raw file into
+ * `books_<MODE>.jsonl.zst` and remove the raw.
+ *
  * The 1-weight lookUpTable is the small, fast input `curate` reads to optimize
- * (no need to decompress the multi-GB books). The `.zst` keeps the full round
+ * (no need to decompress the multi-GB books). The archive keeps the full round
  * data around for inspection / re-curation at a fraction of the disk cost.
  *
  * zstd may not be on PATH: on failure we keep the raw `.jsonl` and log a note
@@ -19,13 +24,13 @@
  */
 
 import {
-  existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createReadStream,
+  existsSync, mkdirSync, unlinkSync, renameSync, readFileSync, writeFileSync,
 } from 'node:fs';
-import { createInterface } from 'node:readline';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { roundToRow } from './curate.js';
 import { createLineWriter } from './lut-io.js';
+import { dumpLineStream, isGzipFile } from './dump-io.js';
 import type { ResolvedMode } from '../mathConfig';
 
 /** zstd level for the pool library. Default 12: on multi-GB dumps (kitsune
@@ -42,15 +47,29 @@ export function poolCompressionDisabled(): boolean {
   return poolZstdLevel() <= 0;
 }
 
+/**
+ * True when POOL_ZSTD_LEVEL is set in the environment.
+ *
+ * Unset means "let the engine gzip the dump as it writes it" — the default, and
+ * the only path that never materializes the raw pool. Setting the variable is
+ * an explicit request for the legacy behaviour: dump raw, then zstd it (`=0`
+ * keeps the raw file). Read per call so a run can flip it without a fresh
+ * process, same as the level itself.
+ */
+export function poolZstdRequested(): boolean {
+  return process.env.POOL_ZSTD_LEVEL !== undefined;
+}
+
 function poolZstdLevel(): number {
   const level = Number(process.env.POOL_ZSTD_LEVEL ?? 12);
   return Number.isFinite(level) ? level : 12;
 }
 
 /**
- * Stream the raw dump into a 1-weight lookUpTable (`sim,weight,payoutCents`).
+ * Stream the dump into a 1-weight lookUpTable (`sim,weight,payoutCents`).
  * Uses readline (line-at-a-time) so the multi-GB dump never lands in memory at
- * once, and a batching writer so a 6M-row LUT costs ~80 flushes rather than 6M
+ * once — gzipped dumps are inflated through the same stream, never onto disk —
+ * and a batching writer so a 6M-row LUT costs ~80 flushes rather than 6M
  * `writeSync` calls. Returns the number of rows written.
  */
 async function writePoolLut(
@@ -63,7 +82,7 @@ async function writePoolLut(
   const out = createLineWriter(lutPath);
   let sim = 0;
   try {
-    const rl = createInterface({ input: createReadStream(dumpPath, { encoding: 'utf-8' }) });
+    const rl = dumpLineStream(dumpPath);
     for await (const line of rl) {
       const row = roundToRow(line, sim, capMaxWin);
       if (row) {
@@ -104,10 +123,11 @@ interface IndexMode { name: string; cost: number; events: string; weights: strin
 interface IndexJson { modes: IndexMode[] }
 
 /** Upsert this mode's entry into `<poolDir>/index.json` (keep sibling modes).
- *  `events` names the books file that actually exists — the pool stays raw when
- *  compression is off or zstd is missing, and an index pointing at a `.zst` that
- *  was never written sends every consumer of the pool to a missing file. */
-function upsertPoolIndex(poolDir: string, mode: string, cost: number, compressed: boolean): void {
+ *  `books` names the file that actually exists — `.gz` from the engine, `.zst`
+ *  from our zstd pass, or the raw `.jsonl` when compression is off or zstd is
+ *  missing. An index pointing at an archive that was never written sends every
+ *  consumer of the pool to a missing file. */
+function upsertPoolIndex(poolDir: string, mode: string, cost: number, books: string): void {
   const path = join(poolDir, 'index.json');
   let index: IndexJson = { modes: [] };
   if (existsSync(path)) {
@@ -119,7 +139,7 @@ function upsertPoolIndex(poolDir: string, mode: string, cost: number, compressed
   const entry: IndexMode = {
     name: mode,
     cost,
-    events: compressed ? `books_${mode}.jsonl.zst` : `books_${mode}.jsonl`,
+    events: books,
     weights: `lookUpTable_${mode}_0.csv`,
   };
   const i = index.modes.findIndex((m) => m.name === mode);
@@ -128,26 +148,58 @@ function upsertPoolIndex(poolDir: string, mode: string, cost: number, compressed
   writeFileSync(path, JSON.stringify(index, null, 2) + '\n');
 }
 
+/**
+ * Reconcile the dump path we ASKED the engine for with what it actually wrote.
+ *
+ * An engine that predates gzipped dumps writes plain JSONL to whatever `-dump`
+ * names, `.gz` included — a file every later reader would try to gunzip and
+ * fail on. Rather than probing the binary's version, we look at the two magic
+ * bytes and, when they are missing, rename the file to its honest `.jsonl` name
+ * and let the legacy zstd path take over. Returns the path to use from here on.
+ */
+export function normalizeDumpPath(dumpPath: string, label?: string): string {
+  if (!dumpPath.toLowerCase().endsWith('.gz')) return dumpPath;
+  if (!existsSync(dumpPath) || isGzipFile(dumpPath)) return dumpPath;
+  const rawPath = dumpPath.slice(0, -'.gz'.length);
+  if (existsSync(rawPath)) unlinkSync(rawPath);
+  renameSync(dumpPath, rawPath);
+  process.stderr.write(
+    `  ${label ? `[${label}] ` : ''}engine wrote the dump uncompressed — ` +
+      `update the e8 binary for gzipped dumps; falling back to ${basename(rawPath)} + zstd\n`,
+  );
+  return rawPath;
+}
+
 export interface FinalizePoolResult {
   /** Rows written to the pool lookUpTable. */
   rows: number;
-  /** Whether the raw dump was zstd-compressed (false when zstd is absent). */
+  /** Whether the pool's books are compressed (gzipped by the engine, or zstd'd here). */
   compressed: boolean;
+  /** The books file the pool actually holds — what `index.json` points at. */
+  books: string;
 }
 
 /**
- * Turn a freshly-written raw dump into the compressed pool library: write the
- * 1-weight lookUpTable, compress the books to `.zst` (-19, raw removed), and
- * upsert the pool `index.json`. Idempotent per mode.
+ * Turn a freshly-written dump into the pool library: write the 1-weight
+ * lookUpTable, make sure the books are compressed, and upsert the pool
+ * `index.json`. Idempotent per mode.
+ *
+ * A dump the engine already gzipped is left exactly as it is — re-packing a
+ * multi-GB archive to change its container buys nothing. Only a raw dump goes
+ * through zstd (which removes the raw with `--rm`).
  */
 export async function finalizePool(
   mode: ResolvedMode,
   opts: { poolDir: string; dumpPath: string },
 ): Promise<FinalizePoolResult> {
   mkdirSync(opts.poolDir, { recursive: true });
-  // LUT first (reads the raw dump), THEN compress (which removes the raw with --rm).
+  const preCompressed = isGzipFile(opts.dumpPath);
+  // LUT first (reads the dump), THEN compress (which removes the raw with --rm).
   const rows = await writePoolLut(opts.dumpPath, opts.poolDir, mode.mode, mode.curate.capMaxWin);
-  const compressed = compressPoolBooks(opts.dumpPath, opts.poolDir, mode.mode);
-  upsertPoolIndex(opts.poolDir, mode.mode, mode.costMultiplier, compressed);
-  return { rows, compressed };
+  const compressed = preCompressed || compressPoolBooks(opts.dumpPath, opts.poolDir, mode.mode);
+  const books = preCompressed
+    ? basename(opts.dumpPath)
+    : `books_${mode.mode}.jsonl${compressed ? '.zst' : ''}`;
+  upsertPoolIndex(opts.poolDir, mode.mode, mode.costMultiplier, books);
+  return { rows, compressed, books };
 }

@@ -384,7 +384,8 @@ bit-for-bit via `(rng.server_seed, rng.client_seed, spins[0].nonce)`.
 
 On a real game the math itself is a rounding error next to the I/O around it:
 serializing 14M rounds, compressing them, reading them back and throwing 95% away
-dominates the wall clock. Three knobs matter.
+dominates the wall clock. Most of that is handled by default (the dump is written
+compressed in one pass); two knobs cover the rest.
 
 **`--jobs N` — curate several modes at once.** Modes are independent from `pool`
 onward, so the curate stage runs up to `N` of them concurrently; reports still
@@ -401,23 +402,44 @@ the heaviest mode either way. In `all`, the pool stage stays sequential: the
 engine's workers already saturate the CPU, so running modes side by side there
 measures ~1.0×.
 
-**`POOL_ZSTD_LEVEL=0` — keep the intermediate pool raw.** The pool is temporary:
-curate reads it once and it is deleted; only the curated books are published. But
-`zstd -T0` does not parallelize a single stream (~100 MB/s), so archiving a 50+ GB
-pool costs ~10 minutes for a file nobody keeps.
+**The pool is written compressed — there is no separate packing pass.** `pool`
+and `all` ask the engine for `-dump …/books_<MODE>.jsonl.gz`, and `e8 simulate`
+gzips as it writes. The raw dump (tens of GB on a real game) never exists on
+disk, nothing is re-read to compress it, and each engine worker gzips its own
+part in parallel, so the cost is a fraction of the old single-threaded `zstd`
+pass. Compression changes nothing about the run: same seed, same rounds, same
+bytes once inflated.
+
+Everything downstream reads the archive in-process via `zlib` — no external
+binary, and a multi-GB pool never lands on disk inflated. `curate` accepts
+`books_<MODE>.jsonl`, `books_<MODE>.jsonl.gz` and `books_<MODE>.jsonl.zst`, in
+that order, so pools from any era still curate.
 
 ```bash
-POOL_ZSTD_LEVEL=0 e8-math all --config ./math.config.ts   # pool stays .jsonl
+e8-math all --config ./math.config.ts       # → stake-math-pool/books_BASE.jsonl.gz
 ```
 
-The default (12) is unchanged, and `index.json` names whichever file was actually
-written. Level 19 remains available when the pool matters as an archive.
+An engine that predates gzipped dumps writes plain JSONL to the `.gz` path. That
+is detected by the file's magic bytes (not its name), the dump is renamed back to
+`books_<MODE>.jsonl`, and the legacy path below takes over with a note on stderr.
+Update the e8 binary to get the fast path.
 
-**Gzipped pools are read directly.** curate accepts `books_<MODE>.jsonl`,
-`books_<MODE>.jsonl.gz` and `books_<MODE>.jsonl.zst`, in that order. The engine's
-`e8 books --out pool/books_BASE.jsonl.gz` writes the compressed pool in one pass,
-and `.gz` is inflated in-process (`zlib`) — no external binary, and a multi-GB
-pool never lands on disk inflated.
+**`POOL_ZSTD_LEVEL` — the legacy archive path.** Setting it at all opts out of
+gzipped dumps: the engine writes the raw `.jsonl` and `zstd -<level>` packs it
+afterwards, exactly as before. `=0` skips compression and keeps the raw file.
+
+```bash
+POOL_ZSTD_LEVEL=19 e8-math all --config ./math.config.ts  # pool as a .zst archive
+POOL_ZSTD_LEVEL=0  e8-math all --config ./math.config.ts  # pool stays .jsonl
+```
+
+Reach for it when the pool matters as a long-lived archive and the extra ratio is
+worth the wall clock — `zstd -T0` does not parallelize a single stream (~100 MB/s),
+so on a 50+ GB pool that pass costs ~10 minutes for a file curate reads once.
+Either way `index.json` names whichever file was actually written.
+
+A dump the engine already gzipped is never re-packed, even with `POOL_ZSTD_LEVEL`
+set: rewriting a multi-GB archive to change its container buys nothing.
 
 **The pool and the lookUpTable must describe the same run.** A curated row's `sim`
 is the dump's line index, so the two files are coupled positionally. curate fails
