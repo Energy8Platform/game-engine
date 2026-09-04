@@ -128,6 +128,12 @@ async function readPoolRows(poolDir: string, mode: string, capMaxWin: number): P
   );
 }
 
+/** Non-decreasing? Then the books can be written as they are read. */
+function isAscending(sims: readonly number[]): boolean {
+  for (let i = 1; i < sims.length; i++) if (sims[i] < sims[i - 1]) return false;
+  return true;
+}
+
 /** The event stream for one mode: an explicit dump (the heavy pass's output) when given,
  *  otherwise whatever the pool holds. */
 function openEvents(poolDir: string, mode: string, dumpPath?: string): LineStream | null {
@@ -253,7 +259,13 @@ async function streamWriteEvents(
 
   const stats: EventsSizeStats = { maxEventsBytes: 0, maxEventsBytesBookId: -1, booksOverEventsLimit: 0, dumpFound: false };
 
-  const tmpFd = openSync(tmpPath, 'w');
+  // Ascending rows (what curate now produces) mean the dump — itself ascending by round — arrives
+  // in exactly the order the books must be written, so each line goes straight to its final home.
+  // A pool whose rows are NOT ascending (an older selection, a hand-built LUT) still works: books
+  // are staged in a temp file and reordered by offset below.
+  const streaming = isAscending(originalSims);
+  const outPath = streaming ? rawPath : tmpPath;
+  const tmpFd = openSync(outPath, 'w');
   let tmpOff = 0;
   const appendBook = (outIdx: number, events: Record<string, unknown>[]): void => {
     const r = rows[outIdx];
@@ -351,19 +363,22 @@ async function streamWriteEvents(
 
   // Pass 3: reorder temp → final raw books in curated-row order (random access by offset). One
   // reusable buffer sized to the largest line; only one book line is resident at a time.
-  let maxLen = 1;
-  for (const s of slot) if (s && s.len > maxLen) maxLen = s.len;
-  const buf = Buffer.allocUnsafe(maxLen);
-  const readFd = openSync(tmpPath, 'r');
-  const outFd = openSync(rawPath, 'w');
-  for (let i = 0; i < rows.length; i++) {
-    const s = slot[i]!; // pass 2 guarantees every row is filled
-    readSync(readFd, buf, 0, s.len, s.off);
-    writeSync(outFd, buf, 0, s.len);
+  // Skipped entirely on the streaming path — `appendBook` already wrote in row order.
+  if (!streaming) {
+    let maxLen = 1;
+    for (const s of slot) if (s && s.len > maxLen) maxLen = s.len;
+    const buf = Buffer.allocUnsafe(maxLen);
+    const readFd = openSync(tmpPath, 'r');
+    const outFd = openSync(rawPath, 'w');
+    for (let i = 0; i < rows.length; i++) {
+      const s = slot[i]!; // pass 2 guarantees every row is filled
+      readSync(readFd, buf, 0, s.len, s.off);
+      writeSync(outFd, buf, 0, s.len);
+    }
+    closeSync(readFd);
+    closeSync(outFd);
+    unlinkSync(tmpPath);
   }
-  closeSync(readFd);
-  closeSync(outFd);
-  unlinkSync(tmpPath);
 
   try {
     // `--rm` removes the raw .jsonl on success; same call kitsune's native.ts uses.
@@ -413,8 +428,15 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   const params = resolveOptimizeParams(mode.curate, rawRows);
   const result = optimizeLookupTable(rawRows, params);
 
-  // Capture each selected row's original pool sim (the dump line index) BEFORE renumbering — the
-  // event stream keys off it. Held as a flat number[] (a few MB), not the parsed event payloads.
+  // Capture each selected row's original pool round BEFORE renumbering — the event stream keys
+  // off it. Held as a flat number[] (a few MB), not the parsed event payloads.
+  //
+  // Sorted by that round first, which costs nothing here and saves a whole pass over the books
+  // later: the dump is written in ascending round order, so ascending rows let the writer stream
+  // it straight out instead of buffering every book and reordering by offset. Synthetic padding
+  // rows (sim < 0) sort to the front and are filled with empty events either way. Row order is
+  // ours to choose — Stake only requires that ids be contiguous and line up with the LUT.
+  result.rows.sort((a, b) => a.sim - b.sim);
   const originalSims = result.rows.map((r) => r.sim);
 
   // Renumber the curated rows with curate's OWN 0-based contiguous ids (matching the shipped
