@@ -8,6 +8,12 @@ export interface RunSimOptions {
   dumpCsv?: string;
   /** Limit `dump` to the round indices listed in this file. */
   onlyRounds?: string;
+  /** Book map (`round,id,payoutCents`) — makes the engine write the final books itself. */
+  booksMap?: string;
+  /** Where those books go (`.zst` compresses as it writes). */
+  booksOut?: string;
+  /** Max-win cap in cents, for `criteria: "wincap"`. */
+  booksCap?: number;
   /**
    * Master seed override. The heavy pass runs with the seed the light pass
    * actually used, which is often one the engine invented (the config need not
@@ -46,5 +52,8 @@ export async function runSim(cfg: MathConfig, m: ResolvedMode, opts: RunSimOptio
     dump: opts.dump,
     dumpCsv: opts.dumpCsv,
     onlyRounds: opts.onlyRounds,
+    booksMap: opts.booksMap,
+    booksOut: opts.booksOut,
+    booksCap: opts.booksCap,
   }).run();
 }

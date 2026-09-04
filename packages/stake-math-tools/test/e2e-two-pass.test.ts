@@ -87,7 +87,7 @@ const cfg: MathConfig = {
 let tmpDir: string;
 let onePass: { lut: string; books: string } | null = null;
 let twoPass: { lut: string; books: string } | null = null;
-/** False on an engine without `-dump-csv` / `-only-rounds`. */
+/** False on an engine without `-dump-csv` / `-books-map`. */
 let engineTwoPass = false;
 let skipReason = '';
 
@@ -137,7 +137,14 @@ describe.skipIf(!hasBinary)('e2e: two-pass build equals one-pass (binary require
       return;
     }
     await curateMode(base, { poolDir: poolB, outDir: outB, skipEvents: true });
-    await runBooksStage(cfg, base, { poolDir: poolB, outDir: outB });
+    try {
+      await runBooksStage(cfg, base, { poolDir: poolB, outDir: outB });
+    } catch (err) {
+      // An engine that has `-dump-csv` but not `-books-map` (0.1.4) lands here.
+      engineTwoPass = false;
+      skipReason = err instanceof Error ? err.message : String(err);
+      return;
+    }
     twoPass = { lut: readFileSync(join(outB, 'lookUpTable_BASE_0.csv'), 'utf-8'), books: readBooks(outB) };
   }, 120_000);
 
@@ -162,6 +169,74 @@ describe.skipIf(!hasBinary)('e2e: two-pass build equals one-pass (binary require
     expect(existsSync(join(poolB, 'books_BASE.jsonl.gz'))).toBe(false);
     expect(existsSync(join(poolB, 'pool_BASE.csv'))).toBe(true);
     expect(existsSync(join(poolB, 'pool_BASE.manifest.json'))).toBe(true);
-    expect(existsSync(join(poolB, 'selected_BASE.txt'))).toBe(true);
+    expect(existsSync(join(poolB, 'selected_BASE.csv'))).toBe(true);
   });
+});
+
+/**
+ * Route 2: a size-gated `transformEvents` (paper-duel's shape — pack the rare
+ * book that would breach Stake's 1 MiB cap). The engine still writes the books;
+ * the pipeline only reopens the lines the gate points at.
+ */
+describe.skipIf(!hasBinary)('e2e: gated transformEvents rewrites only the big books', () => {
+  it('leaves small books byte-identical and rewrites the ones over the gate', async (ctx) => {
+    if (!engineTwoPass) return ctx.skip();
+
+    const dir = mkdtempSync(join(tmpdir(), 'e8-e2e-gate-'));
+    try {
+      const poolDir = join(dir, 'pool');
+      const outDir = join(dir, 'out');
+      mkdirSync(poolDir, { recursive: true });
+      mkdirSync(outDir, { recursive: true });
+
+      // Two runs: the first with a gate nothing reaches, to learn this game's
+      // line lengths and to prove an unreachable gate rewrites nothing; the
+      // second with a gate only the longest lines cross (the real one is ~980
+      // KiB, which needs a bonus-heavy game to trip).
+      let seen = 0;
+      const mk = (gate: number): MathConfig => ({
+        ...cfg,
+        transformEvents: (events) => { seen++; return events.map((e) => ({ ...e, packed: true })); },
+        transformEventsWhenBytesOver: gate,
+      });
+
+      const never = mk(Number.MAX_SAFE_INTEGER);
+      const base0: ResolvedMode = resolveModes(never).find((m) => m.mode === 'BASE')!;
+      const csv = join(poolDir, 'pool_BASE.csv');
+      const light = await runSim(never, base0, { dumpCsv: csv });
+      await finalizeLightPool(base0, {
+        poolDir, csvPath: csv, masterSeed: light.masterSeed!, spinHash: hashSpin(never.luaScript),
+      });
+      await curateMode(base0, { poolDir, outDir, skipEvents: true });
+      const untouched = await runBooksStage(never, base0, { poolDir, outDir });
+      expect(untouched.rewritten).toBe(0);
+      expect(seen).toBe(0);
+
+      const lengths = readBooks(outDir).split('\n').filter((l) => l.trim()).map((l) => l.length)
+        .sort((a, b) => a - b);
+      const GATE = lengths[Math.floor(lengths.length * 0.9)];
+      expect(GATE).toBeGreaterThan(lengths[0]); // the game must produce varied books
+
+      const gated = mk(GATE);
+      const base: ResolvedMode = resolveModes(gated).find((m) => m.mode === 'BASE')!;
+      const res = await runBooksStage(gated, base, { poolDir, outDir });
+
+      expect(res.route).toBe('engine+rewrite');
+      // Only the books above the gate were parsed at all…
+      expect(seen).toBe(res.rewritten);
+      expect(res.rewritten).toBeGreaterThan(0);
+      expect(res.rewritten).toBeLessThan(res.rows);
+
+      const lines = readBooks(outDir).split('\n').filter((l) => l.trim());
+      expect(lines.length).toBe(res.rows);
+      const packed = lines.filter((l) => l.includes('"packed":true'));
+      expect(packed.length).toBe(res.rewritten);
+      // …and every line the gate skipped is still exactly what the engine wrote.
+      for (const l of lines) {
+        if (l.length < GATE) expect(l).not.toContain('"packed"');
+      }
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+  }, 120_000);
 });

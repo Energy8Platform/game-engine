@@ -64,6 +64,7 @@ export async function runCli(argv: string[]): Promise<void> {
   // (measured ~1.0×). curate is Node-side and single-threaded per mode, so that
   // is where `--jobs` pays off.
   const full = fullPool(flags);
+  const started = Date.now();
   mkdirSync(poolDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
   for (const m of modes) await poolMode(cfg, m, poolDir, full);
@@ -71,7 +72,7 @@ export async function runCli(argv: string[]): Promise<void> {
   if (!full) {
     for (const m of modes) await booksMode(cfg, m, poolDir, outDir, flags.keepDump);
   }
-  console.log(`\nDone. Stake artifacts in ${outDir}`);
+  console.log(`\nDone in ${fmtDuration(Date.now() - started)}. Stake artifacts in ${outDir}`);
 }
 
 /**
@@ -92,7 +93,9 @@ async function poolMode(
 ): Promise<void> {
   if (full) {
     const dump = resolve(poolDir, poolDumpName(m.mode));
-    console.log(formatGoReport(m.mode, await runSim(cfg, m, { dump })));
+    const out = await timed(`[${m.mode}] pool (--full): ${m.sim.iterations.toLocaleString('en-US')} rounds`,
+      () => runSim(cfg, m, { dump }));
+    console.log(formatGoReport(m.mode, out));
     const fin = await finalizePool(m, { poolDir, dumpPath: normalizeDumpPath(dump, m.mode) });
     if (!fin.compressed && !poolCompressionDisabled()) {
       process.stderr.write(`  [${m.mode}] pool kept raw (zstd absent)\n`);
@@ -105,7 +108,8 @@ async function poolMode(
   }
 
   const csvPath = resolve(poolDir, `pool_${m.mode}.csv`);
-  const out = await runSim(cfg, m, { dumpCsv: csvPath });
+  const out = await timed(`[${m.mode}] pool: ${m.sim.iterations.toLocaleString('en-US')} rounds`,
+    () => runSim(cfg, m, { dumpCsv: csvPath }));
   console.log(formatGoReport(m.mode, out));
   if (!out.masterSeed) {
     throw new Error(
@@ -126,7 +130,10 @@ async function poolMode(
 async function curateAll(
   modes: readonly ResolvedMode[], poolDir: string, outDir: string, jobs?: number,
 ): Promise<void> {
-  const curated = await curateModes(modes, { poolDir, outDir, jobs });
+  const curated = await timed(
+    `curate: ${modes.length} mode(s)${jobs && jobs > 1 ? ` (jobs=${jobs})` : ''}`,
+    () => curateModes(modes, { poolDir, outDir, jobs }),
+  );
   for (const c of curated) console.log(formatCurateReport(c.mode, c.result));
 }
 
@@ -134,14 +141,36 @@ async function curateAll(
 async function booksMode(
   cfg: MathConfig, m: ResolvedMode, poolDir: string, outDir: string, keepDump?: boolean,
 ): Promise<void> {
-  const res = await runBooksStage(cfg, m, { poolDir, outDir, keepDump });
+  const res = await timed(`[${m.mode}] books`, () =>
+    runBooksStage(cfg, m, { poolDir, outDir, keepDump }));
+  // The route matters when a run is slower than expected: `pipeline` means every
+  // book was parsed and re-serialized here, which an events gate would avoid.
+  const route = {
+    engine: 'written by the engine',
+    'engine+rewrite': `written by the engine, ${res.rewritten ?? 0} rewritten by transformEvents`,
+    pipeline: 'assembled here (ungated transformEvents)',
+  }[res.route];
   console.log(
-    `  [${m.mode}] books: ${res.rows} row(s) from ${res.rounds} serialized round(s), ` +
+    `  [${m.mode}] books: ${res.rows} row(s) from ${res.rounds} round(s), ${route}; ` +
       `largest events ${res.maxEventsBytes} B (book ${res.maxEventsBytesBookId})` +
-      (res.booksOverEventsLimit > 0
-        ? ` — ${res.booksOverEventsLimit} over Stake's limit!`
-        : ''),
+      (res.booksOverEventsLimit > 0 ? ` — ${res.booksOverEventsLimit} over Stake's limit!` : ''),
   );
+}
+
+/** `12.4s` / `1m 03s` — stage timings read at a glance, not parsed. */
+function fmtDuration(ms: number): string {
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(2)}s`;
+  const m = Math.floor(sec / 60);
+  return `${m}m ${(sec - m * 60).toFixed(0).padStart(2, '0')}s`;
+}
+
+/** Run a stage, print what it cost. The engine prints its own line the same way. */
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  const out = await fn();
+  console.log(`  ⏱  ${label} — ${fmtDuration(Date.now() - started)}`);
+  return out;
 }
 
 /**

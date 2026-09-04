@@ -108,7 +108,7 @@ describe('manifest guard', () => {
 
 describe('selection', () => {
   it('reads back in curated-row order, padding rows included', () => {
-    writeFileSync(selectionPath(poolDir, 'BASE'), '17\n4\n-1\n4\n');
+    writeFileSync(selectionPath(poolDir, 'BASE'), '17,0,100\n4,1,0\n-1,2,0\n4,3,0\n');
     // Order matters: selection[i] is the pool round behind curated row i, and a
     // round may back several rows. `-1` is a synthetic padding row.
     expect(readSelection(poolDir, 'BASE')).toEqual([17, 4, -1, 4]);
@@ -135,14 +135,14 @@ describe('re-pooling a mode invalidates what came after it', () => {
     // numbers, different simulation, and nothing about the books looks wrong.
     writeFileSync(join(poolDir, 'books_BASE.jsonl.zst'), 'stale');
     writeFileSync(join(poolDir, 'books_BASE.jsonl'), 'stale');
-    writeFileSync(join(poolDir, 'selected_BASE.txt'), '1\n2\n3\n');
+    writeFileSync(join(poolDir, 'selected_BASE.csv'), '1,0,0\n2,1,0\n3,2,0\n');
     writeFileSync(join(poolDir, 'only_BASE.txt'), '1\n');
 
     await finalizeLightPool(mode, {
       poolDir, csvPath: writePoolCsvFixture(), masterSeed: 'deadbeef', spinHash: hashSpin(SPIN),
     });
 
-    for (const stale of ['books_BASE.jsonl.zst', 'books_BASE.jsonl', 'selected_BASE.txt', 'only_BASE.txt']) {
+    for (const stale of ['books_BASE.jsonl.zst', 'books_BASE.jsonl', 'selected_BASE.csv', 'only_BASE.txt']) {
       expect(existsSync(join(poolDir, stale)), `${stale} must be gone`).toBe(false);
     }
     // A sibling mode's pool is none of our business.

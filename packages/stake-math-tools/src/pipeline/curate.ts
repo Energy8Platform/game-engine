@@ -48,12 +48,21 @@ export interface CurateOptions {
   skipEvents?: boolean;
 }
 
-/** Where curate records which pool rounds its rows came from — the input to the heavy pass.
- *  One round index per line, in curated-row order; `-1` marks a synthetic padding row. */
+/**
+ * curate's handoff to the books stage: `round,id,payoutCents` per curated row.
+ *
+ * The first column is what the JS path calls `originalSims` — which pool round
+ * backs each row. The other two make the file directly usable as the engine's
+ * `-books-map`, so the engine can write the finished book without the pipeline
+ * parsing anything. One file rather than two: a separate selection and map could
+ * drift apart, and they describe the same thing.
+ *
+ * `round = -1` marks a synthetic padding row — a book with empty events.
+ */
 export const selectionPath = (poolDir: string, mode: string): string =>
-  join(poolDir, `selected_${mode}.txt`);
+  join(poolDir, `selected_${mode}.csv`);
 
-/** Read a selection back as `originalSims` (curated-row order preserved). */
+/** Read the selection back as `originalSims` (curated-row order preserved). */
 export function readSelection(poolDir: string, mode: string): number[] {
   const path = selectionPath(poolDir, mode);
   if (!existsSync(path)) {
@@ -65,13 +74,15 @@ export function readSelection(poolDir: string, mode: string): number[] {
   return readFileSync(path, 'utf-8')
     .split('\n')
     .filter((l) => l.trim().length > 0)
-    .map((l) => Number(l));
+    .map((l) => Number(l.split(',')[0]));
 }
 
-function writeSelection(poolDir: string, mode: string, originalSims: number[]): void {
+function writeSelection(poolDir: string, mode: string, rows: readonly LookupRow[], originalSims: readonly number[]): void {
   const w = createLineWriter(selectionPath(poolDir, mode));
   try {
-    for (const sim of originalSims) w.write(`${sim}\n`);
+    for (let i = 0; i < rows.length; i++) {
+      w.write(`${originalSims[i]},${rows[i].sim},${rows[i].payoutCents}\n`);
+    }
   } finally {
     w.close();
   }
@@ -396,7 +407,7 @@ interface IndexMode { name: string; cost: number; events: string; weights: strin
 interface IndexJson { modes: IndexMode[] }
 
 /** Upsert this mode's entry into `<outDir>/index.json` (keep sibling modes). */
-function upsertIndex(outDir: string, mode: string, cost: number): void {
+export function upsertIndex(outDir: string, mode: string, cost: number): void {
   const path = join(outDir, 'index.json');
   let index: IndexJson = { modes: [] };
   if (existsSync(path)) {
@@ -449,13 +460,13 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
   // The selection is curate's real output in a two-pass build: these are the rounds
   // worth serializing. Written even on the one-pass path — it costs a few MB and it
   // is the only record of which pool round each published book came from.
-  writeSelection(opts.poolDir, mode.mode, originalSims);
+  writeSelection(opts.poolDir, mode.mode, result.rows, originalSims);
 
   if (opts.skipEvents) {
     upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
     result.warnings.push(
       `books not written yet — ${result.rows.length} round(s) selected into ` +
-        `selected_${mode.mode}.txt; run \`e8-math books --mode ${mode.mode}\` to serialize them.`,
+        `selected_${mode.mode}.csv; run \`e8-math books --mode ${mode.mode}\` to serialize them.`,
     );
     return result;
   }
@@ -495,7 +506,7 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
  * This is the second half of `curateMode`, split out for the two-pass build: by
  * the time the heavy pass has run, the lookUpTable and the selection are already
  * on disk, so the rows come from `<outDir>/lookUpTable_<MODE>_0.csv` and the
- * pool-round mapping from `selected_<MODE>.txt`. Every book's `id` still lines
+ * pool-round mapping from `selected_<MODE>.csv`. Every book's `id` still lines
  * up positionally with its LUT row — that is what the selection preserves.
  */
 export async function assembleBooks(

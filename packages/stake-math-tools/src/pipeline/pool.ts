@@ -185,7 +185,7 @@ export function normalizeDumpPath(dumpPath: string, label?: string): string {
 function invalidateMode(poolDir: string, mode: string): void {
   const stale = [
     `books_${mode}.jsonl`, `books_${mode}.jsonl.gz`, `books_${mode}.jsonl.zst`,
-    `selected_${mode}.txt`, `only_${mode}.txt`,
+    `selected_${mode}.csv`, `only_${mode}.txt`,
   ];
   for (const name of stale) {
     const path = join(poolDir, name);

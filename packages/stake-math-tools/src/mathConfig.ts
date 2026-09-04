@@ -42,6 +42,8 @@ export type CurateEventsTransform = (
 
 export interface ModeMathConfig {
   sim?: ModeSimConfig;
+  /** Per-mode override of the transform's size gate (see the top-level field). */
+  transformEventsWhenBytesOver?: number;
   /** Curate params (stake-math-tools OptimizeParams); capMaxWin defaults to spec.maxWin × 100 (cents). */
   curate?: Partial<OptimizeParams>;
   /** Per-mode override of the events transform (falls back to the top-level `transformEvents`). */
@@ -66,6 +68,20 @@ export interface MathConfig {
   /** Default events transform applied to every mode's books during curate.
    *  A per-mode `modes[mode].transformEvents` overrides it for that mode. */
   transformEvents?: CurateEventsTransform;
+  /**
+   * Size gate for `transformEvents`, in bytes: books whose serialized line is
+   * shorter than this are known to come out of the transform unchanged.
+   *
+   * Declaring it is what lets the books stage skip them without parsing —
+   * the engine's output is copied through byte for byte, and only the rare
+   * oversized book is parsed and transformed. A transform that guards Stake's
+   * 1 MiB `events` limit (deflating payloads that would blow past it) is exactly
+   * this shape; set the gate to the same threshold the transform tests inside.
+   *
+   * Unset means the transform may change any book, so every book is parsed and
+   * re-serialized — correct, but the slow path.
+   */
+  transformEventsWhenBytesOver?: number;
 }
 
 export interface ResolvedMode {
@@ -76,6 +92,8 @@ export interface ResolvedMode {
   curate: Partial<OptimizeParams> & { capMaxWin: number; costMultiplier: number };
   /** Resolved events transform for this mode (per-mode override ?? top-level default ?? none). */
   transformEvents?: CurateEventsTransform;
+  /** Resolved size gate for that transform (per-mode ?? top-level ?? none). */
+  transformEventsWhenBytesOver?: number;
 }
 
 const SIM_DEFAULTS = { iterations: 1_000_000, bet: 1, rng: 'provably-fair' as const };
@@ -93,6 +111,8 @@ export function resolveModes(cfg: MathConfig): ResolvedMode[] {
       // capMaxWin is in CENTS: payoutCents is bet-mult × 100, so the cap is maxWin × 100.
       curate: { capMaxWin: maxWin * 100, costMultiplier: m.costMultiplier, ...over.curate },
       transformEvents: over.transformEvents ?? cfg.transformEvents,
+      transformEventsWhenBytesOver:
+        over.transformEventsWhenBytesOver ?? cfg.transformEventsWhenBytesOver,
     };
   });
 }

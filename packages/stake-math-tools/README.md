@@ -404,6 +404,12 @@ nothing else. curate optimizes off that and records which pool rounds its rows
 came from (`selected_<MODE>.txt`). Only then does the books stage re-run the
 simulation with `-only-rounds`, serializing the survivors.
 
+The books stage does not stop at re-simulating: the engine writes the finished
+Stake books itself (`-books-map` → `{id,payoutMultiplier,events,criteria}`,
+zstd-compressed as it writes). The pipeline used to parse that output and
+re-serialize every book, which on 200k books cost 1.0 s of parsing and ~2.8 s of
+`JSON.stringify` — the data was being serialized twice, the second time in JS.
+
 Re-running is safe because a round is a pure function of `(master seed, round
 index)`: the lane is `round % 64`, its seed `sha256(master:lane)`, its nonce
 `round / 64 + 1`. Nothing depends on the host's core count or on which rounds
@@ -412,13 +418,48 @@ byte-identical to the same round in a full dump, and this package's e2e asserts
 that a two-pass build produces byte-identical `lookUpTable_<MODE>_0.csv` and
 `books_<MODE>.jsonl.zst` to a one-pass build.
 
-Measured on kitsune BASE, 1M rounds, one mode — `e8-math all`:
+Measured on kitsune, 4M rounds → 200k books, one mode — `e8-math all`:
 
 | | one-pass (`--full`) | two-pass (default) |
 |---|---|---|
-| wall clock | 21.6 s | **3.7 s** |
-| pool on disk | 149 MB | **19 MB** |
-| artifacts | — | byte-identical |
+| wall clock | 63.6 s | **5.5 s** |
+| of which the books stage | — | **0.76 s** |
+| pool on disk | 745 MB | **19 MB** |
+| artifacts | — | byte-identical (200k books, 208 MB) |
+
+Every stage prints what it cost, so a slow run says where it went:
+
+```
+  ⏱  [BASE] pool: 4,000,000 rounds — 2.42s
+  ⏱  curate: 1 mode(s) — 1.62s
+  ⏱  [BASE] books — 0.76s
+  [BASE] books: 200000 row(s) from 200000 round(s), written by the engine; …
+Done in 5.47s.
+```
+
+### `transformEvents` and the size gate
+
+A `transformEvents` hook in `math.config.ts` shapes each book's events before
+serialization. Applying a JS function to a book means parsing and re-serializing
+it, so a hook normally puts the mode back on the slow path — every book through
+Node.
+
+Most such hooks only care about the rare oversized book. paper-duel's deflates
+`spin` payloads for books that would breach Stake's 1 MiB `events` cap, which is
+a handful out of 400k. Declare that threshold and the books stage skips the rest
+without parsing them:
+
+```ts
+transformEvents: transform,
+transformEventsWhenBytesOver: 980 * 1024,   // below this, the transform is a no-op
+```
+
+The stage then copies engine-written lines through byte for byte and only opens
+the ones above the gate (re-deriving their `criteria`, since a transform may
+change the events it is derived from). Unset, the hook still works exactly as
+before — every book parsed, transformed, re-serialized. The console line names
+which route ran: `written by the engine`, `written by the engine, N rewritten by
+transformEvents`, or `assembled here (ungated transformEvents)`.
 
 ### The pool manifest
 
