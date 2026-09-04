@@ -92,8 +92,11 @@ export function buildTieredLookup(
   // so the second pass usually nails the limit. Disables itself on the
   // recursive call via maxProb5K/10K=undefined.
   if (params.maxProb5K !== undefined || params.maxProb10K !== undefined) {
-    const cachedRows: LookupRow[] = [];
-    for (const r of rowsIn) cachedRows.push(r);
+    // Cache a one-shot Iterable so the retry loop can re-run over it — but an
+    // array is already re-iterable, and copying one costs a second full source.
+    // On a 100M-round pool that is ~5.6 GB of duplicate rows before the first
+    // build even starts.
+    const cachedRows: LookupRow[] = Array.isArray(rowsIn) ? rowsIn : [...rowsIn];
 
     // If user gave no largePmThreshold, default it so the subsampled tier
     // exactly covers the constrained zone (rows ≥ 5K / 10K bet multiples).
@@ -183,9 +186,9 @@ export function buildTieredLookup(
     params.targetCV > 0
   ) {
     // Cache the rows so we don't re-iterate a one-shot Iterable across
-    // multiple inner runs.
-    const cachedRows: LookupRow[] = [];
-    for (const r of rowsIn) cachedRows.push(r);
+    // multiple inner runs. An array already is one — copying it would double
+    // the source (~5.6 GB on a 100M-round pool).
+    const cachedRows: LookupRow[] = Array.isArray(rowsIn) ? rowsIn : [...rowsIn];
 
     const targetCV = params.targetCV;
     const tolerance = Math.max(0.01, params.toleranceCV);
