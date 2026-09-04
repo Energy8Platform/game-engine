@@ -29,7 +29,8 @@ import {
 import { execFileSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { roundToRow } from './curate.js';
-import { createLineWriter } from './lut-io.js';
+import { createLineWriter, readPoolCsv, writeLut } from './lut-io.js';
+import { writeManifest } from './manifest.js';
 import { dumpLineStream, isGzipFile } from './dump-io.js';
 import type { ResolvedMode } from '../mathConfig';
 
@@ -168,6 +169,37 @@ export function normalizeDumpPath(dumpPath: string, label?: string): string {
       `update the e8 binary for gzipped dumps; falling back to ${basename(rawPath)} + zstd\n`,
   );
   return rawPath;
+}
+
+/**
+ * Finalize a LIGHT pool: the engine's `round,payoutCents` CSV → the 1-weight
+ * lookUpTable curate optimizes, plus the manifest the heavy pass replays from.
+ *
+ * No JSON is parsed here at all — that is the point of the light pass. The CSV
+ * for 14M rounds is ~120 MB against ~51 GB of full dump, and reading it is the
+ * same digit-accumulating pass the LUT reader already uses.
+ */
+export async function finalizeLightPool(
+  mode: ResolvedMode,
+  opts: { poolDir: string; csvPath: string; masterSeed: string; spinHash: string },
+): Promise<{ rows: number }> {
+  mkdirSync(opts.poolDir, { recursive: true });
+  const rows = await readPoolCsv(opts.csvPath, mode.curate.capMaxWin);
+  writeLut(rows, join(opts.poolDir, `lookUpTable_${mode.mode}_0.csv`));
+  writeManifest(opts.poolDir, {
+    mode: mode.mode,
+    action: mode.action,
+    bet: mode.sim.bet,
+    iterations: mode.sim.iterations,
+    rng: mode.sim.rng,
+    masterSeed: opts.masterSeed,
+    params: mode.sim.params,
+    spinHash: opts.spinHash,
+    rounds: rows.length,
+    createdAt: new Date().toISOString(),
+  });
+  upsertPoolIndex(opts.poolDir, mode.mode, mode.costMultiplier, basename(opts.csvPath));
+  return { rows: rows.length };
 }
 
 export interface FinalizePoolResult {

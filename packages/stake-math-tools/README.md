@@ -380,12 +380,79 @@ bit-for-bit via `(rng.server_seed, rng.client_seed, spins[0].nonce)`.
 `stake-math-tools ≤ 0.8.x`. Porting: see
 [docs/lua-to-spin-migration.md](../../docs/lua-to-spin-migration.md).
 
+## The two-pass build
+
+The pipeline runs in three stages, and the split is the single biggest thing it
+does for wall clock:
+
+```bash
+e8-math pool     --config ./math.config.ts   # light: round,payoutCents per round
+e8-math curate   --config ./math.config.ts   # optimize → lookUpTable + selection
+e8-math books    --config ./math.config.ts   # heavy: serialize ONLY the selected rounds
+e8-math all      --config ./math.config.ts   # all three, end to end
+```
+
+On a real game ~5% of simulated rounds reach the published books. The old
+one-pass build paid full JSON serialization for 100% of them: 14M rounds became
+51 GB that was written, compressed, read back, parsed, and thrown away. Math was
+never the bottleneck — on kitsune, 1M rounds cost 0.66 s to *compute* and 4.7 s
+to *print*.
+
+So the pool stage no longer prints anything. `e8 simulate -dump-csv` writes one
+`round,payoutCents` line per round — everything curate needs to choose rows, and
+nothing else. curate optimizes off that and records which pool rounds its rows
+came from (`selected_<MODE>.txt`). Only then does the books stage re-run the
+simulation with `-only-rounds`, serializing the survivors.
+
+Re-running is safe because a round is a pure function of `(master seed, round
+index)`: the lane is `round % 64`, its seed `sha256(master:lane)`, its nonce
+`round / 64 + 1`. Nothing depends on the host's core count or on which rounds
+were serialized. The engine test asserts a selectively-dumped round is
+byte-identical to the same round in a full dump, and this package's e2e asserts
+that a two-pass build produces byte-identical `lookUpTable_<MODE>_0.csv` and
+`books_<MODE>.jsonl.zst` to a one-pass build.
+
+Measured on kitsune BASE, 1M rounds, one mode — `e8-math all`:
+
+| | one-pass (`--full`) | two-pass (default) |
+|---|---|---|
+| wall clock | 21.6 s | **3.7 s** |
+| pool on disk | 149 MB | **19 MB** |
+| artifacts | — | byte-identical |
+
+### The pool manifest
+
+`pool` writes `pool_<MODE>.manifest.json` next to the CSV: the master seed the
+run **actually** used (`math.config.ts` need not pin `sim.seed` — the engine
+invents one per run, and the heavy pass has to reuse it), the rng profile,
+action, bet, iterations, params, and a sha256 of the `.spin` source.
+
+`books` refuses to run when any of that drifted:
+
+```
+[BASE] the pool was simulated from a different run than the config now describes
+(the .spin source changed; iterations 6000000 → 4000000). The books stage would
+serialize rounds the lookUpTable never saw. Re-run `e8-math pool --mode BASE`.
+```
+
+Without the check the failure is invisible: the artifacts stay valid JSON, every
+size and tolerance check passes, and the game deals grids nobody simulated.
+
+### `--full` — the one-pass pool
+
+`e8-math pool --full` (and `all --full`) serializes every round up front, as
+before. Slower and much bigger, but the pool is self-contained: `curate` alone
+then yields publishable books, no `books` stage involved. Use it when you want
+the whole simulation on disk to inspect, or with an engine that predates
+`-dump-csv`. Setting `POOL_ZSTD_LEVEL` implies `--full` (it archives a dump, and
+the light pool has none).
+
+`books --keep-dump` keeps the heavy pass's filtered dump in the pool instead of
+deleting it — a few GB at most, since it holds only the selected rounds.
+
 ## Pipeline throughput
 
-On a real game the math itself is a rounding error next to the I/O around it:
-serializing 14M rounds, compressing them, reading them back and throwing 95% away
-dominates the wall clock. Most of that is handled by default (the dump is written
-compressed in one pass); two knobs cover the rest.
+The stages above remove most of the I/O. What is left:
 
 **`--jobs N` — curate several modes at once.** Modes are independent from `pool`
 onward, so the curate stage runs up to `N` of them concurrently; reports still
@@ -402,22 +469,16 @@ the heaviest mode either way. In `all`, the pool stage stays sequential: the
 engine's workers already saturate the CPU, so running modes side by side there
 measures ~1.0×.
 
-**The pool is written compressed — there is no separate packing pass.** `pool`
-and `all` ask the engine for `-dump …/books_<MODE>.jsonl.gz`, and `e8 simulate`
-gzips as it writes. The raw dump (tens of GB on a real game) never exists on
-disk, nothing is re-read to compress it, and each engine worker gzips its own
-part in parallel, so the cost is a fraction of the old single-threaded `zstd`
-pass. Compression changes nothing about the run: same seed, same rounds, same
-bytes once inflated.
+**Whatever the engine dumps, it dumps compressed.** A `-dump` path ending in
+`.gz` is gzipped as it is written — each engine worker compresses its own part in
+parallel, and the raw file never exists on disk. This is what the `books` stage
+writes, and what `--full` writes for the whole pool. Compression changes nothing
+about the run: same seed, same rounds, same bytes once inflated.
 
 Everything downstream reads the archive in-process via `zlib` — no external
 binary, and a multi-GB pool never lands on disk inflated. `curate` accepts
 `books_<MODE>.jsonl`, `books_<MODE>.jsonl.gz` and `books_<MODE>.jsonl.zst`, in
 that order, so pools from any era still curate.
-
-```bash
-e8-math all --config ./math.config.ts       # → stake-math-pool/books_BASE.jsonl.gz
-```
 
 An engine that predates gzipped dumps writes plain JSONL to the `.gz` path. That
 is detected by the file's magic bytes (not its name), the dump is renamed back to

@@ -94,6 +94,26 @@ export async function readLut(path: string): Promise<LookupRow[]> {
   return rows;
 }
 
+/**
+ * Read the engine's light-pass pool CSV (`round,payoutCents` per line) as 1-weight
+ * lookup rows, capping each payout at `capCents`.
+ *
+ * Column mapping is the same digit-accumulating pass as {@link readLut}: the
+ * first field closes into `sim` (here the round index) and the last one is the
+ * payout, so a two-column CSV lands as `{sim, weight: 0, payoutCents}` and only
+ * the weight needs filling in. The cap stays here rather than in the engine —
+ * it is `maxWin × 100` from the mode's config, which the engine has no reason
+ * to know.
+ */
+export async function readPoolCsv(path: string, capCents: number): Promise<LookupRow[]> {
+  const rows = await readLut(path);
+  for (const r of rows) {
+    r.weight = 1;
+    if (capCents > 0 && r.payoutCents > capCents) r.payoutCents = capCents;
+  }
+  return rows;
+}
+
 /** A batching line writer: appends into a ~1 MiB buffer and flushes with one `writeSync`. */
 export interface LineWriter {
   /** Append one already-newline-terminated line. */
