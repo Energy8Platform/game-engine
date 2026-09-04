@@ -95,6 +95,76 @@ export async function readLut(path: string): Promise<LookupRow[]> {
 }
 
 /**
+ * Stream the engine's light-pass pool CSV (`round,payoutCents`) straight into a
+ * 1-weight lookUpTable, applying the mode's cap. Returns the rows written.
+ *
+ * Nothing is materialized: a pool of 100M rounds is 100M rows, and as objects
+ * that is ~5.6 GB (measured at 56 B/row) before the optimizer has allocated
+ * anything at all. The transform itself is per line — cap the payout, prepend
+ * the weight — so there is no reason to hold more than one.
+ */
+export async function streamPoolCsvToLut(
+  csvPath: string,
+  lutPath: string,
+  capCents: number,
+): Promise<number> {
+  const out = createLineWriter(lutPath);
+  let rows = 0;
+  const fd = openSync(csvPath, 'r');
+  const buf = Buffer.allocUnsafe(CHUNK);
+
+  // Same digit-accumulating scan as readLut: first field is the round, the last
+  // one on the line is the payout in cents.
+  let field = 0;
+  let value = 0;
+  let negative = false;
+  let sawDigit = false;
+  let round = 0;
+
+  const endRow = (): void => {
+    if (sawDigit || field > 0) {
+      const payout = negative ? -value : value;
+      out.write(`${round},1,${capCents > 0 && payout > capCents ? capCents : payout}
+`);
+      rows++;
+    }
+    field = 0;
+    value = 0;
+    negative = false;
+    sawDigit = false;
+  };
+
+  try {
+    for (;;) {
+      const read = readSync(fd, buf, 0, CHUNK, null);
+      if (read === 0) break;
+      for (let i = 0; i < read; i++) {
+        const b = buf[i];
+        if (b >= CH_ZERO && b <= CH_NINE) {
+          value = value * 10 + (b - CH_ZERO);
+          sawDigit = true;
+        } else if (b === CH_COMMA) {
+          if (field === 0) round = negative ? -value : value;
+          field++;
+          value = 0;
+          negative = false;
+          sawDigit = false;
+        } else if (b === CH_NEWLINE) {
+          endRow();
+        } else if (b === CH_MINUS) {
+          negative = true;
+        }
+      }
+    }
+    endRow(); // final line with no trailing newline
+  } finally {
+    closeSync(fd);
+    out.close();
+  }
+  return rows;
+}
+
+/**
  * Read the engine's light-pass pool CSV (`round,payoutCents` per line) as 1-weight
  * lookup rows, capping each payout at `capCents`.
  *

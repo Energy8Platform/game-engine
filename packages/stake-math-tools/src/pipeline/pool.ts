@@ -29,7 +29,7 @@ import {
 import { execFileSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { roundToRow } from './curate.js';
-import { createLineWriter, readPoolCsv, writeLut } from './lut-io.js';
+import { createLineWriter, streamPoolCsvToLut } from './lut-io.js';
 import { writeManifest } from './manifest.js';
 import { dumpLineStream, isGzipFile } from './dump-io.js';
 import type { ResolvedMode } from '../mathConfig';
@@ -207,8 +207,11 @@ export async function finalizeLightPool(
 ): Promise<{ rows: number }> {
   mkdirSync(opts.poolDir, { recursive: true });
   invalidateMode(opts.poolDir, mode.mode);
-  const rows = await readPoolCsv(opts.csvPath, mode.curate.capMaxWin);
-  writeLut(rows, join(opts.poolDir, `lookUpTable_${mode.mode}_0.csv`));
+  const rows = await streamPoolCsvToLut(
+    opts.csvPath,
+    join(opts.poolDir, `lookUpTable_${mode.mode}_0.csv`),
+    mode.curate.capMaxWin,
+  );
   writeManifest(opts.poolDir, {
     mode: mode.mode,
     action: mode.action,
@@ -218,11 +221,11 @@ export async function finalizeLightPool(
     masterSeed: opts.masterSeed,
     params: mode.sim.params,
     spinHash: opts.spinHash,
-    rounds: rows.length,
+    rounds: rows,
     createdAt: new Date().toISOString(),
   });
   upsertPoolIndex(opts.poolDir, mode.mode, mode.costMultiplier, basename(opts.csvPath));
-  return { rows: rows.length };
+  return { rows };
 }
 
 export interface FinalizePoolResult {
