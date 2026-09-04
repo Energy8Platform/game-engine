@@ -11,6 +11,23 @@ describe('NativeSimulationRunner dump', () => {
     const args = buildNativeArgs({ configPath: '/tmp/c.json', iterations: 1000, bet: 1, action: 'spin' });
     expect(args).not.toContain('-dump');
   });
+
+  // Two-pass book build: the light pass writes CSV only, the heavy pass filters
+  // the JSONL dump by round list. Neither flag may leak into an ordinary run.
+  it('adds -dump-csv and -only-rounds when set', () => {
+    const args = buildNativeArgs({
+      configPath: '/tmp/c.json', iterations: 1000, bet: 1, action: 'spin',
+      dump: '/tmp/books.jsonl.gz', dumpCsv: '/tmp/pool.csv', onlyRounds: '/tmp/only.txt',
+    });
+    expect(args[args.indexOf('-dump-csv') + 1]).toBe('/tmp/pool.csv');
+    expect(args[args.indexOf('-only-rounds') + 1]).toBe('/tmp/only.txt');
+  });
+
+  it('omits both when not set', () => {
+    const args = buildNativeArgs({ configPath: '/tmp/c.json', iterations: 1000, bet: 1, action: 'spin' });
+    expect(args).not.toContain('-dump-csv');
+    expect(args).not.toContain('-only-rounds');
+  });
 });
 
 describe('requireE8Binary', () => {

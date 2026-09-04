@@ -69,6 +69,19 @@ export interface NativeSimulationConfig {
    * analysis of the full round log.
    */
   dump?: string;
+  /**
+   * Path for the light per-round CSV (`round,payoutCents` per line, no JSON at
+   * all). This is the first half of the two-pass book build: the pipeline
+   * curates off these numbers, then re-runs with `onlyRounds` to serialize only
+   * the rounds that survived. `.gz` compresses as it writes, same as `dump`.
+   */
+  dumpCsv?: string;
+  /**
+   * Path to a file of round indices (one per line) limiting which rounds `dump`
+   * serializes. Every round is still simulated, so the RNG stream — and each
+   * kept round's content — is identical to a full run.
+   */
+  onlyRounds?: string;
   /** Progress callback */
   onProgress?: (completed: number, total: number) => void;
 }
@@ -177,6 +190,8 @@ export interface NativeArgsInput {
   rng?: string;
   seed?: string;
   dump?: string;
+  dumpCsv?: string;
+  onlyRounds?: string;
   replay?: { serverSeed: string; clientSeed: string; nonceStart: number };
 }
 
@@ -193,6 +208,8 @@ export function buildNativeArgs(a: NativeArgsInput): string[] {
   if (a.rng) args.push('-rng', a.rng);
   if (a.seed) args.push('-seed', a.seed);
   if (a.dump) args.push('-dump', a.dump);
+  if (a.dumpCsv) args.push('-dump-csv', a.dumpCsv);
+  if (a.onlyRounds) args.push('-only-rounds', a.onlyRounds);
   if (a.replay) {
     args.push(
       '-replay-server-seed', a.replay.serverSeed,
@@ -213,7 +230,7 @@ export class NativeSimulationRunner {
   }
 
   async run(): Promise<NativeSimulationResult> {
-    const { binaryPath, script, scriptExt, argsPrefix, gameDefinition, iterations, bet, action, params, seed, rng, replay, dump } = this.config;
+    const { binaryPath, script, scriptExt, argsPrefix, gameDefinition, iterations, bet, action, params, seed, rng, replay, dump, dumpCsv, onlyRounds } = this.config;
 
     if (replay && rng && rng !== 'provably-fair') {
       throw new Error(`Replay mode requires rng="provably-fair" (got rng="${rng}")`);
@@ -232,7 +249,7 @@ export class NativeSimulationRunner {
       ]);
 
       // Build CLI args
-      const args = buildNativeArgs({ configPath, iterations, bet, action, params, rng, seed, dump, replay });
+      const args = buildNativeArgs({ configPath, iterations, bet, action, params, rng, seed, dump, dumpCsv, onlyRounds, replay });
 
       // Execute binary
       const output = await this.exec(binaryPath, [...(argsPrefix ?? []), ...args]);
