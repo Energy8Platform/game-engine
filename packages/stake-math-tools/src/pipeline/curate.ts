@@ -27,7 +27,8 @@ import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
 import type { LookupRow, OptimizeParams, OptimizeResult } from '../types.js';
 import type { ResolvedMode, CurateEventsTransform } from '../mathConfig';
 import { createLineWriter, readLut, writeLut } from './lut-io.js';
-import { dumpLineStream, poolDumpLineStream, type LineStream } from './dump-io.js';
+import { dumpLineStream, poolDumpLineStream, poolDumpPath, type LineStream } from './dump-io.js';
+import { readManifest } from './manifest.js';
 import { mapWithConcurrency } from './concurrency.js';
 
 export interface CurateOptions {
@@ -38,9 +39,11 @@ export interface CurateOptions {
   /**
    * Skip the events pass and leave the books to the `books` stage.
    *
-   * Set by the two-pass build: at this point the selected rounds have not been
-   * serialized yet — that is the whole idea — so there is nothing to read them
-   * from. curate still writes the lookUpTable and the selection.
+   * Left unset it is decided per mode: a LIGHT pool (a manifest and no round
+   * dump) means the selected rounds have not been serialized yet — that is the
+   * whole idea of the two-pass build — so there is nothing to read them from,
+   * and curate stops after the lookUpTable and the selection. A pool with a
+   * dump, or a bare lookUpTable with neither, behaves as it always has.
    */
   skipEvents?: boolean;
 }
@@ -523,6 +526,14 @@ export async function curateModes(
 ): Promise<CuratedMode[]> {
   return mapWithConcurrency(modes, opts.jobs ?? 1, async (m) => ({
     mode: m.mode,
-    result: await curateMode(m, opts),
+    // Per mode, not per run: a pool can hold a light mode next to one that was
+    // dumped in full, and deciding once for all of them would either skip books
+    // that could be written now or try to read a dump that does not exist.
+    result: await curateMode(m, { ...opts, skipEvents: opts.skipEvents ?? isLightPool(opts.poolDir, m.mode) }),
   }));
+}
+
+/** A light pool: the manifest is there, the round dump is not — the books stage owes us events. */
+function isLightPool(poolDir: string, mode: string): boolean {
+  return poolDumpPath(poolDir, mode) === null && readManifest(poolDir, mode) !== null;
 }

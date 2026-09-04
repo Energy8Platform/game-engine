@@ -5,7 +5,6 @@ import { resolveModes } from './mathConfig';
 import { runSim } from './pipeline/sim';
 import { curateModes } from './pipeline/curate';
 import { runBooksStage } from './pipeline/books';
-import { poolDumpPath } from './pipeline/dump-io';
 import { hashSpin } from './pipeline/manifest';
 import type { MathConfig, ResolvedMode } from './mathConfig';
 import {
@@ -122,12 +121,12 @@ async function poolMode(
   );
 }
 
-/** Curate every mode. Events are left to the `books` stage unless the pool carries a full dump. */
+/** Curate every mode. Whether events are written now or left to the `books` stage is decided
+ *  per mode by the shape of its pool. */
 async function curateAll(
   modes: readonly ResolvedMode[], poolDir: string, outDir: string, jobs?: number,
 ): Promise<void> {
-  const skipEvents = modes.some((m) => poolDumpPath(poolDir, m.mode) === null);
-  const curated = await curateModes(modes, { poolDir, outDir, jobs, skipEvents });
+  const curated = await curateModes(modes, { poolDir, outDir, jobs });
   for (const c of curated) console.log(formatCurateReport(c.mode, c.result));
 }
 

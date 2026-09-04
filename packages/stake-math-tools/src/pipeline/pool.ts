@@ -172,6 +172,28 @@ export function normalizeDumpPath(dumpPath: string, label?: string): string {
 }
 
 /**
+ * Drop everything in the pool that described this mode's PREVIOUS run.
+ *
+ * A stale round dump next to a fresh pool is the dangerous case: curate would
+ * read its rows from the new lookUpTable and its events from the old dump, and
+ * because both files cover the same round numbers, nothing would look wrong —
+ * the books would simply show grids from a simulation nobody curated. Same for
+ * a selection left over from an earlier curate. Re-pooling a mode invalidates
+ * everything downstream of it, so the only way to get books is to walk the
+ * stages again.
+ */
+function invalidateMode(poolDir: string, mode: string): void {
+  const stale = [
+    `books_${mode}.jsonl`, `books_${mode}.jsonl.gz`, `books_${mode}.jsonl.zst`,
+    `selected_${mode}.txt`, `only_${mode}.txt`,
+  ];
+  for (const name of stale) {
+    const path = join(poolDir, name);
+    if (existsSync(path)) unlinkSync(path);
+  }
+}
+
+/**
  * Finalize a LIGHT pool: the engine's `round,payoutCents` CSV → the 1-weight
  * lookUpTable curate optimizes, plus the manifest the heavy pass replays from.
  *
@@ -184,6 +206,7 @@ export async function finalizeLightPool(
   opts: { poolDir: string; csvPath: string; masterSeed: string; spinHash: string },
 ): Promise<{ rows: number }> {
   mkdirSync(opts.poolDir, { recursive: true });
+  invalidateMode(opts.poolDir, mode.mode);
   const rows = await readPoolCsv(opts.csvPath, mode.curate.capMaxWin);
   writeLut(rows, join(opts.poolDir, `lookUpTable_${mode.mode}_0.csv`));
   writeManifest(opts.poolDir, {

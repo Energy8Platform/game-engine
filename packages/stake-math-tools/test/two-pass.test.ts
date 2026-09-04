@@ -127,3 +127,33 @@ describe('pool manifest I/O', () => {
     expect(existsSync(join(poolDir, 'pool_BASE.manifest.json'))).toBe(true);
   });
 });
+
+describe('re-pooling a mode invalidates what came after it', () => {
+  it('drops a stale round dump and selection when the light pool is rebuilt', async () => {
+    // The dangerous shape: a pool dir left over from an older full run. Rows would
+    // come from the new lookUpTable and events from the old dump — same round
+    // numbers, different simulation, and nothing about the books looks wrong.
+    writeFileSync(join(poolDir, 'books_BASE.jsonl.zst'), 'stale');
+    writeFileSync(join(poolDir, 'books_BASE.jsonl'), 'stale');
+    writeFileSync(join(poolDir, 'selected_BASE.txt'), '1\n2\n3\n');
+    writeFileSync(join(poolDir, 'only_BASE.txt'), '1\n');
+
+    await finalizeLightPool(mode, {
+      poolDir, csvPath: writePoolCsvFixture(), masterSeed: 'deadbeef', spinHash: hashSpin(SPIN),
+    });
+
+    for (const stale of ['books_BASE.jsonl.zst', 'books_BASE.jsonl', 'selected_BASE.txt', 'only_BASE.txt']) {
+      expect(existsSync(join(poolDir, stale)), `${stale} must be gone`).toBe(false);
+    }
+    // A sibling mode's pool is none of our business.
+    expect(existsSync(join(poolDir, 'pool_BASE.csv'))).toBe(true);
+  });
+
+  it('leaves other modes alone', async () => {
+    writeFileSync(join(poolDir, 'books_BONUS.jsonl.zst'), 'other mode');
+    await finalizeLightPool(mode, {
+      poolDir, csvPath: writePoolCsvFixture(), masterSeed: 'deadbeef', spinHash: hashSpin(SPIN),
+    });
+    expect(existsSync(join(poolDir, 'books_BONUS.jsonl.zst'))).toBe(true);
+  });
+});
