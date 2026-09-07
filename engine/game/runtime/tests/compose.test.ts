@@ -429,4 +429,55 @@ describe('createGame — the failure screen', () => {
 
     expect(mount.textContent).toContain('row addresses a plugin nothing placed');
   });
+
+  /**
+   * The seam whose absence let a regression ship: the host reads
+   * `game/script.spin` and puts what it found — schema, or `null` plus a
+   * diagnostic — into the SAME `/api/composition` body as the rows. Until
+   * this test, nothing in this package pinned what a game does with that
+   * diagnostic, and the answer was "paints the failure screen over the
+   * mount", because the diagnostic arrived at `severity: 'error'` and
+   * `createGame` blanks on any error. A project with no `.spin` at all
+   * played fine before that slice and stopped playing after it.
+   *
+   * Two claims, and both are about THIS package, not about the host: a
+   * warning-severity diagnostic does not blank the game, and it is not
+   * swallowed either — it still reaches `game.diagnostics`, which is what
+   * the IDE's own panel renders. (The host's half — that a `.spin` it
+   * cannot read produces `warning`, not `error` — is pinned on its own
+   * side, in `ide/host/tests/schema.test.ts`.)
+   */
+  it('a schema diagnostic from the host degrades the game — it does not blank it', async () => {
+    const mount = document.createElement('div');
+    mount.textContent = 'the game';
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1')],
+          diagnostics: [
+            {
+              severity: 'warning',
+              plugin: 'spin-parser',
+              where: 'line 12',
+              message: 'record "Broken" is unterminated — dropping it',
+            },
+          ],
+          // What the host serves when the `.spin` did not fully read:
+          // spelled out, never omitted (see `fakeFetch`'s own doc).
+          schema: null,
+        }),
+        importModule: async () => ({ apply: () => {} }),
+      },
+    });
+
+    // The mount is untouched: no failure screen, and whatever the game
+    // had drawn is still there.
+    expect(mount.textContent).toBe('the game');
+    // And the reason still travelled — degraded, not discarded.
+    expect(game.diagnostics).toContainEqual(
+      expect.objectContaining({ message: 'record "Broken" is unterminated — dropping it' }),
+    );
+  });
 });

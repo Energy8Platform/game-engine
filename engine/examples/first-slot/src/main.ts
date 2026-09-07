@@ -200,8 +200,16 @@ if (missing.length > 0) {
   }
 }
 
+// "errors" and "warnings" are not the same news and must not read as the
+// same news. A composition carrying only warnings STILL PLAYS — the game
+// is on screen, Spin works, and the only thing that happened is that
+// something (an unreadable `game/script.spin`, most likely) could not be
+// fully read. Calling that "errors" told a developer their game was
+// broken when it was running in front of them.
 if (diagnostics.length > 0) {
-  statusEl.textContent = 'composition has errors — see log';
+  const errors = diagnostics.filter((d) => d.severity === 'error').length;
+  statusEl.textContent =
+    errors > 0 ? 'composition has errors — see log' : 'composition has warnings — see log';
   for (const d of diagnostics) log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`);
 } else {
   statusEl.textContent = 'ready';

@@ -83,6 +83,29 @@ function findBlocks(
   while ((match = re.exec(source)) !== null) {
     const afterKeyword = match.index + match[0].length;
     const line = source.slice(0, match.index).split('\n').length;
+    // The keyword is being used as a CLAUSE KEY, not opening a block:
+    // `feature = Feat` is the game block's own legal clause form, and no
+    // block header in this grammar is ever followed by an `=` (they are
+    // bare names — `Vars`, `"demo"`, `SpinData tag stage`, an action's
+    // name, or `feature`'s empty one). Without this, the clause form was
+    // scanned for a `{` arbitrarily far ahead and, finding none, reported
+    // as a BROKEN BLOCK — `parseInlineFeature` running over
+    // `action other { … feature = Feat }` produced `"feature" block has
+    // no "{" — nothing to parse` against a file with nothing wrong with
+    // it. `(?!=)` excludes a `==` comparison, the same exclusion (and for
+    // the same reason) that `findClauses`' boundary pattern makes.
+    //
+    // Silent, and deliberately so: this is not a block that got dropped,
+    // it is text that was never a block. An unrecognized clause is
+    // already ignored by `findClauses`/`parseActions` (see "an
+    // unrecognized clause between two known ones…" in the tests) and this
+    // changes nothing about that.
+    //
+    // Here rather than in `parseInlineFeature` for the same reason the
+    // unterminated-block diagnostic is here: this is the ONE function
+    // every block form goes through, so a block keyword added later that
+    // also has a clause form inherits the distinction by construction.
+    if (/^\s*=(?!=)/.test(source.slice(afterKeyword))) continue;
     const braceStart = source.indexOf('{', afterKeyword);
     if (braceStart === -1) {
       diagnostics.push(
@@ -679,7 +702,18 @@ function parseInlineFeature(body: string, diagnostics: Diagnostic[]): Record<str
   return feature;
 }
 
-const ACTION_KEYS = ['stage', 'cost', 'session', 'extends', 'opens', 'feature'];
+/**
+ * No `'feature'`: an action's feature is the nested BLOCK form
+ * (`feature { buy = 1 }`), read by `parseInlineFeature` above, and
+ * `parseActions` never asks `findClauses` for a `feature` clause. Listing
+ * it here bought nothing and implied `feature = X` is a legal action
+ * clause, which it is not — the clause form belongs to the game block
+ * (`GAME_KEYS`). Removing it costs no boundary either: `findClauses`
+ * records a boundary at every `identifier =` it sees, known key or not,
+ * precisely so an unrecognized clause still terminates its neighbour's
+ * value.
+ */
+const ACTION_KEYS = ['stage', 'cost', 'session', 'extends', 'opens'];
 
 function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
   const actions: ActionDef[] = [];

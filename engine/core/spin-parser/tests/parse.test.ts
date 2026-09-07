@@ -180,6 +180,30 @@ action buy { stage = base_game  cost = 5.0  feature { buy = 1 }  opens = spin co
     expect(buy.opens).toEqual([{ action: 'spin', countVar: 'free_spins_awarded' }]);
   });
 
+  it('"feature = X" in an action body is not mistaken for a broken feature BLOCK', () => {
+    // The false positive the final review measured: `parseInlineFeature`
+    // asked `findBlocks` for every `feature` in the action body, and
+    // `findBlocks` treated the keyword as a block header whatever
+    // followed it — so the clause form (`feature = Feat`, which the game
+    // block legitimately uses) came back as `"feature" block has no "{"
+    // — nothing to parse`. Against a real project that diagnostic then
+    // travelled all the way to the failure screen.
+    const src = MINIMAL + `
+action other { stage = base_game  cost = 1.0  feature = Feat }`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics).toEqual([]);
+    // And the clause BEFORE it survives: `feature` is no longer in
+    // `ACTION_KEYS`, and this is what proves that removal cost nothing —
+    // `findClauses` terminates a value at the next `identifier =`
+    // generically, known key or not, so `cost` still reads as `1.0`
+    // rather than as `"1.0  feature = Feat"`.
+    expect(schema!.actions.find((a) => a.name === 'other')).toEqual({
+      name: 'other',
+      stage: 'base_game',
+      cost: 1,
+    });
+  });
+
   it('a field with no type after the colon is diagnosed without dropping its good siblings', () => {
     // Critical C: partial success is field-granular, not record-granular
     // — one bad field must not take a good one down with it.
