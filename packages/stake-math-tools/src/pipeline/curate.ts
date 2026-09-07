@@ -24,11 +24,12 @@ import { join } from 'node:path';
 import { optimizeLookupTable } from '../optimize-lookup.js';
 import { computeMetrics } from '../metrics.js';
 import { STAKE_EVENTS_MAX_BYTES } from '../types.js';
-import type { LookupRow, OptimizeParams, OptimizeResult } from '../types.js';
+import type { LookupRow, OptimizeAchieved, OptimizeParams, OptimizeResult } from '../types.js';
 import type { ResolvedMode, CurateEventsTransform } from '../mathConfig';
 import { createLineWriter, readLut, writeLut } from './lut-io.js';
 import { dumpLineStream, poolDumpLineStream, poolDumpPath, type LineStream } from './dump-io.js';
 import { readManifest } from './manifest.js';
+import { curateWithEngine, engineSourceMetrics } from './curate-native.js';
 import { mapWithConcurrency } from './concurrency.js';
 
 export interface CurateOptions {
@@ -189,9 +190,12 @@ function deriveCriteria(
  * policy kitsune's optimize-lut uses. `capMaxWin` is required (in cents) and
  * supplied by `resolveModes`.
  */
-function resolveOptimizeParams(curate: ResolvedMode['curate'], source: LookupRow[]): OptimizeParams {
-  const m = computeMetrics(source);
-  const nRowsOut = curate.nRowsOut ?? Math.max(1, Math.min(100_000, Math.floor(source.length / 2)));
+function resolveOptimizeParams(
+  curate: ResolvedMode['curate'],
+  m: OptimizeAchieved,
+  sourceRows: number,
+): OptimizeParams {
+  const nRowsOut = curate.nRowsOut ?? Math.max(1, Math.min(100_000, Math.floor(sourceRows / 2)));
   return {
     targetRTP: curate.targetRTP ?? m.rtp,
     toleranceRTP: curate.toleranceRTP ?? 0.001,
@@ -434,9 +438,17 @@ export function upsertIndex(outDir: string, mode: string, cost: number): void {
  */
 export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promise<OptimizeResult> {
   mkdirSync(opts.outDir, { recursive: true });
+
+  // The engine curates when it can: the optimizer is this pipeline's memory
+  // ceiling (~200 bytes per pool row — 20 GB on a 100M-round pool), and the
+  // engine holds the same rows in integer vectors. It is a byte-for-byte port,
+  // verified against the code below, which stays the reference implementation.
+  const engineResult = await curateWithEngineIfPossible(mode, opts);
+  if (engineResult) return engineResult;
+
   const rawRows = await readPoolRows(opts.poolDir, mode.mode, mode.curate.capMaxWin);
 
-  const params = resolveOptimizeParams(mode.curate, rawRows);
+  const params = resolveOptimizeParams(mode.curate, computeMetrics(rawRows), rawRows.length);
   const result = optimizeLookupTable(rawRows, params);
 
   // Capture each selected row's original pool round BEFORE renumbering — the event stream keys
@@ -500,6 +512,68 @@ export async function curateMode(mode: ResolvedMode, opts: CurateOptions): Promi
 }
 
 /** One mode's curate outcome, tagged so reports stay attributable after a parallel run. */
+/**
+ * Try the engine's curator. Returns null when it is unavailable or the pool has
+ * no lookUpTable to read (a bare dump — the JS path builds the rows itself).
+ *
+ * Source metrics come from the engine too (`e8 curate metrics`): they seed the
+ * optimizer's defaults, and reading 100M rows into Node just to average them
+ * would give back exactly the memory this path exists to save.
+ */
+async function curateWithEngineIfPossible(
+  mode: ResolvedMode,
+  opts: CurateOptions,
+): Promise<OptimizeResult | null> {
+  const poolLut = join(opts.poolDir, `lookUpTable_${mode.mode}_0.csv`);
+  if (!existsSync(poolLut)) return null;
+  const source = engineSourceMetrics(poolLut);
+  if (!source) return null;
+
+  const params = resolveOptimizeParams(mode.curate, source.achieved, source.rows);
+  const result = await curateWithEngine(
+    poolLut,
+    params,
+    join(opts.outDir, `lookUpTable_${mode.mode}_0.csv`),
+    selectionPath(opts.poolDir, mode.mode),
+  );
+  if (!result) return null;
+
+  if (opts.skipEvents) {
+    upsertIndex(opts.outDir, mode.mode, mode.costMultiplier);
+    result.warnings.push(
+      `books not written yet — ${params.nRowsOut} round(s) selected into ` +
+        `selected_${mode.mode}.csv; run \`e8-math books --mode ${mode.mode}\` to serialize them.`,
+    );
+    return result;
+  }
+
+  // One-pass pool: the rounds are already dumped, so the books can be written now.
+  const dumpPath = poolDumpPath(opts.poolDir, mode.mode);
+  const stats = await assembleBooks(mode, {
+    poolDir: opts.poolDir,
+    outDir: opts.outDir,
+    dumpPath: dumpPath ?? join(opts.poolDir, `books_${mode.mode}.jsonl`),
+  });
+  result.stakeReport.maxEventsBytes = stats.maxEventsBytes;
+  result.stakeReport.maxEventsBytesBookId = stats.maxEventsBytesBookId;
+  result.stakeReport.booksOverEventsLimit = stats.booksOverEventsLimit;
+  if (!stats.dumpFound) {
+    result.warnings.push(
+      `no round dump in the pool — books_${mode.mode}.jsonl was written without events ` +
+        `(every book has an empty \`events\` array). Fine while tuning weights off the ` +
+        `lookUpTable; NOT publishable. Run \`e8-math pool\` to restore the dump.`,
+    );
+  }
+  if (stats.booksOverEventsLimit > 0) {
+    result.warnings.push(
+      `${stats.booksOverEventsLimit} book(s) exceed Stake's ${STAKE_EVENTS_MAX_BYTES}-byte events ` +
+        `limit (largest ${stats.maxEventsBytes} bytes at book id ${stats.maxEventsBytesBookId}) — ` +
+        `these will be rejected on publication`,
+    );
+  }
+  return result;
+}
+
 /**
  * Serialize the books for one mode from a dump that holds the selected rounds.
  *

@@ -437,6 +437,33 @@ Every stage prints what it cost, so a slow run says where it went:
 Done in 5.47s.
 ```
 
+### Curation runs in the engine
+
+The optimizer is where this pipeline runs out of memory. Measured at ~200 bytes
+per pool row — the source array of `{sim, weight, payoutCents}` objects is 56 of
+them, the rest is the optimizer's working copies — which puts a 100M-round pool
+at ~20 GB, past any Node heap.
+
+So `curate` hands the work to the engine (`e8 curate run`), which holds the same
+pool in three integer vectors. It is a byte-for-byte port of `tiered.ts`, and
+this package's implementation stays the reference: the two are compared on real
+pools across all five branches (main path, `shapeDistribution`,
+`shapeAutoMatchCV`, the probability-limit retry loop, the `starRating` preset),
+including the curated table, the book map and every number in the report.
+
+| kitsune, 4M pool → 200k books | JS optimizer | engine |
+|---|---|---|
+| curate stage | 1.62 s | **0.34 s** |
+| peak RSS of the whole run | 842 MB | **285 MB** |
+
+Nothing to configure. An engine without the subcommand falls back to the
+TypeScript path silently, and `E8_CURATE=js` forces it — useful when comparing
+the two. `E8_CURATE=engine` turns the fallback into an error instead, for a CI
+that wants to know the fast path is actually running.
+
+NNLS/QP (`algorithm: 'nnls'`) was not ported: every shipped game uses `tiered`.
+Those modes stay on the TypeScript path.
+
 ### `transformEvents` and the size gate
 
 A `transformEvents` hook in `math.config.ts` shapes each book's events before
