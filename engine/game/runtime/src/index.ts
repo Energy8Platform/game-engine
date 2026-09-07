@@ -417,6 +417,13 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
     // project with none has nothing bound to check.
     const mechanics = ctx.reflect.get('mechanics', false);
     if (mechanics) {
+      // Two rows that claimed one mechanic id. Read HERE rather than
+      // reported from `register` itself, because `register` returns a
+      // disposer (every caller hands it to `ctx.effect`) and because this
+      // is the first moment at which every row that was going to register
+      // has — a row registering from an `inject` callback lands during
+      // composition, not before it. See `MechanicsService.collisions`.
+      diagnostics.push(...mechanics.collisions());
       diagnostics.push(...checkAgainstSchema(spinSchema, mechanics.bindings()));
     }
   } catch (error) {

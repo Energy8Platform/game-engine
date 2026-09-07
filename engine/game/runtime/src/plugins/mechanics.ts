@@ -2,7 +2,7 @@
  * The per-stage mechanic registry.
  *
  * A mechanic is registered under an id, and a stage is bound to exactly one
- * mechanic id at a time (`bind` overwrites, it never accumulates). The
+ * mechanic id at a time (`bind` overwrites, it never accumulates).
  * The stored type is `AnySpinMechanic` — `SpinMechanic<{ kind: string }>`,
  * the widest form — because a registry holds mechanics it did not write and
  * cannot name their step types. A mechanic authored as `SpinMechanic` (the
@@ -20,10 +20,10 @@
  * exports straight to `register()` with no adapter in between.
  *
  * The rule that shapes every method here: failures are data. A stage bound
- * to an unregistered mechanic, or data checked against a mechanic whose
- * requirements it doesn't meet, produces a `Diagnostic` — never an
- * exception, and never a silent fallback to "whichever mechanic happens to
- * be registered first."
+ * to an unregistered mechanic, data checked against a mechanic whose
+ * requirements it doesn't meet, or two rows claiming one mechanic id, each
+ * produces a `Diagnostic` — never an exception, and never a silent guess
+ * about which mechanic was meant.
  */
 import type { Context } from 'cordis';
 import {
@@ -37,7 +37,36 @@ import {
 } from '@energy8engine/contracts';
 
 export interface MechanicsService {
-  /** Registers a mechanic under its id. Returns a disposer that unregisters it again. */
+  /**
+   * Registers a mechanic under its id, IF no mechanic holds that id
+   * already. Returns a disposer that unregisters it again.
+   *
+   * **An id already taken is a collision, and the incumbent keeps it.**
+   * This used to be `mechanics.set(mechanic.id, mechanic)` — last writer
+   * wins, no complaint — which meant any plugin could shadow the built-in
+   * `classic` or `cascade` just by reusing its id, and the game would
+   * present with something other than what the composition reads like,
+   * with nothing on screen to say so. The asymmetry that made this worth
+   * finding: `@energy8engine/play-loop`'s step registry took real care to
+   * stop a plugin shadowing a built-in STEP, while the mechanic id right
+   * next to it could be taken in silence.
+   *
+   * First wins — the same rule, chosen for the same three reasons, as
+   * `BoardStepRegistry.register` (see its doc in
+   * `@energy8engine/play-loop`, which states them in full): it matches
+   * the precedence `executePlan` already applies, it matches
+   * `spin-parser`'s `NamedCollection`, and last-wins would make the
+   * winner depend on a composition order the project author does not
+   * directly control.
+   *
+   * A row that WANTS to replace a mechanic disposes the incumbent's
+   * registration first, or registers under an id of its own and binds the
+   * stage to that.
+   *
+   * The refused registration's disposer is a no-op: it never held the id,
+   * so it has nothing to give back — and were it to delete the entry it
+   * would take the WINNER out with it.
+   */
   register(mechanic: AnySpinMechanic): () => void;
   /**
    * Binds `stage` to the mechanic named `mechanicId`. A later call for the
@@ -75,6 +104,18 @@ export interface MechanicsService {
    * `checkAgainstSchema` has no slot for "maybe".
    */
   bindings(): Record<string, AnySpinMechanic>;
+  /**
+   * Every collision `register` has refused, in the order they happened.
+   * Cumulative and idempotent — reading it does not clear it.
+   *
+   * Separate from `register`'s return value because that return value is
+   * a disposer and every caller in the repo passes it straight to
+   * `ctx.effect`. `createGame` merges this into the game's diagnostics
+   * once the composition has finished applying — the same array the
+   * failure screen and the IDE's panel already read, and the moment when
+   * every row that was going to register has.
+   */
+  collisions(): Diagnostic[];
 }
 
 declare module 'cordis' {
@@ -96,15 +137,30 @@ export const name = 'mechanics';
 export function apply(ctx: Context) {
   const mechanics = new Map<string, AnySpinMechanic>();
   const bindings = new Map<string, string>();
+  const collisions: Diagnostic[] = [];
 
   const service: MechanicsService = {
     register(mechanic) {
+      if (mechanics.has(mechanic.id)) {
+        collisions.push(
+          diagnostic(
+            'error',
+            mechanic.id,
+            'mechanics.register',
+            `two mechanics claim id "${mechanic.id}": the one already registered keeps it, this one is ignored`,
+            `give one of them an id of its own and bind the stage to that, or unregister the first before registering the second — a mechanic id names exactly one mechanic`,
+          ),
+        );
+        // No `ctx.effect` and no eviction — see `register`'s doc.
+        return () => {};
+      }
       const dispose = ctx.effect(() => {
         mechanics.set(mechanic.id, mechanic);
         return () => {
-          // Only remove the entry if it's still *this* registration — an
-          // earlier registration's disposer must not delete a later one
-          // that re-registered the same id in the meantime.
+          // Only remove the entry if it's still *this* registration. A
+          // stale disposer — one whose registration was already disposed,
+          // and whose id another row then took — must not evict the
+          // replacement.
           if (mechanics.get(mechanic.id) === mechanic) {
             mechanics.delete(mechanic.id);
           }
@@ -181,6 +237,10 @@ export function apply(ctx: Context) {
         if (mechanic) result[stage] = mechanic;
       }
       return result;
+    },
+
+    collisions() {
+      return [...collisions];
     },
   };
 

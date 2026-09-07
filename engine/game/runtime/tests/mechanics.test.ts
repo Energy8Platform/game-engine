@@ -114,15 +114,19 @@ describe('the mechanic registry', () => {
 
   it('a stale disposer from a replaced registration does not evict the replacement', async () => {
     const { ctx } = await registry();
-    // Two registrations under the SAME id — the second replaces the first
-    // in the map, but both disposers close over that same id.
+    // Two registrations under the SAME id, one after the other's was
+    // disposed — the ordinary plugin lifecycle (a row leaves, another
+    // takes the id), and the only way one registration REPLACES another
+    // now that a live collision is refused instead. Both disposers close
+    // over that same id.
     const FIRST = { id: 'classic', requires: { fields: {} }, present: () => [] };
     const SECOND = { id: 'classic', requires: { fields: {} }, present: () => [] };
     const disposeFirst = ctx.mechanics.register(FIRST);
+    disposeFirst();
     const disposeSecond = ctx.mechanics.register(SECOND);
 
-    // disposeFirst is stale: its registration was already replaced. Calling
-    // it must not remove the live replacement that disposeSecond owns.
+    // disposeFirst is stale: its registration is already gone. Calling it
+    // again must not remove the live replacement disposeSecond owns.
     disposeFirst();
     ctx.mechanics.bind('base_game', 'classic');
     expect(ctx.mechanics.forStage('base_game')).toBe(SECOND);
@@ -130,6 +134,71 @@ describe('the mechanic registry', () => {
     // The real owner still works.
     disposeSecond();
     expect(ctx.mechanics.forStage('base_game')).toBeNull();
+    await ctx.fiber.dispose();
+  });
+
+  /**
+   * Two plugins claiming one mechanic id.
+   *
+   * `register` was `mechanics.set(id, mechanic)` — last writer wins, no
+   * complaint — so any plugin could shadow the built-in `classic` or
+   * `cascade` simply by using its id, and the game would present with
+   * something other than what the composition read like. Note the
+   * asymmetry that made this worth finding: the step registry took real
+   * care to stop a plugin shadowing a built-in STEP, while the mechanic
+   * id next to it could be taken in silence.
+   *
+   * Same rule as `BoardStepRegistry.register` and the same reasons (see
+   * its doc): the incumbent keeps the id, the newcomer is refused, and it
+   * is reported.
+   */
+  it('two mechanics claiming one id: the first keeps it, the second is refused', async () => {
+    const { ctx } = await registry();
+    const FIRST = { id: 'classic', requires: { fields: {} }, present: () => [] };
+    const SECOND = { id: 'classic', requires: { fields: {} }, present: () => [] };
+    ctx.mechanics.register(FIRST);
+    ctx.mechanics.register(SECOND);
+
+    ctx.mechanics.bind('base_game', 'classic');
+    expect(ctx.mechanics.forStage('base_game')).toBe(FIRST);
+    await ctx.fiber.dispose();
+  });
+
+  it('...and says so, naming the id and both claimants', async () => {
+    const { ctx } = await registry();
+    ctx.mechanics.register({ id: 'classic', requires: { fields: {} }, present: () => [] });
+    ctx.mechanics.register({ id: 'classic', requires: { fields: {} }, present: () => [] });
+
+    const [d] = ctx.mechanics.collisions();
+    expect(d.severity).toBe('error');
+    expect(d.message).toContain('classic');
+    expect(d.message).toContain('already registered');
+    expect(d.message).toContain('ignored');
+    await ctx.fiber.dispose();
+  });
+
+  it('the refused registration disposes to nothing — it must not unregister the winner', async () => {
+    const { ctx } = await registry();
+    const WINNER = { id: 'classic', requires: { fields: {} }, present: () => [] };
+    ctx.mechanics.register(WINNER);
+    const disposeLoser = ctx.mechanics.register({
+      id: 'classic',
+      requires: { fields: {} },
+      present: () => [],
+    });
+
+    disposeLoser();
+    ctx.mechanics.bind('base_game', 'classic');
+    expect(ctx.mechanics.forStage('base_game')).toBe(WINNER);
+    await ctx.fiber.dispose();
+  });
+
+  it('an id re-registered AFTER the first was disposed is not a collision', async () => {
+    const { ctx } = await registry();
+    const dispose = ctx.mechanics.register(CLASSIC);
+    dispose();
+    ctx.mechanics.register({ id: 'classic', requires: { fields: {} }, present: () => [] });
+    expect(ctx.mechanics.collisions()).toEqual([]);
     await ctx.fiber.dispose();
   });
 

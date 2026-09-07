@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import type { SpinSchema } from '@energy8engine/contracts';
+import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
 import { createGame, type GameApp } from '../src/index';
 import { fakeFetch, row } from './helpers';
 import * as mechanicsRow from '../src/runtime';
@@ -184,6 +185,55 @@ describe('createGame — a third-party mechanic', () => {
     expect(game.diagnostics).toEqual([]);
     expect(game.ctx.mechanics.forStage('base_game')?.id).toBe('acme');
     expect(mount.textContent).toBe('untouched');
+  });
+
+  /**
+   * The other side of the same freedom: a plugin row that claims an id
+   * the composition already gave to something else.
+   *
+   * `MechanicsService.register` refuses it and records why, but a
+   * collision recorded in a registry nobody reads is still silent. This
+   * is the read — `createGame` merging it into the same `diagnostics`
+   * array the failure screen and the IDE's panel show, after every row
+   * that was going to register has.
+   */
+  it('a row claiming an id the composition already registered is reported, not silently ignored', async () => {
+    // The REAL `mechanics1` row, which registers the shipped `classic`,
+    // plus a plugin row that tries to take that id for itself — the exact
+    // shadowing that was silent before this. `present` returns a marker
+    // step so "which one is bound" is answered by what actually presents,
+    // not by an id string both of them share.
+    const IMPOSTOR = {
+      id: 'classic',
+      requires: { fields: {} },
+      present: () => [{ kind: 'wait', ms: 1 }] as never,
+    };
+    const modules: Record<string, unknown> = {
+      mechanics1: mechanicsRow,
+      impostor1: {
+        apply: (ctx: any) => {
+          ctx.inject(['mechanics'], (scope: any) => scope.mechanics.register(IMPOSTOR));
+        },
+      },
+    };
+
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('mechanics1', { stages: { base_game: 'classic' } }), row('impostor1')],
+          diagnostics: [],
+        }),
+        importModule: async (url) => modules[url.split('/').pop()!],
+      },
+    });
+
+    const collision = game.diagnostics.find(
+      (d) => d.message.includes('classic') && d.message.includes('already registered'),
+    );
+    expect(collision).toBeDefined();
+    // ...and the incumbent — the shipped mechanic — is what stays bound.
+    expect(game.ctx.mechanics.forStage('base_game')).not.toBe(IMPOSTOR);
+    expect(game.ctx.mechanics.forStage('base_game')).toBe(classicMechanic);
   });
 });
 

@@ -112,11 +112,44 @@ export interface StepHandler {
  */
 export interface BoardStepRegistry {
   /**
-   * Registers `handler` under `handler.kind`, replacing whatever was there
-   * before. Returns a disposer that unregisters it again — call it (or let
-   * `ctx.effect` call it on unload) when the plugin that registered it
-   * goes away, so a row that left the composition doesn't leave its
-   * handler behind for the next thing that reuses the kind.
+   * Registers `handler` under `handler.kind`, IF nothing is serving that
+   * kind already. Returns a disposer that unregisters it again — call it
+   * (or let `ctx.effect` call it on unload) when the plugin that
+   * registered it goes away, so a row that left the composition doesn't
+   * leave its handler behind for the next thing that reuses the kind.
+   *
+   * **A kind already taken is a collision, and the incumbent keeps it.**
+   * This used to be `handlers.set(kind, handler)` — last writer wins, no
+   * complaint — so two plugins bringing the same step kind meant one of
+   * them composed, applied, and did nothing, with nothing anywhere saying
+   * which. That is the same defect `@energy8engine/spin-parser`'s
+   * `NamedCollection` exists to prevent (two `record Vars`, silently one),
+   * on state shared BETWEEN plugins rather than inside one file — where it
+   * is worse, because no one reader ever sees both claims.
+   *
+   * First wins, for three reasons, and the same rule
+   * `game-runtime`'s `MechanicsService.register` applies to mechanic ids:
+   *
+   *  1. it is the rule `executePlan` already lives by one level up — the
+   *     board gets first refusal and a registration cannot displace it —
+   *     so "what is already serving this kind keeps serving it" is one
+   *     rule here, not two;
+   *  2. it is `NamedCollection`'s rule, so a `.spin` author and a plugin
+   *     author are not told opposite things about what a repeated name
+   *     does;
+   *  3. last-wins makes the winner depend on composition ORDER, which a
+   *     project author does not control directly (it falls out of bundle
+   *     stacking and patch rows) — so the same project would present
+   *     differently for reasons nothing on screen explains.
+   *
+   * A registration that WANTS to replace another disposes the incumbent's
+   * registration first (that is what the returned disposer is for), or
+   * uses a kind of its own.
+   *
+   * The refused registration's disposer is a no-op: it never held the
+   * kind, so there is nothing for it to give back — and if it deleted the
+   * entry it would take the WINNER out on its way, which is exactly the
+   * silent hole this method exists to close.
    */
   register(handler: StepHandler): () => void;
   /** True when something is currently registered for `kind`. */
@@ -132,14 +165,46 @@ export interface BoardStepRegistry {
    * (`reelStep`).
    */
   kinds(): string[];
+  /**
+   * Every collision `register` has refused, in the order they happened.
+   * Cumulative and idempotent — reading it does not clear it.
+   *
+   * It exists because this registry has no channel of its own: it is
+   * cordis-free by design (see this file's module doc), so it cannot
+   * provide a service, and `register` must keep returning a plain
+   * disposer, since that is the exact shape `ctx.effect(() =>
+   * registry.register(h))` wants and every plugin in the repo uses it
+   * that way. So the collision is RECORDED here and `executePlan` reports
+   * it with the rest of what went wrong while running a plan — which is
+   * the one outlet this package already has, and the right moment: a
+   * shadowed kind is a fact about every plan that names it, not only
+   * about the instant two plugins raced.
+   */
+  collisions(): Diagnostic[];
 }
 
 /** A fresh, empty `BoardStepRegistry` — nothing registered until something calls `register`. */
 export function createBoardStepRegistry(): BoardStepRegistry {
   const handlers = new Map<string, StepHandler>();
+  const collisions: Diagnostic[] = [];
 
   return {
     register(handler) {
+      const incumbent = handlers.get(handler.kind);
+      if (incumbent !== undefined) {
+        collisions.push(
+          diagnostic(
+            'error',
+            'play-loop',
+            `steps.${handler.kind}`,
+            `two handlers claim step kind "${handler.kind}": the one already registered keeps it, this one is ignored`,
+            `give one of them a kind of its own, or unregister the first before registering the second — a step kind is served by exactly one handler`,
+          ),
+        );
+        // Deliberately not a disposer over the incumbent — see
+        // `BoardStepRegistry.register`'s doc.
+        return () => {};
+      }
       handlers.set(handler.kind, handler);
       return () => {
         // Only remove the entry if it's still *this* registration — an
@@ -160,6 +225,9 @@ export function createBoardStepRegistry(): BoardStepRegistry {
     },
     kinds() {
       return [...handlers.keys()];
+    },
+    collisions() {
+      return [...collisions];
     },
   };
 }
@@ -213,28 +281,56 @@ type BoardMethod = (step: PresentationStep) => Promise<void>;
  * file's own tests before this parameter existed, and every caller
  * outside this package until something hands it one) gets exactly the
  * behaviour this function had before `registry` existed.
+ *
+ * A registry that refused a colliding registration reports it HERE, ahead
+ * of anything this plan itself ran into — see `BoardStepRegistry.collisions`
+ * for why this is the outlet, and why the report repeats for every plan
+ * rather than firing once.
  */
 export async function executePlan(
   plan: PresentationStep[],
   board: BoardApi | undefined,
   registry?: BoardStepRegistry,
 ): Promise<Diagnostic[]> {
+  // Read before the `!board` early return, on purpose: a collision is a
+  // fact about the composition, not about this plan, so it must not be
+  // swallowed by a plan that had nothing to run or no board to run it on.
+  //
+  // Guarded, for the same reason `registry.get(...)` below is: this is a
+  // call into an interface a THIRD PARTY implements, and `executePlan`
+  // promises never to throw no matter what the registry does. See
+  // `tests/registry.test.ts`'s "a registry whose collisions() throws".
+  const problems: Diagnostic[] = [];
+  if (registry) {
+    try {
+      problems.push(...registry.collisions());
+    } catch (error) {
+      problems.push(
+        diagnostic(
+          'error',
+          'play-loop',
+          'registry',
+          `the registry's collisions() threw: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    }
+  }
+
   if (!board) {
     // A plan with nothing to run needs no board either — only report the
     // failure when there was actually something for the (missing) board
     // to have done.
-    if (plan.length === 0) return [];
-    return [
+    if (plan.length === 0) return problems;
+    problems.push(
       diagnostic(
         'error',
         'play-loop',
         'board',
         'cannot run a presentation plan: no board to run it on',
       ),
-    ];
+    );
+    return problems;
   }
-
-  const problems: Diagnostic[] = [];
 
   for (let index = 0; index < plan.length; index += 1) {
     const step = plan[index];
