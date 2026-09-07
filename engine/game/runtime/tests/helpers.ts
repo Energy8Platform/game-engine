@@ -8,7 +8,7 @@
  * Twelve lines are cheaper than a shared test-utils package for two
  * callers; if a third appears, extract then.
  */
-import type { E8SeamDeclaration, GameCompositionRow } from '@energy8engine/contracts';
+import type { E8SeamDeclaration, GameCompositionRow, SpinSchema } from '@energy8engine/contracts';
 
 /**
  * Which seam a row declares, keyed by the alphabetic part of its id.
@@ -38,10 +38,19 @@ export function row(id: string, config: Record<string, unknown> = {}): GameCompo
   };
 }
 
-/** A `fetchFn` that answers `GET /api/composition` with a fixed body, whatever URL it's asked for. */
+/**
+ * A `fetchFn` that answers `GET /api/composition` with a fixed body,
+ * whatever URL it's asked for. `schema` is optional and defaults to
+ * absent (not `null`) — most callers don't care about it, and a fixture
+ * that never mentions the field is how `createGame`'s `withSchemaCapture`
+ * (see `../src/index.ts`) tells "an old host that predates schema" apart
+ * from "a host that parsed the .spin and found nothing" (`schema: null`,
+ * spelled out).
+ */
 export function fakeFetch(body: {
   rows: GameCompositionRow[];
   diagnostics: unknown[];
+  schema?: SpinSchema | null;
 }): typeof fetch {
   return (async () =>
     ({

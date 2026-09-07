@@ -206,10 +206,13 @@ function readUrlParams(): Record<string, string> {
  * fetches for `rows`/`diagnostics`, instead of a second round trip to the
  * same URL — the host puts `schema` in that response for exactly this
  * reason (see `runtime-assets.ts`'s doc comment on `GET /api/composition`).
- * `composeFromProject` calls `fetchFn` exactly once and only ever reads
- * `res.ok` and `res.json()` off what comes back, so substituting a
- * plain object shaped the same way, after reading the body ourselves,
- * changes nothing it can observe.
+ * `composeFromProject` calls `fetchFn` exactly once. On the SUCCESS path
+ * it only ever reads `res.ok` and `res.json()` off what comes back, so
+ * substituting a plain object shaped the same way, after reading the body
+ * ourselves, changes nothing it can observe there. On the FAILURE path
+ * (`!res.ok`) it also reads `res.status`/`res.statusText` to build its own
+ * diagnostic — which is exactly why that branch, below, returns the
+ * original `res` untouched rather than a substitute missing those fields.
  *
  * A response whose status was not ok is returned untouched — that is
  * `composeFromProject`'s own failure to report, and this wrapper has

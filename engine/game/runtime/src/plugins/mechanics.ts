@@ -198,10 +198,17 @@ function unwrapOptional(type: FieldType): FieldType {
  * match on, and forcing them through one signature would only make both
  * harder to read.
  *
- * `grid` requires two levels of list/array nesting (`[[int]]`, the shape
- * `spin-parser` derives for a `grid: [[int]]` field) — a plain `list`
- * doesn't qualify, and neither does a `list` of anything that isn't
- * itself a list/array.
+ * `grid` requires two levels of list/array nesting with a numeric leaf
+ * (`[[int]]` or `[[float]]`, the shape `spin-parser` derives for a
+ * `grid: [[int]]` field) — a plain `list` doesn't qualify, neither does a
+ * `list` of anything that isn't itself a list/array, and neither does a
+ * correctly-nested `list` whose innermost element isn't `int`/`float`
+ * (`grid: [[str]]`, say). That last leg mirrors `isGrid` above, the
+ * VALUE-level equivalent of this check: `isGrid` requires every leaf cell
+ * to satisfy `isFiniteNumber`, so a schema that let a non-numeric leaf
+ * through here would pass the pre-flight check in this file and then
+ * permanently fail `checkShape`'s post-spin one on the very first sample —
+ * a gap between the two checks with no game that could ever close it.
  */
 function matchesFieldKind(kind: FieldKind, type: FieldType): boolean {
   const declared = unwrapOptional(type);
@@ -213,7 +220,9 @@ function matchesFieldKind(kind: FieldKind, type: FieldType): boolean {
     case 'grid': {
       if (declared.kind !== 'list' && declared.kind !== 'array') return false;
       const inner = unwrapOptional(declared.of);
-      return inner.kind === 'list' || inner.kind === 'array';
+      if (inner.kind !== 'list' && inner.kind !== 'array') return false;
+      const leaf = unwrapOptional(inner.of);
+      return leaf.kind === 'int' || leaf.kind === 'float';
     }
   }
 }
@@ -251,6 +260,21 @@ function describeFieldType(type: FieldType): string {
  * `@energy8engine/contracts` — a `list` field only proves "is an array",
  * so a game that never actually produces the field on some codepaths
  * still needs a real sample to catch).
+ *
+ * **This means the same mistake can legitimately reach the SAME failure
+ * screen twice** — once from this function on page load (the schema says
+ * the field isn't there), and again from `checkShape`/`check` above once
+ * the developer clicks Spin (the actual sample doesn't have it either).
+ * That is deliberate, not a bug in either check: they answer different
+ * questions at different moments, and collapsing them would trade a real
+ * guarantee for a tidier screen. The two messages below that this can
+ * duplicate (missing field, wrong kind) say so in their own text — see
+ * the `— checked …` clause each carries — so a person reading only the
+ * screen, not this comment, has the same explanation `checkAgainstSchema`
+ * gives a person reading the source. The third case (an unknown stage)
+ * has no post-spin counterpart — `checkShape` never learns a stage name,
+ * only `MechanicsService.check` does, and that reports a DIFFERENT
+ * failure ("nothing is bound") — so its message carries no such clause.
  *
  * `schema: null` — a project whose `.spin` failed to parse, or has none —
  * performs NO check and reports NOTHING. The project's own diagnostic
@@ -312,7 +336,7 @@ export function checkAgainstSchema(
             'error',
             mechanic.id,
             stage,
-            `mechanic "${mechanic.id}" on stage "${stage}" expects field "${field}" (${kind}), but the math's schema does not declare it`,
+            `mechanic "${mechanic.id}" on stage "${stage}" expects field "${field}" (${kind}), but the math's schema does not declare it — checked here against the declared schema, before any spin; the same requirement is checked again against real data once one runs`,
             `add "${field}" to the "${stage}" stage's data in .spin, or bind "${stage}" to a mechanic that does not need it`,
           ),
         );
@@ -324,7 +348,7 @@ export function checkAgainstSchema(
             'error',
             mechanic.id,
             stage,
-            `mechanic "${mechanic.id}" on stage "${stage}" expects field "${field}" to be a ${kind}, but the math's schema types it as ${describeFieldType(fieldType)}`,
+            `mechanic "${mechanic.id}" on stage "${stage}" expects field "${field}" to be a ${kind}, but the math's schema types it as ${describeFieldType(fieldType)} — checked here against the declared schema, before any spin; the same requirement is checked again against real data once one runs`,
             `fix the type of "${field}" in .spin, or bind "${stage}" to a different mechanic`,
           ),
         );

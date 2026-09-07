@@ -249,14 +249,18 @@ describe('checkAgainstSchema', () => {
 
   it('a field present but of the wrong kind is named, with both kinds', () => {
     // `cascade_history: float` where a list was required.
-    const [d] = checkAgainstSchema(SCHEMA_CASCADE_IS_FLOAT, { base_game: cascadeMechanic });
+    const diagnostics = checkAgainstSchema(SCHEMA_CASCADE_IS_FLOAT, { base_game: cascadeMechanic });
+    expect(diagnostics).toHaveLength(1);
+    const [d] = diagnostics;
     expect(d.message).toContain('cascade_history');
     expect(d.message).toContain('list');
     expect(d.message).toContain('float');
   });
 
   it('a stage the schema does not declare is a diagnostic naming the stages it does', () => {
-    const [d] = checkAgainstSchema(SCHEMA, { free_spins: classicMechanic });
+    const diagnostics = checkAgainstSchema(SCHEMA, { free_spins: classicMechanic });
+    expect(diagnostics).toHaveLength(1);
+    const [d] = diagnostics;
     expect(d.message).toContain('free_spins');
     expect(d.message).toContain('base_game');
   });
@@ -265,5 +269,65 @@ describe('checkAgainstSchema', () => {
     // A project whose .spin could not be parsed already has ITS diagnostic;
     // inventing a second one here would report the same problem twice.
     expect(checkAgainstSchema(null, { base_game: cascadeMechanic })).toEqual([]);
+  });
+
+  // The three tests below close gaps the review found by mutation: each
+  // documented rule in `matchesFieldKind` (mechanics.ts) that no test
+  // actually held. Every one is written so it fails if the rule its name
+  // states is removed — confirmed by deliberately removing each rule and
+  // watching exactly this test (and no other) fail, then restoring it.
+
+  it('a flat (single-level) list does not satisfy a "grid" requirement — grid needs two levels of nesting', () => {
+    const SCHEMA_FLAT_GRID = schemaWithStages({
+      base_game: {
+        // One level of nesting only — `[int]`, not `[[int]]`.
+        grid: { kind: 'list', of: { kind: 'int' } },
+        cascade_history: { kind: 'list', of: { kind: 'record', name: 'CascadeStep' } },
+      },
+    });
+    const diagnostics = checkAgainstSchema(SCHEMA_FLAT_GRID, { base_game: cascadeMechanic });
+    expect(diagnostics).toHaveLength(1);
+    const [d] = diagnostics;
+    expect(d.message).toContain('grid');
+    expect(d.message).toContain('base_game');
+  });
+
+  it('a grid whose leaf is not numeric does not satisfy "grid" — mirrors isGrid\'s numeric-leaf rule', () => {
+    const SCHEMA_STRING_GRID = schemaWithStages({
+      base_game: {
+        // Correctly nested two levels deep, but the leaf is `str`, not
+        // `int`/`float` — `isGrid` (the post-spin, value-level check in
+        // contracts/mechanic.ts) would reject this at runtime; the
+        // pre-flight check must reject it too, or a schema like this
+        // passes here and then permanently fails on the first real spin.
+        grid: { kind: 'list', of: { kind: 'list', of: { kind: 'str' } } },
+        cascade_history: { kind: 'list', of: { kind: 'record', name: 'CascadeStep' } },
+      },
+    });
+    const diagnostics = checkAgainstSchema(SCHEMA_STRING_GRID, { base_game: cascadeMechanic });
+    expect(diagnostics).toHaveLength(1);
+    const [d] = diagnostics;
+    expect(d.message).toContain('grid');
+    expect(d.message).toContain('base_game');
+  });
+
+  it('an optional-wrapped field still satisfies its requirement — presence, not optionality, is what matters', () => {
+    // `classic` needs `base_win` to be a `number`. A math author writing
+    // `base_win: float?` in .spin has not thereby made the field
+    // unusable to `classic` — a `FieldKind` requirement has no way to
+    // demand or reject optionality in the first place (see
+    // `unwrapOptional`'s doc comment). Silence here is the assertion:
+    // if `matchesFieldKind` stopped unwrapping `optional` and matched the
+    // raw wrapper type instead, this would report a false mismatch.
+    const SCHEMA_OPTIONAL_BASE_WIN = schemaWithStages({
+      base_game: {
+        grid: GRID_TYPE,
+        base_win: { kind: 'optional', of: { kind: 'float' } },
+        lines: { kind: 'list', of: { kind: 'record', name: 'LineWin' } },
+      },
+    });
+    expect(checkAgainstSchema(SCHEMA_OPTIONAL_BASE_WIN, { base_game: classicMechanic })).toEqual(
+      [],
+    );
   });
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
+import type { SpinSchema } from '@energy8engine/contracts';
 import { createGame, type GameApp } from '../src/index';
 import { fakeFetch, row } from './helpers';
 import * as mechanicsRow from '../src/runtime';
@@ -183,6 +184,61 @@ describe('createGame — a third-party mechanic', () => {
     expect(game.diagnostics).toEqual([]);
     expect(game.ctx.mechanics.forStage('base_game')?.id).toBe('acme');
     expect(mount.textContent).toBe('untouched');
+  });
+});
+
+describe('createGame — checkAgainstSchema is actually wired in', () => {
+  // Regression test for a defect the review found, not one this suite
+  // caught on its own: deleting `checkAgainstSchema`'s call site in
+  // `../src/index.ts` left every other test in this package green — the
+  // "a third-party mechanic" test above still passes with `schema`
+  // entirely absent from `fakeFetch`'s body (`spinSchema` stays `null`,
+  // and `checkAgainstSchema(null, …)` is silent by design either way), so
+  // it cannot tell "wired correctly" from "wired to nothing". This test
+  // is the one difference that can: a real `schema`, missing a field a
+  // BOUND mechanic actually needs, run through the REAL `mechanics1` row
+  // (not a stand-in), asserting the diagnostic reaches `game.diagnostics`
+  // — the same array the failure screen renders.
+  it('checks a bound mechanic against the schema the host serves, before any spin', async () => {
+    // The exact scenario the review confirmed live against a real
+    // `e8 dev`: `classic` bound to `base_game`, and the schema's
+    // `base_game` stage missing `lines` — one of `classic`'s own
+    // `requires` fields (`grid`/`base_win`/`lines`; see
+    // `@energy8engine/mechanic-classic`).
+    const SCHEMA_WITHOUT_LINES: SpinSchema = {
+      gameId: 'demo',
+      betLevels: [1],
+      maxWin: 100,
+      vars: {},
+      stages: {
+        base_game: {
+          grid: { kind: 'list', of: { kind: 'list', of: { kind: 'int' } } },
+          base_win: { kind: 'float' },
+          // `lines` deliberately absent.
+        },
+      },
+      records: {},
+      actions: [],
+    };
+
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('mechanics1', { stages: { base_game: 'classic' } })],
+          diagnostics: [],
+          schema: SCHEMA_WITHOUT_LINES,
+        }),
+        importModule: async () => mechanicsRow,
+      },
+    });
+
+    const found = game.diagnostics.find(
+      (d) =>
+        d.message.includes('classic') &&
+        d.message.includes('lines') &&
+        d.message.includes('base_game'),
+    );
+    expect(found).toBeDefined();
   });
 });
 
