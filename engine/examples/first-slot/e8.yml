@@ -7,7 +7,12 @@
 # no-op (see its own module doc) — its real job happens BROWSER-SIDE, composed
 # directly into the running game by src/main.ts, which listens on the SAME
 # `/ide` websocket this row's edits travel over and rebinds the mechanic live.
+#
+# No `base_game` here on purpose: `e8.patch.yml` decides what renders the
+# stage, and this row exists so a human can OVERRIDE that live. A value
+# written here is pushed over the patch's binding on the first snapshot
+# after boot, so the field starts empty. (Keep notes like this short — the
+# IDE rewrites this file on every edit and does not preserve comments.)
 - id: bridge1
   name: '@energy8engine/ide-bridge'
-  config:
-    base_game: classic
+  config: {}

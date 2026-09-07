@@ -228,11 +228,25 @@ if (diagnostics.length > 0) {
 const bound = game.ctx.reflect.get('mechanics', false)?.forStage('base_game')?.id;
 if (bound) mechanicSelect.value = bound;
 
-// `ide-bridge`'s own boot-time bind uses `mechanicSelect.value` too, so the
-// two channels (this page's local `<select>`, and the IDE's composition
-// screen over `/ide`) agree at first load; whichever one the developer
-// touches most recently wins from then on — see ide-bridge's module doc.
-ideBridge.apply(game.ctx, { base_game: mechanicSelect.value });
+/**
+ * The live channel from the IDE's composition screen — and NOTHING is
+ * passed for `base_game` on purpose.
+ *
+ * This used to hand over `mechanicSelect.value`, so the page's own
+ * `<option>` order re-bound the stage at boot and quietly overrode
+ * `e8.patch.yml`. Both defaults are gone now: the composition decides what
+ * is bound (the `<select>` above is seeded FROM it), and `ide-bridge` binds
+ * only when a human has actually written a value into its row — see
+ * `IdeBridgeSettableConfig.base_game`. Whoever turns a knob last still
+ * wins; what no longer happens is a knob turning itself.
+ *
+ * Its complaints land in this page's log, which is the only place it has:
+ * `ide-bridge` is composed here, by the page, not by the loader, so
+ * nothing else would ever collect them.
+ */
+ideBridge.apply(game.ctx, {
+  onDiagnostic: (d) => log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`),
+});
 
 mechanicSelect.addEventListener('change', () => {
   game.ctx.mechanics.bind('base_game', mechanicSelect.value);

@@ -286,3 +286,156 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
     expect(socket.close).toHaveBeenCalled();
   });
 });
+
+/**
+ * Which mechanics exist is a RUNTIME fact — what a project's composition
+ * registered — not a compile-time one. `Config.base_game` used to be
+ * `Schema.union(['classic', 'cascade'])`, a closed enum of the two the
+ * ENGINE ships, so a project's own third mechanic was unnameable from the
+ * IDE: setting it failed cordis config validation and the row never came
+ * up at all. And because this module rebinds on every snapshot, a project
+ * whose patch bound that third mechanic got the enum's stale default
+ * pushed over it a second after boot, silently.
+ */
+describe('ide-bridge — naming a mechanic the engine has never heard of', () => {
+  it('accepts any mechanic id, not just the two the engine ships', () => {
+    ctx = new Context();
+    const { bind, forStage } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+
+    // The schema is what the IDE validates a row's config against — the
+    // failure this replaces was a ValidationError out of cordis, before
+    // `apply` ever ran.
+    expect(() => ideBridge.Config({ base_game: 'reel-step' })).not.toThrow();
+
+    ideBridge.apply(ctx, {
+      base_game: 'reel-step',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+    });
+
+    expect(bind).toHaveBeenCalledWith('base_game', 'reel-step');
+  });
+
+  it('says so when the id it was told to bind is not registered', () => {
+    ctx = new Context();
+    // A registry that accepts the bind and still resolves to nothing — the
+    // real one does exactly this for an id nobody registered.
+    const bind = vi.fn();
+    const forStage = vi.fn(() => null);
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const reported: { message: string }[] = [];
+
+    ideBridge.apply(ctx, {
+      base_game: 'no-such-mechanic',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+
+    expect(bind).toHaveBeenCalledWith('base_game', 'no-such-mechanic');
+    expect(reported).toHaveLength(1);
+    expect(reported[0].message).toContain('no-such-mechanic');
+  });
+
+  it('a row that names no mechanic leaves the composition’s own binding alone', () => {
+    // The stale-default clobber. `e8.patch.yml` binds the stage; this row
+    // exists so a human CAN override that from the IDE — not so that a
+    // value nobody wrote overrides it a second after boot.
+    ctx = new Context();
+    const { bind, forStage } = fakeMechanics();
+    bind('base_game', 'reel-step'); // what the composition already bound
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+
+    ideBridge.apply(ctx, {
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+    });
+
+    expect(bind).not.toHaveBeenCalled();
+    expect(forStage('base_game')).toEqual({ id: 'reel-step' });
+  });
+
+  it('and neither does a snapshot whose row names none', () => {
+    ctx = new Context();
+    const { bind, forStage } = fakeMechanics();
+    bind('base_game', 'reel-step');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+    });
+
+    socket.emit(snapshotMessage([{ name: '@energy8engine/ide-bridge', config: {} }]));
+    socket.emit(snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: '' } }]));
+
+    expect(bind).not.toHaveBeenCalled();
+    expect(forStage('base_game')).toEqual({ id: 'reel-step' });
+  });
+
+  it('says it once, not once per snapshot', () => {
+    // `rpc.ts` broadcasts on ANY composition change, and an unregistered id
+    // can never satisfy the dedupe above (`forStage` keeps answering null),
+    // so every broadcast re-attempts the bind. Measured in a real browser:
+    // one edit produced four identical lines in the game's log. The BIND
+    // stays unconditional — see its comment — but saying the same sentence
+    // again adds nothing.
+    ctx = new Context();
+    const bind = vi.fn();
+    const forStage = vi.fn(() => null);
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const reported: { message: string }[] = [];
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      base_game: 'no-such-mechanic',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+    socket.emit(
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { base_game: 'no-such-mechanic' } },
+      ]),
+    );
+    socket.emit(
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { base_game: 'no-such-mechanic' } },
+      ]),
+    );
+
+    expect(reported).toHaveLength(1);
+
+    // A DIFFERENT bad id is different news, and still gets said.
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'also-bad' } }]),
+    );
+    expect(reported).toHaveLength(2);
+    expect(reported[1].message).toContain('also-bad');
+  });
+
+  it('a human turning the knob still wins, third mechanic or not', () => {
+    ctx = new Context();
+    const { bind, forStage } = fakeMechanics();
+    bind('base_game', 'reel-step');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+    });
+
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'cascade' } }]),
+    );
+
+    expect(bind).toHaveBeenCalledWith('base_game', 'cascade');
+    expect(forStage('base_game')).toEqual({ id: 'cascade' });
+  });
+});

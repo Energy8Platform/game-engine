@@ -48,12 +48,25 @@
  */
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
-import type { ServerMessage } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type ServerMessage } from '@energy8engine/contracts';
 
 /** The one field a human edits from the composition screen. */
 export interface IdeBridgeSettableConfig {
-  /** Which registered mechanic renders `first-slot`'s one stage, `base_game`. */
-  base_game: string;
+  /**
+   * Which registered mechanic renders `first-slot`'s one stage,
+   * `base_game`. Any id — this is a RUNTIME fact (what a project's
+   * composition registered), not a compile-time one, so it is not an enum
+   * of the mechanics the engine happens to ship. See `Config` below.
+   *
+   * **Optional, and absent means "say nothing".** A row that names no
+   * mechanic leaves whatever the composition itself bound (`e8.patch.yml`'s
+   * `mechanics1.stages`) exactly as it is. That is not a convenience: this
+   * module rebinds on EVERY snapshot, so a value nobody wrote would
+   * otherwise be pushed over the project's own binding a second after boot,
+   * silently. A human turning the knob writes a value, and from then on it
+   * wins — which is the whole point of the row.
+   */
+  base_game?: string;
 }
 
 export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
@@ -71,6 +84,19 @@ export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
   bridgeUrl?: string;
   /** Test seam — same shape `connection.ts`'s own `socketFactory` uses. */
   socketFactory?: (url: string) => WebSocketLike;
+  /**
+   * Where this module reports a binding it could not make good on — a
+   * `base_game` naming a mechanic nothing registered. It has nowhere else
+   * to put one: it is composed by the game's own page, not by the loader,
+   * so a throw would be collected by nobody and would take the page with
+   * it. Failures are data; this is the channel.
+   *
+   * Omitted is legitimate (the host-side half has no page to draw on), and
+   * the complaint is not lost when it is: `MechanicsService.check` reports
+   * the same unregistered binding, with the whole story, on the first
+   * spin. This one is earlier, not instead.
+   */
+  onDiagnostic?: (diagnostic: Diagnostic) => void;
 }
 
 /** The slice of WebSocket this module needs — enough to fake in a test. */
@@ -94,20 +120,32 @@ const STAGE = 'base_game';
 
 export const name = 'ide-bridge';
 
-// Deliberately not annotated `: Schema<IdeBridgeSettableConfig>` — the
-// schema's own inferred type (`base_game: 'classic' | 'cascade'`) is
-// narrower than `IdeBridgeSettableConfig.base_game: string`, and
-// schemastery's `Schema<T>` needs its declared T to match what it actually
-// validates. `IdeBridgeSettableConfig` stays the broader, simpler type
-// `apply()` itself works with (mirroring what actually arrives over the
-// wire — `mechanics.bind(stage, id: string)` and a broadcast row's config
-// are both untyped strings at that boundary); letting `Config` infer its
-// own precise literal-union type here costs nothing since nothing else in
-// this module names `Config`'s type.
+/**
+ * A free string, not an enum.
+ *
+ * It WAS `Schema.union(['classic', 'cascade'])` — the two mechanics the
+ * engine itself ships — and that made a project's own third mechanic
+ * unnameable from the IDE: writing `base_game: reel-step` into e8.yml
+ * failed cordis's config validation (`expected "classic" | "cascade"`)
+ * before `apply` ever ran, so the row never came up at all. Which
+ * mechanics exist is decided by what a composition registered at runtime,
+ * which no schema written in this file can know.
+ *
+ * The cost of a free string is that a typo is no longer caught by the
+ * form. That is answered where the answer is actually knowable — `apply`
+ * below reports a `base_game` nothing registered through `onDiagnostic`,
+ * and `MechanicsService.check` reports it again on the first spin. It is
+ * the same trade `checkAgainstSchema` already makes: a name is validated
+ * against what exists, not against a list kept by hand.
+ *
+ * **No `.default()`** — see `IdeBridgeSettableConfig.base_game`. A default
+ * here is a value nobody wrote, and this module would push it over the
+ * project's own binding on the first snapshot. The composition screen
+ * still renders an empty field the human can fill; what it no longer does
+ * is fill it in on their behalf and then act on it.
+ */
 export const Config = Schema.object({
-  base_game: Schema.union(['classic', 'cascade'] as const)
-    .default('classic')
-    .description('механика стадии base_game'),
+  base_game: Schema.string().description('механика стадии base_game'),
 });
 
 export function apply(ctx: Context, config: IdeBridgeConfig): void {
@@ -133,12 +171,52 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // asks the mechanics registry itself what is CURRENTLY bound — the one
   // source that is updated no matter which of the two writers changed it
   // — so this module can never skip a write it did not itself make.
+  // The last id this module complained about. Only ever suppresses a
+  // repeat of the same SENTENCE — never a bind, which stays unconditional
+  // above for the reason that comment gives.
+  let reportedUnregistered: string | null = null;
+
   const bind = (mechanicId: string) => {
-    if (mechanics.forStage(STAGE)?.id === mechanicId) return;
+    if (mechanics.forStage(STAGE)?.id === mechanicId) {
+      reportedUnregistered = null;
+      return;
+    }
     mechanics.bind(STAGE, mechanicId);
+    // Now that `base_game` is a free string, a typo reaches here instead
+    // of being refused by the schema — so this is where it gets answered.
+    // Asked of the registry AFTER the bind, because the registry is the
+    // only thing that knows: `bind` deliberately accepts an id nothing has
+    // registered YET (composition order is not knowable at bind time — see
+    // `MechanicsService.bind`), and by the time this module runs, the
+    // composition has settled, so `forStage` returning something else is a
+    // fact rather than a race.
+    if (mechanics.forStage(STAGE)?.id === mechanicId) {
+      reportedUnregistered = null;
+      return;
+    }
+    // `rpc.ts` broadcasts on every composition change and an unregistered
+    // id can never satisfy the dedupe above, so without this one edit
+    // produces one log line per broadcast — measured, four for a single
+    // keystroke-free `fill`.
+    if (reportedUnregistered === mechanicId) return;
+    reportedUnregistered = mechanicId;
+    config.onDiagnostic?.(
+      diagnostic(
+        'error',
+        'ide-bridge',
+        STAGE,
+        `the IDE bound stage "${STAGE}" to mechanic "${mechanicId}", but no mechanic with that id is registered in this game`,
+        `check the spelling, or add the row that registers "${mechanicId}" to this project's composition`,
+      ),
+    );
   };
 
-  bind(config.base_game);
+  // A row that names no mechanic says nothing — it does not push a value
+  // nobody wrote over whatever `e8.patch.yml` already bound. See
+  // `IdeBridgeSettableConfig.base_game`.
+  if (typeof config.base_game === 'string' && config.base_game.length > 0) {
+    bind(config.base_game);
+  }
 
   const url =
     config.bridgeUrl ?? (typeof location !== 'undefined' ? `ws://${location.host}/ide` : undefined);
@@ -172,7 +250,11 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     const row = message.snapshot.rows.find((candidate) => candidate.name === PACKAGE_NAME);
     if (!row) return;
     const rowConfig = row.config as { base_game?: unknown } | null;
-    if (typeof rowConfig?.base_game !== 'string') return;
+    // Same rule as the boot-time bind above: a row that names nothing —
+    // absent, or cleared back to an empty string in the form — leaves the
+    // running binding alone rather than resetting it to whatever the
+    // engine happens to ship.
+    if (typeof rowConfig?.base_game !== 'string' || rowConfig.base_game.length === 0) return;
     bind(rowConfig.base_game);
   });
 

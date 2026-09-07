@@ -98,7 +98,13 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   // `composition-screen.test.tsx`/`skeleton.spec.ts` already exercise.
   await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
   const mechanicField = page.getByLabel('механика стадии base_game');
-  await expect(mechanicField).toHaveValue('classic');
+  // Empty, and a free text box rather than a two-option `<select>`. Both
+  // changed on purpose: which mechanics exist is what a composition
+  // registered at runtime, so `base_game` is a plain string a project's own
+  // third mechanic can be typed into — and it carries no default, because a
+  // value nobody wrote used to be pushed over `e8.patch.yml`'s own binding
+  // on the first `/ide` snapshot after boot. See `IdeBridgeSettableConfig`.
+  await expect(mechanicField).toHaveValue('');
 
   // Markers to prove NEITHER the outer IDE page NOR the game's own iframe
   // page reload at any point below — a real navigation would wipe both.
@@ -109,25 +115,36 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
     (window as unknown as { __gameMarker: string }).__gameMarker = 'still-here';
   });
 
-  // A losing spin presents identically under both mechanics for a boring
-  // reason (nothing to remove) — that would prove nothing. Find a real
-  // winning spin (measured empirically: ~15% hit rate for this fixture's
-  // math, so 80 attempts is comfortably over 99.99% likely to find one).
+  // Bind `classic` FROM THE IDE first. This project's own `e8.patch.yml`
+  // binds `base_game` to `reel-step` (its `plugins/reel-step` row), so
+  // `classic` is no longer what the game boots on — and the point of this
+  // test is the IDE driving the binding, which now means driving it in both
+  // directions rather than only away from a default that happened to suit.
+  await mechanicField.fill('classic');
+
+  // A losing spin presents identically under every mechanic for a boring
+  // reason (nothing to remove, nothing to scroll) — that would prove
+  // nothing. Find a real winning spin (measured empirically: ~14% hit rate
+  // for this fixture's math). The `reelStep` exclusion is what makes this
+  // loop also the wait for the rebind to land: a winning spin under
+  // `reel-step` ALWAYS carries a `reelStep` step (the math's `reel_steps`
+  // is non-empty exactly when the spin paid), so an accepted outcome is
+  // proof the IDE's write has reached the running game.
   let classicResult:
     | {
         result: { stage: string; data: Record<string, unknown>; win: number };
         steps: { kind: string; [key: string]: unknown }[];
       }
     | undefined;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-    if (outcome.result.win > 0) {
+    if (outcome.result.win > 0 && !outcome.steps.some((s: { kind: string }) => s.kind === 'reelStep')) {
       classicResult = outcome;
       break;
     }
   }
   if (!classicResult)
-    throw new Error('no winning spin found in 80 attempts — math or fixture regressed');
+    throw new Error('no winning classic spin found in 200 attempts — math, fixture, or the IDE rebind regressed');
   const classicStepKinds = classicResult.steps.map((s) => s.kind);
 
   // What a person watching the classic presentation would see: the board
@@ -137,8 +154,8 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   expect(classicStepKinds).not.toContain('remove');
   expect(classicStepKinds).not.toContain('refill');
 
-  // Turn the knob — in the IDE, not in the game's own local <select>.
-  await mechanicField.selectOption('cascade');
+  // Turn the knob again — in the IDE, not in the game's own local <select>.
+  await mechanicField.fill('cascade');
 
   // Propagation is asynchronous (composition.update() -> e8.yml write and
   // fiber restart -> /ide broadcast -> ide-bridge's own websocket handler
