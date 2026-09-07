@@ -1,3 +1,47 @@
+/**
+ * The `e8` field of a plugin's package.json — the manifest a plugin author
+ * writes, and the shapes the host reads out of it.
+ *
+ * **Writing a plugin for one project, with no install step.**
+ *
+ * Documented here because this is the file a plugin author reads to write
+ * their `package.json`, and the rule itself lives in the IDE host's own
+ * internals (`resolvePackage.ts`), which a project does not depend on and
+ * would have no reason to open. It was reverse-engineered by the first
+ * person who tried; that is the gap this comment closes.
+ *
+ * A package named by a row is looked for in two places, in this order:
+ *
+ *  1. `<project>/plugins/<name>` — a directory placed by hand. No install,
+ *     no `node_modules` entry, not a workspace. This wins over an installed
+ *     package of the same name, deliberately: someone who put a plugin in
+ *     `plugins/` did it to have THAT one used.
+ *  2. ordinary Node resolution from the project (`node_modules`, including
+ *     workspace symlinks).
+ *
+ * So a whole plugin is four things:
+ *
+ *  - `<project>/plugins/<name>/package.json` — whose `"name"` and whose
+ *    **directory name must both be `<name>`**: the row's `name` is joined
+ *    straight onto `plugins/`, so `plugins/reel-step` is reached by a row
+ *    saying `name: reel-step`. A scoped name lands at
+ *    `plugins/@acme/thing`, nested exactly as written.
+ *  - `"e8": { "runtime": { "entry": "./src/index.ts" }, "hot": false }` —
+ *    see `E8RuntimeHalf` above for when a `.ts` entry is safe.
+ *  - the entry module itself, exporting `apply(ctx, config)` (and
+ *    optionally `name`, and a `Config` schema if the IDE should render a
+ *    form for it).
+ *  - a row in the project's `e8.patch.yml` carrying both an `id` and that
+ *    `name` — a patch row with a `name` INSERTS a row no bundle placed, and
+ *    it lands last, after the rows `e8-base` supplies.
+ *
+ * `engine/examples/first-slot/plugins/reel-step` is a worked example of all
+ * four, including the two halves a mechanic-bearing plugin needs.
+ *
+ * A plugin directory that is itself a symlink pointing outside `plugins/`
+ * does not resolve — deliberately, so a project-local drop-in cannot
+ * silently pull in code from elsewhere.
+ */
 import { type Diagnostic, diagnostic } from './diagnostic';
 
 /** The browser half of a plugin, loaded into the IDE at runtime. */
@@ -34,7 +78,24 @@ export interface E8ClientHalf {
  * at the end of a plan.
  */
 export interface E8RuntimeHalf {
-  /** Module path inside the package, relative to its root. */
+  /**
+   * Module path inside the package, relative to its root.
+   *
+   * **A `.ts` path works under `e8 dev` and not under `e8 ide`, and that is
+   * worth knowing before you pick one.** With `dev-game` composed (i.e.
+   * `e8 dev`) the host hands the browser `/@fs/<realpath>` served through
+   * that plugin's own vite instance, which strips types and rewrites bare
+   * specifiers — so `./src/index.ts` importing `pixi.js` is fine. With no
+   * vite on the origin (`e8 ide`) the host serves `/plugin-runtime/:id`,
+   * which is the file's bytes verbatim: a browser's native `import()`
+   * throws on the first piece of TypeScript syntax or the first bare
+   * specifier it meets. Ship a built `.js` for anything that must load
+   * under both. See `engine/ide/host/src/plugins/runtime-assets.ts`.
+   *
+   * The path must stay inside the package — an entry that resolves outside
+   * it (through a symlink, most often) is refused, with a diagnostic, at
+   * composition time and again on the raw route.
+   */
   entry: string;
 }
 
@@ -142,7 +203,7 @@ export function parseManifest(
           pluginId,
           'e8.runtime.entry',
           'the runtime half needs a module path in "entry"',
-          'add e8.runtime.entry, e.g. "./runtime.js"',
+          'add e8.runtime.entry — a built "./runtime.js" to load under both `e8 dev` and `e8 ide`, or "./src/index.ts" for a dev-only plugin vite will transform',
         ),
       );
     } else {

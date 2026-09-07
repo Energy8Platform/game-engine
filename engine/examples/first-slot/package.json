@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "test": "npm --prefix plugins/reel-step test",
+    "typecheck": "tsc --noEmit && npm --prefix plugins/reel-step run typecheck"
   },
   "dependencies": {
     "@energy8engine/contracts": "*",

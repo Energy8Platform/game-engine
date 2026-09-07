@@ -4,10 +4,25 @@
  *
  * This directory is not installed, not published, and not a workspace. It is
  * `<project>/plugins/reel-step`, a folder placed by hand, which the host
- * resolves ahead of `node_modules` (see `readProjectPlugin` in the IDE
- * host's `resolvePackage.ts`). One row in `first-slot`'s `e8.patch.yml`
- * names it and one line binds `base_game` to it. Nothing in `engine/game/`
- * or `engine/core/` knows this exists.
+ * resolves ahead of `node_modules`. One row in `first-slot`'s
+ * `e8.patch.yml` names it and one line binds `base_game` to it. Nothing in
+ * `engine/game/` or `engine/core/` knows this exists.
+ *
+ * The convention in full — where the directory goes, why its name must
+ * match the row's, what `e8.runtime.entry` may point at, and what a patch
+ * row needs — is written down on `@energy8engine/contracts`' `manifest.ts`,
+ * which is the file you read to write the `package.json` next to this one.
+ * (`readProjectPlugin` in the IDE host's `resolvePackage.ts` is what
+ * implements it, but a project does not depend on that package.)
+ *
+ * **Not a workspace, and still gated.** The root workspace glob reaches
+ * `first-slot` and stops there — it matches two levels under `engine/`, and
+ * this is three — so this directory's own tests and typecheck ran only by
+ * hand for a while. `first-slot`'s `package.json` now delegates both to it
+ * (`npm --prefix plugins/reel-step ...`), so the artifact that proves this
+ * slice's claim is checked by the same command that checks the project
+ * around it — without becoming an installed package and quietly weakening
+ * the "resolves with no install" half of that claim.
  *
  * **Both halves are here, and that is the whole point.** `classic` and
  * `cascade` ship in the engine because they fit the six step kinds the board
