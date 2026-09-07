@@ -1,13 +1,20 @@
 -- first-slot — spike: 5x3 lines game, no bonus stage.
--- Two win-representations from ONE spin, on purpose:
+-- Three win-representations from ONE spin, on purpose:
 --   `lines`           — single-pass evaluation of the initial grid (classic
 --                        mechanic: spin, reveal wins, done).
 --   `cascade_history` — the same board tumbled: winning cells removed,
 --                        gravity, refill, re-evaluate, repeat (cascade
 --                        mechanic consumes this instead).
--- classic mechanic ignores cascade_history; cascade mechanic ignores lines
--- (beyond round 0) and walks cascade_history instead. Same game, same
--- script, two playable shapes — switched from the IDE's composition screen.
+--   `reel_steps`      — the same board under the ReelStep rule: pay the
+--                        winning cells, then scroll every reel DOWN by its
+--                        own count of them. Nothing is removed — the
+--                        symbols ride down, fresh ones enter at the top,
+--                        the bottom ones ride off (a project plugin's
+--                        `reel-step` mechanic consumes this).
+-- classic ignores cascade_history and reel_steps; cascade ignores lines
+-- (beyond round 0) and reel_steps; reel-step ignores both of the others.
+-- Same game, same script, three playable shapes — switched from the IDE's
+-- composition screen.
 --
 -- The mechanic renders, the math pays: `win` (== `data.win`, the amount the
 -- server credits) accumulates EVERY cascade round, so it will not equal
@@ -15,6 +22,19 @@
 -- the round-0-only total — sum(lines[].win) === base_win, always. A
 -- `classic` presentation reveals `lines` + `base_win`; whichever mechanic is
 -- rendering, `win` is what actually got paid.
+--
+-- Where `reel_steps` sits in that sentence, stated here and not left to be
+-- inferred: it is a SECOND chain over the same landed board, not a
+-- re-labelling of the first. Round 0 is shared by all three forms — the
+-- reels land on `grid`, the same cells win, and
+-- reel_steps[0].win === base_win === sum(lines[].win) === cascade_history[0].win.
+-- From round 1 on the two chains are looking at different boards, because a
+-- scroll and a tumble move symbols differently, so sum(reel_steps[].win) is
+-- the ReelStep chain's OWN total and is not the credited figure. `win` is,
+-- and `win` is the tumble's total, because the tumble is the chain this
+-- `execute` actually walks. A `reel-step` presentation therefore shows its
+-- own chain and still reports `win` as what the player was paid — the same
+-- rule `classic` already lives under. See `session-dev/src/types.ts`.
 
 record Vars {
   max_win_reached: bool
@@ -43,6 +63,23 @@ record CascadeStep {
   win: float
 }
 
+-- One ReelStep round. The first three fields are the legacy
+-- `ReelStepController`'s own `ReelStepData` (`winningCells`, `shifts`,
+-- `settledGrid`) — the presentation needs exactly these to run the step.
+-- `win` is the fourth, and it is not decoration: without a per-round payout
+-- there is no "sum over reel_steps" to hold against `win` at all, and the
+-- three forms could disagree in silence. See the header.
+record ReelStep {
+  -- cells that won on the board this step ran against, paid before the scroll
+  winning: [CellPos]
+  -- how far each reel scrolls down; length = number of columns, 0 = stays put
+  shifts: [int]
+  -- the board after every reel has scrolled by its own shifts[col]
+  settled: [[int]]
+  -- this round's payout; reel_steps[0].win === base_win, always
+  win: float
+}
+
 enum SpinData tag stage {
   base_game {
     grid: [[int]]
@@ -52,6 +89,10 @@ enum SpinData tag stage {
     base_win: float
     lines: [LineWin]
     cascade_history: [CascadeStep]
+    -- the third form: the same landed board under the ReelStep rule.
+    -- sum(reel_steps[].win) is this chain's own total, NOT `win`; the two
+    -- chains share round 0 and diverge after it. See the header.
+    reel_steps: [ReelStep]
   }
 }
 
@@ -174,6 +215,49 @@ fn apply_gravity(gsym: [int; 15]) {
   }
 }
 
+-- ── the ReelStep rule ───────────────────────────────────────────────────
+-- Not a variant of the tumble above: nothing is removed and gravity never
+-- runs. A reel scrolls DOWN by one position per winning cell that landed on
+-- it, so its symbols ride down, that many fresh symbols enter at the top,
+-- and the same number ride off the bottom — winners and non-winners alike.
+-- That is why this is a second chain and not a second reading of the first:
+-- from round 1 on it is evaluating a board the tumble never produces.
+
+-- How far each reel scrolls: one position per winning cell on that reel.
+fn shifts_of(removed: [int; 15], col: int) -> int {
+  let n = 0
+  for row in 0..3 {
+    if removed[col * 3 + row] == 1 { n = n + 1 }
+  }
+  return n
+}
+
+fn shifts_out(c: ctx, removed: [int; 15]) -> [int] {
+  let l: [int] = list()
+  for col in 0..5 { push(l, shifts_of(removed, col)) }
+  return l
+}
+
+-- Scroll every reel down by its own shift, in place. Written bottom-up so
+-- each row reads a source row this pass has not overwritten yet.
+fn scroll_reels(c: ctx, gsym: [int; 15], removed: [int; 15]) {
+  for col in 0..5 {
+    let n = shifts_of(removed, col)
+    if n > 3 { n = 3 }
+    if n > 0 {
+      for k in 0..3 {
+        let row = 2 - k
+        let i = col * 3 + row
+        if row >= n {
+          gsym[i] = gsym[col * 3 + (row - n)]
+        } else {
+          gsym[i] = rng_weighted(c, SYM_W) + 1
+        }
+      }
+    }
+  }
+}
+
 fn grid_out(c: ctx, gsym: [int; 15]) -> [[int]] {
   let cols: [[int]] = list()
   for col in 0..5 {
@@ -184,10 +268,56 @@ fn grid_out(c: ctx, gsym: [int; 15]) -> [[int]] {
   return cols
 }
 
+-- Walk the ReelStep chain from the board the reels landed on. Same stop
+-- rule and same 10-round cap as the tumble: a round that pays nothing ends
+-- the chain, and no round is ever recorded without a payout — which is what
+-- makes "this spin has a reel chain" and "this spin paid" the same fact.
+fn reel_chain(c: ctx, landed: [int; 15]) -> [ReelStep] {
+  let g = [0; 15]
+  for i in 0..15 { g[i] = landed[i] }
+
+  let steps: [ReelStep] = list()
+  let iterations = 0
+
+  while iterations < 10 {
+    iterations = iterations + 1
+    let removed = [0; 15]
+    let line_row = [0; 3]
+    let line_sym = [0; 3]
+    let line_count = [0; 3]
+    let line_win = [0.0; 3]
+    let n = mark_and_pay(g, removed, line_row, line_sym, line_count, line_win)
+    if n == 0 { break }
+
+    -- read the round off the board it ran against, THEN scroll: `winning`
+    -- and `shifts` name the pre-scroll board, `settled` is the post-scroll one.
+    let winning = removed_out(c, removed)
+    let shifts = shifts_out(c, removed)
+    let step_win = total_of(n, line_win)
+
+    scroll_reels(c, g, removed)
+
+    push(steps, ReelStep {
+      winning: winning,
+      shifts: shifts,
+      settled: grid_out(c, g),
+      win: step_win,
+    })
+  }
+
+  return steps
+}
+
 fn execute(c: ctx, v: Vars) -> outcome {
   let gsym = [0; 15]
   fill_grid(c, gsym)
   let initial_grid = grid_out(c, gsym)
+
+  -- The board the reels landed on, kept aside: the tumble below consumes
+  -- `gsym`, and the ReelStep chain has to start from the same board — that
+  -- shared round 0 is the whole reason the three forms agree about anything.
+  let landed = [0; 15]
+  for i in 0..15 { landed[i] = gsym[i] }
 
   let steps: [CascadeStep] = list()
   let total_win = 0.0
@@ -242,6 +372,11 @@ fn execute(c: ctx, v: Vars) -> outcome {
   let round_lines = lines_out(c, r0_n, r0_row, r0_sym, r0_count, r0_win)
   let base_win = total_of(r0_n, r0_win)
 
+  -- Run last, on the copy: the tumble's RNG draws stay exactly what they
+  -- were before this chain existed, so adding a third form changed no
+  -- board the other two already described.
+  let reel_steps = reel_chain(c, landed)
+
   return outcome {
     win: total_win,
     vars: Vars { max_win_reached: false },
@@ -251,6 +386,7 @@ fn execute(c: ctx, v: Vars) -> outcome {
       base_win: base_win,
       lines: round_lines,
       cascade_history: steps,
+      reel_steps: reel_steps,
     },
   }
 }
