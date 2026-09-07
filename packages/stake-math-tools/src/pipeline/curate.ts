@@ -530,6 +530,11 @@ async function curateWithEngineIfPossible(
   if (!source) return null;
 
   const params = resolveOptimizeParams(mode.curate, source.achieved, source.rows);
+  // Only `tiered` was ported. An `nnls` mode has to stay on the TypeScript
+  // path — running it through the engine would silently curate it with a
+  // different algorithm, and nothing about the artifacts would look wrong.
+  if ((params.algorithm ?? 'tiered') !== 'tiered') return null;
+
   const result = await curateWithEngine(
     poolLut,
     params,

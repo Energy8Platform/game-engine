@@ -126,6 +126,25 @@ describe.skipIf(!binary)('curation in the engine', () => {
     expect(engine.lut.split('\n').filter((l) => l.trim()).length).toBe(4_000);
   }, 120_000);
 
+  it('leaves an nnls mode to the TypeScript optimizer', async (ctx) => {
+    if (!engineCurates) return ctx.skip();
+
+    // Only `tiered` was ported. Handing an nnls mode to the engine would curate
+    // it with a different algorithm and nothing in the artifacts would say so.
+    const nnls: ResolvedMode = {
+      ...mode,
+      curate: { ...mode.curate, algorithm: 'nnls', nRowsOut: 200 },
+    };
+    const out = join(dir, 'out-nnls');
+    mkdirSync(out, { recursive: true });
+    const res = await curateMode(nnls, { poolDir, outDir: out, skipEvents: true });
+
+    // The NNLS path concentrates weight — tiered never would.
+    expect(res.rows.length).toBe(200);
+    expect(res.toleranceMet.weightCap).toBeDefined();
+    expect(res.rows.some((r) => r.weight !== res.rows[0].weight)).toBe(true);
+  }, 120_000);
+
   it('falls back to the JS path when the engine is switched off', async (ctx) => {
     if (!engineCurates) return ctx.skip();
 
