@@ -217,3 +217,69 @@ describe('createBoardStepRegistry — two plugins claiming one kind', () => {
     expect(diagnostics.some((d) => d.message.includes('reelStep') && d.message.includes('already registered'))).toBe(true);
   });
 });
+
+/**
+ * `board[step.kind]` is a property read on an object with a prototype, and
+ * it used to run for EVERY kind — so which kinds actually reached the
+ * registry was decided by JavaScript's object model rather than by the
+ * vocabulary.
+ *
+ * The board-first rule is now gated on `KNOWN_STEP_KINDS`: the six kinds
+ * `BoardApi` declares go to the board, everything else goes straight to
+ * the registry. That is exactly what this file's module doc always
+ * claimed, and what `executePlan`'s own doc says.
+ */
+describe('executePlan — the board only wins the kinds BoardApi actually declares', () => {
+  it("a kind named after an Object.prototype member reaches its registered handler", () => {
+    // Before the gate: `board.toString` is inherited from
+    // `Object.prototype`, `typeof` it is `'function'`, so `executePlan`
+    // called THAT and the plugin's handler was never consulted — silently,
+    // because `Object.prototype.toString.call(board)` returns a string
+    // rather than throwing. Same for `valueOf`, `constructor`,
+    // `hasOwnProperty`.
+    return Promise.all(
+      ['toString', 'valueOf', 'constructor', 'hasOwnProperty'].map(async (kind) => {
+        const registry = createBoardStepRegistry();
+        let ran = false;
+        registry.register({ kind, run: async () => { ran = true; } });
+        const diagnostics = await executePlan([{ kind }], fakeBoard(), registry);
+        expect(diagnostics, `${kind} should run clean`).toEqual([]);
+        expect(ran, `${kind} should have reached its handler`).toBe(true);
+      }),
+    );
+  });
+
+  it('a board method for a kind BoardApi never declared does not outrank the registry', async () => {
+    // `ReelsBoard` really does carry methods past the six — `destroy()`
+    // among them — so "whatever the board happens to have" is a wider and
+    // more dangerous rule than "the six", not a hypothetical one.
+    const board = { ...fakeBoard(), reelStep: async () => { throw new Error('board must not win this'); } };
+    const registry = createBoardStepRegistry();
+    let ran = false;
+    registry.register({ kind: 'reelStep', run: async () => { ran = true; } });
+
+    const diagnostics = await executePlan([{ kind: 'reelStep' }], board as never, registry);
+    expect(diagnostics).toEqual([]);
+    expect(ran).toBe(true);
+  });
+
+  it('a kind BoardApi never declared, with nothing registered, is still reported', async () => {
+    // The gate must not turn an unknown kind into silence: the board is
+    // no longer asked, so the message is now only about the registry, and
+    // it still has to appear.
+    const registry = createBoardStepRegistry();
+    const [d] = await executePlan([{ kind: 'toString' }], fakeBoard(), registry);
+    expect(d).toBeDefined();
+    expect(d.message).toContain('toString');
+  });
+
+  it('the six still go to the board even when something is registered for them', async () => {
+    // The rule this gate must not weaken, restated against the gate.
+    const board = fakeBoard();
+    const registry = createBoardStepRegistry();
+    registry.register({ kind: 'spinTo', run: async () => { throw new Error('registry must not win'); } });
+    const diagnostics = await executePlan([{ kind: 'spinTo', board: [[1]] }], board, registry);
+    expect(diagnostics).toEqual([]);
+    expect(board.calls).toEqual(['spinTo']);
+  });
+});

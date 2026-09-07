@@ -238,9 +238,10 @@ export function createBoardStepRegistry(): BoardStepRegistry {
  * second half, a project that registers `reelStep` and then typos it as
  * `reelStap` would be told about `spinTo, revealWins, …` — true, but not
  * the one kind the typo was actually reaching for. A `Set` dedupes the
- * unlikely case of a registry also holding one of the six (never reached
- * through it — the board always wins those, see `executePlan` — but still
- * "known" in the sense this message means).
+ * unlikely case of a registry also holding one of the six — reachable
+ * only against a board that is missing a method its own interface
+ * declares, since a board that HAS the method always wins it (see
+ * `executePlan`), and "known" in the sense this message means either way.
  */
 function knownKindsList(registry: BoardStepRegistry | undefined): string {
   const kinds = new Set<string>(KNOWN_STEP_KINDS);
@@ -275,8 +276,11 @@ type BoardMethod = (step: PresentationStep) => Promise<void>;
  * on is exactly the kind of failure this function promises to report as
  * data, not throw on.
  *
- * `registry` is optional and checked ONLY when `board` has no method for
- * the step's kind — see this file's module doc for why that order is not
+ * `registry` is optional, and reached only after the board has had its
+ * refusal: for a kind in `KNOWN_STEP_KINDS`, that means the board carries
+ * no method for it; for any other kind, the board is not asked at all
+ * (see the gate below for why "not asked" and "has no method" are not the
+ * same thing). See this file's module doc for why that order is not
  * incidental. A caller that never passes a registry (every one of this
  * file's own tests before this parameter existed, and every caller
  * outside this package until something hands it one) gets exactly the
@@ -365,16 +369,38 @@ export async function executePlan(
     // the plan. See `tests/registry.test.ts`'s "a registry whose get()
     // throws" and "a board whose property lookup throws".
     try {
-      const method = (board as unknown as Record<string, BoardMethod | undefined>)[step.kind];
+      // The board gets first refusal on the SIX KINDS `BoardApi`
+      // declares, and only those. A registered handler is consulted after
+      // the board has said it has nothing, never before: reversing that
+      // would let a plugin's registration win over `spinTo` (or any other
+      // built-in) for every game that loads it, silently. See this file's
+      // module doc and `tests/registry.test.ts`'s "a built-in kind still
+      // goes to the board, not the registry".
+      //
+      // `KNOWN_STEP_KINDS` is what gates it, and the gate is load-bearing
+      // twice over. `board[step.kind]` is an ordinary property read on an
+      // object with a prototype, so ungated it answered for names nobody
+      // put on a board:
+      //
+      //  - a plugin registering `toString`, `valueOf`, `constructor` or
+      //    `hasOwnProperty` was silently never consulted — the INHERITED
+      //    member is a function, so `typeof method === 'function'` held
+      //    and `Object.prototype.toString.call(board)` ran instead, which
+      //    returns a string rather than throwing, so nothing complained;
+      //  - and any own method a board happens to carry past the six
+      //    outranked a plugin's handler for that name. Not hypothetical:
+      //    `@energy8engine/reels`' `ReelsBoard` carries `destroy()`, so a
+      //    step kind `destroy` would have torn the board down.
+      //
+      // Gating on the vocabulary makes the rule exactly what both docs
+      // already claimed — the six go to the board, everything else goes
+      // to the registry — instead of "whatever the board object answers
+      // to", which is a wider set than anyone writes down.
+      const isKnownKind = (KNOWN_STEP_KINDS as readonly string[]).includes(step.kind);
+      const method = isKnownKind
+        ? (board as unknown as Record<string, BoardMethod | undefined>)[step.kind]
+        : undefined;
 
-      // The board gets first refusal on every kind, known or not —
-      // including one of the six `BoardApi` already has a method for. A
-      // registered handler is consulted only once the board has said it
-      // has nothing, never before: reversing this would let a plugin's
-      // registration win over `spinTo` (or any other built-in) for every
-      // game that loads it, silently. See this file's module doc and
-      // `tests/registry.test.ts`'s "a built-in kind still goes to the
-      // board, not the registry".
       if (typeof method === 'function') {
         await method.call(board, step);
         continue;
@@ -392,7 +418,14 @@ export async function executePlan(
           'error',
           'play-loop',
           where,
-          `board cannot perform step "${step.kind}": no matching method` +
+          // Worded off `isKnownKind` because the two situations are
+          // genuinely different and a person debugging needs them apart:
+          // a known kind the board could not perform is a board that is
+          // missing a method it declares; an unknown kind was never the
+          // board's to perform at all, and the board was not asked.
+          (isKnownKind
+            ? `board cannot perform step "${step.kind}": no matching method`
+            : `nothing can perform step "${step.kind}": it is not one of the kinds a board declares`) +
             (registry ? ', and nothing is registered for it either' : '') +
             ` — known kinds: ${knownKindsList(registry)}`,
         ),
