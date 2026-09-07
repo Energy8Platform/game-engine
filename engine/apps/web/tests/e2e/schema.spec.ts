@@ -139,9 +139,12 @@ test('a .spin the parser can only half-read still plays, with the dropped declar
   page.on('pageerror', (error) => pageErrors.push(String(error)));
   try {
     // One unterminated `record` — an ordinary missing-brace typo, mid
-    // edit. `CellPos` is chosen because nothing the bound `classic`
-    // mechanic REQUIRES is typed by it, so this measures the half-parse
-    // rule itself and not the pre-flight check's separate behaviour.
+    // edit. `CellPos` is chosen because none of the fields the BOUND
+    // mechanic requires is typed by it: `first-slot`'s patch binds
+    // `base_game` to `reel-step`, which needs `grid` and `reel_steps`, and
+    // both keep their declared types when `CellPos` is dropped. So this
+    // measures the half-parse rule itself, not the pre-flight check's
+    // separate behaviour.
     const spin = join(dir, 'game', 'script.spin');
     const source = readFileSync(spin, 'utf8');
     const broken = source.replace(
