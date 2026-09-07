@@ -107,6 +107,33 @@ const stored: AnySpinMechanic[] = [plugin, closedByDefault];
 /** And what a registry hands back is what `executePlan` takes, unchanged. */
 const forExecute: PresentationStep[] = stored[0].present({});
 
+/**
+ * Why `AnySpinMechanic`'s `{ kind: string }` is a STORAGE type and never an
+ * authoring one — the three facts its doc comment states, checked here so
+ * the doc cannot drift from the compiler.
+ *
+ * The premise this replaces was backwards: it claimed `{ kind: string }`
+ * carries an implicit index signature and would absorb a typo'd literal
+ * "exactly the way `UnknownPresentationStep` does". It does the reverse. A
+ * maintainer reasoning from the old sentence would have concluded the
+ * widest storage type was dangerous for the wrong reason, and might have
+ * "fixed" it by widening `TStep`'s constraint to `UnknownPresentationStep`
+ * — which is the one change that WOULD lose the guarantee.
+ */
+type WidestStep = KnownPresentationStep | { kind: string };
+
+/** 1. It REJECTS a typo'd built-in — the index signature is what absorbs, and it has none. */
+// @ts-expect-error `boardTYPO` is excess against both members
+const notAbsorbed: WidestStep[] = [{ kind: 'spinTo', boardTYPO: 1 }];
+
+/** 2. It rejects a plugin's OWN fields too — too strict to author against, which is why `TStep` exists. */
+// @ts-expect-error `shifts` does not exist in type '{ kind: string; }'
+const tooStrictToAuthorAgainst: WidestStep[] = [{ kind: 'reelStep', shifts: [1] }];
+
+/** 3. And an existing value widens into it with no excess-property check at all. */
+const alreadyTyped: ReelStepStep = { kind: 'reelStep', shifts: [1], settled: [[1]] };
+const widensCleanly: WidestStep = alreadyTyped;
+
 describe('SpinMechanic — open to a plugin, closed to a typo', () => {
   it('a plugin mechanic emits its own step kind alongside the built-in ones', () => {
     expect(plugin.present({}).map((step) => step.kind)).toEqual(['spinTo', 'reelStep']);
@@ -127,5 +154,8 @@ describe('SpinMechanic — open to a plugin, closed to a typo', () => {
     expect(mistypedBuiltIn()).toHaveLength(1);
     expect(strayFieldOnOwnStep()).toHaveLength(1);
     expect(stored).toHaveLength(2);
+    expect(notAbsorbed).toHaveLength(1);
+    expect(tooStrictToAuthorAgainst).toHaveLength(1);
+    expect(widensCleanly).toBe(alreadyTyped);
   });
 });

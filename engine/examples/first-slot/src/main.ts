@@ -283,20 +283,19 @@ async function presentStage(
   const mechanic = game.ctx.mechanics.forStage(stage)!;
 
   // Keep the control honest about what actually rendered. The binding has
-  // two other writers besides this page's `<select>`: `e8.patch.yml`, and
-  // `@energy8engine/ide-bridge`, which rebinds `base_game` to whatever its
-  // own `e8.yml` row says on every `/ide` snapshot — including the one the
-  // host broadcasts the moment the socket connects, seconds after boot.
-  // MEASURED, not supposed: with the patch binding `reel-step`, the page
-  // came up on `reel-step` and was rebound to `classic` by that first
-  // snapshot, with the dropdown still reading `reel-step`. The reason the
-  // IDE cannot say `reel-step` at all is that `ide-bridge`'s own `Config`
-  // is `Schema.union(['classic', 'cascade'])` — a closed enum of the two
-  // mechanics the ENGINE ships, which a project's third mechanic is not in.
-  // Widening it is an edit to `engine/game/ide-bridge`; see
-  // task-8-9-report.md for why that was reported instead of made. Until it
-  // is, the least this page can do is not lie about which mechanic drew the
-  // board.
+  // two writers besides this page's `<select>`: `e8.patch.yml`, which sets
+  // it, and `@energy8engine/ide-bridge`, which rebinds it live whenever a
+  // human writes a value into that row from the IDE's composition screen.
+  // Neither of them touches this element, so without this line the dropdown
+  // would keep showing whatever it showed last while the board drew
+  // something else.
+  //
+  // A mechanic id the dropdown has no `<option>` for leaves it alone rather
+  // than blanking it: `base_game` is free text in the IDE now, so an id
+  // this page never heard of is reachable and is not this control's to
+  // display. It is reported instead — see `ideBridge.apply`'s
+  // `onDiagnostic` above, and `mechanics.check` at the top of this
+  // function.
   if ([...mechanicSelect.options].some((option) => option.value === mechanic.id)) {
     mechanicSelect.value = mechanic.id;
   }

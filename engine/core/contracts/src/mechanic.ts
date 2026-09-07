@@ -91,12 +91,26 @@ export interface SpinMechanic<TStep extends { kind: string } = never> {
  * default `SpinMechanic`.
  *
  * This is the type to store and hand back, never the type to author a
- * mechanic against: `{ kind: string }` is an anonymous object type, so it
- * carries an implicit index signature and would absorb a typo'd literal
- * exactly the way `UnknownPresentationStep` does. Nothing assigns a fresh
- * object literal to it — mechanics are authored against `SpinMechanic<T>`
- * and merely widen into this on the way into a registry, which is ordinary
- * assignability and not an excess-property check at all.
+ * mechanic against — and the reason is the opposite of the one you might
+ * expect from `UnknownPresentationStep`. Measured, not reasoned:
+ *
+ *   - `KnownPresentationStep | { kind: string }` **rejects** a typo'd
+ *     built-in, `{ kind: 'spinTo', boardTYPO: 1 }` — `TS2353`. It does not
+ *     absorb one. That absorption is `UnknownPresentationStep`'s doing, and
+ *     it comes from its INDEX SIGNATURE, which `{ kind: string }` does not
+ *     have.
+ *   - It also rejects a plugin's own fields, `{ kind: 'reelStep',
+ *     shifts: [1] }` — `TS2353` again, "'shifts' does not exist in type
+ *     '{ kind: string; }'". So it is too STRICT to author against, not too
+ *     loose: a mechanic written against it could not write its own step at
+ *     all. That is precisely the design task 7 tried and rejected, and it
+ *     is why `TStep` exists.
+ *   - As a STORAGE type it is exactly right: an existing value of any
+ *     `SpinMechanic<T>` widens into it by ordinary structural subtyping,
+ *     with no excess-property check involved, because nothing assigns a
+ *     fresh object literal here.
+ *
+ * All three are pinned in `tests/mechanic-open.test.ts`.
  */
 export type AnySpinMechanic = SpinMechanic<{ kind: string }>;
 
