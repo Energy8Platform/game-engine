@@ -433,4 +433,23 @@ spinBtn.addEventListener('click', async () => {
   spins(): readonly unknown[] {
     return game.ctx.reflect.get('spinLog', false)?.entries() ?? [];
   },
+  /**
+   * Which mechanic is bound to `stage` right now — a READ of the registry,
+   * never a write. There is still no `bind()` here: rebinding goes through
+   * the IDE, which is the stronger test because it exercises the whole pipe.
+   *
+   * It exists because the IDE's write arrives asynchronously (e8.yml ->
+   * fiber restart -> /ide broadcast -> ide-bridge), so a test has to wait
+   * for it, and the only other thing it could wait on is the presentation
+   * it is about to assert about — waiting for the plan to look right and
+   * then checking that the plan looks right. Reading the binding separates
+   * "has the rebind landed" from "is the presentation correct", so the
+   * second question is asked once and answered honestly.
+   *
+   * `null` when nothing is bound, or when the stage is bound to an id
+   * nothing has registered (see `MechanicsService.forStage`).
+   */
+  bound(stage: string): string | null {
+    return game.ctx.reflect.get('mechanics', false)?.forStage(stage)?.id ?? null;
+  },
 };

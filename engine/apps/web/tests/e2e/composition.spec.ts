@@ -70,59 +70,16 @@
  * there; and `stop()` has to be able to WAIT for the port to be free,
  * since `playwright.config.ts` runs this suite with `workers: 1` and the
  * next spec file binds the same port.
+ *
+ * Both of those — the copy and the host — now live in `./project-fixture`,
+ * because `reel-step.spec.ts` needs the same two and a second copy of them
+ * would drift. The reasoning that shaped each one moved with it.
  */
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
-import * as devGame from '@energy8engine/ide-host/dev-game';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXAMPLES = join(__dirname, '..', '..', '..', '..', 'examples');
-const FIXTURE = join(EXAMPLES, 'first-slot');
-
-/** A private, writable copy of `first-slot`. Never the checked-in example itself. */
-function projectCopy(): string {
-  const dir = mkdtempSync(join(EXAMPLES, 'e8-compose-'));
-  cpSync(FIXTURE, dir, {
-    recursive: true,
-    // The fixture's `node_modules` holds nothing but vite's own
-    // optimize-deps cache. Copying it hands the new server a cache keyed
-    // to a different root — the stale-bundle trap; let vite build its own.
-    filter: (src) => !src.endsWith('/node_modules'),
-  });
-  return dir;
-}
-
-interface DevHost {
-  /** Origin of the running GAME — `dev-game`'s catch-all owns `/` on the host's own port. */
-  gameUrl: string;
-  stop(): Promise<void>;
-}
-
-/** Boots `e8 dev` in `dir`: the same host, with the same `dev-game` on top, the CLI's `dev` command boots. */
-async function startDevHost(dir: string): Promise<DevHost> {
-  const gamesDir = join(dir, 'game');
-  // Read from the project, the way the CLI does — not hardcoded here, so
-  // a fixture that renamed its game could not silently keep passing.
-  const spec = JSON.parse(readFileSync(join(gamesDir, 'spec.json'), 'utf8')) as {
-    id: string;
-    betLevels?: number[];
-  };
-  const host: IdeHost = await createIdeHost({ cwd: dir, port: 5679 });
-  await host.ctx.plugin(devGame, {
-    root: dir,
-    gamesDir,
-    gameId: spec.id,
-    betLevel: spec.betLevels?.[0] ?? 1,
-    port: 0,
-  });
-  // `host.stop()` awaits the fiber's disposal, which closes the HTTP
-  // server — the next spec file may bind 5679 the moment this resolves.
-  return { gameUrl: host.url, stop: () => host.stop() };
-}
+import { projectCopy, startDevHost } from './project-fixture';
 
 /**
  * The fixture's own patch with exactly ONE row changed: `reels1` stops
