@@ -1,6 +1,9 @@
-# The baseline row set every slot game composes from. These six packages
-# used to be hardcoded into `createGame` (in `@energy8engine/game-runtime`)
-# as static imports; they are rows now, and this file is where they live.
+# The baseline row set every slot game composes from. Six of these seven
+# packages used to be hardcoded into `createGame` (in
+# `@energy8engine/game-runtime`) as static imports; they are rows now, and
+# this file is where they live. The seventh, `spinlog1`, was never
+# hardcoded anywhere — it is the "adding a seventh is an edit to a bundle"
+# case below, done.
 # `@energy8engine/project`'s `resolveComposition` reads it (see
 # `engine/ide/host/src/plugins/project.ts`, which resolves this bundle for
 # any project whose `e8.profile.yml` lists `e8-base`), the host serves the
@@ -29,3 +32,14 @@ rows:
     name: '@energy8engine/game-runtime'
   - id: playloop1
     name: '@energy8engine/play-loop'
+  # The durable record of what happened, as opposed to the live events of
+  # what is shown (§7 of the spec). Baseline rather than per-project
+  # because of the note that spec attaches to it: a log added later is a
+  # log of everything after it was added.
+  #
+  # Nothing requires this row. Drop it from a profile's stack, or
+  # `remove: true` it in a patch, and the game plays exactly as before
+  # keeping no record — `@energy8engine/play-loop`'s `record()` looks the
+  # service up per call and does nothing when it isn't there.
+  - id: spinlog1
+    name: '@energy8engine/spin-log'

@@ -63,6 +63,11 @@ import {
 // capabilities it expects the project's composition to have provided.
 import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/play-loop/runtime';
+// Same device again, for `ctx.spinLog` — the durable record of spins the
+// `spinlog1` row provides. Unlike the two above it is NOT in `REQUIRES`:
+// this page reads it only through `reflect.get(..., false)`, and a game
+// with no log is a working game.
+import type {} from '@energy8engine/spin-log/runtime';
 
 /** Matches `e8.patch.yml`'s `reels1` grid — this file only uses it to size the placeholder art. */
 const CELL = 96;
@@ -308,11 +313,49 @@ async function presentStage(
 
 let lastSpin: { stage: string; data: Record<string, unknown> } | null = null;
 
+/**
+ * What this page asks the math for. It has no bet control, so the body is
+ * empty and `dev-game` falls back to the composition's own bet level — but
+ * it is sent, and it is what the log records, so the request in the record
+ * is the request that was made rather than a guess at it.
+ */
+function spinRequest(): Record<string, unknown> {
+  return {};
+}
+
+/**
+ * Writes one spin into the composition's durable log: what was asked, what
+ * came back, and the plan it was actually presented with.
+ *
+ * Called at each SPIN, never inside `presentStage`. `presentStage` is also
+ * the replay path — `__e8.present` re-runs one captured result under a
+ * different mechanic — and three replays of one spin are one line in this
+ * log, not three. That is §7's distinction and the reason the log is kept
+ * apart from the live events of the presentation: the result is the fact,
+ * the plan is an interpretation of it.
+ *
+ * Through `reflect.get` for the same reason `REQUIRES` above is: a
+ * composition with no `playloop1` row is a legal edit, already reported as
+ * a diagnostic, and it must not turn into a `TypeError` here — least of all
+ * on the line whose job is keeping a record when things are going wrong.
+ * The row that provides the log itself (`spinlog1`) is not in `REQUIRES` at
+ * all, on purpose: a game that keeps no record is a working game, and
+ * `play.record` is a no-op without one.
+ */
+function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep[]): void {
+  game.ctx.reflect.get('play', false)?.record({ request, result, plan });
+}
+
 spinBtn.addEventListener('click', async () => {
   spinBtn.disabled = true;
   statusEl.textContent = 'spinning…';
   try {
-    const res = await fetch('/api/spin', { method: 'POST' });
+    const request = spinRequest();
+    const res = await fetch('/api/spin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    });
     // `dev-game`'s route responds with the bare `SpinResult` (contracts'
     // normative envelope for this crossing) on 2xx, or `{ diagnostics }`
     // on a non-2xx — see dev-game.ts's own route handler.
@@ -327,7 +370,8 @@ spinBtn.addEventListener('click', async () => {
     const result = body as SpinResult;
     log(`win ${result.win} (total ${result.totalWin}), stage "${result.stage}"`);
     lastSpin = { stage: result.stage, data: result.data };
-    await presentStage(result.stage, result.data);
+    const steps = await presentStage(result.stage, result.data);
+    recordSpin(request, result, steps);
     statusEl.textContent = 'done';
   } catch (error) {
     log(`error: ${error instanceof Error ? error.message : String(error)}`);
@@ -353,7 +397,12 @@ spinBtn.addEventListener('click', async () => {
   diagnostics,
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
   async spin(): Promise<{ result: SpinResult; steps: PresentationStep[] }> {
-    const res = await fetch('/api/spin', { method: 'POST' });
+    const request = spinRequest();
+    const res = await fetch('/api/spin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    });
     const body: SpinResult | { diagnostics: unknown[] } = await res.json();
     if (!res.ok) {
       throw new Error(
@@ -363,6 +412,11 @@ spinBtn.addEventListener('click', async () => {
     const result = body as SpinResult;
     lastSpin = { stage: result.stage, data: result.data };
     const steps = await presentStage(result.stage, result.data);
+    // Recorded here too, and for the same reason the button records: this
+    // is a real spin, indistinguishable from a click. A harness that
+    // skipped it would make the log say something different from what the
+    // game does.
+    recordSpin(request, result, steps);
     return { result, steps };
   },
   /** Re-presents arbitrary (or the last captured) stage data under whichever mechanic is currently bound — the same `data`, a possibly different mechanic. */
@@ -370,5 +424,13 @@ spinBtn.addEventListener('click', async () => {
     const target = stage && data ? { stage, data } : lastSpin;
     if (!target) throw new Error('no spin to present yet');
     return presentStage(target.stage, target.data);
+  },
+  /**
+   * What the durable log holds — the spins that actually happened, not the
+   * presentations that were drawn. `[]` when no `spin-log` row is in the
+   * composition, which is a legal composition.
+   */
+  spins(): readonly unknown[] {
+    return game.ctx.reflect.get('spinLog', false)?.entries() ?? [];
   },
 };

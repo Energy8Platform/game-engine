@@ -82,6 +82,52 @@ test('the running game is visible in the IDE preview, and a spin plays', async (
   await expect.poll(() => frame.locator('#status').textContent(), { timeout: 15_000 }).toBe('done');
 });
 
+/**
+ * The `spin-log` row, in a real composed game — the only place the claim
+ * "the composition brings a durable log and the play loop writes to it"
+ * can actually be checked. Its unit tests prove the log keeps a record and
+ * that `play.record` reaches one; neither of them proves any row composes
+ * a log or that anything calls `record`, which is precisely how a feature
+ * ends up wired to nothing.
+ *
+ * The second half is the distinction the package exists for: a
+ * re-presentation is not a spin. `__e8.present()` runs a whole plan
+ * through the board again — everything a viewer would see — and the log
+ * must not grow, because nothing happened.
+ */
+test('the spin that played is written down, and re-presenting it is not a second spin', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const frame = await gameFrame(page);
+  await expect
+    .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
+    .toBe('ready');
+
+  // Nothing has happened yet, so there is nothing to have recorded. Also
+  // the check that `spins()` is reaching a real log rather than answering
+  // `[]` because no `spin-log` row composed — the assertions below would
+  // fail on that, this one would not.
+  expect(await frame.evaluate(() => (window as any).__e8.spins())).toEqual([]);
+
+  const outcome = await frame.evaluate(() => (window as any).__e8.spin());
+  const recorded = await frame.evaluate(() => (window as any).__e8.spins());
+
+  expect(recorded).toHaveLength(1);
+  // What happened: the server's result, whole and unedited.
+  expect(recorded[0].result).toEqual(outcome.result);
+  // And how it was shown: the same plan the board was actually asked to
+  // run, content and all — not a summary of it, and not the kinds alone.
+  expect(recorded[0].plan).toEqual(outcome.steps);
+  // What was asked. Empty today (this page has no bet control), but it is
+  // the body that was actually posted, not a placeholder.
+  expect(recorded[0].request).toEqual({});
+
+  // Drawing the same result again is not a second spin.
+  await frame.evaluate(() => (window as any).__e8.present());
+  expect(await frame.evaluate(() => (window as any).__e8.spins())).toHaveLength(1);
+});
+
 test('switching base_game from classic to cascade in the IDE presents the SAME spin result differently — live, with no reload', async ({
   page,
 }) => {

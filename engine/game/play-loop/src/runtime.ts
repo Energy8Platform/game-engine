@@ -4,7 +4,7 @@
  * See `@energy8engine/renderer-pixi`'s `src/runtime.ts` module doc: this is
  * a real TypeScript module served through `dev-game`'s own vite instance.
  *
- * This row composes two things a game cannot reach otherwise:
+ * This row composes three things a game cannot reach otherwise:
  *
  *  1. **`ctx.play.execute`** — `./index.ts`'s `executePlan` is a plain
  *     function with no cordis dependency of its own, so this puts it on
@@ -12,6 +12,11 @@
  *     of `@energy8engine/play-loop` at all).
  *  2. **`ctx.steps`** — a `BoardStepRegistry`, created here, which
  *     `execute` consults by default.
+ *  3. **`ctx.play.record`** — the one door to the composition's `spin-log`,
+ *     which may not be there at all. See `PlayService.record` for why it is
+ *     a separate call rather than something `execute` does on its own: a
+ *     plan is run for every re-presentation, and only some of those are
+ *     spins.
  *
  * The second exists because the first was, on its own, a door to a room
  * nobody could enter. `executePlan` grew an optional `registry` parameter
@@ -45,6 +50,12 @@
  */
 import type { Context } from 'cordis';
 import type { Diagnostic, PresentationStep } from '@energy8engine/contracts';
+import type { SpinLog, SpinLogEntry } from '@energy8engine/spin-log';
+// Type-only and fully erased — the same device `first-slot`'s `main.ts`
+// uses. This is the module that DECLARES `ctx.spinLog` on cordis's
+// `Context`; importing its types is not importing it, and nothing here
+// pulls `spin-log` into a composition that did not ask for it.
+import type {} from '@energy8engine/spin-log/runtime';
 import {
   createBoardStepRegistry,
   executePlan,
@@ -70,6 +81,23 @@ export interface PlayService {
    * service does not need a second `inject` to reach it.
    */
   steps: BoardStepRegistry;
+  /**
+   * Writes one spin down: what was asked, what came back, and the plan it
+   * was presented with. Goes to the composition's `spin-log` if there is
+   * one, and nowhere at all if there isn't — the log is optional, and a
+   * caller does not have to know which.
+   *
+   * Never throws, for the same reason `execute` doesn't: a spin must not
+   * fail because recording it failed.
+   *
+   * **Called per SPIN, not per plan.** `execute` deliberately does not do
+   * this itself — re-presenting a captured result under a different
+   * mechanic runs a plan without a spin having happened, and three replays
+   * of one spin are one line in this log, not three. That is the whole
+   * distinction §7 of the spec draws: the result is the fact, the
+   * presentation is an interpretation of it.
+   */
+  record(entry: SpinLogEntry): void;
 }
 
 declare module 'cordis' {
@@ -93,5 +121,28 @@ export function apply(ctx: Context): void {
   ctx.provide('play', {
     execute: (plan, board, registry = steps) => executePlan(plan, board, registry),
     steps,
+    record(entry) {
+      try {
+        // Looked up per call, not captured at apply time. Row order
+        // between this row and a `spin-log` row is not this row's to
+        // assume (the same reason `ctx.inject` is used for `steps` by
+        // everything that registers into it), and a lookup done once at
+        // compose time would miss a log that landed a moment later and
+        // stay missing for the life of the page.
+        //
+        // `reflect.get(name, false)` rather than `ctx.spinLog`: cordis
+        // throws on a property read of a registered service this plugin
+        // did not `inject`, and "nobody composed one" is the answer
+        // wanted here, not an exception.
+        (ctx.reflect.get('spinLog', false) as SpinLog | undefined)?.append(entry);
+      } catch {
+        // Swallowed on purpose, and this is the one place in this package
+        // that swallows rather than reporting. `execute` can hand a
+        // `Diagnostic` back to its caller; `record` returns nothing, and
+        // giving it a return value would put the burden of "did writing
+        // the log work" on every spin. A log is a record OF the game, not
+        // a part of it: the game is still correct without one.
+      }
+    },
   } satisfies PlayService);
 }

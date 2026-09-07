@@ -2,6 +2,6 @@
   "name": "@energy8engine/bundle-e8-base",
   "version": "0.0.0",
   "private": true,
-  "description": "e8-base: the baseline row set a slot game composes from (boot, renderer, stage, reels, mechanics, play-loop).",
+  "description": "e8-base: the baseline row set a slot game composes from (boot, renderer, stage, reels, mechanics, play-loop, spin-log).",
   "license": "MIT"
 }
