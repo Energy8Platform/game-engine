@@ -160,6 +160,31 @@ export type PresentationPlan = KnownPresentationStep[];
  * second hand-maintained copy of this list drifting from this one. Kept in
  * sync with the `switch` by hand — there are six of these and the module
  * doc above says why that count isn't expected to grow.
+ *
+ * It also gates which kinds a BOARD gets first refusal on: `executePlan`
+ * consults `board[step.kind]` only for a kind in this list, and sends
+ * everything else to the step registry. Without that gate a plugin
+ * registering `toString` was silently answered by `Object.prototype`, and
+ * any own method a board carried past the six outranked a registered
+ * handler for that name.
+ *
+ * **`setMultiplier` and `wait` are unreachable today.** Nothing in this
+ * repo emits either one: `classic`, `cascade` and the project plugin
+ * `reel-step` between them produce `spinTo`, `revealWins`, `remove` and
+ * `refill`, and the only `{ kind: 'setMultiplier' }` / `{ kind: 'wait' }`
+ * literals anywhere are in tests and in the type declarations above. They
+ * are still implemented on both sides — `BoardApi` declares them and
+ * `@energy8engine/reels` performs them — so they are live code, just code
+ * nothing calls. The visible cost is that this list is what an "unknown
+ * kind" diagnostic offers a developer chasing a misspelling, and two of
+ * the six names it offers name nothing any mechanic here can produce.
+ *
+ * They are NOT removed here, deliberately: dropping a kind is a change to
+ * `BoardApi`, whose implementation in `reels` would have to lose two
+ * methods with it. That is its own slice. Whether it should happen at all
+ * is a genuine question now that `BoardStepRegistry` exists — a
+ * speculative built-in kind buys nothing a plugin's own registered kind
+ * would not buy better — and the report for this wave recommends it.
  */
 export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
   'spinTo',

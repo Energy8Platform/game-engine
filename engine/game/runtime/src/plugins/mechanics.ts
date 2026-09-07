@@ -427,6 +427,22 @@ function describeFieldType(type: FieldType): string {
  * so a game that never actually produces the field on some codepaths
  * still needs a real sample to catch).
  *
+ * **They are NOT symmetric in consequence, and reading "both are correct
+ * and both stay" as parity is the mistake to avoid.** This one runs
+ * inside `createGame`, and its findings land in the `diagnostics` array
+ * `createGame` checks for `severity: 'error'` — so a finding here PAINTS
+ * THE FAILURE SCREEN OVER THE MOUNT and the game does not start. The
+ * post-spin one runs from `MechanicsService.present`, and its findings go
+ * back to whoever called it; in this repo that is `first-slot`'s page,
+ * which writes them into a `<pre>` it happens to have. A different game
+ * with no log element shows nothing at all for the same mistake.
+ *
+ * So: same mistake, two checks, and one of them stops the game while the
+ * other may be invisible. That asymmetry is a property of WHERE each
+ * check's output goes, not of what either check knows, and neither is
+ * wrong — but a maintainer weakening or strengthening one of them should
+ * know which one they are holding.
+ *
  * **This means the same mistake can legitimately reach the SAME failure
  * screen twice** — once from this function on page load (the schema says
  * the field isn't there), and again from `checkShape`/`check` above once
