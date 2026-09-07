@@ -37,8 +37,15 @@ export interface RuntimeAssetsConfig {
  * ever serve one without a vite instance in the process. Under `e8 dev` it
  * is currently unexercised: `dev-game` is always composed there, so every
  * `runtimeUrl` comes out `/@fs/<realpath>` and nothing asks for this
- * route. It also carries the realpath containment check, which the
- * `/@fs/` URL delegates to vite's own workspace-root confinement.
+ * route. It also carries its own realpath containment check, re-derived at
+ * request time from whatever is on disk right now — see task-6-brief.md:
+ * that check used to be the ONLY one, and the `/@fs/` URL had none of its
+ * own, relying entirely on vite's workspace-wide `server.fs.allow`, which
+ * has no notion of "this row's own package" to confine anything to.
+ * `resolveRuntimeUrl` below now performs the equivalent check itself,
+ * once, before EITHER url shape is handed out — so a row that escapes its
+ * package never reaches the browser, regardless of which route would have
+ * served it.
  *
  * The second route is `client-assets.ts` with two differences, not a fresh
  * design — read that file's doc comments for the full reasoning behind the
@@ -108,7 +115,7 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
   });
 
   /**
-   * `url: null` used to be the whole answer, and it collapsed three
+   * `url: null` used to be the whole answer, and it collapsed several
    * different situations into the one that is legitimately silent:
    *
    *  1. the package resolved and declares no `e8.runtime` — a client-only
@@ -116,8 +123,13 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
    *  2. the package could not be resolved at all — a typo in a row's
    *     `name`, which is the most likely first-run mistake there is.
    *  3. the package declares an `entry` that is not on disk.
+   *  4. the package declares an `entry` that IS on disk but resolves
+   *     outside the package's own directory (a symlink escaping it, most
+   *     likely) — see task-6-brief.md. The same class of packaging mistake
+   *     as 3, not a check against a hostile package: a legitimate
+   *     `e8.runtime.entry` never has a reason to point outside itself.
    *
-   * 2 and 3 are author mistakes, and a row that silently contributes
+   * 2, 3, and 4 are author mistakes, and a row that silently contributes
    * nothing is exactly the blank screen with nothing said that this whole
    * design exists to prevent: the loader skips a `null` `runtimeUrl`
    * without comment (`composeFromProject`'s own rule, correct for case 1),
@@ -151,11 +163,13 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
 
     const entryPath = resolve(pkg.dir, manifest.runtime.entry);
     let realEntryPath: string;
+    let realPackageRoot: string;
     try {
       // Real-pathed for the same reason `/plugin-runtime/:id` below
       // resolves through symlinks before trusting a path — an npm
       // workspace routinely symlinks the package directory itself.
       realEntryPath = realpathSync(entryPath);
+      realPackageRoot = realpathSync(resolve(pkg.dir));
     } catch (error) {
       return {
         url: null,
@@ -171,8 +185,36 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       };
     }
 
-    // Both branches need the entry to exist, so the check above is not
-    // conditional on `dev-game`; only which URL can serve it is.
+    // The containment check `/plugin-runtime/:id` performs at request
+    // time, done HERE instead, once, up front. `/@fs/<realpath>` — the
+    // OTHER url shape this function can hand out — has no checkpoint of
+    // its own once handed to the browser: it's served by `dev-game.ts`'s
+    // own vite instance, gated only by vite's `server.fs.allow`, a single
+    // workspace-wide allowlist with no notion of "this row's own package".
+    // An entry that escapes its package but still lands inside that
+    // allowlist (a sibling row's package, say) would otherwise sail
+    // through untouched. Checked unconditionally, not just for the
+    // `/@fs/` branch, so a row that fails this reports it one request
+    // earlier — at composition time — instead of only on
+    // `/plugin-runtime/:id`'s own copy of this same check (kept; that
+    // route is reachable directly, without going through composition
+    // first, so its own check stays load-bearing regardless).
+    if (realEntryPath !== realPackageRoot && !realEntryPath.startsWith(realPackageRoot + sep)) {
+      return {
+        url: null,
+        diagnostic: diagnostic(
+          'error',
+          row.id,
+          'e8.runtime.entry',
+          `row "${row.id}" (${row.name}) declares e8.runtime.entry "${manifest.runtime.entry}", which escapes its package directory`,
+          `fix "e8.runtime.entry" in ${row.name}'s package.json so it stays inside the package`,
+        ),
+      };
+    }
+
+    // Both branches need the entry to exist and stay contained, so the
+    // checks above are not conditional on `dev-game`; only which URL can
+    // serve it is.
     return { url: devGamePresent ? `/@fs/${realEntryPath}` : `/plugin-runtime/${row.id}` };
   }
 

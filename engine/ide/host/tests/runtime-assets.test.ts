@@ -1,6 +1,7 @@
 import { cpSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Context } from 'cordis';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createIdeHost, type IdeHost } from '../src/index';
 
@@ -241,6 +242,89 @@ describe('GET /api/composition', () => {
       expect(found[0].message).toContain('./dist/runtime.js');
       expect(found[0].message).toContain('badentry-pkg');
     });
+  });
+
+  /**
+   * `/plugin-runtime/:id`'s own "escapee1" fixture below (see
+   * `describe('GET /plugin-runtime/:id')`) already proves a symlinked
+   * `e8.runtime.entry` can't escape ITS route's containment check. This
+   * proves the OTHER url shape `resolveRuntimeUrl` can hand out —
+   * `/@fs/<realpath>`, produced once `dev-game` is composed — gets the
+   * same protection, even though nothing here ever reaches `dev-game`'s
+   * own vite instance: `/@fs/` is served by vite's middleware, gated only
+   * by `server.fs.allow` (a workspace-wide allowlist, not a per-row
+   * boundary), so the containment check has to happen before the URL is
+   * ever handed out, not at the point something fetches it.
+   *
+   * A fake `devGameRoot` provider (not the real `dev-game` plugin) is
+   * enough: `resolveRuntimeUrl`'s url-shape branch reacts to that
+   * service's mere presence (see runtime-assets.ts's module doc), and the
+   * real plugin's vite/session-dev machinery is already exercised by
+   * dev-game.test.ts and the Playwright suite — irrelevant to what this
+   * test checks.
+   */
+  it("refuses an e8.runtime.entry that escapes its package, even under dev-game's /@fs/ URL", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-fs-escape-'));
+    const nodeModules = join(workspace, 'node_modules');
+    mkdirSync(nodeModules);
+
+    // The escape target must actually EXIST — see the sibling
+    // `/plugin-runtime/:id` fixture's own comment: a target that's merely
+    // absent dies on `realpathSync`'s ENOENT before the containment
+    // comparison ever runs, which proves nothing about the check itself.
+    const secretOutsideThePackage = join(workspace, 'fs-escapee-secret.js');
+    writeFileSync(secretOutsideThePackage, "export const secret = 'FS_ESCAPED_SECRET';\n");
+
+    const escapeeDir = join(nodeModules, 'fs-escapee-pkg');
+    mkdirSync(escapeeDir);
+    writeFileSync(
+      join(escapeeDir, 'package.json'),
+      JSON.stringify({
+        name: 'fs-escapee-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './link.js' } },
+      }),
+    );
+    writeFileSync(
+      join(escapeeDir, 'index.js'),
+      "export const name = 'fs-escapee-pkg';\nexport function apply() {}\n",
+    );
+    symlinkSync(secretOutsideThePackage, join(escapeeDir, 'link.js'));
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-fs-escape-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-fs-escape-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'e8.bundle.yml'),
+      ['name: e8-fs-escape-fixture', 'rows:', '  - id: fsescapee1', '    name: fs-escapee-pkg', ''].join(
+        '\n',
+      ),
+    );
+
+    host = await createIdeHost({ cwd: workspace, port: 0 });
+    await host.ctx.plugin({
+      name: 'fake-dev-game-root',
+      apply(ctx: Context) {
+        ctx.provide('devGameRoot', {});
+      },
+    });
+
+    const body = await (await fetch(`${host.url}/api/composition`)).json();
+    const row = body.rows.find((r: { id: string }) => r.id === 'fsescapee1');
+    expect(row.runtimeUrl).toBeNull();
+    // Belt-and-suspenders, same shape as the /plugin-runtime/:id escapee
+    // test: the secret's own marker must not ride along anywhere in the
+    // response — not just "some other field happens to be right".
+    expect(JSON.stringify(body)).not.toContain('FS_ESCAPED_SECRET');
+
+    const found = body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'fsescapee1');
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toContain('fsescapee1');
+    expect(found[0].message).toContain('escapes');
   });
 
   it('reloads from disk on every call, so an edit is reflected without restarting the host', async () => {

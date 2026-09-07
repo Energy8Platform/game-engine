@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
@@ -116,6 +118,106 @@ describe('dev-game — serving the bundle', () => {
     expect(res.headers.get('content-type')).toContain('javascript');
     const text = await res.text();
     expect(text).toContain('dev-game-fixture-module');
+  });
+});
+
+/**
+ * `runtime-assets.ts`'s new containment check (task-6-brief.md) is scoped
+ * to a ROW'S PACKAGE directory, not to the single file `e8.runtime.entry`
+ * names, and it leaves vite's own `server.fs.allow` untouched entirely —
+ * the alternative considered (narrowing `fs.allow` down to just the row
+ * packages' roots) was rejected specifically because a `fs.allow` narrowed
+ * to a single FILE per row risks 403ing a plugin's own transitive imports
+ * (a sibling file, or a dependency reachable from its own package) the
+ * moment vite's module graph walk reaches them. This test builds that
+ * exact shape — an entry that imports a sibling file in the SAME
+ * package — and proves it still round-trips through `/@fs/` unchanged
+ * with the new check in place, rather than only arguing it from the fact
+ * that `fs.allow` was never touched.
+ */
+describe('dev-game — /@fs/ containment does not cost legitimate multi-file plugins anything', () => {
+  it("serves both a row's runtime entry and the sibling file it imports, through /@fs/", async () => {
+    // Realpath'd, not the raw `mkdtempSync` result — measured directly:
+    // macOS's `os.tmpdir()` answers through `/var`, itself a symlink to
+    // `/private/var`. Vite's OWN `server.fs.allow` default is built from
+    // `root` as given, unresolved; the `/@fs/<path>` this test fetches is
+    // realpath'd (by `runtime-assets.ts`, same as `/plugin-runtime/:id`
+    // always has been). Leaving `root` unresolved here made vite's own
+    // allowlist compare `/private/var/...` against `/var/...` and 403 —
+    // a mismatch in the TEST's fixture, not evidence of anything wrong in
+    // the code under test. The exact class of accidental symlink failure
+    // this whole task is otherwise about, this time in vite's own check.
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-dev-game-fs-transitive-')));
+    // `dev-game`'s vite instance needs SOME `index.html` at its root to
+    // boot its SPA fallback — unused by this test, which never fetches
+    // `/`, but present for the same reason `WEB_ROOT` carries one.
+    writeFileSync(join(workspace, 'index.html'), '<!doctype html><title>fixture</title>\n');
+
+    const pkgDir = join(workspace, 'node_modules', 'multi-file-pkg');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({
+        name: 'multi-file-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js' } },
+      }),
+    );
+    writeFileSync(
+      join(pkgDir, 'index.js'),
+      "export const name = 'multi-file-pkg';\nexport function apply() {}\n",
+    );
+    // The sibling the entry imports — a different file than the one
+    // `e8.runtime.entry` names, still inside the same package.
+    writeFileSync(join(pkgDir, 'helper.js'), "export const helperMarker = 'HELPER_LOADED';\n");
+    writeFileSync(
+      join(pkgDir, 'runtime.js'),
+      "import { helperMarker } from './helper.js';\nexport function apply(ctx) { ctx.__marker = helperMarker; }\n",
+    );
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-transitive-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-transitive-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'e8.bundle.yml'),
+      ['name: e8-transitive-fixture', 'rows:', '  - id: multi1', '    name: multi-file-pkg', ''].join(
+        '\n',
+      ),
+    );
+
+    // `root: workspace` mirrors the real CLI (`engine/apps/cli/src/
+    // index.ts` passes `root: cwd` to `dev-game` for `e8 dev`), and keeps
+    // this row's package inside vite's default `fs.allow` search — the
+    // same real-world configuration, not a fixture-only shortcut.
+    host = await createIdeHost({ cwd: workspace, port: 0 });
+    await host.ctx.plugin(devGame, {
+      root: workspace,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+    });
+
+    const body = await (await fetch(`${host.url}/api/composition`)).json();
+    expect(body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'multi1')).toEqual([]);
+    const row = body.rows.find((r: { id: string }) => r.id === 'multi1');
+    expect(row.runtimeUrl).toMatch(/^\/@fs\/.*runtime\.js$/);
+
+    const entryRes = await fetch(`${host.url}${row.runtimeUrl}`);
+    expect(entryRes.status).toBe(200);
+    expect(await entryRes.text()).toContain('helper.js');
+
+    // Not gated by runtime-assets.ts's own check at all — that only ever
+    // looks at the DECLARED entry — so this confirms vite's own serving of
+    // a plain sibling file is unaffected by the new check existing at all.
+    const helperUrl = row.runtimeUrl.replace(/runtime\.js$/, 'helper.js');
+    const helperRes = await fetch(`${host.url}${helperUrl}`);
+    expect(helperRes.status).toBe(200);
+    expect(await helperRes.text()).toContain('HELPER_LOADED');
   });
 });
 
