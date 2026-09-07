@@ -616,3 +616,95 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     expect(spiritGateSpin).toMatchObject({ stage: 'spirit_gate', cost: 1, session: true, endsWhenVar: 'sg_done' });
   });
 });
+
+/**
+ * The third silent-loss class, alongside the unterminated block and the
+ * repeated name that `findBlocks` and `NamedCollection` already close: the
+ * dangling REFERENCE. A one-character typo in a name that points at
+ * something — `vars = Varz`, `globals = Nope`, a field typed by a record
+ * nobody declared — resolved to `{}`, to a dropped field, or to a type no
+ * consumer can follow, and said nothing at all. Two `game { }` blocks are
+ * the same shape of loss from the other direction: the second was taken
+ * off the file without a word.
+ *
+ * Nothing consumes `vars`/`globals`/`records` today, which is exactly why
+ * this would have survived until the first consumer arrived and then been
+ * very hard to see.
+ */
+describe('parseSpinSchema — dangling references and repeated blocks', () => {
+  it('vars naming a record that does not exist is diagnosed, not silently {}', () => {
+    const { schema, diagnostics } = parseSpinSchema(MINIMAL.replace('vars = Vars', 'vars = Varz'));
+    expect(schema!.vars).toEqual({});
+    const d = diagnostics.find((x) => x.message.includes('Varz'))!;
+    expect(d).toBeDefined();
+    // Both halves of the reference, so a person can see which name is the
+    // typo and which clause carries it.
+    expect(d.message).toContain('vars');
+  });
+
+  it('globals naming a record that does not exist is diagnosed, not a silently dropped field', () => {
+    const src = MINIMAL.replace('  vars = Vars\n', '  vars = Vars\n  globals = Nope\n');
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.globals).toBeUndefined();
+    expect(diagnostics.some((d) => d.message.includes('Nope') && d.message.includes('globals'))).toBe(true);
+  });
+
+  it('a field typed by a record nobody declared is diagnosed — the field is kept, the dangle is named', () => {
+    const src = MINIMAL.replace('max_win_reached: bool', 'max_win_reached: bool  where: NoSuchRecord');
+    const { schema, diagnostics } = parseSpinSchema(src);
+    // Kept: the parser cannot know whether the record or the reference is
+    // the mistake, and dropping the field would lose a second thing on a
+    // guess.
+    expect(schema!.vars.where).toEqual({ kind: 'record', name: 'NoSuchRecord' });
+    expect(diagnostics.some((d) => d.message.includes('NoSuchRecord'))).toBe(true);
+  });
+
+  it('a dangling record reference nested inside a list is diagnosed too', () => {
+    // The reference that hides: `[Nope]` and `Nope?` are the forms a real
+    // `.spin` actually uses (`positions: [CellPos]`), so a check that only
+    // looked at top-level `record` types would miss the common case.
+    const src = MINIMAL.replace('max_win_reached: bool', 'max_win_reached: bool  hits: [Nope]');
+    const { diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('Nope'))).toBe(true);
+  });
+
+  it('a stage variant field with a dangling record type is diagnosed as well as a record one', () => {
+    const src = MINIMAL.replace('grid: [[int]]', 'grid: [[int]]  extra: Missing');
+    const { diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('Missing'))).toBe(true);
+  });
+
+  it('a resolvable record reference is silent', () => {
+    const src = MINIMAL
+      .replace('record Vars', 'record CellPos { col: int  row: int }\nrecord Vars')
+      .replace('max_win_reached: bool', 'max_win_reached: bool  at: CellPos  path: [CellPos]');
+    expect(parseSpinSchema(src).diagnostics).toEqual([]);
+  });
+
+  it('two game blocks: the first is used, the second is diagnosed by line', () => {
+    const src = MINIMAL + `
+game "second" {
+  bet_levels = [1.0]
+  max_win = 10.0
+  data = SpinData
+}`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.gameId).toBe('demo');
+    const d = diagnostics.find((x) => x.message.includes('game'))!;
+    expect(d).toBeDefined();
+    expect(d.message).toContain('second');
+  });
+
+  it('a tagged enum that declares no stage variant at all is diagnosed, not a silent empty stages', () => {
+    // Measured while fixing the failure screen: strip `base_game`'s own
+    // `{` and the enum still resolves, the variant scanner finds nothing,
+    // and `stages` came back `{}` with ZERO diagnostics — after which
+    // `checkAgainstSchema` reported "the math declares no stages" about a
+    // file that declares one. A fifth case of the same class as the four
+    // above, found by the same question.
+    const src = MINIMAL.replace('  base_game { grid: [[int]]  win: float }\n', '');
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(schema!.stages).toEqual({});
+    expect(diagnostics.some((d) => d.message.includes('SpinData') && d.message.includes('no stage'))).toBe(true);
+  });
+});

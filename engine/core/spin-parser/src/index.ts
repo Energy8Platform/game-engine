@@ -14,16 +14,38 @@
  * down with it. Silent loss is worse than a parse error: a schema that
  * looks complete gets trusted.
  *
- * That guarantee covers two failure shapes, each resolved in exactly ONE
- * place so a new block kind or a new name-keyed collection inherits it by
- * construction rather than by a future author remembering to reimplement
- * it: an unterminated block (a `{` with no matching `}` — an ordinary
- * missing-brace typo, not an exotic input) is diagnosed by `findBlocks`
- * itself, the single function every block form goes through; a name an
- * author repeated (two `record Vars`, two `base_game` variants in one
- * enum) is diagnosed by `NamedCollection`, the single type every
- * name-keyed accumulator is built on. `actions` needs neither — it's an
- * array, so a repeated action name is just two entries, not a collision.
+ * That guarantee covers four failure shapes. Three of them are resolved
+ * in exactly ONE place each, so a new block kind, a new name-keyed
+ * collection or a new field type inherits the guarantee by construction
+ * rather than by a future author remembering to reimplement it:
+ *
+ *  1. **An unterminated block** (a `{` with no matching `}` — an ordinary
+ *     missing-brace typo, not an exotic input) is diagnosed by
+ *     `findBlocks` itself, the single function every block form goes
+ *     through.
+ *  2. **A name an author repeated** (two `record Vars`, two `base_game`
+ *     variants in one enum) is diagnosed by `NamedCollection`, the single
+ *     type every name-keyed accumulator is built on. `actions` needs
+ *     neither — it's an array, so a repeated action name is just two
+ *     entries, not a collision.
+ *  3. **A dangling record reference** in a field's TYPE is collected by
+ *     `parseFieldList` (the single function every field in the file goes
+ *     through, via `collectRecordRefs`, which recurses into
+ *     list/array/optional) and resolved by `checkReferences` once the
+ *     whole file has been read — a forward reference is legal, so there
+ *     is no earlier honest moment.
+ *  4. **A dangling reference in a game CLAUSE** (`vars = Varz`,
+ *     `globals = Nope`) is also diagnosed by `checkReferences`, but from
+ *     a hand-written list of the two clauses that carry a record name.
+ *     This is the one case with no structural guarantee: a THIRD such
+ *     clause added to `GAME_KEYS` later inherits nothing and has to be
+ *     added to that list by hand. Said plainly rather than left to be
+ *     discovered — see the report.
+ *
+ * A repeated `game { }` block goes the same way as a repeated name (first
+ * kept, rest diagnosed), decided in `parseGame`, which is the only place
+ * that reads one.
+ *
  * Where attribution can still point at a NEIGHBOR rather than the exact
  * culprit (garbage text with no field-name colon of its own, glued onto
  * whichever field precedes it) the loss is still visible as SOME
@@ -200,6 +222,49 @@ function parseFieldType(text: string): FieldType | null {
   return null;
 }
 
+/**
+ * One place a field named a RECORD type, remembered so the reference can
+ * be checked once every `record` block in the file has been read.
+ *
+ * It cannot be checked where it is parsed: a forward reference is legal
+ * (`positions: [CellPos]` may precede `record CellPos`), so the only
+ * honest moment is after the whole file. Collected here rather than
+ * re-derived by walking the finished schema so the OWNER and the LINE
+ * survive — a `RecordShape` is a bare `{ field: FieldType }` and carries
+ * neither, and "somewhere in this file, something points at NoSuchRecord"
+ * is a much worse diagnostic than one that names the block and the line.
+ */
+interface RecordRef {
+  /** The record type named — the thing that may not exist. */
+  name: string;
+  /** The `record` or stage-variant block the field belongs to. */
+  owner: string;
+  field: string;
+  line: number;
+}
+
+/** Every `record` type inside `type`, however deeply nested in list/array/optional. */
+function collectRecordRefs(
+  type: FieldType,
+  owner: string,
+  field: string,
+  line: number,
+  refs: RecordRef[],
+): void {
+  switch (type.kind) {
+    case 'record':
+      refs.push({ name: type.name, owner, field, line });
+      return;
+    case 'list':
+    case 'array':
+    case 'optional':
+      collectRecordRefs(type.of, owner, field, line, refs);
+      return;
+    default:
+      return;
+  }
+}
+
 /** Index of the `;` that separates a `[T; N]` array's element type from its
  *  length — the top-level one, not one nested inside an element type that
  *  is itself a `[T; N]` array. */
@@ -233,6 +298,7 @@ function parseFieldList(
   blockName: string,
   line: number,
   diagnostics: Diagnostic[],
+  refs: RecordRef[],
 ): RecordShape {
   const shape: RecordShape = {};
   const fieldRe = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g;
@@ -271,6 +337,7 @@ function parseFieldList(
       continue;
     }
     shape[name] = type;
+    collectRecordRefs(type, blockName, name, line, refs);
   }
 
   return shape;
@@ -329,7 +396,11 @@ class NamedCollection<T> {
   }
 }
 
-function parseRecords(source: string, diagnostics: Diagnostic[]): Record<string, RecordShape> {
+function parseRecords(
+  source: string,
+  diagnostics: Diagnostic[],
+  refs: RecordRef[],
+): Record<string, RecordShape> {
   const records = new NamedCollection<RecordShape>('record', '');
   for (const { header, body, line } of findBlocks(source, 'record', diagnostics)) {
     const name = header.trim();
@@ -337,7 +408,7 @@ function parseRecords(source: string, diagnostics: Diagnostic[]): Record<string,
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'record block has no name'));
       continue;
     }
-    records.insert(name, parseFieldList(body, name, line, diagnostics), line, diagnostics);
+    records.insert(name, parseFieldList(body, name, line, diagnostics, refs), line, diagnostics);
   }
   return records.build();
 }
@@ -395,6 +466,7 @@ function parseStages(
   dataTypeName: string,
   records: Record<string, RecordShape>,
   actionStageNames: string[],
+  refs: RecordRef[],
 ): Record<string, RecordShape> {
   const enumBlocks = findBlocks(source, 'enum', diagnostics);
   const wantedHeader = new RegExp(`^${escapeRegExp(dataTypeName)}\\s+tag\\s+stage$`);
@@ -434,10 +506,35 @@ function parseStages(
       const braceEnd = requireMatchingBrace(spinData.body, braceStart, `stage variant "${name}"`, variantLine, diagnostics);
       if (braceEnd === null) break; // unreachable today — see note above
       const body = spinData.body.slice(braceStart + 1, braceEnd);
-      stages.insert(name, parseFieldList(body, name, variantLine, diagnostics), variantLine, diagnostics);
+      stages.insert(
+        name,
+        parseFieldList(body, name, variantLine, diagnostics, refs),
+        variantLine,
+        diagnostics,
+      );
       variantRe.lastIndex = braceEnd + 1;
     }
-    return stages.build();
+    const built = stages.build();
+    // A tagged enum that RESOLVED and yet declared nothing. The enum's own
+    // brace balanced, so `findBlocks` had nothing to report, and the
+    // variant scanner simply found no `name { ... }` group — which is what
+    // an author gets by dropping a single `{` off the first variant. The
+    // result was `stages: {}` with ZERO diagnostics, after which
+    // `checkAgainstSchema` told a developer "the math declares no stages"
+    // about a file that plainly declares one. Silent loss, same class as
+    // the dangling references `parseSpinSchema` checks below.
+    if (Object.keys(built).length === 0) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          PLUGIN,
+          `line ${spinData.line}`,
+          `"enum ${dataTypeName} tag stage" declares no stage variant — nothing inside it reads as "name { ... }"`,
+          'give the enum at least one stage variant, e.g. "base_game { grid: [[int]] }"',
+        ),
+      );
+    }
+    return built;
   }
 
   // No enum matches `dataType`. Fall back to the flat-record dialect: pair
@@ -646,13 +743,39 @@ const GAME_KEYS = ['bet_levels', 'max_win', 'vars', 'feature', 'data', 'globals'
 function parseGame(
   source: string,
   diagnostics: Diagnostic[],
-): { gameId: string; betLevels: number[]; maxWin: number; varsName?: string; globalsName?: string; dataName?: string } | null {
+): {
+  gameId: string;
+  betLevels: number[];
+  maxWin: number;
+  line: number;
+  varsName?: string;
+  globalsName?: string;
+  dataName?: string;
+} | null {
   const blocks = findBlocks(source, 'game', diagnostics);
   if (blocks.length === 0) {
     diagnostics.push(diagnostic('error', PLUGIN, 'file', 'no "game { ... }" block found'));
     return null;
   }
   const { header, body, line } = blocks[0];
+  // The first block wins — the same rule `NamedCollection` applies to a
+  // repeated name, for the same reason: `SpinSchema` has one `gameId`,
+  // one `bet_levels` and one `max_win`, so "keep both" is not a shape it
+  // can hold. What changed is that the losers are now NAMED. A second
+  // `game { }` block (a copy-paste left behind mid-edit, most likely) was
+  // taken off the file in complete silence, and the schema that came back
+  // looked exactly like a file with one.
+  for (const extra of blocks.slice(1)) {
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        `line ${extra.line}`,
+        `a second "game ${extra.header.trim()}" block — a file declares exactly one game; keeping the one on line ${line}, dropping this one`,
+        'delete the duplicate game block, or merge its clauses into the first',
+      ),
+    );
+  }
   const nameMatch = /^"([^"]*)"$/.exec(header.trim());
   if (nameMatch === null) {
     diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'game block has no quoted name'));
@@ -673,6 +796,7 @@ function parseGame(
     gameId: nameMatch[1],
     betLevels,
     maxWin,
+    line,
     varsName: get('vars'),
     globalsName: get('globals'),
     dataName: get('data'),
@@ -782,10 +906,28 @@ export function parseSpinSchema(source: string): { schema: SpinSchema | null; di
   const game = parseGame(clean, diagnostics);
   if (game === null) return { schema: null, diagnostics };
 
-  const records = parseRecords(clean, diagnostics);
+  const refs: RecordRef[] = [];
+  const records = parseRecords(clean, diagnostics, refs);
   const actions = parseActions(clean, diagnostics);
   const actionStageNames = [...new Set(actions.map((a) => a.stage))];
-  const stages = parseStages(clean, diagnostics, game.dataName ?? 'SpinData', records, actionStageNames);
+  const stages = parseStages(
+    clean,
+    diagnostics,
+    game.dataName ?? 'SpinData',
+    records,
+    actionStageNames,
+    refs,
+  );
+
+  // Every reference that points at nothing. Run here, after the whole
+  // file, because a forward reference is legal — `positions: [CellPos]`
+  // may precede `record CellPos`, and it does in `first-slot`.
+  //
+  // `data =` is deliberately NOT checked here: `parseStages` above already
+  // reports it, in a message that also says which dialect it was looking
+  // for, and a second complaint about the same name would only make the
+  // one that knows more harder to find.
+  diagnostics.push(...checkReferences(game, records, refs));
 
   const vars = (game.varsName !== undefined && records[game.varsName]) || {};
   const globals = game.globalsName !== undefined ? records[game.globalsName] : undefined;
@@ -802,4 +944,72 @@ export function parseSpinSchema(source: string): { schema: SpinSchema | null; di
   };
 
   return { schema, diagnostics };
+}
+
+/**
+ * The dangling REFERENCE — the third silent-loss class, alongside the
+ * unterminated block `findBlocks` catches and the repeated name
+ * `NamedCollection` catches.
+ *
+ * A name that POINTS at something can be wrong in a way a name that
+ * DECLARES something cannot, and every one of these resolved to a value
+ * that looked ordinary:
+ *
+ *  - `vars = Varz` (one character off) became `vars: {}` — a game with no
+ *    persistent variables, which is a perfectly legal thing to be;
+ *  - `globals = Nope` dropped the field entirely, indistinguishable from
+ *    a file that declares no globals;
+ *  - a field typed by a record nobody declared stayed in the schema as
+ *    `{ kind: 'record', name: 'NoSuchRecord' }`, which every consumer will
+ *    follow into nothing.
+ *
+ * Nothing reads `vars`/`globals`/`records` today. That is exactly why this
+ * had to be closed now: the first consumer to arrive would have inherited
+ * three silent wrong answers and no way to see where they came from.
+ *
+ * A dangling field reference is diagnosed but the FIELD IS KEPT. Which of
+ * the two names is the mistake — the reference or the missing declaration
+ * — is not something this parser can know, and dropping the field would
+ * lose a second thing on a guess. `vars` and `globals` have no such
+ * choice: there is nothing to keep.
+ */
+function checkReferences(
+  game: { varsName?: string; globalsName?: string; line: number },
+  records: Record<string, RecordShape>,
+  refs: RecordRef[],
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const declared = Object.keys(records);
+  const known = declared.length > 0 ? declared.join(', ') : '(none)';
+
+  for (const [clause, name] of [
+    ['vars', game.varsName],
+    ['globals', game.globalsName],
+  ] as const) {
+    if (name === undefined || name in records) continue;
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        `line ${game.line}`,
+        `game block: "${clause} = ${name}" names a record the file does not declare — it declares: ${known}`,
+        `fix the name after "${clause} =", or add "record ${name} { ... }"`,
+      ),
+    );
+  }
+
+  for (const ref of refs) {
+    if (ref.name in records) continue;
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        `line ${ref.line}`,
+        `block "${ref.owner}": field "${ref.field}" is typed "${ref.name}", which is not a built-in type and which the file does not declare as a record — it declares: ${known}`,
+        `fix the type of "${ref.field}", or add "record ${ref.name} { ... }"`,
+      ),
+    );
+  }
+
+  return diagnostics;
 }
