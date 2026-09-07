@@ -16,12 +16,26 @@
  * the player looking at a frozen board. `executePlan` never throws, no
  * matter what the plan contains (including a step whose `kind` matches
  * nothing in the vocabulary).
+ *
+ * **The registry.** `BoardApi` is the closed vocabulary two shipped
+ * mechanics stand on — six kinds, six methods, not touched here. A third
+ * kind (task 9's `reelStep` among them) has nowhere to land on `BoardApi`
+ * without editing this package, so `executePlan` also accepts a
+ * `BoardStepRegistry`: a plugin registers a `StepHandler` for the kind
+ * `BoardApi` doesn't have, and `executePlan` runs it instead of reporting
+ * "no matching method." The registry is checked ONLY after the board says
+ * it has no method for the kind — a kind `BoardApi` already knows always
+ * goes to the board, never to the registry, even if something is
+ * registered for it too. Without that rule a plugin could silently replace
+ * `spinTo` for every game that loads it; see `executePlan`'s own tests for
+ * the case that pins it down. The registry argument is optional: a caller
+ * that never passes one gets exactly today's behaviour, unchanged.
  */
 import {
   diagnostic,
   isPresentationStep,
+  KNOWN_STEP_KINDS,
   type Diagnostic,
-  type PresentationPlan,
   type PresentationStep,
   type RefillStep,
   type RemoveStep,
@@ -45,15 +59,85 @@ export interface BoardApi {
   wait(step: WaitStep): Promise<void>;
 }
 
+/**
+ * What a plugin offers for the one kind it adds — `BoardApi` has no slot
+ * for a kind it was never told about, so a `BoardStepRegistry` handler
+ * gets the whole step plus the board (untyped: this package doesn't know
+ * `BoardApi`'s legacy pixi implementation, only that `executePlan` will
+ * hand back whatever `board` it was given) instead of a named method.
+ */
+export interface StepHandler {
+  kind: string;
+  run(step: PresentationStep, board: unknown): Promise<void>;
+}
+
+/**
+ * Where a plugin's step gets a handler `BoardApi` doesn't have one for.
+ * Cordis-free by design, same as `executePlan` itself (see this file's
+ * module doc) — `register`'s return value is a plain disposer, which is
+ * exactly the shape `ctx.effect(() => registry.register(handler))` wants:
+ * whoever composes a plugin ties the registration to that plugin's
+ * lifetime by wrapping the call, this package does not need to know
+ * cordis exists to make that possible. §5.4 requires the reversibility;
+ * this is how it's satisfied without a cordis dependency here.
+ */
+export interface BoardStepRegistry {
+  /**
+   * Registers `handler` under `handler.kind`, replacing whatever was there
+   * before. Returns a disposer that unregisters it again — call it (or let
+   * `ctx.effect` call it on unload) when the plugin that registered it
+   * goes away, so a row that left the composition doesn't leave its
+   * handler behind for the next thing that reuses the kind.
+   */
+  register(handler: StepHandler): () => void;
+  /** True when something is currently registered for `kind`. */
+  has(kind: string): boolean;
+  /** The handler currently registered for `kind`, or `undefined`. What `executePlan` actually calls. */
+  get(kind: string): StepHandler | undefined;
+}
+
+/** A fresh, empty `BoardStepRegistry` — nothing registered until something calls `register`. */
+export function createBoardStepRegistry(): BoardStepRegistry {
+  const handlers = new Map<string, StepHandler>();
+
+  return {
+    register(handler) {
+      handlers.set(handler.kind, handler);
+      return () => {
+        // Only remove the entry if it's still *this* registration — an
+        // earlier registration's disposer must not delete a later one
+        // that re-registered the same kind in the meantime. Same guard,
+        // same reason, as `game-runtime`'s `MechanicsService.register`.
+        if (handlers.get(handler.kind) === handler) {
+          handlers.delete(handler.kind);
+        }
+      };
+    },
+    has(kind) {
+      return handlers.has(kind);
+    },
+    get(kind) {
+      return handlers.get(kind);
+    },
+  };
+}
+
 type BoardMethod = (step: PresentationStep) => Promise<void>;
 
 /**
  * Plays `plan` against `board`, one step at a time, awaiting each before
  * starting the next. Returns the diagnostics collected along the way —
  * empty when everything ran clean. Never rejects and never throws: a step
- * the board can't perform (no matching method) or one whose handler throws
- * or rejects is recorded as a `Diagnostic` and the remaining steps still
- * run.
+ * the board can't perform and has no registered handler either, or one
+ * whose handler throws or rejects, is recorded as a `Diagnostic` and the
+ * remaining steps still run.
+ *
+ * `plan`'s element type is `PresentationStep`, not `PresentationPlan` —
+ * deliberately wider than what `classic`/`cascade` actually emit, so a
+ * plan carrying a plugin's step (task 9's `reelStep`, say) is still a
+ * well-typed call. Any real `PresentationPlan` widens into it with no cast
+ * needed; see `PresentationStep`'s own doc in `@energy8engine/contracts`
+ * for why that type stays separate from the one mechanics build with.
  *
  * `board` is typed optional because it legitimately IS, at the one real
  * caller: `first-slot`'s `main.ts` passes `game.ctx.board` straight
@@ -62,10 +146,18 @@ type BoardMethod = (step: PresentationStep) => Promise<void>;
  * reachable, not hypothetical). A plan with steps and no board to run them
  * on is exactly the kind of failure this function promises to report as
  * data, not throw on.
+ *
+ * `registry` is optional and checked ONLY when `board` has no method for
+ * the step's kind — see this file's module doc for why that order is not
+ * incidental. A caller that never passes a registry (every one of this
+ * file's own tests before this parameter existed, and every caller
+ * outside this package until something hands it one) gets exactly the
+ * behaviour this function had before `registry` existed.
  */
 export async function executePlan(
-  plan: PresentationPlan,
+  plan: PresentationStep[],
   board: BoardApi | undefined,
+  registry?: BoardStepRegistry,
 ): Promise<Diagnostic[]> {
   if (!board) {
     // A plan with nothing to run needs no board either — only report the
@@ -104,28 +196,51 @@ export async function executePlan(
       continue;
     }
 
+    // A step's handler throwing/rejecting becomes a diagnostic the same
+    // way regardless of where the handler came from — the board's own
+    // method, or a plugin's, below.
+    const runHandler = async (run: () => Promise<void>): Promise<void> => {
+      try {
+        await run();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        problems.push(
+          diagnostic('error', 'play-loop', where, `step "${step.kind}" failed: ${message}`),
+        );
+      }
+    };
+
     const method = (board as unknown as Record<string, BoardMethod | undefined>)[step.kind];
 
-    if (typeof method !== 'function') {
-      problems.push(
-        diagnostic(
-          'error',
-          'play-loop',
-          where,
-          `board cannot perform step "${step.kind}": no matching method`,
-        ),
-      );
+    // The board gets first refusal on every kind, known or not — including
+    // one of the six `BoardApi` already has a method for. A registered
+    // handler is consulted only once the board has said it has nothing,
+    // never before: reversing this would let a plugin's registration win
+    // over `spinTo` (or any other built-in) for every game that loads it,
+    // silently. See this file's module doc and `tests/registry.test.ts`'s
+    // "a built-in kind still goes to the board, not the registry".
+    if (typeof method === 'function') {
+      await runHandler(() => method.call(board, step));
       continue;
     }
 
-    try {
-      await method.call(board, step);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      problems.push(
-        diagnostic('error', 'play-loop', where, `step "${step.kind}" failed: ${message}`),
-      );
+    const handler = registry?.get(step.kind);
+
+    if (handler) {
+      await runHandler(() => handler.run(step, board));
+      continue;
     }
+
+    problems.push(
+      diagnostic(
+        'error',
+        'play-loop',
+        where,
+        `board cannot perform step "${step.kind}": no matching method` +
+          (registry ? ', and nothing is registered for it either' : '') +
+          ` — known kinds: ${KNOWN_STEP_KINDS.join(', ')}`,
+      ),
+    );
   }
 
   return problems;

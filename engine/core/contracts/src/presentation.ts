@@ -1,9 +1,16 @@
 /**
  * The vocabulary of presentation steps every mechanic must express itself in.
  * A mechanic doesn't animate — it emits a `PresentationPlan`, and the board
- * executes it. This is a contract, not a plugin surface: it is deliberately
- * not extensible here (a `board.step` registry for third-party steps is a
- * later plan).
+ * executes it.
+ *
+ * `PresentationPlan` (what `classic`/`cascade` actually emit) stays the
+ * closed six-kind vocabulary below — that is deliberate, see
+ * `KnownPresentationStep`'s own doc. `PresentationStep` (what a board, a
+ * `BoardStepRegistry`, and `executePlan` accept) is wider: a plugin's step
+ * only needs a `kind` and its own fields, no edit to this file. See
+ * `UnknownPresentationStep`'s doc for why those two are different types
+ * rather than one, and `@energy8engine/play-loop`'s `BoardStepRegistry` for
+ * where a plugin's step actually gets a handler.
  *
  * Two different numbers are both, informally, "the total" — do not confuse
  * them, because the next implementer meets both within one function:
@@ -85,8 +92,17 @@ export interface WaitStep {
   ms: number;
 }
 
-/** One step of a presentation plan. */
-export type PresentationStep =
+/**
+ * One of the six steps `classic`/`cascade` actually stand on — see the
+ * module doc. Kept as its own named union (rather than folding straight
+ * into `PresentationStep` below) because `PresentationPlan` is defined from
+ * THIS type, not from `PresentationStep`: a mechanic's `steps.push({ kind:
+ * 'spinTo', ...typo })` must still fail to compile, and it only does
+ * because `PresentationPlan`'s element type has no open member for a typo'd
+ * literal to quietly match instead. See `UnknownPresentationStep`'s doc for
+ * the mechanism that would otherwise defeat that.
+ */
+export type KnownPresentationStep =
   | SpinToStep
   | RevealWinsStep
   | RemoveStep
@@ -94,8 +110,65 @@ export type PresentationStep =
   | SetMultiplierStep
   | WaitStep;
 
-/** What a mechanic emits instead of animating: an ordered script for the board. */
-export type PresentationPlan = PresentationStep[];
+/**
+ * A step naming any OTHER kind — a plugin's, task 9's `reelStep` among
+ * them. Only `kind` is required; everything else is between the plugin's
+ * mechanic and its `StepHandler` (`@energy8engine/play-loop`), neither of
+ * which this package knows about.
+ *
+ * This is deliberately not merged into `KnownPresentationStep` to form
+ * `PresentationStep` as a single flat union — TypeScript's excess-property
+ * check on a union accepts an object literal the moment ANY member fits,
+ * and an index-signature member fits almost anything, so a mistyped
+ * `spinTo` (say, a misspelled field instead of the real `board`) would
+ * silently type-check by matching THIS member instead of being rejected
+ * for not matching `SpinToStep`. Keeping `PresentationPlan`
+ * built from `KnownPresentationStep` alone, with no sibling like this one,
+ * is what keeps that typo a compile error. `PresentationStep` below still
+ * includes this member — that's fine, because nothing authors a
+ * `PresentationPlan` by assigning a fresh object literal to the wider
+ * `PresentationStep` type; only `executePlan` and a `BoardStepRegistry`
+ * consume it, and both are meant to accept exactly this looseness.
+ */
+export interface UnknownPresentationStep {
+  kind: string;
+  [field: string]: unknown;
+}
+
+/**
+ * A step as `executePlan`/`BoardStepRegistry` see it: one of the six known
+ * kinds by its exact shape, or anything else that at least names a `kind`.
+ * NOT what mechanics build `PresentationPlan` out of — see
+ * `KnownPresentationStep`'s doc for why those stay two different types.
+ */
+export type PresentationStep = KnownPresentationStep | UnknownPresentationStep;
+
+/**
+ * What a mechanic emits instead of animating: an ordered script for the
+ * board. Built from `KnownPresentationStep`, not `PresentationStep` — see
+ * that type's doc comment. This is the vocabulary `classic`/`cascade`
+ * stand on (Task 4) and it stays closed on purpose: widening it would
+ * silently drop compile-time checking from THEIR code, not just open a
+ * door for someone else's.
+ */
+export type PresentationPlan = KnownPresentationStep[];
+
+/**
+ * The six kinds' names, exactly as the `switch` below and `BoardApi`'s six
+ * methods (`@energy8engine/play-loop`) both key off. Exported so a
+ * diagnostic naming an unknown kind can also name what IS known, without a
+ * second hand-maintained copy of this list drifting from this one. Kept in
+ * sync with the `switch` by hand — there are six of these and the module
+ * doc above says why that count isn't expected to grow.
+ */
+export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
+  'spinTo',
+  'revealWins',
+  'remove',
+  'refill',
+  'setMultiplier',
+  'wait',
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -128,9 +201,24 @@ function isRevealedLine(value: unknown): value is RevealedLine {
   );
 }
 
-/** True for any well-formed step in the vocabulary above — false for everything else, never throws. */
+/**
+ * True for any well-formed `PresentationStep` — false for everything else,
+ * never throws. "Well-formed" means two different things depending on
+ * `kind`: for one of the six known kinds, the FULL shape that kind's own
+ * interface promises (a `spinTo` needs a real `board`, not just any
+ * object); for anything else, only that it names a `kind` at all — this
+ * function has no way to know what shape a plugin's step should be, and
+ * saying "false" for every kind it doesn't recognize is exactly the
+ * closed-vocabulary behaviour the registry (`@energy8engine/play-loop`)
+ * exists to end. A step whose kind is unknown but which lands on no
+ * registered handler either still gets caught — as a DIFFERENT diagnostic,
+ * from `executePlan` itself, once it has a registry (or lack of one) to
+ * check against; this function only answers "is this readable as a step
+ * at all," not "does anything know how to run it."
+ */
 export function isPresentationStep(value: unknown): value is PresentationStep {
   if (!isRecord(value)) return false;
+  if (typeof value.kind !== 'string') return false;
 
   switch (value.kind) {
     case 'spinTo':
@@ -150,6 +238,9 @@ export function isPresentationStep(value: unknown): value is PresentationStep {
     case 'wait':
       return isFiniteNumber(value.ms);
     default:
-      return false;
+      // Not one of the six — not malformed BY THAT FACT alone. `value.kind`
+      // is already confirmed a string above, which is everything
+      // `UnknownPresentationStep` requires.
+      return true;
   }
 }

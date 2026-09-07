@@ -22,8 +22,17 @@ describe('presentation steps', () => {
     expect(isPresentationStep({ kind: 'revealWins', total: 4, lines: [] })).toBe(true);
   });
 
-  it('rejects a step with an unknown kind', () => {
-    expect(isPresentationStep({ kind: 'explode', force: 9 })).toBe(false);
+  // Task 7: the vocabulary stopped being closed — a kind outside the six
+  // is a plugin's to define, not this function's to reject. Whether
+  // anything can actually RUN it is a different question, answered by a
+  // `BoardStepRegistry` (`@energy8engine/play-loop`), not by this check.
+  it('accepts a step whose kind is not one of the six', () => {
+    expect(isPresentationStep({ kind: 'explode', force: 9 })).toBe(true);
+  });
+
+  it('rejects a step whose kind is not even a string', () => {
+    expect(isPresentationStep({ kind: 123 })).toBe(false);
+    expect(isPresentationStep({})).toBe(false);
   });
 
   it('rejects a well-shaped kind whose payload is wrong', () => {
