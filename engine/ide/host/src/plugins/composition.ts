@@ -6,7 +6,7 @@ import {
   diagnostic,
   parseManifest,
 } from '@energy8engine/contracts';
-import { readPackageJson } from '../resolvePackage';
+import { readPackageJson, unresolvedReason } from '../resolvePackage';
 
 declare module 'cordis' {
   interface Context {
@@ -204,14 +204,27 @@ export function apply(ctx: Context, config: CompositionConfig) {
         const pkgName = entry.options.name;
         const pkg = readPackageJson(config.cwd, pkgName);
         if (!pkg) {
+          // Same distinction `runtime-assets.ts` draws, for the same
+          // reason: a package that IS in this project's `plugins/` and
+          // whose manifest will not parse is not a package that could not
+          // be found, and "install it" is the wrong instruction.
+          const reason = unresolvedReason(config.cwd, pkgName);
           diagnostics.push(
-            diagnostic(
-              'error',
-              entry.id,
-              'package',
-              `cannot resolve package "${pkgName}"`,
-              `install it, or fix the name in ${'e8.yml'}`,
-            ),
+            reason
+              ? diagnostic(
+                  'error',
+                  entry.id,
+                  'package',
+                  `package "${pkgName}" is present in this project's plugins/ but could not be read: ${reason}`,
+                  `fix the JSON in ${pkgName}'s package.json`,
+                )
+              : diagnostic(
+                  'error',
+                  entry.id,
+                  'package',
+                  `cannot resolve package "${pkgName}"`,
+                  `install it, or fix the name in ${'e8.yml'}`,
+                ),
           );
         }
 

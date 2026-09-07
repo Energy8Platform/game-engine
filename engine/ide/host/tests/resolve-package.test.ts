@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readPackageJson } from '../src/resolvePackage';
+import { readPackageJson, unresolvedReason } from '../src/resolvePackage';
 
 /**
  * Builds a fresh temp project from a flat map of relative-path -> file
@@ -105,5 +105,52 @@ describe('readPackageJson', () => {
     const dir = projectWith({});
     mkdirSync(join(dir, 'plugins', 'broken2', 'package.json'), { recursive: true });
     expect(readPackageJson(dir, 'broken2')).toBeNull();
+  });
+});
+
+/**
+ * Why `readPackageJson` came back `null`, for the callers that turn that
+ * `null` into a diagnostic.
+ *
+ * `null` collapses two situations a person needs apart: nothing by that
+ * name anywhere (a typo, or a missing install), and a package that IS
+ * there, in the project's own `plugins/`, whose manifest cannot be read.
+ * The caller's message was written for the first and was being shown for
+ * the second — "check for a typo in e8.patch.yml, or install it" about a
+ * package already sitting on disk.
+ */
+describe('unresolvedReason', () => {
+  it('explains a plugins/ manifest whose JSON does not parse, naming the file', () => {
+    const dir = projectWith({ 'plugins/broken/package.json': '{ this is not valid JSON' });
+    const reason = unresolvedReason(dir, 'broken')!;
+    expect(reason).toBeDefined();
+    expect(reason).toContain(join(dir, 'plugins', 'broken', 'package.json'));
+    expect(reason.toLowerCase()).toContain('json');
+  });
+
+  it('explains a package.json that is a directory, not only one with bad syntax', () => {
+    const dir = projectWith({});
+    mkdirSync(join(dir, 'plugins', 'broken2', 'package.json'), { recursive: true });
+    expect(unresolvedReason(dir, 'broken2')).toContain('package.json');
+  });
+
+  it('has nothing to say about a name that is simply not there', () => {
+    // The caller's own "could not be resolved … check for a typo, or
+    // install it" is exactly right for this one, and must not be
+    // second-guessed.
+    const dir = projectWith({ 'plugins/ok/package.json': '{"name":"ok","version":"1.0.0"}' });
+    expect(unresolvedReason(dir, 'no-such-thing')).toBeUndefined();
+  });
+
+  it('has nothing to say about a package that resolves fine', () => {
+    const dir = projectWith({ 'plugins/ok/package.json': '{"name":"ok","version":"1.0.0"}' });
+    expect(unresolvedReason(dir, 'ok')).toBeUndefined();
+  });
+
+  it('has nothing to say about a name that escapes plugins/ — that is refusal, not damage', () => {
+    const root = projectWith({ 'secret/package.json': '{"name":"secret","version":"6.6.6"}' });
+    const dir = join(root, 'project');
+    mkdirSync(join(dir, 'plugins'), { recursive: true });
+    expect(unresolvedReason(dir, '../../secret')).toBeUndefined();
   });
 });

@@ -399,6 +399,17 @@ describe('GET /api/composition', () => {
     expect(brokenDiagnostics[0].message).toContain('broken1');
     expect(brokenDiagnostics[0].message).toContain('broken-plugin');
 
+    // ...and it says what ACTUALLY happened. Stopping the 500 left the
+    // row falling through to ordinary node resolution, which reports
+    // "could not be resolved … check for a typo, or install it" — about a
+    // package sitting right there in `plugins/`, whose only problem is
+    // that its JSON does not parse. A person following that fix looks for
+    // a typo in a NAME that is correct, or installs a package they
+    // already have.
+    expect(brokenDiagnostics[0].message).toContain('package.json');
+    expect(brokenDiagnostics[0].message.toLowerCase()).toContain('json');
+    expect(brokenDiagnostics[0].fix).not.toContain('install it');
+
     // The blast radius: a completely healthy sibling row in the SAME
     // composition still comes back with its own real data intact — not
     // dropped, not corrupted by the broken row ahead of it in the same

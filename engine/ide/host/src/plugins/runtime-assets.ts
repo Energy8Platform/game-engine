@@ -8,7 +8,7 @@ import {
   parseManifest,
   type ResolvedRow,
 } from '@energy8engine/contracts';
-import { readPackageJson } from '../resolvePackage';
+import { readPackageJson, unresolvedReason } from '../resolvePackage';
 
 export const name = 'runtime-assets';
 export const inject = ['server', 'project', 'spinSchema'];
@@ -158,15 +158,31 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     pkg: { dir: string } | null,
   ): { url: string | null; diagnostic?: Diagnostic } {
     if (!pkg) {
+      // Two situations, and until now one message for both. A name
+      // nothing answers to is a typo or a missing install; a
+      // `plugins/<name>/package.json` that does not parse is a package
+      // sitting right there whose manifest is broken, and telling that
+      // author to check for a typo in the NAME or to install it sends
+      // them looking for a problem that is not there. `unresolvedReason`
+      // knows which one happened.
+      const reason = unresolvedReason(config.cwd, row.name);
       return {
         url: null,
-        diagnostic: diagnostic(
-          'error',
-          row.id,
-          'package',
-          `row "${row.id}" names the package "${row.name}", which could not be resolved from ${config.cwd}`,
-          `check "${row.name}" for a typo in e8.patch.yml or the bundle that places "${row.id}", or install it`,
-        ),
+        diagnostic: reason
+          ? diagnostic(
+              'error',
+              row.id,
+              'package',
+              `row "${row.id}" names the package "${row.name}", which is present in this project's plugins/ but could not be read: ${reason}`,
+              `fix the JSON in ${row.name}'s package.json`,
+            )
+          : diagnostic(
+              'error',
+              row.id,
+              'package',
+              `row "${row.id}" names the package "${row.name}", which could not be resolved from ${config.cwd}`,
+              `check "${row.name}" for a typo in e8.patch.yml or the bundle that places "${row.id}", or install it`,
+            ),
       };
     }
 

@@ -21,7 +21,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
  */
 export function readPackageJson(cwd: string, name: string): { dir: string; json: unknown } | null {
   const projectPlugin = readProjectPlugin(cwd, name);
-  if (projectPlugin) return projectPlugin;
+  if (projectPlugin.kind === 'found') return { dir: projectPlugin.dir, json: projectPlugin.json };
 
   const require = createRequire(join(cwd, 'noop.js'));
   try {
@@ -46,6 +46,59 @@ export function readPackageJson(cwd: string, name: string): { dir: string; json:
   }
   return null;
 }
+
+/**
+ * Why `readPackageJson` came back `null`, when there is more to say than
+ * "nothing by that name" — otherwise `undefined`.
+ *
+ * `readPackageJson` returns one `null` for two different situations, and a
+ * person needs them apart. Its callers turn that `null` into "row X names
+ * the package Y, which could not be resolved … check for a typo in
+ * e8.patch.yml, or install it" — exactly right when nothing by that name
+ * exists anywhere, and actively misleading when the package is sitting in
+ * the project's own `plugins/` directory and its manifest simply does not
+ * parse. The earlier fix correctly stopped that case from throwing a
+ * `SyntaxError` through every caller's per-row loop; what it did not do
+ * was carry the reason forward, so the row fell through to node
+ * resolution and reported a typo in a name that is correct.
+ *
+ * Only the project-plugin path can produce a reason. A package under
+ * `node_modules` whose manifest is broken fails inside `require.resolve`,
+ * which has already tried several strategies by then and cannot say which
+ * one was "the" failure — and an installed package is not a file the
+ * project author hand-edited a moment ago, which is what makes the
+ * `plugins/` case worth a sentence of its own.
+ *
+ * `undefined` for a name that resolved fine, for a name that is genuinely
+ * absent, and for one that RESOLVED OUTSIDE `plugins/` (the containment
+ * refusal): the first two are not failures this can improve on, and the
+ * third is a deliberate refusal rather than damage — reporting "your
+ * manifest is broken" about a file the host declined to read would be a
+ * new wrong answer in place of the old one.
+ *
+ * Calling this re-runs `readProjectPlugin`, so the work is done twice on
+ * the failure path. That path is one broken row per composition, on a
+ * request that is already producing a diagnostic; the alternative — a
+ * wider return type through `readPackageJson` and its four call sites,
+ * three of which have nothing to say about the reason — costs more than
+ * it buys.
+ */
+export function unresolvedReason(cwd: string, name: string): string | undefined {
+  const result = readProjectPlugin(cwd, name);
+  return result.kind === 'unreadable' ? result.reason : undefined;
+}
+
+/**
+ * What a project's `plugins/<name>` lookup found. Three outcomes, not two:
+ * `absent` (nothing there, or something there the host refuses to read
+ * outside `plugins/`) and `unreadable` (it IS there and cannot be parsed)
+ * used to collapse into one `null`, which is what let a broken manifest be
+ * reported as a missing package. See `unresolvedReason`.
+ */
+type ProjectPluginResult =
+  | { kind: 'found'; dir: string; json: unknown }
+  | { kind: 'unreadable'; reason: string }
+  | { kind: 'absent' };
 
 /**
  * A project's own `plugins/<name>/package.json` — no `node_modules` entry,
@@ -79,10 +132,10 @@ export function readPackageJson(cwd: string, name: string): { dir: string; json:
  *
  * `realpathSync` throwing — no `plugins/` directory, no entry by that
  * name, no `package.json` inside it — and the entry existing but
- * resolving outside `plugins/` both come back the same way: silence, so
+ * resolving outside `plugins/` both come back the same way: `absent`, so
  * the caller falls through to ordinary Node resolution instead.
  */
-function readProjectPlugin(cwd: string, name: string): { dir: string; json: unknown } | null {
+function readProjectPlugin(cwd: string, name: string): ProjectPluginResult {
   const pluginsRoot = resolve(cwd, 'plugins');
   const candidateDir = resolve(pluginsRoot, name);
   const manifestPath = join(candidateDir, 'package.json');
@@ -93,11 +146,11 @@ function readProjectPlugin(cwd: string, name: string): { dir: string; json: unkn
     realManifestPath = realpathSync(manifestPath);
     realPluginsRoot = realpathSync(pluginsRoot);
   } catch {
-    return null;
+    return { kind: 'absent' };
   }
 
   if (realManifestPath !== realPluginsRoot && !realManifestPath.startsWith(realPluginsRoot + sep)) {
-    return null;
+    return { kind: 'absent' };
   }
 
   // Wrapped for the same reason the two `require.resolve`-based branches
@@ -113,8 +166,18 @@ function readProjectPlugin(cwd: string, name: string): { dir: string; json: unkn
     // plugin's location relative to the `cwd` they passed in; handing back
     // a realpath'd string here would silently substitute a different (if
     // equivalent) path whenever `cwd` itself sits behind a symlink.
-    return { dir: candidateDir, json: JSON.parse(readFileSync(manifestPath, 'utf8')) };
-  } catch {
-    return null;
+    return { kind: 'found', dir: candidateDir, json: JSON.parse(readFileSync(manifestPath, 'utf8')) };
+  } catch (error) {
+    // Still not a throw, and still `readPackageJson`-null to every caller
+    // that only asked whether the package resolved — but the reason is
+    // kept now instead of dropped, for `unresolvedReason` above. The path
+    // is the UNRESOLVED one, for the same reason `dir` is: it is the path
+    // the author would recognize.
+    return {
+      kind: 'unreadable',
+      reason: `${manifestPath} could not be read as JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
   }
 }
