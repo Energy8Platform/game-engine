@@ -24,15 +24,26 @@
  *
  * **Where the typo check actually lives, measured rather than assumed.**
  * TypeScript performs no excess-property check on an object literal
- * RETURNED from a contextually-typed function: `present: () => [{ kind:
- * 'reelStep', …, shiftsTYPO: [9] }]` compiles clean against every shape
- * tried, including a plain `() => Ret` with no generics anywhere. The check
- * fires on a direct assignment or a `push`. That was true before this
- * change too — `mechanic-classic`'s protection has always come from the
- * `const steps: PresentationPlan = [...]` inside its own `plan()`, never
- * from the `present` signature — so the cases below are written the way a
- * mechanic is actually written, at the assignment, which is the only place
- * the guarantee is real.
+ * returned from a function whose return type it knows only from CONTEXT.
+ * The four cases, each run:
+ *
+ *   - `const a: () => Ret = () => [{ …, TYPO: 1 }]`      — no check
+ *   - `const c: { m(): Ret } = { m() { return […] } }`   — no check
+ *   - `function b(): Ret { return [{ …, TYPO: 1 }] }`    — **TS2353**
+ *   - `const d = (): Ret => [{ …, TYPO: 1 }]`            — **TS2353**
+ *
+ * So the line is not arrow-versus-function and not "returns are exempt": a
+ * function that carries its OWN return annotation is checked, and one that
+ * only inherits a contextual type is not. `present: (data) => plan(data)`
+ * is the first kind of position; `export function plan(…): ReelStepPlan`
+ * is the second, which is why `reel-step`'s steps are checked where it
+ * writes them.
+ *
+ * That was true before this change too — `mechanic-classic`'s protection
+ * has always come from the `const steps: PresentationPlan = [...]` inside
+ * its own `plan()`, never from the `present` signature. The cases below are
+ * therefore written the way a mechanic is actually written: a standalone
+ * annotated function building into an annotated local.
  */
 import { describe, expect, it } from 'vitest';
 import type { AnySpinMechanic, SpinMechanic } from '../src/mechanic';

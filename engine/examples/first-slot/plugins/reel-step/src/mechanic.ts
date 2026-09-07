@@ -126,10 +126,13 @@ export const expects: SpinShapeRequirement = {
  * declares `present` to return. Writing the steps into a local of that type
  * is also where the compiler actually checks them: a mistyped `spinTo`, or
  * a stray field on this plugin's own step, is an error HERE. It is not one
- * at the `present` signature — TypeScript performs no excess-property check
- * through a function's return position, measured, and that was as true of
- * the old closed contract as it is of this one. See
- * `@energy8engine/contracts`' `tests/mechanic-open.test.ts`.
+ * at the `present` signature, and the reason is precise rather than
+ * "returns are exempt": TypeScript skips the excess-property check on a
+ * literal returned from a function whose return type it knows only from
+ * CONTEXT (`present: (data) => …`), and performs it on one whose function
+ * carries its own return annotation — which this function does, twice over
+ * (`: ReelStepPlan` here and on the local below). The four measured cases
+ * are in `@energy8engine/contracts`' `tests/mechanic-open.test.ts`.
  */
 export function plan(data: ReelStepStageData): ReelStepPlan {
   const steps: ReelStepPlan = [{ kind: 'spinTo', board: data.grid }];
