@@ -330,3 +330,65 @@ describe('data.reel_steps vs data.win — three forms, one spin, one shared roun
     );
   });
 });
+
+// Part 3 of the invariant — "sum(reel_steps[].win) is that chain's own
+// total and is NOT the credited figure" — was, until these tests, the
+// loudest sentence in `src/types.ts` and the one nothing would have noticed
+// losing. Measured: rewrite `reel_chain` to tumble instead of scroll and
+// `reel_steps` collapses into `cascade_history`, part 3 becomes false, and
+// exactly ONE test fails — the board-shape one, which is about geometry,
+// not money. The board rule was protecting the money claim by accident.
+//
+// So the money claim gets its own checks.
+//
+// One candidate was written and then DELETED rather than kept: "the reel
+// chain is not the tumble chain retold", comparing the two chains' boards
+// per spin. It passed under the tumble mutation — for a reason that has
+// nothing to do with the rule. `reel_chain` runs after the tumble loop and
+// draws its own refills, so the two chains' boards differ by random symbols
+// whether or not they follow the same rule. A test that green-lights the
+// mutation it was written to catch is worse than no test; what actually
+// pins the RULE is the scroll test above, and what pins the MONEY is
+// below.
+describe('data.reel_steps vs data.win — part 3, the claim that costs money to get wrong', () => {
+  it('a chain that ran more than one round pays strictly more than round 0', async () => {
+    // Deterministic, per spin: every recorded round paid something (the
+    // math never records a round that did not), so a second round can only
+    // add. This is what "never below base_win" means when there is actually
+    // something above it — an accounting change that dropped later rounds'
+    // payouts, or zeroed them, fails here rather than in a comment.
+    const r = await spinUntil((s) => s.data.reel_steps.length >= 2);
+    const chain = r.data.reel_steps.reduce((total: number, s: { win: number }) => total + s.win, 0);
+    for (const step of r.data.reel_steps) expect(step.win).toBeGreaterThan(0);
+    expect(chain).toBeGreaterThan(r.data.base_win);
+    expect(r.data.reel_steps[0].win).toBeCloseTo(r.data.base_win, 10);
+  });
+
+  it('the chain total and the credited win diverge, and not rarely', async () => {
+    // The half no single spin can show. Over a sample the two totals must
+    // disagree on a large fraction of paying spins — measured at ~70% for
+    // this math. A `reel_chain` that merely retold the tumble drops that to
+    // ~6%, so the threshold sits far from both: with ~80 paying spins in
+    // 600, an observed 0.70 sits ~7 standard deviations above 0.35 and an
+    // observed 0.06 sits ~9 below it. This is a claim about a distribution,
+    // and it is checked as one.
+    let paid = 0;
+    let diverged = 0;
+    for (let i = 0; i < 600; i += 1) {
+      const r = await play();
+      if (r.data.reel_steps.length === 0) continue;
+      paid += 1;
+      const chain = r.data.reel_steps.reduce(
+        (total: number, s: { win: number }) => total + s.win,
+        0,
+      );
+      // Never below the round every form shares, on every paying spin —
+      // not just on the one `spinUntil` happened to find.
+      expect(chain).toBeGreaterThanOrEqual(r.data.base_win - 1e-10);
+      if (Math.abs(chain - r.data.win) > 1e-9) diverged += 1;
+    }
+
+    expect(paid).toBeGreaterThan(30);
+    expect(diverged / paid).toBeGreaterThan(0.35);
+  }, 60_000);
+});
