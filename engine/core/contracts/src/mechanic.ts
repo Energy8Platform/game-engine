@@ -1,5 +1,5 @@
 import { type Diagnostic, diagnostic } from './diagnostic';
-import type { PresentationPlan } from './presentation';
+import type { KnownPresentationStep, PresentationPlan } from './presentation';
 
 /**
  * A stage field's shape, not its meaning. Kept to exactly the three kinds
@@ -44,17 +44,61 @@ export interface SpinShapeRequirement {
 }
 
 /**
- * A mechanic as the board runs it: it turns one stage's spin data into a
- * `PresentationPlan` (the board's step vocabulary — see `presentation.ts`),
- * and it declares up front what that stage's data must contain via
- * `requires`, so `checkShape` can catch a mismatch before the player ever
- * clicks spin instead of leaving a blank board after.
+ * A mechanic as the board runs it: it turns one stage's spin data into an
+ * ordered script for the board (the step vocabulary — see
+ * `presentation.ts`), and it declares up front what that stage's data must
+ * contain via `requires`, so `checkShape` can catch a mismatch before the
+ * player ever clicks spin instead of leaving a blank board after.
+ *
+ * **`TStep` is how a mechanic brings a step kind the engine has never heard
+ * of.** Leave it off and `present` returns exactly `PresentationPlan` — the
+ * six built-in kinds and nothing else, which is what `classic` and
+ * `cascade` are and what this interface has always meant. Name your own
+ * step type and `present` returns the six PLUS that one:
+ *
+ * ```ts
+ * interface ReelStepStep { kind: 'reelStep'; shifts: number[]; settled: Board }
+ * export const mechanic: SpinMechanic<ReelStepStep> = { … };
+ * ```
+ *
+ * A type PARAMETER rather than simply widening `present` to
+ * `PresentationStep[]`, and the difference is not stylistic — it is the one
+ * property this contract cannot afford to lose. `PresentationStep` includes
+ * `UnknownPresentationStep`, whose index signature absorbs any object
+ * literal: widen `present` to it and `present: () => [{ kind: 'spinTo',
+ * boardTYPO: … }]` compiles clean, in every mechanic, forever (the same
+ * trap `UnknownPresentationStep`'s own doc describes, and the reason
+ * `PresentationPlan` is not built from it). With a parameter, the only
+ * extra shape a mechanic's literals are checked against is the one that
+ * mechanic itself declared — so its own step matches precisely and a
+ * mistyped `spinTo` still has nowhere to hide. Both halves are pinned by
+ * `tests/mechanic-open.test.ts`, at compile time.
+ *
+ * Declare `TStep` as a plain interface, not one extending
+ * `UnknownPresentationStep` — see `StepHandler` in
+ * `@energy8engine/play-loop` for what that `extends` silently costs.
  */
-export interface SpinMechanic {
+export interface SpinMechanic<TStep extends { kind: string } = never> {
   id: string;
   requires: SpinShapeRequirement;
-  present(data: unknown): PresentationPlan;
+  present(data: unknown): (KnownPresentationStep | TStep)[];
 }
+
+/**
+ * A mechanic as a REGISTRY holds one: it may emit any step kind, because a
+ * registry stores mechanics it did not write and cannot name their step
+ * types. Every `SpinMechanic<T>` is assignable to this, including the
+ * default `SpinMechanic`.
+ *
+ * This is the type to store and hand back, never the type to author a
+ * mechanic against: `{ kind: string }` is an anonymous object type, so it
+ * carries an implicit index signature and would absorb a typo'd literal
+ * exactly the way `UnknownPresentationStep` does. Nothing assigns a fresh
+ * object literal to it — mechanics are authored against `SpinMechanic<T>`
+ * and merely widen into this on the way into a registry, which is ordinary
+ * assignability and not an excess-property check at all.
+ */
+export type AnySpinMechanic = SpinMechanic<{ kind: string }>;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);

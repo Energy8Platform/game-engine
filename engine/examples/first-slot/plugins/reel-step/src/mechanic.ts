@@ -27,8 +27,7 @@
 import type {
   Board,
   Cell,
-  PresentationPlan,
-  PresentationStep,
+  KnownPresentationStep,
   SpinMechanic,
   SpinShapeRequirement,
 } from '@energy8engine/contracts';
@@ -87,6 +86,13 @@ export interface ReelStepStep {
   index: number;
 }
 
+/**
+ * What this mechanic's `present` returns: the six kinds every board already
+ * performs, plus the one this plugin brings. Named because both `plan` and
+ * the `SpinMechanic<ReelStepStep>` below are written against it.
+ */
+export type ReelStepPlan = (KnownPresentationStep | ReelStepStep)[];
+
 /** `reel-step` needs the landed board to spin to, plus the chain to walk. */
 export const expects: SpinShapeRequirement = {
   fields: { grid: 'grid', reel_steps: 'list' },
@@ -115,12 +121,18 @@ export const expects: SpinShapeRequirement = {
  * the legacy `ReelStepController` does — so the reveal here is the money
  * readout and nothing else.
  *
- * The return type is `PresentationStep[]`, not `PresentationPlan`: a
- * `PresentationPlan` is the six known kinds and `reelStep` is not one of
- * them. See `mechanic` below for where that difference has to be absorbed.
+ * The return type is `ReelStepPlan` — the six built-in kinds plus this
+ * plugin's own one, which is exactly what `SpinMechanic<ReelStepStep>`
+ * declares `present` to return. Writing the steps into a local of that type
+ * is also where the compiler actually checks them: a mistyped `spinTo`, or
+ * a stray field on this plugin's own step, is an error HERE. It is not one
+ * at the `present` signature — TypeScript performs no excess-property check
+ * through a function's return position, measured, and that was as true of
+ * the old closed contract as it is of this one. See
+ * `@energy8engine/contracts`' `tests/mechanic-open.test.ts`.
  */
-export function plan(data: ReelStepStageData): PresentationStep[] {
-  const steps: PresentationStep[] = [{ kind: 'spinTo', board: data.grid }];
+export function plan(data: ReelStepStageData): ReelStepPlan {
+  const steps: ReelStepPlan = [{ kind: 'spinTo', board: data.grid }];
 
   data.reel_steps.every((round, index) => {
     const paid = round.winning.length > 0;
@@ -144,18 +156,22 @@ export function plan(data: ReelStepStageData): PresentationStep[] {
 /**
  * The registration bundle `MechanicsService.register` takes.
  *
- * `present` is declared to return `PresentationPlan` — the CLOSED six-kind
- * list — so a mechanic that emits a seventh kind cannot satisfy that
- * signature without the cast below. This is the one place the open
- * vocabulary is not open: `executePlan` and `BoardStepRegistry` were both
- * widened to `PresentationStep` in task 7, `SpinMechanic.present` was not.
- * The cast is type-level only and provably harmless at runtime — the array
- * goes straight to `executePlan`, whose parameter is the wide type and
- * which dispatches on `kind` — but it is a cast, and pretending otherwise
- * by hiding it behind a helper would be worse than naming it here.
+ * `SpinMechanic<ReelStepStep>` — the type parameter is how a mechanic says
+ * "I also emit this kind", and it is why there is no cast here. There used
+ * to be one: `present` was declared to return the closed `PresentationPlan`,
+ * so a mechanic emitting a seventh kind could not satisfy its own
+ * registration type without `as PresentationPlan`. Naming the step type
+ * instead keeps the plan honest in both directions — this plugin's step is
+ * admitted, and a mistyped built-in one is still rejected.
+ *
+ * The `data as ReelStepStageData` cast that remains is a different thing
+ * and is not going away: `present(data: unknown)` is the registry's
+ * signature because a registry cannot know what shape any given stage
+ * carries. `requires` is what makes that cast safe — `checkShape` runs
+ * against real stage data before anything is presented.
  */
-export const mechanic: SpinMechanic = {
+export const mechanic: SpinMechanic<ReelStepStep> = {
   id: 'reel-step',
   requires: expects,
-  present: (data) => plan(data as ReelStepStageData) as PresentationPlan,
+  present: (data) => plan(data as ReelStepStageData),
 };

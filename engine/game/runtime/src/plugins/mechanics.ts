@@ -3,7 +3,15 @@
  *
  * A mechanic is registered under an id, and a stage is bound to exactly one
  * mechanic id at a time (`bind` overwrites, it never accumulates). The
- * registered object is a `SpinMechanic` (`{ id, requires, present }`) from
+ * The stored type is `AnySpinMechanic` — `SpinMechanic<{ kind: string }>`,
+ * the widest form — because a registry holds mechanics it did not write and
+ * cannot name their step types. A mechanic authored as `SpinMechanic` (the
+ * six built-in kinds, e.g. `classic`) or as `SpinMechanic<MyStep>` (a
+ * plugin's, e.g. `reel-step`) widens into it on the way in, with no cast at
+ * this seam in either direction. See `AnySpinMechanic`'s own doc for why
+ * that widest form is a storage type and never an authoring one.
+ *
+ * The registered object is a `SpinMechanic` (`{ id, requires, present }`) from
  * `@energy8engine/contracts` — the exact shape `mechanic-classic` and
  * `mechanic-cascade` already bundle and export as `mechanic`, built for
  * this registry on purpose (see the doc comment on each package's
@@ -19,18 +27,18 @@
  */
 import type { Context } from 'cordis';
 import {
+  type AnySpinMechanic,
   checkShape,
   diagnostic,
   type Diagnostic,
   type FieldKind,
   type FieldType,
-  type SpinMechanic,
   type SpinSchema,
 } from '@energy8engine/contracts';
 
 export interface MechanicsService {
   /** Registers a mechanic under its id. Returns a disposer that unregisters it again. */
-  register(mechanic: SpinMechanic): () => void;
+  register(mechanic: AnySpinMechanic): () => void;
   /**
    * Binds `stage` to the mechanic named `mechanicId`. A later call for the
    * same stage replaces the earlier one.
@@ -51,7 +59,7 @@ export interface MechanicsService {
    */
   bind(stage: string, mechanicId: string): void;
   /** The mechanic currently bound to `stage`, or `null` if none is (or its registration is gone). */
-  forStage(stage: string): SpinMechanic | null;
+  forStage(stage: string): AnySpinMechanic | null;
   /**
    * Checks `sample` against the shape the stage's bound mechanic declares
    * it needs. A thin wrapper over `checkShape` from the contracts package —
@@ -66,7 +74,7 @@ export interface MechanicsService {
    * as `null`: that absence is not a failure at this point, and
    * `checkAgainstSchema` has no slot for "maybe".
    */
-  bindings(): Record<string, SpinMechanic>;
+  bindings(): Record<string, AnySpinMechanic>;
 }
 
 declare module 'cordis' {
@@ -86,7 +94,7 @@ export const name = 'mechanics';
  * name; cordis passes a config argument this plugin simply ignores.
  */
 export function apply(ctx: Context) {
-  const mechanics = new Map<string, SpinMechanic>();
+  const mechanics = new Map<string, AnySpinMechanic>();
   const bindings = new Map<string, string>();
 
   const service: MechanicsService = {
@@ -164,7 +172,7 @@ export function apply(ctx: Context) {
     },
 
     bindings() {
-      const result: Record<string, SpinMechanic> = {};
+      const result: Record<string, AnySpinMechanic> = {};
       for (const [stage, mechanicId] of bindings) {
         const mechanic = mechanics.get(mechanicId);
         // A stage bound to an id nobody has registered yet is not this
@@ -304,7 +312,7 @@ function describeFieldType(type: FieldType): string {
  */
 export function checkAgainstSchema(
   schema: SpinSchema | null,
-  bindings: Record<string, SpinMechanic>,
+  bindings: Record<string, AnySpinMechanic>,
 ): Diagnostic[] {
   if (schema === null) return [];
 

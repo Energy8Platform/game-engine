@@ -52,7 +52,7 @@ import * as ideBridge from '@energy8engine/ide-bridge';
 import {
   diagnostic,
   type Diagnostic,
-  type PresentationPlan,
+  type PresentationStep,
   type SpinResult,
 } from '@energy8engine/contracts';
 // Type-only, and fully erased: these two modules are what DECLARE the
@@ -249,7 +249,7 @@ mechanicSelect.addEventListener('change', () => {
  * `ctx.play.execute` and `ctx.board` are both services rows provided
  * (`playloop1` and `reels1`) — this file imports neither package.
  *
- * Returns the full `PresentationPlan`, not just each step's `kind` — a
+ * Returns the full plan, not just each step's `kind` — a
  * step's content (which board `spinTo`/`refill` name, which cells `remove`
  * names) is exactly what a person watching the board actually sees, and a
  * kind-only sequence cannot tell a correctly-refilled board apart from one
@@ -258,7 +258,7 @@ mechanicSelect.addEventListener('change', () => {
 async function presentStage(
   stage: string,
   data: Record<string, unknown>,
-): Promise<PresentationPlan> {
+): Promise<PresentationStep[]> {
   const shapeProblems = game.ctx.mechanics.check(stage, data);
   if (shapeProblems.length > 0) {
     log(`mechanic can't read this stage's data: ${JSON.stringify(shapeProblems)}`);
@@ -339,7 +339,7 @@ spinBtn.addEventListener('click', async () => {
   /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". Includes what THIS page found missing (see `REQUIRES`), not only what `createGame` collected. */
   diagnostics,
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
-  async spin(): Promise<{ result: SpinResult; steps: PresentationPlan }> {
+  async spin(): Promise<{ result: SpinResult; steps: PresentationStep[] }> {
     const res = await fetch('/api/spin', { method: 'POST' });
     const body: SpinResult | { diagnostics: unknown[] } = await res.json();
     if (!res.ok) {
@@ -353,7 +353,7 @@ spinBtn.addEventListener('click', async () => {
     return { result, steps };
   },
   /** Re-presents arbitrary (or the last captured) stage data under whichever mechanic is currently bound — the same `data`, a possibly different mechanic. */
-  async present(stage?: string, data?: Record<string, unknown>): Promise<PresentationPlan> {
+  async present(stage?: string, data?: Record<string, unknown>): Promise<PresentationStep[]> {
     const target = stage && data ? { stage, data } : lastSpin;
     if (!target) throw new Error('no spin to present yet');
     return presentStage(target.stage, target.data);
