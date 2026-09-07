@@ -62,4 +62,58 @@ describe('executePlan with a BoardStepRegistry', () => {
     expect(diagnostics).toHaveLength(1);
     expect(board.calls).toEqual(['spinTo']);      // the next step still ran
   });
+
+  // Review round: `executePlan` promises never to throw no matter what the
+  // plan contains — that promise has to cover what a THIRD PARTY's
+  // `BoardStepRegistry` does too, not just what its `run()` does.
+  // `registry?.get(step.kind)` is a call into code this package does not
+  // control, exactly like `run()` is, and a synchronously-throwing `get()`
+  // reached `executePlan`'s caller as a rejection before this test existed.
+  it('a registry whose get() throws becomes a diagnostic, not a throw', async () => {
+    const throwingRegistry: BoardStepRegistry = {
+      register: () => () => {},
+      has: () => false,
+      get: () => {
+        throw new Error('get() blew up');
+      },
+      kinds: () => [],
+    };
+    const diagnostics = await executePlan(
+      [{ kind: 'reelStep', shifts: [1, 0] }],
+      board,
+      throwingRegistry,
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('reelStep');
+    expect(diagnostics[0].message).toContain('get() blew up');
+  });
+
+  // Same hazard, the other interface a third party's `board` implements
+  // (task 9's, eventually): a throwing GETTER on the property named by
+  // `step.kind`, not just a throwing METHOD once called. `board[step.kind]`
+  // is a plain property read, and reading it is enough to run someone
+  // else's code.
+  it('a board whose property lookup throws becomes a diagnostic, not a throw', async () => {
+    const evilBoard: any = {};
+    Object.defineProperty(evilBoard, 'spinTo', {
+      get() {
+        throw new Error('property access blew up');
+      },
+    });
+    const diagnostics = await executePlan([{ kind: 'spinTo', board: [[1]] }], evilBoard);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('spinTo');
+    expect(diagnostics[0].message).toContain('property access blew up');
+  });
+
+  // Review round: the "known kinds" list used to be the compile-time fixed
+  // six ONLY — a project that registers `reelStep` and mistypes it as
+  // `reelStap` was told about `spinTo, revealWins, …`, never about the one
+  // kind the typo was actually reaching for.
+  it('an unknown kind diagnostic also names a kind the registry actually holds', async () => {
+    registry.register({ kind: 'reelStep', run: async () => {} });
+    const [d] = await executePlan([{ kind: 'reelStap' }], board, registry);
+    expect(d.message).toContain('reelStap');
+    expect(d.message).toContain('reelStep');
+  });
 });
