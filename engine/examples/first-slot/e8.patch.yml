@@ -49,4 +49,25 @@ rows:
   - id: mechanics1
     config:
       stages:
-        base_game: classic
+        # Bound to a mechanic NO row in `e8-base` ships and nothing in the
+        # engine has heard of. That is legal, and `MechanicsService.bind`
+        # says why in its own doc: a binding to an unregistered id is not a
+        # failure, because the row that registers it may not have applied
+        # yet — `reelstep1` below is appended after this one, and the
+        # binding resolves the moment it lands.
+        base_game: reel-step
+  # The third mechanic, and the row this whole slice was built to make
+  # possible. `reel-step` is not installed and not published: it is
+  # `plugins/reel-step/` in this project, a directory placed by hand, which
+  # the host resolves ahead of `node_modules` (see `readProjectPlugin` in
+  # the IDE host's `resolvePackage.ts`). A patch row with a `name` INSERTS a
+  # row the bundle never placed, and it lands last — after `mechanics1`,
+  # which is exactly the order the comment above is about.
+  #
+  # It brings two things the engine does not have: a mechanic that emits a
+  # `reelStep` step, and the handler that performs one. `classic` and
+  # `cascade` needed only the first, because the six built-in step kinds
+  # already covered them.
+  - id: reelstep1
+    name: reel-step
+    config: {}

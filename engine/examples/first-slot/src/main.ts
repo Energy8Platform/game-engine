@@ -63,6 +63,11 @@ import {
 // capabilities it expects the project's composition to have provided.
 import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/play-loop/runtime';
+// Same rule, one step further: a TYPE for the registry a step-bringing
+// plugin provides, so the value read off `ctx` below is not an `any`.
+// Erased like the two above; `@energy8engine/play-loop` is not imported
+// here, only described.
+import type { BoardStepRegistry } from '@energy8engine/play-loop';
 
 /** Matches `e8.patch.yml`'s `reels1` grid — this file only uses it to size the placeholder art. */
 const CELL = 96;
@@ -202,6 +207,32 @@ if (diagnostics.length > 0) {
   statusEl.textContent = 'ready';
 }
 
+/**
+ * The `<select>` starts on whatever the COMPOSITION actually bound, not on
+ * whichever `<option>` happens to be first in the HTML.
+ *
+ * It used to start on the HTML's first option and immediately bind that,
+ * which silently overrode `e8.patch.yml`: the patch could say
+ * `base_game: reel-step` and the page would rebind to `classic` before the
+ * developer touched anything. Two files stating the default, one of them
+ * always losing, and nothing on screen saying so. Reading it back off the
+ * registry leaves `e8.patch.yml` the single place that decides, and leaves
+ * this control what it always was — a way to change it afterwards.
+ *
+ * A stage bound to a mechanic nothing registered reads as `null` here (see
+ * `MechanicsService.forStage`), and the `<select>`'s own current value
+ * stands. That is not a case to paper over: `mechanics.check` reports it
+ * with the whole story on the first spin, and it is the only report that
+ * can, because only it knows whether the registration ever arrived.
+ *
+ * Through `reflect.get` for the same reason `REQUIRES` above is: a
+ * composition with no `mechanics1` row is a legal edit, already reported
+ * as a diagnostic a few lines up, and this line must not turn that into a
+ * `TypeError` that stops the page before the report is drawn.
+ */
+const bound = game.ctx.reflect.get('mechanics', false)?.forStage('base_game')?.id;
+if (bound) mechanicSelect.value = bound;
+
 // `ide-bridge`'s own boot-time bind uses `mechanicSelect.value` too, so the
 // two channels (this page's local `<select>`, and the IDE's composition
 // screen over `/ide`) agree at first load; whichever one the developer
@@ -211,6 +242,28 @@ ideBridge.apply(game.ctx, { base_game: mechanicSelect.value });
 mechanicSelect.addEventListener('change', () => {
   game.ctx.mechanics.bind('base_game', mechanicSelect.value);
 });
+
+/**
+ * The registry of steps the built-in board has no method for — this
+ * project's `plugins/reel-step` provides one and registers `reelStep` into
+ * it (see that plugin's module doc). `executePlan` consults it only after
+ * the board has said it cannot perform a kind, so nothing registered here
+ * can shadow one of the six built-ins.
+ *
+ * **This handshake is the project's, not the engine's.** No row in
+ * `e8-base` composes a registry and `@energy8engine/play-loop`'s runtime
+ * half provides only `ctx.play.execute`, so if this page does not pass one,
+ * a plugin's step reaches nothing and every spin under `reel-step` is a
+ * diagnostic. The name `steps` is a convention between this file and the
+ * plugins in this project — the engine defines neither the name nor the
+ * requirement. See task-8-9-report.md.
+ *
+ * `undefined` is the ordinary case, not a failure: a composition with no
+ * step-bringing plugin has no registry, and `execute`'s third parameter is
+ * optional precisely so that composition behaves exactly as it did before
+ * any of this existed.
+ */
+const steps = game.ctx.reflect.get('steps', false) as BoardStepRegistry | undefined;
 
 /**
  * Checks `data` against the stage's currently bound mechanic, presents it,
@@ -241,8 +294,28 @@ async function presentStage(
   }
 
   const mechanic = game.ctx.mechanics.forStage(stage)!;
+
+  // Keep the control honest about what actually rendered. The binding has
+  // two other writers besides this page's `<select>`: `e8.patch.yml`, and
+  // `@energy8engine/ide-bridge`, which rebinds `base_game` to whatever its
+  // own `e8.yml` row says on every `/ide` snapshot — including the one the
+  // host broadcasts the moment the socket connects, seconds after boot.
+  // MEASURED, not supposed: with the patch binding `reel-step`, the page
+  // came up on `reel-step` and was rebound to `classic` by that first
+  // snapshot, with the dropdown still reading `reel-step`. The reason the
+  // IDE cannot say `reel-step` at all is that `ide-bridge`'s own `Config`
+  // is `Schema.union(['classic', 'cascade'])` — a closed enum of the two
+  // mechanics the ENGINE ships, which a project's third mechanic is not in.
+  // Widening it is an edit to `engine/game/ide-bridge`; see
+  // task-8-9-report.md for why that was reported instead of made. Until it
+  // is, the least this page can do is not lie about which mechanic drew the
+  // board.
+  if ([...mechanicSelect.options].some((option) => option.value === mechanic.id)) {
+    mechanicSelect.value = mechanic.id;
+  }
+
   const plan = mechanic.present(data);
-  const problems = await game.ctx.play.execute(plan, game.ctx.board);
+  const problems = await game.ctx.play.execute(plan, game.ctx.board, steps);
   if (problems.length > 0) log(`presentation problems: ${JSON.stringify(problems)}`);
   return plan;
 }
