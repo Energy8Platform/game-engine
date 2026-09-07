@@ -43,9 +43,21 @@ export interface RuntimeAssetsConfig {
  * own, relying entirely on vite's workspace-wide `server.fs.allow`, which
  * has no notion of "this row's own package" to confine anything to.
  * `resolveRuntimeUrl` below now performs the equivalent check itself,
- * once, before EITHER url shape is handed out — so a row that escapes its
- * package never reaches the browser, regardless of which route would have
- * served it.
+ * once, before EITHER url shape is handed out.
+ *
+ * State the guarantee exactly, not more than it is: the HOST will not
+ * hand out an escaping URL through `/api/composition`, and
+ * `/plugin-runtime/:id` refuses to serve one even asked for directly, by
+ * id, bypassing composition entirely. `/@fs/<realpath>` itself is vite's
+ * own route, not this plugin's, and stays reachable exactly as it was
+ * before this check existed — by any same-origin script that constructs
+ * the URL itself, not only by a URL this host handed out — gated only by
+ * vite's `server.fs.allow`. Closing THAT would mean narrowing `fs.allow`
+ * to the row packages' own roots — a real design change with a real risk
+ * to legitimate transitive imports (checked, not just reasoned about; see
+ * `dev-game.test.ts`'s multi-file `/@fs/` test), and deliberately left
+ * undone here — task-6-brief.md sanctions either this check OR that one,
+ * not both, and the end of a task is the wrong place to add the other.
  *
  * The second route is `client-assets.ts` with two differences, not a fresh
  * design — read that file's doc comments for the full reasoning behind the

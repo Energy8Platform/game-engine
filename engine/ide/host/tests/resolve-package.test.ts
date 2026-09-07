@@ -81,4 +81,29 @@ describe('readPackageJson', () => {
     mkdirSync(join(dir, 'plugins'), { recursive: true });
     expect(readPackageJson(dir, '../../secret')).toBeNull();
   });
+
+  it('invalid JSON in a plugins/ manifest resolves nothing, not a throw', () => {
+    // The single most ordinary mistake the hand-edited `plugins/` workflow
+    // invites — a typo that breaks the JSON. `readProjectPlugin`'s own
+    // `JSON.parse` used to sit outside any try/catch, the only one in this
+    // file not wrapped: the two `require.resolve`-based branches above
+    // already catch a `JSON.parse` failure incidentally, since their
+    // `try` wraps the whole resolve-then-parse sequence. A `SyntaxError`
+    // here must come back as an ordinary "could not resolve" null, not
+    // propagate out of this function and up through every caller's own
+    // per-row loop.
+    const dir = projectWith({ 'plugins/broken/package.json': '{ this is not valid JSON' });
+    expect(readPackageJson(dir, 'broken')).toBeNull();
+  });
+
+  it('a package.json that is a directory resolves nothing, not a throw', () => {
+    // `readFileSync` on a directory throws EISDIR — a different failure
+    // shape than "missing" (which `realpathSync` alone already handles;
+    // the path genuinely exists here, so that check passes and only the
+    // subsequent read fails). Still must not escape as an uncaught
+    // exception.
+    const dir = projectWith({});
+    mkdirSync(join(dir, 'plugins', 'broken2', 'package.json'), { recursive: true });
+    expect(readPackageJson(dir, 'broken2')).toBeNull();
+  });
 });

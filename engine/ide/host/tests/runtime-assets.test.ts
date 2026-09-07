@@ -327,6 +327,87 @@ describe('GET /api/composition', () => {
     expect(found[0].message).toContain('escapes');
   });
 
+  /**
+   * The bug review caught: `readProjectPlugin`'s own `JSON.parse` sat
+   * outside any try/catch — the only one in `resolvePackage.ts` not
+   * wrapped. A malformed `plugins/<name>/package.json` — the single most
+   * ordinary mistake the hand-edited `plugins/` workflow invites — threw a
+   * `SyntaxError` straight out of `readPackageJson`, up through this
+   * route's own `.map()` over every row, turning one typo into a 500 for
+   * the WHOLE composition, not just the row that named it.
+   *
+   * The healthy sibling assertion at the end is the one that actually pins
+   * the fix: a version that only stopped the 500 by swallowing the error
+   * — but still let the thrown row abort the `.map()` before reaching
+   * later rows — would still fail it. `broken1` is listed BEFORE
+   * `healthy1` in the fixture bundle specifically so a still-broken
+   * `.map()` would have to skip over it to fail this the interesting way.
+   */
+  it('a malformed plugins/ manifest is a diagnostic on its own row, not a 500 for the whole composition', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-broken-manifest-'));
+    mkdirSync(join(workspace, 'plugins', 'broken-plugin'), { recursive: true });
+    writeFileSync(
+      join(workspace, 'plugins', 'broken-plugin', 'package.json'),
+      '{ this is not valid JSON',
+    );
+
+    const healthyDir = join(workspace, 'plugins', 'healthy-plugin');
+    mkdirSync(healthyDir, { recursive: true });
+    writeFileSync(
+      join(healthyDir, 'package.json'),
+      JSON.stringify({
+        name: 'healthy-plugin',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js' } },
+      }),
+    );
+    writeFileSync(
+      join(healthyDir, 'index.js'),
+      "export const name = 'healthy-plugin';\nexport function apply() {}\n",
+    );
+    writeFileSync(join(healthyDir, 'runtime.js'), 'export function apply() {}\n');
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-broken-manifest-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-broken-manifest-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'e8.bundle.yml'),
+      [
+        'name: e8-broken-manifest-fixture',
+        'rows:',
+        '  - id: broken1',
+        '    name: broken-plugin',
+        '  - id: healthy1',
+        '    name: healthy-plugin',
+        '',
+      ].join('\n'),
+    );
+
+    host = await createIdeHost({ cwd: workspace, port: 0 });
+    const res = await fetch(`${host.url}/api/composition`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    const brokenRow = body.rows.find((r: { id: string }) => r.id === 'broken1');
+    expect(brokenRow.runtimeUrl).toBeNull();
+    const brokenDiagnostics = body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'broken1');
+    expect(brokenDiagnostics).toHaveLength(1);
+    expect(brokenDiagnostics[0].message).toContain('broken1');
+    expect(brokenDiagnostics[0].message).toContain('broken-plugin');
+
+    // The blast radius: a completely healthy sibling row in the SAME
+    // composition still comes back with its own real data intact — not
+    // dropped, not corrupted by the broken row ahead of it in the same
+    // `.map()`.
+    const healthyRow = body.rows.find((r: { id: string }) => r.id === 'healthy1');
+    expect(healthyRow.runtimeUrl).toBe('/plugin-runtime/healthy1');
+    expect(body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'healthy1')).toEqual([]);
+  });
+
   it('reloads from disk on every call, so an edit is reflected without restarting the host', async () => {
     // Same edit `project.test.ts`'s "reload() picks up an edited patch"
     // makes directly against `ctx.project.reload()` — this proves the HTTP

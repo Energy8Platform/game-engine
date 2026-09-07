@@ -124,16 +124,29 @@ describe('dev-game — serving the bundle', () => {
 /**
  * `runtime-assets.ts`'s new containment check (task-6-brief.md) is scoped
  * to a ROW'S PACKAGE directory, not to the single file `e8.runtime.entry`
- * names, and it leaves vite's own `server.fs.allow` untouched entirely —
- * the alternative considered (narrowing `fs.allow` down to just the row
- * packages' roots) was rejected specifically because a `fs.allow` narrowed
- * to a single FILE per row risks 403ing a plugin's own transitive imports
- * (a sibling file, or a dependency reachable from its own package) the
- * moment vite's module graph walk reaches them. This test builds that
- * exact shape — an entry that imports a sibling file in the SAME
- * package — and proves it still round-trips through `/@fs/` unchanged
- * with the new check in place, rather than only arguing it from the fact
- * that `fs.allow` was never touched.
+ * names, and it leaves vite's own `server.fs.allow` untouched entirely.
+ *
+ * The brief's own named risk for the alternative it also sanctioned —
+ * narrowing `fs.allow` down to the row packages' roots — was specifically
+ * about a plugin's TRANSITIVE IMPORTS OUT OF `node_modules`: a real
+ * third-party dependency, reachable from the row's package but not
+ * necessarily living inside it. This test does NOT build that shape, and
+ * no test run against the check actually chosen here could: since this
+ * approach never touches `fs.allow` at all, that specific risk was
+ * structurally avoided by the choice of approach, not validated against —
+ * there is nothing for a test to catch. (The full Playwright suite, which
+ * loads the real `first-slot` example and its real `node_modules`
+ * dependencies through this same seam, is the closer evidence for that
+ * particular claim — still not a controlled A/B against the rejected
+ * approach, since neither this suite nor that one ever runs with `fs.allow`
+ * narrowed.)
+ *
+ * What this test DOES build and confirm: a sibling file inside the SAME
+ * package as the declared entry — the realistic shape of a plugin that is
+ * more than one file — still round-trips through `/@fs/` unchanged with
+ * the new per-row containment check in place. Confirmatory regression
+ * evidence that the check costs a legitimate multi-file plugin nothing,
+ * not a direct test of the brief's own named `node_modules` risk.
  */
 describe('dev-game — /@fs/ containment does not cost legitimate multi-file plugins anything', () => {
   it("serves both a row's runtime entry and the sibling file it imports, through /@fs/", async () => {
