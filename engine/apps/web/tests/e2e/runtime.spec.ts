@@ -184,13 +184,18 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
     | undefined;
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-    if (outcome.result.win > 0 && !outcome.steps.some((s: { kind: string }) => s.kind === 'reelStep')) {
+    if (
+      outcome.result.win > 0 &&
+      !outcome.steps.some((s: { kind: string }) => s.kind === 'reelStep')
+    ) {
       classicResult = outcome;
       break;
     }
   }
   if (!classicResult)
-    throw new Error('no winning classic spin found in 200 attempts — math, fixture, or the IDE rebind regressed');
+    throw new Error(
+      'no winning classic spin found in 200 attempts — math, fixture, or the IDE rebind regressed',
+    );
   const classicStepKinds = classicResult.steps.map((s) => s.kind);
 
   // What a person watching the classic presentation would see: the board
@@ -256,8 +261,7 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   ).toBeGreaterThan(0);
 
   const spinToStep = cascadeSteps.find((s) => s.kind === 'spinTo') as
-    | { board: number[][] }
-    | undefined;
+    { board: number[][] } | undefined;
   expect(spinToStep, 'cascade must spin to a board').toBeTruthy();
   // The board the reels land on is the PRE-cascade board (`data.grid`) —
   // not round 0's post-collapse board, which is what the bug spun to.

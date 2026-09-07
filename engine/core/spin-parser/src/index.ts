@@ -51,7 +51,14 @@
  * whichever field precedes it) the loss is still visible as SOME
  * diagnostic on SOME field, never zero diagnostics — see `parseFieldList`.
  */
-import { type Diagnostic, diagnostic, type ActionDef, type FieldType, type RecordShape, type SpinSchema } from '@energy8engine/contracts';
+import {
+  type Diagnostic,
+  diagnostic,
+  type ActionDef,
+  type FieldType,
+  type RecordShape,
+  type SpinSchema,
+} from '@energy8engine/contracts';
 
 const PLUGIN = 'spin-parser';
 
@@ -131,7 +138,12 @@ function findBlocks(
     const braceStart = source.indexOf('{', afterKeyword);
     if (braceStart === -1) {
       diagnostics.push(
-        diagnostic('error', PLUGIN, `line ${line}`, `"${keyword}" block has no "{" — nothing to parse`),
+        diagnostic(
+          'error',
+          PLUGIN,
+          `line ${line}`,
+          `"${keyword}" block has no "{" — nothing to parse`,
+        ),
       );
       continue;
     }
@@ -166,7 +178,14 @@ function requireMatchingBrace(
 ): number | null {
   const end = matchingBrace(source, braceStart);
   if (end === -1) {
-    diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, `${label}: unterminated block — no matching "}" found`));
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        `line ${line}`,
+        `${label}: unterminated block — no matching "}" found`,
+      ),
+    );
     return null;
   }
   return end;
@@ -481,13 +500,17 @@ function parseStages(
     // uncovered copy of that exact defect, local to this loop). Two
     // variants sharing a name go through `NamedCollection`, same rule as
     // `records` — see its doc for why that's a rule, not a per-site guess.
-    const stages = new NamedCollection<RecordShape>('stage variant', `enum ${dataTypeName} tag stage`);
+    const stages = new NamedCollection<RecordShape>(
+      'stage variant',
+      `enum ${dataTypeName} tag stage`,
+    );
     const variantRe = /([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
     let match: RegExpExecArray | null;
     while ((match = variantRe.exec(spinData.body)) !== null) {
       const name = match[1];
       const braceStart = match.index + match[0].length - 1;
-      const variantLine = spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
+      const variantLine =
+        spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
       // NOTE ON REACHABILITY: `requireMatchingBrace` can provably never
       // return null here. `spinData.body` only ever exists because the
       // OUTER `findBlocks` call above already ran `matchingBrace` on the
@@ -503,7 +526,13 @@ function parseStages(
       // costs nothing, it keeps this loop's shape identical to
       // `findBlocks`'s (the reviewer's ask), and it is genuinely live
       // defense if `spinData.body`'s derivation ever changes.
-      const braceEnd = requireMatchingBrace(spinData.body, braceStart, `stage variant "${name}"`, variantLine, diagnostics);
+      const braceEnd = requireMatchingBrace(
+        spinData.body,
+        braceStart,
+        `stage variant "${name}"`,
+        variantLine,
+        diagnostics,
+      );
       if (braceEnd === null) break; // unreachable today — see note above
       const body = spinData.body.slice(braceStart + 1, braceEnd);
       stages.insert(
@@ -789,7 +818,14 @@ function parseGame(
   const betLevels = betLevelsText === undefined ? null : parseNumberArray(betLevelsText);
   const maxWin = maxWinText === undefined ? NaN : Number(maxWinText);
   if (betLevels === null || !Number.isFinite(maxWin)) {
-    diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'game block is missing "bet_levels" or "max_win"'));
+    diagnostics.push(
+      diagnostic(
+        'error',
+        PLUGIN,
+        `line ${line}`,
+        'game block is missing "bet_levels" or "max_win"',
+      ),
+    );
     return null;
   }
   return {
@@ -808,14 +844,22 @@ function parseGame(
  *  every consumer this needs only shows or re-evaluates it as an
  *  expression). */
 function parseOpens(text: string): { action: string; countVar: string; when?: string } | undefined {
-  const match = /^([A-Za-z_][A-Za-z0-9_]*)\s+count\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+when\s+(.+))?$/.exec(text.trim());
+  const match =
+    /^([A-Za-z_][A-Za-z0-9_]*)\s+count\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+when\s+(.+))?$/.exec(
+      text.trim(),
+    );
   if (match === null) return undefined;
   const [, action, countVar, when] = match;
-  return when !== undefined && when.trim() !== '' ? { action, countVar, when: when.trim() } : { action, countVar };
+  return when !== undefined && when.trim() !== ''
+    ? { action, countVar, when: when.trim() }
+    : { action, countVar };
 }
 
 /** `feature { key = value ... }`, nested inside an `action` block's body. */
-function parseInlineFeature(body: string, diagnostics: Diagnostic[]): Record<string, number> | undefined {
+function parseInlineFeature(
+  body: string,
+  diagnostics: Diagnostic[],
+): Record<string, number> | undefined {
   const featureBlocks = findBlocks(body, 'feature', diagnostics);
   if (featureBlocks.length === 0) return undefined;
   const feature: Record<string, number> = {};
@@ -855,7 +899,14 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
     const costText = get('cost');
     const cost = costText === undefined ? NaN : Number(costText);
     if (stage === undefined || !Number.isFinite(cost)) {
-      diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, `action "${name}" is missing "stage" or "cost"`));
+      diagnostics.push(
+        diagnostic(
+          'error',
+          PLUGIN,
+          `line ${line}`,
+          `action "${name}" is missing "stage" or "cost"`,
+        ),
+      );
       continue;
     }
     const action: ActionDef = { name, stage, cost };
@@ -876,7 +927,12 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
         const entry = parseOpens(text);
         if (entry === undefined) {
           diagnostics.push(
-            diagnostic('error', PLUGIN, `line ${line}`, `action "${name}": unreadable "opens" clause "${text}"`),
+            diagnostic(
+              'error',
+              PLUGIN,
+              `line ${line}`,
+              `action "${name}": unreadable "opens" clause "${text}"`,
+            ),
           );
           continue;
         }
@@ -899,7 +955,10 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
  * a single malformed declaration is dropped (with its own diagnostic)
  * rather than losing the rest of an otherwise-good file.
  */
-export function parseSpinSchema(source: string): { schema: SpinSchema | null; diagnostics: Diagnostic[] } {
+export function parseSpinSchema(source: string): {
+  schema: SpinSchema | null;
+  diagnostics: Diagnostic[];
+} {
   const diagnostics: Diagnostic[] = [];
   const clean = stripComments(source);
 

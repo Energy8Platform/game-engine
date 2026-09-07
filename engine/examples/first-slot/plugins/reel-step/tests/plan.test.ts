@@ -13,8 +13,22 @@ const DATA = {
     [4, 5, 6],
   ],
   reel_steps: [
-    { winning: [{ col: 0, row: 0 }], shifts: [1, 0], settled: [[7, 1, 2], [4, 5, 6]] },
-    { winning: [], shifts: [0, 0], settled: [[7, 1, 2], [4, 5, 6]] },
+    {
+      winning: [{ col: 0, row: 0 }],
+      shifts: [1, 0],
+      settled: [
+        [7, 1, 2],
+        [4, 5, 6],
+      ],
+    },
+    {
+      winning: [],
+      shifts: [0, 0],
+      settled: [
+        [7, 1, 2],
+        [4, 5, 6],
+      ],
+    },
   ],
 };
 

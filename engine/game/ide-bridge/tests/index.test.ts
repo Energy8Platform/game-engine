@@ -371,7 +371,9 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
     });
 
     socket.emit(snapshotMessage([{ name: '@energy8engine/ide-bridge', config: {} }]));
-    socket.emit(snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: '' } }]));
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: '' } }]),
+    );
 
     expect(bind).not.toHaveBeenCalled();
     expect(forStage('base_game')).toEqual({ id: 'reel-step' });

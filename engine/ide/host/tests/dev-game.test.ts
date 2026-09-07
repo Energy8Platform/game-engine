@@ -197,9 +197,13 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
     mkdirSync(bundlesDir, { recursive: true });
     writeFileSync(
       join(bundlesDir, 'e8.bundle.yml'),
-      ['name: e8-transitive-fixture', 'rows:', '  - id: multi1', '    name: multi-file-pkg', ''].join(
-        '\n',
-      ),
+      [
+        'name: e8-transitive-fixture',
+        'rows:',
+        '  - id: multi1',
+        '    name: multi-file-pkg',
+        '',
+      ].join('\n'),
     );
 
     // `root: workspace` mirrors the real CLI (`engine/apps/cli/src/

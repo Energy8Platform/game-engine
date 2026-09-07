@@ -35,7 +35,9 @@ describe('spin schema vocabulary', () => {
     // Vocabulary, not policy: whether that is a MISTAKE is task 3's diagnostic
     // to make, not this type guard's. The guard says "is this the right shape",
     // never "is this a good game".
-    expect(isSpinSchema({ ...SCHEMA, actions: [{ name: 'x', stage: 'nope', cost: 1 }] })).toBe(true);
+    expect(isSpinSchema({ ...SCHEMA, actions: [{ name: 'x', stage: 'nope', cost: 1 }] })).toBe(
+      true,
+    );
   });
 });
 
@@ -57,7 +59,9 @@ describe('spin schema vocabulary — FieldType shapes', () => {
   });
 
   it('rejects an array whose element type is malformed', () => {
-    expect(isSpinSchema(withField({ kind: 'array', of: { kind: 'nonsense' }, length: 5 }))).toBe(false);
+    expect(isSpinSchema(withField({ kind: 'array', of: { kind: 'nonsense' }, length: 5 }))).toBe(
+      false,
+    );
   });
 
   it('rejects a record reference missing its name', () => {
@@ -97,14 +101,21 @@ describe('spin schema vocabulary — ActionDef shape', () => {
     // single object can no longer represent every real `.spin` file.
     expect(
       isSpinSchema(
-        withAction({ name: 'spin', stage: 'base_game', cost: 1, opens: { action: 'free_spin', countVar: 'n' } }),
+        withAction({
+          name: 'spin',
+          stage: 'base_game',
+          cost: 1,
+          opens: { action: 'free_spin', countVar: 'n' },
+        }),
       ),
     ).toBe(false);
   });
 
   it('rejects an opens entry missing countVar', () => {
     expect(
-      isSpinSchema(withAction({ name: 'spin', stage: 'base_game', cost: 1, opens: [{ action: 'free_spin' }] })),
+      isSpinSchema(
+        withAction({ name: 'spin', stage: 'base_game', cost: 1, opens: [{ action: 'free_spin' }] }),
+      ),
     ).toBe(false);
   });
 
@@ -139,7 +150,9 @@ describe('spin schema vocabulary — ActionDef shape', () => {
 
   it('rejects a feature map with a non-number value', () => {
     expect(
-      isSpinSchema(withAction({ name: 'spin', stage: 'base_game', cost: 1, feature: { buy: 'one' } })),
+      isSpinSchema(
+        withAction({ name: 'spin', stage: 'base_game', cost: 1, feature: { buy: 'one' } }),
+      ),
     ).toBe(false);
   });
 });

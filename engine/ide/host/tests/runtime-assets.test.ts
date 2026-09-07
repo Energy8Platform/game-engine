@@ -76,7 +76,10 @@ describe('GET /api/composition', () => {
         type: 'module',
         main: 'index.js',
         exports: { '.': './index.js', './package.json': './package.json' },
-        e8: { runtime: { entry: './runtime.js' }, seam: { name: 'renderer', matcher: { default: true } } },
+        e8: {
+          runtime: { entry: './runtime.js' },
+          seam: { name: 'renderer', matcher: { default: true } },
+        },
       }),
     );
     writeFileSync(join(seamDir, 'index.js'), 'export function apply() {}\n');
@@ -300,9 +303,13 @@ describe('GET /api/composition', () => {
     mkdirSync(bundlesDir, { recursive: true });
     writeFileSync(
       join(bundlesDir, 'e8.bundle.yml'),
-      ['name: e8-fs-escape-fixture', 'rows:', '  - id: fsescapee1', '    name: fs-escapee-pkg', ''].join(
-        '\n',
-      ),
+      [
+        'name: e8-fs-escape-fixture',
+        'rows:',
+        '  - id: fsescapee1',
+        '    name: fs-escapee-pkg',
+        '',
+      ].join('\n'),
     );
 
     host = await createIdeHost({ cwd: workspace, port: 0 });
@@ -394,7 +401,9 @@ describe('GET /api/composition', () => {
 
     const brokenRow = body.rows.find((r: { id: string }) => r.id === 'broken1');
     expect(brokenRow.runtimeUrl).toBeNull();
-    const brokenDiagnostics = body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'broken1');
+    const brokenDiagnostics = body.diagnostics.filter(
+      (d: { plugin: string }) => d.plugin === 'broken1',
+    );
     expect(brokenDiagnostics).toHaveLength(1);
     expect(brokenDiagnostics[0].message).toContain('broken1');
     expect(brokenDiagnostics[0].message).toContain('broken-plugin');
@@ -427,9 +436,9 @@ describe('GET /api/composition', () => {
     host = await createIdeHost({ cwd: dir, port: 0 });
 
     const before = await (await fetch(`${host.url}/api/composition`)).json();
-    expect(
-      before.rows.find((r: { id: string }) => r.id === 'reels1').config,
-    ).toEqual({ grid: { cols: 5, rows: 3 } });
+    expect(before.rows.find((r: { id: string }) => r.id === 'reels1').config).toEqual({
+      grid: { cols: 5, rows: 3 },
+    });
 
     writeFileSync(join(dir, 'e8.patch.yml'), 'rows:\n  - id: reels1\n    config: { grid: 9 }\n');
 
@@ -474,7 +483,7 @@ describe('GET /plugin-runtime/:id', () => {
     );
     writeFileSync(
       join(runtimeDir, 'runtime.js'),
-      "export function apply(ctx) {\n  ctx.__runtimeApplied = true;\n}\n",
+      'export function apply(ctx) {\n  ctx.__runtimeApplied = true;\n}\n',
     );
 
     // A plugin that only declares a CLIENT half — no runtime.

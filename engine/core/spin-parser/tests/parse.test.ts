@@ -32,14 +32,20 @@ describe('parseSpinSchema', () => {
   });
 
   it('reads records, so a record-typed field can be followed', () => {
-    const src = MINIMAL.replace('record Vars', 'record LineWin { line: int  win: float }\nrecord Vars');
+    const src = MINIMAL.replace(
+      'record Vars',
+      'record LineWin { line: int  win: float }\nrecord Vars',
+    );
     expect(parseSpinSchema(src).schema!.records.LineWin).toEqual({
-      line: { kind: 'int' }, win: { kind: 'float' },
+      line: { kind: 'int' },
+      win: { kind: 'float' },
     });
   });
 
   it('reads an action with its session declarations', () => {
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 action free_spin {
   stage = base_game
   cost = 1.0
@@ -50,8 +56,11 @@ action free_spin {
 }`;
     const free = parseSpinSchema(src).schema!.actions.find((a) => a.name === 'free_spin')!;
     expect(free).toMatchObject({
-      stage: 'base_game', cost: 1, session: true,
-      extendsVar: 'retrigger_spins', endsWhenVar: 'max_win_reached',
+      stage: 'base_game',
+      cost: 1,
+      session: true,
+      extendsVar: 'retrigger_spins',
+      endsWhenVar: 'max_win_reached',
       opens: [{ action: 'free_spin', countVar: 'free_spins_awarded' }],
     });
   });
@@ -59,15 +68,20 @@ action free_spin {
   it('reads optional and fixed-size array types', () => {
     const src = MINIMAL.replace('win: float', 'win: float  mult: int?  reels: [int; 5]');
     expect(parseSpinSchema(src).schema!.stages.base_game.mult).toEqual({
-      kind: 'optional', of: { kind: 'int' },
+      kind: 'optional',
+      of: { kind: 'int' },
     });
     expect(parseSpinSchema(src).schema!.stages.base_game.reels).toEqual({
-      kind: 'array', of: { kind: 'int' }, length: 5,
+      kind: 'array',
+      of: { kind: 'int' },
+      length: 5,
     });
   });
 
   it('ignores everything that is not a declaration', () => {
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 const W: [int; 3] = [1, 2, 3]
 fn helper(c: ctx) -> int { return 1 }
 fn execute(c: ctx, v: Vars) -> outcome { return outcome { win: 0.0 } }`;
@@ -83,7 +97,10 @@ fn execute(c: ctx, v: Vars) -> outcome { return outcome { win: 0.0 } }`;
   });
 
   it('a broken record does not lose the rest of the file', () => {
-    const src = MINIMAL.replace('record Vars { max_win_reached: bool }', 'record Vars { max_win_reached: }');
+    const src = MINIMAL.replace(
+      'record Vars { max_win_reached: bool }',
+      'record Vars { max_win_reached: }',
+    );
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(schema).not.toBeNull();
     expect(schema!.gameId).toBe('demo');
@@ -93,13 +110,16 @@ fn execute(c: ctx, v: Vars) -> outcome { return outcome { win: 0.0 } }`;
   it('parses first-slot for real', () => {
     // The one test that stops this being a parser for a language of one file.
     const src = readFileSync(
-      new URL('../../../examples/first-slot/game/script.spin', import.meta.url), 'utf8');
+      new URL('../../../examples/first-slot/game/script.spin', import.meta.url),
+      'utf8',
+    );
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('first-slot');
     expect(Object.keys(schema!.stages)).toEqual(['base_game']);
     expect(schema!.stages.base_game.cascade_history).toEqual({
-      kind: 'list', of: { kind: 'record', name: 'CascadeStep' },
+      kind: 'list',
+      of: { kind: 'record', name: 'CascadeStep' },
     });
     expect(schema!.actions).toEqual([{ name: 'spin', stage: 'base_game', cost: 1 }]);
   });
@@ -128,7 +148,9 @@ describe('parseSpinSchema — regressions found against real files', () => {
     // kitsune-wrath's `spin` opens both `free_spin` (unconditionally) and
     // `spirit_gate` (guarded). ActionDef.opens was a single object, which
     // can't hold two — see the report and task 1's follow-up commit.
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 action spin2 {
   stage = base_game
   cost = 1.0
@@ -151,7 +173,9 @@ action spin2 {
     // `group` must still terminate `session`'s value instead of trailing
     // onto it ("true\n  group = spirit_gate" !== "true", silently losing
     // the session flag).
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 action gated {
   stage = base_game
   cost = 1.0
@@ -170,7 +194,9 @@ action gated {
     // feature.spin's `buy_bonus` action was lost entirely: `cost = 5.0`
     // immediately followed by `feature { buy = 1 }` made `cost`'s value
     // read as "5.0  feature { buy = 1 }", which fails Number(...).
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 action buy { stage = base_game  cost = 5.0  feature { buy = 1 }  opens = spin count free_spins_awarded }`;
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(diagnostics).toEqual([]);
@@ -188,7 +214,9 @@ action buy { stage = base_game  cost = 5.0  feature { buy = 1 }  opens = spin co
     // block legitimately uses) came back as `"feature" block has no "{"
     // — nothing to parse`. Against a real project that diagnostic then
     // travelled all the way to the failure screen.
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 action other { stage = base_game  cost = 1.0  feature = Feat }`;
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(diagnostics).toEqual([]);
@@ -308,7 +336,9 @@ action spin { stage = base_game  cost = 1.0 }
 `;
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(schema!.stages).toEqual({});
-    expect(diagnostics.some((d) => d.message.includes('no record "NeverDeclared" to fall back to'))).toBe(true);
+    expect(
+      diagnostics.some((d) => d.message.includes('no record "NeverDeclared" to fall back to')),
+    ).toBe(true);
   });
 });
 
@@ -334,7 +364,9 @@ action spin { stage = base_game cost = 1.0 }
     // there is nothing trustworthy to keep — but it is NAMED on the way
     // out, not silently absent.
     expect(schema!.records).toEqual({});
-    expect(diagnostics.some((d) => d.message.includes('Broken') && d.message.includes('unterminated'))).toBe(true);
+    expect(
+      diagnostics.some((d) => d.message.includes('Broken') && d.message.includes('unterminated')),
+    ).toBe(true);
     // Everything AFTER the broken record still parses — matchingBrace's
     // own scan for "enum"/"game"/"action" starts fresh from each
     // keyword's own brace, independent of "record"'s failure.
@@ -430,11 +462,16 @@ describe('parseSpinSchema — previously-unexercised diagnostic branches', () =>
     const src = MINIMAL.replace('max_win_reached: bool', 'max_win_reached: bool  odd: not$a$type');
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(schema!.vars).toEqual({ max_win_reached: { kind: 'bool' } });
-    expect(diagnostics.some((d) => d.message.includes('odd') && d.message.includes('not$a$type'))).toBe(true);
+    expect(
+      diagnostics.some((d) => d.message.includes('odd') && d.message.includes('not$a$type')),
+    ).toBe(true);
   });
 
   it('a record with no name is diagnosed', () => {
-    const src = MINIMAL.replace('record Vars { max_win_reached: bool }', 'record { max_win_reached: bool }\nrecord Vars { max_win_reached: bool }');
+    const src = MINIMAL.replace(
+      'record Vars { max_win_reached: bool }',
+      'record { max_win_reached: bool }\nrecord Vars { max_win_reached: bool }',
+    );
     const { diagnostics } = parseSpinSchema(src);
     expect(diagnostics.some((d) => d.message.includes('no name'))).toBe(true);
   });
@@ -459,12 +496,16 @@ describe('parseSpinSchema — previously-unexercised diagnostic branches', () =>
   });
 
   it('an unreadable "opens" clause is diagnosed, not silently dropped', () => {
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 action bonus { stage = base_game  cost = 1.0  opens = not_a_valid_opens_clause }`;
     const { schema, diagnostics } = parseSpinSchema(src);
     const bonus = schema!.actions.find((a) => a.name === 'bonus')!;
     expect(bonus.opens).toBeUndefined();
-    expect(diagnostics.some((d) => d.message.includes('opens') && d.message.includes('bonus'))).toBe(true);
+    expect(
+      diagnostics.some((d) => d.message.includes('opens') && d.message.includes('bonus')),
+    ).toBe(true);
   });
 });
 
@@ -479,7 +520,10 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     // `enum ... tag stage` — but the stage NAME is still declared, by the
     // action's own `stage = base_game`. `stages.base_game` is D's shape.
     const src = readFileSync(
-      new URL('../../../../packages/platform-core/tests/game-spec/fixtures/logic.spin', import.meta.url),
+      new URL(
+        '../../../../packages/platform-core/tests/game-spec/fixtures/logic.spin',
+        import.meta.url,
+      ),
       'utf8',
     );
     const { schema, diagnostics } = parseSpinSchema(src);
@@ -501,10 +545,18 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     expect(schema!.gameId).toBe('payer-game');
     expect(schema!.actions).toEqual([
       {
-        name: 'spin', stage: 'base_game', cost: 1,
+        name: 'spin',
+        stage: 'base_game',
+        cost: 1,
         opens: [{ action: 'free_spin', countVar: 'free_spins_awarded' }],
       },
-      { name: 'free_spin', stage: 'free_spins', cost: 1, session: true, extendsVar: 'retrigger_spins' },
+      {
+        name: 'free_spin',
+        stage: 'free_spins',
+        cost: 1,
+        session: true,
+        extendsVar: 'retrigger_spins',
+      },
     ]);
     // Same object identity, not just equal shape — the flat dialect's cost:
     // there is exactly one record for both stages, not two coincidentally
@@ -538,7 +590,9 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     expect(schema!.gameId).toBe('rng-game');
     expect(schema!.actions).toEqual([
       {
-        name: 'spin', stage: 'base_game', cost: 1,
+        name: 'spin',
+        stage: 'base_game',
+        cost: 1,
         opens: [{ action: 'free_spin', countVar: 'free_spins_awarded' }],
       },
       { name: 'free_spin', stage: 'free_spins', cost: 1, session: true },
@@ -558,7 +612,9 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('one-shot-game');
     expect(schema!.actions).toEqual([{ name: 'one_shot', stage: 'base_game', cost: 1 }]);
-    expect(schema!.stages).toEqual({ base_game: { stage: { kind: 'str' }, win: { kind: 'float' } } });
+    expect(schema!.stages).toEqual({
+      base_game: { stage: { kind: 'str' }, win: { kind: 'float' } },
+    });
   });
 
   it('packages/artube-server/tests/fixtures/feature.spin: flat Data record, THREE distinct stages derived, one inline "feature { }" clause', () => {
@@ -571,15 +627,25 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     expect(schema!.gameId).toBe('feature-game');
     expect(schema!.actions).toEqual([
       {
-        name: 'spin', stage: 'base_game', cost: 1,
+        name: 'spin',
+        stage: 'base_game',
+        cost: 1,
         opens: [{ action: 'free_spin', countVar: 'free_spins_awarded' }],
       },
       {
-        name: 'buy_bonus', stage: 'buy_bonus', cost: 5,
+        name: 'buy_bonus',
+        stage: 'buy_bonus',
+        cost: 5,
         opens: [{ action: 'free_spin', countVar: 'free_spins_awarded' }],
         feature: { buy: 1 },
       },
-      { name: 'free_spin', stage: 'free_spins', cost: 1, session: true, extendsVar: 'retrigger_spins' },
+      {
+        name: 'free_spin',
+        stage: 'free_spins',
+        cost: 1,
+        session: true,
+        extendsVar: 'retrigger_spins',
+      },
     ]);
     expect(Object.keys(schema!.stages)).toEqual(['base_game', 'buy_bonus', 'free_spins']);
     expect(schema!.stages.base_game).toEqual({ stage: { kind: 'str' }, win: { kind: 'float' } });
@@ -593,15 +659,32 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     // TWO "opens" clauses (one guarded by "when"), and inline "feature { }"
     // blocks share lines with "opens =" and "cost =". All of it is
     // real syntax nobody wrote to suit this parser.
-    const src = readFileSync('/Users/mrphelko/Documents/repo/kitsune-wrath/game/script.spin', 'utf8');
+    const src = readFileSync(
+      '/Users/mrphelko/Documents/repo/kitsune-wrath/game/script.spin',
+      'utf8',
+    );
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(diagnostics).toEqual([]);
     expect(schema!.gameId).toBe('kitsune-wrath');
-    expect(Object.keys(schema!.stages)).toEqual(['base_game', 'free_spins', 'spirit_gate', 'buy_bonus']);
-    expect(schema!.records.Vars.pos_mults).toEqual({ kind: 'array', of: { kind: 'int' }, length: 64 });
+    expect(Object.keys(schema!.stages)).toEqual([
+      'base_game',
+      'free_spins',
+      'spirit_gate',
+      'buy_bonus',
+    ]);
+    expect(schema!.records.Vars.pos_mults).toEqual({
+      kind: 'array',
+      of: { kind: 'int' },
+      length: 64,
+    });
     expect(schema!.actions.map((a) => a.name)).toEqual([
-      'spin', 'ante_spin', 'free_spin', 'spirit_gate_spin',
-      'buy_bonus_fox_fire', 'buy_bonus_spirit_rage', 'buy_bonus_nine_tails',
+      'spin',
+      'ante_spin',
+      'free_spin',
+      'spirit_gate_spin',
+      'buy_bonus_fox_fire',
+      'buy_bonus_spirit_rage',
+      'buy_bonus_nine_tails',
     ]);
     const spin = schema!.actions.find((a) => a.name === 'spin')!;
     expect(spin.opens).toEqual([
@@ -613,7 +696,12 @@ describe('parseSpinSchema — the full real-world corpus', () => {
     // ActionDef doesn't model (see the report) — it's silently out of
     // vocabulary, same as `feature =`/`data =` on a `game {}` block, and
     // must NOT corrupt the recognized clauses around it.
-    expect(spiritGateSpin).toMatchObject({ stage: 'spirit_gate', cost: 1, session: true, endsWhenVar: 'sg_done' });
+    expect(spiritGateSpin).toMatchObject({
+      stage: 'spirit_gate',
+      cost: 1,
+      session: true,
+      endsWhenVar: 'sg_done',
+    });
   });
 });
 
@@ -646,11 +734,16 @@ describe('parseSpinSchema — dangling references and repeated blocks', () => {
     const src = MINIMAL.replace('  vars = Vars\n', '  vars = Vars\n  globals = Nope\n');
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(schema!.globals).toBeUndefined();
-    expect(diagnostics.some((d) => d.message.includes('Nope') && d.message.includes('globals'))).toBe(true);
+    expect(
+      diagnostics.some((d) => d.message.includes('Nope') && d.message.includes('globals')),
+    ).toBe(true);
   });
 
   it('a field typed by a record nobody declared is diagnosed — the field is kept, the dangle is named', () => {
-    const src = MINIMAL.replace('max_win_reached: bool', 'max_win_reached: bool  where: NoSuchRecord');
+    const src = MINIMAL.replace(
+      'max_win_reached: bool',
+      'max_win_reached: bool  where: NoSuchRecord',
+    );
     const { schema, diagnostics } = parseSpinSchema(src);
     // Kept: the parser cannot know whether the record or the reference is
     // the mistake, and dropping the field would lose a second thing on a
@@ -675,14 +768,17 @@ describe('parseSpinSchema — dangling references and repeated blocks', () => {
   });
 
   it('a resolvable record reference is silent', () => {
-    const src = MINIMAL
-      .replace('record Vars', 'record CellPos { col: int  row: int }\nrecord Vars')
-      .replace('max_win_reached: bool', 'max_win_reached: bool  at: CellPos  path: [CellPos]');
+    const src = MINIMAL.replace(
+      'record Vars',
+      'record CellPos { col: int  row: int }\nrecord Vars',
+    ).replace('max_win_reached: bool', 'max_win_reached: bool  at: CellPos  path: [CellPos]');
     expect(parseSpinSchema(src).diagnostics).toEqual([]);
   });
 
   it('two game blocks: the first is used, the second is diagnosed by line', () => {
-    const src = MINIMAL + `
+    const src =
+      MINIMAL +
+      `
 game "second" {
   bet_levels = [1.0]
   max_win = 10.0
@@ -705,6 +801,8 @@ game "second" {
     const src = MINIMAL.replace('  base_game { grid: [[int]]  win: float }\n', '');
     const { schema, diagnostics } = parseSpinSchema(src);
     expect(schema!.stages).toEqual({});
-    expect(diagnostics.some((d) => d.message.includes('SpinData') && d.message.includes('no stage'))).toBe(true);
+    expect(
+      diagnostics.some((d) => d.message.includes('SpinData') && d.message.includes('no stage')),
+    ).toBe(true);
   });
 });

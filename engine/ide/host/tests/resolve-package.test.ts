@@ -34,7 +34,9 @@ function projectWith(files: Record<string, string>): string {
 
 describe('readPackageJson', () => {
   it('finds a plugin the project keeps in plugins/', () => {
-    const dir = projectWith({ 'plugins/acme-thing/package.json': '{"name":"acme-thing","version":"1.0.0"}' });
+    const dir = projectWith({
+      'plugins/acme-thing/package.json': '{"name":"acme-thing","version":"1.0.0"}',
+    });
     expect(readPackageJson(dir, 'acme-thing')!.dir).toBe(join(dir, 'plugins', 'acme-thing'));
   });
 
@@ -48,7 +50,10 @@ describe('readPackageJson', () => {
   });
 
   it('still finds installed packages when the project has no plugins/ at all', () => {
-    const dir = projectWith({ 'node_modules/only/package.json': '{"name":"only","version":"1.0.0"}', 'node_modules/only/index.js': '' });
+    const dir = projectWith({
+      'node_modules/only/package.json': '{"name":"only","version":"1.0.0"}',
+      'node_modules/only/index.js': '',
+    });
     expect(readPackageJson(dir, 'only')!.dir).toBe(join(dir, 'node_modules', 'only'));
   });
 

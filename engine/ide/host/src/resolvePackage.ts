@@ -166,7 +166,11 @@ function readProjectPlugin(cwd: string, name: string): ProjectPluginResult {
     // plugin's location relative to the `cwd` they passed in; handing back
     // a realpath'd string here would silently substitute a different (if
     // equivalent) path whenever `cwd` itself sits behind a symlink.
-    return { kind: 'found', dir: candidateDir, json: JSON.parse(readFileSync(manifestPath, 'utf8')) };
+    return {
+      kind: 'found',
+      dir: candidateDir,
+      json: JSON.parse(readFileSync(manifestPath, 'utf8')),
+    };
   } catch (error) {
     // Still not a throw, and still `readPackageJson`-null to every caller
     // that only asked whether the package resolved — but the reason is

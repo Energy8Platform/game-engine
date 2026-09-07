@@ -129,7 +129,7 @@ describe('data.lines — ruling 1: reveal the wins, not just grid + win', () => 
 });
 
 describe('data.cascade_history — ruling 2: a cascade-shaped chain of steps', () => {
-  it('a step carries the board after it, the cells removed, and that step\'s win', async () => {
+  it("a step carries the board after it, the cells removed, and that step's win", async () => {
     const result = await spinUntil((r) => r.data.cascade_history.length > 0);
     const step = result.data.cascade_history[0];
 
@@ -167,7 +167,10 @@ describe('data.win vs data.base_win — the mechanic renders, the math pays', ()
 
   it('win sums every cascade round; base_win only round 0 — they diverge once a cascade retriggers', async () => {
     const result = await spinUntil((r) => r.data.cascade_history.length >= 2);
-    const sumSteps = result.data.cascade_history.reduce((total: number, s: any) => total + s.win, 0);
+    const sumSteps = result.data.cascade_history.reduce(
+      (total: number, s: any) => total + s.win,
+      0,
+    );
     expect(result.data.win).toBeCloseTo(sumSteps, 10);
     // the whole point of the invariant: once there's a second cascade round,
     // the credited total is strictly more than what `lines`/`base_win` alone
@@ -266,7 +269,7 @@ describe('data.reel_steps — ruling 3: the same spin under the ReelStep rule', 
   // for is one where a winning cell sits above the bottom row — the case
   // where the two rules genuinely disagree about where a surviving symbol
   // ends up.
-  it('a reel step scrolls: the symbols ride down by that reel\'s own shift, and only the top `shift` cells are new', async () => {
+  it("a reel step scrolls: the symbols ride down by that reel's own shift, and only the top `shift` cells are new", async () => {
     const r = await spinUntil((s) => {
       const bottom = s.data.grid[0].length - 1;
       return s.data.reel_steps.some((step: { winning: Pos[] }) =>

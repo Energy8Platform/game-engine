@@ -336,10 +336,9 @@ test('a misspelled package name on a row says so, naming the row and the package
 
     const mount = page.locator('#mount');
     await expect(mount).toContainText('This game could not start');
-    await expect(
-      mount,
-      'the diagnostic must name the row whose name is wrong',
-    ).toContainText('reels1');
+    await expect(mount, 'the diagnostic must name the row whose name is wrong').toContainText(
+      'reels1',
+    );
     await expect(
       mount,
       'the diagnostic must name the package that could not be resolved',

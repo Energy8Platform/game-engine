@@ -144,7 +144,10 @@ test('a .spin the parser can only half-read still plays, with the dropped declar
     // rule itself and not the pre-flight check's separate behaviour.
     const spin = join(dir, 'game', 'script.spin');
     const source = readFileSync(spin, 'utf8');
-    const broken = source.replace('record CellPos {\n  col: int\n  row: int\n}', 'record CellPos {\n  col: int\n  row: int');
+    const broken = source.replace(
+      'record CellPos {\n  col: int\n  row: int\n}',
+      'record CellPos {\n  col: int\n  row: int',
+    );
     expect(broken, 'the fixture must actually have been edited').not.toBe(source);
     writeFileSync(spin, broken);
 

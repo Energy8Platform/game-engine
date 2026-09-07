@@ -422,9 +422,9 @@ describe('createGame — the failure screen', () => {
     expect(mount.textContent).toContain('This game could not start');
     expect(mount.textContent).toContain('screen-blew-up');
     expect(mount.textContent).toContain('renderer');
-    expect(
-      game.diagnostics.some((d) => d.plugin === 'boot' && d.where === 'renderFailure'),
-    ).toBe(true);
+    expect(game.diagnostics.some((d) => d.plugin === 'boot' && d.where === 'renderFailure')).toBe(
+      true,
+    );
   });
 
   it('falls back to its own copy when the composition never got as far as a boot row', async () => {
@@ -470,7 +470,12 @@ describe('createGame — the failure screen', () => {
         fetchFn: fakeFetch({
           rows: [row('renderer1')],
           diagnostics: [
-            { severity: 'error', plugin: 'project', where: 'e8.patch.yml', message: 'row addresses a plugin nothing placed' },
+            {
+              severity: 'error',
+              plugin: 'project',
+              where: 'e8.patch.yml',
+              message: 'row addresses a plugin nothing placed',
+            },
           ],
         }),
         importModule: async () => ({ apply: () => {} }),

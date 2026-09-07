@@ -230,9 +230,15 @@ function withSchemaCapture(
     const res = await fetchFn(...args);
     if (!res.ok) return res;
     const body: unknown = await res.json();
-    const raw = typeof body === 'object' && body !== null ? (body as { schema?: unknown }).schema : undefined;
+    const raw =
+      typeof body === 'object' && body !== null ? (body as { schema?: unknown }).schema : undefined;
     onSchema(isSpinSchema(raw) ? raw : null);
-    return { ok: true, status: res.status, statusText: res.statusText, json: async () => body } as unknown as Response;
+    return {
+      ok: true,
+      status: res.status,
+      statusText: res.statusText,
+      json: async () => body,
+    } as unknown as Response;
   }) as typeof fetch;
 }
 
@@ -323,8 +329,7 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
           // this. Pushing it through beats re-deriving a vaguer one from
           // `pid === null`.
           const started = ctx.reflect.get('session', false) as
-            | { startupDiagnostic?: Diagnostic | null }
-            | undefined;
+            { startupDiagnostic?: Diagnostic | null } | undefined;
           if (started?.startupDiagnostic) planDiagnostics.push(started.startupDiagnostic);
         } catch (error) {
           // Caught here rather than left to the loader's own catch: a

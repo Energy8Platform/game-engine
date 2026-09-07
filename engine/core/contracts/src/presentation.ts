@@ -103,12 +103,7 @@ export interface WaitStep {
  * the mechanism that would otherwise defeat that.
  */
 export type KnownPresentationStep =
-  | SpinToStep
-  | RevealWinsStep
-  | RemoveStep
-  | RefillStep
-  | SetMultiplierStep
-  | WaitStep;
+  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | SetMultiplierStep | WaitStep;
 
 /**
  * A step naming any OTHER kind — a plugin's, task 9's `reelStep` among

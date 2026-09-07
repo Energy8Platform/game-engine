@@ -109,7 +109,9 @@ function isStagesMap(value: unknown): value is Record<string, RecordShape> {
   return isPlainObject(value) && Object.values(value).every(isRecordShape);
 }
 
-function isOpensEntry(value: unknown): value is { action: string; countVar: string; when?: string } {
+function isOpensEntry(
+  value: unknown,
+): value is { action: string; countVar: string; when?: string } {
   if (!isPlainObject(value) || !isString(value.action) || !isString(value.countVar)) return false;
   if (value.when !== undefined && !isString(value.when)) return false;
   return true;
@@ -125,7 +127,11 @@ function isActionDef(value: unknown): value is ActionDef {
   if (value.session !== undefined && typeof value.session !== 'boolean') return false;
   if (value.extendsVar !== undefined && !isString(value.extendsVar)) return false;
   if (value.endsWhenVar !== undefined && !isString(value.endsWhenVar)) return false;
-  if (value.opens !== undefined && (!Array.isArray(value.opens) || !value.opens.every(isOpensEntry))) return false;
+  if (
+    value.opens !== undefined &&
+    (!Array.isArray(value.opens) || !value.opens.every(isOpensEntry))
+  )
+    return false;
   if (value.feature !== undefined && !isFeatureMap(value.feature)) return false;
   return true;
 }

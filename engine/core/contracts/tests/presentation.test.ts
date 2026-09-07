@@ -64,9 +64,7 @@ describe('presentation steps', () => {
       isPresentationStep({
         kind: 'revealWins',
         total: 1.5,
-        lines: [
-          { line: 0, symbol: 3, count: 3, win: 1.5, positions: [{ col: 0 }] },
-        ],
+        lines: [{ line: 0, symbol: 3, count: 3, win: 1.5, positions: [{ col: 0 }] }],
       }),
     ).toBe(false);
   });

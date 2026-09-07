@@ -130,7 +130,7 @@ export function createReelStepHandler(options: {
       if (typeof resolve !== 'function') {
         throw new Error(
           'the "reelStep" step needs the game\'s symbol art: no "assets" service with a ' +
-            'resolve(symbolId) was provided (a .yml row cannot carry a function — the game\'s ' +
+            "resolve(symbolId) was provided (a .yml row cannot carry a function — the game's " +
             'own page passes it through createGame({ provide: { assets } }))',
         );
       }

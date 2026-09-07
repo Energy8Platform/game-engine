@@ -11,12 +11,24 @@ function fakeBoard() {
   const calls: string[] = [];
   return {
     calls,
-    spinTo: vi.fn(async () => { calls.push('spinTo'); }),
-    revealWins: vi.fn(async () => { calls.push('revealWins'); }),
-    remove: vi.fn(async () => { calls.push('remove'); }),
-    refill: vi.fn(async () => { calls.push('refill'); }),
-    setMultiplier: vi.fn(async () => { calls.push('setMultiplier'); }),
-    wait: vi.fn(async () => { calls.push('wait'); }),
+    spinTo: vi.fn(async () => {
+      calls.push('spinTo');
+    }),
+    revealWins: vi.fn(async () => {
+      calls.push('revealWins');
+    }),
+    remove: vi.fn(async () => {
+      calls.push('remove');
+    }),
+    refill: vi.fn(async () => {
+      calls.push('refill');
+    }),
+    setMultiplier: vi.fn(async () => {
+      calls.push('setMultiplier');
+    }),
+    wait: vi.fn(async () => {
+      calls.push('wait');
+    }),
   };
 }
 
@@ -31,14 +43,24 @@ describe('executePlan with a BoardStepRegistry', () => {
 
   it('runs a registered step the built-in board does not know', async () => {
     const seen: string[] = [];
-    registry.register({ kind: 'reelStep', run: async () => { seen.push('reelStep'); } });
+    registry.register({
+      kind: 'reelStep',
+      run: async () => {
+        seen.push('reelStep');
+      },
+    });
     const diagnostics = await executePlan([{ kind: 'reelStep', shifts: [1, 0] }], board, registry);
     expect(seen).toEqual(['reelStep']);
     expect(diagnostics).toEqual([]);
   });
 
   it('a built-in kind still goes to the board, not the registry', async () => {
-    registry.register({ kind: 'spinTo', run: async () => { throw new Error('registry must not win'); } });
+    registry.register({
+      kind: 'spinTo',
+      run: async () => {
+        throw new Error('registry must not win');
+      },
+    });
     const diagnostics = await executePlan([{ kind: 'spinTo', board: [[1]] }], board, registry);
     expect(diagnostics).toEqual([]);
     expect(board.calls).toEqual(['spinTo']);
@@ -57,10 +79,19 @@ describe('executePlan with a BoardStepRegistry', () => {
   });
 
   it('a handler that rejects becomes a diagnostic, and the plan continues', async () => {
-    registry.register({ kind: 'boom', run: async () => { throw new Error('handler blew up'); } });
-    const diagnostics = await executePlan([{ kind: 'boom' }, { kind: 'spinTo', board: [[1]] }], board, registry);
+    registry.register({
+      kind: 'boom',
+      run: async () => {
+        throw new Error('handler blew up');
+      },
+    });
+    const diagnostics = await executePlan(
+      [{ kind: 'boom' }, { kind: 'spinTo', board: [[1]] }],
+      board,
+      registry,
+    );
     expect(diagnostics).toHaveLength(1);
-    expect(board.calls).toEqual(['spinTo']);      // the next step still ran
+    expect(board.calls).toEqual(['spinTo']); // the next step still ran
   });
 
   // Review round: `executePlan` promises never to throw no matter what the
@@ -103,7 +134,11 @@ describe('executePlan with a BoardStepRegistry', () => {
         throw new Error('collisions() blew up');
       },
     };
-    const diagnostics = await executePlan([{ kind: 'spinTo', board: [[1]] }], board, throwingRegistry);
+    const diagnostics = await executePlan(
+      [{ kind: 'spinTo', board: [[1]] }],
+      board,
+      throwingRegistry,
+    );
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message).toContain('collisions() blew up');
     // ...and the plan still ran.
@@ -159,8 +194,18 @@ describe('createBoardStepRegistry — two plugins claiming one kind', () => {
   it('keeps the first registration and refuses the second, instead of overwriting', async () => {
     const registry = createBoardStepRegistry();
     const ran: string[] = [];
-    registry.register({ kind: 'reelStep', run: async () => { ran.push('first'); } });
-    registry.register({ kind: 'reelStep', run: async () => { ran.push('second'); } });
+    registry.register({
+      kind: 'reelStep',
+      run: async () => {
+        ran.push('first');
+      },
+    });
+    registry.register({
+      kind: 'reelStep',
+      run: async () => {
+        ran.push('second');
+      },
+    });
 
     await executePlan([{ kind: 'reelStep' }], fakeBoard(), registry);
     expect(ran).toEqual(['first']);
@@ -214,7 +259,11 @@ describe('createBoardStepRegistry — two plugins claiming one kind', () => {
     registry.register({ kind: 'reelStep', run: async () => {} });
 
     const diagnostics = await executePlan([{ kind: 'reelStep' }], fakeBoard(), registry);
-    expect(diagnostics.some((d) => d.message.includes('reelStep') && d.message.includes('already registered'))).toBe(true);
+    expect(
+      diagnostics.some(
+        (d) => d.message.includes('reelStep') && d.message.includes('already registered'),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -230,7 +279,7 @@ describe('createBoardStepRegistry — two plugins claiming one kind', () => {
  * claimed, and what `executePlan`'s own doc says.
  */
 describe('executePlan — the board only wins the kinds BoardApi actually declares', () => {
-  it("a kind named after an Object.prototype member reaches its registered handler", () => {
+  it('a kind named after an Object.prototype member reaches its registered handler', () => {
     // Before the gate: `board.toString` is inherited from
     // `Object.prototype`, `typeof` it is `'function'`, so `executePlan`
     // called THAT and the plugin's handler was never consulted — silently,
@@ -241,7 +290,12 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
       ['toString', 'valueOf', 'constructor', 'hasOwnProperty'].map(async (kind) => {
         const registry = createBoardStepRegistry();
         let ran = false;
-        registry.register({ kind, run: async () => { ran = true; } });
+        registry.register({
+          kind,
+          run: async () => {
+            ran = true;
+          },
+        });
         const diagnostics = await executePlan([{ kind }], fakeBoard(), registry);
         expect(diagnostics, `${kind} should run clean`).toEqual([]);
         expect(ran, `${kind} should have reached its handler`).toBe(true);
@@ -253,10 +307,20 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
     // `ReelsBoard` really does carry methods past the six — `destroy()`
     // among them — so "whatever the board happens to have" is a wider and
     // more dangerous rule than "the six", not a hypothetical one.
-    const board = { ...fakeBoard(), reelStep: async () => { throw new Error('board must not win this'); } };
+    const board = {
+      ...fakeBoard(),
+      reelStep: async () => {
+        throw new Error('board must not win this');
+      },
+    };
     const registry = createBoardStepRegistry();
     let ran = false;
-    registry.register({ kind: 'reelStep', run: async () => { ran = true; } });
+    registry.register({
+      kind: 'reelStep',
+      run: async () => {
+        ran = true;
+      },
+    });
 
     const diagnostics = await executePlan([{ kind: 'reelStep' }], board as never, registry);
     expect(diagnostics).toEqual([]);
@@ -277,7 +341,12 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
     // The rule this gate must not weaken, restated against the gate.
     const board = fakeBoard();
     const registry = createBoardStepRegistry();
-    registry.register({ kind: 'spinTo', run: async () => { throw new Error('registry must not win'); } });
+    registry.register({
+      kind: 'spinTo',
+      run: async () => {
+        throw new Error('registry must not win');
+      },
+    });
     const diagnostics = await executePlan([{ kind: 'spinTo', board: [[1]] }], board, registry);
     expect(diagnostics).toEqual([]);
     expect(board.calls).toEqual(['spinTo']);

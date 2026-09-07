@@ -23,9 +23,7 @@ describe('ctx.spinSchema', () => {
   it('a missing script.spin is a diagnostic and the host still starts', async () => {
     const host = await createIdeHost({ cwd: fixture('project-no-spin'), port: 0 });
     expect(host.ctx.spinSchema.schema).toBeNull();
-    expect(host.ctx.spinSchema.diagnostics.some((d) => d.where.includes('script.spin'))).toBe(
-      true,
-    );
+    expect(host.ctx.spinSchema.diagnostics.some((d) => d.where.includes('script.spin'))).toBe(true);
     expect(host.url).toBeTruthy();
     await host.stop();
   });
