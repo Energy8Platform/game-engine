@@ -20,19 +20,16 @@
  *     `BoardStepRegistry`, which knows how to run `reelStep` on a real reel
  *     board (`./step.ts`).
  *
- * **Where the registry comes from, and the one thing that is not settled.**
- * `executePlan(plan, board, registry?)` consults a registry only for kinds
- * the board has no method for — but no row in `e8-base` composes a registry,
- * and `@energy8engine/play-loop`'s runtime half provides only
- * `ctx.play.execute`. So the registry has to come from somewhere, and the
- * only two places it can are this plugin and the game's own page. This
- * plugin creates one and provides it as the `steps` service — reusing an
- * existing one if some other plugin got there first, so a second
- * step-bringing plugin does not collide on the service name — and
- * `first-slot`'s `main.ts` reads `steps` off the context and passes it to
- * `execute`. That handshake is a PROJECT convention, not an engine one:
- * nothing in the engine defines the name `steps` or requires anyone to pass
- * a registry at all. See task-8-9-report.md.
+ * **Where the registry comes from.** `ctx.steps`, composed by the
+ * `playloop1` row (`@energy8engine/play-loop`'s runtime half) — the same
+ * registry `ctx.play.execute` consults by default. So this plugin registers
+ * a handler and the game's page keeps calling
+ * `ctx.play.execute(plan, board)` with two arguments, exactly as it did
+ * before any of this existed. Nothing about the wiring is this project's to
+ * arrange: no service to create, no name to agree on, no argument to
+ * thread through the page. (It was, briefly — see task-8-9-report.md for
+ * the round in which the registry was composed by nobody and this plugin
+ * had to invent the handshake.)
  *
  * **Reversibility (§5.4).** Both registrations go through `ctx.effect`, so a
  * row that leaves the composition takes its mechanic and its step handler
@@ -52,7 +49,11 @@ import type { Context } from 'cordis';
 // `Context`; importing its types is not importing it, and nothing about
 // this line pulls `game-runtime` into the browser bundle.
 import type {} from '@energy8engine/game-runtime';
-import { createBoardStepRegistry, type BoardStepRegistry } from '@energy8engine/play-loop';
+// The module that DECLARES `ctx.steps` and `ctx.play` on cordis's
+// `Context`. Type-only and erased, same as the `game-runtime` line above —
+// this plugin reaches the registry off the composed context, it does not
+// import the play loop.
+import type {} from '@energy8engine/play-loop/runtime';
 import type { SymbolResolver } from '@energy8platform/game-engine/slot';
 import { mechanic } from './mechanic';
 import { createReelStepHandler, type CascadeOverride } from './step';
@@ -73,26 +74,6 @@ export interface ReelStepRowConfig {
   cascade?: CascadeOverride;
 }
 
-/** The name this plugin's `BoardStepRegistry` is provided under. A project convention — see the module doc. */
-export const STEPS_SERVICE = 'steps';
-
-/**
- * The registry every step-bringing plugin in this composition shares: the
- * one already on the context if there is one, a fresh one otherwise.
- *
- * `ctx.reflect.get(name, false)` rather than a property read, for the reason
- * `@energy8engine/reels` gives for the same call: cordis throws on a plain
- * read of a registered service a plugin did not `inject`, and "nobody
- * provided one" is the answer wanted here, not an exception.
- */
-function sharedRegistry(ctx: Context): BoardStepRegistry {
-  const existing = ctx.reflect.get(STEPS_SERVICE, false) as BoardStepRegistry | undefined;
-  if (existing) return existing;
-  const registry = createBoardStepRegistry();
-  ctx.provide(STEPS_SERVICE, registry);
-  return registry;
-}
-
 export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {
   // Half one: the mechanic. Through `ctx.inject` rather than a static
   // `inject: ['mechanics']`, so this row composes whether or not a mechanics
@@ -105,13 +86,17 @@ export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {
     mechanicsCtx.effect(() => mechanicsCtx.mechanics.register(mechanic), 'reel-step:mechanic');
   });
 
-  // Half two: the step. `resolve` is read per run, not captured here — see
+  // Half two: the step, into the registry `playloop1` composed. Same
+  // `ctx.inject` shape and the same reason as the mechanic above — the row
+  // order between this plugin and the play loop is not this plugin's to
+  // assume. `resolve` is read per run, not captured here; see
   // `createReelStepHandler`.
-  const registry = sharedRegistry(ctx);
   const handler = createReelStepHandler({
     resolve: () =>
       (ctx.reflect.get('assets', false) as { resolve?: SymbolResolver } | undefined)?.resolve,
     cascade: config.cascade,
   });
-  ctx.effect(() => registry.register(handler), 'reel-step:step');
+  ctx.inject(['steps'], (stepsCtx) => {
+    stepsCtx.effect(() => stepsCtx.steps.register(handler), 'reel-step:step');
+  });
 }

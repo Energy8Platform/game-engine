@@ -63,11 +63,6 @@ import {
 // capabilities it expects the project's composition to have provided.
 import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/play-loop/runtime';
-// Same rule, one step further: a TYPE for the registry a step-bringing
-// plugin provides, so the value read off `ctx` below is not an `any`.
-// Erased like the two above; `@energy8engine/play-loop` is not imported
-// here, only described.
-import type { BoardStepRegistry } from '@energy8engine/play-loop';
 
 /** Matches `e8.patch.yml`'s `reels1` grid — this file only uses it to size the placeholder art. */
 const CELL = 96;
@@ -244,28 +239,6 @@ mechanicSelect.addEventListener('change', () => {
 });
 
 /**
- * The registry of steps the built-in board has no method for — this
- * project's `plugins/reel-step` provides one and registers `reelStep` into
- * it (see that plugin's module doc). `executePlan` consults it only after
- * the board has said it cannot perform a kind, so nothing registered here
- * can shadow one of the six built-ins.
- *
- * **This handshake is the project's, not the engine's.** No row in
- * `e8-base` composes a registry and `@energy8engine/play-loop`'s runtime
- * half provides only `ctx.play.execute`, so if this page does not pass one,
- * a plugin's step reaches nothing and every spin under `reel-step` is a
- * diagnostic. The name `steps` is a convention between this file and the
- * plugins in this project — the engine defines neither the name nor the
- * requirement. See task-8-9-report.md.
- *
- * `undefined` is the ordinary case, not a failure: a composition with no
- * step-bringing plugin has no registry, and `execute`'s third parameter is
- * optional precisely so that composition behaves exactly as it did before
- * any of this existed.
- */
-const steps = game.ctx.reflect.get('steps', false) as BoardStepRegistry | undefined;
-
-/**
  * Checks `data` against the stage's currently bound mechanic, presents it,
  * and runs the resulting plan through the real board — the one code path
  * both a real spin (below) and the test-only replay instrumentation
@@ -315,7 +288,7 @@ async function presentStage(
   }
 
   const plan = mechanic.present(data);
-  const problems = await game.ctx.play.execute(plan, game.ctx.board, steps);
+  const problems = await game.ctx.play.execute(plan, game.ctx.board);
   if (problems.length > 0) log(`presentation problems: ${JSON.stringify(problems)}`);
   return plan;
 }
