@@ -266,35 +266,36 @@ mechanicSelect.addEventListener('change', () => {
 });
 
 /**
- * Checks `data` against the stage's currently bound mechanic, presents it,
- * and runs the resulting plan through the real board — the one code path
- * both a real spin (below) and the test-only replay instrumentation
- * (`window.__e8`, further down) go through, so a Playwright test observing
- * the latter is observing exactly what a real spin would have produced,
- * not a shortcut built just for the test.
+ * Presents `data` through the stage's currently bound mechanic and runs
+ * the resulting plan on the real board — the one code path both a real
+ * spin (below) and the test-only replay instrumentation (`window.__e8`,
+ * further down) go through, so a Playwright test observing the latter is
+ * observing exactly what a real spin would have produced, not a shortcut
+ * built just for the test.
  *
- * `ctx.play.execute` and `ctx.board` are both services rows provided
- * (`playloop1` and `reels1`) — this file imports neither package.
+ * `ctx.mechanics.present`, `ctx.play.execute` and `ctx.board` are all
+ * services rows provided (`mechanics1`, `playloop1`, `reels1`) — this file
+ * imports none of those packages.
  *
- * Returns the full plan, not just each step's `kind` — a
- * step's content (which board `spinTo`/`refill` name, which cells `remove`
- * names) is exactly what a person watching the board actually sees, and a
- * kind-only sequence cannot tell a correctly-refilled board apart from one
- * with a permanent hole in it.
+ * **Check-then-present is one call, and this page no longer performs it
+ * itself.** It used to `check`, bail on failure, then call
+ * `mechanic.present(data)` directly — the last unguarded third-party call
+ * in the system: a plugin mechanic whose `present` threw took the page
+ * down with it rather than producing a diagnostic. The order was also a
+ * convention this page happened to follow, which the next game would have
+ * had to rediscover. Both now belong to `mechanics.present`, which never
+ * throws and cannot be called out of order.
+ *
+ * Returns the full plan, not just each step's `kind` — a step's content
+ * (which board `spinTo`/`refill` name, which cells `remove` names) is
+ * exactly what a person watching the board actually sees, and a kind-only
+ * sequence cannot tell a correctly-refilled board apart from one with a
+ * permanent hole in it.
  */
 async function presentStage(
   stage: string,
   data: Record<string, unknown>,
 ): Promise<PresentationStep[]> {
-  const shapeProblems = game.ctx.mechanics.check(stage, data);
-  if (shapeProblems.length > 0) {
-    log(`mechanic can't read this stage's data: ${JSON.stringify(shapeProblems)}`);
-    statusEl.textContent = 'shape mismatch — see log';
-    return [];
-  }
-
-  const mechanic = game.ctx.mechanics.forStage(stage)!;
-
   // Keep the control honest about what actually rendered. The binding has
   // two writers besides this page's `<select>`: `e8.patch.yml`, which sets
   // it, and `@energy8engine/ide-bridge`, which rebinds it live whenever a
@@ -307,13 +308,23 @@ async function presentStage(
   // than blanking it: `base_game` is free text in the IDE now, so an id
   // this page never heard of is reachable and is not this control's to
   // display. It is reported instead — see `ideBridge.apply`'s
-  // `onDiagnostic` above, and `mechanics.check` at the top of this
-  // function.
-  if ([...mechanicSelect.options].some((option) => option.value === mechanic.id)) {
-    mechanicSelect.value = mechanic.id;
+  // `onDiagnostic` above, and the diagnostics `present` returns below.
+  //
+  // Read before presenting, and tolerant of `null`: a stage bound to
+  // nothing is exactly a case `present` reports, and this control has
+  // nothing to say about it.
+  const bound = game.ctx.mechanics.forStage(stage);
+  if (bound && [...mechanicSelect.options].some((option) => option.value === bound.id)) {
+    mechanicSelect.value = bound.id;
   }
 
-  const plan = mechanic.present(data);
+  const { plan, diagnostics: presentProblems } = game.ctx.mechanics.present(stage, data);
+  if (presentProblems.length > 0) {
+    log(`could not present this stage: ${JSON.stringify(presentProblems)}`);
+    statusEl.textContent = 'presentation failed — see log';
+    return [];
+  }
+
   const problems = await game.ctx.play.execute(plan, game.ctx.board);
   if (problems.length > 0) log(`presentation problems: ${JSON.stringify(problems)}`);
   return plan;

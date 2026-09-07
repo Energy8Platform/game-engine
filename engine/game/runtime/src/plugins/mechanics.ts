@@ -33,6 +33,7 @@ import {
   type Diagnostic,
   type FieldKind,
   type FieldType,
+  type PresentationStep,
   type SpinSchema,
 } from '@energy8engine/contracts';
 
@@ -95,6 +96,45 @@ export interface MechanicsService {
    * this registry does not implement a second shape checker.
    */
   check(stage: string, sample: Record<string, unknown>): Diagnostic[];
+  /**
+   * Checks `data` against the stage's bound mechanic and, only if it
+   * passes, asks that mechanic for a presentation plan. Returns both —
+   * never throws, whatever the mechanic does.
+   *
+   * **Why the engine owns this call.** `mechanic.present(data)` was the
+   * last third-party call in the system outside "failures are data": its
+   * only call site was a game's own page, unguarded, so a plugin mechanic
+   * whose `present` threw produced a JS exception instead of a
+   * `Diagnostic` — and, on a page whose entry is a module-top-level
+   * `await`, a blank screen. `requires` cannot close that: it says a
+   * field is a list, never what the list contains, and nothing at all
+   * about the code that reads it.
+   *
+   * **Why the two steps are one call and not two.** Every game that
+   * presents a stage has to `check` first and stop if it fails. That was
+   * a habit each page re-invented, in the right order by luck rather than
+   * by construction — and a page that got it wrong handed unchecked data
+   * to a mechanic that had declared it could not read it. Here the order
+   * is the method.
+   *
+   * A failure of any kind — nothing bound to the stage, data the mechanic
+   * cannot read, a `present` that threw, a `present` that returned
+   * something that is not a plan — yields an empty `plan` alongside the
+   * diagnostics. Empty rather than partial: half a presentation of a spin
+   * is not a spin presented worse, it is a board left in a state no
+   * mechanic claims.
+   *
+   * `plan` is deliberately `PresentationStep[]` — the wide type — because
+   * that is what `executePlan` takes, and what a plugin mechanic's own
+   * step widens into. Each element is validated by `executePlan` itself,
+   * step by step; this method only guarantees that what comes back is a
+   * plan-shaped ARRAY, which is the one thing `executePlan` reads before
+   * any of its own guards run.
+   */
+  present(
+    stage: string,
+    data: Record<string, unknown>,
+  ): { plan: PresentationStep[]; diagnostics: Diagnostic[] };
   /**
    * Every stage currently bound to a mechanic that has actually
    * registered, keyed by stage — the exact shape `checkAgainstSchema`
@@ -225,6 +265,64 @@ export function apply(ctx: Context) {
         ];
       }
       return checkShape(mechanic.requires, sample, mechanic.id, stage);
+    },
+
+    present(stage, data) {
+      // The check comes first and its failure is terminal — see this
+      // method's doc on the interface above. `check` already reports both
+      // "nothing is bound" and "bound to an id nobody registered", so
+      // there is no second lookup to make here when it comes back empty:
+      // a clean check means `forStage` has a mechanic.
+      const problems = service.check(stage, data);
+      if (problems.length > 0) return { plan: [], diagnostics: problems };
+
+      const mechanic = service.forStage(stage)!;
+      let plan: unknown;
+      try {
+        plan = mechanic.present(data);
+      } catch (error) {
+        return {
+          plan: [],
+          diagnostics: [
+            diagnostic(
+              'error',
+              mechanic.id,
+              stage,
+              `mechanic "${mechanic.id}" threw while presenting stage "${stage}": ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              `fix "${mechanic.id}"'s present(), or bind "${stage}" to a mechanic that can read this data`,
+            ),
+          ],
+        };
+      }
+
+      // `executePlan` reads `plan.length` before any of its own guards
+      // run, so a non-array reaches it as a TypeError — or, for a plain
+      // object, as a plan that silently runs no steps at all. Neither is
+      // a failure it can report, so it is reported here.
+      if (!Array.isArray(plan)) {
+        return {
+          plan: [],
+          diagnostics: [
+            diagnostic(
+              'error',
+              mechanic.id,
+              stage,
+              `mechanic "${mechanic.id}" did not return a plan for stage "${stage}": present() gave ${
+                plan === null ? 'null' : typeof plan
+              }, not an array of steps`,
+              `have "${mechanic.id}"'s present() return an array of presentation steps`,
+            ),
+          ],
+        };
+      }
+
+      // Each STEP is validated by `executePlan`, step by step, and
+      // deliberately not again here: it reports a malformed step against
+      // its position in the plan (`plan[3]`), which is the address a
+      // person debugging one actually needs.
+      return { plan: plan as PresentationStep[], diagnostics: [] };
     },
 
     bindings() {

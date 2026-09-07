@@ -210,6 +210,106 @@ describe('the mechanic registry', () => {
   });
 });
 
+/**
+ * `present` — check-then-present as ONE call the engine owns.
+ *
+ * `mechanic.present(data)` was the last third-party call in the system
+ * outside "failures are data": its only call site was a game's own page,
+ * unguarded, so a plugin mechanic whose `present` threw produced a JS
+ * exception instead of a `Diagnostic`. `requires` cannot close that —
+ * it says a field is a list, never what the list contains, and never
+ * anything at all about the code that reads it.
+ *
+ * The sequence is guaranteed rather than conventional: every game that
+ * presented a stage had to remember to `check` first, and the order was a
+ * habit each page re-invented.
+ */
+describe('mechanics.present', () => {
+  const GOOD = {
+    id: 'good',
+    requires: { fields: { grid: 'grid' } },
+    present: () => [{ kind: 'wait', ms: 1 }],
+  } as const;
+
+  it('checks first, then presents, and returns the plan', async () => {
+    const { ctx } = await registry();
+    ctx.mechanics.register(GOOD);
+    ctx.mechanics.bind('base_game', 'good');
+
+    const { plan, diagnostics } = ctx.mechanics.present('base_game', { grid: [[1]] });
+    expect(diagnostics).toEqual([]);
+    expect(plan).toEqual([{ kind: 'wait', ms: 1 }]);
+    await ctx.fiber.dispose();
+  });
+
+  it('data the mechanic cannot read is reported and NOTHING is presented', async () => {
+    const { ctx } = await registry();
+    let presented = false;
+    ctx.mechanics.register({
+      id: 'good',
+      requires: { fields: { grid: 'grid' } },
+      present: () => {
+        presented = true;
+        return [];
+      },
+    });
+    ctx.mechanics.bind('base_game', 'good');
+
+    const { plan, diagnostics } = ctx.mechanics.present('base_game', { grid: 'not a grid' });
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(plan).toEqual([]);
+    // The whole point of owning the sequence: `present` was never reached.
+    expect(presented).toBe(false);
+    await ctx.fiber.dispose();
+  });
+
+  it('a mechanic whose present() throws becomes a diagnostic, not an exception', async () => {
+    const { ctx } = await registry();
+    ctx.mechanics.register({
+      id: 'boom',
+      requires: { fields: {} },
+      present: () => {
+        throw new Error('present blew up');
+      },
+    });
+    ctx.mechanics.bind('base_game', 'boom');
+
+    const { plan, diagnostics } = ctx.mechanics.present('base_game', {});
+    expect(plan).toEqual([]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('present blew up');
+    expect(diagnostics[0].plugin).toBe('boom');
+    await ctx.fiber.dispose();
+  });
+
+  it('a mechanic whose present() returns something that is not a plan is a diagnostic', async () => {
+    // `executePlan` reads `plan.length` before anything else, so a
+    // non-array reaches it as a TypeError (or, for a plain object, as a
+    // plan that silently runs no steps at all).
+    const { ctx } = await registry();
+    ctx.mechanics.register({
+      id: 'wrong',
+      requires: { fields: {} },
+      present: () => undefined as never,
+    });
+    ctx.mechanics.bind('base_game', 'wrong');
+
+    const { plan, diagnostics } = ctx.mechanics.present('base_game', {});
+    expect(plan).toEqual([]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('did not return a plan');
+    await ctx.fiber.dispose();
+  });
+
+  it('a stage nothing is bound to reports that, and presents nothing', async () => {
+    const { ctx } = await registry();
+    const { plan, diagnostics } = ctx.mechanics.present('base_game', {});
+    expect(plan).toEqual([]);
+    expect(diagnostics.some((d) => d.message.includes('nothing is bound'))).toBe(true);
+    await ctx.fiber.dispose();
+  });
+});
+
 describe('the mechanics1 row', () => {
   it('registers both shipped mechanics and binds the stages its config names', async () => {
     const ctx = new Context();
