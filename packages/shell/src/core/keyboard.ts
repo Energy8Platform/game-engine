@@ -1,4 +1,5 @@
 import type { ShellState } from './types';
+import { bonusBuyLocked } from './state';
 
 export interface KeyboardHost {
   readonly state: ShellState;
@@ -153,7 +154,12 @@ export class KeyboardController {
           if (h.turboLevels > 0 && !s.replay) { h.cycleTurbo(); return; }
           break;
         case 'KeyB':
-          if (h.buyBonusEnabled && s.mode === 'base' && !s.replay) { h.openBuyBonus(); return; }
+          // `bonusBuyLocked` is the same predicate the bar's coin uses. Without it this hotkey
+          // reached past a disabled coin and opened the overlay mid-round.
+          if (h.buyBonusEnabled && s.mode === 'base' && !s.replay && !bonusBuyLocked(s)) {
+            h.openBuyBonus();
+            return;
+          }
           break;
         case 'KeyI':
           h.openInfo(); return;

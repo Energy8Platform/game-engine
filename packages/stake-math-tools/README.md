@@ -1,10 +1,10 @@
 # @energy8platform/stake-math-tools
 
-Node-only dev-time utilities for building [Stake Engine](https://stake-engine.com/docs) **lookup tables (force matrices)** from raw simulation output. Compresses millions of source simulations into a small weighted table that passes Stake's publish-time validation gates (Liability Limits, Gaps in Hit Rate Table, Unique Events). Companion to [`@energy8platform/stake-bridge`](../stake-bridge).
+Node-only dev-time utilities for building [Engine](https://stake-engine.com/docs) **lookup tables (force matrices)** from raw simulation output. Compresses millions of source simulations into a small weighted table that passes Stake's publish-time validation gates (Liability Limits, Gaps in Hit Rate Table, Unique Events). Companion to [`@energy8platform/stake-bridge`](../stake-bridge).
 
 ## Why
 
-Stake Engine games ship a pre-built weighted lookup table: each row is `(sim_id, weight, payout_cents)` and the RGS samples a row at runtime to decide each round's outcome. The math team's job is to compress millions of raw simulations down to a much smaller weighted table whose aggregate distribution still hits the design's target **RTP / volatility / hit-rate** under a hard `capMaxWin` ceiling, **and** passes Stake's risk-management checks.
+Engine games ship a pre-built weighted lookup table: each row is `(sim_id, weight, payout_cents)` and the RGS samples a row at runtime to decide each round's outcome. The math team's job is to compress millions of raw simulations down to a much smaller weighted table whose aggregate distribution still hits the design's target **RTP / volatility / hit-rate** under a hard `capMaxWin` ceiling, **and** passes Stake's risk-management checks.
 
 This package does that compression in one call.
 
@@ -270,7 +270,7 @@ Determinism: same `(rows, params)` → bit-identical output.
 
 ## Hit-rate distribution table
 
-`result.stakeReport.hitRateDistribution` mirrors what Stake Engine shows in the publish UI. 16 payout-multiplier buckets:
+`result.stakeReport.hitRateDistribution` mirrors what Engine shows in the publish UI. 16 payout-multiplier buckets:
 
 ```
 [0, 0.1)   [0.1, 1)   [1, 2)   [2, 5)   [5, 10)   [10, 20)
@@ -379,6 +379,216 @@ bit-for-bit via `(rng.server_seed, rng.client_seed, spins[0].nonce)`.
 `runtime: 'lua'` is rejected with a migration hint — legacy Lua games pin
 `stake-math-tools ≤ 0.8.x`. Porting: see
 [docs/lua-to-spin-migration.md](../../docs/lua-to-spin-migration.md).
+
+## The two-pass build
+
+The pipeline runs in three stages, and the split is the single biggest thing it
+does for wall clock:
+
+```bash
+e8-math pool     --config ./math.config.ts   # light: round,payoutCents per round
+e8-math curate   --config ./math.config.ts   # optimize → lookUpTable + selection
+e8-math books    --config ./math.config.ts   # heavy: serialize ONLY the selected rounds
+e8-math all      --config ./math.config.ts   # all three, end to end
+```
+
+On a real game ~5% of simulated rounds reach the published books. The old
+one-pass build paid full JSON serialization for 100% of them: 14M rounds became
+51 GB that was written, compressed, read back, parsed, and thrown away. Math was
+never the bottleneck — on kitsune, 1M rounds cost 0.66 s to *compute* and 4.7 s
+to *print*.
+
+So the pool stage no longer prints anything. `e8 simulate -dump-csv` writes one
+`round,payoutCents` line per round — everything curate needs to choose rows, and
+nothing else. curate optimizes off that and records which pool rounds its rows
+came from (`selected_<MODE>.txt`). Only then does the books stage re-run the
+simulation with `-only-rounds`, serializing the survivors.
+
+The books stage does not stop at re-simulating: the engine writes the finished
+Stake books itself (`-books-map` → `{id,payoutMultiplier,events,criteria}`,
+zstd-compressed as it writes). The pipeline used to parse that output and
+re-serialize every book, which on 200k books cost 1.0 s of parsing and ~2.8 s of
+`JSON.stringify` — the data was being serialized twice, the second time in JS.
+
+Re-running is safe because a round is a pure function of `(master seed, round
+index)`: the lane is `round % 64`, its seed `sha256(master:lane)`, its nonce
+`round / 64 + 1`. Nothing depends on the host's core count or on which rounds
+were serialized. The engine test asserts a selectively-dumped round is
+byte-identical to the same round in a full dump, and this package's e2e asserts
+that a two-pass build produces byte-identical `lookUpTable_<MODE>_0.csv` and
+`books_<MODE>.jsonl.zst` to a one-pass build.
+
+Measured on kitsune, 4M rounds → 200k books, one mode — `e8-math all`:
+
+| | one-pass (`--full`) | two-pass (default) |
+|---|---|---|
+| wall clock | 63.6 s | **5.5 s** |
+| of which the books stage | — | **0.76 s** |
+| pool on disk | 745 MB | **19 MB** |
+| artifacts | — | byte-identical (200k books, 208 MB) |
+
+Every stage prints what it cost, so a slow run says where it went:
+
+```
+  ⏱  [BASE] pool: 4,000,000 rounds — 2.42s
+  ⏱  curate: 1 mode(s) — 1.62s
+  ⏱  [BASE] books — 0.76s
+  [BASE] books: 200000 row(s) from 200000 round(s), written by the engine; …
+Done in 5.47s.
+```
+
+### Curation runs in the engine
+
+The optimizer is where this pipeline runs out of memory. Measured at ~200 bytes
+per pool row — the source array of `{sim, weight, payoutCents}` objects is 56 of
+them, the rest is the optimizer's working copies — which puts a 100M-round pool
+at ~20 GB, past any Node heap.
+
+So `curate` hands the work to the engine (`e8 curate run`), which holds the same
+pool in three integer vectors. It is a byte-for-byte port of `tiered.ts`, and
+this package's implementation stays the reference: the two are compared on real
+pools across all five branches (main path, `shapeDistribution`,
+`shapeAutoMatchCV`, the probability-limit retry loop, the `starRating` preset),
+including the curated table, the book map and every number in the report.
+
+| kitsune, 4M pool → 200k books | JS optimizer | engine |
+|---|---|---|
+| curate stage | 1.62 s | **0.34 s** |
+| peak RSS of the whole run | 842 MB | **285 MB** |
+
+Nothing to configure. An engine without the subcommand falls back to the
+TypeScript path silently, and `E8_CURATE=js` forces it — useful when comparing
+the two. `E8_CURATE=engine` turns the fallback into an error instead, for a CI
+that wants to know the fast path is actually running.
+
+NNLS/QP (`algorithm: 'nnls'`) was not ported: every shipped game uses `tiered`.
+Those modes stay on the TypeScript path.
+
+### `transformEvents` and the size gate
+
+A `transformEvents` hook in `math.config.ts` shapes each book's events before
+serialization. Applying a JS function to a book means parsing and re-serializing
+it, so a hook normally puts the mode back on the slow path — every book through
+Node.
+
+Most such hooks only care about the rare oversized book. paper-duel's deflates
+`spin` payloads for books that would breach Stake's 1 MiB `events` cap, which is
+a handful out of 400k. Declare that threshold and the books stage skips the rest
+without parsing them:
+
+```ts
+transformEvents: transform,
+transformEventsWhenBytesOver: 980 * 1024,   // below this, the transform is a no-op
+```
+
+The stage then copies engine-written lines through byte for byte and only opens
+the ones above the gate (re-deriving their `criteria`, since a transform may
+change the events it is derived from). Unset, the hook still works exactly as
+before — every book parsed, transformed, re-serialized. The console line names
+which route ran: `written by the engine`, `written by the engine, N rewritten by
+transformEvents`, or `assembled here (ungated transformEvents)`.
+
+### The pool manifest
+
+`pool` writes `pool_<MODE>.manifest.json` next to the CSV: the master seed the
+run **actually** used (`math.config.ts` need not pin `sim.seed` — the engine
+invents one per run, and the heavy pass has to reuse it), the rng profile,
+action, bet, iterations, params, and a sha256 of the `.spin` source.
+
+`books` refuses to run when any of that drifted:
+
+```
+[BASE] the pool was simulated from a different run than the config now describes
+(the .spin source changed; iterations 6000000 → 4000000). The books stage would
+serialize rounds the lookUpTable never saw. Re-run `e8-math pool --mode BASE`.
+```
+
+Without the check the failure is invisible: the artifacts stay valid JSON, every
+size and tolerance check passes, and the game deals grids nobody simulated.
+
+### `--full` — the one-pass pool
+
+`e8-math pool --full` (and `all --full`) serializes every round up front, as
+before. Slower and much bigger, but the pool is self-contained: `curate` alone
+then yields publishable books, no `books` stage involved. Use it when you want
+the whole simulation on disk to inspect, or with an engine that predates
+`-dump-csv`. Setting `POOL_ZSTD_LEVEL` implies `--full` (it archives a dump, and
+the light pool has none).
+
+`books --keep-dump` keeps the heavy pass's filtered dump in the pool instead of
+deleting it — a few GB at most, since it holds only the selected rounds.
+
+## Pipeline throughput
+
+The stages above remove most of the I/O. What is left:
+
+**`--jobs N` — curate several modes at once.** Modes are independent from `pool`
+onward, so the curate stage runs up to `N` of them concurrently; reports still
+print in config order, and the artifacts are identical either way.
+
+```bash
+e8-math curate --config ./math.config.ts --jobs 4
+```
+
+The default is 1 because the limit is memory, not CPU: each in-flight mode holds
+its whole source LUT plus the optimizer's working copies (several hundred MB for
+a 6M-round BASE). Raise it as far as the machine allows — the win is capped by
+the heaviest mode either way. In `all`, the pool stage stays sequential: the
+engine's workers already saturate the CPU, so running modes side by side there
+measures ~1.0×.
+
+**Whatever the engine dumps, it dumps compressed.** A `-dump` path ending in
+`.gz` is gzipped as it is written — each engine worker compresses its own part in
+parallel, and the raw file never exists on disk. This is what the `books` stage
+writes, and what `--full` writes for the whole pool. Compression changes nothing
+about the run: same seed, same rounds, same bytes once inflated.
+
+Everything downstream reads the archive in-process via `zlib` — no external
+binary, and a multi-GB pool never lands on disk inflated. `curate` accepts
+`books_<MODE>.jsonl`, `books_<MODE>.jsonl.gz` and `books_<MODE>.jsonl.zst`, in
+that order, so pools from any era still curate.
+
+An engine that predates gzipped dumps writes plain JSONL to the `.gz` path. That
+is detected by the file's magic bytes (not its name), the dump is renamed back to
+`books_<MODE>.jsonl`, and the legacy path below takes over with a note on stderr.
+Update the e8 binary to get the fast path.
+
+**`POOL_ZSTD_LEVEL` — the legacy archive path.** Setting it at all opts out of
+gzipped dumps: the engine writes the raw `.jsonl` and `zstd -<level>` packs it
+afterwards, exactly as before. `=0` skips compression and keeps the raw file.
+
+```bash
+POOL_ZSTD_LEVEL=19 e8-math all --config ./math.config.ts  # pool as a .zst archive
+POOL_ZSTD_LEVEL=0  e8-math all --config ./math.config.ts  # pool stays .jsonl
+```
+
+Reach for it when the pool matters as a long-lived archive and the extra ratio is
+worth the wall clock — `zstd -T0` does not parallelize a single stream (~100 MB/s),
+so on a 50+ GB pool that pass costs ~10 minutes for a file curate reads once.
+Either way `index.json` names whichever file was actually written.
+
+A dump the engine already gzipped is never re-packed, even with `POOL_ZSTD_LEVEL`
+set: rewriting a multi-GB archive to change its container buys nothing.
+
+**The pool and the lookUpTable must describe the same run.** A curated row's `sim`
+is the dump's line index, so the two files are coupled positionally. curate fails
+if a selected round has no line in the dump:
+
+```
+[BASE] pool is missing 30 of the 40 rounds the lookUpTable selected (30 curated
+row(s) affected) — books_BASE.jsonl[.gz|.zst] does not describe the same run as
+lookUpTable_BASE_0.csv.
+```
+
+Without that check those rows ship as books with an empty `events` array — valid
+JSON, accepted by every size and tolerance check, and dead on screen. A damaged
+archive cannot slip through either: a truncated or non-gzip `.gz` raises
+`unexpected end of file` / `incorrect header check` rather than yielding a short
+read, and concatenated gzip members are read in full.
+
+Curating off a bare lookUpTable, with no dump in the pool at all, still works —
+useful while tuning weights — but every book comes out event-less, so the result
+carries a warning saying exactly that.
 
 ## Scripts
 

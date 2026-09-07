@@ -3,6 +3,7 @@ import type { BonusOption } from '@/core/types';
 import { betDir } from '@/core/keyboard';
 import { effectiveAccent, contrastText } from '@/core/colors';
 import { createOverlay, createCardModal } from '../primitives';
+import { attachScrollAffordance, type ScrollAffordance } from '../scroll-affordance';
 import { icon, type IconName } from '../icons';
 
 /** Mutable state shared between the overlay DOM and the onKey handler. */
@@ -21,11 +22,15 @@ export function openBuyBonusOverlay(host: ShellHost): { root: HTMLElement; onKey
 
   const st: OverlayState = { focusIndex: -1, confirmBonus: undefined };
 
-  const { root, body } = createOverlay({ title: host.t('Buy bonus'), onClose: () => host.actions.closeOverlay() });
+  const { root, body, affordance } = createOverlay({ title: host.t('Buy bonus'), onClose: () => host.actions.closeOverlay() });
   root.dataset.ge = 'buybonus-overlay';
+
+  // The strip's own X-scroll affordance, rebuilt with the grid it describes.
+  let gridAffordance: ScrollAffordance | null = null;
 
   // Re-render the grid whenever the bet changes so every card's price stays live.
   const renderGrid = (): void => {
+    gridAffordance?.destroy();
     body.innerHTML = '';
     const grid = document.createElement('div'); grid.className = 'ge-bb-grid';
     // Card count drives the width-fit clamp in CSS (each card is 18em; N cards must fit the frame
@@ -46,6 +51,11 @@ export function openBuyBonusOverlay(host: ShellHost): { root: HTMLElement; onKey
     } else {
       st.focusIndex = -1;
     }
+    // Two axes, two affordances. Below a ~340px frame the CSS stacks the cards and the OVERLAY
+    // scrolls vertically (see the ge-bb-frame container query); above it the STRIP scrolls
+    // horizontally. Each is attached unconditionally and stays silent on the axis that fits.
+    gridAffordance = attachScrollAffordance(grid, { axis: 'x', cue: false });
+    affordance.sync();
   };
 
   renderGrid();

@@ -17,7 +17,10 @@ describe('genClaudeMd', () => {
     expect(md).toContain('npm run dev');
     expect(md).toContain('npm run stake');
     expect(md).toContain('npm run build:stake');
-    expect(md).toContain('math:curate');
+    // The math pipeline is three stages, and the scripts are named after them.
+    expect(md).toContain('npm run math');
+    expect(md).toContain('npm run curate');
+    expect(md).toContain('npm run books');
   });
 
   it('mentions the cascade mechanic when cascades are on', () => {

@@ -146,3 +146,86 @@ describe('createAutoplayLoop', () => {
     expect(a.active).toBe(false);
   });
 });
+
+/**
+ * Restarting a run while the stopped run's last round is still animating.
+ *
+ * `stop()` ends the RUN, but the round already in flight keeps playing to the end — so the loop is
+ * still parked on `await playRound`, and `running` stays true until it resolves. `start()` bailed on
+ * `running`, which made the restart a silent no-op.
+ *
+ * Silent is the problem. ShellController.startAutoplay sets `state.autoplay = { active: true,
+ * remaining }` and re-renders BEFORE the host is consulted, so the disc lights up with the chosen
+ * count and then never moves: no loop is running to report a single decrement. From the player's
+ * seat autoplay is on and the counter is stuck.
+ */
+describe('createAutoplayLoop restart window', () => {
+  /** A playRound whose rounds resolve only when the test says so, tracking peak concurrency —
+   *  the loop's core promise is that it never has two rounds in flight. */
+  function deferredHarness() {
+    const plays: string[] = [];
+    const states: Array<{ active: boolean; remaining: number }> = [];
+    let release: (() => void) | null = null;
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const deps: AutoplayDeps = {
+      resolveAction: () => 'spin',
+      canAfford: () => true,
+      playRound: async (a) => {
+        plays.push(a);
+        inFlight += 1;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise<void>((res) => { release = res; });
+        inFlight -= 1;
+      },
+      onState: (s) => { states.push({ ...s }); },
+    };
+    return {
+      deps, plays, states,
+      releaseRound: () => { release?.(); release = null; },
+      peak: () => peakInFlight,
+    };
+  }
+
+  it('starts a fresh run when the player restarts while the stopped round is still playing', async () => {
+    const { deps, plays, states, releaseRound } = deferredHarness();
+    const a = createAutoplayLoop(deps);
+
+    a.start(3);
+    await vi.waitFor(() => expect(plays).toHaveLength(1)); // round 1 in flight
+    a.stop();
+    expect(a.active).toBe(false);
+
+    // The player immediately picks a new count. The round from the old run has NOT resolved yet.
+    a.start(5);
+    expect(a.active).toBe(true);
+    expect(states.at(-1)).toEqual({ active: true, remaining: 5 });
+
+    releaseRound(); // the old round finally finishes
+    await vi.waitFor(() => expect(plays.length).toBeGreaterThan(1)); // the new run is spinning
+    expect(a.remaining).toBeLessThan(5); // and the counter is moving
+  });
+
+  it('reuses the parked loop rather than spawning a second one', async () => {
+    const { deps, plays, releaseRound, peak } = deferredHarness();
+    const a = createAutoplayLoop(deps);
+    a.start(2);
+    await vi.waitFor(() => expect(plays).toHaveLength(1));
+    a.stop();
+    a.start(2); // restart while round 1 is still in flight
+
+    // Drain the whole thing: the old round, then the new run's two.
+    releaseRound();
+    await vi.waitFor(() => expect(plays).toHaveLength(2));
+    releaseRound();
+    await vi.waitFor(() => expect(plays).toHaveLength(3));
+    releaseRound();
+    await vi.waitFor(() => expect(a.active).toBe(false));
+
+    // 1 round from the stopped run + exactly the 2 the player asked for.
+    expect(plays).toHaveLength(3);
+    // The claim that matters: never two rounds at once. A second loop would double up here.
+    expect(peak()).toBe(1);
+    expect(a.remaining).toBe(0);
+  });
+});

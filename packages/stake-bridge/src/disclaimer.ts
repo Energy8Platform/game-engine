@@ -16,7 +16,7 @@
  *   4. Expected return         — "RTP calculated over many plays."
  *   5. Display accuracy        — "Display is illustrative, not a physical device."
  *   6. Payout source           — "Winnings are settled by the RGS."
- *   7. Copyright               — "TM and © {year} Stake Engine."
+ *   7. Copyright               — "TM and © {year} Engine."
  */
 
 export interface DisclaimerOptions {
@@ -41,7 +41,7 @@ function buildDefault(year: number): string[] {
     'The expected return is calculated over many plays.',
     'The game display is not representative of any physical device and is for illustrative purposes only.',
     'Winnings are settled according to the amount received from the Remote Game Server and not from events within the web browser.',
-    `TM and © ${year} Stake Engine.`,
+    `TM and © ${year} Engine.`,
   ];
 }
 
@@ -58,7 +58,7 @@ function buildDefault(year: number): string[] {
  * > of any physical device and is for illustrative purposes only.
  * > Winnings are settled according to the amount received from the
  * > Remote Game Server and not from events within the web browser.
- * > TM and © {year} Stake Engine.
+ * > TM and © {year} Engine.
  */
 export const DEFAULT_DISCLAIMER_LINES: string[] = buildDefault(
   new Date().getFullYear(),

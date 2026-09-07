@@ -106,7 +106,7 @@ Expected: FAIL — cannot resolve `../src/detect`.
 ```ts
 // packages/stake-bridge/src/detect.ts
 /**
- * Lightweight, non-throwing detector for a Stake Engine launch.
+ * Lightweight, non-throwing detector for a Engine launch.
  *
  * Lives in a leaf module (no RGSClient / StakeBridge imports) so it can be
  * imported to gate whether to lazy-load the heavy bridge, without pulling

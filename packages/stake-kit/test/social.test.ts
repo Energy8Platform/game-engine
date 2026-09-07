@@ -7,8 +7,8 @@ describe('applySocialText (no bridge dict loaded)', () => {
     expect(applySocialText('Insufficient funds')).toBe('Insufficient balance');
     expect(applySocialText('Buy Bonus')).toBe('Get Bonus');
   });
-  it('protects the "Stake Engine" brand from the bet→play swap', () => {
-    expect(applySocialText('Powered by Stake Engine')).toBe('Powered by Stake Engine');
+  it('protects the "Engine" brand from the bet→play swap', () => {
+    expect(applySocialText('Powered by Engine')).toBe('Powered by Engine');
   });
   it('merges caller overrides into the PRE pass', () => {
     expect(applySocialText('Spin to win', { pre: [[/\bSpin\b/g, 'Tap']] })).toBe('Tap to win');

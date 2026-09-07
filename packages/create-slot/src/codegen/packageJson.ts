@@ -17,6 +17,7 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     'math:smoke': 'e8-math sim --config ./math.config.ts --iterations 2000',
     pool: 'e8-math pool --config ./math.config.ts',
     curate: 'e8-math curate --config ./math.config.ts',
+    books: 'e8-math books --config ./math.config.ts',
     math: 'e8-math all --config ./math.config.ts',
   };
   if (a.stake) {

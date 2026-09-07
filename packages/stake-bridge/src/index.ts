@@ -1,8 +1,8 @@
 /**
- * Stake Engine integration.
+ * Engine integration.
  *
  * Drop-in host-side wrapper that lets a game built against
- * `CasinoGameSDK` run on Stake Engine without changes.
+ * `CasinoGameSDK` run on Engine without changes.
  *
  * ```ts
  * import { StakeBridge } from '@energy8platform/stake-bridge';

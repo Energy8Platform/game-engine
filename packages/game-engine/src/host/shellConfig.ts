@@ -2,7 +2,7 @@
 // `socialize` / `createI18n` / `Lang` are renderer-agnostic helpers from the shell core
 // (@energy8platform/shell). Renderer-agnostic types (GameInfoSection/Content, PaytableRow,
 // GameMode) and the pixi-specific surface types come from the @energy8platform/shell/pixi entry.
-import { socialize, createI18n } from '@energy8platform/shell';
+import { socialize, createI18n, DISCLAIMER_LINES } from '@energy8platform/shell';
 import type { Lang } from '@energy8platform/shell';
 import type { GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/shell/pixi';
 import type {
@@ -60,8 +60,11 @@ export interface ShellRuntime {
   mode: ShellMode;
   /** Social-casino mode from initData (`config.socialMode`); swaps shell vocabulary. */
   social?: boolean;
-  /** Stake-required disclaimer lines from initData (`config.disclaimerLines`); when
-   *  absent (non-stake/dev) no disclaimer section is rendered. */
+  /** Disclaimer lines the PLATFORM supplied (`initData.config.disclaimerLines` — in practice the
+   *  Stake bridge, which appends its own "TM and © {year} Engine." to the mandated body).
+   *  They outrank the default. When absent — Artube, dev, any other host — the shell's canonical
+   *  `DISCLAIMER_LINES` are used: the same mandated wording, minus a mark that isn't theirs. The
+   *  disclaimer is required legal copy, so there is no case where the section is simply missing. */
   disclaimerLines?: string[];
   /** Jurisdiction flags from initData (`config.jurisdiction`). Restrict shell features — applied
    *  OVER the author's features so a jurisdiction restriction always wins. */
@@ -257,10 +260,10 @@ function winsSection(model: GameModel): GameInfoSection | null {
 /** Title of the legal disclaimer section — used to build it and to exempt it from socialization. */
 const DISCLAIMER_TITLE = 'DISCLAIMER';
 
-/** The copyright/brand line ("TM and © {year} Stake Engine.") is shown verbatim; the legal body
- *  lines localize. Detecting the brand keeps "Stake Engine" out of the translation lookup entirely. */
+/** The copyright/brand line ("TM and © {year} Engine.") is shown verbatim; the legal body
+ *  lines localize. Detecting the brand keeps " Engine" out of the translation lookup entirely. */
 function isBrandLine(line: string): boolean {
-  return /stake\s+engine/i.test(line);
+  return /engine/i.test(line);
 }
 
 /** A disclaimer section from initData's disclaimer lines; null when none supplied. The legal body is
@@ -268,7 +271,7 @@ function isBrandLine(line: string): boolean {
  *  caller passes a translation-only resolver (never socializing) — mandated legal copy must not be
  *  word-swapped even in social mode. */
 function disclaimerSection(
-  lines: string[] | undefined,
+  lines: readonly string[] | undefined,
   t: (s: string) => string = (s) => s,
 ): GameInfoSection | null {
   const clean = (lines ?? []).map((l) => l.trim()).filter(Boolean);
@@ -312,7 +315,7 @@ export function defaultGameInfo(
   const modes = modesSection(model, t);
   if (modes) sections.push(modes);
   sections.push({ type: 'controls' });
-  const disclaimer = disclaimerSection(runtime.disclaimerLines, tDisclaimer);
+  const disclaimer = disclaimerSection(runtime.disclaimerLines ?? DISCLAIMER_LINES, tDisclaimer);
   if (disclaimer) sections.push(disclaimer);
   return { sections };
 }

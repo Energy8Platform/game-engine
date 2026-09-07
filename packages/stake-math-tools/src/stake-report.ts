@@ -2,7 +2,7 @@ import type { LookupRow, OptimizeAchieved, StakeReport, TopKShare, HitRateBucket
 
 /**
  * Stake's hit-rate distribution table boundaries (payout multipliers).
- * Mirrors the ranges shown in Stake Engine's publish UI under
+ * Mirrors the ranges shown in Engine's publish UI under
  * "Hit-Rate Ranges". Stake flags any intermediate empty range as a gap.
  *
  * Note: Stake displays the first range as `[0, 0.1)` (closed-open) — this

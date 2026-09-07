@@ -150,7 +150,7 @@ segments[i].nextActions = isFinal ? nextRoundActions(model) : [segments[i+1].act
 - `DEFAULT_PRE_REPLACEMENTS` / `DEFAULT_POST_REPLACEMENTS: SocialRule[]` — common base swaps
   (bet→play, cost→play, funds→balance, buy bonus→get bonus; longer phrases first; POST cleanup).
 - `applySocialText(text, overrides?)` — PRE(default+overrides.pre) → stake-bridge
-  `applySocialReplacements` → POST(default+overrides.post), with `Stake Engine` brand-protect
+  `applySocialReplacements` → POST(default+overrides.post), with `Engine` brand-protect
   (sentinel → swap → restore).
 - `ensureSocialDictionary()` — lazy `import('@energy8platform/stake-bridge')`, cache the fn.
 - `SocialRule = [RegExp | string, string]`.
@@ -169,7 +169,7 @@ segments[i].nextActions = isFinal ? nextRoundActions(model) : [segments[i+1].act
   rewind). Model from `defineGame`.
 - **jurisdiction**: canonical mapping (disabledTurbo→regulatory key; maxBet min-cap; defaultBet mirror;
   preserves existing regulatory).
-- **social**: `applySocialText` (default swaps applied; override merged; `Stake Engine` preserved).
+- **social**: `applySocialText` (default swaps applied; override merged; `Engine` preserved).
 
 ## Validation — extend `examples/spec-slot/`
 

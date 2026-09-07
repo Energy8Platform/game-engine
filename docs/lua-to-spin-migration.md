@@ -84,8 +84,10 @@ For a game created with `npm create @energy8platform/slot`:
    (e8-server with hot reload) instead of the fengari plugin.
 5. **`package.json`**: the `math:*` scripts run `e8-math` (`pool` = sim +
    dump + LUT, `optimize` = curate over the existing pool). Big pools need
-   `NODE_OPTIONS=--max-old-space-size=8192` and profit from
-   `POOL_ZSTD_LEVEL=12`.
+   `NODE_OPTIONS=--max-old-space-size=8192`. Since stake-math-tools 0.11 the
+   pool dump is written gzipped by the engine itself, so leave
+   `POOL_ZSTD_LEVEL` unset — setting it opts back into the slower
+   dump-then-pack path.
 6. **Delete the `.lua`** once validated.
 
 Checkpoints, in order:

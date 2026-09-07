@@ -867,7 +867,7 @@ const BASE_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
 // Kept in a separate block (grouped per language, not interleaved) because these are long legal
 // sentences, MACHINE-TRANSLATED and pending native QA. The keys are the exact English source lines
 // the Stake bridge emits (see @energy8platform/stake-bridge `buildDisclaimer`). The copyright/brand
-// line ("TM and © {year} Stake Engine.") is deliberately omitted — it renders verbatim.
+// line ("TM and © {year} Engine.") is deliberately omitted — it renders verbatim.
 const D = {
   L1: 'Malfunction voids all wins and plays.',
   L2: 'A consistent internet connection is required. In the event of a disconnection, reload the game to finish any uncompleted rounds.',
@@ -875,6 +875,20 @@ const D = {
   L4: 'The game display is not representative of any physical device and is for illustrative purposes only.',
   L5: 'Winnings are settled according to the amount received from the Remote Game Server and not from events within the web browser.',
 } as const;
+
+/**
+ * The disclaimer body every launch shows, in source English — and the SAME strings that key the
+ * translations below. One constant for both on purpose: a host that kept its own copy would drift
+ * from these keys by one character and the lookup would miss in silence, leaving a player on any
+ * language with English legal text. Certification asks for the opposite ("if multiple languages are
+ * supported, the disclaimer is translated and displayed in each language").
+ *
+ * Brand-free by construction. Stake's own template ends with a seventh line — "TM and © {year}
+ * Engine." — and that one belongs to a Stake launch alone: it arrives with the Stake bridge's
+ * `INIT.config.disclaimerLines`, which outrank this default, and renders verbatim (see the host's
+ * `isBrandLine`). Every other platform gets the same mandated wording without someone else's mark.
+ */
+export const DISCLAIMER_LINES: readonly string[] = [D.L1, D.L2, D.L3, D.L4, D.L5];
 
 const DISCLAIMER_LOCALES: Partial<Record<Lang, Record<string, string>>> = {
   da: {

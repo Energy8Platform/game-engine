@@ -2,6 +2,7 @@ import type { ShellHost } from '@/core/renderer';
 import { effectiveAccent } from '@/core/colors';
 import { icon, type IconName } from '../icons';
 import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART, BUY_BONUS_DISABLED_ART } from '../../buy-bonus-art';
+import { bonusBuyLocked } from '@/core/state';
 
 /** A floating labelled money readout (balance/win/bet). */
 function readout(ge: string, label: string, value: string): HTMLElement {
@@ -295,5 +296,5 @@ function applyBusy(host: ShellHost, bar: HTMLElement): void {
   if (betVal) betVal.classList.toggle('ge-disabled', lockBet);
   const buy = bar.querySelector('[data-ge="buybonus"]') as HTMLButtonElement | null;
   // disabled for the whole autoplay run (not just per-spin busy) so it doesn't flicker/pulse
-  if (buy) buy.disabled = busy || auto || !host.state.buyBonusEnabled;
+  if (buy) buy.disabled = bonusBuyLocked(host.state);
 }

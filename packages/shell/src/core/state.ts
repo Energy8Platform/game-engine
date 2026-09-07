@@ -41,3 +41,18 @@ export function nextTurbo(current: number, maxLevels: number): number {
   if (maxLevels <= 0) return 0;
   return current >= maxLevels ? 0 : current + 1;
 }
+
+/**
+ * Is a bonus buy unavailable right now?
+ *
+ * The three RUNTIME locks, in one place because they used to be in three: both bottom bars spelled
+ * them out for the coin, and the Shift+B hotkey spelled out a different, shorter set — so the
+ * keyboard opened the buy-bonus overlay mid-round and let a player stake a second bet on top of a
+ * round already in flight. A predicate the bars and the hotkey share cannot drift apart again.
+ *
+ * Runtime only. Whether the feature EXISTS at all is a config question (`features.buyBonus`), and
+ * whether this particular surface should offer it (mode, replay) belongs to the caller.
+ */
+export function bonusBuyLocked(s: ShellState): boolean {
+  return s.busy || s.autoplay.active || !s.buyBonusEnabled;
+}

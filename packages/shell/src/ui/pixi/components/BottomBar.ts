@@ -15,6 +15,7 @@ import {
 } from '../primitives/widgets';
 import type { SpinAutoplayMode } from '../primitives/widgets';
 import type { IconName } from '../icons';
+import { bonusBuyLocked } from '@/core/state';
 
 // ── design constants (mirror the DOM `.ge-bar-panel` / mobile rules) ──────────
 /** Which of the disc's three faces the autoplay state calls for — see `SpinAutoplayMode`. A run
@@ -425,7 +426,12 @@ export class BottomBar extends Container {
     if (config.features.turbo > 0) {
       this.turboBtn = makeTurboButton(this.host, state.turbo, () => this.onTurbo(), 40, 22);
     }
-    const buy = isBase ? (this.buildBuy(M_BUY, 9, 2) ?? undefined) : undefined;
+    // On `this`, not a local: applyBusy() guards every line with `if (this.<control>)`, so a coin
+    // kept in a local is drawn, laid out, tappable — and unreachable by every lock there is.
+    // That is exactly how a phone player could tap SPIN and open buy-bonus on the round in
+    // flight. (Safe for layout: applyFit() hands mobile to applyFitMobile() before it touches
+    // `this.buy` for the wide bar's positioning.)
+    this.buy = isBase ? (this.buildBuy(M_BUY, 9, 2) ?? undefined) : undefined;
 
     // level 1 — controls bar (dark)
     const controls = new FlexBox({
@@ -445,7 +451,7 @@ export class BottomBar extends Container {
       if (this.autoBtn) lz.add(this.autoBtn);
       const rz = new FlexBox({ direction: 'row', align: 'center', gap: SIDE, justify: 'end' });
       if (this.turboBtn) rz.add(this.turboBtn);
-      if (buy) rz.add(buy);
+      if (this.buy) rz.add(this.buy);
       const zw = Math.max(lz.measureSize().w, rz.measureSize().w);
       lz.setLayoutSize(zw, undefined);
       rz.setLayoutSize(zw, undefined);
@@ -608,7 +614,7 @@ export class BottomBar extends Container {
     if (this.betDown) this.betDown.disabled = lockBet || i <= 0;
     if (this.spin) this.spin.disabled = state.busy && !auto;
     if (this.autoBtn) this.autoBtn.disabled = state.busy && !auto;
-    if (this.buy) this.buy.disabled = state.busy || auto || !state.buyBonusEnabled;
+    if (this.buy) this.buy.disabled = bonusBuyLocked(state);
     if (this.betReadout && lockBet) {
       this.betReadout.eventMode = 'none';
       this.betReadout.cursor = 'default';

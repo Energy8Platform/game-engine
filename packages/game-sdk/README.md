@@ -4,7 +4,7 @@ PostMessage-based bridge SDK for integrating HTML5 games into the Energy8 Platfo
 
 Games run inside an iframe; **all backend communication goes through the host casino shell** via `window.postMessage`. The game never has direct access to API endpoints or player tokens.
 
-> Running on Stake Engine? See [`@energy8platform/stake-bridge`](../stake-bridge) — a thick host wrapper that lets the same SDK-driven game run on Stake without changes.
+> Running on Engine? See [`@energy8platform/stake-bridge`](../stake-bridge) — a thick host wrapper that lets the same SDK-driven game run on Stake without changes.
 
 ## Installation
 
@@ -177,7 +177,7 @@ round re-watched move-by-move) instead of placing real bets. The same
 `sdk.play()` / `PLAY_RESULT` flow is reused — only the data source and a config
 flag differ. No new protocol, no new SDK class.
 
-> On Stake Engine this is handled for you by [`@energy8platform/stake-bridge`](../stake-bridge)
+> On Engine this is handled for you by [`@energy8platform/stake-bridge`](../stake-bridge)
 > (`?replay=true&game=…&version=…&mode=…&event=…`). The recipe below is for the
 > generic Energy8 host built on `Bridge`.
 

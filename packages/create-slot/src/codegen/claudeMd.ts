@@ -99,7 +99,7 @@ refuse to start.
   return `# CLAUDE.md
 
 Guidance for Claude Code (claude.ai/code) working in this repository — a slot game built on the
-Energy8 \`@energy8platform/game-engine\` framework, targeting Stake Engine${a.artube ? ' and Artube' : ''}.
+Energy8 \`@energy8platform/game-engine\` framework, targeting Engine${a.artube ? ' and Artube' : ''}.
 
 ## What this project is
 
@@ -147,17 +147,22 @@ The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); 
 npm run dev            # local dev via Energy8 DevBridge (e8-server runs script.spin)
 npm run stake          # the Stake dev harness — iframe wrapper + dev-RGS backed by curated books
 npm run build:stake    # the Stake frontend build → dist-stake/ (base './', no DevBridge)
-npm run math:pool      # Stage A — honest large simulation (the pool); see math.config.ts
-npm run math:curate    # Stage B — compress the pool into the publishable stake-math/ bundle
+npm run math           # pool → curate → books, the whole bundle; see math.config.ts
+npm run pool           # just the simulation pass (payout per round)
+npm run curate         # just the optimizer (fast — re-run while tuning targets)
+npm run books          # serialize the rounds curate picked → publishable stake-math/
 ${artubeCommands}\`\`\`
 ${artubeSection}
 
 ## Math pipeline
 
 \`math.config.ts\` declares per-mode sim + curate tuning (iterations, CV, hit-rate, nRowsOut,
-tolerances). The pipeline (\`e8-math\`) runs the native Go simulator, builds a pool, then curates a
-~Stake-canonical book bundle (\`stake-math/\`: \`books_<MODE>.jsonl.zst\` + \`lookUpTable_<MODE>_0.csv\`
-+ \`index.json\`). Book events are canonical \`{ type, spin }\`. The harness replays from these books.
+tolerances). The pipeline (\`e8-math\`) produces a ~Stake-canonical book bundle (\`stake-math/\`:
+\`books_<MODE>.jsonl.zst\` + \`lookUpTable_<MODE>_0.csv\` + \`index.json\`) in three stages:
+\`pool\` simulates every round and records only its payout, \`curate\` optimizes the lookUpTable and
+picks the rounds worth shipping, \`books\` re-runs the simulation to serialize just those (~5% of
+them — which is why it is fast). \`npm run math\` is all three. Book events are canonical
+\`{ type, spin }\`. The harness replays from these books.
 
 ## What the framework already handles — do NOT reimplement
 

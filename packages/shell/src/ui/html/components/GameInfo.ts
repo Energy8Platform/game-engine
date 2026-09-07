@@ -17,7 +17,7 @@ export interface GameInfoModal {
 }
 
 export function openGameInfoModal(host: ShellHost): GameInfoModal {
-  const { root, body, scroll } = createOverlay({
+  const { root, body, scroll, affordance } = createOverlay({
     title: host.t('Game info'),
     onClose: () => host.actions.closeOverlay(),
     onBack: () => { root.remove(); host.actions.openMenu(); },
@@ -46,6 +46,8 @@ export function openGameInfoModal(host: ShellHost): GameInfoModal {
     .forEach(({ s }) => body.appendChild(renderSection(host, s)));
 
   body.appendChild(versionFooter(host));
+  // The body is filled after createOverlay returned, so its first honest measurement is here.
+  affordance.sync();
 
   const LINE = 60;
   const PAGE = (): number => Math.floor(scroll.clientHeight * 0.9) || Math.floor(540 * 0.9);

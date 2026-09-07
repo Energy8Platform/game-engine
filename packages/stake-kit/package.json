@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/stake-kit",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "type": "module",
   "main": "dist/stake-kit.umd.js",
   "module": "dist/stake-kit.esm.js",
@@ -22,6 +22,7 @@
   },
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
+    "prepublishOnly": "npm run build",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

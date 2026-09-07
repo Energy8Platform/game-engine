@@ -3,15 +3,23 @@ import { resolve } from 'node:path';
 import { loadMathConfig } from './pipeline/config';
 import { resolveModes } from './mathConfig';
 import { runSim } from './pipeline/sim';
-import { curateMode } from './pipeline/curate';
-import { finalizePool } from './pipeline/pool';
+import { curateModes } from './pipeline/curate';
+import { runBooksStage } from './pipeline/books';
+import { hashSpin } from './pipeline/manifest';
+import type { MathConfig, ResolvedMode } from './mathConfig';
+import {
+  finalizeLightPool, finalizePool, normalizeDumpPath, poolCompressionDisabled, poolZstdRequested,
+} from './pipeline/pool';
 import { formatGoReport, formatCurateReport } from './pipeline/report';
 
 export async function runCli(argv: string[]): Promise<void> {
   const cmd = argv[0];
   const flags = parseFlags(argv.slice(1));
-  if (!['sim', 'pool', 'curate', 'all'].includes(cmd)) {
-    throw new Error(`usage: e8-math <sim|pool|curate|all> --config ./math.config.ts [--mode BASE]`);
+  if (!['sim', 'pool', 'curate', 'books', 'all'].includes(cmd)) {
+    throw new Error(
+      `usage: e8-math <sim|pool|curate|books|all> --config ./math.config.ts ` +
+        `[--mode BASE] [--jobs N] [--full] [--keep-dump]`,
+    );
   }
   const cfg = await loadMathConfig(flags.config ?? './math.config.ts');
   let modes = resolveModes(cfg);
@@ -25,59 +33,193 @@ export async function runCli(argv: string[]): Promise<void> {
   const poolDir = resolve(process.cwd(), 'stake-math-pool');
   const outDir = resolve(process.cwd(), flags.out ?? 'stake-math');
 
-  if (cmd === 'sim' || cmd === 'pool') {
-    if (cmd === 'pool') mkdirSync(poolDir, { recursive: true });
-    for (const m of modes) {
-      const dump = cmd === 'pool' ? resolve(poolDir, `books_${m.mode}.jsonl`) : undefined;
-      const out = await runSim(cfg, m, { dump });
-      console.log(formatGoReport(m.mode, out));
-      if (dump) {
-        // Compress the raw dump → books_<MODE>.jsonl.zst (-19) + lookUpTable, so the pool
-        // is a compact Stake-style library instead of an 80–90 GB raw .jsonl.
-        const fin = await finalizePool(m, { poolDir, dumpPath: dump });
-        const books = fin.compressed ? `books_${m.mode}.jsonl.zst` : `books_${m.mode}.jsonl (raw — zstd absent)`;
-        console.log(`  → ${poolDir}/${books} + lookUpTable_${m.mode}_0.csv (${fin.rows} rows)`);
-      }
-    }
+  if (cmd === 'sim') {
+    for (const m of modes) console.log(formatGoReport(m.mode, await runSim(cfg, m)));
+    return;
+  }
+
+  if (cmd === 'pool') {
+    mkdirSync(poolDir, { recursive: true });
+    for (const m of modes) await poolMode(cfg, m, poolDir, fullPool(flags));
     return;
   }
 
   if (cmd === 'curate') {
-    // Read the raw pool dump each mode left behind and curate it into outDir.
     mkdirSync(outDir, { recursive: true });
-    for (const m of modes) {
-      const result = await curateMode(m, { poolDir, outDir });
-      console.log(formatCurateReport(m.mode, result));
-    }
+    await curateAll(modes, poolDir, outDir, flags.jobs);
+    return;
+  }
+
+  if (cmd === 'books') {
+    mkdirSync(outDir, { recursive: true });
+    for (const m of modes) await booksMode(cfg, m, poolDir, outDir, flags.keepDump);
     console.log(`\nDone. Stake artifacts in ${outDir}`);
     return;
   }
 
-  // 'all' — pool (go-native dump) → Go report → curate → curate report, per mode.
+  // 'all' — pool → curate → books, end to end.
+  //
+  // The simulation stages stay sequential: the engine's own workers already
+  // saturate the CPU, so running modes side by side there buys nothing
+  // (measured ~1.0×). curate is Node-side and single-threaded per mode, so that
+  // is where `--jobs` pays off.
+  const full = fullPool(flags);
+  const started = Date.now();
   mkdirSync(poolDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
-  for (const m of modes) {
-    const dump = resolve(poolDir, `books_${m.mode}.jsonl`);
-    const go = await runSim(cfg, m, { dump });
-    console.log(formatGoReport(m.mode, go));
-    // Compress + LUT the pool, then curate reads the LUT (no multi-GB decompress).
-    const fin = await finalizePool(m, { poolDir, dumpPath: dump });
-    if (!fin.compressed) {
-      process.stderr.write(`  [${m.mode}] pool kept raw (zstd absent)\n`);
-    }
-    const result = await curateMode(m, { poolDir, outDir });
-    console.log(formatCurateReport(m.mode, result));
+  for (const m of modes) await poolMode(cfg, m, poolDir, full);
+  await curateAll(modes, poolDir, outDir, flags.jobs);
+  if (!full) {
+    for (const m of modes) await booksMode(cfg, m, poolDir, outDir, flags.keepDump);
   }
-  console.log(`\nDone. Stake artifacts in ${outDir}`);
+  console.log(`\nDone in ${fmtDuration(Date.now() - started)}. Stake artifacts in ${outDir}`);
 }
 
-export function parseFlags(argv: string[]): { config?: string; mode?: string; out?: string; iterations?: number } {
-  const out: { config?: string; mode?: string; out?: string; iterations?: number } = {};
+/**
+ * Pool one mode.
+ *
+ * Default is the LIGHT pass: the engine writes `round,payoutCents` and nothing
+ * else, which is all curate needs to choose rows. The rounds that survive are
+ * serialized later by the `books` stage — on a real game that is ~5% of them,
+ * against 100% here before.
+ *
+ * `--full` (or POOL_ZSTD_LEVEL, which only means anything for a full dump) asks
+ * for the one-pass pool instead: every round serialized up front. Slower and
+ * far bigger, but self-contained — `curate` alone then produces publishable
+ * books, and old pools keep working.
+ */
+async function poolMode(
+  cfg: MathConfig, m: ResolvedMode, poolDir: string, full: boolean,
+): Promise<void> {
+  if (full) {
+    const dump = resolve(poolDir, poolDumpName(m.mode));
+    const out = await timed(`[${m.mode}] pool (--full): ${m.sim.iterations.toLocaleString('en-US')} rounds`,
+      () => runSim(cfg, m, { dump }));
+    console.log(formatGoReport(m.mode, out));
+    const fin = await finalizePool(m, { poolDir, dumpPath: normalizeDumpPath(dump, m.mode) });
+    if (!fin.compressed && !poolCompressionDisabled()) {
+      process.stderr.write(`  [${m.mode}] pool kept raw (zstd absent)\n`);
+    }
+    console.log(
+      `  → ${poolDir}/${fin.books}${rawNote(fin.compressed)} + ` +
+        `lookUpTable_${m.mode}_0.csv (${fin.rows} rows)`,
+    );
+    return;
+  }
+
+  const csvPath = resolve(poolDir, `pool_${m.mode}.csv`);
+  const out = await timed(`[${m.mode}] pool: ${m.sim.iterations.toLocaleString('en-US')} rounds`,
+    () => runSim(cfg, m, { dumpCsv: csvPath }));
+  console.log(formatGoReport(m.mode, out));
+  if (!out.masterSeed) {
+    throw new Error(
+      `[${m.mode}] the engine reported no master seed, so the books stage could not replay ` +
+        `these rounds. Update the e8 binary, or use --full for a one-pass pool.`,
+    );
+  }
+  const fin = await finalizeLightPool(m, {
+    poolDir, csvPath, masterSeed: out.masterSeed, spinHash: hashSpin(cfg.luaScript),
+  });
+  console.log(
+    `  → ${poolDir}/pool_${m.mode}.csv + lookUpTable_${m.mode}_0.csv (${fin.rows} rows)`,
+  );
+}
+
+/** Curate every mode. Whether events are written now or left to the `books` stage is decided
+ *  per mode by the shape of its pool. */
+async function curateAll(
+  modes: readonly ResolvedMode[], poolDir: string, outDir: string, jobs?: number,
+): Promise<void> {
+  const curated = await timed(
+    `curate: ${modes.length} mode(s)${jobs && jobs > 1 ? ` (jobs=${jobs})` : ''}`,
+    () => curateModes(modes, { poolDir, outDir, jobs }),
+  );
+  for (const c of curated) console.log(formatCurateReport(c.mode, c.result));
+}
+
+/** Heavy pass + book assembly for one mode. */
+async function booksMode(
+  cfg: MathConfig, m: ResolvedMode, poolDir: string, outDir: string, keepDump?: boolean,
+): Promise<void> {
+  const res = await timed(`[${m.mode}] books`, () =>
+    runBooksStage(cfg, m, { poolDir, outDir, keepDump }));
+  // The route matters when a run is slower than expected: `pipeline` means every
+  // book was parsed and re-serialized here, which an events gate would avoid.
+  const route = {
+    engine: 'written by the engine',
+    'engine+rewrite': `written by the engine, ${res.rewritten ?? 0} rewritten by transformEvents`,
+    pipeline: 'assembled here (ungated transformEvents)',
+  }[res.route];
+  console.log(
+    `  [${m.mode}] books: ${res.rows} row(s) from ${res.rounds} round(s), ${route}; ` +
+      `largest events ${res.maxEventsBytes} B (book ${res.maxEventsBytesBookId})` +
+      (res.booksOverEventsLimit > 0 ? ` — ${res.booksOverEventsLimit} over Stake's limit!` : ''),
+  );
+}
+
+/** `12.4s` / `1m 03s` — stage timings read at a glance, not parsed. */
+function fmtDuration(ms: number): string {
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(2)}s`;
+  const m = Math.floor(sec / 60);
+  return `${m}m ${(sec - m * 60).toFixed(0).padStart(2, '0')}s`;
+}
+
+/** Run a stage, print what it cost. The engine prints its own line the same way. */
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  const out = await fn();
+  console.log(`  ⏱  ${label} — ${fmtDuration(Date.now() - started)}`);
+  return out;
+}
+
+/**
+ * The dump file we ask the engine to write for one mode.
+ *
+ * `.gz` by default: `e8 simulate -dump …/books_<MODE>.jsonl.gz` compresses as it
+ * writes, so the raw pool (tens of GB on a real game) never exists on disk and
+ * no separate compression pass runs. Setting POOL_ZSTD_LEVEL asks for the legacy
+ * path instead — raw dump, then zstd at that level (`0` = keep it raw).
+ */
+function poolDumpName(mode: string): string {
+  return `books_${mode}.jsonl${poolZstdRequested() ? '' : '.gz'}`;
+}
+
+/** Why the pool's books ended up uncompressed, for the console line. */
+function rawNote(compressed: boolean): string {
+  if (compressed) return '';
+  return poolCompressionDisabled() ? ' (raw — POOL_ZSTD_LEVEL=0)' : ' (raw — zstd absent)';
+}
+
+export interface CliFlags {
+  config?: string;
+  mode?: string;
+  out?: string;
+  iterations?: number;
+  /** Modes curated concurrently. Unset = 1 (sequential, the safe default for memory). */
+  jobs?: number;
+  /** Serialize every round up front (the one-pass pool) instead of the two-pass build. */
+  full?: boolean;
+  /** Keep the heavy pass's filtered dump in the pool instead of deleting it. */
+  keepDump?: boolean;
+}
+
+/** A full one-pass pool is asked for explicitly, or implied by POOL_ZSTD_LEVEL
+ *  (which archives a dump — meaningless when no dump is written). */
+function fullPool(flags: CliFlags): boolean {
+  return flags.full === true || poolZstdRequested();
+}
+
+export function parseFlags(argv: string[]): CliFlags {
+  const out: CliFlags = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--config') out.config = argv[++i];
     else if (argv[i] === '--mode') out.mode = argv[++i];
     else if (argv[i] === '--out') out.out = argv[++i];
     else if (argv[i] === '--iterations') out.iterations = parseInt(argv[++i], 10);
+    else if (argv[i] === '--jobs') out.jobs = parseInt(argv[++i], 10);
+    else if (argv[i] === '--full') out.full = true;
+    else if (argv[i] === '--keep-dump') out.keepDump = true;
   }
   return out;
 }

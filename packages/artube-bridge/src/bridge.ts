@@ -83,6 +83,16 @@ export function betIndexOf(betLevels: number[], bet: number): number {
 }
 
 /**
+ * Метка демо-сессии в поле валюты. У Artube это `DEMO` — их общепринятое
+ * слово, и лаборатория проверяет пунктом «the DEMO indicator is displayed»
+ * именно его. Валюты с таким кодом не существует, поэтому `lookupCurrency`
+ * промахивается и шелл пишет слово рядом с суммой как есть: «1 000.00 DEMO».
+ */
+const DEMO_CURRENCY = 'DEMO';
+
+/**
+ * Что игра пишет рядом с деньгами.
+ *
  * Код валюты в контракте SDK — это ISO 4217, ВЕРХНИМ регистром: по нему игра
  * (и `lookupCurrency` из stake-bridge) ищет символ. GamesAPI отдаёт его
  * строчными (`"usd"`), и без нормализации поиск промахивался, а шелл писал
@@ -90,10 +100,19 @@ export function betIndexOf(betLevels: number[], bet: number): number {
  * сессии Artube. Нормализуем ровно здесь, на границе провода: дальше по
  * коду валюта уже канонична.
  *
- * `null` — демо-сессия (у GamesAPI это и есть её признак); показываем 'FUN'.
+ * Демо решает `init.demo`, а НЕ форма валюты — так это и заведено на проводе
+ * (см. `artube-server`'s `buildInit`: «признак демо здесь отдельным полем
+ * `demo`, а не формой валюты»). Раньше метка выводилась из «кода нет», и
+ * демо-сессия, у которой код всё-таки есть — а это ровно демо на локальном
+ * кошельке, — приезжала игроку как реальные деньги, вообще без индикатора.
+ *
+ * Отсутствующий код — старое написание того же самого: наш сервер шлёт его
+ * только для демо (для всех прочих он подставляет `USD`), так что читаем его
+ * так же и не оставляем игрока с деньгами без подписи.
  */
-function currencyCodeOf(currency: string | null | undefined): string {
-  return currency ? currency.toUpperCase() : 'FUN';
+function displayCurrency(init: Pick<ServerInit, 'demo' | 'currency'> | null | undefined): string {
+  if (init?.demo || !init?.currency) return DEMO_CURRENCY;
+  return init.currency.toUpperCase();
 }
 
 /**
@@ -294,7 +313,7 @@ export class ArtubeBridge {
         },
       };
       const payload: InitPayload = {
-        currency: currencyCodeOf(init.currency),
+        currency: displayCurrency(init),
         // В демо `init.balance` — стартовое значение серверной заглушки, не
         // обязательно совпадающее с тем, что видит кошелёк (см. `options.demoBalance`).
         balance: this.demoWallet ? this.demoWallet.balance : init.balance,
@@ -594,7 +613,7 @@ export class ArtubeBridge {
       // считает), но не переживает реконнект и не то, что видел игрок.
       balanceAfter: this.demoWallet ? this.demoWallet.balance : (result.balanceAfter ?? this.balance),
       totalWin: result.totalWinX * result.betAmount,
-      currency: currencyCodeOf(this.init?.currency),
+      currency: displayCurrency(this.init),
       gameId: this.gameId,
       data: result.data,
       nextActions: result.nextActions,

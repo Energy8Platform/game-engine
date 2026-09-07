@@ -173,11 +173,11 @@ export function optimizeLookupTable(
       muHat = newMu;
     }
 
-    // ── Iterative RTP-share + per-row weight cap (Stake Engine "Within Liability Limits") ─
+    // ── Iterative RTP-share + per-row weight cap (Engine "Within Liability Limits") ─
     //
     // After NNLS converges, one or a few rows may dominate the total RTP, or a single
     // row may absorb enormous weight (zero-payout or near-zero-payout filler rows used
-    // to satisfy hit-rate / total-weight constraints cheaply). Stake Engine rejects
+    // to satisfy hit-rate / total-weight constraints cheaply). Engine rejects
     // tables where a single row carries an oversized share of expected return OR
     // oversized weight (the Expected Tail Liability check). We iteratively cap any
     // violating row and re-solve the (smaller) NNLS problem on the remaining rows

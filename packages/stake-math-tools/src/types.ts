@@ -43,7 +43,7 @@ export interface OptimizeParams {
   minPerBucket?: number;
 
   /** Maximum fraction of total RTP that any single output row may contribute.
-   *  Stake Engine's "Within Liability Limits" check fails when one row dominates RTP.
+   *  Engine's "Within Liability Limits" check fails when one row dominates RTP.
    *  Default 0.05 (5%). Set to 1.0 to disable.
    */
   maxRowRtpShare?: number;
@@ -58,7 +58,7 @@ export interface OptimizeParams {
   /** Algorithm for compressing source rows into a weighted lookup table.
    *  - 'tiered' (default): tier-based rarity weighting (cap/large rows get weight=1,
    *    small rows get calculated weight W). Preserves source distribution rates;
-   *    passes Stake Engine's "Within Liability Limits" check.
+   *    passes Engine's "Within Liability Limits" check.
    *  - 'nnls': legacy NNLS optimization; hits RTP/CV/HR targets exactly but may
    *    concentrate weight on few rows and fail Stake's Liability check. */
   algorithm?: 'tiered' | 'nnls';
@@ -164,7 +164,7 @@ export interface OptimizeParams {
   maxCostMultiplier?: number;
 
   /** Tier-based only: minimum fraction of nRowsOut that must be distinct payoutCents
-   *  values in the output. Stake Engine rejects "Insufficient Unique Events" when
+   *  values in the output. Engine rejects "Insufficient Unique Events" when
    *  too few distinct outcomes exist (same events repeat in a session). Default 0.01
    *  (1%). For 100K output → 1K unique payouts required. Set to 0 to disable.
    *

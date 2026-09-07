@@ -1,6 +1,6 @@
 /**
  * StakeBridge — a thick host-side wrapper that lets a game built against
- * `CasinoGameSDK` run on Stake Engine without changes.
+ * `CasinoGameSDK` run on Engine without changes.
  *
  * On the iframe boundary StakeBridge speaks the same `__casino_bridge`
  * protocol our regular `Bridge` does. Internally it talks to Stake's

@@ -1,10 +1,15 @@
-import { Container, Graphics, Rectangle, type FederatedPointerEvent } from 'pixi.js';
+import { Container, Graphics, Rectangle, type FederatedPointerEvent, type Ticker } from 'pixi.js';
+import { scrollHint } from '@/core/scrollHint';
+import { ScrollAffordanceView } from './scroll-affordance';
 
 /** A vertically-scrolling viewport — mask + drag + mouse-wheel, the Pixi analogue of the
  *  overlay's `overflow-y:auto` scroll region. Add content to `.content`; call `refresh()`
  *  after content changes or a resize. */
 export class ScrollBox extends Container {
   readonly content = new Container();
+  /** The drawn "this scrolls" marks — thumb, edge scrim, chevron. Public so the overlay that owns
+   *  the box (and the tests) can read what a player would see. */
+  readonly affordance: ScrollAffordanceView;
   private maskG = new Graphics();
   private viewW = 0;
   private viewH = 0;
@@ -16,10 +21,13 @@ export class ScrollBox extends Container {
   private canvas?: HTMLCanvasElement;
   private wheelHandler?: (e: WheelEvent) => void;
 
-  constructor(canvas?: HTMLCanvasElement) {
+  constructor(canvas?: HTMLCanvasElement, ticker?: Ticker) {
     super();
     this.canvas = canvas;
-    this.addChild(this.content);
+    this.affordance = new ScrollAffordanceView(ticker);
+    // Added AFTER content, and never masked: the marks describe the viewport, so clipping them to
+    // the content they describe would hide them exactly when the content overflows.
+    this.addChild(this.content, this.affordance);
     // maskG is added to the scene only while scrolling (see refresh) — a leftover unused mask
     // graphic renders as a white rect. (Masking does NOT gate pointer events to the content, despite
     // what an earlier version of this comment claimed — see the correction in refresh() below.)
@@ -73,6 +81,7 @@ export class ScrollBox extends Container {
     }
     this.eventMode = scrollable ? 'static' : 'passive';
     this.setScroll(this.scrollY);
+    this.syncAffordance();
   }
 
   /** Max scrollable distance (0 when content fits) — exposed for tests. */
@@ -91,6 +100,15 @@ export class ScrollBox extends Container {
     if (this.destroyed || !this.content || this.content.destroyed) return;
     this.scrollY = Math.max(0, Math.min(this.maxScroll, y)) || 0; // || 0 converts -0 to 0
     this.content.y = this.scrollY === 0 ? 0 : -this.scrollY;
+    this.syncAffordance();
+  }
+
+  private syncAffordance(): void {
+    if (this.destroyed || this.affordance.destroyed) return;
+    this.affordance.update(
+      { x: 0, y: 0, w: this.viewW, h: this.viewH, axis: 'y' },
+      scrollHint({ scrollTop: this.scrollY, scrollHeight: this.viewH + this.maxScroll, clientHeight: this.viewH }),
+    );
   }
 
   private onDown = (e: FederatedPointerEvent): void => {
