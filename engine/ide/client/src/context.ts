@@ -6,6 +6,7 @@ import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
 import * as gameComposition from './plugins/game-composition';
 import type { GameCompositionConfig } from './plugins/game-composition';
+import * as gameDiagnostics from './plugins/diagnostics';
 
 /**
  * Boot the browser-side cordis application.
@@ -26,5 +27,10 @@ export async function createIdeClient(
   await ctx.plugin(slots);
   await ctx.plugin(modules, config);
   await ctx.plugin(gameComposition, config);
+  // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
+  // own doc) — no new field for this signature to carry, just another
+  // plugin reading the same `url`/`socketFactory` this function's caller
+  // already supplies.
+  await ctx.plugin(gameDiagnostics, config);
   return ctx;
 }

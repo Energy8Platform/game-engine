@@ -15,6 +15,12 @@ export {
   type GameCompositionState,
   type GameCompositionConfig,
 } from './plugins/game-composition';
+export {
+  useGameDiagnostics,
+  type GameDiagnosticsService,
+  type GameDiagnosticsState,
+  type GameDiagnosticsConfig,
+} from './plugins/diagnostics';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, Preview, computePreviewUrl } from './screens/CompositionScreen';
