@@ -252,57 +252,27 @@ function layerLabel(from: string): string {
 export interface GameCompositionProps {
   /** The GAME's resolved composition — one row per plugin, in layering order, each carrying which layer placed it. */
   rows: ResolvedRow[];
-  /**
-   * The PROJECT's own diagnostics, as `GET /api/composition` serves them
-   * alongside `rows` — a malformed `e8.profile.yml`, a bundle that was not
-   * found, a row whose package could not be resolved. Namespace 1 of
-   * `Diagnostic.plugin`: every one carries a composition-row id, a bundle
-   * name, or a fixed sentinel like `profile`.
-   *
-   * These are about the very rows listed below, so this panel DOES resolve
-   * `plugin` → row name against its own `rows`, the same way
-   * `EditorComposition` resolves the editor's diagnostics against the
-   * editor's rows. It used to be forbidden to, on the grounds that the
-   * array held a running GAME's runtime seam/mechanic ids — but nothing
-   * has ever fed it those. The prop was named `gameDiagnostics` and typed
-   * `GameDiagnostic[]` after a channel that does not exist, and a
-   * diagnostic about `reels1` rendered as the bare string `reels1`
-   * directly above a row labelled `@energy8engine/reels`.
-   *
-   * **What this panel does not show:** a running game's own diagnostics.
-   * `createGame` collects those in the browser tab the game runs in and
-   * draws them on its own failure screen; nothing forwards them to the
-   * IDE. Building that channel is a real feature and is not this. If it is
-   * ever built, its diagnostics must NOT join this array — they carry
-   * runtime seam/mechanic ids, which have no rows to resolve against, and
-   * a patch author is free to name a row `session`.
-   */
-  projectDiagnostics?: Diagnostic[];
 }
 
-/** The GAME's resolved composition — which layer placed each row, and what the host said went wrong while resolving them. */
-function GameComposition({ rows, projectDiagnostics }: GameCompositionProps) {
-  // Same job as `EditorComposition`'s `pluginLabel`, against the other
-  // namespace's rows: a person reads the row header as a package name, so
-  // a diagnostic printing a bare row id above it leaves them to connect
-  // the two themselves. Falls back to the raw value for the diagnostics
-  // that are about no single row — a bundle name, `profile`, `patch`.
-  const rowLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
-
+/**
+ * The GAME's resolved composition — which layer placed each row.
+ *
+ * Used to also render the PROJECT's own diagnostics here as a standalone
+ * list above the rows (`GET /api/composition`'s own `diagnostics` — a
+ * malformed `e8.profile.yml`, a bundle not found, a row whose package
+ * could not be resolved), resolving each one's `plugin` id to the row's
+ * package name. Removed once `DiagnosticsPanel` (Task 8) existed: §8 of
+ * the design spec names the panel as THE list ("список в панели
+ * диагностик"), and this screen's own copy — standalone, not attached to
+ * the row it was about — was pure duplication of what the panel already
+ * shows, not a second legitimate view of it. The row-name resolution this
+ * used to do is a real capability the panel does not (yet) replicate —
+ * `DiagnosticsPanel` shows the raw `plugin` id — named here rather than
+ * silently dropped, for whoever next has reason to add it there instead.
+ */
+function GameComposition({ rows }: GameCompositionProps) {
   return (
     <section className="e8-game-composition">
-      {projectDiagnostics && projectDiagnostics.length > 0 && (
-        <ul className="e8-game-diagnostics">
-          {projectDiagnostics.map((d, index) => (
-            <li key={index} data-testid={`project-diagnostic-${index}`} data-severity={d.severity}>
-              <strong className="e8-severity">{d.severity}</strong> {rowLabel(d.plugin)} · {d.where}:{' '}
-              {d.message}
-              {d.fix ? ` — ${d.fix}` : ''}
-            </li>
-          ))}
-        </ul>
-      )}
-
       {rows.map((row) => (
         <section className="e8-game-row" key={row.id} data-testid={`row-${row.id}`}>
           <header>
@@ -320,16 +290,14 @@ export interface CompositionScreenProps {
   ctx?: Context;
   /** The GAME's resolved composition — omit when only the editor's own rows are being shown. */
   rows?: ResolvedRow[];
-  /** See `GameCompositionProps.projectDiagnostics` — including what it deliberately does not carry. */
-  projectDiagnostics?: Diagnostic[];
 }
 
-export function CompositionScreen({ ctx, rows, projectDiagnostics }: CompositionScreenProps) {
+export function CompositionScreen({ ctx, rows }: CompositionScreenProps) {
   return (
     <main className="e8-composition">
       <h1>Состав</h1>
       {ctx ? <EditorComposition ctx={ctx} /> : null}
-      {rows ? <GameComposition rows={rows} projectDiagnostics={projectDiagnostics} /> : null}
+      {rows ? <GameComposition rows={rows} /> : null}
     </main>
   );
 }

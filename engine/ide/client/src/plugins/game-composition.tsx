@@ -49,8 +49,12 @@ export interface GameCompositionState {
    * `diagnostics`), plus this plugin's if the fetch itself failed. Every
    * one carries a composition-row id, a bundle name, or a sentinel like
    * `profile` — namespace 1 of `Diagnostic.plugin`. Not a running game's
-   * diagnostics: nothing forwards those to the IDE (see
-   * `GameCompositionProps.projectDiagnostics`).
+   * own diagnostics — those are `ctx.gameDiagnostics` instead
+   * (`plugins/diagnostics.tsx`, Task 7), namespace 2, forwarded over the
+   * `/ide` socket rather than fetched here. The two meet on screen only in
+   * `DiagnosticsPanel` (Task 8), which reads this array under the name
+   * `project` and that one under `game`, and keeps them apart by which
+   * array a diagnostic came in on rather than by its `plugin` field.
    */
   diagnostics: Diagnostic[];
 }

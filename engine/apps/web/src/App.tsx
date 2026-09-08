@@ -32,26 +32,22 @@ function DiagnosticsPanelCard({ ctx }: { ctx: Context }) {
  * bootstrap in `main.tsx`, so a later screen or a router has somewhere to
  * go without main.tsx growing UI concerns.
  *
- * Two halves reach the screen from two different places, which is the
- * point of it taking them as separate props: the EDITOR's own plugin
+ * Two halves reach `CompositionScreen` from two different places, which is
+ * the point of it taking them as separate props: the EDITOR's own plugin
  * graph off `ctx` (live, over the `/ide` socket), and the GAME's resolved
- * composition off `ctx.gameComposition` (fetched once from
+ * composition rows off `ctx.gameComposition` (fetched once from
  * `/api/composition` — see `game-composition.tsx`).
  *
- * `diagnostics` from that same fetch are the PROJECT's — the host's own
- * complaints about resolving those rows. They go in under the name that
- * says so. They are not a running game's diagnostics; nothing forwards
- * those here (see `GameCompositionProps.projectDiagnostics`).
- *
- * A THIRD source joins on screen via the slot registration below rather
- * than a third prop here: `ctx.gameDiagnostics` (task 7) — what a live,
- * running game itself has reported over the `/ide` socket, forwarded by
- * `ide-bridge` and relayed by the host. `DiagnosticsPanel` is where that
- * and the project's own diagnostics finally sit on one screen, each row
- * marked which side it came from.
+ * The PROJECT's own diagnostics from that same fetch, and the GAME's own
+ * (task 7's `ctx.gameDiagnostics`), do NOT go to `CompositionScreen` at
+ * all — they reach the screen only via the slot registration below.
+ * `DiagnosticsPanel` is the one place they sit together, each row marked
+ * which side it came from (see `CompositionScreen.tsx`'s own comment on
+ * `GameComposition` for why a second, standalone copy of the project half
+ * used to live there and does not anymore).
  */
 export function App({ ctx }: { ctx: Context }) {
-  const { rows, diagnostics } = useGameComposition(ctx);
+  const { rows } = useGameComposition(ctx);
 
   useEffect(() => {
     return ctx.slots.register({ name: 'composition.card', key: 'diagnostics' }, () => (
@@ -60,5 +56,5 @@ export function App({ ctx }: { ctx: Context }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  return <CompositionScreen ctx={ctx} rows={rows ?? undefined} projectDiagnostics={diagnostics} />;
+  return <CompositionScreen ctx={ctx} rows={rows ?? undefined} />;
 }
