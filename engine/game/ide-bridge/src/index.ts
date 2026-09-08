@@ -286,13 +286,43 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
 
   /** Was told which stage, or has nothing to say about which. */
   let reportedNoStage = false;
+  /** Said once about the field that no longer exists — see `applyRow`. */
+  let reportedLegacyKey = false;
 
   /**
    * One row's worth of intent — from this row's own config at boot, and
    * from every broadcast snapshot afterwards. Both go through here so the
    * two paths cannot drift apart.
    */
-  const applyRow = (settable: IdeBridgeSettableConfig) => {
+  const applyRow = (settable: IdeBridgeSettableConfig & { base_game?: unknown }) => {
+    // The field this row used to have, still written in somebody's
+    // `e8.yml`.
+    //
+    // `base_game` named the mechanic AND, by its own name, the stage — one
+    // field doing two jobs, which is why the stage could not be named at
+    // all. It is `stage` + `mechanic` now, with no alias: an alias would be
+    // keeping the hardcoded stage name, and the engine ships no published
+    // games that would need one.
+    //
+    // What it must not be is silent, and it was. Schemastery passes an
+    // unknown key through untouched, so the value survives all the way to
+    // here, `mechanic` reads as absent, and this function returns — which
+    // is byte-for-byte what the LEGITIMATE "a row that names no mechanic
+    // leaves the binding alone" case does. A person whose row stopped
+    // working would have had nothing at all to look at.
+    if (named(settable.base_game) !== null && !reportedLegacyKey) {
+      reportedLegacyKey = true;
+      report(
+        diagnostic(
+          'error',
+          'ide-bridge',
+          'base_game',
+          'this row sets "base_game", which this version of ide-bridge does not read, so it is doing nothing',
+          'replace "base_game: <mechanic>" with "mechanic: <mechanic>", and add "stage: <stage>" if this game binds more than one stage',
+        ),
+      );
+    }
+
     // A row that names no mechanic says nothing — it does not push a value
     // nobody wrote over whatever `e8.patch.yml` already bound. See
     // `IdeBridgeSettableConfig.mechanic`.
@@ -362,10 +392,18 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     // path: a row that names no mechanic — absent, or cleared back to an
     // empty string in the form — leaves the running binding alone rather
     // than resetting it to whatever the engine happens to ship.
-    const rowConfig = (row.config ?? {}) as { stage?: unknown; mechanic?: unknown };
+    const rowConfig = (row.config ?? {}) as {
+      stage?: unknown;
+      mechanic?: unknown;
+      base_game?: unknown;
+    };
     applyRow({
       stage: typeof rowConfig.stage === 'string' ? rowConfig.stage : undefined,
       mechanic: typeof rowConfig.mechanic === 'string' ? rowConfig.mechanic : undefined,
+      // Carried through so a hand-edited `e8.yml` broadcast over `/ide`
+      // gets the same complaint the boot-time config does — the IDE's own
+      // form cannot produce this key, but a file can.
+      base_game: rowConfig.base_game,
     });
   });
 

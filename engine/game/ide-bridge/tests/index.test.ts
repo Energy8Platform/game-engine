@@ -628,6 +628,70 @@ describe('ide-bridge — naming a stage the module was never told about', () => 
     expect(reported.filter((d) => d.severity === 'warning')).toHaveLength(1);
   });
 
+  it('says so when a row still sets the field that no longer exists', () => {
+    // Measured before the complaint existed: schemastery passes an unknown
+    // key through untouched, `mechanic` reads as absent, and `applyRow`
+    // returns — byte-for-byte what the legitimate "names no mechanic,
+    // leave the binding alone" case does. A person whose row stopped
+    // working had nothing at all to look at.
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('base_game', 'reel-step');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const reported: { message: string; severity: string }[] = [];
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      base_game: 'classic',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+      onDiagnostic: (d) => reported.push(d),
+    } as never);
+
+    // Still binds nothing — no alias, deliberately.
+    expect(bind).not.toHaveBeenCalled();
+    expect(forStage('base_game')).toEqual({ id: 'reel-step' });
+    expect(reported).toHaveLength(1);
+    expect(reported[0].severity).toBe('error');
+    expect(reported[0].message).toContain('base_game');
+    expect(reported[0].message).toContain('doing nothing');
+
+    // Said once, not once per broadcast.
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'classic' } }]),
+    );
+    expect(reported).toHaveLength(1);
+  });
+
+  it('and a snapshot carrying it gets the same complaint, not silence', () => {
+    // The IDE's own form cannot produce this key; a hand-edited `e8.yml`
+    // broadcast over `/ide` can, so the snapshot path carries it through
+    // to the same check.
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('base_game', 'reel-step');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const reported: { message: string }[] = [];
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+    expect(reported).toEqual([]);
+
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'cascade' } }]),
+    );
+
+    expect(reported).toHaveLength(1);
+    expect(reported[0].message).toContain('base_game');
+    expect(bind).not.toHaveBeenCalled();
+  });
+
   it('the stage the composition binds is read once, before this module binds anything', () => {
     // Otherwise the fallback would depend on what the human had already
     // typed: binding a second stage from the IDE would make
