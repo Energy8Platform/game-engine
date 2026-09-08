@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import Schema from 'schemastery';
 import { describe, expect, it, vi } from 'vitest';
-import type { ServerMessage } from '@energy8engine/contracts';
-import { CompositionScreen, createIdeClient } from '../src/index';
+import { diagnostic, type ServerMessage } from '@energy8engine/contracts';
+import { CompositionScreen, createIdeClient, useEditorDiagnostics } from '../src/index';
 
 const SCHEMA = JSON.parse(
   JSON.stringify(
@@ -151,5 +151,50 @@ describe('CompositionScreen', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+/**
+ * `useEditorDiagnostics` used to be exercised only indirectly, through
+ * `EditorComposition`'s own rendering of this same list — removing that
+ * rendering (the editor's diagnostics now reach `DiagnosticsPanel` through
+ * `App.tsx` instead) removed the hook's only coverage along with it, since
+ * `App.tsx` has no unit tests of its own and the e2e suite never provokes
+ * an editor-namespace diagnostic. These exercise the hook directly against
+ * a real `createIdeClient()` and `ctx.connection.report()`, not a
+ * hand-built stub: the property that matters is the whole reactive chain
+ * — `report()` → `useSyncExternalStore` → a new render — not just that the
+ * hook returns whatever `ctx.connection` happens to hold at call time.
+ */
+describe('useEditorDiagnostics', () => {
+  it('reflects a report() through the real connection', async () => {
+    const { ctx } = await harness();
+    const { result } = renderHook(() => useEditorDiagnostics(ctx));
+    expect(result.current).toEqual([]);
+
+    act(() => {
+      ctx.connection.report(diagnostic('error', 'x', 'w', 'm'));
+    });
+
+    expect(result.current.map((d) => d.message)).toEqual(['m']);
+  });
+
+  it('returns a referentially stable array across a render nothing changed', async () => {
+    // `ctx.connection.diagnostics` is a getter that builds a fresh array on
+    // every read (see connection.ts) — the hook's own cache exists so
+    // `useSyncExternalStore`'s snapshot stays referentially stable across a
+    // render that didn't follow a real change. A cache that always decided
+    // "changed" would still return the right VALUES (the test above would
+    // stay green) while defeating the one thing this test checks, and
+    // risking the infinite-render loop `useSyncExternalStore` exists to
+    // guard against.
+    const { ctx } = await harness();
+    const { result, rerender } = renderHook(() => useEditorDiagnostics(ctx));
+    act(() => {
+      ctx.connection.report(diagnostic('error', 'x', 'w', 'm'));
+    });
+    const settled = result.current;
+    rerender();
+    expect(result.current).toBe(settled);
   });
 });
