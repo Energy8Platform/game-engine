@@ -35,6 +35,13 @@
  * says so on screen when one is missing, instead of booting to `ready`
  * over an empty canvas.
  *
+ * **`<pre id="log">` is a reader, not a destination.** Everything this page
+ * shows about what has gone wrong comes off `ctx.diagnostics` — the live
+ * list the `diagnostics1` row provides — and every failure this page itself
+ * discovers is written back into it. There is no second record kept here;
+ * see `renderDiagnostics` below for why that matters and for what the
+ * element used to be.
+ *
  * `@energy8engine/ide-bridge` (Task 12) is composed directly into
  * `game.ctx` below — the "hot fork to the game": it opens the SAME `/ide`
  * websocket `engine/ide/client/src/plugins/connection.ts` speaks, listens
@@ -49,7 +56,7 @@ import { Container, Graphics, Text } from 'pixi.js';
 import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/slot';
 import { createGame } from '@energy8engine/game-runtime';
 import * as ideBridge from '@energy8engine/ide-bridge';
-import { reportAll } from '@energy8engine/diagnostics';
+import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
 import {
   diagnostic,
   type Diagnostic,
@@ -96,10 +103,6 @@ const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
 const spinBtn = document.getElementById('spin') as HTMLButtonElement;
 const mechanicSelect = document.getElementById('mechanic') as HTMLSelectElement;
-
-function log(message: string): void {
-  logEl.textContent = `${new Date().toLocaleTimeString()}  ${message}\n${logEl.textContent}`;
-}
 
 const game = await createGame({
   mount,
@@ -179,6 +182,33 @@ const missing = unmet.map((need) =>
 const diagnostics = [...game.diagnostics, ...missing];
 
 /**
+ * The game's own live diagnostics list — the service the `diagnostics1` row
+ * provides (`@energy8engine/diagnostics`). Everything this page shows in
+ * `<pre id="log">` is read from here, and every failure this page ITSELF
+ * discovers is written here. It is the whole of the page's relationship
+ * with what has gone wrong: no second list, no private channel.
+ *
+ * Through `reflect.get(name, false)` for the same reason `REQUIRES` above
+ * is: `diagnostics1` is an optional row (see `e8-base`'s own bundle file),
+ * a composition without it is legal, and cordis throws on a property read
+ * of a registered service this module never injected. `renderDiagnostics`
+ * below says so on screen rather than silently showing an empty log —
+ * "there is no list" and "the list is empty" are different news.
+ */
+const diagnosticsLog = game.ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
+
+/**
+ * The page's own findings join the same list everything else writes to.
+ *
+ * `game.diagnostics` is already in it — `createGame` mirrors the array it
+ * collected into the service before it returns — so only `missing` is
+ * written here, and it is written exactly once. These are diagnostics no
+ * other producer could have made: whether THIS page can work with the
+ * composition it was handed is a fact only this page knows (see `REQUIRES`).
+ */
+reportAll(diagnosticsLog, missing);
+
+/**
  * Draws the reasons where a person is already looking — over the mount,
  * replacing whatever the renderer row attached to it. `createGame` does
  * this itself for the diagnostics IT collected; these are ours, found
@@ -216,10 +246,63 @@ if (diagnostics.length > 0) {
   const errors = diagnostics.filter((d) => d.severity === 'error').length;
   statusEl.textContent =
     errors > 0 ? 'composition has errors — see log' : 'composition has warnings — see log';
-  for (const d of diagnostics) log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`);
 } else {
   statusEl.textContent = 'ready';
 }
+
+/**
+ * `<pre id="log">` — a READER of the diagnostics service, and nothing else.
+ *
+ * It used to be a destination: four different places in this file called a
+ * local `log()` that pushed a formatted string into the element, which made
+ * this page a second, private record of what had gone wrong — visible only
+ * to whoever had this tab open, and different from what the IDE was shown.
+ * That is the exact shape §8 of the design spec rules out ("the game, the
+ * IDE and the agent see the same list"), and it is why the recorded defect
+ * was possible at all: six healthy rows on the composition screen next to a
+ * game lying under a failure screen.
+ *
+ * So the element now renders `ctx.diagnostics` and re-renders on
+ * `subscribe`. Everything it shows was reported by whichever producer
+ * actually saw the failure — the play loop, the mechanics registry, the
+ * bridge, this page — and the same list is what `ide-bridge` forwards to
+ * the IDE panel, verbatim. Nothing is formatted for one surface and not the
+ * other: this line and `DiagnosticsPanel`'s row render the same four fields
+ * in the same order.
+ *
+ * Oldest first, which is `list()`'s own order — the newest entry is at the
+ * bottom, and the element is scrolled to it, so a bounded viewport still
+ * shows the thing that just happened. (The old `log()` prepended, with a
+ * wall-clock timestamp per line; a `Diagnostic` carries no time, and
+ * inventing one here would have been this page's phrasing of the service's
+ * data again, in miniature.)
+ *
+ * `dropped()` is rendered rather than ignored for the same reason the panel
+ * renders it: the list is bounded, and a reader that shows only the
+ * survivors while saying nothing about the rest looks complete while it
+ * isn't.
+ */
+function renderDiagnostics(): void {
+  if (!diagnosticsLog) {
+    logEl.textContent =
+      'no "diagnostics1" row in this composition, so this game keeps no list to show';
+    return;
+  }
+  const lines = diagnosticsLog
+    .list()
+    .map(
+      (d) => `[${d.severity}] ${d.plugin} (${d.where}): ${d.message}${d.fix ? ` — ${d.fix}` : ''}`,
+    );
+  const dropped = diagnosticsLog.dropped();
+  if (dropped > 0) {
+    lines.push(`… and ${dropped} older ones this list has forgotten — it keeps a bounded history`);
+  }
+  logEl.textContent = lines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+renderDiagnostics();
+diagnosticsLog?.subscribe(renderDiagnostics);
 
 /**
  * The `<select>` starts on whatever the COMPOSITION actually bound, not on
@@ -259,13 +342,17 @@ if (bound) mechanicSelect.value = bound;
  * `IdeBridgeSettableConfig.mechanic`. Whoever turns a knob last still
  * wins; what no longer happens is a knob turning itself.
  *
- * Its complaints land in this page's log, which is the only place it has:
- * `ide-bridge` is composed here, by the page, not by the loader, so
- * nothing else would ever collect them.
+ * **No `onDiagnostic` callback any more.** This call used to pass one, and
+ * it printed the bridge's complaints into this page's own log — the
+ * callback exists because `ide-bridge` is composed HERE, by the page, and
+ * for a while a caller's callback really was the only place it could put
+ * one. It is not any more: `apply` is handed this game's `ctx`, and
+ * `ide-bridge`'s own `report()` writes every diagnostic it raises into
+ * `ctx.diagnostics` — the same list the `<pre>` above renders. Passing a
+ * callback that wrote the same event into the same element a second way
+ * would put this page back in the business of keeping its own record.
  */
-ideBridge.apply(game.ctx, {
-  onDiagnostic: (d) => log(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`),
-});
+ideBridge.apply(game.ctx, {});
 
 mechanicSelect.addEventListener('change', () => {
   game.ctx.mechanics.bind('base_game', mechanicSelect.value);
@@ -315,8 +402,8 @@ async function presentStage(
   // A mechanic id the dropdown has no `<option>` for leaves it alone rather
   // than blanking it: `base_game` is free text in the IDE now, so an id
   // this page never heard of is reachable and is not this control's to
-  // display. It is reported instead — see `ideBridge.apply`'s
-  // `onDiagnostic` above, and the diagnostics `present` returns below.
+  // display. It is reported instead — `ide-bridge` writes it into
+  // `ctx.diagnostics`, and so does `present` below.
   //
   // Read before presenting, and tolerant of `null`: a stage bound to
   // nothing is exactly a case `present` reports, and this control has
@@ -326,9 +413,17 @@ async function presentStage(
     mechanicSelect.value = bound.id;
   }
 
+  // Neither of the two calls below is followed by a log line any more, and
+  // that is the point of the whole change: `mechanics.present` and
+  // `play.execute` are both cordis-aware service methods that ALREADY wrote
+  // what they returned into `ctx.diagnostics` (see task-2-3-report.md).
+  // Re-printing the returned arrays here — as this page did, as
+  // `JSON.stringify(...)` under a sentence of its own invention — was the
+  // same event told twice, in a format only this page used, in a place only
+  // this page could see. The `<pre>` shows them now because the service
+  // does, and it shows the message the producer actually wrote.
   const { plan, diagnostics: presentProblems } = game.ctx.mechanics.present(stage, data);
   if (presentProblems.length > 0) {
-    log(`could not present this stage: ${JSON.stringify(presentProblems)}`);
     statusEl.textContent = 'presentation failed — see log';
     // `null`, not `[]`. An empty plan is a legal thing for a mechanic to
     // emit, so a caller cannot tell the two apart from the array alone —
@@ -337,8 +432,7 @@ async function presentStage(
     return null;
   }
 
-  const problems = await game.ctx.play.execute(plan, game.ctx.board);
-  if (problems.length > 0) log(`presentation problems: ${JSON.stringify(problems)}`);
+  await game.ctx.play.execute(plan, game.ctx.board);
   return plan;
 }
 
@@ -378,7 +472,7 @@ function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep
 }
 
 /**
- * What to say when a click failed.
+ * What to say when a click threw.
  *
  * The exception's own text is evidence, not an explanation. With
  * `mechanics1` out of the composition, the first line of this page's log
@@ -389,16 +483,28 @@ function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep
  *
  * So when this page already knows a requirement went unmet (`unmet`,
  * above), the message says which row, and points at the diagnostic already
- * on screen. The raw text still travels — it is what distinguishes "the
+ * in the list. The raw text still travels — it is what distinguishes "the
  * spin failed for the reason we predicted" from "it failed for some other
  * reason while a row happened to be missing", and this function cannot
  * tell those apart.
+ *
+ * A `Diagnostic` now, rather than a string this page painted into its own
+ * element. It is the same kind of thing `missing` above is — something only
+ * THIS page is in a position to know — so it belongs in the same list, and
+ * it reaches the IDE for free by being there. `first-slot`/`spin` is the
+ * address: namespace 2 of `Diagnostic.plugin` (this page is a running game,
+ * not a composition row), and `spin` is where inside it.
  */
-function spinFailure(error: unknown): string {
+function spinFailure(error: unknown): Diagnostic {
   const raw = error instanceof Error ? error.message : String(error);
-  if (unmet.length === 0) return `error: ${raw}`;
+  if (unmet.length === 0) return diagnostic('error', 'first-slot', 'spin', `error: ${raw}`);
   const rows = unmet.map((need) => `"${need.row}" (${need.service})`).join(', ');
-  return `error: this spin needed a row the composition did not provide — ${rows}; see the diagnostic above that names it. The raw failure was: ${raw}`;
+  return diagnostic(
+    'error',
+    'first-slot',
+    'spin',
+    `error: this spin needed a row the composition did not provide — ${rows}; see the diagnostic above that names it. The raw failure was: ${raw}`,
+  );
 }
 
 spinBtn.addEventListener('click', async () => {
@@ -417,25 +523,35 @@ spinBtn.addEventListener('click', async () => {
     const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
 
     if (!res.ok) {
-      const problems = (body as { diagnostics: Diagnostic[] }).diagnostics;
-      log(`spin failed: ${JSON.stringify(problems)}`);
       // These diagnostics are `session-dev`'s, produced on the HOST side of
       // `/api/spin` (`dev-game.ts`'s route) — a different PROCESS from this
-      // page's own `game.ctx`, so there is no `ctx` that row could share
-      // with a `diagnostics1` row to write through directly (unlike
-      // `play.execute`'s or `mechanics.present`'s, which already write
-      // themselves from inside the composed context — see
-      // task-2-3-report.md). This fetch response is the one place they
-      // cross back into a `ctx` at all, so this is where they reach the
-      // service, once, same as everything else this page reads and
-      // forwards no further.
-      reportAll(game.ctx.reflect.get('diagnostics', false), problems);
-      statusEl.textContent = 'spin failed — see log';
+      // page's own `game.ctx`. This page used to relay them into
+      // `ctx.diagnostics`, because for a while it was the only thing that
+      // could: the host had no way of its own to speak about a running
+      // game. It has one now — `dev-game`'s route broadcasts the same
+      // diagnostics as a `game-diagnostics` frame over `/ide` (see that
+      // route, and `rpc.ts`'s `broadcastGameDiagnostics`) — so relaying
+      // them here made ONE failure travel twice for this project and only
+      // this project: once straight from the host, and once round through
+      // this page, `ctx.diagnostics` and `ide-bridge`. The host's is the
+      // one that works for every game, including one whose page never
+      // wired a relay, so it is the one that stays.
+      //
+      // What this page keeps is the part it is genuinely the only witness
+      // to: that the click it was handling did not produce a spin.
+      statusEl.textContent = 'spin failed — the host reported it to the IDE';
       return;
     }
 
+    // The `win N (total M), stage "S"` line this used to print into `#log`
+    // went with the rest of them. It was the one thing there that was not a
+    // diagnostic at all, and a log that IS the diagnostics list has no row
+    // shape for "nothing went wrong, here is the money" — dressing one up
+    // as an `info` diagnostic would push every spin of every game into the
+    // IDE's failure panel. What the spin paid is on the board, `#status`
+    // still reaches `done`, and the durable record is `spinlog1`'s
+    // (`recordSpin` below; `__e8.spins()` for a test).
     const result = body as SpinResult;
-    log(`win ${result.win} (total ${result.totalWin}), stage "${result.stage}"`);
     lastSpin = { stage: result.stage, data: result.data };
     const steps = await presentStage(result.stage, result.data);
     recordSpin(request, result, steps ?? []);
@@ -444,7 +560,7 @@ spinBtn.addEventListener('click', async () => {
     // it announced a spin that never reached the board.
     if (steps) statusEl.textContent = 'done';
   } catch (error) {
-    log(spinFailure(error));
+    reportAll(diagnosticsLog, [spinFailure(error)]);
     statusEl.textContent = 'error — see log';
   } finally {
     spinBtn.disabled = false;

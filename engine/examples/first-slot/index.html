@@ -56,7 +56,13 @@
       <span id="status"></span>
     </div>
     <div id="mount"></div>
-    <pre id="log"></pre>
+    <!-- The game's own diagnostics list, rendered. NOT a place anything on
+         this page writes to: src/main.ts reads `ctx.diagnostics` and
+         re-renders this element on every report, so what a person reads
+         here is the same list `ide-bridge` forwards to the IDE's
+         diagnostics panel — same entries, same text, same order. See
+         `renderDiagnostics` in src/main.ts. -->
+    <pre id="log" aria-label="diagnostics"></pre>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

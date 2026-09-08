@@ -491,7 +491,15 @@ test('a spin that could not be presented does not report itself as done', async 
 
     await page.locator('#spin').click();
     const log = page.locator('#log');
-    await expect(log).toContainText('could not present this stage', { timeout: 20_000 });
+    // The words the REGISTRY wrote, not a sentence the page wrapped around
+    // them. `#log` used to be a place `main.ts` printed to, and what it
+    // printed here was its own "could not present this stage: <the
+    // diagnostics, as JSON>"; the element renders `ctx.diagnostics` now, so
+    // what a person reads is `MechanicsService.check`'s own message — which
+    // names the actual cause (nothing is bound) where the page's wrapper
+    // only said that presenting had failed.
+    await expect(log).toContainText('cannot check stage "base_game"', { timeout: 20_000 });
+    await expect(log).toContainText('nothing is bound to it');
     await expect(
       page.locator('#status'),
       'a spin that never reached the board must not read as done',

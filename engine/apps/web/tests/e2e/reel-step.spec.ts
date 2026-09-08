@@ -164,12 +164,19 @@ test('the same spin, presented a third way, by a plugin from the project', async
       // own step. `executePlan` records a step nothing can perform as a
       // diagnostic and carries on with the rest, so a `reel-step` whose
       // handler never reached the registry would return this exact plan and
-      // leave the board sitting still. `presentStage` writes those
-      // diagnostics into the page's own log; there must be none.
+      // leave the board sitting still.
+      //
+      // Named by its PRODUCER rather than by the page's old wrapper. This
+      // used to look for "presentation problems", the sentence `main.ts`
+      // printed above `JSON.stringify(problems)` when it still wrote to
+      // `#log` itself; that element renders `ctx.diagnostics` now, and
+      // every diagnostic `executePlan` raises carries `plugin:
+      // 'play-loop'` — so the absence of that name is the absence of the
+      // whole class, wrapper or no wrapper.
       expect(
         await frame.locator('#log').textContent(),
         `"${mechanic}" left a problem in the game's own log — the plan was produced but not played`,
-      ).not.toContain('presentation problems');
+      ).not.toContain('play-loop');
       return plan;
     };
 
