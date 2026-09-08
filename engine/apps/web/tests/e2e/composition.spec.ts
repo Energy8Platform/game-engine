@@ -149,6 +149,29 @@ const PATCH_WITH_MISSPELLED_REELS = `rows:
 `;
 
 /** The fixture's own patch with the `mechanics1` row removed — see the `mechanics` test below. */
+/** Every row present, including the registry — but no stage bound to anything. */
+const PATCH_WITH_NOTHING_BOUND = `rows:
+  - id: renderer1
+    config:
+      width: 480
+      height: 288
+      background: '#10121a'
+  - id: stage1
+    config:
+      design:
+        width: 480
+        height: 288
+  - id: reels1
+    config:
+      config:
+        grid:
+          cols: 5
+          rows: 3
+  - id: mechanics1
+    config:
+      stages: {}
+`;
+
 const PATCH_WITHOUT_MECHANICS = `rows:
   - id: renderer1
     config:
@@ -420,6 +443,59 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
       'a composition with no mechanic registry must not read as ready',
     ).not.toHaveText('ready');
     await expect(page.locator('#mount')).toContainText('mechanics1');
+
+    // And a click on Spin says the same thing the screen already says.
+    // It used to log `error: Cannot read properties of undefined (reading
+    // 'forStage')` — true, and useless: the name of an internal of a
+    // service that is not there, sitting directly above a diagnostic that
+    // names the row a person has to put back.
+    await page.locator('#spin').click();
+    const log = page.locator('#log');
+    await expect(log).toContainText('mechanics1', { timeout: 20_000 });
+    await expect(
+      log,
+      'the message must point at the diagnostic, not just repeat the throw',
+    ).toContainText('the composition did not provide');
+    // The raw text still travels: it is what tells "failed for the reason
+    // we predicted" apart from "failed for another reason while a row
+    // happened to be missing".
+    await expect(log).toContainText('forStage');
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A composition that HAS a mechanic registry and binds nothing to the
+ * stage. Legal — `mechanics1.stages` is a project's to fill in — and it is
+ * the one case where the game reaches the board and stops there.
+ *
+ * The status line used to say `done` for it. `presentStage` reported the
+ * failure and set the status to match, and the spin handler then wrote
+ * `done` straight over it: a spin that never reached the board, announced
+ * as finished, with the reason sitting in the log underneath. Found while
+ * reproducing the raw-`TypeError` message above, not looked for.
+ */
+test('a spin that could not be presented does not report itself as done', async ({ page }) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    writeFileSync(join(dir, 'e8.patch.yml'), PATCH_WITH_NOTHING_BOUND);
+    await page.goto(host.gameUrl);
+    await settled(page);
+
+    // The registry is there, so nothing is missing and the page is not a
+    // failure screen — this is a working game with an unbound stage.
+    await expect(page.locator('#status')).toHaveText('ready');
+
+    await page.locator('#spin').click();
+    const log = page.locator('#log');
+    await expect(log).toContainText('could not present this stage', { timeout: 20_000 });
+    await expect(
+      page.locator('#status'),
+      'a spin that never reached the board must not read as done',
+    ).not.toHaveText('done');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

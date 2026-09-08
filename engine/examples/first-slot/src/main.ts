@@ -150,9 +150,14 @@ const REQUIRES = [
   },
 ] as const;
 
-const missing = REQUIRES.filter(
-  (need) => game.ctx.reflect.get(need.service, false) === undefined,
-).map((need) =>
+/**
+ * The requirements this composition did not meet — kept as the REQUIREMENT
+ * entries, not only as the diagnostics built from them, because the spin
+ * handler further down needs the row NAME to point at when a click fails.
+ */
+const unmet = REQUIRES.filter((need) => game.ctx.reflect.get(need.service, false) === undefined);
+
+const missing = unmet.map((need) =>
   // What this check actually knows is that the SERVICE is absent — not
   // why. "The row is not there" was one guess at the cause, and it is the
   // wrong one whenever the row IS there and something else about it broke
@@ -290,12 +295,14 @@ mechanicSelect.addEventListener('change', () => {
  * (which board `spinTo`/`refill` name, which cells `remove` names) is
  * exactly what a person watching the board actually sees, and a kind-only
  * sequence cannot tell a correctly-refilled board apart from one with a
- * permanent hole in it.
+ * permanent hole in it. `null` when the stage could not be presented at
+ * all, which an empty array cannot say: a mechanic emitting no steps is a
+ * legal, successful presentation.
  */
 async function presentStage(
   stage: string,
   data: Record<string, unknown>,
-): Promise<PresentationStep[]> {
+): Promise<PresentationStep[] | null> {
   // Keep the control honest about what actually rendered. The binding has
   // two writers besides this page's `<select>`: `e8.patch.yml`, which sets
   // it, and `@energy8engine/ide-bridge`, which rebinds it live whenever a
@@ -322,7 +329,11 @@ async function presentStage(
   if (presentProblems.length > 0) {
     log(`could not present this stage: ${JSON.stringify(presentProblems)}`);
     statusEl.textContent = 'presentation failed — see log';
-    return [];
+    // `null`, not `[]`. An empty plan is a legal thing for a mechanic to
+    // emit, so a caller cannot tell the two apart from the array alone —
+    // and the spin handler below used to write "done" over the status this
+    // line just set, announcing success on a stage that never presented.
+    return null;
   }
 
   const problems = await game.ctx.play.execute(plan, game.ctx.board);
@@ -365,6 +376,30 @@ function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep
   game.ctx.reflect.get('play', false)?.record({ request, result, plan });
 }
 
+/**
+ * What to say when a click failed.
+ *
+ * The exception's own text is evidence, not an explanation. With
+ * `mechanics1` out of the composition, the first line of this page's log
+ * read `error: Cannot read properties of undefined (reading 'forStage')` —
+ * true, and useless: it names an internal of a service that is not there
+ * rather than the row a person has to put back, and it sat directly above
+ * a diagnostic that says exactly that.
+ *
+ * So when this page already knows a requirement went unmet (`unmet`,
+ * above), the message says which row, and points at the diagnostic already
+ * on screen. The raw text still travels — it is what distinguishes "the
+ * spin failed for the reason we predicted" from "it failed for some other
+ * reason while a row happened to be missing", and this function cannot
+ * tell those apart.
+ */
+function spinFailure(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (unmet.length === 0) return `error: ${raw}`;
+  const rows = unmet.map((need) => `"${need.row}" (${need.service})`).join(', ');
+  return `error: this spin needed a row the composition did not provide — ${rows}; see the diagnostic above that names it. The raw failure was: ${raw}`;
+}
+
 spinBtn.addEventListener('click', async () => {
   spinBtn.disabled = true;
   statusEl.textContent = 'spinning…';
@@ -390,10 +425,13 @@ spinBtn.addEventListener('click', async () => {
     log(`win ${result.win} (total ${result.totalWin}), stage "${result.stage}"`);
     lastSpin = { stage: result.stage, data: result.data };
     const steps = await presentStage(result.stage, result.data);
-    recordSpin(request, result, steps);
-    statusEl.textContent = 'done';
+    recordSpin(request, result, steps ?? []);
+    // Only when the stage actually presented. `presentStage` has already
+    // said what went wrong and set the status to match; writing "done" over
+    // it announced a spin that never reached the board.
+    if (steps) statusEl.textContent = 'done';
   } catch (error) {
-    log(`error: ${error instanceof Error ? error.message : String(error)}`);
+    log(spinFailure(error));
     statusEl.textContent = 'error — see log';
   } finally {
     spinBtn.disabled = false;
@@ -430,7 +468,10 @@ spinBtn.addEventListener('click', async () => {
     }
     const result = body as SpinResult;
     lastSpin = { stage: result.stage, data: result.data };
-    const steps = await presentStage(result.stage, result.data);
+    // `?? []` keeps this harness's own contract an array. A failed
+    // presentation is reported on the page (see `presentStage`); what a
+    // test observing this needs is "which steps ran", and none did.
+    const steps = (await presentStage(result.stage, result.data)) ?? [];
     // Recorded here too, and for the same reason the button records: this
     // is a real spin, indistinguishable from a click. A harness that
     // skipped it would make the log say something different from what the
@@ -442,7 +483,7 @@ spinBtn.addEventListener('click', async () => {
   async present(stage?: string, data?: Record<string, unknown>): Promise<PresentationStep[]> {
     const target = stage && data ? { stage, data } : lastSpin;
     if (!target) throw new Error('no spin to present yet');
-    return presentStage(target.stage, target.data);
+    return (await presentStage(target.stage, target.data)) ?? [];
   },
   /**
    * What the durable log holds — the spins that actually happened, not the
