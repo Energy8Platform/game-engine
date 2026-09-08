@@ -792,41 +792,144 @@ describe('ide-bridge — reporting to the diagnostics service', () => {
 
 /**
  * `attachDiagnosticsForwarding` is the plan's own interface (task-5-brief):
- * subscribes a socket to a `DiagnosticsService` and forwards every change
- * as one `game-diagnostics` frame. Tested standalone, against a plain fake
+ * subscribes a socket to a `DiagnosticsService` and forwards the list as one
+ * `game-diagnostics` frame — as soon as there is an open socket to say it
+ * on, and again on every change. Tested standalone, against a plain fake
  * socket and a real `createDiagnostics()` service — not through `apply()` —
- * because it is Named and exported precisely so it can be.
+ * because it is named and exported precisely so it can be.
+ *
+ * The "as soon as there is an open socket" half was missing, and it was the
+ * whole of the recorded defect: everything `createGame` collects is already
+ * in the log before this function runs, so a game that failed AT BOOT had no
+ * later change to forward and said nothing at all to the editor — measured
+ * live, the game showing its reason and the panel saying "no game connected
+ * yet". The same line fixes the mirror case: a game whose failure has been
+ * FIXED states an empty list, which is what replaces the stale frame
+ * `rpc.ts` retains and deliberately never clears.
  *
  * Local `fakeSocket`/`d` helpers, deliberately not the file's own
  * module-level `fakeSocket()` above: that one fakes the RECEIVING half
  * (`addEventListener`/`emit`) `apply()`'s inbound `snapshot` listener
- * needs; this one fakes the SENDING half (`readyState`/`send`) this
- * function needs, and the two names would collide if both lived at module
- * scope.
+ * needs; this one fakes the SENDING half this function needs, and the two
+ * names would collide if both lived at module scope.
  */
 describe('ide-bridge forwards the game diagnostics', () => {
-  /** A socket whose readyState the test owns, recording every frame sent. */
+  /**
+   * A socket the test drives: `readyState` is writable, `open()` flips it
+   * and fires the listener this function registers, and every frame sent is
+   * recorded. `openNow` starts it already open, which is what a caller
+   * handing over a live socket looks like.
+   */
   function fakeSocket(readyState = 1) {
     const sent: string[] = [];
-    return {
+    // `WebSocketLike` has one listener signature for every event type (see
+    // its own doc) — a `message` listener reads `event.data`, an `open`
+    // listener reads nothing — so this matches that signature and hands the
+    // open listener an event it does not look at.
+    const openListeners: ((event: { data: string }) => void)[] = [];
+    const socket = {
       readyState,
-      send: (frame: string) => sent.push(frame),
+      send: (frame: string) => {
+        sent.push(frame);
+      },
       sent,
-      addEventListener() {},
+      addEventListener(type: string, listener: (event: { data: string }) => void) {
+        if (type === 'open') openListeners.push(listener);
+      },
       close() {},
+      /** What a real socket does when it finishes connecting. */
+      open() {
+        socket.readyState = 1;
+        for (const listener of openListeners) listener({ data: '' });
+      },
     };
+    return socket;
   }
   const d = (message: string) => ({ severity: 'error' as const, plugin: 'p', where: 'w', message });
+  /** Every frame this socket has been sent, parsed. */
+  const frames = (socket: { sent: string[] }) => socket.sent.map((raw) => JSON.parse(raw));
+  const last = (socket: { sent: string[] }) => frames(socket).at(-1);
+
+  it('states the list it is attaching to, before anything changes', () => {
+    // The boot case, in one test: everything `createGame` collected is
+    // already in the log when this function runs. Nothing changes
+    // afterwards, and the editor must still be told.
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    log.report(d('the composition failed at boot'));
+
+    attachDiagnosticsForwarding(socket, log);
+
+    expect(socket.sent).toHaveLength(1);
+    expect(last(socket).type).toBe('game-diagnostics');
+    expect(last(socket).diagnostics.map((x: { message: string }) => x.message)).toEqual([
+      'the composition failed at boot',
+    ]);
+  });
+
+  it('waits for the socket to open when it is still connecting, then states it', () => {
+    // The ordinary browser case: `apply()` wires this up on a socket that
+    // has not finished connecting, so the immediate attempt is a no-op and
+    // `open` is what actually carries the boot list.
+    const socket = fakeSocket(0); // CONNECTING
+    const log = createDiagnostics();
+    log.report(d('the composition failed at boot'));
+
+    attachDiagnosticsForwarding(socket, log);
+    expect(socket.sent, 'nothing can be said on a socket that is not open yet').toEqual([]);
+
+    socket.open();
+    expect(socket.sent).toHaveLength(1);
+    expect(last(socket).diagnostics.map((x: { message: string }) => x.message)).toEqual([
+      'the composition failed at boot',
+    ]);
+  });
+
+  it('a healthy game states an EMPTY list — the fact that replaces a stale one', () => {
+    // The mirror of the boot case, and the reason an empty frame is not
+    // "nothing to send": `rpc.ts` retains the last frame per source and
+    // never clears it, so a game that has been fixed can only stop being
+    // shown as broken by saying what is true now.
+    const socket = fakeSocket(0);
+    const log = createDiagnostics();
+
+    attachDiagnosticsForwarding(socket, log);
+    socket.open();
+
+    expect(socket.sent).toHaveLength(1);
+    expect(last(socket)).toMatchObject({ type: 'game-diagnostics', diagnostics: [], dropped: 0 });
+  });
+
+  it('says nothing more once disposed, even if the socket opens later', () => {
+    const socket = fakeSocket(0);
+    const log = createDiagnostics();
+    const detach = attachDiagnosticsForwarding(socket, log);
+    detach();
+    socket.open();
+    log.report(d('after teardown'));
+    expect(socket.sent).toEqual([]);
+  });
 
   it('sends what the service holds, as one game-diagnostics frame, when it changes', () => {
     const socket = fakeSocket();
     const log = createDiagnostics();
     attachDiagnosticsForwarding(socket, log); // the unit under test
     log.report(d('reels blew up'));
-    expect(socket.sent).toHaveLength(1);
-    const frame = JSON.parse(socket.sent[0]);
-    expect(frame.type).toBe('game-diagnostics');
-    expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual(['reels blew up']);
+    // Two: the list as it stood when this attached (empty), and the list
+    // after the report. The second is the one this test is about.
+    expect(socket.sent).toHaveLength(2);
+    expect(last(socket).type).toBe('game-diagnostics');
+    expect(last(socket).diagnostics.map((x: { message: string }) => x.message)).toEqual([
+      'reels blew up',
+    ]);
+  });
+
+  it('sends nothing when the socket is not open, and does not throw', () => {
+    const socket = fakeSocket(0); // CONNECTING, and never opened
+    const log = createDiagnostics();
+    attachDiagnosticsForwarding(socket, log);
+    expect(() => log.report(d('while closed'))).not.toThrow();
+    expect(socket.sent).toEqual([]);
   });
 
   it('sends what the game PRODUCED, not what it was handed', () => {
@@ -841,9 +944,12 @@ describe('ide-bridge forwards the game diagnostics', () => {
     attachDiagnosticsForwarding(socket, log);
     log.report(d('reels blew up'));
 
-    expect(socket.sent).toHaveLength(1);
-    const frame = JSON.parse(socket.sent[0]);
-    expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual(['reels blew up']);
+    expect(last(socket).diagnostics.map((x: { message: string }) => x.message)).toEqual([
+      'reels blew up',
+    ]);
+    // And the frame this attached with said the same — a seeded entry is
+    // never sent, at any moment.
+    expect(frames(socket)[0].diagnostics).toEqual([]);
   });
 
   it('still says how many were forgotten, counting both kinds', () => {
@@ -857,19 +963,10 @@ describe('ide-bridge forwards the game diagnostics', () => {
     attachDiagnosticsForwarding(socket, log);
     log.report(d('the only survivor'));
 
-    const frame = JSON.parse(socket.sent[0]);
-    expect(frame.dropped).toBe(1);
-    expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual([
+    expect(last(socket).dropped).toBe(1);
+    expect(last(socket).diagnostics.map((x: { message: string }) => x.message)).toEqual([
       'the only survivor',
     ]);
-  });
-
-  it('sends nothing when the socket is not open, and does not throw', () => {
-    const socket = fakeSocket(0); // CONNECTING
-    const log = createDiagnostics();
-    attachDiagnosticsForwarding(socket, log);
-    expect(() => log.report(d('while closed'))).not.toThrow();
-    expect(socket.sent).toEqual([]);
   });
 
   it('a send that throws does not trigger another send', () => {
@@ -889,6 +986,11 @@ describe('ide-bridge forwards the game diagnostics', () => {
       },
     };
     attachDiagnosticsForwarding(socket, log);
+    // The attach itself states the (empty) list and throws doing it. Zeroed
+    // here so the count below is one report's worth and nothing else —
+    // otherwise a recursion of exactly one extra call would hide inside the
+    // initial frame's own count.
+    calls = 0;
     log.report(d('first'));
     expect(calls).toBe(1);
   });

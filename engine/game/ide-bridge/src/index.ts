@@ -144,6 +144,14 @@ export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
  */
 export interface WebSocketLike {
   readyState: number;
+  /**
+   * One signature for every event type this module listens for: a
+   * `message` listener reads `event.data`, and the `open` listener
+   * `attachDiagnosticsForwarding` registers reads nothing at all (a
+   * listener that ignores its argument is assignable to one that takes
+   * it). Splitting it into overloads would buy nothing and would make
+   * every fake in every test declare both.
+   */
   addEventListener(type: string, listener: (event: { data: string }) => void): void;
   send(data: string): void;
   close(): void;
@@ -216,6 +224,33 @@ export const Config = Schema.object({
  * bounded, small array (`DEFAULT_LIMIT` — see `@energy8engine/diagnostics`),
  * so resending it in full costs nothing this module needs to economize on.
  *
+ * **It states the list as soon as it can, not only when it next changes.**
+ * This used to be `return log.subscribe(forward)` and nothing else, and
+ * that one missing line was the whole of the defect this slice exists to
+ * remove, in both directions:
+ *
+ *  - A game that failed AT BOOT said nothing. Everything `createGame`
+ *    collected — a row whose `apply` threw, a seam with two providers, a
+ *    mechanic expecting a field the math never declares — was already in
+ *    the log by the time this function ran, so there was no later change
+ *    to forward. Measured on a live host: the game showed "composition has
+ *    errors — see log" with the reason in it, and the IDE panel said "no
+ *    game connected yet", zero rows. That is exactly the recorded defect —
+ *    an authoritative-looking editor beside a game lying under a failure
+ *    screen — reached by the commonest failure there is.
+ *  - A game whose failure had been FIXED was still shown as broken,
+ *    forever. `rpc.ts` retains the last frame per source and never clears
+ *    it (deliberately — see its own doc), so the only thing that can
+ *    replace a stale `game` slot is the game saying what is true now. A
+ *    healthy game had nothing to say and so never said it.
+ *
+ * So: forward once on `open`, and once immediately if the socket is
+ * already open when this is called. A boot-failing game states its list; a
+ * healthy one states an empty list, which is not nothing — it is the fact
+ * that replaces the stale slot. No protocol change and no new message
+ * type: an empty whole-list frame already means "this source has nothing",
+ * because whole-list frames always meant that.
+ *
  * **Never throws, and never re-enters `log`.** A closed or half-open
  * socket, or one whose `send` itself throws, is not this function's
  * failure to escalate — see `connection.ts`'s `update()` for the ordinary
@@ -228,11 +263,20 @@ export const Config = Schema.object({
  * swallowed.
  */
 export function attachDiagnosticsForwarding(
-  socket: Pick<WebSocket, 'readyState' | 'send'>,
+  socket: Pick<WebSocketLike, 'readyState' | 'send' | 'addEventListener'>,
   log: DiagnosticsService,
 ): () => void {
   const WEBSOCKET_OPEN = 1;
+  /**
+   * Set by the disposer. `WebSocketLike` declares no `removeEventListener`
+   * — it is the small slice of a socket this module needs, and widening it
+   * for one teardown would make every fake in every test grow a method —
+   * so the `open` listener below stays registered and is made inert
+   * instead. It fires at most once either way.
+   */
+  let disposed = false;
   const forward = () => {
+    if (disposed) return;
     if (socket.readyState !== WEBSOCKET_OPEN) return;
     try {
       const message: ClientMessage = {
@@ -255,7 +299,22 @@ export function attachDiagnosticsForwarding(
       // would not loop straight back through `log` and this subscription.
     }
   };
-  return log.subscribe(forward);
+
+  // The state of the log NOW, as soon as there is a socket to say it on —
+  // see this function's doc. `open` for the ordinary browser case (the
+  // socket is still CONNECTING when `apply` wires this up), and the
+  // immediate call for a caller that hands over an already-open one, which
+  // never fires `open` again. Guarded so the two cannot both send: an
+  // already-open socket does not raise `open`, and one that raises `open`
+  // was not open a moment ago.
+  socket.addEventListener('open', forward);
+  forward();
+
+  const unsubscribe = log.subscribe(forward);
+  return () => {
+    disposed = true;
+    unsubscribe();
+  };
 }
 
 export function apply(ctx: Context, config: IdeBridgeConfig): void {

@@ -45,7 +45,7 @@
  * `./project-fixture` gives at length, and every copy is removed in
  * `finally`.
  */
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { projectCopy, startDevHost } from './project-fixture';
@@ -292,6 +292,181 @@ test('a project failure appears once, on the project side', async ({ page, conte
     // two, the second wearing `game`.
     await expect(projectRow, 'the project row must appear once, not once per side').toHaveCount(1);
     await expect(projectRow).toContainText(/project/i);
+  } finally {
+    await host.stop();
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+/**
+ * **A failure at BOOT.** The suite above provokes every failure AFTER the
+ * game is up, on the reasoning that a boot failure "already reaches the
+ * screen". That is true of the GAME's screen — `createGame` paints it — and
+ * false of the IDE's, which is the half this slice built. So the case the
+ * whole slice exists for was the one case the acceptance suite could not
+ * express.
+ *
+ * Measured on a live host before the fix, on a project plugin whose `apply`
+ * throws:
+ *
+ *     GAME #status: composition has errors — see log
+ *     GAME #log:    [error] reelstep1 (runtime): …boot-failure-probe…
+ *     IDE PANEL:    Diagnostics  no game connected yet
+ *     IDE ROWS:     0
+ *
+ * The recorded defect exactly — an authoritative-looking editor beside a
+ * game lying under a failure screen — reached by the commonest failure
+ * there is. The cause was one missing line in `attachDiagnosticsForwarding`:
+ * everything `createGame` collects is already in the log by the time the
+ * bridge attaches, so a game that failed at boot had no later CHANGE to
+ * forward and therefore said nothing.
+ *
+ * Three fixtures, one per boot-time row of the spec's §11 table that a
+ * project can actually reach: a plugin that fails to load, a seam with two
+ * providers, and a mechanic whose `expects` does not meet the math's
+ * schema. All three were equally invisible.
+ */
+interface BootFailure {
+  /** What goes wrong, as a test name. */
+  what: string;
+  /** Breaks the copied project. */
+  prepare(dir: string): void;
+  /** A distinctive fragment of the diagnostic, used to find the line on both surfaces. */
+  fragment: string;
+}
+
+/** Rewrites one file in the copy, refusing to pass if the edit found nothing. */
+function patchFile(file: string, find: string, replace: string): void {
+  const source = readFileSync(file, 'utf8');
+  const next = source.replace(find, replace);
+  expect(next, `the fixture edit must actually have changed ${file}`).not.toBe(source);
+  writeFileSync(file, next);
+}
+
+const BOOT_FAILURES: BootFailure[] = [
+  {
+    what: 'a project plugin whose apply throws',
+    prepare: (dir) =>
+      patchFile(
+        join(dir, 'plugins', 'reel-step', 'src', 'index.ts'),
+        'export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {',
+        "export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {\n  throw new Error('boot-failure-probe: the reel-step row refused to apply');",
+      ),
+    fragment: 'boot-failure-probe',
+  },
+  {
+    what: 'a seam with two default providers',
+    // §11: "Конфликт провайдера шва — ноль кандидатов или двое: error с
+    // перечислением кандидатов и их матчеров." A second row of the same
+    // renderer package is the cheapest way for a project to reach it, and
+    // it is a plausible mistake: a patch that adds a renderer without
+    // removing the bundle's.
+    prepare: (dir) =>
+      appendFileSync(
+        join(dir, 'e8.patch.yml'),
+        "  - id: renderer2\n    name: '@energy8engine/renderer-pixi'\n    config: {}\n",
+      ),
+    fragment: 'default providers',
+  },
+  {
+    what: 'a mechanic expecting a field the math never declares',
+    // §11: "`expects` механики не сходится со `SpinSchema` — error с именем
+    // стадии, ожидаемым полем и его формой." Checked before the first spin
+    // by `checkAgainstSchema`, so it is a BOOT diagnostic — and `bonus_wild`
+    // is genuinely absent from the schema rather than dropped by the parser,
+    // which is the case that is deliberately NOT reported (see
+    // `schema.spec.ts`).
+    prepare: (dir) =>
+      patchFile(
+        join(dir, 'plugins', 'reel-step', 'src', 'mechanic.ts'),
+        "fields: { grid: 'grid', reel_steps: 'list' },",
+        "fields: { grid: 'grid', reel_steps: 'list', bonus_wild: 'number' },",
+      ),
+    fragment: 'bonus_wild',
+  },
+];
+
+for (const failure of BOOT_FAILURES) {
+  test(`a boot failure reaches the IDE panel: ${failure.what}`, async ({ page, context }) => {
+    const project = projectCopy();
+    failure.prepare(project);
+    const host = await startDevHost(project);
+    try {
+      const game = await context.newPage();
+      await game.goto(host.gameUrl);
+      // Not `ready`: this game did not start. The page says so, which was
+      // never the problem — the problem was that only the page said so.
+      await expect(game.locator('#status')).toHaveText('composition has errors — see log', {
+        timeout: 20_000,
+      });
+      await expect(game.locator('#log')).toContainText(failure.fragment);
+      const onTheGame = await game.locator('#log').textContent();
+
+      await page.goto(IDE_URL);
+      const panel = page.getByTestId('diagnostics-panel');
+      await expect(
+        panel,
+        'a game that failed at boot must reach the editor, not only its own screen',
+      ).toContainText(failure.fragment, { timeout: 20_000 });
+
+      // Word for word, the same check the after-boot acceptance makes: the
+      // panel shows the game's line, not its own account of it.
+      const line = new RegExp(`${failure.fragment}[^\\n]*`).exec(onTheGame ?? '')![0];
+      await expect(panel).toContainText(line);
+
+      // And attributed to the game, not to the project: these are the
+      // GAME's own diagnostics (`report`), not the host's seeded ones.
+      await expect(page.getByTestId(/^diag-/).filter({ hasText: failure.fragment })).toContainText(
+        /game/i,
+      );
+    } finally {
+      await host.stop();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+}
+
+/**
+ * The mirror of the same missing line, and the more insidious half: a
+ * failure that has been FIXED went on being shown by the IDE forever.
+ *
+ * `rpc.ts` retains the last frame per source and deliberately never clears
+ * it — a game going quiet because it crashed is exactly when its last words
+ * matter most. The only thing that can replace a stale `game` slot is the
+ * game saying what is true NOW, and a healthy game had nothing to say.
+ * Measured before the fix: the game's own log empty, the panel still showing
+ * the old error.
+ */
+test('a failure that has been fixed stops being shown', async ({ page, context }) => {
+  const project = projectCopy();
+  const pluginEntry = join(project, 'plugins', 'reel-step', 'src', 'index.ts');
+  const healthy = readFileSync(pluginEntry, 'utf8');
+  BOOT_FAILURES[0].prepare(project);
+
+  const host = await startDevHost(project);
+  try {
+    const game = await context.newPage();
+    await game.goto(host.gameUrl);
+    await expect(game.locator('#log')).toContainText('boot-failure-probe', { timeout: 20_000 });
+
+    // The editor sees it — the state this test is about undoing.
+    await page.goto(IDE_URL);
+    const panel = page.getByTestId('diagnostics-panel');
+    await expect(panel).toContainText('boot-failure-probe', { timeout: 20_000 });
+
+    // The developer fixes it and reloads the game. The editor tab is left
+    // open, exactly as a person would leave it.
+    writeFileSync(pluginEntry, healthy);
+    await game.reload();
+    await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
+    await expect(game.locator('#log'), "the game's own list is clean now").not.toContainText(
+      'boot-failure-probe',
+    );
+
+    await expect(
+      panel,
+      'a fixed failure must stop being shown, not be shown until something else happens',
+    ).not.toContainText('boot-failure-probe', { timeout: 20_000 });
   } finally {
     await host.stop();
     rmSync(project, { recursive: true, force: true });
