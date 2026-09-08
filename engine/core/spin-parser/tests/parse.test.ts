@@ -177,12 +177,61 @@ describe('parseSpinSchema — the gaps a partial reading leaves', () => {
     expect(schema!.gaps).toContainEqual({ in: 'records', name: 'Vars', field: null });
   });
 
-  it('covers every stage when an unterminated record takes its own name with it', () => {
+  it('restates a dropped duplicate on every stage derived from it, under the flat dialect', () => {
+    // The case that survived the first pass, and it is the MAJORITY case:
+    // five of the eight real `.spin` files in this repo use the flat
+    // `data = <Record>` dialect. There, the record IS the stage's shape, so
+    // an entry-level `records` gap that stops on the records side leaves a
+    // stage-shaped consumer — `checkAgainstSchema` — with nothing, and it
+    // goes back to saying the math does not declare fields the dropped
+    // declaration declares. The tagged twin above never had the problem
+    // because a duplicate stage VARIANT is recorded against `stages`
+    // directly, which is exactly why this read as done.
+    const src = `
+record LineWin { line: int  win: float }
+record D { grid: [[int]] }
+record D { grid: [[int]]  base_win: float  lines: [LineWin] }
+game "flat" { bet_levels = [1.0]  max_win = 10.0  data = D }
+action spin { stage = base_game  cost = 1.0 }
+action buy  { stage = bonus      cost = 5.0 }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('duplicate record "D"'))).toBe(true);
+    // The records side still says it …
+    expect(schema!.gaps).toContainEqual({ in: 'records', name: 'D', field: null });
+    // … and now so does every stage that record became. `field: null`
+    // because which fields the dropped declaration would have added is not
+    // knowable from the copy that lost.
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: null });
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'bonus', field: null });
+  });
+
+  it('and does not lose the winning declaration’s own field losses to it', () => {
+    // The dropped duplicate appends to `unread`, it does not replace it:
+    // the declaration that WON may have had unreadable fields of its own,
+    // and they are still named per stage rather than collapsed into the
+    // unnamed one.
+    const src = `
+record D { grid:  win: float }
+record D { grid: [[int]] }
+game "flat" { bet_levels = [1.0]  max_win = 10.0  data = D }
+action spin { stage = base_game  cost = 1.0 }
+`;
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: 'grid' });
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: null });
+  });
+
+  it('leaves an unnamed records gap when an unterminated record takes its own name with it', () => {
     const src = MINIMAL.replace(
       'record Vars { max_win_reached: bool }',
       'record Vars { max_win_reached: bool',
     );
     const { schema } = parseSpinSchema(src);
+    // `records`, not `stages`: this file is the TAGGED dialect, where the
+    // enum declares the stages and a lost record cannot take one with it.
+    // The name used to say "covers every stage", which this assertion does
+    // not measure — `coveredByGap` reads only `in: 'stages'` entries.
     expect(schema!.gaps).toContainEqual({ in: 'records', name: null, field: null });
   });
 

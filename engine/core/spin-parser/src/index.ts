@@ -477,6 +477,19 @@ function parseRecords(
       // the mistake is not knowable here, so the gap covers the entry
       // rather than naming fields off the copy that lost.
       gaps.push({ in: 'records', name, field: null });
+      // And the same loss travels in `unread`, as the unnamed field it is.
+      // Under the flat `data = <Record>` dialect this record IS a stage's
+      // shape, and `parseStages` restates whatever `unread` holds onto
+      // every stage derived from it. Without this line the loss stopped on
+      // the `records` side, where a stage-shaped consumer never looks — and
+      // the pre-flight went back to saying the math does not declare a
+      // field the dropped declaration declares, on five of the eight real
+      // `.spin` files in this repo.
+      //
+      // Appended, not assigned: the declaration that WON may have had
+      // field-level losses of its own, and they are not superseded by this
+      // one.
+      (unread[name] ??= []).push(null);
     }
   }
   return { records: records.build(), unread };

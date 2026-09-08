@@ -651,6 +651,43 @@ describe('checkAgainstSchema', () => {
       expect(checkAgainstSchema(schema, { base_game: classicMechanic })).toEqual([]);
     });
 
+    it('is silent under the FLAT dialect too, where a dropped duplicate is the whole loss', () => {
+      // The majority case — five of the eight real `.spin` files in this
+      // repo use `data = <Record>` — and the one the first pass missed.
+      // The record IS the stage's shape there, so a `records` gap that
+      // never reached the stages side left this function saying the math
+      // does not declare `base_win`/`lines` about a file whose dropped
+      // duplicate declares both. Measured: two `error` diagnostics and the
+      // failure screen.
+      const flat = `
+record LineWin { line: int  win: float }
+record D { grid: [[int]] }
+record D { grid: [[int]]  base_win: float  lines: [LineWin] }
+game "flat" { bet_levels = [1.0]  max_win = 10.0  data = D }
+action spin { stage = base_game  cost = 1.0 }
+`;
+      const { schema, diagnostics } = parseSpinSchema(flat);
+      expect(diagnostics.some((d) => d.message.includes('duplicate record "D"'))).toBe(true);
+      expect(schema!.stages.base_game.lines).toBeUndefined();
+      expect(checkAgainstSchema(schema, { base_game: classicMechanic })).toEqual([]);
+    });
+
+    it('… and the same file with no duplicate still reports the genuine absence', () => {
+      // The control. One declaration, nothing dropped, `base_win`/`lines`
+      // really are not there.
+      const flat = `
+record D { grid: [[int]] }
+game "flat" { bet_levels = [1.0]  max_win = 10.0  data = D }
+action spin { stage = base_game  cost = 1.0 }
+`;
+      const { schema, diagnostics } = parseSpinSchema(flat);
+      expect(diagnostics).toEqual([]);
+      expect(schema!.gaps).toEqual([]);
+      const found = checkAgainstSchema(schema, { base_game: classicMechanic });
+      expect(found).toHaveLength(2);
+      expect(found.every((d) => d.severity === 'error')).toBe(true);
+    });
+
     it('still reports the absence when the field is DELETED rather than left unreadable', () => {
       // The control that separates "unread" from "not declared" against
       // the same real file: remove the declaration outright and the
