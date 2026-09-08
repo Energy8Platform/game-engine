@@ -5,6 +5,7 @@ import type {
   GameDiagnosticsSource,
   ServerMessage,
 } from '@energy8engine/contracts';
+import { createDiagnostics } from '@energy8engine/diagnostics';
 import type { WebSocket } from 'ws';
 
 declare module 'cordis' {
@@ -27,11 +28,28 @@ declare module 'cordis' {
  */
 export interface IdeRpcService {
   /**
-   * Sends a `game-diagnostics` frame to every connected client. Unlike the
+   * Records what the HOST has just found wrong with the running game, and
+   * sends this host's WHOLE list to every connected client. Unlike the
    * relay below, there is no "sender" socket to exclude — the host itself
    * is the origin, not a client passing something on.
+   *
+   * **Records, not just sends, and the difference is the whole point.**
+   * This was `broadcastGameDiagnostics(diagnostics, dropped?)` — it shipped
+   * the array it was handed with `dropped` defaulting to `0`, and the
+   * client replaces a source's whole list on receipt. So two consecutive
+   * `/api/spin` failures left only the second, under a panel asserting that
+   * nothing had been forgotten. That is the one direction
+   * `GameDiagnosticsMessage.dropped`'s own doc forbids: a reader told too
+   * little believes it has everything. The mechanism built so a panel
+   * cannot lie did not cover one of its two sources.
+   *
+   * So the host keeps a list of its own, with the same bound, the same
+   * honest `dropped`, and the same "a byte-identical repeat is one entry"
+   * rule the GAME's list uses — it is literally the same
+   * `createDiagnostics()`, which is cordis-free precisely so a host-side
+   * collector can use it (see that package's `runtime.ts` doc).
    */
-  broadcastGameDiagnostics(diagnostics: Diagnostic[], dropped?: number): void;
+  reportGameDiagnostics(diagnostics: Diagnostic[]): void;
 }
 
 export const name = 'ide-rpc';
@@ -53,7 +71,7 @@ export function apply(ctx: Context) {
    *
    *  1. **One retained frame PER SOURCE — two of them, not one, and not
    *     one per socket.** It was one, and that was wrong: this host is
-   *     itself a second speaker (`broadcastGameDiagnostics`, for
+   *     itself a second speaker (`reportGameDiagnostics`, for
    *     `/api/spin`), and a host frame carrying only its own failure
    *     replaced everything the game had reported — for a reader that
    *     replaces on receipt, terminally, since nothing makes the game
@@ -110,15 +128,23 @@ export function apply(ctx: Context) {
     for (const socket of clients) send(socket, { type: 'snapshot', snapshot });
   };
 
+  /**
+   * What the HOST itself has found wrong with the running game, kept whole
+   * — see `IdeRpcService.reportGameDiagnostics`. The same service a game's
+   * own `ctx.diagnostics` is, composed by nobody: it has no cordis
+   * dependency for exactly this reason.
+   */
+  const hostDiagnostics = createDiagnostics();
+
   ctx.provide('ideRpc', {
-    broadcastGameDiagnostics(diagnostics, dropped = 0) {
-      lastGameDiagnostics.set('host', { diagnostics, dropped });
-      const message: ServerMessage = {
-        type: 'game-diagnostics',
-        diagnostics,
-        dropped,
-        source: 'host',
+    reportGameDiagnostics(diagnostics) {
+      for (const d of diagnostics) hostDiagnostics.report(d);
+      const frame = {
+        diagnostics: [...hostDiagnostics.list()],
+        dropped: hostDiagnostics.dropped(),
       };
+      lastGameDiagnostics.set('host', frame);
+      const message: ServerMessage = { type: 'game-diagnostics', ...frame, source: 'host' };
       for (const socket of clients) send(socket, message);
     },
   });

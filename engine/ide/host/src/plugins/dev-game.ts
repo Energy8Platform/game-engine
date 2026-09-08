@@ -323,13 +323,17 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       // it reads (`first-slot/src/main.ts` does) would otherwise get this
       // any further. Speaking `game-diagnostics` here too means the IDE
       // panel sees it unconditionally, the same way it would for a game
-      // that never wires that relay. `ideRpc` is read leniently — `rpc`
+      // that never wires that relay. `report`, not `broadcast`: this route
+      // hands over what just went wrong and `rpc` keeps the HOST's whole
+      // list — otherwise a second failed spin would replace the first on a
+      // reader that replaces per source, with the panel asserting nothing
+      // had been lost. `ideRpc` is read leniently — `rpc`
       // and `dev-game` are SIBLING plugin scopes under `e8 dev`'s shared
       // host `ctx`, and this plugin's own standalone tests compose it with
       // no `rpc` at all, so a static `inject` would leave this fiber
       // PENDING forever waiting for a service nobody provides.
       const ideRpc = ctx.reflect.get('ideRpc', false) as IdeRpcService | undefined;
-      ideRpc?.broadcastGameDiagnostics(diagnostics);
+      ideRpc?.reportGameDiagnostics(diagnostics);
       return;
     }
 

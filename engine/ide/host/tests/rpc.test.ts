@@ -360,13 +360,12 @@ describe('ide rpc — a game reports its own diagnostics', () => {
 describe('ide rpc — the host can originate its own game-diagnostics', () => {
   it('broadcasts to a connected client, with no sender of its own to exclude', async () => {
     const ideRpc = host.ctx.reflect.get('ideRpc', false) as
-      { broadcastGameDiagnostics(diagnostics: unknown[], dropped?: number): void } | undefined;
+      { reportGameDiagnostics(diagnostics: unknown[]): void } | undefined;
     expect(ideRpc).toBeDefined();
 
-    ideRpc!.broadcastGameDiagnostics(
-      [{ severity: 'error', plugin: 'session', where: 'e8-server', message: 'did not start' }],
-      2,
-    );
+    ideRpc!.reportGameDiagnostics([
+      { severity: 'error', plugin: 'session', where: 'e8-server', message: 'did not start' },
+    ]);
 
     // `socket`/`inbox` are the outer `beforeEach`'s own connected client,
     // reused here on purpose: this broadcast has no "sender" socket to
@@ -377,7 +376,9 @@ describe('ide rpc — the host can originate its own game-diagnostics', () => {
     expect(message).toMatchObject({
       type: 'game-diagnostics',
       diagnostics: [{ severity: 'error', plugin: 'session' }],
-      dropped: 2,
+      // Its own list's count, not a number the caller supplied: nothing has
+      // been forgotten yet, so it is honestly 0. See I2's test below.
+      dropped: 0,
     });
   });
 });
@@ -417,12 +418,11 @@ describe('ide rpc — the two speakers do not overwrite each other', () => {
 
   function hostRpc() {
     const ideRpc = host.ctx.reflect.get('ideRpc', false) as {
-      broadcastGameDiagnostics(diagnostics: unknown[], dropped?: number): void;
+      reportGameDiagnostics(diagnostics: unknown[]): void;
     };
-    ideRpc.broadcastGameDiagnostics(
-      [{ severity: 'error', plugin: 'session', where: 'play', message: 'the host said this' }],
-      0,
-    );
+    ideRpc.reportGameDiagnostics([
+      { severity: 'error', plugin: 'session', where: 'play', message: 'the host said this' },
+    ]);
   }
 
   it("stamps a relayed frame as the game's, so a reader can tell the speakers apart", async () => {
@@ -480,6 +480,58 @@ describe('ide rpc — the two speakers do not overwrite each other', () => {
     late.ws.close();
     game.ws.close();
     editor.ws.close();
+  });
+
+  /**
+   * The host is a source, so it must keep a source's whole list.
+   *
+   * It did not: it shipped the array it was handed with `dropped` defaulting
+   * to `0`, and a reader replaces a source's whole list on receipt. Two
+   * consecutive `/api/spin` failures therefore left only the second, under a
+   * panel asserting nothing had been forgotten — the one direction
+   * `GameDiagnosticsMessage.dropped`'s own doc forbids.
+   */
+  it('keeps its own whole list, so a second failure does not erase the first', async () => {
+    const ideRpc = host.ctx.reflect.get('ideRpc', false) as {
+      reportGameDiagnostics(diagnostics: unknown[]): void;
+    };
+    ideRpc.reportGameDiagnostics([
+      { severity: 'error', plugin: 'session', where: 'play', message: 'first bad spin' },
+    ]);
+    await inbox.waitFor((m) => m.type === 'game-diagnostics');
+    ideRpc.reportGameDiagnostics([
+      { severity: 'error', plugin: 'session', where: 'play', message: 'second bad spin' },
+    ]);
+
+    const message = await inbox.waitFor(
+      (m) =>
+        m.type === 'game-diagnostics' && m.diagnostics.some((d) => d.message === 'second bad spin'),
+    );
+    expect(message).toMatchObject({
+      diagnostics: [{ message: 'first bad spin' }, { message: 'second bad spin' }],
+    });
+  });
+
+  it('says honestly how many of its own it has forgotten', async () => {
+    // The bound is `@energy8engine/diagnostics`'s `DEFAULT_LIMIT` (500), so
+    // this reports past it rather than reaching for a smaller one — the
+    // point is that the count is the host's OWN list's, not a number a
+    // caller supplied and not a hardcoded zero.
+    const ideRpc = host.ctx.reflect.get('ideRpc', false) as {
+      reportGameDiagnostics(diagnostics: unknown[]): void;
+    };
+    ideRpc.reportGameDiagnostics(
+      Array.from({ length: 502 }, (_unused, i) => ({
+        severity: 'error',
+        plugin: 'session',
+        where: 'play',
+        message: `bad spin ${i}`,
+      })),
+    );
+
+    const message = await inbox.waitFor((m) => m.type === 'game-diagnostics');
+    expect(message).toMatchObject({ dropped: 2 });
+    expect((message as { diagnostics: unknown[] }).diagnostics).toHaveLength(500);
   });
 
   /**
