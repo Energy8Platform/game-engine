@@ -148,7 +148,6 @@ const PATCH_WITH_MISSPELLED_REELS = `rows:
         base_game: classic
 `;
 
-/** The fixture's own patch with the `mechanics1` row removed — see the `mechanics` test below. */
 /** Every row present, including the registry — but no stage bound to anything. */
 const PATCH_WITH_NOTHING_BOUND = `rows:
   - id: renderer1
@@ -172,12 +171,15 @@ const PATCH_WITH_NOTHING_BOUND = `rows:
       stages: {}
 `;
 
-// `reelstep1` stays in, even though this patch replaces the file wholesale
-// and could just as easily have dropped it too — this is a test of what
-// happens to a row that IS still here and needs `mechanics`, not of what
-// happens when it also leaves. `reel-step`'s own `package.json` declares
-// `e8.runtime.requires: ["mechanics"]` (task 2 of "declared, not agreed"),
-// so this row is what makes `mechanics1: remove: true` reportable at all.
+// `reelstep1` goes with it, and that is the whole point of this fixture's
+// shape: the patch replaces the file wholesale, so every row that needs
+// `mechanics` leaves in the same edit. It briefly carried a `reelstep1`
+// row, which kept this test green through that row's declared
+// `e8.runtime.requires: ["mechanics"]` while excluding the case a person
+// actually reaches by deleting one row from a patch. The page states its
+// own two needs now (`PAGE_NEEDS` in `first-slot`'s `main.ts`), so the
+// composition below is reported by the thing that reads `ctx.mechanics`
+// with no row left to speak for it.
 const PATCH_WITHOUT_MECHANICS = `rows:
   - id: renderer1
     config:
@@ -197,9 +199,6 @@ const PATCH_WITHOUT_MECHANICS = `rows:
           rows: 3
   - id: mechanics1
     remove: true
-  - id: reelstep1
-    name: reel-step
-    config: {}
 `;
 
 /**
@@ -441,15 +440,23 @@ test('a misspelled package name on a row says so, naming the row and the package
  * `mechanics1` — a legal patch edit — booted the page to `ready` over a
  * canvas that could never present anything, and threw on the first click.
  *
- * Rephrased, not weakened: `main.ts` keeps no `REQUIRES` list any more
- * (task 2 of "declared, not agreed"). `plugins/reel-step`'s own
- * `package.json` now declares `e8.runtime.requires: ["mechanics"]` — it
- * registers a mechanic through `ctx.inject(['mechanics'], …)`, which
- * tolerates `mechanics1` never arriving by simply never firing, and
- * `requires` is what turns that silence into a diagnostic instead. So the
- * row this test expects to see named is `reelstep1`, not `mechanics1`:
- * the row that noticed, not the row that is gone (see the previous test's
- * doc comment for the same shift, on `board`/`playloop1`).
+ * The defect came back once, in the slice that was meant to close it.
+ * `main.ts` handed its whole `REQUIRES` list to `e8.runtime.requires`,
+ * which is a field of a package.json and therefore only ever a ROW's to
+ * declare — and the only row left declaring `mechanics` was
+ * `plugins/reel-step`, which this same patch removes. So this test was
+ * kept green by adding a `reelstep1` row back into the fixture, under a
+ * comment excluding the case where it leaves too. It was not the
+ * mechanism that held; it was the fixture.
+ *
+ * What holds it now is the page: `first-slot`'s `PAGE_NEEDS` states the
+ * two services `main.ts` itself reads off `ctx` — `mechanics` and `play`
+ * — and reports and draws them the same way `createGame` does for a
+ * row's. So the row named here is `mechanics1`, as the thing that
+ * normally provides the service; the message is careful not to claim it
+ * was removed, because the same absence is reachable with the row
+ * present and failing (see the misspelled-package test above, which
+ * pins that wording).
  */
 test('removing the mechanics row says so instead of booting to ready', async ({ page }) => {
   const dir = projectCopy();
@@ -467,24 +474,63 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
       page.locator('#status'),
       'a composition with no mechanic registry must not read as ready',
     ).not.toHaveText('ready');
-    await expect(page.locator('#mount')).toContainText('reelstep1');
+    const mount = page.locator('#mount');
+    await expect(mount).toContainText('This game could not start');
+    await expect(
+      mount,
+      'the screen must name the row that normally provides the registry',
+    ).toContainText('mechanics1');
 
     // And a click on Spin still throws — `presentStage`'s
     // `game.ctx.mechanics.forStage(stage)` is unguarded on purpose (see
     // `main.ts`) — but the reason is not repeated from scratch: the boot
-    // diagnostic naming `reelstep1` is still sitting in the same bounded
+    // diagnostic naming `mechanics1` is still sitting in the same bounded
     // log, above the raw throw, exactly where it landed before the click.
     await page.locator('#spin').click();
     const log = page.locator('#log');
-    await expect(log).toContainText('reelstep1', { timeout: 20_000 });
-    await expect(
-      log,
-      'the requires diagnostic names the missing service, not just the throw',
-    ).toContainText('requires "mechanics"');
+    await expect(log).toContainText('mechanics1', { timeout: 20_000 });
+    await expect(log, 'the diagnostic names the missing service, not just the throw').toContainText(
+      'nothing in the composition provided "mechanics"',
+    );
     // The raw text still travels too: it is what tells "failed for the
     // reason we predicted" apart from "failed for another reason while a
     // row happened to be missing".
     await expect(log).toContainText('forStage');
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The other service only the page reads: `ctx.play`, which `presentStage`
+ * hands a plan and a board. Nothing declares it a row's `requires`,
+ * because no ROW reads it, so before `PAGE_NEEDS` existed this edit booted
+ * to `ready` and the first click gave `Cannot read properties of undefined
+ * (reading 'execute')` — the same shape as the `mechanics` case above, one
+ * service along.
+ *
+ * `removeRowId` rather than a wholesale patch, and deliberately: this
+ * composition keeps `reelstep1`, so the row that needs what `playloop1`
+ * ALSO provided is still here to speak for itself.
+ */
+test('removing the play loop row says so before the first click', async ({ page }) => {
+  const dir = projectCopy({ removeRowId: 'playloop1' });
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(host.gameUrl);
+    await settled(page);
+
+    await expect(
+      page.locator('#status'),
+      'a composition with no play loop must not read as ready',
+    ).not.toHaveText('ready');
+    const mount = page.locator('#mount');
+    await expect(mount).toContainText('This game could not start');
+    await expect(
+      mount,
+      'the page names the row that normally provides the service it reads',
+    ).toContainText('playloop1');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

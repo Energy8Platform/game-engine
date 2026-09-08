@@ -32,15 +32,24 @@
  * The other side of that freedom is that a composition can legally leave
  * out something a row needs — and until now, nothing but THIS PAGE knew
  * that, by hand: a `REQUIRES` list of `{ service, row, pkg, what }` it
- * filtered against `game.ctx.reflect.get(...)` itself. That list is gone.
- * The rows that actually need `board`/`mechanics`/... now say so in their
+ * filtered against `game.ctx.reflect.get(...)` itself. Most of that list
+ * is gone. The rows that need `board`/`mechanics`/`steps` say so in their
  * OWN `package.json` (`e8.runtime.requires` — see `E8RuntimeHalf.requires`
  * in `@energy8engine/contracts`), and `createGame` checks it after every
  * row has applied, landing the result straight in `game.diagnostics` — the
- * same list this page already reads for everything else. This file no
- * longer keeps a second one; if some capability this page itself reaches
- * off `ctx` (not a row) ever needed its own check again, that would be a
- * gap in the engine's mechanism, not a reason to bring `REQUIRES` back.
+ * same list this page already reads for everything else.
+ *
+ * What is left of it is `PAGE_NEEDS` below, and it is two entries rather
+ * than the old three. `requires` is a field of a package.json, and a PAGE
+ * has none the composition ever reads, so a service only this file
+ * touches is nobody else's to check. Leaving it unchecked was measured,
+ * not assumed: with `reelstep1` also out of the patch — no row left
+ * declaring `mechanics` — dropping `mechanics1` booted this page to
+ * `ready` over an empty canvas with an empty log, and the first click
+ * gave `Cannot read properties of undefined (reading 'forStage')`. That
+ * is the white rectangle the whole `boot` design exists to prevent,
+ * reached by an edit the composition considers legal. So the check is
+ * narrowed to what only this page knows, not restored wholesale.
  *
  * **`<pre id="log">` is a reader, not a destination.** Everything this page
  * shows about what has gone wrong comes off `ctx.diagnostics` — the live
@@ -137,14 +146,108 @@ const game = await createGame({
  */
 const diagnosticsLog = game.ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
 
+/**
+ * What THIS PAGE reads off `ctx` and cannot work without — the remainder
+ * of the old `REQUIRES` list, kept for the reason the module doc gives:
+ * `e8.runtime.requires` is declared in a package.json, by a row, and this
+ * page is not one.
+ *
+ * Two entries, where there used to be three. `board` left the list
+ * because a row genuinely covers it now:
+ * `@energy8engine/play-loop`'s own package.json declares
+ * `requires: ["board"]`, so a composition that drops `reels1` is reported
+ * by the row that noticed rather than a second time by this page — and
+ * the single line here that touches `ctx.board` hands it to
+ * `ctx.play.execute`, which this list guards in front of it. The two that
+ * stay have no such row: nothing anywhere declares `play`, because no row
+ * READS it — only this page does — and the one row that declares
+ * `mechanics` is `reelstep1`, a project plugin the same patch edit can
+ * remove, which is exactly the composition that was measured booting to
+ * `ready` over an empty canvas.
+ *
+ * `what` is a phrase about this PAGE, and the row is named as the thing
+ * that normally provides the service rather than as the cause: the row
+ * may be right there in `e8.patch.yml` and failing for a reason the host
+ * already reported, and two diagnostics contradicting each other about
+ * which is which is worse than one that only states what it measured.
+ *
+ * `reflect.get(name, false)` rather than `ctx.play`: cordis throws on a
+ * property read of a REGISTERED service this module never injected, and
+ * "nobody provided one" is the answer this needs, not an exception. It is
+ * the same guarded read the `<select>`'s seed performs further down.
+ */
+const PAGE_NEEDS = [
+  {
+    service: 'mechanics',
+    row: 'mechanics1',
+    pkg: '@energy8engine/game-runtime',
+    what: 'a mechanic registry to turn a spin result into a presentation',
+  },
+  {
+    service: 'play',
+    row: 'playloop1',
+    pkg: '@energy8engine/play-loop',
+    what: 'a play loop to run a presentation plan through',
+  },
+] as const;
+
+const unmet = PAGE_NEEDS.filter(
+  (need) => game.ctx.reflect.get(need.service, false) === undefined,
+).map((need) =>
+  diagnostic(
+    'error',
+    'first-slot',
+    need.service,
+    `this page needs ${need.what}, and nothing in the composition provided "${need.service}" — the "${need.row}" row (${need.pkg}) is what normally does`,
+    `check the "${need.row}" row: it may have been removed in e8.patch.yml, or it may be listed but failing — any diagnostic above naming "${need.row}" says which`,
+  ),
+);
+
+/**
+ * The page's own findings join the same list everything else writes to.
+ * `game.diagnostics` is already in it — `createGame` mirrors what it
+ * collected into the service before it returns — so only `unmet` is
+ * written here, and exactly once.
+ */
+reportAll(diagnosticsLog, unmet);
+
+const diagnostics = [...game.diagnostics, ...unmet];
+
+/**
+ * Draws the reasons where a person is already looking, replacing whatever
+ * the renderer row attached to the mount. `createGame` does this for the
+ * diagnostics IT collected; these were found after it returned, so making
+ * them visible is this page's to do.
+ *
+ * Through the composed `boot` service, which is the point of `boot1` being
+ * a row: a project shipping a branded failure screen gets this one too.
+ * The fallback and the try/catch are the same two guards `createGame`'s
+ * own `renderFailure` carries, for the same two reasons — `boot1` can
+ * legally be dropped from a composition, and a failure screen that throws
+ * must not blank the page it was supposed to explain.
+ */
+if (unmet.length > 0) {
+  const boot = game.ctx.reflect.get('boot', false) as
+    { renderFailure(root: HTMLElement, list: Diagnostic[]): void } | undefined;
+  try {
+    if (!boot) throw new Error('no boot row in this composition');
+    boot.renderFailure(mount, diagnostics);
+  } catch {
+    mount.textContent = [
+      'This game could not start',
+      ...diagnostics.map((d) => `${d.plugin} — ${d.where}: ${d.message}`),
+    ].join('\n');
+  }
+}
+
 // "errors" and "warnings" are not the same news and must not read as the
 // same news. A composition carrying only warnings STILL PLAYS — the game
 // is on screen, Spin works, and the only thing that happened is that
 // something (an unreadable `game/script.spin`, most likely) could not be
 // fully read. Calling that "errors" told a developer their game was
 // broken when it was running in front of them.
-if (game.diagnostics.length > 0) {
-  const errors = game.diagnostics.filter((d) => d.severity === 'error').length;
+if (diagnostics.length > 0) {
+  const errors = diagnostics.filter((d) => d.severity === 'error').length;
   statusEl.textContent =
     errors > 0 ? 'composition has errors — see log' : 'composition has warnings — see log';
 } else {
@@ -224,11 +327,11 @@ diagnosticsLog?.subscribe(renderDiagnostics);
  * can, because only it knows whether the registration ever arrived.
  *
  * Through `reflect.get`: a composition with no `mechanics1` row is a legal
- * edit — `reelstep1` declares `requires: ["mechanics"]` (see its own
- * `package.json`), so `createGame` has already reported it in
- * `game.diagnostics` by the time this line runs — and this line must not
- * turn the absence into a `TypeError` that stops the page before that
- * report is drawn.
+ * edit — `PAGE_NEEDS` above has already reported it and drawn the failure
+ * screen by the time this line runs, and `reelstep1` will have said the
+ * same about its own half if that row is in the composition — and this
+ * line must not turn the absence into a `TypeError` that stops the page
+ * before those reports are drawn.
  */
 const bound = game.ctx.reflect.get('mechanics', false)?.forStage('base_game')?.id;
 if (bound) mechanicSelect.value = bound;
@@ -364,15 +467,14 @@ function spinRequest(): Record<string, unknown> {
  *
  * Through `reflect.get`: a composition with no `playloop1` row is a legal
  * edit, and it must not turn into a `TypeError` here — least of all on the
- * line whose job is keeping a record when things are going wrong. Unlike
- * `board`/`mechanics`, nothing in this composition declares `play` a
- * `requires` — no row reads `ctx.play` internally, only this page does —
- * so removing `playloop1` outright is not reported at boot the way
- * removing `reels1` or `mechanics1` now is; it surfaces on the first Spin
- * click instead, as a raw failure (see `spinFailure`). A known gap, not an
- * oversight: closing it would mean giving this PAGE a way to declare a
- * requirement, which the current mechanism does not offer to anything
- * other than a row with its own `package.json`.
+ * line whose job is keeping a record when things are going wrong. Nothing
+ * anywhere declares `play` a row's `requires`, because no row READS
+ * `ctx.play` — only this page does, which is why `play` is one of the two
+ * entries in `PAGE_NEEDS` above. What is genuinely left over after that is
+ * narrower than this comment used to claim: not the whole `playloop1` row,
+ * but a page's own reads, which `e8.runtime.requires` has no way to carry
+ * because that field belongs to a package.json and a page has none the
+ * composition reads.
  * The row that provides the durable log (`spinlog1`) is not a `requires`
  * anywhere, on purpose: a game that keeps no record is a working game, and
  * `play.record` is a no-op without one.
@@ -390,13 +492,14 @@ function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep
  * nothing else — true, and by itself unhelpful: it names an internal of a
  * service that is not there rather than the row a person has to put back.
  *
- * This function used to repair that itself, from a page-local `unmet` list
- * built by hand. It does not any more: a row that requires a service now
- * says so through `E8RuntimeHalf.requires`, and `createGame` already wrote
- * that diagnostic into `game.diagnostics` — and onto the screen, above
- * this one — before the first click ever happened, for every case the
- * mechanism covers. So this only reports the raw failure; the reader who
- * needs the "why" has it already, sitting higher in the same log.
+ * This function used to repair that itself, reaching back into a
+ * page-local list to work out which row a click had tripped over. It does
+ * not any more, and it does not need to: a row that requires a service
+ * says so through `E8RuntimeHalf.requires`, this page says the same about
+ * the two services only it reads (`PAGE_NEEDS`), and both were written
+ * into the same log — and onto the screen — before the first click ever
+ * happened. So this only reports the raw failure; the reader who needs
+ * the "why" has it already, sitting higher in the same log.
  *
  * A `Diagnostic`, not a string painted into this page's own element: it
  * belongs in the same list everything else does, and reaches the IDE for
@@ -481,8 +584,8 @@ spinBtn.addEventListener('click', async () => {
  * imports this file's test harness, either.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
-  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field: every row's unmet `requires` is in it too, there being no second, page-local list any more. */
-  diagnostics: game.diagnostics,
+  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `PAGE_NEEDS` found, which is the whole of what the boot screen and `#log` were given. */
+  diagnostics,
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
   async spin(): Promise<{ result: SpinResult; steps: PresentationStep[] }> {
     const request = spinRequest();
