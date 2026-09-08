@@ -816,9 +816,13 @@ describe('ide-bridge — reporting to the diagnostics service', () => {
 describe('ide-bridge forwards the game diagnostics', () => {
   /**
    * A socket the test drives: `readyState` is writable, `open()` flips it
-   * and fires the listener this function registers, and every frame sent is
-   * recorded. `openNow` starts it already open, which is what a caller
-   * handing over a live socket looks like.
+   * and fires the listener this function registers, every frame sent is
+   * recorded, and `deliver()`/`deliverRaw()` fire whatever `message`
+   * listener this function registers — the inbound half added alongside
+   * `open`, so a test can hand this socket a frame the way a real one
+   * hands `attachDiagnosticsForwarding` bytes off the wire. `openNow`
+   * starts it already open, which is what a caller handing over a live
+   * socket looks like.
    */
   function fakeSocket(readyState = 1) {
     const sent: string[] = [];
@@ -827,6 +831,7 @@ describe('ide-bridge forwards the game diagnostics', () => {
     // listener reads nothing — so this matches that signature and hands the
     // open listener an event it does not look at.
     const openListeners: ((event: { data: string }) => void)[] = [];
+    const messageListeners: ((event: { data: string }) => void)[] = [];
     const socket = {
       readyState,
       send: (frame: string) => {
@@ -835,12 +840,22 @@ describe('ide-bridge forwards the game diagnostics', () => {
       sent,
       addEventListener(type: string, listener: (event: { data: string }) => void) {
         if (type === 'open') openListeners.push(listener);
+        if (type === 'message') messageListeners.push(listener);
       },
       close() {},
       /** What a real socket does when it finishes connecting. */
       open() {
         socket.readyState = 1;
         for (const listener of openListeners) listener({ data: '' });
+      },
+      /** What a real socket does when a well-formed frame arrives FROM the host. */
+      deliver(message: unknown) {
+        const data = JSON.stringify(message);
+        for (const listener of messageListeners) listener({ data });
+      },
+      /** Same, for bytes that are not even valid JSON. */
+      deliverRaw(data: string) {
+        for (const listener of messageListeners) listener({ data });
       },
     };
     return socket;
@@ -993,6 +1008,123 @@ describe('ide-bridge forwards the game diagnostics', () => {
     calls = 0;
     log.report(d('first'));
     expect(calls).toBe(1);
+  });
+
+  /**
+   * The receiving half — Task 6. `rpc.ts`'s `reportGameDiagnostics`
+   * already sends this host's OWN `/api/spin` failures down this exact
+   * socket, stamped `source: 'host'`, to every connected client: the host
+   * keeps one socket set and draws no line between an editor tab and a
+   * game's bridge (see `rpc.ts`'s own `clients` doc). Nothing on this side
+   * ever read that frame, so a failure only the HOST had noticed reached
+   * the editor but never the game it happened to — the gap these tests
+   * close.
+   */
+  it('seeds a game-diagnostics frame the host sends down, and does not forward it back up', () => {
+    // The loop this must not have: down (`seed`) -> up (`own()` via
+    // `forward`, subscribed above) -> down again. `seed`ing still notifies
+    // that same subscription — `add()` inside `createDiagnostics` does not
+    // distinguish `report` from `seed` when it fires listeners — so the
+    // loop is broken by WHAT gets sent staying empty (`own()` excludes a
+    // seeded entry), not by the subscription never firing again.
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    attachDiagnosticsForwarding(socket, log);
+
+    socket.deliver({
+      type: 'game-diagnostics',
+      source: 'host',
+      dropped: 0,
+      diagnostics: [d('spin failed')],
+    });
+
+    expect(log.own()).toEqual([]); // seeded, not reported
+    expect(log.list().map((x) => x.message)).toEqual(['spin failed']);
+    expect(frames(socket).filter((f) => f.diagnostics.length > 0)).toEqual([]);
+  });
+
+  it('a seeded diagnostic still shows on the game page', () => {
+    // Not a property of `attachDiagnosticsForwarding` itself — `seed` and
+    // `list` are `@energy8engine/diagnostics`'s own contract, already
+    // covered in that package's tests. Restated here, the same way the
+    // composition test at the bottom of this file restates a Task 2
+    // property, so the reason the test above seeds rather than reports has
+    // a home right next to where that choice is made: `list()` is what
+    // `boot` and this game's own page paint, and it must carry a seeded
+    // entry just as it carries a reported one — whoever first noticed it.
+    const log = createDiagnostics();
+    log.seed(d('spin failed'));
+    expect(log.list()).toHaveLength(1);
+  });
+
+  it('still ignores frames it has no business with', () => {
+    // The strict filter is what keeps the namespaces apart. Widening it by
+    // one type — accepting `game-diagnostics` — must not widen it by two:
+    // a `game-diagnostics` frame is this game's business ONLY when it is
+    // stamped `source: 'host'`.
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    attachDiagnosticsForwarding(socket, log);
+
+    // The original case: a project diagnostic, wrong type entirely.
+    socket.deliver({ type: 'diagnostics', diagnostics: [d('a project problem')] });
+    // The same wrong type, with a `source` field bolted on — proves the
+    // type check itself is doing the rejecting here, not the source check
+    // below catching it by coincidence.
+    socket.deliver({
+      type: 'diagnostics',
+      diagnostics: [d('a project problem, source spoofed')],
+      source: 'host',
+    });
+    // Right type, wrong source: `rpc.ts`'s relay forwards a CLIENT's own
+    // frame to every OTHER client, so with two games open on one dev host,
+    // this socket also receives ANOTHER game's frame, stamped
+    // `source: 'game'`. Seeding that would mix one game's failures into an
+    // unrelated game's list — worse than the gap this closes.
+    socket.deliver({
+      type: 'game-diagnostics',
+      source: 'game',
+      dropped: 0,
+      diagnostics: [d('a DIFFERENT game said this')],
+    });
+    // Right type, no source at all: `GameDiagnosticsMessage.source`'s own
+    // doc says an absent source reads as `'game'` — the meaning the field
+    // had before there were two speakers — so it must be rejected the same
+    // way an explicit `'game'` is.
+    socket.deliver({ type: 'game-diagnostics', dropped: 0, diagnostics: [d('no source given')] });
+
+    expect(log.list()).toEqual([]);
+  });
+
+  it('ignores a malformed frame delivered the same way, and does not throw', () => {
+    // Same family `apply()`'s own snapshot listener already guards
+    // against: `null`, an array, and a primitive all pass `JSON.parse` but
+    // would throw on `.type` outside a catch; plain unparsable text throws
+    // inside `JSON.parse` itself.
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    attachDiagnosticsForwarding(socket, log);
+
+    expect(() => {
+      for (const raw of ['not json', 'null', '42', '[]']) socket.deliverRaw(raw);
+    }).not.toThrow();
+    expect(log.list()).toEqual([]);
+  });
+
+  it('seeds nothing more once disposed, even if a frame arrives later', () => {
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    const detach = attachDiagnosticsForwarding(socket, log);
+    detach();
+
+    socket.deliver({
+      type: 'game-diagnostics',
+      source: 'host',
+      dropped: 0,
+      diagnostics: [d('too late')],
+    });
+
+    expect(log.list()).toEqual([]);
   });
 
   it('a game with no bridge row costs the game nothing', () => {

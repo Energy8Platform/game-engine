@@ -221,8 +221,11 @@ export const Config = Schema.object({
 });
 
 /**
- * Subscribes `socket` to `log`: on every change, sends the log's WHOLE
- * current list as one `game-diagnostics` frame. Named and exported on its
+ * Subscribes `socket` to `log`, both ways. Out: on every change, sends the
+ * log's WHOLE current list as one `game-diagnostics` frame (immediately
+ * below). In: accepts that same frame back FROM the host and seeds what it
+ * carries (the second half of this function, past the outbound doc below —
+ * see the comment sitting right on it for why). Named and exported on its
  * own — not folded into `apply` — because it is the one line in this whole
  * package that lives only in development (see the module doc), and because
  * it is tested standalone, against a plain fake socket and a real
@@ -326,6 +329,56 @@ export function attachDiagnosticsForwarding(
   forward();
 
   const unsubscribe = log.subscribe(forward);
+
+  /**
+   * The other half of this function's name — not only OUT to the host, but
+   * also IN from it. `rpc.ts`'s `reportGameDiagnostics` already sends this
+   * host's OWN `/api/spin` failures down this exact socket, stamped
+   * `source: 'host'` — to every connected client, this one included,
+   * because the host keeps one socket set and draws no line between an
+   * editor tab and a game's bridge (see `rpc.ts`'s own `clients` doc).
+   * Nothing on this side ever read that frame, so a failure only the HOST
+   * had noticed reached the editor but never the game's own page — the gap
+   * this closes.
+   *
+   * `seed`ed, not `report`ed. Reporting it would notify this same
+   * `log.subscribe(forward)` above and go straight back out as part of
+   * `own()` — closing a loop this socket cannot afford: down, report,
+   * `own()`, up, down again, forever. `seed` is the same verb `createGame`
+   * already uses for the host's PROJECT diagnostics (see
+   * `DiagnosticsService.seed`'s own doc): a diagnostic this game did not
+   * itself produce, so `list()` — what `boot` and this game's own page
+   * paint — carries it, while `own()` — what `forward` above sends on —
+   * does not.
+   *
+   * **Only `source: 'host'`, nothing else accepted.** The relay in
+   * `rpc.ts` forwards a CLIENT's own frame to every OTHER client, so with
+   * two games open on one dev host, this socket also receives ANOTHER
+   * game's frame, stamped `source: 'game'`. Seeding that would mix one
+   * game's failures into an unrelated game's list — worse than the gap
+   * this closes. An absent `source` reads as `'game'` by the protocol's
+   * own rule (`GameDiagnosticsMessage.source`'s doc — the meaning the
+   * field had before there were two speakers), so it is rejected here
+   * exactly like an explicit `'game'` would be.
+   */
+  socket.addEventListener('message', (event) => {
+    if (disposed) return;
+    let message: Extract<ServerMessage, { type: 'game-diagnostics' }>;
+    try {
+      const parsed: unknown = JSON.parse(event.data);
+      // Same family `apply()`'s own snapshot listener guards against below
+      // — `null`, an array, or a primitive all pass `JSON.parse` but would
+      // throw on `.type` outside this catch.
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      if ((parsed as { type?: unknown }).type !== 'game-diagnostics') return;
+      message = parsed as Extract<ServerMessage, { type: 'game-diagnostics' }>;
+    } catch {
+      return;
+    }
+    if (message.source !== 'host') return;
+    for (const d of message.diagnostics) log.seed(d);
+  });
+
   return () => {
     disposed = true;
     unsubscribe();
