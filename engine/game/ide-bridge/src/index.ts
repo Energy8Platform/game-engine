@@ -49,7 +49,12 @@
  */
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
-import { diagnostic, type Diagnostic, type ServerMessage } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type ClientMessage,
+  type Diagnostic,
+  type ServerMessage,
+} from '@energy8engine/contracts';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
 // Type-only and fully erased — declares `ctx.diagnostics` on cordis's
 // `Context` without importing the row itself. See `@energy8engine/spin-log`'s
@@ -127,9 +132,20 @@ export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
   onDiagnostic?: (diagnostic: Diagnostic) => void;
 }
 
-/** The slice of WebSocket this module needs — enough to fake in a test. */
+/**
+ * The slice of WebSocket this module needs — enough to fake in a test.
+ *
+ * `readyState`/`send` joined `addEventListener`/`close` here for the same
+ * reason they are already on `connection.ts`'s own `WebSocketLike`: this
+ * module used to only LISTEN on this socket (see the module doc's history
+ * — "there is no `socket.send` in it at all" was true until
+ * `attachDiagnosticsForwarding`). A real `WebSocket` already has both, so
+ * the default factory below needs no change.
+ */
 export interface WebSocketLike {
+  readyState: number;
   addEventListener(type: string, listener: (event: { data: string }) => void): void;
+  send(data: string): void;
   close(): void;
 }
 
@@ -180,6 +196,58 @@ export const Config = Schema.object({
   stage: Schema.string().description('стадия (пусто — та единственная, что связал состав)'),
   mechanic: Schema.string().description('механика стадии'),
 });
+
+/**
+ * Subscribes `socket` to `log`: on every change, sends the log's WHOLE
+ * current list as one `game-diagnostics` frame. Named and exported on its
+ * own — not folded into `apply` — because it is the one line in this whole
+ * package that lives only in development (see the module doc), and because
+ * it is tested standalone, against a plain fake socket and a real
+ * `createDiagnostics()` service, below.
+ *
+ * **Whole list, not a delta.** A delta is cheaper per frame, but it only
+ * means anything to a reader that already has everything sent before it —
+ * which makes "a client that just (re)connected" a case this function
+ * would have to solve on its own (replay-from-empty, or a separate
+ * "give me the current state" message `rpc.ts` does not have). Sending the
+ * whole list every time sidesteps that entirely: the very next report after
+ * a reconnect hands the new socket a complete, self-sufficient picture, not
+ * an increment onto state it may not have. `log.list()` is already a
+ * bounded, small array (`DEFAULT_LIMIT` — see `@energy8engine/diagnostics`),
+ * so resending it in full costs nothing this module needs to economize on.
+ *
+ * **Never throws, and never re-enters `log`.** A closed or half-open
+ * socket, or one whose `send` itself throws, is not this function's
+ * failure to escalate — see `connection.ts`'s `update()` for the ordinary
+ * shape of "a send failure becomes a diagnostic" and why THIS function
+ * cannot follow it: the only service there is to write that diagnostic
+ * into is `log` itself, and `log.report()` would notify this SAME
+ * subscription again, forwarding again, over a socket that just proved it
+ * cannot be forwarded to. A dev-only bridge that spins on a broken socket
+ * is worse than one that goes quiet, so a send failure here is simply
+ * swallowed.
+ */
+export function attachDiagnosticsForwarding(
+  socket: Pick<WebSocket, 'readyState' | 'send'>,
+  log: DiagnosticsService,
+): () => void {
+  const WEBSOCKET_OPEN = 1;
+  const forward = () => {
+    if (socket.readyState !== WEBSOCKET_OPEN) return;
+    try {
+      const message: ClientMessage = {
+        type: 'game-diagnostics',
+        diagnostics: [...log.list()],
+        dropped: log.dropped(),
+      };
+      socket.send(JSON.stringify(message));
+    } catch {
+      // See this function's own doc: nowhere safe to report this that
+      // would not loop straight back through `log` and this subscription.
+    }
+  };
+  return log.subscribe(forward);
+}
 
 export function apply(ctx: Context, config: IdeBridgeConfig): void {
   const mechanics = ctx.get('mechanics') as MechanicsBinder | undefined;
@@ -384,6 +452,17 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   const factory =
     config.socketFactory ?? ((u: string) => new WebSocket(u) as unknown as WebSocketLike);
   const socket = factory(url);
+
+  // The one line that lives only in development (see the module doc): a
+  // running game's own diagnostics, forwarded to the host so the IDE shows
+  // the SAME list a panel embedded in the game itself would read. Optional
+  // in exactly the way `report` above already is — a composition with no
+  // `diagnostics` row leaves this simply unwired, never broken.
+  const diagnosticsLog = ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
+  if (diagnosticsLog) {
+    const detachForwarding = attachDiagnosticsForwarding(socket, diagnosticsLog);
+    ctx.effect(() => detachForwarding, 'ide-bridge-diagnostics-forwarding');
+  }
 
   socket.addEventListener('message', (event) => {
     // Narrowed straight to the one variant this module reads — a second,

@@ -1,8 +1,10 @@
 import { Context } from 'cordis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
+import { createDiagnostics } from '@energy8engine/diagnostics';
 import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import * as ideBridge from '../src/index';
+import { attachDiagnosticsForwarding } from '../src/index';
 
 /**
  * `ide-bridge` runs in two different places under the SAME `apply()`:
@@ -785,5 +787,84 @@ describe('ide-bridge — reporting to the diagnostics service', () => {
     ).not.toThrow();
 
     expect(reported).toHaveLength(1);
+  });
+});
+
+/**
+ * `attachDiagnosticsForwarding` is the plan's own interface (task-5-brief):
+ * subscribes a socket to a `DiagnosticsService` and forwards every change
+ * as one `game-diagnostics` frame. Tested standalone, against a plain fake
+ * socket and a real `createDiagnostics()` service — not through `apply()` —
+ * because it is Named and exported precisely so it can be.
+ *
+ * Local `fakeSocket`/`d` helpers, deliberately not the file's own
+ * module-level `fakeSocket()` above: that one fakes the RECEIVING half
+ * (`addEventListener`/`emit`) `apply()`'s inbound `snapshot` listener
+ * needs; this one fakes the SENDING half (`readyState`/`send`) this
+ * function needs, and the two names would collide if both lived at module
+ * scope.
+ */
+describe('ide-bridge forwards the game diagnostics', () => {
+  /** A socket whose readyState the test owns, recording every frame sent. */
+  function fakeSocket(readyState = 1) {
+    const sent: string[] = [];
+    return {
+      readyState,
+      send: (frame: string) => sent.push(frame),
+      sent,
+      addEventListener() {},
+      close() {},
+    };
+  }
+  const d = (message: string) => ({ severity: 'error' as const, plugin: 'p', where: 'w', message });
+
+  it('sends what the service holds, as one game-diagnostics frame, when it changes', () => {
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    attachDiagnosticsForwarding(socket, log); // the unit under test
+    log.report(d('reels blew up'));
+    expect(socket.sent).toHaveLength(1);
+    const frame = JSON.parse(socket.sent[0]);
+    expect(frame.type).toBe('game-diagnostics');
+    expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual([
+      'reels blew up',
+    ]);
+  });
+
+  it('sends nothing when the socket is not open, and does not throw', () => {
+    const socket = fakeSocket(0); // CONNECTING
+    const log = createDiagnostics();
+    attachDiagnosticsForwarding(socket, log);
+    expect(() => log.report(d('while closed'))).not.toThrow();
+    expect(socket.sent).toEqual([]);
+  });
+
+  it('a send that throws does not trigger another send', () => {
+    // The recursion this must not have: forward -> throws -> reports the
+    // failure -> the service notifies -> forward again. A dev-only bridge
+    // that spins on a broken socket is worse than one that says nothing.
+    const log = createDiagnostics();
+    let calls = 0;
+    const socket = {
+      readyState: 1,
+      sent: [] as string[],
+      addEventListener() {},
+      close() {},
+      send() {
+        calls += 1;
+        throw new Error('socket died mid-send');
+      },
+    };
+    attachDiagnosticsForwarding(socket, log);
+    log.report(d('first'));
+    expect(calls).toBe(1);
+  });
+
+  it('a game with no bridge row costs the game nothing', () => {
+    // Nothing to assert on the bridge itself — this is the composition test
+    // in task 2 restated here so the property has a home in this file too.
+    const log = createDiagnostics();
+    expect(() => log.report(d('no bridge present'))).not.toThrow();
+    expect(log.list()).toHaveLength(1);
   });
 });
