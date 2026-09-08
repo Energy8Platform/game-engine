@@ -57,6 +57,29 @@ describe('slots', () => {
     expect(ctx.slots.list('composition.card')).toHaveLength(1);
   });
 
+  // Task 8, Step 5: the replace above used to be entirely silent — the
+  // same last-writer-wins defect this branch already found and fixed
+  // twice elsewhere (spin-parser's `NamedCollection`, play-loop/
+  // game-runtime's `BoardStepRegistry`/`MechanicsService`). The policy
+  // here stays a replace (see the "stale disposer" test below, which
+  // depends on the second registration winning) — only the silence is
+  // fixed: a collision is now reported through `ctx.connection`, the same
+  // outlet `CardBoundary` already uses for a crashed card.
+  it('reports a collision through ctx.connection instead of swapping the key in silence', async () => {
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>first</span>);
+    expect(ctx.connection.diagnostics).toHaveLength(0);
+
+    ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>second</span>);
+
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+    expect(ctx.connection.diagnostics[0]).toMatchObject({
+      severity: 'warning',
+      plugin: 'a',
+      where: 'composition.card',
+    });
+  });
+
   it('does not throw when the same disposer is called twice', async () => {
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
     const dispose = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => null);

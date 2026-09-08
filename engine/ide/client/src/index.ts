@@ -24,3 +24,4 @@ export {
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, Preview, computePreviewUrl } from './screens/CompositionScreen';
+export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
