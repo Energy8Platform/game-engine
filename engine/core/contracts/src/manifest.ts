@@ -235,6 +235,26 @@ export function parseManifest(
           );
         } else {
           const validRequires = runtime.requires.filter((v): v is string => typeof v === 'string');
+          // An entry that is not a string is dropped, and SAID. Dropping
+          // it quietly weakened the declaration in the one direction a
+          // reader can never notice: `["board", 7]` became "requires
+          // board", `[7]` became "requires nothing", and both look
+          // exactly like a package that meant it. The strings around it
+          // still parse, for the same reason a malformed `requires`
+          // leaves `entry` alone one branch up — half a manifest beats
+          // none.
+          const dropped = runtime.requires.length - validRequires.length;
+          if (dropped > 0) {
+            diagnostics.push(
+              diagnostic(
+                'warning',
+                pluginId,
+                'e8.runtime.requires',
+                `"requires" lists service names, and ${dropped} of its ${runtime.requires.length} entries ${dropped === 1 ? 'is' : 'are'} not a string — ${dropped === 1 ? 'that one is' : 'those are'} dropped, the rest still count`,
+                'make every entry of e8.runtime.requires a string, e.g. ["board", "mechanics"]',
+              ),
+            );
+          }
           if (validRequires.length > 0) {
             runtimeHalf.requires = validRequires;
           }

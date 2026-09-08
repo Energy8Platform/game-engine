@@ -87,11 +87,44 @@ describe('parseManifest', () => {
     expect(diagnostics).toEqual([]);
   });
 
-  it('a requires that is not an array of strings is a diagnostic naming the row', () => {
+  it('a requires that is not an array at all is a diagnostic naming the row', () => {
     const { diagnostics } = parseManifest({ e8: { runtime: { entry: './r.ts', requires: 'board' } } }, 'row1');
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].plugin).toBe('row1');
-    expect(diagnostics[0].message).toContain('requires');
+    expect(diagnostics[0].where).toBe('e8.runtime.requires');
+  });
+
+  // The three tests below are the array case, split one per branch. They
+  // used to be one test named for all of them, exercising the non-array
+  // case only — so `["board", 7]` silently weakened to `["board"]` and
+  // `[7]` silently became "requires nothing", both under a name that
+  // promised otherwise.
+  it('a non-string element of requires is a diagnostic naming the row and the field', () => {
+    const { diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', requires: ['board', 7] } } },
+      'row1',
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].plugin).toBe('row1');
+    expect(diagnostics[0].where).toBe('e8.runtime.requires');
+  });
+
+  it('the valid names in a mixed requires still parse — half a manifest beats none', () => {
+    const { manifest } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', requires: ['board', 7] } } },
+      'row1',
+    );
+    expect(manifest!.runtime!.requires).toEqual(['board']);
+  });
+
+  it('a requires with no string in it at all still says so', () => {
+    const { manifest, diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', requires: [7] } } },
+      'row1',
+    );
+    expect(manifest!.runtime!.requires).toBeUndefined();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].where).toBe('e8.runtime.requires');
   });
 
   it('the entry still parses when requires is malformed — half a manifest beats none', () => {
