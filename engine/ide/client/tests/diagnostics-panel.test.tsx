@@ -42,7 +42,30 @@ describe('DiagnosticsPanel', () => {
   });
 
   it('a bounded log that forgot something says so', () => {
-    render(<DiagnosticsPanel project={[]} game={[d('error', 'p', 'w', 'last')]} droppedFromGame={3} />);
+    render(
+      <DiagnosticsPanel project={[]} game={[d('error', 'p', 'w', 'last')]} droppedFromGame={3} />,
+    );
     expect(screen.getByTestId('diagnostics-panel')).toHaveTextContent('3');
+  });
+  /**
+   * A third namespace exists — the EDITOR's own plugin graph — and it is
+   * rendered by `CompositionScreen`, beside the row each entry is about,
+   * because that is the one place `plugin` ids resolve to row names. A
+   * panel whose whole claim is "one place to look" must still account for
+   * them rather than leave them out in silence.
+   */
+  it("says how many are about the editor's own plugins, and where they are", () => {
+    render(<DiagnosticsPanel project={[]} game={[]} editorCount={2} />);
+    const note = screen.getByTestId('diag-editor-note');
+    expect(note).toHaveTextContent('2');
+    expect(note).toHaveTextContent(/editor/i);
+    expect(note, 'a reader must be told where to look, not just that more exist').toHaveTextContent(
+      /above/i,
+    );
+  });
+
+  it('says nothing about the editor when there is nothing to say', () => {
+    render(<DiagnosticsPanel project={[]} game={[]} editorCount={0} />);
+    expect(screen.queryByTestId('diag-editor-note')).toBeNull();
   });
 });

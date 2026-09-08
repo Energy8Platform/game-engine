@@ -3,6 +3,7 @@ import type { Context } from 'cordis';
 import {
   CompositionScreen,
   DiagnosticsPanel,
+  useEditorDiagnostics,
   useGameComposition,
   useGameDiagnostics,
 } from '@energy8engine/ide-client';
@@ -23,7 +24,18 @@ import {
 function DiagnosticsPanelCard({ ctx }: { ctx: Context }) {
   const { diagnostics: project } = useGameComposition(ctx);
   const { diagnostics: game, dropped } = useGameDiagnostics(ctx);
-  return <DiagnosticsPanel project={project} game={game} droppedFromGame={dropped} />;
+  // The third namespace — the EDITOR's own plugin graph. Counted here, not
+  // listed: `CompositionScreen` shows each of these beside the row it is
+  // about, which the panel cannot do. See `DiagnosticsPanelProps.editorCount`.
+  const editor = useEditorDiagnostics(ctx);
+  return (
+    <DiagnosticsPanel
+      project={project}
+      game={game}
+      droppedFromGame={dropped}
+      editorCount={editor.length}
+    />
+  );
 }
 
 /**

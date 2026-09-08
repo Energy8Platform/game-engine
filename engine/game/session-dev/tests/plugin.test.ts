@@ -162,10 +162,18 @@ describe('the session plugin', () => {
  * `diagnostics` service — this row's `apply(ctx)` already holds `ctx` (the
  * same way `mechanics1`'s does), so it is positioned to write directly, for
  * whichever composition actually shares a `ctx` with a `diagnostics1` row.
- * See task-2-3-report.md for why THIS repo's one real caller
- * (`dev-game.ts`'s HOST-side `/api/spin` route) is a different process from
- * the browser's own `ctx.diagnostics` and cannot reach it this way — that
- * gap is `first-slot`'s `main.ts` to bridge, not this row's.
+ *
+ * **No composition in this repo is that one, and this block says so rather
+ * than implying otherwise.** The only production caller is `dev-game.ts`'s
+ * host-side `/api/spin` route, whose `ctx` is the IDE host's and composes
+ * no `diagnostics1`; the host reaches the editor by a different road
+ * (`rpc.ts`'s `reportGameDiagnostics`), and `first-slot` never passes
+ * `createGame({ session })`. What the arrangement below IS, exactly, is
+ * what `createGame({ session })` produces over a composition that includes
+ * `diagnostics1` — the in-process node path `GameConfig.session` exists for
+ * — so these tests pin a reachable path with no caller yet, not an
+ * impossible one. See the long comment at the write itself in `../src/
+ * index.ts` for why it is kept rather than deleted.
  *
  * **Deliberately NOT covered here: the startup failure `!handle` returns.**
  * `startupDiagnostic` is read EAGERLY, at compose time, by

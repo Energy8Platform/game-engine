@@ -128,6 +128,21 @@ export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
    * the complaint is not lost when it is: `MechanicsService.check` reports
    * the same unregistered binding, with the whole story, on the first
    * spin. This one is earlier, not instead.
+   *
+   * **No production caller passes one any more, and the reason it is still
+   * here has changed — said plainly rather than left as a field that looks
+   * abandoned.** The original reason went when this module learned to write
+   * to `ctx.diagnostics` itself: `first-slot`'s page dropped its callback,
+   * because passing one printed the same event into the same element a
+   * second way. What the callback still is, and nothing else can be, is the
+   * only observation point for what THIS MODULE decided to report. The
+   * shared service now collapses byte-identical repeats
+   * (`@energy8engine/diagnostics`), so a test reading the service back
+   * cannot tell "the bridge reported once" from "the bridge reported five
+   * times and the list kept one" — which is exactly the property this
+   * module's own dedupe maps (`reportedUnregistered`, `reportedNoStage`,
+   * `reportedLegacyKey`) exist to hold. Its tests read it for that, and
+   * only that.
    */
   onDiagnostic?: (diagnostic: Diagnostic) => void;
 }

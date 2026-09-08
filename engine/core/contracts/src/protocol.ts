@@ -122,20 +122,5 @@ export type ServerMessage =
   | GameDiagnosticsMessage;
 
 /** Browser to host. */
-export type ClientMessage = { type: 'update'; id: string; config: unknown } | GameDiagnosticsMessage;
-
-/**
- * A loose runtime check for "this parsed JSON is shaped like a
- * `ServerMessage`" — as loose as the inline guards `rpc.ts` and
- * `connection.ts` already apply by hand before trusting a socket frame's
- * `.type`. Only the type tag is load-bearing here, on purpose: a receiver
- * must tell `diagnostics` and `game-diagnostics` apart by TYPE ALONE,
- * never by inspecting `plugin` or any other field — see
- * `GameDiagnosticsMessage`'s own doc for why guessing from the data is
- * exactly the mistake this type exists to make impossible.
- */
-export function isServerMessage(value: unknown): value is ServerMessage {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const type = (value as { type?: unknown }).type;
-  return type === 'snapshot' || type === 'diagnostics' || type === 'game-diagnostics';
-}
+export type ClientMessage =
+  { type: 'update'; id: string; config: unknown } | GameDiagnosticsMessage;

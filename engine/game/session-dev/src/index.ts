@@ -133,6 +133,30 @@ export async function apply(ctx: Context, config: SessionConfig) {
         // row's `apply(ctx)` already holds `ctx` (the same position
         // `mechanics1`'s registry writes from), so it writes directly
         // rather than leaving every composer to notice and relay it.
+        //
+        // **And in this repo, today, that write reaches nobody. Said
+        // plainly rather than left to be discovered.** This package is
+        // node-only (it spawns a real e8-server), it is not a row in
+        // `e8-base`, and its ONE production caller is `dev-game.ts`'s
+        // host-side `/api/spin` route — whose `ctx` is the IDE HOST's,
+        // which composes no `diagnostics1`. So `reflect.get` returns
+        // `undefined` and this line does nothing, every time. The host
+        // reaches the editor by a different road entirely (`rpc.ts`'s
+        // `reportGameDiagnostics`), and `first-slot` never passes
+        // `createGame({ session })`.
+        //
+        // It is kept, not deleted, and the condition that would make it
+        // fire is exact: a caller of `createGame` that passes
+        // `config.session` — the in-process path `GameConfig.session`
+        // exists for, a node-side test or simulation rather than a
+        // browser — over a composition that also has a `diagnostics1` row.
+        // `createGame` composes this plugin into that same `ctx`, and this
+        // lookup is done per call rather than at apply time, so the
+        // service is there by the time anything plays. Nothing in this
+        // repo is that caller yet. Deleting the line would mean the first
+        // one to appear silently loses its per-spin failures — the exact
+        // gap task 3 closed — for the sake of one `reflect.get` on a
+        // failed spin.
         const failure = [
           diagnostic(
             'error',

@@ -11,6 +11,13 @@ import { SchemaForm } from '../schema-form/SchemaForm';
 import { useSlot } from '../plugins/slots';
 
 /**
+ * The EDITOR's own diagnostics — its plugin graph, namespace 1 of
+ * `Diagnostic.plugin` resolved against the EDITOR's rows. Exported because
+ * `DiagnosticsPanel` has to be able to say how many of these exist and
+ * where they are shown (see `DiagnosticsPanelProps.editorCount`): a panel
+ * that claims to be the one place to look cannot leave a third producer
+ * out in silence, and the shell is the only place that holds both.
+ *
  * `ctx.connection.diagnostics` is a getter that concatenates two backing
  * arrays into a *fresh* array on every read (see connection.ts). That's
  * fine for plain reads, but `useSyncExternalStore`'s `getSnapshot` must
@@ -22,7 +29,7 @@ import { useSlot } from '../plugins/slots';
  * contents change, so an elementwise reference comparison against the
  * previous snapshot is enough to tell "really changed" from "read again".
  */
-function useDiagnostics(ctx: Context): Diagnostic[] {
+export function useEditorDiagnostics(ctx: Context): Diagnostic[] {
   const cache = useRef<Diagnostic[]>(ctx.connection.diagnostics);
   return useSyncExternalStore(ctx.connection.subscribe, () => {
     const next = ctx.connection.diagnostics;
@@ -174,7 +181,7 @@ export function Preview({ ctx, url }: PreviewProps) {
  */
 function EditorComposition({ ctx }: { ctx: Context }) {
   const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
-  const diagnostics = useDiagnostics(ctx);
+  const diagnostics = useEditorDiagnostics(ctx);
   const cards = useSlot(ctx, 'composition.card');
 
   const rows = snapshot?.rows ?? [];
@@ -249,7 +256,7 @@ function layerLabel(from: string): string {
   return from.startsWith('bundle:') ? from.slice('bundle:'.length) : from;
 }
 
-export interface GameCompositionProps {
+interface GameCompositionProps {
   /** The GAME's resolved composition — one row per plugin, in layering order, each carrying which layer placed it. */
   rows: ResolvedRow[];
 }

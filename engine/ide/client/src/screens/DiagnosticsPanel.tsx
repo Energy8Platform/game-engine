@@ -31,6 +31,15 @@ import type { Diagnostic } from '@energy8engine/contracts';
  * in `diagnostics.tsx`. This panel says so in words, rather than showing a
  * silently-empty list either state could otherwise produce.
  *
+ * **A third namespace exists, and this panel names it rather than
+ * pretending otherwise.** `ctx.connection.diagnostics` is the EDITOR's own
+ * — a row of the IDE's `e8.yml` that failed to apply, a slot card that
+ * crashed while rendering. `CompositionScreen` renders those beside the row
+ * each is about, resolving the `plugin` id to that row's package name,
+ * which is more useful than a flat line here could be. What a panel called
+ * "one place to look" must not do is leave them out in silence, so
+ * `editorCount` says how many there are and where they are.
+ *
  * **`droppedFromGame` is not decoration.** The game's own diagnostics log
  * is bounded (`@energy8engine/diagnostics`), and `dropped` counts what it
  * forgot. A panel that rendered only the surviving entries, with nothing
@@ -63,6 +72,24 @@ export interface DiagnosticsPanelProps {
    * then regardless of what is passed here.
    */
   droppedFromGame?: number;
+  /**
+   * How many diagnostics the EDITOR has about its own plugin graph —
+   * `ctx.connection.diagnostics`, a third namespace this panel does not
+   * render.
+   *
+   * It is a count and not a list on purpose. Those diagnostics are about
+   * the IDE's own rows, and `CompositionScreen` resolves each one's
+   * `plugin` id to the row's package name and shows it beside that row,
+   * which is strictly more useful than a flat line here would be — it is
+   * the one namespace where id-to-row resolution is both correct and
+   * available. Moving them in would cost that and give nothing back.
+   *
+   * But a panel whose whole claim is "one place to look" cannot leave a
+   * producer out in silence, which is exactly what it did. So it says how
+   * many there are and where they are, and a reader who sees `0` knows the
+   * panel is the whole picture rather than merely hoping so.
+   */
+  editorCount?: number;
 }
 
 interface Row {
@@ -70,7 +97,12 @@ interface Row {
   origin: 'project' | 'game';
 }
 
-export function DiagnosticsPanel({ project, game, droppedFromGame = 0 }: DiagnosticsPanelProps) {
+export function DiagnosticsPanel({
+  project,
+  game,
+  droppedFromGame = 0,
+  editorCount = 0,
+}: DiagnosticsPanelProps) {
   // Project rows before game rows. The origin tag comes from WHICH ARRAY a
   // diagnostic arrived in — never from `diagnostic.plugin` — see the
   // module doc for why that field can hold the identical string on both
@@ -113,6 +145,13 @@ export function DiagnosticsPanel({ project, game, droppedFromGame = 0 }: Diagnos
       {game !== null && droppedFromGame > 0 && (
         <p className="e8-diagnostics-dropped">
           the game's own log forgot {droppedFromGame} more — it only keeps a bounded history
+        </p>
+      )}
+
+      {editorCount > 0 && (
+        <p className="e8-diagnostics-elsewhere" data-testid="diag-editor-note">
+          {editorCount} more {editorCount === 1 ? 'is' : 'are'} about the editor&rsquo;s own
+          plugins, shown above beside the row each is about
         </p>
       )}
     </section>
