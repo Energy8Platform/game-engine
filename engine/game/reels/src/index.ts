@@ -2,7 +2,7 @@
  * `BoardApi` (from `@energy8engine/play-loop`) implemented over the legacy
  * `createReelSystem` from `@energy8platform/game-engine/slot`. This is the
  * `board` half of the seam Task 7 declared: play-loop's `executePlan` walks
- * a `PresentationPlan` and calls one of these six methods per step; this
+ * a `PresentationPlan` and calls one of these four methods per step; this
  * file is what actually moves pixels (or, in a test, a fake standing in
  * for pixels).
  *
@@ -40,19 +40,22 @@
  *    feature reads) reporting the pre-removal symbols. `remove()` re-syncs
  *    it with one `setBoard(...)` call at the end, over a snapshot of the
  *    current board with just the removed cells nulled — see its comment.
- *  - `setMultiplier` has no counterpart on `ReelSystem` at all — its own
- *    `multiplier` getter is READ-ONLY (climbs only via `cascade`/
- *    `reelStep`). `MultiplierAccumulator` — a separate, headless legacy
- *    class with `.value`/`.set()`/`.add()`/`.reset()` — is the piece that
- *    fits, so this module owns one per board.
- *  - `wait` has no legacy counterpart at all; it is a plain timer.
+ *
+ * This board used to carry two more methods, `setMultiplier` and `wait`,
+ * because `BoardApi` used to declare six kinds rather than four. No
+ * mechanic ever emitted either kind; both are gone, along with the
+ * `MultiplierAccumulator` this module kept per board purely to give
+ * `setMultiplier` something to move. A mechanic that wants a multiplier
+ * step now brings the kind and its own handler through
+ * `BoardStepRegistry` — see `KNOWN_STEP_KINDS` in
+ * `@energy8engine/contracts`.
  *
  * One more measured decision baked in here: the step vocabulary's `Board`
  * is `number[][]` (symbol ids as numbers), but the legacy `SymbolResolver`
  * is keyed by `string`. Converted with `String(id)` — the only generic,
  * lossless mapping available without a game-specific symbol legend.
  */
-import { MultiplierAccumulator, createReelSystem } from '@energy8platform/game-engine/slot';
+import { createReelSystem } from '@energy8platform/game-engine/slot';
 import type {
   CellData,
   CreateReelSystemOptions,
@@ -64,15 +67,11 @@ import type {
   RefillStep,
   RemoveStep,
   RevealWinsStep,
-  SetMultiplierStep,
   SpinToStep,
-  WaitStep,
 } from '@energy8engine/contracts';
 import type { BoardApi } from '@energy8engine/play-loop';
 
 export type { BoardApi } from '@energy8engine/play-loop';
-export { MultiplierAccumulator } from '@energy8platform/game-engine/slot';
-export type { CarryPolicy } from '@energy8platform/game-engine/slot';
 
 /** The one legacy cell object `revealWins`/`remove` drive directly — measured on `SymbolCell`. */
 export interface CellLike {
@@ -107,13 +106,9 @@ function toCellBoard(board: Board): CellData[][] {
 
 /**
  * Builds `BoardApi` over an already-constructed legacy reel system — or,
- * in a test, a fake satisfying `LegacyReelSystem`. `multiplier` defaults
- * to a fresh spin-scoped accumulator when the caller doesn't supply one.
+ * in a test, a fake satisfying `LegacyReelSystem`.
  */
-export function boardFromReelSystem(
-  reelSystem: LegacyReelSystem,
-  multiplier: MultiplierAccumulator = new MultiplierAccumulator({ policy: 'spin' }),
-): BoardApi {
+export function boardFromReelSystem(reelSystem: LegacyReelSystem): BoardApi {
   return {
     async spinTo(step: SpinToStep) {
       await reelSystem.spin(toCellBoard(step.board));
@@ -153,14 +148,6 @@ export function boardFromReelSystem(
     async refill(step: RefillStep) {
       reelSystem.setBoard(toCellBoard(step.board));
     },
-
-    async setMultiplier(step: SetMultiplierStep) {
-      multiplier.set(step.value);
-    },
-
-    async wait(step: WaitStep) {
-      await new Promise<void>((resolve) => setTimeout(resolve, step.ms));
-    },
   };
 }
 
@@ -169,8 +156,6 @@ export interface ReelsBoard extends BoardApi {
   readonly view: Container;
   /** The grid this board drives — same object `revealWins`/`remove` reach via `getCell`. */
   readonly grid: GridLike;
-  /** Current value of this board's multiplier accumulator (what `setMultiplier` last set). */
-  readonly multiplier: number;
   destroy(): void;
 }
 
@@ -184,15 +169,11 @@ export interface ReelsBoard extends BoardApi {
  */
 export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
   const reelSystem: ReelSystem = createReelSystem(options);
-  const acc = new MultiplierAccumulator({ policy: 'spin' });
-  const api = boardFromReelSystem(reelSystem, acc);
+  const api = boardFromReelSystem(reelSystem);
   return {
     ...api,
     view: reelSystem.view,
     grid: reelSystem.grid,
-    get multiplier() {
-      return acc.value;
-    },
     destroy() {
       reelSystem.destroy();
     },

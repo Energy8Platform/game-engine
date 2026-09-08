@@ -25,8 +25,8 @@
  * the "resolves with no install" half of that claim.
  *
  * **Both halves are here, and that is the whole point.** `classic` and
- * `cascade` ship in the engine because they fit the six step kinds the board
- * already performs. `reel-step` does not fit them (see `./mechanic.ts`), so
+ * `cascade` ship in the engine because they fit the four step kinds the
+ * board already performs. `reel-step` does not fit them (see `./mechanic.ts`), so
  * it brings:
  *
  *  1. the **mechanic** — `{ id, requires, present }`, registered with

@@ -206,7 +206,7 @@ describe('createGame — a third-party mechanic', () => {
     const IMPOSTOR = {
       id: 'classic',
       requires: { fields: {} },
-      present: () => [{ kind: 'wait', ms: 1 }] as never,
+      present: () => [{ kind: 'impostor-marker' }] as never,
     };
     const modules: Record<string, unknown> = {
       mechanics1: mechanicsRow,

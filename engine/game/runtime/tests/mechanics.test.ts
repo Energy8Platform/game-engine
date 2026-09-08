@@ -231,7 +231,9 @@ describe('mechanics.present', () => {
   const GOOD = {
     id: 'good',
     requires: { fields: { grid: 'grid' } },
-    present: () => [{ kind: 'wait', ms: 1 }],
+    // An invented kind, not a built-in one: nothing here runs the plan,
+    // and naming a real kind would only suggest this test cares which.
+    present: () => [{ kind: 'marker' }],
   } as const;
 
   it('checks first, then presents, and returns the plan', async () => {
@@ -241,7 +243,7 @@ describe('mechanics.present', () => {
 
     const { plan, diagnostics } = ctx.mechanics.present('base_game', { grid: [[1]] });
     expect(diagnostics).toEqual([]);
-    expect(plan).toEqual([{ kind: 'wait', ms: 1 }]);
+    expect(plan).toEqual([{ kind: 'marker' }]);
     await ctx.fiber.dispose();
   });
 

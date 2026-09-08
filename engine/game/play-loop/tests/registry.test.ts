@@ -23,12 +23,6 @@ function fakeBoard() {
     refill: vi.fn(async () => {
       calls.push('refill');
     }),
-    setMultiplier: vi.fn(async () => {
-      calls.push('setMultiplier');
-    }),
-    wait: vi.fn(async () => {
-      calls.push('wait');
-    }),
   };
 }
 
@@ -70,6 +64,21 @@ describe('executePlan with a BoardStepRegistry', () => {
     const [d] = await executePlan([{ kind: 'nope' }], board, registry);
     expect(d.message).toContain('nope');
     expect(d.message).toContain('spinTo');
+  });
+
+  // This list is the one thing a developer chasing a misspelling actually
+  // reads, so what it offers has to be what a board can really do.
+  // `setMultiplier` and `wait` were on it while no mechanic in the repo
+  // could emit either and no board was ever asked to perform one — a third
+  // of the advice, pointing nowhere. They are gone; this holds them gone.
+  it('offers exactly the four kinds a board declares, and neither removed one', async () => {
+    const [d] = await executePlan([{ kind: 'nope' }], board, registry);
+    const offered = d.message.slice(d.message.indexOf('known kinds:'));
+    for (const kind of ['spinTo', 'revealWins', 'remove', 'refill']) {
+      expect(offered, `should offer ${kind}`).toContain(kind);
+    }
+    expect(offered).not.toContain('setMultiplier');
+    expect(offered).not.toContain('wait');
   });
 
   it('unregistering removes the handler', async () => {
@@ -164,7 +173,7 @@ describe('executePlan with a BoardStepRegistry', () => {
   });
 
   // Review round: the "known kinds" list used to be the compile-time fixed
-  // six ONLY — a project that registers `reelStep` and mistypes it as
+  // built-ins ONLY — a project that registers `reelStep` and mistypes it as
   // `reelStap` was told about `spinTo, revealWins, …`, never about the one
   // kind the typo was actually reaching for.
   it('an unknown kind diagnostic also names a kind the registry actually holds', async () => {
@@ -273,7 +282,7 @@ describe('createBoardStepRegistry — two plugins claiming one kind', () => {
  * registry was decided by JavaScript's object model rather than by the
  * vocabulary.
  *
- * The board-first rule is now gated on `KNOWN_STEP_KINDS`: the six kinds
+ * The board-first rule is now gated on `KNOWN_STEP_KINDS`: the four kinds
  * `BoardApi` declares go to the board, everything else goes straight to
  * the registry. That is exactly what this file's module doc always
  * claimed, and what `executePlan`'s own doc says.

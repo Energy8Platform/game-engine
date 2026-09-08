@@ -18,7 +18,7 @@
  * nothing in the vocabulary).
  *
  * **The registry.** `BoardApi` is the closed vocabulary two shipped
- * mechanics stand on — six kinds, six methods, not touched here. A third
+ * mechanics stand on — four kinds, four methods, not touched here. A third
  * kind (task 9's `reelStep` among them) has nowhere to land on `BoardApi`
  * without editing this package, so `executePlan` also accepts a
  * `BoardStepRegistry`: a plugin registers a `StepHandler` for the kind
@@ -40,9 +40,7 @@ import {
   type RefillStep,
   type RemoveStep,
   type RevealWinsStep,
-  type SetMultiplierStep,
   type SpinToStep,
-  type WaitStep,
 } from '@energy8engine/contracts';
 
 /**
@@ -55,8 +53,6 @@ export interface BoardApi {
   revealWins(step: RevealWinsStep): Promise<void>;
   remove(step: RemoveStep): Promise<void>;
   refill(step: RefillStep): Promise<void>;
-  setMultiplier(step: SetMultiplierStep): Promise<void>;
-  wait(step: WaitStep): Promise<void>;
 }
 
 /**
@@ -159,7 +155,7 @@ export interface BoardStepRegistry {
   /**
    * Every kind something is currently registered for. What lets an
    * "unknown kind" diagnostic name a plugin's OWN registered kinds
-   * alongside the built-in six — see `knownKindsList` below — rather than
+   * alongside the built-in four — see `knownKindsList` below — rather than
    * only ever pointing a typo (`reelStap`) at kinds it can't have meant
    * (`spinTo`) while staying silent about the one it probably did
    * (`reelStep`).
@@ -233,12 +229,12 @@ export function createBoardStepRegistry(): BoardStepRegistry {
 }
 
 /**
- * The kinds an "unknown kind" diagnostic can point at: the six `BoardApi`
+ * The kinds an "unknown kind" diagnostic can point at: the four `BoardApi`
  * always has, plus whatever `registry` currently holds. Without the
  * second half, a project that registers `reelStep` and then typos it as
  * `reelStap` would be told about `spinTo, revealWins, …` — true, but not
  * the one kind the typo was actually reaching for. A `Set` dedupes the
- * unlikely case of a registry also holding one of the six — reachable
+ * unlikely case of a registry also holding one of the four — reachable
  * only against a board that is missing a method its own interface
  * declares, since a board that HAS the method always wins it (see
  * `executePlan`), and "known" in the sense this message means either way.
@@ -369,7 +365,7 @@ export async function executePlan(
     // the plan. See `tests/registry.test.ts`'s "a registry whose get()
     // throws" and "a board whose property lookup throws".
     try {
-      // The board gets first refusal on the SIX KINDS `BoardApi`
+      // The board gets first refusal on the FOUR KINDS `BoardApi`
       // declares, and only those. A registered handler is consulted after
       // the board has said it has nothing, never before: reversing that
       // would let a plugin's registration win over `spinTo` (or any other
@@ -387,13 +383,13 @@ export async function executePlan(
       //    member is a function, so `typeof method === 'function'` held
       //    and `Object.prototype.toString.call(board)` ran instead, which
       //    returns a string rather than throwing, so nothing complained;
-      //  - and any own method a board happens to carry past the six
+      //  - and any own method a board happens to carry past the four
       //    outranked a plugin's handler for that name. Not hypothetical:
       //    `@energy8engine/reels`' `ReelsBoard` carries `destroy()`, so a
       //    step kind `destroy` would have torn the board down.
       //
       // Gating on the vocabulary makes the rule exactly what both docs
-      // already claimed — the six go to the board, everything else goes
+      // already claimed — the four go to the board, everything else goes
       // to the registry — instead of "whatever the board object answers
       // to", which is a wider set than anyone writes down.
       const isKnownKind = (KNOWN_STEP_KINDS as readonly string[]).includes(step.kind);

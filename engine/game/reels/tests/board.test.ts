@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MultiplierAccumulator } from '@energy8platform/game-engine/slot';
+import { describe, expect, it, vi } from 'vitest';
 import { boardFromReelSystem, type CellLike, type LegacyReelSystem } from '../src/index';
 
 /**
@@ -237,41 +236,6 @@ describe('boardFromReelSystem: revealWins', () => {
 
     releasePlayWin();
     await result;
-    expect(settled).toBe(true);
-  });
-});
-
-describe('boardFromReelSystem: setMultiplier', () => {
-  it('sets the value on the measured MultiplierAccumulator.set(value)', async () => {
-    const { reelSystem } = fakeReelSystem();
-    const acc = new MultiplierAccumulator({ policy: 'spin' });
-    const board = boardFromReelSystem(reelSystem, acc);
-
-    expect(acc.value).toBe(1);
-    await board.setMultiplier({ kind: 'setMultiplier', value: 7 });
-    expect(acc.value).toBe(7);
-  });
-});
-
-describe('boardFromReelSystem: wait', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('does not resolve before its ms have elapsed, and does resolve once they have', async () => {
-    vi.useFakeTimers();
-    const { reelSystem } = fakeReelSystem();
-    const board = boardFromReelSystem(reelSystem);
-
-    let settled = false;
-    board.wait({ kind: 'wait', ms: 100 }).then(() => {
-      settled = true;
-    });
-
-    await vi.advanceTimersByTimeAsync(99);
-    expect(settled).toBe(false);
-
-    await vi.advanceTimersByTimeAsync(1);
     expect(settled).toBe(true);
   });
 });

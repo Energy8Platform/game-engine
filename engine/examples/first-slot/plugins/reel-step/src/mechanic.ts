@@ -4,9 +4,9 @@
  * this is a module of its own rather than part of `./index.ts`, and why its
  * tests run in plain node against the fixture in the brief.
  *
- * **The step this brings, and why it could not be one of the six.** The six
+ * **The step this brings, and why it could not be a built-in.** The four
  * built-in kinds (`@energy8engine/contracts`' `presentation.ts`) describe a
- * board that lands, reveals, removes, refills, multiplies, and waits. A
+ * board that lands, reveals, removes and refills. A
  * ReelStep round does none of those: it pays the cells that won and then
  * scrolls EACH REEL DOWN by its own count of them — nothing is removed,
  * gravity never runs, the surviving symbols ride down, that many fresh ones
@@ -87,8 +87,8 @@ export interface ReelStepStep {
 }
 
 /**
- * What this mechanic's `present` returns: the six kinds every board already
- * performs, plus the one this plugin brings. Named because both `plan` and
+ * What this mechanic's `present` returns: the four kinds every board
+ * already performs, plus the one this plugin brings. Named because both `plan` and
  * the `SpinMechanic<ReelStepStep>` below are written against it.
  */
 export type ReelStepPlan = (KnownPresentationStep | ReelStepStep)[];
@@ -121,7 +121,7 @@ export const expects: SpinShapeRequirement = {
  * the legacy `ReelStepController` does — so the reveal here is the money
  * readout and nothing else.
  *
- * The return type is `ReelStepPlan` — the six built-in kinds plus this
+ * The return type is `ReelStepPlan` — the four built-in kinds plus this
  * plugin's own one, which is exactly what `SpinMechanic<ReelStepStep>`
  * declares `present` to return. Writing the steps into a local of that type
  * is also where the compiler actually checks them: a mistyped `spinTo`, or

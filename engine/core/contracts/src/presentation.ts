@@ -4,7 +4,7 @@
  * executes it.
  *
  * `PresentationPlan` (what `classic`/`cascade` actually emit) stays the
- * closed six-kind vocabulary below — that is deliberate, see
+ * closed four-kind vocabulary below — that is deliberate, see
  * `KnownPresentationStep`'s own doc. `PresentationStep` (what a board, a
  * `BoardStepRegistry`, and `executePlan` accept) is wider: a plugin's step
  * only needs a `kind` and its own fields, no edit to this file. See
@@ -80,20 +80,8 @@ export interface RefillStep {
   board: Board;
 }
 
-/** The active win multiplier becomes this value. */
-export interface SetMultiplierStep {
-  kind: 'setMultiplier';
-  value: number;
-}
-
-/** Nothing happens for this long — a beat for the player to read the board. */
-export interface WaitStep {
-  kind: 'wait';
-  ms: number;
-}
-
 /**
- * One of the six steps `classic`/`cascade` actually stand on — see the
+ * One of the four steps `classic`/`cascade` actually stand on — see the
  * module doc. Kept as its own named union (rather than folding straight
  * into `PresentationStep` below) because `PresentationPlan` is defined from
  * THIS type, not from `PresentationStep`: a mechanic's `steps.push({ kind:
@@ -101,9 +89,12 @@ export interface WaitStep {
  * because `PresentationPlan`'s element type has no open member for a typo'd
  * literal to quietly match instead. See `UnknownPresentationStep`'s doc for
  * the mechanism that would otherwise defeat that.
+ *
+ * It was six. `setMultiplier` and `wait` were built before any mechanic
+ * asked for them, nothing ever emitted either, and they are gone — see
+ * `KNOWN_STEP_KINDS`.
  */
-export type KnownPresentationStep =
-  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | SetMultiplierStep | WaitStep;
+export type KnownPresentationStep = SpinToStep | RevealWinsStep | RemoveStep | RefillStep;
 
 /**
  * A step naming any OTHER kind — a plugin's, task 9's `reelStep` among
@@ -131,8 +122,8 @@ export interface UnknownPresentationStep {
 }
 
 /**
- * A step as `executePlan`/`BoardStepRegistry` see it: one of the six known
- * kinds by its exact shape, or anything else that at least names a `kind`.
+ * A step as `executePlan`/`BoardStepRegistry` see it: one of the four
+ * known kinds by its exact shape, or anything else that at least names a `kind`.
  * NOT what mechanics build `PresentationPlan` out of — see
  * `KnownPresentationStep`'s doc for why those stay two different types.
  */
@@ -149,45 +140,39 @@ export type PresentationStep = KnownPresentationStep | UnknownPresentationStep;
 export type PresentationPlan = KnownPresentationStep[];
 
 /**
- * The six kinds' names, exactly as the `switch` below and `BoardApi`'s six
- * methods (`@energy8engine/play-loop`) both key off. Exported so a
+ * The four kinds' names, exactly as the `switch` below and `BoardApi`'s
+ * four methods (`@energy8engine/play-loop`) both key off. Exported so a
  * diagnostic naming an unknown kind can also name what IS known, without a
  * second hand-maintained copy of this list drifting from this one. Kept in
- * sync with the `switch` by hand — there are six of these and the module
- * doc above says why that count isn't expected to grow.
+ * sync with the `switch` by hand.
  *
  * It also gates which kinds a BOARD gets first refusal on: `executePlan`
  * consults `board[step.kind]` only for a kind in this list, and sends
  * everything else to the step registry. Without that gate a plugin
  * registering `toString` was silently answered by `Object.prototype`, and
- * any own method a board carried past the six outranked a registered
+ * any own method a board carried past the four outranked a registered
  * handler for that name.
  *
- * **`setMultiplier` and `wait` are unreachable today.** Nothing in this
- * repo emits either one: `classic`, `cascade` and the project plugin
- * `reel-step` between them produce `spinTo`, `revealWins`, `remove` and
- * `refill`, and the only `{ kind: 'setMultiplier' }` / `{ kind: 'wait' }`
- * literals anywhere are in tests and in the type declarations above. They
- * are still implemented on both sides — `BoardApi` declares them and
- * `@energy8engine/reels` performs them — so they are live code, just code
- * nothing calls. The visible cost is that this list is what an "unknown
- * kind" diagnostic offers a developer chasing a misspelling, and two of
- * the six names it offers name nothing any mechanic here can produce.
+ * **It was six.** `setMultiplier` and `wait` were built before any
+ * mechanic asked for them and none ever did: `classic`, `cascade` and the
+ * project plugin `reel-step` between them produce `spinTo`, `revealWins`,
+ * `remove` and `refill`, and the only literals of the other two anywhere
+ * in the repo were in tests. The cost was paid by a developer chasing a
+ * misspelling: this list is what an "unknown kind" diagnostic offers, and
+ * a third of what it offered named nothing any mechanic here could make.
  *
- * They are NOT removed here, deliberately: dropping a kind is a change to
- * `BoardApi`, whose implementation in `reels` would have to lose two
- * methods with it. That is its own slice. Whether it should happen at all
- * is a genuine question now that `BoardStepRegistry` exists — a
- * speculative built-in kind buys nothing a plugin's own registered kind
- * would not buy better — and the report for this wave recommends it.
+ * `BoardStepRegistry` (`@energy8engine/play-loop`) is what makes a
+ * speculative built-in unnecessary: a mechanic that needs a multiplier
+ * step or a beat brings the kind AND the handler that performs it, the way
+ * the `reel-step` plugin brings `reelStep`. Adding a kind back to this
+ * list is therefore not how to get one — it is how to oblige every board
+ * in existence to implement it.
  */
 export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
   'spinTo',
   'revealWins',
   'remove',
   'refill',
-  'setMultiplier',
-  'wait',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -224,7 +209,7 @@ function isRevealedLine(value: unknown): value is RevealedLine {
 /**
  * True for any well-formed `PresentationStep` — false for everything else,
  * never throws. "Well-formed" means two different things depending on
- * `kind`: for one of the six known kinds, the FULL shape that kind's own
+ * `kind`: for one of the four known kinds, the FULL shape that kind's own
  * interface promises (a `spinTo` needs a real `board`, not just any
  * object); for anything else, only that it names a `kind` at all — this
  * function has no way to know what shape a plugin's step should be, and
@@ -253,12 +238,8 @@ export function isPresentationStep(value: unknown): value is PresentationStep {
       return Array.isArray(value.cells) && value.cells.every(isCell);
     case 'refill':
       return isBoard(value.board);
-    case 'setMultiplier':
-      return isFiniteNumber(value.value);
-    case 'wait':
-      return isFiniteNumber(value.ms);
     default:
-      // Not one of the six — not malformed BY THAT FACT alone. `value.kind`
+      // Not one of the four — not malformed BY THAT FACT alone. `value.kind`
       // is already confirmed a string above, which is everything
       // `UnknownPresentationStep` requires.
       return true;

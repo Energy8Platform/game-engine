@@ -12,8 +12,6 @@ describe('presentation steps', () => {
       },
       { kind: 'remove', cells: [{ col: 0, row: 1 }] },
       { kind: 'refill', board: [[4, 5, 6]] },
-      { kind: 'setMultiplier', value: 2 },
-      { kind: 'wait', ms: 300 },
     ];
     for (const step of plan) expect(isPresentationStep(step)).toBe(true);
   });
@@ -22,11 +20,11 @@ describe('presentation steps', () => {
     expect(isPresentationStep({ kind: 'revealWins', total: 4, lines: [] })).toBe(true);
   });
 
-  // Task 7: the vocabulary stopped being closed — a kind outside the six
+  // Task 7: the vocabulary stopped being closed — a kind outside the four
   // is a plugin's to define, not this function's to reject. Whether
   // anything can actually RUN it is a different question, answered by a
   // `BoardStepRegistry` (`@energy8engine/play-loop`), not by this check.
-  it('accepts a step whose kind is not one of the six', () => {
+  it('accepts a step whose kind is not one of the four', () => {
     expect(isPresentationStep({ kind: 'explode', force: 9 })).toBe(true);
   });
 
@@ -36,8 +34,8 @@ describe('presentation steps', () => {
   });
 
   it('rejects a well-shaped kind whose payload is wrong', () => {
-    expect(isPresentationStep({ kind: 'wait', ms: 'soon' })).toBe(false);
     expect(isPresentationStep({ kind: 'spinTo' })).toBe(false);
+    expect(isPresentationStep({ kind: 'spinTo', board: 'nope' })).toBe(false);
   });
 
   it('rejects a revealWins step missing the reveal total', () => {
@@ -79,9 +77,13 @@ describe('presentation steps', () => {
     expect(isPresentationStep({ kind: 'refill', board: [[1, 'x', 3]] })).toBe(false);
   });
 
-  it('rejects a setMultiplier step with a missing or non-numeric value', () => {
-    expect(isPresentationStep({ kind: 'setMultiplier' })).toBe(false);
-    expect(isPresentationStep({ kind: 'setMultiplier', value: '2x' })).toBe(false);
+  // `setMultiplier` and `wait` were two of the six known kinds and are
+  // gone (see `KNOWN_STEP_KINDS`). They are not rejected now — they are
+  // simply not KNOWN, so a step naming either reads as any other plugin
+  // kind would: shaped like a step, with nothing here that can run it.
+  it('treats the two removed kinds as any other unknown kind, not as errors', () => {
+    expect(isPresentationStep({ kind: 'setMultiplier', value: 2 })).toBe(true);
+    expect(isPresentationStep({ kind: 'wait', ms: 'soon' })).toBe(true);
   });
 
   it('rejects non-objects instead of throwing', () => {

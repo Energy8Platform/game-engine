@@ -6,11 +6,11 @@ import { createReelsBoard } from '../src/index';
 /**
  * `boardFromReelSystem` (board.test.ts) is proven against a fake, per the
  * brief — pixi does not initialise usefully in jsdom and animation timing
- * cannot be asserted in a unit test. But `refill`, `remove` and
- * `setMultiplier` all measured out SYNCHRONOUS in Step 1 (no `Tween`, no
- * `Ticker` involved), so this suite wires `createReelsBoard` to the REAL
- * `createReelSystem` and exercises exactly those three — real construction,
- * real `ReelGrid`/`SymbolCell` objects, no fake standing in for them. This
+ * cannot be asserted in a unit test. But `refill` and `remove` both
+ * measured out SYNCHRONOUS in Step 1 (no `Tween`, no `Ticker` involved),
+ * so this suite wires `createReelsBoard` to the REAL `createReelSystem`
+ * and exercises exactly those two — real construction, real
+ * `ReelGrid`/`SymbolCell` objects, no fake standing in for them. This
  * is strictly extra: it is not a substitute for the mapping tests, and it
  * deliberately never touches `spinTo`/`revealWins` (both need a live pixi
  * `Application` ticker to settle — see the module doc in src/index.ts).
@@ -25,7 +25,6 @@ describe('createReelsBoard (real createReelSystem, synchronous paths only)', () 
   it('constructs headlessly and exposes a mountable view', () => {
     const board = createReelsBoard({ resolve, config: { grid: { cols: 2, rows: 2 } } });
     expect(board.view).toBeInstanceOf(Container);
-    expect(board.multiplier).toBe(1);
     board.destroy();
   });
 
@@ -49,15 +48,6 @@ describe('createReelsBoard (real createReelSystem, synchronous paths only)', () 
     // `frameStyleKey` is SymbolCell's own public hook, "exposed for tests/inspection".
     const cell = board.grid.getCell(0, 0) as unknown as { frameStyleKey: string };
     expect(cell.frameStyleKey).toBe('removed');
-    board.destroy();
-  });
-
-  it('setMultiplier really moves the accumulator the board reports back', async () => {
-    const board = createReelsBoard({ resolve, config: {} });
-
-    await board.setMultiplier({ kind: 'setMultiplier', value: 4 });
-
-    expect(board.multiplier).toBe(4);
     board.destroy();
   });
 });
