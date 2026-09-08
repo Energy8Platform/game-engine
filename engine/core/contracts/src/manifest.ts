@@ -97,6 +97,19 @@ export interface E8RuntimeHalf {
    * composition time and again on the raw route.
    */
   entry: string;
+  /**
+   * Services this row cannot work without. Checked AFTER composition, never
+   * used to order anything — this is not a revival of the old `inject` field.
+   * See the note above on why `inject` was removed: a runtime half is applied
+   * directly via `module.apply?.(ctx, config)`, not through `ctx.plugin()`,
+   * so cordis's dependency gating never sees it. The composition order is
+   * fixed: bundles in profile order, then patch layers, one at a time with
+   * `await`. A row that needs another service must come after it in that
+   * order, or reach it reactively via `ctx.inject()` from inside its own
+   * `apply`. This field lets a row DECLARE what it needs, so the host can
+   * check afterward that those services exist.
+   */
+  requires?: string[];
 }
 
 /**
@@ -207,7 +220,28 @@ export function parseManifest(
         ),
       );
     } else {
-      manifest.runtime = { entry: runtime.entry };
+      const runtimeHalf: E8RuntimeHalf = { entry: runtime.entry };
+
+      if (runtime.requires !== undefined) {
+        if (!Array.isArray(runtime.requires)) {
+          diagnostics.push(
+            diagnostic(
+              'warning',
+              pluginId,
+              'e8.runtime.requires',
+              'the runtime half needs an array of service names in "requires"',
+              'add e8.runtime.requires as an array of strings, or remove it',
+            ),
+          );
+        } else {
+          const validRequires = runtime.requires.filter((v): v is string => typeof v === 'string');
+          if (validRequires.length > 0) {
+            runtimeHalf.requires = validRequires;
+          }
+        }
+      }
+
+      manifest.runtime = runtimeHalf;
     }
   }
 
