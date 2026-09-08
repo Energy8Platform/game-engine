@@ -16,7 +16,7 @@ import * as spinLog from '@energy8engine/spin-log/runtime';
 import type { BoardApi } from '../src/index';
 import * as runtime from '../src/runtime';
 
-/** A board with exactly one of the six kinds — enough to tell "the board won" from "the registry won". */
+/** A board with exactly one of the four kinds — enough to tell "the board won" from "the registry won". */
 function fakeBoard() {
   const calls: string[] = [];
   return {
@@ -70,8 +70,8 @@ describe('play-loop runtime half', () => {
     //
     // Both asserted present FIRST, on purpose: `toBe` alone passes
     // vacuously while neither exists, which is exactly the state this row
-    // was in before this change (measured — it was the one test of the six
-    // that stayed green against the unfixed row).
+    // was in before this change (measured — it was the one test in this
+    // file that stayed green against the unfixed row).
     expect(ctx.steps).toBeDefined();
     expect(ctx.play.steps).toBeDefined();
     expect(ctx.play.steps).toBe(ctx.steps);
@@ -140,7 +140,7 @@ describe('play-loop runtime half', () => {
     );
 
     expect(problem.message).toContain('reelStap');
-    // The composed registry's own kinds, not only the built-in six — the
+    // The composed registry's own kinds, not only the built-in four — the
     // typo's nearest neighbour is the one a person needs named.
     expect(problem.message).toContain('reelStep');
 

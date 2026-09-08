@@ -313,9 +313,9 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
   });
 
   it('a board method for a kind BoardApi never declared does not outrank the registry', async () => {
-    // `ReelsBoard` really does carry methods past the six — `destroy()`
+    // `ReelsBoard` really does carry methods past the four — `destroy()`
     // among them — so "whatever the board happens to have" is a wider and
-    // more dangerous rule than "the six", not a hypothetical one.
+    // more dangerous rule than "the four", not a hypothetical one.
     const board = {
       ...fakeBoard(),
       reelStep: async () => {
@@ -346,7 +346,7 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
     expect(d.message).toContain('toString');
   });
 
-  it('the six still go to the board even when something is registered for them', async () => {
+  it('the four still go to the board even when something is registered for them', async () => {
     // The rule this gate must not weaken, restated against the gate.
     const board = fakeBoard();
     const registry = createBoardStepRegistry();

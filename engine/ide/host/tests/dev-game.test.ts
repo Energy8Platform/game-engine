@@ -406,12 +406,21 @@ describe('dev-game — /@fs/ cannot be walked out of the served roots', () => {
   });
 
   it('does not turn a path that is simply absent into an access refusal', async () => {
-    // A missing file is vite's 404 to give, not this guard's 403. Getting
-    // this backwards is what makes an escape test pass for the wrong
-    // reason, so it is held here explicitly.
+    // An absent file is not this guard's to answer. Getting that backwards
+    // is what makes an escape test pass for the wrong reason, so it is
+    // held here explicitly — the assertion is that the answer is NOT a
+    // 403, not that any particular answer arrives.
+    //
+    // What actually arrives, measured rather than assumed: 200, with the
+    // vite root's own `index.html`. Vite's `appType: 'spa'` fallback owns
+    // every unmatched request under `dev-game`'s catch-all, so there is no
+    // 404 on this server to expect. The property this test names holds;
+    // the mechanism it used to claim ("vite's 404") did not exist.
     const { base } = await escapeFixture();
     const res = await fetch(`${base}/@fs/${join(tmpdir(), 'ide-host-fs-nothing-here.js')}`);
     expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<title>fixture</title>');
   });
 });
 

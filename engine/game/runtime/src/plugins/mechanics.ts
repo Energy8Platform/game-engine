@@ -6,7 +6,7 @@
  * The stored type is `AnySpinMechanic` — `SpinMechanic<{ kind: string }>`,
  * the widest form — because a registry holds mechanics it did not write and
  * cannot name their step types. A mechanic authored as `SpinMechanic` (the
- * six built-in kinds, e.g. `classic`) or as `SpinMechanic<MyStep>` (a
+ * four built-in kinds, e.g. `classic`) or as `SpinMechanic<MyStep>` (a
  * plugin's, e.g. `reel-step`) widens into it on the way in, with no cast at
  * this seam in either direction. See `AnySpinMechanic`'s own doc for why
  * that widest form is a storage type and never an authoring one.

@@ -63,7 +63,7 @@ interface ReelStepStep {
   settled: number[][];
 }
 
-/** What a plugin's `present` returns: the six, plus this plugin's own one. */
+/** What a plugin's `present` returns: the four, plus this plugin's own one. */
 type ReelStepPlan = (KnownPresentationStep | ReelStepStep)[];
 
 const requires = { fields: {} };
@@ -90,10 +90,10 @@ function strayFieldOnOwnStep(): ReelStepPlan {
   return steps;
 }
 
-/** And `PresentationPlan` itself is unchanged: still exactly the six. */
+/** And `PresentationPlan` itself is unchanged: still exactly the built-in kinds. */
 function closedPlan(): PresentationPlan {
   const steps: PresentationPlan = [];
-  // @ts-expect-error a plan built from the six known kinds cannot carry a plugin's
+  // @ts-expect-error a plan built from the four known kinds cannot carry a plugin's
   steps.push({ kind: 'reelStep', shifts: [1], settled: [[1]] });
   return steps;
 }

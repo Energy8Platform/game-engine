@@ -247,15 +247,15 @@ const bound = game.ctx.reflect.get('mechanics', false)?.forStage('base_game')?.i
 if (bound) mechanicSelect.value = bound;
 
 /**
- * The live channel from the IDE's composition screen — and NOTHING is
- * passed for `base_game` on purpose.
+ * The live channel from the IDE's composition screen — and NO stage or
+ * mechanic is passed on purpose.
  *
  * This used to hand over `mechanicSelect.value`, so the page's own
  * `<option>` order re-bound the stage at boot and quietly overrode
  * `e8.patch.yml`. Both defaults are gone now: the composition decides what
  * is bound (the `<select>` above is seeded FROM it), and `ide-bridge` binds
  * only when a human has actually written a value into its row — see
- * `IdeBridgeSettableConfig.base_game`. Whoever turns a knob last still
+ * `IdeBridgeSettableConfig.mechanic`. Whoever turns a knob last still
  * wins; what no longer happens is a knob turning itself.
  *
  * Its complaints land in this page's log, which is the only place it has:

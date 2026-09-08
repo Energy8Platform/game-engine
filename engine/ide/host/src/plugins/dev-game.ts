@@ -392,10 +392,16 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     try {
       real = realpathSync(requested);
     } catch {
-      // Not on disk at all. Vite's own 404/403 says so better than a
-      // second opinion from here would, and refusing here would turn
-      // "missing file" into "access denied" — the exact confusion that
-      // makes an escape test pass for the wrong reason.
+      // Not on disk at all, so there is no real file to have an opinion
+      // about — hand it on. Refusing here would turn "missing file" into
+      // "access denied", the exact confusion that makes an escape test
+      // pass for the wrong reason.
+      //
+      // What vite then answers is its own business, and it is not a 404:
+      // `appType: 'spa'` means the catch-all below serves the root's
+      // `index.html` with a 200 for anything unmatched (measured — see
+      // `dev-game.test.ts`). That is fine; what this route owes is only
+      // that an absence is never dressed up as a refusal.
       return next();
     }
 

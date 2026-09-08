@@ -71,10 +71,10 @@ function fakeBoard() {
 
 describe('reel-step: the step the board did not have', () => {
   it('is a kind the board has no method for — without this plugin it is a diagnostic', async () => {
-    // The claim, stated as a test: `reelStep` is not one of the six, and a
-    // board built for the six cannot perform it. If this ever passes with no
-    // diagnostic, the engine's vocabulary quietly grew a seventh kind and
-    // this plugin stopped being the thing that proves it is open.
+    // The claim, stated as a test: `reelStep` is not one of the built-in
+    // kinds, and a board built for those cannot perform it. If this ever
+    // passes with no diagnostic, the engine's vocabulary quietly grew this
+    // kind and this plugin stopped being the thing that proves it is open.
     const board = fakeBoard();
     const diagnostics = await executePlan([asStep(QUIET_STEP)], board as unknown as BoardApi);
 

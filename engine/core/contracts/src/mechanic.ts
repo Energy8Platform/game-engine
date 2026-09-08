@@ -52,9 +52,9 @@ export interface SpinShapeRequirement {
  *
  * **`TStep` is how a mechanic brings a step kind the engine has never heard
  * of.** Leave it off and `present` returns exactly `PresentationPlan` — the
- * six built-in kinds and nothing else, which is what `classic` and
+ * four built-in kinds and nothing else, which is what `classic` and
  * `cascade` are and what this interface has always meant. Name your own
- * step type and `present` returns the six PLUS that one:
+ * step type and `present` returns the four PLUS that one:
  *
  * ```ts
  * interface ReelStepStep { kind: 'reelStep'; shifts: number[]; settled: Board }
