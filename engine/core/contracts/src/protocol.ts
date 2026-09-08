@@ -61,8 +61,15 @@ export type GameDiagnosticsSource = 'game' | 'host';
  * insertion-ordered so the panel's row order is a property of the protocol
  * and not of which speaker happened to go first: the game's own account,
  * then what the host has to add about it.
+ *
+ * `readonly`, so "declared once, in one order" is something the compiler
+ * holds rather than something its two consumers happen to observe. It
+ * shipped as a mutable array, which left any importer a `push` or a
+ * `reverse` away from reordering the panel for everyone — the same shape
+ * of agreed-not-declared this whole slice is about, in the artifact the
+ * slice made to end it.
  */
-export const GAME_DIAGNOSTIC_SOURCES: GameDiagnosticsSource[] = ['game', 'host'];
+export const GAME_DIAGNOSTIC_SOURCES: readonly GameDiagnosticsSource[] = ['game', 'host'] as const;
 
 /**
  * A running game's own diagnostics, riding the SAME `/ide` socket the

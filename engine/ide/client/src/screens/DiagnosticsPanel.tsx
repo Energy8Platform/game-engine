@@ -85,12 +85,15 @@ export interface DiagnosticsPanelProps {
    *
    * This used to arrive as `editorCount`, a number, with the actual
    * entries rendered by `CompositionScreen` instead — see the module doc
-   * for why that changed and what it cost. Optional, defaulting to empty,
-   * so call sites written before this prop existed keep compiling; a real
-   * caller (`App.tsx`) always has the array in hand, even when it is
-   * empty.
+   * for why that changed and what it cost. Required, like `project` and
+   * `game`: it was briefly optional "so call sites written before this
+   * prop existed keep compiling", which was never true of anything — the
+   * prop it replaced was REMOVED in the same edit, so no such call site
+   * could compile either way. What optional actually bought was a panel
+   * that silently shows two of its three sources when a caller forgets
+   * the third.
    */
-  editor?: readonly Diagnostic[];
+  editor: readonly Diagnostic[];
 }
 
 interface Row {
@@ -102,7 +105,7 @@ export function DiagnosticsPanel({
   project,
   game,
   droppedFromGame = 0,
-  editor = [],
+  editor,
 }: DiagnosticsPanelProps) {
   // Project rows before game rows before editor rows. The origin tag comes
   // from WHICH ARRAY a diagnostic arrived in — never from `diagnostic.plugin`
