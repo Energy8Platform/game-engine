@@ -218,13 +218,24 @@ function readUrlParams(): Record<string, string> {
  * `composeFromProject`'s own failure to report, and this wrapper has
  * nothing useful to say about a schema it never got a body for.
  * `onSchema` runs after validating the raw wire value through
- * `isSpinSchema`: `GameConfig.loader`'s `fetchFn` may be a test double
- * whose body has no `schema` field at all (an old host, or a fixture that
- * predates this), and that must read as "no schema", not as a crash.
+ * `isSpinSchema`, and the three answers it can give are not alike:
+ *
+ *  - **absent** (`schema` is not a field of the body at all) — an old host,
+ *    or a test double that predates schemas. "No schema", silently: there
+ *    is nothing to say about a field nobody sent.
+ *  - **`null`** — the host read the `.spin` and could not parse it. Also
+ *    silent here: the host has already said so, in its own diagnostics,
+ *    which travel in the same response.
+ *  - **present and malformed** — a value ARRIVED and this side rejected it.
+ *    That one is reported. The consequence is invisible otherwise: a
+ *    rejected schema becomes `null`, `checkAgainstSchema(null, …)` returns
+ *    `[]` by design, and the entire pre-flight silently stops running while
+ *    every screen still reads as healthy. Failures are data, and this is a
+ *    failure of the wire, not of the math.
  */
 function withSchemaCapture(
   fetchFn: typeof fetch,
-  onSchema: (schema: SpinSchema | null) => void,
+  onSchema: (schema: SpinSchema | null, rejected: Diagnostic | null) => void,
 ): typeof fetch {
   return (async (...args: Parameters<typeof fetch>) => {
     const res = await fetchFn(...args);
@@ -232,7 +243,22 @@ function withSchemaCapture(
     const body: unknown = await res.json();
     const raw =
       typeof body === 'object' && body !== null ? (body as { schema?: unknown }).schema : undefined;
-    onSchema(isSpinSchema(raw) ? raw : null);
+    if (isSpinSchema(raw)) {
+      onSchema(raw, null);
+    } else {
+      onSchema(
+        null,
+        raw === undefined || raw === null
+          ? null
+          : diagnostic(
+              'warning',
+              'game-runtime',
+              'schema',
+              'the host sent a schema this build cannot read, so no mechanic was checked against the math before the first spin',
+              'the host and the game are probably built from different versions — rebuild or reinstall so both agree on the SpinSchema shape',
+            ),
+      );
+    }
     return {
       ok: true,
       status: res.status,
@@ -409,8 +435,14 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
     // Captured by `withSchemaCapture` below, off the composition fetch
     // `composeFromProject` makes on its own — see that function's doc.
     let spinSchema: SpinSchema | null = null;
-    const fetchFn = withSchemaCapture(config.loader?.fetchFn ?? fetch, (schema) => {
+    // A `warning`, not an `error`: this is a fact about the wire between a
+    // host and a game, and it must not paint the failure screen over a game
+    // that composes and plays perfectly well without a pre-flight — the same
+    // line `plugins/schema.ts` on the host side already draws for a `.spin`
+    // it could not read. What it must not do is nothing.
+    const fetchFn = withSchemaCapture(config.loader?.fetchFn ?? fetch, (schema, rejected) => {
       spinSchema = schema;
+      if (rejected) diagnostics.push(rejected);
     });
 
     diagnostics.push(...(await composeFromProject(ctx, { ...config.loader, fetchFn, plan })));

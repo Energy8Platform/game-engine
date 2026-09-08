@@ -104,9 +104,20 @@ export interface SpinSchema {
   actions: ActionDef[];
   /**
    * Everything the reading that produced this schema dropped — empty when
-   * nothing was. Required, not optional: a producer that has not thought
-   * about its own losses cannot compile, and a consumer never has to
-   * treat "absent" and "nothing lost" as the same answer. See `SchemaGap`.
+   * nothing was.
+   *
+   * **Required, while `globals` right above it is optional, and the
+   * difference is not an inconsistency.** An absent `globals` is a true
+   * statement — this game declares none — so optional costs nothing there.
+   * An absent `gaps` would have to be read as `[]`, which asserts "nothing
+   * was lost", and that is precisely the false claim this field exists to
+   * stop a consumer making. There is no honest default, so there is no
+   * default: a producer that has not thought about its own losses does not
+   * compile, and a consumer never has to treat "absent" and "nothing lost"
+   * as the same answer. What that costs is stated where it is paid — a
+   * schema arriving over the wire without this field fails `isSpinSchema`,
+   * and `@energy8engine/game-runtime` reports that rather than quietly
+   * skipping its pre-flight. See `SchemaGap`.
    *
    * `vars` and `globals` carry no gaps of their own because they are not
    * declarations of their own: each is a copy of a `records` entry the

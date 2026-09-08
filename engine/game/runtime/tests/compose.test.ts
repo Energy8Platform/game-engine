@@ -294,6 +294,54 @@ describe('createGame — checkAgainstSchema is actually wired in', () => {
     );
     expect(found).toBeDefined();
   });
+
+  /**
+   * A schema that ARRIVED and this build rejected.
+   *
+   * `isSpinSchema` is the gate, and failing it turns the value into `null`
+   * — after which `checkAgainstSchema(null, …)` returns `[]` by design, so
+   * the whole pre-flight stops running with nothing on any screen to say
+   * so. Every diagnostic reads healthy while a guarantee has quietly been
+   * switched off. That is the shape of failure this branch exists to
+   * remove, and it is reachable the moment a host and a game are built
+   * from different versions of `SpinSchema`.
+   */
+  it('says so when the host sends a schema this build cannot read, instead of silently not checking', async () => {
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('mechanics1', { stages: { base_game: 'classic' } })],
+          diagnostics: [],
+          // Shaped like a schema, and not one — `stages` is an array.
+          schema: { gameId: 'x', stages: [] } as never,
+        }),
+        importModule: async () => mechanicsRow,
+      },
+    });
+
+    const found = game.diagnostics.find((d) => d.message.includes('cannot read'));
+    expect(found).toBeDefined();
+    // A `warning`: the game composes and plays without a pre-flight, and
+    // an `error` here would paint the failure screen over a working game.
+    expect(found!.severity).toBe('warning');
+    expect(found!.message).toContain('before the first spin');
+  });
+
+  it('stays silent when the host sends no schema at all, or an explicit null', async () => {
+    // The two legitimate answers. Absent is an old host or a fixture that
+    // predates schemas; `null` is a host that read the `.spin` and could
+    // not parse it, and has already said so in the same response.
+    for (const body of [
+      { rows: [], diagnostics: [] },
+      { rows: [], diagnostics: [], schema: null },
+    ]) {
+      const app = await createGame({
+        loader: { fetchFn: fakeFetch(body), importModule: async () => mechanicsRow },
+      });
+      expect(app.diagnostics.filter((d) => d.message.includes('cannot read'))).toEqual([]);
+      await app.stop();
+    }
+  });
 });
 
 describe('createGame — a malformed provide entry', () => {
