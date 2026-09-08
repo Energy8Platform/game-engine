@@ -35,6 +35,45 @@ export const inject = ['composition', 'server'];
 export function apply(ctx: Context) {
   const clients = new Set<WebSocket>();
 
+  /**
+   * The last `game-diagnostics` frame this host has seen, from EITHER
+   * origin (a game's own `ide-bridge` relay below, or this host speaking
+   * for itself via `broadcastGameDiagnostics`) — so a client that connects
+   * (or reconnects) AFTER the fact still learns about it, instead of
+   * seeing nothing until the NEXT thing happens to report. `Snapshot`
+   * already gets this treatment (recomputed fresh and sent to every new
+   * connection below); this is `game-diagnostics`'s own missing half of
+   * the same symmetry.
+   *
+   * Two decisions this makes on purpose, not by accident:
+   *
+   *  1. **One retained frame, not one per game.** The protocol carries no
+   *     game/session identity at all — `GameDiagnosticsMessage` is just
+   *     `{diagnostics, dropped}` — so there is no key to keep several
+   *     under even if this wanted to. In this dev model there is exactly
+   *     one project being edited at a time (`e8 dev` serves one), so more
+   *     than one connected GAME socket overwhelmingly means more than one
+   *     VIEW of the same game (the preview iframe alongside a directly
+   *     opened tab), not two different games — the same assumption
+   *     `ctx.composition.snapshot()` already makes for the ONE `Snapshot`
+   *     every client shares. Last-wins across whichever socket reported
+   *     most recently is therefore the natural read of "the current
+   *     picture", not an arbitrary tie-break.
+   *  2. **Never cleared when the reporting socket disconnects.** A game
+   *     going quiet because it crashed is exactly the case this exists
+   *     for — the failure that caused the disconnect is the single most
+   *     important thing for a client connecting afterwards to learn, and
+   *     clearing it at the moment of disconnect would erase it at the
+   *     worst possible time. The cost is real and named, not ignored: a
+   *     newly connected client can be handed a frame describing a game
+   *     that is no longer running. Between "may describe a game that has
+   *     since gone" and "silently drops a real failure because a socket
+   *     dropped", this picks the first — the same lean §8 and this whole
+   *     slice already take everywhere else (a stale-but-true fact beats a
+   *     silently withheld one).
+   */
+  let lastGameDiagnostics: { diagnostics: Diagnostic[]; dropped: number } | null = null;
+
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
   };
@@ -47,6 +86,7 @@ export function apply(ctx: Context) {
 
   ctx.provide('ideRpc', {
     broadcastGameDiagnostics(diagnostics, dropped = 0) {
+      lastGameDiagnostics = { diagnostics, dropped };
       const message: ServerMessage = { type: 'game-diagnostics', diagnostics, dropped };
       for (const socket of clients) send(socket, message);
     },
@@ -82,6 +122,11 @@ export function apply(ctx: Context) {
         // re-labelled `{type:'diagnostics'}` — those two namespaces stay
         // apart the same way `Diagnostic.plugin`'s own doc keeps them
         // apart (see contracts' `protocol.ts`).
+        //
+        // Recorded before the relay loop, unconditionally — see
+        // `lastGameDiagnostics`'s own doc for why this is retained rather
+        // than only forwarded live.
+        lastGameDiagnostics = { diagnostics: message.diagnostics, dropped: message.dropped };
         for (const other of clients) {
           if (other !== socket) send(other, message);
         }
@@ -97,6 +142,22 @@ export function apply(ctx: Context) {
     });
 
     send(socket, { type: 'snapshot', snapshot: await ctx.composition.snapshot() });
+    // A client that (re)connects after a game already reported trouble
+    // must not see "nothing has ever gone wrong" just because it wasn't
+    // listening at the time — see `lastGameDiagnostics`'s own doc. Sent
+    // whole, after the snapshot, the same "always the current picture, in
+    // the same place" treatment `Snapshot` above already gets. Omitted
+    // entirely (not sent as an empty frame) when nothing has EVER been
+    // reported in this host's lifetime — that is genuinely "no game has
+    // reported anything yet", which the client already renders correctly
+    // on its own (`GameDiagnosticsState.diagnostics` starts `null`).
+    if (lastGameDiagnostics) {
+      send(socket, {
+        type: 'game-diagnostics',
+        diagnostics: lastGameDiagnostics.diagnostics,
+        dropped: lastGameDiagnostics.dropped,
+      });
+    }
   });
 
   // The graph is the source of truth: whenever it moves, the browser hears about it.

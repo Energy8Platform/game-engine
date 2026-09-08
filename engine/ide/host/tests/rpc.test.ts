@@ -295,6 +295,59 @@ describe('ide rpc — a game reports its own diagnostics', () => {
     await expect.poll(() => editor.received).toContainEqual(expect.objectContaining(frame));
     expect(editor.received.filter((m) => m.type === 'diagnostics')).toEqual([]);
   });
+
+  /**
+   * The reconnect gap the coordinator found on a live host: a client that
+   * connects (or reconnects) AFTER a game already reported trouble used to
+   * see only a `Snapshot`, and never learned about the failure at all. The
+   * four tests above all wait on a socket that was ALREADY listening when
+   * the report happened — none of them could have caught this. These two
+   * connect their observer AFTER the report instead, matching how the
+   * coordinator reproduced it: "a client that connects after the report,
+   * not one that was already listening."
+   */
+  describe('a client that connects after the fact', () => {
+    it('still receives the last game-diagnostics frame, not only a snapshot', async () => {
+      game.ws.send(JSON.stringify(frame));
+      // Confirmed landed on the already-listening `editor` first, so the
+      // host has provably recorded it before `late` connects — not a race
+      // against the write.
+      await expect.poll(() => editor.received).toContainEqual(expect.objectContaining(frame));
+
+      const late = await connectClient(); // simulates a reloaded IDE tab
+      await expect.poll(() => late.received.some((m) => m.type === 'game-diagnostics')).toBe(
+        true,
+      );
+      expect(late.received.filter((m) => m.type === 'game-diagnostics')).toEqual([
+        expect.objectContaining(frame),
+      ]);
+
+      late.ws.close();
+    });
+
+    // Decision 2 (see `lastGameDiagnostics`'s own doc in rpc.ts): the
+    // retained frame survives the reporting socket's own disconnect — a
+    // game going quiet BECAUSE it crashed is exactly the case this exists
+    // for, and clearing on close would erase the failure at the moment it
+    // matters most.
+    it('keeps the last frame even after the game that reported it has disconnected', async () => {
+      game.ws.send(JSON.stringify(frame));
+      await expect.poll(() => editor.received).toContainEqual(expect.objectContaining(frame));
+
+      game.ws.close();
+      await new Promise((resolve) => game.ws.once('close', resolve));
+
+      const late = await connectClient();
+      await expect.poll(() => late.received.some((m) => m.type === 'game-diagnostics')).toBe(
+        true,
+      );
+      expect(late.received.filter((m) => m.type === 'game-diagnostics')).toEqual([
+        expect.objectContaining(frame),
+      ]);
+
+      late.ws.close();
+    });
+  });
 });
 
 /**
