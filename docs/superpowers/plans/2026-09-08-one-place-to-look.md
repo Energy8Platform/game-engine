@@ -255,9 +255,9 @@ it('a diagnostic that is both returned and recorded appears once', async () => {
 
 ```ts
 // client -> server: the game telling the host what went wrong inside it
-{ type: 'game-diagnostics'; diagnostics: Diagnostic[] }
+{ type: 'game-diagnostics'; diagnostics: Diagnostic[]; dropped: number }
 // server -> client: the host passing that on to the editor
-{ type: 'game-diagnostics'; diagnostics: Diagnostic[] }
+{ type: 'game-diagnostics'; diagnostics: Diagnostic[]; dropped: number }
 ```
 
 **Почему отдельный тип, а не переиспользование `diagnostics`.** Существующий `{type:'diagnostics'}` несёт диагностику **проекта**, чей `plugin` — id строки состава. Диагностика игры несёт id шва или механики. Это два разных пространства имён в одном поле, и Срез 1a развёл их документацией только потому, что тогда они не могли встретиться. Теперь могут. **Тип сообщения — то, что их разделяет**; иначе принимающая сторона будет угадывать по имени, а имя строки пишет человек и вправе написать `session`.
@@ -283,6 +283,16 @@ it('a project diagnostic and a game diagnostic are different messages, even with
 **Files:**
 - Modify: `engine/game/ide-bridge/src/index.ts`
 - Test: `engine/game/ide-bridge/tests/index.test.ts`
+
+**Interfaces:**
+```ts
+/** Subscribes the socket to the service. Returns a disposer. Never throws. */
+export function attachDiagnosticsForwarding(
+  socket: Pick<WebSocket, 'readyState' | 'send'>,
+  log: DiagnosticsService,
+): () => void
+```
+Named и экспортируемая, потому что её зовут тесты ниже; `apply` вызывает её сам.
 
 `ide-bridge` подписывается на `ctx.diagnostics` и шлёт список наверх. Это единственная строка, живущая только в разработке, — и потому единственное место, где игре уместно разговаривать с хостом.
 
@@ -429,6 +439,8 @@ it('a game diagnostic does not become a project diagnostic', async () => {
 interface GameDiagnosticsState {
   /** What the game has reported. Null until the first frame arrives — absent is not empty. */
   readonly diagnostics: readonly Diagnostic[] | null;
+  /** How many the game's bounded log forgot. The panel must be able to say so. */
+  readonly dropped: number;
   subscribe(listener: () => void): () => void;
 }
 ```
@@ -544,7 +556,9 @@ it('a bounded log that forgot something says so', () => {
 
 - [ ] **Шаг 3: Убедиться, что видно то же самое**
 
-Прогнать Playwright целиком: специи, которые уже утверждают содержимое лога (`schema.spec.ts` проверяет предупреждение парсера, приёмка Среза 1b — чистоту лога после показа), обязаны остаться зелёными без правок. Если какой-то тест пришлось тронуть — это сигнал, что видно стало другое, и надо объяснить, что именно.
+Прогнать Playwright целиком. Специи, уже утверждающие содержимое лога (`schema.spec.ts` — предупреждение парсера; приёмка Среза 1b — чистоту лога после показа), должны остаться зелёными.
+
+Править их **можно только** там, где изменилось оформление тех же событий, и каждую такую правку назвать в отчёте: что переехало и почему. А вот если тест приходится **ослабить** — событий стало меньше, текст менее конкретен, — это значит, что сервис что-то потерял, и тогда задача останавливается, а не подгоняется.
 
 - [ ] **Шаг 4: Мутационная проверка.** Отписать `<pre>` от сервиса — падают те специи, что читают лог, и никакие другие.
 
