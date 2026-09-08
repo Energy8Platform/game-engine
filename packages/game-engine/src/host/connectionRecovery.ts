@@ -11,14 +11,21 @@
  * cleared to zero on the way. Reconnecting healed the link but nothing took the screen back down.
  *
  * So, per transition:
- *  - **lost** — halt autoplay (the counter survives, see `autoplay.halt()`) and put up the
- *    reconnect overlay. Repeated `lost` (one per failed reconnect attempt) doesn't restack it.
+ *  - **lost** — halt autoplay (the counter survives the drop, see `autoplay.halt()`) and put up
+ *    the reconnect overlay. Repeated `lost` (one per failed reconnect attempt) doesn't restack it.
  *  - **lost + `ConnectionGone`** — the bridge gave up retrying. That is terminal and honest about
  *    it: a Reload modal, not a "Reconnecting…" that will never resolve.
- *  - **restored** — take the overlay down and finish what the drop interrupted: if the platform
- *    still holds an open round, play it out silently to settlement. No modal asks the player to
- *    confirm this — it is their own round, they already paid for it, and an extra screen here is
- *    the very thing the remark objected to.
+ *  - **restored** — reset autoplay, take the overlay down, and finish what the drop interrupted:
+ *    if the platform still holds an open round, play it out silently to settlement. No modal asks
+ *    the player to confirm this — it is their own round, they already paid for it, and an extra
+ *    screen here is the very thing the remark objected to.
+ *
+ * Why halt on the way down but reset on the way up: while the link is down the run is stopped yet
+ * its remaining spins are still the player's, so the counter must keep showing them rather than
+ * snap to zero (the lab's original finding was exactly "the autoplay counter is reset"). Once the
+ * link is back, Artube wants the run **over**, not parked one tap from resuming: a run the player
+ * ordered before a network drop must not carry on across it, and the player re-orders autoplay
+ * deliberately. So `restored` clears the counter and the disc goes back to a plain SPIN.
  *
  * A `restored` that never followed a `lost` does nothing at all: it must not close a modal that
  * belongs to someone else.
@@ -35,8 +42,12 @@ export interface ConnectionState {
 }
 
 export interface ConnectionRecoveryDeps {
-  /** Stop an autoplay run WITHOUT clearing its counter (`Autoplay.halt`). */
+  /** Stop an autoplay run WITHOUT clearing its counter (`Autoplay.halt`) — used while the link
+   *  is down, so the spins still owed stay on screen. */
   haltAutoplay(): void;
+  /** End the run and clear its counter (`Autoplay.stop`) — used once the link is back: autoplay
+   *  does not survive a reconnect. */
+  resetAutoplay(): void;
   /** Put up the blocking "Reconnecting…" overlay. */
   showReconnecting(): void;
   /** Put up the terminal "the connection is gone — reload" modal. */
@@ -106,6 +117,9 @@ export function createConnectionRecovery(deps: ConnectionRecoveryDeps): Connecti
 
       if (!linkLost) return; // nothing of ours is on screen; nothing of ours to recover
       linkLost = false;
+      // The run does not resume across a reconnect. Like the halt above, this runs even when a
+      // modal owns the screen — the counter must not outlive the drop that ended the run.
+      deps.resetAutoplay();
       if (!blocked()) deps.dismiss();
       await recover();
     },

@@ -549,6 +549,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     const { createConnectionRecovery } = await import('./connectionRecovery');
     const connection = createConnectionRecovery({
       haltAutoplay: () => haltAutoplay(),
+      // A reconnect ends the run for good (Artube): the counter the halt preserved while the link
+      // was down is cleared here, and the disc goes back to a plain SPIN.
+      resetAutoplay: () => stopAutoplay(),
       showReconnecting: () =>
         shell!.openModal({
           availableClose: false,
