@@ -38,6 +38,7 @@ import {
   type SpinSchema,
 } from '@energy8engine/contracts';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
+import { createRegistry } from '@energy8engine/registry';
 // Type-only and fully erased — declares `ctx.diagnostics` on cordis's
 // `Context` without importing the row itself. See `@energy8engine/spin-log`'s
 // `src/runtime.ts` module doc for the same device.
@@ -181,7 +182,18 @@ export const name = 'mechanics';
  * name; cordis passes a config argument this plugin simply ignores.
  */
 export function apply(ctx: Context) {
-  const mechanics = new Map<string, AnySpinMechanic>();
+  // Same guarantee `@energy8engine/play-loop`'s `BoardStepRegistry` now
+  // gets from the same package, in place of a second hand-rolled `Map` +
+  // has-then-set branch + identity-guarded removal — see
+  // `registries-context.md`. `ctx.effect`'s whole-registry teardown net
+  // (below, in `register`) is this adapter's own addition on top: the
+  // generic collection is deliberately cordis-free, so tying a winning
+  // registration to this service's own scope stays this file's job, not
+  // something the collection could do for it.
+  const mechanics = createRegistry<AnySpinMechanic>({
+    policy: 'first-wins',
+    describe: (m) => m.id,
+  });
   const bindings = new Map<string, string>();
   const collisions: Diagnostic[] = [];
 
@@ -211,7 +223,14 @@ export function apply(ctx: Context) {
 
   const service: MechanicsService = {
     register(mechanic) {
-      if (mechanics.has(mechanic.id)) {
+      // Same "checked before add(), not re-decided" shape as
+      // `@energy8engine/play-loop`'s `BoardStepRegistry.register` — a
+      // collision is exactly "something is already registered under this
+      // id", which `add()` applies for itself; this read only decides
+      // whether THIS call renders a diagnostic.
+      const collided = mechanics.get(mechanic.id) !== undefined;
+      const off = mechanics.add(mechanic.id, mechanic);
+      if (collided) {
         collisions.push(
           diagnostic(
             'error',
@@ -221,21 +240,21 @@ export function apply(ctx: Context) {
             `give one of them an id of its own and bind the stage to that, or unregister the first before registering the second — a mechanic id names exactly one mechanic`,
           ),
         );
-        // No `ctx.effect` and no eviction — see `register`'s doc.
-        return () => {};
+        // No `ctx.effect` and no eviction — see `register`'s doc. `off`
+        // is already the registry's own no-op for a refused registration
+        // (see `@energy8engine/registry`), so a rejected row never enters
+        // the teardown net below and can never take the winner out with
+        // it.
+        return off;
       }
-      const dispose = ctx.effect(() => {
-        mechanics.set(mechanic.id, mechanic);
-        return () => {
-          // Only remove the entry if it's still *this* registration. A
-          // stale disposer — one whose registration was already disposed,
-          // and whose id another row then took — must not evict the
-          // replacement.
-          if (mechanics.get(mechanic.id) === mechanic) {
-            mechanics.delete(mechanic.id);
-          }
-        };
-      }, `mechanic:${mechanic.id}`);
+      // `off` already performed the write (`mechanics.add`, above), so
+      // this `ctx.effect` does no acquiring of its own — it only ties
+      // `off` to this service's own scope, so EVERY winning registration
+      // is torn down when this plugin's context is, whether or not its
+      // own caller ever calls what `register` returns. That is the
+      // "whole-registry teardown net" this interface's own doc contrasts
+      // with `BoardStepRegistry`, which deliberately has none.
+      const dispose = ctx.effect(() => () => off(), `mechanic:${mechanic.id}`);
       return () => {
         dispose();
       };

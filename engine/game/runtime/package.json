@@ -25,6 +25,7 @@
     "@energy8engine/loader": "*",
     "@energy8engine/mechanic-cascade": "*",
     "@energy8engine/mechanic-classic": "*",
+    "@energy8engine/registry": "*",
     "@energy8engine/seam": "*",
     "@energy8engine/session-dev": "*",
     "cordis": "4.0.0-rc.8"

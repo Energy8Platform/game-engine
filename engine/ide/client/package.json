@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@energy8engine/contracts": "*",
+    "@energy8engine/registry": "*",
     "cordis": "4.0.0-rc.8",
     "schemastery": "3.18.0"
   },

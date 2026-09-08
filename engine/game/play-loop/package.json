@@ -10,6 +10,7 @@
   "dependencies": {
     "@energy8engine/contracts": "*",
     "@energy8engine/diagnostics": "*",
+    "@energy8engine/registry": "*",
     "@energy8engine/spin-log": "*",
     "cordis": "4.0.0-rc.8"
   },

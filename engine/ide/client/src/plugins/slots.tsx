@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ComponentType } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
+import { createRegistry } from '@energy8engine/registry';
 import type { ConnectionService } from './connection';
 
 export interface SlotMeta {
@@ -37,7 +38,20 @@ export interface SlotsService {
 export const name = 'slots';
 
 export function apply(ctx: Context) {
-  const entries = new Map<string, SlotEntry>();
+  // Same replace-and-report guarantee as before, now from
+  // `@energy8engine/registry` instead of a hand-rolled `Map` — see
+  // `registries-context.md`. What stays here is what the generic
+  // collection cannot know on its own: building the COMPOSITE key
+  // (`name::key` — `key` alone is only unique WITHIN a slot, so the
+  // generic collection, which only ever sees a flat `(key, value)`, must
+  // be handed the combined string), rendering this package's own
+  // collision diagnostic, delivering it leniently through `ctx.reflect`,
+  // and calling `notify()` on every actual mutation. See `register`'s own
+  // comment below for why the POLICY itself stays a replace.
+  const entries = createRegistry<SlotEntry>({
+    policy: 'last-wins',
+    describe: (entry) => `${entry.name}::${entry.key}`,
+  });
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
@@ -63,7 +77,12 @@ export function apply(ctx: Context) {
       // somewhere to look for why. Read leniently — `slots` has no static
       // dependency on `connection` and must keep working (silently, as
       // before) if this is ever composed without it.
-      if (entries.has(id)) {
+      //
+      // Checked before `add()`, not re-decided from its result: a
+      // collision is exactly "something is already registered under this
+      // id", which `add()` applies for itself (as a replace, under this
+      // collection's last-wins policy) whether or not anyone asked first.
+      if (entries.get(id) !== undefined) {
         const connection = ctx.reflect.get('connection', false) as ConnectionService | undefined;
         connection?.report(
           diagnostic(
@@ -75,22 +94,32 @@ export function apply(ctx: Context) {
           ),
         );
       }
-      entries.set(id, entry);
+      const off = entries.add(id, entry);
       notify();
       return () => {
-        // Compare by reference, not just by id: a later registration under
-        // the same key replaces the map entry but keeps the same id, and
-        // this closure must not evict that replacement out from under its
-        // owner. The same check makes calling this disposer twice a no-op
-        // for free — the second call finds the id already gone (or holding
-        // someone else's entry) and does nothing.
-        if (entries.get(id) !== entry) return;
-        entries.delete(id);
-        notify();
+        // Checked BEFORE calling `off()`, not after: the registry's own
+        // disposer already no-ops on a stale call (compares the slot it
+        // added by reference, not by id — see `@energy8engine/registry`),
+        // but it has no way to tell its caller whether it actually removed
+        // anything. A stale disposer here must not notify either, for the
+        // same reason it must not remove: nothing changed for a subscriber
+        // to re-render over.
+        const isCurrent = entries.get(id) === entry;
+        off();
+        if (isCurrent) notify();
       };
     },
     list(slotName) {
-      return [...entries.values()].filter((entry) => entry.name === slotName);
+      // `entries.keys()` is insertion-ordered (see
+      // `@energy8engine/registry`), and this is the one adopter of the
+      // three that actually depends on that: `useSlot` renders every
+      // result of this call as a list, in this order.
+      const result: SlotEntry[] = [];
+      for (const id of entries.keys()) {
+        const entry = entries.get(id);
+        if (entry && entry.name === slotName) result.push(entry);
+      }
+      return result;
     },
     subscribe(listener) {
       listeners.add(listener);

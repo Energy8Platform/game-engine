@@ -42,6 +42,7 @@ import {
   type RevealWinsStep,
   type SpinToStep,
 } from '@energy8engine/contracts';
+import { createRegistry } from '@energy8engine/registry';
 
 /**
  * What a board must offer to play a `PresentationPlan`: one async method
@@ -181,13 +182,30 @@ export interface BoardStepRegistry {
 
 /** A fresh, empty `BoardStepRegistry` — nothing registered until something calls `register`. */
 export function createBoardStepRegistry(): BoardStepRegistry {
-  const handlers = new Map<string, StepHandler>();
+  // The collision policy and the disposer's identity-guard used to be
+  // hand-rolled here: a `Map`, a has-then-set branch, and an `if
+  // (handlers.get(kind) === handler)` removal guard — the exact shape
+  // that shipped the silent-overwrite bug `BoardStepRegistry.register`'s
+  // own doc describes. `@energy8engine/registry` is that guarantee given
+  // once instead of hand-rolled per collection — see
+  // `registries-context.md`. What stays here is what the generic
+  // collection cannot know on its own: deriving the key from
+  // `handler.kind` (it only ever sees a flat `(key, value)`), and
+  // rendering + storing THIS package's own collision diagnostic — the
+  // collection hands back structured facts, never a sentence.
+  const handlers = createRegistry<StepHandler>({ policy: 'first-wins', describe: (h) => h.kind });
   const collisions: Diagnostic[] = [];
 
   return {
     register(handler) {
-      const incumbent = handlers.get(handler.kind);
-      if (incumbent !== undefined) {
+      // A collision is exactly "something is already registered under
+      // this kind" — checked before `add()` so this call can decide
+      // whether to render a diagnostic, without re-deciding who wins:
+      // `add()` already applies first-wins on its own, synchronously, so
+      // nothing can change between this read and that call.
+      const collided = handlers.get(handler.kind) !== undefined;
+      const off = handlers.add(handler.kind, handler);
+      if (collided) {
         collisions.push(
           diagnostic(
             'error',
@@ -197,24 +215,14 @@ export function createBoardStepRegistry(): BoardStepRegistry {
             `give one of them a kind of its own, or unregister the first before registering the second — a step kind is served by exactly one handler`,
           ),
         );
-        // Deliberately not a disposer over the incumbent — see
-        // `BoardStepRegistry.register`'s doc.
-        return () => {};
       }
-      handlers.set(handler.kind, handler);
-      return () => {
-        // Only remove the entry if it's still *this* registration — an
-        // earlier registration's disposer must not delete a later one
-        // that re-registered the same kind in the meantime. Same guard,
-        // same reason, as `game-runtime`'s `MechanicsService.register`
-        // (see this interface's own doc for where the parallel ends).
-        if (handlers.get(handler.kind) === handler) {
-          handlers.delete(handler.kind);
-        }
-      };
+      // On a collision `off` is already the registry's own no-op — see
+      // `BoardStepRegistry.register`'s doc for why a refused registration
+      // must never be able to evict the winner.
+      return off;
     },
     has(kind) {
-      return handlers.has(kind);
+      return handlers.get(kind) !== undefined;
     },
     get(kind) {
       return handlers.get(kind);

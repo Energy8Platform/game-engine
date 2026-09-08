@@ -1,7 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { Context } from 'cordis';
+import { Context } from 'cordis';
 import { createIdeClient, useSlot } from '../src/index';
+import * as slotsPlugin from '../src/plugins/slots';
 
 // `createIdeClient` is async (Task 8, Ruling 2) — cordis applies a plugin
 // through a Fiber that is not guaranteed ACTIVE by the time `ctx.plugin()`
@@ -125,5 +126,65 @@ describe('slots', () => {
     expect(() =>
       ctx.slots.register({ name: 'composition.card', key: 'late' }, () => null),
     ).not.toThrow();
+  });
+});
+
+/**
+ * Task 4 moved `entries` off a hand-rolled `Map` onto
+ * `@energy8engine/registry`, which only ever sees a flat `(key, value)`.
+ * Three things stayed this file's own job rather than the collection's:
+ * building the COMPOSITE key, calling `notify()` on every actual mutation,
+ * and reading `connection` leniently. Every test above already passes
+ * without any of the three — each goes through `createIdeClient`, which
+ * always composes `connection` alongside `slots`, and each either reads
+ * state through `ctx.slots.list()` directly (no subscription involved) or
+ * renders AFTER registering (so a component's INITIAL state already has
+ * the answer, and `notify()` never has to fire for the test to pass).
+ * Verified by mutating the adapter, one property at a time, and confirming
+ * each of these three is what turns red — see task-4-report.md.
+ */
+describe('slots — the adapter seam, not the collection', () => {
+  it('keeps two different slot NAMES apart even when they share a key', async () => {
+    // `key` is only unique WITHIN a slot (see `SlotMeta.key`'s own doc) —
+    // the composite id is what makes that true, and every test above uses
+    // a distinct key whenever it uses a distinct name, so a composite id
+    // that silently dropped the name half would still pass all of them.
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    ctx.slots.register({ name: 'composition.card', key: 'shared' }, () => <span>card</span>);
+    ctx.slots.register({ name: 'sidebar.item', key: 'shared' }, () => <span>item</span>);
+    expect(ctx.slots.list('composition.card')).toHaveLength(1);
+    expect(ctx.slots.list('sidebar.item')).toHaveLength(1);
+  });
+
+  it('a mounted subscriber sees an entry added after mount, not only what existed at mount time', async () => {
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    render(<Host ctx={ctx} />);
+    expect(screen.queryByText('late card')).toBeNull();
+    // `act()`, same reason as the stale-disposer test above: `notify()`
+    // runs the subscription synchronously, outside any testing-library
+    // event helper.
+    act(() => {
+      ctx.slots.register({ name: 'composition.card', key: 'late' }, () => <span>late card</span>);
+    });
+    expect(screen.getByText('late card')).toBeTruthy();
+  });
+
+  it('registering a collision does not throw when composed without ctx.connection', async () => {
+    // Every test above goes through `createIdeClient`, which always
+    // composes `connection` next to `slots` — none of them can tell a
+    // lenient read (`ctx.reflect.get('connection', false)`) apart from one
+    // that assumes `connection` is there. This composes `slots` alone, the
+    // same way `game-runtime`'s `mechanics.test.ts` composes its own
+    // registry alone to prove the same thing about `ctx.diagnostics`.
+    const ctx = new Context();
+    await ctx.plugin(slotsPlugin);
+
+    ctx.slots.register({ name: 'composition.card', key: 'a' }, () => null);
+    expect(() =>
+      ctx.slots.register({ name: 'composition.card', key: 'a' }, () => null),
+    ).not.toThrow();
+    expect(ctx.slots.list('composition.card')).toHaveLength(1);
+
+    await ctx.fiber.dispose();
   });
 });
