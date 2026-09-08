@@ -246,7 +246,10 @@ describe('play-loop runtime half: reporting to the diagnostics service', () => {
     await ctx.plugin(diagnosticsRuntime);
     await ctx.plugin(runtime);
 
-    const diagnostics = await ctx.play.execute([{ kind: 'nope' }], fakeBoard() as unknown as BoardApi);
+    const diagnostics = await ctx.play.execute(
+      [{ kind: 'nope' }],
+      fakeBoard() as unknown as BoardApi,
+    );
 
     expect(diagnostics).toHaveLength(1);
     expect(ctx.diagnostics.list()).toHaveLength(1);
@@ -271,6 +274,45 @@ describe('play-loop runtime half: reporting to the diagnostics service', () => {
     await ctx.fiber.dispose();
   });
 
+  /**
+   * The measured case, in one test. `executePlan` reads
+   * `registry.collisions()` on EVERY call — deliberately, since a collision
+   * is a fact about the composition rather than about this plan — so ten
+   * clean spins against a colliding registry handed the service ten
+   * identical entries and one distinct message. At the bound the list would
+   * have been nothing but that message, every real failure evicted, and
+   * every spin would have forwarded the whole growing list to the IDE.
+   *
+   * `execute`'s RETURN is deliberately unchanged: a collision is still
+   * reported to its caller on every call, because a caller asking "did this
+   * plan play cleanly" has to be told the registry is ambiguous. The
+   * collapse belongs in the list, which has no time axis and so cannot mean
+   * anything by a second identical row.
+   */
+  it('one composition fact, ten spins, one entry', async () => {
+    const ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(runtime);
+
+    const handler = { kind: 'reelStep', async run() {} };
+    ctx.steps.register(handler);
+    ctx.steps.register({ ...handler }); // a second plugin claiming the same kind
+
+    for (let i = 0; i < 10; i += 1) {
+      const returned = await ctx.play.execute(
+        [{ kind: 'spinTo', board: [[1]] }],
+        fakeBoard() as unknown as BoardApi,
+      );
+      // Returned every time — see this test's own doc.
+      expect(returned, `spin ${i} must still be told the registry is ambiguous`).toHaveLength(1);
+    }
+
+    expect(ctx.diagnostics.list()).toHaveLength(1);
+    expect(ctx.diagnostics.list()[0].message).toContain('claim');
+
+    await ctx.fiber.dispose();
+  });
+
   it('does nothing, quietly, when no diagnostics row is composed', async () => {
     // The row is optional, like spin-log. A plan with a real problem must
     // still be playable and still return what went wrong — it just has
@@ -278,7 +320,10 @@ describe('play-loop runtime half: reporting to the diagnostics service', () => {
     const ctx = new Context();
     await ctx.plugin(runtime);
 
-    const diagnostics = await ctx.play.execute([{ kind: 'nope' }], fakeBoard() as unknown as BoardApi);
+    const diagnostics = await ctx.play.execute(
+      [{ kind: 'nope' }],
+      fakeBoard() as unknown as BoardApi,
+    );
 
     expect(diagnostics).toHaveLength(1);
 

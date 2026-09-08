@@ -34,6 +34,22 @@
  *     after an unbounded list grew for as long as a session stayed open;
  *     it goes in from the start here.
  *
+ *     **A byte-identical repeat is not a second entry.** The bound alone
+ *     was not enough, because the thing that fills a list is rarely a
+ *     hundred different failures — it is one COMPOSITION FACT re-reported
+ *     on every spin. Measured: two plugins claiming one step kind, then
+ *     ten clean successful spins, gave ten identical entries and one
+ *     distinct message; at the bound the list would have been nothing but
+ *     that message, every real failure evicted, and every spin would have
+ *     forwarded the whole growing list to the IDE. This list carries no
+ *     time and no count, so a second identical row says nothing the first
+ *     does not — see `sameIdentity` below, and note that the editor's own
+ *     half of the same panel (`connection.ts`) already collapses repeats
+ *     by exactly these three fields. Producers may still dedupe at source
+ *     when they have a better reason to (`ide-bridge` suppresses a repeat
+ *     to avoid rebinding work, not just to avoid a row); this is the
+ *     backstop that means none of them HAS to.
+ *
  * **Not the same package as `spin-log`, on purpose.** The two look alike —
  * both are a bounded, copy-in/copy-out, never-throws list with a dropped
  * count — but the shape of what they hold is different enough that sharing
@@ -95,7 +111,15 @@ export interface DiagnosticsService {
    * the project's, and once, wrongly, as the game's.
    */
   own(): readonly Diagnostic[];
-  /** Adds one this game produced. Never throws. Returns nothing — a reporter is not a caller that checks. */
+  /**
+   * Adds one this game produced. Never throws. Returns nothing — a
+   * reporter is not a caller that checks.
+   *
+   * A byte-identical repeat (same `plugin`/`where`/`message`/`fix`) is
+   * stored once and notifies once, however many times it is reported — see
+   * the module doc's point 3. A producer re-stating one composition fact
+   * on every spin is the normal case, not an abuse.
+   */
   report(diagnostic: Diagnostic): void;
   /**
    * Adds one this game did NOT produce — a diagnostic it was handed by
@@ -148,6 +172,21 @@ function copy(d: Diagnostic): Diagnostic {
   return { ...d };
 }
 
+/**
+ * Whether two diagnostics are the same complaint: `plugin` + `where` +
+ * `message`. The same three fields `ide/client/src/plugins/connection.ts`'s
+ * own `report` keys on, and deliberately so — those two lists now sit on
+ * one screen (`DiagnosticsPanel`), and two halves of one panel collapsing
+ * repeats by different rules would be worse than either rule alone.
+ *
+ * `fix` is not part of the identity: it is advice about the complaint, not
+ * part of what happened, so a producer that improves its wording should
+ * update the entry rather than add a second one.
+ */
+function sameIdentity(a: Diagnostic, b: Diagnostic): boolean {
+  return a.plugin === b.plugin && a.where === b.where && a.message === b.message;
+}
+
 /** A fresh, empty service. Holds diagnostics in memory for the life of the page. */
 export function createDiagnostics(options: DiagnosticsOptions = {}): DiagnosticsService {
   const requested = options.limit;
@@ -169,7 +208,19 @@ export function createDiagnostics(options: DiagnosticsOptions = {}): Diagnostics
 
   const add = (diagnostic: Diagnostic, own: boolean): void => {
     try {
-      records.push({ diagnostic: copy(diagnostic), own });
+      const incoming = copy(diagnostic);
+      // A byte-identical repeat is not a second event this list can
+      // express — see `sameIdentity` above. Nothing is stored and nobody is
+      // notified, so a producer that re-reports one composition fact on
+      // every spin costs one entry and one notification, not N of each.
+      const existing = records.find((record) => sameIdentity(record.diagnostic, incoming));
+      if (existing && existing.diagnostic.fix === incoming.fix) return;
+      records.push({ diagnostic: incoming, own });
+      // Same identity, different `fix` — the newer wording stands, at the
+      // newer position, and the older is dropped rather than left to read
+      // as a second failure. Removed AFTER the push so the record just
+      // added is never the one removed.
+      if (existing) records.splice(records.indexOf(existing), 1);
       if (records.length > limit) {
         dropped += records.splice(0, records.length - limit).length;
       }

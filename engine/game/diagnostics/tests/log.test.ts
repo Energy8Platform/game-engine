@@ -164,3 +164,75 @@ describe('what this game produced, and what it was handed', () => {
     expect(() => log.seed(null as unknown as Diagnostic)).not.toThrow();
   });
 });
+
+/**
+ * One composition fact, re-reported on every spin, is one entry.
+ *
+ * Measured before this: two plugins claiming one step kind, then ten clean
+ * successful spins — `executePlan` reads `registry.collisions()` on every
+ * call and this service stored the result each time — gave ten identical
+ * entries and one distinct message. At the bound the list would have been
+ * nothing but that message, every real failure evicted, and every spin
+ * forwarded the whole growing list to the IDE.
+ *
+ * The same identity rule the EDITOR's half of the panel already uses
+ * (`ide/client/src/plugins/connection.ts`), because the two halves now sit
+ * on one screen.
+ */
+describe('a repeat is not a second entry', () => {
+  it('stores one entry however many times the same complaint is reported', () => {
+    const log = createDiagnostics();
+    for (let i = 0; i < 10; i += 1) log.report(d('two handlers claim step kind "reelStep"'));
+    expect(log.list()).toHaveLength(1);
+  });
+
+  it('does not notify on a repeat, so nothing downstream re-sends the list', () => {
+    const log = createDiagnostics();
+    let calls = 0;
+    log.subscribe(() => {
+      calls += 1;
+    });
+    log.report(d('the same complaint'));
+    log.report(d('the same complaint'));
+    log.report(d('the same complaint'));
+    expect(calls).toBe(1);
+  });
+
+  it('a repeat does not consume the bound, so real failures are not evicted', () => {
+    // The half that matters most: without this, one repeated message at the
+    // limit pushes out every distinct failure underneath it.
+    const log = createDiagnostics({ limit: 2 });
+    log.report(d('a real failure'));
+    for (let i = 0; i < 10; i += 1) log.report(d('the composition fact'));
+    expect(log.list().map((x) => x.message)).toEqual(['a real failure', 'the composition fact']);
+    expect(log.dropped()).toBe(0);
+  });
+
+  it('a different failure from the same producer stands alongside', () => {
+    // The mistake the editor's own dedupe already learned to avoid: keying
+    // on anything wider than the whole complaint collapses unrelated things.
+    const log = createDiagnostics();
+    log.report({ severity: 'error', plugin: 'p', where: 'w', message: 'first reason' });
+    log.report({ severity: 'error', plugin: 'p', where: 'w', message: 'second reason' });
+    log.report({ severity: 'error', plugin: 'p', where: 'other', message: 'first reason' });
+    expect(log.list()).toHaveLength(3);
+  });
+
+  it('the same complaint with better advice replaces the earlier wording', () => {
+    // `fix` is advice about the complaint, not part of what happened.
+    const log = createDiagnostics();
+    log.report({ severity: 'error', plugin: 'p', where: 'w', message: 'm' });
+    log.report({ severity: 'error', plugin: 'p', where: 'w', message: 'm', fix: 'try this' });
+    expect(log.list()).toEqual([
+      { severity: 'error', plugin: 'p', where: 'w', message: 'm', fix: 'try this' },
+    ]);
+  });
+
+  it('a seeded repeat collapses the same way', () => {
+    const log = createDiagnostics();
+    log.seed(d('the host said this'));
+    log.seed(d('the host said this'));
+    expect(log.list()).toHaveLength(1);
+    expect(log.own()).toEqual([]);
+  });
+});
