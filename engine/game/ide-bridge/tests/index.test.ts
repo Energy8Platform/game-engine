@@ -643,11 +643,16 @@ describe('ide-bridge — naming a stage the module was never told about', () => 
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
       onDiagnostic: (d) => reported.push(d),
-    } as never);
+      // Spread rather than written inline, and deliberately: `base_game`
+      // is not a field of `IdeBridgeConfig` any more, which is the whole
+      // point. Casting the WHOLE object to silence that would also erase
+      // `onDiagnostic`'s parameter type, so the extra key alone is the
+      // untyped part — exactly as a hand-edited `e8.yml` delivers it.
+      ...({ base_game: 'classic' } as Record<string, unknown>),
+    });
 
     // Still binds nothing — no alias, deliberately.
     expect(bind).not.toHaveBeenCalled();
