@@ -237,7 +237,16 @@ export function attachDiagnosticsForwarding(
     try {
       const message: ClientMessage = {
         type: 'game-diagnostics',
-        diagnostics: [...log.list()],
+        // `own()`, not `list()`. The game's list also carries what the HOST
+        // said about the project (`createGame` seeds it there so `boot` and
+        // the page can paint one list), and the editor already holds those
+        // from the same `/api/composition` response over its own channel —
+        // sending them again made the panel render one project failure
+        // twice, the second copy labelled as the game's. `dropped()` is
+        // still the whole list's, which can only ever OVERSTATE what this
+        // frame is missing: a reader told too much was forgotten loses a
+        // sentence, a reader told too little believes it has everything.
+        diagnostics: [...log.own()],
         dropped: log.dropped(),
       };
       socket.send(JSON.stringify(message));

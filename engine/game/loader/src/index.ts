@@ -95,6 +95,24 @@ export interface LoadOptions {
    * racing rows that might read it.
    */
   plan?: (rows: GameCompositionRow[]) => RowPlan | Promise<RowPlan>;
+  /**
+   * Called with the diagnostics the HOST sent on the composition response —
+   * a malformed `e8.profile.yml`, a bundle that was not found, a row whose
+   * package could not be resolved — before any row applies.
+   *
+   * They are also in this function's return value, exactly as they always
+   * were (the same objects, spread into the returned array), so a caller
+   * that ignores this hook loses nothing. It exists because a caller may
+   * need to tell those apart from everything else in that array, and only
+   * this function knows which is which by the time they are merged: the
+   * editor ALREADY has the host's diagnostics, over its own channel, so a
+   * game that forwards its list onward has to know not to send them again.
+   * See `@energy8engine/diagnostics`'s `seed`/`own`.
+   *
+   * Never throws out of this function: like everything else here, a hook
+   * that fails is not a reason for the game to go blank.
+   */
+  onHostDiagnostics?: (diagnostics: readonly Diagnostic[]) => void;
 }
 
 interface CompositionResponse {
@@ -143,6 +161,19 @@ export async function composeFromProject(ctx: Context, options: LoadOptions = {}
   // The host's own diagnostics (a malformed e8.yml, a bundle that failed to
   // resolve, …) travel through untouched; rows below only ever ADD to this.
   const diagnostics: Diagnostic[] = [...composition.diagnostics];
+  // Announced as well as returned — see `LoadOptions.onHostDiagnostics`.
+  // The SAME objects that went into `diagnostics` above (the array is
+  // spread; the diagnostics in it are not copied), so a caller can match
+  // them by identity against what this function returns. Guarded because a
+  // caller's hook throwing must not abandon a composition that has not
+  // started applying yet.
+  if (options.onHostDiagnostics && composition.diagnostics.length > 0) {
+    try {
+      options.onHostDiagnostics(composition.diagnostics);
+    } catch {
+      // Nothing to report it to that would not be this same list.
+    }
+  }
 
   // No `plan`: every row the host resolved applies, in the order it
   // resolved them — the behaviour before this option existed.

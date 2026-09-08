@@ -87,3 +87,80 @@ describe('reportAll', () => {
     expect(log.list()).toEqual([]);
   });
 });
+
+/**
+ * The fourth property (see the module doc): the list knows which entries
+ * this game produced.
+ *
+ * `report` is the game's own; `seed` is one it was handed by something that
+ * already has a reader of its own at the other end — today, exactly the
+ * HOST's project diagnostics, which `createGame` mirrors here so `boot` and
+ * the game's page can paint one list. A reader showing the GAME wants both
+ * (`list`); a reader FORWARDING to the editor must send only the first
+ * (`own`), or one project failure arrives twice and the second copy is
+ * attributed to the wrong side.
+ */
+describe('what this game produced, and what it was handed', () => {
+  it('list() holds both, in the order they arrived', () => {
+    const log = createDiagnostics();
+    log.seed(d('the host said this'));
+    log.report(d('the game said this'));
+    log.seed(d('the host said this too'));
+    expect(log.list().map((x) => x.message)).toEqual([
+      'the host said this',
+      'the game said this',
+      'the host said this too',
+    ]);
+  });
+
+  it('own() holds only what was reported', () => {
+    const log = createDiagnostics();
+    log.seed(d('handed over'));
+    log.report(d('produced here'));
+    expect(log.own().map((x) => x.message)).toEqual(['produced here']);
+  });
+
+  it('own() is empty, not everything, when only seeded entries exist', () => {
+    // The mistake this catches is the cheap one: an `own()` that forgets to
+    // filter reads identically to `list()` on a log where everything was
+    // reported anyway.
+    const log = createDiagnostics();
+    log.seed(d('handed over'));
+    expect(log.list()).toHaveLength(1);
+    expect(log.own()).toEqual([]);
+  });
+
+  it('seed notifies subscribers — it changes what list() shows', () => {
+    const log = createDiagnostics();
+    let calls = 0;
+    log.subscribe(() => {
+      calls += 1;
+    });
+    log.seed(d('handed over'));
+    expect(calls).toBe(1);
+  });
+
+  it('own() cannot be edited through, the same as list()', () => {
+    const log = createDiagnostics();
+    log.report(d('original'));
+    const taken = log.own() as Diagnostic[];
+    taken[0].message = 'rewritten';
+    taken.push(d('smuggled in'));
+    expect(log.own().map((x) => x.message)).toEqual(['original']);
+  });
+
+  it('dropped() counts both kinds, so a forwarder can never understate what was forgotten', () => {
+    const log = createDiagnostics({ limit: 2 });
+    log.seed(d('first, seeded'));
+    log.seed(d('second, seeded'));
+    log.report(d('third, reported'));
+    expect(log.dropped()).toBe(1);
+    expect(log.own().map((x) => x.message)).toEqual(['third, reported']);
+    expect(log.list().map((x) => x.message)).toEqual(['second, seeded', 'third, reported']);
+  });
+
+  it('seed never throws, the same as report', () => {
+    const log = createDiagnostics();
+    expect(() => log.seed(null as unknown as Diagnostic)).not.toThrow();
+  });
+});

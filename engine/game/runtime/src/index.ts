@@ -70,7 +70,7 @@ import { selectProvider, type SeamCandidate, type SeamContext } from '@energy8en
 import { renderBootFailure } from '@energy8engine/boot';
 import type { BootService } from '@energy8engine/boot/runtime';
 import type { SessionConfig } from '@energy8engine/session-dev';
-import { reportAll } from '@energy8engine/diagnostics';
+import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import { checkAgainstSchema } from './plugins/mechanics';
 
 export type { MechanicsService } from './plugins/mechanics';
@@ -279,6 +279,22 @@ function withSchemaCapture(
 export async function createGame(config: GameConfig = {}): Promise<GameApp> {
   const ctx = new Context();
   const diagnostics: Diagnostic[] = [];
+  /**
+   * The subset of `diagnostics` that came from the HOST, on the composition
+   * response — filled by `composeFromProject`'s `onHostDiagnostics` hook
+   * below, and read once at the end of this function.
+   *
+   * They are in `diagnostics` too, merged with everything else, and they
+   * must stay merged: `boot` paints one list and so does the game's own
+   * page. What this set is for is the OTHER reader — the editor already
+   * holds these, off the same `/api/composition` response, over its own
+   * channel — so a game forwarding its list onward has to know not to send
+   * them again. Identity is how it can tell; the loader spreads the array
+   * and never copies the diagnostics in it. Declared out here rather than
+   * beside its one write because the write is inside the `try` and the read
+   * is after it.
+   */
+  const fromHost = new Set<Diagnostic>();
 
   try {
     // Everything the caller supplies goes on the context first, so a row
@@ -446,7 +462,16 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
       if (rejected) diagnostics.push(rejected);
     });
 
-    diagnostics.push(...(await composeFromProject(ctx, { ...config.loader, fetchFn, plan })));
+    diagnostics.push(
+      ...(await composeFromProject(ctx, {
+        ...config.loader,
+        fetchFn,
+        plan,
+        onHostDiagnostics: (list) => {
+          for (const d of list) fromHost.add(d);
+        },
+      })),
+    );
 
     // §7.1's pre-flight: a mechanic's `requires` checked against what the
     // math's schema actually declares, before the first spin — not just
@@ -484,14 +509,33 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
   // it into the service a `diagnostics1` row may have provided, so a panel
   // reading `ctx.diagnostics` sees exactly what `GameApp.diagnostics` says,
   // not only what was collected after boot (see task-2-3-report.md, and the
-  // module doc's point 1). `reportAll` is a no-op when no such row composed
-  // — the row is optional, like `spinlog1`; its absence costs the panel, not
-  // the game. This is the ONE place this array is written to the service:
-  // every producer that writes to it directly for a diagnostic born AFTER
-  // this function returns (a plan step, a post-spin check, ...) is a
-  // DIFFERENT event than anything collected here, so there is no double
-  // count between the two.
-  reportAll(ctx.reflect.get('diagnostics', false), diagnostics);
+  // module doc's point 1). A no-op when no such row composed — the row is
+  // optional, like `spinlog1`; its absence costs the panel, not the game.
+  // This is the ONE place this array is written to the service: every
+  // producer that writes to it directly for a diagnostic born AFTER this
+  // function returns (a plan step, a post-spin check, ...) is a DIFFERENT
+  // event than anything collected here, so there is no double count between
+  // the two.
+  //
+  // **Two ways in, not one, and the difference is which OTHER reader
+  // already has the entry.** Everything this game worked out for itself —
+  // the seam plan, a row whose `apply` threw, a schema it could not read,
+  // a mechanic id two rows claimed — is `report`ed, and a bridge forwarding
+  // to the editor sends it on, because nothing else would ever tell the
+  // editor about it. The HOST's own project diagnostics (`fromHost`) are
+  // `seed`ed instead: the editor fetched the very same list off
+  // `/api/composition` for itself, so forwarding them made the IDE panel
+  // render one project failure twice — once as the project's, once wrongly
+  // as the game's. They still go IN, unchanged, because `boot` and the
+  // game's page both paint `list()` and both need the whole picture.
+  const diagnosticsService = ctx.reflect.get('diagnostics', false) as
+    DiagnosticsService | undefined;
+  if (diagnosticsService) {
+    for (const d of diagnostics) {
+      if (fromHost.has(d)) diagnosticsService.seed(d);
+      else diagnosticsService.report(d);
+    }
+  }
 
   if (config.mount && diagnostics.some((d) => d.severity === 'error')) {
     renderFailure(ctx, config.mount, diagnostics);

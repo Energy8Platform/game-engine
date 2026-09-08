@@ -826,8 +826,41 @@ describe('ide-bridge forwards the game diagnostics', () => {
     expect(socket.sent).toHaveLength(1);
     const frame = JSON.parse(socket.sent[0]);
     expect(frame.type).toBe('game-diagnostics');
+    expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual(['reels blew up']);
+  });
+
+  it('sends what the game PRODUCED, not what it was handed', () => {
+    // `createGame` seeds the HOST's project diagnostics into the same
+    // service so `boot` and the game's page can paint one list. The editor
+    // already holds those, off the same `/api/composition` response, over
+    // its own channel — forwarding them made the panel render one project
+    // failure twice, the second copy labelled as the game's.
+    const socket = fakeSocket();
+    const log = createDiagnostics();
+    log.seed(d('the host already told the editor this'));
+    attachDiagnosticsForwarding(socket, log);
+    log.report(d('reels blew up'));
+
+    expect(socket.sent).toHaveLength(1);
+    const frame = JSON.parse(socket.sent[0]);
+    expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual(['reels blew up']);
+  });
+
+  it('still says how many were forgotten, counting both kinds', () => {
+    // `dropped` is the whole list's, which can only OVERSTATE what this
+    // frame is missing. That is the safe direction: a reader told too much
+    // was forgotten loses a sentence; one told too little believes it has
+    // everything.
+    const socket = fakeSocket();
+    const log = createDiagnostics({ limit: 1 });
+    log.seed(d('seeded, will be forgotten'));
+    attachDiagnosticsForwarding(socket, log);
+    log.report(d('the only survivor'));
+
+    const frame = JSON.parse(socket.sent[0]);
+    expect(frame.dropped).toBe(1);
     expect(frame.diagnostics.map((x: { message: string }) => x.message)).toEqual([
-      'reels blew up',
+      'the only survivor',
     ]);
   });
 

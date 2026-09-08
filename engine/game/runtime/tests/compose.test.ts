@@ -677,6 +677,49 @@ describe('createGame — the diagnostics service', () => {
     expect(game.diagnostics).toEqual([]);
   });
 
+  /**
+   * The HOST's own project diagnostics go into the service too — `boot` and
+   * the game's page both paint `list()` and both need the whole picture —
+   * but they are SEEDED, not reported, because the editor already holds
+   * them off the same `/api/composition` response over its own channel.
+   * Forwarding them onward made the IDE panel render one project failure
+   * twice, the second copy labelled as the game's.
+   */
+  it("the host's own diagnostics are seeded, not reported — they are in list() and not in own()", async () => {
+    const hostSaid = {
+      severity: 'error' as const,
+      plugin: 'session',
+      where: 'patch',
+      message: 'patch addresses row "session", which no bundle placed',
+    };
+    game = await createGame({
+      loader: {
+        // One host diagnostic AND one of the game's own (`broken1`'s half
+        // fails to import). Both halves are needed: a test with only the
+        // host's could pass on an `own()` that returns nothing at all.
+        fetchFn: fakeFetch({
+          rows: [row('diagnostics1'), row('broken1')],
+          diagnostics: [hostSaid],
+        }),
+        importModule: importHalf,
+      },
+    });
+
+    const list = game.ctx.diagnostics.list().map((d) => d.message);
+    const own = game.ctx.diagnostics.own().map((d) => d.message);
+
+    // Everything is in the game's own list, exactly as `GameApp.diagnostics`
+    // says — that half must not regress, or `boot` loses what to paint.
+    expect(list).toEqual(game.diagnostics.map((d) => d.message));
+    expect(list).toContain(hostSaid.message);
+
+    // But what a forwarder sends excludes it, and still carries the game's
+    // own failure.
+    expect(own).not.toContain(hostSaid.message);
+    expect(own.length).toBe(list.length - 1);
+    expect(own.some((m) => m.includes('this module does not exist'))).toBe(true);
+  });
+
   it('reporting to an absent service costs nothing, even when there is something to report', async () => {
     // The guard `reportAll` (and every writer built on it) relies on: a
     // NON-EMPTY list handed to a MISSING service. `list.length === 0`

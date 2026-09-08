@@ -146,28 +146,20 @@ test('one id in both namespaces renders as two rows, not one', async ({ page }) 
 
   const host = await startDevHost(project);
   try {
-    // The spin that produces the game's half — the same request the game's
-    // own Spin button makes, `POST /api/spin` with an empty body, and the
-    // route answers `502 { diagnostics }` and broadcasts them as a
-    // `game-diagnostics` frame.
+    // The spin that produces the game's half, clicked on the game's own
+    // page: `POST /api/spin` fails in the host process, the route answers
+    // `502 { diagnostics }`, and the host broadcasts them as a
+    // `game-diagnostics` frame of its own.
     //
-    // Asked for directly rather than by opening the game and clicking, and
-    // the reason is a MEASURED one rather than convenience. A project
-    // diagnostic is also part of what `createGame` collects, so a running
-    // game's own `ctx.diagnostics` holds a copy of the `session` row's
-    // complaint too — and the moment that game reports anything after boot,
-    // `ide-bridge` forwards its whole list and the panel renders that one
-    // event a second time, as a `game` row (measured: three rows, the first
-    // two identical but for the origin tag). That is a real inconsistency,
-    // and it is written up as one — but it is not what THIS test is about,
-    // and letting it decide the row count here would make a namespace test
-    // pass or fail on an unrelated forwarding rule.
-    const spun = await fetch(`${host.gameUrl}/api/spin`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    expect(spun.status, 'the spin must actually have failed at the host').toBe(502);
+    // The page shows a failure screen here, and that is correct rather than
+    // incidental: a patch row nothing can place is an `error`, and a
+    // composition with an error in it is not a game a player should be
+    // looking at. Spin still works — the button is not in the mount — which
+    // is all this test needs from it.
+    await page.goto(host.gameUrl);
+    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await page.locator('#spin').click();
+    await expect(page.locator('#status')).toContainText('spin failed', { timeout: 20_000 });
 
     await page.goto(IDE_URL);
     const rows = page.getByTestId(/^diag-/);
@@ -239,6 +231,67 @@ test('a host-side failure does not erase what the game already reported', async 
       "the host's own frame must not replace what the game reported",
     ).toContainText('first-unbound');
     await expect(panel).toContainText('second-unbound');
+  } finally {
+    await host.stop();
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The slice's own disease in its last form. `createGame` mirrors the HOST's
+ * project diagnostics into the game's `ctx.diagnostics` on purpose — `boot`
+ * paints one list and the page reads one list — and `ide-bridge` forwards
+ * that list onward. So the editor, which already has those diagnostics from
+ * `/api/composition`, received them a second time and rendered them again,
+ * the second copy labelled `game`.
+ *
+ * The invariant: each diagnostic appears exactly once, attributed to where
+ * it actually came from. And the game's own list stays COMPLETE — that half
+ * is asserted here too, on the game's page, because the obvious wrong fix is
+ * to stop mirroring and leave `boot` with nothing to paint.
+ */
+test('a project failure appears once, on the project side', async ({ page, context }) => {
+  const project = projectCopy({ patchRowId: 'session' });
+  const host = await startDevHost(project);
+  try {
+    const game = await context.newPage();
+    await game.goto(host.gameUrl);
+    await expect(game.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+
+    // Half one: the game's own list is still complete. The project's
+    // complaint is in it, where `boot` and this page both need it.
+    await expect(
+      game.locator('#log'),
+      "the game's own list must still carry what the host said about the project",
+    ).toContainText('which no bundle placed');
+
+    // Something of the game's own, so the bridge actually forwards.
+    await game.evaluate(() => (window as any).__e8.present('unbound-stage', {}));
+    await expect(game.locator('#log')).toContainText('unbound-stage');
+
+    await page.goto(IDE_URL);
+    const rows = page.getByTestId(/^diag-/);
+    const projectRow = rows.filter({ hasText: 'which no bundle placed' });
+    const gameRow = rows.filter({ hasText: 'unbound-stage' });
+
+    // The game's own report FIRST, and it is what arms everything below.
+    // The project half is rendered from `/api/composition`, which the editor
+    // fetches on its own; the game half arrives a moment later, over the
+    // socket. Counting the project rows before that second frame lands would
+    // find one of them and pass through a branch this test does not name —
+    // measured, not guessed: that is exactly how it passed spuriously the
+    // first time it was run against the unfixed code, and the duplicate was
+    // caught one line further down by luck rather than by design.
+    await expect(gameRow, "the game's own report must still arrive").toHaveCount(1, {
+      timeout: 20_000,
+    });
+    await expect(gameRow).toContainText(/game/i);
+
+    // Half two, now that the whole picture is in: exactly one row for the
+    // project's complaint, and it is the project's. Before the fix there were
+    // two, the second wearing `game`.
+    await expect(projectRow, 'the project row must appear once, not once per side').toHaveCount(1);
+    await expect(projectRow).toContainText(/project/i);
   } finally {
     await host.stop();
     rmSync(project, { recursive: true, force: true });

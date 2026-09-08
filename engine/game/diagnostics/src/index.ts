@@ -59,17 +59,70 @@
  *
  * If `Diagnostic` ever grows a field that is not a plain string — should
  * that happen, this call is worth revisiting.
+ *
+ * **A fourth property, added after the first three were measured against a
+ * real IDE: the list knows which entries this game produced.** `report`
+ * puts one in; `seed` puts one in that this game was merely HANDED (today,
+ * exactly one thing: the host's project diagnostics, which `createGame`
+ * mirrors here so `boot` and the game's page can paint one list). `list()`
+ * returns both, because a reader showing the GAME needs the whole picture;
+ * `own()` returns only the reported ones, because a reader FORWARDING to
+ * somewhere that already has the seeded ones must not send them twice.
+ * Without the distinction the IDE rendered one project failure twice —
+ * once as the project's and once, wrongly, as the game's — which is this
+ * slice's own disease in a new form.
  */
 import type { Diagnostic } from '@energy8engine/contracts';
 
 export interface DiagnosticsService {
-  /** Everything reported so far, oldest first. A copy: mutating it must not reach the service. */
+  /**
+   * Everything in this game's list, oldest first — reported AND seeded (see
+   * `seed`). A copy: mutating it must not reach the service.
+   *
+   * This is what a reader that is showing THE GAME shows: the failure
+   * screen `boot` paints, the game page's own log. Both need the whole
+   * picture, whoever first noticed each part of it.
+   */
   list(): readonly Diagnostic[];
-  /** Adds one. Never throws. Returns nothing — a reporter is not a caller that checks. */
+  /**
+   * The subset of `list()` this game itself produced — everything that
+   * arrived through `report`, and nothing that arrived through `seed`.
+   *
+   * This is what a reader that is FORWARDING somewhere else sends
+   * (`@energy8engine/ide-bridge`). The distinction is not cosmetic: a
+   * seeded diagnostic already has a reader of its own at the other end, and
+   * forwarding it made the IDE render one project failure twice — once as
+   * the project's, and once, wrongly, as the game's.
+   */
+  own(): readonly Diagnostic[];
+  /** Adds one this game produced. Never throws. Returns nothing — a reporter is not a caller that checks. */
   report(diagnostic: Diagnostic): void;
-  /** Called after every `report`. Returns a disposer. */
+  /**
+   * Adds one this game did NOT produce — a diagnostic it was handed by
+   * something that already has its own way of telling the world.
+   *
+   * There is exactly one such source today: the HOST's project diagnostics,
+   * which `createGame` collects off `GET /api/composition` and mirrors here
+   * so `boot` and the page can paint one list. The editor already has those
+   * from the same response over its own channel, so anything forwarding
+   * from this service must not send them again — hence `own()` above.
+   *
+   * Otherwise identical to `report`: copied in, bounded the same way,
+   * notifies subscribers, never throws.
+   */
+  seed(diagnostic: Diagnostic): void;
+  /** Called after every `report` or `seed`. Returns a disposer. */
   subscribe(listener: () => void): () => void;
-  /** How many the bound has forgotten. A panel that lies about completeness is worse than none. */
+  /**
+   * How many the bound has forgotten. A panel that lies about completeness
+   * is worse than none.
+   *
+   * Counts drops of BOTH kinds — a seeded entry falling off the front is
+   * still something this list no longer holds. A forwarder sending `own()`
+   * alongside this number therefore never understates what was forgotten,
+   * which is the direction that matters: overstating costs a reader a
+   * sentence, understating lets it believe it has everything.
+   */
   dropped(): number;
 }
 
@@ -103,40 +156,57 @@ export function createDiagnostics(options: DiagnosticsOptions = {}): Diagnostics
       ? Math.floor(requested)
       : DEFAULT_LIMIT;
 
-  const records: Diagnostic[] = [];
+  /**
+   * `own` marks a record this game produced itself, as opposed to one it
+   * was handed (see `DiagnosticsService.seed`). Kept beside the diagnostic
+   * rather than on it: `Diagnostic` is a closed shape shared by the game,
+   * the IDE and the wire, and "who put this in MY list" is a fact about
+   * this service's bookkeeping, not about the failure.
+   */
+  const records: { diagnostic: Diagnostic; own: boolean }[] = [];
   const listeners = new Set<() => void>();
   let dropped = 0;
 
+  const add = (diagnostic: Diagnostic, own: boolean): void => {
+    try {
+      records.push({ diagnostic: copy(diagnostic), own });
+      if (records.length > limit) {
+        dropped += records.splice(0, records.length - limit).length;
+      }
+    } catch {
+      // Copying should not be able to fail for a genuine `Diagnostic` —
+      // see the module doc — but `report` promises never to throw
+      // regardless of what a caller actually hands it, so a diagnostic
+      // whose fields cannot even be read is dropped rather than taking
+      // the game down.
+      return;
+    }
+    // A snapshot, not the live set: a listener that subscribes or
+    // disposes itself mid-notification must not change who else hears
+    // THIS report.
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch {
+        // A panel blowing up while rendering is that panel's failure,
+        // not this service's — the diagnostic already has its place in
+        // the list (above), and the next listener still gets called.
+      }
+    }
+  };
+
   return {
     list() {
-      return records.map(copy);
+      return records.map((record) => copy(record.diagnostic));
+    },
+    own() {
+      return records.filter((record) => record.own).map((record) => copy(record.diagnostic));
     },
     report(diagnostic) {
-      try {
-        records.push(copy(diagnostic));
-        if (records.length > limit) {
-          dropped += records.splice(0, records.length - limit).length;
-        }
-      } catch {
-        // Copying should not be able to fail for a genuine `Diagnostic` —
-        // see the module doc — but `report` promises never to throw
-        // regardless of what a caller actually hands it, so a diagnostic
-        // whose fields cannot even be read is dropped rather than taking
-        // the game down.
-        return;
-      }
-      // A snapshot, not the live set: a listener that subscribes or
-      // disposes itself mid-notification must not change who else hears
-      // THIS report.
-      for (const listener of [...listeners]) {
-        try {
-          listener();
-        } catch {
-          // A panel blowing up while rendering is that panel's failure,
-          // not this service's — the diagnostic already has its place in
-          // the list (above), and the next listener still gets called.
-        }
-      }
+      add(diagnostic, true);
+    },
+    seed(diagnostic) {
+      add(diagnostic, false);
     },
     subscribe(listener) {
       listeners.add(listener);

@@ -215,6 +215,64 @@ describe('composeFromProject', () => {
     expect(diags).toHaveLength(1);
   });
 
+  /**
+   * A caller needs to tell the HOST's own diagnostics apart from everything
+   * else in the array this returns — the editor already holds the host's,
+   * over its own channel, so a game forwarding its list must not send them
+   * again (see `LoadOptions.onHostDiagnostics`). Only this function knows
+   * which is which by the time they are merged.
+   */
+  it('announces the host project diagnostics, as the very objects it returns', async () => {
+    const hostSaid = { severity: 'error' as const, plugin: 'p', where: 'w', message: 'the host' };
+    const seen: unknown[] = [];
+    const ctx = new Context();
+    const diags = await composeFromProject(ctx, {
+      // One host diagnostic and one of the loader's own (`bad1` fails to
+      // import), so a hook that simply forwarded everything would be caught.
+      fetchFn: fakeFetch({ rows: [row('bad1')], diagnostics: [hostSaid] }),
+      importModule: async () => {
+        throw new Error('this module does not exist');
+      },
+      onHostDiagnostics: (list) => seen.push(...list),
+    });
+
+    expect(seen).toHaveLength(1);
+    // Identity, not equality: the caller matches these against the returned
+    // array by reference, so a copy here would silently break it.
+    expect(seen[0]).toBe(diags[0]);
+    expect(diags).toHaveLength(2);
+  });
+
+  it('does not call the hook when the host said nothing', async () => {
+    let calls = 0;
+    const ctx = new Context();
+    await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [], diagnostics: [] }),
+      importModule: async () => ({}),
+      onHostDiagnostics: () => {
+        calls += 1;
+      },
+    });
+    expect(calls).toBe(0);
+  });
+
+  it('a hook that throws does not stop the composition', async () => {
+    const applied: string[] = [];
+    const ctx = new Context();
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({
+        rows: [row('r1')],
+        diagnostics: [{ severity: 'error', plugin: 'p', where: 'w', message: 'the host' }],
+      }),
+      importModule: async () => ({ apply: () => applied.push('r1') }),
+      onHostDiagnostics: () => {
+        throw new Error('a caller hook blew up');
+      },
+    });
+    expect(applied).toEqual(['r1']);
+    expect(diags).toHaveLength(1);
+  });
+
   it('a failed composition fetch is a diagnostic, not a throw', async () => {
     const ctx = new Context();
     const diags = await composeFromProject(ctx, {
@@ -233,7 +291,13 @@ describe('composeFromProject', () => {
     await composeFromProject(ctx, {
       fetchFn: fakeFetch({
         rows: [
-          { id: 'a', name: '@e/a', config: { speed: 7 }, from: 'patch', runtimeUrl: '/plugin-runtime/a' },
+          {
+            id: 'a',
+            name: '@e/a',
+            config: { speed: 7 },
+            from: 'patch',
+            runtimeUrl: '/plugin-runtime/a',
+          },
         ],
         diagnostics: [],
       }),
