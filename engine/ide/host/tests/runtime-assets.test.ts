@@ -131,6 +131,82 @@ describe('GET /api/composition', () => {
   });
 
   /**
+   * `requires` is `@energy8engine/game-runtime`'s to enforce, but only the
+   * host can read a package manifest — so this is the one place that
+   * matters: without this row-by-row forwarding, `createGame`'s check
+   * would be enforcing a field the browser never actually receives, and
+   * every project's `e8.runtime.requires` would be silently inert. Same
+   * fixture shape as the `seam` test just above it, for the same reason:
+   * one row that declares the field, one that does not, so the response
+   * distinguishes "absent" from "present and forwarded" rather than
+   * proving only that SOME row on the response has SOME `requires` key.
+   */
+  it("carries a row's requires declaration, so the browser can enforce it after composing", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-requires-'));
+    const nodeModules = join(workspace, 'node_modules');
+    mkdirSync(nodeModules);
+
+    const requiresDir = join(nodeModules, 'requires-pkg');
+    mkdirSync(requiresDir);
+    writeFileSync(
+      join(requiresDir, 'package.json'),
+      JSON.stringify({
+        name: 'requires-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js', requires: ['board'] } },
+      }),
+    );
+    writeFileSync(join(requiresDir, 'index.js'), 'export function apply() {}\n');
+    writeFileSync(join(requiresDir, 'runtime.js'), 'export function apply() {}\n');
+
+    // The same package shape with no `e8.runtime.requires` at all — a row
+    // that needs nothing declared, which is what most rows are.
+    const plainDir = join(nodeModules, 'plain-requires-pkg');
+    mkdirSync(plainDir);
+    writeFileSync(
+      join(plainDir, 'package.json'),
+      JSON.stringify({
+        name: 'plain-requires-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js' } },
+      }),
+    );
+    writeFileSync(join(plainDir, 'index.js'), 'export function apply() {}\n');
+    writeFileSync(join(plainDir, 'runtime.js'), 'export function apply() {}\n');
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-requires-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-requires-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'e8.bundle.yml'),
+      [
+        'name: e8-requires-fixture',
+        'rows:',
+        '  - id: playloop1',
+        '    name: requires-pkg',
+        '  - id: reels1',
+        '    name: plain-requires-pkg',
+        '',
+      ].join('\n'),
+    );
+
+    host = await createIdeHost({ cwd: workspace, port: 0 });
+    const body = await (await fetch(`${host.url}/api/composition`)).json();
+
+    expect(body.rows.find((r: { id: string }) => r.id === 'playloop1').requires).toEqual([
+      'board',
+    ]);
+    expect(body.rows.find((r: { id: string }) => r.id === 'reels1').requires).toBeUndefined();
+  });
+
+  /**
    * The three ways a row can end up with `runtimeUrl: null`, which used to
    * be indistinguishable from the outside. Only ONE of them is legitimate,
    * and the other two are the most likely first-run mistakes there are —

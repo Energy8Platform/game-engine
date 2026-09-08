@@ -848,4 +848,39 @@ describe('createGame — requires: checked after composition, never as an orderi
 
     expect(game.diagnostics).toEqual([]);
   });
+
+  /**
+   * Regression for a review finding: `renderer1`'s own half throws for a
+   * reason that has nothing to do with `board` — its message would say so
+   * on its own, under its own id — and `playloop1` requires `board`, which
+   * no row anywhere provides. Nothing declares what it PROVIDES, so this
+   * function cannot know `renderer1` was never going to supply `board`;
+   * the fix is to state both facts and let the reader draw the inference,
+   * not to have the message draw it FOR them with confident, unverifiable
+   * language ("that is very likely why...").
+   */
+  it('reports a broken row as a fact next to a DIFFERENT missing requirement, never as its claimed cause', async () => {
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1'), row('playloop1')], diagnostics: [] }),
+        importModule: async (url) =>
+          url.endsWith('renderer1')
+            ? { apply: () => { throw new Error('renderer1 refused'); } }
+            : { apply: () => {} },
+      },
+    });
+
+    const d = game.diagnostics.find((x) => x.message.includes('board'))!;
+    // Both facts, stated plainly.
+    expect(d.message).toContain('requires "board"');
+    expect(d.message).toContain('nothing in the composition provided it');
+    expect(d.message).toContain('renderer1');
+    expect(d.message).toContain('failed to apply');
+    // No causal claim between them — that inference is the reader's to
+    // draw, not this function's to assert.
+    expect(d.message).not.toMatch(/very likely|why it never appeared|the real cause/i);
+  });
 });

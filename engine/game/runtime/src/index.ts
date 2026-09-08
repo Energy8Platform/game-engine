@@ -301,11 +301,17 @@ function checkRequires(
   const brokenRowIds = new Set(
     diagnosticsSoFar.filter((d) => d.severity === 'error').map((d) => d.plugin),
   );
-  // Named in a missing requirement's own message, when there are any, on
-  // the same reasoning `first-slot/src/main.ts`'s old hand-rolled check
-  // used to apply by itself: "reels1 failed, so board is missing" points at
-  // the real cause; "board is missing" alone sends the reader looking for a
-  // row that may be sitting right there in the composition.
+  // Named alongside a missing requirement's own message, when there are
+  // any — but only as a FACT, never as a claimed cause. No row anywhere
+  // declares what it PROVIDES, only what it requires, so this function has
+  // no way to know whether a given broken row was ever going to supply the
+  // service some OTHER row is missing; `reels1` failing has nothing to do
+  // with `board` being unmet if the row that actually needed `board` was
+  // never going to get it from `reels1` in the first place. A reader who
+  // sees both facts side by side can draw that inference for themselves —
+  // correctly, most of the time a composition has exactly one broken row —
+  // and the message must not draw it FOR them, confidently, when the code
+  // has no way to check it.
   const brokenRowNames = composedRows
     .map((row) => row.id)
     .filter((id) => brokenRowIds.has(id));
@@ -315,16 +321,17 @@ function checkRequires(
     if (brokenRowIds.has(row.id) || !row.requires?.length) continue;
     for (const service of new Set(row.requires)) {
       if (ctx.reflect.get(service, false) !== undefined) continue;
+      const missing = `the "${row.id}" row requires "${service}", and nothing in the composition provided it`;
       found.push(
         diagnostic(
           'error',
           row.id,
           service,
           brokenRowNames.length > 0
-            ? `the "${row.id}" row requires "${service}", and ${brokenRowNames
+            ? `${missing}. These rows failed to apply: ${brokenRowNames
                 .map((id) => `"${id}"`)
-                .join(', ')} failed to apply — that is very likely why it never appeared`
-            : `the "${row.id}" row requires "${service}", and nothing in this composition provides it`,
+                .join(', ')}`
+            : missing,
           `add a row that provides "${service}" to this composition, or check whether "${row.id}" still needs it`,
         ),
       );
