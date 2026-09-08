@@ -70,6 +70,7 @@ import { selectProvider, type SeamCandidate, type SeamContext } from '@energy8en
 import { renderBootFailure } from '@energy8engine/boot';
 import type { BootService } from '@energy8engine/boot/runtime';
 import type { SessionConfig } from '@energy8engine/session-dev';
+import { reportAll } from '@energy8engine/diagnostics';
 import { checkAgainstSchema } from './plugins/mechanics';
 
 export type { MechanicsService } from './plugins/mechanics';
@@ -478,6 +479,19 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
       ),
     );
   }
+
+  // `diagnostics` is final as of this line — nothing below adds to it. Mirror
+  // it into the service a `diagnostics1` row may have provided, so a panel
+  // reading `ctx.diagnostics` sees exactly what `GameApp.diagnostics` says,
+  // not only what was collected after boot (see task-2-3-report.md, and the
+  // module doc's point 1). `reportAll` is a no-op when no such row composed
+  // — the row is optional, like `spinlog1`; its absence costs the panel, not
+  // the game. This is the ONE place this array is written to the service:
+  // every producer that writes to it directly for a diagnostic born AFTER
+  // this function returns (a plan step, a post-spin check, ...) is a
+  // DIFFERENT event than anything collected here, so there is no double
+  // count between the two.
+  reportAll(ctx.reflect.get('diagnostics', false), diagnostics);
 
   if (config.mount && diagnostics.some((d) => d.severity === 'error')) {
     renderFailure(ctx, config.mount, diagnostics);

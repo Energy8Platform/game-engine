@@ -149,3 +149,28 @@ export function createDiagnostics(options: DiagnosticsOptions = {}): Diagnostics
     },
   };
 }
+
+/**
+ * Forwards every diagnostic in `list`, in order, to `service.report()`.
+ *
+ * The shape every post-composition producer's WRITER repeats: "I already
+ * hold the `Diagnostic[]` a producer returned to me, and a service that
+ * might not be composed." `service` is optional so a call site never needs
+ * its own `if (service)` guard first — the same reason `report` itself
+ * never throws.
+ *
+ * This is a convenience, not a second implementation: it does nothing
+ * `records.forEach(d => service.report(d))` wouldn't, and it exists so that
+ * repeating it at every writer (a plan's runner, a mechanic's post-spin
+ * check, a session's per-call failure, a bridge's live rebind) is one
+ * import rather than one hand-rolled loop each. See this module's own doc,
+ * point 1: whoever writes here does so exactly once per diagnostic — this
+ * function does not itself decide who that is.
+ */
+export function reportAll(
+  service: Pick<DiagnosticsService, 'report'> | undefined,
+  list: readonly Diagnostic[],
+): void {
+  if (!service) return;
+  for (const d of list) service.report(d);
+}

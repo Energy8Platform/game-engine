@@ -21,6 +21,7 @@
   "dependencies": {
     "@energy8engine/boot": "*",
     "@energy8engine/contracts": "*",
+    "@energy8engine/diagnostics": "*",
     "@energy8engine/loader": "*",
     "@energy8engine/mechanic-cascade": "*",
     "@energy8engine/mechanic-classic": "*",

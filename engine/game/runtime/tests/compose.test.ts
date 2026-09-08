@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SpinSchema } from '@energy8engine/contracts';
 import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
+import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import { createGame, type GameApp } from '../src/index';
 import { fakeFetch, row } from './helpers';
 import * as mechanicsRow from '../src/runtime';
@@ -586,5 +588,109 @@ describe('createGame — the failure screen', () => {
     expect(game.diagnostics).toContainEqual(
       expect.objectContaining({ message: 'record "Broken" is unterminated — dropping it' }),
     );
+  });
+});
+
+describe('createGame — the diagnostics service', () => {
+  /**
+   * The order guarantee `diagnostics1`'s own comment in `e8.bundle.yml`
+   * makes ("even boot, which reports its own troubles, needs to find
+   * `ctx.diagnostics` already there") is a property of that FILE, not of
+   * this package — so it is pinned here by reading the real file, not by a
+   * fixture that could quietly drift from it. A plain regex over `- id:`
+   * lines, not a YAML parser: this test's only job is to catch someone
+   * moving a row, the same "twelve lines are cheaper" trade `helpers.ts`
+   * already makes for this suite.
+   */
+  it('e8-base places the diagnostics row first, ahead of every row that could report through it', () => {
+    const text = readFileSync(
+      join(__dirname, '..', '..', '..', 'bundles', 'e8-base', 'e8.bundle.yml'),
+      'utf8',
+    );
+    const ids = [...text.matchAll(/^\s*-\s*id:\s*(\S+)/gm)].map((m) => m[1]);
+
+    expect(ids[0]).toBe('diagnostics1');
+    // Named explicitly, not just "first": `boot1` is the row the brief
+    // calls out by name for reporting its own troubles.
+    expect(ids.indexOf('diagnostics1')).toBeLessThan(ids.indexOf('boot1'));
+  });
+
+  /** `diagnostics1` resolves to the real runtime half; anything else is a bare no-op row, unless named otherwise below. */
+  const importHalf = async (url: string) => {
+    const id = url.split('/').pop()!;
+    if (id === 'diagnostics1') return diagnosticsRuntime;
+    if (id === 'broken1') throw new Error('this module does not exist');
+    return { apply: () => {} };
+  };
+
+  it('the diagnostics row is applied before anything that reports', async () => {
+    // `renderer1` is here only to keep the composition clean — `renderer`
+    // is a REQUIRED seam (see `../src/index.ts`), and this test wants an
+    // empty list to mean "nothing went wrong", not "one unrelated seam
+    // diagnostic happens to share this array with the two rows under test".
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('diagnostics1'), row('boot1'), row('renderer1')],
+          diagnostics: [],
+        }),
+        importModule: importHalf,
+      },
+    });
+
+    expect(game.ctx.diagnostics).toBeDefined();
+    expect(game.ctx.diagnostics.list()).toEqual([]);
+  });
+
+  it('what createGame collected is in the service, not only in the field', async () => {
+    // `broken1`'s half fails to import — one diagnostic `composeFromProject`
+    // returns, which lands in `game.diagnostics` the same way it always
+    // has. The service must show the SAME thing, not a second copy of it
+    // and not nothing.
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('diagnostics1'), row('broken1')], diagnostics: [] }),
+        importModule: importHalf,
+      },
+    });
+
+    expect(game.diagnostics.length).toBeGreaterThan(0);
+    expect(game.ctx.diagnostics.list().map((d) => d.message)).toEqual(
+      game.diagnostics.map((d) => d.message),
+    );
+  });
+
+  it('a game composed without the diagnostics row still runs', async () => {
+    // The row is optional, like `spinlog1`. Its absence costs the panel,
+    // not the game — `GameApp.diagnostics` (the field every existing
+    // caller already reads) is exactly as populated either way: clean here.
+    // `renderer1` again only to keep that array actually empty — see the
+    // previous test's comment.
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('boot1'), row('renderer1')], diagnostics: [] }),
+        importModule: importHalf,
+      },
+    });
+
+    expect(game.ctx.diagnostics).toBeUndefined();
+    expect(game.diagnostics).toEqual([]);
+  });
+
+  it('reporting to an absent service costs nothing, even when there is something to report', async () => {
+    // The guard `reportAll` (and every writer built on it) relies on: a
+    // NON-EMPTY list handed to a MISSING service. `list.length === 0`
+    // alone cannot catch a missing guard — the loop touches nothing either
+    // way when there's nothing to iterate — so this needs a real failure
+    // in the mix, with no `diagnostics1` row to receive it.
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('boot1'), row('broken1')], diagnostics: [] }),
+        importModule: importHalf,
+      },
+    });
+
+    expect(game.ctx.diagnostics).toBeUndefined();
+    expect(game.diagnostics.length).toBeGreaterThan(0);
   });
 });

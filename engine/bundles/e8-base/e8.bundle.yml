@@ -1,15 +1,17 @@
-# The baseline row set every slot game composes from. Six of these seven
+# The baseline row set every slot game composes from. Six of these eight
 # packages used to be hardcoded into `createGame` (in
 # `@energy8engine/game-runtime`) as static imports; they are rows now, and
-# this file is where they live. The seventh, `spinlog1`, was never
-# hardcoded anywhere — it is the "adding a seventh is an edit to a bundle"
-# case below, done.
+# this file is where they live. The other two were never hardcoded
+# anywhere — `spinlog1` is the "adding a seventh is an edit to a bundle"
+# case, done; `diagnostics1` below is the same move again, for the shared
+# service `createGame` now fills instead of only its own local array (see
+# task-2-3-report.md).
 # `@energy8engine/project`'s `resolveComposition` reads it (see
 # `engine/ide/host/src/plugins/project.ts`, which resolves this bundle for
 # any project whose `e8.profile.yml` lists `e8-base`), the host serves the
 # result at `GET /api/composition`, and the browser's `createGame` applies
 # each row's runtime half in this order. Nothing in the engine names these
-# packages any more — replacing one, or adding a seventh, is an edit to a
+# packages any more — replacing one, or adding a ninth, is an edit to a
 # bundle or a patch.
 #
 # Rows carry no `config` here on purpose — this is the TEMPLATE, not any
@@ -20,6 +22,23 @@
 # task-8-report.md for which of `main.ts`'s current settings do — and do
 # not — have a home in that patch.
 rows:
+  # The one shared destination for a diagnostic born once the game is
+  # already running (a plan step, a post-spin check, a bridge's live
+  # rebind), as well as everything `createGame` itself collects before the
+  # first row even applies. FIRST in this list ON PURPOSE: every later
+  # row — `boot1` included, which reports its own troubles the same as
+  # anything else — needs to find `ctx.diagnostics` already there if it
+  # wants to use it. `engine/game/runtime/tests/compose.test.ts` pins this
+  # row's position against THIS FILE; do not rely on this comment alone to
+  # keep it here.
+  #
+  # Optional, exactly like `spinlog1` below: nothing requires it, and a
+  # composition that drops it plays exactly the same — every writer looks
+  # the service up per call and does nothing when it isn't there (see
+  # task-2-3-report.md). `GameApp.diagnostics` (createGame's own returned
+  # field) is unaffected either way.
+  - id: diagnostics1
+    name: '@energy8engine/diagnostics'
   - id: boot1
     name: '@energy8engine/boot'
   - id: renderer1

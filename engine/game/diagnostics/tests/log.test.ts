@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic } from '@energy8engine/contracts';
-import { createDiagnostics } from '../src/index';
+import { createDiagnostics, reportAll } from '../src/index';
 
 const d = (message: string) => ({ severity: 'error' as const, plugin: 'p', where: 'w', message });
 
@@ -56,5 +56,34 @@ describe('createDiagnostics', () => {
     log.report(d('c'));
     expect(log.list().map((x) => x.message)).toEqual(['b', 'c']);
     expect(log.dropped()).toBe(1);
+  });
+});
+
+describe('reportAll', () => {
+  it('forwards every diagnostic in the list, in order', () => {
+    const log = createDiagnostics();
+    reportAll(log, [d('first'), d('second')]);
+    expect(log.list().map((x) => x.message)).toEqual(['first', 'second']);
+  });
+
+  it('a diagnostic that is both returned and forwarded appears once, not twice', () => {
+    // The failure mode this whole rule exists to prevent: one event with
+    // two writers. A producer's return value goes to exactly one caller,
+    // which reports it exactly once — `reportAll` does not itself decide
+    // who that caller is, but calling it once must add exactly one entry.
+    const log = createDiagnostics();
+    const produced = [d('nope')];
+    reportAll(log, produced);
+    expect(log.list()).toHaveLength(1);
+  });
+
+  it('costs nothing against an absent service', () => {
+    expect(() => reportAll(undefined, [d('one')])).not.toThrow();
+  });
+
+  it('does nothing to an empty list', () => {
+    const log = createDiagnostics();
+    reportAll(log, []);
+    expect(log.list()).toEqual([]);
   });
 });
