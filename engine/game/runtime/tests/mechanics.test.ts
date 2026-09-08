@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Context } from 'cordis';
-import type { SpinSchema } from '@energy8engine/contracts';
+import type { SchemaGap, SpinSchema } from '@energy8engine/contracts';
 import { mechanic as cascadeMechanic } from '@energy8engine/mechanic-cascade';
 import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
+import { parseSpinSchema } from '@energy8engine/spin-parser';
 import { checkAgainstSchema } from '../src/plugins/mechanics';
 import * as mechanicsPlugin from '../src/plugins/mechanics';
 import * as mechanicsRow from '../src/runtime';
@@ -365,7 +368,7 @@ describe('the mechanics1 row', () => {
  * different field name would prove nothing about it.
  */
 describe('checkAgainstSchema', () => {
-  function schemaWithStages(stages: SpinSchema['stages']): SpinSchema {
+  function schemaWithStages(stages: SpinSchema['stages'], gaps: SchemaGap[] = []): SpinSchema {
     return {
       gameId: 'demo',
       betLevels: [1],
@@ -374,6 +377,7 @@ describe('checkAgainstSchema', () => {
       stages,
       records: {},
       actions: [],
+      gaps,
     };
   }
 
@@ -498,5 +502,166 @@ describe('checkAgainstSchema', () => {
     expect(checkAgainstSchema(SCHEMA_OPTIONAL_BASE_WIN, { base_game: classicMechanic })).toEqual(
       [],
     );
+  });
+
+  /**
+   * The half-read schema. `checkAgainstSchema` used to treat "the parser
+   * dropped this field" and "the math never declared it" as the same
+   * fact, so a missing brace anywhere near a required field stopped the
+   * game with a sentence that was FALSE. The schema now carries its own
+   * partiality (`gaps`), and every test below holds one edge of what that
+   * buys — including the edges it must NOT buy.
+   */
+  describe('a schema that was only half read', () => {
+    const SCHEMA_LINES_UNREAD = schemaWithStages(
+      {
+        base_game: {
+          grid: GRID_TYPE,
+          base_win: { kind: 'float' },
+          // `lines` absent — but absent because the reading lost it, which
+          // is what the gap below says.
+        },
+      },
+      [{ in: 'stages', name: 'base_game', field: 'lines' }],
+    );
+
+    it('says nothing about a field the schema records as unread', () => {
+      expect(checkAgainstSchema(SCHEMA_LINES_UNREAD, { base_game: classicMechanic })).toEqual([]);
+    });
+
+    it('still reports the same absence when nothing says the field was unread', () => {
+      // The control. Identical schema, empty `gaps` — a math file that
+      // genuinely does not declare `lines`.
+      const SCHEMA_LINES_MISSING = schemaWithStages({
+        base_game: { grid: GRID_TYPE, base_win: { kind: 'float' } },
+      });
+      const diagnostics = checkAgainstSchema(SCHEMA_LINES_MISSING, {
+        base_game: classicMechanic,
+      });
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].message).toContain('lines');
+      expect(diagnostics[0].severity).toBe('error');
+    });
+
+    it('is silenced only for the field the gap names, not for its neighbours', () => {
+      // `base_win` is missing too, and nothing says it was unread — the
+      // gap covering `lines` must not cover it. This is the exact failure
+      // of the cheap fix that was prototyped and rejected: downgrading
+      // every finding whenever any parser warning exists also downgrades
+      // a real, unrelated error.
+      const SCHEMA_TWO_ABSENCES = schemaWithStages({ base_game: { grid: GRID_TYPE } }, [
+        { in: 'stages', name: 'base_game', field: 'lines' },
+      ]);
+      const diagnostics = checkAgainstSchema(SCHEMA_TWO_ABSENCES, { base_game: classicMechanic });
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].message).toContain('base_win');
+    });
+
+    it('is silenced only for the stage the gap names, not for another stage', () => {
+      const SCHEMA_OTHER_STAGE_UNREAD = schemaWithStages(
+        { base_game: { grid: GRID_TYPE, base_win: { kind: 'float' } } },
+        [{ in: 'stages', name: 'free_spins', field: 'lines' }],
+      );
+      const diagnostics = checkAgainstSchema(SCHEMA_OTHER_STAGE_UNREAD, {
+        base_game: classicMechanic,
+      });
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].message).toContain('lines');
+    });
+
+    it('a records gap covers nothing on the stages side', () => {
+      // The two maps are separate vocabularies. A record read in part says
+      // nothing about whether a STAGE declares a field.
+      const SCHEMA_RECORD_GAP = schemaWithStages(
+        { base_game: { grid: GRID_TYPE, base_win: { kind: 'float' } } },
+        [{ in: 'records', name: 'LineWin', field: null }],
+      );
+      expect(checkAgainstSchema(SCHEMA_RECORD_GAP, { base_game: classicMechanic })).toHaveLength(1);
+    });
+
+    it('an unnamed stage gap covers a stage the schema does not declare at all', () => {
+      // `name: null` is the widest claim there is: this reading could not
+      // say which stages the file has. Complaining that `free_spins` is
+      // not declared would be a guess.
+      const SCHEMA_NO_STAGES = schemaWithStages({}, [{ in: 'stages', name: null, field: null }]);
+      expect(checkAgainstSchema(SCHEMA_NO_STAGES, { free_spins: classicMechanic })).toEqual([]);
+    });
+
+    it('still reports an undeclared stage when nothing says the stage list is in doubt', () => {
+      // The control for the one above.
+      const diagnostics = checkAgainstSchema(SCHEMA, { free_spins: classicMechanic });
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].message).toContain('free_spins');
+    });
+
+    it('a WRONG KIND is still an error, gap or no gap — a dropped field never becomes a mistyped one', () => {
+      // The asymmetry that keeps this check worth having. The parser drops
+      // a field it cannot read; it never rewrites one into another type.
+      // So a mismatch is always about a field the reading DID read, and a
+      // gap naming that very field must not silence it.
+      const SCHEMA_MISTYPED_AND_UNREAD = schemaWithStages(
+        {
+          base_game: {
+            grid: GRID_TYPE,
+            base_win: { kind: 'float' },
+            lines: { kind: 'float' },
+          },
+        },
+        [{ in: 'stages', name: 'base_game', field: 'lines' }],
+      );
+      const diagnostics = checkAgainstSchema(SCHEMA_MISTYPED_AND_UNREAD, {
+        base_game: classicMechanic,
+      });
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].message).toContain('lines');
+      expect(diagnostics[0].message).toContain('float');
+    });
+  });
+
+  /**
+   * The exact reproduction, end to end through the real parser and the
+   * real `classic` bundle: `first-slot`'s own `game/script.spin` with
+   * `lines: [LineWin]` cut to `lines:` — one keystroke's worth of damage,
+   * mid-edit, on a file whose math is fine.
+   *
+   * Two fixtures side by side would have proved nothing here: the point
+   * is that the schema handed to this function is one a real parser
+   * produced from a real file, gaps and all.
+   */
+  describe("first-slot's own .spin, half read", () => {
+    const SOURCE = readFileSync(
+      join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game', 'script.spin'),
+      'utf8',
+    );
+
+    it('says nothing about `lines` when the parser could not read the line declaring it', () => {
+      const broken = SOURCE.replace('lines: [LineWin]', 'lines:');
+      expect(broken, 'the fixture must actually have been edited').not.toBe(SOURCE);
+      const { schema, diagnostics } = parseSpinSchema(broken);
+      // The parser did report it — this is not silence about the loss.
+      expect(diagnostics.some((d) => d.message.includes('lines'))).toBe(true);
+      expect(checkAgainstSchema(schema, { base_game: classicMechanic })).toEqual([]);
+    });
+
+    it('is silent on the intact file too, so the test above is not measuring nothing', () => {
+      const { schema, diagnostics } = parseSpinSchema(SOURCE);
+      expect(diagnostics).toEqual([]);
+      expect(checkAgainstSchema(schema, { base_game: classicMechanic })).toEqual([]);
+    });
+
+    it('still reports the absence when the field is DELETED rather than left unreadable', () => {
+      // The control that separates "unread" from "not declared" against
+      // the same real file: remove the declaration outright and the
+      // pre-flight speaks up exactly as it always did.
+      const without = SOURCE.replace('    lines: [LineWin]\n', '');
+      expect(without, 'the fixture must actually have been edited').not.toBe(SOURCE);
+      const { schema, diagnostics } = parseSpinSchema(without);
+      expect(diagnostics).toEqual([]);
+      expect(schema!.gaps).toEqual([]);
+      const found = checkAgainstSchema(schema, { base_game: classicMechanic });
+      expect(found).toHaveLength(1);
+      expect(found[0].message).toContain('lines');
+      expect(found[0].severity).toBe('error');
+    });
   });
 });

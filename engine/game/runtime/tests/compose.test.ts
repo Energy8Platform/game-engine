@@ -269,6 +269,10 @@ describe('createGame — checkAgainstSchema is actually wired in', () => {
       },
       records: {},
       actions: [],
+      // Nothing was lost reading this one: the absence below is what the
+      // file says, not what a parser could not read — which is exactly the
+      // distinction `gaps` carries and this test relies on.
+      gaps: [],
     };
 
     game = await createGame({

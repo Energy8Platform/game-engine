@@ -15,6 +15,7 @@ const SCHEMA: SpinSchema = {
   },
   records: { LineWin: { line: { kind: 'int' }, win: { kind: 'float' } } },
   actions: [{ name: 'spin', stage: 'base_game', cost: 1 }],
+  gaps: [],
 };
 
 describe('spin schema vocabulary', () => {

@@ -37,6 +37,46 @@ export interface ActionDef {
   feature?: Record<string, number>;
 }
 
+/**
+ * One declaration a reading of a `.spin` could not recover.
+ *
+ * A `SpinSchema` is the shape a math file DECLARES. A parser hands back
+ * the shape it managed to READ, and those are not the same thing: a
+ * missing brace, an unreadable field type, a repeated name each cost the
+ * reading something the file itself states perfectly well. Without a
+ * record of what was lost, a consumer cannot tell "the math does not
+ * declare `lines`" from "we could not read the line where it does" — and
+ * the first of those is a false accusation to put in front of a person
+ * whose file is fine.
+ *
+ * So the partiality travels with the schema. Each gap names WHERE the
+ * loss landed, as precisely as the reading could tell:
+ *
+ *  - `in` — which of the schema's two shape maps the loss belongs to.
+ *  - `name` — the stage or record entry, or `null` when the reading lost
+ *    the name as well (a whole `enum` block dropped, say, so nothing
+ *    downstream can say which names it would have declared). A `null`
+ *    name covers EVERY entry of that map.
+ *  - `field` — the field that was dropped, or `null` when the loss cannot
+ *    be pinned to one field (a dropped block, a repeated declaration,
+ *    unreadable text carrying no field name of its own). A `null` field
+ *    covers EVERY field of the entry.
+ *
+ * `null` is therefore always the WIDER claim, never the vaguer one: it
+ * says "this reading cannot rule the loss out here", which is exactly
+ * what a consumer needs in order to stay quiet rather than guess.
+ *
+ * A gap is not a diagnostic and does not replace one. The parser reports
+ * every loss as a `Diagnostic` too, and that is what a person reads; a
+ * gap is the machine-readable half, for a consumer deciding whether its
+ * OWN complaint would be true.
+ */
+export interface SchemaGap {
+  in: 'stages' | 'records';
+  name: string | null;
+  field: string | null;
+}
+
 export interface SpinSchema {
   gameId: string;
   betLevels: number[];
@@ -62,6 +102,18 @@ export interface SpinSchema {
   /** Every `record` declared, so a field of kind `record` can be followed. */
   records: Record<string, RecordShape>;
   actions: ActionDef[];
+  /**
+   * Everything the reading that produced this schema dropped — empty when
+   * nothing was. Required, not optional: a producer that has not thought
+   * about its own losses cannot compile, and a consumer never has to
+   * treat "absent" and "nothing lost" as the same answer. See `SchemaGap`.
+   *
+   * `vars` and `globals` carry no gaps of their own because they are not
+   * declarations of their own: each is a copy of a `records` entry the
+   * game block named, so a loss inside one appears as a `records` gap
+   * under that record's name.
+   */
+  gaps: SchemaGap[];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -121,6 +173,14 @@ function isFeatureMap(value: unknown): value is Record<string, number> {
   return isPlainObject(value) && Object.values(value).every(isNumber);
 }
 
+function isSchemaGap(value: unknown): value is SchemaGap {
+  if (!isPlainObject(value)) return false;
+  if (value.in !== 'stages' && value.in !== 'records') return false;
+  if (value.name !== null && !isString(value.name)) return false;
+  if (value.field !== null && !isString(value.field)) return false;
+  return true;
+}
+
 function isActionDef(value: unknown): value is ActionDef {
   if (!isPlainObject(value)) return false;
   if (!isString(value.name) || !isString(value.stage) || !isNumber(value.cost)) return false;
@@ -152,5 +212,6 @@ export function isSpinSchema(value: unknown): value is SpinSchema {
   if (!isStagesMap(value.stages)) return false;
   if (!isStagesMap(value.records)) return false;
   if (!Array.isArray(value.actions) || !value.actions.every(isActionDef)) return false;
+  if (!Array.isArray(value.gaps) || !value.gaps.every(isSchemaGap)) return false;
   return true;
 }

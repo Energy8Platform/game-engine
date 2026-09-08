@@ -50,6 +50,15 @@
  * culprit (garbage text with no field-name colon of its own, glued onto
  * whichever field precedes it) the loss is still visible as SOME
  * diagnostic on SOME field, never zero diagnostics — see `parseFieldList`.
+ *
+ * Every one of those losses is reported twice, in two registers. A
+ * `Diagnostic` says it in words, for a person. A `SchemaGap` on the
+ * returned schema's `gaps` says it in a form a consumer can act on: which
+ * map, which entry, which field, with `null` meaning "wider than that".
+ * The second register exists because the first cannot be read by a
+ * machine without guessing — and the consumer that guessed wrong told a
+ * developer their math did not declare a field their math declares. A new
+ * loss added here owes both.
  */
 import {
   type Diagnostic,
@@ -57,6 +66,7 @@ import {
   type ActionDef,
   type FieldType,
   type RecordShape,
+  type SchemaGap,
   type SpinSchema,
 } from '@energy8engine/contracts';
 
@@ -318,8 +328,9 @@ function parseFieldList(
   line: number,
   diagnostics: Diagnostic[],
   refs: RecordRef[],
-): RecordShape {
+): { shape: RecordShape; unread: (string | null)[] } {
   const shape: RecordShape = {};
+  const unread: (string | null)[] = [];
   const fieldRe = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g;
   const boundaries: { name: string; start: number; end: number }[] = [];
   let match: RegExpExecArray | null;
@@ -329,6 +340,11 @@ function parseFieldList(
 
   const leading = body.slice(0, boundaries[0]?.start ?? body.length).trim();
   if (leading !== '') {
+    // `null`, not a name: this text never became a field, so nothing here
+    // knows which field it was going to be. The gap is therefore the wide
+    // one — "some field of this block may be missing" — which is the only
+    // true thing that can be said about it.
+    unread.push(null);
     diagnostics.push(
       diagnostic(
         'error',
@@ -345,6 +361,7 @@ function parseFieldList(
     const typeText = body.slice(end, valueEnd).trim();
     const type = typeText === '' ? null : parseFieldType(typeText);
     if (type === null) {
+      unread.push(name);
       diagnostics.push(
         diagnostic(
           'error',
@@ -359,7 +376,7 @@ function parseFieldList(
     collectRecordRefs(type, blockName, name, line, refs);
   }
 
-  return shape;
+  return { shape, unread };
 }
 
 /**
@@ -395,7 +412,10 @@ class NamedCollection<T> {
     private readonly scope: string,
   ) {}
 
-  insert(name: string, value: T, line: number, diagnostics: Diagnostic[]): void {
+  /** `false` when the name was already taken and this declaration was
+   *  dropped — the caller records the gap, because only it knows which of
+   *  the schema's maps this collection becomes. */
+  insert(name: string, value: T, line: number, diagnostics: Diagnostic[]): boolean {
     if (name in this.map) {
       diagnostics.push(
         diagnostic(
@@ -405,9 +425,10 @@ class NamedCollection<T> {
           `duplicate ${this.kind} "${name}"${this.scope === '' ? '' : ` in ${this.scope}`} — keeping the first, dropping this one`,
         ),
       );
-      return;
+      return false;
     }
     this.map[name] = value;
+    return true;
   }
 
   build(): Record<string, T> {
@@ -415,21 +436,50 @@ class NamedCollection<T> {
   }
 }
 
+/**
+ * Every `record` block, plus what reading them cost.
+ *
+ * `unread` is keyed the same way `records` is, and `parseStages` needs it
+ * as well as this function's own gaps: under the flat dialect a stage's
+ * shape IS one of these records, so a field this reading dropped out of
+ * `record Data` is a field dropped out of every stage derived from it.
+ */
 function parseRecords(
   source: string,
   diagnostics: Diagnostic[],
   refs: RecordRef[],
-): Record<string, RecordShape> {
+  gaps: SchemaGap[],
+): { records: Record<string, RecordShape>; unread: Record<string, (string | null)[]> } {
   const records = new NamedCollection<RecordShape>('record', '');
-  for (const { header, body, line } of findBlocks(source, 'record', diagnostics)) {
+  const unread: Record<string, (string | null)[]> = {};
+  // Its own array, so a block this scan dropped entirely (no "{", or no
+  // matching "}") is visible here as well as in the diagnostics — a
+  // dropped block takes its NAME with it, so the gap it leaves is the
+  // wide one.
+  const blockDiagnostics: Diagnostic[] = [];
+  const blocks = findBlocks(source, 'record', blockDiagnostics);
+  diagnostics.push(...blockDiagnostics);
+  if (blockDiagnostics.length > 0) gaps.push({ in: 'records', name: null, field: null });
+
+  for (const { header, body, line } of blocks) {
     const name = header.trim();
     if (name === '') {
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'record block has no name'));
+      gaps.push({ in: 'records', name: null, field: null });
       continue;
     }
-    records.insert(name, parseFieldList(body, name, line, diagnostics, refs), line, diagnostics);
+    const parsed = parseFieldList(body, name, line, diagnostics, refs);
+    if (records.insert(name, parsed.shape, line, diagnostics)) {
+      unread[name] = parsed.unread;
+      for (const field of parsed.unread) gaps.push({ in: 'records', name, field });
+    } else {
+      // The repeat was dropped whole. Which of the two declarations was
+      // the mistake is not knowable here, so the gap covers the entry
+      // rather than naming fields off the copy that lost.
+      gaps.push({ in: 'records', name, field: null });
+    }
   }
-  return records.build();
+  return { records: records.build(), unread };
 }
 
 /**
@@ -484,12 +534,28 @@ function parseStages(
   diagnostics: Diagnostic[],
   dataTypeName: string,
   records: Record<string, RecordShape>,
+  recordUnread: Record<string, (string | null)[]>,
   actionStageNames: string[],
+  actionsDropped: boolean,
   refs: RecordRef[],
+  gaps: SchemaGap[],
 ): Record<string, RecordShape> {
-  const enumBlocks = findBlocks(source, 'enum', diagnostics);
+  // Its own array first, so "this scan dropped a block" is a fact here and
+  // not only a line in the diagnostics — see the fall-through below.
+  const enumBlockDiagnostics: Diagnostic[] = [];
+  const enumBlocks = findBlocks(source, 'enum', enumBlockDiagnostics);
+  diagnostics.push(...enumBlockDiagnostics);
   const wantedHeader = new RegExp(`^${escapeRegExp(dataTypeName)}\\s+tag\\s+stage$`);
   const spinData = enumBlocks.find((b) => wantedHeader.test(b.header.trim()));
+
+  // The enum this file names could be exactly the block that scan dropped,
+  // and nothing below can tell that apart from a file that has no tagged
+  // enum at all. Recorded before either branch runs: whichever way the
+  // fall-through goes, the stage shapes it produces are not what the file
+  // declares.
+  if (spinData === undefined && enumBlockDiagnostics.length > 0) {
+    gaps.push({ in: 'stages', name: null, field: null });
+  }
 
   if (spinData !== undefined) {
     // `findBlocks` needs a keyword to anchor on; stage variants have none,
@@ -535,12 +601,12 @@ function parseStages(
       );
       if (braceEnd === null) break; // unreachable today — see note above
       const body = spinData.body.slice(braceStart + 1, braceEnd);
-      stages.insert(
-        name,
-        parseFieldList(body, name, variantLine, diagnostics, refs),
-        variantLine,
-        diagnostics,
-      );
+      const parsed = parseFieldList(body, name, variantLine, diagnostics, refs);
+      if (stages.insert(name, parsed.shape, variantLine, diagnostics)) {
+        for (const field of parsed.unread) gaps.push({ in: 'stages', name, field });
+      } else {
+        gaps.push({ in: 'stages', name, field: null });
+      }
       variantRe.lastIndex = braceEnd + 1;
     }
     const built = stages.build();
@@ -553,6 +619,7 @@ function parseStages(
     // about a file that plainly declares one. Silent loss, same class as
     // the dangling references `parseSpinSchema` checks below.
     if (Object.keys(built).length === 0) {
+      gaps.push({ in: 'stages', name: null, field: null });
       diagnostics.push(
         diagnostic(
           'error',
@@ -572,6 +639,21 @@ function parseStages(
   // derivation, not a guess — and its cost).
   const flatShape = records[dataTypeName];
   if (flatShape !== undefined && actionStageNames.length > 0) {
+    // Under this dialect a stage's shape IS the flat record's, so the
+    // record's losses are the stage's losses — restated per derived stage
+    // rather than left as a `records` gap a stage-shaped consumer would
+    // have to know to follow.
+    for (const stageName of actionStageNames) {
+      for (const field of recordUnread[dataTypeName] ?? []) {
+        gaps.push({ in: 'stages', name: stageName, field });
+      }
+    }
+    // And the stage NAMES themselves come from the actions here, so an
+    // action this reading dropped is a stage that may be missing from the
+    // map entirely — with no name to give it. (Under the tagged dialect
+    // the names come from the enum, and a dropped action costs the stages
+    // map nothing, which is why this is inside the flat branch.)
+    if (actionsDropped) gaps.push({ in: 'stages', name: null, field: null });
     // No `NamedCollection` needed here: every key comes from
     // `actionStageNames` (already deduplicated — see the call site), and
     // every one of them is assigned the exact SAME `flatShape` reference,
@@ -594,6 +676,7 @@ function parseStages(
       ? `no record "${dataTypeName}" to fall back to`
       : 'no action declares a stage to derive one from';
   diagnostics.push(diagnostic('error', PLUGIN, 'file', `${enumPart}, and ${fallbackPart}`));
+  gaps.push({ in: 'stages', name: null, field: null });
   return {};
 }
 
@@ -883,12 +966,28 @@ function parseInlineFeature(
  */
 const ACTION_KEYS = ['stage', 'cost', 'session', 'extends', 'opens'];
 
-function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
+/**
+ * Every `action` block, plus whether reading them lost one.
+ *
+ * `dropped` matters to `parseStages` and to nothing else: under the flat
+ * `data = <Record>` dialect the set of stage names is derived from the
+ * actions, so an action this function could not read is a stage that may
+ * be absent from `stages` with no name to record it under.
+ */
+function parseActions(
+  source: string,
+  diagnostics: Diagnostic[],
+): { actions: ActionDef[]; dropped: boolean } {
   const actions: ActionDef[] = [];
-  for (const { header, body, line } of findBlocks(source, 'action', diagnostics)) {
+  const blockDiagnostics: Diagnostic[] = [];
+  const blocks = findBlocks(source, 'action', blockDiagnostics);
+  diagnostics.push(...blockDiagnostics);
+  let dropped = blockDiagnostics.length > 0;
+  for (const { header, body, line } of blocks) {
     const name = header.trim();
     if (name === '') {
       diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'action block has no name'));
+      dropped = true;
       continue;
     }
     const clauses = findClauses(body, ACTION_KEYS, true);
@@ -907,6 +1006,7 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
           `action "${name}" is missing "stage" or "cost"`,
         ),
       );
+      dropped = true;
       continue;
     }
     const action: ActionDef = { name, stage, cost };
@@ -946,7 +1046,7 @@ function parseActions(source: string, diagnostics: Diagnostic[]): ActionDef[] {
 
     actions.push(action);
   }
-  return actions;
+  return { actions, dropped };
 }
 
 /**
@@ -966,16 +1066,23 @@ export function parseSpinSchema(source: string): {
   if (game === null) return { schema: null, diagnostics };
 
   const refs: RecordRef[] = [];
-  const records = parseRecords(clean, diagnostics, refs);
-  const actions = parseActions(clean, diagnostics);
+  // Every place this reading drops something a `.spin` declares. It travels
+  // on the schema so a consumer can tell "the math does not declare X"
+  // apart from "we could not read where it does" — see `SchemaGap`.
+  const gaps: SchemaGap[] = [];
+  const { records, unread: recordUnread } = parseRecords(clean, diagnostics, refs, gaps);
+  const { actions, dropped: actionsDropped } = parseActions(clean, diagnostics);
   const actionStageNames = [...new Set(actions.map((a) => a.stage))];
   const stages = parseStages(
     clean,
     diagnostics,
     game.dataName ?? 'SpinData',
     records,
+    recordUnread,
     actionStageNames,
+    actionsDropped,
     refs,
+    gaps,
   );
 
   // Every reference that points at nothing. Run here, after the whole
@@ -999,6 +1106,7 @@ export function parseSpinSchema(source: string): {
     stages,
     records,
     actions,
+    gaps,
     ...(globals !== undefined ? { globals } : {}),
   };
 

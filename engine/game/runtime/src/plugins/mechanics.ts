@@ -34,6 +34,7 @@ import {
   type FieldKind,
   type FieldType,
   type PresentationStep,
+  type SchemaGap,
   type SpinSchema,
 } from '@energy8engine/contracts';
 
@@ -466,6 +467,42 @@ function describeFieldType(type: FieldType): string {
  * the very schema that failed to parse, would report the same root cause
  * twice.
  *
+ * **What a half-read schema costs this check, and why it goes quiet
+ * rather than loud.** A `SpinSchema` is the shape a math file DECLARES;
+ * what arrives here is the shape a parser managed to READ. Before
+ * `SchemaGap` existed those were indistinguishable, so a missing brace or
+ * an unreadable field type landing on a field a bound mechanic requires
+ * produced the message "the math's schema does not declare it" about a
+ * file that declares it perfectly well — measured against `first-slot`'s
+ * own `.spin` with `lines: [LineWin]` cut to `lines:`. At `error`
+ * severity, that false sentence painted the failure screen over a game
+ * that would have played.
+ *
+ * So every finding below is first asked whether the schema's own `gaps`
+ * cover the thing it is about, and dropped if they do. Dropped, not
+ * downgraded: the parser has ALREADY reported the loss, in the words of
+ * whoever actually saw it, and the IDE host forwards that report as a
+ * warning. A second complaint from here would say the same thing worse —
+ * the same reasoning `schema: null` above is decided by, applied to the
+ * case where only part of the file was lost.
+ *
+ * The suppression is deliberately asymmetric, and only one of the three
+ * findings needs it twice over:
+ *
+ *  - a stage the map does not have, and a field the stage's shape does
+ *    not have, are both ABSENCES, and an absence is exactly what a
+ *    dropped declaration produces. Both are suppressed by a covering gap.
+ *  - a field present but of the WRONG KIND keeps full force always. The
+ *    parser never turns a declaration into a differently-typed one: an
+ *    unreadable type is dropped whole (`parseFieldType` returns null and
+ *    the field never enters the shape), so no gap can be the cause of a
+ *    mismatch, and staying silent about one would only hide a real error.
+ *    This is the finding the rejected cheap fix — downgrade everything
+ *    whenever any parser warning exists — got wrong.
+ *
+ * A cheaper alternative was prototyped and rejected on that evidence.
+ * Do not reintroduce it.
+ *
  * **The flat-dialect caveat, inherited, not introduced here.** Under
  * SpinML's flat `data = <Record>` dialect (five of the eight real `.spin`
  * files in this repo — see `SpinSchema.stages`'s own doc comment) every
@@ -496,6 +533,11 @@ export function checkAgainstSchema(
   for (const [stage, mechanic] of Object.entries(bindings)) {
     const stageShape = schema.stages[stage];
     if (!stageShape) {
+      // The stage may be absent because the file does not declare it, or
+      // because this reading lost the declaration. Only the second is a
+      // thing to stay quiet about, and `gaps` is the only thing that can
+      // tell them apart.
+      if (coveredByGap(schema.gaps, stage, null)) continue;
       diagnostics.push(
         diagnostic(
           'error',
@@ -513,6 +555,7 @@ export function checkAgainstSchema(
     for (const [field, kind] of Object.entries(mechanic.requires.fields)) {
       const fieldType = stageShape[field];
       if (!fieldType) {
+        if (coveredByGap(schema.gaps, stage, field)) continue;
         diagnostics.push(
           diagnostic(
             'error',
@@ -524,6 +567,10 @@ export function checkAgainstSchema(
         );
         continue;
       }
+      // No gap check here, and that is the point — see this function's doc.
+      // A dropped declaration produces an ABSENT field, never a
+      // wrong-typed one, so a mismatch is always a real error about a
+      // field this reading did read.
       if (!matchesFieldKind(kind, fieldType)) {
         diagnostics.push(
           diagnostic(
@@ -539,4 +586,25 @@ export function checkAgainstSchema(
   }
 
   return diagnostics;
+}
+
+/**
+ * Does the schema's record of its own partiality cover an absence at
+ * `stage` (and, when named, `field`)?
+ *
+ * `null` in a gap is the WIDER claim, never the vaguer one — `name: null`
+ * means the reading could not say which stages the file has at all, and
+ * `field: null` means it could not say which field of that stage it lost
+ * — so either matches everything at its level. See `SchemaGap`.
+ *
+ * `field: null` as an ARGUMENT asks the stage-level question ("could this
+ * whole stage have been lost?"), which only a stage-level gap can answer.
+ */
+function coveredByGap(gaps: SchemaGap[], stage: string, field: string | null): boolean {
+  return gaps.some(
+    (gap) =>
+      gap.in === 'stages' &&
+      (gap.name === null || gap.name === stage) &&
+      (gap.field === null || gap.field === field),
+  );
 }

@@ -48,14 +48,18 @@
  *    our reading; it is a contradiction inside a file we DID read — an
  *    action naming a stage the same file's own enum never declared.
  *
- * The residual, stated because it is not fixed here: the pre-flight in
- * `game-runtime`'s `checkAgainstSchema` also reports at `error`, and it
- * cannot tell a schema that parsed CLEANLY from one that half-parsed. A
- * parse loss that lands on the very field a bound mechanic requires
- * therefore still stops the game, on a claim ("the math's schema does not
- * declare it") that is false — the math declares it, we just could not
- * read it. Closing that needs the partiality to travel on the wire, which
- * is a change to `SpinSchema` itself; see final-fix-report.md.
+ * The other half of that line, and the reason the two halves belong in one
+ * doc: `game-runtime`'s pre-flight `checkAgainstSchema` reports at
+ * `error`, so a finding there DOES stop a game. It used to be unable to
+ * tell a schema that parsed cleanly from one that half-parsed, which meant
+ * a parse loss landing on the very field a bound mechanic requires stopped
+ * the game on a claim that was false — "the math's schema does not declare
+ * it" about a field the math declares. That is closed: the partiality now
+ * travels with the schema, as `SpinSchema.gaps` (see `SchemaGap` in
+ * `@energy8engine/contracts`), the parser fills it in wherever it drops
+ * something, and the pre-flight stays quiet about anything it covers. This
+ * file changes nothing about that and needs to change nothing: `gaps`
+ * rides along inside the schema value served over `/api/composition`.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';

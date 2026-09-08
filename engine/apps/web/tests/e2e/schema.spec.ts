@@ -9,8 +9,8 @@
  * composed and played fine before that slice and showed "This game could
  * not start" after it.
  *
- * Two projects, two screens, both measured in a real browser rather than
- * inferred from a severity constant:
+ * Three projects, three screens, all measured in a real browser rather
+ * than inferred from a severity constant:
  *
  *  1. no `game/script.spin` at all — the state of a project whose math has
  *     not been written yet;
@@ -18,17 +18,16 @@
  *     everything else fine. Half a schema plus a diagnostic is the
  *     parser's whole design, and it is worth nothing downstream if half a
  *     schema still blanks the screen.
+ *  3. a `.spin` whose parse loss lands on the very field the bound
+ *     mechanic requires — the hardest of the three, because until the
+ *     schema carried its own partiality the pre-flight check answered it
+ *     with a sentence that was FALSE, at `error` severity, over a game
+ *     that would have played.
  *
- * Both must leave a game a person can play. The canvas is read the same
- * honest way `composition.spec.ts` reads it — four quadrants, four
+ * All three must leave a game a person can play. The canvas is read the
+ * same honest way `composition.spec.ts` reads it — four quadrants, four
  * different pictures — because "a canvas element exists" is also true of a
  * game that drew nothing at all.
- *
- * NOT covered here, and deliberately: a parse loss that lands on the very
- * field the bound mechanic requires. That one still stops the game, from
- * `game-runtime`'s pre-flight `checkAgainstSchema`, which cannot tell a
- * schema that parsed cleanly from one that half-parsed. See
- * final-fix-report.md.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -166,6 +165,71 @@ test('a .spin the parser can only half-read still plays, with the dropped declar
 
     expect(pageErrors, 'the page should degrade, not throw').toEqual([]);
 
+    await expectSpinRuns(page);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a parse loss on the very field the bound mechanic needs still plays, and makes no false claim', async ({
+  page,
+}) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(String(error)));
+  try {
+    // Two edits, and both are needed for this to measure anything.
+    //
+    // The patch binds `base_game` to `reel-step`, which needs `grid` and
+    // `reel_steps` — so breaking `lines` under the shipped composition
+    // would cost the pre-flight check nothing and prove nothing. `classic`
+    // is the mechanic that actually requires `lines` (see
+    // `@energy8engine/mechanic-classic`: grid, base_win, lines).
+    const patch = join(dir, 'e8.patch.yml');
+    const patched = readFileSync(patch, 'utf8').replace(
+      'base_game: reel-step',
+      'base_game: classic',
+    );
+    expect(patched, 'the patch must actually have been edited').not.toBe(
+      readFileSync(patch, 'utf8'),
+    );
+    writeFileSync(patch, patched);
+
+    // And the loss itself: one field's type text gone, which is what a
+    // half-finished edit looks like. The parser drops the field and says
+    // so; the math still declares it.
+    const spin = join(dir, 'game', 'script.spin');
+    const source = readFileSync(spin, 'utf8');
+    const broken = source.replace('lines: [LineWin]', 'lines:');
+    expect(broken, 'the fixture must actually have been edited').not.toBe(source);
+    writeFileSync(spin, broken);
+
+    await page.goto(host.gameUrl);
+    await settled(page);
+
+    // The game is on screen. Before `SpinSchema.gaps`, this is where the
+    // failure screen was.
+    await expectPlayable(page);
+
+    // The loss is named — by the party that actually saw it.
+    await expect(page.locator('#status')).toHaveText('composition has warnings — see log');
+    await expect(page.locator('#log')).toContainText('[warning]');
+    await expect(page.locator('#log')).toContainText('lines');
+
+    // And the false sentence is nowhere on the page. Asserted against the
+    // words `checkAgainstSchema` actually emits, not against a severity
+    // count: the math DOES declare `lines`, and nothing may say otherwise.
+    await expect(page.locator('#log')).not.toContainText('does not declare');
+    await expect(page.locator('#log')).not.toContainText('[error]');
+    await expect(page.locator('#mount')).not.toContainText('This game could not start');
+
+    expect(pageErrors, 'the page should degrade, not throw').toEqual([]);
+
+    // `classic` is what is bound, and the spin it presents runs end to
+    // end — on the very field the schema could not describe.
+    expect(await page.evaluate(() => (window as any).__e8.bound('base_game'))).toBe('classic');
     await expectSpinRuns(page);
   } finally {
     await host.stop();

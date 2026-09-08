@@ -122,6 +122,145 @@ fn execute(c: ctx, v: Vars) -> outcome { return outcome { win: 0.0 } }`;
       of: { kind: 'record', name: 'CascadeStep' },
     });
     expect(schema!.actions).toEqual([{ name: 'spin', stage: 'base_game', cost: 1 }]);
+    // A file this reading read whole says so, in the field a consumer
+    // checks before deciding an absence is the math's fault.
+    expect(schema!.gaps).toEqual([]);
+  });
+});
+
+/**
+ * `gaps` — the machine-readable half of every loss this parser already
+ * reports in words.
+ *
+ * It exists for one consumer question: "is this field absent because the
+ * math does not declare it, or because we could not read where it does?"
+ * Before `gaps`, a `checkAgainstSchema` in `@energy8engine/game-runtime`
+ * could only guess, guessed the first, and stopped a working game with the
+ * sentence "the math's schema does not declare `lines`" about a file that
+ * declares it. So each test here holds one loss shape against the entry it
+ * must cover — a diagnostic alone is not enough, and neither is a gap
+ * whose `name`/`field` point somewhere else.
+ */
+describe('parseSpinSchema — the gaps a partial reading leaves', () => {
+  it('names the stage and the field when a stage variant field has an unreadable type', () => {
+    const src = MINIMAL.replace('grid: [[int]]  win: float', 'grid:  win: float');
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('grid'))).toBe(true);
+    expect(schema!.stages.base_game.grid).toBeUndefined();
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: 'grid' });
+  });
+
+  it('names the record and the field when a record field has an unreadable type', () => {
+    const src = MINIMAL.replace('max_win_reached: bool', 'max_win_reached:');
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.gaps).toContainEqual({
+      in: 'records',
+      name: 'Vars',
+      field: 'max_win_reached',
+    });
+  });
+
+  it('leaves an unnamed field gap for text that never became a field at all', () => {
+    // No colon of its own, so nothing here knows which field it was going
+    // to be — `field: null` is the only true claim available.
+    const src = MINIMAL.replace('base_game { grid:', 'base_game { junk grid:');
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: null });
+  });
+
+  it('covers the whole entry when a name is declared twice and the repeat is dropped', () => {
+    const src = MINIMAL.replace(
+      'record Vars { max_win_reached: bool }',
+      'record Vars { max_win_reached: bool }\nrecord Vars { other: int }',
+    );
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.gaps).toContainEqual({ in: 'records', name: 'Vars', field: null });
+  });
+
+  it('covers every stage when an unterminated record takes its own name with it', () => {
+    const src = MINIMAL.replace(
+      'record Vars { max_win_reached: bool }',
+      'record Vars { max_win_reached: bool',
+    );
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.gaps).toContainEqual({ in: 'records', name: null, field: null });
+  });
+
+  it('covers every stage when no dialect resolves and there are no stages at all', () => {
+    const src = MINIMAL.replace('data = SpinData', 'data = Nope');
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.stages).toEqual({});
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: null, field: null });
+  });
+
+  it('covers every stage when the tagged enum resolved but declared no variant', () => {
+    const src = MINIMAL.replace('base_game { grid: [[int]]  win: float }', '');
+    const { schema } = parseSpinSchema(src);
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: null, field: null });
+  });
+
+  it("restates a flat record's losses on every stage derived from it", () => {
+    // The flat `data = <Record>` dialect: a stage's shape IS the record's,
+    // so a field dropped out of the record is dropped out of both stages —
+    // said per stage, because a stage-shaped consumer has no record name
+    // to follow.
+    const src = `
+record D { win:  sym: int }
+game "flat" { bet_levels = [1.0]  max_win = 10.0  data = D }
+action spin { stage = base_game  cost = 1.0 }
+action buy  { stage = bonus      cost = 5.0 }
+`;
+    const { schema } = parseSpinSchema(src);
+    expect(Object.keys(schema!.stages).sort()).toEqual(['base_game', 'bonus']);
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: 'win' });
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'bonus', field: 'win' });
+  });
+
+  it('covers every stage when a dropped action costs the flat dialect a stage NAME', () => {
+    // Under the flat dialect the stage names come from the actions. An
+    // action this reading could not read is a stage that may be missing
+    // from `stages` entirely, and there is no name to record it under.
+    const src = `
+record D { win: float }
+game "flat" { bet_levels = [1.0]  max_win = 10.0  data = D }
+action spin { stage = base_game  cost = 1.0 }
+action buy  { stage = bonus }
+`;
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('buy'))).toBe(true);
+    expect(Object.keys(schema!.stages)).toEqual(['base_game']);
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: null, field: null });
+  });
+
+  it('leaves the stages map alone when a dropped action costs the TAGGED dialect nothing', () => {
+    // Same broken action, but the enum declares the stages, so nothing
+    // about `stages` is in doubt and no stage gap is owed.
+    const src = MINIMAL.replace(
+      'action spin { stage = base_game  cost = 1.0 }',
+      'action spin { stage = base_game  cost = 1.0 }\naction buy { stage = bonus }',
+    );
+    const { schema, diagnostics } = parseSpinSchema(src);
+    expect(diagnostics.some((d) => d.message.includes('buy'))).toBe(true);
+    expect(schema!.gaps.filter((g) => g.in === 'stages')).toEqual([]);
+  });
+
+  it("the exact reproduction: first-slot's own .spin with `lines: [LineWin]` cut to `lines:`", () => {
+    const src = readFileSync(
+      new URL('../../../examples/first-slot/game/script.spin', import.meta.url),
+      'utf8',
+    );
+    const broken = src.replace('lines: [LineWin]', 'lines:');
+    expect(broken, 'the fixture must actually have been edited').not.toBe(src);
+    const { schema, diagnostics } = parseSpinSchema(broken);
+    // The loss is reported in words, as it always was …
+    expect(
+      diagnostics.some((d) => d.message.includes('lines') && d.message.includes('base_game')),
+    ).toBe(true);
+    // … the field really is gone from the shape …
+    expect(schema!.stages.base_game.lines).toBeUndefined();
+    // … and the schema now carries the one fact a consumer needs to know
+    // that its absence is this parser's doing and not the math's.
+    expect(schema!.gaps).toContainEqual({ in: 'stages', name: 'base_game', field: 'lines' });
   });
 });
 
