@@ -206,6 +206,41 @@ describe('the mechanic registry', () => {
     await ctx.fiber.dispose();
   });
 
+  // Round 1 review, Task 4: `register` used to write to the registry
+  // (`mechanics.add`) and only THEN open `ctx.effect` to tie the write to
+  // this service's own scope. `ctx.effect` checks the scope is alive
+  // BEFORE it runs anything (cordis's `Fiber.effect` calls `assertActive`
+  // first) — so a `register` call reaching this service after its OWNING
+  // scope is already gone still performed the write, and only THEN threw
+  // on `ctx.effect`. Nothing was left holding a disposer for that entry:
+  // it is not what `check`/`present` would ever see (nothing was bound to
+  // it), but it silently occupies the id forever, because `mechanics`
+  // (first-wins) now believes something already claims it.
+  //
+  // `service` is captured before disposal — the scenario is an external
+  // caller that kept a `ctx.mechanics` reference past the plugin's own
+  // teardown, not a call made through `ctx` itself (which cordis would
+  // refuse for an unrelated reason before ever reaching `register`).
+  it('a scope disposed before register() runs refuses atomically — nothing survives the throw', async () => {
+    const { ctx } = await registry();
+    const service = ctx.mechanics;
+    await ctx.fiber.dispose();
+
+    // The write must not happen at all — same promise `ctx.effect` makes
+    // for any other resource this service manages.
+    expect(() => service.register(CLASSIC)).toThrow();
+
+    // If CLASSIC's entry had survived that throw (the bug), THIS second
+    // call would find "classic" already occupied and take the COLLISION
+    // branch — which never opens `ctx.effect` at all — so it would return
+    // quietly instead of throwing, and `collisions()` would gain an entry
+    // nothing here ever legitimately claimed.
+    expect(() =>
+      service.register({ id: 'classic', requires: { fields: {} }, present: () => [] }),
+    ).toThrow();
+    expect(service.collisions()).toEqual([]);
+  });
+
   it('checking a stage nothing is bound to reports a diagnostic instead of a silent pass', async () => {
     const { ctx } = await registry();
     const problems = ctx.mechanics.check('base_game', { grid: [[1]] });

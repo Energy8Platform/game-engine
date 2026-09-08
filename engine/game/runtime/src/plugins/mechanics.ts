@@ -223,14 +223,14 @@ export function apply(ctx: Context) {
 
   const service: MechanicsService = {
     register(mechanic) {
-      // Same "checked before add(), not re-decided" shape as
-      // `@energy8engine/play-loop`'s `BoardStepRegistry.register` — a
-      // collision is exactly "something is already registered under this
-      // id", which `add()` applies for itself; this read only decides
-      // whether THIS call renders a diagnostic.
+      // Checked before any write, same shape as `@energy8engine/play-loop`'s
+      // `BoardStepRegistry.register` — a collision is exactly "something is
+      // already registered under this id", which `add()` applies for
+      // itself; this read only decides whether THIS call renders a
+      // diagnostic and which of the two branches below runs.
       const collided = mechanics.get(mechanic.id) !== undefined;
-      const off = mechanics.add(mechanic.id, mechanic);
       if (collided) {
+        const off = mechanics.add(mechanic.id, mechanic);
         collisions.push(
           diagnostic(
             'error',
@@ -247,14 +247,22 @@ export function apply(ctx: Context) {
         // it.
         return off;
       }
-      // `off` already performed the write (`mechanics.add`, above), so
-      // this `ctx.effect` does no acquiring of its own — it only ties
-      // `off` to this service's own scope, so EVERY winning registration
-      // is torn down when this plugin's context is, whether or not its
-      // own caller ever calls what `register` returns. That is the
-      // "whole-registry teardown net" this interface's own doc contrasts
-      // with `BoardStepRegistry`, which deliberately has none.
-      const dispose = ctx.effect(() => () => off(), `mechanic:${mechanic.id}`);
+      // `mechanics.add` runs INSIDE the effect's setup, not before it.
+      // `ctx.effect` asserts this scope is still active before it calls
+      // setup at all (cordis's `Fiber.effect`) — so a `register` reaching
+      // this service after its own scope is gone must be refused before
+      // the write happens, not after. An earlier shape hoisted the write
+      // above `ctx.effect` (to keep it out of the collision branch, which
+      // must never open `ctx.effect` at all) and broke exactly that: on a
+      // disposed scope, `ctx.effect` still threw, but the entry was
+      // already in — orphaned, with no owning disposer, silently
+      // occupying the id forever. See task-4-report.md, round 1.
+      const dispose = ctx.effect(() => {
+        const off = mechanics.add(mechanic.id, mechanic);
+        return () => {
+          off();
+        };
+      }, `mechanic:${mechanic.id}`);
       return () => {
         dispose();
       };
