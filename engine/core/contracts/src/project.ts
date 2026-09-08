@@ -86,4 +86,14 @@ export interface GameCompositionRow extends ResolvedRow {
    * host from the package manifest, the same way `runtimeUrl` is.
    */
   seam?: E8SeamDeclaration;
+  /**
+   * The row's own `e8.runtime.requires` (see `E8RuntimeHalf.requires`) —
+   * services it said it cannot work without. Computed by the host from the
+   * package manifest, the same way `runtimeUrl`/`seam` are: a browser has
+   * no `package.json` of its own to read. `@energy8engine/game-runtime`'s
+   * `createGame` is the reader — checked once, after every row in the
+   * composition has had its chance to apply, never used to order anything
+   * here either.
+   */
+  requires?: string[];
 }

@@ -57,6 +57,17 @@
  * mechanic is pure and can register regardless, and a row that fails to
  * apply would leave `base_game` bound to an id nobody registered — a second,
  * less useful complaint about the same missing piece.
+ *
+ * **`e8.runtime.requires: ["mechanics"]`** (this package's own
+ * `package.json`), alongside the `ctx.inject(['mechanics'], …)` above and
+ * not instead of it. The two do different jobs: `inject` is what keeps this
+ * row from throwing when `mechanics1` composes in either order, or not at
+ * all — its callback simply never runs. `requires` is what says so, once,
+ * to a person: if `mechanics` never shows up for the life of the game, an
+ * `inject` callback that silently never fires looks identical to one doing
+ * its job quietly, and `@energy8engine/game-runtime`'s `createGame` is what
+ * turns that silence into a diagnostic — checked once, after the whole
+ * composition has applied, never as a reason to reorder anything.
  */
 import type { Context } from 'cordis';
 // Type-only and fully erased — the same device `first-slot`'s `main.ts`

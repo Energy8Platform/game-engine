@@ -25,9 +25,26 @@ const SEAM_BY_PREFIX: Record<string, E8SeamDeclaration> = {
   session: { name: 'session', matcher: { default: true } },
 };
 
+/**
+ * Which services a row requires, keyed the same way `SEAM_BY_PREFIX` is.
+ *
+ * Mirrors what `@energy8engine/play-loop`'s own `package.json` now declares
+ * (`e8.runtime.requires: ["board"]`) — a play loop with no board to run a
+ * plan against cannot do its job, the same honest reading `requires`'s own
+ * doc comment invites. Kept here, and not only there, so a fixture row
+ * built by `row('playloop1')` behaves like the real package would without
+ * every test spelling `requires` out by hand — the same convenience
+ * `SEAM_BY_PREFIX` already buys for `renderer`/`session`.
+ */
+const REQUIRES_BY_PREFIX: Record<string, string[]> = {
+  playloop: ['board'],
+};
+
 /** A minimal `GameCompositionRow`, shaped like `runtime-assets.ts`'s `/api/composition` would emit it. */
 export function row(id: string, config: Record<string, unknown> = {}): GameCompositionRow {
-  const seam = SEAM_BY_PREFIX[id.replace(/\d+$/, '')];
+  const prefix = id.replace(/\d+$/, '');
+  const seam = SEAM_BY_PREFIX[prefix];
+  const requires = REQUIRES_BY_PREFIX[prefix];
   return {
     id,
     name: `@e/${id}`,
@@ -35,6 +52,7 @@ export function row(id: string, config: Record<string, unknown> = {}): GameCompo
     from: 'patch',
     runtimeUrl: `/plugin-runtime/${id}`,
     ...(seam ? { seam } : {}),
+    ...(requires ? { requires } : {}),
   };
 }
 

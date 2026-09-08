@@ -402,6 +402,12 @@ describe('createGame — choosing one provider per seam', () => {
     const applied: string[] = [];
 
     game = await createGame({
+      // `playloop1` declares `requires: ['board']` (see `helpers.ts`), and
+      // `recordingHalf` below is generic — it records each row's id, it
+      // does not provide `board`. Not this test's concern (it is about
+      // seam candidacy, not `requires`), so `board` is provided directly,
+      // the same way a live value with no `.yml` home always is.
+      provide: { board: {} },
       loader: {
         fetchFn: fakeFetch({
           rows: [row('boot1'), row('renderer1'), row('reels1'), row('playloop1')],
@@ -735,5 +741,111 @@ describe('createGame — the diagnostics service', () => {
 
     expect(game.ctx.diagnostics).toBeUndefined();
     expect(game.diagnostics.length).toBeGreaterThan(0);
+  });
+});
+
+describe('createGame — requires: checked after composition, never as an ordering hint', () => {
+  /**
+   * `E8RuntimeHalf.requires` (task 1) lets a row declare, in its own
+   * package.json, which services it cannot do its job without. This is the
+   * one place that gets enforced: `createGame` used to leave it entirely to
+   * `first-slot/src/main.ts`'s own hand-rolled `REQUIRES` list, which knew
+   * nothing about any OTHER project's rows. That list is gone now (see
+   * `main.ts`'s own history) — every project gets this for free, from
+   * whatever its own rows declared.
+   */
+  it('a row that requires a service nothing provides is a diagnostic naming both', async () => {
+    const mount = document.createElement('div');
+
+    // `row('reels1')` carries no `requires` of its own (see `helpers.ts`'s
+    // `REQUIRES_BY_PREFIX` — only `playloop` does), so this composition's
+    // only row is given one by hand: it needs `board`, and nothing here
+    // provides it.
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [{ ...row('reels1'), requires: ['board'] }],
+          diagnostics: [],
+        }),
+        importModule: async () => ({ apply: () => {} }),
+      },
+    });
+
+    const d = game.diagnostics.find((x) => x.message.includes('board'))!;
+    expect(d.plugin).toBe('reels1');
+    expect(d.message).toContain('board');
+  });
+
+  it('names the row that would have provided it, when the composition has one', async () => {
+    // reels1 IS in the composition but its half threw, so `board` never
+    // appeared. "reels1 failed, so board is missing" points at the real
+    // cause; "board is missing" sends the reader looking for a row that is
+    // right there. `playloop1` is the one that actually declares
+    // `requires: ['board']` (see `helpers.ts`).
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('reels1'), row('playloop1')], diagnostics: [] }),
+        importModule: async (url) =>
+          url.endsWith('reels1')
+            ? { apply: () => { throw new Error('reels1 refused'); } }
+            : { apply: (ctx: any) => { ctx.play = {}; } },
+      },
+    });
+
+    const d = game.diagnostics.find((x) => x.message.includes('board'))!;
+    expect(d.message).toContain('reels1');
+  });
+
+  it('a row requiring a service that IS provided says nothing', async () => {
+    const mount = document.createElement('div');
+
+    // `renderer1` is here only so `REQUIRED_SEAMS` has a winner and this
+    // composition's own diagnostics list is actually empty — see every
+    // other `toEqual([])` test in this file for the same reason.
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1'), row('reels1'), row('playloop1')],
+          diagnostics: [],
+        }),
+        importModule: async (url) =>
+          url.endsWith('reels1')
+            ? { apply: (ctx: any) => { ctx.provide('board', {}); } }
+            : { apply: () => {} },
+      },
+    });
+
+    expect(game.diagnostics).toEqual([]);
+  });
+
+  it('requires is checked after ALL rows applied, not as each one lands', async () => {
+    // `playloop1` (requires board) is composed BEFORE `reels1` (provides
+    // board) — the opposite of `e8-base`'s own order. A row-by-row checker
+    // would judge `playloop1`'s requirement at the moment IT applies, while
+    // `board` still does not exist, and report it wrongly. This is the
+    // property that keeps `requires` a check and not an ordering
+    // constraint — get it wrong and it becomes `inject` by accident.
+    const mount = document.createElement('div');
+
+    game = await createGame({
+      mount,
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1'), row('playloop1'), row('reels1')],
+          diagnostics: [],
+        }),
+        importModule: async (url) =>
+          url.endsWith('reels1')
+            ? { apply: (ctx: any) => { ctx.provide('board', {}); } }
+            : { apply: () => {} },
+      },
+    });
+
+    expect(game.diagnostics).toEqual([]);
   });
 });

@@ -10,7 +10,8 @@
   },
   "e8": {
     "runtime": {
-      "entry": "./src/index.ts"
+      "entry": "./src/index.ts",
+      "requires": ["mechanics"]
     },
     "hot": false
   },

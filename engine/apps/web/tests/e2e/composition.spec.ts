@@ -172,6 +172,12 @@ const PATCH_WITH_NOTHING_BOUND = `rows:
       stages: {}
 `;
 
+// `reelstep1` stays in, even though this patch replaces the file wholesale
+// and could just as easily have dropped it too — this is a test of what
+// happens to a row that IS still here and needs `mechanics`, not of what
+// happens when it also leaves. `reel-step`'s own `package.json` declares
+// `e8.runtime.requires: ["mechanics"]` (task 2 of "declared, not agreed"),
+// so this row is what makes `mechanics1: remove: true` reportable at all.
 const PATCH_WITHOUT_MECHANICS = `rows:
   - id: renderer1
     config:
@@ -191,6 +197,9 @@ const PATCH_WITHOUT_MECHANICS = `rows:
           rows: 3
   - id: mechanics1
     remove: true
+  - id: reelstep1
+    name: reel-step
+    config: {}
 `;
 
 /**
@@ -330,15 +339,21 @@ test('removing the reels row from the patch takes the board off the screen', asy
  * The other half of the same criterion: the board going is not enough —
  * the person has to be told which row went.
  *
- * Nothing in the ENGINE can say this, and that is not a shortcoming.
- * Removing a row is a legal edit; `@energy8engine/reels` declares no
- * seam, so `createGame`'s `REQUIRED_SEAMS` never looks for it; and a game
- * that draws with something other than a reel board is a perfectly good
- * game with no `board` service at all. "This game needs a board" is a
- * property of THIS game, so `first-slot/src/main.ts` is where it is
- * declared and where it is checked — see its `REQUIRES` list. The engine
- * learning to enforce a row-declared capability is real design work and
- * belongs in its own plan.
+ * Rephrased in place of a stale claim, not a new test: this used to say
+ * "nothing in the ENGINE can say this" and route the whole check through
+ * `first-slot/src/main.ts`'s own hand-rolled `REQUIRES` list — because
+ * removing a row is a legal edit, and only THIS game knew it could not do
+ * without a board. That routing is gone (`main.ts` keeps no such list any
+ * more; see its own module doc). The engine now says it: `@energy8engine
+ * /play-loop`'s `package.json` declares `e8.runtime.requires: ["board"]`
+ * — a play loop with no board to run a plan against cannot do the one
+ * thing it exists for — and `createGame` checks that after every row has
+ * applied. So the row this test now expects to see named is `playloop1`,
+ * the row that DECLARED it needed a board, not `reels1`, the row that is
+ * simply gone; naming the row that noticed over the row that vanished is
+ * exactly what lets this same mechanism also cover a `reels1` that is
+ * still THERE but whose own half failed (see `compose.test.ts`'s "names
+ * the row that would have provided it").
  */
 test('… and says which row went missing', async ({ page }) => {
   const dir = projectCopy();
@@ -352,13 +367,13 @@ test('… and says which row went missing', async ({ page }) => {
     await page.reload();
     await settled(page);
 
-    // A reason, where the board used to be, naming the row that went
-    // missing — so the person is told WHICH part of their composition is
-    // gone, not that something somewhere went wrong.
+    // A reason, where the board used to be, naming the row that DECLARED
+    // it needed a board — so the person is told WHICH part of their
+    // composition noticed, not that something somewhere went wrong.
     await expect(
       page.locator('#mount'),
-      'acceptance criterion: with reels1 removed the game must say so, naming reels',
-    ).toContainText(/reels/i);
+      'acceptance criterion: with reels1 removed the game must say so, naming the row that required "board"',
+    ).toContainText(/playloop/i);
     await expect(page.locator('#mount')).toContainText('This game could not start');
     // And the half-built game is not left underneath the explanation.
     await expect(page.locator('canvas')).toHaveCount(0);
@@ -425,6 +440,16 @@ test('a misspelled package name on a row says so, naming the row and the package
  * `main.ts` read `ctx.mechanics` unguarded in two places. So removing
  * `mechanics1` — a legal patch edit — booted the page to `ready` over a
  * canvas that could never present anything, and threw on the first click.
+ *
+ * Rephrased, not weakened: `main.ts` keeps no `REQUIRES` list any more
+ * (task 2 of "declared, not agreed"). `plugins/reel-step`'s own
+ * `package.json` now declares `e8.runtime.requires: ["mechanics"]` — it
+ * registers a mechanic through `ctx.inject(['mechanics'], …)`, which
+ * tolerates `mechanics1` never arriving by simply never firing, and
+ * `requires` is what turns that silence into a diagnostic instead. So the
+ * row this test expects to see named is `reelstep1`, not `mechanics1`:
+ * the row that noticed, not the row that is gone (see the previous test's
+ * doc comment for the same shift, on `board`/`playloop1`).
  */
 test('removing the mechanics row says so instead of booting to ready', async ({ page }) => {
   const dir = projectCopy();
@@ -442,23 +467,23 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
       page.locator('#status'),
       'a composition with no mechanic registry must not read as ready',
     ).not.toHaveText('ready');
-    await expect(page.locator('#mount')).toContainText('mechanics1');
+    await expect(page.locator('#mount')).toContainText('reelstep1');
 
-    // And a click on Spin says the same thing the screen already says.
-    // It used to log `error: Cannot read properties of undefined (reading
-    // 'forStage')` — true, and useless: the name of an internal of a
-    // service that is not there, sitting directly above a diagnostic that
-    // names the row a person has to put back.
+    // And a click on Spin still throws — `presentStage`'s
+    // `game.ctx.mechanics.forStage(stage)` is unguarded on purpose (see
+    // `main.ts`) — but the reason is not repeated from scratch: the boot
+    // diagnostic naming `reelstep1` is still sitting in the same bounded
+    // log, above the raw throw, exactly where it landed before the click.
     await page.locator('#spin').click();
     const log = page.locator('#log');
-    await expect(log).toContainText('mechanics1', { timeout: 20_000 });
+    await expect(log).toContainText('reelstep1', { timeout: 20_000 });
     await expect(
       log,
-      'the message must point at the diagnostic, not just repeat the throw',
-    ).toContainText('the composition did not provide');
-    // The raw text still travels: it is what tells "failed for the reason
-    // we predicted" apart from "failed for another reason while a row
-    // happened to be missing".
+      'the requires diagnostic names the missing service, not just the throw',
+    ).toContainText('requires "mechanics"');
+    // The raw text still travels too: it is what tells "failed for the
+    // reason we predicted" apart from "failed for another reason while a
+    // row happened to be missing".
     await expect(log).toContainText('forStage');
   } finally {
     await host.stop();

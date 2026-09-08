@@ -270,6 +270,70 @@ function withSchemaCapture(
 }
 
 /**
+ * `E8RuntimeHalf.requires` (task 1's declaration), enforced. Each row in
+ * `composedRows` said, in its own package.json, which services it cannot do
+ * its job without; this checks that every one of them actually exists on
+ * `ctx` by now.
+ *
+ * **Called exactly once, after the composition loop has finished — never
+ * per row.** That is not a style choice: a row that requires a service a
+ * LATER row provides is not broken, because the loader has already decided
+ * the order by the time this game exists. Checking as each row lands would
+ * judge that row before the composition has finished answering it, and the
+ * result would be `inject` again — ordering rows by their declared needs —
+ * which is exactly the field `manifest.ts`'s own doc comment says
+ * `requires` is not a revival of. `createGame` only calls this once, with
+ * `composedRows` captured after the whole loop, so there is no branch here
+ * that could run early even by accident.
+ *
+ * A row whose OWN half already failed (an `apply` that threw, a package
+ * that would not resolve, a bad `e8.runtime.entry` — anything that left an
+ * `error` diagnostic under its own id) is skipped rather than also checked:
+ * its own diagnostic already explains why it provided nothing, and a
+ * second complaint about its unmet requirements would just be the same
+ * failure counted twice under two different rows.
+ */
+function checkRequires(
+  ctx: Context,
+  composedRows: readonly GameCompositionRow[],
+  diagnosticsSoFar: readonly Diagnostic[],
+): Diagnostic[] {
+  const brokenRowIds = new Set(
+    diagnosticsSoFar.filter((d) => d.severity === 'error').map((d) => d.plugin),
+  );
+  // Named in a missing requirement's own message, when there are any, on
+  // the same reasoning `first-slot/src/main.ts`'s old hand-rolled check
+  // used to apply by itself: "reels1 failed, so board is missing" points at
+  // the real cause; "board is missing" alone sends the reader looking for a
+  // row that may be sitting right there in the composition.
+  const brokenRowNames = composedRows
+    .map((row) => row.id)
+    .filter((id) => brokenRowIds.has(id));
+
+  const found: Diagnostic[] = [];
+  for (const row of composedRows) {
+    if (brokenRowIds.has(row.id) || !row.requires?.length) continue;
+    for (const service of new Set(row.requires)) {
+      if (ctx.reflect.get(service, false) !== undefined) continue;
+      found.push(
+        diagnostic(
+          'error',
+          row.id,
+          service,
+          brokenRowNames.length > 0
+            ? `the "${row.id}" row requires "${service}", and ${brokenRowNames
+                .map((id) => `"${id}"`)
+                .join(', ')} failed to apply — that is very likely why it never appeared`
+            : `the "${row.id}" row requires "${service}", and nothing in this composition provides it`,
+          `add a row that provides "${service}" to this composition, or check whether "${row.id}" still needs it`,
+        ),
+      );
+    }
+  }
+  return found;
+}
+
+/**
  * Boots the game. Async because composition is: the composition is
  * fetched, and each row's runtime half imported and applied, before this
  * resolves — so every caller gets a `GameApp` whose services are already
@@ -446,12 +510,19 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
         if (winningRow) planned.push(winningRow);
       });
 
+      composedRows = planned;
       return { rows: planned, diagnostics: planDiagnostics };
     };
 
     // Captured by `withSchemaCapture` below, off the composition fetch
     // `composeFromProject` makes on its own — see that function's doc.
     let spinSchema: SpinSchema | null = null;
+    // Captured by `plan` above, once it has picked a seam winner per seam
+    // and settled the final row order — the exact list `composeFromProject`
+    // is about to apply, one row at a time. Read by the `requires` check
+    // below, after that loop has actually run: a losing seam candidate
+    // never applies and owes nothing.
+    let composedRows: GameCompositionRow[] = [];
     // A `warning`, not an `error`: this is a fact about the wire between a
     // host and a game, and it must not paint the failure screen over a game
     // that composes and plays perfectly well without a pre-flight — the same
@@ -489,6 +560,12 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
       diagnostics.push(...mechanics.collisions());
       diagnostics.push(...checkAgainstSchema(spinSchema, mechanics.bindings()));
     }
+
+    // `requires`, checked once here — after `composeFromProject` has
+    // awaited every row's `apply` — never inside that loop. See
+    // `checkRequires`'s own doc comment for why that boundary is the whole
+    // point.
+    diagnostics.push(...checkRequires(ctx, composedRows, diagnostics));
   } catch (error) {
     // `composeFromProject` catches its own failures, its rows', and the
     // plan's, so reaching here means something structural — providing a

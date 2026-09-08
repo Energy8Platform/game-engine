@@ -47,6 +47,17 @@
  * boards with different step sets, keeps that option.
  *
  * `config` is unused — `play-loop` has no settings, only capabilities.
+ *
+ * **`e8.runtime.requires: ["board"]`** (this package's own `package.json`).
+ * `apply` below never reads `ctx.board` itself — `execute`'s `board`
+ * argument is handed in by the CALLER, per call, and even types as
+ * `BoardApi | undefined`. The declaration is still honest: a play loop with
+ * no board to run a plan against cannot do the one thing it exists for,
+ * every `spinTo`/`refill`/... step degrading to its own "board cannot
+ * perform step" diagnostic. `@energy8engine/game-runtime`'s `createGame`
+ * checks it once, after the whole composition has applied — see
+ * `E8RuntimeHalf.requires`'s doc comment for why that is not a revival of
+ * the `inject` field this row deliberately does not have.
  */
 import type { Context } from 'cordis';
 import type { Diagnostic, PresentationStep } from '@energy8engine/contracts';

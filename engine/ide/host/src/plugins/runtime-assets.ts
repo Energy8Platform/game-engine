@@ -345,11 +345,18 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
         );
       }
 
-      // `seam` rides along for the same reason `runtimeUrl` does: only
-      // the host can read a package's manifest, and the browser has to
-      // know which rows are competing to provide a capability before it
-      // applies any of them (see `GameCompositionRow.seam`).
-      return { ...row, runtimeUrl: runtime.url, seam: parsed.manifest?.seam };
+      // `seam` and `requires` both ride along for the reason `runtimeUrl`
+      // does: only the host can read a package's manifest, and the browser
+      // (which composes from this response) has no `package.json` of its
+      // own to fall back on. `requires` is `@energy8engine/game-runtime`'s
+      // to enforce, after every row has applied — see `GameCompositionRow
+      // .requires` and `E8RuntimeHalf.requires`.
+      return {
+        ...row,
+        runtimeUrl: runtime.url,
+        seam: parsed.manifest?.seam,
+        requires: parsed.manifest?.runtime?.requires,
+      };
     });
     // `schema` always rides here, even `null` — omitting the field on a
     // parse failure would be indistinguishable from an old host that has
