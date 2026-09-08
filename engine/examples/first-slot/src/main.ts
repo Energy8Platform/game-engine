@@ -49,6 +49,7 @@ import { Container, Graphics, Text } from 'pixi.js';
 import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/slot';
 import { createGame } from '@energy8engine/game-runtime';
 import * as ideBridge from '@energy8engine/ide-bridge';
+import { reportAll } from '@energy8engine/diagnostics';
 import {
   diagnostic,
   type Diagnostic,
@@ -413,10 +414,22 @@ spinBtn.addEventListener('click', async () => {
     // `dev-game`'s route responds with the bare `SpinResult` (contracts'
     // normative envelope for this crossing) on 2xx, or `{ diagnostics }`
     // on a non-2xx — see dev-game.ts's own route handler.
-    const body: SpinResult | { diagnostics: unknown[] } = await res.json();
+    const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
 
     if (!res.ok) {
-      log(`spin failed: ${JSON.stringify((body as { diagnostics: unknown[] }).diagnostics)}`);
+      const problems = (body as { diagnostics: Diagnostic[] }).diagnostics;
+      log(`spin failed: ${JSON.stringify(problems)}`);
+      // These diagnostics are `session-dev`'s, produced on the HOST side of
+      // `/api/spin` (`dev-game.ts`'s route) — a different PROCESS from this
+      // page's own `game.ctx`, so there is no `ctx` that row could share
+      // with a `diagnostics1` row to write through directly (unlike
+      // `play.execute`'s or `mechanics.present`'s, which already write
+      // themselves from inside the composed context — see
+      // task-2-3-report.md). This fetch response is the one place they
+      // cross back into a `ctx` at all, so this is where they reach the
+      // service, once, same as everything else this page reads and
+      // forwards no further.
+      reportAll(game.ctx.reflect.get('diagnostics', false), problems);
       statusEl.textContent = 'spin failed — see log';
       return;
     }

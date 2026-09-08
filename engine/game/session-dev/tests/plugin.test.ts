@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { Context } from 'cordis';
+import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import * as session from '../src/index';
 
 // Same fixture and the same `--games-dir` gotcha as spin.test.ts: e8-server's
@@ -153,5 +154,95 @@ describe('the session plugin', () => {
     ctx = undefined; // already disposed — afterEach's dispose would be a harmless no-op, but skip it explicitly
 
     expect(isProcessAlive(pid!)).toBe(false);
+  });
+});
+
+/**
+ * `play()`'s PER-CALL diagnostics, reaching the composition's shared
+ * `diagnostics` service — this row's `apply(ctx)` already holds `ctx` (the
+ * same way `mechanics1`'s does), so it is positioned to write directly, for
+ * whichever composition actually shares a `ctx` with a `diagnostics1` row.
+ * See task-2-3-report.md for why THIS repo's one real caller
+ * (`dev-game.ts`'s HOST-side `/api/spin` route) is a different process from
+ * the browser's own `ctx.diagnostics` and cannot reach it this way — that
+ * gap is `first-slot`'s `main.ts` to bridge, not this row's.
+ *
+ * **Deliberately NOT covered here: the startup failure `!handle` returns.**
+ * `startupDiagnostic` is read EAGERLY, at compose time, by
+ * `@energy8engine/game-runtime`'s `createGame` (for the `config.session`
+ * path) — and, per task 2, whatever `createGame` collects is ALREADY
+ * mirrored into the service once composition settles. `play()` handing back
+ * that SAME diagnostic object on every subsequent call is a convenience for
+ * a caller that never checked eagerly, not a new event — writing it again
+ * here would double-count the one createGame already recorded. See the
+ * "does not accumulate" test below, which pins exactly that.
+ */
+describe('the session plugin: reporting to the diagnostics service', () => {
+  it('a play() failure that is both returned and recorded appears once', async () => {
+    // The server started (unlike the startup-failure tests) and rejected
+    // THIS call — genuinely new information nothing else could have
+    // written, unlike `startupDiagnostic` (see the module doc above).
+    ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+
+    const { diagnostics } = await ctx.session.play({
+      gameId: 'first-slot',
+      action: 'no-such-action',
+      betLevel: 1.0,
+    });
+
+    expect(diagnostics).toHaveLength(1);
+    expect(ctx.diagnostics.list()).toHaveLength(1);
+    expect(ctx.diagnostics.list()[0].message).toBe(diagnostics[0].message);
+  });
+
+  it('a clean play() reports nothing', async () => {
+    ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+
+    const { diagnostics } = await ctx.session.play({
+      gameId: 'first-slot',
+      action: 'spin',
+      betLevel: 1.0,
+    });
+
+    expect(diagnostics).toEqual([]);
+    expect(ctx.diagnostics.list()).toEqual([]);
+  });
+
+  it('does nothing, quietly, when no diagnostics row is composed', async () => {
+    // The row is optional. `play()` must still return what it always did.
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+
+    const { diagnostics } = await ctx.session.play({
+      gameId: 'first-slot',
+      action: 'no-such-action',
+      betLevel: 1.0,
+    });
+
+    expect(diagnostics).toHaveLength(1);
+  });
+
+  it('a startup failure returned by repeated play() calls does not accumulate in the service', async () => {
+    // `startupDiagnostic` is the SAME object every `play()` call against a
+    // dead session hands back. `createGame` (task 2) is its one writer,
+    // once, at compose time — this row must not ALSO write it per call, or
+    // two calls would leave two copies of one failure in the service.
+    ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(session, {
+      gamesDir: GAME,
+      port: 0,
+      binPath: '/nonexistent/e8-server-binary',
+      readyTimeoutMs: 5_000,
+    });
+
+    await ctx.session.play({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
+    await ctx.session.play({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
+
+    expect(ctx.diagnostics.list()).toEqual([]);
   });
 });

@@ -37,6 +37,11 @@ import {
   type SchemaGap,
   type SpinSchema,
 } from '@energy8engine/contracts';
+import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
+// Type-only and fully erased — declares `ctx.diagnostics` on cordis's
+// `Context` without importing the row itself. See `@energy8engine/spin-log`'s
+// `src/runtime.ts` module doc for the same device.
+import type {} from '@energy8engine/diagnostics/runtime';
 
 export interface MechanicsService {
   /**
@@ -180,6 +185,30 @@ export function apply(ctx: Context) {
   const bindings = new Map<string, string>();
   const collisions: Diagnostic[] = [];
 
+  /**
+   * Forwards `list` to the composition's shared `diagnostics` service, and
+   * hands `list` straight back — so a return site reads `return
+   * report(...)` instead of splitting the write from the return.
+   *
+   * `check`/`present` are the two methods here that run POST-composition,
+   * once per spin — unlike `collisions()` below, which `createGame` reads
+   * itself at compose time (see that method's own doc) and is already
+   * covered by the service being filled from what `createGame` collected.
+   * Nothing else in a composition calls `check`/`present`; this registry
+   * IS the cordis plugin that owns the call (`MechanicsService.present`'s
+   * own doc: "why the engine owns this call"), so it is the one place
+   * positioned to write here without every game's own page having to
+   * notice and wire it. See task-2-3-report.md.
+   *
+   * Looked up per call, not captured at apply time — a `diagnostics` row
+   * may compose in either order relative to `mechanics1`, the same reason
+   * `play-loop`'s `record()` looks `spinLog` up per call.
+   */
+  function report(list: Diagnostic[]): Diagnostic[] {
+    reportAll(ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined, list);
+    return list;
+  }
+
   const service: MechanicsService = {
     register(mechanic) {
       if (mechanics.has(mechanic.id)) {
@@ -247,7 +276,7 @@ export function apply(ctx: Context) {
         // rather than a guess — the composition is long since applied and
         // real stage data is being presented right now.
         const boundTo = bindings.get(stage);
-        return [
+        return report([
           boundTo === undefined
             ? diagnostic(
                 'error',
@@ -263,9 +292,9 @@ export function apply(ctx: Context) {
                 `stage "${stage}" is bound to mechanic "${boundTo}", but no mechanic with that id ever registered`,
                 `register a mechanic with id "${boundTo}", or bind "${stage}" to one that is registered`,
               ),
-        ];
+        ]);
       }
-      return checkShape(mechanic.requires, sample, mechanic.id, stage);
+      return report(checkShape(mechanic.requires, sample, mechanic.id, stage));
     },
 
     present(stage, data) {
@@ -273,7 +302,11 @@ export function apply(ctx: Context) {
       // method's doc on the interface above. `check` already reports both
       // "nothing is bound" and "bound to an id nobody registered", so
       // there is no second lookup to make here when it comes back empty:
-      // a clean check means `forStage` has a mechanic.
+      // a clean check means `forStage` has a mechanic. `check` has ALSO
+      // already written this same list to the diagnostics service (see
+      // `report`, above) — this branch returns it unchanged and does not
+      // report it a second time, or it would double-count on the one
+      // service every producer's writer shares.
       const problems = service.check(stage, data);
       if (problems.length > 0) return { plan: [], diagnostics: problems };
 
@@ -282,9 +315,12 @@ export function apply(ctx: Context) {
       try {
         plan = mechanic.present(data);
       } catch (error) {
+        // Unlike the branch above, THIS diagnostic is `present`'s own —
+        // `check` never produces it — so `present` is the one that writes
+        // it, through the same `report` helper.
         return {
           plan: [],
-          diagnostics: [
+          diagnostics: report([
             diagnostic(
               'error',
               mechanic.id,
@@ -294,7 +330,7 @@ export function apply(ctx: Context) {
               }`,
               `fix "${mechanic.id}"'s present(), or bind "${stage}" to a mechanic that can read this data`,
             ),
-          ],
+          ]),
         };
       }
 
@@ -305,7 +341,7 @@ export function apply(ctx: Context) {
       if (!Array.isArray(plan)) {
         return {
           plan: [],
-          diagnostics: [
+          diagnostics: report([
             diagnostic(
               'error',
               mechanic.id,
@@ -315,7 +351,7 @@ export function apply(ctx: Context) {
               }, not an array of steps`,
               `have "${mechanic.id}"'s present() return an array of presentation steps`,
             ),
-          ],
+          ]),
         };
       }
 

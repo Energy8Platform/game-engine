@@ -6,6 +6,7 @@ import type { SchemaGap, SpinSchema } from '@energy8engine/contracts';
 import { mechanic as cascadeMechanic } from '@energy8engine/mechanic-cascade';
 import { mechanic as classicMechanic } from '@energy8engine/mechanic-classic';
 import { parseSpinSchema } from '@energy8engine/spin-parser';
+import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import { checkAgainstSchema } from '../src/plugins/mechanics';
 import * as mechanicsPlugin from '../src/plugins/mechanics';
 import * as mechanicsRow from '../src/runtime';
@@ -702,5 +703,126 @@ action spin { stage = base_game  cost = 1.0 }
       expect(found[0].message).toContain('lines');
       expect(found[0].severity).toBe('error');
     });
+  });
+});
+
+/**
+ * `check`/`present` reporting to the shared diagnostics service.
+ *
+ * Unlike `collisions()`/`checkAgainstSchema` above — read directly by
+ * `createGame` at compose time, and covered by task 2's fill of the
+ * service from what it collected — `check`/`present` run POST-composition,
+ * per spin, and `createGame` never calls either. Nothing else in this
+ * composition is positioned to write them: this registry IS the cordis
+ * plugin that owns the call (see `MechanicsService.present`'s own doc,
+ * "why the engine owns this call"), so it writes here rather than leaving
+ * every page to notice and wire it — see task-2-3-report.md.
+ *
+ * `check` writes its OWN diagnostics whenever it runs, called directly or
+ * through `present`. `present` writes only the diagnostics that are its
+ * OWN (a mechanic that threw, or returned something that is not a plan) —
+ * never re-writing what `check` already reported in the shared
+ * check-then-present sequence. That split is what the "appears once" tests
+ * below actually pin.
+ */
+describe('mechanics: reporting to the diagnostics service', () => {
+  async function registryWithDiagnostics(): Promise<{ ctx: Context }> {
+    const ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(mechanicsPlugin);
+    return { ctx };
+  }
+
+  it('check(): a diagnostic that is both returned and recorded appears once', async () => {
+    const { ctx } = await registryWithDiagnostics();
+
+    const problems = ctx.mechanics.check('base_game', { grid: [[1]] });
+
+    expect(problems.length).toBeGreaterThan(0);
+    expect(ctx.diagnostics.list()).toHaveLength(problems.length);
+    expect(ctx.diagnostics.list().map((d) => d.message)).toEqual(problems.map((d) => d.message));
+
+    await ctx.fiber.dispose();
+  });
+
+  it('present(): a check failure reaches the service once, not twice', async () => {
+    // `present` returns EXACTLY what `check` returned in this branch —
+    // the scenario that would double-count if both `check` and `present`
+    // wrote independently rather than `present` deferring to `check`'s own
+    // write.
+    const { ctx } = await registryWithDiagnostics();
+
+    const { diagnostics } = ctx.mechanics.present('base_game', {});
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(ctx.diagnostics.list()).toHaveLength(diagnostics.length);
+
+    await ctx.fiber.dispose();
+  });
+
+  it("present(): its OWN failure (present() throws) reaches the service once", async () => {
+    const { ctx } = await registryWithDiagnostics();
+    ctx.mechanics.register({
+      id: 'boom',
+      requires: { fields: {} },
+      present: () => {
+        throw new Error('present blew up');
+      },
+    });
+    ctx.mechanics.bind('base_game', 'boom');
+
+    const { diagnostics } = ctx.mechanics.present('base_game', {});
+
+    expect(diagnostics).toHaveLength(1);
+    expect(ctx.diagnostics.list()).toHaveLength(1);
+    expect(ctx.diagnostics.list()[0].message).toBe(diagnostics[0].message);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('present(): its OWN failure (not a plan) reaches the service once', async () => {
+    const { ctx } = await registryWithDiagnostics();
+    ctx.mechanics.register({
+      id: 'wrong',
+      requires: { fields: {} },
+      present: () => undefined as never,
+    });
+    ctx.mechanics.bind('base_game', 'wrong');
+
+    const { diagnostics } = ctx.mechanics.present('base_game', {});
+
+    expect(diagnostics).toHaveLength(1);
+    expect(ctx.diagnostics.list()).toHaveLength(1);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('a clean present() reports nothing', async () => {
+    const { ctx } = await registryWithDiagnostics();
+    ctx.mechanics.register({
+      id: 'good',
+      requires: { fields: { grid: 'grid' } },
+      present: () => [{ kind: 'marker' } as never],
+    });
+    ctx.mechanics.bind('base_game', 'good');
+
+    const { diagnostics } = ctx.mechanics.present('base_game', { grid: [[1]] });
+
+    expect(diagnostics).toEqual([]);
+    expect(ctx.diagnostics.list()).toEqual([]);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('does nothing, quietly, when no diagnostics row is composed', async () => {
+    // The row is optional. `check`/`present` must still return what they
+    // always did — they just have nowhere in common to also land it.
+    const { ctx } = await registry();
+
+    expect(() => ctx.mechanics.check('base_game', {})).not.toThrow();
+    const problems = ctx.mechanics.check('base_game', {});
+    expect(problems.length).toBeGreaterThan(0);
+
+    await ctx.fiber.dispose();
   });
 });

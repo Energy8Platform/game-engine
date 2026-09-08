@@ -13,6 +13,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import * as spinLog from '@energy8engine/spin-log/runtime';
+import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import type { BoardApi } from '../src/index';
 import * as runtime from '../src/runtime';
 
@@ -219,6 +220,67 @@ describe('play-loop runtime half: recording a spin', () => {
     });
 
     expect(() => ctx.play.record({ request: {}, result: {}, plan: [] })).not.toThrow();
+
+    await ctx.fiber.dispose();
+  });
+});
+
+/**
+ * A THIRD door this row's `execute` opens, alongside `steps` and `record`:
+ * `ctx.play.execute` is `executePlan`'s only production caller (see
+ * `../src/index.ts`'s own module doc on `executePlan`'s return), so it is
+ * the one place that both knows a plan just ran and can reach the
+ * composition's shared diagnostics service — see task-2-3-report.md for why
+ * that puts the write here rather than in `executePlan` itself (which
+ * returns to a caller and stays cordis-free) or in whichever page happens
+ * to call `ctx.play.execute`.
+ */
+describe('play-loop runtime half: reporting to the diagnostics service', () => {
+  it('a diagnostic that is both returned and recorded appears once', async () => {
+    // The failure mode this rule exists to prevent: two writers for one
+    // event. `execute`'s return value is untouched by this — the same
+    // array a caller has always gotten back — so a caller that ALSO logs
+    // `diagnostics` locally (first-slot's page does) is a second READER of
+    // this array, not a second WRITER of the service.
+    const ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(runtime);
+
+    const diagnostics = await ctx.play.execute([{ kind: 'nope' }], fakeBoard() as unknown as BoardApi);
+
+    expect(diagnostics).toHaveLength(1);
+    expect(ctx.diagnostics.list()).toHaveLength(1);
+    expect(ctx.diagnostics.list()[0].message).toBe(diagnostics[0].message);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('a clean plan reports nothing', async () => {
+    const ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    await ctx.plugin(runtime);
+
+    const diagnostics = await ctx.play.execute(
+      [{ kind: 'spinTo', board: [[1]] }],
+      fakeBoard() as unknown as BoardApi,
+    );
+
+    expect(diagnostics).toEqual([]);
+    expect(ctx.diagnostics.list()).toEqual([]);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('does nothing, quietly, when no diagnostics row is composed', async () => {
+    // The row is optional, like spin-log. A plan with a real problem must
+    // still be playable and still return what went wrong — it just has
+    // nowhere in common to also land.
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const diagnostics = await ctx.play.execute([{ kind: 'nope' }], fakeBoard() as unknown as BoardApi);
+
+    expect(diagnostics).toHaveLength(1);
 
     await ctx.fiber.dispose();
   });

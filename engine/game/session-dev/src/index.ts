@@ -32,6 +32,11 @@
  */
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
+import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
+// Type-only and fully erased — declares `ctx.diagnostics` on cordis's
+// `Context` without importing the row itself. See `@energy8engine/spin-log`'s
+// `src/runtime.ts` module doc for the same device.
+import type {} from '@energy8engine/diagnostics/runtime';
 import { startE8Server } from './e8server';
 import type { E8Handle, SpinRequest, SpinResult, StartE8ServerOptions } from './types';
 
@@ -108,21 +113,36 @@ export async function apply(ctx: Context, config: SessionConfig) {
     pid: handle?.pid ?? null,
     startupDiagnostic,
     async play(req) {
+      // `startupDiagnostic` is NOT written to the diagnostics service here,
+      // deliberately — it is the SAME object on every call this branch
+      // takes, and `@energy8engine/game-runtime`'s `createGame` already
+      // reads it eagerly, once, at compose time (for the `config.session`
+      // path), which per task 2 is already mirrored into the service.
+      // Writing it again per call would leave two copies of one startup
+      // failure for two `play()` calls against a dead session. See
+      // task-2-3-report.md and `tests/plugin.test.ts`'s "does not
+      // accumulate" test.
       if (!handle) return { diagnostics: [startupDiagnostic!] };
       try {
         const result = await handle.play(req);
         return { result, diagnostics: [] };
       } catch (error) {
-        return {
-          diagnostics: [
-            diagnostic(
-              'error',
-              'session',
-              'play',
-              `spin failed: ${error instanceof Error ? error.message : String(error)}`,
-            ),
-          ],
-        };
+        // THIS diagnostic, by contrast, is genuinely new every call — a
+        // fact about THIS request, not about how the session started —
+        // and nothing else in a composition could have written it. This
+        // row's `apply(ctx)` already holds `ctx` (the same position
+        // `mechanics1`'s registry writes from), so it writes directly
+        // rather than leaving every composer to notice and relay it.
+        const failure = [
+          diagnostic(
+            'error',
+            'session',
+            'play',
+            `spin failed: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        ];
+        reportAll(ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined, failure);
+        return { diagnostics: failure };
       }
     },
   };

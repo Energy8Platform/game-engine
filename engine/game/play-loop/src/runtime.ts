@@ -51,11 +51,14 @@
 import type { Context } from 'cordis';
 import type { Diagnostic, PresentationStep } from '@energy8engine/contracts';
 import type { SpinLog, SpinLogEntry } from '@energy8engine/spin-log';
+import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
 // Type-only and fully erased — the same device `first-slot`'s `main.ts`
 // uses. This is the module that DECLARES `ctx.spinLog` on cordis's
 // `Context`; importing its types is not importing it, and nothing here
-// pulls `spin-log` into a composition that did not ask for it.
+// pulls `spin-log` into a composition that did not ask for it. Same for
+// `@energy8engine/diagnostics/runtime`, which declares `ctx.diagnostics`.
 import type {} from '@energy8engine/spin-log/runtime';
+import type {} from '@energy8engine/diagnostics/runtime';
 import {
   createBoardStepRegistry,
   executePlan,
@@ -119,7 +122,23 @@ export function apply(ctx: Context): void {
   ctx.provide('steps', steps);
 
   ctx.provide('play', {
-    execute: (plan, board, registry = steps) => executePlan(plan, board, registry),
+    async execute(plan, board, registry = steps) {
+      const problems = await executePlan(plan, board, registry);
+      // This row IS `executePlan`'s caller — the nearest point that both
+      // knows a plan just ran and can reach the composition's shared
+      // `diagnostics` service, so every game gets this for free rather
+      // than every page having to wire it by hand. `executePlan` itself
+      // (`./index.ts`) stays cordis-free and returns to ITS caller — this
+      // row — unchanged; the return below is that exact same array, so a
+      // caller logging it locally is a second READER, not a second writer
+      // of the service. See task-2-3-report.md.
+      //
+      // Looked up per call, not captured at apply time — same reason
+      // `record`'s `spinLog` lookup below is: a `diagnostics` row may
+      // compose in either order relative to this one.
+      reportAll(ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined, problems);
+      return problems;
+    },
     steps,
     record(entry) {
       try {

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@energy8engine/contracts": "*",
+    "@energy8engine/diagnostics": "*",
     "schemastery": "3.18.0"
   },
   "peerDependencies": {

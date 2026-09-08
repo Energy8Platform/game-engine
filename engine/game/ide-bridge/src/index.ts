@@ -50,6 +50,11 @@
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import { diagnostic, type Diagnostic, type ServerMessage } from '@energy8engine/contracts';
+import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
+// Type-only and fully erased — declares `ctx.diagnostics` on cordis's
+// `Context` without importing the row itself. See `@energy8engine/spin-log`'s
+// `src/runtime.ts` module doc for the same device.
+import type {} from '@energy8engine/diagnostics/runtime';
 
 /** The two fields a human edits from the composition screen. */
 export interface IdeBridgeSettableConfig {
@@ -209,7 +214,22 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   const reportedUnregistered = new Map<string, string>();
   const reportedUnknownStage = new Set<string>();
 
-  const report = (d: Diagnostic) => config.onDiagnostic?.(d);
+  // Two independent destinations, not one written twice: `onDiagnostic` is
+  // this module's ORIGINAL channel — a callback the caller supplies,
+  // because this row is composed by the game's own page, not by the
+  // loader, and had nowhere else to put one (see the module doc). The
+  // shared `diagnostics` service is the SAME `ctx` this function was
+  // handed (`apply(ctx, config)` — a running game's `ctx`, when this row
+  // is composed browser-side), so writing there directly means an IDE
+  // panel reading the service sees this without the page having to relay
+  // it. `reflect.get(name, false)` rather than `ctx.diagnostics`: cordis
+  // throws on a property read of a registered service this function did
+  // not `inject`, and "no such row composed" is the answer wanted here,
+  // not an exception.
+  const report = (d: Diagnostic) => {
+    config.onDiagnostic?.(d);
+    reportAll(ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined, [d]);
+  };
 
   const bind = (stage: string, mechanicId: string) => {
     // Skips a rebind that would be a no-op — cheap insurance against

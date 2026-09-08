@@ -1,6 +1,7 @@
 import { Context } from 'cordis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
+import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import * as ideBridge from '../src/index';
 
 /**
@@ -725,5 +726,64 @@ describe('ide-bridge — naming a stage the module was never told about', () => 
     );
 
     expect(bind).toHaveBeenLastCalledWith('only_stage', 'reel-step');
+  });
+});
+
+/**
+ * `report`'s diagnostics, reaching the composition's shared `diagnostics`
+ * service — this module's own doc already says why nothing else could:
+ * "composed by the game's own page, not by the loader, so a throw would be
+ * collected by nobody... Failures are data; this is the channel." Since
+ * `apply(ctx, config)` is handed the SAME `ctx` a `diagnostics1` row may
+ * have composed into (`first-slot`'s `main.ts` calls `ideBridge.apply(
+ * game.ctx, ...)`), this module is positioned to write there directly,
+ * same as `onDiagnostic` — a second, independent destination, not a
+ * replacement for it. See task-2-3-report.md.
+ */
+describe('ide-bridge — reporting to the diagnostics service', () => {
+  it('a diagnostic reported through onDiagnostic also reaches the service, once', async () => {
+    ctx = new Context();
+    await ctx.plugin(diagnosticsRuntime);
+    const bind = vi.fn();
+    const forStage = vi.fn(() => null);
+    const bindings = vi.fn(() => ({ base_game: {} }));
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const reported: { message: string }[] = [];
+
+    ideBridge.apply(ctx, {
+      stage: 'base_game',
+      mechanic: 'no-such-mechanic',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+
+    // Both channels hear it — that is two DESTINATIONS, not the service
+    // being written twice.
+    expect(reported).toHaveLength(1);
+    expect(ctx.diagnostics.list()).toHaveLength(1);
+    expect(ctx.diagnostics.list()[0].message).toBe(reported[0].message);
+  });
+
+  it('does nothing, quietly, when no diagnostics row is composed', async () => {
+    // The row is optional. `onDiagnostic` must still fire exactly as before.
+    ctx = new Context();
+    const bind = vi.fn();
+    const forStage = vi.fn(() => null);
+    const bindings = vi.fn(() => ({ base_game: {} }));
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const reported: { message: string }[] = [];
+
+    expect(() =>
+      ideBridge.apply(ctx!, {
+        stage: 'base_game',
+        mechanic: 'no-such-mechanic',
+        bridgeUrl: 'ws://x/ide',
+        socketFactory: () => fakeSocket() as never,
+        onDiagnostic: (d) => reported.push(d),
+      }),
+    ).not.toThrow();
+
+    expect(reported).toHaveLength(1);
   });
 });
