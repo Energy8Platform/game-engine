@@ -11,7 +11,7 @@
   "e8": {
     "runtime": {
       "entry": "./src/index.ts",
-      "requires": ["mechanics"]
+      "requires": ["mechanics", "steps"]
     },
     "hot": false
   },

@@ -512,7 +512,11 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
  *
  * `removeRowId` rather than a wholesale patch, and deliberately: this
  * composition keeps `reelstep1`, so the row that needs what `playloop1`
- * ALSO provided is still here to speak for itself.
+ * ALSO provided — `ctx.steps`, the registry its step handler registers
+ * into — is still here to speak for itself. Both producers are asserted,
+ * because they say different things: the page can only speak for what IT
+ * reads, and a game whose page never called `execute` would have nothing
+ * but the row's word.
  */
 test('removing the play loop row says so before the first click', async ({ page }) => {
   const dir = projectCopy({ removeRowId: 'playloop1' });
@@ -531,6 +535,10 @@ test('removing the play loop row says so before the first click', async ({ page 
       mount,
       'the page names the row that normally provides the service it reads',
     ).toContainText('playloop1');
+    await expect(
+      mount,
+      'and the row whose step handler had nowhere to register names itself',
+    ).toContainText('the "reelstep1" row requires "steps"');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
