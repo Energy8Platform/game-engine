@@ -26,7 +26,7 @@ import * as ideBridge from '../src/index';
  * `Config` schema's own call signature, not from `apply`'s declared
  * parameter type, since a schemastery `Schema` instance is itself callable
  * — see `src/index.ts`'s module doc). `Config` here deliberately only
- * describes `base_game` (what a human edits from the composition screen);
+ * describes `stage` and `mechanic` (what a human edits from the composition screen);
  * `bridgeUrl`/`socketFactory` are wiring, not settings, and a plain
  * function call keeps them out of that inference path entirely. `ctx.loader`
  * itself (the real host-side caller) invokes `apply` reflectively at
@@ -57,7 +57,12 @@ function fakeMechanics() {
     const id = bound.get(stage);
     return id === undefined ? null : { id };
   });
-  return { bind, forStage };
+  // Every stage bound to a registered mechanic — the real registry's
+  // `bindings()`. `ide-bridge` reads it once, at apply time, as the only
+  // list of stage names available on the browser side, so a fake without
+  // it would make every stage-resolution assertion below vacuous.
+  const bindings = vi.fn(() => Object.fromEntries([...bound].map(([stage]) => [stage, {}])));
+  return { bind, forStage, bindings };
 }
 
 interface FakeSocket {
@@ -109,7 +114,7 @@ describe('ide-bridge — host-side registration (no ctx.mechanics)', () => {
     ctx = new Context();
     const factory = vi.fn();
     expect(() =>
-      ideBridge.apply(ctx!, { base_game: 'classic', socketFactory: factory }),
+      ideBridge.apply(ctx!, { stage: 'base_game', mechanic: 'classic', socketFactory: factory }),
     ).not.toThrow();
     expect(factory).not.toHaveBeenCalled();
   });
@@ -118,11 +123,12 @@ describe('ide-bridge — host-side registration (no ctx.mechanics)', () => {
 describe('ide-bridge — composed into a running game (ctx.mechanics present)', () => {
   it('binds the configured mechanic at boot, synchronously', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
 
     ideBridge.apply(ctx, {
-      base_game: 'cascade',
+      stage: 'base_game',
+      mechanic: 'cascade',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => fakeSocket() as never,
     });
@@ -132,11 +138,11 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('does not open a socket when no bridgeUrl is given and no browser location exists', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const factory = vi.fn();
 
-    ideBridge.apply(ctx, { base_game: 'classic', socketFactory: factory });
+    ideBridge.apply(ctx, { stage: 'base_game', mechanic: 'classic', socketFactory: factory });
 
     // Boot-time bind still happens — only the live-update wiring is skipped.
     expect(bind).toHaveBeenCalledWith('base_game', 'classic');
@@ -145,18 +151,21 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('rebinds live when a snapshot names this row with a new value', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
+      stage: 'base_game',
+      mechanic: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
 
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'cascade' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: 'cascade' } },
+      ]),
     );
 
     expect(bind).toHaveBeenCalledTimes(2);
@@ -166,38 +175,48 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('ignores a snapshot with no row for this package name', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
+      stage: 'base_game',
+      mechanic: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
 
-    socket.emit(snapshotMessage([{ name: 'some-other-plugin', config: { base_game: 'cascade' } }]));
+    socket.emit(
+      snapshotMessage([
+        { name: 'some-other-plugin', config: { stage: 'base_game', mechanic: 'cascade' } },
+      ]),
+    );
 
     expect(bind).toHaveBeenCalledTimes(1); // boot only
   });
 
   it('does not rebind when the incoming value equals the one already bound', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
+      stage: 'base_game',
+      mechanic: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
 
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'classic' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: 'classic' } },
+      ]),
     );
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'classic' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: 'classic' } },
+      ]),
     );
 
     expect(bind).toHaveBeenCalledTimes(1); // boot only — both pushes repeat the already-bound value
@@ -210,12 +229,13 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
     // wrapper entirely — so a `lastBound`-style cache that only tracks
     // "what did *I* last write" goes stale the instant that happens.
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
+      stage: 'base_game',
+      mechanic: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
@@ -232,7 +252,9 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
     // 'cascade' while the IDE believes it set 'classic'. The fix compares
     // against ground truth instead, so this must still apply.
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'classic' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: 'classic' } },
+      ]),
     );
 
     expect(forStage('base_game')).toEqual({ id: 'classic' });
@@ -243,12 +265,13 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('ignores malformed or unrelated frames without throwing', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
+      stage: 'base_game',
+      mechanic: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
@@ -271,12 +294,13 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
   it('closes the socket on dispose', async () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'classic',
+      stage: 'base_game',
+      mechanic: 'classic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
@@ -289,7 +313,7 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 
 /**
  * Which mechanics exist is a RUNTIME fact — what a project's composition
- * registered — not a compile-time one. `Config.base_game` used to be
+ * registered — not a compile-time one. `Config.mechanic` used to be
  * `Schema.union(['classic', 'cascade'])`, a closed enum of the two the
  * ENGINE ships, so a project's own third mechanic was unnameable from the
  * IDE: setting it failed cordis config validation and the row never came
@@ -300,16 +324,17 @@ describe('ide-bridge — composed into a running game (ctx.mechanics present)', 
 describe('ide-bridge — naming a mechanic the engine has never heard of', () => {
   it('accepts any mechanic id, not just the two the engine ships', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
 
     // The schema is what the IDE validates a row's config against — the
     // failure this replaces was a ValidationError out of cordis, before
     // `apply` ever ran.
-    expect(() => ideBridge.Config({ base_game: 'reel-step' })).not.toThrow();
+    expect(() => ideBridge.Config({ stage: 'base_game', mechanic: 'reel-step' })).not.toThrow();
 
     ideBridge.apply(ctx, {
-      base_game: 'reel-step',
+      stage: 'base_game',
+      mechanic: 'reel-step',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => fakeSocket() as never,
     });
@@ -323,11 +348,15 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
     // real one does exactly this for an id nobody registered.
     const bind = vi.fn();
     const forStage = vi.fn(() => null);
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    // `base_game` is a stage this composition binds, so the only thing left
+    // for `ide-bridge` to have an opinion about is the MECHANIC.
+    const bindings = vi.fn(() => ({ base_game: {} }));
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const reported: { message: string }[] = [];
 
     ideBridge.apply(ctx, {
-      base_game: 'no-such-mechanic',
+      stage: 'base_game',
+      mechanic: 'no-such-mechanic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => fakeSocket() as never,
       onDiagnostic: (d) => reported.push(d),
@@ -343,10 +372,10 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
     // exists so a human CAN override that from the IDE — not so that a
     // value nobody wrote overrides it a second after boot.
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
+    const { bind, forStage, bindings } = fakeMechanics();
     bind('base_game', 'reel-step'); // what the composition already bound
     bind.mockClear();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
 
     ideBridge.apply(ctx, {
       bridgeUrl: 'ws://x/ide',
@@ -359,10 +388,10 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
 
   it('and neither does a snapshot whose row names none', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
+    const { bind, forStage, bindings } = fakeMechanics();
     bind('base_game', 'reel-step');
     bind.mockClear();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
@@ -372,7 +401,9 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
 
     socket.emit(snapshotMessage([{ name: '@energy8engine/ide-bridge', config: {} }]));
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: '' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: '' } },
+      ]),
     );
 
     expect(bind).not.toHaveBeenCalled();
@@ -389,24 +420,34 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
     ctx = new Context();
     const bind = vi.fn();
     const forStage = vi.fn(() => null);
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    // `base_game` is a stage this composition binds, so the only thing left
+    // for `ide-bridge` to have an opinion about is the MECHANIC.
+    const bindings = vi.fn(() => ({ base_game: {} }));
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const reported: { message: string }[] = [];
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
-      base_game: 'no-such-mechanic',
+      stage: 'base_game',
+      mechanic: 'no-such-mechanic',
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
       onDiagnostic: (d) => reported.push(d),
     });
     socket.emit(
       snapshotMessage([
-        { name: '@energy8engine/ide-bridge', config: { base_game: 'no-such-mechanic' } },
+        {
+          name: '@energy8engine/ide-bridge',
+          config: { stage: 'base_game', mechanic: 'no-such-mechanic' },
+        },
       ]),
     );
     socket.emit(
       snapshotMessage([
-        { name: '@energy8engine/ide-bridge', config: { base_game: 'no-such-mechanic' } },
+        {
+          name: '@energy8engine/ide-bridge',
+          config: { stage: 'base_game', mechanic: 'no-such-mechanic' },
+        },
       ]),
     );
 
@@ -414,7 +455,9 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
 
     // A DIFFERENT bad id is different news, and still gets said.
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'also-bad' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: 'also-bad' } },
+      ]),
     );
     expect(reported).toHaveLength(2);
     expect(reported[1].message).toContain('also-bad');
@@ -422,10 +465,10 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
 
   it('a human turning the knob still wins, third mechanic or not', () => {
     ctx = new Context();
-    const { bind, forStage } = fakeMechanics();
+    const { bind, forStage, bindings } = fakeMechanics();
     bind('base_game', 'reel-step');
     bind.mockClear();
-    ctx.provide('mechanics' as never, { bind, forStage } as never);
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
     const socket = fakeSocket();
 
     ideBridge.apply(ctx, {
@@ -434,10 +477,184 @@ describe('ide-bridge — naming a mechanic the engine has never heard of', () =>
     });
 
     socket.emit(
-      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { base_game: 'cascade' } }]),
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'base_game', mechanic: 'cascade' } },
+      ]),
     );
 
     expect(bind).toHaveBeenCalledWith('base_game', 'cascade');
     expect(forStage('base_game')).toEqual({ id: 'cascade' });
+  });
+});
+/**
+ * Which STAGE the IDE rebinds.
+ *
+ * This module used to hold `const STAGE = 'base_game'` — the name of the
+ * one stage the example game has, compiled into a package that has no
+ * business knowing it. The IDE could therefore rebind exactly one stage of
+ * one game, and a project whose math declares `free_spins` had no way to
+ * say so. Which stages a game has is a runtime fact (the math declares
+ * them), so the field is a free string for the same reason the mechanic is.
+ */
+describe('ide-bridge — naming a stage the module was never told about', () => {
+  it('binds whatever stage the row names, not a stage baked into this file', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    // A composition that binds two stages — so nothing here can be
+    // mistaken for the sole-stage fallback below.
+    bind('base_game', 'classic');
+    bind('free_spins', 'classic');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+
+    ideBridge.apply(ctx, {
+      stage: 'free_spins',
+      mechanic: 'cascade',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+    });
+
+    expect(bind).toHaveBeenCalledWith('free_spins', 'cascade');
+    expect(forStage('free_spins')).toEqual({ id: 'cascade' });
+    // And it left the other one alone.
+    expect(forStage('base_game')).toEqual({ id: 'classic' });
+  });
+
+  it('rebinds that same stage live, from a snapshot', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('base_game', 'classic');
+    bind('free_spins', 'classic');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+    });
+
+    socket.emit(
+      snapshotMessage([
+        {
+          name: '@energy8engine/ide-bridge',
+          config: { stage: 'free_spins', mechanic: 'cascade' },
+        },
+      ]),
+    );
+
+    expect(forStage('free_spins')).toEqual({ id: 'cascade' });
+    expect(forStage('base_game')).toEqual({ id: 'classic' });
+  });
+
+  it('falls back to the one stage the composition binds when the row names none', () => {
+    // The ordinary case, and why the stage field is optional: a game with
+    // one stage needs no answer to "which one", and demanding it would
+    // make the common path a two-field form for no information.
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('only_stage', 'classic');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+
+    ideBridge.apply(ctx, {
+      mechanic: 'cascade',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+    });
+
+    expect(bind).toHaveBeenCalledWith('only_stage', 'cascade');
+  });
+
+  it('says so, and binds nothing, when there is no stage to fall back on', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('base_game', 'classic');
+    bind('free_spins', 'classic');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const reported: { message: string; severity: string }[] = [];
+
+    ideBridge.apply(ctx, {
+      mechanic: 'cascade',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+
+    expect(bind).not.toHaveBeenCalled();
+    expect(reported).toHaveLength(1);
+    expect(reported[0].severity).toBe('error');
+    expect(reported[0].message).toContain('base_game');
+    expect(reported[0].message).toContain('free_spins');
+  });
+
+  it('warns about a stage nothing else in the composition binds — the typo that would otherwise be silent', () => {
+    // The bind still happens: a game may legitimately have a stage its
+    // patch leaves unbound, and this module cannot see the math's own list
+    // (only what the composition bound). But a mistyped stage name looks
+    // exactly like this, and without the warning the human turns the knob
+    // and nothing happens at all.
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('base_game', 'classic');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const reported: { message: string; severity: string }[] = [];
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      stage: 'bass_game',
+      mechanic: 'cascade',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+
+    expect(bind).toHaveBeenCalledWith('bass_game', 'cascade');
+    expect(reported).toHaveLength(1);
+    expect(reported[0].severity).toBe('warning');
+    expect(reported[0].message).toContain('bass_game');
+    expect(reported[0].message).toContain('base_game');
+
+    // Said once, not once per broadcast — `rpc.ts` broadcasts on ANY
+    // composition change, the same rule the unregistered-mechanic
+    // complaint already lives under.
+    socket.emit(
+      snapshotMessage([
+        { name: '@energy8engine/ide-bridge', config: { stage: 'bass_game', mechanic: 'classic' } },
+      ]),
+    );
+    expect(reported.filter((d) => d.severity === 'warning')).toHaveLength(1);
+  });
+
+  it('the stage the composition binds is read once, before this module binds anything', () => {
+    // Otherwise the fallback would depend on what the human had already
+    // typed: binding a second stage from the IDE would make
+    // `bindings()` report two, and a later row naming no stage would stop
+    // resolving. Read at boot, it stays a fact about the project.
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    bind('only_stage', 'classic');
+    bind.mockClear();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeSocket();
+
+    ideBridge.apply(ctx, {
+      stage: 'a_second_stage',
+      mechanic: 'cascade',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+    });
+
+    // Now the row stops naming a stage. The fallback must still be
+    // `only_stage`, not "ambiguous, there are two". A mechanic that is not
+    // what `only_stage` already holds, so the dedupe cannot swallow the
+    // call this is measuring.
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { mechanic: 'reel-step' } }]),
+    );
+
+    expect(bind).toHaveBeenLastCalledWith('only_stage', 'reel-step');
   });
 });

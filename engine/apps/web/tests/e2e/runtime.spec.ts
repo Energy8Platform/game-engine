@@ -143,14 +143,17 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   // names it), schema-driven form and all — the same proven path
   // `composition-screen.test.tsx`/`skeleton.spec.ts` already exercise.
   await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
-  const mechanicField = page.getByLabel('механика стадии base_game');
-  // Empty, and a free text box rather than a two-option `<select>`. Both
-  // changed on purpose: which mechanics exist is what a composition
-  // registered at runtime, so `base_game` is a plain string a project's own
-  // third mechanic can be typed into — and it carries no default, because a
-  // value nobody wrote used to be pushed over `e8.patch.yml`'s own binding
-  // on the first `/ide` snapshot after boot. See `IdeBridgeSettableConfig`.
+  const mechanicField = page.getByLabel('механика стадии');
+  const stageField = page.getByLabel('стадия (пусто — та единственная, что связал состав)');
+  // Both empty, and both free text boxes rather than closed `<select>`s.
+  // Which mechanics exist is what a composition registered at runtime, and
+  // which stages a game has is what its math declares — so neither is an
+  // enum a schema in this repo could write. Neither carries a default
+  // either: a value nobody wrote used to be pushed over `e8.patch.yml`'s
+  // own binding on the first `/ide` snapshot after boot. See
+  // `IdeBridgeSettableConfig`.
   await expect(mechanicField).toHaveValue('');
+  await expect(stageField).toHaveValue('');
 
   // Markers to prove NEITHER the outer IDE page NOR the game's own iframe
   // page reload at any point below — a real navigation would wipe both.
@@ -166,6 +169,12 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   // `classic` is no longer what the game boots on — and the point of this
   // test is the IDE driving the binding, which now means driving it in both
   // directions rather than only away from a default that happened to suit.
+  //
+  // The stage field is left empty on purpose: `first-slot`'s composition
+  // binds exactly one stage, and `ide-bridge` resolves an unnamed stage to
+  // that one. Naming it here would test the explicit path (which
+  // `ide-bridge`'s own suite covers) instead of the one a person actually
+  // meets on a one-stage game.
   await mechanicField.fill('classic');
 
   // A losing spin presents identically under every mechanic for a boring

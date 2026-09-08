@@ -1,18 +1,21 @@
 # Composition entries for the IDE editor (probe plugins, panels, ...) — the
 # same format engine/examples/workspace/e8.yml uses. `@energy8engine/ide-bridge`
 # is the one entry Task 12's SDD plan gives first-slot: registered here so
-# the composition screen renders a row with a `base_game` field (schema-driven,
-# same as `e8-example-probe`'s "скорость барабана"). The ide-host's own
-# `ctx.loader` composes this entry HOST-SIDE, where `ide-bridge` is an honest
-# no-op (see its own module doc) — its real job happens BROWSER-SIDE, composed
-# directly into the running game by src/main.ts, which listens on the SAME
-# `/ide` websocket this row's edits travel over and rebinds the mechanic live.
+# the composition screen renders a row with `stage` and `mechanic` fields
+# (schema-driven, same as `e8-example-probe`'s "скорость барабана"). The
+# ide-host's own `ctx.loader` composes this entry HOST-SIDE, where
+# `ide-bridge` is an honest no-op (see its own module doc) — its real job
+# happens BROWSER-SIDE, composed directly into the running game by
+# src/main.ts, which listens on the SAME `/ide` websocket this row's edits
+# travel over and rebinds the mechanic live.
 #
-# No `base_game` here on purpose: `e8.patch.yml` decides what renders the
-# stage, and this row exists so a human can OVERRIDE that live. A value
-# written here is pushed over the patch's binding on the first snapshot
-# after boot, so the field starts empty. (Keep notes like this short — the
-# IDE rewrites this file on every edit and does not preserve comments.)
+# No values here on purpose: `e8.patch.yml` decides what renders the stage,
+# and this row exists so a human can OVERRIDE that live. A value written
+# here is pushed over the patch's binding on the first snapshot after boot,
+# so both fields start empty — and an empty `stage` means "the one stage
+# this composition binds", which is all first-slot has. (Keep notes like
+# this short — the IDE rewrites this file on every edit and does not
+# preserve comments.)
 - id: bridge1
   name: '@energy8engine/ide-bridge'
   config: {}
