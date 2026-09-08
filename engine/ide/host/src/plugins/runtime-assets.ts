@@ -368,3 +368,49 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     res.text(source);
   });
 }
+/**
+ * The real, contained runtime-entry paths of a composition's rows — the
+ * files a browser will dynamically `import()` once `/api/composition` has
+ * told it their URLs.
+ *
+ * It exists for `dev-game`, which needs them BEFORE it creates its vite
+ * instance, and needs them for a reason that has nothing to do with
+ * serving: vite's dependency optimizer only crawls what it can reach
+ * statically from the project's own html, and a row's runtime half is
+ * reachable only through a dynamic import made minutes later. Discovering
+ * a new bare dependency at that point makes vite re-optimize and change
+ * the `?v=` stamp on every optimized module — so the page ends up running
+ * two generations of the same dependency at once. See `dev-game.ts`, which
+ * documents what that cost and how it was measured.
+ *
+ * Rows that resolve to nothing, declare no runtime half, or whose entry is
+ * missing or escapes its package are simply left out: this function
+ * reports nothing and is not a second opinion about a composition's
+ * health. `/api/composition` above is where a row's problems are named,
+ * and it re-derives them from disk at request time.
+ */
+export function runtimeEntryPaths(cwd: string, rows: readonly ResolvedRow[]): string[] {
+  const paths: string[] = [];
+  for (const row of rows) {
+    const pkg = readPackageJson(cwd, row.name);
+    if (!pkg) continue;
+    const manifest = parseManifest(pkg.json, row.id).manifest;
+    if (!manifest?.runtime) continue;
+    try {
+      const realEntryPath = realpathSync(resolve(pkg.dir, manifest.runtime.entry));
+      const realPackageRoot = realpathSync(resolve(pkg.dir));
+      // The same containment rule `resolveRuntimeUrl` applies before
+      // handing a URL out, restated rather than shared because this
+      // function has no diagnostics to produce and no URL to shape — what
+      // the two have in common is exactly this one comparison.
+      if (realEntryPath !== realPackageRoot && !realEntryPath.startsWith(realPackageRoot + sep)) {
+        continue;
+      }
+      paths.push(realEntryPath);
+    } catch {
+      // Not on disk. `/api/composition` says so; this one just has
+      // nothing to warm.
+    }
+  }
+  return paths;
+}

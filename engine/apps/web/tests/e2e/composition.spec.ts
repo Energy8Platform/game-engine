@@ -208,6 +208,49 @@ async function canvasQuadrants(page: Page): Promise<string[]> {
   return hashes;
 }
 
+/**
+ * The control every other test in this file was missing: an UNMODIFIED
+ * project, booted and clicked, with nothing removed.
+ *
+ * It is here because of what its absence hid. Every spec in this suite
+ * either avoided clicking Spin or clicked it without watching for page
+ * errors, so a `TypeError` raised on every pointer interaction over the
+ * canvas — twice per click, from pixi's federated event system — went
+ * unnoticed through an entire slice. Nothing in the game caused it: a
+ * first `e8 dev` in a project has a cold dependency-optimizer cache, and
+ * the row runtime halves the browser imports by URL brought a dependency
+ * vite had not prebundled, so vite re-optimized mid-load and the page
+ * finished with two generations of `pixi.js` — two `Container` classes,
+ * one of which never received pixi's own event mixin. `dev-game` now names
+ * the row entries to vite's optimizer up front; see that plugin's
+ * `warmupEntries`.
+ *
+ * `projectCopy()` is what makes this measure anything: the copy excludes
+ * `node_modules`, so this test always runs against a COLD optimizer, which
+ * is the only state the fault appeared in.
+ */
+test('an unmodified project boots and spins with nothing thrown on the page', async ({ page }) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(String(error)));
+  try {
+    await page.goto(host.gameUrl);
+    await settled(page);
+    await expect(page.locator('#status')).toHaveText('ready');
+
+    // The click is the point: the fault this guards against needed a
+    // pointer event over the canvas to appear at all.
+    await page.locator('#spin').click();
+    await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
+
+    expect(pageErrors, 'a spin should raise nothing on the page').toEqual([]);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('removing the reels row from the patch takes the board off the screen', async ({ page }) => {
   const dir = projectCopy();
   const host = await startDevHost(dir);

@@ -65,21 +65,26 @@ async function canvasQuadrants(page: Page): Promise<string[]> {
 }
 
 /**
- * Clicks Spin and waits for the spin to finish.
+ * Clicks Spin, waits for the spin to finish, and requires that nothing was
+ * thrown on the page along the way.
  *
- * Kept apart from the `pageErrors` assertion above it in each test, and
- * that ordering is deliberate: clicking Spin in this harness raises two
- * `TypeError: currentTarget.isInteractive is not a function` from pixi's
- * federated event system, and it does so on a completely UNMODIFIED
- * project too (measured — the same two, with `game/script.spin` intact and
- * `#status` reading `ready`). It is a pre-existing artifact of this page's
- * pixi setup, not something an unreadable `.spin` causes, so folding it
- * into "the page should degrade, not throw" would make that assertion
- * about the wrong thing.
+ * The last part used to be missing, and its absence hid a real fault for a
+ * whole slice: clicking Spin raised two `TypeError: currentTarget.
+ * isInteractive is not a function` from pixi's federated event system, on
+ * an unmodified project as well as on these edited ones. That was not
+ * something an unreadable `.spin` caused — it was `dev-game`'s vite
+ * re-optimizing dependencies mid-load on a cold cache, leaving the page
+ * with two generations of `pixi.js`. It is fixed at the cause (see
+ * `dev-game.ts`'s `warmupEntries`), so the assertion belongs here, where a
+ * regression would be caught by the tests that actually click.
+ *
+ * `errors` is the caller's own array, still collecting: a `pageerror`
+ * raised by the click lands in it before this returns.
  */
-async function expectSpinRuns(page: Page): Promise<void> {
+async function expectSpinRuns(page: Page, errors: string[]): Promise<void> {
   await page.locator('#spin').click();
   await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
+  expect(errors, 'a spin should raise nothing on the page').toEqual([]);
 }
 
 /** The game is on screen and playable — board drawn, Spin live, no failure text. */
@@ -115,14 +120,15 @@ test('a project with no game/script.spin still plays, and says why there is no s
     await expect(page.locator('#log')).toContainText('script.spin');
 
     // Nothing escaped as an uncaught error while composing over a `.spin`
-    // that is not there. Asserted BEFORE the click on purpose — see
-    // `expectSpinRuns`.
+    // that is not there. Asserted before the click as well as after it
+    // (see `expectSpinRuns`), so a failure says which of the two moments
+    // it happened in.
     expect(pageErrors, 'the page should degrade, not throw').toEqual([]);
 
     // And a spin still runs end to end, through a mechanic whose
     // `requires` were never checked against a schema because there is
     // none to check against.
-    await expectSpinRuns(page);
+    await expectSpinRuns(page, pageErrors);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -165,7 +171,7 @@ test('a .spin the parser can only half-read still plays, with the dropped declar
 
     expect(pageErrors, 'the page should degrade, not throw').toEqual([]);
 
-    await expectSpinRuns(page);
+    await expectSpinRuns(page, pageErrors);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -230,7 +236,7 @@ test('a parse loss on the very field the bound mechanic needs still plays, and m
     // `classic` is what is bound, and the spin it presents runs end to
     // end — on the very field the schema could not describe.
     expect(await page.evaluate(() => (window as any).__e8.bound('base_game'))).toBe('classic');
-    await expectSpinRuns(page);
+    await expectSpinRuns(page, pageErrors);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

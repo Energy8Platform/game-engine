@@ -114,6 +114,7 @@ import type { Context } from 'cordis';
 import * as session from '@energy8engine/session-dev';
 import type { SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
+import { runtimeEntryPaths } from './runtime-assets';
 
 /**
  * A marker service, not a real capability — its only reader is
@@ -207,6 +208,51 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     binPath: config.binPath,
   });
 
+  /**
+   * The row runtime halves vite's dependency optimizer must see BEFORE the
+   * browser loads anything.
+   *
+   * The optimizer crawls what it can reach statically from the project's
+   * own html. A row's runtime half is not reachable that way by design —
+   * the whole point of the composition is that the page imports it by a
+   * URL it is handed at runtime — so any bare dependency reachable ONLY
+   * through a row was discovered mid-load, which makes vite re-optimize
+   * and change the `?v=` stamp on every optimized module.
+   *
+   * Vite's own remedy for that is a full page reload sent over HMR, and
+   * `hmr: false` above means it is never delivered. So the page kept
+   * running with half its module graph on the pre-optimization generation
+   * and half on the post-: two copies of `pixi.js`, two `Container`
+   * classes, and the reel board's containers instances of the one whose
+   * prototype never received pixi's own `FederatedContainer` mixin. The
+   * visible symptom was `TypeError: currentTarget.isInteractive is not a
+   * function`, twice per pointer interaction over the canvas, from pixi's
+   * federated event system — and, less visibly, no pointer events reaching
+   * the board at all.
+   *
+   * Measured, cold cache versus warm: a first `e8 dev` in a project served
+   * `chunk-XPXRP5GS.js?v=d407f451` AND `?v=e6b31c4e` and raised the two
+   * errors; a second run against the same `node_modules/.vite` served one
+   * stamp and raised none. Naming the row entries here makes every run the
+   * warm one.
+   *
+   * `ctx.project` is read reactively rather than injected: `dev-game` is
+   * composed onto a bare `Context` in its own tests, and a host with no
+   * project has nothing to warm — an empty list simply leaves vite's
+   * default behaviour in place.
+   *
+   * The residual, stated rather than left to be discovered: a row ADDED to
+   * the composition while the server is up brings its dependencies with
+   * it, and this vite instance is already running. That case still
+   * re-optimizes mid-session. Closing it needs vite to be able to tell the
+   * browser to reload, which is the thing `hmr: false` gives up (see point
+   * 5 above, and note that enabling HMR would also make an edit to
+   * `e8.yml` reload the page — exactly what the live-rebind path exists
+   * not to do).
+   */
+  const project = ctx.reflect.get('project', false);
+  const warmupEntries = project ? runtimeEntryPaths(config.root, project.composition.rows) : [];
+
   const vite: ViteDevServer = await createViteServer({
     root: config.root,
     appType: 'spa',
@@ -218,6 +264,13 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       // WS-upgrade dispatcher is racy and was measured to fail; disabled
       // rather than relied on.
       hmr: false,
+    },
+    optimizeDeps: {
+      // `'**/*.html'` is vite's own default for this field, restated
+      // because naming any entry replaces the default rather than adding
+      // to it. Everything after it is this composition's row entries —
+      // see `warmupEntries` above.
+      entries: ['**/*.html', ...warmupEntries],
     },
   });
   ctx.effect(() => {
