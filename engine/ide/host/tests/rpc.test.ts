@@ -464,7 +464,7 @@ describe('ide rpc — the two speakers do not overwrite each other', () => {
       .toContainEqual(expect.objectContaining({ source: 'host' }));
 
     // A tab opening now — the moment a person actually looks — must be told
-    // BOTH, in `SOURCES` order: the game's own account, then the host's.
+    // BOTH, in `GAME_DIAGNOSTIC_SOURCES` order: the game's own account, then the host's.
     const late = await connectClient();
     await expect
       .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { Context } from 'cordis';
-import type { Diagnostic, GameDiagnosticsSource } from '@energy8engine/contracts';
+import {
+  GAME_DIAGNOSTIC_SOURCES,
+  type Diagnostic,
+  type GameDiagnosticsSource,
+} from '@energy8engine/contracts';
 import type { ConnectionConfig, WebSocketLike } from './connection';
 
 /**
@@ -47,8 +51,8 @@ declare module 'cordis' {
 export interface GameDiagnosticsState {
   /**
    * What has been reported about the running game, from every source that
-   * has spoken, concatenated in `SOURCE_ORDER` — the game's own list, then
-   * whatever the host has to add about it.
+   * has spoken, concatenated in `GAME_DIAGNOSTIC_SOURCES` order — the
+   * game's own list, then whatever the host has to add about it.
    *
    * Null until the FIRST frame from ANY source arrives — absent is not
    * empty. Once one source has spoken, this is that source's list; a
@@ -69,14 +73,6 @@ export interface GameDiagnosticsService extends GameDiagnosticsState {
 export type GameDiagnosticsConfig = ConnectionConfig;
 
 export const name = 'game-diagnostics';
-
-/**
- * The order sources are concatenated in. Fixed, so the panel's row order is
- * a property of the protocol rather than of which speaker happened to send
- * first — and matching `rpc.ts`'s own `SOURCES`, which is the order a newly
- * connected client is handed the retained frames in.
- */
-const SOURCE_ORDER: GameDiagnosticsSource[] = ['game', 'host'];
 
 export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   const listeners = new Set<() => void>();
@@ -103,7 +99,7 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   const service: GameDiagnosticsService = {
     get diagnostics() {
       if (bySource.size === 0) return null;
-      return SOURCE_ORDER.flatMap((source) => bySource.get(source)?.diagnostics ?? []);
+      return GAME_DIAGNOSTIC_SOURCES.flatMap((source) => bySource.get(source)?.diagnostics ?? []);
     },
     get dropped() {
       let total = 0;

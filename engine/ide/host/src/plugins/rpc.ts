@@ -1,12 +1,13 @@
 import type { Context } from 'cordis';
-import type {
-  ClientMessage,
-  Diagnostic,
-  GameDiagnosticsSource,
-  ServerMessage,
+import type { WebSocket } from 'ws';
+import {
+  GAME_DIAGNOSTIC_SOURCES,
+  type ClientMessage,
+  type Diagnostic,
+  type GameDiagnosticsSource,
+  type ServerMessage,
 } from '@energy8engine/contracts';
 import { createDiagnostics } from '@energy8engine/diagnostics';
-import type { WebSocket } from 'ws';
 
 declare module 'cordis' {
   interface Context {
@@ -109,14 +110,6 @@ export function apply(ctx: Context) {
     GameDiagnosticsSource,
     { diagnostics: Diagnostic[]; dropped: number }
   >();
-
-  /**
-   * The order a newly connected client is told about the sources. Fixed
-   * rather than insertion-ordered so the panel's row order is a property
-   * of the protocol and not of which speaker happened to go first: the
-   * game's own account, then what the host has to add about it.
-   */
-  const SOURCES: GameDiagnosticsSource[] = ['game', 'host'];
 
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
@@ -221,12 +214,12 @@ export function apply(ctx: Context) {
     // whole, after the snapshot, the same "always the current picture, in
     // the same place" treatment `Snapshot` above already gets.
     //
-    // ONE FRAME PER SOURCE, in `SOURCES` order. A source that has never
-    // spoken is skipped entirely rather than sent as an empty frame —
-    // "nothing has been reported" is not "an empty report", and the client
-    // already renders the first correctly on its own
+    // ONE FRAME PER SOURCE, in `GAME_DIAGNOSTIC_SOURCES` order. A source
+    // that has never spoken is skipped entirely rather than sent as an empty
+    // frame — "nothing has been reported" is not "an empty report", and the
+    // client already renders the first correctly on its own
     // (`GameDiagnosticsState.diagnostics` starts `null`).
-    for (const source of SOURCES) {
+    for (const source of GAME_DIAGNOSTIC_SOURCES) {
       const retained = lastGameDiagnostics.get(source);
       if (!retained) continue;
       send(socket, {

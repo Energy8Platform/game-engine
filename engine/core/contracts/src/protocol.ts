@@ -56,6 +56,15 @@ export interface Snapshot {
 export type GameDiagnosticsSource = 'game' | 'host';
 
 /**
+ * The order a newly connected client is told about the sources, and the
+ * order a reader concatenates them to show the union — fixed rather than
+ * insertion-ordered so the panel's row order is a property of the protocol
+ * and not of which speaker happened to go first: the game's own account,
+ * then what the host has to add about it.
+ */
+export const GAME_DIAGNOSTIC_SOURCES: GameDiagnosticsSource[] = ['game', 'host'];
+
+/**
  * A running game's own diagnostics, riding the SAME `/ide` socket the
  * project's composition already does — client to server when `ide-bridge`
  * (the dev-only row that subscribes to a game's `ctx.diagnostics`) forwards

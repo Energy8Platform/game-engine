@@ -113,8 +113,8 @@ describe('game diagnostics store, per source', () => {
       source: 'host',
     });
     await vi.waitFor(() => expect(ctx.gameDiagnostics.diagnostics).toHaveLength(2));
-    // Game first, then host — `SOURCE_ORDER`, matching the order `rpc.ts`
-    // hands the retained frames to a newly connected client.
+    // Game first, then host — `GAME_DIAGNOSTIC_SOURCES` order, matching
+    // the order `rpc.ts` hands the retained frames to a newly connected client.
     expect(ctx.gameDiagnostics.diagnostics!.map((x) => x.message)).toEqual([
       'the game said this',
       'the host said this',
