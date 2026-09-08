@@ -80,6 +80,18 @@ export interface SpinShapeRequirement {
  */
 export interface SpinMechanic<TStep extends { kind: string } = never> {
   id: string;
+  /**
+   * The FIELDS this mechanic's stage data must carry, checked against the
+   * math's `.spin` schema by `checkShape`/`checkAgainstSchema`.
+   *
+   * Not the other `requires` in this package. `E8RuntimeHalf.requires`
+   * (`./manifest.ts`) is a row's list of SERVICE names, checked after the
+   * whole composition has applied. The two are read fifteen lines apart in
+   * `@energy8engine/game-runtime`'s `createGame`, they share a word and
+   * nothing else: different subject (a data shape vs. a service), different
+   * checker, different moment. Whichever one you are reading, the other is
+   * probably not the one you meant.
+   */
   requires: SpinShapeRequirement;
   present(data: unknown): (KnownPresentationStep | TStep)[];
 }

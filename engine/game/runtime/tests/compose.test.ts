@@ -777,12 +777,15 @@ describe('createGame — requires: checked after composition, never as an orderi
     expect(d.message).toContain('board');
   });
 
-  it('names the row that would have provided it, when the composition has one', async () => {
+  it('names a row that failed to apply beside the unmet requirement, as a fact', async () => {
     // reels1 IS in the composition but its half threw, so `board` never
-    // appeared. "reels1 failed, so board is missing" points at the real
-    // cause; "board is missing" sends the reader looking for a row that is
-    // right there. `playloop1` is the one that actually declares
-    // `requires: ['board']` (see `helpers.ts`).
+    // appeared. "board is missing" on its own sends the reader looking for
+    // a row that is right there; naming reels1 too puts the second fact in
+    // front of them. It is stated as a fact and not as the cause on
+    // purpose — nothing declares what a row PROVIDES, so this check cannot
+    // know reels1 was ever going to supply `board`, and the last test in
+    // this block is the one that pins that restraint. `playloop1` is the
+    // row that actually declares `requires: ['board']` (see `helpers.ts`).
     const mount = document.createElement('div');
 
     game = await createGame({

@@ -78,9 +78,10 @@
  *
  * **A fourth property, added after the first three were measured against a
  * real IDE: the list knows which entries this game produced.** `report`
- * puts one in; `seed` puts one in that this game was merely HANDED (today,
- * exactly one thing: the host's project diagnostics, which `createGame`
- * mirrors here so `boot` and the game's page can paint one list). `list()`
+ * puts one in; `seed` puts one in that this game was merely HANDED — the
+ * host's project diagnostics, and anything else the host says about this
+ * game from its own process (see `seed`'s own doc for the current list).
+ * `list()`
  * returns both, because a reader showing the GAME needs the whole picture;
  * `own()` returns only the reported ones, because a reader FORWARDING to
  * somewhere that already has the seeded ones must not send them twice.
@@ -125,11 +126,21 @@ export interface DiagnosticsService {
    * Adds one this game did NOT produce — a diagnostic it was handed by
    * something that already has its own way of telling the world.
    *
-   * There is exactly one such source today: the HOST's project diagnostics,
-   * which `createGame` collects off `GET /api/composition` and mirrors here
-   * so `boot` and the page can paint one list. The editor already has those
-   * from the same response over its own channel, so anything forwarding
-   * from this service must not send them again — hence `own()` above.
+   * Two sources today, both of them the HOST speaking about this game from
+   * a process this game does not run in:
+   *
+   *  - its project diagnostics, which `createGame` collects off
+   *    `GET /api/composition` and mirrors here so `boot` and the page can
+   *    paint one list;
+   *  - a `/api/spin` failure, which `@energy8engine/ide-bridge` seeds when
+   *    a `game-diagnostics` frame arrives stamped `source: 'host'` (see
+   *    that package's socket listener, and `GameDiagnosticsSource`).
+   *
+   * The editor already has both from the host directly, so anything
+   * forwarding from this service must not send them again — hence `own()`
+   * above. That is what makes the count matter rather than being trivia: a
+   * third source added without this doc changing is a third way to make the
+   * IDE render one failure twice.
    *
    * Otherwise identical to `report`: copied in, bounded the same way,
    * notifies subscribers, never throws.

@@ -351,8 +351,8 @@ test('removing the reels row from the patch takes the board off the screen', asy
  * the row that DECLARED it needed a board, not `reels1`, the row that is
  * simply gone; naming the row that noticed over the row that vanished is
  * exactly what lets this same mechanism also cover a `reels1` that is
- * still THERE but whose own half failed (see `compose.test.ts`'s "names
- * the row that would have provided it").
+ * still THERE but whose own half failed (see `compose.test.ts`'s "names a
+ * row that failed to apply beside the unmet requirement").
  */
 test('… and says which row went missing', async ({ page }) => {
   const dir = projectCopy();

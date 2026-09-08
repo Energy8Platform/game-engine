@@ -108,6 +108,14 @@ export interface E8RuntimeHalf {
    * order, or reach it reactively via `ctx.inject()` from inside its own
    * `apply`. This field lets a row DECLARE what it needs, so the host can
    * check afterward that those services exist.
+   *
+   * Not the other `requires` in this package. `SpinMechanic.requires`
+   * (`./mechanic.ts`) is a mechanic's list of FIELDS its stage data must
+   * carry, checked against the math's `.spin` schema. The two are read
+   * fifteen lines apart in `@energy8engine/game-runtime`'s `createGame`,
+   * they share a word and nothing else: different subject (a service vs. a
+   * data shape), different checker, different moment. Whichever one you are
+   * reading, the other is probably not the one you meant.
    */
   requires?: string[];
 }
