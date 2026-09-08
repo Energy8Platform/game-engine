@@ -35,6 +35,26 @@
  * appends. Stamping the clock here would make every test of this file need
  * a fake clock to say anything, and the record itself does not depend on
  * the time it was taken.
+ *
+ * **It is bounded, and it says how much it dropped.** The log lives in
+ * memory for the life of the page and had no cap at all: a session left
+ * spinning grew it until the tab did. It now keeps the most recent
+ * `DEFAULT_LIMIT` spins and drops the OLDEST past that — the only sensible
+ * end to drop from, since the interesting spin is almost always the one
+ * that just happened. Dropping is counted and readable (`dropped()`), for
+ * the same reason every other loss in this repo is named rather than
+ * absorbed: a panel showing "the log" while the log has quietly forgotten
+ * the first hour is a panel that lies.
+ *
+ * **Reading is cheap on purpose.** `entries()` used to `structuredClone`
+ * every field of every entry on every call, so a panel polling an N-entry
+ * log N times did N² clones. The copy that keeps a reader out of the
+ * record is now made ONCE, on the way in, and then frozen — so a normal
+ * read is a shallow array copy and nothing else. An entry holding
+ * something freezing cannot make immutable (a `Map`, a `Set`, a `Date`, a
+ * typed array, or a value that could not be cloned at all) keeps the old
+ * copy-on-read path instead, so the promise below is exactly as strong as
+ * it was; see `freezeDeep`.
  */
 import type { PresentationStep } from '@energy8engine/contracts';
 
@@ -71,11 +91,39 @@ export interface SpinLog {
    */
   append(entry: SpinLogEntry): void;
   /**
-   * Every spin recorded so far, oldest first. A copy: mutating what comes
-   * back — the array, an entry, or anything nested inside one — does not
-   * reach the log.
+   * Every spin still held, oldest first — at most `limit` of them. What
+   * comes back cannot be edited into the log: the array is this call's
+   * own, and each entry is either frozen or a fresh copy (see the module
+   * doc). Mutating an entry or anything nested in one therefore either
+   * fails outright or reaches nothing; either way the record stands.
    */
   entries(): readonly SpinLogEntry[];
+  /**
+   * How many spins have been dropped off the OLD end to stay inside the
+   * bound — 0 until the log is full. Cumulative; reading does not reset
+   * it. A reader that shows the log needs this to say "the last 500 of
+   * 900" rather than "900" or, worse, "500".
+   */
+  dropped(): number;
+}
+
+/**
+ * How many spins the log keeps. A development session is dozens to low
+ * hundreds of spins, so this holds essentially all of one, while capping
+ * the memory a left-running tab can reach: `first-slot`'s own spin payload
+ * (grid, lines, cascade history, reel steps, plus the plan) is a few
+ * kilobytes, so a full log is single-digit megabytes rather than
+ * unbounded.
+ *
+ * It is a bound, not a tuning knob: the `spinlog1` row takes the default
+ * and exposes no config for it. `createSpinLog` accepts one so a test can
+ * fill a log without writing five hundred spins.
+ */
+export const DEFAULT_LIMIT = 500;
+
+export interface SpinLogOptions {
+  /** Maximum spins kept. Anything below 1, or not a finite number, means `DEFAULT_LIMIT`. */
+  limit?: number;
 }
 
 /**
@@ -96,12 +144,66 @@ export interface SpinLog {
  * a spin result and a presentation plan are actually made of — numbers,
  * strings, arrays, plain objects — clones.
  */
-function copyOf(value: unknown): unknown {
+function copyOf(value: unknown): { value: unknown; cloned: boolean } {
   try {
-    return structuredClone(value);
+    return { value: structuredClone(value), cloned: true };
   } catch {
-    return value;
+    return { value, cloned: false };
   }
+}
+
+/**
+ * Values `Object.freeze` cannot actually make immutable. A frozen `Map`
+ * still takes `set`, a frozen `Set` still takes `add`, a frozen `Date`
+ * still takes `setTime`, and a frozen typed array still takes an index
+ * write — freezing seals the OBJECT's properties, not the internal state
+ * these keep beside them.
+ *
+ * They are listed rather than assumed away because `structuredClone`
+ * produces every one of them, so an entry can genuinely hold one. Nothing
+ * in this repo does — a spin result arrives through `res.json()` and a
+ * plan is built by a mechanic, both plain data — but "nothing does today"
+ * is not a promise, and the promise this log makes has to hold for the odd
+ * input it exists to capture.
+ */
+function isUnfreezable(value: object): boolean {
+  return (
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof Date ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  );
+}
+
+/**
+ * Freezes everything reachable from `value`, and answers whether that was
+ * ENOUGH — `true` only when nothing in the subtree can still be changed.
+ *
+ * Called on the log's own clone, never on a caller's object: the caller's
+ * is only ever reached when `copyOf` could not clone it, and `append`
+ * below skips freezing entirely in that case. Freezing something the
+ * caller still holds would be this log reaching back out and changing the
+ * program it is recording.
+ *
+ * `seen` is not an optimisation. A spin result that refers to itself is
+ * exactly the sort of input this log promises to survive, `structuredClone`
+ * preserves the cycle, and walking one without a guard does not return.
+ */
+function freezeDeep(value: unknown, seen: WeakSet<object>): boolean {
+  if (value === null || typeof value !== 'object') return true;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (isUnfreezable(value)) return false;
+  Object.freeze(value);
+  let complete = true;
+  // `structuredClone`'s output carries data properties only — no getters,
+  // no proxies — so reading each one back is safe here in a way it is not
+  // on a caller's object (see `read`).
+  for (const key of Object.getOwnPropertyNames(value)) {
+    if (!freezeDeep((value as Record<string, unknown>)[key], seen)) complete = false;
+  }
+  return complete;
 }
 
 /**
@@ -132,24 +234,69 @@ function read(entry: SpinLogEntry | null | undefined, field: keyof SpinLogEntry)
  * here validates the plan — a log that rejected a malformed one would be
  * refusing to record the spin worth looking at most.
  */
-function snapshot(entry: SpinLogEntry | null | undefined): SpinLogEntry {
+function snapshot(entry: SpinLogEntry | null | undefined): {
+  entry: SpinLogEntry;
+  cloned: boolean;
+} {
+  const request = copyOf(read(entry, 'request'));
+  const result = copyOf(read(entry, 'result'));
+  const plan = copyOf(read(entry, 'plan'));
   return {
-    request: copyOf(read(entry, 'request')),
-    result: copyOf(read(entry, 'result')),
-    plan: copyOf(read(entry, 'plan')) as PresentationStep[],
+    entry: { request: request.value, result: result.value, plan: plan.value as PresentationStep[] },
+    cloned: request.cloned && result.cloned && plan.cloned,
   };
 }
 
+/**
+ * One stored spin: the log's own copy, plus whether that copy is now
+ * genuinely immutable.
+ *
+ * `sealed` is what makes reading cheap. A sealed record is handed straight
+ * to a reader — nothing it can do reaches the log — while an unsealed one
+ * is copied again on the way out, exactly as every record used to be.
+ */
+interface StoredEntry {
+  entry: SpinLogEntry;
+  sealed: boolean;
+}
+
 /** A fresh, empty log. Holds spins in memory for the life of the page — nothing here persists to disk. */
-export function createSpinLog(): SpinLog {
-  const records: SpinLogEntry[] = [];
+export function createSpinLog(options: SpinLogOptions = {}): SpinLog {
+  const requested = options.limit;
+  const limit =
+    typeof requested === 'number' && Number.isFinite(requested) && requested >= 1
+      ? Math.floor(requested)
+      : DEFAULT_LIMIT;
+
+  const records: StoredEntry[] = [];
+  let dropped = 0;
 
   return {
     append(entry) {
-      records.push(snapshot(entry));
+      const taken = snapshot(entry);
+      let sealed = false;
+      if (taken.cloned) {
+        // Guarded like everything else here: `freezeDeep` walks a graph
+        // this log did not choose the shape of, and a stack overflow on a
+        // pathologically deep result must cost the seal, not the spin.
+        try {
+          sealed = freezeDeep(taken.entry, new WeakSet());
+        } catch {
+          sealed = false;
+        }
+      }
+      records.push({ entry: taken.entry, sealed });
+      // Oldest first out. `splice` rather than `shift` so a limit lowered
+      // between calls cannot leave the log over its bound.
+      if (records.length > limit) {
+        dropped += records.splice(0, records.length - limit).length;
+      }
     },
     entries() {
-      return records.map(snapshot);
+      return records.map((record) => (record.sealed ? record.entry : snapshot(record.entry).entry));
+    },
+    dropped() {
+      return dropped;
     },
   };
 }
