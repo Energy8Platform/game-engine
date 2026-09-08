@@ -506,6 +506,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     let playErrorOpen = false;
     let stopAutoplay: () => void = () => {}; // wired to the autoplay loop once it's created (below)
     let haltAutoplay: () => void = () => {}; // ditto — stops the run but KEEPS its counter
+    let holdAutoplay: () => void = () => {}; // ditto — pauses the run, owing it a resume
+    let releaseAutoplay: () => void = () => {}; // ditto — gives back a run that hold() paused
     const reload = () => {
       try {
         window.location.reload();
@@ -598,8 +600,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     game.scenes.root.on('pointertap', () => skip.tap(performance.now()));
 
     // Full auto-pause: on tab blur, freeze the ticker (stops tweens/onUpdate/in-flight onSpin),
-    // duck music to silence, hold autoplay, and notify the scene. On focus, reverse it all.
-    // `stopAutoplay` is reassigned in the base-mode block below — the closure reads it live.
+    // duck music to silence, hold autoplay, and notify the scene. On focus, reverse it all —
+    // autoplay included: a tab switch is not the player pressing STOP.
+    // `holdAutoplay`/`releaseAutoplay` are reassigned in the base-mode block below — the closures
+    // read them live.
     const { createPauseController } = await import('./pauseController');
     createPauseController({
       isHidden: () => typeof document !== 'undefined' && document.hidden,
@@ -611,12 +615,19 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       onHidden: () => {
         game.app.ticker.stop(); // freezes tweens, onUpdate, in-flight onSpin animation
         game.audio.duckMusic(0); // silence music (ducked to 0; restored on resume)
-        stopAutoplay(); // hold autoplay — don't start the next auto-round
+        // Hold, don't stop. No auto-round may start while the tab is hidden (the ticker is frozen,
+        // so an animation would never finish, and a play fired here spends the player's money out
+        // of sight) — but the run is owed back: the lab reads "the autoplay sequence stops when the
+        // Stop button is pressed" as ONLY the Stop button, and stopAutoplay() here ended the run and
+        // zeroed its counter on every alt-tab. `hold()` forgets itself if anything else ends the run
+        // meanwhile (a lost connection, a failed round), so those don't come back on the way in.
+        holdAutoplay();
         gameScene()?.onPause?.();
       },
       onVisible: () => {
         game.app.ticker.start();
         game.audio.unduckMusic();
+        releaseAutoplay(); // the run the blur paused picks up where it left off
         gameScene()?.onResume?.();
       },
     });
@@ -852,6 +863,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       });
       stopAutoplay = () => autoplay.stop();
       haltAutoplay = () => autoplay.halt();
+      holdAutoplay = () => autoplay.hold();
+      releaseAutoplay = () => autoplay.release();
       shell.on('autoplayStart', (o: { remaining?: number }) => autoplay.start(o?.remaining ?? 0));
       shell.on('autoplayStop', () => autoplay.stop());
 
