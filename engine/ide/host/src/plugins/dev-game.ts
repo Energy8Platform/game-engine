@@ -114,6 +114,7 @@ import type { Context } from 'cordis';
 import * as session from '@energy8engine/session-dev';
 import type { SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
+import type { IdeRpcService } from './rpc';
 import { runtimeEntryPaths } from './runtime-assets';
 
 /**
@@ -315,6 +316,20 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     if (diagnostics.length > 0 || !result) {
       res.status = 502;
       res.json({ diagnostics });
+      // This route runs in the HOST process, not the browser, so nothing
+      // on the game's own side can write these into `ctx.diagnostics` the
+      // way an in-page seam does — the HTTP response above is read by
+      // whatever page made the request, and ONLY a page that relays what
+      // it reads (`first-slot/src/main.ts` does) would otherwise get this
+      // any further. Speaking `game-diagnostics` here too means the IDE
+      // panel sees it unconditionally, the same way it would for a game
+      // that never wires that relay. `ideRpc` is read leniently — `rpc`
+      // and `dev-game` are SIBLING plugin scopes under `e8 dev`'s shared
+      // host `ctx`, and this plugin's own standalone tests compose it with
+      // no `rpc` at all, so a static `inject` would leave this fiber
+      // PENDING forever waiting for a service nobody provides.
+      const ideRpc = ctx.reflect.get('ideRpc', false) as IdeRpcService | undefined;
+      ideRpc?.broadcastGameDiagnostics(diagnostics);
       return;
     }
 

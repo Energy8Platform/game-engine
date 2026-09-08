@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
+import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ServerMessage } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as devGame from '../src/plugins/dev-game';
 
@@ -473,6 +475,55 @@ describe('dev-game — the spin route', () => {
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'session' });
+  });
+
+  /**
+   * The gap task-2-3-report.md named and task-4-6-report.md closes: this
+   * route runs in the HOST process, not the browser, so nothing on the
+   * game's own side can write its failures into `ctx.diagnostics` the way
+   * an in-page seam does — only a page reading the HTTP response could
+   * relay them (`first-slot/src/main.ts` does), and a different game's
+   * page that does not wire the same relay would show nothing for the
+   * same failure. So the host speaks `game-diagnostics` itself, over the
+   * SAME `/ide` socket `rpc.ts` (Task 6) just learned the type for —
+   * unconditionally, not depending on any page being open at all.
+   *
+   * Uses `createIdeHost` (composes `rpc`, hence `ctx.ideRpc`) rather than
+   * the bare `Context` + `Server` the test above uses — `dev-game` and
+   * `rpc` are SIBLING plugin scopes under the SAME host `ctx` in this
+   * shape, which is the real one `e8 dev` boots (see `apps/cli/src/
+   * index.ts`), and the one `ctx.reflect.get('ideRpc', false)` inside
+   * `dev-game.ts` has to actually work against.
+   */
+  it('also reaches the IDE panel directly, as game-diagnostics on the /ide socket — not only via a page relay', async () => {
+    host = await createIdeHost({ cwd: WORKSPACE, port: 0 });
+    await host.ctx.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+      binPath: '/nonexistent/e8-server-binary',
+    });
+
+    const socket = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const received: ServerMessage[] = [];
+    socket.on('message', (data) => received.push(JSON.parse(String(data)) as ServerMessage));
+    await new Promise((resolve) => socket.once('open', resolve));
+
+    const res = await fetch(`${host.url}/api/spin`, { method: 'POST' });
+    expect(res.status).toBe(502); // the HTTP response still carries it too — unchanged
+
+    await expect
+      .poll(() => received.filter((m) => m.type === 'game-diagnostics'))
+      .toHaveLength(1);
+    const [message] = received.filter((m) => m.type === 'game-diagnostics');
+    expect(message).toMatchObject({
+      type: 'game-diagnostics',
+      diagnostics: [{ severity: 'error', plugin: 'session' }],
+    });
+
+    socket.close();
   });
 });
 
