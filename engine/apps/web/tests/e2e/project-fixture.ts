@@ -13,7 +13,7 @@
  * whose name ends in `.spec` or `.test`, so this one is importable from a
  * spec without becoming one.
  */
-import { appendFileSync, cpSync, mkdtempSync, readFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
@@ -67,6 +67,91 @@ export interface ProjectCopyOptions {
    * reports under exactly that name (see `Diagnostic.plugin`'s doc).
    */
   patchRowId?: string;
+
+  /**
+   * Append a `remove: true` patch row for this id — the mirror image of
+   * `patchRowId`, just above: instead of addressing an id nothing placed,
+   * this addresses one the bundle already did, and takes it back out.
+   *
+   * Appended AFTER the fixture's own rows, never written in place of them,
+   * for the same reason `patchRowId` appends rather than replaces — and
+   * appending is enough to win: `resolveComposition`
+   * (`engine/core/project/src/index.ts`) walks one patch layer's rows in
+   * FILE ORDER against a single map, so a `remove: true` entry that comes
+   * after an earlier entry for the same id (the fixture's own `reels1`
+   * row, config and all) simply overwrites what that earlier entry did.
+   * No hand-edited YAML in a spec file, and no wholesale second copy of
+   * `e8.patch.yml` — this fixture already owns knowing how the file is
+   * shaped, which is the same reason `patchRowId` exists.
+   *
+   * It exists for `declared.spec.ts`'s "names both" test. Removing
+   * `reels1` this way drops the one row that provides the `board`
+   * service — legal composition on its own, nothing throws — and is
+   * exactly the case `@energy8engine/play-loop`'s `e8.runtime.requires:
+   * ["board"]` (task 1) and `createGame`'s post-composition check (task
+   * 2) exist to catch: `playloop1` still applies, finds nothing behind
+   * `ctx.board`, and the resulting diagnostic names both the service and
+   * the row that needed it.
+   */
+  removeRowId?: string;
+
+  /**
+   * Overwrite `game/spec.json`'s own `id` field before the host ever
+   * reads it — the same edit `diagnostics.spec.ts` makes inline, in three
+   * places, to stage a failure without touching the composition at all.
+   * Generalized here rather than copied a fourth time.
+   *
+   * `startDevHost` reads this id straight off the project (see its own
+   * doc) and hands it to `session-dev` as the game to load, so a value
+   * nothing under `--games-dir` answers to turns every `POST /api/spin`
+   * into a failure INSIDE THE HOST PROCESS — a different producer, and a
+   * different kind of failure, than anything a patch row can stage: the
+   * game itself still boots to `ready` (the id is only consulted once a
+   * spin is actually played), and what fails is a process this page never
+   * runs in. It exists for `declared.spec.ts`'s test of the one producer
+   * that, before task 6, never reached the running game's own list.
+   */
+  specId?: string;
+
+  /**
+   * Insert two editor-side rows into `e8.yml`, both naming
+   * `e8-example-probe` (`engine/examples/probe-plugin` — the same package
+   * `examples/workspace/e8.yml` composes ONE of, and `skeleton.spec.ts`
+   * already proves renders live, card text and all) — the second one
+   * `disabled: true`.
+   *
+   * That package's client half (`src/client.js`) registers into the
+   * `composition.card` slot under a key HARDCODED in that file —
+   * `'probe'` — never derived from the row id, and never consulting
+   * whether the ROW is disabled: `modules.ts` imports and applies a row's
+   * `clientUrl` on its `clientUrl` alone, and a disabled entry's manifest
+   * — hence its `clientUrl` — resolves exactly the same as an enabled
+   * one's (`composition.ts`'s snapshot reads the package, not the fiber).
+   * So two rows importing the same module both call
+   * `ctx.slots.register({ name: 'composition.card', key: 'probe' }, …)`
+   * with the identical key, and the second call is exactly the collision
+   * `@energy8engine/registry`'s last-wins policy (task 3) exists to REPORT
+   * rather than silently allow — see `plugins/slots.tsx`'s own comment for
+   * why that collection stays a replace, not a refusal, and reports the
+   * replace anyway.
+   *
+   * `disabled: true` is load-bearing, not decoration. That package's
+   * SERVER half (`src/index.ts`) also calls `ctx.provide('probe', …)`,
+   * and cordis refuses a second provider of a service already provided —
+   * fine for ONE extra row (`composition.ts`'s per-entry failure tracking
+   * turns that into a plain `apply` diagnostic, same as any other broken
+   * row), except that the failure is delivered by an UNHANDLED REJECTION
+   * the host can only recognize AFTER THE FACT (see that file's own long
+   * comment on `ensureUnhandledRejectionGuard`), which measured out as a
+   * genuine, occasional race against Node's own unhandled-rejection
+   * detection — this fixture crashed the host process under Playwright on
+   * exactly this timing before `disabled: true` was added, even though a
+   * standalone repro of the same two rows (no Playwright involved) did
+   * not. A disabled entry never applies at all — no fiber runs, no second
+   * `ctx.provide`, nothing to race — so the ONLY collision left is the one
+   * this option exists to stage, on the browser side, every time.
+   */
+  duplicateSlotKey?: boolean;
 }
 
 export function projectCopy(options: ProjectCopyOptions = {}): string {
@@ -86,6 +171,21 @@ export function projectCopy(options: ProjectCopyOptions = {}): string {
   // caller asked for.
   if (options.patchRowId) {
     appendFileSync(join(dir, 'e8.patch.yml'), `  - id: ${options.patchRowId}\n    config: {}\n`);
+  }
+  if (options.removeRowId) {
+    appendFileSync(join(dir, 'e8.patch.yml'), `  - id: ${options.removeRowId}\n    remove: true\n`);
+  }
+  if (options.specId) {
+    const specFile = join(dir, 'game', 'spec.json');
+    const spec = JSON.parse(readFileSync(specFile, 'utf8')) as Record<string, unknown>;
+    writeFileSync(specFile, JSON.stringify({ ...spec, id: options.specId }, null, 2));
+  }
+  if (options.duplicateSlotKey) {
+    appendFileSync(
+      join(dir, 'e8.yml'),
+      '\n- id: probe1\n  name: e8-example-probe\n  config: {}\n' +
+        '- id: probe2\n  name: e8-example-probe\n  disabled: true\n  config: {}\n',
+    );
   }
   return dir;
 }
