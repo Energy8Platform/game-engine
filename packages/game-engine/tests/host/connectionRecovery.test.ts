@@ -3,20 +3,36 @@ import { createConnectionRecovery, type ConnectionRecoveryDeps } from '@/host/co
 
 /**
  * Замечание Artube: «If connection is lost during autoplay, autoplay stops, and after reconnection
- * the counter is displayed correctly» — а игра вместо этого сбрасывала счётчик и показывала экран
- * с предложением перезагрузить страницу. Этот контроллер и есть ответ: обрыв только останавливает
- * прогон (счётчик сохраняет autoplay.halt()), возврат связи молча доигрывает прерванный раунд.
+ * the counter is displayed correctly» — а игра вместо этого показывала экран с предложением
+ * перезагрузить страницу. Этот контроллер и есть ответ: обрыв только останавливает прогон
+ * (счётчик держится, пока связи нет), возврат связи сбрасывает автоплей и молча доигрывает
+ * прерванный раунд.
  */
 function harness(over: Partial<ConnectionRecoveryDeps> = {}) {
   const calls: string[] = [];
   const deps: ConnectionRecoveryDeps = {
-    haltAutoplay: () => { calls.push('halt'); },
-    showReconnecting: () => { calls.push('reconnecting'); },
-    showGone: () => { calls.push('gone'); },
-    dismiss: () => { calls.push('dismiss'); },
+    haltAutoplay: () => {
+      calls.push('halt');
+    },
+    resetAutoplay: () => {
+      calls.push('reset');
+    },
+    showReconnecting: () => {
+      calls.push('reconnecting');
+    },
+    showGone: () => {
+      calls.push('gone');
+    },
+    dismiss: () => {
+      calls.push('dismiss');
+    },
     getState: async () => null,
-    drain: async () => { calls.push('drain'); },
-    onError: () => { calls.push('error'); },
+    drain: async () => {
+      calls.push('drain');
+    },
+    onError: () => {
+      calls.push('error');
+    },
     ...over,
   };
   return { deps, calls, rec: createConnectionRecovery(deps) };
@@ -48,12 +64,15 @@ describe('createConnectionRecovery', () => {
     const drained: unknown[] = [];
     const { rec, calls } = harness({
       getState: async () => SNAP,
-      drain: async (s) => { drained.push(s); calls.push('drain'); },
+      drain: async (s) => {
+        drained.push(s);
+        calls.push('drain');
+      },
     });
     rec.onState({ status: 'lost' });
     await rec.onState({ status: 'restored' });
     // Ни одного экрана «перезагрузите страницу» — ровно то, на что жаловались.
-    expect(calls).toEqual(['halt', 'reconnecting', 'dismiss', 'drain']);
+    expect(calls).toEqual(['halt', 'reconnecting', 'reset', 'dismiss', 'drain']);
     expect(drained).toEqual([SNAP]);
   });
 
@@ -61,7 +80,7 @@ describe('createConnectionRecovery', () => {
     const { rec, calls } = harness();
     rec.onState({ status: 'lost' });
     await rec.onState({ status: 'restored' });
-    expect(calls).toEqual(['halt', 'reconnecting', 'dismiss']);
+    expect(calls).toEqual(['halt', 'reconnecting', 'reset', 'dismiss']);
   });
 
   it('«restored» без обрыва ничего не трогает', async () => {
@@ -82,7 +101,7 @@ describe('createConnectionRecovery', () => {
     const { rec, calls } = harness({ isBlocked: () => true, getState: async () => SNAP });
     rec.onState({ status: 'lost' });
     await rec.onState({ status: 'restored' });
-    expect(calls).toEqual(['halt', 'drain']);
+    expect(calls).toEqual(['halt', 'reset', 'drain']);
   });
 
   it('провал восстановления не уходит в пустоту', async () => {
@@ -90,7 +109,9 @@ describe('createConnectionRecovery', () => {
     const seen: unknown[] = [];
     const { rec } = harness({
       getState: async () => SNAP,
-      drain: async () => { throw boom; },
+      drain: async () => {
+        throw boom;
+      },
       onError: (e) => seen.push(e),
     });
     rec.onState({ status: 'lost' });
@@ -100,7 +121,9 @@ describe('createConnectionRecovery', () => {
 
   it('getState, который упал, не мешает снять оверлей', async () => {
     const { rec, calls } = harness({
-      getState: async () => { throw new Error('no state'); },
+      getState: async () => {
+        throw new Error('no state');
+      },
     });
     rec.onState({ status: 'lost' });
     await rec.onState({ status: 'restored' });
@@ -114,6 +137,21 @@ describe('createConnectionRecovery', () => {
     await rec.onState({ status: 'restored' });
     rec.onState({ status: 'lost' });
     expect(calls.filter((c) => c === 'reconnecting')).toHaveLength(2);
+  });
+
+  it('возврат связи сбрасывает автоплей — прогон не «ждёт» игрока', async () => {
+    // Требование Artube поверх замечания лаборатории: после реконнекта автоплей сброшен,
+    // а не сохранён «до одного тапа». Сброс происходит и когда доигрывать нечего.
+    const { rec, calls } = harness();
+    rec.onState({ status: 'lost' });
+    await rec.onState({ status: 'restored' });
+    expect(calls.filter((c) => c === 'reset')).toHaveLength(1);
+  });
+
+  it('«restored» без обрыва автоплей не трогает', async () => {
+    const { rec, calls } = harness();
+    await rec.onState({ status: 'restored' });
+    expect(calls).not.toContain('reset');
   });
 
   it('«connecting» — промежуточный статус, экран не трогает', () => {
@@ -134,7 +172,11 @@ describe('createConnectionRecovery', () => {
     let release!: () => void;
     const { rec, calls } = harness({
       getState: async () => SNAP,
-      drain: () => new Promise<void>((r) => { release = r; calls.push('drain'); }),
+      drain: () =>
+        new Promise<void>((r) => {
+          release = r;
+          calls.push('drain');
+        }),
     });
     rec.onState({ status: 'lost' });
     const done = rec.onState({ status: 'restored' });

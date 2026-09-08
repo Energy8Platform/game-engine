@@ -139,7 +139,7 @@ the host drains segment-by-segment. The WIN readout is the host's too (cleared a
 post-onSpin); the ONE exception is \`api.shell.reportWin\` for a step-by-step cascade climb, which the
 host reconciles to the segment's real win afterwards.
 
-The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); \`onSpin\` feeds results to it (${cascade ? '\`system.cascade(result.steps)\`' : '\`system.spin(result.targetGrid)\`'}). In the dev harness (\`npm run stake\`) the **"Reels" sidebar** tunes \`reelConfig\` live via \`mountReelDevBridge\` — click **Copy config** and paste back into \`reelConfig.ts\` to persist (live edits are ephemeral).${cascade ? ' This is a CASCADE game — the running win multiplier is driven by \`reelConfig.cascade.multiplier\`, and each settled step should call \`api.shell.reportWin(winSoFar, { durationMs })\` so the bar\'s WIN climbs with the cascade instead of jumping once at the end.' : ''}
+The reels are the configurable **ReelSystem** (see \`src/slot/reelConfig.ts\`); \`onSpin\` feeds results to it (${cascade ? '\`system.cascade(result.steps)\`' : '\`system.spin(result.targetGrid)\`'}). In the dev harness (\`npm run stake\`) the **"Reels" sidebar** tunes \`reelConfig\` live via \`mountReelDevBridge\` — click **Copy config** and paste back into \`reelConfig.ts\` to persist (live edits are ephemeral).${cascade ? " This is a CASCADE game — the running win multiplier is driven by \`reelConfig.cascade.multiplier\`, and each settled step should call \`api.shell.reportWin(winSoFar, { durationMs })\` so the bar's WIN climbs with the cascade instead of jumping once at the end." : ''}
 
 ## Commands
 
@@ -170,7 +170,7 @@ Segment-drain of bonuses, \`roundId\` forwarding, free-spins counter (with retri
 unfinished round, win/balance HUD timing, social-mode vocabulary, the legal disclaimer, currency
 formatting, jurisdiction → feature restrictions, the insufficient-funds guard, the play-error modal
 + reconnect overlay, autoplay, the bet ladder + default bet from \`/wallet/authenticate\`, the
-open-redirect \`rgs_url\` guard${a.artube ? ' (and the Artube blank-`sessionId` guard)' : ''}, spacebar handling, pause on tab-blur (ticker + music), and
+open-redirect \`rgs_url\` guard${a.artube ? ' (and the Artube blank-`sessionId` guard)' : ''}, spacebar handling, pause on tab-blur (ticker + music; an autoplay run is HELD and resumes on return, never ended), and
 double-tap-to-skip (opt out with \`createSlotGame({ skipGesture: false })\`). Write player-facing
 copy normally — it is socialized automatically in social mode.
 

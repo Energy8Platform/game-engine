@@ -7,8 +7,12 @@ function harness(over: Partial<AutoplayDeps> = {}) {
   const deps: AutoplayDeps = {
     resolveAction: () => 'spin',
     canAfford: () => true,
-    playRound: async (a) => { plays.push(a); },
-    onState: (s) => { states.push({ ...s }); },
+    playRound: async (a) => {
+      plays.push(a);
+    },
+    onState: (s) => {
+      states.push({ ...s });
+    },
     ...over,
   };
   return { deps, plays, states };
@@ -38,7 +42,14 @@ describe('createAutoplayLoop', () => {
 
   it('stop() ends the run after the in-flight round', async () => {
     let resolveRound!: () => void;
-    const { deps, plays } = harness({ playRound: (a) => { plays.push(a); return new Promise<void>((r) => { resolveRound = r; }); } });
+    const { deps, plays } = harness({
+      playRound: (a) => {
+        plays.push(a);
+        return new Promise<void>((r) => {
+          resolveRound = r;
+        });
+      },
+    });
     const a = createAutoplayLoop(deps);
     a.start(5);
     await vi.waitFor(() => expect(plays.length).toBe(1)); // first round in flight
@@ -49,7 +60,12 @@ describe('createAutoplayLoop', () => {
   });
 
   it('halts on a play error (the round rejected)', async () => {
-    const { deps, plays } = harness({ playRound: async (a) => { plays.push(a); throw new Error('boom'); } });
+    const { deps, plays } = harness({
+      playRound: async (a) => {
+        plays.push(a);
+        throw new Error('boom');
+      },
+    });
     const a = createAutoplayLoop(deps);
     a.start(5);
     await vi.waitFor(() => expect(a.active).toBe(false));
@@ -62,7 +78,12 @@ describe('createAutoplayLoop', () => {
     it('останавливает прогон, но СОХРАНЯЕТ остаток для показа', async () => {
       let resolveRound!: () => void;
       const { deps, plays, states } = harness({
-        playRound: (a) => { plays.push(a); return new Promise<void>((r) => { resolveRound = r; }); },
+        playRound: (a) => {
+          plays.push(a);
+          return new Promise<void>((r) => {
+            resolveRound = r;
+          });
+        },
       });
       const a = createAutoplayLoop(deps);
       a.start(5);
@@ -87,9 +108,15 @@ describe('createAutoplayLoop', () => {
         // Первый раунд висит (в нём и рвётся связь), остальные проходят.
         playRound: (act) => {
           plays.push(act);
-          return plays.length === 1 ? new Promise<void>((r) => { release = r; }) : Promise.resolve();
+          return plays.length === 1
+            ? new Promise<void>((r) => {
+                release = r;
+              })
+            : Promise.resolve();
         },
-        onState: (s) => { states.push({ ...s }); },
+        onState: (s) => {
+          states.push({ ...s });
+        },
       });
       a.start(5);
       await vi.waitFor(() => expect(plays.length).toBe(1));
@@ -126,12 +153,88 @@ describe('createAutoplayLoop', () => {
 
     it('ошибка спина тоже сохраняет остаток (модалку показывает хост)', async () => {
       const { deps, states } = harness({
-        playRound: async () => { throw new Error('connection lost'); },
+        playRound: async () => {
+          throw new Error('connection lost');
+        },
       });
       const a = createAutoplayLoop(deps);
       a.start(5);
       await vi.waitFor(() => expect(a.active).toBe(false));
       expect(states.at(-1)).toEqual({ active: false, remaining: 4 });
+    });
+  });
+
+  describe('hold()/release(): вкладку свернули, а не нажали STOP', () => {
+    it('hold() придерживает прогон и бережёт счётчик, release() возвращает его', async () => {
+      const { deps, states } = harness({ playRound: () => new Promise(() => {}) }); // раунд висит
+      const a = createAutoplayLoop(deps);
+      a.start(5);
+      await vi.waitFor(() => expect(a.remaining).toBe(4));
+
+      a.hold();
+      expect(a.active).toBe(false); // новые раунды не стартуют
+      expect(a.remaining).toBe(4); // но заказ игрока цел
+      expect(states.at(-1)).toEqual({ active: false, remaining: 4 });
+
+      a.release();
+      expect(a.active).toBe(true);
+      expect(states.at(-1)).toEqual({ active: true, remaining: 4 });
+    });
+
+    it('release() без hold() ничего не делает', () => {
+      const { deps, states } = harness();
+      const a = createAutoplayLoop(deps);
+      a.release();
+      expect(a.active).toBe(false);
+      expect(states).toEqual([]);
+    });
+
+    it('hold() без активного прогона нечего возвращать', () => {
+      const { deps, states } = harness();
+      const a = createAutoplayLoop(deps);
+      a.hold();
+      a.release();
+      expect(a.active).toBe(false);
+      expect(states).toEqual([]);
+    });
+
+    it('STOP под паузой отменяет возврат — прогон окончен', async () => {
+      const { deps } = harness({ playRound: () => new Promise(() => {}) });
+      const a = createAutoplayLoop(deps);
+      a.start(5);
+      await vi.waitFor(() => expect(a.remaining).toBe(4));
+      a.hold();
+
+      a.stop();
+      a.release();
+      expect(a.active).toBe(false);
+      expect(a.remaining).toBe(0);
+    });
+
+    it('halt() под паузой (оборвалась связь) тоже отменяет возврат', async () => {
+      // Счётчик halt бережёт, но прогон уже не «придержан вкладкой» — поднимать его при
+      // возвращении на вкладку нельзя: связь-то не вернулась.
+      const { deps } = harness({ playRound: () => new Promise(() => {}) });
+      const a = createAutoplayLoop(deps);
+      a.start(5);
+      await vi.waitFor(() => expect(a.remaining).toBe(4));
+      a.hold();
+
+      a.halt();
+      a.release();
+      expect(a.active).toBe(false);
+      expect(a.remaining).toBe(4); // остаток на месте — его показывает шелл
+    });
+
+    it('второй release() подряд прогон не перезапускает', async () => {
+      const { deps, plays } = harness();
+      const a = createAutoplayLoop(deps);
+      a.start(2);
+      a.hold();
+      a.release();
+      a.release();
+      await vi.waitFor(() => expect(a.active).toBe(false));
+      expect(plays).toHaveLength(2); // ровно заказанные два спина, без дубля
     });
   });
 
@@ -175,14 +278,23 @@ describe('createAutoplayLoop restart window', () => {
         plays.push(a);
         inFlight += 1;
         peakInFlight = Math.max(peakInFlight, inFlight);
-        await new Promise<void>((res) => { release = res; });
+        await new Promise<void>((res) => {
+          release = res;
+        });
         inFlight -= 1;
       },
-      onState: (s) => { states.push({ ...s }); },
+      onState: (s) => {
+        states.push({ ...s });
+      },
     };
     return {
-      deps, plays, states,
-      releaseRound: () => { release?.(); release = null; },
+      deps,
+      plays,
+      states,
+      releaseRound: () => {
+        release?.();
+        release = null;
+      },
       peak: () => peakInFlight,
     };
   }

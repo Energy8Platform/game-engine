@@ -19,7 +19,12 @@ import { resolvePlayError } from '@/host/playError';
  */
 
 class SDKError extends Error {
-  constructor(public code: string, message: string) { super(message); }
+  constructor(
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 const cfg = (): ShellConfig => ({
@@ -62,7 +67,14 @@ function harness(opts: { failOnRound: number; failCode: string }) {
       body: shell.t(v.body),
       actions: v.reload
         ? [{ title: shell.t('Reload'), on: reload }]
-        : [{ title: shell.t('OK'), on: () => { playErrorOpen = false; } }],
+        : [
+            {
+              title: shell.t('OK'),
+              on: () => {
+                playErrorOpen = false;
+              },
+            },
+          ],
     });
   };
 
@@ -85,6 +97,7 @@ function harness(opts: { failOnRound: number; failCode: string }) {
 
   const connection = createConnectionRecovery({
     haltAutoplay: () => autoplay.halt(),
+    resetAutoplay: () => autoplay.stop(),
     showReconnecting: () =>
       shell.openModal({
         availableClose: false,
@@ -100,14 +113,19 @@ function harness(opts: { failOnRound: number; failCode: string }) {
       }),
     dismiss: () => shell.closeModal(),
     getState: async () => openRound as never,
-    drain: async (snap) => { drained.push(snap); openRound = null; },
+    drain: async (snap) => {
+      drained.push(snap);
+      openRound = null;
+    },
     onError: showPlayError,
     isBlocked: () => playErrorOpen,
   });
 
+  shell.on('spin', () => void playRound('spin'));
   shell.on('autoplayStart', (o: { remaining: number }) => autoplay.start(o.remaining));
   shell.on('autoplayStop', () => autoplay.stop());
-  const restore = (): Promise<void> => connection.onState({ status: 'restored' } as ConnectionState);
+  const restore = (): Promise<void> =>
+    connection.onState({ status: 'restored' } as ConnectionState);
   return { shell, autoplay, plays, drained, reload, restore };
 }
 
@@ -132,7 +150,7 @@ describe('обрыв связи посреди автоплея', () => {
     expect(h.reload).not.toHaveBeenCalled();
   });
 
-  it('связь вернулась: оверлей ушёл, раунд доигран, счётчик на месте', async () => {
+  it('связь вернулась: оверлей ушёл, раунд доигран, автоплей сброшен', async () => {
     const h = harness({ failOnRound: 3, failCode: 'ConnectionLost' });
     h.autoplay.start(10);
     await vi.waitFor(() => expect(h.autoplay.active).toBe(false));
@@ -140,29 +158,21 @@ describe('обрыв связи посреди автоплея', () => {
 
     expect(q('[data-ge="modal-body"]')).toBeNull(); // ни одного экрана поверх игры
     expect(h.drained).toEqual([{ roundId: 'r3' }]); // прерванный раунд доигран молча
-    expect(disc().textContent).toContain('7');
+    // Остаток не переживает реконнект: прогон окончен, диск — обычный SPIN.
+    expect(h.autoplay.remaining).toBe(0);
+    expect(disc().textContent).not.toContain('7');
   });
 
-  it('после возврата связи игрок одним тапом продолжает прогон', async () => {
+  it('после возврата связи тап по диску — это один спин, а не продолжение прогона', async () => {
     const h = harness({ failOnRound: 3, failCode: 'ConnectionLost' });
     h.autoplay.start(10);
     await vi.waitFor(() => expect(h.autoplay.active).toBe(false));
     await h.restore();
 
     disc().click();
-    await vi.waitFor(() => expect(h.autoplay.active).toBe(false));
-    expect(h.plays).toHaveLength(10); // 3 до обрыва + 7 оставшихся
-  });
-
-  it('кнопка авто снимает остаток, и диск снова обычный SPIN', async () => {
-    const h = harness({ failOnRound: 3, failCode: 'ConnectionLost' });
-    h.autoplay.start(10);
-    await vi.waitFor(() => expect(h.autoplay.active).toBe(false));
-    await h.restore();
-
-    (q('[data-ge="autoplay"]') as HTMLButtonElement).click();
-    expect(h.autoplay.remaining).toBe(0);
-    expect(disc().textContent).not.toContain('7');
+    await vi.waitFor(() => expect(h.plays).toHaveLength(4));
+    expect(h.autoplay.active).toBe(false);
+    expect(h.plays).toHaveLength(4); // 3 до обрыва + один ручной
   });
 
   it('настоящая ошибка раунда по-прежнему показывает свой экран — и тоже бережёт счётчик', async () => {

@@ -44,6 +44,10 @@ export class PixiRenderer implements ShellRenderer {
   private bar?: BottomBar;
   private currentLayer: ShellLayer | null = null;
   private backdrop?: { node: Container; texture: RenderTexture };
+  /** Whether `currentLayer` asked for a frosted backdrop. Light-dismiss layers (the menu popover)
+   *  pass `{ backdrop: false }`, and that answer has to survive past the open: a resize re-snapshots
+   *  the backdrop, and without this it re-snapshotted for layers that never wanted one. */
+  private layerBackdrop = false;
   private moneyAnims: Array<() => void> = [];
   private destroyed = false;
 
@@ -213,7 +217,8 @@ export class PixiRenderer implements ShellRenderer {
     this.clearLayer();
     // Light-dismiss layers (the menu popover) opt out with `{ backdrop: false }` — no frosted
     // snapshot, the game stays visible behind them. Every other caller is unaffected (defaults on).
-    if (opts?.backdrop !== false) this.makeBackdrop(); // frosted snapshot (the DOM's backdrop-filter:blur)
+    this.layerBackdrop = opts?.backdrop !== false;
+    if (this.layerBackdrop) this.makeBackdrop(); // frosted snapshot (the DOM's backdrop-filter:blur)
     this.currentLayer = node;
     this.modalLayer.addChild(node);
     this.fitModals();
@@ -236,6 +241,7 @@ export class PixiRenderer implements ShellRenderer {
       this.currentLayer.destroy({ children: true });
       this.currentLayer = null;
     }
+    this.layerBackdrop = false;
     this.removeBackdrop();
   }
 
@@ -260,7 +266,10 @@ export class PixiRenderer implements ShellRenderer {
     // reads as more frost, never sharp game.
     node.addChild(new Graphics().rect(0, 0, w, h).fill(0x0c111c));
     this.modalLayer.addChild(node);
-    this.backdrop = { node, texture: RenderTexture.create({ width: w, height: h, resolution: 0.25 }) };
+    this.backdrop = {
+      node,
+      texture: RenderTexture.create({ width: w, height: h, resolution: 0.25 }),
+    };
     try {
       // Heavy downscale (¼ res) is the blur-STRENGTH lever (each texel covers more screen), far cheaper
       // than a full-res large-radius blur and smooth over fine detail. Effective on-screen blur ≈
@@ -321,8 +330,14 @@ export class PixiRenderer implements ShellRenderer {
     this.host.notifyResize(this.screenW, this.screenH);
     if (this.currentLayer) {
       this.currentLayer.resize?.(this.screenW, this.screenH);
-      this.makeBackdrop(); // re-snapshot at the new size
-      if (this.backdrop) this.modalLayer.setChildIndex(this.backdrop.node, 0); // keep it below the layer
+      // Only for a layer that ASKED for the frost. A rotation with the bar menu open used to slap a
+      // backdrop under a light-dismiss popover that had opted out of one — and since modalLayer
+      // draws above barLayer, that frozen blurred snapshot covered the game AND the bar until the
+      // menu was closed. That is the "UI is not adopted on rotation while the menu is open" remark.
+      if (this.layerBackdrop) {
+        this.makeBackdrop(); // re-snapshot at the new size
+        if (this.backdrop) this.modalLayer.setChildIndex(this.backdrop.node, 0); // keep it below the layer
+      }
     }
   };
 
@@ -335,13 +350,27 @@ export class PixiRenderer implements ShellRenderer {
     const self = this;
     const ctx: PixiComponentContext = {
       // — core ShellHost (forwarded) —
-      get state() { return host.state; },
-      get config() { return host.config; },
-      get tokens() { return host.tokens; },
-      get layout() { return host.layout; },
-      get soundOn() { return host.soundOn; },
-      get menu() { return host.menu; },
-      get actions() { return host.actions; },
+      get state() {
+        return host.state;
+      },
+      get config() {
+        return host.config;
+      },
+      get tokens() {
+        return host.tokens;
+      },
+      get layout() {
+        return host.layout;
+      },
+      get soundOn() {
+        return host.soundOn;
+      },
+      get menu() {
+        return host.menu;
+      },
+      get actions() {
+        return host.actions;
+      },
       openReplay: (opts) => host.openReplay(opts),
       t: (s) => host.t(s),
       formatCurrency: (n, win) => host.formatCurrency(n, win),
@@ -354,10 +383,18 @@ export class PixiRenderer implements ShellRenderer {
       setMenuValue: (id, v) => host.setMenuValue(id, v),
       setMenuRefresh: (fn) => host.setMenuRefresh(fn),
       // — Pixi-specific surface —
-      get ticker() { return self.app.ticker; },
-      get canvas() { return self.app.canvas as HTMLCanvasElement | undefined; },
-      get screenW() { return self.app.screen.width; },
-      get screenH() { return self.app.screen.height; },
+      get ticker() {
+        return self.app.ticker;
+      },
+      get canvas() {
+        return self.app.canvas as HTMLCanvasElement | undefined;
+      },
+      get screenW() {
+        return self.app.screen.width;
+      },
+      get screenH() {
+        return self.app.screen.height;
+      },
       render: () => self.renderBar(),
       pushLayer: (node, opts) => self.pushLayer(node, opts),
       // Route component-initiated closes through the controller (not straight to self.closeLayer) so
