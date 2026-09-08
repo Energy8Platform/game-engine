@@ -1,5 +1,10 @@
 import type { Context } from 'cordis';
-import type { ClientMessage, Diagnostic, ServerMessage } from '@energy8engine/contracts';
+import type {
+  ClientMessage,
+  Diagnostic,
+  GameDiagnosticsSource,
+  ServerMessage,
+} from '@energy8engine/contracts';
 import type { WebSocket } from 'ws';
 
 declare module 'cordis' {
@@ -36,43 +41,64 @@ export function apply(ctx: Context) {
   const clients = new Set<WebSocket>();
 
   /**
-   * The last `game-diagnostics` frame this host has seen, from EITHER
-   * origin (a game's own `ide-bridge` relay below, or this host speaking
-   * for itself via `broadcastGameDiagnostics`) — so a client that connects
-   * (or reconnects) AFTER the fact still learns about it, instead of
-   * seeing nothing until the NEXT thing happens to report. `Snapshot`
-   * already gets this treatment (recomputed fresh and sent to every new
-   * connection below); this is `game-diagnostics`'s own missing half of
-   * the same symmetry.
+   * The last `game-diagnostics` frame this host has seen **from each
+   * source** (see `GameDiagnosticsSource`) — so a client that connects (or
+   * reconnects) AFTER the fact still learns about it, instead of seeing
+   * nothing until the NEXT thing happens to report. `Snapshot` already
+   * gets this treatment (recomputed fresh and sent to every new connection
+   * below); this is `game-diagnostics`'s own missing half of the same
+   * symmetry.
    *
-   * Two decisions this makes on purpose, not by accident:
+   * Three decisions this makes on purpose, not by accident:
    *
-   *  1. **One retained frame, not one per game.** The protocol carries no
-   *     game/session identity at all — `GameDiagnosticsMessage` is just
-   *     `{diagnostics, dropped}` — so there is no key to keep several
-   *     under even if this wanted to. In this dev model there is exactly
-   *     one project being edited at a time (`e8 dev` serves one), so more
-   *     than one connected GAME socket overwhelmingly means more than one
-   *     VIEW of the same game (the preview iframe alongside a directly
-   *     opened tab), not two different games — the same assumption
-   *     `ctx.composition.snapshot()` already makes for the ONE `Snapshot`
-   *     every client shares. Last-wins across whichever socket reported
-   *     most recently is therefore the natural read of "the current
-   *     picture", not an arbitrary tie-break.
-   *  2. **Never cleared when the reporting socket disconnects.** A game
-   *     going quiet because it crashed is exactly the case this exists
-   *     for — the failure that caused the disconnect is the single most
-   *     important thing for a client connecting afterwards to learn, and
-   *     clearing it at the moment of disconnect would erase it at the
-   *     worst possible time. The cost is real and named, not ignored: a
-   *     newly connected client can be handed a frame describing a game
-   *     that is no longer running. Between "may describe a game that has
-   *     since gone" and "silently drops a real failure because a socket
-   *     dropped", this picks the first — the same lean §8 and this whole
-   *     slice already take everywhere else (a stale-but-true fact beats a
-   *     silently withheld one).
+   *  1. **One retained frame PER SOURCE — two of them, not one, and not
+   *     one per socket.** It was one, and that was wrong: this host is
+   *     itself a second speaker (`broadcastGameDiagnostics`, for
+   *     `/api/spin`), and a host frame carrying only its own failure
+   *     replaced everything the game had reported — for a reader that
+   *     replaces on receipt, terminally, since nothing makes the game
+   *     speak again afterwards. Keyed by source rather than by socket
+   *     because in this dev model there is exactly one project being
+   *     edited (`e8 dev` serves one), so more than one connected GAME
+   *     socket overwhelmingly means more than one VIEW of the same game
+   *     (the preview iframe alongside a directly opened tab), not two
+   *     different games — the same assumption `ctx.composition.snapshot()`
+   *     already makes for the ONE `Snapshot` every client shares. Those
+   *     views share the `game` slot and the most recent wins. A key per
+   *     socket would also grow without bound across page reloads, and
+   *     would show one game's list N times.
+   *  2. **The source is decided HERE, from where the frame entered** — a
+   *     frame off an `/ide` socket is `game`, a frame this host originates
+   *     is `host` — never read off the frame. See
+   *     `GameDiagnosticsSource`'s own doc.
+   *  3. **Never cleared when a source goes away.** A game going quiet
+   *     because it crashed is exactly the case this exists for — the
+   *     failure that caused the disconnect is the single most important
+   *     thing for a client connecting afterwards to learn, and clearing it
+   *     at the moment of disconnect would erase it at the worst possible
+   *     time. Unchanged from when there was one retained frame, and it has
+   *     to stay unchanged for both sources or the rule would depend on
+   *     which speaker happened to fall silent. The cost is real and named,
+   *     not ignored: a newly connected client can be handed a frame
+   *     describing a game that is no longer running. Between "may describe
+   *     a game that has since gone" and "silently drops a real failure
+   *     because a socket dropped", this picks the first — the same lean §8
+   *     and this whole slice already take everywhere else (a stale-but-
+   *     true fact beats a silently withheld one). Bounded by decision 1:
+   *     there are two slots, so this cannot accumulate.
    */
-  let lastGameDiagnostics: { diagnostics: Diagnostic[]; dropped: number } | null = null;
+  const lastGameDiagnostics = new Map<
+    GameDiagnosticsSource,
+    { diagnostics: Diagnostic[]; dropped: number }
+  >();
+
+  /**
+   * The order a newly connected client is told about the sources. Fixed
+   * rather than insertion-ordered so the panel's row order is a property
+   * of the protocol and not of which speaker happened to go first: the
+   * game's own account, then what the host has to add about it.
+   */
+  const SOURCES: GameDiagnosticsSource[] = ['game', 'host'];
 
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
@@ -86,8 +112,13 @@ export function apply(ctx: Context) {
 
   ctx.provide('ideRpc', {
     broadcastGameDiagnostics(diagnostics, dropped = 0) {
-      lastGameDiagnostics = { diagnostics, dropped };
-      const message: ServerMessage = { type: 'game-diagnostics', diagnostics, dropped };
+      lastGameDiagnostics.set('host', { diagnostics, dropped });
+      const message: ServerMessage = {
+        type: 'game-diagnostics',
+        diagnostics,
+        dropped,
+        source: 'host',
+      };
       for (const socket of clients) send(socket, message);
     },
   });
@@ -126,9 +157,25 @@ export function apply(ctx: Context) {
         // Recorded before the relay loop, unconditionally — see
         // `lastGameDiagnostics`'s own doc for why this is retained rather
         // than only forwarded live.
-        lastGameDiagnostics = { diagnostics: message.diagnostics, dropped: message.dropped };
+        //
+        // Stamped `source: 'game'` on the way out rather than passed
+        // through untouched: the frame that arrived is a `ClientMessage`,
+        // which carries no source at all, and what leaves here is a
+        // `ServerMessage`, which must. The stamp is this host's own
+        // knowledge of where the frame entered — see
+        // `GameDiagnosticsSource`.
+        lastGameDiagnostics.set('game', {
+          diagnostics: message.diagnostics,
+          dropped: message.dropped,
+        });
+        const relayed: ServerMessage = {
+          type: 'game-diagnostics',
+          diagnostics: message.diagnostics,
+          dropped: message.dropped,
+          source: 'game',
+        };
         for (const other of clients) {
-          if (other !== socket) send(other, message);
+          if (other !== socket) send(other, relayed);
         }
         return;
       }
@@ -146,16 +193,21 @@ export function apply(ctx: Context) {
     // must not see "nothing has ever gone wrong" just because it wasn't
     // listening at the time — see `lastGameDiagnostics`'s own doc. Sent
     // whole, after the snapshot, the same "always the current picture, in
-    // the same place" treatment `Snapshot` above already gets. Omitted
-    // entirely (not sent as an empty frame) when nothing has EVER been
-    // reported in this host's lifetime — that is genuinely "no game has
-    // reported anything yet", which the client already renders correctly
-    // on its own (`GameDiagnosticsState.diagnostics` starts `null`).
-    if (lastGameDiagnostics) {
+    // the same place" treatment `Snapshot` above already gets.
+    //
+    // ONE FRAME PER SOURCE, in `SOURCES` order. A source that has never
+    // spoken is skipped entirely rather than sent as an empty frame —
+    // "nothing has been reported" is not "an empty report", and the client
+    // already renders the first correctly on its own
+    // (`GameDiagnosticsState.diagnostics` starts `null`).
+    for (const source of SOURCES) {
+      const retained = lastGameDiagnostics.get(source);
+      if (!retained) continue;
       send(socket, {
         type: 'game-diagnostics',
-        diagnostics: lastGameDiagnostics.diagnostics,
-        dropped: lastGameDiagnostics.dropped,
+        diagnostics: retained.diagnostics,
+        dropped: retained.dropped,
+        source,
       });
     }
   });

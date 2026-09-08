@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { Context } from 'cordis';
-import type { Diagnostic } from '@energy8engine/contracts';
+import type { Diagnostic, GameDiagnosticsSource } from '@energy8engine/contracts';
 import type { ConnectionConfig, WebSocketLike } from './connection';
 
 /**
  * The client-side store for a GAME's own diagnostics — the far end of the
  * road tasks 1-6 built: a running game's `ctx.diagnostics` forwarded by
  * `ide-bridge`, relayed by the host to every OTHER connected socket as
- * `{type:'game-diagnostics', diagnostics, dropped}`.
+ * `{type:'game-diagnostics', diagnostics, dropped, source}`. Two speakers
+ * share that message type and each sends a whole list, so this store keeps
+ * ONE LIST PER SOURCE and hands out their union — see `bySource` below.
  *
  * Shaped after `connection.ts`: a service with `subscribe(listener)`, a
  * socket owned and parsed the same defensive way (a `WebSocketLike` seam,
@@ -43,9 +45,19 @@ declare module 'cordis' {
 }
 
 export interface GameDiagnosticsState {
-  /** What the game has reported. Null until the first frame arrives — absent is not empty. */
+  /**
+   * What has been reported about the running game, from every source that
+   * has spoken, concatenated in `SOURCE_ORDER` — the game's own list, then
+   * whatever the host has to add about it.
+   *
+   * Null until the FIRST frame from ANY source arrives — absent is not
+   * empty. Once one source has spoken, this is that source's list; a
+   * second source speaking ADDS to it rather than replacing it, which is
+   * the whole point of `GameDiagnosticsSource` existing (see its doc in
+   * `@energy8engine/contracts`).
+   */
   readonly diagnostics: readonly Diagnostic[] | null;
-  /** How many the game's bounded log forgot. The panel must be able to say so. */
+  /** How many the bounded logs behind those sources forgot, summed. The panel must be able to say so. */
   readonly dropped: number;
 }
 
@@ -58,21 +70,45 @@ export type GameDiagnosticsConfig = ConnectionConfig;
 
 export const name = 'game-diagnostics';
 
+/**
+ * The order sources are concatenated in. Fixed, so the panel's row order is
+ * a property of the protocol rather than of which speaker happened to send
+ * first — and matching `rpc.ts`'s own `SOURCES`, which is the order a newly
+ * connected client is handed the retained frames in.
+ */
+const SOURCE_ORDER: GameDiagnosticsSource[] = ['game', 'host'];
+
 export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   const listeners = new Set<() => void>();
   const socket = (config.socketFactory ?? ((url) => new WebSocket(url) as WebSocketLike))(
     config.url,
   );
 
-  let diagnostics: Diagnostic[] | null = null;
-  let dropped = 0;
+  /**
+   * One list per source. A frame replaces THAT source's entry and leaves
+   * every other one alone.
+   *
+   * It was a single `diagnostics` variable, replaced on every frame, and
+   * that is the bug this map exists to fix: the host is a second speaker on
+   * this message type (`dev-game`'s `/api/spin` route, which runs outside
+   * any browser), it only ever holds its own failures, and its frame
+   * therefore erased everything the game had reported — terminally, since
+   * nothing makes the game speak again afterwards. Whole-list remains right
+   * — it is what makes a frame self-sufficient for a client that just
+   * connected — but the whole list a frame carries is the whole list of ONE
+   * SOURCE.
+   */
+  const bySource = new Map<GameDiagnosticsSource, { diagnostics: Diagnostic[]; dropped: number }>();
 
   const service: GameDiagnosticsService = {
     get diagnostics() {
-      return diagnostics;
+      if (bySource.size === 0) return null;
+      return SOURCE_ORDER.flatMap((source) => bySource.get(source)?.diagnostics ?? []);
     },
     get dropped() {
-      return dropped;
+      let total = 0;
+      for (const entry of bySource.values()) total += entry.dropped;
+      return total;
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -81,7 +117,7 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   };
 
   socket.addEventListener('message', (event: { data: string }) => {
-    let message: { diagnostics: Diagnostic[]; dropped?: number };
+    let message: { diagnostics: Diagnostic[]; dropped?: number; source?: unknown };
     try {
       const parsed: unknown = JSON.parse(event.data);
       // Malformed frames are ignored, not just unparsable ones — `null`, an
@@ -92,16 +128,25 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
       // never `plugin`. A `{type:'diagnostics'}` frame (the project's own,
       // equally well-formed) must still be ignored: see the module doc.
       if ((parsed as { type?: unknown }).type !== 'game-diagnostics') return;
-      message = parsed as { diagnostics: Diagnostic[]; dropped?: number };
+      message = parsed as { diagnostics: Diagnostic[]; dropped?: number; source?: unknown };
     } catch {
       return;
     }
-    diagnostics = message.diagnostics;
-    // Not required to be present at runtime by anything that actually
-    // checks it — matching `isServerMessage`'s own deliberate looseness —
-    // so a frame missing it degrades to "nothing forgotten" rather than
-    // `NaN`/`undefined` reaching the panel.
-    dropped = message.dropped ?? 0;
+    // An absent or unrecognised `source` reads as `game` — the meaning this
+    // message had before the host became a second speaker, so an older host
+    // (or a hand-written frame) lands in the slot it would have replaced
+    // anyway rather than inventing a third bucket that nothing renders in
+    // order. Same deliberate looseness as `isServerMessage`'s.
+    const source: GameDiagnosticsSource =
+      message.source === 'host' || message.source === 'game' ? message.source : 'game';
+    bySource.set(source, {
+      diagnostics: message.diagnostics,
+      // Not required to be present at runtime by anything that actually
+      // checks it — matching `isServerMessage`'s own deliberate looseness —
+      // so a frame missing it degrades to "nothing forgotten" rather than
+      // `NaN`/`undefined` reaching the panel.
+      dropped: message.dropped ?? 0,
+    });
     for (const listener of listeners) listener();
   });
 

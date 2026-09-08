@@ -315,9 +315,7 @@ describe('ide rpc — a game reports its own diagnostics', () => {
       await expect.poll(() => editor.received).toContainEqual(expect.objectContaining(frame));
 
       const late = await connectClient(); // simulates a reloaded IDE tab
-      await expect.poll(() => late.received.some((m) => m.type === 'game-diagnostics')).toBe(
-        true,
-      );
+      await expect.poll(() => late.received.some((m) => m.type === 'game-diagnostics')).toBe(true);
       expect(late.received.filter((m) => m.type === 'game-diagnostics')).toEqual([
         expect.objectContaining(frame),
       ]);
@@ -338,9 +336,7 @@ describe('ide rpc — a game reports its own diagnostics', () => {
       await new Promise((resolve) => game.ws.once('close', resolve));
 
       const late = await connectClient();
-      await expect.poll(() => late.received.some((m) => m.type === 'game-diagnostics')).toBe(
-        true,
-      );
+      await expect.poll(() => late.received.some((m) => m.type === 'game-diagnostics')).toBe(true);
       expect(late.received.filter((m) => m.type === 'game-diagnostics')).toEqual([
         expect.objectContaining(frame),
       ]);
@@ -364,8 +360,7 @@ describe('ide rpc — a game reports its own diagnostics', () => {
 describe('ide rpc — the host can originate its own game-diagnostics', () => {
   it('broadcasts to a connected client, with no sender of its own to exclude', async () => {
     const ideRpc = host.ctx.reflect.get('ideRpc', false) as
-      | { broadcastGameDiagnostics(diagnostics: unknown[], dropped?: number): void }
-      | undefined;
+      { broadcastGameDiagnostics(diagnostics: unknown[], dropped?: number): void } | undefined;
     expect(ideRpc).toBeDefined();
 
     ideRpc!.broadcastGameDiagnostics(
@@ -384,5 +379,136 @@ describe('ide rpc — the host can originate its own game-diagnostics', () => {
       diagnostics: [{ severity: 'error', plugin: 'session' }],
       dropped: 2,
     });
+  });
+});
+
+/**
+ * Two speakers, one message type, and a reader that replaces on receipt.
+ *
+ * The host became a second speaker (the describe block above) after the
+ * whole-list-not-a-delta decision was already made, and the two collided:
+ * a host frame carries only its own `/api/spin` failure, so it replaced
+ * everything a game had reported — terminally, since nothing makes the game
+ * speak again afterwards. The fix is that whole-list is per SOURCE. These
+ * tests hold the host's half of it: the stamp it puts on each frame, and
+ * the retention that keeps one per source rather than one in total.
+ */
+describe('ide rpc — the two speakers do not overwrite each other', () => {
+  function collect(ws: WebSocket): ServerMessage[] {
+    const received: ServerMessage[] = [];
+    ws.on('message', (data) => received.push(JSON.parse(String(data)) as ServerMessage));
+    return received;
+  }
+
+  async function connectClient(): Promise<{ ws: WebSocket; received: ServerMessage[] }> {
+    const ws = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const received = collect(ws);
+    await new Promise((resolve) => ws.once('open', resolve));
+    return { ws, received };
+  }
+
+  const gameFrame = {
+    type: 'game-diagnostics',
+    diagnostics: [
+      { severity: 'error', plugin: 'reels', where: 'runtime', message: 'the game said this' },
+    ],
+    dropped: 0,
+  };
+
+  function hostRpc() {
+    const ideRpc = host.ctx.reflect.get('ideRpc', false) as {
+      broadcastGameDiagnostics(diagnostics: unknown[], dropped?: number): void;
+    };
+    ideRpc.broadcastGameDiagnostics(
+      [{ severity: 'error', plugin: 'session', where: 'play', message: 'the host said this' }],
+      0,
+    );
+  }
+
+  it("stamps a relayed frame as the game's, so a reader can tell the speakers apart", async () => {
+    const game = await connectClient();
+    const editor = await connectClient();
+    game.ws.send(JSON.stringify(gameFrame));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ source: 'game' }));
+    game.ws.close();
+    editor.ws.close();
+  });
+
+  it("stamps its own broadcast as the host's", async () => {
+    hostRpc();
+    const message = await inbox.waitFor((m) => m.type === 'game-diagnostics');
+    expect(message).toMatchObject({ source: 'host' });
+  });
+
+  it('retains one frame PER SOURCE, so a late client is told both', async () => {
+    const game = await connectClient();
+    const editor = await connectClient();
+
+    // The game speaks first…
+    game.ws.send(JSON.stringify(gameFrame));
+    // …confirmed landed on the already-listening editor, so the host has
+    // provably recorded it before the host's own broadcast can race it.
+    // Anchored on an ORDERED signal on one connection rather than on a
+    // second connection's timing — the same correction the echo test above
+    // needed.
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ source: 'game' }));
+
+    // …and then the host does.
+    hostRpc();
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ source: 'host' }));
+
+    // A tab opening now — the moment a person actually looks — must be told
+    // BOTH, in `SOURCES` order: the game's own account, then the host's.
+    const late = await connectClient();
+    await expect
+      .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
+      .toBe(2);
+    const frames = late.received.filter((m) => m.type === 'game-diagnostics');
+    expect(frames).toEqual([
+      expect.objectContaining({ source: 'game' }),
+      expect.objectContaining({ source: 'host' }),
+    ]);
+    expect(frames[0]).toMatchObject({ diagnostics: [{ message: 'the game said this' }] });
+    expect(frames[1]).toMatchObject({ diagnostics: [{ message: 'the host said this' }] });
+
+    late.ws.close();
+    game.ws.close();
+    editor.ws.close();
+  });
+
+  /**
+   * Retention survives a source going away — the same call already made for
+   * the single retained frame, applied to both sources so the rule does not
+   * depend on which speaker happens to fall silent. A game going quiet
+   * BECAUSE it crashed is exactly the case this exists for.
+   */
+  it("keeps a disconnected game's frame alongside the host's", async () => {
+    const game = await connectClient();
+    const editor = await connectClient();
+    game.ws.send(JSON.stringify(gameFrame));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ source: 'game' }));
+    hostRpc();
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ source: 'host' }));
+
+    game.ws.close();
+    await new Promise((resolve) => game.ws.once('close', resolve));
+
+    const late = await connectClient();
+    await expect
+      .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
+      .toBe(2);
+
+    late.ws.close();
+    editor.ws.close();
   });
 });

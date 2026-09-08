@@ -31,12 +31,49 @@ export interface Snapshot {
 }
 
 /**
+ * Which speaker a `game-diagnostics` frame's list belongs to.
+ *
+ * Two of them reach the editor, and they are not the same voice:
+ *
+ *  - `game` — a running game's own `ctx.diagnostics`, forwarded by
+ *    `ide-bridge` from the browser. Several connected game sockets are
+ *    several VIEWS of one game in this dev model (`e8 dev` serves one
+ *    project), so they share this one source and the most recent wins —
+ *    the same assumption `ctx.composition.snapshot()` already makes for
+ *    the one `Snapshot` every client shares.
+ *  - `host` — the host speaking for itself, for the one producer that is
+ *    not in a browser at all: `dev-game.ts`'s `/api/spin` route, which
+ *    runs in the host process and has no `ctx.diagnostics` to write into.
+ *
+ * **Set by the HOST, never declared by the sender**, and inferred from
+ * where the frame entered rather than from anything in it: a frame that
+ * arrived on an `/ide` socket is `game`, a frame the host originated is
+ * `host`. A browser page has no identity this protocol could verify, and
+ * "who said this" is a routing fact the host owns — the same reasoning
+ * that keeps a reader from telling the two namespaces apart by inspecting
+ * `Diagnostic.plugin`.
+ */
+export type GameDiagnosticsSource = 'game' | 'host';
+
+/**
  * A running game's own diagnostics, riding the SAME `/ide` socket the
  * project's composition already does — client to server when `ide-bridge`
  * (the dev-only row that subscribes to a game's `ctx.diagnostics`) forwards
  * what it holds, server to client when the host passes that on to the
- * editor. Identical shape both ways: the host relays this message, it does
- * not transform it.
+ * editor.
+ *
+ * **Each frame carries a whole list, and it replaces that SOURCE's list —
+ * not the reader's whole picture.** Whole-list rather than a delta because
+ * a delta only means something to a reader that already holds everything
+ * before it, which makes "a client that just connected" a problem the
+ * sender would have to solve. Per-source rather than global because two
+ * speakers share this message type (see `GameDiagnosticsSource`) and
+ * neither of them ever holds the other's list: a host frame carrying its
+ * own `/api/spin` failure used to overwrite everything the game had
+ * reported, terminally, since nothing makes the game speak again
+ * afterwards. Measured, not theorised — see `engine/apps/web/tests/e2e/
+ * diagnostics.spec.ts`. A reader keeps one list per source and shows the
+ * union.
  *
  * **Its own type, deliberately not a reuse of `{type:'diagnostics'}`.**
  * That message carries the PROJECT's diagnostics, whose `plugin` is a
@@ -63,6 +100,19 @@ export interface GameDiagnosticsMessage {
    * the moment it's not repeated.
    */
   dropped: number;
+  /**
+   * Whose list this is — see `GameDiagnosticsSource`.
+   *
+   * Optional in the type, and that is not laziness about the server half:
+   * the two directions genuinely differ. A client→server frame never
+   * carries one (a game does not name itself; the host stamps it on the
+   * way through), and a host older than this field sends none either. The
+   * host always sets it on a server→client frame. **A reader that finds
+   * it absent must read it as `game`** — the meaning this message had
+   * before there was a second speaker — rather than inventing a third
+   * bucket.
+   */
+  source?: GameDiagnosticsSource;
 }
 
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */

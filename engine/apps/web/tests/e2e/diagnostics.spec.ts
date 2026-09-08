@@ -183,3 +183,64 @@ test('one id in both namespaces renders as two rows, not one', async ({ page }) 
     rmSync(project, { recursive: true, force: true });
   }
 });
+
+/**
+ * Two speakers reach the panel over the `game-diagnostics` wire — a running
+ * game's own `ide-bridge`, and the host itself for the one producer that is
+ * not in the browser at all (`dev-game`'s `/api/spin` route, which runs in
+ * the host process). Each sends its WHOLE list, which is the right design
+ * for a reader that may have just connected; what it must not mean is that
+ * one speaker's whole list replaces the OTHER speaker's.
+ *
+ * Measured before the fix: the game reported two things, the host then
+ * reported one, and the panel showed only the host's — terminally, because
+ * nothing makes the game speak again afterwards. A panel whose whole job is
+ * being trustworthy, quietly dropping two real failures the moment a third
+ * arrives.
+ */
+test('a host-side failure does not erase what the game already reported', async ({
+  page,
+  context,
+}) => {
+  const project = projectCopy();
+  // Makes `POST /api/spin` fail in the HOST process — the math is asked for
+  // a game it does not have — so the host speaks on the same wire the game
+  // does. The game itself boots and runs perfectly: the id is only consulted
+  // when a spin is actually played.
+  const specFile = join(project, 'game', 'spec.json');
+  const spec = JSON.parse(readFileSync(specFile, 'utf8')) as { id: string };
+  writeFileSync(specFile, JSON.stringify({ ...spec, id: 'not-a-game' }, null, 2));
+
+  const host = await startDevHost(project);
+  try {
+    const game = await context.newPage();
+    await game.goto(host.gameUrl);
+    await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
+
+    // The game reports two things of its own, through the same
+    // `mechanics.present` path a click goes through — two stages nothing in
+    // this composition binds.
+    await game.evaluate(() => (window as any).__e8.present('first-unbound', {}));
+    await game.evaluate(() => (window as any).__e8.present('second-unbound', {}));
+    await expect(game.locator('#log')).toContainText('first-unbound');
+    await expect(game.locator('#log')).toContainText('second-unbound');
+
+    // …and THEN the host reports one of its own, on the same wire.
+    await game.locator('#spin').click();
+    await expect(game.locator('#status')).toContainText('spin failed', { timeout: 20_000 });
+
+    // The editor arrives afterwards and must be told all three — the two the
+    // game said and the one the host said.
+    await page.goto(IDE_URL);
+    const panel = page.getByTestId('diagnostics-panel');
+    await expect(panel).toContainText('unknown game "not-a-game"', { timeout: 20_000 });
+    await expect(
+      panel,
+      "the host's own frame must not replace what the game reported",
+    ).toContainText('first-unbound');
+    await expect(panel).toContainText('second-unbound');
+  } finally {
+    await host.stop();
+    rmSync(project, { recursive: true, force: true });
+  }
+});

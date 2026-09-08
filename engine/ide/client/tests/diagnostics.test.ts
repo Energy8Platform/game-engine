@@ -84,3 +84,89 @@ describe('game diagnostics store', () => {
     await vi.waitFor(() => expect(seen).toHaveBeenCalledTimes(1));
   });
 });
+
+/**
+ * Two speakers share this message type — a running game's `ide-bridge` and
+ * the host itself (`dev-game`'s `/api/spin` route, which is in no browser
+ * at all). Each sends its WHOLE list, which is what makes a frame
+ * self-sufficient for a client that just connected; what it must not mean
+ * is that one speaker's list replaces the other's.
+ *
+ * This store held a single `diagnostics` variable and replaced it on every
+ * frame, so the host's frame — carrying only its own `/api/spin` failure —
+ * erased everything the game had reported, terminally, since nothing makes
+ * the game speak again afterwards.
+ */
+describe('game diagnostics store, per source', () => {
+  it('a host frame does not replace what the game reported', async () => {
+    const ctx = harness();
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('the game said this')],
+      dropped: 0,
+      source: 'game',
+    });
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('the host said this')],
+      dropped: 0,
+      source: 'host',
+    });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.diagnostics).toHaveLength(2));
+    // Game first, then host — `SOURCE_ORDER`, matching the order `rpc.ts`
+    // hands the retained frames to a newly connected client.
+    expect(ctx.gameDiagnostics.diagnostics!.map((x) => x.message)).toEqual([
+      'the game said this',
+      'the host said this',
+    ]);
+  });
+
+  it('a second frame from one source replaces only that source', async () => {
+    const ctx = harness();
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('game, first')],
+      dropped: 0,
+      source: 'game',
+    });
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('host, only')],
+      dropped: 0,
+      source: 'host',
+    });
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('game, first'), d('game, second')],
+      dropped: 0,
+      source: 'game',
+    });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.diagnostics).toHaveLength(3));
+    expect(ctx.gameDiagnostics.diagnostics!.map((x) => x.message)).toEqual([
+      'game, first',
+      'game, second',
+      'host, only',
+    ]);
+  });
+
+  it('a frame with no source reads as the game — the meaning it had before there were two', async () => {
+    const ctx = harness();
+    deliver(ctx, { type: 'game-diagnostics', diagnostics: [d('unlabelled')], dropped: 0 });
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('relabelled')],
+      dropped: 0,
+      source: 'game',
+    });
+    // Replaced, not accumulated: an unlabelled frame is not a third bucket.
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.diagnostics).toHaveLength(1));
+    expect(ctx.gameDiagnostics.diagnostics![0].message).toBe('relabelled');
+  });
+
+  it("sums the sources' dropped counts, so the panel cannot understate what was forgotten", async () => {
+    const ctx = harness();
+    deliver(ctx, { type: 'game-diagnostics', diagnostics: [], dropped: 7, source: 'game' });
+    deliver(ctx, { type: 'game-diagnostics', diagnostics: [], dropped: 2, source: 'host' });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.dropped).toBe(9));
+  });
+});
