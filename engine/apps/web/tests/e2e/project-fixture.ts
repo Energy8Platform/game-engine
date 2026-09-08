@@ -13,7 +13,7 @@
  * whose name ends in `.spec` or `.test`, so this one is importable from a
  * spec without becoming one.
  */
-import { cpSync, mkdtempSync, readFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdtempSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
@@ -50,7 +50,26 @@ export const FIXTURE = join(EXAMPLES, 'first-slot');
  * `engine/examples/e8-compose-*` is gitignored. Callers remove the copy in
  * a `finally`.
  */
-export function projectCopy(): string {
+export interface ProjectCopyOptions {
+  /**
+   * Append a patch row with this id — a row a human wrote into
+   * `e8.patch.yml` by hand, addressing nothing any bundle placed and
+   * carrying no `name` to insert one.
+   *
+   * The copy then resolves with exactly ONE project diagnostic, whose
+   * `plugin` is this id (`Diagnostic.plugin`'s namespace 1 — a composition
+   * row id), and with its rows otherwise untouched: the row is dropped, so
+   * the game composes and plays exactly as the unmodified fixture does.
+   *
+   * It exists for `diagnostics.spec.ts`'s namespace test, which needs one
+   * id to occur on BOTH sides of the panel — and `session` is the word the
+   * design spec picks for that, because a running game's own session seam
+   * reports under exactly that name (see `Diagnostic.plugin`'s doc).
+   */
+  patchRowId?: string;
+}
+
+export function projectCopy(options: ProjectCopyOptions = {}): string {
   const dir = mkdtempSync(join(EXAMPLES, 'e8-compose-'));
   cpSync(FIXTURE, dir, {
     recursive: true,
@@ -61,6 +80,13 @@ export function projectCopy(): string {
     // kind of thing and resolves fine from the repo root without it.)
     filter: (src) => !src.endsWith('/node_modules'),
   });
+  // Appended rather than written over the whole file, so every row the
+  // fixture already carries — and every reason its comments give for them —
+  // stays exactly as it is. The one thing that changes is the one thing the
+  // caller asked for.
+  if (options.patchRowId) {
+    appendFileSync(join(dir, 'e8.patch.yml'), `  - id: ${options.patchRowId}\n    config: {}\n`);
+  }
   return dir;
 }
 

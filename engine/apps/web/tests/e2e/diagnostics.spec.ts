@@ -1,0 +1,185 @@
+/**
+ * The acceptance test for the "one place to look" slice: **the game, the
+ * IDE and the agent see the same list** (§8 of the design spec, "Тот же
+ * список видят игра, IDE и агент").
+ *
+ * The debt this closes was recorded, not imagined: the IDE's composition
+ * screen could show six healthy rows beside a game sitting under its own
+ * failure screen, in a browser tab the editor never looked at.
+ * Authoritative-looking, and wrong.
+ *
+ * Two things are asserted here, and neither is "the panel shows
+ * something":
+ *
+ *  1. **Word for word.** A failure raised inside a running game reaches
+ *     the IDE panel carrying the SAME TEXT the game itself shows. A panel
+ *     with its own phrasing of the same trouble — a summary, a truncation,
+ *     a severity count — would pass a `toContainText('failed')` check and
+ *     break §8's promise, which is about one list rather than two views
+ *     that agree in spirit. So the game's own line is read off `#log`,
+ *     and the panel is required to contain it whole, `fix` clause and all.
+ *  2. **Two namespaces, two rows.** `Diagnostic.plugin` is drawn from two
+ *     disjoint namespaces (its own doc spells them out): a composition row
+ *     id, and a running game's seam or mechanic id. A human is entitled to
+ *     write `id: session` into `e8.patch.yml` while a game's own session
+ *     seam reports as `plugin: 'session'` too. Both must appear, each
+ *     attributed to its own side — never one rendered as the other, and
+ *     never one swallowed as a duplicate of the other.
+ *
+ * **The failures are provoked AFTER boot on purpose.** A boot failure
+ * already reaches the screen through `createGame`'s failure screen and
+ * `GameApp.diagnostics`, which is the path that existed before this slice;
+ * a test that used one would prove the old road, not the new one. So the
+ * first test breaks a mechanic that only runs on a click, and the second
+ * fails a spin at the host — both of them things that happen to a game
+ * that booted perfectly.
+ *
+ * **The editor is opened last, and is told nothing directly.** In both
+ * tests the game reports while no IDE tab exists at all; the panel learns
+ * about it from the frame `rpc.ts` retains and re-sends to a connection
+ * that arrives afterwards. That is deliberate — a person opens the editor
+ * because something looks wrong, which is precisely the moment a panel
+ * that only forwards live events would have nothing to say.
+ *
+ * The project is copied before it is touched, for the reasons
+ * `./project-fixture` gives at length, and every copy is removed in
+ * `finally`.
+ */
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, test } from '@playwright/test';
+import { projectCopy, startDevHost } from './project-fixture';
+
+/** The IDE app — vite on 5680, proxying `/api` and `/ide` to the host on 5679. */
+const IDE_URL = 'http://127.0.0.1:5680/';
+
+/**
+ * The message the project's own `reel-step` mechanic throws instead of
+ * presenting.
+ *
+ * Long, and specific to this test, on purpose. The claim being checked is
+ * that the panel shows the game's text rather than its own account of the
+ * same trouble, and a short string ("failed") could be reproduced by any
+ * summary that happened to use the same word. This one cannot be arrived
+ * at by paraphrase.
+ *
+ * It begins with `presentation failed` because that is what the game's own
+ * page calls this state in `#status`, so the two surfaces of the GAME
+ * agree as well.
+ */
+const THROWN = 'presentation failed: reel-step refused this board (fixture 7f3a)';
+
+/**
+ * Makes the copied project's own mechanic throw when it is asked to
+ * present — a third-party plugin failing inside a running game, which is
+ * exactly the case `MechanicsService.present` exists to catch and report
+ * rather than let escape.
+ *
+ * An edit to the PROJECT's plugin, never to the checked-in fixture: the
+ * copy is what runs, and `plugins/reel-step` is served through the same
+ * vite instance as the rest of it.
+ */
+function breakPresentation(dir: string): void {
+  const file = join(dir, 'plugins', 'reel-step', 'src', 'mechanic.ts');
+  const source = readFileSync(file, 'utf8');
+  const broken = source.replace(
+    'present: (data) => plan(data as ReelStepStageData),',
+    `present: () => {\n    throw new Error(${JSON.stringify(THROWN)});\n  },`,
+  );
+  expect(broken, "the fixture's mechanic must actually have been edited").not.toBe(source);
+  writeFileSync(file, broken);
+}
+
+test('a failure inside the running game reaches the IDE panel, word for word', async ({
+  page,
+  context,
+}) => {
+  const project = projectCopy();
+  breakPresentation(project);
+  const host = await startDevHost(project);
+  try {
+    // The game page first: provoke a failure AFTER boot, not at boot — a boot
+    // failure already reaches the screen, and would prove the old path.
+    const game = await context.newPage();
+    await game.goto(host.gameUrl);
+    // 20s, the same wait every spec in this suite gives a first load: the
+    // copy excludes `node_modules`, so vite's dependency optimizer is cold.
+    await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
+    await game.locator('#spin').click(); // the fixture's bound mechanic fails to present
+    await expect(game.locator('#log')).toContainText('presentation failed', { timeout: 20_000 });
+    const onTheGame = await game.locator('#log').textContent();
+
+    // Now the editor, which was never told anything directly.
+    await page.goto(IDE_URL);
+    const panel = page.getByTestId('diagnostics-panel');
+    await expect(panel).toContainText('presentation failed', { timeout: 20_000 });
+
+    // §8's promise, checked rather than assumed: the same list, not a summary.
+    const message = /presentation failed[^\n]*/.exec(onTheGame ?? '')![0];
+    // Guards this assertion against passing on a stub of itself: if the
+    // game's line were somehow just the words searched for, containing it
+    // would prove nothing about the panel.
+    expect(
+      message.length,
+      "the game's own line must be more than the words searched for",
+    ).toBeGreaterThan('presentation failed'.length + 20);
+    await expect(panel).toContainText(message);
+  } finally {
+    await host.stop();
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('one id in both namespaces renders as two rows, not one', async ({ page }) => {
+  // A project row the human named `session`, plus the game's own `session`
+  // seam diagnostic. The panel must show both and attribute each correctly.
+  const project = projectCopy({ patchRowId: 'session' });
+  // And the game's half of the collision. `session-dev` reports a failed
+  // spin as `plugin: 'session'` (namespace 2 — a runtime seam id), and the
+  // cheapest honest way to fail one is to ask the math for a game it does
+  // not have: `startDevHost` reads this id out of the project, exactly as
+  // the CLI's `dev` command does, so nothing here reaches around the
+  // product to stage the failure.
+  const specFile = join(project, 'game', 'spec.json');
+  const spec = JSON.parse(readFileSync(specFile, 'utf8')) as { id: string };
+  writeFileSync(specFile, JSON.stringify({ ...spec, id: 'not-a-game' }, null, 2));
+
+  const host = await startDevHost(project);
+  try {
+    // The spin that produces the game's half — the same request the game's
+    // own Spin button makes, `POST /api/spin` with an empty body, and the
+    // route answers `502 { diagnostics }` and broadcasts them as a
+    // `game-diagnostics` frame.
+    //
+    // Asked for directly rather than by opening the game and clicking, and
+    // the reason is a MEASURED one rather than convenience. A project
+    // diagnostic is also part of what `createGame` collects, so a running
+    // game's own `ctx.diagnostics` holds a copy of the `session` row's
+    // complaint too — and the moment that game reports anything after boot,
+    // `ide-bridge` forwards its whole list and the panel renders that one
+    // event a second time, as a `game` row (measured: three rows, the first
+    // two identical but for the origin tag). That is a real inconsistency,
+    // and it is written up as one — but it is not what THIS test is about,
+    // and letting it decide the row count here would make a namespace test
+    // pass or fail on an unrelated forwarding rule.
+    const spun = await fetch(`${host.gameUrl}/api/spin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(spun.status, 'the spin must actually have failed at the host').toBe(502);
+
+    await page.goto(IDE_URL);
+    const rows = page.getByTestId(/^diag-/);
+    await expect(rows).toHaveCount(2, { timeout: 20_000 });
+    await expect(rows.nth(0)).toContainText(/project/i);
+    await expect(rows.nth(1)).toContainText(/game/i);
+    // Both really are the same id — otherwise the two rows above would be
+    // telling apart two things that were never in danger of being confused.
+    await expect(rows.nth(0)).toContainText('session');
+    await expect(rows.nth(1)).toContainText('session');
+  } finally {
+    await host.stop();
+    rmSync(project, { recursive: true, force: true });
+  }
+});
