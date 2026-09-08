@@ -239,6 +239,94 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
 });
 
 /**
+ * A row that joins the composition after the dev server started.
+ *
+ * `dev-game` names the row entries it knows about to vite's dependency
+ * optimizer at startup, so the browser only ever sees one optimizer
+ * generation — that is what stops the two-`Container` fault the pixi
+ * `TypeError` came from. A row added afterwards is outside that crawl, and
+ * the reload vite would send to repair the resulting tear goes nowhere
+ * because `dev-game` runs with `hmr: false`.
+ *
+ * That residual cannot be closed from here. What it can stop being is
+ * SILENT: vite logs "optimized dependencies changed. reloading" to the
+ * server console, and the person in the browser simply loses pointer
+ * events on the board.
+ */
+describe('dev-game — a row added after the server started says so', () => {
+  function bundle(rows: string[]): string {
+    return ['name: e8-late-row-fixture', 'rows:', ...rows, ''].join('\n');
+  }
+
+  function pkg(dir: string, name: string): void {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name,
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js' } },
+      }),
+    );
+    writeFileSync(
+      join(dir, 'index.js'),
+      `export const name = '${name}';\nexport function apply() {}\n`,
+    );
+    writeFileSync(join(dir, 'runtime.js'), `export function apply() {}\n`);
+  }
+
+  it('warns about the late row, and only about it', async () => {
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-late-row-')));
+    writeFileSync(join(workspace, 'index.html'), '<!doctype html><title>fixture</title>\n');
+    pkg(join(workspace, 'node_modules', 'early-pkg'), 'early-pkg');
+    pkg(join(workspace, 'node_modules', 'late-pkg'), 'late-pkg');
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-late-row-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-late-row-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    const bundleFile = join(bundlesDir, 'e8.bundle.yml');
+    writeFileSync(bundleFile, bundle(['  - id: early1', '    name: early-pkg']));
+
+    host = await createIdeHost({ cwd: workspace, port: 0 });
+    await host.ctx.plugin(devGame, {
+      root: workspace,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+    });
+
+    // Nothing to say yet: every row was in the crawl.
+    const before = await (await fetch(`${host.url}/api/composition`)).json();
+    expect(before.diagnostics.filter((d: { where: string }) => d.where === 'dev-server')).toEqual(
+      [],
+    );
+
+    // Now a row arrives, with the server already up. `/api/composition`
+    // re-reads the project from disk, which is the whole point of that
+    // route — see its own comment.
+    writeFileSync(
+      bundleFile,
+      bundle(['  - id: early1', '    name: early-pkg', '  - id: late1', '    name: late-pkg']),
+    );
+
+    const after = await (await fetch(`${host.url}/api/composition`)).json();
+    expect(after.rows.map((r: { id: string }) => r.id)).toEqual(['early1', 'late1']);
+    const late = after.diagnostics.filter((d: { where: string }) => d.where === 'dev-server');
+    expect(late).toHaveLength(1);
+    expect(late[0].plugin).toBe('late1');
+    expect(late[0].severity).toBe('warning');
+    expect(late[0].message).toContain('after the dev server started');
+    // And the row that WAS in the crawl is not swept up with it.
+    expect(late[0].message).not.toContain('early1');
+  });
+});
+
+/**
  * The containment gap on the path the browser actually loads through.
  *
  * `runtime-assets.ts` realpaths both sides before it hands out a

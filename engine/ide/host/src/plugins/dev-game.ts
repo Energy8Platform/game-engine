@@ -117,18 +117,27 @@ import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { runtimeEntryPaths } from './runtime-assets';
 
 /**
- * A marker service, not a real capability — its only reader is
- * `runtime-assets.ts`'s `ctx.inject(['devGameRoot'], ...)`, which uses its
- * mere PRESENCE to switch `/api/composition`'s `runtimeUrl` from the raw
+ * `runtime-assets.ts` reads this service twice over: its mere PRESENCE
+ * switches `/api/composition`'s `runtimeUrl` from the raw
  * `/plugin-runtime/:id` route to `/@fs/<realpath>` served through THIS
- * plugin's own vite instance.
+ * plugin's own vite instance, and `warmedEntries` lets it say when a row
+ * arrived too late for that vite's dependency crawl.
  *
- * Empty on purpose. It used to carry `root`, provided and never read: the
- * `/@fs/` URL is built from each entry's own realpath, not from the vite
- * root, so nothing could have used it. A field kept "for anyone debugging"
- * reads as data something depends on.
+ * It was empty, deliberately — it used to carry `root`, provided and never
+ * read, and a field kept "for anyone debugging" reads as data something
+ * depends on. `warmedEntries` is here because it IS read, and because it is
+ * the only place the fact lives: no other party knows what this vite
+ * instance was told at startup.
  */
-export interface DevGameRootService {}
+export interface DevGameRootService {
+  /**
+   * The row runtime entries this vite's dependency optimizer was told to
+   * crawl before it started serving — see `warmupEntries` below. A row
+   * whose entry is not in this list joined the composition after the
+   * server did, so its dependencies were not part of that crawl.
+   */
+  readonly warmedEntries: readonly string[];
+}
 
 declare module 'cordis' {
   interface Context {
@@ -191,14 +200,6 @@ function isInside(root: string, file: string): boolean {
 }
 
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
-  // Announces this plugin's presence to `runtime-assets.ts` — see
-  // `DevGameRootService`'s doc comment above. Provided first, before
-  // anything here can fail, so a later throw in this function still
-  // leaves the marker up for as long as `ctx` (this fiber) is alive; if
-  // this fiber is disposed the effect system tears the provision down
-  // with it, same as every other `ctx.provide` in this codebase.
-  ctx.provide('devGameRoot', {});
-
   // A direct function call, not `ctx.plugin(session, ...)` — see the
   // module doc's last point for why: it keeps `ctx.session` readable on
   // THIS scope instead of landing it on an unreadable child.
@@ -252,6 +253,15 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    */
   const project = ctx.reflect.get('project', false);
   const warmupEntries = project ? runtimeEntryPaths(config.root, project.composition.rows) : [];
+
+  // Announces this plugin's presence to `runtime-assets.ts`, and hands it
+  // the crawl list — see `DevGameRootService`. Provided as early as it can
+  // be (right after the list exists, before vite is created and before
+  // anything here can fail), so a later throw in this function still leaves
+  // the marker up for as long as `ctx` (this fiber) is alive; if this fiber
+  // is disposed the effect system tears the provision down with it, same as
+  // every other `ctx.provide` in this codebase.
+  ctx.provide('devGameRoot', { warmedEntries: warmupEntries });
 
   const vite: ViteDevServer = await createViteServer({
     root: config.root,
@@ -346,6 +356,17 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * `mechanic-cascade`, `ide-bridge` and `vite/dist/client` as ordinary
    * transitive imports out of rows. Narrowing the allow list to row roots
    * would 403 every one of them and the game would not compose at all.
+   *
+   * **What this does NOT close, said plainly so nobody reads it as more
+   * than it is.** The boundary here is the same one vite draws — the
+   * allowed roots — resolved through symlinks. It is not a per-package
+   * boundary, and it cannot become one: those same 31 requests are the
+   * proof that a running game legitimately reaches six workspace packages
+   * that are not rows of its composition. So a script on this origin can
+   * still read any file under the workspace root through `/@fs/`, exactly
+   * as it could before. What it can no longer do is use a symlink to reach
+   * OUT of that root, which is the only thing the lexical check was
+   * missing.
    *
    * Nothing is cached across requests except the allow roots themselves,
    * which vite fixes at config time. The realpath is re-read per request,

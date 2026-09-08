@@ -13,6 +13,9 @@ import { readPackageJson, unresolvedReason } from '../resolvePackage';
 export const name = 'runtime-assets';
 export const inject = ['server', 'project', 'spinSchema'];
 
+/** Vite's own prefix for "serve this absolute path off disk" — the shape `resolveRuntimeUrl` hands out once `dev-game` is composed. */
+const FS_PREFIX = '/@fs/';
+
 export interface RuntimeAssetsConfig {
   cwd: string;
 }
@@ -123,8 +126,21 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
   // doc above. Read at request time by `resolveRuntimeUrl`, not captured
   // eagerly, since `dev-game` is composed strictly after this plugin.
   let devGamePresent = false;
-  ctx.inject(['devGameRoot'], () => {
+  // The row entries `dev-game`'s vite was told to crawl at startup. `null`
+  // until (and unless) `dev-game` arrives — which is a different thing from
+  // an empty list, and the check below must not fire for it.
+  let warmedEntries: readonly string[] | null = null;
+  ctx.inject(['devGameRoot'], (scope: Context) => {
     devGamePresent = true;
+    // Read structurally rather than through `DevGameRootService`'s type.
+    // The provider is another plugin this one deliberately does not import
+    // (the whole relationship is "react to it if it ever shows up"), and
+    // the thing that actually shows up may be a stand-in — this file's own
+    // tests provide a bare `{}` to exercise the URL-shape branch. A list
+    // that is not a list means "nothing was warmed that we can speak
+    // about", which is the same silence as `dev-game` never arriving.
+    const provided: unknown = (scope.devGameRoot as { warmedEntries?: unknown }).warmedEntries;
+    warmedEntries = Array.isArray(provided) ? (provided as readonly string[]) : null;
   });
 
   /**
@@ -291,6 +307,43 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
 
       const runtime = resolveRuntimeUrl(row, parsed.manifest, pkg);
       if (runtime.diagnostic) diagnostics.push(runtime.diagnostic);
+
+      // A row that joined the composition after `e8 dev` started.
+      //
+      // Vite's dependency optimizer crawls what it is told to at startup —
+      // `dev-game` names the row entries it knew about then, precisely so
+      // the browser only ever sees one optimizer generation (see that
+      // plugin's `warmupEntries`, and the two-`Container` fault it exists
+      // to prevent). A row added since is outside that crawl, so if it
+      // brings a bare dependency this server has not already prebundled,
+      // vite re-optimizes mid-load and restamps every optimized module —
+      // and the reload vite would normally send to fix that goes nowhere,
+      // because `dev-game` runs with `hmr: false`.
+      //
+      // The consequence is otherwise completely silent to the person: vite
+      // logs "optimized dependencies changed. reloading" to the SERVER
+      // console and the browser simply loses pointer events on the board.
+      // This says it where they are already looking.
+      //
+      // A `warning`, and worded conditionally, because that is the honest
+      // shape of what is known here: the row is certainly outside the
+      // crawl; whether it brings a new dependency is the optimizer's
+      // business, not this route's, and a row that brings none costs
+      // nothing at all.
+      const entryPath = runtime.url?.startsWith(FS_PREFIX)
+        ? runtime.url.slice(FS_PREFIX.length)
+        : null;
+      if (warmedEntries !== null && entryPath !== null && !warmedEntries.includes(entryPath)) {
+        diagnostics.push(
+          diagnostic(
+            'warning',
+            row.id,
+            'dev-server',
+            `row "${row.id}" (${row.name}) joined this composition after the dev server started, so its dependencies were not part of vite's startup crawl — if it brings one this server has not already prebundled, the page can end up running two copies of it and the board stops receiving pointer events`,
+            'restart `e8 dev` to fold this row into the crawl; nothing else about the row is wrong',
+          ),
+        );
+      }
 
       // `seam` rides along for the same reason `runtimeUrl` does: only
       // the host can read a package's manifest, and the browser has to
