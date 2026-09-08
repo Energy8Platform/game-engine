@@ -108,6 +108,8 @@
  * one case the rule always allows: reading back a service you provided on
  * yourself.
  */
+import { realpathSync } from 'node:fs';
+import { posix, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
 import * as session from '@energy8engine/session-dev';
 import type { SpinResult } from '@energy8engine/contracts';
@@ -152,6 +154,40 @@ export interface DevGameConfig {
 
 export const name = 'dev-game';
 export const inject = ['server'];
+
+/** Vite's own prefix for "serve this absolute path off disk". */
+const FS_PREFIX = '/@fs/';
+
+/**
+ * The absolute file path a `/@fs/` request names — derived exactly the way
+ * vite derives it (`fsPathFromUrl`), so the guard below and vite's own
+ * check are looking at the same string and cannot disagree about WHICH
+ * file is being asked for.
+ *
+ * `?import`, `?t=…` and a `#fragment` are stripped (vite's `cleanUrl`),
+ * the prefix is sliced off, the result is posix-normalized (so `..`
+ * segments collapse before anything compares it), and a leading `/` is
+ * restored — `/@fs/Users/x` and `/@fs//Users/x` are both spellings vite
+ * accepts and both mean `/Users/x`.
+ */
+function fsPathFromRequestUrl(url: string): string | null {
+  const clean = url.replace(/[?#].*$/s, '');
+  if (!clean.startsWith(FS_PREFIX)) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURI(clean);
+  } catch {
+    // A malformed escape is not ours to interpret; vite answers it.
+    return null;
+  }
+  const path = posix.normalize(decoded.slice(FS_PREFIX.length));
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+/** Is `file` the root itself, or somewhere under it? */
+function isInside(root: string, file: string): boolean {
+  return file === root || file.startsWith(root + sep);
+}
 
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
   // Announces this plugin's presence to `runtime-assets.ts` — see
@@ -223,6 +259,79 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // contracts/spin.ts. The browser rebuilds nothing.
     const payload: SpinResult = result;
     res.json(payload);
+  });
+
+  /**
+   * The containment check on the path the browser actually loads through.
+   *
+   * `runtime-assets.ts` realpaths both sides before it hands out a
+   * `runtimeUrl`, and `/plugin-runtime/:id` re-checks at request time. But
+   * `/@fs/<path>` is vite's OWN route, reachable by any same-origin script
+   * that builds the URL itself rather than only by one this host handed
+   * out — so the hardened check guarded a door nobody walks through.
+   *
+   * What stands there instead is `server.fs.allow`, and it compares
+   * LEXICALLY. Measured, not reasoned about: with the allow list at the
+   * vite root, `GET /@fs/<root>/link.js` where `link.js` is a symlink to a
+   * file outside the root returns **200 with that file's contents**, while
+   * `GET /@fs/<the target itself>` returns 403. Same bytes, two answers,
+   * decided by which spelling was asked for.
+   *
+   * This route runs before the catch-all that hands requests to vite and
+   * closes exactly that difference: it resolves the request's path through
+   * symlinks and requires the REAL file to still be inside one of the
+   * roots vite would allow. It is strictly additive — it can only refuse
+   * something vite would have served, never allow something vite would
+   * have refused — because a passing request is handed straight on with
+   * `next()` and vite's own check still runs after it.
+   *
+   * The alternative the carried-forward note named — narrowing `fs.allow`
+   * to each row package's root — was measured and rejected. Loading the
+   * real `first-slot` in a browser issues 31 `/@fs/` requests across 13
+   * package directories, and only 8 of those are composition rows: the
+   * game reaches `contracts`, `loader`, `seam`, `mechanic-classic`,
+   * `mechanic-cascade`, `ide-bridge` and `vite/dist/client` as ordinary
+   * transitive imports out of rows. Narrowing the allow list to row roots
+   * would 403 every one of them and the game would not compose at all.
+   *
+   * Nothing is cached across requests except the allow roots themselves,
+   * which vite fixes at config time. The realpath is re-read per request,
+   * for the same reason `/plugin-runtime/:id` re-derives its own: a
+   * symlink can be repointed while the server is up.
+   */
+  const allowRoots = vite.config.server.fs.allow.map((root) => {
+    try {
+      return realpathSync(root);
+    } catch {
+      // A root that is not on disk cannot contain anything; keeping the
+      // lexical form means it simply never matches, which is the safe way
+      // for this to fail.
+      return resolve(root);
+    }
+  });
+
+  ctx.server.all(/^\/@fs\//, async (req, res, next) => {
+    const requested = fsPathFromRequestUrl(req._req.url ?? '');
+    if (requested === null) return next();
+
+    let real: string;
+    try {
+      real = realpathSync(requested);
+    } catch {
+      // Not on disk at all. Vite's own 404/403 says so better than a
+      // second opinion from here would, and refusing here would turn
+      // "missing file" into "access denied" — the exact confusion that
+      // makes an escape test pass for the wrong reason.
+      return next();
+    }
+
+    if (allowRoots.some((root) => isInside(root, real))) return next();
+
+    res.status = 403;
+    res.json({
+      error: `"${requested}" resolves to "${real}", which is outside every path this server may serve`,
+      allow: allowRoots,
+    });
   });
 
   // Registered LAST, deliberately — see point 3 above. Everything this

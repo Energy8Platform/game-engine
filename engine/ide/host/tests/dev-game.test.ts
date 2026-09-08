@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
@@ -235,6 +235,95 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
     const helperRes = await fetch(`${host.url}${helperUrl}`);
     expect(helperRes.status).toBe(200);
     expect(await helperRes.text()).toContain('HELPER_LOADED');
+  });
+});
+
+/**
+ * The containment gap on the path the browser actually loads through.
+ *
+ * `runtime-assets.ts` realpaths both sides before it hands out a
+ * `runtimeUrl`, and `/plugin-runtime/:id` re-checks at request time — but
+ * `/@fs/<path>` is vite's own route, reachable by any same-origin script
+ * that builds the URL itself. What guards it there is `server.fs.allow`,
+ * which compares LEXICALLY, so a symlink INSIDE an allowed root serves
+ * whatever it points at.
+ *
+ * Both halves are measured here rather than asserted about one path only:
+ * the escape must be refused, and the identical file must still be refused
+ * when asked for directly (which proves the fixture is a real escape and
+ * not a file that was out of bounds anyway), and a legitimate file inside
+ * the root must still be served (which proves the guard is not just
+ * refusing everything).
+ *
+ * **The target of the symlink EXISTS**, deliberately. A symlink pointing
+ * at nothing dies on `realpathSync`'s ENOENT before any containment
+ * comparison runs — the request would still fail, and the test would still
+ * be green, while measuring nothing about the check it names. That exact
+ * mistake has cost this branch a round before; `runtime-assets.test.ts`'s
+ * escapee fixtures carry the same note.
+ */
+describe('dev-game — /@fs/ cannot be walked out of the served roots', () => {
+  async function escapeFixture(): Promise<{ base: string; link: string; secret: string }> {
+    // Realpath'd for the reason the multi-file test above spells out:
+    // macOS `/var` is itself a symlink, and an unresolved root makes
+    // vite's own allow list disagree with the path this test asks for.
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-fs-outside-')));
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-fs-root-')));
+    writeFileSync(join(workspace, 'index.html'), '<!doctype html><title>fixture</title>\n');
+    writeFileSync(join(workspace, 'inside.js'), "export const marker = 'INSIDE_THE_ROOT';\n");
+
+    const secret = join(outside, 'secret.js');
+    writeFileSync(secret, "export const secret = 'FS_WALKED_OUT';\n");
+    const link = join(workspace, 'link.js');
+    symlinkSync(secret, link);
+
+    ctx = new Context();
+    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
+    await ctx.plugin(devGame, {
+      root: workspace,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+    });
+    return {
+      base: `http://${ctx.server.host}:${ctx.server.port}`,
+      link,
+      secret: join(workspace, 'inside.js'),
+    };
+  }
+
+  it('refuses a symlink inside the served root whose target is outside it', async () => {
+    const { base, link } = await escapeFixture();
+    const res = await fetch(`${base}/@fs/${link}`);
+    expect(res.status).toBe(403);
+    // The bytes themselves must not ride along in any shape — this served
+    // 200 with the secret's contents before the guard existed.
+    expect(await res.text()).not.toContain('FS_WALKED_OUT');
+  });
+
+  it('still refuses the same file asked for directly — so the case above is a real escape', async () => {
+    const { base, link } = await escapeFixture();
+    const target = realpathSync(link);
+    const res = await fetch(`${base}/@fs/${target}`);
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain('FS_WALKED_OUT');
+  });
+
+  it('still serves an ordinary file inside the root', async () => {
+    const { base, secret: inside } = await escapeFixture();
+    const res = await fetch(`${base}/@fs/${inside}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('INSIDE_THE_ROOT');
+  });
+
+  it('does not turn a path that is simply absent into an access refusal', async () => {
+    // A missing file is vite's 404 to give, not this guard's 403. Getting
+    // this backwards is what makes an escape test pass for the wrong
+    // reason, so it is held here explicitly.
+    const { base } = await escapeFixture();
+    const res = await fetch(`${base}/@fs/${join(tmpdir(), 'ide-host-fs-nothing-here.js')}`);
+    expect(res.status).not.toBe(403);
   });
 });
 

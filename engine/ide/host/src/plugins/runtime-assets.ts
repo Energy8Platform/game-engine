@@ -49,15 +49,16 @@ export interface RuntimeAssetsConfig {
  * hand out an escaping URL through `/api/composition`, and
  * `/plugin-runtime/:id` refuses to serve one even asked for directly, by
  * id, bypassing composition entirely. `/@fs/<realpath>` itself is vite's
- * own route, not this plugin's, and stays reachable exactly as it was
- * before this check existed — by any same-origin script that constructs
- * the URL itself, not only by a URL this host handed out — gated only by
- * vite's `server.fs.allow`. Closing THAT would mean narrowing `fs.allow`
- * to the row packages' own roots — a real design change with a real risk
- * to legitimate transitive imports (checked, not just reasoned about; see
- * `dev-game.test.ts`'s multi-file `/@fs/` test), and deliberately left
- * undone here — task-6-brief.md sanctions either this check OR that one,
- * not both, and the end of a task is the wrong place to add the other.
+ * own route, not this plugin's, and stays reachable by any same-origin
+ * script that constructs the URL itself rather than only by a URL this
+ * host handed out. That door is no longer guarded by `server.fs.allow`
+ * alone: `dev-game.ts` now runs its own realpath containment check ahead
+ * of vite, because `fs.allow` compares LEXICALLY and a symlink inside an
+ * allowed root therefore served whatever it pointed at (measured — see
+ * that route's own doc and `dev-game.test.ts`). Narrowing `fs.allow` was
+ * the other candidate and was rejected on measurement, also recorded
+ * there: the real game reaches six workspace packages that are not rows
+ * at all, as ordinary transitive imports.
  *
  * The second route is `client-assets.ts` with two differences, not a fresh
  * design — read that file's doc comments for the full reasoning behind the
