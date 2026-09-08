@@ -24,17 +24,12 @@ import {
 function DiagnosticsPanelCard({ ctx }: { ctx: Context }) {
   const { diagnostics: project } = useGameComposition(ctx);
   const { diagnostics: game, dropped } = useGameDiagnostics(ctx);
-  // The third namespace — the EDITOR's own plugin graph. Counted here, not
-  // listed: `CompositionScreen` shows each of these beside the row it is
-  // about, which the panel cannot do. See `DiagnosticsPanelProps.editorCount`.
+  // The third namespace — the EDITOR's own plugin graph. Rendered as rows
+  // now, the same as `project`'s and `game`'s: `CompositionScreen` no
+  // longer keeps a separate copy of its own.
   const editor = useEditorDiagnostics(ctx);
   return (
-    <DiagnosticsPanel
-      project={project}
-      game={game}
-      droppedFromGame={dropped}
-      editorCount={editor.length}
-    />
+    <DiagnosticsPanel project={project} game={game} droppedFromGame={dropped} editor={editor} />
   );
 }
 

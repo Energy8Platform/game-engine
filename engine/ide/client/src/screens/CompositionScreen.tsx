@@ -13,10 +13,11 @@ import { useSlot } from '../plugins/slots';
 /**
  * The EDITOR's own diagnostics — its plugin graph, namespace 1 of
  * `Diagnostic.plugin` resolved against the EDITOR's rows. Exported because
- * `DiagnosticsPanel` has to be able to say how many of these exist and
- * where they are shown (see `DiagnosticsPanelProps.editorCount`): a panel
- * that claims to be the one place to look cannot leave a third producer
- * out in silence, and the shell is the only place that holds both.
+ * `App.tsx`'s `DiagnosticsPanelCard` reads it reactively and hands the
+ * array straight to `DiagnosticsPanel`'s `editor` prop, which renders
+ * these as rows now, the same as `project`'s and `game`'s — see
+ * `EditorComposition`'s own comment, below, for why this screen no longer
+ * renders a copy of its own.
  *
  * `ctx.connection.diagnostics` is a getter that concatenates two backing
  * arrays into a *fresh* array on every read (see connection.ts). That's
@@ -178,45 +179,27 @@ export function Preview({ ctx, url }: PreviewProps) {
  * `useSyncExternalStore` call cannot be made conditional on `ctx` being
  * present, so it has to live behind a component that's ONLY mounted when
  * `ctx` exists, not behind an `if` inside one that always mounts).
+ *
+ * Used to also render `useEditorDiagnostics(ctx)` here as a standalone
+ * list, resolving each entry's `plugin` id to the row's package name —
+ * `GameComposition`'s own comment, below, records the same removal for
+ * the PROJECT half. Removed once `DiagnosticsPanel`'s `editor` prop
+ * existed: §8 of the design spec names the panel as THE list, and a
+ * second, unattributed copy of the same diagnostics here — just resolved
+ * by row name instead of raw id — was the "second place to look" that
+ * rules out. The row-name resolution is a real capability the panel does
+ * not (yet) replicate — named here rather than silently dropped, for
+ * whoever next has reason to add it there instead.
  */
 function EditorComposition({ ctx }: { ctx: Context }) {
   const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
-  const diagnostics = useEditorDiagnostics(ctx);
   const cards = useSlot(ctx, 'composition.card');
 
   const rows = snapshot?.rows ?? [];
 
-  // `Diagnostic.plugin` carries the composition entry id (see its doc
-  // comment) — the row header shows `row.name` (the package name), so
-  // without this resolution a real failure would print its raw entry id
-  // above a row labelled by package name and a human couldn't connect the
-  // two. Falls back to the raw id for diagnostics that aren't about any
-  // one entry (a malformed e8.yml, a card's slot key, …) — those don't
-  // match a row by construction. This resolution must only ever run on
-  // the EDITOR's own diagnostics against the EDITOR's own rows — see
-  // `Diagnostic.plugin`'s doc comment for why a runtime-namespace
-  // diagnostic (a live game's `session`/`renderer-pixi`/mechanic id, …)
-  // landing in `diagnostics` here would risk resolving against an
-  // unrelated row that merely shares its id. `GameComposition`, below,
-  // does the same job with its own separate pair — the GAME's rows and the
-  // PROJECT's diagnostics — and the two pairs never cross.
-  const pluginLabel = (id: string): string => rows.find((row) => row.id === id)?.name ?? id;
-
   return (
     <>
       <Preview ctx={ctx} />
-
-      {diagnostics.length > 0 && (
-        <ul className="e8-diagnostics">
-          {diagnostics.map((d, index) => (
-            <li key={index} data-severity={d.severity}>
-              <strong className="e8-severity">{d.severity}</strong> {pluginLabel(d.plugin)} ·{' '}
-              {d.where}: {d.message}
-              {d.fix ? ` — ${d.fix}` : ''}
-            </li>
-          ))}
-        </ul>
-      )}
 
       {snapshot === null ? (
         <p className="e8-empty">подключение…</p>

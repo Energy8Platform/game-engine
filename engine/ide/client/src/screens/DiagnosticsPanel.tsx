@@ -7,20 +7,22 @@ import type { Diagnostic } from '@energy8engine/contracts';
  * agent see the same list. The debt this answers: the composition screen
  * could show six healthy rows next to a game sitting under its own
  * failure screen, in a browser tab the IDE never looked at. `project`
- * (namespace 1 of `Diagnostic.plugin` — composing/resolving the game) and
- * `game` (namespace 2 — what the running game itself reported, task 7's
- * store) finally meet on one screen here.
+ * (namespace 1 of `Diagnostic.plugin` — composing/resolving the game),
+ * `game` (namespace 2 — what the running game itself reported) and
+ * `editor` (the IDE's own plugin graph, a third origin this panel used to
+ * only count) finally meet on one screen here.
  *
- * **The message TYPE is what told the two apart on the wire, and that
+ * **The message TYPE is what told them apart on the wire, and that
  * distinction must survive to the screen.** A human is entitled to write
  * `id: session` in `e8.patch.yml` while a running game's own session seam
  * ALSO reports as `plugin: 'session'` — see `Diagnostic.plugin`'s own doc.
  * This component never inspects `plugin` to decide a row's origin; the
  * origin is decided once, by the caller, by which prop a diagnostic was
- * handed in under (`project` vs `game`) — which is itself decided by which
- * wire message it arrived as (`{type:'diagnostics'}` vs
- * `{type:'game-diagnostics'}`), never by inspecting the diagnostic's own
- * fields. Project rows render before game rows; that ordering, plus the
+ * handed in under (`project`, `game` or `editor`) — itself decided by
+ * where that diagnostic actually came from (a `{type:'diagnostics'}`
+ * message, a `{type:'game-diagnostics'}` frame, or `ctx.connection`'s own
+ * state), never by inspecting the diagnostic's own fields. Project rows
+ * render before game rows before editor rows; that ordering, plus the
  * origin tag on the row itself, is the only thing distinguishing two
  * diagnostics that happen to be byte-identical otherwise.
  *
@@ -29,16 +31,19 @@ import type { Diagnostic } from '@energy8engine/contracts';
  * no game running at all — is not the same fact as a game that reported
  * and has nothing wrong. See `GameDiagnosticsState.diagnostics`'s own doc
  * in `diagnostics.tsx`. This panel says so in words, rather than showing a
- * silently-empty list either state could otherwise produce.
+ * silently-empty list either state could otherwise produce. `project` and
+ * `editor` have no such state — both are always arrays, from the moment
+ * this panel exists at all.
  *
- * **A third namespace exists, and this panel names it rather than
- * pretending otherwise.** `ctx.connection.diagnostics` is the EDITOR's own
- * — a row of the IDE's `e8.yml` that failed to apply, a slot card that
- * crashed while rendering. `CompositionScreen` renders those beside the row
- * each is about, resolving the `plugin` id to that row's package name,
- * which is more useful than a flat line here could be. What a panel called
- * "one place to look" must not do is leave them out in silence, so
- * `editorCount` says how many there are and where they are.
+ * **The editor used to be a count pointing elsewhere; now it is rows,
+ * here.** `ctx.connection.diagnostics` — the IDE's own plugin graph —
+ * used to arrive as `editorCount`, a number, with the entries themselves
+ * rendered by `CompositionScreen` instead, resolved against the row each
+ * was about. That left "one place to look" with a second place after
+ * all. `CompositionScreen` no longer renders that list — every editor
+ * diagnostic is a row here, same as `project`'s and `game`'s. The
+ * id-to-row-name resolution `CompositionScreen` used to do is the one
+ * capability that did not move with them; see its own comment for why.
  *
  * **`droppedFromGame` is not decoration.** The game's own diagnostics log
  * is bounded (`@energy8engine/diagnostics`), and `dropped` counts what it
@@ -73,43 +78,40 @@ export interface DiagnosticsPanelProps {
    */
   droppedFromGame?: number;
   /**
-   * How many diagnostics the EDITOR has about its own plugin graph —
-   * `ctx.connection.diagnostics`, a third namespace this panel does not
-   * render.
+   * The EDITOR's own diagnostics — `ctx.connection.diagnostics`
+   * (`useEditorDiagnostics`'s return), a third origin alongside `project`
+   * and `game`. Always an array, the same as `project`: the IDE's own
+   * plugin graph has no "hasn't reported yet" state either.
    *
-   * It is a count and not a list on purpose. Those diagnostics are about
-   * the IDE's own rows, and `CompositionScreen` resolves each one's
-   * `plugin` id to the row's package name and shows it beside that row,
-   * which is strictly more useful than a flat line here would be — it is
-   * the one namespace where id-to-row resolution is both correct and
-   * available. Moving them in would cost that and give nothing back.
-   *
-   * But a panel whose whole claim is "one place to look" cannot leave a
-   * producer out in silence, which is exactly what it did. So it says how
-   * many there are and where they are, and a reader who sees `0` knows the
-   * panel is the whole picture rather than merely hoping so.
+   * This used to arrive as `editorCount`, a number, with the actual
+   * entries rendered by `CompositionScreen` instead — see the module doc
+   * for why that changed and what it cost. Optional, defaulting to empty,
+   * so call sites written before this prop existed keep compiling; a real
+   * caller (`App.tsx`) always has the array in hand, even when it is
+   * empty.
    */
-  editorCount?: number;
+  editor?: readonly Diagnostic[];
 }
 
 interface Row {
   diagnostic: Diagnostic;
-  origin: 'project' | 'game';
+  origin: 'project' | 'game' | 'editor';
 }
 
 export function DiagnosticsPanel({
   project,
   game,
   droppedFromGame = 0,
-  editorCount = 0,
+  editor = [],
 }: DiagnosticsPanelProps) {
-  // Project rows before game rows. The origin tag comes from WHICH ARRAY a
-  // diagnostic arrived in — never from `diagnostic.plugin` — see the
-  // module doc for why that field can hold the identical string on both
-  // sides on purpose.
+  // Project rows before game rows before editor rows. The origin tag comes
+  // from WHICH ARRAY a diagnostic arrived in — never from `diagnostic.plugin`
+  // — see the module doc for why that field can hold the identical string
+  // in all three origins on purpose.
   const rows: Row[] = [
     ...project.map((diagnostic): Row => ({ diagnostic, origin: 'project' })),
     ...(game ?? []).map((diagnostic): Row => ({ diagnostic, origin: 'game' })),
+    ...editor.map((diagnostic): Row => ({ diagnostic, origin: 'editor' })),
   ];
 
   return (
@@ -145,13 +147,6 @@ export function DiagnosticsPanel({
       {game !== null && droppedFromGame > 0 && (
         <p className="e8-diagnostics-dropped">
           the game's own log forgot {droppedFromGame} more — it only keeps a bounded history
-        </p>
-      )}
-
-      {editorCount > 0 && (
-        <p className="e8-diagnostics-elsewhere" data-testid="diag-editor-note">
-          {editorCount} more {editorCount === 1 ? 'is' : 'are'} about the editor&rsquo;s own
-          plugins, shown above beside the row each is about
         </p>
       )}
     </section>
