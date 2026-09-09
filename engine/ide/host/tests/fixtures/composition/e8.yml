@@ -11,3 +11,6 @@
 - id: missingentryhoisted1
   name: missing-entry-hoisted
   config: {}
+- id: clientonlyhoisted1
+  name: client-only-hoisted
+  config: {}

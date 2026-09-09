@@ -13,6 +13,7 @@ dist/
 !engine/ide/host/tests/fixtures/dev-game-web/main.js
 !engine/ide/host/tests/fixtures/broken-plugin/index.js
 !engine/ide/host/tests/fixtures/composition/plugins/client-only/client.js
+!engine/ide/host/tests/fixtures/client-only-hoisted/client.js
 !engine/examples/probe-plugin/src/client.js
 !engine/examples/first-slot/plugins/screen-demo/src/client.js
 .DS_Store

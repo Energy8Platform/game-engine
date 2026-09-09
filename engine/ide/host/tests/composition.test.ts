@@ -148,4 +148,31 @@ describe('composition.snapshot', () => {
     expect(schemaDiagnostics).toHaveLength(1);
     expect(schemaDiagnostics[0].message).toContain('missing-entry-hoisted');
   });
+
+  // Fix round 3 (task 7, "a screen is a plugin"): the combination none of
+  // the fixtures above cover — a CLIENT-ONLY manifest (nothing importable
+  // declared, on purpose, same as `client-only` above) resolved through
+  // the HOISTED path (a real `node_modules` entry, same as
+  // `missing-entry-hoisted` above) instead of the project-local one.
+  // `client-only-hoisted` (`file:./tests/fixtures/client-only-hoisted` in
+  // this workspace's own package.json) writes its manifest the modern,
+  // well-formed way — an `exports` map with no `"."` key — and Node
+  // resolves that through a DIFFERENT thrown code than a `plugins/`-only
+  // package with the same shape: `ERR_PACKAGE_PATH_NOT_EXPORTED`, not
+  // `ERR_MODULE_NOT_FOUND`, because a hoisted package IS locatable and
+  // Node gets as far as reading its `exports` before finding no match.
+  // `NOTHING_IMPORTABLE_CODES` not recognizing that third code was
+  // round 1's exact bug, alive again on the one path nothing exercised —
+  // this test is what closes it, and what would have caught it two
+  // rounds ago had it existed then.
+  it('a hoisted client-only row with an exports map and no "." key produces no schema diagnostic', async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'client-only-hoisted');
+    expect(row).toBeDefined();
+    expect(row!.schema).toBeNull();
+    const schemaDiagnostics = snapshot.diagnostics.filter(
+      (d) => d.plugin === row!.id && d.where === 'schema',
+    );
+    expect(schemaDiagnostics).toEqual([]);
+  });
 });

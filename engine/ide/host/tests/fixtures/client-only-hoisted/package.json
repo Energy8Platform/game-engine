@@ -1,0 +1,6 @@
+{
+  "name": "client-only-hoisted",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": { "./client": "./client.js", "./package.json": "./package.json" }
+}

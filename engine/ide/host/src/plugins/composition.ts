@@ -69,8 +69,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Whether a package.json declares anywhere for a bare `import(name)` to
  * land: a `"main"` field, or an `exports` map with a `"."` entry (the
  * shorthand `"exports": "./foo.js"` form counts too). Used only to decide
- * whether a `MODULE_NOT_FOUND`-family failure was EXPECTED to succeed —
- * see that decision in `schemaOf`'s own catch block for why "was a main
+ * whether one of `NOTHING_IMPORTABLE_CODES`, below, was EXPECTED — see
+ * that decision in `schemaOf`'s own catch block for why "was a main
  * declared" and "did `readPackageJson` find a package.json at all" are
  * two different questions this needs answered separately.
  */
@@ -83,15 +83,42 @@ function hasImportableMain(pkgJson: unknown): boolean {
 }
 
 /**
- * Node's own name for "this bare specifier resolves to nothing at all" —
- * `require.resolve`'s `MODULE_NOT_FOUND` and ESM `import()`'s
- * `ERR_MODULE_NOT_FOUND` (the code seen in practice: `ctx.loader.import`
- * resolves through a real `import()`, so `ERR_MODULE_NOT_FOUND` is the one
- * actually thrown; `MODULE_NOT_FOUND` is kept alongside it as the
- * CommonJS-era name for the same condition, in case a future loader change
- * resolves through `require` instead).
+ * Node's own names for "this bare specifier had nothing for `import()` to
+ * land on" — not one code, but three, because Node reaches "nothing here"
+ * by different routes depending on where the package actually lives:
+ *
+ *  - `ERR_MODULE_NOT_FOUND` (and CommonJS's `MODULE_NOT_FOUND`, kept
+ *    alongside it in case a future loader change resolves through
+ *    `require` instead) — the package itself could not be located AT ALL.
+ *    This is what a `plugins/<name>`-only package throws: `ctx.loader
+ *    .import`'s plain resolution has no notion of `plugins/`, so it never
+ *    even reaches the point of reading that package's `main`/`exports`.
+ *  - `ERR_PACKAGE_PATH_NOT_EXPORTED` — fix round 3: the HOISTED twin of the
+ *    same shape. A real `node_modules` entry (or a workspace package like
+ *    `@energy8engine/ide-bridge` — this monorepo already publishes several)
+ *    IS locatable, so Node gets far enough to read its `exports` map — and
+ *    an `exports` map present with no `"."` key (the modern, well-formed
+ *    way to write a client-only package's manifest; both fixtures this
+ *    file's own tests use already write it this way) is a DIFFERENT thrown
+ *    code than "package not found", even though the underlying fact —
+ *    nothing importable was ever declared — is identical. Verified against
+ *    the real pipeline before adding it here, not assumed: a hoisted
+ *    package with `exports` and no `"."` throws exactly this code, with
+ *    the message `No "exports" main defined in <path>/package.json`.
+ *
+ * All three converge on the same downstream question `hasImportableMain`
+ * already answers from the manifest alone — was anything importable ever
+ * DECLARED — which is why recognizing the third code cannot mask a real
+ * fault: Node throws `ERR_PACKAGE_PATH_NOT_EXPORTED` for a bare specifier
+ * only when no `"."` export exists, precisely the condition
+ * `hasImportableMain` detects from the manifest directly. The two signals
+ * agree by construction, not by coincidence.
  */
-const MODULE_NOT_FOUND_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND']);
+const NOTHING_IMPORTABLE_CODES = new Set([
+  'ERR_MODULE_NOT_FOUND',
+  'MODULE_NOT_FOUND',
+  'ERR_PACKAGE_PATH_NOT_EXPORTED',
+]);
 
 async function schemaOf(
   ctx: Context,
@@ -162,16 +189,36 @@ async function schemaOf(
     //    failed: the manifest promised a module that is not actually
     //    there. A real fault, and the one round 1 went silent on by
     //    mistake. Reported.
-    // Anything that is not `MODULE_NOT_FOUND` at all — a module that DOES
-    // exist and throws while being evaluated, or has broken syntax —
-    // is unconditionally reported regardless of `pkg`, exactly as before:
-    // `import-broken-plugin` throws a plain `Error` from inside its own
-    // module body, carrying no `MODULE_NOT_FOUND`-family code, so it never
-    // reaches this decision at all.
+    // Anything that is not one of `NOTHING_IMPORTABLE_CODES` at all — a
+    // module that DOES exist and throws while being evaluated, or has
+    // broken syntax — is unconditionally reported regardless of `pkg`,
+    // exactly as before: `import-broken-plugin` throws a plain `Error`
+    // from inside its own module body, carrying none of those codes, so
+    // it never reaches this decision at all.
+    //
+    // Fix round 3: `hasImportableMain` reading "an `exports` map with no
+    // `"."` key" as nothing-declared was correct from the start, but the
+    // round-2 code set only recognized the PROJECT-LOCAL shape of "nothing
+    // to find" (`ERR_MODULE_NOT_FOUND`). Resolve the identical manifest
+    // through the HOISTED path instead and Node finds the package, reads
+    // its `exports` map, finds no `"."`, and throws
+    // `ERR_PACKAGE_PATH_NOT_EXPORTED` — a code the round-2 set did not
+    // hold, so `nothingImportable` came back `false` and the row fell
+    // through to the report branch regardless of `wasExpectedToResolve`.
+    // Latent rather than live at the time it was found — nothing in this
+    // repo happened to compose a hoisted client-only plugin yet — but not
+    // contrived either: `client-only-hoisted`'s own manifest (this file's
+    // fixture for it) is the same well-formed `exports`-with-no-`"."`
+    // shape `screen-demo` and `client-only` already use, and this monorepo
+    // already publishes plugins as ordinary packages (`@energy8engine
+    // /ide-bridge`, composed in `e8.yml` the same as any of these). Added
+    // to `NOTHING_IMPORTABLE_CODES` above rather than handled as a fourth
+    // special case here, since the decision below already treats every
+    // code in that set identically.
     const code = (error as { code?: unknown } | null)?.code;
-    const notFound = typeof code === 'string' && MODULE_NOT_FOUND_CODES.has(code);
+    const nothingImportable = typeof code === 'string' && NOTHING_IMPORTABLE_CODES.has(code);
     const wasExpectedToResolve = pkg !== null && hasImportableMain(pkg.json);
-    if (notFound && !wasExpectedToResolve) {
+    if (nothingImportable && !wasExpectedToResolve) {
       return { schema: null, diagnostic: null };
     }
     return {

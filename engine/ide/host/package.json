@@ -24,6 +24,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "broken-plugin": "file:./tests/fixtures/broken-plugin",
+    "client-only-hoisted": "file:./tests/fixtures/client-only-hoisted",
     "import-broken-plugin": "file:./tests/fixtures/import-broken-plugin",
     "missing-entry-hoisted": "file:./tests/fixtures/missing-entry-hoisted",
     "probe-plugin": "file:./tests/fixtures/probe-plugin",
