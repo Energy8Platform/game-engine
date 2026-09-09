@@ -564,3 +564,212 @@ describe('ide rpc — the two speakers do not overwrite each other', () => {
     editor.ws.close();
   });
 });
+
+/**
+ * Task 5: a third axis, one level finer than `source` and living only
+ * inside it. The describe block above proved the two SOURCES keep each
+ * other's frame; these tests prove the same property one level down, where
+ * `source` alone runs out: the preview wall (a later task) opens several
+ * tiles against this one host at once, each its own socket, each its own
+ * `GameDiagnosticsMessage.game` — and a single shared `'game'` slot (what
+ * `lastGameDiagnostics` used before this) let the second tile's whole-list
+ * frame silently erase the first's. Reproduced directly against pre-Task-5
+ * code before writing the fix: two sockets reporting as `a` and `b` left a
+ * later client told only about `b` — see task-5-context.md.
+ *
+ * `twoClients`/`connect`/`settle`/`retainedMessages`/`framesFor` from the
+ * plan's own brief are illustrative, not literal, matching the precedent
+ * the describe block above already set (see its own comment): this suite's
+ * connect-and-buffer pattern is reused rather than invented helpers
+ * matching the brief verbatim.
+ */
+describe('ide rpc — several games do not overwrite each other', () => {
+  function collect(ws: WebSocket): ServerMessage[] {
+    const received: ServerMessage[] = [];
+    ws.on('message', (data) => received.push(JSON.parse(String(data)) as ServerMessage));
+    return received;
+  }
+
+  async function connectClient(): Promise<{ ws: WebSocket; received: ServerMessage[] }> {
+    const ws = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const received = collect(ws);
+    await new Promise((resolve) => ws.once('open', resolve));
+    return { ws, received };
+  }
+
+  function gameFrame(game: string, message: string) {
+    return JSON.stringify({
+      type: 'game-diagnostics',
+      game,
+      diagnostics: [{ severity: 'error', plugin: 'reels', where: 'runtime', message }],
+      dropped: 0,
+    });
+  }
+
+  it('retains one frame per game, not one for the whole game source', async () => {
+    // The host half of the defect Task 4's own bridge test recorded: two
+    // DIFFERENT games reporting must not leave only the second one's
+    // message behind. Read back through a late connection — the same
+    // "ask the host what it retained by seeing what it replays" idiom
+    // every other retention test in this file already uses; there is no
+    // other seam to ask.
+    const a = await connectClient();
+    const b = await connectClient();
+    const editor = await connectClient();
+
+    a.ws.send(gameFrame('a', 'A said this'));
+    // Confirmed landed on an independently-listening third socket before
+    // `b` speaks, so the host has provably recorded `a`'s frame first —
+    // not a race against `b`'s write landing first purely by luck.
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'a' }));
+    b.ws.send(gameFrame('b', 'B said this'));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'b' }));
+
+    const late = await connectClient();
+    await expect
+      .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
+      .toBe(2);
+    const messages = late.received
+      .filter((m) => m.type === 'game-diagnostics')
+      .flatMap((m) => (m.type === 'game-diagnostics' ? m.diagnostics.map((d) => d.message) : []));
+    expect(messages.sort()).toEqual(['A said this', 'B said this']);
+
+    late.ws.close();
+    a.ws.close();
+    b.ws.close();
+    editor.ws.close();
+  });
+
+  it('a late-connecting client is told about every game that has spoken', async () => {
+    // The existing "retains one frame PER SOURCE" test is the model; this
+    // is the same promise one level finer — every GAME, not just every
+    // source.
+    const a = await connectClient();
+    const b = await connectClient();
+    const editor = await connectClient();
+
+    a.ws.send(gameFrame('a', 'A said this'));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'a' }));
+    b.ws.send(gameFrame('b', 'B said this'));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'b' }));
+
+    const late = await connectClient();
+    await expect
+      .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
+      .toBe(2);
+    const frames = late.received.filter(
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> => m.type === 'game-diagnostics',
+    );
+    expect(frames.map((f) => f.game).sort()).toEqual(['a', 'b']);
+
+    late.ws.close();
+    a.ws.close();
+    b.ws.close();
+    editor.ws.close();
+  });
+
+  it('a host frame is still retained once, under no game', async () => {
+    // The host is one speaker, not one of several games — adding a
+    // per-game key must not accidentally give it a game identity it does
+    // not have (see `lastGameDiagnostics`'s own doc, decision 1).
+    const ideRpc = host.ctx.reflect.get('ideRpc', false) as {
+      reportGameDiagnostics(diagnostics: unknown[]): void;
+    };
+    ideRpc.reportGameDiagnostics([
+      { severity: 'error', plugin: 'session', where: 'play', message: 'spin failed' },
+    ]);
+
+    const late = await connectClient();
+    await expect
+      .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
+      .toBe(1);
+    const frames = late.received.filter(
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> => m.type === 'game-diagnostics',
+    );
+    const hostFrames = frames.filter((f) => f.source === 'host');
+    expect(hostFrames).toHaveLength(1);
+    expect(hostFrames[0].game).toBeUndefined();
+
+    late.ws.close();
+  });
+
+  it('a game that disconnects stops being retained, so a closed tile does not haunt the panel', async () => {
+    // Otherwise the wall accumulates the ghosts of every tile ever opened —
+    // see `lastGameDiagnostics`'s own doc, decision 3, for why this is the
+    // property that now bounds the map, replacing the old "there are only
+    // two slots" argument.
+    const a = await connectClient();
+    const editor = await connectClient();
+    a.ws.send(gameFrame('a', 'A said this'));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'a' }));
+
+    a.ws.close();
+    await new Promise((resolve) => a.ws.once('close', resolve));
+
+    const late = await connectClient();
+    await expect.poll(() => late.received.some((m) => m.type === 'snapshot')).toBe(true);
+    const snapshot = late.received.find((m) => m.type === 'snapshot')!;
+    const id =
+      snapshot.type === 'snapshot'
+        ? snapshot.snapshot.rows.find((r) => r.name === 'probe-plugin')!.id
+        : '';
+
+    // A negative (no retained frame for the now-closed game `a`) is not
+    // provable by "wait a bit and see" — see the echo test above, in the
+    // describe block above this one, for why that shape of proof is a
+    // race rather than evidence. Instead: make `late` provoke a reply on
+    // ITS OWN connection, after it has already read its snapshot.
+    // Everything the host had already queued for `late` — including any
+    // retained `game-diagnostics` frame — is necessarily delivered before
+    // that reply, because it is the same single-threaded server writing to
+    // the same ordered connection.
+    late.ws.send(JSON.stringify({ type: 'update', id, config: { speed: 8 } }));
+    await expect
+      .poll(() =>
+        late.received.some(
+          (m) =>
+            m.type === 'snapshot' &&
+            JSON.stringify(m.snapshot.rows.find((r) => r.id === id)?.config) ===
+              JSON.stringify({ speed: 8 }),
+        ),
+      )
+      .toBe(true);
+
+    const frames = late.received.filter(
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> => m.type === 'game-diagnostics',
+    );
+    expect(frames.filter((f) => f.game === 'a')).toEqual([]);
+
+    late.ws.close();
+    editor.ws.close();
+  });
+
+  it("relays a game's frame to other clients with its game label intact, not only to a late-connecting one", async () => {
+    // The retained-and-replayed path above is one of two ways a client
+    // learns which game a frame is about; the LIVE relay (`rpc.ts`'s
+    // `for (const other of clients)` loop) is the other, and an
+    // already-connected editor watching a wall needs the label on THIS
+    // path too, not only on reconnect.
+    const a = await connectClient();
+    const editor = await connectClient();
+
+    a.ws.send(gameFrame('a', 'A said this'));
+
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ source: 'game', game: 'a' }));
+
+    a.ws.close();
+    editor.ws.close();
+  });
+});

@@ -23,6 +23,7 @@ export {
 } from './plugins/game-composition';
 export {
   useGameDiagnostics,
+  type GameDiagnosticsGroup,
   type GameDiagnosticsService,
   type GameDiagnosticsState,
   type GameDiagnosticsConfig,

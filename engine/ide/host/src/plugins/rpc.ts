@@ -59,57 +59,113 @@ export const inject = ['composition', 'server'];
 export function apply(ctx: Context) {
   const clients = new Set<WebSocket>();
 
+  /** One source's, or one GAME's, whole reported list, as retained. */
+  type RetainedFrame = { diagnostics: Diagnostic[]; dropped: number };
+
   /**
    * The last `game-diagnostics` frame this host has seen **from each
-   * source** (see `GameDiagnosticsSource`) — so a client that connects (or
-   * reconnects) AFTER the fact still learns about it, instead of seeing
-   * nothing until the NEXT thing happens to report. `Snapshot` already
-   * gets this treatment (recomputed fresh and sent to every new connection
-   * below); this is `game-diagnostics`'s own missing half of the same
-   * symmetry.
+   * GAME** (see `GameDiagnosticsMessage.game`) — so a client that connects
+   * (or reconnects) AFTER the fact still learns about it, instead of
+   * seeing nothing until the NEXT thing happens to report. `Snapshot`
+   * already gets this treatment (recomputed fresh and sent to every new
+   * connection below); this is `game-diagnostics`'s own missing half of
+   * the same symmetry.
+   *
+   * The HOST's own frames live apart from this map entirely, in
+   * `lastHostDiagnostics` below, never as an entry here — `source` (which
+   * SPEAKER) and `game` (which GAME, a finer axis living only inside the
+   * `game` speaker) do not collapse into one key. See
+   * `GAME_DIAGNOSTIC_SOURCES`'s own doc for that rule stated for `source`
+   * itself.
    *
    * Three decisions this makes on purpose, not by accident:
    *
-   *  1. **One retained frame PER SOURCE — two of them, not one, and not
-   *     one per socket.** It was one, and that was wrong: this host is
-   *     itself a second speaker (`reportGameDiagnostics`, for
-   *     `/api/spin`), and a host frame carrying only its own failure
-   *     replaced everything the game had reported — for a reader that
-   *     replaces on receipt, terminally, since nothing makes the game
-   *     speak again afterwards. Keyed by source rather than by socket
-   *     because in this dev model there is exactly one project being
-   *     edited (`e8 dev` serves one), so more than one connected GAME
-   *     socket overwhelmingly means more than one VIEW of the same game
-   *     (the preview iframe alongside a directly opened tab), not two
-   *     different games — the same assumption `ctx.composition.snapshot()`
-   *     already makes for the ONE `Snapshot` every client shares. Those
-   *     views share the `game` slot and the most recent wins. A key per
-   *     socket would also grow without bound across page reloads, and
-   *     would show one game's list N times.
-   *  2. **The source is decided HERE, from where the frame entered** — a
-   *     frame off an `/ide` socket is `game`, a frame this host originates
-   *     is `host` — never read off the frame. See
-   *     `GameDiagnosticsSource`'s own doc.
-   *  3. **Never cleared when a source goes away.** A game going quiet
-   *     because it crashed is exactly the case this exists for — the
-   *     failure that caused the disconnect is the single most important
-   *     thing for a client connecting afterwards to learn, and clearing it
-   *     at the moment of disconnect would erase it at the worst possible
-   *     time. Unchanged from when there was one retained frame, and it has
-   *     to stay unchanged for both sources or the rule would depend on
-   *     which speaker happened to fall silent. The cost is real and named,
-   *     not ignored: a newly connected client can be handed a frame
-   *     describing a game that is no longer running. Between "may describe
-   *     a game that has since gone" and "silently drops a real failure
-   *     because a socket dropped", this picks the first — the same lean §8
-   *     and this whole slice already take everywhere else (a stale-but-
-   *     true fact beats a silently withheld one). Bounded by decision 1:
-   *     there are two slots, so this cannot accumulate.
+   *  1. **One retained frame per GAME, keyed by `GameDiagnosticsMessage.
+   *     game` — `undefined` included, as a legal key of its own.** This
+   *     was one retained frame for the WHOLE `game` speaker, full stop,
+   *     because more than one connected GAME socket overwhelmingly meant
+   *     more than one VIEW of the same game in this dev model (`e8 dev`
+   *     serves one project) — the preview iframe alongside a directly
+   *     opened tab, not two different games. That is still exactly right
+   *     for a socket that names no game: every such socket shares the one
+   *     `undefined` key, most-recent-wins, unchanged. It stopped being
+   *     right the moment a socket COULD name itself: the preview wall (a
+   *     later task) opens several tiles against this one host at once,
+   *     each its own socket, each its own `game` id, and the old single
+   *     slot let the second tile's whole-list frame silently erase the
+   *     first's — measured directly against this file before this fix,
+   *     two sockets reporting as `a` and `b` left a later client told only
+   *     about `b`. A socket that DOES send an id is trusted at its word
+   *     and gets a slot of its own, because that id is the one thing that
+   *     tells two tiles apart at all.
+   *  2. **The source is decided HERE, from where the frame entered — never
+   *     read off the frame.** Unchanged, and still about `source` only:
+   *     `game` is the opposite, carried through exactly as the sender
+   *     wrote it, never inferred — the host can tell its own process from
+   *     a socket, but it cannot verify what a browser page claims to be
+   *     running. See `GameDiagnosticsMessage.game`'s own doc.
+   *  3. **Cleared on disconnect — but only a NAMED entry, and only by the
+   *     socket that currently owns it.** This used to never clear at all,
+   *     for the one speaker that had a retained slot, because a game going
+   *     quiet BECAUSE it crashed is exactly the case retention exists for,
+   *     and clearing at the moment of disconnect would erase the failure
+   *     at the worst possible time. That argument is untouched for the
+   *     `undefined` key (still shared, still never cleared — the one
+   *     project `e8 dev` serves crashing is still worth remembering after
+   *     its socket drops) and for the host (see `lastHostDiagnostics`,
+   *     which has no disconnect to clear on at all). It does NOT survive
+   *     for a named game, because the reasoning that made "never clear"
+   *     SAFE does not survive either: that reasoning was "there are two
+   *     slots, full stop" (the old version of decision 1, above), and a
+   *     key the wall can mint without limit breaks it completely — an
+   *     entry per tile ever opened, kept for the life of the host process,
+   *     is a leak, not a stale-but-true fact held a while longer. So a
+   *     named entry is deleted when the socket that owns it closes
+   *     (`gameSocket` below is the ownership record that makes "the socket
+   *     that owns it" answerable, since a `Diagnostic[]` says nothing
+   *     about who sent it) — and THAT ownership rule is what bounds this
+   *     map now, not decision 1's old count of two: a named entry only
+   *     exists while some socket currently claims that id, so the named
+   *     portion of this map can never outnumber the sockets that are open
+   *     and identified RIGHT NOW, a live fact about the running host, not
+   *     a growing history of every id it has ever used.
    */
-  const lastGameDiagnostics = new Map<
-    GameDiagnosticsSource,
-    { diagnostics: Diagnostic[]; dropped: number }
-  >();
+  const lastGameDiagnostics = new Map<string | undefined, RetainedFrame>();
+
+  /**
+   * Which socket currently claims to BE a given named game — the
+   * ownership record decision 3 above needs and `lastGameDiagnostics`
+   * cannot hold by itself, since a `Diagnostic[]` says nothing about which
+   * socket sent it. Only ever keyed by a DEFINED game id; the anonymous
+   * slot has no owner to track because nothing ever needs to take its
+   * entry back (see decision 3).
+   *
+   * Updated on every frame that names a game, not only the first, so a
+   * fresher connection reporting under the same id displaces an older one
+   * as that id's owner. Without this, a stale tile's `close` racing a
+   * reconnect — an old socket that had not yet noticed it was gone —
+   * could delete a NEWER socket's still-live entry out from under it.
+   *
+   * The other edge this resolves: one socket naming two different games
+   * over its life. Nothing here forbids it — both ids simply end up
+   * pointing at this one socket, and its eventual `close` releases both.
+   * The alternative, picking a single id as "the" winner for that socket,
+   * would have to silently prefer one over the other with nothing to show
+   * for the choice — the exact shape of defect this whole slice exists to
+   * end.
+   */
+  const gameSocket = new Map<string, WebSocket>();
+
+  /**
+   * The host's own last frame — see `IdeRpcService.reportGameDiagnostics`.
+   * Exactly one slot, never a map keyed by anything: the host is one
+   * speaker with no game of its own to further key by
+   * (`GameDiagnosticsMessage.game` is always absent on a host frame — see
+   * that field's own doc). Never cleared, unlike a named game's entry:
+   * this plugin IS the host process, so there is no "the host
+   * disconnected" event to clear it on.
+   */
+  let lastHostDiagnostics: RetainedFrame | null = null;
 
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
@@ -119,6 +175,20 @@ export function apply(ctx: Context) {
     if (!clients.size) return;
     const snapshot = await ctx.composition.snapshot();
     for (const socket of clients) send(socket, { type: 'snapshot', snapshot });
+  };
+
+  /**
+   * What a newly connecting client is told about ONE speaker — see
+   * `lastGameDiagnostics`'s own doc for why the two speakers' retained
+   * shapes differ (a game can be several; the host can only ever be one).
+   * `GAME_DIAGNOSTIC_SOURCES` below still governs the SPEAKER order (the
+   * game's own account before the host's); which of several games comes
+   * first within that is not a promise this protocol makes — the client
+   * groups by `game` and does not rely on wire order to do it.
+   */
+  const retainedFrames = (source: GameDiagnosticsSource): (RetainedFrame & { game?: string })[] => {
+    if (source === 'host') return lastHostDiagnostics ? [{ ...lastHostDiagnostics }] : [];
+    return [...lastGameDiagnostics].map(([game, frame]) => ({ ...frame, game }));
   };
 
   /**
@@ -136,7 +206,7 @@ export function apply(ctx: Context) {
         diagnostics: [...hostDiagnostics.list()],
         dropped: hostDiagnostics.dropped(),
       };
-      lastGameDiagnostics.set('host', frame);
+      lastHostDiagnostics = frame;
       const message: ServerMessage = { type: 'game-diagnostics', ...frame, source: 'host' };
       for (const socket of clients) send(socket, message);
     },
@@ -145,7 +215,20 @@ export function apply(ctx: Context) {
   ctx.server.ws('/ide', async (_req, accept) => {
     const socket = await accept();
     clients.add(socket);
-    socket.on('close', () => clients.delete(socket));
+    socket.on('close', () => {
+      clients.delete(socket);
+      // Release whatever named game(s) this socket owned — see
+      // `gameSocket`'s own doc for why "whatever it owned" can be more
+      // than one id, and why OWNERSHIP (not merely "this socket once sent
+      // this id") is what decides whether an entry actually goes: a
+      // socket that lost its claim to a fresher reconnect before it closed
+      // must not delete the entry that fresher socket now owns.
+      for (const [game, owner] of gameSocket) {
+        if (owner !== socket) continue;
+        gameSocket.delete(game);
+        lastGameDiagnostics.delete(game);
+      }
+    });
 
     socket.on('message', async (data) => {
       let message: ClientMessage;
@@ -173,25 +256,31 @@ export function apply(ctx: Context) {
         // apart the same way `Diagnostic.plugin`'s own doc keeps them
         // apart (see contracts' `protocol.ts`).
         //
-        // Recorded before the relay loop, unconditionally — see
-        // `lastGameDiagnostics`'s own doc for why this is retained rather
-        // than only forwarded live.
+        // Recorded before the relay loop, unconditionally, keyed by WHICH
+        // GAME rather than by source — see `lastGameDiagnostics`'s own doc
+        // for why this is retained at all, and for decision 1 on why the
+        // key is `message.game` now. `gameSocket` learns this socket's
+        // claim in the same breath, for decision 3's cleanup on close.
         //
         // Stamped `source: 'game'` on the way out rather than passed
         // through untouched: the frame that arrived is a `ClientMessage`,
         // which carries no source at all, and what leaves here is a
         // `ServerMessage`, which must. The stamp is this host's own
         // knowledge of where the frame entered — see
-        // `GameDiagnosticsSource`.
-        lastGameDiagnostics.set('game', {
+        // `GameDiagnosticsSource`. `game`, unlike `source`, needs no such
+        // stamp: it already arrived exactly as the sender wrote it, and is
+        // passed on unchanged.
+        lastGameDiagnostics.set(message.game, {
           diagnostics: message.diagnostics,
           dropped: message.dropped,
         });
+        if (message.game !== undefined) gameSocket.set(message.game, socket);
         const relayed: ServerMessage = {
           type: 'game-diagnostics',
           diagnostics: message.diagnostics,
           dropped: message.dropped,
           source: 'game',
+          game: message.game,
         };
         for (const other of clients) {
           if (other !== socket) send(other, relayed);
@@ -214,20 +303,24 @@ export function apply(ctx: Context) {
     // whole, after the snapshot, the same "always the current picture, in
     // the same place" treatment `Snapshot` above already gets.
     //
-    // ONE FRAME PER SOURCE, in `GAME_DIAGNOSTIC_SOURCES` order. A source
-    // that has never spoken is skipped entirely rather than sent as an empty
-    // frame — "nothing has been reported" is not "an empty report", and the
-    // client already renders the first correctly on its own
+    // SPEAKER-major order, in `GAME_DIAGNOSTIC_SOURCES`: the game's own
+    // account (one frame per game that has spoken, in no particular order
+    // among themselves — nothing here promises which tile comes first)
+    // before the host's single frame. A speaker, or a game, that has never
+    // spoken is skipped entirely rather than sent as an empty frame —
+    // "nothing has been reported" is not "an empty report", and the client
+    // already renders the first correctly on its own
     // (`GameDiagnosticsState.diagnostics` starts `null`).
     for (const source of GAME_DIAGNOSTIC_SOURCES) {
-      const retained = lastGameDiagnostics.get(source);
-      if (!retained) continue;
-      send(socket, {
-        type: 'game-diagnostics',
-        diagnostics: retained.diagnostics,
-        dropped: retained.dropped,
-        source,
-      });
+      for (const frame of retainedFrames(source)) {
+        send(socket, {
+          type: 'game-diagnostics',
+          diagnostics: frame.diagnostics,
+          dropped: frame.dropped,
+          source,
+          game: frame.game,
+        });
+      }
     }
   });
 

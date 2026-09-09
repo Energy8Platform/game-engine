@@ -10,7 +10,9 @@ describe('DiagnosticsPanel', () => {
     render(
       <DiagnosticsPanel
         project={[]}
-        game={[d('error', 'reels', 'runtime', 'reels blew up')]}
+        game={[
+          { game: undefined, diagnostics: [d('error', 'reels', 'runtime', 'reels blew up')], dropped: 0 },
+        ]}
         editor={[]}
       />,
     );
@@ -34,7 +36,13 @@ describe('DiagnosticsPanel', () => {
     // The collision Slice 1a settled with a comment and Slice 1b kept apart at
     // render. Here they finally meet, and the wire type is what tells them apart.
     const same = { severity: 'error' as const, plugin: 'session', where: 'w', message: 'm' };
-    render(<DiagnosticsPanel project={[same]} game={[same]} editor={[]} />);
+    render(
+      <DiagnosticsPanel
+        project={[same]}
+        game={[{ game: undefined, diagnostics: [same], dropped: 0 }]}
+        editor={[]}
+      />,
+    );
     expect(screen.getAllByText(/^m$/)).toHaveLength(2);
     expect(screen.getByTestId('diag-0')).toHaveTextContent(/project/i);
     expect(screen.getByTestId('diag-1')).toHaveTextContent(/game/i);
@@ -52,12 +60,21 @@ describe('DiagnosticsPanel', () => {
     render(
       <DiagnosticsPanel
         project={[]}
-        game={[d('error', 'p', 'w', 'last')]}
+        game={[{ game: undefined, diagnostics: [d('error', 'p', 'w', 'last')], dropped: 0 }]}
         droppedFromGame={3}
         editor={[]}
       />,
     );
     expect(screen.getByTestId('diagnostics-panel')).toHaveTextContent('3');
+  });
+
+  it('the heading reads in the IDE’s own language, not a stray English one', () => {
+    // Ruling 8/9: every visible string in `ide/client/src` is Russian
+    // (`Состав`, `состав пуст`, `подключение…`) — this heading was the one
+    // holdout, predating the ruling. Addressed by accessible name, matching
+    // `App.test.tsx`'s own precedent for the composition tab's title.
+    render(<DiagnosticsPanel project={[]} game={[]} editor={[]} />);
+    expect(screen.getByRole('heading', { name: 'Диагностика' })).toBeTruthy();
   });
 });
 
@@ -91,7 +108,13 @@ describe('DiagnosticsPanel — the editor as a third source', () => {
     // matching the two-namespace collision test above): reading origin off
     // `plugin` would collapse three rows into fewer, or mis-order them.
     const same = d('session', 'm');
-    render(<DiagnosticsPanel project={[same]} game={[same]} editor={[same]} />);
+    render(
+      <DiagnosticsPanel
+        project={[same]}
+        game={[{ game: undefined, diagnostics: [same], dropped: 0 }]}
+        editor={[same]}
+      />,
+    );
     expect(screen.getAllByText(/^m$/)).toHaveLength(3);
     expect(screen.getByTestId('diag-0')).toHaveTextContent(/project/i);
     expect(screen.getByTestId('diag-1')).toHaveTextContent(/game/i);
@@ -115,6 +138,64 @@ describe('DiagnosticsPanel — the editor as a third source', () => {
     render(<DiagnosticsPanel project={[]} game={[]} editor={[]} />);
     expect(screen.queryByTestId('diag-0')).toBeNull();
     expect(screen.getByTestId('diagnostics-panel')).toHaveTextContent(/nothing to report/i);
+  });
+});
+
+/**
+ * Task 5: `game` went from a flat `Diagnostic[]` to `GameDiagnosticsGroup[]`
+ * — one group per game, because the preview wall (a later task) can have
+ * several talking to the host at once, and the panel must not flatten them
+ * back into one indistinguishable list, which would put us right back
+ * where the host-side defect started (see task-5-context.md). Which GAME a
+ * row came from is a finer grain living INSIDE the `game` namespace, not a
+ * fourth namespace next to `project`/`game`/`editor` — these tests never
+ * add a fourth origin label, only a finer one attached to `game` rows.
+ */
+describe('DiagnosticsPanel — several games, each kept apart', () => {
+  it('the panel attributes a game row to its game', () => {
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[
+          { game: 'tile-3', diagnostics: [d('error', 'reels', 'w', 'mobile broke')], dropped: 0 },
+          { game: 'tile-1', diagnostics: [d('error', 'reels', 'w', 'desktop broke')], dropped: 0 },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('diag-0')).toHaveTextContent('tile-3');
+    expect(screen.getByTestId('diag-1')).toHaveTextContent('tile-1');
+  });
+
+  it('one game is shown exactly as before, with no game label to read', () => {
+    // The single-game case is the common one and must not grow ceremony.
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[{ game: undefined, diagnostics: [d('error', 'reels', 'w', 'it broke')], dropped: 0 }]}
+      />,
+    );
+    expect(screen.getByTestId('diag-0')).toHaveTextContent('it broke');
+    expect(screen.getByTestId('diag-0').textContent).not.toMatch(/tile|game "/i);
+  });
+
+  it('two rows from the same game both carry that game’s label', () => {
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[
+          {
+            game: 'tile-1',
+            diagnostics: [d('error', 'reels', 'w', 'first'), d('error', 'reels', 'w', 'second')],
+            dropped: 0,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('diag-0')).toHaveTextContent('tile-1');
+    expect(screen.getByTestId('diag-1')).toHaveTextContent('tile-1');
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Diagnostic } from '@energy8engine/contracts';
+import type { GameDiagnosticsGroup } from '../plugins/diagnostics';
 
 /**
  * One list of everything that has gone wrong, each row saying which side
@@ -29,11 +30,24 @@ import type { Diagnostic } from '@energy8engine/contracts';
  * **`game === null` is its own state, not an empty list.** A game that has
  * not reported yet — or was never connected; a project can be opened with
  * no game running at all — is not the same fact as a game that reported
- * and has nothing wrong. See `GameDiagnosticsState.diagnostics`'s own doc
- * in `diagnostics.tsx`. This panel says so in words, rather than showing a
+ * and has nothing wrong. See `GameDiagnosticsState.groups`'s own doc in
+ * `diagnostics.tsx`. This panel says so in words, rather than showing a
  * silently-empty list either state could otherwise produce. `project` and
  * `editor` have no such state — both are always arrays, from the moment
  * this panel exists at all.
+ *
+ * **Which GAME a row came from is a finer grain living INSIDE the `game`
+ * namespace, never a fourth one beside it.** `game` is `readonly
+ * GameDiagnosticsGroup[]`, one entry per game that has spoken (see that
+ * type's own doc) — not because a game is a new origin to render alongside
+ * `project`/`game`/`editor`, but because more than one game can now be
+ * talking to the host at once (the preview wall, a later task), and this
+ * panel must not flatten them back into one indistinguishable list, which
+ * is the exact defect the host-side half of this task closes one layer
+ * down. `GAME_DIAGNOSTIC_SOURCES` (which SPEAKER) and this panel's
+ * `project → game → editor` order (which NAMESPACE) are two separate axes
+ * already; which GAME is a third, and it only ever refines a `game` row —
+ * it never reorders or relabels a `project` or `editor` one.
  *
  * **The editor used to be a count pointing elsewhere; now it is rows,
  * here.** `ctx.connection.diagnostics` — the IDE's own plugin graph —
@@ -61,20 +75,22 @@ export interface DiagnosticsPanelProps {
    */
   project: readonly Diagnostic[];
   /**
-   * What the running game itself has reported (namespace 2). `null` until
-   * its first `game-diagnostics` frame arrives — see the module doc.
+   * What every running game has reported (namespace 2), one group per
+   * game — see `GameDiagnosticsGroup`. `null` until the first
+   * `game-diagnostics` frame from ANY game arrives — see the module doc.
    *
-   * `readonly`, matching `GameDiagnosticsState.diagnostics`'s own type
-   * (`useGameDiagnostics`'s return, task 7): this panel only ever reads
-   * the array, so the wider (readonly-accepting) prop type is the honest
-   * one, not a cast at the call site.
+   * `readonly`, matching `GameDiagnosticsState.groups`'s own type
+   * (`useGameDiagnostics`'s return): this panel only ever reads the
+   * array, so the wider (readonly-accepting) prop type is the honest one,
+   * not a cast at the call site.
    */
-  game: readonly Diagnostic[] | null;
+  game: readonly GameDiagnosticsGroup[] | null;
   /**
-   * How many more the game's own bounded log forgot, riding the same
-   * frame as `game`. Meaningless while `game` is `null` (nothing has
-   * reported a count yet either), so this panel says nothing about it
-   * then regardless of what is passed here.
+   * How many more the games' own bounded logs forgot, summed across every
+   * group — `GameDiagnosticsState.dropped`'s own total, riding alongside
+   * `game`. Meaningless while `game` is `null` (nothing has reported a
+   * count yet either), so this panel says nothing about it then
+   * regardless of what is passed here.
    */
   droppedFromGame?: number;
   /**
@@ -99,6 +115,15 @@ export interface DiagnosticsPanelProps {
 interface Row {
   diagnostic: Diagnostic;
   origin: 'project' | 'game' | 'editor';
+  /**
+   * Which GAME this row is about — the finer grain living inside
+   * `origin === 'game'` rows only (see the module doc). Absent on every
+   * `project`/`editor` row, and absent on a `game` row too whenever that
+   * row's own group named no game (`GameDiagnosticsGroup.game ===
+   * undefined`) — the common single-game case, which must read exactly as
+   * it did before there could be more than one.
+   */
+  gameLabel?: string;
 }
 
 export function DiagnosticsPanel({
@@ -110,16 +135,24 @@ export function DiagnosticsPanel({
   // Project rows before game rows before editor rows. The origin tag comes
   // from WHICH ARRAY a diagnostic arrived in — never from `diagnostic.plugin`
   // — see the module doc for why that field can hold the identical string
-  // in all three origins on purpose.
+  // in all three origins on purpose. Within the game rows, group order is
+  // preserved as given (`game` is already `GAME_DIAGNOSTIC_SOURCES`-ordered
+  // inside each group, and the order of groups themselves is not a promise
+  // this panel or its data source make — see `GameDiagnosticsGroup`'s own
+  // doc).
   const rows: Row[] = [
     ...project.map((diagnostic): Row => ({ diagnostic, origin: 'project' })),
-    ...(game ?? []).map((diagnostic): Row => ({ diagnostic, origin: 'game' })),
+    ...(game ?? []).flatMap((group) =>
+      group.diagnostics.map(
+        (diagnostic): Row => ({ diagnostic, origin: 'game', gameLabel: group.game }),
+      ),
+    ),
     ...editor.map((diagnostic): Row => ({ diagnostic, origin: 'editor' })),
   ];
 
   return (
     <section className="e8-diagnostics-panel" data-testid="diagnostics-panel">
-      <h2>Diagnostics</h2>
+      <h2>Диагностика</h2>
 
       {rows.length > 0 && (
         <ul className="e8-diagnostics-panel-list">
@@ -131,6 +164,9 @@ export function DiagnosticsPanel({
               className="e8-diagnostic-row"
             >
               <span className="e8-diagnostic-origin">{row.origin}</span>{' '}
+              {row.gameLabel !== undefined && (
+                <span className="e8-diagnostic-game">game &quot;{row.gameLabel}&quot;</span>
+              )}{' '}
               <strong className="e8-severity">{row.diagnostic.severity}</strong>{' '}
               <span className="e8-diagnostic-plugin">{row.diagnostic.plugin}</span>
               {' · '}

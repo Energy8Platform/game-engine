@@ -11,9 +11,16 @@ import type { ConnectionConfig, WebSocketLike } from './connection';
  * The client-side store for a GAME's own diagnostics — the far end of the
  * road tasks 1-6 built: a running game's `ctx.diagnostics` forwarded by
  * `ide-bridge`, relayed by the host to every OTHER connected socket as
- * `{type:'game-diagnostics', diagnostics, dropped, source}`. Two speakers
- * share that message type and each sends a whole list, so this store keeps
- * ONE LIST PER SOURCE and hands out their union — see `bySource` below.
+ * `{type:'game-diagnostics', diagnostics, dropped, source, game}`. Two
+ * speakers share that message type and each sends a whole list, so this
+ * store keeps one list per source (see `GameDiagnosticsSource`) — and, one
+ * axis finer, one list per GAME within the `game` speaker (see
+ * `GameDiagnosticsGroup`), because the preview wall (a later task) can have
+ * several games talking to the same host at once. Neither axis absorbs the
+ * other: `byGame` below nests a per-source map INSIDE each game's own
+ * entry, the same shape `rpc.ts`'s own retention took on the host side —
+ * see that file's doc on `lastGameDiagnostics` for the identical rule
+ * stated for the wire.
  *
  * Shaped after `connection.ts`: a service with `subscribe(listener)`, a
  * socket owned and parsed the same defensive way (a `WebSocketLike` seam,
@@ -48,20 +55,47 @@ declare module 'cordis' {
   }
 }
 
+/**
+ * One running game's whole list, kept apart from every other game's — the
+ * per-game generalisation of what used to be this store's single flat
+ * list. A game is a THIRD axis, finer than `source` and living only inside
+ * the `game` speaker (see the module doc): the host is not a game and
+ * never produces a group of its own — a `source: 'host'` frame carries no
+ * `game` (see `GameDiagnosticsMessage.game`'s own doc) and lands in the
+ * SAME group as the one unidentified game, `game: undefined`.
+ */
+export interface GameDiagnosticsGroup {
+  /**
+   * Which game. `undefined` when only one game ever spoke — the common
+   * case, a project opened the ordinary way with no wall in play — and
+   * also where a HOST frame's contribution lands, since the host has no
+   * game identity of its own to be grouped by.
+   */
+  game: string | undefined;
+  /**
+   * This group's own list, concatenated in `GAME_DIAGNOSTIC_SOURCES` order
+   * across whichever speakers have contributed to it — the game's own
+   * account before the host's, exactly the order the flat list used before
+   * there could be more than one game.
+   */
+  diagnostics: readonly Diagnostic[];
+  /** How many this group's own bounded logs forgot, summed across its speakers. */
+  dropped: number;
+}
+
 export interface GameDiagnosticsState {
   /**
-   * What has been reported about the running game, from every source that
-   * has spoken, concatenated in `GAME_DIAGNOSTIC_SOURCES` order — the
-   * game's own list, then whatever the host has to add about it.
+   * Every game that has spoken, each kept apart from the others — see
+   * `GameDiagnosticsGroup`.
    *
    * Null until the FIRST frame from ANY source arrives — absent is not
-   * empty. Once one source has spoken, this is that source's list; a
-   * second source speaking ADDS to it rather than replacing it, which is
-   * the whole point of `GameDiagnosticsSource` existing (see its doc in
-   * `@energy8engine/contracts`).
+   * empty, the same distinction this field always made, now stated one
+   * level up: a game with an empty `diagnostics` array (reported and has
+   * nothing wrong) is a group that exists; no group having spoken yet is
+   * `null`.
    */
-  readonly diagnostics: readonly Diagnostic[] | null;
-  /** How many the bounded logs behind those sources forgot, summed. The panel must be able to say so. */
+  readonly groups: readonly GameDiagnosticsGroup[] | null;
+  /** How many the bounded logs behind every group forgot, summed. The panel must be able to say so. */
   readonly dropped: number;
 }
 
@@ -81,29 +115,47 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   );
 
   /**
-   * One list per source. A frame replaces THAT source's entry and leaves
-   * every other one alone.
+   * One list per (game, source) pair — `bySource`, generalised one axis
+   * outward. The inner map is unchanged from before this task: a frame
+   * replaces THAT source's entry within its game and leaves every other
+   * one alone, which is what makes a second speaker (the host) additive
+   * rather than destructive within one game's group — see the module doc.
+   * The outer key is `GameDiagnosticsMessage.game`, `undefined` included as
+   * a legal key of its own (the anonymous game, and every host frame — see
+   * `GameDiagnosticsGroup`'s own doc for why the two share a bucket).
    *
-   * It was a single `diagnostics` variable, replaced on every frame, and
-   * that is the bug this map exists to fix: the host is a second speaker on
-   * this message type (`dev-game`'s `/api/spin` route, which runs outside
-   * any browser), it only ever holds its own failures, and its frame
-   * therefore erased everything the game had reported — terminally, since
-   * nothing makes the game speak again afterwards. Whole-list remains right
-   * — it is what makes a frame self-sufficient for a client that just
-   * connected — but the whole list a frame carries is the whole list of ONE
-   * SOURCE.
+   * It was `bySource`, one level shallower, keyed by source alone — right
+   * when at most one game could ever be talking to the host, wrong once
+   * the wall could open several at once: a second game's frame landed in
+   * the SAME `'game'` slot the first one used and silently replaced it,
+   * the identical defect the source axis itself exists to prevent, one
+   * level down. Reproduced directly against this store before this fix —
+   * see task-5-context.md.
    */
-  const bySource = new Map<GameDiagnosticsSource, { diagnostics: Diagnostic[]; dropped: number }>();
+  const byGame = new Map<
+    string | undefined,
+    Map<GameDiagnosticsSource, { diagnostics: Diagnostic[]; dropped: number }>
+  >();
 
   const service: GameDiagnosticsService = {
-    get diagnostics() {
-      if (bySource.size === 0) return null;
-      return GAME_DIAGNOSTIC_SOURCES.flatMap((source) => bySource.get(source)?.diagnostics ?? []);
+    get groups() {
+      if (byGame.size === 0) return null;
+      return [...byGame].map(([game, bySource]) => ({
+        game,
+        diagnostics: GAME_DIAGNOSTIC_SOURCES.flatMap(
+          (source) => bySource.get(source)?.diagnostics ?? [],
+        ),
+        dropped: GAME_DIAGNOSTIC_SOURCES.reduce(
+          (total, source) => total + (bySource.get(source)?.dropped ?? 0),
+          0,
+        ),
+      }));
     },
     get dropped() {
       let total = 0;
-      for (const entry of bySource.values()) total += entry.dropped;
+      for (const bySource of byGame.values()) {
+        for (const entry of bySource.values()) total += entry.dropped;
+      }
       return total;
     },
     subscribe(listener) {
@@ -113,7 +165,12 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   };
 
   socket.addEventListener('message', (event: { data: string }) => {
-    let message: { diagnostics: Diagnostic[]; dropped?: number; source?: unknown };
+    let message: {
+      diagnostics: Diagnostic[];
+      dropped?: number;
+      source?: unknown;
+      game?: unknown;
+    };
     try {
       const parsed: unknown = JSON.parse(event.data);
       // Malformed frames are ignored, not just unparsable ones — `null`, an
@@ -124,7 +181,12 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
       // never `plugin`. A `{type:'diagnostics'}` frame (the project's own,
       // equally well-formed) must still be ignored: see the module doc.
       if ((parsed as { type?: unknown }).type !== 'game-diagnostics') return;
-      message = parsed as { diagnostics: Diagnostic[]; dropped?: number; source?: unknown };
+      message = parsed as {
+        diagnostics: Diagnostic[];
+        dropped?: number;
+        source?: unknown;
+        game?: unknown;
+      };
     } catch {
       return;
     }
@@ -135,6 +197,19 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
     // order. Same deliberate looseness as `isServerMessage`'s.
     const source: GameDiagnosticsSource =
       message.source === 'host' || message.source === 'game' ? message.source : 'game';
+    // A host frame names no game — see `GameDiagnosticsGroup`'s own doc —
+    // so it always joins the anonymous game's bucket rather than reading
+    // whatever (nothing, in practice) it carries in `.game`. A `game`
+    // frame's own id is trusted only when it is actually a string; anything
+    // else (missing, or a malformed non-string) degrades to `undefined`,
+    // the same looseness `dropped` below already gets.
+    const game: string | undefined =
+      source === 'host' ? undefined : typeof message.game === 'string' ? message.game : undefined;
+    let bySource = byGame.get(game);
+    if (!bySource) {
+      bySource = new Map();
+      byGame.set(game, bySource);
+    }
     bySource.set(source, {
       diagnostics: message.diagnostics,
       // Not required to be present at runtime by anything that actually
@@ -150,10 +225,10 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
   ctx.provide('gameDiagnostics', service);
 }
 
-/** Subscribe a component to the game's own diagnostics. */
+/** Subscribe a component to every game's own diagnostics. */
 export function useGameDiagnostics(ctx: Context): GameDiagnosticsState {
   const read = (): GameDiagnosticsState => ({
-    diagnostics: ctx.gameDiagnostics.diagnostics,
+    groups: ctx.gameDiagnostics.groups,
     dropped: ctx.gameDiagnostics.dropped,
   });
   const [state, setState] = useState<GameDiagnosticsState>(read);

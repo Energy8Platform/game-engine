@@ -24,7 +24,7 @@ import {
  */
 function DiagnosticsPanelCard({ ctx }: { ctx: Context }) {
   const { diagnostics: project } = useGameComposition(ctx);
-  const { diagnostics: game, dropped } = useGameDiagnostics(ctx);
+  const { groups: game, dropped } = useGameDiagnostics(ctx);
   // The third namespace — the EDITOR's own plugin graph. Rendered as rows
   // now, the same as `project`'s and `game`'s: `CompositionScreen` no
   // longer keeps a separate copy of its own.
