@@ -131,6 +131,14 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
    * the identical defect the source axis itself exists to prevent, one
    * level down. Reproduced directly against this store before this fix —
    * see task-5-context.md.
+   *
+   * Entries also LEAVE, on a `game-gone` frame. For a while the only
+   * mutation here was a `set`, so a client connected while a wall tile was
+   * open kept that tile's rows for the life of the page — rows naming a
+   * game that had stopped running, which is a false statement about the
+   * system, not a stale-but-true one. The host had already drawn that
+   * distinction for its own retention (`rpc.ts`, decision 3) and had no
+   * way to pass it on.
    */
   const byGame = new Map<
     string | undefined,
@@ -166,6 +174,7 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
 
   socket.addEventListener('message', (event: { data: string }) => {
     let message: {
+      type: string;
       diagnostics: Diagnostic[];
       dropped?: number;
       source?: unknown;
@@ -180,14 +189,34 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
       // The type tag is the ONLY thing read here to recognise a frame —
       // never `plugin`. A `{type:'diagnostics'}` frame (the project's own,
       // equally well-formed) must still be ignored: see the module doc.
-      if ((parsed as { type?: unknown }).type !== 'game-diagnostics') return;
+      const type = (parsed as { type?: unknown }).type;
+      if (type !== 'game-diagnostics' && type !== 'game-gone') return;
       message = parsed as {
+        type: string;
         diagnostics: Diagnostic[];
         dropped?: number;
         source?: unknown;
         game?: unknown;
       };
     } catch {
+      return;
+    }
+
+    // A game the host has watched disconnect (see `GameGoneMessage`). Its
+    // whole group goes — every speaker's contribution to it, the host's
+    // included, since what the host had to say was said ABOUT that game.
+    // Only a named one: `undefined` is the anonymous game's bucket, which
+    // this frame never carries and which nothing releases, on either side
+    // of the wire.
+    //
+    // Notified only when something actually went. A frame for a game this
+    // client never heard from is not an error and not news — the host
+    // broadcasts to every connected client, and only some of them were
+    // listening when that tile spoke.
+    if (message.type === 'game-gone') {
+      if (typeof message.game !== 'string') return;
+      if (!byGame.delete(message.game)) return;
+      for (const listener of listeners) listener();
       return;
     }
     // An absent or unrecognised `source` reads as `game` — the meaning this

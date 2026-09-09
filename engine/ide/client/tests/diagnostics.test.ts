@@ -339,3 +339,95 @@ describe('game diagnostics store, per game', () => {
     await vi.waitFor(() => expect(ctx.gameDiagnostics.dropped).toBe(7));
   });
 });
+
+/**
+ * A game that goes away says so, and this store lets go — the reader's
+ * half of `GameGoneMessage`. Before it, the only mutation here was a
+ * `set`: a client connected while a wall tile was open kept that tile's
+ * rows for the life of the page, each one naming, by id, a game that had
+ * stopped running. The host had already fixed its own side of exactly
+ * this (`rpc.ts`'s release-on-close) and had no frame to tell anyone.
+ */
+describe('game diagnostics store, releasing a game that is gone', () => {
+  it('drops the group for a game the host says has gone', async () => {
+    const ctx = harness();
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('A said this')],
+      dropped: 0,
+      source: 'game',
+      game: 'a',
+    });
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('B said this')],
+      dropped: 0,
+      source: 'game',
+      game: 'b',
+    });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(2));
+
+    deliver(ctx, { type: 'game-gone', game: 'a' });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(1));
+    // The OTHER game is untouched — this releases one tile, not the wall.
+    expect(ctx.gameDiagnostics.groups![0].game).toBe('b');
+    expect(allMessages(ctx)).toEqual(['B said this']);
+  });
+
+  it('drops what the host said ABOUT that game along with it', async () => {
+    // The host's contribution to a named game's group is still about that
+    // game, so it goes when the game does. (The host's own anonymous
+    // frames are a different bucket — the test below.)
+    const ctx = harness();
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('the game said this')],
+      dropped: 4,
+      source: 'game',
+      game: 'a',
+    });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.dropped).toBe(4));
+
+    deliver(ctx, { type: 'game-gone', game: 'a' });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toBeNull());
+    expect(ctx.gameDiagnostics.dropped).toBe(0);
+  });
+
+  it('never touches the anonymous group, which has no name to be released by', async () => {
+    const ctx = harness();
+    deliver(ctx, { type: 'game-diagnostics', diagnostics: [d('it broke')], dropped: 0 });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(1));
+
+    // A conforming host never sends this — `GameGoneMessage.game` is
+    // always a string — and if one ever did, the anonymous bucket is the
+    // one thing neither side releases.
+    deliver(ctx, { type: 'game-gone', game: undefined } as any);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(ctx.gameDiagnostics.groups).toHaveLength(1);
+    expect(allMessages(ctx)).toEqual(['it broke']);
+  });
+
+  it('notifies subscribers when a group goes, and stays quiet when nothing did', async () => {
+    const ctx = harness();
+    deliver(ctx, {
+      type: 'game-diagnostics',
+      diagnostics: [d('A said this')],
+      dropped: 0,
+      source: 'game',
+      game: 'a',
+    });
+    await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(1));
+
+    const seen = vi.fn();
+    ctx.gameDiagnostics.subscribe(seen);
+    // A game this client never heard from is not news: the host
+    // broadcasts to everyone, and only some were listening when that tile
+    // spoke. Re-rendering the panel over it would be work for nothing.
+    deliver(ctx, { type: 'game-gone', game: 'never-heard-of' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(seen).not.toHaveBeenCalled();
+
+    deliver(ctx, { type: 'game-gone', game: 'a' });
+    await vi.waitFor(() => expect(seen).toHaveBeenCalledTimes(1));
+  });
+});

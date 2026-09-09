@@ -846,4 +846,74 @@ describe('ide rpc — several games do not overwrite each other', () => {
     fresh.ws.close();
     observer.ws.close();
   });
+
+  it('tells the clients still connected that a named game has gone', async () => {
+    // Releasing the retained entry (the ghost test above) only fixes what
+    // a LATER client is told. A client that was already watching holds its
+    // own copy of that tile's list, and nothing else on this wire would
+    // ever contradict it — so it would keep showing rows under a tile name
+    // that stopped running, for the life of the page.
+    const a = await connectClient();
+    const editor = await connectClient();
+    a.ws.send(gameFrame('a', 'A said this'));
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'a' }));
+
+    a.ws.close();
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-gone'))
+      .toContainEqual({ type: 'game-gone', game: 'a' });
+
+    editor.ws.close();
+  });
+
+  it('says nothing when a socket that never named a game closes', async () => {
+    // The anonymous bucket is never released, on either side — see
+    // `lastGameDiagnostics`'s own doc, decision 3: the one project `e8 dev`
+    // serves crashing is exactly the case retention exists for. So there
+    // is nothing to announce, and announcing it would tell every reader to
+    // forget the crash that just happened.
+    const anonymous = await connectClient();
+    const editor = await connectClient();
+    anonymous.ws.send(
+      JSON.stringify({
+        type: 'game-diagnostics',
+        diagnostics: [
+          { severity: 'error', plugin: 'reels', where: 'runtime', message: 'it broke' },
+        ],
+        dropped: 0,
+      }),
+    );
+    await expect
+      .poll(() => editor.received.filter((m) => m.type === 'game-diagnostics').length)
+      .toBeGreaterThan(0);
+
+    anonymous.ws.close();
+    await new Promise((resolve) => anonymous.ws.once('close', resolve));
+
+    // A negative needs a provoked reply on the editor's OWN connection to
+    // be evidence rather than a race — the same technique the ghost test
+    // above uses, and for the same reason.
+    const snapshot = editor.received.find((m) => m.type === 'snapshot')!;
+    const id =
+      snapshot.type === 'snapshot'
+        ? snapshot.snapshot.rows.find((r) => r.name === 'probe-plugin')!.id
+        : '';
+    editor.ws.send(JSON.stringify({ type: 'update', id, config: { speed: 7 } }));
+    await expect
+      .poll(() =>
+        editor.received.some(
+          (m) =>
+            m.type === 'snapshot' &&
+            JSON.stringify(m.snapshot.rows.find((r) => r.id === id)?.config) ===
+              JSON.stringify({ speed: 7 }),
+        ),
+      )
+      .toBe(true);
+
+    expect(editor.received.filter((m) => m.type === 'game-gone')).toEqual([]);
+
+    editor.ws.close();
+  });
 });

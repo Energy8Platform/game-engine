@@ -231,6 +231,15 @@ export function apply(ctx: Context) {
         if (owner !== socket) continue;
         gameSocket.delete(game);
         lastGameDiagnostics.delete(game);
+        // Say so, rather than only forgetting. Releasing the entry fixes
+        // what a LATER client is told; every client already connected
+        // holds its own copy of this game's list and has no other way to
+        // learn the game is gone — so it would keep showing a tile's rows,
+        // under that tile's name, for the life of the page. `clients` no
+        // longer holds this socket (deleted above), so this reaches
+        // exactly the readers that need it.
+        const gone: ServerMessage = { type: 'game-gone', game };
+        for (const other of clients) send(other, gone);
       }
     });
 

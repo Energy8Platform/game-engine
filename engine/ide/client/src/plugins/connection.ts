@@ -189,7 +189,14 @@ export function apply(ctx: Context, config: ConnectionConfig) {
   };
 
   socket.addEventListener('message', (event: { data: string }) => {
-    let message: ServerMessage;
+    // Narrowed to the two frame types the filter below actually lets
+    // through, rather than the whole `ServerMessage` union: this handler
+    // ignores every other type by design (see `diagnostics.tsx`'s module
+    // doc on why that filter is a guarantee and not an oversight), and
+    // saying so here is what keeps the `else` below honest as the union
+    // grows — it used to mean "a diagnostics frame" only because there was
+    // nothing else it could be.
+    let message: Extract<ServerMessage, { type: 'snapshot' | 'diagnostics' }>;
     try {
       const parsed: unknown = JSON.parse(event.data);
       // Malformed frames are ignored, not just unparsable ones — `null`, an
@@ -204,7 +211,7 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       ) {
         return;
       }
-      message = parsed as ServerMessage;
+      message = parsed as Extract<ServerMessage, { type: 'snapshot' | 'diagnostics' }>;
     } catch {
       return;
     }

@@ -173,11 +173,41 @@ export interface GameDiagnosticsMessage {
   game?: string;
 }
 
+/**
+ * A named game is gone — its socket closed, and the host has released what
+ * it retained for it. Host to browser only: the host is the one that can
+ * see a socket close, and a game cannot announce its own disappearance.
+ *
+ * **The other half of `GameDiagnosticsMessage`'s retention.** That message
+ * is how a reader learns a game exists and what it has to say; without
+ * this one there was no way to learn it had stopped existing, so a client
+ * that was connected while a wall tile was open kept that tile's rows for
+ * the life of the page — rows attributed, by name, to a game that is no
+ * longer running. The host had already decided this was worth fixing on
+ * its own side (see `rpc.ts`'s `lastGameDiagnostics`, decision 3, which
+ * calls an unbounded per-tile map "a leak, not a stale-but-true fact held
+ * a while longer"); every reader downstream inherited the same problem and
+ * had nothing to act on.
+ *
+ * **Only ever a NAMED game.** The anonymous game — a socket that sent no
+ * `game` at all, the ordinary single-project case — is never announced
+ * gone, exactly as the host never releases its retained frame: a game
+ * going quiet BECAUSE it crashed is the case retention exists for, and
+ * there is only ever one of those. It is the ids a wall can mint without
+ * limit that have to be releasable.
+ */
+export interface GameGoneMessage {
+  type: 'game-gone';
+  /** Which game. Always present — see the type's own doc for why never absent. */
+  game: string;
+}
+
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: Snapshot }
   | { type: 'diagnostics'; diagnostics: Diagnostic[] }
-  | GameDiagnosticsMessage;
+  | GameDiagnosticsMessage
+  | GameGoneMessage;
 
 /** Browser to host. */
 export type ClientMessage =
