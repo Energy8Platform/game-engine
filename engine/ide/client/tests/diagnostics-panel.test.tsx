@@ -11,7 +11,11 @@ describe('DiagnosticsPanel', () => {
       <DiagnosticsPanel
         project={[]}
         game={[
-          { game: undefined, diagnostics: [d('error', 'reels', 'runtime', 'reels blew up')], dropped: 0 },
+          {
+            game: undefined,
+            diagnostics: [d('error', 'reels', 'runtime', 'reels blew up')],
+            dropped: 0,
+          },
         ]}
         editor={[]}
       />,
@@ -173,7 +177,9 @@ describe('DiagnosticsPanel — several games, each kept apart', () => {
       <DiagnosticsPanel
         project={[]}
         editor={[]}
-        game={[{ game: undefined, diagnostics: [d('error', 'reels', 'w', 'it broke')], dropped: 0 }]}
+        game={[
+          { game: undefined, diagnostics: [d('error', 'reels', 'w', 'it broke')], dropped: 0 },
+        ]}
       />,
     );
     expect(screen.getByTestId('diag-0')).toHaveTextContent('it broke');

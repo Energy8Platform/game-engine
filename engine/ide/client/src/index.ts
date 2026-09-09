@@ -8,12 +8,7 @@ export * from './plugins/connection';
 // import, so the barrel only needs to re-export the public surface a
 // consumer actually uses.
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
-export {
-  useLayout,
-  type ScreenMeta,
-  type ScreenEntry,
-  type LayoutService,
-} from './plugins/layout';
+export { useLayout, type ScreenMeta, type ScreenEntry, type LayoutService } from './plugins/layout';
 export type { ModulesService, ModulesConfig } from './plugins/modules';
 export {
   useGameComposition,

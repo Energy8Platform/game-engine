@@ -577,10 +577,7 @@ test('removing the reels row says so from the page\'s own read of "board", not o
       mount,
       'the page must name its own need for "board", not merely inherit playloop1\'s row-level one',
     ).toContainText('this page needs a board');
-    await expect(
-      mount,
-      'and the row that would normally have provided it',
-    ).toContainText('reels1');
+    await expect(mount, 'and the row that would normally have provided it').toContainText('reels1');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

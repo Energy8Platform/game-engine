@@ -234,9 +234,7 @@ describe('layout', () => {
     await ctx.plugin(layoutPlugin);
 
     ctx.layout.screen({ id: 'a', title: 'First' }, Dummy);
-    expect(() =>
-      ctx.layout.screen({ id: 'a', title: 'Second' }, Dummy),
-    ).not.toThrow();
+    expect(() => ctx.layout.screen({ id: 'a', title: 'Second' }, Dummy)).not.toThrow();
     expect(ctx.layout.screens().map((s) => s.title)).toEqual(['Second']);
 
     await ctx.fiber.dispose();
@@ -283,7 +281,9 @@ describe('Layout', () => {
     // lands whenever its import resolves, which is after this renders.
     const ctx = harness();
     render(<Layout ctx={ctx} />);
-    act(() => { ctx.layout.screen({ id: 'late', title: 'Late' }, () => <div>LATE</div>); });
+    act(() => {
+      ctx.layout.screen({ id: 'late', title: 'Late' }, () => <div>LATE</div>);
+    });
     expect(screen.getByRole('tab', { name: 'Late' })).toBeTruthy();
   });
 
@@ -295,7 +295,9 @@ describe('Layout', () => {
 
   it('a screen that throws does not take the rest of the IDE with it', () => {
     const ctx = harness();
-    const Bad = () => { throw new Error('screen exploded'); };
+    const Bad = () => {
+      throw new Error('screen exploded');
+    };
     ctx.layout.screen({ id: 'bad', title: 'Bad' }, Bad);
     ctx.layout.screen({ id: 'ok', title: 'OK' }, () => <div>OK BODY</div>);
     render(<Layout ctx={ctx} />);
@@ -305,7 +307,9 @@ describe('Layout', () => {
 
   it('reports the crashed screen, so it reaches the one list', () => {
     const ctx = harness();
-    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => { throw new Error('screen exploded'); });
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => {
+      throw new Error('screen exploded');
+    });
     render(<Layout ctx={ctx} />);
     expect(ctx.connection.diagnostics.map((d) => d.plugin)).toContain('bad');
   });
@@ -314,7 +318,9 @@ describe('Layout', () => {
     // A boundary that swallows the crash but keeps the tabs unreachable
     // leaves the IDE just as stuck as no boundary at all.
     const ctx = harness();
-    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => { throw new Error('boom'); });
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => {
+      throw new Error('boom');
+    });
     ctx.layout.screen({ id: 'ok', title: 'OK' }, () => <div>OK BODY</div>);
     render(<Layout ctx={ctx} />);
     await userEvent.click(screen.getByRole('tab', { name: 'OK' }));

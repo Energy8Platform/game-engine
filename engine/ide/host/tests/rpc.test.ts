@@ -666,7 +666,8 @@ describe('ide rpc — several games do not overwrite each other', () => {
       .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
       .toBe(2);
     const frames = late.received.filter(
-      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> => m.type === 'game-diagnostics',
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> =>
+        m.type === 'game-diagnostics',
     );
     expect(frames.map((f) => f.game).sort()).toEqual(['a', 'b']);
 
@@ -692,7 +693,8 @@ describe('ide rpc — several games do not overwrite each other', () => {
       .poll(() => late.received.filter((m) => m.type === 'game-diagnostics').length)
       .toBe(1);
     const frames = late.received.filter(
-      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> => m.type === 'game-diagnostics',
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> =>
+        m.type === 'game-diagnostics',
     );
     const hostFrames = frames.filter((f) => f.source === 'host');
     expect(hostFrames).toHaveLength(1);
@@ -746,7 +748,8 @@ describe('ide rpc — several games do not overwrite each other', () => {
       .toBe(true);
 
     const frames = late.received.filter(
-      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> => m.type === 'game-diagnostics',
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> =>
+        m.type === 'game-diagnostics',
     );
     expect(frames.filter((f) => f.game === 'a')).toEqual([]);
 

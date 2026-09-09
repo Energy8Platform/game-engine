@@ -143,9 +143,11 @@ export function DiagnosticsPanel({
   const rows: Row[] = [
     ...project.map((diagnostic): Row => ({ diagnostic, origin: 'project' })),
     ...(game ?? []).flatMap((group) =>
-      group.diagnostics.map(
-        (diagnostic): Row => ({ diagnostic, origin: 'game', gameLabel: group.game }),
-      ),
+      group.diagnostics.map((diagnostic): Row => ({
+        diagnostic,
+        origin: 'game',
+        gameLabel: group.game,
+      })),
     ),
     ...editor.map((diagnostic): Row => ({ diagnostic, origin: 'editor' })),
   ];
