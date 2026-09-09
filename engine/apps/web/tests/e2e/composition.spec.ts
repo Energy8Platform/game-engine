@@ -177,7 +177,7 @@ const PATCH_WITH_NOTHING_BOUND = `rows:
 // row, which kept this test green through that row's declared
 // `e8.runtime.requires: ["mechanics"]` while excluding the case a person
 // actually reaches by deleting one row from a patch. The page states its
-// own two needs now (`PAGE_NEEDS` in `first-slot`'s `main.ts`), so the
+// own needs now (`need()` in `first-slot`'s `main.ts`), so the
 // composition below is reported by the thing that reads `ctx.mechanics`
 // with no row left to speak for it.
 const PATCH_WITHOUT_MECHANICS = `rows:
@@ -449,10 +449,10 @@ test('a misspelled package name on a row says so, naming the row and the package
  * comment excluding the case where it leaves too. It was not the
  * mechanism that held; it was the fixture.
  *
- * What holds it now is the page: `first-slot`'s `PAGE_NEEDS` states the
- * two services `main.ts` itself reads off `ctx` — `mechanics` and `play`
- * — and reports and draws them the same way `createGame` does for a
- * row's. So the row named here is `mechanics1`, as the thing that
+ * What holds it now is the page: `first-slot`'s `need()` records the
+ * services `main.ts` itself reads off `ctx` — `mechanics`, `play` and
+ * `board` — and reports and draws them the same way `createGame` does for
+ * a row's. So the row named here is `mechanics1`, as the thing that
  * normally provides the service; the message is careful not to claim it
  * was removed, because the same absence is reachable with the row
  * present and failing (see the misspelled-package test above, which
@@ -505,10 +505,10 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
 /**
  * The other service only the page reads: `ctx.play`, which `presentStage`
  * hands a plan and a board. Nothing declares it a row's `requires`,
- * because no ROW reads it, so before `PAGE_NEEDS` existed this edit booted
- * to `ready` and the first click gave `Cannot read properties of undefined
- * (reading 'execute')` — the same shape as the `mechanics` case above, one
- * service along.
+ * because no ROW reads it, so before this page recorded its own needs this
+ * edit booted to `ready` and the first click gave `Cannot read properties
+ * of undefined (reading 'execute')` — the same shape as the `mechanics`
+ * case above, one service along.
  *
  * `removeRowId` rather than a wholesale patch, and deliberately: this
  * composition keeps `reelstep1`, so the row that needs what `playloop1`
@@ -539,6 +539,48 @@ test('removing the play loop row says so before the first click', async ({ page 
       mount,
       'and the row whose step handler had nowhere to register names itself',
     ).toContainText('the "reelstep1" row requires "steps"');
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The third of the page's own needs, and until this task the one that was
+ * never actually recorded — only inferred. `presentStage` hands
+ * `play.execute` a `board` two lines below `play` itself
+ * (`play.execute(plan, board)`), and that read was safe only because
+ * `play` is evaluated first in the same expression: with `play` present
+ * and `board` absent, the call itself would still have blown up on its
+ * second argument, with nothing here to say why, the moment a play loop
+ * ever stopped declaring `requires: ["board"]` on its own account.
+ *
+ * `declared.spec.ts`'s "a row that requires a missing service says so,
+ * naming both" already proves the ROW's half of this — `playloop1`'s own
+ * `e8.runtime.requires: ["board"]`, read off `#log` right after boot. This
+ * test proves the other half, the one this task added: the PAGE's own
+ * words, on the failure screen, naming `reels1` as what normally provides
+ * `board` — independent of whatever any other row happens to declare.
+ */
+test('removing the reels row says so from the page\'s own read of "board", not only the row', async ({
+  page,
+}) => {
+  const dir = projectCopy({ removeRowId: 'reels1' });
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(host.gameUrl);
+    await settled(page);
+
+    const mount = page.locator('#mount');
+    await expect(mount).toContainText('This game could not start');
+    await expect(
+      mount,
+      'the page must name its own need for "board", not merely inherit playloop1\'s row-level one',
+    ).toContainText('this page needs a board');
+    await expect(
+      mount,
+      'and the row that would normally have provided it',
+    ).toContainText('reels1');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

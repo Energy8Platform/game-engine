@@ -135,6 +135,37 @@ describe('modules', () => {
     expect(importModule).toHaveBeenCalledTimes(3);
   });
 
+  // Fix round 2 (task 7, "a screen is a plugin"): this `inject` list named
+  // `connection` and `slots` and stopped there, because until this task
+  // nothing had ever tried to reach `ctx.layout` from a DYNAMICALLY loaded
+  // client half — `App.tsx` registers the composition and preview screens
+  // by calling `ctx.layout.screen` on the unrestricted root `ctx` it was
+  // handed directly, never through this plugin's `sync`. The first project
+  // plugin that tried (`engine/examples/first-slot/plugins/screen-demo`)
+  // got cordis's own "cannot get property 'layout' without inject" back —
+  // the exact shape of a service that genuinely exists on the composed
+  // context but is invisible from a scope that never declared it. Adding
+  // `layout` here is the whole fix; nothing about `ctx.layout` itself
+  // changed. Pinned so a future new plugin service does not silently
+  // repeat this — reachable from `App.tsx` on day one, unreachable from
+  // every project plugin until someone happens to try one.
+  it('a dynamically loaded client half can reach ctx.layout, not only ctx.slots', async () => {
+    const registered: string[] = [];
+    const importModule = vi.fn(async () => ({
+      apply(ctx: { layout: { screen: (meta: { id: string }, component: unknown) => void } }) {
+        ctx.layout.screen({ id: 'from-a-plugin' }, () => null);
+        registered.push('from-a-plugin');
+      },
+    }));
+    const { ctx, push } = await harness(importModule);
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
+    await vi.waitFor(() => expect(registered).toEqual(['from-a-plugin']));
+
+    expect(ctx.connection.diagnostics).toHaveLength(0);
+    expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin');
+  });
+
   it('treats a client half with no apply export as loaded, not a failure', async () => {
     const importModule = vi.fn(async () => ({}));
     const { ctx, push } = await harness(importModule);

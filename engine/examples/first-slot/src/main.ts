@@ -39,18 +39,22 @@
  * row has applied, landing the result straight in `game.diagnostics` — the
  * same list this page already reads for everything else.
  *
- * What is left of it is `PAGE_NEEDS` below, and it is two entries rather
- * than the old three. `requires` is a field of a package.json, and a PAGE
- * has none the composition ever reads, so a service only this file
- * touches is nobody else's to check. Leaving it unchecked was measured,
- * not assumed: with `reelstep1` also out of the patch — no row left
- * declaring `mechanics` — dropping `mechanics1` left `#status` reading
- * `ready`, `#log` empty and not one word anywhere on the page, over a
- * board that could never present anything; the first click then gave
- * `Cannot read properties of undefined (reading 'forStage')`. That is
- * the silence the whole `boot` design exists to prevent, reached by an
- * edit the composition considers legal. So the check is narrowed to what
- * only this page knows, not restored wholesale.
+ * What is left of it is the three services `need()` (further down) reads
+ * and records in the same call — `mechanics`, `play`, and `board`.
+ * `requires` is a field of a package.json, and a PAGE has none the
+ * composition ever reads, so a service only this file touches is nobody
+ * else's to check. Leaving it unchecked was measured, not assumed: with
+ * `reelstep1` also out of the patch — no row left declaring `mechanics`
+ * — dropping `mechanics1` left `#status` reading `ready`, `#log` empty
+ * and not one word anywhere on the page, over a board that could never
+ * present anything; the first click then gave `Cannot read properties of
+ * undefined (reading 'forStage')`. That is the silence the whole `boot`
+ * design exists to prevent, reached by an edit the composition considers
+ * legal. So the check is narrowed to what only this page knows, not
+ * restored wholesale — and narrowed a second way now too: `need()` is the
+ * only way this file reaches any of the three, enforced in the type
+ * system (see `PageCtx` below), so a fourth one cannot start being read
+ * here without being declared here first.
  *
  * **`<pre id="log">` is a reader, not a destination.** Everything this page
  * shows about what has gone wrong comes off `ctx.diagnostics` — the live
@@ -128,6 +132,120 @@ const game = await createGame({
 });
 
 /**
+ * The services this PAGE reads off `ctx` and cannot work without — not
+ * `e8.runtime.requires`, kept for the reason the module doc gives:
+ * `requires` is declared in a package.json, by a row, and this page is
+ * not one.
+ *
+ * Named once, here, rather than left to be re-typed at every read: a
+ * fourth call to `need()` (below) naming a service outside this union is
+ * a compile error, so widening what the page needs starts at this line,
+ * not at the read that would otherwise sneak one in uncounted.
+ */
+type PageNeedService = 'mechanics' | 'play' | 'board';
+
+interface PageNeedDescriptor {
+  service: PageNeedService;
+  row: string;
+  pkg: string;
+  what: string;
+}
+
+interface PageNeed extends PageNeedDescriptor {
+  /** Whether `ctx.reflect.get` found something, the moment `need()` looked. */
+  met: boolean;
+}
+
+const pageNeeds: PageNeed[] = [];
+
+/**
+ * Reads one service this page cannot do without, and records having read
+ * it — the same call, so the record can never say something different
+ * from what was actually asked for. `unmet`, a little further down, is
+ * only ever a filter over what got pushed here; there is no second list
+ * to keep in sync with the reads, because this IS the read.
+ *
+ * `ctx.reflect.get(name, false)` rather than `ctx.<name>` directly, for
+ * the reason the old list gave: cordis throws on a property read of a
+ * REGISTERED service this module never injected, and "nobody provided
+ * one" is the answer this needs, not an exception.
+ */
+function need(descriptor: PageNeedDescriptor): unknown {
+  const value = ctx.reflect.get(descriptor.service, false);
+  pageNeeds.push({ ...descriptor, met: value !== undefined });
+  return value;
+}
+
+/**
+ * `game.ctx`, viewed with exactly the three services above removed — so
+ * `ctx.mechanics` (or `.play`, or `.board`), typed straight off `ctx`
+ * anywhere below this line, does not compile. `game.ctx` itself keeps its
+ * full type: `ideBridge.apply(game.ctx, {})` further down needs the real
+ * `Context`, and TypeScript has no way to narrow a value that still
+ * exists, fully typed, under its own name — so this is the file's own
+ * decision to route every other read through the narrower view, not a
+ * wall the language builds unasked. What that decision buys: the three
+ * consts right below (`mechanics`, `play`, `board`) are the only way this
+ * file reaches those services from here down, because `need()` is the
+ * only thing still holding a reference wide enough to read them.
+ * `diagnostics`, `boot` and `spinLog` are untouched by the narrowing —
+ * genuinely optional, not page needs — and still read straight off `ctx`
+ * a few lines down, the same guarded way they always did.
+ */
+type PageCtx = Omit<typeof game.ctx, PageNeedService>;
+const ctx: PageCtx = game.ctx;
+
+// The type-level half of the guarantee above, pinned so it cannot go
+// quietly stale: `tsc --noEmit` (part of this workspace's own `typecheck`
+// script) fails the build the moment any of these three lines compiles
+// cleanly, exactly the way `engine/core/contracts/tests/mechanic-open
+// .test.ts` pins its own compile-time claims. There is no runtime half to
+// pair it with — the point of each line is that it must never run — so
+// unlike that file this is not also a `.test.ts`; it lives here, right
+// next to the type it is a claim about, and is checked on every
+// `npm run typecheck --workspace e8-example-first-slot`.
+// @ts-expect-error `mechanics` is a page need — read it through the `mechanics` const below, never off `ctx` directly
+void ctx.mechanics;
+// @ts-expect-error `play` is a page need — read it through the `play` const below, never off `ctx` directly
+void ctx.play;
+// @ts-expect-error `board` is a page need — read it through the `board` const below, never off `ctx` directly
+void ctx.board;
+
+const mechanics = need({
+  service: 'mechanics',
+  row: 'mechanics1',
+  pkg: '@energy8engine/game-runtime',
+  what: 'a mechanic registry to turn a spin result into a presentation',
+}) as typeof game.ctx.mechanics | undefined;
+
+const play = need({
+  service: 'play',
+  row: 'playloop1',
+  pkg: '@energy8engine/play-loop',
+  what: 'a play loop to run a presentation plan through',
+}) as typeof game.ctx.play | undefined;
+
+/**
+ * `board` rejoins the page's own needs instead of staying an inference.
+ * It was left out once on the reasoning that `@energy8engine/play-loop`'s
+ * own `requires: ["board"]` already covers it — true for the ROW's half
+ * of the story, but the PAGE's own read, in `presentStage` below
+ * (`play.execute(plan, board)`), was safe only because `play` happens to
+ * be evaluated first in that same expression, not because anything here
+ * said so. A play loop that stopped requiring a board — a legal future
+ * edit to that one OTHER row — would have turned this read back into an
+ * unexplained throw with nothing here to catch it first. Recording it
+ * here does not replace `playloop1`'s own check; it means this page no
+ * longer depends on that other row's phrasing to explain itself.
+ */
+const board = need({
+  service: 'board',
+  row: 'reels1',
+  pkg: '@energy8engine/reels',
+  what: 'a board for the play loop to run its presentation against',
+}) as typeof game.ctx.board | undefined;
+
+/**
  * The game's own live diagnostics list — the service the `diagnostics1` row
  * provides (`@energy8engine/diagnostics`). Everything this page shows in
  * `<pre id="log">` is read from here, and there is no second list, no
@@ -138,71 +256,26 @@ const game = await createGame({
  * failure screen by the time this line runs; `createGame` draws it
  * itself, the same `boot`-or-fallback logic it always has.
  *
- * Through `reflect.get(name, false)`: `diagnostics1` is an optional row
+ * Through `ctx.reflect.get(name, false)`: `diagnostics1` is an optional row
  * (see `e8-base`'s own bundle file), a composition without it is legal,
  * and cordis throws on a property read of a registered service this
  * module never injected. `renderDiagnostics` below says so on screen
  * rather than silently showing an empty log — "there is no list" and "the
  * list is empty" are different news.
  */
-const diagnosticsLog = game.ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
+const diagnosticsLog = ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
 
-/**
- * What THIS PAGE reads off `ctx` and cannot work without — the remainder
- * of the old `REQUIRES` list, kept for the reason the module doc gives:
- * `e8.runtime.requires` is declared in a package.json, by a row, and this
- * page is not one.
- *
- * Two entries, where there used to be three. `board` left the list
- * because a row genuinely covers it now:
- * `@energy8engine/play-loop`'s own package.json declares
- * `requires: ["board"]`, so a composition that drops `reels1` is reported
- * by the row that noticed rather than a second time by this page — and
- * the single line here that touches `ctx.board` hands it to
- * `ctx.play.execute`, which this list guards in front of it. The two that
- * stay have no such row: nothing anywhere declares `play`, because no row
- * READS it — only this page does — and the one row that declares
- * `mechanics` is `reelstep1`, a project plugin the same patch edit can
- * remove, which is exactly the composition that was measured booting to
- * `ready` over an empty canvas.
- *
- * `what` is a phrase about this PAGE, and the row is named as the thing
- * that normally provides the service rather than as the cause: the row
- * may be right there in `e8.patch.yml` and failing for a reason the host
- * already reported, and two diagnostics contradicting each other about
- * which is which is worse than one that only states what it measured.
- *
- * `reflect.get(name, false)` rather than `ctx.play`: cordis throws on a
- * property read of a REGISTERED service this module never injected, and
- * "nobody provided one" is the answer this needs, not an exception. It is
- * the same guarded read the `<select>`'s seed performs further down.
- */
-const PAGE_NEEDS = [
-  {
-    service: 'mechanics',
-    row: 'mechanics1',
-    pkg: '@energy8engine/game-runtime',
-    what: 'a mechanic registry to turn a spin result into a presentation',
-  },
-  {
-    service: 'play',
-    row: 'playloop1',
-    pkg: '@energy8engine/play-loop',
-    what: 'a play loop to run a presentation plan through',
-  },
-] as const;
-
-const unmet = PAGE_NEEDS.filter(
-  (need) => game.ctx.reflect.get(need.service, false) === undefined,
-).map((need) =>
-  diagnostic(
-    'error',
-    'first-slot',
-    need.service,
-    `this page needs ${need.what}, and nothing in the composition provided "${need.service}" — the "${need.row}" row (${need.pkg}) is what normally does`,
-    `check the "${need.row}" row: it may have been removed in e8.patch.yml, or it may be listed but failing — any diagnostic above naming "${need.row}" says which`,
-  ),
-);
+const unmet = pageNeeds
+  .filter((entry) => !entry.met)
+  .map((entry) =>
+    diagnostic(
+      'error',
+      'first-slot',
+      entry.service,
+      `this page needs ${entry.what}, and nothing in the composition provided "${entry.service}" — the "${entry.row}" row (${entry.pkg}) is what normally does`,
+      `check the "${entry.row}" row: it may have been removed in e8.patch.yml, or it may be listed but failing — any diagnostic above naming "${entry.row}" says which`,
+    ),
+  );
 
 /**
  * The page's own findings join the same list everything else writes to.
@@ -228,7 +301,7 @@ const diagnostics = [...game.diagnostics, ...unmet];
  * must not blank the page it was supposed to explain.
  */
 if (unmet.length > 0) {
-  const boot = game.ctx.reflect.get('boot', false) as
+  const boot = ctx.reflect.get('boot', false) as
     { renderFailure(root: HTMLElement, list: Diagnostic[]): void } | undefined;
   try {
     if (!boot) throw new Error('no boot row in this composition');
@@ -327,14 +400,15 @@ diagnosticsLog?.subscribe(renderDiagnostics);
  * with the whole story on the first spin, and it is the only report that
  * can, because only it knows whether the registration ever arrived.
  *
- * Through `reflect.get`: a composition with no `mechanics1` row is a legal
- * edit — `PAGE_NEEDS` above has already reported it and drawn the failure
- * screen by the time this line runs, and `reelstep1` will have said the
- * same about its own half if that row is in the composition — and this
- * line must not turn the absence into a `TypeError` that stops the page
- * before those reports are drawn.
+ * Through the `mechanics` handle `need()` captured above, optionally
+ * chained rather than read fresh: a composition with no `mechanics1` row
+ * is a legal edit — `need()`'s own boot-time check has already reported
+ * it and drawn the failure screen by the time this line runs, and
+ * `reelstep1` will have said the same about its own half if that row is
+ * in the composition — and this line must not turn the absence into a
+ * `TypeError` that stops the page before those reports are drawn.
  */
-const bound = game.ctx.reflect.get('mechanics', false)?.forStage('base_game')?.id;
+const bound = mechanics?.forStage('base_game')?.id;
 if (bound) mechanicSelect.value = bound;
 
 /**
@@ -362,7 +436,7 @@ if (bound) mechanicSelect.value = bound;
 ideBridge.apply(game.ctx, {});
 
 mechanicSelect.addEventListener('change', () => {
-  game.ctx.mechanics.bind('base_game', mechanicSelect.value);
+  mechanics!.bind('base_game', mechanicSelect.value);
 });
 
 /**
@@ -415,7 +489,7 @@ async function presentStage(
   // Read before presenting, and tolerant of `null`: a stage bound to
   // nothing is exactly a case `present` reports, and this control has
   // nothing to say about it.
-  const bound = game.ctx.mechanics.forStage(stage);
+  const bound = mechanics!.forStage(stage);
   if (bound && [...mechanicSelect.options].some((option) => option.value === bound.id)) {
     mechanicSelect.value = bound.id;
   }
@@ -429,7 +503,7 @@ async function presentStage(
   // same event told twice, in a format only this page used, in a place only
   // this page could see. The `<pre>` shows them now because the service
   // does, and it shows the message the producer actually wrote.
-  const { plan, diagnostics: presentProblems } = game.ctx.mechanics.present(stage, data);
+  const { plan, diagnostics: presentProblems } = mechanics!.present(stage, data);
   if (presentProblems.length > 0) {
     statusEl.textContent = 'presentation failed — see log';
     // `null`, not `[]`. An empty plan is a legal thing for a mechanic to
@@ -439,7 +513,7 @@ async function presentStage(
     return null;
   }
 
-  await game.ctx.play.execute(plan, game.ctx.board);
+  await play!.execute(plan, board!);
   return plan;
 }
 
@@ -466,22 +540,23 @@ function spinRequest(): Record<string, unknown> {
  * apart from the live events of the presentation: the result is the fact,
  * the plan is an interpretation of it.
  *
- * Through `reflect.get`: a composition with no `playloop1` row is a legal
- * edit, and it must not turn into a `TypeError` here — least of all on the
- * line whose job is keeping a record when things are going wrong. Nothing
- * anywhere declares `play` a row's `requires`, because no row READS
- * `ctx.play` — only this page does, which is why `play` is one of the two
- * entries in `PAGE_NEEDS` above. What is genuinely left over after that is
- * narrower than this comment used to claim: not the whole `playloop1` row,
- * but a page's own reads, which `e8.runtime.requires` has no way to carry
- * because that field belongs to a package.json and a page has none the
- * composition reads.
+ * Through the `play` handle `need()` captured above, optionally chained
+ * rather than read fresh: a composition with no `playloop1` row is a
+ * legal edit, and it must not turn into a `TypeError` here — least of all
+ * on the line whose job is keeping a record when things are going wrong.
+ * Nothing anywhere declares `play` a row's `requires`, because no row
+ * READS `ctx.play` — only this page does, which is why `play` is one of
+ * the services `need()` records above. What is genuinely left over after
+ * that is narrower than this comment used to claim: not the whole
+ * `playloop1` row, but a page's own reads, which `e8.runtime.requires`
+ * has no way to carry because that field belongs to a package.json and a
+ * page has none the composition reads.
  * The row that provides the durable log (`spinlog1`) is not a `requires`
  * anywhere, on purpose: a game that keeps no record is a working game, and
  * `play.record` is a no-op without one.
  */
 function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep[]): void {
-  game.ctx.reflect.get('play', false)?.record({ request, result, plan });
+  play?.record({ request, result, plan });
 }
 
 /**
@@ -497,10 +572,11 @@ function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep
  * page-local list to work out which row a click had tripped over. It does
  * not any more, and it does not need to: a row that requires a service
  * says so through `E8RuntimeHalf.requires`, this page says the same about
- * the two services only it reads (`PAGE_NEEDS`), and both were written
- * into the same log — and onto the screen — before the first click ever
- * happened. So this only reports the raw failure; the reader who needs
- * the "why" has it already, sitting higher in the same log.
+ * the services only it reads — recorded where each is read, by `need()`,
+ * above — and both were written into the same log — and onto the screen —
+ * before the first click ever happened. So this only reports the raw
+ * failure; the reader who needs the "why" has it already, sitting higher
+ * in the same log.
  *
  * A `Diagnostic`, not a string painted into this page's own element: it
  * belongs in the same list everything else does, and reaches the IDE for
@@ -585,7 +661,7 @@ spinBtn.addEventListener('click', async () => {
  * imports this file's test harness, either.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
-  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `PAGE_NEEDS` found, which is the whole of what the boot screen and `#log` were given. */
+  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `need()` found unmet, which is the whole of what the boot screen and `#log` were given. */
   diagnostics,
   /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
   async spin(): Promise<{ result: SpinResult; steps: PresentationStep[] }> {
@@ -626,7 +702,7 @@ spinBtn.addEventListener('click', async () => {
    * composition, which is a legal composition.
    */
   spins(): readonly unknown[] {
-    return game.ctx.reflect.get('spinLog', false)?.entries() ?? [];
+    return ctx.reflect.get('spinLog', false)?.entries() ?? [];
   },
   /**
    * Which mechanic is bound to `stage` right now — a READ of the registry,
@@ -645,6 +721,6 @@ spinBtn.addEventListener('click', async () => {
    * nothing has registered (see `MechanicsService.forStage`).
    */
   bound(stage: string): string | null {
-    return game.ctx.reflect.get('mechanics', false)?.forStage(stage)?.id ?? null;
+    return mechanics?.forStage(stage)?.id ?? null;
   },
 };

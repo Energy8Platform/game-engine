@@ -19,3 +19,15 @@
 - id: bridge1
   name: '@energy8engine/ide-bridge'
   config: {}
+# `screen-demo` (`plugins/screen-demo/` in this project) belongs here and
+# not in `e8.patch.yml`: this file is what `ctx.loader`/`ctx.composition`
+# on the host resolves, and only ITS rows get a `clientUrl` broadcast over
+# `/ide` for the IDE's `modules.ts` to fetch and `apply(ctx)` — the GAME's
+# own composition (`e8.profile.yml` + `e8.patch.yml`) is a separate
+# service on purpose (see `engine/ide/host/src/index.ts`'s own comment)
+# and never reaches the browser tab that has the editor open. A screen is
+# exactly this kind of entry: it draws into the EDITOR, the same as
+# `bridge1` above, not into the running game.
+- id: screendemo1
+  name: screen-demo
+  config: {}

@@ -18,7 +18,7 @@ export interface ModulesConfig {
 }
 
 export const name = 'modules';
-export const inject = ['connection', 'slots'];
+export const inject = ['connection', 'slots', 'layout'];
 
 export function apply(ctx: Context, config: ModulesConfig) {
   // Entry ids for which an import has been *started* — claimed before the
