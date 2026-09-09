@@ -312,9 +312,7 @@ function checkRequires(
   // correctly, most of the time a composition has exactly one broken row —
   // and the message must not draw it FOR them, confidently, when the code
   // has no way to check it.
-  const brokenRowNames = composedRows
-    .map((row) => row.id)
-    .filter((id) => brokenRowIds.has(id));
+  const brokenRowNames = composedRows.map((row) => row.id).filter((id) => brokenRowIds.has(id));
 
   const found: Diagnostic[] = [];
   for (const row of composedRows) {

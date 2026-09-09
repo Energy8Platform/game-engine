@@ -77,18 +77,27 @@ describe('parseManifest', () => {
   });
 
   it('reads a requires list off the runtime half', () => {
-    const { manifest } = parseManifest({ e8: { runtime: { entry: './r.ts', requires: ['board'] } } }, 'row1');
+    const { manifest } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', requires: ['board'] } } },
+      'row1',
+    );
     expect(manifest!.runtime!.requires).toEqual(['board']);
   });
 
   it('a runtime half with no requires is legal and means none', () => {
-    const { manifest, diagnostics } = parseManifest({ e8: { runtime: { entry: './r.ts' } } }, 'row1');
+    const { manifest, diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './r.ts' } } },
+      'row1',
+    );
     expect(manifest!.runtime!.requires).toBeUndefined();
     expect(diagnostics).toEqual([]);
   });
 
   it('a requires that is not an array at all is a diagnostic naming the row', () => {
-    const { diagnostics } = parseManifest({ e8: { runtime: { entry: './r.ts', requires: 'board' } } }, 'row1');
+    const { diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', requires: 'board' } } },
+      'row1',
+    );
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].plugin).toBe('row1');
     expect(diagnostics[0].where).toBe('e8.runtime.requires');
@@ -128,7 +137,10 @@ describe('parseManifest', () => {
   });
 
   it('the entry still parses when requires is malformed — half a manifest beats none', () => {
-    const { manifest } = parseManifest({ e8: { runtime: { entry: './r.ts', requires: 7 } } }, 'row1');
+    const { manifest } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', requires: 7 } } },
+      'row1',
+    );
     expect(manifest!.runtime!.entry).toBe('./r.ts');
   });
 });

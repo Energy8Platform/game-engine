@@ -200,9 +200,7 @@ describe('GET /api/composition', () => {
     host = await createIdeHost({ cwd: workspace, port: 0 });
     const body = await (await fetch(`${host.url}/api/composition`)).json();
 
-    expect(body.rows.find((r: { id: string }) => r.id === 'playloop1').requires).toEqual([
-      'board',
-    ]);
+    expect(body.rows.find((r: { id: string }) => r.id === 'playloop1').requires).toEqual(['board']);
     expect(body.rows.find((r: { id: string }) => r.id === 'reels1').requires).toBeUndefined();
   });
 

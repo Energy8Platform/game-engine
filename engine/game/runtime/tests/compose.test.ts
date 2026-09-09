@@ -794,8 +794,16 @@ describe('createGame — requires: checked after composition, never as an orderi
         fetchFn: fakeFetch({ rows: [row('reels1'), row('playloop1')], diagnostics: [] }),
         importModule: async (url) =>
           url.endsWith('reels1')
-            ? { apply: () => { throw new Error('reels1 refused'); } }
-            : { apply: (ctx: any) => { ctx.play = {}; } },
+            ? {
+                apply: () => {
+                  throw new Error('reels1 refused');
+                },
+              }
+            : {
+                apply: (ctx: any) => {
+                  ctx.play = {};
+                },
+              },
       },
     });
 
@@ -818,7 +826,11 @@ describe('createGame — requires: checked after composition, never as an orderi
         }),
         importModule: async (url) =>
           url.endsWith('reels1')
-            ? { apply: (ctx: any) => { ctx.provide('board', {}); } }
+            ? {
+                apply: (ctx: any) => {
+                  ctx.provide('board', {});
+                },
+              }
             : { apply: () => {} },
       },
     });
@@ -844,7 +856,11 @@ describe('createGame — requires: checked after composition, never as an orderi
         }),
         importModule: async (url) =>
           url.endsWith('reels1')
-            ? { apply: (ctx: any) => { ctx.provide('board', {}); } }
+            ? {
+                apply: (ctx: any) => {
+                  ctx.provide('board', {});
+                },
+              }
             : { apply: () => {} },
       },
     });
@@ -871,7 +887,11 @@ describe('createGame — requires: checked after composition, never as an orderi
         fetchFn: fakeFetch({ rows: [row('renderer1'), row('playloop1')], diagnostics: [] }),
         importModule: async (url) =>
           url.endsWith('renderer1')
-            ? { apply: () => { throw new Error('renderer1 refused'); } }
+            ? {
+                apply: () => {
+                  throw new Error('renderer1 refused');
+                },
+              }
             : { apply: () => {} },
       },
     });
