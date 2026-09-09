@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../src/index';
 
 /**
- * `createRegistry` is the one place the "add under a key, handle a
- * collision, hand back a disposer" logic lives. Three call sites
- * (play-loop's step registry, game-runtime's mechanic registry, the IDE's
- * slot registry) each hand-rolled this and each shipped the same
- * silent-overwrite bug before being fixed independently — see
- * `registries-context.md`. These tests measure exactly the guarantees
- * those three call sites depend on, so Task 4 can move onto this without
- * losing any of them.
+ * `createRegistry` is the one place the "add under a key, apply the
+ * collision policy, hand back a disposer that removes only its own entry"
+ * logic lives. Three call sites (play-loop's step registry, game-runtime's
+ * mechanic registry, the IDE's slot registry) each hand-rolled this and
+ * each shipped the same silent-overwrite bug before being fixed
+ * independently — see `registries-context.md`. These tests measure exactly
+ * the guarantees those three call sites depend on, so Task 4 can move onto
+ * this without losing any of them.
+ *
+ * Nothing here asserts on a collision REPORT, because this package makes
+ * none: each adopter reads `get(key)` before `add()` and words its own
+ * diagnostic — see the module doc. What the tests below pin is what `add`
+ * does to the map and what disposer it hands back.
  *
  * Three properties get their own test on top of the brief's six, because
  * each is easy to satisfy by accident for the wrong reason (a disposer
@@ -24,25 +29,25 @@ import { createRegistry } from '../src/index';
  *    its contents as a list.
  */
 describe('createRegistry', () => {
-  it('first-wins keeps the first and reports the collision', () => {
-    const r = createRegistry<string>({ policy: 'first-wins', describe: (v) => v });
+  it('first-wins keeps the first, and the second never enters', () => {
+    const r = createRegistry<string>({ policy: 'first-wins' });
     r.add('x', 'alpha');
     r.add('x', 'beta');
     expect(r.get('x')).toBe('alpha');
-    expect(r.collisions()).toEqual([{ key: 'x', kept: 'alpha', dropped: 'beta' }]);
+    expect(r.keys()).toEqual(['x']);
   });
 
-  it('last-wins keeps the last and reports it too', () => {
-    const r = createRegistry<string>({ policy: 'last-wins', describe: (v) => v });
+  it('last-wins lets the second replace the first', () => {
+    const r = createRegistry<string>({ policy: 'last-wins' });
     r.add('x', 'alpha');
     r.add('x', 'beta');
     expect(r.get('x')).toBe('beta');
-    expect(r.collisions()).toEqual([{ key: 'x', kept: 'beta', dropped: 'alpha' }]);
+    expect(r.keys()).toEqual(['x']);
   });
 
   it('a disposer removes only what it added, never a newer entry for the same key', () => {
     // The stale-disposer race MechanicsService already guards against.
-    const r = createRegistry<string>({ policy: 'last-wins', describe: (v) => v });
+    const r = createRegistry<string>({ policy: 'last-wins' });
     const off = r.add('x', 'alpha');
     r.add('x', 'beta');
     off();
@@ -50,26 +55,19 @@ describe('createRegistry', () => {
   });
 
   it('double disposal is a no-op, not a throw', () => {
-    const r = createRegistry<string>({ policy: 'first-wins', describe: (v) => v });
+    const r = createRegistry<string>({ policy: 'first-wins' });
     const off = r.add('x', 'alpha');
     off();
     expect(() => off()).not.toThrow();
   });
 
   it('re-adding after disposal works, and the new entry is what get() returns', () => {
-    const r = createRegistry<string>({ policy: 'first-wins', describe: (v) => v });
+    const r = createRegistry<string>({ policy: 'first-wins' });
     r.add('x', 'alpha')();
+    // A disposed entry is not an incumbent: under first-wins the newcomer
+    // would be rejected if it were.
     r.add('x', 'gamma');
     expect(r.get('x')).toBe('gamma');
-    expect(r.collisions()).toEqual([]); // a disposed entry is not a collision
-  });
-
-  it('collisions() is a copy — a caller cannot edit the record', () => {
-    const r = createRegistry<string>({ policy: 'first-wins', describe: (v) => v });
-    r.add('x', 'a');
-    r.add('x', 'b');
-    (r.collisions() as unknown[]).push({});
-    expect(r.collisions()).toHaveLength(1);
   });
 
   // --- The three properties above, each isolated in its own test. ---
@@ -80,7 +78,7 @@ describe('createRegistry', () => {
     // enough to prove this — it would pass even if the loser's disposer
     // were a real, working disposer that nobody happened to call yet.
     // This test calls it.
-    const r = createRegistry<string>({ policy: 'first-wins', describe: (v) => v });
+    const r = createRegistry<string>({ policy: 'first-wins' });
     r.add('x', 'alpha');
     const loserOff = r.add('x', 'beta');
     loserOff();
@@ -98,7 +96,7 @@ describe('createRegistry', () => {
     // that removes by key alone, instead of by identity, evicts the
     // newcomer here even though it never touches the incumbent in the
     // collision case above.
-    const r = createRegistry<string>({ policy: 'first-wins', describe: (v) => v });
+    const r = createRegistry<string>({ policy: 'first-wins' });
     const off = r.add('x', 'alpha');
     off();
     r.add('x', 'beta');
@@ -107,7 +105,7 @@ describe('createRegistry', () => {
   });
 
   it('keys() preserves insertion order, because one adopter renders its contents as a list', () => {
-    const r = createRegistry<string>({ policy: 'last-wins', describe: (v) => v });
+    const r = createRegistry<string>({ policy: 'last-wins' });
     r.add('zebra', 'v1');
     r.add('alpha', 'v2');
     r.add('mu', 'v3');

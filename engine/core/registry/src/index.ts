@@ -1,45 +1,59 @@
 /**
  * A name→value collection with an explicit collision policy.
  *
- * Three call sites in this engine (play-loop's step registry,
- * game-runtime's mechanic registry, the IDE's slot registry) each
- * hand-roll "add under a key, decide what happens on a collision, hand
- * back a disposer that undoes only this registration" — and each shipped
- * the same silent-overwrite bug independently before being fixed. This
- * package gives that guarantee once instead of three times.
+ * **What this package holds, precisely.** Two things, and they are the two
+ * where all three adopters had bugs: the collision POLICY (what `add`
+ * does to the incumbent, and what disposer a rejected registration gets
+ * back), and the disposer's IDENTITY GUARD (a disposer removes the slot it
+ * created or nothing at all). Both were hand-rolled three times over — in
+ * play-loop's step registry, game-runtime's mechanic registry and the
+ * IDE's slot registry — and each copy shipped the same silent-overwrite
+ * defect independently before being fixed.
  *
- * Deliberately renderer/platform-free: no cordis, no contracts, no
- * diagnostics import. This is a data structure, not a plugin, and it does
- * not own diagnostic delivery — the three adopters report collisions three
- * different ways (a local array, `ctx.diagnostics`, a leniently-read
- * optional service) and word the sentence differently. `collisions()`
- * hands back structured data; turning it into a sentence and delivering it
- * is each adopter's job.
+ * **What each adopter still owns.** Everything about SAYING so. Each one
+ * reads `get(key)` on the line before `add()` to learn whether this call
+ * collided, writes its own `Diagnostic` in its own words (a step kind, a
+ * mechanic id, a slot key are three different sentences with three
+ * different `plugin`/`where` addresses), keeps that in its own array, and
+ * delivers it its own way — a local list `createGame` reads at compose
+ * time, `ctx.diagnostics`, a leniently-read optional `connection` service.
+ * That split was deliberate and reviewed; this package deliberately has no
+ * cordis, no contracts and no diagnostics import, so it could not deliver
+ * any of it even if it wanted to.
+ *
+ * It briefly ALSO offered `collisions()`, a `Collision` record type and a
+ * mandatory `describe` option to render one — the structured half of a
+ * report the adopters were then expected to word themselves. Nothing
+ * outside this package's own tests ever read any of the three, because
+ * each adopter already knew it had collided one line earlier and had the
+ * two values in hand. They are gone rather than documented: a dead API in
+ * a package whose whole purpose is removing duplication is its own small
+ * joke.
+ *
+ * **The fourth collection, and why it is not here.**
+ * `@energy8engine/spin-parser`'s `NamedCollection` is name-keyed with the
+ * same first-wins-and-diagnose rule, and two of the three adopters cite it
+ * as the precedent. It was considered and left alone: it has no disposal
+ * at all — a parsed `record` block is never unregistered, so the identity
+ * guard, which is half of what this package exists for, has nothing to
+ * guard. Its `insert()` also takes the source LINE and pushes the
+ * diagnostic itself, which is the shape a one-pass parser wants and the
+ * opposite of the read-then-add dance a live registry does. Adopting would
+ * hand it a disposer per entry that nobody can call and cost it the line
+ * number. If it ever grows removal, revisit this paragraph first.
  */
 
 export type CollisionPolicy = 'first-wins' | 'last-wins';
-
-export interface Collision {
-  key: string;
-  /** What stayed registered under `key`, described via `describe()`. */
-  kept: string;
-  /** What lost the collision and was never registered, described via `describe()`. */
-  dropped: string;
-}
 
 export interface NamedRegistry<T> {
   /** Adds under `key`. Returns a disposer that removes ONLY what it added. */
   add(key: string, value: T): () => void;
   get(key: string): T | undefined;
   keys(): readonly string[];
-  /** One entry per collision seen, in the order they happened. A copy. */
-  collisions(): readonly Collision[];
 }
 
-export interface RegistryOptions<T> {
+export interface RegistryOptions {
   policy: CollisionPolicy;
-  /** How an entry names itself in a collision report. */
-  describe: (value: T) => string;
 }
 
 /**
@@ -61,27 +75,21 @@ interface Slot<T> {
 }
 
 /** A fresh, empty `NamedRegistry` — nothing registered until something calls `add`. */
-export function createRegistry<T>(options: RegistryOptions<T>): NamedRegistry<T> {
-  const { policy, describe } = options;
+export function createRegistry<T>(options: RegistryOptions): NamedRegistry<T> {
+  const { policy } = options;
   const entries = new Map<string, Slot<T>>();
-  const collisions: Collision[] = [];
 
   return {
     add(key, value) {
       const incumbent = entries.get(key);
 
       if (incumbent !== undefined && policy === 'first-wins') {
-        // The incumbent keeps the key. Record the collision as data, but
-        // never touch `entries` and never hand this caller a disposer
-        // with any power over the winner — a rejected registration must
-        // not be able to delete what beat it.
-        collisions.push({ key, kept: describe(incumbent.value), dropped: describe(value) });
+        // The incumbent keeps the key: never touch `entries`, and never
+        // hand this caller a disposer with any power over the winner — a
+        // rejected registration must not be able to delete what beat it.
+        // Whether anyone is TOLD is the caller's business; it already
+        // knows, having read `get(key)` on the line before this one.
         return () => {};
-      }
-      if (incumbent !== undefined) {
-        // last-wins: the new value takes the key; the loss is the
-        // incumbent's.
-        collisions.push({ key, kept: describe(value), dropped: describe(incumbent.value) });
       }
 
       const slot: Slot<T> = { value };
@@ -107,12 +115,6 @@ export function createRegistry<T>(options: RegistryOptions<T>): NamedRegistry<T>
       // -present key (the last-wins replace above) keeps its original
       // position rather than moving it to the end.
       return [...entries.keys()];
-    },
-    collisions() {
-      // A copy, down to each row — not a view onto the live array and not
-      // a share of its element objects — so a caller can't edit the
-      // record by mutating what this returns.
-      return collisions.map((c) => ({ ...c }));
     },
   };
 }

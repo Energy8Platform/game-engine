@@ -398,6 +398,18 @@ function parseFieldList(
  * vocabulary, already relied on elsewhere), not arrays — "keep both" is
  * not a shape either of them can hold, so this is the one available rule,
  * applied identically to both callers below rather than invented per-site.
+ *
+ * **Not `@energy8engine/registry`, and that was decided rather than
+ * overlooked.** That package is the same first-wins-and-diagnose rule for
+ * the three LIVE registries, two of which cite this class as their
+ * precedent — but what it holds is the collision policy plus a disposer
+ * identity guard, and nothing here is ever unregistered: a parsed `record`
+ * block stays for the life of the schema. `insert()` also takes the source
+ * LINE and pushes the diagnostic itself, which is what a one-pass parser
+ * wants and the opposite of the read-then-add dance a live registry does.
+ * Adopting would buy a disposer per entry that nobody can call and cost
+ * the line number. See that package's own module doc, which records the
+ * same decision from its end.
  */
 class NamedCollection<T> {
   private readonly map: Record<string, T> = {};

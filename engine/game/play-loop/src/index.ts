@@ -190,10 +190,11 @@ export function createBoardStepRegistry(): BoardStepRegistry {
   // once instead of hand-rolled per collection — see
   // `registries-context.md`. What stays here is what the generic
   // collection cannot know on its own: deriving the key from
-  // `handler.kind` (it only ever sees a flat `(key, value)`), and
-  // rendering + storing THIS package's own collision diagnostic — the
-  // collection hands back structured facts, never a sentence.
-  const handlers = createRegistry<StepHandler>({ policy: 'first-wins', describe: (h) => h.kind });
+  // `handler.kind` (it only ever sees a flat `(key, value)`), and noticing
+  // + wording + storing THIS package's own collision diagnostic. The
+  // collection says nothing about a collision at all — `register` below
+  // reads `get(kind)` first and is the one that knows.
+  const handlers = createRegistry<StepHandler>({ policy: 'first-wins' });
   const collisions: Diagnostic[] = [];
 
   return {

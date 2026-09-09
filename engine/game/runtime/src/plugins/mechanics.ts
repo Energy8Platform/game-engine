@@ -185,15 +185,15 @@ export function apply(ctx: Context) {
   // Same guarantee `@energy8engine/play-loop`'s `BoardStepRegistry` now
   // gets from the same package, in place of a second hand-rolled `Map` +
   // has-then-set branch + identity-guarded removal — see
-  // `registries-context.md`. `ctx.effect`'s whole-registry teardown net
-  // (below, in `register`) is this adapter's own addition on top: the
-  // generic collection is deliberately cordis-free, so tying a winning
-  // registration to this service's own scope stays this file's job, not
-  // something the collection could do for it.
-  const mechanics = createRegistry<AnySpinMechanic>({
-    policy: 'first-wins',
-    describe: (m) => m.id,
-  });
+  // `registries-context.md`. The collision SENTENCE stays here, as it does
+  // in both other adopters: `register` reads `mechanics.get(id)` before
+  // adding, and the collection reports nothing itself. `ctx.effect`'s
+  // whole-registry teardown net (below, in `register`) is this adapter's
+  // own addition on top: the generic collection is deliberately
+  // cordis-free, so tying a winning registration to this service's own
+  // scope stays this file's job, not something the collection could do for
+  // it.
+  const mechanics = createRegistry<AnySpinMechanic>({ policy: 'first-wins' });
   const bindings = new Map<string, string>();
   const collisions: Diagnostic[] = [];
 

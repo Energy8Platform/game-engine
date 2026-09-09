@@ -48,10 +48,7 @@ export function apply(ctx: Context) {
   // collision diagnostic, delivering it leniently through `ctx.reflect`,
   // and calling `notify()` on every actual mutation. See `register`'s own
   // comment below for why the POLICY itself stays a replace.
-  const entries = createRegistry<SlotEntry>({
-    policy: 'last-wins',
-    describe: (entry) => `${entry.name}::${entry.key}`,
-  });
+  const entries = createRegistry<SlotEntry>({ policy: 'last-wins' });
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
