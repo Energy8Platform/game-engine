@@ -123,12 +123,16 @@ export function apply(ctx: Context) {
    *     named entry is deleted when the socket that owns it closes
    *     (`gameSocket` below is the ownership record that makes "the socket
    *     that owns it" answerable, since a `Diagnostic[]` says nothing
-   *     about who sent it) — and THAT ownership rule is what bounds this
-   *     map now, not decision 1's old count of two: a named entry only
-   *     exists while some socket currently claims that id, so the named
-   *     portion of this map can never outnumber the sockets that are open
-   *     and identified RIGHT NOW, a live fact about the running host, not
-   *     a growing history of every id it has ever used.
+   *     about who sent it) — and THAT release-on-close rule is what bounds
+   *     this map now, not decision 1's old count of two. Not "one entry
+   *     per open socket": one socket that names several different ids over
+   *     its life holds that many entries until IT closes (see
+   *     `gameSocket`'s own doc) — the actual guarantee is narrower, "no
+   *     entry outlives the socket that claimed it", which is not a hard
+   *     cap on how many can exist at any one instant. It is the wall's own
+   *     discipline of closing a tile's socket when the tile closes that
+   *     keeps this map from becoming a growing history of every id the
+   *     host has ever seen.
    */
   const lastGameDiagnostics = new Map<string | undefined, RetainedFrame>();
 

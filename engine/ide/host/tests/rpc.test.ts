@@ -772,4 +772,75 @@ describe('ide rpc — several games do not overwrite each other', () => {
     a.ws.close();
     editor.ws.close();
   });
+
+  it('a fresher reconnect for the same game survives a stale socket closing after it', async () => {
+    // A tile that reloads (or a page that reconnects before the old socket
+    // has noticed it is gone) is one socket handing a game's identity to
+    // another, live, and the OLD socket's own `close` must not be allowed
+    // to erase what the NEW one has since reported. A naive ownership
+    // record — one entry per SOCKET, "the last id I sent" — gets this
+    // wrong: it still remembers `stale` as `shared`'s claimant even after
+    // `fresh` has taken it over, so `stale`'s `close` deletes `fresh`'s
+    // still-live entry. Every other test in this describe block passes
+    // under that naive shape too, because none of them has two sockets
+    // contest the SAME game id — this is the one that does.
+    const stale = await connectClient();
+    const observer = await connectClient();
+
+    stale.ws.send(gameFrame('shared', 'A said this'));
+    await expect
+      .poll(() => observer.received.filter((m) => m.type === 'game-diagnostics'))
+      .toContainEqual(expect.objectContaining({ game: 'shared' }));
+
+    const fresh = await connectClient();
+    fresh.ws.send(gameFrame('shared', 'B said this'));
+    // Two relayed `shared` frames now (A's, then B's) — confirmed on the
+    // already-listening `observer`, so the host has provably recorded B's
+    // claim before `stale` closes below.
+    await expect
+      .poll(
+        () =>
+          observer.received.filter((m) => m.type === 'game-diagnostics' && m.game === 'shared')
+            .length,
+      )
+      .toBe(2);
+
+    stale.ws.close();
+    await new Promise((resolve) => stale.ws.once('close', resolve));
+
+    const late = await connectClient();
+    await expect.poll(() => late.received.some((m) => m.type === 'snapshot')).toBe(true);
+    const snapshot = late.received.find((m) => m.type === 'snapshot')!;
+    const id =
+      snapshot.type === 'snapshot'
+        ? snapshot.snapshot.rows.find((r) => r.name === 'probe-plugin')!.id
+        : '';
+
+    // Same "provoke a reply on late's OWN connection" technique as the
+    // ghost test above — the exact count below (not just "at least one")
+    // is only trustworthy once everything the host queued for `late` has
+    // necessarily already arrived.
+    late.ws.send(JSON.stringify({ type: 'update', id, config: { speed: 9 } }));
+    await expect
+      .poll(() =>
+        late.received.some(
+          (m) =>
+            m.type === 'snapshot' &&
+            JSON.stringify(m.snapshot.rows.find((r) => r.id === id)?.config) ===
+              JSON.stringify({ speed: 9 }),
+        ),
+      )
+      .toBe(true);
+
+    const sharedFrames = late.received.filter(
+      (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> =>
+        m.type === 'game-diagnostics' && m.game === 'shared',
+    );
+    expect(sharedFrames).toHaveLength(1);
+    expect(sharedFrames[0].diagnostics.map((d) => d.message)).toEqual(['B said this']);
+
+    late.ws.close();
+    fresh.ws.close();
+    observer.ws.close();
+  });
 });
