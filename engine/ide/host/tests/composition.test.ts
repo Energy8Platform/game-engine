@@ -77,7 +77,7 @@ describe('composition.snapshot', () => {
   // not one" red the moment `screendemo1` became a permanent `e8.yml` row:
   // that test counts rows in the diagnostics panel, and a third, unrelated
   // row is not the two it was written to expect. `schemaOf`'s own
-  // `MODULE_NOT_FOUND_CODES` check is what closes it — see that catch
+  // `NOTHING_IMPORTABLE_CODES` check is what closes it — see that catch
   // block's own doc for why the fix is not "skip when there's no
   // `e8.runtime`" or "skip when `readPackageJson` finds no main", both of
   // which were tried first and both of which broke something else
@@ -174,5 +174,34 @@ describe('composition.snapshot', () => {
       (d) => d.plugin === row!.id && d.where === 'schema',
     );
     expect(schemaDiagnostics).toEqual([]);
+  });
+
+  // Fix round 4 (task 7, "a screen is a plugin"): `hasImportableMain`
+  // required `exp['.']` to be a bare STRING, which missed the CONDITIONAL
+  // form — `"exports": { ".": { "import": "./index.js" } }` — the shape a
+  // package reaches for the moment it wants separate ESM/CommonJS targets,
+  // and at least as common as the plain-string form the other fixtures
+  // above use. `conditional-exports-missing` writes its `"."` exactly that
+  // way, with `./index.js` missing: Node resolves the `"."` key fine,
+  // matches the `"import"` condition, and only then discovers the file
+  // itself is not there — throwing the same `ERR_MODULE_NOT_FOUND`
+  // `missing-entry-hoisted` (round 2) does. Before this round,
+  // `hasImportableMain` saw an OBJECT at `exp['.']` and read it as
+  // "nothing declared", silencing a genuine broken-entry fault the same
+  // way round 1's original bug did — on a manifest shape this function
+  // itself had simply never been taught to look inside. `hasStringTarget`
+  // is what closes it: a real fault stays reported the moment ANY
+  // condition anywhere under `"."` — nested arbitrarily deep — names an
+  // actual file.
+  it('a row whose conditional export target is missing produces exactly one schema diagnostic', async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'conditional-exports-missing');
+    expect(row).toBeDefined();
+    expect(row!.schema).toBeNull();
+    const schemaDiagnostics = snapshot.diagnostics.filter(
+      (d) => d.plugin === row!.id && d.where === 'schema',
+    );
+    expect(schemaDiagnostics).toHaveLength(1);
+    expect(schemaDiagnostics[0].message).toContain('conditional-exports-missing');
   });
 });

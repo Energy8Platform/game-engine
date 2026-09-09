@@ -1,0 +1,6 @@
+{
+  "name": "conditional-exports-missing",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": { ".": { "import": "./index.js" }, "./package.json": "./package.json" }
+}

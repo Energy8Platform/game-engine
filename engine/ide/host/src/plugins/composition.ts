@@ -66,6 +66,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Whether an `exports` CONDITIONS value — the value a `"."` key (or any
+ * nested condition inside it) can hold — names an actual file anywhere
+ * under it: a bare string target, or an object of further conditions
+ * (`"import"`, `"require"`, `"default"`, a runtime name, …) where at least
+ * one of THOSE holds a string, checked recursively so a condition nested
+ * two or more levels deep — `{ "node": { "import": "./x.js" } }` — still
+ * counts. An object with no string anywhere under it — `{}`, or a set of
+ * conditions that only ever nest further objects — genuinely names
+ * nothing importable, the same as no `"."` key at all.
+ */
+function hasStringTarget(value: unknown): boolean {
+  if (typeof value === 'string') return true;
+  return isRecord(value) && Object.values(value).some(hasStringTarget);
+}
+
+/**
  * Whether a package.json declares anywhere for a bare `import(name)` to
  * land: a `"main"` field, or an `exports` map with a `"."` entry (the
  * shorthand `"exports": "./foo.js"` form counts too). Used only to decide
@@ -73,13 +89,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * that decision in `schemaOf`'s own catch block for why "was a main
  * declared" and "did `readPackageJson` find a package.json at all" are
  * two different questions this needs answered separately.
+ *
+ * Fix round 4: `exp['.']` used to have to be a STRING for this to return
+ * `true` — which missed the modern, and at least as common, conditional
+ * form: `"exports": { ".": { "import": "./index.js" } }`, the shape a
+ * package reaches for the moment it wants separate ESM and CommonJS
+ * targets. A hoisted package written that way, with `./index.js` missing,
+ * throws the same `ERR_MODULE_NOT_FOUND` `missing-entry-hoisted` (round 2)
+ * does — Node resolves the `"."` key fine, matches the `"import"`
+ * condition, and only then discovers the file it points to is not there —
+ * but `hasImportableMain` read the OBJECT at `exp['.']` as "nothing
+ * declared" and this function silenced it: the exact outcome the three
+ * rounds before this one exist to prevent, on a manifest shape this
+ * function itself was never taught to recognize. `hasStringTarget`, above,
+ * is what closes it — a real fault stays reported the moment ANY condition
+ * anywhere under `"."` names a file; only a `"."` with no string target at
+ * all (this plugin's actual client-only case, and `client-only`/
+ * `client-only-hoisted`'s fixtures) stays quiet.
  */
 function hasImportableMain(pkgJson: unknown): boolean {
   if (!isRecord(pkgJson)) return false;
   if (typeof pkgJson.main === 'string') return true;
   const exp = pkgJson.exports;
   if (typeof exp === 'string') return true;
-  return isRecord(exp) && typeof exp['.'] === 'string';
+  return isRecord(exp) && hasStringTarget(exp['.']);
 }
 
 /**

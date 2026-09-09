@@ -14,3 +14,6 @@
 - id: clientonlyhoisted1
   name: client-only-hoisted
   config: {}
+- id: conditionalexportsmissing1
+  name: conditional-exports-missing
+  config: {}
