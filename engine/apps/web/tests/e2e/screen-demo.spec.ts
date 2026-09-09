@@ -49,7 +49,7 @@ test('a project plugin brings its own screen, no engine change required', async 
     // exists" (testid) and "it says the right thing" (role name), so a
     // wording change alone cannot make this half look broken.
     const tab = page.getByTestId('tab-demo');
-    await expect(tab, 'screen-demo\'s apply(ctx) must have called ctx.layout.screen').toBeVisible({
+    await expect(tab, "screen-demo's apply(ctx) must have called ctx.layout.screen").toBeVisible({
       timeout: 20_000,
     });
 
@@ -106,6 +106,17 @@ test('the demo screen can be made to fail as data, on request, without taking th
     await expect(compositionTab).toBeVisible();
     await compositionTab.click();
     await expect(compositionTab).toHaveAttribute('aria-selected', 'true');
+
+    // `aria-selected` alone lives in `Layout.tsx`'s `<nav>` and flips on
+    // `current?.id` regardless of whether `<main>` actually recovered — it
+    // would read exactly this way even if `<ScreenBoundary>` stayed stuck
+    // showing the crashed screen's own stale fallback. `key={current.id}`
+    // on that boundary (`Layout.tsx`'s own doc explains why at length) is
+    // what makes React discard the errored instance instead of reusing it,
+    // and this is the one assertion that actually depends on that: the
+    // composition screen's own unconditional heading, which only a fresh,
+    // successfully-rendered `CompositionScreen` puts on the page.
+    await expect(page.getByRole('heading', { name: 'Состав' })).toBeVisible();
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
