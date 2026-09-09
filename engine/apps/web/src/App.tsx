@@ -3,6 +3,7 @@ import type { Context } from 'cordis';
 import {
   CompositionScreen,
   DiagnosticsPanel,
+  Layout,
   useEditorDiagnostics,
   useGameComposition,
   useGameDiagnostics,
@@ -34,28 +35,36 @@ function DiagnosticsPanelCard({ ctx }: { ctx: Context }) {
 }
 
 /**
- * The app shell. A single screen today (`CompositionScreen`, the only one
- * this plan builds) — kept as its own component, separate from the
- * bootstrap in `main.tsx`, so a later screen or a router has somewhere to
- * go without main.tsx growing UI concerns.
+ * `ctx.layout` mounts a registered screen as `<component ctx={ctx} />` —
+ * `ctx` alone, nothing else (see `layout.tsx`'s `ScreenEntry`) — so the
+ * GAME's resolved composition rows, which `App` used to read once for
+ * itself and hand down, have to be fetched right here instead, one level
+ * lower than before this screen became a registration. Handed to
+ * `CompositionScreen` exactly as `App` used to hand them.
+ */
+function CompositionScreenEntry({ ctx }: { ctx: Context }) {
+  const { rows } = useGameComposition(ctx);
+  return <CompositionScreen ctx={ctx} rows={rows ?? undefined} />;
+}
+
+/**
+ * The app shell. Registers the composition screen and draws `<Layout/>` —
+ * it does not render a screen itself, and does not know how many are
+ * registered; a second screen is another `ctx.layout.screen` call away,
+ * made by whichever plugin owns it, not by another edit here. Before this,
+ * `App` rendered `CompositionScreen` directly, which made it the one place
+ * a second screen would have had to be wired in by hand.
  *
- * Two halves reach `CompositionScreen` from two different places, which is
- * the point of it taking them as separate props: the EDITOR's own plugin
- * graph off `ctx` (live, over the `/ide` socket), and the GAME's resolved
- * composition rows off `ctx.gameComposition` (fetched once from
- * `/api/composition` — see `game-composition.tsx`).
- *
- * The PROJECT's own diagnostics from that same fetch, and the GAME's own
- * (task 7's `ctx.gameDiagnostics`), do NOT go to `CompositionScreen` at
- * all — they reach the screen only via the slot registration below.
- * `DiagnosticsPanel` is the one place they sit together, each row marked
- * which side it came from (see `CompositionScreen.tsx`'s own comment on
- * `GameComposition` for why a second, standalone copy of the project half
- * used to live there and does not anymore).
+ * The PROJECT's own diagnostics (`CompositionScreenEntry`'s own
+ * `useGameComposition` fetch) and the GAME's own (`ctx.gameDiagnostics`)
+ * do NOT go to `CompositionScreen` at all — they reach the screen only via
+ * the slot registration below. `DiagnosticsPanel` is the one place they
+ * sit together, each row marked which side it came from (see
+ * `CompositionScreen.tsx`'s own comment on `GameComposition` for why a
+ * second, standalone copy of the project half used to live there and does
+ * not anymore).
  */
 export function App({ ctx }: { ctx: Context }) {
-  const { rows } = useGameComposition(ctx);
-
   useEffect(() => {
     return ctx.slots.register({ name: 'composition.card', key: 'diagnostics' }, () => (
       <DiagnosticsPanelCard ctx={ctx} />
@@ -63,5 +72,10 @@ export function App({ ctx }: { ctx: Context }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  return <CompositionScreen ctx={ctx} rows={rows ?? undefined} />;
+  useEffect(() => {
+    return ctx.layout.screen({ id: 'composition', title: 'Composition' }, CompositionScreenEntry);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  return <Layout ctx={ctx} />;
 }

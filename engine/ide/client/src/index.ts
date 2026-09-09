@@ -29,11 +29,7 @@ export {
 } from './plugins/diagnostics';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
-export {
-  CompositionScreen,
-  Preview,
-  computePreviewUrl,
-  useEditorDiagnostics,
-} from './screens/CompositionScreen';
+export { CompositionScreen, useEditorDiagnostics } from './screens/CompositionScreen';
+export { Preview, computePreviewUrl } from './screens/PreviewWall';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Layout } from './screens/Layout';

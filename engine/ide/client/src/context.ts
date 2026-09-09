@@ -2,6 +2,7 @@ import { Context } from 'cordis';
 import * as connection from './plugins/connection';
 import type { ConnectionConfig } from './plugins/connection';
 import * as slots from './plugins/slots';
+import * as layout from './plugins/layout';
 import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
 import * as gameComposition from './plugins/game-composition';
@@ -25,6 +26,11 @@ export async function createIdeClient(
   const ctx = new Context();
   await ctx.plugin(connection, config);
   await ctx.plugin(slots);
+  // Screens are the same kind of contribution cards already are (a
+  // registry a plugin's client half adds to, `App` merely draws) — see
+  // `layout.tsx`'s own doc — so it composes alongside `slots` here, before
+  // the plugins that fetch or forward data rather than just hold state.
+  await ctx.plugin(layout);
   await ctx.plugin(modules, config);
   await ctx.plugin(gameComposition, config);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
