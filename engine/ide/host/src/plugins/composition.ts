@@ -443,6 +443,14 @@ export function apply(ctx: Context, config: CompositionConfig) {
           schema: schemaResult.schema,
           hot: parsed.manifest?.hot ?? false,
           clientUrl: parsed.manifest?.client ? `/plugin-client/${entry.id}` : null,
+          // Sent even for a row the composition has switched off. The
+          // browser needs both facts, and they are different ones: a null
+          // `clientUrl` means "this package has no client half at all",
+          // `disabled` means "it has one and this composition does not want
+          // it running". Folding the second into the first would leave the
+          // editor unable to tell them apart, and `modules.ts` is where the
+          // decision belongs anyway — it is the thing that loads.
+          clientInject: parsed.manifest?.client?.inject ?? [],
         });
       }
 

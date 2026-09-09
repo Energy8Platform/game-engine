@@ -31,7 +31,7 @@
  * Every project is a private `projectCopy()`, removed in a `finally` — see
  * `./project-fixture` for why a copy, why it lands beside the checked-in
  * fixture rather than in a temp dir, and for the options this suite adds to
- * it (`removeRowId`, `specId`, `duplicateSlotKey`), each documented at its
+ * it (`removeRowId`, `specId`, `duplicateScreenId`), each documented at its
  * own declaration in that file rather than repeated here.
  */
 import { rmSync } from 'node:fs';
@@ -121,16 +121,16 @@ test("a /api/spin failure appears in the game's own log, not only in the IDE", a
  * attributed to `editor` — and the composition screen no longer keeps a
  * diagnostics list of its own.
  *
- * `duplicateSlotKey` (see `./project-fixture`) inserts two editor-side rows
- * that both import the same plugin client half, which registers into the
- * `composition.card` slot under one hardcoded key — the exact collision
- * `@energy8engine/registry`'s last-wins policy (task 3) reports rather than
- * silently allows. That reaches `ctx.connection`, which is what
+ * `duplicateScreenId` (see `./project-fixture`) gives the project a second
+ * row naming `screen-demo`, so that one client half is imported twice and
+ * registers a screen under one hardcoded id both times — the exact
+ * collision `@energy8engine/registry`'s last-wins policy (task 3) reports
+ * rather than silently allows. That reaches `ctx.connection`, which is what
  * `useEditorDiagnostics` reads and `DiagnosticsPanelCard` (`apps/web`'s own
  * `App.tsx`) hands to `DiagnosticsPanel`'s `editor` prop — task 7's
  * `editorCount → editor: readonly Diagnostic[]` change, proven here for
  * the first time against a REAL collision reported through the REAL
- * `ctx.slots` registry, rather than a `DiagnosticsPanel` handed a
+ * `ctx.layout` registry, rather than a `DiagnosticsPanel` handed a
  * hand-built array directly, or a hook driven through a bare
  * `ctx.connection.report()` call with nothing actually colliding.
  *
@@ -157,7 +157,7 @@ test("a /api/spin failure appears in the game's own log, not only in the IDE", a
  * and closes the race; it is not part of the claim being proven.
  */
 test("the editor's own trouble appears in the panel, and nowhere else", async ({ page }) => {
-  const project = projectCopy({ duplicateSlotKey: true });
+  const project = projectCopy({ duplicateScreenId: true });
   const host = await startDevHost(project);
   try {
     await page.goto(host.gameUrl);

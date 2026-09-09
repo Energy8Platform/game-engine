@@ -100,6 +100,7 @@ function snapshotMessage(rows: { name: string; config: unknown }[]): ServerMessa
         schema: null,
         hot: true,
         clientUrl: null,
+        clientInject: [],
       })),
       diagnostics: [],
     },

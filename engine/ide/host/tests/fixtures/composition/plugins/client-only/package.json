@@ -3,5 +3,5 @@
   "version": "0.0.0",
   "type": "module",
   "exports": { "./client": "./client.js", "./package.json": "./package.json" },
-  "e8": { "client": { "entry": "./client.js" }, "hot": false }
+  "e8": { "client": { "entry": "./client.js", "inject": ["slots", "layout"] }, "hot": false }
 }

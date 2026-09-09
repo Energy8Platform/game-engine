@@ -13,6 +13,7 @@ const SNAPSHOT: Snapshot = {
       schema: null,
       hot: true,
       clientUrl: null,
+      clientInject: [],
     },
   ],
   diagnostics: [],

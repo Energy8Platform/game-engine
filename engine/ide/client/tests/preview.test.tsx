@@ -51,6 +51,7 @@ function row(overrides: Partial<CompositionRow>): CompositionRow {
     schema: null,
     hot: true,
     clientUrl: null,
+    clientInject: [],
     ...overrides,
   };
 }

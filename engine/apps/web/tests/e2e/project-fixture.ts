@@ -114,44 +114,35 @@ export interface ProjectCopyOptions {
   specId?: string;
 
   /**
-   * Insert two editor-side rows into `e8.yml`, both naming
-   * `e8-example-probe` (`engine/examples/probe-plugin` — the same package
-   * `examples/workspace/e8.yml` composes ONE of, and `skeleton.spec.ts`
-   * already proves renders live, card text and all) — the second one
-   * `disabled: true`.
+   * Insert a SECOND editor-side row naming `screen-demo` — the project
+   * already carries `screendemo1` in its own `e8.yml`, so this makes two
+   * rows importing that one client half.
    *
-   * That package's client half (`src/client.js`) registers into the
-   * `composition.card` slot under a key HARDCODED in that file —
-   * `'probe'` — never derived from the row id, and never consulting
-   * whether the ROW is disabled: `modules.ts` imports and applies a row's
-   * `clientUrl` on its `clientUrl` alone, and a disabled entry's manifest
-   * — hence its `clientUrl` — resolves exactly the same as an enabled
-   * one's (`composition.ts`'s snapshot reads the package, not the fiber).
-   * So two rows importing the same module both call
-   * `ctx.slots.register({ name: 'composition.card', key: 'probe' }, …)`
-   * with the identical key, and the second call is exactly the collision
+   * That half registers a screen under an id HARDCODED in it (`'demo'`,
+   * `plugins/screen-demo/src/client.js`), never derived from the row id.
+   * So the second row's `apply` calls `ctx.layout.screen({ id: 'demo' }, …)`
+   * over an id that is already taken, and that is exactly the collision
    * `@energy8engine/registry`'s last-wins policy (task 3) exists to REPORT
-   * rather than silently allow — see `plugins/slots.tsx`'s own comment for
+   * rather than silently allow — see `plugins/layout.tsx`'s own comment for
    * why that collection stays a replace, not a refusal, and reports the
    * replace anyway.
    *
-   * `disabled: true` is load-bearing, not decoration. That package's
-   * SERVER half (`src/index.ts`) also calls `ctx.provide('probe', …)`,
-   * and cordis refuses a second provider of a service already provided —
-   * fine for ONE extra row (`composition.ts`'s per-entry failure tracking
-   * turns that into a plain `apply` diagnostic, same as any other broken
-   * row), except that the failure is delivered by an UNHANDLED REJECTION
-   * the host can only recognize AFTER THE FACT (see that file's own long
-   * comment on `ensureUnhandledRejectionGuard`), which measured out as a
-   * genuine, occasional race against Node's own unhandled-rejection
-   * detection — this fixture crashed the host process under Playwright on
-   * exactly this timing before `disabled: true` was added, even though a
-   * standalone repro of the same two rows (no Playwright involved) did
-   * not. A disabled entry never applies at all — no fiber runs, no second
-   * `ctx.provide`, nothing to race — so the ONLY collision left is the one
-   * this option exists to stage, on the browser side, every time.
+   * **Two rows of the same CLIENT-ONLY package, both enabled.** This used
+   * to stage the same collision through `e8-example-probe` and its
+   * `composition.card` slot key, with the second row `disabled: true` —
+   * which worked only because a disabled row's client half was imported
+   * and applied anyway, the very defect the final review found. Now it is
+   * not, so a disabled row stages nothing at all. Enabling both probe rows
+   * instead was rejected: that package's SERVER half calls
+   * `ctx.provide('probe', …)`, cordis refuses a second provider, and the
+   * refusal arrives as an unhandled rejection the host can only recognize
+   * after the fact (see `composition.ts`'s own comment on
+   * `ensureUnhandledRejectionGuard`) — a race that crashed the host under
+   * Playwright when it was last tried. `screen-demo` declares no
+   * `e8.runtime` at all, so there is no server half to collide, and both
+   * rows can simply be on.
    */
-  duplicateSlotKey?: boolean;
+  duplicateScreenId?: boolean;
 }
 
 export function projectCopy(options: ProjectCopyOptions = {}): string {
@@ -180,12 +171,8 @@ export function projectCopy(options: ProjectCopyOptions = {}): string {
     const spec = JSON.parse(readFileSync(specFile, 'utf8')) as Record<string, unknown>;
     writeFileSync(specFile, JSON.stringify({ ...spec, id: options.specId }, null, 2));
   }
-  if (options.duplicateSlotKey) {
-    appendFileSync(
-      join(dir, 'e8.yml'),
-      '\n- id: probe1\n  name: e8-example-probe\n  config: {}\n' +
-        '- id: probe2\n  name: e8-example-probe\n  disabled: true\n  config: {}\n',
-    );
+  if (options.duplicateScreenId) {
+    appendFileSync(join(dir, 'e8.yml'), '\n- id: screendemo2\n  name: screen-demo\n  config: {}\n');
   }
   return dir;
 }

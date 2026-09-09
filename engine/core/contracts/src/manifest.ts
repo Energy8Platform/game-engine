@@ -48,7 +48,21 @@ import { type Diagnostic, diagnostic } from './diagnostic';
 export interface E8ClientHalf {
   /** Module path inside the package, relative to its root. */
   entry: string;
-  /** Client services this half needs before it can register anything. */
+  /**
+   * Client services this half needs before it can register anything —
+   * `ctx.layout`, `ctx.slots`, `ctx.gameComposition` and so on, named
+   * exactly as the editor provides them.
+   *
+   * **This is the one place a client half declares its needs.** The host
+   * copies the list onto `CompositionRow.clientInject`, and the editor's
+   * `modules.ts` hands it to `ctx.plugin()`, which holds the half pending
+   * until every named service exists. A half that reaches for a service it
+   * did not name here gets cordis's own `cannot get property "x" without
+   * inject` back, reported as a diagnostic against its row. A module-level
+   * `export const inject` is NOT consulted: the host has to know a half's
+   * needs without importing it, and one declaration that both sides read
+   * cannot disagree with itself.
+   */
   inject: string[];
 }
 

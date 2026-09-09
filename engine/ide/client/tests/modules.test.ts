@@ -1,23 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ServerMessage, Snapshot } from '@energy8engine/contracts';
+import type { CompositionRow, ServerMessage, Snapshot } from '@energy8engine/contracts';
 import { createIdeClient } from '../src/index';
 
-function snapshotWith(clientUrl: string | null): Snapshot {
+function row(over: Partial<CompositionRow> = {}): CompositionRow {
   return {
-    rows: [
-      {
-        id: 'a:probe1',
-        name: 'probe-plugin',
-        disabled: false,
-        state: 2,
-        config: {},
-        schema: null,
-        hot: true,
-        clientUrl,
-      },
-    ],
-    diagnostics: [],
+    id: 'a:probe1',
+    name: 'probe-plugin',
+    disabled: false,
+    state: 2,
+    config: {},
+    schema: null,
+    hot: true,
+    clientUrl: '/plugin-client/a:probe1',
+    clientInject: [],
+    ...over,
   };
+}
+
+function snapshotWith(clientUrl: string | null, clientInject: string[] = []): Snapshot {
+  return { rows: [row({ clientUrl, clientInject })], diagnostics: [] };
 }
 
 // `createIdeClient` is async (Task 8, Ruling 2), so this harness must be too
@@ -26,7 +27,16 @@ function snapshotWith(clientUrl: string | null): Snapshot {
 // `WebSocketLike` (Task 8) even though these tests never exercise sending —
 // shaped like the fake socket in tests/connection.test.ts, not the brief's
 // (which omits it and fails to typecheck).
-async function harness(importModule: (url: string) => Promise<unknown>) {
+//
+// `fetchFn` is stubbed for `game-composition`, which fetches `/api/composition`
+// at boot: jsdom has no host to answer it, and a real (failing) fetch would
+// leave an unrelated diagnostic in that service's own list and a pending
+// promise in every test here. `composition` (a service beyond `layout`) is
+// what the inject tests below actually reach for, so it has to answer.
+async function harness(
+  importModule: (url: string) => Promise<unknown>,
+  rows: unknown[] = [{ id: 'boot1' }],
+) {
   const listeners: ((event: any) => void)[] = [];
   const socket = {
     readyState: 1,
@@ -40,6 +50,10 @@ async function harness(importModule: (url: string) => Promise<unknown>) {
     url: 'ws://x/ide',
     socketFactory: () => socket,
     importModule,
+    fetchFn: (async () =>
+      new Response(JSON.stringify({ rows, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch,
   });
   const push = (message: ServerMessage) => {
     for (const listener of listeners) listener({ data: JSON.stringify(message) });
@@ -57,7 +71,7 @@ describe('modules', () => {
     await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
 
     expect(importModule).toHaveBeenCalledWith('/plugin-client/a:probe1');
-    expect(ctx.modules.loaded()).toEqual(['a:probe1']);
+    await vi.waitFor(() => expect(ctx.modules.loaded()).toEqual(['a:probe1']));
   });
 
   it('does not import the same half twice across snapshots', async () => {
@@ -100,6 +114,10 @@ describe('modules', () => {
 
     expect(ctx.connection.diagnostics.length).toBeGreaterThan(0);
     expect(ctx.connection.diagnostics[0].message).toContain('boom');
+    // An import that never happened is the one failure "check the plugin
+    // client entry in its package.json" is actually about — see the
+    // apply-failure test below for why the other path may not say this.
+    expect(ctx.connection.diagnostics[0].fix).toContain('package.json');
   });
 
   // Fix round 1: a permanently-poisoned row (never releasing the claimed
@@ -135,21 +153,33 @@ describe('modules', () => {
     expect(importModule).toHaveBeenCalledTimes(3);
   });
 
-  // Fix round 2 (task 7, "a screen is a plugin"): this `inject` list named
-  // `connection` and `slots` and stopped there, because until this task
-  // nothing had ever tried to reach `ctx.layout` from a DYNAMICALLY loaded
-  // client half — `App.tsx` registers the composition and preview screens
-  // by calling `ctx.layout.screen` on the unrestricted root `ctx` it was
-  // handed directly, never through this plugin's `sync`. The first project
-  // plugin that tried (`engine/examples/first-slot/plugins/screen-demo`)
-  // got cordis's own "cannot get property 'layout' without inject" back —
-  // the exact shape of a service that genuinely exists on the composed
-  // context but is invisible from a scope that never declared it. Adding
-  // `layout` here is the whole fix; nothing about `ctx.layout` itself
-  // changed. Pinned so a future new plugin service does not silently
-  // repeat this — reachable from `App.tsx` on day one, unreachable from
-  // every project plugin until someone happens to try one.
-  it('a dynamically loaded client half can reach ctx.layout, not only ctx.slots', async () => {
+  it('treats a client half with no apply export as loaded, not a failure', async () => {
+    const importModule = vi.fn(async () => ({}));
+    const { ctx, push } = await harness(importModule);
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
+    await vi.waitFor(() => expect(ctx.modules.loaded()).toEqual(['a:probe1']));
+
+    expect(ctx.connection.diagnostics).toHaveLength(0);
+  });
+});
+
+/**
+ * A client half is applied through `ctx.plugin()`, not by calling
+ * `half.apply(ctx)` — so it gets a cordis fiber of its own, and the
+ * `e8.client.inject` its package.json declares is what decides which
+ * services that fiber can see.
+ *
+ * The direct call gave a half exactly the services `modules` itself
+ * happened to `inject`, and nothing else: a hardcoded allowlist, three
+ * services wide, maintained in `modules.ts` on behalf of every plugin
+ * anyone would ever write. A half reaching for anything else got cordis's
+ * own `cannot get property "x" without inject` — measured, not assumed,
+ * against `ctx.gameComposition` and `ctx.gameDiagnostics`, both of them
+ * real, both of them composed by `createIdeClient` two lines away.
+ */
+describe('modules — a half declares what it needs, and gets it', () => {
+  it('reaches ctx.layout when its row declares it', async () => {
     const registered: string[] = [];
     const importModule = vi.fn(async () => ({
       apply(ctx: { layout: { screen: (meta: { id: string }, component: unknown) => void } }) {
@@ -159,20 +189,148 @@ describe('modules', () => {
     }));
     const { ctx, push } = await harness(importModule);
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
+    push({
+      type: 'snapshot',
+      snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']),
+    });
     await vi.waitFor(() => expect(registered).toEqual(['from-a-plugin']));
 
     expect(ctx.connection.diagnostics).toHaveLength(0);
     expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin');
   });
 
-  it('treats a client half with no apply export as loaded, not a failure', async () => {
-    const importModule = vi.fn(async () => ({}));
-    const { ctx, push } = await harness(importModule);
+  // The claim `layout` alone cannot prove: `layout` was one of the three
+  // names the old hardcoded list held, so a half reaching it would have
+  // worked either way. `gameComposition` was never on that list, and this
+  // is the test that fails if the inject list on the wire stops being
+  // honoured.
+  it('reaches a service beyond layout — one the editor never allowlisted', async () => {
+    const seen: { rows: unknown[] | null }[] = [];
+    const importModule = vi.fn(async () => ({
+      apply(ctx: { gameComposition: { rows: unknown[] | null } }) {
+        // The service itself, not a snapshot of it: the fetch behind it may
+        // not have settled when this half applies, and what is under test
+        // is that the half reached the LIVE service — the same object the
+        // editor's own screens read — not that it got a value early.
+        seen.push(ctx.gameComposition);
+      },
+    }));
+    const { ctx, push } = await harness(importModule, [{ id: 'boot1' }, { id: 'reels1' }]);
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
-    await vi.waitFor(() => expect(ctx.modules.loaded()).toEqual(['a:probe1']));
+    push({
+      type: 'snapshot',
+      snapshot: snapshotWith('/plugin-client/a:probe1', ['gameComposition']),
+    });
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    await vi.waitFor(() => expect(seen[0].rows).toEqual([{ id: 'boot1' }, { id: 'reels1' }]));
 
     expect(ctx.connection.diagnostics).toHaveLength(0);
+  });
+
+  it('reports a half that reaches for a service it did not declare, and says where to declare it', async () => {
+    const importModule = vi.fn(async () => ({
+      apply(ctx: { gameComposition: { rows: unknown[] | null } }) {
+        void ctx.gameComposition.rows;
+      },
+    }));
+    const { ctx, push } = await harness(importModule);
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await vi.waitFor(() => expect(ctx.connection.diagnostics).toHaveLength(1));
+
+    expect(ctx.connection.diagnostics[0].message).toContain('gameComposition');
+    // The fix a person can act on. "check the plugin client entry in its
+    // package.json" — the advice this path used to give — cannot help
+    // here: the entry imported fine, and it is the inject list that is
+    // short.
+    expect(ctx.connection.diagnostics[0].fix).toContain('e8.client.inject');
+    expect(ctx.modules.loaded()).toEqual([]);
+  });
+
+  // cordis holds a plugin PENDING until every service it injects exists,
+  // and a fiber that never starts throws nothing and renders nothing —
+  // the one failure a person cannot see from the screen. So it is said.
+  it('says so when a declared service does not exist, instead of never starting in silence', async () => {
+    const apply = vi.fn();
+    const importModule = vi.fn(async () => ({ apply }));
+    const { ctx, push } = await harness(importModule);
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['nosuchthing']) });
+    await vi.waitFor(() => expect(ctx.connection.diagnostics).toHaveLength(1));
+
+    expect(apply).not.toHaveBeenCalled();
+    expect(ctx.connection.diagnostics[0].message).toContain('nosuchthing');
+    expect(ctx.modules.loaded()).toEqual([]);
+  });
+});
+
+/**
+ * The other half of applying through cordis: a fiber can be disposed, so a
+ * row that leaves the composition — deleted from `e8.yml`, or switched off
+ * with `disabled: true` — takes its plugin's contributions with it. The
+ * direct `half.apply(ctx)` call had nothing to hand back, so a screen
+ * outlived the row that put it there and the IDE went on rendering code
+ * from a plugin the composition said was gone.
+ *
+ * A half registers through `ctx.effect` for this to work — cordis's own
+ * contract, demonstrated by `first-slot`'s `screen-demo` plugin.
+ */
+describe('modules — a row that goes takes its screen with it', () => {
+  const screenHalf = () => ({
+    apply(ctx: {
+      effect: (execute: () => () => void, label: string) => unknown;
+      layout: { screen: (meta: { id: string }, component: unknown) => () => void };
+    }) {
+      ctx.effect(() => ctx.layout.screen({ id: 'from-a-plugin' }, () => null), 'demo');
+    },
+  });
+
+  it('removes a screen when the row leaves the snapshot', async () => {
+    const { ctx, push } = await harness(vi.fn(async () => screenHalf()));
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await vi.waitFor(() =>
+      expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin'),
+    );
+
+    push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+    await vi.waitFor(() =>
+      expect(ctx.layout.screens().map((s) => s.id)).not.toContain('from-a-plugin'),
+    );
+    expect(ctx.modules.loaded()).toEqual([]);
+  });
+
+  it('removes a screen when the row is switched off, and brings it back when it returns', async () => {
+    const { ctx, push } = await harness(vi.fn(async () => screenHalf()));
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await vi.waitFor(() =>
+      expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin'),
+    );
+
+    push({
+      type: 'snapshot',
+      snapshot: { rows: [row({ disabled: true, clientInject: ['layout'] })], diagnostics: [] },
+    });
+    await vi.waitFor(() =>
+      expect(ctx.layout.screens().map((s) => s.id)).not.toContain('from-a-plugin'),
+    );
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await vi.waitFor(() =>
+      expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin'),
+    );
+  });
+
+  it('never imports a half whose row is already switched off', async () => {
+    const importModule = vi.fn(async () => screenHalf());
+    const { push } = await harness(importModule);
+
+    push({
+      type: 'snapshot',
+      snapshot: { rows: [row({ disabled: true, clientInject: ['layout'] })], diagnostics: [] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(importModule).not.toHaveBeenCalled();
   });
 });

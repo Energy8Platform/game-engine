@@ -14,10 +14,10 @@
  *     break hooks (they rely on exactly one module instance).
  *
  * Instead, the IDE shell publishes the one React it runs on as a global
- * before it boots its client context: `globalThis.__E8_IDE__ = { React }`
- * (see `engine/apps/web/src/main.tsx`). Every client half reads React from
- * there, so the whole IDE — shell and every plugin's card — shares one
- * instance.
+ * before it boots its client context, alongside the hooks a plugin's own
+ * screen needs (see `engine/apps/web/src/main.tsx`). Every client half
+ * reads React from there, so the whole IDE — shell and every plugin's card
+ * — shares one instance.
  */
 const { React } = globalThis.__E8_IDE__;
 
@@ -25,14 +25,23 @@ const { React } = globalThis.__E8_IDE__;
  * `apply(ctx)` is called once this module has been imported. The IDE shell
  * never had to know this plugin exists: it only knows the `composition.card`
  * slot, and this plugin is the one deciding what goes into it.
+ *
+ * `ctx` is this plugin's own cordis fiber, and it can see exactly the
+ * services this package's `e8.client.inject` names — `slots`, here.
+ * Registering through `ctx.effect` is what lets the editor take the card
+ * back when the row goes: disposing the fiber runs the effect's disposer.
  */
 export function apply(ctx) {
-  ctx.slots.register({ name: 'composition.card', key: 'probe' }, () =>
-    React.createElement(
-      'aside',
-      { className: 'e8-card' },
-      React.createElement('h2', null, 'Проба'),
-      React.createElement('p', null, 'Эта карточка пришла из плагина, а не из оболочки.'),
-    ),
+  ctx.effect(
+    () =>
+      ctx.slots.register({ name: 'composition.card', key: 'probe' }, () =>
+        React.createElement(
+          'aside',
+          { className: 'e8-card' },
+          React.createElement('h2', null, 'Проба'),
+          React.createElement('p', null, 'Эта карточка пришла из плагина, а не из оболочки.'),
+        ),
+      ),
+    'probe:card',
   );
 }

@@ -23,6 +23,20 @@ export interface CompositionRow {
   hot: boolean;
   /** Where the browser fetches this plugin's client half, or null when it has none. */
   clientUrl: string | null;
+  /**
+   * What that client half declared it needs — `e8.client.inject`, verbatim.
+   * Empty when the row has no client half, and empty when it has one that
+   * asks for nothing.
+   *
+   * Travels beside `clientUrl` because the browser applies a half through
+   * `ctx.plugin()`, and cordis reads a plugin's needs off the object it is
+   * handed, before the plugin runs. The editor never imports a package.json
+   * — only the host can read one — so the host says here what the half
+   * asked for, and `modules.ts` passes it straight to cordis. Without it
+   * the field would be parsed, typed and read by nobody, which is exactly
+   * why the RUNTIME half's own `inject` was deleted (see `E8RuntimeHalf`).
+   */
+  clientInject: string[];
 }
 
 export interface Snapshot {

@@ -7,6 +7,9 @@
     "./client": "./src/client.js",
     "./package.json": "./package.json"
   },
-  "e8": { "client": { "entry": "./src/client.js", "inject": ["layout"] }, "hot": true },
+  "e8": {
+    "client": { "entry": "./src/client.js", "inject": ["layout", "gameComposition"] },
+    "hot": true
+  },
   "license": "MIT"
 }

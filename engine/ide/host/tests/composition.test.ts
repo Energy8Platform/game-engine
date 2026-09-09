@@ -59,6 +59,25 @@ describe('composition.snapshot', () => {
     expect(row.clientUrl).toBe(`/plugin-client/${row.id}`);
   });
 
+  // The browser applies a client half through `ctx.plugin()`, and cordis
+  // reads what a plugin needs off the object it is handed — before the
+  // plugin runs. The editor cannot read a package.json (only the host can),
+  // so a half's declared `e8.client.inject` has to travel with the row or
+  // it may as well not be written down. It was not written down anywhere
+  // that was read, for the whole life of the field.
+  it("carries the client half's declared inject, so the browser can honour it", async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const clientOnly = snapshot.rows.find((r) => r.name === 'client-only')!;
+    expect(clientOnly.clientInject).toEqual(['slots', 'layout']);
+
+    // A half that asks for nothing gets an empty list, never `undefined` —
+    // the browser passes this straight to cordis, which would read a
+    // missing list as "needs nothing" anyway, but a reader of the wire
+    // should not have to know that.
+    const probe = snapshot.rows.find((r) => r.name === 'probe-plugin')!;
+    expect(probe.clientInject).toEqual([]);
+  });
+
   it('says nothing about entries that have no schema, instead of inventing one', async () => {
     const snapshot = await host.ctx.composition.snapshot();
     const include = snapshot.rows.find((r) => r.name === '@cordisjs/plugin-include')!;

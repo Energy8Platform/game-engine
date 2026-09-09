@@ -1,4 +1,4 @@
-import type { Context } from 'cordis';
+import type { Context, Fiber } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
 
 declare module 'cordis' {
@@ -18,72 +18,199 @@ export interface ModulesConfig {
 }
 
 export const name = 'modules';
-export const inject = ['connection', 'slots', 'layout'];
+/**
+ * `connection` and nothing else. This list used to name `slots` and
+ * `layout` too, because a half was applied by calling `half.apply(ctx)`
+ * with THIS plugin's own scope — so a half could reach exactly the
+ * services this plugin happened to declare, and nothing more. That made
+ * the list a hardcoded allowlist of what a plugin was permitted to see,
+ * maintained here, by us, one service behind whoever needed the next one.
+ * A half now goes through `ctx.plugin()` and gets a fiber of its own, with
+ * its own `inject` (see `apply` below), so what a half may reach is a
+ * question this plugin no longer answers.
+ */
+export const inject = ['connection'];
+
+/**
+ * cordis's `FiberState.ACTIVE`. The enum is declared `const` in cordis's
+ * own typings, so it exists at compile time only and cannot be imported —
+ * the same reason `CompositionRow.state` carries a bare number and says so
+ * in its doc.
+ */
+const FIBER_ACTIVE = 2;
 
 export function apply(ctx: Context, config: ModulesConfig) {
-  // Entry ids for which an import has been *started* — claimed before the
-  // await so a second snapshot mentioning the same row can't begin a
-  // duplicate import while the first is still in flight. Released again on
-  // failure, so a later snapshot (the developer fixes the client half, the
-  // host pushes a new one) gets a fresh attempt instead of the row being
-  // stuck broken until a full page reload.
-  //
-  // Releasing it does let a failure retrigger itself once, on its own:
-  // `ctx.connection.report()` notifies subscribers, including this
-  // plugin's own `sync` below, so the notification from the *first*
-  // failure causes one immediate extra attempt before this function even
-  // returns. That does not cascade further — a second consecutive failure
-  // produces a byte-identical `Diagnostic`, and `report()`'s own identity
-  // dedupe (same plugin+where+message) recognises the repeat and returns
-  // before notifying — so the self-triggered retry is bounded at exactly
-  // one wasted fetch, not unbounded. Verified by mutation testing (delete
-  // this release and rerun modules.test.ts: the "retries a failed import"
-  // test starts failing because the second, explicit snapshot no longer
-  // gets a turn).
-  const attempted = new Set<string>();
-  const applied = new Set<string>();
+  /**
+   * The current attempt for a row, if any. A token rather than a boolean
+   * because the whole point is telling attempts apart: an import that was
+   * in flight when its row left the snapshot must not apply itself on
+   * arrival, and must not be mistaken for the fresh attempt a later
+   * snapshot started. The claim is taken BEFORE the await — the host may
+   * push several snapshots per edit, in an order that is not guaranteed,
+   * and both could otherwise see the row as unattempted and start a
+   * duplicate import.
+   *
+   * Released on failure, so a later snapshot (the developer fixes the
+   * client half, the host pushes a new one) gets a fresh attempt instead
+   * of the row staying broken until a full page reload. That release does
+   * let a failure retrigger itself once, on its own: `ctx.connection
+   * .report()` notifies subscribers, including this plugin's own `sync`
+   * below, so the notification from the FIRST failure causes one immediate
+   * extra attempt before this function even returns. It does not cascade —
+   * a second consecutive failure produces a byte-identical `Diagnostic`,
+   * and `report()`'s own identity dedupe recognises the repeat and returns
+   * before notifying — so the self-triggered retry is bounded at exactly
+   * one wasted fetch. Verified by mutation testing (delete this release
+   * and rerun modules.test.ts: the "retries a failed import" test starts
+   * failing because the second, explicit snapshot no longer gets a turn).
+   */
+  const claims = new Map<string, symbol>();
+  /**
+   * What each row is holding, so it can be handed back. An entry appears
+   * the moment the fiber exists rather than once it has settled: a row
+   * that leaves the snapshot while its own `apply` is still running is
+   * exactly the case a disposal ledger is for, and a fiber missing from
+   * here is a fiber nothing can ever take down.
+   */
+  const holding = new Map<string, Fiber>();
+  /** Entry ids whose half imported and applied without error — `loaded()`. */
+  const loaded = new Set<string>();
+  /** Row ids the latest snapshot says should be running right now. */
+  const wanted = new Set<string>();
   const importModule = config.importModule ?? ((url: string) => import(/* @vite-ignore */ url));
+
+  const report = (id: string, message: string, fix: string) => {
+    ctx.connection.report(diagnostic('error', id, 'client', message, fix));
+  };
+
+  /**
+   * Hands back everything a row's client half is holding. Disposing the
+   * fiber is what takes its contributions with it — a screen, a card, a
+   * subscription — provided the half registered them as effects, which is
+   * cordis's own contract and what `screen-demo` demonstrates. A half that
+   * calls `ctx.layout.screen(...)` bare keeps its screen after its row is
+   * gone, exactly as a runtime plugin that skips `ctx.effect` keeps
+   * whatever it registered.
+   */
+  const release = (id: string) => {
+    const fiber = holding.get(id);
+    holding.delete(id);
+    loaded.delete(id);
+    claims.delete(id);
+    void fiber?.dispose();
+  };
+
+  const load = async (id: string, name: string, url: string, needs: string[], token: symbol) => {
+    let module: unknown;
+    try {
+      module = await importModule(url);
+    } catch (error) {
+      if (claims.get(id) === token) claims.delete(id);
+      report(
+        id,
+        error instanceof Error ? error.message : String(error),
+        'check the plugin client entry in its package.json',
+      );
+      return;
+    }
+
+    // The row can have left the snapshot, or a later attempt can have
+    // taken over, while the import was in flight. Either way this attempt
+    // is stale and must not apply: applying anyway would put a plugin on a
+    // context nothing is tracking, with no way left to take it off.
+    if (claims.get(id) !== token) return;
+
+    // A module with no `apply` (or a non-function one) is a no-op, not a
+    // failure — it imported cleanly, it just has nothing to wire up. It
+    // cannot go through `ctx.plugin()` either: cordis rejects a plugin
+    // object without an `apply` method, synchronously, and that refusal is
+    // about the shape of the call, not about anything the developer did
+    // wrong.
+    const half = module as { apply?: (ctx: Context) => void };
+    if (typeof half.apply !== 'function') {
+      loaded.add(id);
+      return;
+    }
+
+    // Through cordis, never `half.apply(ctx)` directly. Two things follow
+    // from that and neither is available any other way: the half's own
+    // `inject` is honoured, so it reaches the services it declared rather
+    // than the ones this plugin happens to hold; and the call yields a
+    // fiber, so the half can be handed back when its row goes.
+    //
+    // `name` is the row's package name rather than anything the module
+    // exports: it is what a human wrote in `e8.yml`, and it is what cordis
+    // shows in a fiber's own name if this half ever turns up in a trace.
+    const fiber = ctx.plugin({ name, inject: needs, apply: half.apply });
+    holding.set(id, fiber);
+    try {
+      await fiber;
+    } catch (error) {
+      release(id);
+      report(
+        id,
+        error instanceof Error ? error.message : String(error),
+        "fix the plugin's client half, or add what it reaches to e8.client.inject in its package.json",
+      );
+      return;
+    }
+
+    // A fiber that never reached ACTIVE and never threw is one cordis is
+    // still holding back: every service in its `inject` has to exist
+    // first, and one of them does not. Nothing throws on this path and
+    // nothing renders — the half simply never runs — which is the one
+    // outcome a person cannot diagnose from the screen, so it is said out
+    // loud here. The message names the services actually missing rather
+    // than the whole list, because the whole list is what the developer
+    // already wrote down.
+    if (fiber.state !== FIBER_ACTIVE) {
+      const missing = needs.filter((service) => ctx.reflect.get(service, false) === undefined);
+      release(id);
+      report(
+        id,
+        missing.length
+          ? `waiting for ${missing.join(', ')}, which the editor does not provide`
+          : 'the client half never started, and the services it asked for are all present',
+        'check e8.client.inject in its package.json against the services the editor provides',
+      );
+      return;
+    }
+
+    loaded.add(id);
+  };
 
   const sync = () => {
     const snapshot = ctx.connection.snapshot;
     if (!snapshot) return;
 
+    wanted.clear();
     for (const row of snapshot.rows) {
-      if (!row.clientUrl || attempted.has(row.id)) continue;
-      // Claim the id before awaiting the import: the host may push several
-      // snapshots per edit, in an order that is not guaranteed, and both
-      // could otherwise observe the row as "not yet attempted" and start a
-      // duplicate import.
-      attempted.add(row.id);
+      // `disabled` is read here rather than folded into `clientUrl` on the
+      // host — see `composition.ts`. A row the composition has switched
+      // off must not have its client half running for the same reason its
+      // server half does not: the composition says it is off. This is also
+      // the only half of "a row leaves" that arrives as an edit rather
+      // than as an absence.
+      if (row.clientUrl && !row.disabled) wanted.add(row.id);
+    }
+
+    // Anything applied (or mid-import) that the snapshot no longer wants
+    // goes back before anything new is loaded, so a row that is removed
+    // and re-added in one edit ends up applied once, not twice.
+    for (const id of [...holding.keys()]) if (!wanted.has(id)) release(id);
+    for (const id of [...claims.keys()]) if (!wanted.has(id)) claims.delete(id);
+    for (const id of [...loaded]) if (!wanted.has(id)) loaded.delete(id);
+
+    for (const row of snapshot.rows) {
       const url = row.clientUrl;
-      void importModule(url)
-        .then((module) => {
-          // A module with no `apply` (or a non-function one) is a no-op,
-          // not a failure — it imported cleanly, it just has nothing to
-          // wire up. `apply` throwing synchronously is still caught here:
-          // this callback runs inside the promise chain, so a synchronous
-          // throw rejects the chain and lands in `.catch` below exactly
-          // like an import failure would.
-          const half = module as { apply?: (ctx: Context) => void };
-          half.apply?.(ctx);
-          applied.add(row.id);
-        })
-        .catch((error: unknown) => {
-          attempted.delete(row.id);
-          ctx.connection.report(
-            diagnostic(
-              'error',
-              row.id,
-              'client',
-              error instanceof Error ? error.message : String(error),
-              'check the plugin client entry in its package.json',
-            ),
-          );
-        });
+      if (!url || !wanted.has(row.id) || claims.has(row.id)) continue;
+      const token = Symbol(row.id);
+      claims.set(row.id, token);
+      void load(row.id, row.name, url, row.clientInject ?? [], token);
     }
   };
 
-  const service: ModulesService = { loaded: () => [...applied] };
+  const service: ModulesService = { loaded: () => [...loaded] };
 
   ctx.effect(() => ctx.connection.subscribe(sync), 'modules-sync');
   ctx.provide('modules', service);

@@ -63,7 +63,17 @@ test('a project plugin brings its own screen, no engine change required', async 
     // — `React.createElement` off the shell's own `globalThis.__E8_IDE__`
     // React, not a stub the test would pass against for the wrong reason.
     await tab.click();
-    await expect(page.getByTestId('demo-screen')).toHaveText('a screen from a project plugin');
+    await expect(page.getByTestId('demo-screen')).toContainText('a screen from a project plugin');
+
+    // The half of the claim a static `div` could never make: this number
+    // comes from `ctx.gameComposition`, read through the plugin's OWN
+    // cordis scope, which can see it only because this package's
+    // `e8.client.inject` names it. A registration surface a plugin can
+    // reach but cannot feed from anything is not a first-class screen.
+    // Non-zero, so a service that answered `null` (never fetched, or a
+    // half quietly holding the shell's root context instead of its own)
+    // cannot pass this by rendering a plausible zero.
+    await expect(page.getByTestId('demo-rows')).toHaveText(/the game composes [1-9]\d* rows/);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
