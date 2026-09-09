@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
 import * as layoutPlugin from '../src/plugins/layout';
+import { Layout } from '../src/screens/Layout';
 
 const Dummy = () => <div>x</div>;
 
@@ -237,5 +240,84 @@ describe('layout', () => {
     expect(ctx.layout.screens().map((s) => s.title)).toEqual(['Second']);
 
     await ctx.fiber.dispose();
+  });
+});
+
+describe('Layout', () => {
+  // Two crash tests below deliberately throw from inside a render; React's
+  // own error-boundary contract logs that to console.error as it happens
+  // (twice, in a dev build) even though `ScreenBoundary` catches it a line
+  // later. Expected noise from a deliberate throw, not a real failure —
+  // silenced here rather than inside each `it`, so the six bodies below
+  // stay exactly what the plan wrote rather than each growing its own
+  // `vi.spyOn`. Same noise `composition-screen.test.tsx`'s own crash test
+  // silences, for the same reason.
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('draws the current screen and a tab per registered screen', () => {
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'Alpha' }, () => <div>ALPHA BODY</div>);
+    ctx.layout.screen({ id: 'b', title: 'Beta' }, () => <div>BETA BODY</div>);
+    render(<Layout ctx={ctx} />);
+    expect(screen.getByText('ALPHA BODY')).toBeTruthy();
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Alpha', 'Beta']);
+  });
+
+  it('clicking a tab shows that screen', async () => {
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'Alpha' }, () => <div>ALPHA BODY</div>);
+    ctx.layout.screen({ id: 'b', title: 'Beta' }, () => <div>BETA BODY</div>);
+    render(<Layout ctx={ctx} />);
+    await userEvent.click(screen.getByRole('tab', { name: 'Beta' }));
+    expect(screen.getByText('BETA BODY')).toBeTruthy();
+    expect(screen.queryByText('ALPHA BODY')).toBeNull();
+  });
+
+  it('a screen registered after mount appears without a reload', () => {
+    // The whole point of screens being contributions: a plugin's client half
+    // lands whenever its import resolves, which is after this renders.
+    const ctx = harness();
+    render(<Layout ctx={ctx} />);
+    act(() => { ctx.layout.screen({ id: 'late', title: 'Late' }, () => <div>LATE</div>); });
+    expect(screen.getByRole('tab', { name: 'Late' })).toBeTruthy();
+  });
+
+  it('with no screens at all it explains itself instead of painting nothing', () => {
+    const ctx = harness();
+    render(<Layout ctx={ctx} />);
+    expect(screen.getByTestId('layout-empty').textContent).toMatch(/no screens/i);
+  });
+
+  it('a screen that throws does not take the rest of the IDE with it', () => {
+    const ctx = harness();
+    const Bad = () => { throw new Error('screen exploded'); };
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, Bad);
+    ctx.layout.screen({ id: 'ok', title: 'OK' }, () => <div>OK BODY</div>);
+    render(<Layout ctx={ctx} />);
+    expect(screen.getByRole('tab', { name: 'OK' })).toBeTruthy();
+    expect(screen.getByTestId('screen-error').textContent).toContain('screen exploded');
+  });
+
+  it('reports the crashed screen, so it reaches the one list', () => {
+    const ctx = harness();
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => { throw new Error('screen exploded'); });
+    render(<Layout ctx={ctx} />);
+    expect(ctx.connection.diagnostics.map((d) => d.plugin)).toContain('bad');
+  });
+
+  it('a crashed screen still lets you navigate away from it', async () => {
+    // A boundary that swallows the crash but keeps the tabs unreachable
+    // leaves the IDE just as stuck as no boundary at all.
+    const ctx = harness();
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => { throw new Error('boom'); });
+    ctx.layout.screen({ id: 'ok', title: 'OK' }, () => <div>OK BODY</div>);
+    render(<Layout ctx={ctx} />);
+    await userEvent.click(screen.getByRole('tab', { name: 'OK' }));
+    expect(screen.getByText('OK BODY')).toBeTruthy();
   });
 });

@@ -36,3 +36,4 @@ export {
   useEditorDiagnostics,
 } from './screens/CompositionScreen';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
+export { Layout } from './screens/Layout';
