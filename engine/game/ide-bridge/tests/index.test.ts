@@ -1203,4 +1203,70 @@ describe('ide-bridge forwards the game diagnostics', () => {
       expect(log.list()).toEqual([]);
     });
   });
+
+  /**
+   * The four tests above hand `attachDiagnosticsForwarding` an
+   * already-built identity — none of them go through `apply()`, so the
+   * resolution order `IdeBridgeConfig.game`'s own doc promises
+   * (`config.game ?? ?game= off this page's own address`) had no test at
+   * either layer: not the ternary in `apply()` itself, and not — unlike
+   * `bridgeUrl`'s sibling fallback, which roughly twenty e2e specs
+   * exercise for real through `first-slot`'s `main.ts` calling
+   * `ideBridge.apply(game.ctx, {})` with no `bridgeUrl` — anywhere one
+   * layer up either, since nothing in this tree opens a game at a `?game=`
+   * URL yet. This is the one piece of genuinely new logic in the whole
+   * diff with no backstop, and it is exactly the wire a preview wall
+   * depends on, so it gets its own two tests rather than staying an
+   * inspection-only claim in a doc comment.
+   *
+   * `vi.stubGlobal`/`vi.unstubAllGlobals` needs no jsdom — `location` does
+   * not exist in this suite's plain node environment, so stubbing it is
+   * adding a global for the duration of one test, not overriding a real
+   * one. Scoped to this describe's own `afterEach` so no other test in this
+   * file — in particular "does not open a socket when no bridgeUrl is
+   * given and no browser location exists", which depends on `location`
+   * staying absent — ever sees it.
+   */
+  describe('ide-bridge forwards the game diagnostics — apply() resolves the identity', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("an explicit config.game wins over a ?game= in the page's own address", async () => {
+      ctx = new Context();
+      await ctx.plugin(diagnosticsRuntime);
+      const { bind, forStage, bindings } = fakeMechanics();
+      ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+      vi.stubGlobal('location', { search: '?game=from-url' });
+      const socket = fakeSocket();
+
+      ideBridge.apply(ctx, {
+        stage: 'base_game',
+        mechanic: 'classic',
+        bridgeUrl: 'ws://x/ide',
+        game: 'from-config',
+        socketFactory: () => socket as never,
+      });
+
+      expect(last(socket).game).toBe('from-config');
+    });
+
+    it("with no config.game, the page's own ?game= in the address is used", async () => {
+      ctx = new Context();
+      await ctx.plugin(diagnosticsRuntime);
+      const { bind, forStage, bindings } = fakeMechanics();
+      ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+      vi.stubGlobal('location', { search: '?game=from-url' });
+      const socket = fakeSocket();
+
+      ideBridge.apply(ctx, {
+        stage: 'base_game',
+        mechanic: 'classic',
+        bridgeUrl: 'ws://x/ide',
+        socketFactory: () => socket as never,
+      });
+
+      expect(last(socket).game).toBe('from-url');
+    });
+  });
 });
