@@ -44,12 +44,13 @@
  * has none the composition ever reads, so a service only this file
  * touches is nobody else's to check. Leaving it unchecked was measured,
  * not assumed: with `reelstep1` also out of the patch — no row left
- * declaring `mechanics` — dropping `mechanics1` booted this page to
- * `ready` over an empty canvas with an empty log, and the first click
- * gave `Cannot read properties of undefined (reading 'forStage')`. That
- * is the white rectangle the whole `boot` design exists to prevent,
- * reached by an edit the composition considers legal. So the check is
- * narrowed to what only this page knows, not restored wholesale.
+ * declaring `mechanics` — dropping `mechanics1` left `#status` reading
+ * `ready`, `#log` empty and not one word anywhere on the page, over a
+ * board that could never present anything; the first click then gave
+ * `Cannot read properties of undefined (reading 'forStage')`. That is
+ * the silence the whole `boot` design exists to prevent, reached by an
+ * edit the composition considers legal. So the check is narrowed to what
+ * only this page knows, not restored wholesale.
  *
  * **`<pre id="log">` is a reader, not a destination.** Everything this page
  * shows about what has gone wrong comes off `ctx.diagnostics` — the live
