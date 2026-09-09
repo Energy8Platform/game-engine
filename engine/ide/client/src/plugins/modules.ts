@@ -100,7 +100,7 @@ export function apply(ctx: Context, config: ModulesConfig) {
     void fiber?.dispose();
   };
 
-  const load = async (id: string, name: string, url: string, needs: string[], token: symbol) => {
+  const load = async (id: string, pkg: string, url: string, needs: string[], token: symbol) => {
     let module: unknown;
     try {
       module = await importModule(url);
@@ -138,10 +138,10 @@ export function apply(ctx: Context, config: ModulesConfig) {
     // than the ones this plugin happens to hold; and the call yields a
     // fiber, so the half can be handed back when its row goes.
     //
-    // `name` is the row's package name rather than anything the module
-    // exports: it is what a human wrote in `e8.yml`, and it is what cordis
-    // shows in a fiber's own name if this half ever turns up in a trace.
-    const fiber = ctx.plugin({ name, inject: needs, apply: half.apply });
+    // The fiber is named after the row's package rather than anything the
+    // module exports: it is what a human wrote in `e8.yml`, and it is what
+    // cordis shows if this half ever turns up in a trace.
+    const fiber = ctx.plugin({ name: pkg, inject: needs, apply: half.apply });
     holding.set(id, fiber);
     try {
       await fiber;
