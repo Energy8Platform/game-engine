@@ -56,9 +56,27 @@ describe('App', () => {
     // The guard against the old shape coming back. `App` used to render
     // `CompositionScreen` directly; if it still did, the composition body
     // would be on screen even though nothing put a tab there — `Layout` is
-    // the only thing here that draws a `role="tab"` at all.
+    // the only thing here that draws a `role="tab"` at all. Addressed by
+    // id (`Layout`'s own `data-testid={`tab-${id}`}`), not by the tab's
+    // wording: this test is about the STRUCTURE — a tab exists for the
+    // registered screen — and pinning it to visible text would fail on a
+    // translation that changed nothing this test actually cares about.
     const ctx = await harness();
     render(<App ctx={ctx} />);
-    expect(screen.getByRole('tab', { name: /composition/i })).toBeTruthy();
+    expect(screen.getByTestId('tab-composition')).toBeTruthy();
+  });
+
+  it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
+    // The one place in this suite that pins WORDING rather than structure.
+    // Every visible string in `ide/client/src` is Russian (`Состав`,
+    // `состав пуст`, `подключение…`) — an English tab title sitting above
+    // `CompositionScreen`'s own `<h1>Состав</h1>` would be this task quietly
+    // introducing the one inconsistency nothing else here has. Addressed by
+    // the tab's accessible name (`role="tab"`'s `name`, which is
+    // `entry.title` — see `Layout.tsx`), the one thing that actually
+    // carries the wording; the testid above deliberately does not.
+    const ctx = await harness();
+    render(<App ctx={ctx} />);
+    expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
   });
 });

@@ -73,12 +73,18 @@ class ScreenBoundary extends Component<
 
 /**
  * The chrome around whichever screens the running IDE was given: a tab per
- * registered screen (`role="tab"`, so `title` is what a human — and a
- * test — reads) and the current one's body, always reading through
+ * registered screen and the current one's body, always reading through
  * `useLayout` so a screen landing after mount (a plugin's client half,
  * loaded by its own dynamic import) shows up with no reload. Nothing here
  * ever throws: zero screens is `layout-empty` saying so, and one bad
  * screen is `ScreenBoundary` saying so — never a blank pane either way.
+ *
+ * A tab carries two identities and a test should pick deliberately: `title`
+ * is the WORDING a human reads (`role="tab"`'s accessible name), and it can
+ * be translated out from under a test that pins it; `data-testid={`tab-
+ * ${id}`}` is the screen's own id, the same stable thing the address hash
+ * already commits to. Most tests should address a tab by id — a test that
+ * exists to prove wording is a separate, deliberate exception.
  */
 export function Layout({ ctx }: { ctx: Context }) {
   const { screens, current } = useLayout(ctx);
@@ -93,6 +99,7 @@ export function Layout({ ctx }: { ctx: Context }) {
             role="tab"
             aria-selected={entry.id === current?.id}
             className="e8-layout-tab"
+            data-testid={`tab-${entry.id}`}
             onClick={() => ctx.layout.go(entry.id)}
           >
             {entry.title}

@@ -73,7 +73,7 @@ export function App({ ctx }: { ctx: Context }) {
   }, [ctx]);
 
   useEffect(() => {
-    return ctx.layout.screen({ id: 'composition', title: 'Composition' }, CompositionScreenEntry);
+    return ctx.layout.screen({ id: 'composition', title: 'Состав' }, CompositionScreenEntry);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
