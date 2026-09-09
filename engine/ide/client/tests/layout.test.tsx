@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Context } from 'cordis';
+import { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
 import * as layoutPlugin from '../src/plugins/layout';
 
@@ -213,5 +213,29 @@ describe('layout', () => {
     await ctx.fiber.dispose();
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     expect(calls).toBe(0);
+  });
+
+  it('registering a collision does not throw when composed without ctx.connection', async () => {
+    // Every test above goes through `harness()`, whose `connection` is a
+    // plain object that is simply always there and whose fake `reflect.get`
+    // is `(name) => ctx[name]` — it cannot tell "works because the lenient
+    // read degrades" apart from "works because the double always had
+    // `connection` sitting on it regardless of how it was read". Only a
+    // REAL cordis `Context`, with no `connection` plugin composed at all,
+    // can prove `ctx.reflect.get('connection', false)` genuinely tolerates
+    // the service being absent — a direct `ctx.connection` read throws in
+    // that situation instead (cordis's own not-injected guard), which is
+    // the mistake this guards against. Same shape as `slots.test.tsx`'s own
+    // "composed without ctx.connection" test.
+    const ctx = new Context();
+    await ctx.plugin(layoutPlugin);
+
+    ctx.layout.screen({ id: 'a', title: 'First' }, Dummy);
+    expect(() =>
+      ctx.layout.screen({ id: 'a', title: 'Second' }, Dummy),
+    ).not.toThrow();
+    expect(ctx.layout.screens().map((s) => s.title)).toEqual(['Second']);
+
+    await ctx.fiber.dispose();
   });
 });
