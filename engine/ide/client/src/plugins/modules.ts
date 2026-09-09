@@ -105,7 +105,16 @@ export function apply(ctx: Context, config: ModulesConfig) {
     try {
       module = await importModule(url);
     } catch (error) {
-      if (claims.get(id) === token) claims.delete(id);
+      // Nothing to say if this attempt is no longer the current one. The
+      // row can have left the snapshot, or turned `disabled`, or been
+      // superseded, while the import was in flight — and a failure to
+      // fetch a half the composition has since removed is not a failure
+      // anyone should be asked to fix. Reporting it would name a plugin
+      // and a remedy that stopped applying the moment the row went, which
+      // is exactly the "asserts a cause the code does not know" this
+      // module's diagnostics exist to avoid.
+      if (claims.get(id) !== token) return;
+      claims.delete(id);
       report(
         id,
         error instanceof Error ? error.message : String(error),
@@ -146,6 +155,15 @@ export function apply(ctx: Context, config: ModulesConfig) {
     try {
       await fiber;
     } catch (error) {
+      // Checked before `release(id)`, which would otherwise clear the
+      // claim and hide the very thing being checked — and, worse, dispose
+      // a fiber belonging to a NEWER attempt that has since claimed this
+      // row. A half whose `apply` awaits anything (a fetch, a nested
+      // import) is still settling for as long as that takes, and cordis
+      // rejects an `await`ed fiber that was disposed underneath it, so
+      // "the row left mid-apply" arrives here as an ordinary failure.
+      // Same reasoning as the import path above.
+      if (claims.get(id) !== token) return;
       release(id);
       report(
         id,
@@ -164,6 +182,13 @@ export function apply(ctx: Context, config: ModulesConfig) {
     // than the whole list, because the whole list is what the developer
     // already wrote down.
     if (fiber.state !== FIBER_ACTIVE) {
+      // A fiber this load no longer owns is not PENDING, it is DISPOSED —
+      // by `release()`, because the row went while the half was settling.
+      // Without this the branch below would announce that a half "never
+      // started" and tell a developer to check the inject list of a plugin
+      // the composition deliberately removed. Same guard, same reason, as
+      // the two paths above.
+      if (claims.get(id) !== token) return;
       const missing = needs.filter((service) => ctx.reflect.get(service, false) === undefined);
       release(id);
       report(

@@ -202,26 +202,27 @@ export function DiagnosticsPanel({
 
       {rows.length > 0 && (
         <ul className="e8-diagnostics-panel-list">
-          {rows.map((row, index) => (
-            <li
-              key={index}
-              data-testid={`diag-${index}`}
-              data-severity={row.diagnostic.severity}
-              className="e8-diagnostic-row"
-            >
-              <span className="e8-diagnostic-origin">{row.origin}</span>{' '}
-              {speakerLabel(row) !== null && (
-                <span className="e8-diagnostic-speaker">{speakerLabel(row)}</span>
-              )}{' '}
-              <strong className="e8-severity">{row.diagnostic.severity}</strong>{' '}
-              <span className="e8-diagnostic-plugin">{row.diagnostic.plugin}</span>
-              {' · '}
-              <span className="e8-diagnostic-where">{row.diagnostic.where}</span>
-              {': '}
-              <span className="e8-diagnostic-message">{row.diagnostic.message}</span>
-              {row.diagnostic.fix ? ` — ${row.diagnostic.fix}` : ''}
-            </li>
-          ))}
+          {rows.map((row, index) => {
+            const speaker = speakerLabel(row);
+            return (
+              <li
+                key={index}
+                data-testid={`diag-${index}`}
+                data-severity={row.diagnostic.severity}
+                className="e8-diagnostic-row"
+              >
+                <span className="e8-diagnostic-origin">{row.origin}</span>{' '}
+                {speaker !== null && <span className="e8-diagnostic-speaker">{speaker}</span>}{' '}
+                <strong className="e8-severity">{row.diagnostic.severity}</strong>{' '}
+                <span className="e8-diagnostic-plugin">{row.diagnostic.plugin}</span>
+                {' · '}
+                <span className="e8-diagnostic-where">{row.diagnostic.where}</span>
+                {': '}
+                <span className="e8-diagnostic-message">{row.diagnostic.message}</span>
+                {row.diagnostic.fix ? ` — ${row.diagnostic.fix}` : ''}
+              </li>
+            );
+          })}
         </ul>
       )}
 

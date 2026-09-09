@@ -322,6 +322,127 @@ describe('modules — a row that goes takes its screen with it', () => {
     );
   });
 
+  /**
+   * A half whose `apply` awaits something — a fetch, a nested import — is
+   * still settling for as long as that takes, and every removal test above
+   * uses a synchronous one, so none of them ever open this window. Held
+   * open explicitly here: the half blocks on a gate the test controls, the
+   * row leaves while it is blocked, and only then is the gate opened.
+   */
+  function gatedHalf(registerAfterAwait = true) {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let started!: () => void;
+    const applying = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    return {
+      open,
+      applying,
+      module: {
+        async apply(ctx: {
+          effect: (execute: () => () => void, label: string) => unknown;
+          layout: { screen: (meta: { id: string }, component: unknown) => () => void };
+        }) {
+          started();
+          await gate;
+          // Registering AFTER the await is what a half awaiting a fetch
+          // actually does — and it is what makes cordis REJECT a fiber
+          // disposed underneath it in the meantime. A half that awaits and
+          // then registers nothing takes the other exit: the fiber settles
+          // without throwing, DISPOSED rather than ACTIVE, which is the
+          // branch that used to announce a half had "never started". Both
+          // are reachable and both are tested.
+          if (!registerAfterAwait) return;
+          ctx.effect(() => ctx.layout.screen({ id: 'from-a-plugin' }, () => null), 'demo');
+        },
+      },
+    };
+  }
+
+  it('says nothing when the row leaves while its half is still settling', async () => {
+    const gated = gatedHalf();
+    const { ctx, push } = await harness(vi.fn(async () => gated.module));
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await gated.applying;
+
+    push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+    gated.open();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Nothing to fix and nobody to tell. The composition removed this row
+    // on purpose; a diagnostic here would name a plugin and a remedy that
+    // stopped applying the moment it went.
+    expect(ctx.connection.diagnostics).toEqual([]);
+    expect(ctx.modules.loaded()).toEqual([]);
+    expect(ctx.layout.screens().map((s) => s.id)).not.toContain('from-a-plugin');
+  });
+
+  it('says nothing when the row is switched off while its half is still settling', async () => {
+    const gated = gatedHalf();
+    const { ctx, push } = await harness(vi.fn(async () => gated.module));
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await gated.applying;
+
+    push({
+      type: 'snapshot',
+      snapshot: { rows: [row({ disabled: true, clientInject: ['layout'] })], diagnostics: [] },
+    });
+    gated.open();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(ctx.connection.diagnostics).toEqual([]);
+    expect(ctx.modules.loaded()).toEqual([]);
+  });
+
+  it('says nothing when a half that registers nothing settles after its row has gone', async () => {
+    // The other exit from the same window. This half awaits and returns,
+    // so cordis has nothing to refuse it over: the fiber simply ends up
+    // DISPOSED instead of ACTIVE, which is the shape that used to be read
+    // as "held back waiting for a service" and reported as a half that
+    // never started — about a row the composition had already removed.
+    const gated = gatedHalf(false);
+    const { ctx, push } = await harness(vi.fn(async () => gated.module));
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await gated.applying;
+
+    push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+    gated.open();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(ctx.connection.diagnostics).toEqual([]);
+    expect(ctx.modules.loaded()).toEqual([]);
+  });
+
+  it('says nothing when an import fails after its row has already left', async () => {
+    // The third shape of the same window, one step earlier: the fetch is
+    // still in flight when the row goes, and then 404s. "check the plugin
+    // client entry in its package.json" is honest advice about a row that
+    // still exists and useless about one that does not.
+    let fail!: (error: Error) => void;
+    const importModule = vi.fn(
+      () =>
+        new Promise<unknown>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const { ctx, push } = await harness(importModule);
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    await vi.waitFor(() => expect(importModule).toHaveBeenCalledTimes(1));
+
+    push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+    fail(new Error('404'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
   it('never imports a half whose row is already switched off', async () => {
     const importModule = vi.fn(async () => screenHalf());
     const { push } = await harness(importModule);
