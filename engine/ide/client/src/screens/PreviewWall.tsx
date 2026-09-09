@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic, type CompositionRow } from '@energy8engine/contracts';
-import { LANGS, SCREEN_PRESETS, screenPreset } from '@energy8platform/harness';
+import { LANGS } from './langs';
+import { SCREEN_PRESETS, screenPreset } from './screenPresets';
 
 /**
  * The preview half of the composition screen, split out of
@@ -11,14 +12,18 @@ import { LANGS, SCREEN_PRESETS, screenPreset } from '@energy8platform/harness';
  * draws. Task 3 only relocated that one frame, unchanged; `PreviewWall`,
  * further down, is the wall itself.
  *
- * `SCREEN_PRESETS`/`screenPreset`/`LANGS` come from
- * `@energy8platform/harness` — the SAME seven presets and sixteen
- * languages the dev harness already frames a game at, not a second list
- * hand-copied here to drift from the first. `packages/*` is legacy and
- * read-only, but depending on it is already established elsewhere in this
- * engine (`engine/game/runtime` on `@energy8platform/game-engine`); a
- * second source of truth for the sizes behaviour is checked at would be
- * worse than the dependency.
+ * `SCREEN_PRESETS`/`screenPreset`/`LANGS` are read from `./screenPresets`/
+ * `./langs` — PINNED COPIES of the same-named exports in
+ * `@energy8platform/harness`, not that package itself. This app tried
+ * depending on the package directly first (fix round 1's own history);
+ * that broke the running app in a real browser and broke `vite build`,
+ * because the package's only public entry welds that data to a Node-only
+ * dev plugin at its module boundary, and `packages/*` is read-only so that
+ * boundary cannot be fixed from here. See `screenPresets.ts`'s own doc for
+ * the full account, and `tests/screen-presets-sync.test.ts` for the thing
+ * that makes a copy an acceptable answer: it imports the real package
+ * (safe there — vitest runs on real Node) and fails if this copy drifts
+ * from it on any field `PreviewWall` actually reads.
  */
 
 /**
@@ -194,7 +199,7 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
           'warning',
           name,
           'preview',
-          `the wall was asked to show preset "${name}", which @energy8platform/harness does not define`,
+          `the wall was asked to show preset "${name}", which SCREEN_PRESETS does not define`,
           'check the preset name against SCREEN_PRESETS, or add it there',
         ),
       );
