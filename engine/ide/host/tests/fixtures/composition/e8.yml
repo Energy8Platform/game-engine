@@ -5,3 +5,9 @@
 - id: clientonly1
   name: client-only
   config: {}
+- id: missingentrylocal1
+  name: missing-entry-local
+  config: {}
+- id: missingentryhoisted1
+  name: missing-entry-hoisted
+  config: {}

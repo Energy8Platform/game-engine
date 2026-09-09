@@ -61,19 +61,44 @@ interface SchemaResult {
   diagnostic: Diagnostic | null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether a package.json declares anywhere for a bare `import(name)` to
+ * land: a `"main"` field, or an `exports` map with a `"."` entry (the
+ * shorthand `"exports": "./foo.js"` form counts too). Used only to decide
+ * whether a `MODULE_NOT_FOUND`-family failure was EXPECTED to succeed —
+ * see that decision in `schemaOf`'s own catch block for why "was a main
+ * declared" and "did `readPackageJson` find a package.json at all" are
+ * two different questions this needs answered separately.
+ */
+function hasImportableMain(pkgJson: unknown): boolean {
+  if (!isRecord(pkgJson)) return false;
+  if (typeof pkgJson.main === 'string') return true;
+  const exp = pkgJson.exports;
+  if (typeof exp === 'string') return true;
+  return isRecord(exp) && typeof exp['.'] === 'string';
+}
+
 /**
  * Node's own name for "this bare specifier resolves to nothing at all" —
  * `require.resolve`'s `MODULE_NOT_FOUND` and ESM `import()`'s
  * `ERR_MODULE_NOT_FOUND` (the code seen in practice: `ctx.loader.import`
- * resolves through a real `import()`, so `ERR_MODULE_NOT_FOUND` is what
- * `screen-demo` — client-only, no `main`, no `"."` export — actually
- * throws; `MODULE_NOT_FOUND` is kept alongside it as the CommonJS-era name
- * for the same condition, in case a future loader change resolves through
- * `require` instead).
+ * resolves through a real `import()`, so `ERR_MODULE_NOT_FOUND` is the one
+ * actually thrown; `MODULE_NOT_FOUND` is kept alongside it as the
+ * CommonJS-era name for the same condition, in case a future loader change
+ * resolves through `require` instead).
  */
 const MODULE_NOT_FOUND_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND']);
 
-async function schemaOf(ctx: Context, entryId: string, name: string): Promise<SchemaResult> {
+async function schemaOf(
+  ctx: Context,
+  entryId: string,
+  name: string,
+  pkg: ReturnType<typeof readPackageJson>,
+): Promise<SchemaResult> {
   let plugin: unknown;
   try {
     // `ctx.loader.import(name)` resolves a bare specifier with a plain
@@ -85,50 +110,68 @@ async function schemaOf(ctx: Context, entryId: string, name: string): Promise<Sc
     // below, not the "declares no Config" one.
     plugin = ctx.loader.unwrapExports(await ctx.loader.import(name));
   } catch (error) {
-    // Fix round (task 7, "a screen is a plugin"): a client-only plugin with
-    // no `main`/`"."` export — `screen-demo`, a project-local plugin whose
-    // ONLY job is a browser-side `apply(ctx)` — was never going to have
-    // anything here for `import(name)` to find, and that is not a plugin
-    // author's mistake to report; it produced a permanent, spurious
-    // `editor error … schema: failed to import "screen-demo"` on every
-    // boot the moment `screendemo1` became a checked-in `e8.yml` row,
-    // which is what `diagnostics.spec.ts`'s "one id in both namespaces
-    // renders as two rows, not one" caught (it counts rows in the panel;
-    // a third, unrelated one is not the two that test was written to
-    // expect).
+    // Fix round 1 (task 7, "a screen is a plugin"): a client-only plugin
+    // with no `main`/`"."` export — `screen-demo`, a project-local plugin
+    // whose ONLY job is a browser-side `apply(ctx)` — was never going to
+    // have anything here for `import(name)` to find, and that is not a
+    // plugin author's mistake to report. Two earlier attempts at this are
+    // in this function's git history and both were wrong, each caught by
+    // re-running the suite it broke rather than assumed correct: gating on
+    // `manifest.runtime`'s presence broke `probe-plugin`/`ide-bridge`
+    // (neither declares `e8.runtime` either, yet their schemas are exactly
+    // what the composition screen's own form fields come from); gating on
+    // `readPackageJson`'s result ALONE broke `broken.test.ts`'s
+    // `import-broken-plugin` case, whose fixture is deliberately composed
+    // from outside the repo specifically because `ctx.loader.import`
+    // resolves wider than `readPackageJson(config.cwd, …)` does.
     //
-    // A first pass at this fix skipped the import outright whenever
-    // `manifest.runtime` was absent, and a SECOND pass after that skipped
-    // it whenever `readPackageJson(config.cwd, name)` came back empty of a
-    // `main`/`"."` field — both wrong, proven by re-running the affected
-    // suites rather than assumed: `e8-example-probe` and
-    // `@energy8engine/ide-bridge` both declare no `e8.runtime` either, yet
-    // their schemas are what the composition screen's "скорость
-    // барабана"/"механика стадии" fields come from (`@cordisjs/plugin
-    // -loader` composes every `e8.yml` entry off its OWN main export,
-    // independent of `E8Manifest.runtime`/`.client` entirely), so gating
-    // on `runtime` broke both. And `readPackageJson` resolves relative to
-    // `config.cwd`, a narrower search than the bare `import(name)` a few
-    // lines up performs (which resolves from `@cordisjs/plugin-loader`'s
-    // own location and so always reaches this monorepo's root
-    // `node_modules`, regardless of `cwd`) — `broken.test.ts`'s
-    // "import-broken-plugin" fixture is composed from a temp directory
-    // OUTSIDE the repo specifically to exercise `schemaOf` on its own, and
-    // gating on `readPackageJson`'s result broke that the same way.
+    // Fix round 2: the round-1 fix — silence EVERY `MODULE_NOT_FOUND`-
+    // family failure — was itself one case too wide. A package that
+    // resolves (a real `plugins/<name>` or `node_modules` entry —
+    // `readPackageJson` found it) but whose DECLARED `main`/`"."` points at
+    // a file that is not actually there throws the exact same
+    // `ERR_MODULE_NOT_FOUND` `screen-demo` does — measured directly: a
+    // project-local package with `main: "./index.js"` and no `index.js` on
+    // disk throws `Cannot find package "<name>"`, byte-for-byte the same
+    // message shape as a client-only manifest with no `main` at all,
+    // because `ctx.loader.import` cannot even locate a `plugins/`-only
+    // directory to begin checking `main` against — while the hoisted
+    // (real `node_modules`) equivalent throws the more specific `Cannot
+    // find module '<absolute path to index.js>'`. Both are
+    // `ERR_MODULE_NOT_FOUND`; neither is `screen-demo`'s case; both used
+    // to vanish into `diagnostics: []` under the round-1 fix, with NO
+    // `package`, `schema`, or `apply` diagnostic anywhere to say why — a
+    // typo'd `e8.runtime.entry`, or a dependency whose build silently
+    // failed to produce its output, would have looked identical to a
+    // healthy client-only plugin.
     //
-    // What actually distinguishes "nothing to import" from "something to
-    // import that is broken" is the error `import()` itself throws:
-    // Node's own `MODULE_NOT_FOUND`/`ERR_MODULE_NOT_FOUND` means there was
-    // no module at the bare specifier for ANY resolver to find, which is
-    // exactly `screen-demo`'s case and never a thing for a human to fix
-    // via this diagnostic. Anything else — a module that DOES exist and
-    // throws while being evaluated, has broken syntax, or fails partway —
-    // is exactly the failure this diagnostic exists to report, and it
-    // still does: `import-broken-plugin` throws a plain `Error` from
-    // inside its own module body, which carries no `MODULE_NOT_FOUND`-
-    // family code, so it falls through to the branch below unchanged.
+    // So `MODULE_NOT_FOUND` alone is not enough; whether a `main`/`"."`
+    // was ever DECLARED is the other half. `pkg` — `readPackageJson`'s own
+    // result, computed once in `snapshot()`'s row loop and threaded
+    // through here rather than re-resolved — answers that without parsing
+    // the error message at all:
+    //  - no `pkg`: the row's package could not be resolved by ANY means,
+    //    and `snapshot()`'s own `!pkg` branch, a few lines up from where
+    //    this is called, already pushed a `package` diagnostic naming it —
+    //    silent here, or every misspelled row would say the same thing
+    //    twice.
+    //  - `pkg` found, no `main`/`"."` declared: nothing was ever going to
+    //    be importable, by design — `screen-demo`'s case, and the case
+    //    round 1 was written for. Silent.
+    //  - `pkg` found, a `main`/`"."` IS declared, and the import still
+    //    failed: the manifest promised a module that is not actually
+    //    there. A real fault, and the one round 1 went silent on by
+    //    mistake. Reported.
+    // Anything that is not `MODULE_NOT_FOUND` at all — a module that DOES
+    // exist and throws while being evaluated, or has broken syntax —
+    // is unconditionally reported regardless of `pkg`, exactly as before:
+    // `import-broken-plugin` throws a plain `Error` from inside its own
+    // module body, carrying no `MODULE_NOT_FOUND`-family code, so it never
+    // reaches this decision at all.
     const code = (error as { code?: unknown } | null)?.code;
-    if (typeof code === 'string' && MODULE_NOT_FOUND_CODES.has(code)) {
+    const notFound = typeof code === 'string' && MODULE_NOT_FOUND_CODES.has(code);
+    const wasExpectedToResolve = pkg !== null && hasImportableMain(pkg.json);
+    if (notFound && !wasExpectedToResolve) {
       return { schema: null, diagnostic: null };
     }
     return {
@@ -308,7 +351,7 @@ export function apply(ctx: Context, config: CompositionConfig) {
           );
         }
 
-        const schemaResult = await schemaOf(ctx, entry.id, pkgName);
+        const schemaResult = await schemaOf(ctx, entry.id, pkgName, pkg);
         if (schemaResult.diagnostic) diagnostics.push(schemaResult.diagnostic);
 
         rows.push({

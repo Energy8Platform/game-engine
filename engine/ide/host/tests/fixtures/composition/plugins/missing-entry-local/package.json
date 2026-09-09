@@ -1,0 +1,6 @@
+{
+  "name": "missing-entry-local",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./index.js"
+}

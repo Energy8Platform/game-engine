@@ -96,4 +96,56 @@ describe('composition.snapshot', () => {
     );
     expect(schemaDiagnostics).toEqual([]);
   });
+
+  // Fix round 2 (task 7, "a screen is a plugin"): the round-1 fix above
+  // silenced every `MODULE_NOT_FOUND`-family failure, and that was one
+  // case too wide. `missing-entry-local` (fixtures/composition/plugins/
+  // missing-entry-local) declares `main: "./index.js"` — a genuine
+  // promise, unlike `client-only`'s package.json above — and no
+  // `index.js` sits next to it. `ctx.loader.import` cannot even locate a
+  // `plugins/`-only directory to get as far as checking `main` against,
+  // so it throws the identical `Cannot find package "missing-entry-local"`
+  // `ERR_MODULE_NOT_FOUND` `client-only` throws — same code, same message
+  // shape — even though this row's manifest is broken and `client-only`'s
+  // is not. Before this round's fix, both produced `diagnostics: []`:
+  // not a `package` diagnostic (`readPackageJson` found the manifest
+  // fine), not a `schema` one (swallowed), and not an `apply` one either
+  // (`@cordisjs/plugin-loader`'s own `Entry._init()` catches the same
+  // failure and only logs it to its own logger — a gap upstream of this
+  // module, not fixed here). A typo'd `e8.runtime.entry`, or a dependency
+  // whose build silently failed to produce its output, would have looked
+  // exactly like a healthy client-only plugin: `schema: null`, `state:
+  // null`, zero diagnostics. §8 of the design spec requires the opposite.
+  it('a row whose declared main does not exist produces exactly one schema diagnostic (project-local)', async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'missing-entry-local');
+    expect(row).toBeDefined();
+    expect(row!.schema).toBeNull();
+    const schemaDiagnostics = snapshot.diagnostics.filter(
+      (d) => d.plugin === row!.id && d.where === 'schema',
+    );
+    expect(schemaDiagnostics).toHaveLength(1);
+    expect(schemaDiagnostics[0].message).toContain('missing-entry-local');
+  });
+
+  // The hoisted twin of the test above — `missing-entry-hoisted` (a real
+  // `node_modules` entry via `file:./tests/fixtures/missing-entry-hoisted`
+  // in this workspace's own package.json, the same device
+  // `import-broken-plugin`/`probe-plugin` use) — proves the fix on the
+  // OTHER resolution path, where `ctx.loader.import`'s failure names the
+  // specific missing file (`Cannot find module '<path>/index.js'`) rather
+  // than the package itself. Both shapes are `ERR_MODULE_NOT_FOUND`; this
+  // test is what confirms the fix catches both, not just the one round-2
+  // was written against.
+  it('a row whose declared main does not exist produces exactly one schema diagnostic (hoisted)', async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'missing-entry-hoisted');
+    expect(row).toBeDefined();
+    expect(row!.schema).toBeNull();
+    const schemaDiagnostics = snapshot.diagnostics.filter(
+      (d) => d.plugin === row!.id && d.where === 'schema',
+    );
+    expect(schemaDiagnostics).toHaveLength(1);
+    expect(schemaDiagnostics[0].message).toContain('missing-entry-hoisted');
+  });
 });

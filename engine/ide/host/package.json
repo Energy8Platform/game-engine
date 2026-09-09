@@ -25,6 +25,7 @@
     "@types/node": "^22.0.0",
     "broken-plugin": "file:./tests/fixtures/broken-plugin",
     "import-broken-plugin": "file:./tests/fixtures/import-broken-plugin",
+    "missing-entry-hoisted": "file:./tests/fixtures/missing-entry-hoisted",
     "probe-plugin": "file:./tests/fixtures/probe-plugin",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0",

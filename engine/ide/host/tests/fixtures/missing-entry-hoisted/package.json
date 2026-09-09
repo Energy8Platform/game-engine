@@ -1,0 +1,7 @@
+{
+  "name": "missing-entry-hoisted",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js", "./package.json": "./package.json" }
+}
