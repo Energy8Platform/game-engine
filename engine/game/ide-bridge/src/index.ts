@@ -41,8 +41,8 @@
  *     a different mechanic, it rebinds — live, no reload, anywhere.
  *
  * A `hot:false` row is a different, legitimate story this module has no
- * part in: `engine/ide/client/src/screens/CompositionScreen.tsx`'s
- * `Preview` component reloads the iframe for THAT case instead. This
+ * part in: `engine/ide/client/src/screens/PreviewWall.tsx`'s `Preview`
+ * component reloads the iframe for THAT case instead. This
  * package declares `"e8": { "hot": true }` in its own package.json — a
  * config change here genuinely never needs the iframe to reload, because
  * this is the mechanism that makes that true.

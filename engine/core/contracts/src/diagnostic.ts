@@ -31,16 +31,31 @@ export interface Diagnostic {
    *     all — there is no row for these to be about — so they name the
    *     seam or mechanic itself, the closest thing a game has to an
    *     address for "who is reporting this".
-   *  3. **A key inside the editor's own UI** — a slot key
-   *     (`ide-client`'s `slots.tsx`, reporting two contributions that
-   *     claim one key) or a card key (`CompositionScreen`'s
-   *     `CardBoundary`, reporting a card that crashed while rendering).
-   *     These are not row ids and never were: the thing that collided is
-   *     a key in a registry, and the row that contributed it is not what
-   *     a person needs named. Written down because it used to be
-   *     invisible — a deleted `pluginLabel` fallback rendered anything
-   *     that matched no row as its raw value, so a key travelled through
-   *     the id-shaped field without anyone noticing it was not one.
+   *  3. **Something the editor's own UI is addressed by** — five kinds
+   *     of string, all of them the editor talking about itself:
+   *
+   *      - a slot key (`ide-client`'s `slots.tsx`, reporting two
+   *        contributions that claim one key);
+   *      - a card key (`CompositionScreen`'s `CardBoundary`, reporting a
+   *        card that crashed while rendering);
+   *      - a screen id (`layout.tsx`, reporting two screens that claim
+   *        one id, and `Layout.tsx`'s `ScreenBoundary`, reporting a
+   *        screen that crashed);
+   *      - a screen-preset name (`PreviewWall`, reporting a preset the
+   *        wall was asked for and `SCREEN_PRESETS` does not define);
+   *      - and, widest of all, a raw address fragment a human typed —
+   *        `layout.tsx` passes `hashId()` straight in when the hash names
+   *        no registered screen. That one is not a registry key at all,
+   *        and cannot be: what is being reported is precisely that
+   *        nothing answers to it.
+   *
+   *     None of these are row ids and none ever were: the thing being
+   *     reported is a key (or a would-be key) in the editor, and the row
+   *     that contributed it is not what a person needs named. Written
+   *     down because it used to be invisible — a deleted `pluginLabel`
+   *     fallback rendered anything that matched no row as its raw value,
+   *     so a key travelled through the id-shaped field without anyone
+   *     noticing it was not one.
    *
    * The three meet on one screen: `DiagnosticsPanel` renders the project's
    * list, the running game's and the editor's own, one after another. An

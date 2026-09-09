@@ -48,7 +48,7 @@ function hashId(): string {
 
 export function apply(ctx: Context) {
   // Same collection `slots` builds on, for the same two guarantees this
-  // file would otherwise have to hand-roll a third time: the collision
+  // file would otherwise have to hand-roll a fourth time: the collision
   // POLICY (last-wins — see `screen()`'s own comment for why that stays a
   // replace here too) and the disposer's IDENTITY GUARD (a disposer
   // removes the entry it added or nothing at all). What stays this file's

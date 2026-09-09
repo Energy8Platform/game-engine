@@ -2,20 +2,22 @@
  * A name→value collection with an explicit collision policy.
  *
  * **What this package holds, precisely.** Two things, and they are the two
- * where all three adopters had bugs: the collision POLICY (what `add`
- * does to the incumbent, and what disposer a rejected registration gets
- * back), and the disposer's IDENTITY GUARD (a disposer removes the slot it
- * created or nothing at all). Both were hand-rolled three times over — in
- * play-loop's step registry, game-runtime's mechanic registry and the
- * IDE's slot registry — and each copy shipped the same silent-overwrite
- * defect independently before being fixed.
+ * where the first three adopters all had bugs: the collision POLICY (what
+ * `add` does to the incumbent, and what disposer a rejected registration
+ * gets back), and the disposer's IDENTITY GUARD (a disposer removes the
+ * slot it created or nothing at all). Both were hand-rolled three times
+ * over — in play-loop's step registry, game-runtime's mechanic registry
+ * and the IDE's slot registry — and each copy shipped the same
+ * silent-overwrite defect independently before being fixed. The IDE's
+ * screen registry (`layout.tsx`) is the fourth adopter, and the first
+ * that never hand-rolled either one.
  *
  * **What each adopter still owns.** Everything about SAYING so. Each one
  * reads `get(key)` on the line before `add()` to learn whether this call
  * collided, writes its own `Diagnostic` in its own words (a step kind, a
- * mechanic id, a slot key are three different sentences with three
- * different `plugin`/`where` addresses), keeps that in its own array, and
- * delivers it its own way — a local list `createGame` reads at compose
+ * mechanic id, a slot key, a screen id are four different sentences with
+ * four different `plugin`/`where` addresses), keeps that in its own array,
+ * and delivers it its own way — a local list `createGame` reads at compose
  * time, `ctx.diagnostics`, a leniently-read optional `connection` service.
  * That split was deliberate and reviewed; this package deliberately has no
  * cordis, no contracts and no diagnostics import, so it could not deliver
@@ -30,10 +32,10 @@
  * a package whose whole purpose is removing duplication is its own small
  * joke.
  *
- * **The fourth collection, and why it is not here.**
+ * **The one collection that stayed outside, and why.**
  * `@energy8engine/spin-parser`'s `NamedCollection` is name-keyed with the
- * same first-wins-and-diagnose rule, and two of the three adopters cite it
- * as the precedent. It was considered and left alone: it has no disposal
+ * same first-wins-and-diagnose rule, and two of the first three adopters
+ * cite it as the precedent. It was considered and left alone: it has no disposal
  * at all — a parsed `record` block is never unregistered, so the identity
  * guard, which is half of what this package exists for, has nothing to
  * guard. Its `insert()` also takes the source LINE and pushes the

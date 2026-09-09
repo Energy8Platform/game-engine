@@ -83,10 +83,14 @@ describe('DiagnosticsPanel', () => {
   });
 
   it('the heading reads in the IDE’s own language, not a stray English one', () => {
-    // Ruling 8/9: every visible string in `ide/client/src` is Russian
-    // (`Состав`, `состав пуст`, `подключение…`) — this heading was the one
-    // holdout, predating the ruling. Addressed by accessible name, matching
-    // `App.test.tsx`'s own precedent for the composition tab's title.
+    // Ruling 8/9 settled this heading on `Диагностика`, to match the
+    // headings around it (`Состав`, `состав пуст`, `подключение…`). The
+    // sweeping version of that reason — every visible string in
+    // `ide/client/src` is Russian — was retracted by Ruling 13 and this
+    // panel's own rows are English. What is pinned is this heading, for
+    // the same reason `App.test.tsx` pins the composition tab: a screen's
+    // own title reads in the language of the screen. Addressed by
+    // accessible name, matching that file's precedent.
     render(<DiagnosticsPanel project={[]} game={[]} editor={[]} />);
     expect(screen.getByRole('heading', { name: 'Диагностика' })).toBeTruthy();
   });

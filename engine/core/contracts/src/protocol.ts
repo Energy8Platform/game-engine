@@ -51,10 +51,14 @@ export interface Snapshot {
  *
  *  - `game` — a running game's own `ctx.diagnostics`, forwarded by
  *    `ide-bridge` from the browser. Several connected game sockets are
- *    several VIEWS of one game in this dev model (`e8 dev` serves one
- *    project), so they share this one source and the most recent wins —
- *    the same assumption `ctx.composition.snapshot()` already makes for
- *    the one `Snapshot` every client shares.
+ *    NOT one game seen several ways: a preview wall opens a tile per
+ *    device preset, each its own page and its own socket, and each names
+ *    itself in `GameDiagnosticsMessage.game`. So this field says WHICH
+ *    SPEAKER, and `game` says which of the speaker's several selves —
+ *    two axes, neither absorbing the other. This doc used to say the
+ *    opposite (one game, most-recent-wins, the way `Snapshot` is shared),
+ *    which was true of the model this protocol started in and is exactly
+ *    the assumption the wall broke.
  *  - `host` — the host speaking for itself, for the one producer that is
  *    not in a browser at all: `dev-game.ts`'s `/api/spin` route, which
  *    runs in the host process and has no `ctx.diagnostics` to write into.

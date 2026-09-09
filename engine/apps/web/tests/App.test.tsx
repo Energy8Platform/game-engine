@@ -80,13 +80,18 @@ describe('App', () => {
 
   it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
     // The one place in this suite that pins WORDING rather than structure.
-    // Every visible string in `ide/client/src` is Russian (`Состав`,
-    // `состав пуст`, `подключение…`) — an English tab title sitting above
-    // `CompositionScreen`'s own `<h1>Состав</h1>` would be this task quietly
-    // introducing the one inconsistency nothing else here has. Addressed by
-    // the tab's accessible name (`role="tab"`'s `name`, which is
-    // `entry.title` — see `Layout.tsx`), the one thing that actually
-    // carries the wording; the testid above deliberately does not.
+    // The reason it used to give — that EVERY visible string in
+    // `ide/client/src` is Russian — was retracted by Ruling 13 and is
+    // less true now than it was then: the layout's own empty and crashed
+    // states, and the diagnostics panel's rows, are all English. What is
+    // actually being held is narrower and still worth holding: the
+    // NAVIGATION reads in the same language as the screen it opens, and
+    // `CompositionScreen`'s own `<h1>` says `Состав`. A tab reading
+    // "Composition" above that heading is the inconsistency, whatever the
+    // rest of the app does. Addressed by the tab's accessible name
+    // (`role="tab"`'s `name`, which is `entry.title` — see `Layout.tsx`),
+    // the one thing that actually carries the wording; the testid above
+    // deliberately does not.
     const ctx = await harness();
     render(<App ctx={ctx} />);
     expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
