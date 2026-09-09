@@ -31,6 +31,11 @@ export {
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, useEditorDiagnostics } from './screens/CompositionScreen';
-export { Preview, computePreviewUrl } from './screens/PreviewWall';
+export {
+  Preview,
+  PreviewWall,
+  computePreviewUrl,
+  type PreviewWallProps,
+} from './screens/PreviewWall';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Layout } from './screens/Layout';

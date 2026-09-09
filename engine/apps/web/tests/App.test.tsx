@@ -66,6 +66,18 @@ describe('App', () => {
     expect(screen.getByTestId('tab-composition')).toBeTruthy();
   });
 
+  it('registers preview after composition, not before it', async () => {
+    // `layout.tsx`'s own comparator sorts an UNORDERED screen after every
+    // ORDERED one, regardless of that one's number (see `layout.test.tsx`'s
+    // "a screen with no order sorts after every screen that has one") — so
+    // giving `preview` an order while leaving `composition` without one
+    // would have put `preview` first, the opposite of what `App` intends.
+    // This is the guard against that going unnoticed a second time.
+    const ctx = await harness();
+    render(<App ctx={ctx} />);
+    expect(ctx.layout.screens().map((s) => s.id)).toEqual(['composition', 'preview']);
+  });
+
   it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
     // The one place in this suite that pins WORDING rather than structure.
     // Every visible string in `ide/client/src` is Russian (`Состав`,

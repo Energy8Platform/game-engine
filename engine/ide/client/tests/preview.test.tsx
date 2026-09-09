@@ -1,7 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { CompositionRow, ServerMessage } from '@energy8engine/contracts';
-import { Preview, computePreviewUrl, createIdeClient } from '../src/index';
+import { Preview, PreviewWall, computePreviewUrl, createIdeClient } from '../src/index';
 
 /**
  * Falling tests for Task 12, step 1: the preview panel draws an iframe at
@@ -165,5 +166,83 @@ describe('Preview', () => {
       },
     });
     expect(screen.getByTitle('превью игры')).toBe(second);
+  });
+});
+
+/**
+ * Falling tests for Task 6: the wall §5 of the design spec asks for —
+ * device presets, orientations and languages open at once, not the single
+ * zoomed frame `Preview` (above) already covered under Task 3.
+ *
+ * Every `it` below calls `await harness()` where the plan's own brief
+ * writes the synchronous `harness()` — this file's `harness()` goes through
+ * the real `createIdeClient`, which is async (see `context.ts`'s own doc:
+ * cordis defers a plugin's `apply()` to the microtask after `ctx.plugin()`
+ * returns, so `ctx.connection` would not exist yet without the await). The
+ * plan's pseudocode elides that; the assertions themselves are unchanged.
+ */
+describe('PreviewWall', () => {
+  it('draws one frame per chosen preset, at that preset’s size', async () => {
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    const tiles = screen.getAllByTestId(/^tile-/);
+    expect(tiles.length).toBeGreaterThan(1); // a wall, not one frame
+    expect(tiles[0].getAttribute('width')).toBe('1200');
+  });
+
+  it('starts with a few tiles, not all seven', async () => {
+    // Every tile is a whole game booting Pixi and opening a socket. The
+    // wall is worth having because you can see several at once, not
+    // because it opens every size anyone ever defined.
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    expect(screen.getAllByTestId(/^tile-/).length).toBeLessThanOrEqual(3);
+  });
+
+  it('turning a preset on adds its tile, turning it off removes it', async () => {
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    const before = screen.getAllByTestId(/^tile-/).length;
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Mobile S' }));
+    expect(screen.getAllByTestId(/^tile-/)).toHaveLength(before + 1);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Mobile S' }));
+    expect(screen.getAllByTestId(/^tile-/)).toHaveLength(before);
+  });
+
+  it('each tile carries its own game identity, so the panel can tell them apart', async () => {
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    const urls = screen.getAllByTestId(/^tile-/).map((t) => t.getAttribute('src'));
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it('rotating a tile swaps its width and height', async () => {
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    const tile = screen.getAllByTestId(/^tile-/)[0];
+    const [w, h] = [tile.getAttribute('width'), tile.getAttribute('height')];
+    await userEvent.click(screen.getByRole('button', { name: /rotate/i }));
+    const rotated = screen.getAllByTestId(/^tile-/)[0];
+    expect([rotated.getAttribute('width'), rotated.getAttribute('height')]).toEqual([h, w]);
+  });
+
+  it('a language choice reaches the tile’s address', async () => {
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /lang/i }), 'de');
+    for (const tile of screen.getAllByTestId(/^tile-/)) {
+      expect(new URL(tile.getAttribute('src')!, 'http://x').searchParams.get('lang')).toBe('de');
+    }
+  });
+
+  it('the wall survives a preset the harness does not know', async () => {
+    // Failures are data: an unknown preset name is a diagnostic and a
+    // skipped tile, not a crashed screen.
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} chosen={['Desktop', 'Hologram']} />);
+    expect(screen.getAllByTestId(/^tile-/)).toHaveLength(1);
+    expect(ctx.connection.diagnostics.map((x) => x.message)).toEqual([
+      expect.stringContaining('Hologram'),
+    ]);
   });
 });
