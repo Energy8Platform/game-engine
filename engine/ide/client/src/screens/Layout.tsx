@@ -2,6 +2,7 @@ import { Component } from 'react';
 import type { ReactNode } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
+import type { ConnectionService } from '../plugins/connection';
 import { useLayout } from '../plugins/layout';
 
 /** What actually threw, reduced to the one thing worth showing a human. */
@@ -50,7 +51,18 @@ class ScreenBoundary extends Component<
     return { message: errorMessage(error) };
   }
   componentDidCatch(error: unknown) {
-    this.props.ctx.connection.report(
+    // Read leniently, exactly as `layout.tsx`'s own `report()` does and for
+    // the same reason: `layout` declares no dependency on `connection` and
+    // is meant to work when composed without it. This read was direct,
+    // which made a crashed screen throw INSIDE the error boundary when the
+    // service was absent — the one path where "a failure is data" has to
+    // hold hardest, since there is nothing left above it to catch. Not
+    // reachable in the shipped app, where `createIdeClient` always
+    // composes both; cheap enough to make consistent that reachability is
+    // not the argument.
+    const connection = this.props.ctx.reflect.get('connection', false) as
+      ConnectionService | undefined;
+    connection?.report(
       diagnostic(
         'error',
         this.props.screenId,
@@ -85,6 +97,12 @@ class ScreenBoundary extends Component<
  * ${id}`}` is the screen's own id, the same stable thing the address hash
  * already commits to. Most tests should address a tab by id — a test that
  * exists to prove wording is a separate, deliberate exception.
+ *
+ * The body is a plain `<div>`, not a `<main>`. A screen owns its own main
+ * landmark — `CompositionScreen` and `PreviewWall` both open with one, and
+ * a plugin's screen is free to — so a `<main>` here nested a landmark
+ * inside a landmark on every screen the IDE ships. The chrome is the tab
+ * bar; the content area is whatever the current screen decided to be.
  */
 export function Layout({ ctx }: { ctx: Context }) {
   const { screens, current } = useLayout(ctx);
@@ -106,7 +124,7 @@ export function Layout({ ctx }: { ctx: Context }) {
           </button>
         ))}
       </nav>
-      <main className="e8-layout-body">
+      <div className="e8-layout-body">
         {current ? (
           <ScreenBoundary key={current.id} ctx={ctx} screenId={current.id}>
             <current.component ctx={ctx} />
@@ -116,7 +134,7 @@ export function Layout({ ctx }: { ctx: Context }) {
             No screens are registered yet.
           </p>
         )}
-      </main>
+      </div>
     </div>
   );
 }

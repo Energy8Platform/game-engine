@@ -326,4 +326,37 @@ describe('Layout', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'OK' }));
     expect(screen.getByText('OK BODY')).toBeTruthy();
   });
+
+  it('a crashed screen is still data when composed without ctx.connection', async () => {
+    // The boundary is the last thing standing when a screen throws, so it
+    // is the one place a missing service must not throw in turn: a direct
+    // `ctx.connection` read fires cordis's own not-injected guard from
+    // inside `componentDidCatch`, and React re-throws whatever that hook
+    // throws — turning the one failure that has to be data into a crash of
+    // the whole page. `layout.tsx`'s own `report()` has always read
+    // leniently for exactly this reason; this holds the boundary to the
+    // same rule. A real `Context` with no `connection` composed, for the
+    // reason the collision test above gives: the fake `reflect.get` cannot
+    // tell a lenient read from a lucky one.
+    const ctx = new Context();
+    await ctx.plugin(layoutPlugin);
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => {
+      throw new Error('screen exploded');
+    });
+
+    expect(() => render(<Layout ctx={ctx} />)).not.toThrow();
+    expect(screen.getByTestId('screen-error').textContent).toContain('screen exploded');
+
+    await ctx.fiber.dispose();
+  });
+
+  it('leaves the main landmark to the screen that owns one', () => {
+    // Both shipped screens open with their own `<main>`, and a plugin's
+    // screen may. A `<main>` around the body nested a landmark inside a
+    // landmark on every one of them.
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'Alpha' }, () => <main>ALPHA BODY</main>);
+    render(<Layout ctx={ctx} />);
+    expect(document.querySelectorAll('main')).toHaveLength(1);
+  });
 });
