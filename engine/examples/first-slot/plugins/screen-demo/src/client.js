@@ -31,11 +31,13 @@ export const name = 'screen-demo';
  * `@energy8engine/ide-bridge` already read their own flags off
  * (`new URLSearchParams(location.search)`).
  *
- * Left reachable on purpose, not exercised by this file: a screen that
- * throws is supposed to be caught by the layout that drew it, not
- * something this plugin can safely rehearse without knowing what catches
- * it — see the task-7 brief for why that proof belongs to a later task,
- * against this same plugin, rather than being hand-rolled here.
+ * `engine/apps/web/tests/e2e/screen-demo.spec.ts` already exercises this
+ * end to end: a real thrown `Error`, caught by the layout's own error
+ * boundary, with the rest of the IDE left working. A later task in this
+ * plan is expected to fixture the same crash a second way — a project
+ * option a test can turn on, rather than a URL a test navigates to — and
+ * the flag stays here, reachable either way, rather than this file
+ * guessing at that shape in advance.
  */
 function shouldCrash() {
   return new URLSearchParams(location.search).has('screen-demo-crash');

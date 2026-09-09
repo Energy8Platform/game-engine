@@ -2,3 +2,6 @@
   name: probe-plugin
   config:
     speed: 12
+- id: clientonly1
+  name: client-only
+  config: {}

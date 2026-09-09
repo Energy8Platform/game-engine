@@ -61,6 +61,18 @@ interface SchemaResult {
   diagnostic: Diagnostic | null;
 }
 
+/**
+ * Node's own name for "this bare specifier resolves to nothing at all" —
+ * `require.resolve`'s `MODULE_NOT_FOUND` and ESM `import()`'s
+ * `ERR_MODULE_NOT_FOUND` (the code seen in practice: `ctx.loader.import`
+ * resolves through a real `import()`, so `ERR_MODULE_NOT_FOUND` is what
+ * `screen-demo` — client-only, no `main`, no `"."` export — actually
+ * throws; `MODULE_NOT_FOUND` is kept alongside it as the CommonJS-era name
+ * for the same condition, in case a future loader change resolves through
+ * `require` instead).
+ */
+const MODULE_NOT_FOUND_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND']);
+
 async function schemaOf(ctx: Context, entryId: string, name: string): Promise<SchemaResult> {
   let plugin: unknown;
   try {
@@ -73,6 +85,52 @@ async function schemaOf(ctx: Context, entryId: string, name: string): Promise<Sc
     // below, not the "declares no Config" one.
     plugin = ctx.loader.unwrapExports(await ctx.loader.import(name));
   } catch (error) {
+    // Fix round (task 7, "a screen is a plugin"): a client-only plugin with
+    // no `main`/`"."` export — `screen-demo`, a project-local plugin whose
+    // ONLY job is a browser-side `apply(ctx)` — was never going to have
+    // anything here for `import(name)` to find, and that is not a plugin
+    // author's mistake to report; it produced a permanent, spurious
+    // `editor error … schema: failed to import "screen-demo"` on every
+    // boot the moment `screendemo1` became a checked-in `e8.yml` row,
+    // which is what `diagnostics.spec.ts`'s "one id in both namespaces
+    // renders as two rows, not one" caught (it counts rows in the panel;
+    // a third, unrelated one is not the two that test was written to
+    // expect).
+    //
+    // A first pass at this fix skipped the import outright whenever
+    // `manifest.runtime` was absent, and a SECOND pass after that skipped
+    // it whenever `readPackageJson(config.cwd, name)` came back empty of a
+    // `main`/`"."` field — both wrong, proven by re-running the affected
+    // suites rather than assumed: `e8-example-probe` and
+    // `@energy8engine/ide-bridge` both declare no `e8.runtime` either, yet
+    // their schemas are what the composition screen's "скорость
+    // барабана"/"механика стадии" fields come from (`@cordisjs/plugin
+    // -loader` composes every `e8.yml` entry off its OWN main export,
+    // independent of `E8Manifest.runtime`/`.client` entirely), so gating
+    // on `runtime` broke both. And `readPackageJson` resolves relative to
+    // `config.cwd`, a narrower search than the bare `import(name)` a few
+    // lines up performs (which resolves from `@cordisjs/plugin-loader`'s
+    // own location and so always reaches this monorepo's root
+    // `node_modules`, regardless of `cwd`) — `broken.test.ts`'s
+    // "import-broken-plugin" fixture is composed from a temp directory
+    // OUTSIDE the repo specifically to exercise `schemaOf` on its own, and
+    // gating on `readPackageJson`'s result broke that the same way.
+    //
+    // What actually distinguishes "nothing to import" from "something to
+    // import that is broken" is the error `import()` itself throws:
+    // Node's own `MODULE_NOT_FOUND`/`ERR_MODULE_NOT_FOUND` means there was
+    // no module at the bare specifier for ANY resolver to find, which is
+    // exactly `screen-demo`'s case and never a thing for a human to fix
+    // via this diagnostic. Anything else — a module that DOES exist and
+    // throws while being evaluated, has broken syntax, or fails partway —
+    // is exactly the failure this diagnostic exists to report, and it
+    // still does: `import-broken-plugin` throws a plain `Error` from
+    // inside its own module body, which carries no `MODULE_NOT_FOUND`-
+    // family code, so it falls through to the branch below unchanged.
+    const code = (error as { code?: unknown } | null)?.code;
+    if (typeof code === 'string' && MODULE_NOT_FOUND_CODES.has(code)) {
+      return { schema: null, diagnostic: null };
+    }
     return {
       schema: null,
       diagnostic: diagnostic(

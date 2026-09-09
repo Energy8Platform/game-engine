@@ -64,4 +64,36 @@ describe('composition.snapshot', () => {
     const include = snapshot.rows.find((r) => r.name === '@cordisjs/plugin-include')!;
     expect(include.clientUrl).toBeNull();
   });
+
+  // Fix round (task 7, "a screen is a plugin"): `client-only` (fixtures/
+  // composition/plugins/client-only) has an `e8.client` and no `main`/`"."`
+  // export — the exact shape `engine/examples/first-slot/plugins/screen
+  // -demo` has, and the shape `schemaOf`'s own `import(name)` was never
+  // going to resolve. Before the fix, this row still composed and served
+  // its client half fine (`clientUrl` below already proves that half
+  // worked) but ALSO produced a spurious `editor error … schema: failed to
+  // import "client-only"` diagnostic — which is what turned
+  // `diagnostics.spec.ts`'s "one id in both namespaces renders as two rows,
+  // not one" red the moment `screendemo1` became a permanent `e8.yml` row:
+  // that test counts rows in the diagnostics panel, and a third, unrelated
+  // row is not the two it was written to expect. `schemaOf`'s own
+  // `MODULE_NOT_FOUND_CODES` check is what closes it — see that catch
+  // block's own doc for why the fix is not "skip when there's no
+  // `e8.runtime`" or "skip when `readPackageJson` finds no main", both of
+  // which were tried first and both of which broke something else
+  // (`probe-plugin`/`ide-bridge`'s already-working schema forms, and this
+  // suite's own `broken.test.ts`, respectively).
+  it('a client-only row with no importable main produces no schema diagnostic', async () => {
+    const snapshot = await host.ctx.composition.snapshot();
+    const row = snapshot.rows.find((r) => r.name === 'client-only');
+    expect(row).toBeDefined();
+    // The client half itself is unaffected — this row still resolves and
+    // still serves, so the fix is scoped to the schema probe alone.
+    expect(row!.clientUrl).toBe(`/plugin-client/${row!.id}`);
+    expect(row!.schema).toBeNull();
+    const schemaDiagnostics = snapshot.diagnostics.filter(
+      (d) => d.plugin === row!.id && d.where === 'schema',
+    );
+    expect(schemaDiagnostics).toEqual([]);
+  });
 });
