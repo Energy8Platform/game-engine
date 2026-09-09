@@ -114,6 +114,30 @@ export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
    * never a crash, see `apply()`.
    */
   bridgeUrl?: string;
+  /**
+   * This bridge's own identity — WHICH running game a `game-diagnostics`
+   * frame is, once more than one can be talking to the same host at once
+   * (see `GameDiagnosticsMessage.game` in `@energy8engine/contracts` for
+   * the wire field this becomes). Not a composition-screen setting:
+   * `Config` below stays `stage` + `mechanic` only, because a human does
+   * not type a game's identity into a form — the address this game was
+   * OPENED AT already carries it, and that address is the one thing
+   * distinguishing two tiles of a preview wall running the SAME project,
+   * the SAME composition, in two different iframes.
+   *
+   * **Optional, and undecided is legitimate — the ordinary case, not a
+   * broken one.** A project opened the ordinary way, one game against one
+   * dev host, has nothing to gain from naming itself.
+   *
+   * **When omitted, `apply()` reads this page's own `?game=` query
+   * parameter** (`new URLSearchParams(location.search).get('game')`) — the
+   * same "explicit config wins, then the page's own address, then
+   * nothing" order `bridgeUrl` above already uses for `location.host`. A
+   * test environment with no `location` global gets no fallback either,
+   * for the same reason `bridgeUrl` gets none there: pass this explicitly
+   * instead.
+   */
+  game?: string;
   /** Test seam — same shape `connection.ts`'s own `socketFactory` uses. */
   socketFactory?: (url: string) => WebSocketLike;
   /**
@@ -221,6 +245,22 @@ export const Config = Schema.object({
 });
 
 /**
+ * This bridge's own identity, stamped onto every frame
+ * `attachDiagnosticsForwarding` sends — see `IdeBridgeConfig.game`'s own
+ * doc for where a caller gets one and `GameDiagnosticsMessage.game`
+ * (`@energy8engine/contracts`) for what it means on the wire. A separate,
+ * narrower type from `IdeBridgeConfig` on purpose: `attachDiagnosticsForwarding`
+ * is tested standalone, against a plain fake socket (see its own doc,
+ * immediately below), and a reader of ITS signature has no reason to see
+ * `stage`/`mechanic`/`onDiagnostic` go past for a value this function does
+ * nothing else with.
+ */
+export interface DiagnosticsForwardingIdentity {
+  /** See `IdeBridgeConfig.game`. Absent means the ordinary case: the only game talking to this host. */
+  game?: string;
+}
+
+/**
  * Subscribes `socket` to `log`, both ways. Out: on every change, sends the
  * log's WHOLE current list as one `game-diagnostics` frame (immediately
  * below). In: accepts that same frame back FROM the host and seeds what it
@@ -279,10 +319,21 @@ export const Config = Schema.object({
  * cannot be forwarded to. A dev-only bridge that spins on a broken socket
  * is worse than one that goes quiet, so a send failure here is simply
  * swallowed.
+ *
+ * **Stamps this bridge's own identity on the way out, if it was given
+ * one.** See `IdeBridgeConfig.game`'s own doc for where a caller gets one
+ * and `GameDiagnosticsMessage.game` (`@energy8engine/contracts`) for what
+ * it means on the wire — an absent identity is the ordinary single-game
+ * case, not a broken frame, so it is simply left off rather than
+ * defaulted to anything. This function does not read `location` itself to
+ * find one; `apply()` does that, the same way it already resolves
+ * `bridgeUrl`, so this stays a plain value in and a plain value out —
+ * testable headless, with nothing here that needs a browser to run.
  */
 export function attachDiagnosticsForwarding(
   socket: Pick<WebSocketLike, 'readyState' | 'send' | 'addEventListener'>,
   log: DiagnosticsService,
+  identity: DiagnosticsForwardingIdentity = {},
 ): () => void {
   const WEBSOCKET_OPEN = 1;
   /**
@@ -310,6 +361,11 @@ export function attachDiagnosticsForwarding(
         // sentence, a reader told too little believes it has everything.
         diagnostics: [...log.own()],
         dropped: log.dropped(),
+        // `undefined` when this bridge has no identity configured —
+        // `JSON.stringify` drops the key entirely rather than sending it
+        // as `null`, so the frame is byte-for-byte what a bridge from
+        // before this field existed would have sent.
+        game: identity.game,
       };
       socket.send(JSON.stringify(message));
     } catch {
@@ -585,6 +641,17 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     config.bridgeUrl ?? (typeof location !== 'undefined' ? `ws://${location.host}/ide` : undefined);
   if (!url) return; // no address to reach the host at — stays on the boot-time binding only.
 
+  // This bridge's own identity — see `IdeBridgeConfig.game`'s own doc for
+  // the fallback order. Resolved here, next to `url` above, for the same
+  // reason: a test environment with no `location` global must be able to
+  // pass it straight in rather than this module reaching for a global it
+  // does not have.
+  const gameId =
+    config.game ??
+    (typeof location !== 'undefined'
+      ? (new URLSearchParams(location.search).get('game') ?? undefined)
+      : undefined);
+
   const factory =
     config.socketFactory ?? ((u: string) => new WebSocket(u) as unknown as WebSocketLike);
   const socket = factory(url);
@@ -596,7 +663,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // `diagnostics` row leaves this simply unwired, never broken.
   const diagnosticsLog = ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
   if (diagnosticsLog) {
-    const detachForwarding = attachDiagnosticsForwarding(socket, diagnosticsLog);
+    const detachForwarding = attachDiagnosticsForwarding(socket, diagnosticsLog, { game: gameId });
     ctx.effect(() => detachForwarding, 'ide-bridge-diagnostics-forwarding');
   }
 

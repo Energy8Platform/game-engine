@@ -129,6 +129,34 @@ export interface GameDiagnosticsMessage {
    * bucket.
    */
   source?: GameDiagnosticsSource;
+  /**
+   * Which running game this list belongs to — see `IdeBridgeConfig.game`
+   * (`@energy8engine/ide-bridge`) for where a bridge gets one: a URL
+   * parameter, because the address a game was opened at is the one thing
+   * that tells two tiles of a preview wall apart. Absent on a host frame —
+   * the host is one speaker, not one of several games, so it has none of
+   * its own to stamp.
+   *
+   * **Absent on a GAME frame is legal too, and means "the only game" — the
+   * ordinary case, not a broken frame.** The same rule `source`'s own doc
+   * states for itself. This field did not exist before a preview wall
+   * could run several games against one host at once, and a project opened
+   * the ordinary way still sends exactly one whole-list frame with nothing
+   * else to be told apart from. It starts to matter only once that stops
+   * being true — several tiles, each its own socket, each sending its OWN
+   * whole list — and a reader keying retention only by `source` (`'game'`,
+   * shared by every one of them) would let the second tile's list silently
+   * replace the first's: the exact failure `source` itself exists to
+   * prevent one level up, reached again one level down.
+   *
+   * **Stamped by the sender, unlike `source`.** The host can always tell a
+   * game's socket from its own process — that is what `source` records —
+   * but it has no way to tell two game sockets apart; only the bridge
+   * itself knows which tile it is running in, so this travels client→host
+   * exactly as the bridge set it, carried rather than invented by whatever
+   * relays it onward.
+   */
+  game?: string;
 }
 
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */

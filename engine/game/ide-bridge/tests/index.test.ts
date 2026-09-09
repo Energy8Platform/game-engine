@@ -1134,4 +1134,73 @@ describe('ide-bridge forwards the game diagnostics', () => {
     expect(() => log.report(d('no bridge present'))).not.toThrow();
     expect(log.list()).toHaveLength(1);
   });
+
+  /**
+   * "A screen is a plugin", Task 4: the preview wall (a later task in that
+   * same slice) runs several games against one host at once, and until
+   * this, every one of them sent the SAME unlabelled `game-diagnostics`
+   * frame — nothing on the wire said WHICH game a whole-list frame was
+   * the whole list OF. Reproduced against the host directly first (see
+   * task-4-report.md): two games reporting left only the second's message
+   * in what a later client was told, because the host's own retention has
+   * no key finer than the fixed source string `'game'`. Fixing THAT
+   * retention is a later task's job; this bridge's own half is narrower —
+   * stamp the identity it was configured with (`IdeBridgeConfig.game`, see
+   * its own doc for where a caller gets one) onto every frame it sends,
+   * and touch nothing else. In particular: the inbound filter right above
+   * this block (`source === 'host'` only, `seed` not `report`) is a
+   * property of an earlier slice with its own tests already guarding it,
+   * and adding a field here must not be the thing that quietly widens it.
+   */
+  describe('ide-bridge forwards the game diagnostics — which game it is', () => {
+    it('the bridge stamps its game onto every frame it sends', () => {
+      const log = createDiagnostics();
+      const socket = fakeSocket();
+      attachDiagnosticsForwarding(socket, log, { game: 'tile-3' });
+      log.report(d('something'));
+      expect(JSON.parse(socket.sent[0]).game).toBe('tile-3');
+    });
+
+    it('a game with no identity configured still sends, and says nothing false', () => {
+      // A single-game setup existed before this field and must keep
+      // working; absent is a legal value meaning "the only game", not a
+      // broken frame.
+      const log = createDiagnostics();
+      const socket = fakeSocket();
+      attachDiagnosticsForwarding(socket, log);
+      log.report(d('something'));
+      expect(JSON.parse(socket.sent[0]).game).toBeUndefined();
+    });
+
+    it('still seeds a host frame, which carries no game of its own', () => {
+      // Restates the earlier slice's own test above by name: `source ===
+      // 'host'` only, `seed` not `report`. Adding a field must not widen
+      // that filter.
+      const log = createDiagnostics();
+      const socket = fakeSocket();
+      attachDiagnosticsForwarding(socket, log);
+      socket.deliver({
+        type: 'game-diagnostics',
+        source: 'host',
+        dropped: 0,
+        diagnostics: [d('spin failed')],
+      });
+      expect(log.own()).toEqual([]);
+      expect(log.list().map((x) => x.message)).toEqual(['spin failed']);
+    });
+
+    it('still ignores another game’s frame, identity or no identity', () => {
+      const log = createDiagnostics();
+      const socket = fakeSocket();
+      attachDiagnosticsForwarding(socket, log, { game: 'tile-1' });
+      socket.deliver({
+        type: 'game-diagnostics',
+        source: 'game',
+        game: 'tile-2',
+        dropped: 0,
+        diagnostics: [d('not mine')],
+      });
+      expect(log.list()).toEqual([]);
+    });
+  });
 });

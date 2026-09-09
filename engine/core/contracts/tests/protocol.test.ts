@@ -59,4 +59,22 @@ describe('protocol — game-diagnostics is its own message, not a reuse of diagn
     expect(fromHost.source).toBe('host');
     expect(fromGame.source).toBeUndefined();
   });
+
+  it('carries which game the list belongs to, and an absent one is a legal frame, not a broken one', () => {
+    // Compile-time proof again: `game` only type-checks here if it is
+    // genuinely part of the `game-diagnostics` variant of both directions.
+    // A preview wall runs several games against one host at once, so a
+    // whole-list frame needs to say WHICH game it is the whole list OF —
+    // but a project opened the ordinary way still has exactly one, with
+    // nothing to be told apart from, and must keep working unchanged.
+    const tileThree: ClientMessage = {
+      type: 'game-diagnostics',
+      diagnostics: [],
+      dropped: 0,
+      game: 'tile-3',
+    };
+    const ordinary: ClientMessage = { type: 'game-diagnostics', diagnostics: [], dropped: 0 };
+    expect(tileThree.game).toBe('tile-3');
+    expect(ordinary.game).toBeUndefined();
+  });
 });
