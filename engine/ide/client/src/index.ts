@@ -18,6 +18,7 @@ export {
 } from './plugins/game-composition';
 export {
   useGameDiagnostics,
+  type GameDiagnosticsEntry,
   type GameDiagnosticsGroup,
   type GameDiagnosticsService,
   type GameDiagnosticsState,

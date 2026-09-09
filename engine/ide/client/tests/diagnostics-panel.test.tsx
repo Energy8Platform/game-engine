@@ -1,22 +1,38 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
-import { diagnostic as d, type Diagnostic } from '@energy8engine/contracts';
+import {
+  diagnostic as d,
+  type Diagnostic,
+  type GameDiagnosticsSource,
+} from '@energy8engine/contracts';
+import type { GameDiagnosticsGroup } from '../src/plugins/diagnostics';
 import { DiagnosticsPanel } from '../src/screens/DiagnosticsPanel';
 import { CompositionScreen } from '../src/screens/CompositionScreen';
+
+/**
+ * One `game` group, built the way the store builds one: every entry
+ * carries the SPEAKER that said it, because two of them share this
+ * namespace and the panel has to tell them apart (see
+ * `GameDiagnosticsEntry`). `source` defaults to `'game'` — a running
+ * game's own account, which is what most of these tests are about — so a
+ * fixture only says `'host'` where the difference is the point.
+ */
+function group(
+  game: string | undefined,
+  diagnostics: Diagnostic[],
+  source: GameDiagnosticsSource = 'game',
+  dropped = 0,
+): GameDiagnosticsGroup {
+  return { game, diagnostics: diagnostics.map((diagnostic) => ({ source, diagnostic })), dropped };
+}
 
 describe('DiagnosticsPanel', () => {
   it('shows a game diagnostic, with its severity and where it came from', () => {
     render(
       <DiagnosticsPanel
         project={[]}
-        game={[
-          {
-            game: undefined,
-            diagnostics: [d('error', 'reels', 'runtime', 'reels blew up')],
-            dropped: 0,
-          },
-        ]}
+        game={[group(undefined, [d('error', 'reels', 'runtime', 'reels blew up')])]}
         editor={[]}
       />,
     );
@@ -40,13 +56,7 @@ describe('DiagnosticsPanel', () => {
     // The collision Slice 1a settled with a comment and Slice 1b kept apart at
     // render. Here they finally meet, and the wire type is what tells them apart.
     const same = { severity: 'error' as const, plugin: 'session', where: 'w', message: 'm' };
-    render(
-      <DiagnosticsPanel
-        project={[same]}
-        game={[{ game: undefined, diagnostics: [same], dropped: 0 }]}
-        editor={[]}
-      />,
-    );
+    render(<DiagnosticsPanel project={[same]} game={[group(undefined, [same])]} editor={[]} />);
     expect(screen.getAllByText(/^m$/)).toHaveLength(2);
     expect(screen.getByTestId('diag-0')).toHaveTextContent(/project/i);
     expect(screen.getByTestId('diag-1')).toHaveTextContent(/game/i);
@@ -64,7 +74,7 @@ describe('DiagnosticsPanel', () => {
     render(
       <DiagnosticsPanel
         project={[]}
-        game={[{ game: undefined, diagnostics: [d('error', 'p', 'w', 'last')], dropped: 0 }]}
+        game={[group(undefined, [d('error', 'p', 'w', 'last')])]}
         droppedFromGame={3}
         editor={[]}
       />,
@@ -112,13 +122,7 @@ describe('DiagnosticsPanel — the editor as a third source', () => {
     // matching the two-namespace collision test above): reading origin off
     // `plugin` would collapse three rows into fewer, or mis-order them.
     const same = d('session', 'm');
-    render(
-      <DiagnosticsPanel
-        project={[same]}
-        game={[{ game: undefined, diagnostics: [same], dropped: 0 }]}
-        editor={[same]}
-      />,
-    );
+    render(<DiagnosticsPanel project={[same]} game={[group(undefined, [same])]} editor={[same]} />);
     expect(screen.getAllByText(/^m$/)).toHaveLength(3);
     expect(screen.getByTestId('diag-0')).toHaveTextContent(/project/i);
     expect(screen.getByTestId('diag-1')).toHaveTextContent(/game/i);
@@ -162,8 +166,8 @@ describe('DiagnosticsPanel — several games, each kept apart', () => {
         project={[]}
         editor={[]}
         game={[
-          { game: 'tile-3', diagnostics: [d('error', 'reels', 'w', 'mobile broke')], dropped: 0 },
-          { game: 'tile-1', diagnostics: [d('error', 'reels', 'w', 'desktop broke')], dropped: 0 },
+          group('tile-3', [d('error', 'reels', 'w', 'mobile broke')]),
+          group('tile-1', [d('error', 'reels', 'w', 'desktop broke')]),
         ]}
       />,
     );
@@ -177,9 +181,7 @@ describe('DiagnosticsPanel — several games, each kept apart', () => {
       <DiagnosticsPanel
         project={[]}
         editor={[]}
-        game={[
-          { game: undefined, diagnostics: [d('error', 'reels', 'w', 'it broke')], dropped: 0 },
-        ]}
+        game={[group(undefined, [d('error', 'reels', 'w', 'it broke')])]}
       />,
     );
     expect(screen.getByTestId('diag-0')).toHaveTextContent('it broke');
@@ -192,16 +194,88 @@ describe('DiagnosticsPanel — several games, each kept apart', () => {
         project={[]}
         editor={[]}
         game={[
-          {
-            game: 'tile-1',
-            diagnostics: [d('error', 'reels', 'w', 'first'), d('error', 'reels', 'w', 'second')],
-            dropped: 0,
-          },
+          group('tile-1', [d('error', 'reels', 'w', 'first'), d('error', 'reels', 'w', 'second')]),
         ]}
       />,
     );
     expect(screen.getByTestId('diag-0')).toHaveTextContent('tile-1');
     expect(screen.getByTestId('diag-1')).toHaveTextContent('tile-1');
+  });
+});
+
+/**
+ * Ruling 29: the host is not a game. Two speakers reach this panel under
+ * one namespace — the running game's own `ctx.diagnostics`, and the HOST
+ * reporting about that game from a process no browser is in. Before the
+ * wall, every game row was unlabelled and the host's rows looked like the
+ * rest. Now that each tile is named, the host's own `/api/spin` failure
+ * rendered as the one UNLABELLED game row beside labelled ones — a host
+ * presented as a game, in the panel that exists to say where a failure
+ * came from. It is labelled; it is still not a fourth origin.
+ */
+describe('DiagnosticsPanel — the host is a speaker, not a game', () => {
+  it("names the host's own row as the host's", () => {
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[group(undefined, [d('error', 'session', 'play', 'spin failed')], 'host')]}
+      />,
+    );
+    expect(screen.getByTestId('diag-0')).toHaveTextContent(/host/i);
+  });
+
+  it('does not turn the host into a fourth origin', () => {
+    // The row still belongs to the game namespace — its `plugin` is a seam
+    // id, not a composition row id — so the origin tag must still read
+    // `game`. Naming the speaker refines that row; it does not move it.
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[group(undefined, [d('error', 'session', 'play', 'spin failed')], 'host')]}
+      />,
+    );
+    expect(screen.getByTestId('diag-0').querySelector('.e8-diagnostic-origin')!.textContent).toBe(
+      'game',
+    );
+  });
+
+  it("tells the host's row apart from a tile's, side by side", () => {
+    // The shape the wall actually produces: a named tile in trouble, and
+    // the host in trouble about the same project. Two rows that used to
+    // differ only by the presence of a label.
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[
+          group('Desktop', [d('error', 'reels', 'runtime', 'tile broke')]),
+          group(undefined, [d('error', 'session', 'play', 'spin failed')], 'host'),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('diag-0')).toHaveTextContent('game "Desktop"');
+    expect(screen.getByTestId('diag-0').textContent).not.toMatch(/the host/i);
+    expect(screen.getByTestId('diag-1')).toHaveTextContent(/the host/i);
+    expect(screen.getByTestId('diag-1').textContent).not.toMatch(/Desktop/);
+  });
+
+  it('does not attribute the forgotten count to the game alone', () => {
+    // `droppedFromGame` sums every speaker's bounded log, the host's
+    // included, so a line reading "the game's own log forgot N" was a
+    // claim the number does not support.
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        editor={[]}
+        game={[group(undefined, [d('error', 'session', 'play', 'spin failed')], 'host')]}
+        droppedFromGame={2}
+      />,
+    );
+    const dropped = document.querySelector('.e8-diagnostics-dropped')!;
+    expect(dropped.textContent).toContain('2');
+    expect(dropped.textContent).not.toMatch(/the game's own log/i);
   });
 });
 

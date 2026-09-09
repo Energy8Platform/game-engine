@@ -1,4 +1,4 @@
-import type { Diagnostic } from '@energy8engine/contracts';
+import type { Diagnostic, GameDiagnosticsSource } from '@energy8engine/contracts';
 import type { GameDiagnosticsGroup } from '../plugins/diagnostics';
 
 /**
@@ -59,8 +59,19 @@ import type { GameDiagnosticsGroup } from '../plugins/diagnostics';
  * id-to-row-name resolution `CompositionScreen` used to do is the one
  * capability that did not move with them; see its own comment for why.
  *
- * **`droppedFromGame` is not decoration.** The game's own diagnostics log
- * is bounded (`@energy8engine/diagnostics`), and `dropped` counts what it
+ * **WHO said a game-namespace row is a third thing, beside which game and
+ * which namespace.** Two speakers reach this panel under `game` — the
+ * running game's own `ctx.diagnostics`, and the HOST reporting about that
+ * game from a process no browser is in (see `GameDiagnosticsSource`). The
+ * wire has always carried the difference and this panel used to drop it,
+ * so the host's own `/api/spin` failure rendered as an unlabelled game row
+ * beside labelled ones — a host presented as a game, which is exactly what
+ * the paragraph above forbids. It is labelled now, and it is still not a
+ * fourth origin: it refines a row already in the game namespace, the same
+ * way which-game does.
+ *
+ * **`droppedFromGame` is not decoration.** The logs behind this list are
+ * bounded (`@energy8engine/diagnostics`), and `dropped` counts what they
  * forgot. A panel that rendered only the surviving entries, with nothing
  * anywhere saying some were forgotten, would look complete while lying
  * about it — worse than a panel that said nothing at all.
@@ -86,11 +97,13 @@ export interface DiagnosticsPanelProps {
    */
   game: readonly GameDiagnosticsGroup[] | null;
   /**
-   * How many more the games' own bounded logs forgot, summed across every
-   * group — `GameDiagnosticsState.dropped`'s own total, riding alongside
-   * `game`. Meaningless while `game` is `null` (nothing has reported a
-   * count yet either), so this panel says nothing about it then
-   * regardless of what is passed here.
+   * How many more the bounded logs behind `game` forgot, summed across
+   * every group — `GameDiagnosticsState.dropped`'s own total, riding
+   * alongside `game`. Every SPEAKER's log, not only the games' own: the
+   * host keeps a bounded list too, and this number has always included it.
+   * Meaningless while `game` is `null` (nothing has reported a count yet
+   * either), so this panel says nothing about it then regardless of what
+   * is passed here.
    */
   droppedFromGame?: number;
   /**
@@ -124,6 +137,32 @@ interface Row {
    * it did before there could be more than one.
    */
   gameLabel?: string;
+  /**
+   * WHO said it — the speaker axis, present on `origin === 'game'` rows
+   * only. `'host'` means the host process reporting about the game rather
+   * than the game reporting about itself; see `GameDiagnosticsSource`.
+   *
+   * Absent on `project`/`editor` rows, which have one speaker each and
+   * nothing to distinguish.
+   */
+  speaker?: GameDiagnosticsSource;
+}
+
+/**
+ * Who said this game-namespace row, in the words a person reads — or
+ * nothing at all, which is its own answer.
+ *
+ * The host is named because it is NOT one of the games, and before this it
+ * rendered as the one unlabelled row among labelled ones: a host presented
+ * as a game, in the panel whose whole job is saying where a failure came
+ * from. A named game is named because a wall has several. And a game that
+ * named no game says nothing extra — the ordinary single-project case,
+ * which must read exactly as it did before there could be more than one.
+ */
+function speakerLabel(row: Row): string | null {
+  if (row.speaker === 'host') return 'the host';
+  if (row.gameLabel !== undefined) return `game "${row.gameLabel}"`;
+  return null;
 }
 
 export function DiagnosticsPanel({
@@ -143,10 +182,15 @@ export function DiagnosticsPanel({
   const rows: Row[] = [
     ...project.map((diagnostic): Row => ({ diagnostic, origin: 'project' })),
     ...(game ?? []).flatMap((group) =>
-      group.diagnostics.map((diagnostic): Row => ({
-        diagnostic,
+      group.diagnostics.map((entry): Row => ({
+        diagnostic: entry.diagnostic,
         origin: 'game',
+        // A HOST frame carries no game of its own and lands in the
+        // anonymous group, so `group.game` is the wrong thing to label
+        // it with — `speakerLabel` reads the speaker first for exactly
+        // that reason.
         gameLabel: group.game,
+        speaker: entry.source,
       })),
     ),
     ...editor.map((diagnostic): Row => ({ diagnostic, origin: 'editor' })),
@@ -166,8 +210,8 @@ export function DiagnosticsPanel({
               className="e8-diagnostic-row"
             >
               <span className="e8-diagnostic-origin">{row.origin}</span>{' '}
-              {row.gameLabel !== undefined && (
-                <span className="e8-diagnostic-game">game &quot;{row.gameLabel}&quot;</span>
+              {speakerLabel(row) !== null && (
+                <span className="e8-diagnostic-speaker">{speakerLabel(row)}</span>
               )}{' '}
               <strong className="e8-severity">{row.diagnostic.severity}</strong>{' '}
               <span className="e8-diagnostic-plugin">{row.diagnostic.plugin}</span>
@@ -187,7 +231,7 @@ export function DiagnosticsPanel({
 
       {game !== null && droppedFromGame > 0 && (
         <p className="e8-diagnostics-dropped">
-          the game's own log forgot {droppedFromGame} more — it only keeps a bounded history
+          {droppedFromGame} more were forgotten — every log behind this list keeps a bounded history
         </p>
       )}
     </section>

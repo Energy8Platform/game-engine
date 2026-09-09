@@ -78,9 +78,31 @@ export interface GameDiagnosticsGroup {
    * account before the host's, exactly the order the flat list used before
    * there could be more than one game.
    */
-  diagnostics: readonly Diagnostic[];
+  diagnostics: readonly GameDiagnosticsEntry[];
   /** How many this group's own bounded logs forgot, summed across its speakers. */
   dropped: number;
+}
+
+/**
+ * One diagnostic, still carrying which SPEAKER said it.
+ *
+ * This used to be a bare `Diagnostic`: the store concatenated the two
+ * speakers' lists in `GAME_DIAGNOSTIC_SOURCES` order and dropped the
+ * distinction on the floor, so a panel had a game's own report and the
+ * HOST's report about that game side by side with nothing to tell them
+ * apart. The wire carries `source` correctly and always has (see
+ * `GameDiagnosticsSource`); this is what stops the last reader from
+ * throwing it away, and it is why `DiagnosticsPanel` can say a row came
+ * from the host instead of showing it as one more game.
+ *
+ * The speaker is NOT a fourth namespace beside `project`/`game`/`editor`,
+ * and this type is deliberately not shaped to become one: it lives inside
+ * a game's group, alongside `game`, refining a row that is already in the
+ * game namespace.
+ */
+export interface GameDiagnosticsEntry {
+  source: GameDiagnosticsSource;
+  diagnostic: Diagnostic;
 }
 
 export interface GameDiagnosticsState {
@@ -150,8 +172,8 @@ export function apply(ctx: Context, config: GameDiagnosticsConfig) {
       if (byGame.size === 0) return null;
       return [...byGame].map(([game, bySource]) => ({
         game,
-        diagnostics: GAME_DIAGNOSTIC_SOURCES.flatMap(
-          (source) => bySource.get(source)?.diagnostics ?? [],
+        diagnostics: GAME_DIAGNOSTIC_SOURCES.flatMap((source) =>
+          (bySource.get(source)?.diagnostics ?? []).map((diagnostic) => ({ source, diagnostic })),
         ),
         dropped: GAME_DIAGNOSTIC_SOURCES.reduce(
           (total, source) => total + (bySource.get(source)?.dropped ?? 0),

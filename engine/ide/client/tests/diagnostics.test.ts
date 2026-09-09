@@ -60,7 +60,9 @@ function deliver(ctx: Harness, message: ServerMessage) {
 
 /** Every message of every group, flattened in group order — for tests that only care about total content, not the grouping itself (that is what the second describe block below is for). */
 function allMessages(ctx: Harness): string[] {
-  return (ctx.gameDiagnostics.groups ?? []).flatMap((g) => g.diagnostics.map((x) => x.message));
+  return (ctx.gameDiagnostics.groups ?? []).flatMap((g) =>
+    g.diagnostics.map((x) => x.diagnostic.message),
+  );
 }
 
 describe('game diagnostics store', () => {
@@ -212,7 +214,10 @@ describe('game diagnostics store, per game', () => {
     });
     await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(2));
     const byGame = Object.fromEntries(
-      ctx.gameDiagnostics.groups!.map((g) => [g.game, g.diagnostics.map((x) => x.message)]),
+      ctx.gameDiagnostics.groups!.map((g) => [
+        g.game,
+        g.diagnostics.map((x) => x.diagnostic.message),
+      ]),
     );
     expect(byGame).toEqual({ a: ['A said this'], b: ['B said this'] });
   });
@@ -239,8 +244,8 @@ describe('game diagnostics store, per game', () => {
     await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(2));
     const groupA = ctx.gameDiagnostics.groups!.find((g) => g.game === 'a')!;
     const groupB = ctx.gameDiagnostics.groups!.find((g) => g.game === 'b')!;
-    expect(groupA.diagnostics.map((x) => x.message)).toEqual(['A said this']);
-    expect(groupB.diagnostics.map((x) => x.message)).toEqual(['B said this']);
+    expect(groupA.diagnostics.map((x) => x.diagnostic.message)).toEqual(['A said this']);
+    expect(groupB.diagnostics.map((x) => x.diagnostic.message)).toEqual(['B said this']);
   });
 
   it('a second frame from one game replaces only that game, leaving the other alone', async () => {
@@ -269,8 +274,8 @@ describe('game diagnostics store, per game', () => {
     await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(2));
     const groupA = ctx.gameDiagnostics.groups!.find((g) => g.game === 'a')!;
     const groupB = ctx.gameDiagnostics.groups!.find((g) => g.game === 'b')!;
-    expect(groupA.diagnostics.map((x) => x.message)).toEqual(['A, second']);
-    expect(groupB.diagnostics.map((x) => x.message)).toEqual(['B, only']);
+    expect(groupA.diagnostics.map((x) => x.diagnostic.message)).toEqual(['A, second']);
+    expect(groupB.diagnostics.map((x) => x.diagnostic.message)).toEqual(['B, only']);
   });
 
   it("a host frame joins the anonymous game's bucket, never a bucket of its own", async () => {
@@ -286,7 +291,7 @@ describe('game diagnostics store, per game', () => {
     });
     await vi.waitFor(() => expect(ctx.gameDiagnostics.groups).toHaveLength(1));
     expect(ctx.gameDiagnostics.groups![0].game).toBeUndefined();
-    expect(ctx.gameDiagnostics.groups![0].diagnostics.map((x) => x.message)).toEqual([
+    expect(ctx.gameDiagnostics.groups![0].diagnostics.map((x) => x.diagnostic.message)).toEqual([
       'spin failed',
     ]);
   });
