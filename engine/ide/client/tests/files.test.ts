@@ -100,11 +100,14 @@ describe('files', () => {
   });
 
   it('a body with neither entries nor diagnostics is this client’s own diagnostic', async () => {
-    // Nothing to carry, so this authors one — the case where the answer
-    // came from something that is not this host at all (a dev proxy, a
-    // gateway) and therefore has no diagnostics of its own. Distinct from
-    // the invalid-JSON case above: this body parses fine, so it is the
-    // shape checks doing the work and not the `res.json()` catch.
+    // Nothing to carry, so this authors one. No producer of this shape
+    // is named on purpose: the vite proxy this app does have
+    // (`apps/web/vite.config.ts`) fails with plain text, which lands in
+    // the `res.json()` catch above and never reaches here. The branch has
+    // to exist because the body is only ever `unknown` until checked —
+    // that is the whole reason it is checked. Distinct from the
+    // invalid-JSON case above: this body parses fine, so it is the shape
+    // checks doing the work and not the `res.json()` catch.
     const ctx = harness({ fetchFn: jsonOnce({ error: 'Bad Gateway' }, { status: 502 }) });
     const { entries, diagnostics } = await ctx.files.tree();
     expect(entries).toEqual([]);

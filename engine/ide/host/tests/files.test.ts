@@ -144,6 +144,18 @@ describe('files service — tree', () => {
     const { entries } = await ctx.files.tree();
     expect(entries.filter((e) => e.path.startsWith('node_modules'))).toEqual([]);
   });
+  it('does not list git’s bookkeeping under a name that is only cased differently', async () => {
+    // macOS APFS, this repo's own platform, is case-insensitive by
+    // default: `.GIT` and `.git` are ONE directory on disk and two
+    // different strings. An exact-case skip list showed the whole of it.
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.GIT', 'hooks'), { recursive: true });
+    writeFileSync(join(dir, '.GIT', 'hooks', 'pre-commit'), '#!/bin/sh\n');
+    const ctx = await hostFor(dir);
+    const { entries } = await ctx.files.tree();
+    expect(entries.filter((e) => /^\.git/i.test(e.path))).toEqual([]);
+  });
+
   it('one entry it cannot stat costs that entry and a warning, not the whole tree', async () => {
     // `readdirSync` was wrapped in a try that degrades to a warning; the
     // `statSync` beside it was not, so one unreadable entry took the
@@ -222,6 +234,31 @@ describe('files service — read', () => {
     const ctx = await hostFor(fixture('plain'));
     const { diagnostics } = await ctx.files.read('game/nope.json');
     expect(diagnostics[0].message).not.toMatch(/outside the project/i);
+  });
+
+  it('refuses a symlink at the leaf, the same as write and remove do', async () => {
+    // Containment was never in doubt here — the target is an ordinary
+    // project file. What was wrong is that a read handed back bytes under
+    // a name `tree()` does not list at all, while a write to the same name
+    // was refused, so the file's own rule was true of two callers out of
+    // three.
+    const dir = fixture('plain');
+    writeFileSync(join(dir, 'ok.txt'), 'OK');
+    symlinkSync(join(dir, 'ok.txt'), join(dir, 'alias.txt'));
+    const ctx = await hostFor(dir);
+    const { bytes: read, diagnostics } = await ctx.files.read('alias.txt');
+    expect(read).toBeUndefined();
+    expect(diagnostics[0].code).toBe('is-symlink');
+  });
+
+  it('refuses to read out of .git, which can hold a credential', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'config'), '[remote "origin"]\n  url = https://t0ken@h/r\n');
+    const ctx = await hostFor(dir);
+    const { bytes: read, diagnostics } = await ctx.files.read('.git/config');
+    expect(read).toBeUndefined();
+    expect(diagnostics[0].code).toBe('protected-path');
   });
 
   it('a directory read is a diagnostic naming what it is', async () => {
@@ -321,6 +358,37 @@ describe('files service — write', () => {
     expect(existsSync(join(dir, '.git', 'hooks', 'pre-commit'))).toBe(false);
   });
 
+  it('refuses .git under any casing, since the filesystem does not care about the difference', async () => {
+    // Measured before this: `PUT /api/files/.GIT/hooks/pre-commit`
+    // answered 200 and put the hook exactly where git runs it, while
+    // `.git` spelled in lower case was refused. Same directory on disk.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    for (const spelling of ['.GIT', '.Git', '.gIt']) {
+      const { diagnostics } = await ctx.files.write(
+        `${spelling}/hooks/pre-commit`,
+        bytes('#!/bin/sh\n'),
+      );
+      expect(diagnostics[0].code).toBe('protected-path');
+    }
+    expect(existsSync(join(dir, '.git', 'hooks', 'pre-commit'))).toBe(false);
+  });
+
+  it('refuses a path that only REACHES .git through a symlinked directory', async () => {
+    // Every segment the request spells is innocent; only the realpath is
+    // not. The leaf check cannot see this — the symlink is the ancestor,
+    // not the leaf — and the containment walk asks only whether the
+    // ancestor is inside the project, which .git is. Measured going
+    // through with no diagnostics at all.
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.git', 'hooks'), { recursive: true });
+    symlinkSync(join(dir, '.git', 'hooks'), join(dir, 'hooksdir'));
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write('hooksdir/post-commit', bytes('#!/bin/sh\n'));
+    expect(diagnostics[0].code).toBe('protected-path');
+    expect(existsSync(join(dir, '.git', 'hooks', 'post-commit'))).toBe(false);
+  });
+
   it('a write that fails leaves behind none of the directories it made for it', async () => {
     // `mkdir -p` runs before the write can fail, and `remove()` refuses
     // directories — so what the browser created, the browser could not
@@ -408,6 +476,16 @@ describe('files service — remove', () => {
     const ctx = await hostFor(dir);
     const { diagnostics } = await ctx.files.remove('.git/HEAD');
     expect(diagnostics[0].message).toMatch(/\.git/);
+    expect(existsSync(join(dir, '.git', 'HEAD'))).toBe(true);
+  });
+
+  it('refuses to remove from .git under any casing', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.remove('.GIT/HEAD');
+    expect(diagnostics[0].code).toBe('protected-path');
     expect(existsSync(join(dir, '.git', 'HEAD'))).toBe(true);
   });
 

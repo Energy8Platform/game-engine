@@ -8,9 +8,12 @@
  * that: list, read, and now write and remove one file at a time.
  */
 import {
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -72,15 +75,31 @@ export const inject = ['server'];
 const SKIPPED_DIRS = new Set(['node_modules', '.git']);
 
 /**
- * Directory names no write or remove may reach through, wherever they
- * occur. Only `.git` — and not for tidiness, which is what
+ * Directory names no read, write or remove may reach through, wherever
+ * they occur. Only `.git` — and not for tidiness, which is what
  * `SKIPPED_DIRS` above is for. `.git/hooks/pre-commit` is a file the
  * browser could write and the developer's own shell would then run at
  * their next commit, and `SKIPPED_DIRS` would keep it out of the tree
  * afterwards, so nothing on any screen would ever show it again.
+ * `.git/config` is the other half: it can carry a credential in a remote
+ * URL, and nothing in this editor has a reason to read it.
  * `node_modules` stays writable: untidy, not dangerous.
  */
 const PROTECTED_DIRS = new Set(['.git']);
+
+/**
+ * Both sets are matched against a lowercased segment. This repo's own
+ * platform (macOS, APFS) is case-insensitive by default, so `.GIT` and
+ * `.git` are ONE directory on disk while being two different strings —
+ * measured: `PUT /api/files/.GIT/hooks/pre-commit` answered 200 and put
+ * the hook where git would run it, and `tree()` then listed `.GIT`
+ * because the skip list did not recognise it either. On a
+ * case-sensitive filesystem this costs at most a directory genuinely
+ * named `NODE_MODULES` being hidden, which is not a real project.
+ */
+function matches(names: Set<string>, segment: string): boolean {
+  return names.has(segment.toLowerCase());
+}
 
 export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
   const service: FilesService = {
@@ -283,7 +302,7 @@ async function readTree(cwd: string): Promise<FileTreeResponse> {
     // Sorted, so the tree is the same on every run regardless of what
     // order the filesystem happens to hand entries back in.
     for (const dirent of [...dirents].sort((a, b) => a.name.localeCompare(b.name))) {
-      if (dirent.isDirectory() && SKIPPED_DIRS.has(dirent.name)) continue;
+      if (dirent.isDirectory() && matches(SKIPPED_DIRS, dirent.name)) continue;
 
       const relPath = relDir ? `${relDir}/${dirent.name}` : dirent.name;
       const absPath = join(absDir, dirent.name);
@@ -331,56 +350,19 @@ function readOne(
 ): { bytes?: Uint8Array; diagnostics: Diagnostic[] } {
   const target = resolve(cwd, requestedPath);
 
-  // Both sides realpath'd, not just the requested path — see
-  // `plugins/client-assets.ts:45-79`, which this copies. A symlink sitting
-  // *inside* the project (legal, and exactly what the escape test below
-  // builds) walks lexical containment straight through: `escape ->
-  // /etc` resolves lexically under `cwd` while actually reading `/etc`.
-  // Comparing realpaths instead compares against where the bytes actually
-  // come from. The project root is realpath'd too, for the same reason
-  // `client-assets.ts` gives: an ordinary file two levels under a
-  // perfectly normal project would otherwise stop sharing a prefix with
-  // an un-realpath'd root the moment any ancestor of `cwd` itself is a
-  // symlink (true of any macOS temp dir, which is how this project's own
-  // tests build their fixtures).
-  let realTarget: string;
-  let realRoot: string;
-  try {
-    realTarget = realpathSync(target);
-    realRoot = realpathSync(cwd);
-  } catch (error) {
-    // Missing on disk (including a dangling symlink) is not an escape —
-    // it is the ordinary "nothing to read" case, and must read as one:
-    // conflating the two sends a reader to fix permissions for what is
-    // actually a typo.
-    return {
-      diagnostics: [
-        fileDiagnostic(
-          'error',
-          'not-found',
-          requestedPath,
-          `"${requestedPath}" was not found: ${errorMessage(error)}`,
-        ),
-      ],
-    };
-  }
-
-  if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) {
-    return {
-      diagnostics: [
-        fileDiagnostic(
-          'error',
-          'outside-project',
-          requestedPath,
-          `"${requestedPath}" resolves outside the project`,
-        ),
-      ],
-    };
-  }
+  // The same refusal every write and remove goes through, rather than a
+  // second containment story of its own. This used to realpath the target
+  // and compare prefixes here — equivalent for a file that exists, which
+  // is the only kind a read ever succeeds against, but it followed a
+  // symlink at the leaf while `describeRefusal` refused one, so the file
+  // read a name the tree does not even list and the rule stated below
+  // `describeRefusal` was not true of all three callers.
+  const refusal = describeRefusal(cwd, requestedPath, target);
+  if (refusal) return { diagnostics: [refusal] };
 
   let stat;
   try {
-    stat = statSync(realTarget);
+    stat = statSync(target);
   } catch (error) {
     return {
       diagnostics: [
@@ -408,7 +390,7 @@ function readOne(
   }
 
   try {
-    const buffer = readFileSync(realTarget);
+    const buffer = readFileSync(target);
     return { bytes: new Uint8Array(buffer), diagnostics: [] };
   } catch (error) {
     return {
@@ -437,9 +419,22 @@ function writeOne(cwd: string, requestedPath: string, bytes: Uint8Array): Diagno
   // in the tree for good, since `remove()` refuses directories and the
   // browser therefore cannot clean up what the browser made.
   let created: string | undefined;
+  let fd: number | undefined;
   try {
     created = mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, bytes);
+    // `O_NOFOLLOW`, and opened rather than written by name: `describeRefusal`
+    // lstats the leaf and this then writes it, and between the two the leaf
+    // could in principle become a symlink. Nothing in this process can lose
+    // that race — the sequence is synchronous — but one open that refuses to
+    // follow is smaller than a check plus a following write, and it puts the
+    // rule at the syscall that enforces it. A raced link answers ELOOP,
+    // reported like any other write failure; the ordinary case still gets
+    // `describeRefusal`'s own plainer wording.
+    fd = openSync(
+      target,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+    );
+    writeFileSync(fd, bytes);
     return { diagnostics: [] };
   } catch (error) {
     if (created !== undefined) rmSync(created, { recursive: true, force: true });
@@ -453,6 +448,8 @@ function writeOne(cwd: string, requestedPath: string, bytes: Uint8Array): Diagno
         ),
       ],
     };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -541,12 +538,20 @@ function removeOne(cwd: string, requestedPath: string): DiagnosticsResponse {
  * because it realpaths the target and a dangling link fails that first.
  *
  * So the rule here is the blunt one: this service does not follow a
- * symlink at the leaf, in either direction. Writing through one would
- * change a file the project's own tree does not even list (`readTree`
- * lists neither symlinks nor what they point at), and removing through
- * one would delete something the person never named. Refusing says so;
- * it also puts write and remove on the same side of the question as
- * `readOne`, which answers a dangling link with a refusal too.
+ * symlink at the leaf, in any of its three directions — `readOne` comes
+ * through here too. Writing through one would change a file the
+ * project's own tree does not even list (`readTree` lists neither
+ * symlinks nor what they point at), reading through one would hand back
+ * a file under a name nothing on screen shows, and removing through one
+ * would delete something the person never named.
+ *
+ * What no check here can see: a HARDLINK. A second name for a file
+ * outside the project is, to `lstat`, an ordinary regular file, and its
+ * realpath is inside — so a pre-placed one is written straight through.
+ * Nothing lstat-based will ever catch that, and this API cannot create
+ * one, so it takes someone who already has write access to the project
+ * directory. Recorded rather than guarded: the leaf check is not the
+ * whole story, and a later reader should not think it is.
  */
 function describeRefusal(
   cwd: string,
@@ -578,10 +583,20 @@ function describeRefusal(
     );
   }
 
-  // `resolve` has already collapsed every `..`, so these are the segments
-  // the write would really land in, not the ones the request spelled.
-  const segments = relative(cwd, target).split(sep);
-  const protectedSegment = segments.find((segment) => PROTECTED_DIRS.has(segment));
+  // Two paths, because either alone has a hole. The SPELLED path
+  // (`resolve` has already collapsed its `..`) catches `.git/hooks/x`
+  // before any of it exists — which is when a plant would happen. The
+  // LANDED path — where the nearest existing ancestor really is, after
+  // realpath — catches the form the spelled one cannot see at all: a
+  // symlink `hooksdir -> <project>/.git/hooks`, whose every spelled
+  // segment is innocent and whose realpath is not. That one was measured
+  // going through with no diagnostics at all, and the leaf-symlink check
+  // below does not reach it, because the symlink is the ancestor and not
+  // the leaf.
+  const protectedSegment = [
+    ...relative(cwd, target).split(sep),
+    ...relative(realRoot, realAncestor).split(sep),
+  ].find((segment) => matches(PROTECTED_DIRS, segment));
   if (protectedSegment !== undefined) {
     return fileDiagnostic(
       'error',
