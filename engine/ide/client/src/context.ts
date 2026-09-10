@@ -8,6 +8,8 @@ import type { ModulesConfig } from './plugins/modules';
 import * as gameComposition from './plugins/game-composition';
 import type { GameCompositionConfig } from './plugins/game-composition';
 import * as gameDiagnostics from './plugins/diagnostics';
+import * as files from './plugins/files';
+import type { FilesConfig } from './plugins/files';
 
 /**
  * Boot the browser-side cordis application.
@@ -21,7 +23,7 @@ import * as gameDiagnostics from './plugins/diagnostics';
  * every caller gets a `Context` with both services already provided.
  */
 export async function createIdeClient(
-  config: ConnectionConfig & ModulesConfig & GameCompositionConfig,
+  config: ConnectionConfig & ModulesConfig & GameCompositionConfig & FilesConfig,
 ): Promise<Context> {
   const ctx = new Context();
   await ctx.plugin(connection, config);
@@ -38,5 +40,9 @@ export async function createIdeClient(
   // plugin reading the same `url`/`socketFactory` this function's caller
   // already supplies.
   await ctx.plugin(gameDiagnostics, config);
+  // A plain fetch wrapper like `gameComposition`, not something anything
+  // else here depends on — composed last for no reason but that this is
+  // where it was added.
+  await ctx.plugin(files, config);
   return ctx;
 }
