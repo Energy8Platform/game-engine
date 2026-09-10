@@ -72,10 +72,22 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
   // wildcard) is what makes `/api/files/*splat` match a multi-segment path
   // at all; `@cordisjs/plugin-server` decodes it exactly once — percent
   // escapes and all — before handing it to the callback as one `/`-joined
-  // string, so `req.params.splat` already IS the path the editor meant.
-  // Decoding it again here would be redundant at best (nothing left to
-  // decode) and wrong at worst (see the "reads a name with a space, a
-  // plus, and a percent sign" test in files.test.ts).
+  // string, so decoding it AGAIN here would be redundant at best (nothing
+  // left to decode) and wrong at worst (see the "reads a name with a
+  // space, a plus, and a percent sign" test in files.test.ts).
+  //
+  // `req.params.splat` is not unconditionally "the path the editor meant",
+  // though: the router's decode is `decodeURIComponent(capture.replace(
+  // /\+/g, ' '))` — the query-string reading of `+`, applied here to a
+  // path segment too. A CORRECTLY encoded `+` (`%2B`) survives it, but a
+  // literal, unencoded `+` in the URL silently becomes a space first — a
+  // file named `a+b.txt` requested as `/api/files/a+b.txt` looks up
+  // `a b.txt` and 404s (see "a literal, unencoded plus in the URL reads as
+  // a space" below). `tree()` returns raw filesystem names with `+`
+  // intact, so a client building a URL from one MUST encode it — string
+  // concatenation is not enough. That's Task 4's `urlFor` to get right;
+  // nothing here can rescue an unencoded `+` after the router has already
+  // rewritten it.
 
   ctx.server.get('/api/files', async (_req, res) => {
     res.json(await service.tree());

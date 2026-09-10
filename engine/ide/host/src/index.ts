@@ -81,6 +81,48 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     await ctx.plugin(files, { cwd: options.cwd });
 
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
+
+    // A throw during ROUTE MATCHING, not just inside a handler, reaches
+    // here uncaught: `@cordisjs/plugin-server`'s own router decodes every
+    // path segment (`decodeURIComponent`, once per named/wildcard param)
+    // while deciding which route matches — before any handler runs — so a
+    // malformed percent-escape (`/plugin-client/%zz`, `/api/files/%zz`)
+    // throws a `URIError` no per-route `try` could ever catch; the throw
+    // happens one layer further out than any handler reaches. Left alone,
+    // the library's own top-level catch answers `res.status = 500` with NO
+    // body at all — the exact empty-500 shape this project has already
+    // been burned by once (see files.ts's doc comments on the same scar).
+    //
+    // `ctx.server.use()` is this library's own sugar for `ctx.on(
+    // 'server/request', middleware, { prepend: true })` — `prepend` is
+    // what makes this run AHEAD of the router's own `server/request`
+    // listener (registered without it, in `Server`'s own constructor)
+    // regardless of which plugin happened to load first, so this `try`
+    // wraps matching AND handling alike, for every route this host has —
+    // not only the ones registered below.
+    //
+    // `URIError` is the one failure this boundary can name with certainty
+    // as the requester's own mistake (a malformed escape is unambiguous),
+    // so it answers 400; anything else stays 500, but — unlike the bug
+    // this exists to close — never with an empty body.
+    ctx.server.use(async (req, res, next) => {
+      try {
+        return await next();
+      } catch (error) {
+        res.status = error instanceof URIError ? 400 : 500;
+        res.json({
+          diagnostics: [
+            diagnostic(
+              'error',
+              'server',
+              req.path,
+              `request to "${req.path}" failed: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          ],
+        });
+      }
+    });
+
     await ctx.plugin(rpc);
     await ctx.plugin(clientAssets, { cwd: options.cwd });
     await ctx.plugin(runtimeAssets, { cwd: options.cwd });

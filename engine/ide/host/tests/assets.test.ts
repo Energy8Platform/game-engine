@@ -37,6 +37,21 @@ describe('plugin client assets', () => {
     const res = await fetch(`${host.url}/plugin-client/not-a-real-id`);
     expect(res.status).toBe(404);
   });
+
+  it('a malformed percent-escape in the id answers 400 with a diagnostic, not an empty 500', async () => {
+    // Same host-wide gap `files.test.ts` names, reached through a
+    // different route: `@cordisjs/plugin-server` decodes `:id` while
+    // MATCHING this route, before this handler's own `req.params.id` ever
+    // exists, so `%zz` throws a `URIError` this route's own code never
+    // gets a chance to catch. `index.ts`'s `ctx.server.use()` boundary is
+    // what turns that into a diagnostic body instead of an empty 500 —
+    // proof it protects every route on this host, not only the ones
+    // `files.ts` added.
+    const res = await fetch(`${host.url}/plugin-client/%zz`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.diagnostics[0].message).toContain('/plugin-client/%zz');
+  });
 });
 
 /**

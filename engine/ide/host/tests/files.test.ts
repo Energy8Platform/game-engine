@@ -404,6 +404,25 @@ describe('files routes', () => {
     expect(await res.text()).toBe('special');
   });
 
+  it('a literal, unencoded plus in the URL reads as a space, not the plus a raw filename has', async () => {
+    // The caveat the test above's comment already leans on, made explicit:
+    // `@cordisjs/plugin-server`'s router decodes a path segment with
+    // `decodeURIComponent(capture.replace(/\+/g, ' '))` — the query-string
+    // reading of `+`, applied here to a path segment too, UNCONDITIONALLY.
+    // A `+` that arrived correctly encoded as `%2B` (the test above) comes
+    // through untouched; a literal `+` typed straight into the URL does
+    // not. `tree()` hands back raw filesystem names, `+` and all, so a
+    // client that turns one into a URL by concatenation instead of
+    // encoding each segment lands here — on the wrong file, 404, not the
+    // one it meant. Nothing in this route can rescue that: the router has
+    // already rewritten the byte before this handler ever sees `req.path`.
+    const dir = fixture('plain');
+    writeFileSync(join(dir, 'a+b.txt'), 'plus');
+    const host = await startHost(dir);
+    const res = await fetch(`${host.url}/api/files/a+b.txt`);
+    expect(res.status).toBe(404);
+  });
+
   it('refuses a ".." segment that arrives percent-encoded, exactly like the plain one', async () => {
     const host = await startHost(fixture('plain'));
     const escaped = ['..', '..', '..', 'etc', 'passwd'].map(encodeURIComponent).join('%2f');
@@ -411,5 +430,21 @@ describe('files routes', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.diagnostics[0].message).toMatch(/outside the project/i);
+  });
+
+  it('a malformed percent-escape answers 400 with a diagnostic, not an empty 500', async () => {
+    // `@cordisjs/plugin-server` decodes every path segment while MATCHING
+    // a route, before any handler — this one included — ever runs. `%zz`
+    // isn't a valid escape, so `decodeURIComponent` throws a `URIError`
+    // one layer out from anything a route's own `try` could catch; without
+    // the `ctx.server.use()` boundary in `index.ts`, that throw reaches the
+    // library's own top-level catch, which answers 500 with no body at
+    // all — the same empty-500 shape as the refused-path test above, just
+    // reached through the router instead of through this route's own code.
+    const host = await startHost(fixture('plain'));
+    const res = await fetch(`${host.url}/api/files/%zz`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.diagnostics[0].message).toContain('/api/files/%zz');
   });
 });
