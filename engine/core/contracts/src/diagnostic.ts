@@ -5,7 +5,7 @@ export type Severity = 'error' | 'warning' | 'info';
 export interface Diagnostic {
   severity: Severity;
   /**
-   * What this failure is about, in one of three disjoint namespaces — pick
+   * What this failure is about, in one of four disjoint namespaces — pick
    * whichever one actually applies to where the code raising the
    * diagnostic runs, not a package name in any case:
    *
@@ -56,8 +56,18 @@ export interface Diagnostic {
    *     fallback rendered anything that matched no row as its raw value,
    *     so a key travelled through the id-shaped field without anyone
    *     noticing it was not one.
+   *  4. **A fixed name for a piece of the HOST that is not a row at all** —
+   *     `'files'` (the project's file service and its four routes) and
+   *     `'server'` (the host-wide request boundary in `index.ts`, which
+   *     answers for a throw that happened before any handler ran). These
+   *     arrived with the file service and fit none of the three above: a
+   *     read of `art/logo.png` is about no composition row, no running
+   *     seam and no editor key. The `where` carries the requested path or
+   *     the request path; `plugin` names the service that refused. Listed
+   *     because a doc this specific has to grow the case rather than let
+   *     a fourth kind travel undeclared.
    *
-   * The three meet on one screen: `DiagnosticsPanel` renders the project's
+   * The four meet on one screen: `DiagnosticsPanel` renders the project's
    * list, the running game's and the editor's own, one after another. An
    * `e8.yml`/`e8.patch.yml` entry can be given any id a project author
    * picks (see `engine/examples/first-slot/e8.yml`'s `id: bridge1`), so a
@@ -94,6 +104,14 @@ export interface Diagnostic {
   message: string;
   /** What the human can do about it, when we know. */
   fix?: string;
+  /**
+   * Why this failed, for code that has to BRANCH on it — a stable tag no
+   * translation touches, unlike `message`. Optional because most producers
+   * have nothing branching on them; see `FileFailure` in `files.ts` for
+   * the one vocabulary that exists so far, and the 404-turned-400 it was
+   * added to prevent.
+   */
+  code?: string;
 }
 
 export function diagnostic(
