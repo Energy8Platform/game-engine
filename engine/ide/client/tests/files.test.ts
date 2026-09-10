@@ -77,6 +77,17 @@ describe('files', () => {
     expect(diagnostics).toHaveLength(1);
   });
 
+  it('valid JSON with no "entries" array is a diagnostic too, not an empty success', async () => {
+    // Distinct from the invalid-JSON case above: this body parses fine,
+    // so it is `!Array.isArray(parsed.entries)` doing the work, not the
+    // `res.json()` catch. A mutant that let this fall through would still
+    // pass the invalid-JSON test above under the same test name.
+    const ctx = harness({ fetchFn: jsonOnce({ notEntries: [] }) });
+    const { entries, diagnostics } = await ctx.files.tree();
+    expect(entries).toEqual([]);
+    expect(diagnostics).toHaveLength(1);
+  });
+
   it('urlFor escapes a path with a space in it', () => {
     const ctx = harness();
     expect(ctx.files.urlFor('art/my logo.png')).toBe('/api/files/art/my%20logo.png');
@@ -131,6 +142,16 @@ describe('files', () => {
     const { diagnostics } = await ctx.files.write('a.txt', new Uint8Array([1]));
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message).toContain('offline');
+  });
+
+  it('valid JSON with no "diagnostics" array is a diagnostic too, not a silent success', async () => {
+    // `diagnosticsFromBody` is shared by write/read-failure/remove; write
+    // exercises it here. Same distinction as tree's own version of this
+    // test — this body parses fine, so it is the `Array.isArray` check
+    // doing the work, not the `res.json()` catch.
+    const ctx = harness({ fetchFn: jsonOnce({ notDiagnostics: [] }) });
+    const { diagnostics } = await ctx.files.write('a.txt', new Uint8Array([1]));
+    expect(diagnostics).toHaveLength(1);
   });
 
   it('removes a file and reports success as no diagnostics', async () => {
