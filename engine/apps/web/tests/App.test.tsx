@@ -75,7 +75,13 @@ describe('App', () => {
     // This is the guard against that going unnoticed a second time.
     const ctx = await harness();
     render(<App ctx={ctx} />);
-    expect(ctx.layout.screens().map((s) => s.id)).toEqual(['composition', 'preview']);
+    expect(ctx.layout.screens().map((s) => s.id)).toEqual(['composition', 'preview', 'assets']);
+  });
+
+  it('registers the assets screen, after preview', async () => {
+    const ctx = await harness();
+    render(<App ctx={ctx} />);
+    expect(screen.getByTestId('tab-assets')).toBeTruthy();
   });
 
   it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {

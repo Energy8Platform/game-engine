@@ -36,3 +36,4 @@ export {
 } from './screens/PreviewWall';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Layout } from './screens/Layout';
+export { AssetsScreen } from './screens/AssetsScreen';

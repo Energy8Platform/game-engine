@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { Context } from 'cordis';
 import {
+  AssetsScreen,
   CompositionScreen,
   DiagnosticsPanel,
   Layout,
@@ -97,6 +98,11 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.layout.screen({ id: 'preview', title: 'Превью', order: 1 }, PreviewWall);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.layout.screen({ id: 'assets', title: 'Ассеты', order: 2 }, AssetsScreen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
