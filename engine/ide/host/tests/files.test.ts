@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -143,6 +144,26 @@ describe('files service — tree', () => {
     const { entries } = await ctx.files.tree();
     expect(entries.filter((e) => e.path.startsWith('node_modules'))).toEqual([]);
   });
+  it('one entry it cannot stat costs that entry and a warning, not the whole tree', async () => {
+    // `readdirSync` was wrapped in a try that degrades to a warning; the
+    // `statSync` beside it was not, so one unreadable entry took the
+    // whole tree out through a signature that says it never throws. A
+    // directory with the read bit but not the execute bit is exactly
+    // that: its names list fine, its children cannot be stat'd.
+    const dir = fixture('plain');
+    mkdirSync(join(dir, 'locked'));
+    writeFileSync(join(dir, 'locked', 'a.txt'), 'a');
+    chmodSync(join(dir, 'locked'), 0o444);
+    try {
+      const ctx = await hostFor(dir);
+      const { entries, diagnostics } = await ctx.files.tree();
+      expect(entries.map((e) => e.path)).toContain('game/script.spin');
+      expect(entries.map((e) => e.path)).not.toContain('locked/a.txt');
+      expect(diagnostics.some((d) => d.where === 'locked/a.txt')).toBe(true);
+    } finally {
+      chmodSync(join(dir, 'locked'), 0o755);
+    }
+  });
 });
 
 describe('files service — read', () => {
@@ -236,8 +257,9 @@ describe('files service — write', () => {
   });
 
   it('refuses to write outside the project, and writes nothing', async () => {
-    // Проверка удержания при записи отличается от чтения: файла ещё нет,
-    // поэтому `realpath` берётся у ближайшего существующего предка.
+    // Containment on the write side differs from the read side: the file
+    // is not there yet, so the realpath comes from the nearest existing
+    // ancestor instead of the target itself.
     const dir = fixture('plain');
     const ctx = await hostFor(dir);
     const { diagnostics } = await ctx.files.write('../escaped.txt', bytes('x'));
@@ -253,6 +275,72 @@ describe('files service — write', () => {
     const { diagnostics } = await ctx.files.write('sub/out/escaped.txt', bytes('x'));
     expect(diagnostics[0].message).toMatch(/outside the project/i);
     expect(existsSync(join(tmpdir(), 'escaped.txt'))).toBe(false);
+  });
+
+  it('refuses to write through a DANGLING symlink whose target is a file outside the project', async () => {
+    // The shape nobody built. Every other escape here is caught by the
+    // ancestor walk, which uses `existsSync` — and `existsSync` follows
+    // symlinks, so a link pointing at something that does not exist is
+    // invisible to it: the walk steps past the leaf to the parent, the
+    // parent is inside the project, and `writeFileSync` then follows the
+    // link and creates the file outside. Measured before the fix: no
+    // diagnostics at all and `OWNED` sitting outside the project.
+    const dir = fixture('plain');
+    const outside = mkdtempSync(join('/tmp', 'ide-host-files-outside-'));
+    symlinkSync(join(outside, 'pwned.txt'), join(dir, 'link.txt'));
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write('link.txt', bytes('OWNED'));
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toMatch(/symlink/i);
+    expect(existsSync(join(outside, 'pwned.txt'))).toBe(false);
+  });
+
+  it('refuses to write through a LIVE symlink even when its target is inside the project', async () => {
+    // Containment is not the only reason to refuse: `tree()` lists no
+    // symlinks, so writing through one changes a file no screen shows as
+    // the one being changed. The refusal has to be about the link itself,
+    // not about where it happens to lead, or the dangling case above
+    // passes for the wrong reason on a lucky day.
+    const dir = fixture('plain');
+    symlinkSync(join(dir, 'game', 'spec.json'), join(dir, 'alias.json'));
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write('alias.json', bytes('OWNED'));
+    expect(diagnostics[0].message).toMatch(/symlink/i);
+    expect(readFileSync(join(dir, 'game', 'spec.json'), 'utf8')).not.toContain('OWNED');
+  });
+
+  it('refuses to write anywhere under .git, where the next commit would run it', async () => {
+    // Not hygiene like node_modules: a pre-commit hook written from the
+    // browser is code the developer's own shell runs at their next
+    // commit, and `SKIPPED_DIRS` then keeps it out of the tree, so
+    // nothing on any screen would ever show it again.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write('.git/hooks/pre-commit', bytes('#!/bin/sh\n'));
+    expect(diagnostics[0].message).toMatch(/\.git/);
+    expect(existsSync(join(dir, '.git', 'hooks', 'pre-commit'))).toBe(false);
+  });
+
+  it('a write that fails leaves behind none of the directories it made for it', async () => {
+    // `mkdir -p` runs before the write can fail, and `remove()` refuses
+    // directories — so what the browser created, the browser could not
+    // clean up. A 400-character name is the shortest honest way to make
+    // the write itself fail after the directories exist.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write(`deep/dir/${'x'.repeat(400)}.txt`, bytes('x'));
+    expect(diagnostics).toHaveLength(1);
+    expect(existsSync(join(dir, 'deep'))).toBe(false);
+  });
+
+  it('keeps the directories a FAILING write did not create', async () => {
+    // The undo removes what this call made, not what was already there —
+    // a write into an existing directory that fails must not take the
+    // directory (or its neighbours) with it.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    await ctx.files.write(`game/${'x'.repeat(400)}.txt`, bytes('x'));
+    expect(existsSync(join(dir, 'game', 'spec.json'))).toBe(true);
   });
 
   it('refuses to write into a sibling directory whose name merely starts with the project directory name', async () => {
@@ -287,7 +375,7 @@ describe('files service — remove', () => {
   });
 
   it('refuses to remove a directory, naming what it is', async () => {
-    // Удаление каталога — другое намерение с другой ценой ошибки.
+    // Removing a directory is a different intent with a different cost.
     const dir = fixture('plain');
     const ctx = await hostFor(dir);
     const { diagnostics } = await ctx.files.remove('game');
@@ -299,6 +387,28 @@ describe('files service — remove', () => {
     const ctx = await hostFor(fixture('plain'));
     const { diagnostics } = await ctx.files.remove('../../../etc/hosts');
     expect(diagnostics[0].message).toMatch(/outside the project/i);
+  });
+
+  it('a dangling symlink is refused as the symlink it is, not reported as absent', async () => {
+    // `statSync` follows the link, so this used to answer "was not found"
+    // about a name that is right there on disk. Write refuses a symlink;
+    // remove has to agree, or the two disagree about what one is.
+    const dir = fixture('plain');
+    symlinkSync(join(dir, 'never-existed.txt'), join(dir, 'link.txt'));
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.remove('link.txt');
+    expect(diagnostics[0].message).toMatch(/symlink/i);
+    expect(diagnostics[0].message).not.toMatch(/was not found/i);
+  });
+
+  it('refuses to remove anything under .git', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.remove('.git/HEAD');
+    expect(diagnostics[0].message).toMatch(/\.git/);
+    expect(existsSync(join(dir, '.git', 'HEAD'))).toBe(true);
   });
 
   it('refuses to remove from a sibling directory whose name merely starts with the project directory name', async () => {

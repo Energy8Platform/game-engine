@@ -9,6 +9,7 @@
  */
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -17,9 +18,17 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
-import { type Diagnostic, type FileEntry, diagnostic } from '@energy8engine/contracts';
+import {
+  type Diagnostic,
+  type DiagnosticsResponse,
+  type FileEntry,
+  type FileFailure,
+  type FileTreeResponse,
+  type FileWriteRequest,
+  fileDiagnostic,
+} from '@energy8engine/contracts';
 
 declare module 'cordis' {
   interface Context {
@@ -29,13 +38,17 @@ declare module 'cordis' {
 
 export interface FilesService {
   /** Every entry in the project's tree, in traversal order. Never throws. */
-  tree(): Promise<{ entries: FileEntry[]; diagnostics: Diagnostic[] }>;
+  tree(): Promise<FileTreeResponse>;
   /** Contents of one file. `bytes` is absent when there is nothing to read. */
   read(path: string): Promise<{ bytes?: Uint8Array; diagnostics: Diagnostic[] }>;
   /** Creates or replaces a file. Missing directories are created. */
-  write(path: string, bytes: Uint8Array): Promise<{ diagnostics: Diagnostic[] }>;
-  /** Removes a file. Does not remove a directory — that is a separate intent. */
-  remove(path: string): Promise<{ diagnostics: Diagnostic[] }>;
+  write(path: string, bytes: Uint8Array): Promise<DiagnosticsResponse>;
+  /**
+   * Removes a file. Not a directory, and not a symlink — both are a
+   * different intent with a different cost, and `describeRefusal` says so
+   * in the diagnostic rather than doing something surprising.
+   */
+  remove(path: string): Promise<DiagnosticsResponse>;
 }
 
 export interface FilesConfig {
@@ -58,9 +71,20 @@ export const inject = ['server'];
  */
 const SKIPPED_DIRS = new Set(['node_modules', '.git']);
 
+/**
+ * Directory names no write or remove may reach through, wherever they
+ * occur. Only `.git` — and not for tidiness, which is what
+ * `SKIPPED_DIRS` above is for. `.git/hooks/pre-commit` is a file the
+ * browser could write and the developer's own shell would then run at
+ * their next commit, and `SKIPPED_DIRS` would keep it out of the tree
+ * afterwards, so nothing on any screen would ever show it again.
+ * `node_modules` stays writable: untidy, not dangerous.
+ */
+const PROTECTED_DIRS = new Set(['.git']);
+
 export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
   const service: FilesService = {
-    tree: () => Promise.resolve(readTree(config.cwd)),
+    tree: () => readTree(config.cwd),
     read: (path) => Promise.resolve(readOne(config.cwd, path)),
     write: (path, bytes) => Promise.resolve(writeOne(config.cwd, path, bytes)),
     remove: (path) => Promise.resolve(removeOne(config.cwd, path)),
@@ -121,20 +145,21 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
       body = undefined;
     }
 
-    const raw = body as { base64?: unknown } | null | undefined;
+    const raw = body as Partial<FileWriteRequest> | null | undefined;
     const decoded = typeof raw?.base64 === 'string' ? decodeBase64Strict(raw.base64) : undefined;
     if (!decoded) {
       res.status = 400;
-      res.json({
+      const refusal: DiagnosticsResponse = {
         diagnostics: [
-          diagnostic(
+          fileDiagnostic(
             'error',
-            'files',
+            'malformed-request',
             path,
             `PUT ${req.path} needs a JSON body shaped {"base64": string}`,
           ),
         ],
-      });
+      };
+      res.json(refusal);
       return;
     }
 
@@ -152,16 +177,22 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
 
 /**
  * The HTTP status that fits a files-service diagnostic — reading the
- * verdict the service already reached off the message it wrote, not
- * re-deciding containment or existence here. "was not found" is exactly
- * that (404); everything else the service reports (outside the project, a
- * directory where a file was wanted, a disk error underneath) is still
- * this request failing on its own terms, so it stays a 400 with the
- * diagnostic riding along — never an empty 500.
+ * verdict the service already reached off the `code` it tagged, not
+ * re-deciding containment or existence here. Everything except
+ * `'not-found'` (outside the project, a directory where a file was
+ * wanted, a disk error underneath) is still this request failing on its
+ * own terms, so it stays a 400 with the diagnostic riding along — never
+ * an empty 500.
+ *
+ * This used to switch on `/was not found/i` against the message the
+ * service had written, with nothing at either end saying the prose was
+ * load-bearing. This IDE translates user-facing strings; the first
+ * translated message would have turned every 404 into a 400 silently.
  */
 function statusFor(diagnostics: Diagnostic[]): number {
   if (diagnostics.length === 0) return 200;
-  return /was not found/i.test(diagnostics[0].message) ? 404 : 400;
+  const code: FileFailure | undefined = diagnostics[0].code as FileFailure | undefined;
+  return code === 'not-found' ? 404 : 400;
 }
 
 /**
@@ -216,7 +247,20 @@ function contentTypeFor(path: string): string {
   return CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream';
 }
 
-function readTree(cwd: string): { entries: FileEntry[]; diagnostics: Diagnostic[] } {
+/**
+ * `async` with a synchronous body on purpose: `FilesService.tree`'s own
+ * doc promises it never throws, and while `tree: () => Promise.resolve(
+ * readTree(cwd))` looked like that promise, it evaluated `readTree`
+ * BEFORE the promise existed — so a throw in here was synchronous and a
+ * caller's `ctx.files.tree().catch(…)` could not catch it. It survived
+ * only because the route's handler happens to be `async`. Marking the
+ * function `async` makes any future throw a rejection, which is the
+ * shape the signature already claims. (The plan said `node:fs/promises`;
+ * the sync `node:fs` below is what made a synchronous throw possible in
+ * the first place, and the divergence is recorded rather than papered
+ * over — nothing here awaits, so the promise is the whole fix.)
+ */
+async function readTree(cwd: string): Promise<FileTreeResponse> {
   const entries: FileEntry[] = [];
   const diagnostics: Diagnostic[] = [];
 
@@ -226,9 +270,9 @@ function readTree(cwd: string): { entries: FileEntry[]; diagnostics: Diagnostic[
       dirents = readdirSync(absDir, { withFileTypes: true });
     } catch (error) {
       diagnostics.push(
-        diagnostic(
+        fileDiagnostic(
           'warning',
-          'files',
+          'io-error',
           relDir || '.',
           `cannot list "${relDir || '.'}": ${errorMessage(error)}`,
         ),
@@ -252,7 +296,26 @@ function readTree(cwd: string): { entries: FileEntry[]; diagnostics: Diagnostic[
         // entirely rather than guessed at. Nothing in this task reads
         // through one, and `read()` below draws its own containment
         // boundary independently of what `tree()` chose to list.
-        const size = statSync(absPath).size;
+        //
+        // Guarded the same way `readdirSync` above is, and for the same
+        // reason: one entry this process cannot stat (a race with a
+        // delete, a mode change under us) costs that one row and a
+        // warning. Unguarded, it took the whole tree out — and took it
+        // out through a signature that says it never throws.
+        let size: number;
+        try {
+          size = statSync(absPath).size;
+        } catch (error) {
+          diagnostics.push(
+            fileDiagnostic(
+              'warning',
+              'io-error',
+              relPath,
+              `cannot read "${relPath}": ${errorMessage(error)}`,
+            ),
+          );
+          continue;
+        }
         entries.push({ path: relPath, kind: 'file', size });
       }
     }
@@ -292,9 +355,9 @@ function readOne(
     // actually a typo.
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'not-found',
           requestedPath,
           `"${requestedPath}" was not found: ${errorMessage(error)}`,
         ),
@@ -305,9 +368,9 @@ function readOne(
   if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'outside-project',
           requestedPath,
           `"${requestedPath}" resolves outside the project`,
         ),
@@ -321,9 +384,9 @@ function readOne(
   } catch (error) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'not-found',
           requestedPath,
           `"${requestedPath}" was not found: ${errorMessage(error)}`,
         ),
@@ -334,9 +397,9 @@ function readOne(
   if (stat.isDirectory()) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'is-directory',
           requestedPath,
           `"${requestedPath}" is a directory, not a file`,
         ),
@@ -350,9 +413,9 @@ function readOne(
   } catch (error) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'io-error',
           requestedPath,
           `cannot read "${requestedPath}": ${errorMessage(error)}`,
         ),
@@ -361,25 +424,30 @@ function readOne(
   }
 }
 
-function writeOne(
-  cwd: string,
-  requestedPath: string,
-  bytes: Uint8Array,
-): { diagnostics: Diagnostic[] } {
+function writeOne(cwd: string, requestedPath: string, bytes: Uint8Array): DiagnosticsResponse {
   const target = resolve(cwd, requestedPath);
-  const outside = describeIfOutside(cwd, requestedPath, target);
-  if (outside) return { diagnostics: [outside] };
+  const refusal = describeRefusal(cwd, requestedPath, target);
+  if (refusal) return { diagnostics: [refusal] };
 
+  // `mkdirSync(…, { recursive: true })` answers with the FIRST directory
+  // it had to create, or `undefined` when everything already existed —
+  // which is exactly what is needed to undo it. A write that fails after
+  // this used to leave its `mkdir -p` behind: a 400-character filename
+  // answers ENAMETOOLONG correctly and `deep/` and `deep/dir/` are then
+  // in the tree for good, since `remove()` refuses directories and the
+  // browser therefore cannot clean up what the browser made.
+  let created: string | undefined;
   try {
-    mkdirSync(dirname(target), { recursive: true });
+    created = mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, bytes);
     return { diagnostics: [] };
   } catch (error) {
+    if (created !== undefined) rmSync(created, { recursive: true, force: true });
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'io-error',
           requestedPath,
           `cannot write "${requestedPath}": ${errorMessage(error)}`,
         ),
@@ -388,20 +456,23 @@ function writeOne(
   }
 }
 
-function removeOne(cwd: string, requestedPath: string): { diagnostics: Diagnostic[] } {
+function removeOne(cwd: string, requestedPath: string): DiagnosticsResponse {
   const target = resolve(cwd, requestedPath);
-  const outside = describeIfOutside(cwd, requestedPath, target);
-  if (outside) return { diagnostics: [outside] };
+  const refusal = describeRefusal(cwd, requestedPath, target);
+  if (refusal) return { diagnostics: [refusal] };
 
+  // The leaf is never a symlink by the time we get here — `describeRefusal`
+  // refused those — so this and `statSync` agree; spelled as the one that
+  // cannot follow, since that is the rule this whole file keeps.
   let stat;
   try {
-    stat = statSync(target);
+    stat = lstatSync(target);
   } catch (error) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'not-found',
           requestedPath,
           `"${requestedPath}" was not found: ${errorMessage(error)}`,
         ),
@@ -412,9 +483,9 @@ function removeOne(cwd: string, requestedPath: string): { diagnostics: Diagnosti
   if (stat.isDirectory()) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'is-directory',
           requestedPath,
           `"${requestedPath}" is a directory, not a file — remove() does not remove directories`,
         ),
@@ -428,9 +499,9 @@ function removeOne(cwd: string, requestedPath: string): { diagnostics: Diagnosti
   } catch (error) {
     return {
       diagnostics: [
-        diagnostic(
+        fileDiagnostic(
           'error',
-          'files',
+          'io-error',
           requestedPath,
           `cannot remove "${requestedPath}": ${errorMessage(error)}`,
         ),
@@ -440,26 +511,44 @@ function removeOne(cwd: string, requestedPath: string): { diagnostics: Diagnosti
 }
 
 /**
- * The write-side containment check, and why it cannot be `readOne`'s.
- * `readOne` realpaths the target itself — safe there, because a read only
- * ever succeeds against a file that already exists. Write and remove both
- * have to answer the containment question BEFORE the target necessarily
- * exists (a new file has no realpath yet; `realpathSync` would just throw
- * "not found", collapsing "outside the project" into "nothing here" for
- * every ordinary new file), so this walks up to the nearest ANCESTOR that
- * does exist and realpaths that instead.
+ * Everything write and remove refuse before they touch the disk, and why
+ * it cannot be `readOne`'s check. `readOne` realpaths the target itself —
+ * safe there, because a read only ever succeeds against a file that
+ * already exists. Write and remove both have to answer the containment
+ * question BEFORE the target necessarily exists (a new file has no
+ * realpath yet; `realpathSync` would just throw "not found", collapsing
+ * "outside the project" into "nothing here" for every ordinary new file),
+ * so this walks up to the nearest ANCESTOR that does exist and realpaths
+ * that instead.
  *
- * This has to be more than "does `cwd` itself exist" — a symlink can sit
- * anywhere along the path, not only at its own end. `sub/out/escaped.txt`
- * with `sub/out` a symlink to outside the project is exactly that: the
- * final segment doesn't exist, but its parent does, and that parent's
+ * That walk has to be more than "does `cwd` itself exist" — a symlink can
+ * sit anywhere along the path, not only at its own end. `sub/out/escaped
+ * .txt` with `sub/out` a symlink to outside the project is exactly that:
+ * the final segment doesn't exist, but its parent does, and that parent's
  * *real* path is outside the root even though its lexical path reads as
- * an ordinary project-relative one. Checking only the leaf, or only
- * `cwd`, misses this; checking the nearest existing ancestor catches it,
- * because that ancestor is the highest point the walk can still ask the
- * filesystem "where does this actually lead".
+ * an ordinary project-relative one.
+ *
+ * And it has to be more than the walk, which is what the leaf check below
+ * exists for. `existsSync` FOLLOWS symlinks, so a link inside the project
+ * pointing at a target that does not exist is invisible to the walk: it
+ * steps straight past the leaf to the parent, the parent is inside, and
+ * `writeFileSync` then follows the link and creates the file wherever it
+ * pointed. Measured, before this existed: `write('link.txt', 'OWNED')`
+ * with `link.txt -> ../outside/pwned.txt` reported no diagnostics at all
+ * and wrote `OWNED` outside the project. Every OTHER shape was already
+ * covered — a live symlink out, an ancestor symlink out, a symlink to a
+ * missing DIRECTORY — and `readOne` survives this one only by accident,
+ * because it realpaths the target and a dangling link fails that first.
+ *
+ * So the rule here is the blunt one: this service does not follow a
+ * symlink at the leaf, in either direction. Writing through one would
+ * change a file the project's own tree does not even list (`readTree`
+ * lists neither symlinks nor what they point at), and removing through
+ * one would delete something the person never named. Refusing says so;
+ * it also puts write and remove on the same side of the question as
+ * `readOne`, which answers a dangling link with a refusal too.
  */
-function describeIfOutside(
+function describeRefusal(
   cwd: string,
   requestedPath: string,
   target: string,
@@ -472,20 +561,51 @@ function describeIfOutside(
     realAncestor = realpathSync(ancestor);
     realRoot = realpathSync(cwd);
   } catch (error) {
-    return diagnostic(
+    return fileDiagnostic(
       'error',
-      'files',
+      'io-error',
       requestedPath,
       `cannot resolve "${requestedPath}": ${errorMessage(error)}`,
     );
   }
 
   if (realAncestor !== realRoot && !realAncestor.startsWith(realRoot + sep)) {
-    return diagnostic(
+    return fileDiagnostic(
       'error',
-      'files',
+      'outside-project',
       requestedPath,
       `"${requestedPath}" resolves outside the project`,
+    );
+  }
+
+  // `resolve` has already collapsed every `..`, so these are the segments
+  // the write would really land in, not the ones the request spelled.
+  const segments = relative(cwd, target).split(sep);
+  const protectedSegment = segments.find((segment) => PROTECTED_DIRS.has(segment));
+  if (protectedSegment !== undefined) {
+    return fileDiagnostic(
+      'error',
+      'protected-path',
+      requestedPath,
+      `"${requestedPath}" is inside "${protectedSegment}", which this editor does not change`,
+    );
+  }
+
+  // `lstatSync`, so this sees the link and not what it points at. A leaf
+  // that isn't there yet is the ordinary new-file case and throws here —
+  // nothing to refuse.
+  let leaf;
+  try {
+    leaf = lstatSync(target);
+  } catch {
+    return undefined;
+  }
+  if (leaf.isSymbolicLink()) {
+    return fileDiagnostic(
+      'error',
+      'is-symlink',
+      requestedPath,
+      `"${requestedPath}" is a symlink, and this editor changes only files it lists`,
     );
   }
 
