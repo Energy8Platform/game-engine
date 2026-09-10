@@ -4,6 +4,10 @@ import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
 import type { ConnectionService } from '../plugins/connection';
 import { useLayout } from '../plugins/layout';
+import { useGameComposition } from '../plugins/game-composition';
+import { useGameDiagnostics } from '../plugins/diagnostics';
+import { useEditorDiagnostics } from './CompositionScreen';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 
 /** What actually threw, reduced to the one thing worth showing a human. */
 function errorMessage(error: unknown): string {
@@ -84,6 +88,56 @@ class ScreenBoundary extends Component<
 }
 
 /**
+ * Reads the game's composition and diagnostics, plus the editor's own, and
+ * hands them to `DiagnosticsPanel` — this used to be `App.tsx`'s
+ * `DiagnosticsPanelCard`, a `composition.card` registration reachable only
+ * on the composition tab. It is a plain component now, not a slot entry:
+ * §8 of the design spec wants ONE list visible to the game, the IDE and an
+ * agent alike, and a card confined to one tab was never that. Reads all
+ * three hooks reactively, the same as the card did — a wrapper that read
+ * them once at registration and closed over the result would go stale the
+ * moment any of the three updates after its first fetch/frame.
+ *
+ * Split from `DiagnosticsChrome` below for the reason
+ * `CompositionScreen.tsx`'s own `EditorComposition` already gives for the
+ * identical split: `useGameComposition`/`useGameDiagnostics`/
+ * `useEditorDiagnostics` read `ctx.gameComposition`/`ctx.gameDiagnostics`/
+ * `ctx.connection` directly, so this must only ever mount once
+ * `DiagnosticsChrome` has confirmed all three exist — a hook call cannot
+ * itself be made conditional.
+ */
+function DiagnosticsPanelEntry({ ctx }: { ctx: Context }) {
+  const { diagnostics: project } = useGameComposition(ctx);
+  const { groups: game, dropped } = useGameDiagnostics(ctx);
+  const editor = useEditorDiagnostics(ctx);
+  return (
+    <DiagnosticsPanel project={project} game={game} droppedFromGame={dropped} editor={editor} />
+  );
+}
+
+/**
+ * The panel's guard: `layout` has no static dependency on `connection`,
+ * `gameComposition` or `gameDiagnostics` and a few tests here compose it
+ * alone (see the two "composed without ctx.connection" cases below) — a
+ * `Context` that thin has none of the three, and `DiagnosticsPanelEntry`'s
+ * hooks would throw reading straight off a service that was never
+ * provided. Checked here, one component up, because the hooks themselves
+ * cannot skip a call conditionally; a context missing any one of the
+ * three renders nothing rather than mounting a component whose first hook
+ * throws. Not reachable in the shipped app, where `createIdeClient`
+ * always composes all three — same non-argument `ScreenBoundary`'s own
+ * `componentDidCatch` already makes for the identical lenient read.
+ */
+function DiagnosticsChrome({ ctx }: { ctx: Context }) {
+  const ready =
+    ctx.reflect.get('connection', false) !== undefined &&
+    ctx.reflect.get('gameComposition', false) !== undefined &&
+    ctx.reflect.get('gameDiagnostics', false) !== undefined;
+  if (!ready) return null;
+  return <DiagnosticsPanelEntry ctx={ctx} />;
+}
+
+/**
  * The chrome around whichever screens the running IDE was given: a tab per
  * registered screen and the current one's body, always reading through
  * `useLayout` so a screen landing after mount (a plugin's client half,
@@ -103,6 +157,16 @@ class ScreenBoundary extends Component<
  * a plugin's screen is free to — so a `<main>` here nested a landmark
  * inside a landmark on every screen the IDE ships. The chrome is the tab
  * bar; the content area is whatever the current screen decided to be.
+ *
+ * `DiagnosticsChrome` is a sibling of `e8-layout-body`, not a child of
+ * `ScreenBoundary` and not keyed by `current.id` the way the boundary is.
+ * Both matter: a sibling means a crashed screen — caught by
+ * `ScreenBoundary` right above — never unmounts the panel alongside it,
+ * which is exactly when the panel is most worth having on screen; no key
+ * means navigating away from one screen to another never remounts it
+ * either, so whatever it was showing survives the trip. Task 7's own debt:
+ * the panel used to be a `composition.card`, reachable on the composition
+ * tab alone and gone the moment the tab it lived on unmounted.
  */
 export function Layout({ ctx }: { ctx: Context }) {
   const { screens, current } = useLayout(ctx);
@@ -135,6 +199,7 @@ export function Layout({ ctx }: { ctx: Context }) {
           </p>
         )}
       </div>
+      <DiagnosticsChrome ctx={ctx} />
     </div>
   );
 }

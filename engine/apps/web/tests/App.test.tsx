@@ -84,6 +84,31 @@ describe('App', () => {
     expect(screen.getByTestId('tab-assets')).toBeTruthy();
   });
 
+  it('the composition screen no longer registers the panel as a card', async () => {
+    // Task 7's debt: the panel used to be a `composition.card` registration,
+    // reachable only on the composition tab. It is now hardcoded chrome in
+    // `Layout` itself — see `ide-client`'s own `layout.test.tsx`. This is
+    // the guard against the registration coming back.
+    const ctx = await harness();
+    render(<App ctx={ctx} />);
+    expect(ctx.slots.list('composition.card').map((c) => c.key)).not.toContain('diagnostics');
+  });
+
+  it('composition.card still works for anything else', async () => {
+    // Уходит одна карточка, не механизм: `App` itself registers no
+    // `composition.card` any more, but the slot a THIRD PARTY registers
+    // still has to reach the screen. Rendered through the real `<App/>`
+    // (whose own JSX is exactly `<Layout ctx={ctx}/>`) rather than a bare
+    // `<Layout/>`, so this exercises the actual path a registration takes:
+    // App → Layout → the composition screen → `CompositionScreen`'s own
+    // `EditorComposition`, which is the one thing in this tree that still
+    // reads `composition.card` — untouched by this task.
+    const ctx = await harness();
+    ctx.slots.register({ name: 'composition.card', key: 'other' }, () => <div>CARD</div>);
+    render(<App ctx={ctx} />);
+    expect(screen.getByText('CARD')).toBeTruthy();
+  });
+
   it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
     // The one place in this suite that pins WORDING rather than structure.
     // The reason it used to give — that EVERY visible string in

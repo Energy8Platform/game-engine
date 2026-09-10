@@ -2,11 +2,16 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
-import type { Diagnostic } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import * as layoutPlugin from '../src/plugins/layout';
 import { Layout } from '../src/screens/Layout';
 
 const Dummy = () => <div>x</div>;
+
+/** These tests only care about `.message` — severity/plugin/where are fixed filler. Same shape as `assets-screen.test.tsx`'s own `d`. */
+function d(message: string): Diagnostic {
+  return diagnostic('error', 'test', 'test', message);
+}
 
 /**
  * A hand-built `Context`, not `createIdeClient()`. Every test below calls
@@ -64,9 +69,28 @@ function harness(): Context {
     },
   };
 
+  // `Layout` now mounts the diagnostics panel unconditionally (Task 7), and
+  // the panel's own hooks (`useGameComposition`/`useGameDiagnostics`) read
+  // `ctx.gameComposition`/`ctx.gameDiagnostics` directly — inert stand-ins
+  // are enough here since nothing in this file exercises the game's own
+  // composition or diagnostics feed; only `connection`'s traffic matters to
+  // these tests.
+  const gameComposition = {
+    rows: null,
+    diagnostics: [] as Diagnostic[],
+    subscribe: () => () => {},
+  };
+  const gameDiagnostics = {
+    groups: null,
+    dropped: 0,
+    subscribe: () => () => {},
+  };
+
   const disposers: (() => void)[] = [];
   const ctx: any = {
     connection,
+    gameComposition,
+    gameDiagnostics,
     reflect: {
       get: (name: string) => ctx[name],
     },
@@ -358,5 +382,34 @@ describe('Layout', () => {
     ctx.layout.screen({ id: 'a', title: 'Alpha' }, () => <main>ALPHA BODY</main>);
     render(<Layout ctx={ctx} />);
     expect(document.querySelectorAll('main')).toHaveLength(1);
+  });
+
+  it('the panel is visible on every screen, not only on composition', async () => {
+    const ctx = harness();
+    ctx.layout.screen({ id: 'other', title: 'Other' }, () => <div>OTHER</div>);
+    render(<Layout ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('tab-other'));
+    expect(screen.getByTestId('diagnostics-panel')).toBeTruthy();
+  });
+
+  it('the panel survives a change of screen without losing what it held', async () => {
+    // Это и есть смысл переезда: список переживает навигацию.
+    const ctx = harness();
+    ctx.layout.screen({ id: 'other', title: 'Other' }, () => <div>OTHER</div>);
+    ctx.connection.report(d('something went wrong'));
+    render(<Layout ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('tab-other'));
+    expect(screen.getByText(/something went wrong/)).toBeTruthy();
+  });
+
+  it('a crashed screen does not take the panel with it', () => {
+    // Панель важнее всего именно тогда, когда что-то сломалось.
+    const ctx = harness();
+    ctx.layout.screen({ id: 'bad', title: 'Bad' }, () => {
+      throw new Error('boom');
+    });
+    render(<Layout ctx={ctx} />);
+    expect(screen.getByTestId('screen-error')).toBeTruthy();
+    expect(screen.getByTestId('diagnostics-panel')).toBeTruthy();
   });
 });
