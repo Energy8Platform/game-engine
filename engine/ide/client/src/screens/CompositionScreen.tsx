@@ -9,11 +9,14 @@ import { Preview } from './PreviewWall';
 /**
  * The EDITOR's own diagnostics — its plugin graph, namespace 1 of
  * `Diagnostic.plugin` resolved against the EDITOR's rows. Exported because
- * `App.tsx`'s `DiagnosticsPanelCard` reads it reactively and hands the
+ * `Layout.tsx`'s `DiagnosticsPanelEntry` reads it reactively and hands the
  * array straight to `DiagnosticsPanel`'s `editor` prop, which renders
  * these as rows now, the same as `project`'s and `game`'s — see
  * `EditorComposition`'s own comment, below, for why this screen no longer
- * renders a copy of its own.
+ * renders a copy of its own. That reader used to be `App.tsx`'s
+ * `DiagnosticsPanelCard`, a card confined to the composition tab; it
+ * moved into the chrome so the one list outlives whichever screen you
+ * are on, and this comment named the deleted card for a slice after.
  *
  * `ctx.connection.diagnostics` is a getter that concatenates two backing
  * arrays into a *fresh* array on every read (see connection.ts). That's

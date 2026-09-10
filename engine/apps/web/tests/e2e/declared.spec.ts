@@ -126,8 +126,9 @@ test("a /api/spin failure appears in the game's own log, not only in the IDE", a
  * registers a screen under one hardcoded id both times — the exact
  * collision `@energy8engine/registry`'s last-wins policy (task 3) reports
  * rather than silently allows. That reaches `ctx.connection`, which is what
- * `useEditorDiagnostics` reads and `DiagnosticsPanelCard` (`apps/web`'s own
- * `App.tsx`) hands to `DiagnosticsPanel`'s `editor` prop — task 7's
+ * `useEditorDiagnostics` reads and `DiagnosticsPanelEntry` (`ide-client`'s
+ * own `Layout.tsx`, the chrome that replaced `App.tsx`'s composition-tab
+ * card) hands to `DiagnosticsPanel`'s `editor` prop — task 7's
  * `editorCount → editor: readonly Diagnostic[]` change, proven here for
  * the first time against a REAL collision reported through the REAL
  * `ctx.layout` registry, rather than a `DiagnosticsPanel` handed a
