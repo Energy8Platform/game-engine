@@ -77,15 +77,39 @@ describe('files', () => {
     expect(diagnostics).toHaveLength(1);
   });
 
-  it('valid JSON with no "entries" array is a diagnostic too, not an empty success', async () => {
-    // Distinct from the invalid-JSON case above: this body parses fine,
-    // so it is `!Array.isArray(parsed.entries)` doing the work, not the
-    // `res.json()` catch. A mutant that let this fall through would still
-    // pass the invalid-JSON test above under the same test name.
-    const ctx = harness({ fetchFn: jsonOnce({ notEntries: [] }) });
+  it('a body with diagnostics and no entries keeps the host’s words, not this client’s guess', async () => {
+    // The exact shape the host's own boundary sends: `index.ts` answers a
+    // throw that reached it before any handler ran with a bare
+    // `DiagnosticsResponse` — diagnostics, no `entries` key at all — and
+    // `/api/files` is the route it is likeliest to fire on. This used to
+    // check `entries` first and replace the host's explanation with
+    // "the response has no entries array", which says nothing a person
+    // can act on. The previous fixture here was `{ notEntries: [] }`, a
+    // shape the host never sends, which is why the pairing went two
+    // reviews unexercised.
+    const said = diagnostic(
+      'error',
+      'server',
+      '/api/files',
+      `request to "/api/files" failed: EACCES: permission denied, stat '/p/sub/a.txt'`,
+    );
+    const ctx = harness({ fetchFn: jsonOnce({ diagnostics: [said] }, { status: 500 }) });
+    const { entries, diagnostics } = await ctx.files.tree();
+    expect(entries).toEqual([]);
+    expect(diagnostics).toEqual([said]);
+  });
+
+  it('a body with neither entries nor diagnostics is this client’s own diagnostic', async () => {
+    // Nothing to carry, so this authors one — the case where the answer
+    // came from something that is not this host at all (a dev proxy, a
+    // gateway) and therefore has no diagnostics of its own. Distinct from
+    // the invalid-JSON case above: this body parses fine, so it is the
+    // shape checks doing the work and not the `res.json()` catch.
+    const ctx = harness({ fetchFn: jsonOnce({ error: 'Bad Gateway' }, { status: 502 }) });
     const { entries, diagnostics } = await ctx.files.tree();
     expect(entries).toEqual([]);
     expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('entries');
   });
 
   it('urlFor escapes a path with a space in it', () => {

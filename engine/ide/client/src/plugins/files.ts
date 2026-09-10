@@ -1,5 +1,12 @@
 import type { Context } from 'cordis';
-import { type Diagnostic, type FileEntry, diagnostic } from '@energy8engine/contracts';
+import {
+  type Diagnostic,
+  type DiagnosticsResponse,
+  type FileEntry,
+  type FileTreeResponse,
+  type FileWriteRequest,
+  diagnostic,
+} from '@energy8engine/contracts';
 
 /**
  * The browser side of `engine/ide/host/src/plugins/files.ts`'s four
@@ -33,10 +40,10 @@ declare module 'cordis' {
 }
 
 export interface FilesService {
-  tree(): Promise<{ entries: FileEntry[]; diagnostics: Diagnostic[] }>;
+  tree(): Promise<FileTreeResponse>;
   read(path: string): Promise<{ bytes?: Uint8Array; diagnostics: Diagnostic[] }>;
-  write(path: string, bytes: Uint8Array): Promise<{ diagnostics: Diagnostic[] }>;
-  remove(path: string): Promise<{ diagnostics: Diagnostic[] }>;
+  write(path: string, bytes: Uint8Array): Promise<DiagnosticsResponse>;
+  remove(path: string): Promise<DiagnosticsResponse>;
   /** Address for `<img src>` — reading the bytes just to show them is wasted work. */
   urlFor(path: string): string;
 }
@@ -106,17 +113,27 @@ export function apply(ctx: Context, config: FilesConfig = {}): void {
     } catch (error) {
       return { entries: [], diagnostics: [ownDiagnostic('/api/files', describeError(error))] };
     }
-    const parsed = body as { entries?: unknown; diagnostics?: unknown };
+    // Diagnostics first, entries second. The host answers a handler
+    // failure with a bare `DiagnosticsResponse` — no `entries` key at all,
+    // by design, and that is the answer the host-wide boundary in
+    // `index.ts` gives for a throw no route could catch. Reading `entries`
+    // first meant this route — the one that boundary is most likely to
+    // fire on — replaced the host's own account of the failure with this
+    // client's guess that the body was the wrong shape. Every other method
+    // here already passes the host's words through; this was the one that
+    // did not.
+    const parsed = body as Partial<FileTreeResponse>;
+    const carried = Array.isArray(parsed.diagnostics) ? (parsed.diagnostics as Diagnostic[]) : [];
     if (!Array.isArray(parsed.entries)) {
       return {
         entries: [],
-        diagnostics: [ownDiagnostic('/api/files', 'the response has no "entries" array')],
+        diagnostics:
+          carried.length > 0
+            ? carried
+            : [ownDiagnostic('/api/files', 'the response has no "entries" array')],
       };
     }
-    return {
-      entries: parsed.entries as FileEntry[],
-      diagnostics: Array.isArray(parsed.diagnostics) ? (parsed.diagnostics as Diagnostic[]) : [],
-    };
+    return { entries: parsed.entries as FileEntry[], diagnostics: carried };
   }
 
   async function read(path: string): ReturnType<FilesService['read']> {
@@ -140,7 +157,7 @@ export function apply(ctx: Context, config: FilesConfig = {}): void {
       res = await fetchFn(urlFor(path), {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ base64: toBase64(bytes) }),
+        body: JSON.stringify({ base64: toBase64(bytes) } satisfies FileWriteRequest),
       });
     } catch (error) {
       return { diagnostics: [ownDiagnostic(path, describeError(error))] };
