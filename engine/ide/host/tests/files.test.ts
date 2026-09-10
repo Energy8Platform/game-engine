@@ -3,10 +3,12 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Context } from 'cordis';
@@ -57,6 +59,50 @@ async function hostFor(cwd: string): Promise<Context> {
   const host = await createIdeHost({ cwd, port: 0 });
   hosts.push(host);
   return host.ctx;
+}
+
+/**
+ * Boots a host for `cwd` and returns the whole `IdeHost` — `host.url` is
+ * what the route tests below exercise, over real HTTP, unlike `hostFor`'s
+ * direct `ctx.files` calls above.
+ */
+async function startHost(cwd: string): Promise<IdeHost> {
+  const host = await createIdeHost({ cwd, port: 0 });
+  hosts.push(host);
+  return host;
+}
+
+/**
+ * Sends a GET with `rawPath` as the literal request-target, bypassing
+ * `fetch()`'s own URL parsing entirely — `node:http`'s `path` option goes
+ * straight onto the request line unparsed.
+ *
+ * This exists because `fetch()` cannot deliver a `..` segment at all: it
+ * parses its input as a WHATWG URL first, and URL parsing collapses
+ * dot-segments before a request is ever made (measured directly: `new
+ * URL('http://h/a/../../etc/passwd').pathname` is already `/etc/passwd`,
+ * and a raw `http.createServer` fed that same string via `fetch()` sees
+ * `req.url === '/etc/passwd'` — the "../.." is gone before the first byte
+ * left this process). A well-behaved editor's own `fetch()` calls could
+ * never reach the containment check this way at all, which is exactly why
+ * it still matters: a hand-built request — `curl`, a raw socket, anything
+ * that isn't routing the path through a URL parser first — sends the
+ * literal bytes, unresolved, same as this helper does.
+ */
+function rawGet(host: IdeHost, rawPath: string): Promise<{ status: number; text: string }> {
+  const url = new URL(host.url);
+  return new Promise((resolveRequest, reject) => {
+    const req = httpRequest(
+      { host: url.hostname, port: url.port, path: rawPath, method: 'GET' },
+      (res) => {
+        let text = '';
+        res.on('data', (chunk) => (text += chunk));
+        res.on('end', () => resolveRequest({ status: res.statusCode ?? 0, text }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 afterEach(async () => {
@@ -264,5 +310,106 @@ describe('files service — remove', () => {
     const { diagnostics } = await ctx.files.remove(`../${basename(sibling)}/secret.txt`);
     expect(diagnostics[0].message).toMatch(/outside the project/i);
     expect(existsSync(join(sibling, 'secret.txt'))).toBe(true);
+  });
+});
+
+describe('files routes', () => {
+  it('GET /api/files returns the tree', async () => {
+    const host = await startHost(fixture('plain'));
+    const body = await (await fetch(`${host.url}/api/files`)).json();
+    expect(body.entries.map((e: { path: string }) => e.path)).toContain('game/script.spin');
+  });
+
+  it('GET /api/files/* returns the bytes', async () => {
+    const host = await startHost(fixture('plain'));
+    const res = await fetch(`${host.url}/api/files/game/spec.json`);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(await res.text()).id).toBe('first-slot');
+  });
+
+  it('a refused path answers with a diagnostic body, not an empty 500', async () => {
+    // An empty 500 already cost this branch one slice: a healthy row lost
+    // its data along with the guilty one. A refusal is data.
+    //
+    // `fetch()` — see `rawGet`'s doc comment — cannot actually deliver this
+    // literal ".." to the server; it gets resolved away before the request
+    // is ever sent, which would make this test exercise the router's
+    // unrelated "no route matched" 404 instead of the containment check it
+    // means to prove. `rawGet` sends the same string unparsed.
+    const host = await startHost(fixture('plain'));
+    const res = await rawGet(host, '/api/files/../../../etc/passwd');
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.text);
+    expect(body.diagnostics[0].message).toMatch(/outside the project/i);
+  });
+
+  it('PUT writes what it was given', async () => {
+    const dir = fixture('plain');
+    const host = await startHost(dir);
+    const res = await fetch(`${host.url}/api/files/art/x.txt`, {
+      method: 'PUT',
+      body: JSON.stringify({ base64: btoa('hello') }),
+    });
+    expect((await res.json()).diagnostics).toEqual([]);
+    expect(readFileSync(join(dir, 'art/x.txt'), 'utf8')).toBe('hello');
+  });
+
+  it('a PUT with a body that is not base64 says so and writes nothing', async () => {
+    const dir = fixture('plain');
+    const host = await startHost(dir);
+    const res = await fetch(`${host.url}/api/files/art/x.txt`, {
+      method: 'PUT',
+      body: JSON.stringify({ base64: 'not really base64!!!' }),
+    });
+    expect((await res.json()).diagnostics).toHaveLength(1);
+    expect(existsSync(join(dir, 'art/x.txt'))).toBe(false);
+  });
+
+  it('a PUT with no body at all is a diagnostic, not a crash', async () => {
+    const host = await startHost(fixture('plain'));
+    const res = await fetch(`${host.url}/api/files/art/x.txt`, { method: 'PUT' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).diagnostics).toHaveLength(1);
+  });
+
+  it('DELETE removes it', async () => {
+    const dir = fixture('plain');
+    const host = await startHost(dir);
+    writeFileSync(join(dir, 'bye.txt'), 'x');
+    const res = await fetch(`${host.url}/api/files/bye.txt`, { method: 'DELETE' });
+    expect((await res.json()).diagnostics).toEqual([]);
+    expect(existsSync(join(dir, 'bye.txt'))).toBe(false);
+  });
+
+  it('serves an image with an image content type, so the screen can show it', async () => {
+    const host = await startHost(fixture('with-png'));
+    const res = await fetch(`${host.url}/api/files/art/logo.png`);
+    expect(res.headers.get('content-type')).toBe('image/png');
+  });
+
+  it('reads a name with a space, a plus, and a percent sign back as the byte-for-byte name the editor meant', async () => {
+    // `+` is meaningful only in a query string; a real `+` in a path
+    // segment survives a correct client's `encodeURIComponent` as `%2B`.
+    // A route that decoded the path a second time (redundant, since the
+    // router already decodes it once) would either corrupt this — `+`
+    // would read back as a space, the query-string reading — or throw
+    // outright: the already-decoded name contains a literal `%` not
+    // followed by a hex pair, which `decodeURIComponent` refuses outright.
+    const dir = fixture('plain');
+    const name = 'a b+c%d.txt';
+    writeFileSync(join(dir, name), 'special');
+    const host = await startHost(dir);
+    const res = await fetch(`${host.url}/api/files/${encodeURIComponent(name)}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('special');
+  });
+
+  it('refuses a ".." segment that arrives percent-encoded, exactly like the plain one', async () => {
+    const host = await startHost(fixture('plain'));
+    const escaped = ['..', '..', '..', 'etc', 'passwd'].map(encodeURIComponent).join('%2f');
+    const res = await fetch(`${host.url}/api/files/${escaped}`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.diagnostics[0].message).toMatch(/outside the project/i);
   });
 });

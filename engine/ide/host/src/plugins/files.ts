@@ -17,7 +17,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
 import { type Diagnostic, type FileEntry, diagnostic } from '@energy8engine/contracts';
 
@@ -44,6 +44,11 @@ export interface FilesConfig {
 }
 
 export const name = 'files';
+// Routes below need `ctx.server`, which the host registers after this
+// plugin (see index.ts) — `inject` is what makes that ordering fine: cordis
+// defers `apply()` until every injected service exists, independent of
+// which one was `ctx.plugin()`-ed first.
+export const inject = ['server'];
 
 /**
  * Directory names a project tree never shows. Not tidiness — a tree that
@@ -61,6 +66,142 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
     remove: (path) => Promise.resolve(removeOne(config.cwd, path)),
   };
   ctx.provide('files', service);
+
+  // Four routes over `service` above — they carry ITS diagnostics outward,
+  // never invent their own containment story. `*splat` (path-to-regexp's
+  // wildcard) is what makes `/api/files/*splat` match a multi-segment path
+  // at all; `@cordisjs/plugin-server` decodes it exactly once — percent
+  // escapes and all — before handing it to the callback as one `/`-joined
+  // string, so `req.params.splat` already IS the path the editor meant.
+  // Decoding it again here would be redundant at best (nothing left to
+  // decode) and wrong at worst (see the "reads a name with a space, a
+  // plus, and a percent sign" test in files.test.ts).
+
+  ctx.server.get('/api/files', async (_req, res) => {
+    res.json(await service.tree());
+  });
+
+  ctx.server.get('/api/files/*splat', async (req, res) => {
+    const path = req.params.splat;
+    const { bytes, diagnostics } = await service.read(path);
+    if (!bytes) {
+      res.status = statusFor(diagnostics);
+      res.json({ diagnostics });
+      return;
+    }
+    res.headers.set('content-type', contentTypeFor(path));
+    res.bytes(bytes);
+  });
+
+  ctx.server.put('/api/files/*splat', async (req, res) => {
+    const path = req.params.splat;
+
+    // ponytail: base64-in-JSON, not multipart/form-data — there is no
+    // multipart parser in this host and this task does not add one.
+    // Fine while an edit fits in memory as a JSON string; multipart is
+    // the upgrade path once uploads get big enough for that to matter.
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      // Absent or unparseable body — a diagnostic below, never a throw.
+      // Same shape as `POST /api/spin`'s body parsing in dev-game.ts.
+      body = undefined;
+    }
+
+    const raw = body as { base64?: unknown } | null | undefined;
+    const decoded = typeof raw?.base64 === 'string' ? decodeBase64Strict(raw.base64) : undefined;
+    if (!decoded) {
+      res.status = 400;
+      res.json({
+        diagnostics: [
+          diagnostic(
+            'error',
+            'files',
+            path,
+            `PUT ${req.path} needs a JSON body shaped {"base64": string}`,
+          ),
+        ],
+      });
+      return;
+    }
+
+    const { diagnostics } = await service.write(path, decoded);
+    res.status = statusFor(diagnostics);
+    res.json({ diagnostics });
+  });
+
+  ctx.server.delete('/api/files/*splat', async (req, res) => {
+    const { diagnostics } = await service.remove(req.params.splat);
+    res.status = statusFor(diagnostics);
+    res.json({ diagnostics });
+  });
+}
+
+/**
+ * The HTTP status that fits a files-service diagnostic — reading the
+ * verdict the service already reached off the message it wrote, not
+ * re-deciding containment or existence here. "was not found" is exactly
+ * that (404); everything else the service reports (outside the project, a
+ * directory where a file was wanted, a disk error underneath) is still
+ * this request failing on its own terms, so it stays a 400 with the
+ * diagnostic riding along — never an empty 500.
+ */
+function statusFor(diagnostics: Diagnostic[]): number {
+  if (diagnostics.length === 0) return 200;
+  return /was not found/i.test(diagnostics[0].message) ? 404 : 400;
+}
+
+/**
+ * `Buffer.from(str, 'base64')` never throws — it silently decodes whatever
+ * characters happen to be valid base64 and drops the rest, so a junk
+ * string "succeeds" with garbage bytes instead of surfacing as a
+ * diagnostic (measured directly: `Buffer.from('not really base64!!!',
+ * 'base64')` returns 11 bytes of noise). Checked against the alphabet and
+ * padding first, so a bad upload is refused instead of written as noise.
+ */
+function decodeBase64Strict(value: string): Uint8Array | undefined {
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return undefined;
+  return new Uint8Array(Buffer.from(value, 'base64'));
+}
+
+/**
+ * Content-type by extension, for the handful of kinds this editor's own
+ * screens actually render — a code/text view or an `<img>`. Everything
+ * else answers `application/octet-stream` rather than guessing; that is a
+ * true, if unhelpful, answer, unlike claiming a PNG is `text/plain`.
+ */
+const CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.cjs': 'text/javascript; charset=utf-8',
+  '.ts': 'text/plain; charset=utf-8',
+  '.tsx': 'text/plain; charset=utf-8',
+  '.jsx': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.yml': 'text/yaml; charset=utf-8',
+  '.yaml': 'text/yaml; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.spin': 'text/plain; charset=utf-8',
+  '.lua': 'text/plain; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+};
+
+function contentTypeFor(path: string): string {
+  return CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream';
 }
 
 function readTree(cwd: string): { entries: FileEntry[]; diagnostics: Diagnostic[] } {
