@@ -1,8 +1,21 @@
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Context } from 'cordis';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createIdeHost, type IdeHost } from '../src/index';
+
+function bytes(text: string): Uint8Array {
+  return new TextEncoder().encode(text);
+}
 
 /**
  * Copies a checked-in fixture into a fresh temp directory and returns its
@@ -149,5 +162,107 @@ describe('files service — read', () => {
     const { bytes, diagnostics } = await ctx.files.read('game');
     expect(bytes).toBeUndefined();
     expect(diagnostics[0].message).toMatch(/directory/i);
+  });
+});
+
+describe('files service — write', () => {
+  it('writes a new file, and reads back what it wrote', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.write('art/logo.txt', bytes('hello'));
+    expect(diagnostics).toEqual([]);
+    const back = await ctx.files.read('art/logo.txt');
+    expect(new TextDecoder().decode(back.bytes!)).toBe('hello');
+  });
+
+  it('creates the directories a new path needs', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    await ctx.files.write('deep/er/still/x.txt', bytes('x'));
+    const { entries } = await ctx.files.tree();
+    expect(entries.map((e) => e.path)).toContain('deep/er/still/x.txt');
+  });
+
+  it('replaces an existing file whole', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    await ctx.files.write('a.txt', bytes('first'));
+    await ctx.files.write('a.txt', bytes('second'));
+    const back = await ctx.files.read('a.txt');
+    expect(new TextDecoder().decode(back.bytes!)).toBe('second');
+  });
+
+  it('refuses to write outside the project, and writes nothing', async () => {
+    // Проверка удержания при записи отличается от чтения: файла ещё нет,
+    // поэтому `realpath` берётся у ближайшего существующего предка.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write('../escaped.txt', bytes('x'));
+    expect(diagnostics[0].message).toMatch(/outside the project/i);
+    expect(existsSync(join(dir, '..', 'escaped.txt'))).toBe(false);
+  });
+
+  it('refuses to write THROUGH a symlink that leads out', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, 'sub'));
+    symlinkSync(tmpdir(), join(dir, 'sub', 'out'));
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write('sub/out/escaped.txt', bytes('x'));
+    expect(diagnostics[0].message).toMatch(/outside the project/i);
+    expect(existsSync(join(tmpdir(), 'escaped.txt'))).toBe(false);
+  });
+
+  it('refuses to write into a sibling directory whose name merely starts with the project directory name', async () => {
+    // Same string-prefix trap `read()` already guards against (see
+    // `files.test.ts`'s read describe block): "/project-evil" is not
+    // inside "/project" just because it starts with the same characters.
+    const dir = fixture('plain');
+    const sibling = `${dir}-evil`;
+    mkdirSync(sibling);
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.write(`../${basename(sibling)}/secret.txt`, bytes('x'));
+    expect(diagnostics[0].message).toMatch(/outside the project/i);
+    expect(existsSync(join(sibling, 'secret.txt'))).toBe(false);
+  });
+});
+
+describe('files service — remove', () => {
+  it('removes a file', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    await ctx.files.write('gone.txt', bytes('x'));
+    const { diagnostics } = await ctx.files.remove('gone.txt');
+    expect(diagnostics).toEqual([]);
+    const { entries } = await ctx.files.tree();
+    expect(entries.map((e) => e.path)).not.toContain('gone.txt');
+  });
+
+  it('removing what is not there says so instead of pretending it worked', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.remove('never-existed.txt');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain('never-existed.txt');
+  });
+
+  it('refuses to remove a directory, naming what it is', async () => {
+    // Удаление каталога — другое намерение с другой ценой ошибки.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.remove('game');
+    expect(diagnostics[0].message).toMatch(/directory/i);
+    expect(existsSync(join(dir, 'game'))).toBe(true);
+  });
+
+  it('refuses to remove outside the project', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.remove('../../../etc/hosts');
+    expect(diagnostics[0].message).toMatch(/outside the project/i);
+  });
+
+  it('refuses to remove from a sibling directory whose name merely starts with the project directory name', async () => {
+    const dir = fixture('plain');
+    const sibling = `${dir}-evil`;
+    mkdirSync(sibling);
+    writeFileSync(join(sibling, 'secret.txt'), 'SIBLING_ESCAPE');
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.remove(`../${basename(sibling)}/secret.txt`);
+    expect(diagnostics[0].message).toMatch(/outside the project/i);
+    expect(existsSync(join(sibling, 'secret.txt'))).toBe(true);
   });
 });
