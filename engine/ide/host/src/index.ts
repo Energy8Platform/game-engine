@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type DiagnosticsResponse } from '@energy8engine/contracts';
 import { Context } from 'cordis';
 import Loader from '@cordisjs/plugin-loader';
 import Server from '@cordisjs/plugin-server';
@@ -110,7 +110,12 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
         return await next();
       } catch (error) {
         res.status = error instanceof URIError ? 400 : 500;
-        res.json({
+        // `DiagnosticsResponse`, the same body every files route refuses
+        // with — named rather than spelled inline because a client has to
+        // read this one off a route whose success shape is different
+        // (`FileTreeResponse`), and reading them in the wrong order is
+        // how the host's own explanation got thrown away once already.
+        const refusal: DiagnosticsResponse = {
           diagnostics: [
             diagnostic(
               'error',
@@ -119,7 +124,8 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
               `request to "${req.path}" failed: ${error instanceof Error ? error.message : String(error)}`,
             ),
           ],
-        });
+        };
+        res.json(refusal);
       }
     });
 
