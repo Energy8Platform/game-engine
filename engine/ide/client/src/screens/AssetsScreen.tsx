@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import type { Context } from 'cordis';
-import type { Diagnostic, FileEntry } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
 
 /**
  * The project's own tree, and what one entry in it actually contains —
@@ -124,6 +124,21 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
         setActionDiagnostics(diagnostics);
         if (diagnostics.length === 0) void refreshTree();
       });
+    };
+    // Every other failure path on this screen surfaces something — the
+    // tree fetch, a read, a write, a remove. A file the browser itself
+    // can't read off disk (yanked media, a permissions error) is rare,
+    // but rare isn't a reason to go back to silent; it's this one path's
+    // own diagnostic, since the host never saw the request at all.
+    reader.onerror = () => {
+      setActionDiagnostics([
+        diagnostic(
+          'error',
+          'files',
+          file.name,
+          `"${file.name}" could not be read from disk: ${reader.error?.message ?? 'unknown error'}`,
+        ),
+      ]);
     };
     reader.readAsArrayBuffer(file);
   }

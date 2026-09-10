@@ -238,6 +238,35 @@ describe('AssetsScreen', () => {
     await waitFor(() => expect(ctx.files.written).toEqual([['logo.png', bytes('x')]]));
   });
 
+  it('a file the browser itself fails to read off disk says so, instead of doing nothing', async () => {
+    // Every other failure path on this screen surfaces something — the
+    // tree fetch, a read, a write, a remove. `FileReader` failing before
+    // the host ever sees the request is the one path that previously had
+    // no `onerror` at all: a picked file the browser can't actually read
+    // (yanked media, a permissions error) just vanished, silently.
+    const ctx = await harness(tree([]));
+    const RealFileReader = globalThis.FileReader;
+    class FailingFileReader {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      result: ArrayBuffer | null = null;
+      error = { message: 'disk yanked' };
+      readAsArrayBuffer() {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    // @ts-expect-error — a minimal test double, not a real FileReader
+    globalThis.FileReader = FailingFileReader;
+    try {
+      render(<AssetsScreen ctx={ctx} />);
+      await userEvent.upload(screen.getByTestId('upload'), new File(['x'], 'logo.png'));
+      expect(await screen.findByText(/disk yanked/)).toBeTruthy();
+      expect(ctx.files.written).toEqual([]); // never reached the host at all
+    } finally {
+      globalThis.FileReader = RealFileReader;
+    }
+  });
+
   it('the tree refreshes after an upload, without a page reload', async () => {
     // Otherwise the upload is invisible until someone reloads, and a
     // person uploads it a second time.
@@ -249,8 +278,15 @@ describe('AssetsScreen', () => {
   });
 
   it('an upload the host refuses shows the host’s words and leaves the tree alone', async () => {
-    const ctx = await harness(tree([]), {}, { writeDiagnostics: [d('outside the project')] });
+    const ctx = await harness(tree(['keep.png']), {}, { writeDiagnostics: [d('outside the project')] });
     render(<AssetsScreen ctx={ctx} />);
+    await screen.findByTestId('entry-keep.png');
+    // What a refetch WOULD show if the refusal were ignored — without
+    // this, the fake tree never changes, so an unconditional refetch
+    // returns the exact same answer and "the tree alone" claim goes
+    // untested. `logo.png` here would land the assertions below flipped:
+    // present instead of absent, present because it changed.
+    ctx.files.nextTree(tree(['keep.png', 'logo.png']));
     await userEvent.upload(screen.getByTestId('upload'), new File(['x'], 'logo.png'));
     expect(await screen.findByText(/outside the project/)).toBeTruthy();
     expect(screen.queryByTestId('entry-logo.png')).toBeNull();
@@ -280,6 +316,13 @@ describe('AssetsScreen', () => {
   it('a delete the host refuses leaves the entry where it was', async () => {
     const ctx = await harness(tree(['game']), {}, { removeDiagnostics: [d('game is a directory')] });
     render(<AssetsScreen ctx={ctx} />);
+    await screen.findByTestId('entry-game');
+    // What a refetch WOULD show if the refusal were ignored — a tree
+    // with `game` already gone. Without this the fake tree never
+    // changes, so "leaves the entry where it was" can't tell a gated
+    // refresh from an unconditional one that happens to fetch the same
+    // static answer back.
+    ctx.files.nextTree(tree([]));
     await userEvent.click(await screen.findByTestId('delete-game'));
     await userEvent.click(screen.getByTestId('confirm-yes'));
     expect(await screen.findByText(/is a directory/)).toBeTruthy();
