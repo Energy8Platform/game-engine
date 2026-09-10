@@ -28,9 +28,12 @@ type TreeSpec = string | (Partial<FileEntry> & { path: string });
 
 /** A bare name with no extension reads as a directory; anything else is a file — the same convention every path in this suite already follows. */
 function entryFor(item: TreeSpec): FileEntry {
-  if (typeof item !== 'string') return { path: item.path, kind: item.kind ?? 'file', size: item.size };
+  if (typeof item !== 'string')
+    return { path: item.path, kind: item.kind ?? 'file', size: item.size };
   const base = item.split('/').pop() ?? item;
-  return /\.[^./]+$/.test(base) ? { path: item, kind: 'file', size: 0 } : { path: item, kind: 'dir' };
+  return /\.[^./]+$/.test(base)
+    ? { path: item, kind: 'file', size: 0 }
+    : { path: item, kind: 'dir' };
 }
 
 type TreeResult = { entries: FileEntry[] } | { diagnostics: Diagnostic[] };
@@ -93,7 +96,8 @@ async function harness(
   const removed: string[] = [];
 
   const fetchFn = (async (input: unknown, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : String((input as { toString(): string }).toString());
+    const url =
+      typeof input === 'string' ? input : String((input as { toString(): string }).toString());
     const method = (init?.method ?? 'GET').toUpperCase();
 
     if (url === '/api/composition') {
@@ -182,7 +186,9 @@ describe('AssetsScreen', () => {
   });
 
   it('clicking a text entry shows its text', async () => {
-    const ctx = await harness(tree(['game/spec.json']), { 'game/spec.json': '{"id":"first-slot"}' });
+    const ctx = await harness(tree(['game/spec.json']), {
+      'game/spec.json': '{"id":"first-slot"}',
+    });
     render(<AssetsScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('entry-game/spec.json'));
     expect(await screen.findByText(/first-slot/)).toBeTruthy();
@@ -226,6 +232,9 @@ describe('AssetsScreen', () => {
     render(<AssetsScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('entry-gone.txt'));
     expect(await screen.findByText(/was not found/)).toBeTruthy();
+    expect(ctx.connection.diagnostics.some((diag) => /was not found/.test(diag.message))).toBe(
+      true,
+    );
   });
 
   it('uploading a file puts it where the tree says it went', async () => {
@@ -262,6 +271,7 @@ describe('AssetsScreen', () => {
       await userEvent.upload(screen.getByTestId('upload'), new File(['x'], 'logo.png'));
       expect(await screen.findByText(/disk yanked/)).toBeTruthy();
       expect(ctx.files.written).toEqual([]); // never reached the host at all
+      expect(ctx.connection.diagnostics.some((diag) => /disk yanked/.test(diag.message))).toBe(true);
     } finally {
       globalThis.FileReader = RealFileReader;
     }
@@ -278,7 +288,8 @@ describe('AssetsScreen', () => {
   });
 
   it('an upload the host refuses shows the host’s words and leaves the tree alone', async () => {
-    const ctx = await harness(tree(['keep.png']), {}, { writeDiagnostics: [d('outside the project')] });
+    const refusal = d('outside the project');
+    const ctx = await harness(tree(['keep.png']), {}, { writeDiagnostics: [refusal] });
     render(<AssetsScreen ctx={ctx} />);
     await screen.findByTestId('entry-keep.png');
     // What a refetch WOULD show if the refusal were ignored — without
@@ -290,6 +301,9 @@ describe('AssetsScreen', () => {
     await userEvent.upload(screen.getByTestId('upload'), new File(['x'], 'logo.png'));
     expect(await screen.findByText(/outside the project/)).toBeTruthy();
     expect(screen.queryByTestId('entry-logo.png')).toBeNull();
+    // And into the one list too, so it outlives this tab — see the two
+    // "reaches the one list" cases below for why both readers matter.
+    expect(ctx.connection.diagnostics).toContainEqual(refusal);
   });
 
   it('deleting asks first, and does nothing when the answer is no', async () => {
@@ -314,18 +328,95 @@ describe('AssetsScreen', () => {
   });
 
   it('a delete the host refuses leaves the entry where it was', async () => {
-    const ctx = await harness(tree(['game']), {}, { removeDiagnostics: [d('game is a directory')] });
+    const ctx = await harness(
+      tree(['logo.png']),
+      {},
+      { removeDiagnostics: [d('"logo.png" was not found: ENOENT')] },
+    );
     render(<AssetsScreen ctx={ctx} />);
-    await screen.findByTestId('entry-game');
+    await screen.findByTestId('entry-logo.png');
     // What a refetch WOULD show if the refusal were ignored — a tree
-    // with `game` already gone. Without this the fake tree never
+    // with `logo.png` already gone. Without this the fake tree never
     // changes, so "leaves the entry where it was" can't tell a gated
     // refresh from an unconditional one that happens to fetch the same
     // static answer back.
     ctx.files.nextTree(tree([]));
-    await userEvent.click(await screen.findByTestId('delete-game'));
+    await userEvent.click(await screen.findByTestId('delete-logo.png'));
     await userEvent.click(screen.getByTestId('confirm-yes'));
-    expect(await screen.findByText(/is a directory/)).toBeTruthy();
-    expect(screen.getByTestId('entry-game')).toBeTruthy();
+    expect(await screen.findByText(/was not found/)).toBeTruthy();
+    expect(screen.getByTestId('entry-logo.png')).toBeTruthy();
+  });
+
+  it('a directory has no delete button, since the only answer it could get is no', async () => {
+    // `remove()` does not remove directories and says so; a button whose
+    // only possible outcome is a refusal is a dead end reached through
+    // the ordinary path.
+    const ctx = await harness(tree(['game', 'game/spec.json']));
+    render(<AssetsScreen ctx={ctx} />);
+    await screen.findByTestId('entry-game');
+    expect(screen.queryByTestId('delete-game')).toBeNull();
+    expect(screen.getByTestId('delete-game/spec.json')).toBeTruthy();
+  });
+
+  it('an upload onto a name already there asks before replacing it', async () => {
+    // The host replaces a file whole, without a word. Someone who drags
+    // in `logo.png` twice did not ask to lose the first.
+    const ctx = await harness(tree(['logo.png']));
+    render(<AssetsScreen ctx={ctx} />);
+    await screen.findByTestId('entry-logo.png');
+    await userEvent.upload(
+      screen.getByTestId('upload') as HTMLInputElement,
+      new File(['second'], 'logo.png'),
+    );
+    expect(await screen.findByText(/replace/)).toBeTruthy();
+    expect(ctx.files.written).toEqual([]);
+    await userEvent.click(screen.getByTestId('confirm-no'));
+    expect(ctx.files.written).toEqual([]);
+  });
+
+  it('saying yes to the replace question writes the file the second time', async () => {
+    const ctx = await harness(tree(['logo.png']));
+    render(<AssetsScreen ctx={ctx} />);
+    await screen.findByTestId('entry-logo.png');
+    await userEvent.upload(
+      screen.getByTestId('upload') as HTMLInputElement,
+      new File(['second'], 'logo.png'),
+    );
+    await userEvent.click(await screen.findByTestId('confirm-yes'));
+    await waitFor(() => expect(ctx.files.written).toEqual([['logo.png', bytes('second')]]));
+  });
+
+  it('an upload onto a name nothing claims yet does not ask', async () => {
+    const ctx = await harness(tree(['logo.png']));
+    render(<AssetsScreen ctx={ctx} />);
+    await screen.findByTestId('entry-logo.png');
+    await userEvent.upload(
+      screen.getByTestId('upload') as HTMLInputElement,
+      new File(['x'], 'other.png'),
+    );
+    await waitFor(() => expect(ctx.files.written).toEqual([['other.png', bytes('x')]]));
+  });
+
+  it('a refusal reaches the one list, not only this screen', async () => {
+    // §8 wants ONE diagnostics list, outliving whichever screen you are
+    // on. This screen used to render its own `<p>` and nothing else, so
+    // navigating away took the refusal with it and nothing outside the
+    // tab — an agent included — ever saw it. `ctx.connection.report` is
+    // what the chrome's panel reads.
+    const refusal = d('"logo.png" resolves outside the project');
+    const ctx = await harness(tree(['logo.png']), {}, { removeDiagnostics: [refusal] });
+    render(<AssetsScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('delete-logo.png'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    await screen.findByText(/outside the project/);
+    expect(ctx.connection.diagnostics).toContainEqual(refusal);
+  });
+
+  it('a tree that could not be read reaches the one list too', async () => {
+    const refusal = d('cannot list ".": EACCES');
+    const ctx = await harness({ diagnostics: [refusal] });
+    render(<AssetsScreen ctx={ctx} />);
+    await screen.findByText(/EACCES/);
+    expect(ctx.connection.diagnostics).toContainEqual(refusal);
   });
 });

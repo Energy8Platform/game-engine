@@ -22,6 +22,14 @@ import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/cont
  * instead; only a clean `{ diagnostics: [] }` triggers a re-fetch of the
  * tree, which is also the only way an upload becomes visible without a
  * page reload.
+ *
+ * Every diagnostic this screen receives goes two places: to the `<p>`
+ * below, where the person who just acted is already looking, and to
+ * `ctx.connection.report()`, which is the one list §8 of the design spec
+ * wants — outliving this screen, visible to the game, the IDE and an
+ * agent alike. This screen used to do only the first, so navigating away
+ * took the refusal with it and nothing outside this tab ever saw it. Two
+ * readers, one report.
  */
 
 /** Bytes past which this screen refuses to fetch a file's contents rather than decode a huge buffer on the main thread.
@@ -62,6 +70,10 @@ function errorFor(preview: Preview, path: string): string | undefined {
   return preview.kind === 'error' && preview.path === path ? preview.message : undefined;
 }
 
+/** What a confirm row is currently asking about — see `pending` below. */
+type Pending =
+  { kind: 'delete'; path: string } | { kind: 'overwrite'; path: string; bytes: Uint8Array };
+
 type Preview =
   | { kind: 'none' }
   | { kind: 'loading'; path: string }
@@ -81,15 +93,28 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
   // `treeDiagnostics` because it's about an action, not the listing, and
   // has to survive independently of whatever the tree itself is doing.
   const [actionDiagnostics, setActionDiagnostics] = useState<Diagnostic[]>([]);
-  // The one entry a delete click is currently asking about. Delete is the
-  // only irreversible thing on this screen, so it's the only one that
-  // asks first — set here, read by the confirm row below, cleared by
-  // either answer.
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  // What this screen is currently asking about, and why. Both irreversible
+  // things here ask first: a delete, and an upload whose name collides
+  // with a file already there — a person who drags in `logo.png` twice did
+  // not ask to lose the first one, and the host replaces a file whole
+  // without a word. One state and one confirm row for both, rather than a
+  // second dialog that would do the same job in different words.
+  const [pending, setPending] = useState<Pending | null>(null);
 
   function applyTree(result: { entries: FileEntry[]; diagnostics: Diagnostic[] }) {
     setEntries(result.entries);
     setTreeDiagnostics(result.diagnostics);
+    report(result.diagnostics);
+  }
+
+  /**
+   * Into the one list that outlives this screen. `report` dedupes a
+   * byte-identical repeat on its own (see connection.ts), so re-reporting
+   * the same still-unresolved tree diagnostic on every refresh costs
+   * nothing.
+   */
+  function report(diagnostics: Diagnostic[]) {
+    for (const diag of diagnostics) ctx.connection.report(diag);
   }
 
   useEffect(() => {
@@ -109,6 +134,15 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
     return ctx.files.tree().then(applyTree);
   }
 
+  /** The write itself, past whatever confirming the collision needed. */
+  function upload(path: string, bytes: Uint8Array) {
+    ctx.files.write(path, bytes).then(({ diagnostics }) => {
+      setActionDiagnostics(diagnostics);
+      report(diagnostics);
+      if (diagnostics.length === 0) void refreshTree();
+    });
+  }
+
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = ''; // lets the same name be picked again
@@ -120,10 +154,12 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
     const reader = new FileReader();
     reader.onload = () => {
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
-      ctx.files.write(file.name, bytes).then(({ diagnostics }) => {
-        setActionDiagnostics(diagnostics);
-        if (diagnostics.length === 0) void refreshTree();
-      });
+      if (entries?.some((entry) => entry.kind === 'file' && entry.path === file.name)) {
+        setActionDiagnostics([]);
+        setPending({ kind: 'overwrite', path: file.name, bytes });
+        return;
+      }
+      upload(file.name, bytes);
     };
     // Every other failure path on this screen surfaces something — the
     // tree fetch, a read, a write, a remove. A file the browser itself
@@ -131,31 +167,38 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
     // but rare isn't a reason to go back to silent; it's this one path's
     // own diagnostic, since the host never saw the request at all.
     reader.onerror = () => {
-      setActionDiagnostics([
+      const own = [
         diagnostic(
           'error',
           'files',
           file.name,
           `"${file.name}" could not be read from disk: ${reader.error?.message ?? 'unknown error'}`,
         ),
-      ]);
+      ];
+      setActionDiagnostics(own);
+      report(own);
     };
     reader.readAsArrayBuffer(file);
   }
 
   function askDelete(path: string) {
     setActionDiagnostics([]); // an older refusal shouldn't linger over a new question
-    setConfirmingDelete(path);
+    setPending({ kind: 'delete', path });
   }
 
-  function cancelDelete() {
-    setConfirmingDelete(null);
+  function cancel() {
+    setPending(null);
   }
 
-  function confirmDelete(path: string) {
-    setConfirmingDelete(null);
-    ctx.files.remove(path).then(({ diagnostics }) => {
+  function confirm(asked: Pending) {
+    setPending(null);
+    if (asked.kind === 'overwrite') {
+      upload(asked.path, asked.bytes);
+      return;
+    }
+    ctx.files.remove(asked.path).then(({ diagnostics }) => {
       setActionDiagnostics(diagnostics);
+      report(diagnostics);
       if (diagnostics.length === 0) void refreshTree();
     });
   }
@@ -179,6 +222,7 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
         // passed through unchanged, same as `files.ts`'s own rule.
         const message = diagnostics[0]?.message ?? `"${entry.path}" could not be read`;
         setPreview({ kind: 'error', path: entry.path, message });
+        report(diagnostics);
         return;
       }
       if (looksBinary(bytes)) {
@@ -245,16 +289,16 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
                 onClick={isFile ? () => select(entry) : undefined}
               >
                 {label}
-                {confirmingDelete === entry.path ? (
+                {pending?.path === entry.path ? (
                   <span className="e8-assets-confirm">
                     {' '}
-                    delete "{entry.path}"?{' '}
+                    {pending.kind === 'delete' ? 'delete' : 'replace'} "{entry.path}"?{' '}
                     <button
                       type="button"
                       data-testid="confirm-yes"
                       onClick={(e) => {
                         e.stopPropagation();
-                        confirmDelete(entry.path);
+                        confirm(pending);
                       }}
                     >
                       yes
@@ -264,24 +308,30 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
                       data-testid="confirm-no"
                       onClick={(e) => {
                         e.stopPropagation();
-                        cancelDelete();
+                        cancel();
                       }}
                     >
                       no
                     </button>
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    data-testid={`delete-${entry.path}`}
-                    className="e8-assets-delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      askDelete(entry.path);
-                    }}
-                  >
-                    delete
-                  </button>
+                  // Files only. A directory row used to get one too, and
+                  // its only possible outcome was a refusal: `remove()`
+                  // does not remove directories, and the row's own click
+                  // handler is already file-gated.
+                  isFile && (
+                    <button
+                      type="button"
+                      data-testid={`delete-${entry.path}`}
+                      className="e8-assets-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        askDelete(entry.path);
+                      }}
+                    >
+                      delete
+                    </button>
+                  )
                 )}
               </li>
             );
