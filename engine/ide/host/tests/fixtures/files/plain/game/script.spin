@@ -1,0 +1,2 @@
+game "first-slot" {
+}

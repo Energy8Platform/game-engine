@@ -8,6 +8,7 @@ import Server from '@cordisjs/plugin-server';
 import * as yaml from 'js-yaml';
 import * as clientAssets from './plugins/client-assets';
 import * as composition from './plugins/composition';
+import * as files from './plugins/files';
 import * as project from './plugins/project';
 import * as rpc from './plugins/rpc';
 import * as runtimeAssets from './plugins/runtime-assets';
@@ -73,6 +74,11 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     // `GET /api/composition` (runtime-assets.ts) can carry it alongside
     // the rows; see plugins/schema.ts's doc comment.
     await ctx.plugin(schema, { cwd: options.cwd });
+    // The project's actual files — the tree and byte contents behind
+    // whatever composition/schema above already resolved. See
+    // plugins/files.ts's doc comment for why this is a separate plugin
+    // from those rather than a method bolted onto one of them.
+    await ctx.plugin(files, { cwd: options.cwd });
 
     await ctx.plugin(Server, { host: options.host ?? '127.0.0.1', port: options.port ?? 5679 });
     await ctx.plugin(rpc);
