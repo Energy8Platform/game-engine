@@ -75,7 +75,16 @@ async function harness(
 describe('AssetsScreen', () => {
   it('draws the project tree, directories before their files', async () => {
     render(<AssetsScreen ctx={await harness(tree(['game', 'game/spec.json', 'index.html']))} />);
-    expect(await screen.findAllByTestId(/^entry-/)).toHaveLength(3);
+    const entries = await screen.findAllByTestId(/^entry-/);
+    expect(entries).toHaveLength(3);
+    // A length check alone passes for any ordering — pin the sequence too,
+    // matching the host's own traversal order (`readTree`'s own doc): the
+    // directory before the files nested under it.
+    expect(entries.map((el) => el.getAttribute('data-testid'))).toEqual([
+      'entry-game',
+      'entry-game/spec.json',
+      'entry-index.html',
+    ]);
   });
 
   it('an empty project says it is empty instead of drawing nothing', async () => {
@@ -90,7 +99,7 @@ describe('AssetsScreen', () => {
   });
 
   it('clicking an image entry shows it, without reading its bytes', async () => {
-    // `urlFor` существует ровно для этого: картинку показывает браузер.
+    // This is exactly what `urlFor` is for: the browser fetches and decodes the image itself.
     const ctx = await harness(tree(['art/logo.png']));
     render(<AssetsScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('entry-art/logo.png'));
@@ -105,21 +114,31 @@ describe('AssetsScreen', () => {
   });
 
   it('a file too big to show says so instead of hanging', async () => {
-    // ponytail: порог, а не потоковая отдача. Потоки — когда начнут
-    // возить видео.
+    // ponytail: a threshold, not streaming. Streaming is the upgrade once
+    // this editor starts shipping video.
     const ctx = await harness(tree([{ path: 'big.bin', kind: 'file', size: 50_000_000 }]));
     render(<AssetsScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('entry-big.bin'));
     expect(await screen.findByTestId('too-big')).toBeTruthy();
   });
 
+  it('a small binary file that is not an image says so instead of rendering mush', async () => {
+    // Not text (a NUL byte in it) and not a recognized image extension —
+    // decoding it as text would just fill the pane with replacement
+    // characters and explain nothing.
+    const ctx = await harness(tree(['data.bin']), { 'data.bin': '\x00\x01\x02binary stuff' });
+    render(<AssetsScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('entry-data.bin'));
+    expect(await screen.findByTestId('binary')).toBeTruthy();
+  });
+
   it('the screen survives a file that vanishes between listing and reading', async () => {
-    // Дерево — снимок. Между щелчком и чтением файл могли удалить.
-    const ctx = await harness(tree(['gone.txt']), {}); // читается — но его уже нет
+    // The tree is a snapshot; the file can be deleted between the click and the read.
+    const ctx = await harness(tree(['gone.txt']), {}); // reads — but it is already gone
     render(<AssetsScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('entry-gone.txt'));
     expect(await screen.findByText(/gone\.txt/)).toBeTruthy();
-    expect(screen.getByTestId('entry-gone.txt')).toBeTruthy(); // экран цел
+    expect(screen.getByTestId('entry-gone.txt')).toBeTruthy(); // the screen stayed whole
   });
 
   it('the vanished-file message is the host’s diagnostic, not just the entry’s own name', async () => {

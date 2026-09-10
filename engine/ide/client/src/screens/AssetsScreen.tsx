@@ -36,6 +36,20 @@ function isImage(path: string): boolean {
   return IMAGE_EXTENSIONS.has(extensionOf(path));
 }
 
+/** How many leading bytes `looksBinary` samples — enough to catch a real binary file's header without reading the whole thing. */
+const SNIFF_BYTES = 8000;
+
+/**
+ * A NUL byte never appears in valid text of any encoding this screen
+ * claims to read — the same cheap tell `file(1)` and most editors use — so
+ * finding one in the leading bytes is a fast, honest signal that decoding
+ * the rest would just fill the pane with replacement-character mush
+ * instead of throwing or staying blank.
+ */
+function looksBinary(bytes: Uint8Array): boolean {
+  return bytes.subarray(0, SNIFF_BYTES).includes(0);
+}
+
 /** The message of an error preview about this exact path — `undefined` for every other preview state or a different entry. */
 function errorFor(preview: Preview, path: string): string | undefined {
   return preview.kind === 'error' && preview.path === path ? preview.message : undefined;
@@ -47,6 +61,8 @@ type Preview =
   | { kind: 'image'; path: string; url: string }
   | { kind: 'text'; path: string; text: string }
   | { kind: 'too-big'; path: string }
+  /** Read fine, but not text and not a recognized image extension — shown as a refusal instead of decoded mush. */
+  | { kind: 'binary'; path: string }
   /** A read that failed — most often the tree's own snapshot going stale between the click and the fetch. The host's message, unchanged. */
   | { kind: 'error'; path: string; message: string };
 
@@ -86,6 +102,10 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
         // passed through unchanged, same as `files.ts`'s own rule.
         const message = diagnostics[0]?.message ?? `"${entry.path}" could not be read`;
         setPreview({ kind: 'error', path: entry.path, message });
+        return;
+      }
+      if (looksBinary(bytes)) {
+        setPreview({ kind: 'binary', path: entry.path });
         return;
       }
       setPreview({ kind: 'text', path: entry.path, text: new TextDecoder().decode(bytes) });
@@ -147,6 +167,12 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
         <p data-testid="too-big">
           "{preview.path}" is too big to show here ({'>'}
           {TOO_BIG_BYTES.toLocaleString()} bytes).
+        </p>
+      )}
+      {preview.kind === 'binary' && (
+        <p data-testid="binary">
+          "{preview.path}" doesn't look like text (it contains a NUL byte) and isn't a recognized
+          image, so it isn't shown here.
         </p>
       )}
     </main>
