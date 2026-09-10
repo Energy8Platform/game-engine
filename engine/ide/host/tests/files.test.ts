@@ -67,7 +67,7 @@ describe('files service — tree', () => {
   });
 
   it('never lists node_modules, which is not the project', async () => {
-    // Иначе дерево проекта — это дерево npm, и экран бесполезен.
+    // Otherwise the project tree is an npm tree, and the screen is useless.
     //
     // Built at runtime, not checked in — the repo's own `.gitignore` has a
     // blanket `node_modules/` rule, so a fixture with a checked-in
@@ -110,8 +110,8 @@ describe('files service — read', () => {
   });
 
   it('refuses a symlink INSIDE the project whose target is outside it', async () => {
-    // Тот же побег, который `dev-game` уже ловит: путь выглядит своим,
-    // а ведёт наружу. Сравниваются реальные пути обеих сторон.
+    // The same escape `dev-game` already catches: the path looks like it
+    // belongs, but leads out. Both sides are compared by real path.
     const dir = fixture('plain');
     symlinkSync('/etc', join(dir, 'escape'));
     const ctx = await hostFor(dir);
@@ -137,8 +137,8 @@ describe('files service — read', () => {
   });
 
   it('an absent file is not reported as an access refusal', async () => {
-    // Иначе «нет такого файла» и «сюда нельзя» сливаются, и читатель
-    // идёт чинить права там, где надо исправить опечатку.
+    // Otherwise "no such file" and "not allowed here" collapse into one,
+    // and the reader goes to fix permissions where they should fix a typo.
     const ctx = await hostFor(fixture('plain'));
     const { diagnostics } = await ctx.files.read('game/nope.json');
     expect(diagnostics[0].message).not.toMatch(/outside the project/i);
