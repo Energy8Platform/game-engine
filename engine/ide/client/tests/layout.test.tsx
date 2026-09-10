@@ -393,12 +393,34 @@ describe('Layout', () => {
   });
 
   it('the panel survives a change of screen without losing what it held', async () => {
-    // Это и есть смысл переезда: список переживает навигацию.
+    // Это и есть смысл переезда: список переживает навигацию. This is a
+    // LIFECYCLE property — not remounted, not re-derived from scratch — and
+    // content alone cannot see it: the panel's hooks re-read their stores on
+    // mount, so a remounted panel would show the same reported diagnostic
+    // right back, just as a survived one would. Asserting the DOM NODE
+    // itself is the same object before and after is what actually
+    // distinguishes "kept" from "torn down and rebuilt identically" — a
+    // remount always hands back a fresh node, even one showing identical
+    // content. `key={current?.id}` on `DiagnosticsChrome` — the exact
+    // regression this task exists to rule out — reproduces the survived
+    // node's content while still failing this the moment it is checked as
+    // node identity rather than text.
+    //
+    // Two screens, not one: `first` is registered before `other`, so it is
+    // the one `current` defaults to (no hash yet falls back to the first
+    // registered — see the `layout` describe block above), and the click
+    // below genuinely moves `current.id` from `first` to `other`. A single
+    // registered screen never actually changes the current id, which would
+    // leave a `key={current?.id}` regression nothing to trigger on.
     const ctx = harness();
+    ctx.layout.screen({ id: 'first', title: 'First' }, () => <div>FIRST</div>);
     ctx.layout.screen({ id: 'other', title: 'Other' }, () => <div>OTHER</div>);
     ctx.connection.report(d('something went wrong'));
     render(<Layout ctx={ctx} />);
+    const before = screen.getByTestId('diagnostics-panel');
     await userEvent.click(screen.getByTestId('tab-other'));
+    const after = screen.getByTestId('diagnostics-panel');
+    expect(after).toBe(before);
     expect(screen.getByText(/something went wrong/)).toBeTruthy();
   });
 
