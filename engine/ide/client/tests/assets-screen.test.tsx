@@ -1,17 +1,22 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
-import { AssetsScreen, createIdeClient } from '../src/index';
+import { AssetsScreen, createIdeClient, type FilesService } from '../src/index';
 
 /**
  * Falling tests for Task 5: the project tree, and what one entry contains.
- * `harness()` goes through the real `createIdeClient`, matching
- * `composition-screen.test.tsx`/`preview.test.tsx`'s own precedent for a
- * SCREEN test — not `files.test.ts`'s single-service `apply()` harness,
- * which only proves the service in isolation, not that a screen mounted
- * against the real client draws it.
+ * Task 6 (upload/delete) adds to the same `harness()` rather than growing
+ * a second variant — see the extras below, all of them derived from
+ * intercepting the fake `fetchFn`'s PUT/DELETE calls, since there is no
+ * fake `files` service to poke directly: the screen runs against the real
+ * one `createIdeClient` provides. `harness()` goes through the real
+ * `createIdeClient`, matching `composition-screen.test.tsx`/
+ * `preview.test.tsx`'s own precedent for a SCREEN test — not
+ * `files.test.ts`'s single-service `apply()` harness, which only proves
+ * the service in isolation, not that a screen mounted against the real
+ * client draws it.
  */
 
 /** These tests only care about `.message` — severity/plugin/where are fixed filler. */
@@ -28,9 +33,45 @@ function entryFor(item: TreeSpec): FileEntry {
   return /\.[^./]+$/.test(base) ? { path: item, kind: 'file', size: 0 } : { path: item, kind: 'dir' };
 }
 
+type TreeResult = { entries: FileEntry[] } | { diagnostics: Diagnostic[] };
+
 function tree(items: TreeSpec[]): { entries: FileEntry[] } {
   return { entries: items.map(entryFor) };
 }
+
+/**
+ * `bytes('x')` — what a `File(['x'], …)` upload decodes to on the other
+ * end. Plain numbers, not a `Uint8Array`: jsdom's test realm and Node's
+ * own construct distinct `Uint8Array` classes, and `toEqual` on two
+ * same-valued instances from different realms fails despite an identical
+ * printed diff — the classic "no visual difference" assertion failure.
+ * Comparing plain arrays sidesteps that entirely.
+ */
+function bytes(text: string): number[] {
+  return Array.from(new TextEncoder().encode(text));
+}
+
+function decodeBase64(value: string): number[] {
+  const binary = atob(value);
+  return Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/**
+ * What the harness hands back beyond the plain `Context` every earlier
+ * screen test already returned: the PUT/DELETE calls the fake `fetchFn`
+ * actually received, and a way to change what the next `GET /api/files`
+ * answers — the harness's own stand-in for "the host's tree changed",
+ * since nothing in this suite runs a real host to change it for real.
+ * Attached onto `ctx.files` itself (the real service `files.ts` provides)
+ * rather than a second object, because `written`/`removed`/`nextTree` are
+ * observations ABOUT that one real service's traffic, not a competing
+ * implementation of it.
+ */
+type TestFiles = FilesService & {
+  written: [string, number[]][];
+  removed: string[];
+  nextTree(result: TreeResult): void;
+};
 
 /**
  * `createIdeClient` always composes `gameComposition` too, which fetches
@@ -40,25 +81,49 @@ function tree(items: TreeSpec[]): { entries: FileEntry[] } {
  * into an unrelated diagnostic this suite isn't testing.
  */
 async function harness(
-  result: { entries: FileEntry[] } | { diagnostics: Diagnostic[] },
+  result: TreeResult,
   contents: Record<string, string> = {},
-): Promise<Context> {
-  const entries = 'entries' in result ? result.entries : [];
-  const diagnostics = 'diagnostics' in result ? result.diagnostics : [];
+  hostAnswers: { writeDiagnostics?: Diagnostic[]; removeDiagnostics?: Diagnostic[] } = {},
+): Promise<Context & { files: TestFiles }> {
+  let entries = 'entries' in result ? result.entries : [];
+  let treeDiagnostics = 'diagnostics' in result ? result.diagnostics : [];
+  const writeDiagnostics = hostAnswers.writeDiagnostics ?? [];
+  const removeDiagnostics = hostAnswers.removeDiagnostics ?? [];
+  const written: [string, number[]][] = [];
+  const removed: string[] = [];
 
-  const fetchFn = (async (input: unknown) => {
+  const fetchFn = (async (input: unknown, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : String((input as { toString(): string }).toString());
+    const method = (init?.method ?? 'GET').toUpperCase();
+
     if (url === '/api/composition') {
       return new Response(JSON.stringify({ rows: [], diagnostics: [] }), {
         headers: { 'content-type': 'application/json' },
       });
     }
-    if (url === '/api/files') {
-      return new Response(JSON.stringify({ entries, diagnostics }), {
+    if (url === '/api/files' && method === 'GET') {
+      return new Response(JSON.stringify({ entries, diagnostics: treeDiagnostics }), {
         headers: { 'content-type': 'application/json' },
       });
     }
+
     const path = decodeURIComponent(url.slice('/api/files/'.length));
+
+    if (method === 'PUT') {
+      const body = JSON.parse((init?.body as string | undefined) ?? '{}') as { base64?: string };
+      written.push([path, decodeBase64(body.base64 ?? '')]);
+      return new Response(JSON.stringify({ diagnostics: writeDiagnostics }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    if (method === 'DELETE') {
+      removed.push(path);
+      return new Response(JSON.stringify({ diagnostics: removeDiagnostics }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     if (Object.prototype.hasOwnProperty.call(contents, path)) {
       return new Response(contents[path]);
     }
@@ -69,7 +134,17 @@ async function harness(
   }) as unknown as typeof fetch;
 
   const socket = { readyState: 1, addEventListener() {}, send() {}, close() {} };
-  return createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+  const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+
+  const testFiles = ctx.files as TestFiles;
+  testFiles.written = written;
+  testFiles.removed = removed;
+  testFiles.nextTree = (next) => {
+    entries = 'entries' in next ? next.entries : [];
+    treeDiagnostics = 'diagnostics' in next ? next.diagnostics : [];
+  };
+
+  return ctx as Context & { files: TestFiles };
 }
 
 describe('AssetsScreen', () => {
@@ -151,5 +226,63 @@ describe('AssetsScreen', () => {
     render(<AssetsScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('entry-gone.txt'));
     expect(await screen.findByText(/was not found/)).toBeTruthy();
+  });
+
+  it('uploading a file puts it where the tree says it went', async () => {
+    const ctx = await harness(tree([]));
+    render(<AssetsScreen ctx={ctx} />);
+    await userEvent.upload(
+      screen.getByTestId('upload'),
+      new File(['x'], 'logo.png', { type: 'image/png' }),
+    );
+    await waitFor(() => expect(ctx.files.written).toEqual([['logo.png', bytes('x')]]));
+  });
+
+  it('the tree refreshes after an upload, without a page reload', async () => {
+    // Otherwise the upload is invisible until someone reloads, and a
+    // person uploads it a second time.
+    const ctx = await harness(tree([]));
+    render(<AssetsScreen ctx={ctx} />);
+    ctx.files.nextTree(tree(['logo.png']));
+    await userEvent.upload(screen.getByTestId('upload'), new File(['x'], 'logo.png'));
+    expect(await screen.findByTestId('entry-logo.png')).toBeTruthy();
+  });
+
+  it('an upload the host refuses shows the host’s words and leaves the tree alone', async () => {
+    const ctx = await harness(tree([]), {}, { writeDiagnostics: [d('outside the project')] });
+    render(<AssetsScreen ctx={ctx} />);
+    await userEvent.upload(screen.getByTestId('upload'), new File(['x'], 'logo.png'));
+    expect(await screen.findByText(/outside the project/)).toBeTruthy();
+    expect(screen.queryByTestId('entry-logo.png')).toBeNull();
+  });
+
+  it('deleting asks first, and does nothing when the answer is no', async () => {
+    // Delete is irreversible — the one place on this screen where a
+    // confirmation earns its cost.
+    const ctx = await harness(tree(['logo.png']));
+    render(<AssetsScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('delete-logo.png'));
+    await userEvent.click(screen.getByTestId('confirm-no'));
+    expect(ctx.files.removed).toEqual([]);
+    expect(screen.getByTestId('entry-logo.png')).toBeTruthy();
+  });
+
+  it('deleting removes the entry from the tree', async () => {
+    const ctx = await harness(tree(['logo.png']));
+    render(<AssetsScreen ctx={ctx} />);
+    ctx.files.nextTree(tree([]));
+    await userEvent.click(await screen.findByTestId('delete-logo.png'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    expect(ctx.files.removed).toEqual(['logo.png']);
+    await waitFor(() => expect(screen.queryByTestId('entry-logo.png')).toBeNull());
+  });
+
+  it('a delete the host refuses leaves the entry where it was', async () => {
+    const ctx = await harness(tree(['game']), {}, { removeDiagnostics: [d('game is a directory')] });
+    render(<AssetsScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('delete-game'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    expect(await screen.findByText(/is a directory/)).toBeTruthy();
+    expect(screen.getByTestId('entry-game')).toBeTruthy();
   });
 });

@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import type { Context } from 'cordis';
 import type { Diagnostic, FileEntry } from '@energy8engine/contracts';
 
 /**
  * The project's own tree, and what one entry in it actually contains —
  * `ctx.files.tree()`/`read()`/`urlFor()` (Tasks 1-4) made this data
- * reachable from the browser; this is the first screen that draws it.
- * Upload and delete are a later task on top of this one; this screen only
- * lists and previews.
+ * reachable from the browser; this is the first screen that draws it,
+ * and — with `write()`/`remove()` below — the one that changes it.
  *
  * ponytail: the whole tree is fetched once on mount, not streamed or
  * paginated — an actual game project (a spec, a script, a handful of
@@ -15,6 +14,14 @@ import type { Diagnostic, FileEntry } from '@energy8engine/contracts';
  * response and one `<ul>` render comfortably. Paging becomes worth it if a
  * project ever grows into the thousands of files a node_modules-shaped
  * tree would have — `SKIPPED_DIRS` on the host already keeps that out.
+ *
+ * Upload and delete, on top of the tree Task 5 drew, follow one rule: the
+ * tree on screen only ever shows what the host has confirmed, never what a
+ * click here merely asked for. A write or a remove that comes back with
+ * diagnostics leaves `entries` untouched and shows the host's own words
+ * instead; only a clean `{ diagnostics: [] }` triggers a re-fetch of the
+ * tree, which is also the only way an upload becomes visible without a
+ * page reload.
  */
 
 /** Bytes past which this screen refuses to fetch a file's contents rather than decode a huge buffer on the main thread.
@@ -70,18 +77,73 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [treeDiagnostics, setTreeDiagnostics] = useState<Diagnostic[]>([]);
   const [preview, setPreview] = useState<Preview>({ kind: 'none' });
+  // The host's answer to the most recent upload or delete — separate from
+  // `treeDiagnostics` because it's about an action, not the listing, and
+  // has to survive independently of whatever the tree itself is doing.
+  const [actionDiagnostics, setActionDiagnostics] = useState<Diagnostic[]>([]);
+  // The one entry a delete click is currently asking about. Delete is the
+  // only irreversible thing on this screen, so it's the only one that
+  // asks first — set here, read by the confirm row below, cleared by
+  // either answer.
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+
+  function applyTree(result: { entries: FileEntry[]; diagnostics: Diagnostic[] }) {
+    setEntries(result.entries);
+    setTreeDiagnostics(result.diagnostics);
+  }
 
   useEffect(() => {
     let cancelled = false;
-    ctx.files.tree().then(({ entries, diagnostics }) => {
-      if (cancelled) return;
-      setEntries(entries);
-      setTreeDiagnostics(diagnostics);
+    ctx.files.tree().then((result) => {
+      if (!cancelled) applyTree(result);
     });
     return () => {
       cancelled = true;
     };
   }, [ctx]);
+
+  // Shared by upload and delete: the only path that ever changes what
+  // `entries` shows, and only ever called after the host has said the
+  // change actually happened.
+  function refreshTree(): Promise<void> {
+    return ctx.files.tree().then(applyTree);
+  }
+
+  function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // lets the same name be picked again
+    if (!file) return;
+    // `FileReader`, not `file.arrayBuffer()` — jsdom's `File`/`Blob` shim
+    // (the whole reason this screen is testable without a real browser)
+    // implements the older reader API but not the newer promise-returning
+    // one, and this needs to run under both.
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result as ArrayBuffer);
+      ctx.files.write(file.name, bytes).then(({ diagnostics }) => {
+        setActionDiagnostics(diagnostics);
+        if (diagnostics.length === 0) void refreshTree();
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function askDelete(path: string) {
+    setActionDiagnostics([]); // an older refusal shouldn't linger over a new question
+    setConfirmingDelete(path);
+  }
+
+  function cancelDelete() {
+    setConfirmingDelete(null);
+  }
+
+  function confirmDelete(path: string) {
+    setConfirmingDelete(null);
+    ctx.files.remove(path).then(({ diagnostics }) => {
+      setActionDiagnostics(diagnostics);
+      if (diagnostics.length === 0) void refreshTree();
+    });
+  }
 
   function select(entry: FileEntry) {
     if (entry.size !== undefined && entry.size > TOO_BIG_BYTES) {
@@ -116,9 +178,23 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
     <main className="e8-assets">
       <h1>Ассеты</h1>
 
+      <input
+        type="file"
+        data-testid="upload"
+        className="e8-assets-upload"
+        onChange={handleUpload}
+      />
+
       {treeDiagnostics.length > 0 &&
         treeDiagnostics.map((diag, i) => (
           <p className="e8-assets-diagnostic" key={i}>
+            {diag.message}
+          </p>
+        ))}
+
+      {actionDiagnostics.length > 0 &&
+        actionDiagnostics.map((diag, i) => (
+          <p className="e8-assets-diagnostic" key={`action-${i}`}>
             {diag.message}
           </p>
         ))}
@@ -154,6 +230,44 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
                 onClick={isFile ? () => select(entry) : undefined}
               >
                 {label}
+                {confirmingDelete === entry.path ? (
+                  <span className="e8-assets-confirm">
+                    {' '}
+                    delete "{entry.path}"?{' '}
+                    <button
+                      type="button"
+                      data-testid="confirm-yes"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        confirmDelete(entry.path);
+                      }}
+                    >
+                      yes
+                    </button>{' '}
+                    <button
+                      type="button"
+                      data-testid="confirm-no"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cancelDelete();
+                      }}
+                    >
+                      no
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`delete-${entry.path}`}
+                    className="e8-assets-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      askDelete(entry.path);
+                    }}
+                  >
+                    delete
+                  </button>
+                )}
               </li>
             );
           })}
