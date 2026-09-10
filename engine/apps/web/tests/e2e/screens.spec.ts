@@ -33,9 +33,9 @@
  * rendered text, and the layout boundary's own error message. Neither
  * needed strengthening.
  *
- * The other four are here, each written to fail without the production
+ * The other five are here, each written to fail without the production
  * change it proves — see task-8-report.md for the revert-and-confirm-red
- * check on all four:
+ * check on all five:
  *
  *  1. The IDE opens ON a screen (not merely lists one), and a second
  *     screen is one real `ctx.layout.go()` round trip away.
@@ -55,6 +55,11 @@
  *     ACTUAL preview wall rather than two bare pages hand-built to the
  *     same URL shape: real tiles, real distinct Pixi instances, the same
  *     `tileUrl()` a human's own preview wall builds.
+ *  5. The diagnostics panel is visible while the preview wall is open, with
+ *     no diagnostics needed to prove it and no second page either. This is
+ *     "the project is editable" slice's own Task 8, closing debt THIS
+ *     file's own case #4 used to carry (see the comment below, on the
+ *     `context.newPage()` inside it, for what changed and what did not).
  *
  * **On not excluding a class of cases.** The previous two slices each lost
  * real coverage this way once — `declared.spec.ts`'s own header records one
@@ -70,14 +75,38 @@
  * drives the real `PreviewWall` component; anything less would not have
  * earned the name "acceptance test of the wall".
  *
+ * **On the workaround this task removes, and what does not go with it.**
+ * Case 4, before this task, opened a second browser page for a reason that
+ * had nothing to do with replay: the diagnostics panel was a card on the
+ * composition screen alone, invisible on `#/preview`, and navigating the
+ * wall's own page away to go look at it would have unmounted both tiles
+ * and closed the very sockets the test needed to stay open. Task 7 of "the
+ * project is editable" (the slice this task belongs to) made the panel
+ * chrome — present under every screen, `#/preview` included — so that
+ * reason is gone, and case 5 above is the direct proof of it: it opens no
+ * second page at all. Case 4's OWN second page stays, but not for that
+ * reason anymore. Its comment, at the `context.newPage()` call itself,
+ * always also said why: connecting fresh, AFTER both tiles already
+ * reported, it never receives either event over a live socket — whatever
+ * it learns, it learns solely from the host's retained per-tile frames,
+ * replayed on connect. That is a genuinely different property from "the
+ * panel is visible", provable only by a connection that was never part of
+ * the conversation, and it does not become true just because the panel
+ * turned into chrome — so it is kept, its comment corrected rather than
+ * the code deleted, per this task's own instruction that the replay
+ * coverage must not dissolve along with the workaround it used to double
+ * as. A first check now runs on `page` itself first, live, chrome and all,
+ * proving the reason for the second page is gone before the second page's
+ * remaining, narrower reason is exercised.
+ *
  * Every project here is a private `projectCopy()`, removed in a `finally`
- * — see `./project-fixture`. None of the four needed a new fixture option:
- * nothing here mutates the project on disk. Cases 1-3 read the SHIPPED
- * screens (`composition`/`preview`, both registered directly in `App.tsx`
- * — nothing a fixture flag could add or remove), and case 4 raises its two
- * diagnostics at runtime, through the same `window.__e8.present(<stage
- * nothing binds>, {})` device `diagnostics.spec.ts` already uses for a
- * single game.
+ * — see `./project-fixture`. None of the five needed a new fixture option:
+ * nothing here mutates the project on disk. Cases 1-3 and 5 read the
+ * SHIPPED screens (`composition`/`preview`, both registered directly in
+ * `App.tsx` — nothing a fixture flag could add or remove), and case 4
+ * raises its two diagnostics at runtime, through the same
+ * `window.__e8.present(<stage nothing binds>, {})` device
+ * `diagnostics.spec.ts` already uses for a single game.
  *
  * Every test visits the game (or a tile) and waits for it to settle before
  * touching the IDE at all — the same reason `declared.spec.ts` and
@@ -165,6 +194,30 @@ test('the preview wall shows several tiles at once', async ({ page }) => {
 });
 
 /**
+ * Task 8's own case, and the direct proof that the workaround the header
+ * comment describes is really gone: no diagnostic is raised here, no
+ * second page is opened, and the panel is still right there. Before Task 7
+ * of this slice, this test could not have been written at all — the panel
+ * did not exist anywhere outside the composition screen, so there would
+ * have been nothing at `diagnostics-panel` to find.
+ */
+test('the diagnostics panel is visible while the preview wall is open', async ({ page }) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(host.gameUrl);
+    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+
+    await page.goto(`${IDE_URL}#/preview`);
+    await expect(page.getByTestId(/^tile-/).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('diagnostics-panel')).toBeVisible();
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
  * `Locator.contentFrame()` hands back a `FrameLocator`, which has no
  * `.evaluate()` — the real `Frame` this test needs `window.__e8` access
  * through comes from `ElementHandle.contentFrame()` instead. Same device
@@ -212,18 +265,31 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
     await desktop.evaluate(() => (window as any).__e8.present('wall-desktop-fault', {}));
     await laptop.evaluate(() => (window as any).__e8.present('wall-laptop-fault', {}));
 
-    // A second, independent page — never a navigation of `page` away from
-    // `#/preview`, which would unmount both tiles and close their sockets,
-    // releasing exactly the retained per-game entries this test needs to
-    // still be there (Task 5's own release-on-close). The host's retained
-    // frames are what let a client that connects AFTER the fact still
-    // learn what happened — the same replay `diagnostics.spec.ts` relies
-    // on for a single game, checked here for two at once.
-    const panelPage = await context.newPage();
-    await panelPage.goto(IDE_URL);
-    const panel = panelPage.getByTestId('diagnostics-panel');
+    // The panel is chrome now (Task 7): both faults show up right here, on
+    // `page` itself, without ever leaving `#/preview` — where the earlier
+    // acceptance suite had no choice but to look somewhere else entirely
+    // (see the file header). This is the reason the second page below is
+    // no longer a VIEWING workaround; it is checked here, live, first.
+    const panel = page.getByTestId('diagnostics-panel');
     await expect(panel).toContainText('wall-desktop-fault', { timeout: 20_000 });
     await expect(panel).toContainText('wall-laptop-fault');
+
+    // A second, independent page — kept on purpose, and not for the reason
+    // it used to be here for. Connecting fresh, AFTER both tiles already
+    // reported, it never receives either event over a live socket at all;
+    // whatever it learns, it learns solely from the host's own retained
+    // per-tile frames, replayed on connect — the same replay
+    // `diagnostics.spec.ts` relies on for a single game, checked here for
+    // two at once. Navigating `page` itself instead of opening a new one
+    // would unmount both tiles and close their sockets, releasing exactly
+    // the retained entries this needs to still be there (Task 5's own
+    // release-on-close) — a page that was never part of the conversation
+    // is the only way to observe replay rather than a live push.
+    const panelPage = await context.newPage();
+    await panelPage.goto(IDE_URL);
+    const replayPanel = panelPage.getByTestId('diagnostics-panel');
+    await expect(replayPanel).toContainText('wall-desktop-fault', { timeout: 20_000 });
+    await expect(replayPanel).toContainText('wall-laptop-fault');
 
     // Not just "both messages appear somewhere" — each on ITS OWN row,
     // carrying ITS OWN tile's identity. Two tiles silently sharing one
@@ -231,7 +297,9 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
     // speaker) would show only the LAST one to report; two tiles merged
     // into one unlabelled bucket (the pre-Task-4 defect: no `?game=` at
     // all) would show both messages with no `game "…"` tag telling them
-    // apart. Either failure mode is exactly what this comparison catches.
+    // apart. Either failure mode is exactly what this comparison catches —
+    // checked on the replayed copy, which is the one a person who opens
+    // the editor late (the common case) would actually see.
     const rowTexts = await panelPage.getByTestId(/^diag-/).allTextContents();
     const desktopRow = rowTexts.find((text) => text.includes('wall-desktop-fault'));
     const laptopRow = rowTexts.find((text) => text.includes('wall-laptop-fault'));
