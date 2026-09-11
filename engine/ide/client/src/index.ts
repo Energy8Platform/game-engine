@@ -38,3 +38,4 @@ export {
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Layout } from './screens/Layout';
 export { AssetsScreen } from './screens/AssetsScreen';
+export { Monaco, type MonacoProps } from './editor/Monaco';

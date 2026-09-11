@@ -22,6 +22,15 @@ export default defineConfig({
   // alias — which fixed the symptom in exactly one app's config, not the
   // coupling itself — has nothing left to stand in for. See that copy's
   // own doc, and `tests/screen-presets-sync.test.ts`, for the full account.
+  //
+  // Nothing here for Monaco either, on purpose. `monaco-editor` needs a web
+  // worker and its own chunking, and both are settled where the editor is
+  // wrapped (`ide-client`'s `editor/Monaco.tsx`): the worker arrives
+  // through a `?worker` import that vite bundles as its own asset, and the
+  // editor itself through a dynamic import that vite splits into a lazy
+  // chunk — so `main.tsx` stays small and Monaco is fetched the first time
+  // a screen mounts it. Measured against `vite build` and a real browser,
+  // dev server and `vite preview` alike, before anything was built on it.
   server: {
     // Explicit, not left to default resolution: Vite's default dev host is
     // the string `'localhost'`, which Node resolves via DNS and binds to a
