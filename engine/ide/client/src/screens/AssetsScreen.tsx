@@ -283,7 +283,7 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
                 data-testid={`entry-${entry.path}`}
                 role={isFile ? 'button' : undefined}
                 tabIndex={isFile ? 0 : undefined}
-                style={{ paddingLeft: depth * 12 }}
+                style={{ paddingLeft: 14 + depth * 12 }}
                 className={
                   isFile
                     ? `e8-assets-entry e8-assets-file${error === undefined ? '' : ' e8-assets-file-error'}`
@@ -299,6 +299,7 @@ export function AssetsScreen({ ctx }: { ctx: Context }): JSX.Element {
                     <button
                       type="button"
                       data-testid="confirm-yes"
+                      className="e8-primary"
                       onClick={(e) => {
                         e.stopPropagation();
                         confirm(pending);

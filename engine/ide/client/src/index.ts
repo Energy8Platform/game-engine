@@ -1,3 +1,5 @@
+import './styles.css';
+
 export * from './context';
 export * from './plugins/connection';
 // Not `export *`: every plugin module follows the cordis convention of

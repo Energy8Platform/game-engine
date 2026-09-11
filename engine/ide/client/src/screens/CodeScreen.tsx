@@ -277,7 +277,12 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
           {pending !== null && (
             <p className="e8-code-confirm">
               discard unsaved changes{pending.kind === 'file' ? ` to "${selected}"` : ''}?{' '}
-              <button type="button" data-testid="confirm-yes" onClick={confirmYes}>
+              <button
+                type="button"
+                className="e8-primary"
+                data-testid="confirm-yes"
+                onClick={confirmYes}
+              >
                 yes
               </button>{' '}
               <button type="button" data-testid="confirm-no" onClick={() => setPending(null)}>
@@ -305,7 +310,7 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
             </p>
           ) : (
             <>
-              <button type="button" onClick={save}>
+              <button type="button" className="e8-primary" onClick={save}>
                 save
               </button>
               <Monaco

@@ -1,0 +1,507 @@
+/* Tokens from DESIGN.md (repo root). Inter stands in for Cal Sans on display
+   sizes: weight 600 with negative tracking, as the substitution note says. */
+:root {
+  --ink: #111111;
+  --ink-active: #242424;
+  --body: #374151;
+  --muted: #6b7280;
+  --muted-soft: #898989;
+  --hairline: #e5e7eb;
+  --hairline-soft: #f3f4f6;
+  --canvas: #ffffff;
+  --surface-soft: #f8f9fa;
+  --surface-card: #f5f5f5;
+  --surface-strong: #e5e7eb;
+  --surface-dark: #101010;
+  --surface-dark-elevated: #1a1a1a;
+  --on-dark: #ffffff;
+  --on-dark-soft: #a1a1aa;
+  --accent: #3b82f6;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --badge-orange: #fb923c;
+  --badge-violet: #8b5cf6;
+  --badge-emerald: #34d399;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 9999px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html {
+  background: var(--canvas);
+  color: var(--body);
+  font: 400 14px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  margin: 0;
+}
+h1,
+h2 {
+  color: var(--ink);
+  font-weight: 600;
+  margin: 0 0 24px;
+}
+h1 {
+  font-size: 36px;
+  line-height: 1.15;
+  letter-spacing: -1px;
+}
+h2 {
+  font-size: 22px;
+  line-height: 1.3;
+  letter-spacing: -0.3px;
+}
+strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+p {
+  margin: 0 0 12px;
+}
+pre,
+code {
+  font: 400 14px/1.5 var(--mono);
+}
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Controls. Every button is button-secondary; `.e8-primary` is button-primary. */
+button,
+input,
+select {
+  font: 600 14px/1 var(--sans);
+  color: var(--ink);
+}
+button {
+  height: 40px;
+  padding: 0 20px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--canvas);
+  cursor: pointer;
+}
+button:active {
+  background: var(--surface-soft);
+}
+button:disabled {
+  background: var(--surface-strong);
+  color: var(--muted);
+  cursor: default;
+}
+button.e8-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--canvas);
+}
+button.e8-primary:active {
+  background: var(--ink-active);
+}
+input[type='text'],
+input[type='number'],
+input:not([type]),
+select {
+  font-weight: 400;
+  font-size: 16px;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--canvas);
+}
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ink);
+  margin: 0;
+}
+label {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.e8-empty {
+  color: var(--muted-soft);
+}
+.e8-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Shell: 64px top nav with the wordmark and a nav-pill-group of screens,
+   the current screen on the canvas, and the diagnostics band closing the
+   page as the one dark surface — the footer's role in the design. */
+.e8-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.e8-layout-tabs {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.e8-layout-brand {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.e8-layout-pills {
+  display: inline-flex;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-soft);
+}
+.e8-layout-tab {
+  height: auto;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.e8-layout-tab[aria-selected='true'] {
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+.e8-layout-body {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 48px 32px;
+}
+.e8-layout-screen-error {
+  color: var(--error);
+}
+
+/* Diagnostics band. Rows are one line each; severity is the only colour. */
+.e8-diagnostics-panel {
+  background: var(--surface-dark);
+  color: var(--on-dark-soft);
+  padding: 48px 32px 64px;
+}
+.e8-diagnostics-panel h2 {
+  color: var(--on-dark);
+}
+.e8-diagnostics-panel .e8-empty {
+  color: var(--on-dark-soft);
+}
+.e8-diagnostics-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 1136px;
+  margin: 0 auto;
+}
+.e8-diagnostics-panel h2,
+.e8-diagnostics-panel > p {
+  max-width: 1136px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.e8-diagnostic-row {
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface-dark-elevated);
+  margin-bottom: 8px;
+  font: 400 14px/1.5 var(--mono);
+  color: var(--on-dark);
+}
+.e8-diagnostic-origin,
+.e8-diagnostic-speaker,
+.e8-diagnostic-plugin,
+.e8-diagnostic-where {
+  color: var(--on-dark-soft);
+}
+.e8-severity {
+  color: var(--on-dark);
+  text-transform: none;
+}
+[data-severity='error'] .e8-severity {
+  color: var(--error);
+}
+[data-severity='warning'] .e8-severity {
+  color: var(--warning);
+}
+[data-severity='info'] .e8-severity {
+  color: var(--accent);
+}
+.e8-diagnostics-dropped {
+  color: var(--muted-soft);
+  font-size: 13px;
+}
+
+/* Preview iframe = hero-app-mockup-card. */
+.e8-preview,
+.e8-preview-tile {
+  display: block;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-2);
+  background: var(--canvas);
+  max-width: 100%;
+}
+.e8-preview {
+  width: 100%;
+  height: 420px;
+  margin-bottom: 32px;
+}
+
+/* Composition: one surface-card per row; the game's own rows beneath as a
+   plain hairline list — a claim about the running game, not an editor. */
+.e8-row {
+  background: var(--surface-card);
+  border-radius: var(--r-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.e8-row > header,
+.e8-game-row > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.e8-row > header strong,
+.e8-game-row > header strong {
+  font-size: 18px;
+}
+.e8-state,
+.e8-layer {
+  color: var(--muted);
+}
+.e8-game-composition {
+  margin-top: 48px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 24px;
+}
+.e8-game-row > header {
+  margin-bottom: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.e8-schema-form {
+  display: grid;
+  gap: 12px;
+}
+.e8-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 320px) auto;
+  align-items: center;
+  gap: 12px;
+}
+.e8-field input[type='checkbox'] {
+  justify-self: start;
+}
+.e8-unsupported-note {
+  color: var(--muted-soft);
+  font-style: normal;
+  font-size: 13px;
+}
+
+/* Preview wall: controls in one row, tiles wrapping beneath. */
+.e8-preview-wall-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.e8-preview-wall-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0;
+  padding: 0 14px;
+  height: 40px;
+  align-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.e8-preview-wall-presets legend {
+  padding: 0 4px;
+  color: var(--muted-soft);
+  font-size: 13px;
+  font-weight: 500;
+}
+.e8-preview-wall-preset-toggle,
+.e8-preview-wall-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.e8-preview-wall-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+/* Assets and code: a file list at left, the thing opened at right. */
+.e8-code-body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.e8-code-files,
+.e8-assets-tree {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.e8-code-files button {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  text-align: left;
+  font: 400 14px/1.5 var(--mono);
+  color: var(--body);
+  overflow-wrap: anywhere;
+}
+.e8-code-files li:last-child button {
+  border-bottom: 0;
+}
+.e8-code-files button[aria-pressed='true'] {
+  background: var(--surface-card);
+  color: var(--ink);
+  font-weight: 500;
+}
+.e8-code-editor {
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 16px;
+}
+.e8-code-editor > button {
+  margin-bottom: 16px;
+}
+.e8-assets-upload {
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.e8-assets-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hairline-soft);
+  font: 400 14px/1.5 var(--mono);
+  color: var(--body);
+}
+.e8-assets-entry:last-child {
+  border-bottom: 0;
+}
+.e8-assets-dir {
+  color: var(--muted);
+}
+.e8-assets-file {
+  cursor: pointer;
+  color: var(--ink);
+}
+.e8-assets-file-error {
+  color: var(--error);
+}
+.e8-assets-delete,
+.e8-assets-confirm button,
+.e8-code-confirm button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+}
+.e8-assets-delete {
+  margin-left: auto;
+  color: var(--muted);
+}
+.e8-assets-confirm,
+.e8-code-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-family: var(--sans);
+}
+.e8-code-confirm {
+  margin-bottom: 16px;
+}
+.e8-assets-text {
+  background: var(--surface-card);
+  border-radius: var(--r-lg);
+  padding: 24px;
+  overflow: auto;
+  max-height: 60vh;
+}
+.e8-assets-tree {
+  max-height: 50vh;
+  overflow: auto;
+}
+.e8-assets img {
+  border-radius: var(--r-lg);
+  border: 1px solid var(--hairline);
+}
+.e8-assets-diagnostic,
+.e8-code-diagnostic,
+.e8-code-error {
+  color: var(--error);
+}
+
+@media (max-width: 768px) {
+  .e8-layout-tabs {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+  .e8-layout-body {
+    padding: 24px 16px;
+  }
+  .e8-code-body {
+    grid-template-columns: 1fr;
+  }
+  .e8-field {
+    grid-template-columns: 1fr;
+  }
+  h1 {
+    font-size: 28px;
+    letter-spacing: -0.5px;
+  }
+}

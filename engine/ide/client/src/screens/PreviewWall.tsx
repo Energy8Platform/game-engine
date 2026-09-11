@@ -96,7 +96,6 @@ export function Preview({ ctx, url }: PreviewProps) {
       className="e8-preview"
       title="превью игры"
       src={url ?? computePreviewUrl()}
-      style={{ width: '100%', height: 420, border: '1px solid #333' }}
     />
   );
 }

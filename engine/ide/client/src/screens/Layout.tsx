@@ -173,20 +173,23 @@ export function Layout({ ctx }: { ctx: Context }) {
 
   return (
     <div className="e8-layout">
-      <nav className="e8-layout-tabs" role="tablist">
-        {screens.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={entry.id === current?.id}
-            className="e8-layout-tab"
-            data-testid={`tab-${entry.id}`}
-            onClick={() => ctx.layout.go(entry.id)}
-          >
-            {entry.title}
-          </button>
-        ))}
+      <nav className="e8-layout-tabs">
+        <span className="e8-layout-brand">e8 ide</span>
+        <div className="e8-layout-pills" role="tablist">
+          {screens.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              role="tab"
+              aria-selected={entry.id === current?.id}
+              className="e8-layout-tab"
+              data-testid={`tab-${entry.id}`}
+              onClick={() => ctx.layout.go(entry.id)}
+            >
+              {entry.title}
+            </button>
+          ))}
+        </div>
       </nav>
       <div className="e8-layout-body">
         {current ? (
