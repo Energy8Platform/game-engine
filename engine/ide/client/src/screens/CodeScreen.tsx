@@ -46,6 +46,27 @@ import { looksBinary } from './AssetsScreen';
  * registered, then calls `ctx.layout.go()` a second time so the retry is
  * not blocked by the very thing it is trying to get past.
  *
+ * **Check diagnostics are NOT sent to the one list, and the reason is not
+ * in this file's imports.** §8's table sends host diagnostics to the
+ * panel, and a reader will ask why `checkDiagnostics` never goes through
+ * `report()` the way a refused save does. Because `connection.report()`
+ * has no retract: a check answers for text that changes on every
+ * keystroke, and a list that cannot forget would fill with "record block
+ * has no name" for a record that was named two keystrokes later. So a
+ * check's answer lives only as long as the text it answered — as a
+ * marker, when it has `at`, and as a paragraph beside the editor when it
+ * does not. The paragraph is not optional: the `checkActionStages` error
+ * (a stage no variant declares), a deleted `game {}` block and
+ * `check.ts`'s own dead-network diagnostic all come with no line, and
+ * "markers only" left the pane empty with the host having said exactly
+ * what was wrong.
+ *
+ * **Only `.spin` is checked.** `ctx.check` runs the `.spin` grammar;
+ * over TypeScript under `plugins/` it finds `\bgame\b` in a variable
+ * name and draws "game block has no quoted name" on code that is not
+ * `.spin` — a message asserting a cause the code does not know. A file
+ * that does not end in `.spin` gets no check, on open or on a keystroke.
+ *
  * **The stale-check race is this screen's problem, not the service's**
  * (Ruling 9 of this slice's ledger): `ctx.check` is a bare `fetch` with no
  * sequence slot, so two in-flight calls can resolve in either order. A
@@ -71,6 +92,11 @@ import { looksBinary } from './AssetsScreen';
  * `waitFor` default. Measure perceived latency before moving it.
  */
 const CHECK_DEBOUNCE_MS = 300;
+
+/** What `ctx.check` knows how to read; everything else is edited, never checked. */
+function isSpin(path: string): boolean {
+  return path.endsWith('.spin');
+}
 
 /** `game/script.spin` and anything under `plugins/` — the two things the spec says are edited by hand. */
 function isEditable(entry: FileEntry): boolean {
@@ -128,7 +154,11 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
   // Registered only while there is something a navigation would discard,
   // dropped the moment that stops being true — on save, on switching to a
   // clean file, or on unmount (the effect's own cleanup, which is also
-  // what an ordinary "this screen went away" relies on).
+  // what an ordinary "this screen went away" relies on). Two doors are
+  // held: the tab click (`layout.guard`) and reload/close
+  // (`beforeunload`, which only the browser's own confirm can answer).
+  // Back/forward through the hash is a third door this cannot hold — see
+  // `LayoutService.guard`'s doc for why it is left open.
   useEffect(() => {
     if (!dirty) return undefined;
     const off = ctx.layout.guard((targetId) => {
@@ -136,8 +166,11 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
       return false;
     });
     navGuardOff.current = off;
+    const holdUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', holdUnload);
     return () => {
       off();
+      window.removeEventListener('beforeunload', holdUnload);
       if (navGuardOff.current === off) navGuardOff.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,6 +237,10 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
       setSavedText(source);
       setCheckDiagnostics([]);
       setSaveDiagnostics([]);
+      // A file that is already broken says so on open, not after the
+      // first keystroke — the answer lands through the same `checkSeq`
+      // gate, so a stale one for the file just left cannot beat it.
+      if (isSpin(path)) runCheck(source);
     });
   }
 
@@ -313,13 +350,20 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
               <button type="button" className="e8-primary" onClick={save}>
                 save
               </button>
+              {checkDiagnostics
+                .filter((diag) => diag.at === undefined)
+                .map((diag, i) => (
+                  <p className="e8-code-diagnostic" key={`check-${i}`}>
+                    {diag.message}
+                  </p>
+                ))}
               <Monaco
                 value={text}
-                language={selected.endsWith('.spin') ? 'spin' : 'plaintext'}
+                language={isSpin(selected) ? 'spin' : 'plaintext'}
                 diagnostics={checkDiagnostics}
                 onChange={(next) => {
                   setText(next);
-                  scheduleCheck(next);
+                  if (isSpin(selected)) scheduleCheck(next);
                 }}
               />
             </>

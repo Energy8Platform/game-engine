@@ -223,7 +223,8 @@ async function markerLine(page: Page): Promise<number> {
       document.querySelectorAll('.monaco-editor .margin .line-numbers'),
     ) as HTMLElement[];
     const closest = rows.reduce((a, b) =>
-      Math.abs(a.getBoundingClientRect().y - markerY) < Math.abs(b.getBoundingClientRect().y - markerY)
+      Math.abs(a.getBoundingClientRect().y - markerY) <
+      Math.abs(b.getBoundingClientRect().y - markerY)
         ? a
         : b,
     );
@@ -426,6 +427,108 @@ test('a refused save reaches the diagnostics panel, on any screen', async ({ pag
     await page.getByTestId('tab-composition').click();
     await page.getByTestId('confirm-yes').click();
     await expect(page.getByTestId('diagnostics-panel')).toContainText(/outside the project/i);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Same as `moveCursorToDocumentEnd` — Monaco's mac binding for "select
+ * all" is the ordinary `Cmd+A`, and elsewhere `Ctrl+A`.
+ */
+async function selectAll(page: Page): Promise<void> {
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
+}
+
+test('a save that breaks the math tells the panel where, without any spin', async ({ page }) => {
+  // The one location for a mistake inside `execute` is the compiler's
+  // own `script.spin:LINE:COL` — the parser never reads that far, so no
+  // marker can. Before this, it reached the panel only when a spin
+  // happened to 502; a person who saved `record {` and waited saw
+  // nothing anywhere.
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(IDE_URL);
+    await openScriptSpin(page);
+    await moveCursorToDocumentEnd(page);
+    await page.keyboard.type('\nrecord {\n');
+    await page.getByRole('button', { name: /save/i }).click();
+    await expect(page.getByTestId('diagnostics-panel')).toContainText(
+      /failed to restart[\s\S]*script\.spin:\d+:\d+/,
+      { timeout: 15_000 },
+    );
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a check error with no line is shown beside the editor', async ({ page }) => {
+  // Text with no `game { ... }` block at all: the host answers with a
+  // diagnostic that has no `at`, which no marker can carry.
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(IDE_URL);
+    await openScriptSpin(page);
+    await selectAll(page);
+    await page.keyboard.type('record Vars { a: int }');
+    await expect(page.locator('.e8-code-diagnostic').filter({ hasText: /no "game/ })).toBeVisible({
+      timeout: 10_000,
+    });
+    expect(await page.locator('.monaco-editor .squiggly-warning').count()).toBe(0);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a TypeScript file under plugins/ gets no .spin marker', async ({ page }) => {
+  // Measured before: one keystroke in `step.ts` drew "game block has no
+  // quoted name" on line 6 — `findBlocks` matching `\bgame\b` in code
+  // that is not .spin.
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  const checks: string[] = [];
+  page.on('request', (req) => {
+    if (req.url().endsWith('/api/check')) checks.push(req.url());
+  });
+  try {
+    await page.goto(IDE_URL);
+    await page.getByTestId('file-plugins/reel-step/src/step.ts').click();
+    await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('editor').click();
+    await page.keyboard.type('\nconst game = 1;\n');
+    // Past the debounce, with room for a request that should not come.
+    await page.waitForTimeout(1500);
+    expect(checks).toEqual([]);
+    expect(await page.locator('.monaco-editor .squiggly-warning').count()).toBe(0);
+    expect(await page.locator('.e8-code-diagnostic').count()).toBe(0);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a mistake several lines into a block is marked on its own line, not the header', async ({
+  page,
+}) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    const before = readFileSync(join(dir, 'game/script.spin'), 'utf8');
+    // `record Late {` lands on the line after the document; `c:` with no
+    // type is three lines below it. The marker used to sit on `record`.
+    const headerLine = before.split('\n').length + 1;
+
+    await page.goto(IDE_URL);
+    await openScriptSpin(page);
+    await moveCursorToDocumentEnd(page);
+    await page.keyboard.type('\nrecord Late {\na: int\nb: int\nc: \n}\n');
+
+    expect(await markerLine(page)).toBe(headerLine + 3);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

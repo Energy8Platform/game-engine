@@ -45,6 +45,15 @@ export interface LayoutService {
    * it once that stops being true — most of the time on unmount, but a
    * screen that means to navigate anyway (the "yes" of its own confirm)
    * disposes it itself first, then calls `go()` a second time.
+   *
+   * **What this does not hold: the back and forward buttons.** They move
+   * the hash themselves; the `hashchange` listener below only hears about
+   * it afterwards, when the previous screen is already gone. Refusing at
+   * that point would mean navigating back to where the person just left,
+   * which is its own surprise, so this guard is consulted by `go()` alone
+   * and back/forward discard unsaved work. Reload and close are held by
+   * the screen itself through `beforeunload`, the one hook a page has
+   * against those.
    */
   guard(fn: (targetId: string) => boolean): () => void;
 }

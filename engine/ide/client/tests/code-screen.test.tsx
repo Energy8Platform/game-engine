@@ -282,11 +282,13 @@ describe('CodeScreen', () => {
     type(editorEl, 'a');
     type(editorEl, 'ab');
     type(editorEl, 'abc');
-    await waitFor(() => expect(ctx.check.calls).toEqual(['abc']));
+    // The first call is the one opening the file makes (see "a file that
+    // is already broken" below); the keystrokes add exactly one more.
+    await waitFor(() => expect(ctx.check.calls).toEqual(['', 'abc']));
     // Give the debounce window a second chance to fire, if the three
     // keystrokes had each scheduled their own call instead of collapsing.
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(ctx.check.calls).toEqual(['abc']);
+    expect(ctx.check.calls).toEqual(['', 'abc']);
   });
 
   it('saving writes through ctx.files.write, and says when the host refused', async () => {
@@ -424,7 +426,8 @@ describe('CodeScreen', () => {
         checkResponder: (source) =>
           new Promise((resolve) => {
             if (source === 'a') resolveForA = resolve;
-            else resolveForAb = resolve;
+            else if (source === 'ab') resolveForAb = resolve;
+            else resolve([]); // the check opening the file makes
           }),
       },
     );
@@ -433,9 +436,9 @@ describe('CodeScreen', () => {
     const editorEl = await screen.findByTestId('editor');
 
     type(editorEl, 'a');
-    await waitFor(() => expect(ctx.check.calls).toEqual(['a']));
+    await waitFor(() => expect(ctx.check.calls).toEqual(['', 'a']));
     type(editorEl, 'ab');
-    await waitFor(() => expect(ctx.check.calls).toEqual(['a', 'ab']));
+    await waitFor(() => expect(ctx.check.calls).toEqual(['', 'a', 'ab']));
 
     // Out of order: the newer text's answer arrives FIRST.
     await act(async () => {
@@ -456,5 +459,101 @@ describe('CodeScreen', () => {
     expect(editorOn(editorEl).model.markers).toEqual([
       expect.objectContaining({ message: 'current for ab' }),
     ]);
+  });
+
+  it('a check diagnostic with no `at` is shown beside the editor, since it cannot be a marker', async () => {
+    // The `checkActionStages` ERROR (`stage = bonus_game` naming no
+    // variant), a deleted `game {}` block, `check.ts`'s own dead-network
+    // diagnostic — all real, none with a line. Markers need `at`, so these
+    // reached no reader at all: an empty pane with the host having said
+    // exactly what is wrong.
+    const ctx = await harness(
+      tree(['game/script.spin']),
+      { 'game/script.spin': 'game = Spin' },
+      { checkDiagnostics: [d('no "game { ... }" block found')] },
+    );
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    const editorEl = await screen.findByTestId('editor');
+    type(editorEl, 'gam');
+    expect(await screen.findByText('no "game { ... }" block found')).toHaveClass(
+      'e8-code-diagnostic',
+    );
+    expect(editorOn(editorEl).model.markers).toEqual([]);
+  });
+
+  it('a check diagnostic WITH `at` is a marker only, not also a paragraph', async () => {
+    // The paragraph is for what cannot be drawn; drawing a line-numbered
+    // one twice would say the same thing in two places.
+    const ctx = await harness(
+      tree(['game/script.spin']),
+      { 'game/script.spin': 'game = Spin' },
+      { checkDiagnostics: [d('record block has no name', { line: 1 })] },
+    );
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    const editorEl = await screen.findByTestId('editor');
+    await waitFor(() => expect(editorOn(editorEl).model.markers).toHaveLength(1));
+    expect(screen.queryByText('record block has no name')).toBeNull();
+  });
+
+  it('a file that is already broken shows it on open, before any keystroke', async () => {
+    // `openFile` cleared the markers and never asked — a broken file
+    // opened clean until the first edit.
+    const ctx = await harness(
+      tree(['game/script.spin']),
+      { 'game/script.spin': 'record {\n}' },
+      { checkDiagnostics: [d('record block has no name', { line: 1 })] },
+    );
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    const editorEl = await screen.findByTestId('editor');
+    await waitFor(() => expect(ctx.check.calls).toEqual(['record {\n}']));
+    await waitFor(() =>
+      expect(editorOn(editorEl).model.markers).toEqual([
+        expect.objectContaining({ message: 'record block has no name' }),
+      ]),
+    );
+  });
+
+  it('a TypeScript file under plugins/ is never checked as .spin', async () => {
+    // Measured: one keystroke in `plugins/reel-step/src/step.ts` drew a
+    // "game block has no quoted name" warning on line 6, from `findBlocks`
+    // matching `\bgame\b` in TypeScript — a .spin grammar error asserted
+    // over code that is not .spin.
+    const ctx = await harness(
+      tree(['plugins/step.ts']),
+      { 'plugins/step.ts': 'const game = 1;' },
+      { checkDiagnostics: [d('game block has no quoted name', { line: 1 })] },
+    );
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-plugins/step.ts'));
+    const editorEl = await screen.findByTestId('editor');
+    type(editorEl, 'const game = 2;');
+    await new Promise((resolve) => setTimeout(resolve, 400)); // past the debounce
+    expect(ctx.check.calls).toEqual([]);
+    expect(editorOn(editorEl).model.markers).toEqual([]);
+    expect(screen.queryByText('game block has no quoted name')).toBeNull();
+  });
+
+  it("a reload with unsaved changes is held for the browser's own confirm; a clean one is not", async () => {
+    // `beforeunload` is the one hook a page has against reload/close.
+    // Back/forward through the hash cannot be held the same way — see
+    // `LayoutService.guard`'s doc.
+    const ctx = await harness(tree(['game/script.spin']), { 'game/script.spin': 'a' });
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    const editorEl = await screen.findByTestId('editor');
+
+    const fire = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(fire()).toBe(false);
+    type(editorEl, 'ab');
+    await waitFor(() => expect(fire()).toBe(true));
+    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(fire()).toBe(false));
   });
 });
