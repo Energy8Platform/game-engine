@@ -201,11 +201,21 @@ function isInside(root: string, file: string): boolean {
 }
 
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
+  // Resolved once, here, rather than read as `config.gamesDir` at every use
+  // below. A trailing slash is an easy way to spell the same directory
+  // (`join(cwd, 'game')` never produces one, which is why this was not hit
+  // by anything that runs today, but nothing stops a future caller from
+  // passing `gamesDir + '/'`) — measured directly: `isInside('/x/game/',
+  // …)` compares every candidate against `/x/game//`, which no real
+  // resolved path ever starts with, so the restart trigger below silently
+  // never fires. `resolve()` also drops a trailing `.`/`..` the same way.
+  const gamesDir = resolve(config.gamesDir);
+
   // A direct function call, not `ctx.plugin(session, ...)` — see the
   // module doc's last point for why: it keeps `ctx.session` readable on
   // THIS scope instead of landing it on an unreadable child.
   await session.apply(ctx, {
-    gamesDir: config.gamesDir,
+    gamesDir,
     port: config.port ?? 0,
     binPath: config.binPath,
   });
@@ -229,20 +239,30 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * plugin's own. `e8-server` is told `--games-dir` and loads every
    * `.spin` it finds there (see `session-dev`'s own diagnostic: "the
    * folder holding the .spin file(s)", plural) — so the actual question is
-   * "did a `.spin` file inside `config.gamesDir` change", answered against
-   * `config.gamesDir` (this plugin's own config, the session's actual
-   * notion of where the math lives), not against a string borrowed from a
-   * different reader of the same project. `isInside` (below) is the same
-   * lexical containment check the `/@fs/` route already uses — not
-   * realpath'd, so a path that reaches `gamesDir` only via a symlink, or
-   * differs only in case on a case-insensitive filesystem, is not
-   * recognized. Both are left, deliberately: closing the symlink case
-   * needs the same treatment `/@fs/`'s own containment check already has
-   * and nothing here calls for it yet; closing the case-folding one needs
-   * `realpathSync.native` (which normalizes case on APFS/NTFS, unlike
-   * plain `realpathSync`) and a decision about what "the same file" means
-   * across every OTHER path this file already compares lexically — out of
-   * scope for this fix.
+   * "did a `.spin` file inside `gamesDir` change", answered against
+   * `gamesDir` (this plugin's own config, the session's actual notion of
+   * where the math lives — resolved once, above), not against a string
+   * borrowed from a different reader of the same project.
+   *
+   * Two checks below, two SEPARATE limitations, kept apart here because an
+   * earlier version of this comment attributed one to the wrong check:
+   *
+   *  - `isInside` is the same lexical containment check the `/@fs/` route
+   *    already uses — not realpath'd, so a path that reaches `gamesDir`
+   *    only via a symlink is not recognized, same as that route's own
+   *    documented limitation. It also compares the DIRECTORY portion of the
+   *    path lexically, so two spellings of the same directory that differ
+   *    only by case on a case-insensitive filesystem would not match
+   *    either — closing either needs `realpathSync`/`realpathSync.native`
+   *    and is out of scope here.
+   *  - `path.endsWith('.spin')` is an ordinary, case-SENSITIVE string
+   *    comparison. `game/script.SPIN` does not end in the literal
+   *    substring `'.spin'`, so it does not restart, even on a filesystem
+   *    that treats the two extensions as the same file — this is the ONE
+   *    that misses an uppercase extension, not `isInside`. Filename casing
+   *    elsewhere is irrelevant to either check: `game/Script.spin` DOES
+   *    restart, because both the containment and the (lowercase) extension
+   *    still match.
    *
    * Fire-and-forget: the write's own HTTP response must not block on a
    * process respawn (a real `e8-server` spawn takes real wall-clock time —
@@ -253,7 +273,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    */
   ctx.on('files/written', ({ path }) => {
     if (!path.endsWith('.spin')) return;
-    if (!isInside(config.gamesDir, resolve(config.root, path))) return;
+    if (!isInside(gamesDir, resolve(config.root, path))) return;
     void ctx.session.restart();
   });
 

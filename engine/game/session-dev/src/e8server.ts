@@ -202,6 +202,13 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   }
 
   let exited = false;
+  // Set ONLY by `'error'` (the process never actually started — wrong
+  // `binPath`, not executable, and so on) — kept apart from a process that
+  // DID start and later exited, because the two point at completely
+  // different problems and the `!ready` branch below needs to tell them
+  // apart to know whether `bin=`/`games-dir=` is useful information or a
+  // red herring. See that branch's own comment.
+  let spawnFailed = false;
   let exitInfo = '';
   const output: string[] = [];
   child.stdout?.on('data', (c) => output.push(String(c)));
@@ -215,12 +222,18 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   // this: on `'exit'`, the readiness loop below could observe `exited`
   // before `output` has the message, so the same failure was captured on
   // one run and silently empty on the next. `'close'` closes that race.
+  //
+  // This is ALSO the flag `stop()` (below) reads to skip waiting on an
+  // `'exit'` that already fired before `stop()` was ever called — see its
+  // own comment for why `'exit'` firing strictly before `'close'` matters
+  // there too.
   child.once('close', (code, signal) => {
     exited = true;
     exitInfo = `exit code=${code} signal=${signal}`;
   });
   child.once('error', (e) => {
     exited = true;
+    spawnFailed = true;
     exitInfo = `spawn error: ${e.message}`;
   });
 
@@ -240,11 +253,33 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   }
 
   if (!ready) {
+    // THREE different facts this used to fold into one message, always
+    // opened with "did not become ready … within Nms" and always naming
+    // `bin=`/`games-dir=`:
+    //
+    //  - a genuine TIMEOUT — the process is still there, never answered.
+    //    `bin=`/`games-dir=` and "did not become ready … within Nms" are
+    //    exactly the useful facts; unchanged below.
+    //  - the process never SPAWNED at all (`spawnFailed`, from `'error'` —
+    //    wrong `binPath`, not executable). `bin=` is still exactly the
+    //    useful fact — the path is the thing that's wrong — so this keeps
+    //    the same shape as the timeout case, not the exit case below.
+    //  - the process STARTED and later EXITED (`exited && !spawnFailed`,
+    //    from `'close'`) — a compiler rejecting a `.spin` a person just
+    //    saved is exactly this, and it is neither of the other two: not a
+    //    timeout (nothing was waited out), and `bin=`/`games-dir=` blame
+    //    two things that did not change, only the loaded `.spin` did.
+    if (exited && !spawnFailed) {
+      throw new Error(
+        `[session-dev] e8-server exited before it became ready (port=${port}, ${exitInfo})` +
+          (output.length ? `\n--- e8-server output ---\n${output.join('')}` : ''),
+      );
+    }
     if (!exited) child.kill('SIGKILL');
     throw new Error(
       `[session-dev] e8-server did not become ready on 127.0.0.1:${port} within ${readyTimeoutMs}ms ` +
         `(bin="${bin}" games-dir="${opts.gamesDir}")` +
-        (exited ? ` — process exited: ${exitInfo}` : '') +
+        (spawnFailed ? ` — ${exitInfo}` : '') +
         (output.length ? `\n--- e8-server output ---\n${output.join('')}` : ''),
     );
   }
@@ -294,7 +329,27 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     // No counterpart before this fix: the gRPC client was never close()d,
     // leaking its channel/connection for the life of the process.
     client.close();
-    if (exited) return;
+    // `exited` alone used to be enough here, back when it was set on
+    // `'exit'` itself — the moment `stop()` could observe it true, the
+    // event that would resolve the promise below had already happened.
+    // Moving `exited` to `'close'` (above, for the readiness loop's own
+    // reason) opened a real gap: Node fires `'exit'` before `'close'`, so a
+    // `stop()` call landing in that window sees `exited === false`, falls
+    // through to `child.once('exit', …)`, and waits for an event that
+    // already fired and, being `.once`, never will again. The unref'd kill
+    // timer below does not rescue this — it only stops NODE from waiting
+    // on the timer, it does not resolve THIS promise, which nothing else
+    // ever settles. Every `restart()` and the plugin's own teardown route
+    // through `dying.stop()`/`handle.stop()`, so one hung `stop()` wedges
+    // the whole chain and `ctx.fiber.dispose()` with it.
+    //
+    // `child.exitCode`/`child.signalCode` are Node's own record of this,
+    // set synchronously as part of firing `'exit'` — reading them catches
+    // exactly the gap `exited` (this closure's OWN flag, updated only by
+    // the LATER `'close'`) cannot yet know about, with no race of its own:
+    // both are `null` until the process has actually exited, and neither
+    // is ever unset afterward.
+    if (exited || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise<void>((resolve) => {
       // Neither cleared nor unref'd before this fix: a clean exit (the
       // common case — the process usually does exit well within 2s of

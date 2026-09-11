@@ -270,6 +270,14 @@ describe('the session plugin: restart', () => {
       // something that did not change.
       expect(diagnostics[0].fix).not.toMatch(/binPath|E8_SERVER_BINARY/);
       expect(message).not.toMatch(/binPath|E8_SERVER_BINARY/);
+
+      // The exit happened in milliseconds, well under `readyTimeoutMs` —
+      // asserting only the absence of `binPath`/`E8_SERVER_BINARY` (as
+      // this test used to) passes even if the message ALSO claims a
+      // timeout that never happened, since neither of those two words
+      // appears in that claim either. This is the fact the review found
+      // the earlier assertion didn't reach: an exit is not a timeout.
+      expect(message).not.toMatch(/did not become ready/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -356,6 +364,44 @@ describe('the session plugin: restart does not orphan a process', () => {
     await ctx.fiber.dispose();
     ctx = undefined;
     await restarting; // let the restart's own promise settle before asserting
+
+    expect(countLive(dir)).toBe(0);
+  });
+
+  /**
+   * The `disposed` flag's OWN case, as opposed to the test above (which
+   * the `chain` await alone already covers — removing `disposed` and
+   * leaving only the `chain`-based teardown still passes it, every dispose
+   * timing tried). The gap `disposed` closes is narrower: a `restart()`
+   * call issued AFTER the disposer has already run and captured its OWN
+   * `chain` reference into `chain.then(() => handle?.stop())` — at that
+   * point the disposer is committed to whichever process THAT snapshot
+   * resolves to, and a brand new chain link started afterward is invisible
+   * to it.
+   *
+   * `svc` is captured BEFORE calling `dispose()`, not read as `ctx.session`
+   * afterward — measured directly that `ctx.session` reads back `undefined`
+   * within single-digit milliseconds of `dispose()` starting (cordis tears
+   * the accessor down close to immediately), which is faster than this
+   * race needs to matter and would make the call throw before ever
+   * reaching `restart()`. The captured object is the exact same closure
+   * `ctx.session` would have handed back a moment earlier — the real
+   * `dev-game.ts` caller reads `ctx.session.restart()` fresh, but the
+   * SERVICE OBJECT itself is what carries the race, not how a caller
+   * happens to have obtained a reference to it.
+   */
+  it('a restart() issued after the disposer has already captured its chain snapshot is still caught by the disposed flag', async () => {
+    dir = privateGame();
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0 });
+    const svc = ctx.session;
+
+    const disposing = ctx.fiber.dispose();
+    ctx = undefined;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const late = svc.restart();
+
+    await Promise.all([disposing, late]);
 
     expect(countLive(dir)).toBe(0);
   });

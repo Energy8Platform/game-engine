@@ -708,7 +708,14 @@ describe('dev-game — restart on a script.spin write', () => {
       .toSatisfy((sha) => typeof sha === 'string' && sha !== before);
   }, 20_000);
 
-  it('a write to any OTHER path does not restart the session', async () => {
+  it('a write to a .spin file OUTSIDE gamesDir does not restart the session — the containment axis, not just the extension one', async () => {
+    // `notes.txt` (the first version of this test) fails BOTH conjuncts at
+    // once — it is neither inside `gamesDir` nor named `*.spin` — so it
+    // could not tell the two checks apart: removing `isInside` entirely
+    // left this test green. `plugins/x.spin` ends in `.spin` and needs no
+    // e8-server validation of anything (the file lands outside `gamesDir`,
+    // so nothing ever asks the real binary to load it), so it isolates the
+    // containment check on its own.
     const projectDir = writableProject();
     ctx = new Context();
     await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
@@ -723,10 +730,10 @@ describe('dev-game — restart on a script.spin write', () => {
 
     const pidBefore = ctx.session.pid;
 
-    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/notes.txt`, {
+    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/plugins/x.spin`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ base64: Buffer.from('hello', 'utf8').toString('base64') }),
+      body: JSON.stringify({ base64: Buffer.from('not a game script', 'utf8').toString('base64') }),
     });
     expect(put.status).toBe(200);
 
