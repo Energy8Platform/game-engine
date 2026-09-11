@@ -80,17 +80,21 @@
  *  - **The restart-serialises / dispose-mid-restart guarantees Task 6
  *    built** — that task's own host-level tests
  *    (`engine/ide/host/tests/*.test.ts`) already drive the real
- *    subprocess; this suite's own save-changes-disk test below (test 2)
- *    is what proves a save reaches that machinery through the real Save
- *    button at all, which is the one thing only a live host and a real
- *    click can show. Re-driving two overlapping saves here would restate
- *    Task 6's own coverage through a slower door.
+ *    subprocess with two overlapping writes; re-driving that here through
+ *    a browser would restate the same coverage through a slower door. What
+ *    those tests do NOT drive is a Save *click*, which is why a separate
+ *    test below (not merely test 2, which only proves click → disk) polls
+ *    a real spin's own `scriptSha256` — see that test's own doc for why
+ *    an earlier draft of this file believed test 2 already covered this
+ *    and was wrong: reverting `ctx.session.restart()` at `dev-game.ts:277`
+ *    left every test in this file green, because none of them ever asked
+ *    the running game whether it had noticed the edit.
  */
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { projectCopy, startDevHost } from './project-fixture';
+import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
 const IDE_URL = 'http://127.0.0.1:5680/#/code';
@@ -150,9 +154,33 @@ async function provokeRefusedSave(page: Page, dir: string): Promise<void> {
   await openScriptSpin(page);
   await page.keyboard.type('\n// edited from the browser\n');
   const outside = mkdtempSync(join(tmpdir(), 'e8-code-outside-'));
-  rmSync(join(dir, 'game'), { recursive: true, force: true });
-  symlinkSync(outside, join(dir, 'game'));
-  await page.getByRole('button', { name: /save/i }).click();
+  try {
+    rmSync(join(dir, 'game'), { recursive: true, force: true });
+    symlinkSync(outside, join(dir, 'game'));
+    await page.getByRole('button', { name: /save/i }).click();
+    // The click only dispatches the event — the PUT it triggers is still
+    // in flight when `.click()` resolves. Deleting `outside` right after
+    // the click (an earlier version of this function did exactly that)
+    // raced the write: `outside` could vanish before the host's ancestor
+    // walk ever looked at it, `game`'s symlink then resolved to nothing,
+    // `nearestExistingAncestor` walked past it to `dir` itself (which DOES
+    // exist), and the refusal that landed was a plain ENOENT from
+    // `mkdirSync` through a dangling link — not "outside the project" —
+    // depending only on which of two async operations happened to finish
+    // first. Waiting for the refusal to actually be ON SCREEN is what
+    // makes "the write has been attempted against a still-real `outside`"
+    // true before anything removes it.
+    await expect(
+      page.locator('.e8-code-diagnostic').filter({ hasText: /outside the project/i }),
+    ).toBeVisible({ timeout: 10_000 });
+  } finally {
+    // Left 13 copies of itself in `os.tmpdir()` across a review's worth of
+    // runs before this fix: nothing here needs `outside` again once the
+    // refusal above is confirmed — `dir/game` stays a dangling link,
+    // removed whole with `dir` by the caller — and this is the one place
+    // that created something OUTSIDE `dir` in the first place.
+    rmSync(outside, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -177,6 +205,13 @@ async function moveCursorToDocumentEnd(page: Page): Promise<void> {
  * `y` of its own `.line-numbers` gutter row (not merely close — identical,
  * to the sub-pixel, in every run), so the gutter row closest to the
  * marker's `y` is the line the marker is actually on.
+ *
+ * Measured against `monaco-editor@0.56.0` (`engine/ide/client/package
+ * .json` pins `^0.56.0`) — `.squiggly-warning`/`.line-numbers` and the
+ * `EditContext` feature-detect above are all internal DOM/class details
+ * with no public API contract. A future bump could rename or restructure
+ * any of them with no warning beyond this suite going red for a reason
+ * its own error message won't explain.
  */
 async function markerLine(page: Page): Promise<number> {
   const marker = page.locator('.monaco-editor .squiggly-warning').first();
@@ -243,6 +278,85 @@ test('editing the math and saving changes the file on disk', async ({ page }) =>
     await expect
       .poll(() => readFileSync(join(dir, 'game/script.spin'), 'utf8'))
       .toContain('edited from the browser');
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * POSTs a spin and reads back `scriptSha256` — the sha256 of the `.spin`
+ * bytes the running `e8-server` is actually loaded from, not merely what
+ * is on disk. Mirrors `engine/ide/host/tests/dev-game.test.ts`'s own
+ * `spinScriptSha256`, which is where this shape — and the reason the next
+ * test checks `typeof sha === 'string'` rather than only `sha !== before`
+ * — was worked out and measured.
+ */
+async function spinScriptSha256(host: DevHost): Promise<string | undefined> {
+  const res = await fetch(`${host.gameUrl}/api/spin`, { method: 'POST' });
+  const body = (await res.json()) as { scriptSha256?: string };
+  return body.scriptSha256;
+}
+
+/**
+ * The assertion this task is actually FOR, missing from the first version
+ * of this file — found by a reviewer commenting out
+ * `void ctx.session.restart();` at `dev-game.ts:277` (the whole
+ * save-restarts-the-math wiring Task 6 built) and watching every test
+ * here stay green. Test 2 above polls the FILE on disk, by its own
+ * comment never spins, and cannot tell a restarted `e8-server` apart from
+ * one that never noticed the write. `dev-game.test.ts`'s own host-level
+ * test proves write → restart → new math, but through `ctx.files.write()`
+ * directly, never a Save click in a browser. Neither closes the loop the
+ * slice actually promises: Save in the editor, and the game a person
+ * would go play next answers with the new script. This does, by reading
+ * `scriptSha256` off a real `POST /api/spin` before and after a real
+ * click on the real Save button.
+ *
+ * `-- edited by mouse` is not an arbitrary edit — it is the exact one
+ * `dev-game.test.ts` uses, verified by hand there (task-6-report.md) to
+ * load cleanly and move the hash. An edit that desynced a literal
+ * elsewhere in the file (adding a field without updating every place that
+ * assumes its old shape) would make the respawn die, and a dead respawn
+ * answers `scriptSha256: undefined` forever — which also satisfies a
+ * naive `.not.toBe(before)`. `moveCursorToDocumentEnd` before typing
+ * makes this the byte-identical edit to the one already verified, not
+ * merely a similarly-shaped one; `typeof sha === 'string'` in the poll
+ * below is what catches a dead respawn if it ever happens anyway.
+ *
+ * The restart runs fire-and-forget off the write (`dev-game.ts`'s own
+ * comment on `ctx.on('files/written', ...)` explains why) and takes real
+ * wall-clock time — a spin sent immediately after Save can land
+ * mid-restart and come back as the OLD hash, or fail between the old
+ * process exiting and the new one answering ready. Polling for the actual
+ * effect, per this suite's own operational note ("wait for the restart,
+ * do not race it"), is what makes this reliable rather than a guess at
+ * how long a respawn usually takes.
+ */
+test('a save in the browser restarts the running game, not only the file on disk', async ({
+  page,
+}) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    const before = await spinScriptSha256(host);
+    expect(before).toBeTruthy();
+
+    await page.goto(IDE_URL);
+    await openScriptSpin(page);
+    await moveCursorToDocumentEnd(page);
+    await page.keyboard.type('\n-- edited by mouse\n');
+    await page.getByRole('button', { name: /save/i }).click();
+
+    await expect
+      .poll(
+        async () => {
+          const sha = await spinScriptSha256(host);
+          return typeof sha === 'string' && sha !== before;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
