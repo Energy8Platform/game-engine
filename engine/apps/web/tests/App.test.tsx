@@ -75,13 +75,24 @@ describe('App', () => {
     // This is the guard against that going unnoticed a second time.
     const ctx = await harness();
     render(<App ctx={ctx} />);
-    expect(ctx.layout.screens().map((s) => s.id)).toEqual(['composition', 'preview', 'assets']);
+    expect(ctx.layout.screens().map((s) => s.id)).toEqual([
+      'composition',
+      'preview',
+      'assets',
+      'code',
+    ]);
   });
 
   it('registers the assets screen, after preview', async () => {
     const ctx = await harness();
     render(<App ctx={ctx} />);
     expect(screen.getByTestId('tab-assets')).toBeTruthy();
+  });
+
+  it('registers the code screen, after assets', async () => {
+    const ctx = await harness();
+    render(<App ctx={ctx} />);
+    expect(screen.getByTestId('tab-code')).toBeTruthy();
   });
 
   it('the composition screen no longer registers the panel as a card', async () => {

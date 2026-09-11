@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { Context } from 'cordis';
 import {
   AssetsScreen,
+  CodeScreen,
   CompositionScreen,
   Layout,
   PreviewWall,
@@ -70,6 +71,11 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.layout.screen({ id: 'assets', title: 'Ассеты', order: 2 }, AssetsScreen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.layout.screen({ id: 'code', title: 'Код', order: 3 }, CodeScreen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
