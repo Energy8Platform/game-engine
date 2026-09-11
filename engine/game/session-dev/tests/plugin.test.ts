@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
-import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
@@ -305,22 +313,22 @@ describe('the session plugin: restart', () => {
  * whatever `spin.test.ts` or the `restart` block above happens to have running
  * against the shared `GAME` fixture in a parallel worker.
  */
+/** Counts OS processes whose command line contains `marker` — `pgrep -f` exits 1 (throws) when nothing matches, which is zero, not an error. */
+function countLive(marker: string): number {
+  try {
+    return execSync(`pgrep -f ${JSON.stringify(marker)}`, { encoding: 'utf8' })
+      .split('\n')
+      .filter((line) => line.trim().length > 0).length;
+  } catch {
+    return 0;
+  }
+}
+
 describe('the session plugin: restart does not orphan a process', () => {
   function privateGame(): string {
     const dir = mkdtempSync(join(tmpdir(), 'session-dev-restart-race-'));
     cpSync(GAME, dir, { recursive: true });
     return dir;
-  }
-
-  /** Counts OS processes whose command line contains `marker` — `pgrep -f` exits 1 (throws) when nothing matches, which is zero, not an error. */
-  function countLive(marker: string): number {
-    try {
-      return execSync(`pgrep -f ${JSON.stringify(marker)}`, { encoding: 'utf8' })
-        .split('\n')
-        .filter((line) => line.trim().length > 0).length;
-    } catch {
-      return 0;
-    }
   }
 
   let dir: string | undefined;
@@ -409,6 +417,152 @@ describe('the session plugin: restart does not orphan a process', () => {
     await Promise.all([disposing, late]);
 
     expect(countLive(dir)).toBe(0);
+  });
+});
+
+/**
+ * The composition of the lifecycle fixes, attacked from the side the
+ * earlier tests do not reach: a dispose that lands BEHIND queued
+ * restarts. Every earlier attack settled with zero orphans, and these keep
+ * that; what they add is the cost and the wording of the restarts that
+ * were still queued when the plugin went away.
+ *
+ * The binary is wrapped in a shell script that appends one line to a log
+ * per spawn before exec-ing the real thing — the one way to count spawns
+ * from outside `startE8Server` without spying on it. `binPath` is used
+ * verbatim by `resolveServerBinary`, so the wrapper is what gets spawned.
+ */
+/** The real binary, resolved the same way `e8server.ts` does with no `binPath` — platform-core's postinstall copy. Wrapped by the tests below in a shell script that decides, per spawn, whether to exec it. */
+function realBinary(): string {
+  const arch = process.arch === 'x64' ? 'amd64' : process.arch;
+  return join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    '..',
+    'packages',
+    'platform-core',
+    'bin',
+    `e8-server-${process.platform}-${arch}`,
+  );
+}
+
+describe('the session plugin: restarts queued behind a dispose', () => {
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  function countingWrapper(root: string): { binPath: string; spawns(): number } {
+    const log = join(root, 'spawns.log');
+    const binPath = join(root, 'e8-server-counting.sh');
+    writeFileSync(
+      binPath,
+      `#!/bin/sh\necho spawn >> ${JSON.stringify(log)}\nexec ${JSON.stringify(realBinary())} "$@"\n`,
+      { mode: 0o755 },
+    );
+    return {
+      binPath,
+      spawns: () =>
+        existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0,
+    };
+  }
+
+  it('a dispose behind three queued restarts spawns nothing more, and each restart says the engine is gone', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'session-dev-dispose-behind-queue-'));
+    cpSync(GAME, join(dir, 'game'), { recursive: true });
+    const wrapper = countingWrapper(dir);
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: join(dir, 'game'), port: 0, binPath: wrapper.binPath });
+    expect(wrapper.spawns()).toBe(1);
+    const svc = ctx.session;
+
+    const queued = [svc.restart(), svc.restart(), svc.restart()];
+    const disposing = ctx.fiber.dispose();
+    ctx = undefined;
+    const results = await Promise.all(queued);
+    await disposing;
+
+    // Without the early return, each queued restart still paid a full
+    // boot after the plugin was gone — three more spawns here, and with a
+    // hung binary three readiness timeouts before Ctrl-C returned.
+    expect(wrapper.spawns()).toBe(1);
+    for (const { diagnostics } of results) {
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].message).not.toMatch(/restarting/);
+      expect(diagnostics[0].message).toMatch(/gone|shut down|disposed/);
+    }
+    expect(countLive(join(dir, 'game'))).toBe(0);
+  });
+});
+
+/**
+ * The `fix` line the restart failure carries, split the way its message
+ * already is: an exit with compiler output is the `.spin`'s fault; a
+ * signal or a timeout is not, and saying "fix the error in the .spin file"
+ * for a process something else killed asserts a cause the code does not
+ * know.
+ */
+describe('the session plugin: what a restart failure says to fix', () => {
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it('an exit with compiler output points at the .spin file', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'session-dev-fix-exit-'));
+    cpSync(GAME, dir, { recursive: true });
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0 });
+    appendFileSync(join(dir, 'script.spin'), '\nthis is not valid spin syntax @@@\n');
+    const { diagnostics } = await ctx.session.restart();
+    expect(diagnostics[0].fix).toMatch(/\.spin/);
+  });
+
+  it('a timeout does not blame the .spin file', async () => {
+    // The wrapper boots the real binary once, then hangs on every later
+    // spawn: the readiness poll runs out, the process is still there, and
+    // nothing about the script was ever read.
+    dir = mkdtempSync(join(tmpdir(), 'session-dev-fix-timeout-'));
+    cpSync(GAME, dir, { recursive: true });
+    const flag = join(dir, 'hang-from-now-on');
+    const wrapper = join(dir, 'hang-after-first.sh');
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nif [ -e ${JSON.stringify(flag)} ]; then sleep 60; fi\nexec ${JSON.stringify(realBinary())} "$@"\n`,
+      { mode: 0o755 },
+    );
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0, binPath: wrapper, readyTimeoutMs: 5000 });
+    expect(ctx.session.pid).not.toBeNull();
+    writeFileSync(flag, '');
+    const { diagnostics } = await ctx.session.restart();
+    expect(diagnostics[0].message).toMatch(/did not become ready/);
+    expect(diagnostics[0].fix).not.toMatch(/\.spin/);
+  });
+
+  it('a signal does not blame the .spin file', async () => {
+    // The wrapper kills itself after the first boot, before it ever
+    // listens — the exit carries a signal and no compiler output.
+    dir = mkdtempSync(join(tmpdir(), 'session-dev-fix-signal-'));
+    cpSync(GAME, dir, { recursive: true });
+    const flag = join(dir, 'die-from-now-on');
+    const wrapper = join(dir, 'die-after-first.sh');
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nif [ -e ${JSON.stringify(flag)} ]; then kill -KILL $$; fi\nexec ${JSON.stringify(realBinary())} "$@"\n`,
+      { mode: 0o755 },
+    );
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0, binPath: wrapper });
+    expect(ctx.session.pid).not.toBeNull();
+    writeFileSync(flag, '');
+    const { diagnostics } = await ctx.session.restart();
+    expect(diagnostics[0].message).toMatch(/signal=SIGKILL/);
+    expect(diagnostics[0].fix).not.toMatch(/\.spin/);
   });
 });
 

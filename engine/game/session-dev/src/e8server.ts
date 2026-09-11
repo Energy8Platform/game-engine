@@ -184,6 +184,27 @@ function call<T>(client: any, method: string, req: unknown): Promise<T> {
   });
 }
 
+/**
+ * Why `startE8Server` rejected, for a caller that words its diagnostic by
+ * it — the message already tells the three apart in prose, and a caller
+ * that had to regex the prose back would be doing the thing this repo's
+ * `Diagnostic.code` was added to stop. `'exit'` is the process ending by
+ * its own code (a compiler refusing the `.spin`); `'signal'` is something
+ * else killing it; `'timeout'` is a process that is still there and never
+ * answered; `'spawn'` never started at all.
+ */
+export type StartFailureKind = 'spawn' | 'exit' | 'signal' | 'timeout';
+
+export class StartFailure extends Error {
+  constructor(
+    message: string,
+    readonly kind: StartFailureKind,
+  ) {
+    super(message);
+    this.name = 'StartFailure';
+  }
+}
+
 export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handle> {
   const port = opts.port === 0 ? await freePort() : opts.port;
   const bin = resolveServerBinary(opts.binPath);
@@ -198,7 +219,10 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     // stdout on the happy path — output is only surfaced if startup fails.
     child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e: any) {
-    throw new Error(`[session-dev] failed to spawn e8-server (${bin}): ${e.message}`);
+    throw new StartFailure(
+      `[session-dev] failed to spawn e8-server (${bin}): ${e.message}`,
+      'spawn',
+    );
   }
 
   let exited = false;
@@ -210,6 +234,7 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   // red herring. See that branch's own comment.
   let spawnFailed = false;
   let exitInfo = '';
+  let exitSignal: NodeJS.Signals | null = null;
   const output: string[] = [];
   child.stdout?.on('data', (c) => output.push(String(c)));
   child.stderr?.on('data', (c) => output.push(String(c)));
@@ -232,7 +257,10 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     // A spawn that never happened also fires `'close'` (code -2), after
     // `'error'` has already recorded the real reason. Keep the ENOENT text;
     // "exit code=-2" tells a person nothing.
-    if (!spawnFailed) exitInfo = `exit code=${code} signal=${signal}`;
+    if (!spawnFailed) {
+      exitInfo = `exit code=${code} signal=${signal}`;
+      exitSignal = signal;
+    }
   });
   child.once('error', (e) => {
     exited = true;
@@ -273,17 +301,19 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     //    timeout (nothing was waited out), and `bin=`/`games-dir=` blame
     //    two things that did not change, only the loaded `.spin` did.
     if (exited && !spawnFailed) {
-      throw new Error(
+      throw new StartFailure(
         `[session-dev] e8-server exited before it became ready (port=${port}, ${exitInfo})` +
           (output.length ? `\n--- e8-server output ---\n${output.join('')}` : ''),
+        exitSignal === null ? 'exit' : 'signal',
       );
     }
     if (!exited) child.kill('SIGKILL');
-    throw new Error(
+    throw new StartFailure(
       `[session-dev] e8-server did not become ready on 127.0.0.1:${port} within ${readyTimeoutMs}ms ` +
         `(bin="${bin}" games-dir="${opts.gamesDir}")` +
         (spawnFailed ? ` — ${exitInfo}` : '') +
         (output.length ? `\n--- e8-server output ---\n${output.join('')}` : ''),
+      spawnFailed ? 'spawn' : 'timeout',
     );
   }
 

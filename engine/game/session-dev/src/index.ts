@@ -37,7 +37,7 @@ import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
 // `Context` without importing the row itself. See `@energy8engine/spin-log`'s
 // `src/runtime.ts` module doc for the same device.
 import type {} from '@energy8engine/diagnostics/runtime';
-import { startE8Server } from './e8server';
+import { StartFailure, startE8Server } from './e8server';
 import type { E8Handle, SpinRequest, SpinResult, StartE8ServerOptions } from './types';
 
 export { startE8Server } from './e8server';
@@ -114,6 +114,19 @@ export interface SessionService {
 
 export const name = 'session';
 
+/**
+ * What a `restart()` resolves to once the plugin is disposed — said as
+ * what happened, not as "restarting", which is what a queued restart used
+ * to answer after teardown had already stopped everything.
+ */
+const GONE: Diagnostic = diagnostic(
+  'error',
+  'session',
+  'e8-server',
+  'the math engine is gone: its session was disposed before this restart ran',
+  'nothing will restart it — start the dev host again',
+);
+
 export async function apply(ctx: Context, config: SessionConfig) {
   let handle: E8Handle | null = null;
   let startupDiagnostic: Diagnostic | null = null;
@@ -137,6 +150,16 @@ export async function apply(ctx: Context, config: SessionConfig) {
    * `restart()`'s own doc for the one difference the failure text carries.
    */
   async function boot(reason: 'start' | 'restart'): Promise<void> {
+    if (disposed) {
+      // A restart still queued on `chain` when the disposer ran. Spawning
+      // here would only be to stop the result a moment later (the branch
+      // below), and each queued restart paid that in full — measured at
+      // one extra spawn per queued call, and with a hung binary one whole
+      // readiness timeout each before a Ctrl-C returned.
+      handle = null;
+      startupDiagnostic = GONE;
+      return;
+    }
     try {
       const spawned = await startE8Server(config);
       if (disposed) {
@@ -155,6 +178,7 @@ export async function apply(ctx: Context, config: SessionConfig) {
           // Best-effort, same as `doRestart`'s own `dying.stop()` below.
         }
         handle = null;
+        startupDiagnostic = GONE;
         return;
       }
       handle = spawned;
@@ -176,8 +200,33 @@ export async function apply(ctx: Context, config: SessionConfig) {
               'session',
               'e8-server',
               `the math engine failed to restart: ${message}`,
-              'the binary and games-dir did not change — fix the error in the .spin file that was just saved and save again',
+              restartFix(error),
             );
+    }
+  }
+
+  /**
+   * What a restart failure says to do about it, by what actually happened.
+   * Only an exit by the process's own code is the `.spin`'s doing — that
+   * is the compiler refusing what was just saved. A signal came from
+   * outside, and a timeout means the process is there and silent; telling
+   * a person to fix the file for either would name a cause the code does
+   * not know, the same mistake the message itself stopped making one fix
+   * ago. A spawn that fails is the binary's path, exactly as on first boot.
+   */
+  function restartFix(error: unknown): string | undefined {
+    const kind = error instanceof StartFailure ? error.kind : undefined;
+    switch (kind) {
+      case 'exit':
+        return 'the binary and games-dir did not change — fix the error in the .spin file that was just saved and save again';
+      case 'signal':
+        return 'the process was stopped by a signal, not by the script — save again to spawn it afresh';
+      case 'timeout':
+        return 'the process started but never answered — save again to spawn it afresh';
+      case 'spawn':
+        return 'check that an e8-server binary is still reachable (binPath, E8_SERVER_BINARY, or PATH)';
+      default:
+        return undefined;
     }
   }
 
