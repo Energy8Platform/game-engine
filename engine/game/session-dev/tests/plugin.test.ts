@@ -291,6 +291,13 @@ describe('the session plugin: restart', () => {
       // appears in that claim either. This is the fact the review found
       // the earlier assertion didn't reach: an exit is not a timeout.
       expect(message).not.toMatch(/did not become ready/);
+
+      // Saving the same mistake again must produce the SAME message. The
+      // one list keys rows by identity and cannot retract, and `e8 dev`
+      // runs on `port: 0` — a port number in this text made every failed
+      // save a fresh row, ten saves ten rows, for one unchanged mistake.
+      const again = await ctx.session.restart();
+      expect(again.diagnostics[0].message).toBe(message);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

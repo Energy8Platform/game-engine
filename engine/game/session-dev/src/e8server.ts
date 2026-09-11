@@ -300,9 +300,13 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     //    saved is exactly this, and it is neither of the other two: not a
     //    timeout (nothing was waited out), and `bin=`/`games-dir=` blame
     //    two things that did not change, only the loaded `.spin` did.
+    //    No port in this one either: `e8 dev` runs on `port: 0`, so the
+    //    number differs on every restart, and the diagnostics list keys
+    //    rows by identity — the same mistake saved twice would otherwise
+    //    show as two rows, and ten times as ten.
     if (exited && !spawnFailed) {
       throw new StartFailure(
-        `[session-dev] e8-server exited before it became ready (port=${port}, ${exitInfo})` +
+        `[session-dev] e8-server exited before it became ready (${exitInfo})` +
           (output.length ? `\n--- e8-server output ---\n${output.join('')}` : ''),
         exitSignal === null ? 'exit' : 'signal',
       );

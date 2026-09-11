@@ -189,6 +189,9 @@ export function CodeScreen({ ctx }: { ctx: Context }): JSX.Element {
   function runCheck(source: string) {
     const seq = ++checkSeq.current;
     ctx.check.check(source).then(({ diagnostics }) => {
+      // Kept out of `ctx.connection.report()` on purpose — see the module
+      // doc: the one list has no retract, so a per-keystroke stream would
+      // leave orphaned rows nothing can remove.
       if (seq === checkSeq.current) setCheckDiagnostics(diagnostics);
     });
   }
