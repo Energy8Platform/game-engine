@@ -44,13 +44,15 @@ import type { Plugin } from 'vite';
 export const SANDBOX_GAMES_API_URL = 'wss://gamesapi-sandbox.artube-888.live/v1/ws';
 
 /**
- * The sandbox integration's `publicGameId`. Every sandbox tenant in the
- * public environment is created as `game1`, so this is the default that makes
- * a freshly scaffolded game playable with no configuration at all. It is only
- * ever used in sandbox mode — against a real GamesAPI the id is assigned by
- * the platform and must be given.
+ * The sandbox integration's `publicGameId`. The Sandbox UI's default preset
+ * ("▶ Generate Data") creates the game as `game-1` — checked against the live
+ * sandbox on 2026-09-11: `game-1` upgrades to 101, the old `game1` is refused
+ * with HTTP 400 before the upgrade. This default makes a freshly scaffolded
+ * game playable with no configuration at all. It is only ever used in sandbox
+ * mode — against a real GamesAPI the id is assigned by the platform and must
+ * be given.
  */
-export const SANDBOX_GAME_ID = 'game1';
+export const SANDBOX_GAME_ID = 'game-1';
 
 /** Where the port scan starts. Historically the documented dev port. */
 export const DEFAULT_ARTUBE_DEV_PORT = 8080;

@@ -431,7 +431,7 @@ identify themselves there rather than turning into a browser-side `ws error`.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `spinPath` | `./src/game/script.spin` | Resolved against the Vite root; where `create-slot` puts it. A missing file is reported before anything is spawned. |
-| `gameId` | `GameId` env → `game1` in sandbox mode | The platform's `publicGameId`. **Required** against a real GamesAPI — only the sandbox has a default, and it is the id every public sandbox tenant is created with. |
+| `gameId` | `GameId` env → `game-1` in sandbox mode | The platform's `publicGameId`. **Required** against a real GamesAPI — only the sandbox has a default, and it is the id the Sandbox UI's default preset creates (`game-1`; the older `game1` is refused with HTTP 400). |
 | `sandbox` | `true` unless a `gamesApiUrl` is given | Passes `--sandbox`, which also relaxes the CLI's `GamesApiUrl`/`GamesApiKey` requirements. |
 | `gamesApiUrl` / `apiKey` | `GamesApiUrl` / `GamesApiKey` env | Setting a URL turns `sandbox` off, and then the key is required — that is a real GamesAPI. |
 | `port` | `ARTUBE_PORT` env → `8080` | Where the scan *starts*; the plugin takes the first free port from there. |
