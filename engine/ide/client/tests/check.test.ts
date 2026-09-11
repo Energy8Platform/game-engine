@@ -69,6 +69,16 @@ describe('check', () => {
     expect(diagnostics).toEqual([said]);
   });
 
+  it('valid JSON with no "diagnostics" array is a diagnostic too, not a silent success', async () => {
+    // The gap `files.test.ts:174` already closes for `write`: a 200 whose
+    // body parses fine but is not the shape asked for must not read as
+    // "nothing wrong" — this is the `Array.isArray` check doing the work,
+    // not the `res.json()` catch above it.
+    const ctx = harness({ fetchFn: jsonOnce({ notDiagnostics: [] }) });
+    const { diagnostics } = await ctx.check.check('x');
+    expect(diagnostics).toHaveLength(1);
+  });
+
   it('is on the context the real createIdeClient hands back', async () => {
     // `layout` shipped as a service every unit test proved and no running
     // IDE had — nothing composed it into `createIdeClient`. This goes
