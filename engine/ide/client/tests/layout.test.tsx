@@ -242,6 +242,53 @@ describe('layout', () => {
     expect(calls).toBe(0);
   });
 
+  it('go() consults a registered guard and refuses the navigation it blocks', () => {
+    // The screen the guard belongs to must stay put: neither the hash nor
+    // a notification fires, so the current screen never changes under it.
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'A' }, Dummy);
+    ctx.layout.screen({ id: 'b', title: 'B' }, Dummy);
+    ctx.layout.guard(() => false);
+    ctx.layout.go('b');
+    expect(location.hash).toBe('');
+    expect(ctx.layout.current()?.id).toBe('a');
+  });
+
+  it('a guard is told which screen navigation was headed to', () => {
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'A' }, Dummy);
+    ctx.layout.screen({ id: 'b', title: 'B' }, Dummy);
+    let seen: string | undefined;
+    ctx.layout.guard((id) => {
+      seen = id;
+      return false;
+    });
+    ctx.layout.go('b');
+    expect(seen).toBe('b');
+  });
+
+  it('go() proceeds once its guard is disposed — the "yes" of a confirm', () => {
+    // The shape a screen's own confirm uses: dispose the guard it
+    // registered, then call go() again for the navigation to actually
+    // happen.
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'A' }, Dummy);
+    ctx.layout.screen({ id: 'b', title: 'B' }, Dummy);
+    const off = ctx.layout.guard(() => false);
+    off();
+    ctx.layout.go('b');
+    expect(location.hash).toBe('#/b');
+    expect(ctx.layout.current()?.id).toBe('b');
+  });
+
+  it('a clean screen with no guard registered does not block navigation', () => {
+    const ctx = harness();
+    ctx.layout.screen({ id: 'a', title: 'A' }, Dummy);
+    ctx.layout.screen({ id: 'b', title: 'B' }, Dummy);
+    ctx.layout.go('b');
+    expect(ctx.layout.current()?.id).toBe('b');
+  });
+
   it('registering a collision does not throw when composed without ctx.connection', async () => {
     // Every test above goes through `harness()`, whose `connection` is a
     // plain object that is simply always there and whose fake `reflect.get`

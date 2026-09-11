@@ -34,6 +34,19 @@ export interface LayoutService {
   /** Navigates. Writes the address hash; the hash is the source of truth. */
   go(id: string): void;
   subscribe(listener: () => void): () => void;
+  /**
+   * Lets the CURRENT screen refuse a navigation attempt — the confirm
+   * before unsaved work is discarded, the same shape `AssetsScreen` already
+   * uses for delete. `go()` calls every registered guard with the id it was
+   * asked to navigate to, before touching the hash at all; any guard
+   * returning `false` refuses the whole navigation (the hash and every
+   * other guard's chance to run are both left alone). A screen registers
+   * one while it holds something a navigation would discard, and disposes
+   * it once that stops being true — most of the time on unmount, but a
+   * screen that means to navigate anyway (the "yes" of its own confirm)
+   * disposes it itself first, then calls `go()` a second time.
+   */
+  guard(fn: (targetId: string) => boolean): () => void;
 }
 
 export const name = 'layout';
@@ -57,6 +70,12 @@ export function apply(ctx: Context) {
   // `notify()` on every actual mutation.
   const entries = createRegistry<ScreenEntry>({ policy: 'last-wins' });
   const listeners = new Set<() => void>();
+  // In practice at most one entry — the current screen's own — but kept as
+  // a set rather than a single slot: nothing here enforces "only the
+  // current screen may register one", and a set costs nothing extra over a
+  // slot while not silently overwriting a second registration that should
+  // have been an error somewhere else instead.
+  const guards = new Set<(targetId: string) => boolean>();
   const notify = () => {
     for (const listener of listeners) listener();
   };
@@ -142,12 +161,25 @@ export function apply(ctx: Context) {
       return list[0];
     },
     go(id) {
+      // Consulted before the hash moves at all: a guard refusing means
+      // nothing here changed — not the hash, not a notification — so the
+      // screen that registered it is still mounted and still current,
+      // free to show its own confirm over exactly the state it was in.
+      for (const guard of guards) {
+        if (!guard(id)) return;
+      }
       location.hash = `#/${id}`;
       notify();
     },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    guard(fn) {
+      guards.add(fn);
+      return () => {
+        guards.delete(fn);
+      };
     },
   };
 

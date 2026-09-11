@@ -55,13 +55,16 @@ function isImage(path: string): boolean {
 const SNIFF_BYTES = 8000;
 
 /**
- * A NUL byte never appears in valid text of any encoding this screen
+ * A NUL byte never appears in valid text of any encoding a screen here
  * claims to read — the same cheap tell `file(1)` and most editors use — so
  * finding one in the leading bytes is a fast, honest signal that decoding
  * the rest would just fill the pane with replacement-character mush
- * instead of throwing or staying blank.
+ * instead of throwing or staying blank. Exported: `CodeScreen` reads
+ * `plugins/**`, which is just as free to hold a binary file as this
+ * screen's own tree is, and needs the identical refusal rather than a
+ * second copy of it.
  */
-function looksBinary(bytes: Uint8Array): boolean {
+export function looksBinary(bytes: Uint8Array): boolean {
   return bytes.subarray(0, SNIFF_BYTES).includes(0);
 }
 

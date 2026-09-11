@@ -1,9 +1,15 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
-import { CodeScreen, createIdeClient, type CheckService, type FilesService } from '../src/index';
+import {
+  CodeScreen,
+  Layout,
+  createIdeClient,
+  type CheckService,
+  type FilesService,
+} from '../src/index';
 
 /**
  * `harness()` below is `assets-screen.test.tsx`'s own harness, reused
@@ -89,6 +95,11 @@ function editorOn(el: HTMLElement) {
   const editor = fake.editors.find((e) => e.el === el && !e.disposed);
   if (!editor) throw new Error('no live editor on that element');
   return editor;
+}
+
+/** A keystroke, wrapped: the fake fires its listener synchronously, which triggers a React state update outside any event React itself dispatched. */
+function type(el: HTMLElement, next: string) {
+  act(() => editorOn(el).type(next));
 }
 
 /** These tests only care about `.message` — severity/plugin/where are fixed filler, `at` added where a test needs a marker. */
@@ -193,6 +204,14 @@ async function harness(
   return ctx as Context & { files: TestFiles; check: TestCheck };
 }
 
+// The two cross-tab tests below navigate for real, through `ctx.layout.go`,
+// which writes `location.hash` — `layout.test.tsx`'s own harness hits the
+// identical leak (a hash one test sets is still there for the next) and
+// resets it the same way.
+beforeEach(() => {
+  location.hash = '';
+});
+
 describe('CodeScreen', () => {
   it('lists the files worth editing, and not the whole tree', async () => {
     // `game/script.spin` and `plugins/**`, per the spec. A PNG in the list
@@ -224,7 +243,15 @@ describe('CodeScreen', () => {
   });
 
   it('typing checks, and the markers arrive without saving', async () => {
-    const ctx = await harness(tree(['game/script.spin']), { 'game/script.spin': 'game = Spin' });
+    // A prior version of this test only polled `ctx.check.calls.length` —
+    // green even with `diagnostics={[]}` hardcoded on the `<Monaco/>`
+    // mount, which is a broken wire, not a working one. This asserts the
+    // marker itself lands.
+    const ctx = await harness(
+      tree(['game/script.spin']),
+      { 'game/script.spin': 'game = Spin' },
+      { checkDiagnostics: [d('record block has no name', { line: 2 })] },
+    );
     render(<CodeScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('file-game/script.spin'));
     const editorEl = await screen.findByTestId('editor');
@@ -232,9 +259,34 @@ describe('CodeScreen', () => {
     // contentEditable machinery — `monaco.test.tsx` drives it the same
     // way, through its own `type()`, which is what fires the wrapper's
     // `onDidChangeModelContent` listener.
-    act(() => editorOn(editorEl).type('game = Spin\nrecord {\n}'));
-    await expect.poll(() => ctx.check.calls.length).toBeGreaterThan(0);
+    type(editorEl, 'game = Spin\nrecord {\n}');
+    await waitFor(() => expect(ctx.check.calls.length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(editorOn(editorEl).model.markers).toEqual([
+        expect.objectContaining({ message: 'record block has no name' }),
+      ]),
+    );
     expect(ctx.files.written).toEqual([]); // nothing saved
+  });
+
+  it('debounces rapid typing into one check call for the last text, not one per keystroke', async () => {
+    // Measured live against a real host: one keystroke, one POST — a dozen
+    // calls for a single inserted line. The sequence guard (proven
+    // separately below) stays regardless — it survives network reordering
+    // a debounce cannot prevent — but the wasted calls themselves are
+    // pure debounce work.
+    const ctx = await harness(tree(['game/script.spin']), { 'game/script.spin': '' });
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    const editorEl = await screen.findByTestId('editor');
+    type(editorEl, 'a');
+    type(editorEl, 'ab');
+    type(editorEl, 'abc');
+    await waitFor(() => expect(ctx.check.calls).toEqual(['abc']));
+    // Give the debounce window a second chance to fire, if the three
+    // keystrokes had each scheduled their own call instead of collapsing.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(ctx.check.calls).toEqual(['abc']);
   });
 
   it('saving writes through ctx.files.write, and says when the host refused', async () => {
@@ -276,7 +328,7 @@ describe('CodeScreen', () => {
     render(<CodeScreen ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('file-game/script.spin'));
     const editorEl = await screen.findByTestId('editor');
-    act(() => editorOn(editorEl).type('one, edited'));
+    type(editorEl, 'one, edited');
 
     await userEvent.click(screen.getByTestId('file-plugins/bonus.lua'));
     // Still on the file that was open, unsaved edit intact — the switch did not happen yet.
@@ -291,6 +343,44 @@ describe('CodeScreen', () => {
     expect(await screen.findByTestId('editor')).toHaveTextContent('two');
   });
 
+  it('leaving via a different tab, with unsaved changes, asks first too', async () => {
+    // `go()` used to unmount whatever screen was current unconditionally —
+    // there was no interception point until this task's `ctx.layout.guard`.
+    // Rendered through the real `<Layout/>`, with a second screen
+    // registered, so this exercises an actual tab click rather than the
+    // in-screen file switch above.
+    const ctx = await harness(tree(['game/script.spin']), { 'game/script.spin': 'one' });
+    ctx.layout.screen({ id: 'code', title: 'Код' }, CodeScreen);
+    ctx.layout.screen({ id: 'other', title: 'Other' }, () => <div>OTHER SCREEN</div>);
+    render(<Layout ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    const editorEl = await screen.findByTestId('editor');
+    type(editorEl, 'one, edited');
+
+    await userEvent.click(screen.getByTestId('tab-other'));
+    // Still on Code — the click was refused, nothing moved.
+    expect(screen.getByTestId('editor')).toHaveTextContent('one, edited');
+    expect(await screen.findByTestId('confirm-yes')).toBeTruthy();
+
+    await userEvent.click(screen.getByTestId('confirm-no'));
+    expect(screen.queryByText('OTHER SCREEN')).toBeNull(); // "no" left the hash alone
+
+    await userEvent.click(screen.getByTestId('tab-other'));
+    await userEvent.click(await screen.findByTestId('confirm-yes'));
+    expect(await screen.findByText('OTHER SCREEN')).toBeTruthy();
+  });
+
+  it('a clean code screen does not block switching tabs', async () => {
+    const ctx = await harness(tree(['game/script.spin']), { 'game/script.spin': 'one' });
+    ctx.layout.screen({ id: 'code', title: 'Код' }, CodeScreen);
+    ctx.layout.screen({ id: 'other', title: 'Other' }, () => <div>OTHER SCREEN</div>);
+    render(<Layout ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-game/script.spin'));
+    await screen.findByTestId('editor'); // opened, untouched — nothing to lose
+    await userEvent.click(screen.getByTestId('tab-other'));
+    expect(await screen.findByText('OTHER SCREEN')).toBeTruthy();
+  });
+
   it('a file that vanished between listing and opening says so', async () => {
     // The tree is a snapshot; the assets screen met this on its own listing.
     const ctx = await harness(tree(['game/script.spin']), {}); // read — but it is already gone
@@ -301,6 +391,19 @@ describe('CodeScreen', () => {
       true,
     );
     // No broken editor was mounted over it.
+    expect(screen.queryByTestId('editor')).toBeNull();
+  });
+
+  it('a binary file under plugins/ is refused instead of decoded as mush', async () => {
+    // `plugins/**` is listed whole — a PNG shipped inside a project plugin
+    // is exactly as real as one in the assets tree, and decoding it as
+    // text (and offering "save" on the result) would write that mush back.
+    const ctx = await harness(tree(['plugins/icon.png']), {
+      'plugins/icon.png': '\x00\x01\x02binary stuff',
+    });
+    render(<CodeScreen ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('file-plugins/icon.png'));
+    expect(await screen.findByText(/doesn't look like text/)).toBeTruthy();
     expect(screen.queryByTestId('editor')).toBeNull();
   });
 
@@ -329,21 +432,27 @@ describe('CodeScreen', () => {
     await userEvent.click(await screen.findByTestId('file-game/script.spin'));
     const editorEl = await screen.findByTestId('editor');
 
-    act(() => editorOn(editorEl).type('a'));
+    type(editorEl, 'a');
     await waitFor(() => expect(ctx.check.calls).toEqual(['a']));
-    act(() => editorOn(editorEl).type('ab'));
+    type(editorEl, 'ab');
     await waitFor(() => expect(ctx.check.calls).toEqual(['a', 'ab']));
 
     // Out of order: the newer text's answer arrives FIRST.
-    resolveForAb?.([d('current for ab', { line: 1 })]);
+    await act(async () => {
+      resolveForAb?.([d('current for ab', { line: 1 })]);
+      await Promise.resolve();
+    });
     await waitFor(() =>
       expect(editorOn(editorEl).model.markers).toEqual([
         expect.objectContaining({ message: 'current for ab' }),
       ]),
     );
     // The stale answer for 'a' arrives second — must be dropped, not applied.
-    resolveForA?.([d('stale for a', { line: 1 })]);
-    await new Promise((r) => setTimeout(r, 0)); // let its .then run, if it's going to
+    await act(async () => {
+      resolveForA?.([d('stale for a', { line: 1 })]);
+      await Promise.resolve();
+      await Promise.resolve(); // let its own .then run, if it were going to
+    });
     expect(editorOn(editorEl).model.markers).toEqual([
       expect.objectContaining({ message: 'current for ab' }),
     ]);
