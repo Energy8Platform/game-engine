@@ -109,6 +109,17 @@ function escapeRegExp(text: string): string {
 }
 
 /**
+ * The 1-based line `offset` falls on in `text`. A block's body is a slice
+ * of the file, so a mistake inside it is on `bodyLine + lineAt(body, k) -
+ * 1` — every site below that knows an offset into a body counts this way,
+ * instead of stamping the block's own header line onto a mistake five
+ * lines further down.
+ */
+function lineAt(text: string, offset: number): number {
+  return text.slice(0, offset).split('\n').length;
+}
+
+/**
  * Finds every top-level `keyword ... { ... }` block by keyword, respecting
  * brace nesting so a block's own nested `{ }` (e.g. a stage variant inside
  * `enum SpinData tag stage { ... }`) doesn't end the match early. Returns
@@ -134,8 +145,8 @@ function findBlocks(
   source: string,
   keyword: string,
   diagnostics: Diagnostic[],
-): { header: string; body: string; line: number }[] {
-  const results: { header: string; body: string; line: number }[] = [];
+): { header: string; body: string; line: number; bodyLine: number }[] {
+  const results: { header: string; body: string; line: number; bodyLine: number }[] = [];
   const re = new RegExp(`\\b${escapeRegExp(keyword)}\\b`, 'g');
   let match: RegExpExecArray | null;
   while ((match = re.exec(source)) !== null) {
@@ -176,7 +187,10 @@ function findBlocks(
     const bodyEnd = requireMatchingBrace(source, braceStart, label, line, diagnostics);
     if (bodyEnd === null) continue;
     const body = source.slice(braceStart + 1, bodyEnd);
-    results.push({ header, body, line });
+    // The body's first character may sit on a later line than the keyword
+    // (`record Vars\n{`), so its line is counted from the brace, not
+    // reused from the header.
+    results.push({ header, body, line, bodyLine: lineAt(source, braceStart + 1) });
     re.lastIndex = bodyEnd + 1;
   }
   return results;
@@ -334,10 +348,14 @@ function topLevelSemicolon(text: string): number {
 function parseFieldList(
   body: string,
   blockName: string,
-  line: number,
+  bodyLine: number,
   diagnostics: Diagnostic[],
   refs: RecordRef[],
 ): { shape: RecordShape; unread: (string | null)[] } {
+  // `bodyLine` is where `body[0]` sits in the file; each field's own line
+  // is counted from there, so the marker lands on the field, not the
+  // block header.
+  const lineOf = (offset: number) => bodyLine + lineAt(body, offset) - 1;
   const shape: RecordShape = {};
   const unread: (string | null)[] = [];
   const fieldRe = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g;
@@ -347,7 +365,8 @@ function parseFieldList(
     boundaries.push({ name: match[1], start: match.index, end: fieldRe.lastIndex });
   }
 
-  const leading = body.slice(0, boundaries[0]?.start ?? body.length).trim();
+  const leadingEnd = boundaries[0]?.start ?? body.length;
+  const leading = body.slice(0, leadingEnd).trim();
   if (leading !== '') {
     // `null`, not a name: this text never became a field, so nothing here
     // knows which field it was going to be. The gap is therefore the wide
@@ -357,14 +376,15 @@ function parseFieldList(
     diagnostics.push(
       lineDiagnostic(
         'error',
-        line,
+        lineOf(body.slice(0, leadingEnd).search(/\S/)),
         `block "${blockName}": unreadable declaration "${leading}" (expected "name: Type")`,
       ),
     );
   }
 
   for (let i = 0; i < boundaries.length; i++) {
-    const { name, end } = boundaries[i];
+    const { name, start, end } = boundaries[i];
+    const line = lineOf(start);
     const valueEnd = boundaries[i + 1]?.start ?? body.length;
     const typeText = body.slice(end, valueEnd).trim();
     const type = typeText === '' ? null : parseFieldType(typeText);
@@ -479,14 +499,14 @@ function parseRecords(
   diagnostics.push(...blockDiagnostics);
   if (blockDiagnostics.length > 0) gaps.push({ in: 'records', name: null, field: null });
 
-  for (const { header, body, line } of blocks) {
+  for (const { header, body, line, bodyLine } of blocks) {
     const name = header.trim();
     if (name === '') {
       diagnostics.push(lineDiagnostic('error', line, 'record block has no name'));
       gaps.push({ in: 'records', name: null, field: null });
       continue;
     }
-    const parsed = parseFieldList(body, name, line, diagnostics, refs);
+    const parsed = parseFieldList(body, name, bodyLine, diagnostics, refs);
     if (records.insert(name, parsed.shape, line, diagnostics)) {
       unread[name] = parsed.unread;
       for (const field of parsed.unread) gaps.push({ in: 'records', name, field });
@@ -606,8 +626,7 @@ function parseStages(
     while ((match = variantRe.exec(spinData.body)) !== null) {
       const name = match[1];
       const braceStart = match.index + match[0].length - 1;
-      const variantLine =
-        spinData.line + spinData.body.slice(0, match.index).split('\n').length - 1;
+      const variantLine = spinData.bodyLine + lineAt(spinData.body, match.index) - 1;
       // NOTE ON REACHABILITY: `requireMatchingBrace` can provably never
       // return null here. `spinData.body` only ever exists because the
       // OUTER `findBlocks` call above already ran `matchingBrace` on the
@@ -632,7 +651,8 @@ function parseStages(
       );
       if (braceEnd === null) break; // unreachable today — see note above
       const body = spinData.body.slice(braceStart + 1, braceEnd);
-      const parsed = parseFieldList(body, name, variantLine, diagnostics, refs);
+      const variantBodyLine = spinData.bodyLine + lineAt(spinData.body, braceStart + 1) - 1;
+      const parsed = parseFieldList(body, name, variantBodyLine, diagnostics, refs);
       if (stages.insert(name, parsed.shape, variantLine, diagnostics)) {
         for (const field of parsed.unread) gaps.push({ in: 'stages', name, field });
       } else {
@@ -713,6 +733,8 @@ function parseStages(
 interface Clause {
   key: string;
   value: string;
+  /** Offset of the key in the body it was found in — for the line a diagnostic about this clause goes on. */
+  start: number;
 }
 
 /**
@@ -866,7 +888,7 @@ function findClauses(body: string, keys: string[], includeEndsWhen: boolean): Cl
     const b = boundaries[i];
     if (!keySet.has(b.key) && !(includeEndsWhen && b.key === 'ends when')) continue;
     const valueEnd = boundaries[i + 1]?.start ?? body.length;
-    clauses.push({ key: b.key, value: body.slice(b.end, valueEnd).trim() });
+    clauses.push({ key: b.key, value: body.slice(b.end, valueEnd).trim(), start: b.start });
   }
   return clauses;
 }
@@ -882,6 +904,12 @@ function parseNumberArray(text: string): number[] | null {
 
 const GAME_KEYS = ['bet_levels', 'max_win', 'vars', 'feature', 'data', 'globals'];
 
+/** A game-block clause that names a record (`vars = Vars`), with the line the clause is on. */
+interface ClauseRef {
+  name: string;
+  line: number;
+}
+
 function parseGame(
   source: string,
   diagnostics: Diagnostic[],
@@ -890,8 +918,8 @@ function parseGame(
   betLevels: number[];
   maxWin: number;
   line: number;
-  varsName?: string;
-  globalsName?: string;
+  vars?: ClauseRef;
+  globals?: ClauseRef;
   dataName?: string;
 } | null {
   const blocks = findBlocks(source, 'game', diagnostics);
@@ -899,7 +927,7 @@ function parseGame(
     diagnostics.push(diagnostic('error', PLUGIN, 'file', 'no "game { ... }" block found'));
     return null;
   }
-  const { header, body, line } = blocks[0];
+  const { header, body, line, bodyLine } = blocks[0];
   // The first block wins — the same rule `NamedCollection` applies to a
   // repeated name, for the same reason: `SpinSchema` has one `gameId`,
   // one `bet_levels` and one `max_win`, so "keep both" is not a shape it
@@ -924,6 +952,10 @@ function parseGame(
   }
   const clauses = findClauses(body, GAME_KEYS, false);
   const get = (key: string) => clauses.find((c) => c.key === key)?.value;
+  const ref = (key: string): ClauseRef | undefined => {
+    const clause = clauses.find((c) => c.key === key);
+    return clause && { name: clause.value, line: bodyLine + lineAt(body, clause.start) - 1 };
+  };
 
   const betLevelsText = get('bet_levels');
   const maxWinText = get('max_win');
@@ -940,8 +972,8 @@ function parseGame(
     betLevels,
     maxWin,
     line,
-    varsName: get('vars'),
-    globalsName: get('globals'),
+    vars: ref('vars'),
+    globals: ref('globals'),
     dataName: get('data'),
   };
 }
@@ -1007,7 +1039,7 @@ function parseActions(
   const blocks = findBlocks(source, 'action', blockDiagnostics);
   diagnostics.push(...blockDiagnostics);
   let dropped = blockDiagnostics.length > 0;
-  for (const { header, body, line } of blocks) {
+  for (const { header, body, line, bodyLine } of blocks) {
     const name = header.trim();
     if (name === '') {
       diagnostics.push(lineDiagnostic('error', line, 'action block has no name'));
@@ -1016,7 +1048,7 @@ function parseActions(
     }
     const clauses = findClauses(body, ACTION_KEYS, true);
     const get = (key: string) => clauses.find((c) => c.key === key)?.value;
-    const getAll = (key: string) => clauses.filter((c) => c.key === key).map((c) => c.value);
+    const getAll = (key: string) => clauses.filter((c) => c.key === key);
 
     const stage = get('stage');
     const costText = get('cost');
@@ -1039,14 +1071,18 @@ function parseActions(
     const endsWhenVar = get('ends when');
     if (endsWhenVar !== undefined) action.endsWhenVar = endsWhenVar;
 
-    const opensTexts = getAll('opens');
-    if (opensTexts.length > 0) {
+    const opensClauses = getAll('opens');
+    if (opensClauses.length > 0) {
       const opens: { action: string; countVar: string; when?: string }[] = [];
-      for (const text of opensTexts) {
+      for (const { value: text, start } of opensClauses) {
         const entry = parseOpens(text);
         if (entry === undefined) {
           diagnostics.push(
-            lineDiagnostic('error', line, `action "${name}": unreadable "opens" clause "${text}"`),
+            lineDiagnostic(
+              'error',
+              bodyLine + lineAt(body, start) - 1,
+              `action "${name}": unreadable "opens" clause "${text}"`,
+            ),
           );
           continue;
         }
@@ -1109,8 +1145,8 @@ export function parseSpinSchema(source: string): {
   // one that knows more harder to find.
   diagnostics.push(...checkReferences(game, records, refs));
 
-  const vars = (game.varsName !== undefined && records[game.varsName]) || {};
-  const globals = game.globalsName !== undefined ? records[game.globalsName] : undefined;
+  const vars = (game.vars !== undefined && records[game.vars.name]) || {};
+  const globals = game.globals !== undefined ? records[game.globals.name] : undefined;
 
   const schema: SpinSchema = {
     gameId: game.gameId,
@@ -1155,7 +1191,7 @@ export function parseSpinSchema(source: string): {
  * choice: there is nothing to keep.
  */
 function checkReferences(
-  game: { varsName?: string; globalsName?: string; line: number },
+  game: { vars?: ClauseRef; globals?: ClauseRef },
   records: Record<string, RecordShape>,
   refs: RecordRef[],
 ): Diagnostic[] {
@@ -1163,15 +1199,16 @@ function checkReferences(
   const declared = Object.keys(records);
   const known = declared.length > 0 ? declared.join(', ') : '(none)';
 
-  for (const [clause, name] of [
-    ['vars', game.varsName],
-    ['globals', game.globalsName],
+  for (const [clause, ref] of [
+    ['vars', game.vars],
+    ['globals', game.globals],
   ] as const) {
-    if (name === undefined || name in records) continue;
+    if (ref === undefined || ref.name in records) continue;
+    const { name, line } = ref;
     diagnostics.push(
       lineDiagnostic(
         'error',
-        game.line,
+        line,
         `game block: "${clause} = ${name}" names a record the file does not declare — it declares: ${known}`,
         `fix the name after "${clause} =", or add "record ${name} { ... }"`,
       ),

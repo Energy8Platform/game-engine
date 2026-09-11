@@ -995,7 +995,7 @@ game "second" {
   });
 });
 
-describe('parseSpinSchema — `at`, the structured twin of `where`\'s line prose', () => {
+describe("parseSpinSchema — `at`, the structured twin of `where`'s line prose", () => {
   // A record needs a `game { ... }` block elsewhere in the file to get past
   // `parseGame`'s early return — an empty or game-less source never reaches
   // `parseRecords` at all, it stops at "no game block found" instead. These
@@ -1096,7 +1096,8 @@ action spin { stage = base_game cost = 1.0 }
         'action spin { stage = base_game }',
       ),
       // parseActions: an unreadable "opens" clause.
-      MINIMAL + '\naction bonus { stage = base_game  cost = 1.0  opens = not_a_valid_opens_clause }',
+      MINIMAL +
+        '\naction bonus { stage = base_game  cost = 1.0  opens = not_a_valid_opens_clause }',
       // checkReferences: "vars = X" names a record the file never declares.
       MINIMAL.replace('vars = Vars', 'vars = Varz'),
       // checkReferences: a field typed by a record the file never declares.
@@ -1107,5 +1108,97 @@ action spin { stage = base_game cost = 1.0 }
         if (/line \d+/.test(d.where)) expect(d.at, d.where).toBeDefined();
       }
     }
+  });
+});
+
+describe('parseSpinSchema — `at` names the line of the mistake, not the line of the block it is in', () => {
+  // Every diagnostic here used to carry the BLOCK's header line: a field
+  // `d:` five lines into `record Vars {` was marked on `record Vars`, and
+  // `vars = Varz` on the game block's opening line. `where` and `at`
+  // agreed, so the prose rule held — the marker was wrong while looking
+  // right. The body offset is known at every site; these pin that it is
+  // used.
+  const GAME = `game "demo" {
+  bet_levels = [1.0]
+  max_win = 10.0
+  data = SpinData
+}
+enum SpinData tag stage { base_game { x: int } }
+action spin { stage = base_game cost = 1.0 }
+`;
+
+  it('a field with an unreadable type is marked on its own line, inside a multi-line record', () => {
+    const src = 'record Vars {\n  a: int\n  b: int\n  c: int\n  d: \n}\n' + GAME;
+    const { diagnostics } = parseSpinSchema(src);
+    const d = diagnostics.find((x) => x.message.includes('field "d"'));
+    expect(d?.at).toEqual({ line: 5 });
+    expect(d?.where).toBe('line 5');
+  });
+
+  it('text that never became a field is marked where it sits, not on the header', () => {
+    const src = 'record Vars {\n\n  garbage\n  a: int\n}\n' + GAME;
+    const { diagnostics } = parseSpinSchema(src);
+    const d = diagnostics.find((x) => x.message.includes('unreadable declaration'));
+    expect(d?.at).toEqual({ line: 3 });
+  });
+
+  it('a field typed by an undeclared record is marked on the field, and follows a brace on a later line', () => {
+    // The `{` is not on the keyword's line — the body starts where the
+    // brace is, not where `record` is.
+    const src = 'record Vars\n{\n  a: int\n  hits: [Nope]\n}\n' + GAME;
+    const { diagnostics } = parseSpinSchema(src);
+    const d = diagnostics.find((x) => x.message.includes('field "hits"'));
+    expect(d?.at).toEqual({ line: 4 });
+  });
+
+  it('"vars = X" naming no record is marked on the clause, not the game block', () => {
+    const src = `record Vars { a: int }
+enum SpinData tag stage { base_game { x: int } }
+game "demo" {
+  bet_levels = [1.0]
+  max_win = 10.0
+  data = SpinData
+  vars = Varz
+}
+action spin { stage = base_game cost = 1.0 }
+`;
+    const { diagnostics } = parseSpinSchema(src);
+    const d = diagnostics.find((x) => x.message.includes('vars = Varz'));
+    expect(d?.at).toEqual({ line: 7 });
+    expect(d?.where).toBe('line 7');
+  });
+
+  it('a stage variant field is marked on its own line, counted from the enum body', () => {
+    // The variant's own brace on the line after its name, for the same
+    // reason as the record test above: the body starts at the brace.
+    const src = `record Vars { a: int }
+enum SpinData tag stage {
+  base_game
+  {
+    grid: [[int]]
+    win: not$a$type
+  }
+}
+game "demo" { bet_levels = [1.0] max_win = 10.0 data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`;
+    const { diagnostics } = parseSpinSchema(src);
+    const d = diagnostics.find((x) => x.message.includes('field "win"'));
+    expect(d?.at).toEqual({ line: 6 });
+  });
+
+  it('an unreadable "opens" clause is marked on the clause, not the action header', () => {
+    const src = `record Vars { a: int }
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 10.0 data = SpinData }
+action spin {
+  stage = base_game
+  cost = 1.0
+  opens = not_a_valid_opens_clause
+}
+`;
+    const { diagnostics } = parseSpinSchema(src);
+    const d = diagnostics.find((x) => x.message.includes('"opens"'));
+    expect(d?.at).toEqual({ line: 7 });
   });
 });
