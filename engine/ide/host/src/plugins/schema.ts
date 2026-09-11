@@ -64,7 +64,12 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Context } from 'cordis';
-import { type Diagnostic, diagnostic, type SpinSchema } from '@energy8engine/contracts';
+import {
+  type CheckResponse,
+  type Diagnostic,
+  diagnostic,
+  type SpinSchema,
+} from '@energy8engine/contracts';
 import { parseSpinSchema } from '@energy8engine/spin-parser';
 
 declare module 'cordis' {
@@ -111,6 +116,58 @@ export async function apply(ctx: Context, config: SpinSchemaConfig): Promise<voi
 
   await load();
   ctx.provide('spinSchema', service);
+
+  // `/api/check` needs `ctx.server`, which the host registers AFTER this
+  // plugin (see index.ts) — reactive `ctx.inject`, not a static top-level
+  // `inject`, on purpose: a static `inject = ['server']` would defer this
+  // whole `apply()`, including `ctx.provide('spinSchema', ...)` above, and
+  // every consumer that reads `ctx.spinSchema` synchronously right after
+  // `createIdeHost()` resolves (this file's own tests, `runtime-assets.ts`)
+  // would see it arrive one tick too late. Same shape `runtime-assets.ts`
+  // already uses for its own optional `devGameRoot` reaction.
+  ctx.inject(['server'], (scope: Context) => {
+    /**
+     * "What is wrong with this text" — for `.spin` text that lives only in
+     * a browser editor buffer, never written to `game/script.spin`.
+     * `parseSpinSchema` is pure (see its own doc comment), so this route
+     * needs no temp file and touches nothing on disk.
+     *
+     * Deliberately calls `parseSpinSchema` and `toDiagnostics` directly
+     * rather than `service.reload()`: `spinSchema` is what the composition
+     * screen reads, and a keystroke in an unsaved editor must never rewrite
+     * what the rest of the IDE believes about the file that IS saved.
+     */
+    scope.server.post('/api/check', async (req, res) => {
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        // Absent or unparseable body — a diagnostic below, never a throw.
+        // Same shape as `PUT /api/files/*`'s body parsing in files.ts.
+        body = undefined;
+      }
+
+      const source = (body as Partial<{ source: string }> | undefined)?.source;
+      if (typeof source !== 'string') {
+        res.status = 400;
+        const refusal: CheckResponse = {
+          diagnostics: [
+            diagnostic(
+              'error',
+              'schema',
+              '/api/check',
+              'POST /api/check needs a JSON body shaped {"source": string}',
+            ),
+          ],
+        };
+        res.json(refusal);
+        return;
+      }
+
+      const response: CheckResponse = { diagnostics: toDiagnostics(parseSpinSchema(source)) };
+      res.json(response);
+    });
+  });
 }
 
 async function readSpinSchema(
@@ -136,18 +193,28 @@ async function readSpinSchema(
   }
 
   const parsed = parseSpinSchema(content);
+  return { schema: parsed.schema, diagnostics: toDiagnostics(parsed) };
+}
+
+/**
+ * `parseSpinSchema`'s raw output, turned into what a consumer should show:
+ * every parser diagnostic degrades to a `warning` (a `.spin` this parser
+ * could not read is a fact about THIS PARSER, not the game — see the
+ * module doc), plus `checkActionStages`'s own `error`-severity judgement
+ * about a schema that WAS read cleanly.
+ *
+ * The one function both `readSpinSchema` (a file on disk) and `/api/check`
+ * (a string an editor is still typing) route through, so the two can never
+ * report the same input two different ways — see the module doc's
+ * "Severity, and why it is not decoration" section.
+ */
+function toDiagnostics(parsed: { schema: SpinSchema | null; diagnostics: Diagnostic[] }): Diagnostic[] {
   if (parsed.schema === null) {
     // The parser's own diagnostic already names what was missing — see
     // `parseSpinSchema`'s doc. Nothing to add but the severity.
-    return { schema: null, diagnostics: parsed.diagnostics.map(asWarning) };
+    return parsed.diagnostics.map(asWarning);
   }
-
-  return {
-    schema: parsed.schema,
-    // Every parser diagnostic degrades; only this file's own judgement
-    // about a schema it DID read stops the game. See the module doc.
-    diagnostics: [...parsed.diagnostics.map(asWarning), ...checkActionStages(parsed.schema)],
-  };
+  return [...parsed.diagnostics.map(asWarning), ...checkActionStages(parsed.schema)];
 }
 
 /**

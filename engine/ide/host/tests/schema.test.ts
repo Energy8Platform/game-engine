@@ -1,9 +1,38 @@
+import { cpSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createIdeHost } from '../src/index';
+import { createIdeHost, type IdeHost } from '../src/index';
 
 function fixture(name: string): string {
   return join(__dirname, 'fixtures', name);
+}
+
+/**
+ * The exact minimal `.spin` `spin-parser`'s own suite already proves parses
+ * with zero diagnostics — see `fixtures/project-simple/game/script.spin`'s
+ * doc comment. Read once, from that checked-in file, rather than retyped
+ * here: retyping it would give `/api/check`'s "nothing wrong" test its own,
+ * independently-driftable copy of "known good".
+ */
+const GOOD_SPIN = readFileSync(join(__dirname, 'fixtures', 'project-simple', 'game', 'script.spin'), 'utf8');
+
+/**
+ * A fresh temp copy of `fixtures/files/plain` (an `e8.yml: []` project, so
+ * the host boots with no composition to resolve) with its `game/script.spin`
+ * overwritten to `GOOD_SPIN` — never the checked-in fixture itself. These
+ * tests exercise a route whose whole point is that it must never touch this
+ * file; running it against a shared, un-copied fixture would make a bug in
+ * that route corrupt a checked-in file instead of failing a test.
+ */
+function checkFixture(): string {
+  const dir = realpathSync(mkdtempSync(join('/tmp', 'ide-host-schema-check-')));
+  cpSync(join(__dirname, 'fixtures', 'files', 'plain'), dir, { recursive: true });
+  writeFileSync(join(dir, 'game', 'script.spin'), GOOD_SPIN);
+  return dir;
+}
+
+function startHost(cwd: string): Promise<IdeHost> {
+  return createIdeHost({ cwd, port: 0 });
 }
 
 /**
@@ -117,6 +146,85 @@ describe('GET /api/composition carries the schema', () => {
     expect(body).toHaveProperty('schema');
     expect(body.schema).toBeNull();
     expect(body.diagnostics.length).toBeGreaterThan(0);
+    await host.stop();
+  });
+});
+
+/**
+ * `POST /api/check` — the answer to "what is wrong with this text", for
+ * `.spin` text that only exists in a browser editor buffer, never
+ * written to `game/script.spin`. `parseSpinSchema` is a pure function of a
+ * string (see its own doc comment), which is what makes this route cheap:
+ * no temp file, no write, nothing to clean up — and, just as important, no
+ * effect on `ctx.spinSchema`, the service the composition screen already
+ * reads. A route that reloaded that service on every keystroke would make
+ * typing in the editor rewrite what the rest of the IDE believes about a
+ * file nobody saved.
+ */
+describe('POST /api/check', () => {
+  it('parses the source it was handed, without touching any file', async () => {
+    const dir = checkFixture();
+    const host = await startHost(dir);
+    const before = readFileSync(join(dir, 'game/script.spin'), 'utf8');
+    const res = await fetch(`${host.url}/api/check`, {
+      method: 'POST',
+      // Missing "bet_levels"/"max_win" — the smallest input that reaches a
+      // diagnostic carrying `at`, checked directly against
+      // `parseSpinSchema` before writing this test (see task-2-report.md):
+      // a bare `record { }` never gets past "no game block found", which
+      // carries no `at` at all.
+      body: JSON.stringify({ source: 'game "x" {\n}\n' }),
+    });
+    expect((await res.json()).diagnostics[0].at).toEqual({ line: 1 });
+    expect(readFileSync(join(dir, 'game/script.spin'), 'utf8')).toBe(before);
+    await host.stop();
+  });
+
+  it('a source with nothing wrong answers with an empty list, not a null', async () => {
+    // An editor clearing its markers needs "no problems" to be a value.
+    const dir = checkFixture();
+    const host = await startHost(dir);
+    const source = readFileSync(join(dir, 'game/script.spin'), 'utf8');
+    const res = await fetch(`${host.url}/api/check`, {
+      method: 'POST',
+      body: JSON.stringify({ source }),
+    });
+    expect((await res.json()).diagnostics).toEqual([]);
+    await host.stop();
+  });
+
+  it('a body with no source is a diagnostic, not a crash', async () => {
+    const host = await startHost(checkFixture());
+    const res = await fetch(`${host.url}/api/check`, {
+      method: 'POST',
+      body: JSON.stringify({ notSource: 'x' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).diagnostics).toHaveLength(1);
+    await host.stop();
+  });
+
+  it('a body that is not JSON is a diagnostic, not an empty 500', async () => {
+    // The scar: an unwrapped parse once answered 500 with nothing in the body.
+    const host = await startHost(checkFixture());
+    const res = await fetch(`${host.url}/api/check`, { method: 'POST', body: '<html>' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).diagnostics).toHaveLength(1);
+    await host.stop();
+  });
+
+  it('does not disturb the schema service the project is already using', async () => {
+    // `/api/check` is a pure question about a string. If it reloaded or
+    // replaced `spinSchema`, typing in the editor would rewrite what the
+    // composition screen believes about a file nobody saved.
+    const host = await startHost(checkFixture());
+    const before = host.ctx.spinSchema.schema;
+    expect(before).not.toBeNull();
+    await fetch(`${host.url}/api/check`, {
+      method: 'POST',
+      body: JSON.stringify({ source: 'game "x" {\n}\n' }),
+    });
+    expect(host.ctx.spinSchema.schema).toBe(before);
     await host.stop();
   });
 });

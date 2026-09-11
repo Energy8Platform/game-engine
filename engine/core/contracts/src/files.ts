@@ -49,6 +49,18 @@ export interface FileWriteRequest {
 }
 
 /**
+ * `POST /api/check` — body `{ source: string }`, the answer to "what is
+ * wrong with this text", for `.spin` text that exists only in a browser
+ * editor buffer and has never been written to `game/script.spin`. Same
+ * shape as `DiagnosticsResponse` on purpose: a client that already reads
+ * one refusal shape reads this one for free, and an empty list means
+ * "nothing wrong" rather than the field being left out.
+ */
+export interface CheckResponse {
+  diagnostics: Diagnostic[];
+}
+
+/**
  * Why a file operation refused, as a tag instead of prose. The host's
  * routes pick an HTTP status from this, and the reason it is a tag: they
  * used to pick it by regex-matching the English sentence the service had
