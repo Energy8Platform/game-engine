@@ -25,6 +25,7 @@ export {
   type GameDiagnosticsConfig,
 } from './plugins/diagnostics';
 export { type FilesService, type FilesConfig } from './plugins/files';
+export { type CheckService, type CheckConfig } from './plugins/check';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, useEditorDiagnostics } from './screens/CompositionScreen';

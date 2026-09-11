@@ -10,6 +10,8 @@ import type { GameCompositionConfig } from './plugins/game-composition';
 import * as gameDiagnostics from './plugins/diagnostics';
 import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
+import * as check from './plugins/check';
+import type { CheckConfig } from './plugins/check';
 
 /**
  * Boot the browser-side cordis application.
@@ -23,7 +25,7 @@ import type { FilesConfig } from './plugins/files';
  * every caller gets a `Context` with both services already provided.
  */
 export async function createIdeClient(
-  config: ConnectionConfig & ModulesConfig & GameCompositionConfig & FilesConfig,
+  config: ConnectionConfig & ModulesConfig & GameCompositionConfig & FilesConfig & CheckConfig,
 ): Promise<Context> {
   const ctx = new Context();
   await ctx.plugin(connection, config);
@@ -44,5 +46,8 @@ export async function createIdeClient(
   // else here depends on — composed last for no reason but that this is
   // where it was added.
   await ctx.plugin(files, config);
+  // Same kind of plain fetch wrapper as `files`, nothing here depends on
+  // it either — the editor two tasks from now is the first consumer.
+  await ctx.plugin(check, config);
   return ctx;
 }
