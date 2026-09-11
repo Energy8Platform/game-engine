@@ -206,7 +206,16 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   const output: string[] = [];
   child.stdout?.on('data', (c) => output.push(String(c)));
   child.stderr?.on('data', (c) => output.push(String(c)));
-  child.once('exit', (code, signal) => {
+  // `'close'`, not `'exit'` — Node fires `'exit'` the moment the OS reaps
+  // the process, which can be BEFORE the `'data'` events above have
+  // delivered everything already written to stdout/stderr; `'close'` is
+  // guaranteed to fire only after every stdio stream has ended. A compiler
+  // that prints its error and exits immediately (a syntax error in a
+  // freshly-saved `.spin`, the exact case `restart()` exists for) races
+  // this: on `'exit'`, the readiness loop below could observe `exited`
+  // before `output` has the message, so the same failure was captured on
+  // one run and silently empty on the next. `'close'` closes that race.
+  child.once('close', (code, signal) => {
     exited = true;
     exitInfo = `exit code=${code} signal=${signal}`;
   });

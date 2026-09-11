@@ -90,15 +90,7 @@ export interface SpinSchemaConfig {
   cwd: string;
 }
 
-/**
- * Exported so a consumer that needs to recognize THIS path — not read or
- * parse it, just recognize it — can compare against the one place that
- * spells it out, rather than carrying a second copy of the string that
- * could drift. `dev-game.ts`'s restart-on-write wiring is the one consumer
- * today: see its own doc comment for why that knowledge belongs there and
- * not in `files.ts`.
- */
-export const SPIN_FILENAME = 'game/script.spin';
+const SPIN_FILENAME = 'game/script.spin';
 
 export const name = 'schema';
 

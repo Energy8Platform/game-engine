@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -42,12 +43,15 @@ const WORKSPACE = join(__dirname, 'fixtures', 'workspace'); // e8.yml: `[]`
 
 let host: IdeHost | undefined;
 let ctx: Context | undefined;
+/** Populated by `writableProject()` (the restart block, below) — cleaned up here rather than in a nested `afterEach`, so removal runs AFTER `ctx`'s e8-server has actually been stopped, not before. */
+const restartTestDirs: string[] = [];
 
 afterEach(async () => {
   await host?.stop();
   host = undefined;
   await ctx?.fiber.dispose();
   ctx = undefined;
+  for (const dir of restartTestDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('dev-game — serving the bundle', () => {
@@ -605,25 +609,55 @@ describe('dev-game — teardown', () => {
  * `scriptSha256` that did not change across a real `PUT` (see
  * task-6-report.md). This block turns that measurement into an assertion.
  *
+ * **What the first version of this test actually proved, corrected in
+ * review.** It edited `script.spin` by adding a field to `record Vars`
+ * without also updating the `vars: Vars { max_win_reached: false }`
+ * literal `execute()` returns — legal-looking SpinML that `e8-server`
+ * actually refuses (`vars literal is missing 'measured_marker' — cover
+ * every field or spread with ..v`), so the respawn died and `/api/spin`
+ * answered `scriptSha256: undefined` from that point on. The assertion
+ * (`.not.toBe(before)`) is satisfied by `undefined !== <a real hash>`, so
+ * the test passed for the wrong reason — a `restart()` that killed the
+ * process and never called `boot()` again would have passed it too.
+ * `edited` below is `original` plus a trailing comment line — verified by
+ * hand, through this exact route, that it loads and the hash moves (see
+ * task-6-report.md's round-3 addendum) — and the poll now requires an
+ * actual string, not merely "not equal to the one before".
+ *
  * `files` is composed here alongside `devGame`, sibling plugin scopes on
  * one bare `Context` — the same shape the "one server, two consumers"
  * block above already sets up for `composition`, and the shape `e8 dev`
  * itself boots (`apps/cli/src/index.ts` composes `files` inside
- * `createIdeHost`, `devGame` after). `dev-game.ts` listens for
- * `files/written` on its OWN scope; cordis events are dispatched against
- * the whole context tree a `ctx.plugin()` call descends from, not scoped
- * to the plugin that happens to emit — the same fact `composition.ts`
- * already relies on for `internal/status`.
+ * `createIdeHost`, `devGame` after, both with the SAME `cwd`/`root`). That
+ * equality is load-bearing here, not incidental: `dev-game.ts`'s trigger
+ * resolves a written path against `config.root` and checks containment
+ * against `config.gamesDir`, so `root` has to be the project directory
+ * `files` writes into — unlike the file's other `devGame` tests above,
+ * which use `WEB_ROOT` (an unrelated fixture) because they never write
+ * through `files` at all. `dev-game.ts` listens for `files/written` on its
+ * OWN scope; cordis events are dispatched against the whole context tree a
+ * `ctx.plugin()` call descends from, not scoped to the plugin that happens
+ * to emit — the same fact `composition.ts` already relies on for
+ * `internal/status`.
  */
 describe('dev-game — restart on a script.spin write', () => {
-  /** A private, writable copy of `GAME` — never the checked-in fixture, which every other test in this file only reads. */
+  /**
+   * A private, writable copy of `GAME` — never the checked-in fixture,
+   * which every other test in this file only reads. Registered into the
+   * module-level `restartTestDirs` (removed by the file's own top-level
+   * `afterEach`, AFTER `ctx`'s e8-server is stopped) rather than a
+   * `describe`-scoped `afterEach` here — vitest runs a nested `afterEach`
+   * BEFORE the outer one, which would have deleted a running process's
+   * `--games-dir` out from under it.
+   */
   function writableProject(): string {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-dev-game-restart-')));
     cpSync(GAME, join(dir, 'game'), { recursive: true });
+    restartTestDirs.push(dir);
     return dir;
   }
 
-  async function spinScriptSha256(port: number): Promise<string> {
+  async function spinScriptSha256(port: number): Promise<string | undefined> {
     const res = await fetch(`http://127.0.0.1:${port}/api/spin`, { method: 'POST' });
     const body = await res.json();
     return body.scriptSha256;
@@ -637,7 +671,7 @@ describe('dev-game — restart on a script.spin write', () => {
     await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
     await ctx.plugin(files, { cwd: projectDir });
     await ctx.plugin(devGame, {
-      root: WEB_ROOT,
+      root: projectDir,
       gamesDir: join(projectDir, 'game'),
       gameId: 'first-slot',
       betLevel: 1.0,
@@ -647,14 +681,13 @@ describe('dev-game — restart on a script.spin write', () => {
     const before = await spinScriptSha256(ctx.server.port);
     expect(before).toBeTruthy();
 
-    // The same edit task-6-report.md measured by hand — legal SpinML, adds
-    // a field nothing else in the script references.
+    // Verified by hand against the real binary, through this exact route,
+    // before trusting it here (see task-6-report.md): loads cleanly, and
+    // the hash moves. A trailing comment is the smallest edit that is
+    // unambiguously still legal SpinML — it cannot possibly desync a
+    // literal elsewhere in the file the way adding a field can.
     const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
-    const edited = original.replace(
-      'record Vars {\n  max_win_reached: bool\n}',
-      'record Vars {\n  max_win_reached: bool\n  measured_marker: int\n}',
-    );
-    expect(edited).not.toBe(original);
+    const edited = `${original}\n-- edited by mouse\n`;
 
     const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/game/script.spin`, {
       method: 'PUT',
@@ -665,10 +698,14 @@ describe('dev-game — restart on a script.spin write', () => {
 
     // The restart runs fire-and-forget off the write (see dev-game.ts's
     // own comment on why) — so this polls for the effect (a changed hash)
-    // rather than assuming a fixed delay is enough.
+    // rather than assuming a fixed delay is enough. `typeof sha ===
+    // 'string'` is the half the first version of this test skipped: a
+    // respawn that died would answer `undefined` forever, which also
+    // is not `before` — this must observe an ACTUAL hash, not merely a
+    // different answer.
     await expect
       .poll(() => spinScriptSha256(ctx!.server.port), { timeout: 15_000 })
-      .not.toBe(before);
+      .toSatisfy((sha) => typeof sha === 'string' && sha !== before);
   }, 20_000);
 
   it('a write to any OTHER path does not restart the session', async () => {
@@ -677,7 +714,7 @@ describe('dev-game — restart on a script.spin write', () => {
     await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
     await ctx.plugin(files, { cwd: projectDir });
     await ctx.plugin(devGame, {
-      root: WEB_ROOT,
+      root: projectDir,
       gamesDir: join(projectDir, 'game'),
       gameId: 'first-slot',
       betLevel: 1.0,
@@ -696,6 +733,38 @@ describe('dev-game — restart on a script.spin write', () => {
     // Proving a negative: give a wrongly-triggered restart a real chance
     // to happen (a restart's own spawn+ready poll runs well under this)
     // before asserting the pid never moved.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(ctx.session.pid).toBe(pidBefore);
+  });
+
+  it('a write to a NON-.spin file inside gamesDir does not restart the session', async () => {
+    const projectDir = writableProject();
+    ctx = new Context();
+    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
+    await ctx.plugin(files, { cwd: projectDir });
+    await ctx.plugin(devGame, {
+      root: projectDir,
+      gamesDir: join(projectDir, 'game'),
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+    });
+
+    const pidBefore = ctx.session.pid;
+
+    // `spec.json` lives inside `gamesDir` too — `.spin` is what makes this
+    // NOT a restart trigger, not being outside the directory.
+    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/game/spec.json`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        base64: Buffer.from(readFileSync(join(projectDir, 'game', 'spec.json'), 'utf8'), 'utf8').toString(
+          'base64',
+        ),
+      }),
+    });
+    expect(put.status).toBe(200);
+
     await new Promise((resolve) => setTimeout(resolve, 2000));
     expect(ctx.session.pid).toBe(pidBefore);
   });

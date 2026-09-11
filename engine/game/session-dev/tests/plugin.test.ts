@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { execSync } from 'node:child_process';
+import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
 import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
@@ -227,6 +230,134 @@ describe('the session plugin: restart', () => {
     ctx = undefined;
 
     expect(isProcessAlive(pid)).toBe(false);
+  });
+
+  /**
+   * The failure text the review corrected: after a restart, `binPath` and
+   * `gamesDir` are exactly what they were a moment ago when the process
+   * WAS running — only the `.spin` a person just saved moved. The old
+   * message ("check that an e8-server binary is reachable…") named a
+   * cause the code has no reason to believe. This uses a genuinely
+   * BROKEN `.spin` (a real syntax error, appended after a clean boot) so
+   * the restart fails for the reason a person editing math by mouse
+   * actually hits, not for a missing binary.
+   *
+   * This also exercises the `'exit'` → `'close'` fix in `e8server.ts`:
+   * the compiler prints its error and exits within milliseconds, and the
+   * review found the error text captured only sometimes when the
+   * readiness loop broke on `'exit'` before the stderr `'data'` event had
+   * necessarily fired.
+   */
+  it('a restart failure names the exit and the compiler, not the binary or games-dir', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-dev-restart-broken-spin-'));
+    cpSync(GAME, dir, { recursive: true });
+    try {
+      ctx = new Context();
+      await ctx.plugin(session, { gamesDir: dir, port: 0 });
+      expect(ctx.session.pid).not.toBeNull(); // boots clean before the edit
+
+      appendFileSync(join(dir, 'script.spin'), '\nthis is not valid spin syntax @@@\n');
+
+      const { diagnostics } = await ctx.session.restart();
+      expect(diagnostics).toHaveLength(1);
+      const message = diagnostics[0].message;
+
+      // Names the exit and carries the compiler's own error text.
+      expect(message).toMatch(/exit code=/);
+      expect(message).toContain('script.spin');
+
+      // Does NOT repeat the first-boot guidance, which would blame
+      // something that did not change.
+      expect(diagnostics[0].fix).not.toMatch(/binPath|E8_SERVER_BINARY/);
+      expect(message).not.toMatch(/binPath|E8_SERVER_BINARY/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Concurrency the review found: `restart()` reading and stopping `handle`
+ * without serializing left two overlapping calls both seeing the same
+ * process as "the one to stop" — the second sees `null` (the first already
+ * nulled it), skips its own stop, and whichever spawn settles last
+ * silently wins the service's `handle` while the other's process is never
+ * referenced again. Two quick saves from the editor is exactly this shape,
+ * not a contrived race.
+ *
+ * Each test below uses its OWN private copy of `GAME`, in a unique temp
+ * directory, so `countLive` — matching the OS process list against that
+ * directory's literal path (it appears verbatim in `--games-dir`, per
+ * `e8server.ts`'s `args`) — counts only processes THIS test spawned, not
+ * whatever `spin.test.ts` or the `restart` block above happens to have running
+ * against the shared `GAME` fixture in a parallel worker.
+ */
+describe('the session plugin: restart does not orphan a process', () => {
+  function privateGame(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'session-dev-restart-race-'));
+    cpSync(GAME, dir, { recursive: true });
+    return dir;
+  }
+
+  /** Counts OS processes whose command line contains `marker` — `pgrep -f` exits 1 (throws) when nothing matches, which is zero, not an error. */
+  function countLive(marker: string): number {
+    try {
+      return execSync(`pgrep -f ${JSON.stringify(marker)}`, { encoding: 'utf8' })
+        .split('\n')
+        .filter((line) => line.trim().length > 0).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it('two overlapping restart() calls leave exactly one process alive', async () => {
+    dir = privateGame();
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0 });
+    expect(countLive(dir)).toBe(1);
+
+    const [a, b] = await Promise.all([ctx.session.restart(), ctx.session.restart()]);
+    expect(a.diagnostics).toEqual([]);
+    expect(b.diagnostics).toEqual([]);
+
+    expect(countLive(dir)).toBe(1);
+    expect(isProcessAlive(ctx.session.pid!)).toBe(true);
+  });
+
+  it('three restart() calls staggered 5ms apart leave exactly one process alive', async () => {
+    dir = privateGame();
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0 });
+
+    const calls = [ctx.session.restart()];
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    calls.push(ctx.session.restart());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    calls.push(ctx.session.restart());
+    await Promise.all(calls);
+
+    expect(countLive(dir)).toBe(1);
+    expect(isProcessAlive(ctx.session.pid!)).toBe(true);
+  });
+
+  it('disposing mid-restart does not leave the in-flight respawn alive', async () => {
+    dir = privateGame();
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: dir, port: 0 });
+
+    const restarting = ctx.session.restart();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await ctx.fiber.dispose();
+    ctx = undefined;
+    await restarting; // let the restart's own promise settle before asserting
+
+    expect(countLive(dir)).toBe(0);
   });
 });
 

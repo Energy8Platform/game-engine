@@ -116,7 +116,6 @@ import type { SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import type { IdeRpcService } from './rpc';
 import { runtimeEntryPaths } from './runtime-assets';
-import { SPIN_FILENAME } from './schema';
 
 /**
  * `runtime-assets.ts` reads this service twice over: its mere PRESENCE
@@ -224,6 +223,27 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * `files.ts` only emits a plain `files/written` event naming the path
    * that changed; this is the one place that decides the path matters.
    *
+   * **What "matters" means, corrected in review.** The first version
+   * compared `path` against the one literal `SPIN_FILENAME` string
+   * `schema.ts` reads — `schema.ts`'s reading of the game, not this
+   * plugin's own. `e8-server` is told `--games-dir` and loads every
+   * `.spin` it finds there (see `session-dev`'s own diagnostic: "the
+   * folder holding the .spin file(s)", plural) — so the actual question is
+   * "did a `.spin` file inside `config.gamesDir` change", answered against
+   * `config.gamesDir` (this plugin's own config, the session's actual
+   * notion of where the math lives), not against a string borrowed from a
+   * different reader of the same project. `isInside` (below) is the same
+   * lexical containment check the `/@fs/` route already uses — not
+   * realpath'd, so a path that reaches `gamesDir` only via a symlink, or
+   * differs only in case on a case-insensitive filesystem, is not
+   * recognized. Both are left, deliberately: closing the symlink case
+   * needs the same treatment `/@fs/`'s own containment check already has
+   * and nothing here calls for it yet; closing the case-folding one needs
+   * `realpathSync.native` (which normalizes case on APFS/NTFS, unlike
+   * plain `realpathSync`) and a decision about what "the same file" means
+   * across every OTHER path this file already compares lexically — out of
+   * scope for this fix.
+   *
    * Fire-and-forget: the write's own HTTP response must not block on a
    * process respawn (a real `e8-server` spawn takes real wall-clock time —
    * see `startE8Server`'s readiness poll), and `restart()` already turns a
@@ -232,7 +252,8 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * here needs to await or re-report it.
    */
   ctx.on('files/written', ({ path }) => {
-    if (path !== SPIN_FILENAME) return;
+    if (!path.endsWith('.spin')) return;
+    if (!isInside(config.gamesDir, resolve(config.root, path))) return;
     void ctx.session.restart();
   });
 

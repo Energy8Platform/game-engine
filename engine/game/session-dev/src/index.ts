@@ -98,6 +98,16 @@ export interface SessionService {
    * is an acceptable cost for a dev host a person is actively editing math
    * against, and it would not be acceptable anywhere `--sessions memory`
    * isn't already the deliberate choice.
+   *
+   * A failure here is worded differently from a first-boot failure: the
+   * binary and `--games-dir` did not change, only the `.spin` a person just
+   * saved did, so the diagnostic names the exit and carries the compiler's
+   * own error text instead of pointing at `binPath`/`gamesDir` — see
+   * `boot()`'s own `reason` parameter.
+   *
+   * Every call is serialized onto one internal queue — see `chain`, in
+   * `apply()` — so two overlapping calls (an ordinary "saved twice fast"
+   * gesture) can never both read the same process as the one to stop.
    */
   restart(): Promise<{ diagnostics: Diagnostic[] }>;
 }
@@ -107,32 +117,131 @@ export const name = 'session';
 export async function apply(ctx: Context, config: SessionConfig) {
   let handle: E8Handle | null = null;
   let startupDiagnostic: Diagnostic | null = null;
+  // Flips once teardown has committed to stopping whatever `handle` names
+  // at that moment — see the `ctx.effect` below and `boot()`'s own check
+  // of it. Without it, a restart whose `startE8Server` call is still in
+  // flight when disposal runs finishes AFTER teardown has already run
+  // (`chain` below makes teardown WAIT for it, which closes most of that
+  // race — see the effect's own comment for the remaining sliver this flag
+  // closes).
+  let disposed = false;
 
-  async function boot(): Promise<void> {
+  /**
+   * `reason` only changes the DIAGNOSTIC a failure produces, never the
+   * spawn itself — `'start'` is this plugin's own first boot, `'restart'`
+   * is every call `restart()` (below) makes through it. The distinction
+   * matters because a restart's failure is not the same FACT as a first
+   * boot's: the binary and `gamesDir` are exactly what they were a moment
+   * ago when the process WAS running, so blaming them (the original
+   * message) would name a cause the code has no reason to believe. See
+   * `restart()`'s own doc for the one difference the failure text carries.
+   */
+  async function boot(reason: 'start' | 'restart'): Promise<void> {
     try {
-      handle = await startE8Server(config);
+      const spawned = await startE8Server(config);
+      if (disposed) {
+        // Teardown already ran and stopped whatever `handle` named at that
+        // moment — this process finished spawning too late to have been
+        // it, so nothing else is coming to stop it. It stops itself rather
+        // than outliving a plugin that has already been disposed. Awaited,
+        // not fire-and-forget: the effect's disposer chains onto THIS
+        // `boot()` call through `chain` (see below), and a caller awaiting
+        // `ctx.fiber.dispose()` is owed an actually-dead process by the
+        // time that resolves, the same guarantee the ordinary stop path
+        // already gives.
+        try {
+          await spawned.stop();
+        } catch {
+          // Best-effort, same as `doRestart`'s own `dying.stop()` below.
+        }
+        handle = null;
+        return;
+      }
+      handle = spawned;
       startupDiagnostic = null;
     } catch (error) {
       handle = null;
-      startupDiagnostic = diagnostic(
-        'error',
-        'session',
-        'e8-server',
-        `the math engine did not start: ${error instanceof Error ? error.message : String(error)}`,
-        'check that an e8-server binary is reachable (binPath, E8_SERVER_BINARY, or PATH) and that gamesDir points directly at the folder holding the .spin file(s)',
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      startupDiagnostic =
+        reason === 'start'
+          ? diagnostic(
+              'error',
+              'session',
+              'e8-server',
+              `the math engine did not start: ${message}`,
+              'check that an e8-server binary is reachable (binPath, E8_SERVER_BINARY, or PATH) and that gamesDir points directly at the folder holding the .spin file(s)',
+            )
+          : diagnostic(
+              'error',
+              'session',
+              'e8-server',
+              `the math engine failed to restart: ${message}`,
+              'the binary and games-dir did not change — fix the error in the .spin file that was just saved and save again',
+            );
     }
   }
 
-  await boot();
+  await boot('start');
+
+  async function doRestart(): Promise<{ diagnostics: Diagnostic[] }> {
+    const dying = handle;
+    handle = null;
+    // Visible to a `play()` racing this restart for the whole window
+    // between here and `boot()` settling — see `play()`'s `!handle`
+    // branch and this method's own doc comment on why that is fine.
+    startupDiagnostic = diagnostic(
+      'error',
+      'session',
+      'e8-server',
+      'the math engine is restarting',
+      'wait for the restart to finish and try again',
+    );
+    if (dying) {
+      try {
+        await dying.stop();
+      } catch {
+        // Best-effort: a process that will not stop cleanly still gets
+        // replaced below — `boot()` binds a fresh pid regardless, and a
+        // dying-but-not-dead old process is no worse than what teardown
+        // already tolerates (SIGKILL after a timeout, inside `stop()`
+        // itself).
+      }
+    }
+    await boot('restart');
+    return { diagnostics: startupDiagnostic ? [startupDiagnostic] : [] };
+  }
+
+  /**
+   * Serializes every `restart()` call onto one queue. Without this, two
+   * overlapping calls both read the SAME `handle` as "the one to stop"
+   * (the second sees `null`, because the first already nulled it, and
+   * skips its own stop), both spawn, and whichever `boot()` settles last
+   * silently wins `handle` while the other's process is never referenced
+   * again — measured directly: two concurrent `restart()` calls left two
+   * live processes, and three staggered 5ms apart left three live with two
+   * orphaned. Two quick saves from the editor is an entirely ordinary
+   * gesture, not a contrived race. Chaining onto `chain` (rather than
+   * awaiting a mutex) makes every call's own promise resolve to ITS turn's
+   * result, in order, once every earlier turn has fully settled.
+   */
+  let chain: Promise<{ diagnostics: Diagnostic[] }> = Promise.resolve({ diagnostics: [] });
 
   // Reversible: unloading this plugin (or the app composing it) stops
-  // whichever process is CURRENTLY running. Reads the outer `handle`
-  // binding at teardown time, deliberately — `restart()` reassigns it, and
-  // a `const` snapshot here (as this used to be) would stop the process
-  // this plugin started with even after a later restart replaced it,
-  // leaving the NEW one running past disposal.
-  ctx.effect(() => () => handle?.stop(), 'session:e8-server');
+  // whichever process is CURRENTLY running. Awaits `chain` FIRST — reading
+  // `handle` synchronously here (as this used to) finds it transiently
+  // `null` mid-restart (see `doRestart`, above) and stops nothing, leaving
+  // the respawn it was mid-flight of running past disposal. `disposed` is
+  // the one interleaving awaiting `chain` alone does not close: a
+  // `restart()` call that starts its OWN new link on `chain` after this
+  // disposer has already read the (now-stale) reference into its own
+  // `.then()` — `boot()`'s own check of the flag is what stops that
+  // respawn, not this line.
+  ctx.effect(() => {
+    return () => {
+      disposed = true;
+      return chain.then(() => handle?.stop());
+    };
+  }, 'session:e8-server');
 
   const service: SessionService = {
     get pid() {
@@ -141,32 +250,9 @@ export async function apply(ctx: Context, config: SessionConfig) {
     get startupDiagnostic() {
       return startupDiagnostic;
     },
-    async restart() {
-      const dying = handle;
-      handle = null;
-      // Visible to a `play()` racing this restart for the whole window
-      // between here and `boot()` settling — see `play()`'s `!handle`
-      // branch and this method's own doc comment on why that is fine.
-      startupDiagnostic = diagnostic(
-        'error',
-        'session',
-        'e8-server',
-        'the math engine is restarting',
-        'wait for the restart to finish and try again',
-      );
-      if (dying) {
-        try {
-          await dying.stop();
-        } catch {
-          // Best-effort: a process that will not stop cleanly still gets
-          // replaced below — `boot()` binds a fresh pid regardless, and a
-          // dying-but-not-dead old process is no worse than what teardown
-          // already tolerates (SIGKILL after a timeout, inside `stop()`
-          // itself).
-        }
-      }
-      await boot();
-      return { diagnostics: startupDiagnostic ? [startupDiagnostic] : [] };
+    restart() {
+      chain = chain.then(doRestart);
+      return chain;
     },
     async play(req) {
       // `startupDiagnostic` is NOT written to the diagnostics service here,
