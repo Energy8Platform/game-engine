@@ -9,11 +9,13 @@ import { Monaco } from '../src/editor/Monaco';
  * function`, from `base/browser/canIUse.js`), before any editor exists.
  * `monaco-jsdom.test.tsx` proves the wrapper survives exactly that. Every
  * other claim about the wrapper therefore has to be observed through a
- * stand-in: this fake records what the wrapper asked of Monaco (`create`,
- * `setModelMarkers`, `dispose`) and mimics the one observable Monaco
- * behaviour the first test reads back (the value shows up inside the host
- * element). It is not a claim that Monaco renders — the real browser check
- * in the task report is; it is a claim about what the wrapper HANDS Monaco.
+ * stand-in: this fake stands in for `src/editor/monacoSlice.ts` — the wrapper's
+ * own assembly of the editor, the one module it loads — and records what
+ * the wrapper asked of it (`create`, `setModelMarkers`, `dispose`) while
+ * mimicking the one observable Monaco behaviour the first test reads back
+ * (the value shows up inside the host element). It is not a claim that
+ * Monaco renders — the real browser check in the task report is; it is a
+ * claim about what the wrapper HANDS Monaco.
  *
  * `vi.mock` is hoisted and file-wide, which is why the real-import test
  * lives in its own file rather than at the bottom of this one.
@@ -79,7 +81,7 @@ const fake = vi.hoisted(() => {
   };
 });
 
-vi.mock('monaco-editor', () => fake);
+vi.mock('../src/editor/monacoSlice', () => fake);
 vi.mock('monaco-editor/editor/editor.worker.js?worker', () => ({ default: class {} }));
 
 function d(message: string, at?: Diagnostic['at']): Diagnostic {

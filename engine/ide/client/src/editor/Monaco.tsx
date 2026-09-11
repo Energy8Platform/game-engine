@@ -1,13 +1,14 @@
 /// <reference types="vite/client" />
 import { useEffect, useRef, useState } from 'react';
-import type * as MonacoApi from 'monaco-editor';
+import type * as MonacoApi from './monacoSlice';
 import type { Diagnostic } from '@energy8engine/contracts';
-// Monaco's language services run in a web worker, and it asks the page
+// Monaco runs its heavier text work in a web worker, and asks the page
 // for one through `MonacoEnvironment.getWorker`. This `?worker` import is
 // vite's way of bundling that worker as its own chunk — the reference to
 // `vite/client` above types it. Vitest accepts the same import and never
 // instantiates it, so this file loads under jsdom; what does NOT load
-// there is `monaco-editor` itself, see `load()` below.
+// there is Monaco itself, see `load()` below. The path has no `esm/vs/`
+// segment on purpose — see `./monacoSlice.ts` for the exports-map reason.
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 
 export interface MonacoProps {
@@ -22,16 +23,17 @@ type Api = typeof MonacoApi;
 type Editor = MonacoApi.editor.IStandaloneCodeEditor;
 
 /**
- * Loaded lazily, not imported at the top: `monaco-editor` throws while it
- * evaluates anywhere without a real browser (jsdom: `document
- * .queryCommandSupported is not a function`), and a static import here
- * would carry that throw into everything that imports the `ide-client`
- * barrel — every test in this package, and `App` — the same way one
- * unconditional `node:fs` import once took the whole IDE down at boot.
- * Behind a dynamic import the failure stays inside this component, which
- * turns it into words on screen instead.
+ * Loaded lazily, not imported at the top: Monaco throws while it evaluates
+ * anywhere without a real browser (jsdom: `document.queryCommandSupported
+ * is not a function`), and a static import here would carry that throw
+ * into everything that imports the `ide-client` barrel — every test in
+ * this package, and `App` — the same way one unconditional `node:fs`
+ * import once took the whole IDE down at boot. Behind a dynamic import
+ * the failure stays inside this component, which turns it into words on
+ * screen instead. `./monacoSlice` is this IDE's own narrow assembly of the
+ * editor, not the package's everything-included entry; its doc says why.
  */
-const load = (): Promise<Api> => import('monaco-editor');
+const load = (): Promise<Api> => import('./monacoSlice');
 
 const SEVERITY: Record<Diagnostic['severity'], keyof Api['MarkerSeverity']> = {
   error: 'Error',
