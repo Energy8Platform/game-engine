@@ -37,6 +37,20 @@ declare module 'cordis' {
   interface Context {
     files: FilesService;
   }
+  interface Events {
+    /**
+     * Fired once a `write()` actually lands on disk — never for a write
+     * `describeRefusal` turned away. `path` is exactly the string the
+     * caller passed (project-relative, the same shape `tree()` lists), so
+     * a listener can compare it against a path it already knows, the way
+     * `dev-game.ts` compares it against `game/script.spin`.
+     *
+     * This service does not name a payload beyond the path, and does not
+     * know or care who, if anyone, is listening — see this file's own doc
+     * comment on why `schema.ts` staying unknown to this file is the point.
+     */
+    'files/written'(payload: { path: string }): void;
+  }
 }
 
 export interface FilesService {
@@ -105,7 +119,16 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
   const service: FilesService = {
     tree: () => readTree(config.cwd),
     read: (path) => Promise.resolve(readOne(config.cwd, path)),
-    write: (path, bytes) => Promise.resolve(writeOne(config.cwd, path, bytes)),
+    write: (path, bytes) => {
+      const result = writeOne(config.cwd, path, bytes);
+      // Emitted here, at the service boundary, rather than in the PUT
+      // route below — so `ctx.files.write()` called directly (a test, or
+      // any future in-process caller) fires it exactly the same as the
+      // browser's save button does. `diagnostics.length === 0` is
+      // `writeOne`'s own success signal; nothing here re-derives it.
+      if (result.diagnostics.length === 0) ctx.emit('files/written', { path });
+      return Promise.resolve(result);
+    },
     remove: (path) => Promise.resolve(removeOne(config.cwd, path)),
   };
   ctx.provide('files', service);

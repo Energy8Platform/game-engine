@@ -116,6 +116,7 @@ import type { SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import type { IdeRpcService } from './rpc';
 import { runtimeEntryPaths } from './runtime-assets';
+import { SPIN_FILENAME } from './schema';
 
 /**
  * `runtime-assets.ts` reads this service twice over: its mere PRESENCE
@@ -208,6 +209,31 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     gamesDir: config.gamesDir,
     port: config.port ?? 0,
     binPath: config.binPath,
+  });
+
+  /**
+   * The link task-6-report.md measured missing: `ctx.spinSchema` and
+   * `GET /api/composition` were already fresh on their next request, but
+   * `ctx.session`'s `e8-server` process is spawned once and never told to
+   * reload — the math a spin actually PLAYS stayed the pre-edit version
+   * until the whole host restarted.
+   *
+   * `files.ts` does not know `game/script.spin` is special, and per
+   * `schema.ts`'s own doc it should not learn that — the knowledge "this
+   * path is the math" belongs where the math is SERVED, which is here.
+   * `files.ts` only emits a plain `files/written` event naming the path
+   * that changed; this is the one place that decides the path matters.
+   *
+   * Fire-and-forget: the write's own HTTP response must not block on a
+   * process respawn (a real `e8-server` spawn takes real wall-clock time —
+   * see `startE8Server`'s readiness poll), and `restart()` already turns a
+   * failed respawn into a `Diagnostic` the next `play()`/`/api/spin` call
+   * reports, the same contract the very first spawn already has. Nothing
+   * here needs to await or re-report it.
+   */
+  ctx.on('files/written', ({ path }) => {
+    if (path !== SPIN_FILENAME) return;
+    void ctx.session.restart();
   });
 
   /**

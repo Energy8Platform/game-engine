@@ -425,6 +425,49 @@ describe('files service — write', () => {
   });
 });
 
+/**
+ * This service does not know `game/script.spin` is special, and per
+ * `schema.ts`'s own brief it should stay that way — the knowledge that a
+ * write to THAT path means "the math changed" belongs with whoever serves
+ * the math (`dev-game.ts`), not here. What this file owes is only the
+ * signal: a plain cordis event, naming the path, fired once a write has
+ * actually landed on disk — and nothing narrower, so any future listener
+ * (not only `dev-game`) can decide for itself which paths it cares about.
+ */
+describe('files service — the files/written event', () => {
+  it('fires with the path once a write actually lands on disk', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const seen: { path: string }[] = [];
+    ctx.on('files/written', (payload) => seen.push(payload));
+
+    await ctx.files.write('game/script.spin', bytes('game "first-slot" {\n}\n'));
+
+    expect(seen).toEqual([{ path: 'game/script.spin' }]);
+  });
+
+  it('stays quiet when the write was refused', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const seen: { path: string }[] = [];
+    ctx.on('files/written', (payload) => seen.push(payload));
+
+    const { diagnostics } = await ctx.files.write('../escaped.txt', bytes('x'));
+    expect(diagnostics.length).toBeGreaterThan(0);
+
+    expect(seen).toEqual([]);
+  });
+
+  it('fires once per write, one event per path, not shared across different files', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const seen: string[] = [];
+    ctx.on('files/written', ({ path }) => seen.push(path));
+
+    await ctx.files.write('art/logo.txt', bytes('a'));
+    await ctx.files.write('game/script.spin', bytes('game "first-slot" {\n}\n'));
+
+    expect(seen).toEqual(['art/logo.txt', 'game/script.spin']);
+  });
+});
+
 describe('files service — remove', () => {
   it('removes a file', async () => {
     const ctx = await hostFor(fixture('plain'));

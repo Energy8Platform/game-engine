@@ -158,6 +158,79 @@ describe('the session plugin', () => {
 });
 
 /**
+ * `restart()`: the one way to get new math into an already-running
+ * `e8-server` — the proto this file's sibling `e8server.ts` speaks has no
+ * reload RPC, so "kill it and spawn a fresh one against the same
+ * `--games-dir`" is not a workaround, it is the whole mechanism. `dev-game`
+ * (the only production caller) triggers this off a `game/script.spin`
+ * write; these tests exercise the service directly, the same way the
+ * startup path above does.
+ */
+describe('the session plugin: restart', () => {
+  it('kills the old process, spawns a new one, and a spin afterward succeeds', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+
+    const firstPid = ctx.session.pid;
+    expect(typeof firstPid).toBe('number');
+
+    const { diagnostics } = await ctx.session.restart();
+    expect(diagnostics).toEqual([]);
+
+    const secondPid = ctx.session.pid;
+    expect(typeof secondPid).toBe('number');
+    expect(secondPid).not.toBe(firstPid);
+    // Not just "a method resolved" — the OLD pid is actually gone and the
+    // NEW one is actually alive, the same standard the teardown test above
+    // holds itself to.
+    expect(isProcessAlive(firstPid!)).toBe(false);
+    expect(isProcessAlive(secondPid!)).toBe(true);
+
+    const spin = await ctx.session.play({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
+    expect(spin.diagnostics).toEqual([]);
+    expect(spin.result).toBeDefined();
+  });
+
+  it('a restart against an unstartable binary never throws — the next play() reports it as data', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, {
+      gamesDir: GAME,
+      port: 0,
+      binPath: '/nonexistent/e8-server-binary',
+      readyTimeoutMs: 5_000,
+    });
+    expect(ctx.session.pid).toBeNull();
+
+    const { diagnostics } = await ctx.session.restart();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].severity).toBe('error');
+    expect(ctx.session.startupDiagnostic).toBe(diagnostics[0]);
+
+    const { result, diagnostics: playDiagnostics } = await ctx.session.play({
+      gameId: 'first-slot',
+      action: 'spin',
+      betLevel: 1.0,
+    });
+    expect(result).toBeUndefined();
+    expect(playDiagnostics).toHaveLength(1);
+  });
+
+  it('disposing after a restart kills the NEW process, not a stale reference to the old one', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+    await ctx.session.restart();
+
+    const pid = ctx.session.pid!;
+    expect(isProcessAlive(pid)).toBe(true);
+
+    await ctx.fiber.dispose();
+    ctx = undefined;
+
+    expect(isProcessAlive(pid)).toBe(false);
+  });
+});
+
+/**
  * `play()`'s PER-CALL diagnostics, reaching the composition's shared
  * `diagnostics` service — this row's `apply(ctx)` already holds `ctx` (the
  * same way `mechanics1`'s does), so it is positioned to write directly, for

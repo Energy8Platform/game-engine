@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
@@ -8,6 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as devGame from '../src/plugins/dev-game';
+import * as files from '../src/plugins/files';
 
 /**
  * `dev-game`'s HTTP half — measured in Step 1 (see task-11-report.md for
@@ -584,5 +593,110 @@ describe('dev-game — teardown', () => {
         { timeout: 5000 },
       )
       .toBe('gone');
+  });
+});
+
+/**
+ * The link task 6's live-host measurement found missing: everything
+ * upstream of the actual math (`ctx.spinSchema`, `GET /api/composition`)
+ * was already fresh on the next request, but `e8-server` — spawned once
+ * by `session.apply` and never told to reload — kept answering with the
+ * PRE-edit script until the whole host restarted, measured directly by a
+ * `scriptSha256` that did not change across a real `PUT` (see
+ * task-6-report.md). This block turns that measurement into an assertion.
+ *
+ * `files` is composed here alongside `devGame`, sibling plugin scopes on
+ * one bare `Context` — the same shape the "one server, two consumers"
+ * block above already sets up for `composition`, and the shape `e8 dev`
+ * itself boots (`apps/cli/src/index.ts` composes `files` inside
+ * `createIdeHost`, `devGame` after). `dev-game.ts` listens for
+ * `files/written` on its OWN scope; cordis events are dispatched against
+ * the whole context tree a `ctx.plugin()` call descends from, not scoped
+ * to the plugin that happens to emit — the same fact `composition.ts`
+ * already relies on for `internal/status`.
+ */
+describe('dev-game — restart on a script.spin write', () => {
+  /** A private, writable copy of `GAME` — never the checked-in fixture, which every other test in this file only reads. */
+  function writableProject(): string {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-dev-game-restart-')));
+    cpSync(GAME, join(dir, 'game'), { recursive: true });
+    return dir;
+  }
+
+  async function spinScriptSha256(port: number): Promise<string> {
+    const res = await fetch(`http://127.0.0.1:${port}/api/spin`, { method: 'POST' });
+    const body = await res.json();
+    return body.scriptSha256;
+  }
+
+  it('a write to game/script.spin through the real route restarts the session, and the next spin reflects the new script', async () => {
+    // Two real e8-server spawns (initial boot + the restart under test)
+    // plus the poll below — comfortably over vitest's 5s default.
+    const projectDir = writableProject();
+    ctx = new Context();
+    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
+    await ctx.plugin(files, { cwd: projectDir });
+    await ctx.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: join(projectDir, 'game'),
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+    });
+
+    const before = await spinScriptSha256(ctx.server.port);
+    expect(before).toBeTruthy();
+
+    // The same edit task-6-report.md measured by hand — legal SpinML, adds
+    // a field nothing else in the script references.
+    const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+    const edited = original.replace(
+      'record Vars {\n  max_win_reached: bool\n}',
+      'record Vars {\n  max_win_reached: bool\n  measured_marker: int\n}',
+    );
+    expect(edited).not.toBe(original);
+
+    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/game/script.spin`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ base64: Buffer.from(edited, 'utf8').toString('base64') }),
+    });
+    expect(put.status).toBe(200);
+
+    // The restart runs fire-and-forget off the write (see dev-game.ts's
+    // own comment on why) — so this polls for the effect (a changed hash)
+    // rather than assuming a fixed delay is enough.
+    await expect
+      .poll(() => spinScriptSha256(ctx!.server.port), { timeout: 15_000 })
+      .not.toBe(before);
+  }, 20_000);
+
+  it('a write to any OTHER path does not restart the session', async () => {
+    const projectDir = writableProject();
+    ctx = new Context();
+    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
+    await ctx.plugin(files, { cwd: projectDir });
+    await ctx.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: join(projectDir, 'game'),
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+    });
+
+    const pidBefore = ctx.session.pid;
+
+    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/notes.txt`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ base64: Buffer.from('hello', 'utf8').toString('base64') }),
+    });
+    expect(put.status).toBe(200);
+
+    // Proving a negative: give a wrongly-triggered restart a real chance
+    // to happen (a restart's own spawn+ready poll runs well under this)
+    // before asserting the pid never moved.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(ctx.session.pid).toBe(pidBefore);
   });
 });

@@ -79,6 +79,27 @@ export interface SessionService {
    * having to re-derive a vaguer one from `pid === null` alone.
    */
   readonly startupDiagnostic: Diagnostic | null;
+  /**
+   * Kills the running `e8-server` and spawns a fresh one against the same
+   * `--games-dir` — the only way this process ever picks up an edited
+   * `.spin`. The gRPC contract this package speaks (`e8server.ts`'s
+   * `ENGINE_PROTO`) has no reload RPC, so a respawn is not a workaround for
+   * a missing feature, it is the actual mechanism a `--sessions memory`
+   * dev host uses. Never rejects, same contract as `play()`: a respawn
+   * that fails to come up is a `Diagnostic`, reachable both from this call
+   * and from every `play()` call afterward, exactly like the first spawn's
+   * failure already is.
+   *
+   * **Every round in flight is lost.** `--sessions memory` keeps round
+   * state inside the killed process; there is no handoff, and nothing
+   * here waits for an in-flight `play()` to finish first — a spin racing
+   * a restart fails as data (see `play()`'s own `!handle` branch), the
+   * same way a spin against a server that never started already does. That
+   * is an acceptable cost for a dev host a person is actively editing math
+   * against, and it would not be acceptable anywhere `--sessions memory`
+   * isn't already the deliberate choice.
+   */
+  restart(): Promise<{ diagnostics: Diagnostic[] }>;
 }
 
 export const name = 'session';
@@ -87,31 +108,66 @@ export async function apply(ctx: Context, config: SessionConfig) {
   let handle: E8Handle | null = null;
   let startupDiagnostic: Diagnostic | null = null;
 
-  try {
-    handle = await startE8Server(config);
-  } catch (error) {
-    startupDiagnostic = diagnostic(
-      'error',
-      'session',
-      'e8-server',
-      `the math engine did not start: ${error instanceof Error ? error.message : String(error)}`,
-      'check that an e8-server binary is reachable (binPath, E8_SERVER_BINARY, or PATH) and that gamesDir points directly at the folder holding the .spin file(s)',
-    );
+  async function boot(): Promise<void> {
+    try {
+      handle = await startE8Server(config);
+      startupDiagnostic = null;
+    } catch (error) {
+      handle = null;
+      startupDiagnostic = diagnostic(
+        'error',
+        'session',
+        'e8-server',
+        `the math engine did not start: ${error instanceof Error ? error.message : String(error)}`,
+        'check that an e8-server binary is reachable (binPath, E8_SERVER_BINARY, or PATH) and that gamesDir points directly at the folder holding the .spin file(s)',
+      );
+    }
   }
 
-  if (handle) {
-    // Reversible: unloading this plugin (or the app composing it) stops the
-    // real process. `started` (not `handle`) is captured so the teardown
-    // closure keeps working even though `handle`'s outer binding is
-    // reassignable — it isn't reassigned again after this point, but tying
-    // the effect to a `const` avoids relying on that.
-    const started = handle;
-    ctx.effect(() => () => started.stop(), 'session:e8-server');
-  }
+  await boot();
+
+  // Reversible: unloading this plugin (or the app composing it) stops
+  // whichever process is CURRENTLY running. Reads the outer `handle`
+  // binding at teardown time, deliberately — `restart()` reassigns it, and
+  // a `const` snapshot here (as this used to be) would stop the process
+  // this plugin started with even after a later restart replaced it,
+  // leaving the NEW one running past disposal.
+  ctx.effect(() => () => handle?.stop(), 'session:e8-server');
 
   const service: SessionService = {
-    pid: handle?.pid ?? null,
-    startupDiagnostic,
+    get pid() {
+      return handle?.pid ?? null;
+    },
+    get startupDiagnostic() {
+      return startupDiagnostic;
+    },
+    async restart() {
+      const dying = handle;
+      handle = null;
+      // Visible to a `play()` racing this restart for the whole window
+      // between here and `boot()` settling — see `play()`'s `!handle`
+      // branch and this method's own doc comment on why that is fine.
+      startupDiagnostic = diagnostic(
+        'error',
+        'session',
+        'e8-server',
+        'the math engine is restarting',
+        'wait for the restart to finish and try again',
+      );
+      if (dying) {
+        try {
+          await dying.stop();
+        } catch {
+          // Best-effort: a process that will not stop cleanly still gets
+          // replaced below — `boot()` binds a fresh pid regardless, and a
+          // dying-but-not-dead old process is no worse than what teardown
+          // already tolerates (SIGKILL after a timeout, inside `stop()`
+          // itself).
+        }
+      }
+      await boot();
+      return { diagnostics: startupDiagnostic ? [startupDiagnostic] : [] };
+    },
     async play(req) {
       // `startupDiagnostic` is NOT written to the diagnostics service here,
       // deliberately — it is the SAME object on every call this branch
