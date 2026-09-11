@@ -62,7 +62,14 @@ import { looksBinary } from './AssetsScreen';
  * back in either order.
  */
 
-/** How long a pause in typing has to last before a check is actually sent — cuts the request volume without changing what gets checked. */
+/**
+ * How long a pause in typing has to last before a check is actually sent —
+ * cuts the request volume without changing what gets checked.
+ *
+ * ponytail: 300 is a guess at the usual editor-lint magnitude, not a
+ * measurement; it was also picked to sit inside the test harness's 1000ms
+ * `waitFor` default. Measure perceived latency before moving it.
+ */
 const CHECK_DEBOUNCE_MS = 300;
 
 /** `game/script.spin` and anything under `plugins/` — the two things the spec says are edited by hand. */
