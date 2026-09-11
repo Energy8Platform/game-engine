@@ -994,3 +994,118 @@ game "second" {
     ).toBe(true);
   });
 });
+
+describe('parseSpinSchema — `at`, the structured twin of `where`\'s line prose', () => {
+  // A record needs a `game { ... }` block elsewhere in the file to get past
+  // `parseGame`'s early return — an empty or game-less source never reaches
+  // `parseRecords` at all, it stops at "no game block found" instead. These
+  // fixtures put a minimal valid game block alongside the broken record so
+  // the record diagnostic is the one under test.
+  it('a record block with no name carries the line it was on', () => {
+    const src = 'record {\n  x: int\n}\ngame "demo" {\n  bet_levels = [1.0]\n  max_win = 10.0\n}\n';
+    const { diagnostics } = parseSpinSchema(src);
+    expect(diagnostics[0].at).toEqual({ line: 1 });
+  });
+
+  it('the line is 1-based, matching what an editor shows', () => {
+    // Off by one here means every marker sits one row above its error, which
+    // looks like the parser is wrong rather than the reporter.
+    const src =
+      '\n\nrecord {\n  x: int\n}\ngame "demo" {\n  bet_levels = [1.0]\n  max_win = 10.0\n}\n';
+    const { diagnostics } = parseSpinSchema(src);
+    expect(diagnostics[0].at!.line).toBe(3);
+  });
+
+  it('keeps `where` exactly as it was, for the human reading a list', () => {
+    // `at` is for the editor. Removing the prose would empty every list that
+    // shows diagnostics without a source file beside them.
+    const src = 'record {\n}\ngame "demo" {\n  bet_levels = [1.0]\n  max_win = 10.0\n}\n';
+    const { diagnostics } = parseSpinSchema(src);
+    expect(diagnostics[0].where).toContain('line 1');
+  });
+
+  it('a diagnostic about no particular line has no `at` at all', () => {
+    // Absent means "the producer does not know", not line 1. A marker at the
+    // top of the file for a whole-file problem points at innocent code.
+    // An empty source never finds a "game { ... }" block, so this is the
+    // one diagnostic `parseSpinSchema('')` ever produces.
+    const { diagnostics } = parseSpinSchema('');
+    expect(diagnostics.some((d) => d.at !== undefined)).toBe(false);
+  });
+
+  it('every diagnostic that names a line in `where` also carries `at`', () => {
+    // The guard against the two drifting: a future parser site that writes the
+    // prose and forgets the field would show a line to a human and none to the
+    // editor. Structural, over many malformed sources, not one fixture — one
+    // entry per line-numbered diagnostic site in the parser, so a site this
+    // task missed shows up here instead of only in a future bug report.
+    //
+    // Each source is MINIMAL (the file's own fixture, above) with exactly one
+    // mutation, or a variant lifted from the unterminated-block/no-brace tests
+    // elsewhere in this file — the same shapes already proven to reach each
+    // branch, not freshly invented ones that might not.
+    const BROKEN = [
+      // findBlocks: a keyword with no "{" at all.
+      `
+record Vars { a: int }
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 100.0 vars = Vars data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+action stray
+`,
+      // requireMatchingBrace: an unterminated block.
+      `
+record Broken { a: int
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 100.0 data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`,
+      // parseFieldList: text before the first field that never became one.
+      MINIMAL.replace(
+        'record Vars { max_win_reached: bool }',
+        'record Vars { garbage max_win_reached: bool }',
+      ),
+      // parseFieldList: a field whose type text doesn't parse.
+      MINIMAL.replace('max_win_reached: bool', 'max_win_reached: bool  odd: not$a$type'),
+      // NamedCollection.insert: a repeated record name.
+      `
+record Vars { a: int }
+record Vars { b: float }
+enum SpinData tag stage { base_game { x: int } }
+game "demo" { bet_levels = [1.0] max_win = 100.0 vars = Vars data = SpinData }
+action spin { stage = base_game cost = 1.0 }
+`,
+      // parseRecords: a record block with no name.
+      MINIMAL.replace('record Vars { max_win_reached: bool }', 'record { max_win_reached: bool }'),
+      // parseStages: a tagged enum that resolves but declares no variant.
+      MINIMAL.replace('  base_game { grid: [[int]]  win: float }\n', ''),
+      // parseGame: a second "game { ... }" block.
+      MINIMAL + '\ngame "second" {\n  bet_levels = [1.0]\n  max_win = 10.0\n  data = SpinData\n}',
+      // parseGame: a game block with no quoted name.
+      MINIMAL.replace('game "demo" {', 'game demo {'),
+      // parseGame: missing "bet_levels" or "max_win".
+      MINIMAL.replace('  bet_levels = [0.2, 1.0]\n', ''),
+      // parseActions: an action block with no name.
+      MINIMAL.replace(
+        'action spin { stage = base_game  cost = 1.0 }',
+        'action { stage = base_game  cost = 1.0 }',
+      ),
+      // parseActions: an action missing "stage" or "cost".
+      MINIMAL.replace(
+        'action spin { stage = base_game  cost = 1.0 }',
+        'action spin { stage = base_game }',
+      ),
+      // parseActions: an unreadable "opens" clause.
+      MINIMAL + '\naction bonus { stage = base_game  cost = 1.0  opens = not_a_valid_opens_clause }',
+      // checkReferences: "vars = X" names a record the file never declares.
+      MINIMAL.replace('vars = Vars', 'vars = Varz'),
+      // checkReferences: a field typed by a record the file never declares.
+      MINIMAL.replace('max_win_reached: bool', 'max_win_reached: bool  hits: [Nope]'),
+    ];
+    for (const source of BROKEN) {
+      for (const d of parseSpinSchema(source).diagnostics) {
+        if (/line \d+/.test(d.where)) expect(d.at, d.where).toBeDefined();
+      }
+    }
+  });
+});

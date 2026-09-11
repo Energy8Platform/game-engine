@@ -20,4 +20,12 @@ describe('diagnostic', () => {
   it('omits the fix key entirely when not given', () => {
     expect('fix' in diagnostic('info', 'p', 'w', 'm')).toBe(false);
   });
+
+  it('has no `at` unless a producer attaches one', () => {
+    // `at` is not a constructor argument — see `diagnostic.ts`'s doc comment
+    // on why a sixth positional string would be worse than the problem it
+    // solves. A producer that knows a position attaches it the same way
+    // `fileDiagnostic` attaches `code`.
+    expect('at' in diagnostic('error', 'p', 'w', 'm')).toBe(false);
+  });
 });

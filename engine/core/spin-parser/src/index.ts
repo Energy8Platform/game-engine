@@ -63,6 +63,7 @@
 import {
   type Diagnostic,
   diagnostic,
+  type Severity,
   type ActionDef,
   type FieldType,
   type RecordShape,
@@ -71,6 +72,24 @@ import {
 } from '@energy8engine/contracts';
 
 const PLUGIN = 'spin-parser';
+
+/**
+ * `diagnostic()`, plus the line stamped into `at` — the structured twin an
+ * editor reads instead of parsing `where`'s `line ${line}` prose back (see
+ * `Diagnostic.at`'s doc comment for why that parse-back is the one thing
+ * this must never become). Every call site below that already knows a line
+ * number goes through this one function instead of `diagnostic()` directly,
+ * so `where`'s prose and `at`'s number can't drift apart at one site while
+ * staying in sync at the rest.
+ */
+function lineDiagnostic(
+  severity: Severity,
+  line: number,
+  message: string,
+  fix?: string,
+): Diagnostic {
+  return { ...diagnostic(severity, PLUGIN, `line ${line}`, message, fix), at: { line } };
+}
 
 /**
  * Strips `.spin`'s only comment form (`-- ...` to end of line) before any
@@ -148,12 +167,7 @@ function findBlocks(
     const braceStart = source.indexOf('{', afterKeyword);
     if (braceStart === -1) {
       diagnostics.push(
-        diagnostic(
-          'error',
-          PLUGIN,
-          `line ${line}`,
-          `"${keyword}" block has no "{" — nothing to parse`,
-        ),
+        lineDiagnostic('error', line, `"${keyword}" block has no "{" — nothing to parse`),
       );
       continue;
     }
@@ -189,12 +203,7 @@ function requireMatchingBrace(
   const end = matchingBrace(source, braceStart);
   if (end === -1) {
     diagnostics.push(
-      diagnostic(
-        'error',
-        PLUGIN,
-        `line ${line}`,
-        `${label}: unterminated block — no matching "}" found`,
-      ),
+      lineDiagnostic('error', line, `${label}: unterminated block — no matching "}" found`),
     );
     return null;
   }
@@ -346,10 +355,9 @@ function parseFieldList(
     // true thing that can be said about it.
     unread.push(null);
     diagnostics.push(
-      diagnostic(
+      lineDiagnostic(
         'error',
-        PLUGIN,
-        `line ${line}`,
+        line,
         `block "${blockName}": unreadable declaration "${leading}" (expected "name: Type")`,
       ),
     );
@@ -363,10 +371,9 @@ function parseFieldList(
     if (type === null) {
       unread.push(name);
       diagnostics.push(
-        diagnostic(
+        lineDiagnostic(
           'error',
-          PLUGIN,
-          `line ${line}`,
+          line,
           `block "${blockName}": field "${name}" has an unreadable type "${typeText === '' ? '(empty)' : typeText}"`,
         ),
       );
@@ -430,10 +437,9 @@ class NamedCollection<T> {
   insert(name: string, value: T, line: number, diagnostics: Diagnostic[]): boolean {
     if (name in this.map) {
       diagnostics.push(
-        diagnostic(
+        lineDiagnostic(
           'error',
-          PLUGIN,
-          `line ${line}`,
+          line,
           `duplicate ${this.kind} "${name}"${this.scope === '' ? '' : ` in ${this.scope}`} — keeping the first, dropping this one`,
         ),
       );
@@ -476,7 +482,7 @@ function parseRecords(
   for (const { header, body, line } of blocks) {
     const name = header.trim();
     if (name === '') {
-      diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'record block has no name'));
+      diagnostics.push(lineDiagnostic('error', line, 'record block has no name'));
       gaps.push({ in: 'records', name: null, field: null });
       continue;
     }
@@ -646,10 +652,9 @@ function parseStages(
     if (Object.keys(built).length === 0) {
       gaps.push({ in: 'stages', name: null, field: null });
       diagnostics.push(
-        diagnostic(
+        lineDiagnostic(
           'error',
-          PLUGIN,
-          `line ${spinData.line}`,
+          spinData.line,
           `"enum ${dataTypeName} tag stage" declares no stage variant — nothing inside it reads as "name { ... }"`,
           'give the enum at least one stage variant, e.g. "base_game { grid: [[int]] }"',
         ),
@@ -904,10 +909,9 @@ function parseGame(
   // looked exactly like a file with one.
   for (const extra of blocks.slice(1)) {
     diagnostics.push(
-      diagnostic(
+      lineDiagnostic(
         'error',
-        PLUGIN,
-        `line ${extra.line}`,
+        extra.line,
         `a second "game ${extra.header.trim()}" block — a file declares exactly one game; keeping the one on line ${line}, dropping this one`,
         'delete the duplicate game block, or merge its clauses into the first',
       ),
@@ -915,7 +919,7 @@ function parseGame(
   }
   const nameMatch = /^"([^"]*)"$/.exec(header.trim());
   if (nameMatch === null) {
-    diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'game block has no quoted name'));
+    diagnostics.push(lineDiagnostic('error', line, 'game block has no quoted name'));
     return null;
   }
   const clauses = findClauses(body, GAME_KEYS, false);
@@ -927,12 +931,7 @@ function parseGame(
   const maxWin = maxWinText === undefined ? NaN : Number(maxWinText);
   if (betLevels === null || !Number.isFinite(maxWin)) {
     diagnostics.push(
-      diagnostic(
-        'error',
-        PLUGIN,
-        `line ${line}`,
-        'game block is missing "bet_levels" or "max_win"',
-      ),
+      lineDiagnostic('error', line, 'game block is missing "bet_levels" or "max_win"'),
     );
     return null;
   }
@@ -1011,7 +1010,7 @@ function parseActions(
   for (const { header, body, line } of blocks) {
     const name = header.trim();
     if (name === '') {
-      diagnostics.push(diagnostic('error', PLUGIN, `line ${line}`, 'action block has no name'));
+      diagnostics.push(lineDiagnostic('error', line, 'action block has no name'));
       dropped = true;
       continue;
     }
@@ -1024,12 +1023,7 @@ function parseActions(
     const cost = costText === undefined ? NaN : Number(costText);
     if (stage === undefined || !Number.isFinite(cost)) {
       diagnostics.push(
-        diagnostic(
-          'error',
-          PLUGIN,
-          `line ${line}`,
-          `action "${name}" is missing "stage" or "cost"`,
-        ),
+        lineDiagnostic('error', line, `action "${name}" is missing "stage" or "cost"`),
       );
       dropped = true;
       continue;
@@ -1052,12 +1046,7 @@ function parseActions(
         const entry = parseOpens(text);
         if (entry === undefined) {
           diagnostics.push(
-            diagnostic(
-              'error',
-              PLUGIN,
-              `line ${line}`,
-              `action "${name}": unreadable "opens" clause "${text}"`,
-            ),
+            lineDiagnostic('error', line, `action "${name}": unreadable "opens" clause "${text}"`),
           );
           continue;
         }
@@ -1180,10 +1169,9 @@ function checkReferences(
   ] as const) {
     if (name === undefined || name in records) continue;
     diagnostics.push(
-      diagnostic(
+      lineDiagnostic(
         'error',
-        PLUGIN,
-        `line ${game.line}`,
+        game.line,
         `game block: "${clause} = ${name}" names a record the file does not declare — it declares: ${known}`,
         `fix the name after "${clause} =", or add "record ${name} { ... }"`,
       ),
@@ -1193,10 +1181,9 @@ function checkReferences(
   for (const ref of refs) {
     if (ref.name in records) continue;
     diagnostics.push(
-      diagnostic(
+      lineDiagnostic(
         'error',
-        PLUGIN,
-        `line ${ref.line}`,
+        ref.line,
         `block "${ref.owner}": field "${ref.field}" is typed "${ref.name}", which is not a built-in type and which the file does not declare as a record — it declares: ${known}`,
         `fix the type of "${ref.field}", or add "record ${ref.name} { ... }"`,
       ),

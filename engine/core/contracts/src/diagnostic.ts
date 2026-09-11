@@ -1,6 +1,14 @@
 /** How much a failure matters. `error` stops the game; `warning` degrades it. */
 export type Severity = 'error' | 'warning' | 'info';
 
+/** A place inside a source FILE — what an editor needs to draw a marker. */
+export interface SourcePosition {
+  /** 1-based, as every editor counts. */
+  line: number;
+  /** 1-based. Absent when the producer knows the line and not the column. */
+  column?: number;
+}
+
 /** A failure that reaches a human, in the same shape for the game, the IDE and the agent. */
 export interface Diagnostic {
   severity: Severity;
@@ -112,6 +120,20 @@ export interface Diagnostic {
    * added to prevent.
    */
   code?: string;
+  /**
+   * Where in a source FILE this is, when the producer knows. Structured
+   * because an editor needs a number: `where` carries prose for a human and
+   * must never be parsed back — this branch removed exactly that pattern from
+   * the host's status selection one slice ago (see `code` above).
+   *
+   * Absent everywhere except the spin parser today, and absent is not "line
+   * 1" — a diagnostic about a whole file has no `at`, because a marker at
+   * the top of the file for a whole-file problem would accuse innocent code.
+   * Attached by the producer after the fact, the same way `fileDiagnostic`
+   * attaches `code`: not a constructor argument, so this factory's five
+   * positional strings don't grow a sixth.
+   */
+  at?: SourcePosition;
 }
 
 export function diagnostic(
