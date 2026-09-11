@@ -42,8 +42,10 @@ declare module 'cordis' {
      * Fired once a `write()` actually lands on disk — never for a write
      * `describeRefusal` turned away. `path` is exactly the string the
      * caller passed (project-relative, the same shape `tree()` lists), so
-     * a listener can compare it against a path it already knows, the way
-     * `dev-game.ts` compares it against `game/script.spin`.
+     * a listener can decide for itself whether the path matters — the way
+     * `dev-game.ts` asks whether it is a `.spin` inside its own games
+     * directory, against its own config rather than a name this file
+     * would have to know.
      *
      * This service does not name a payload beyond the path, and does not
      * know or care who, if anyone, is listening — see this file's own doc

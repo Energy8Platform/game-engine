@@ -65,8 +65,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Context } from 'cordis';
 import {
-  type CheckResponse,
   type Diagnostic,
+  type DiagnosticsResponse,
   diagnostic,
   type SpinSchema,
 } from '@energy8engine/contracts';
@@ -150,7 +150,7 @@ export async function apply(ctx: Context, config: SpinSchemaConfig): Promise<voi
       const source = (body as Partial<{ source: string }> | undefined)?.source;
       if (typeof source !== 'string') {
         res.status = 400;
-        const refusal: CheckResponse = {
+        const refusal: DiagnosticsResponse = {
           diagnostics: [
             diagnostic(
               'error',
@@ -164,7 +164,7 @@ export async function apply(ctx: Context, config: SpinSchemaConfig): Promise<voi
         return;
       }
 
-      const response: CheckResponse = { diagnostics: toDiagnostics(parseSpinSchema(source)) };
+      const response: DiagnosticsResponse = { diagnostics: toDiagnostics(parseSpinSchema(source)) };
       res.json(response);
     });
   });
@@ -208,7 +208,10 @@ async function readSpinSchema(
  * report the same input two different ways — see the module doc's
  * "Severity, and why it is not decoration" section.
  */
-function toDiagnostics(parsed: { schema: SpinSchema | null; diagnostics: Diagnostic[] }): Diagnostic[] {
+function toDiagnostics(parsed: {
+  schema: SpinSchema | null;
+  diagnostics: Diagnostic[];
+}): Diagnostic[] {
   if (parsed.schema === null) {
     // The parser's own diagnostic already names what was missing — see
     // `parseSpinSchema`'s doc. Nothing to add but the severity.

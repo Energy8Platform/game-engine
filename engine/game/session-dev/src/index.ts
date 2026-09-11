@@ -62,21 +62,27 @@ export interface SessionService {
    */
   play(req: SpinRequest): Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }>;
   /**
-   * The OS pid of the backing e8-server process, or `null` if it never
-   * started (see the diagnostic `play()` returns in that case). Exposed for
-   * the same reason `E8Handle.port` is: so a caller — chiefly a test — can
-   * confirm the process is actually there, or actually gone, instead of
-   * trusting that a method was merely called.
+   * The OS pid of the backing e8-server process, or `null` while there is
+   * none: it never started, a `restart()` is between the old process and
+   * the new one, or the last restart failed to come up (see
+   * `startupDiagnostic` for which). Exposed for the same reason
+   * `E8Handle.port` is: so a caller — chiefly a test — can confirm the
+   * process is actually there, or actually gone, instead of trusting that
+   * a method was merely called.
    */
   readonly pid: number | null;
   /**
-   * The specific reason startup failed, or `null` on a healthy start.
-   * Identical to what a `play()` call against this same service returns
-   * when `handle` never came up — exposed here too so a caller that needs
-   * to know *before* ever calling `play()` (e.g. `createGame`, which must
-   * not attempt a canvas after a dead session) gets the real reason
-   * (naming the binary, `binPath`/`E8_SERVER_BINARY`/`gamesDir`) instead of
-   * having to re-derive a vaguer one from `pid === null` alone.
+   * Why there is no process right now, or `null` while one is up. On
+   * first boot it is the specific reason startup failed; after that it is
+   * whatever `restart()` last left — "restarting" (tagged `RESTARTING`)
+   * while a respawn is in flight, the respawn's failure if it did not come
+   * up, or the plugin's own disposal. Identical to what a `play()` call
+   * against this same service returns when `handle` is absent — exposed
+   * here too so a caller that needs to know *before* ever calling
+   * `play()` (e.g. `createGame`, which must not attempt a canvas after a
+   * dead session) gets the real reason (naming the binary,
+   * `binPath`/`E8_SERVER_BINARY`/`gamesDir`) instead of having to
+   * re-derive a vaguer one from `pid === null` alone.
    */
   readonly startupDiagnostic: Diagnostic | null;
   /**

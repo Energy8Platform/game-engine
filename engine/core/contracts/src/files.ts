@@ -35,6 +35,12 @@ export interface FileTreeResponse {
  * in `engine/ide/host/src/index.ts` answers this same shape for every
  * route it wraps, which is why a client reading it must carry
  * `diagnostics` through before deciding the body was the wrong shape.
+ *
+ * Also the whole answer of `POST /api/check` (body `{ source: string }`,
+ * "what is wrong with this text" for `.spin` that lives only in an editor
+ * buffer): an empty list means nothing is wrong. It carried a second name
+ * for a while, `CheckResponse`, field-for-field this — one shape, one
+ * name.
  */
 export interface DiagnosticsResponse {
   diagnostics: Diagnostic[];
@@ -46,18 +52,6 @@ export interface DiagnosticsResponse {
  */
 export interface FileWriteRequest {
   base64: string;
-}
-
-/**
- * `POST /api/check` — body `{ source: string }`, the answer to "what is
- * wrong with this text", for `.spin` text that exists only in a browser
- * editor buffer and has never been written to `game/script.spin`. Same
- * shape as `DiagnosticsResponse` on purpose: a client that already reads
- * one refusal shape reads this one for free, and an empty list means
- * "nothing wrong" rather than the field being left out.
- */
-export interface CheckResponse {
-  diagnostics: Diagnostic[];
 }
 
 /**

@@ -1,13 +1,13 @@
 import type { Context } from 'cordis';
-import { type CheckResponse, type Diagnostic, diagnostic } from '@energy8engine/contracts';
+import { type Diagnostic, type DiagnosticsResponse, diagnostic } from '@energy8engine/contracts';
 
 /**
  * The browser side of `POST /api/check` (`engine/ide/host/src/plugins/schema.ts`):
  * "what is wrong with this text", for `.spin` source that lives only in a
  * browser editor buffer and has never been written to `game/script.spin`.
  *
- * Shaped after `files.ts`'s `diagnosticsFromBody`, not its `tree()`:
- * `CheckResponse` has exactly one field, `diagnostics`, so there is no
+ * Shaped after `files.ts`'s `diagnosticsFromBody`, not its `tree()`: the
+ * answer is a plain `DiagnosticsResponse`, one field, so there is no
  * "own key" for this plugin to check ahead of the host's — the shape
  * `tree()` once got backwards does not exist here. The equivalent mistake
  * would be reading `res.ok` before reading the body: the host's real
@@ -63,7 +63,7 @@ export function apply(ctx: Context, config: CheckConfig = {}): void {
     } catch (error) {
       return { diagnostics: [ownDiagnostic(describeError(error))] };
     }
-    const parsed = body as Partial<CheckResponse>;
+    const parsed = body as Partial<DiagnosticsResponse>;
     if (!Array.isArray(parsed.diagnostics)) {
       return { diagnostics: [ownDiagnostic('the response has no "diagnostics" array')] };
     }

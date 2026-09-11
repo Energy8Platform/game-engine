@@ -162,6 +162,13 @@ export function apply(ctx: Context) {
       // a screen removed since, a typo. Which one it is isn't something
       // this code knows, so the message says only what it does know: the
       // id, and what happens instead.
+      //
+      // Known debt: this also fires for a screen that IS registered, a
+      // moment too early. Booting on `#/code` reports "screen "code" is
+      // not registered" for the life of the page, because `current()` is
+      // read between the first and the last `ctx.layout.screen()` effect
+      // in `App.tsx`. The diagnostic should wait for the first render's
+      // effects to settle before deciding the id answers to nothing.
       report(
         id,
         `the address names screen "${id}", which is not registered — showing the first screen instead`,
