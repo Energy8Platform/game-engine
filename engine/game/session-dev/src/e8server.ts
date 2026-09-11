@@ -229,7 +229,10 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   // there too.
   child.once('close', (code, signal) => {
     exited = true;
-    exitInfo = `exit code=${code} signal=${signal}`;
+    // A spawn that never happened also fires `'close'` (code -2), after
+    // `'error'` has already recorded the real reason. Keep the ENOENT text;
+    // "exit code=-2" tells a person nothing.
+    if (!spawnFailed) exitInfo = `exit code=${code} signal=${signal}`;
   });
   child.once('error', (e) => {
     exited = true;

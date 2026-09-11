@@ -108,6 +108,11 @@ describe('the session plugin', () => {
     // It is the exact object play() returned above, not a re-derived one.
     expect(ctx.session.startupDiagnostic).toBe(diagnostics[0]);
     expect(ctx.session.startupDiagnostic!.message).toContain('/nonexistent/e8-server-binary');
+    // And the REASON survives: a spawn that never happened also fires
+    // `'close'` with code -2 after `'error'`, and that second event used to
+    // overwrite the ENOENT text with "exit code=-2", which tells nobody
+    // anything.
+    expect(ctx.session.startupDiagnostic!.message).toContain('ENOENT');
   });
 
   it('a play() call the running server rejects yields a diagnostic, not a rejected promise', async () => {
