@@ -115,6 +115,15 @@ export interface SessionService {
 export const name = 'session';
 
 /**
+ * `Diagnostic.code` on the answer `play()` gives while a restart is in
+ * flight — for a caller that must tell a WAIT apart from a failure. The
+ * `/api/spin` route hands the wait back to the page that asked and reports
+ * nothing, because a list with no retract must not take in a state that
+ * stops being true two seconds later.
+ */
+export const RESTARTING = 'restarting';
+
+/**
  * What a `restart()` resolves to once the plugin is disposed — said as
  * what happened, not as "restarting", which is what a queued restart used
  * to answer after teardown had already stopped everything.
@@ -238,13 +247,16 @@ export async function apply(ctx: Context, config: SessionConfig) {
     // Visible to a `play()` racing this restart for the whole window
     // between here and `boot()` settling — see `play()`'s `!handle`
     // branch and this method's own doc comment on why that is fine.
-    startupDiagnostic = diagnostic(
-      'error',
-      'session',
-      'e8-server',
-      'the math engine is restarting',
-      'wait for the restart to finish and try again',
-    );
+    startupDiagnostic = {
+      ...diagnostic(
+        'error',
+        'session',
+        'e8-server',
+        'the math engine is restarting',
+        'wait for the restart to finish and try again',
+      ),
+      code: RESTARTING,
+    };
     if (dying) {
       try {
         await dying.stop();

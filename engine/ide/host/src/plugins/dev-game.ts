@@ -112,7 +112,7 @@ import { realpathSync } from 'node:fs';
 import { posix, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
 import * as session from '@energy8engine/session-dev';
-import type { SpinResult } from '@energy8engine/contracts';
+import type { Diagnostic, SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import type { IdeRpcService } from './rpc';
 import { runtimeEntryPaths } from './runtime-assets';
@@ -264,18 +264,43 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    *    restart, because both the containment and the (lowercase) extension
    *    still match.
    *
-   * Fire-and-forget: the write's own HTTP response must not block on a
-   * process respawn (a real `e8-server` spawn takes real wall-clock time —
-   * see `startE8Server`'s readiness poll), and `restart()` already turns a
-   * failed respawn into a `Diagnostic` the next `play()`/`/api/spin` call
-   * reports, the same contract the very first spawn already has. Nothing
-   * here needs to await or re-report it.
+   * The write's own HTTP response must not block on a process respawn (a
+   * real `e8-server` spawn takes real wall-clock time — see
+   * `startE8Server`'s readiness poll), so the restart is not awaited. Its
+   * result is not dropped either: it carries the compiler's own
+   * `script.spin:LINE:COL`, which for a mistake inside `execute` is the
+   * only location there is (the parser never reads that far), and it used
+   * to reach the panel only if a spin happened to 502 afterwards. Verified
+   * in a browser: save `record {`, and nothing, anywhere, said why the
+   * game had stopped answering. It goes down the same road a failed spin's
+   * diagnostics already take — see the route below for why that road is
+   * `report`, not `broadcast`.
+   *
+   * A clean restart reports nothing. Reporting its empty list would only
+   * re-send the host's list unchanged (`reportGameDiagnostics` records
+   * into a list with no retract, then sends the whole of it), so an
+   * earlier "failed to restart" row stays in the panel after the fix that
+   * cured it — a limit of the primitive, stated rather than papered over.
    */
   ctx.on('files/written', ({ path }) => {
     if (!path.endsWith('.spin')) return;
     if (!isInside(gamesDir, resolve(config.root, path))) return;
-    void ctx.session.restart();
+    void ctx.session.restart().then(({ diagnostics }) => {
+      if (diagnostics.length > 0) reportToPanel(diagnostics);
+    });
   });
+
+  /**
+   * `ideRpc` is read leniently, per call — `rpc` and `dev-game` are
+   * SIBLING plugin scopes under `e8 dev`'s shared host `ctx`, and this
+   * plugin's own standalone tests compose it with no `rpc` at all, so a
+   * static `inject` would leave this fiber PENDING forever waiting for a
+   * service nobody provides.
+   */
+  function reportToPanel(diagnostics: Diagnostic[]): void {
+    const ideRpc = ctx.reflect.get('ideRpc', false) as IdeRpcService | undefined;
+    ideRpc?.reportGameDiagnostics(diagnostics);
+  }
 
   /**
    * The row runtime halves vite's dependency optimizer must see BEFORE the
@@ -394,13 +419,18 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       // hands over what just went wrong and `rpc` keeps the HOST's whole
       // list — otherwise a second failed spin would replace the first on a
       // reader that replaces per source, with the panel asserting nothing
-      // had been lost. `ideRpc` is read leniently — `rpc`
-      // and `dev-game` are SIBLING plugin scopes under `e8 dev`'s shared
-      // host `ctx`, and this plugin's own standalone tests compose it with
-      // no `rpc` at all, so a static `inject` would leave this fiber
-      // PENDING forever waiting for a service nobody provides.
-      const ideRpc = ctx.reflect.get('ideRpc', false) as IdeRpcService | undefined;
-      ideRpc?.reportGameDiagnostics(diagnostics);
+      // had been lost.
+      //
+      // Except the one answer that is a WAIT, not a failure: a spin that
+      // lands while `restart()` is between the old process and the new
+      // one. The page that asked gets it as data (the 502 above), and
+      // that is where it stops — the host's list has no retract, so a
+      // state that stops being true two seconds later must not enter it.
+      // Measured before this: after a fix-and-save the panel still read
+      // "the math engine is restarting — wait for the restart to finish"
+      // while the game was already playing the fixed math.
+      const lasting = diagnostics.filter((d) => d.code !== session.RESTARTING);
+      if (lasting.length > 0) reportToPanel(lasting);
       return;
     }
 

@@ -527,9 +527,7 @@ describe('dev-game — the spin route', () => {
     const res = await fetch(`${host.url}/api/spin`, { method: 'POST' });
     expect(res.status).toBe(502); // the HTTP response still carries it too — unchanged
 
-    await expect
-      .poll(() => received.filter((m) => m.type === 'game-diagnostics'))
-      .toHaveLength(1);
+    await expect.poll(() => received.filter((m) => m.type === 'game-diagnostics')).toHaveLength(1);
     const [message] = received.filter((m) => m.type === 'game-diagnostics');
     expect(message).toMatchObject({
       type: 'game-diagnostics',
@@ -657,6 +655,33 @@ describe('dev-game — restart on a script.spin write', () => {
     return dir;
   }
 
+  /** `writableProject()` plus everything else `first-slot` has — `e8.yml` included, which `createIdeHost` reads. */
+  function writableProjectWithManifest(): string {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-dev-game-restart-')));
+    cpSync(join(GAME, '..'), dir, {
+      recursive: true,
+      filter: (src) => !src.includes('node_modules') && !src.endsWith('tsconfig.json'),
+    });
+    restartTestDirs.push(dir);
+    return dir;
+  }
+
+  /** The real binary, where platform-core's postinstall puts it — for a wrapper script that decides per spawn whether to exec it. */
+  function realBinary(): string {
+    const arch = process.arch === 'x64' ? 'amd64' : process.arch;
+    return join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      '..',
+      'packages',
+      'platform-core',
+      'bin',
+      `e8-server-${process.platform}-${arch}`,
+    );
+  }
+
   async function spinScriptSha256(port: number): Promise<string | undefined> {
     const res = await fetch(`http://127.0.0.1:${port}/api/spin`, { method: 'POST' });
     const body = await res.json();
@@ -706,6 +731,113 @@ describe('dev-game — restart on a script.spin write', () => {
     await expect
       .poll(() => spinScriptSha256(ctx!.server.port), { timeout: 15_000 })
       .toSatisfy((sha) => typeof sha === 'string' && sha !== before);
+  }, 20_000);
+
+  /**
+   * `writableProject()` again, but the copy is the host's `cwd` as well —
+   * `createIdeHost` composes `files` (the PUT route) and `rpc` (the `/ide`
+   * socket the panel reads), the real `e8 dev` shape. The bare-`Context`
+   * tests above compose no `rpc`, which is exactly the socket these two
+   * are about.
+   */
+  async function hostOverProject(projectDir: string, binPath?: string) {
+    // `createIdeHost` needs an e8.yml; `first-slot`'s own is copied with
+    // the rest of the project, not only `game/`.
+    host = await createIdeHost({ cwd: projectDir, port: 0 });
+    await host.ctx.plugin(devGame, {
+      root: projectDir,
+      gamesDir: join(projectDir, 'game'),
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+      binPath,
+    });
+    const socket = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const frames: ServerMessage[] = [];
+    socket.on('message', (data) => frames.push(JSON.parse(String(data)) as ServerMessage));
+    await new Promise((resolve) => socket.once('open', resolve));
+    const hostFrames = () =>
+      frames.filter(
+        (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> =>
+          m.type === 'game-diagnostics' && m.source === 'host',
+      );
+    return { socket, hostFrames };
+  }
+
+  async function putScript(projectDir: string, text: string): Promise<number> {
+    const res = await fetch(`${host!.url}/api/files/game/script.spin`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ base64: Buffer.from(text, 'utf8').toString('base64') }),
+    });
+    return res.status;
+  }
+
+  it("a save that breaks the math reaches the IDE panel with the compiler's own location, without any spin", async () => {
+    // `void ctx.session.restart()` discarded the one result that carries
+    // `script.spin:LINE:COL` from the compiler — the only "where" there is
+    // for a mistake inside `execute`, which the parser never reads. It
+    // reached the panel only when a spin happened to 502 afterwards.
+    const projectDir = writableProjectWithManifest();
+    const { socket, hostFrames } = await hostOverProject(projectDir);
+    try {
+      const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      expect(await putScript(projectDir, `${original}\nrecord {\n`)).toBe(200);
+
+      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBeGreaterThan(0);
+      const [frame] = hostFrames();
+      expect(frame.diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          plugin: 'session',
+          message: expect.stringMatching(/failed to restart[\s\S]*script\.spin:\d+:\d+/),
+        }),
+      ]);
+    } finally {
+      socket.close();
+    }
+  }, 20_000);
+
+  it('a spin that lands mid-restart is answered "restarting" but never reported to the panel', async () => {
+    // The wrapper boots the real binary once, then takes three seconds to
+    // fail — long enough for a spin to land inside the restart window, and
+    // a failure after it so the test can wait for something that DOES
+    // reach the panel rather than for an absence.
+    const projectDir = writableProjectWithManifest();
+    const flag = join(projectDir, 'fail-slowly-from-now-on');
+    const wrapper = join(projectDir, 'e8-server-slow-fail.sh');
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nif [ -e ${JSON.stringify(flag)} ]; then sleep 3; exit 1; fi\nexec ${JSON.stringify(realBinary())} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const { socket, hostFrames } = await hostOverProject(projectDir, wrapper);
+    try {
+      writeFileSync(flag, '');
+      const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      expect(await putScript(projectDir, `${original}\n-- edited by mouse\n`)).toBe(200);
+
+      // Inside the window: the caller gets the wait as data.
+      const res = await fetch(`${host!.url}/api/spin`, { method: 'POST' });
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { diagnostics: { message: string }[] };
+      expect(body.diagnostics[0].message).toMatch(/restarting/);
+
+      // After the window: the failure reaches the panel, the wait never did.
+      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBeGreaterThan(0);
+      for (const frame of hostFrames()) {
+        expect(frame.diagnostics.map((d) => d.message)).not.toContainEqual(
+          expect.stringMatching(/restarting/),
+        );
+      }
+      expect(
+        hostFrames()
+          .at(-1)!
+          .diagnostics.map((d) => d.message),
+      ).toContainEqual(expect.stringMatching(/failed to restart/));
+    } finally {
+      socket.close();
+    }
   }, 20_000);
 
   it('a write to a .spin file OUTSIDE gamesDir does not restart the session — the containment axis, not just the extension one', async () => {
@@ -765,9 +897,10 @@ describe('dev-game — restart on a script.spin write', () => {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        base64: Buffer.from(readFileSync(join(projectDir, 'game', 'spec.json'), 'utf8'), 'utf8').toString(
-          'base64',
-        ),
+        base64: Buffer.from(
+          readFileSync(join(projectDir, 'game', 'spec.json'), 'utf8'),
+          'utf8',
+        ).toString('base64'),
       }),
     });
     expect(put.status).toBe(200);
