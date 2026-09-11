@@ -16,6 +16,7 @@ bin/e8-*
 bin/simulation-*
 packages/*/bin/simulate-*
 packages/*/bin/e8-*
+packages/*/bin/.e8-version
 packages/*/bin/simulation-*
 
 # Brainstorming visual companion

@@ -11,7 +11,7 @@
  * binaries are published here, same discipline as the old Go simulate CLI.
  */
 
-import { createWriteStream, chmodSync, existsSync, mkdirSync } from 'fs';
+import { createWriteStream, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { get } from 'https';
@@ -25,7 +25,7 @@ const REPO = process.env.E8_RELEASE_REPO || 'energy8platform/game-engine';
 // e8 binary version — bump when new Rust binaries are uploaded to Releases.
 // The binary is game-agnostic (it compiles any .spin), so it only needs to
 // move when the engine/CLI itself changes.
-const BINARY_VERSION = process.env.E8_BINARY_VERSION || '0.1.6';
+const BINARY_VERSION = process.env.E8_BINARY_VERSION || '0.1.7';
 
 // Два бинаря на платформу: e8 (математика/симуляция) и e8-server
 // (дев-раунды для Vite-плагина).
@@ -51,11 +51,17 @@ async function main() {
   // Префикс e8-: в этом репо теги v* заняты релизами старого Go simulate CLI.
   const tag = `e8-v${BINARY_VERSION}`;
 
+  // Какая версия лежит в bin/ сейчас. Без маркера бамп BINARY_VERSION молча
+  // оставлял старый бинарь везде, где bin/ уже был (любая машина разработчика):
+  // «уже скачано» не отличалось от «скачано другой версией».
+  const marker = join(BIN_DIR, '.e8-version');
+  const installed = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : '';
+
   for (const binaryName of binaryNames) {
     const dest = join(BIN_DIR, binaryName);
 
-    // Skip if already downloaded
-    if (existsSync(dest)) {
+    // Skip if this version is already downloaded
+    if (existsSync(dest) && installed === BINARY_VERSION) {
       continue;
     }
 
@@ -72,6 +78,7 @@ async function main() {
       }
       await download(url, dest);
       chmodSync(dest, 0o755);
+      writeFileSync(marker, `${BINARY_VERSION}\n`);
       console.log(`[e8] Installed ${binaryName}`);
     } catch (err) {
       // Non-fatal — Lua games are unaffected; spin games can use
