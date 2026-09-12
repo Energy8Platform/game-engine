@@ -241,6 +241,7 @@ label {
 
 .e8-sidebar {
   grid-area: sidebar;
+  position: relative;
   overflow: auto;
   background: var(--e8-bg-1);
   border-right: 1px solid var(--e8-border);
@@ -308,11 +309,39 @@ label {
    this task has no reason to add. */
 .e8-panel {
   grid-area: panel;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--e8-bg-1);
   border-top: 1px solid var(--e8-border);
+}
+/* The two drag handles (Shell.tsx's `useResize`): a thin strip riding the
+   sidebar's right edge and the panel's top edge, on top of whatever the
+   region draws there. `touch-action: none` is what lets a finger drag
+   without the page scrolling under it. */
+.e8-resize {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+.e8-resize-x {
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+}
+.e8-resize-y {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 5px;
+  cursor: row-resize;
+}
+.e8-resize:hover,
+.e8-resize:active {
+  background: var(--e8-accent);
 }
 .e8-panel:has(.e8-panel-entry) {
   height: var(--e8-panel-h);

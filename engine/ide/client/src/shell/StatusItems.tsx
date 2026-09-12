@@ -11,6 +11,11 @@ import { useGameComposition } from '../plugins/game-composition';
  * `App.tsx` (Task 6) is what puts them on `shell.status` with a `key`,
  * `side` and `order`; this file only has to be correct in isolation.
  *
+ * None of the four carries a `data-testid` of its own: `Shell.tsx` wraps
+ * each status entry in `status-<key>`, and an item repeating that on its
+ * root made `getByTestId` throw "multiple elements" (Ruling 9). A test
+ * rendering an item alone reads its container or its role.
+ *
  * Every component takes `{ ctx }` alone, the exact shape
  * `StatusMeta['component']` asks for, even `ThemeStatus`, which reads
  * nothing off `ctx` — the four are registered through one slot and drawn
@@ -39,7 +44,7 @@ export function ProjectStatus({ ctx }: { ctx: Context }) {
   const { rows } = useGameComposition(ctx);
   const label = rows === null ? 'loading…' : (rows[0]?.id ?? 'no project');
   return (
-    <span className="e8-status-item" data-testid="status-project">
+    <span className="e8-status-item">
       {label}
     </span>
   );
@@ -74,7 +79,7 @@ export function SessionStatus({ ctx }: { ctx: Context }) {
   );
   const label = restarting ? 'e8-server restarting' : groups === null ? 'e8-server ○' : 'e8-server ●';
   return (
-    <span className="e8-status-item" data-testid="status-session">
+    <span className="e8-status-item">
       {label}
     </span>
   );
@@ -85,7 +90,7 @@ export function DirtyStatus({ ctx }: { ctx: Context }) {
   const { documents } = useShell(ctx);
   const dirty = documents.filter((doc) => doc.dirty).length;
   return (
-    <span className="e8-status-item" data-testid="status-dirty">
+    <span className="e8-status-item">
       {dirty} unsaved
     </span>
   );
@@ -158,7 +163,6 @@ export function ThemeStatus({ ctx: _ctx }: { ctx: Context }) {
     <button
       type="button"
       className="e8-status-item e8-theme-toggle"
-      data-testid="status-theme"
       aria-label="toggle theme"
       onClick={toggle}
     >

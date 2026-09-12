@@ -111,32 +111,32 @@ beforeEach(() => {
 describe('ProjectStatus', () => {
   it('says so while the composition fetch is still in flight', () => {
     const ctx = gameCompositionHarness(() => new Promise<Response>(() => {}));
-    render(<ProjectStatus ctx={ctx} />);
-    expect(screen.getByTestId('status-project')).toHaveTextContent('loading');
+    const { container } = render(<ProjectStatus ctx={ctx} />);
+    expect(container).toHaveTextContent('loading');
   });
 
   it("shows the first composition row's id — the closest thing /api/composition actually carries to a project name", async () => {
     const ctx = gameCompositionHarness(() =>
       jsonResponse({ rows: [{ id: 'bridge1', name: '@energy8engine/ide-bridge' }], diagnostics: [] }),
     );
-    render(<ProjectStatus ctx={ctx} />);
-    await waitFor(() => expect(screen.getByTestId('status-project')).toHaveTextContent('bridge1'));
+    const { container } = render(<ProjectStatus ctx={ctx} />);
+    await waitFor(() => expect(container).toHaveTextContent('bridge1'));
   });
 
   it('says "no project" for a composition that resolved with zero rows, rather than showing nothing', async () => {
     const ctx = gameCompositionHarness(() => jsonResponse({ rows: [], diagnostics: [] }));
-    render(<ProjectStatus ctx={ctx} />);
-    await waitFor(() => expect(screen.getByTestId('status-project')).toHaveTextContent(/no project/i));
+    const { container } = render(<ProjectStatus ctx={ctx} />);
+    await waitFor(() => expect(container).toHaveTextContent(/no project/i));
   });
 });
 
 describe('SessionStatus', () => {
   it('reads as up once any frame has arrived and none of it is a restart', () => {
     const ctx = gameDiagnosticsHarness();
-    render(<SessionStatus ctx={ctx} />);
+    const { container } = render(<SessionStatus ctx={ctx} />);
     act(() => ctx.socket.receive({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' }));
-    expect(screen.getByTestId('status-session')).not.toHaveTextContent(/restart/i);
-    expect(screen.getByTestId('status-session')).toHaveTextContent('●');
+    expect(container).not.toHaveTextContent(/restart/i);
+    expect(container).toHaveTextContent('●');
   });
 
   it('follows the live session state, not a boot-time snapshot', () => {
@@ -145,7 +145,7 @@ describe('SessionStatus', () => {
     // The status is fed by the game-diagnostics channel: a `restarting`
     // code shows one state, an empty list after it another.
     const ctx = gameDiagnosticsHarness();
-    render(<SessionStatus ctx={ctx} />);
+    const { container } = render(<SessionStatus ctx={ctx} />);
     act(() =>
       ctx.socket.receive({
         type: 'game-diagnostics',
@@ -154,16 +154,16 @@ describe('SessionStatus', () => {
         source: 'host',
       }),
     );
-    expect(screen.getByTestId('status-session')).toHaveTextContent(/restart/i);
+    expect(container).toHaveTextContent(/restart/i);
     act(() => ctx.socket.receive({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' }));
-    expect(screen.getByTestId('status-session')).not.toHaveTextContent(/restart/i);
+    expect(container).not.toHaveTextContent(/restart/i);
   });
 });
 
 describe('DirtyStatus', () => {
   it('counts zero with nothing open', () => {
-    render(<DirtyStatus ctx={shellHarness()} />);
-    expect(screen.getByTestId('status-dirty')).toHaveTextContent('0 unsaved');
+    const { container } = render(<DirtyStatus ctx={shellHarness()} />);
+    expect(container).toHaveTextContent('0 unsaved');
   });
 
   it('counts only the documents actually marked dirty, not every open one', () => {
@@ -171,8 +171,8 @@ describe('DirtyStatus', () => {
     ctx.shell.open({ key: 'a', title: 'A', component: () => null, closable: true });
     ctx.shell.open({ key: 'b', title: 'B', component: () => null, closable: true });
     ctx.shell.markDirty('a', true);
-    render(<DirtyStatus ctx={ctx} />);
-    expect(screen.getByTestId('status-dirty')).toHaveTextContent('1 unsaved');
+    const { container } = render(<DirtyStatus ctx={ctx} />);
+    expect(container).toHaveTextContent('1 unsaved');
   });
 });
 
@@ -180,12 +180,12 @@ describe('ThemeStatus', () => {
   it('defaults to dark when nothing was ever stored', () => {
     render(<ThemeStatus ctx={{} as Context} />);
     expect(document.documentElement.dataset.theme).toBe('dark');
-    expect(screen.getByTestId('status-theme')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'toggle theme' })).toBeTruthy();
   });
 
   it('the theme toggle flips data-theme and survives a reload via localStorage', async () => {
     render(<ThemeStatus ctx={{} as Context} />);
-    await userEvent.click(screen.getByTestId('status-theme'));
+    await userEvent.click(screen.getByRole('button', { name: 'toggle theme' }));
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(localStorage.getItem('e8.theme')).toBe('light');
     cleanup();

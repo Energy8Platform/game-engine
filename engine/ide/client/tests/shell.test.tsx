@@ -7,6 +7,7 @@ import * as slotsPlugin from '../src/plugins/slots';
 import * as shellPlugin from '../src/plugins/shell';
 import { createIdeClient } from '../src/context';
 import { Shell } from '../src/shell/Shell';
+import { DirtyStatus } from '../src/shell/StatusItems';
 
 const Dummy = () => <div>x</div>;
 /** Contributes nothing visible — for `shell.activity` registrations, whose own `component` is never rendered. */
@@ -530,6 +531,46 @@ describe('Shell', () => {
     const bar = screen.getByTestId('status-bar');
     expect(bar.querySelector('[data-side=left]')).toHaveTextContent('L1L2');
     expect(bar.querySelector('[data-side=right]')).toHaveTextContent('R');
+  });
+
+  it('a shipped status item under the shell answers to ONE status-<key> testid', () => {
+    // Ruling 9: the shell wraps each entry in `status-<key>`, and the item
+    // used to repeat the same testid on its own root, so `getByTestId`
+    // threw "multiple elements" for every one of the four. `getByTestId`
+    // is the assertion — it throws on a duplicate.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.status', key: 'dirty', side: 'right' }, DirtyStatus);
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('status-dirty')).toHaveTextContent('0 unsaved');
+  });
+
+  it('dragging the sidebar edge and the panel edge resizes them, and the sizes survive a remount', async () => {
+    // Ruling 10. The token in the stylesheet is the default, so nothing is
+    // inline until a drag; after one, the shell root carries the variable,
+    // and a fresh mount reads it back from localStorage.
+    localStorage.clear();
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    const first = render(<Shell ctx={ctx} />);
+    const root = () => screen.getByTestId('shell');
+    expect(root().style.getPropertyValue('--e8-sidebar-w')).toBe('');
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: screen.getByTestId('resize-sidebar'), coords: { x: 10, y: 0 } },
+      { coords: { x: 310, y: 0 } },
+      { keys: '[/MouseLeft]' },
+    ]);
+    // jsdom measures every box as 0, so the start is 0 and the drag alone is the width.
+    expect(root().style.getPropertyValue('--e8-sidebar-w')).toBe('300px');
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: screen.getByTestId('resize-panel'), coords: { x: 0, y: 500 } },
+      { coords: { x: 0, y: 250 } }, // up = taller
+      { keys: '[/MouseLeft]' },
+    ]);
+    expect(root().style.getPropertyValue('--e8-panel-h')).toBe('250px');
+    first.unmount();
+    render(<Shell ctx={ctx} />);
+    expect(root().style.getPropertyValue('--e8-sidebar-w')).toBe('300px');
+    expect(root().style.getPropertyValue('--e8-panel-h')).toBe('250px');
   });
 
   it('with nothing registered anywhere it explains itself instead of painting nothing', () => {

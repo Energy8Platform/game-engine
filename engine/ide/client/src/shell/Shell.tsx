@@ -1,5 +1,5 @@
-import { Component, useEffect, useReducer, useState } from 'react';
-import type { ReactNode } from 'react';
+import { Component, useEffect, useReducer, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
 import type { ConnectionService } from '../plugins/connection';
@@ -75,6 +75,72 @@ class DocumentBoundary extends Component<
     }
     return this.props.children;
   }
+}
+
+/** Narrower than this and a region is a sliver nobody can grab back. */
+const SIZE_MIN = 100;
+
+/** `localStorage` keys for the two draggable sizes (spec §3). */
+const SIZE_KEYS = { sidebar: 'e8.sidebar-w', panel: 'e8.panel-h' } as const;
+
+/**
+ * Failures are data: a private window or storage switched off throws on
+ * both reads and writes. A read failure means the stylesheet's own token
+ * stays in charge; a write failure means the drag still holds for this
+ * tab and does not survive a reload. Same rule `StatusItems`' theme
+ * already applies to its own key.
+ */
+function readSize(key: string): number | undefined {
+  try {
+    const value = Number(localStorage.getItem(key));
+    return value >= SIZE_MIN ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSize(key: string, value: number) {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // See `readSize`.
+  }
+}
+
+/**
+ * One draggable edge. `size` is `undefined` until something was dragged or
+ * stored — the stylesheet's token is the default, and nothing here
+ * repeats its number. The handle captures the pointer on press, so a drag
+ * that crosses the preview's `<iframe>` keeps reporting to the handle
+ * instead of vanishing into it; under jsdom there is no capture, and the
+ * `?.` is what lets the same code be tested there. The parent region's
+ * own box is the starting size when nothing was stored yet.
+ */
+function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
+  const [size, setSize] = useState(() => readSize(key));
+  const drag = useRef<{ from: number; start: number; last: number } | null>(null);
+  const at = (event: ReactPointerEvent<HTMLElement>) => (axis === 'x' ? event.clientX : event.clientY);
+  const handlers = {
+    onPointerDown(event: ReactPointerEvent<HTMLElement>) {
+      const region = event.currentTarget.parentElement?.getBoundingClientRect();
+      const start = size ?? (axis === 'x' ? (region?.width ?? 0) : (region?.height ?? 0));
+      drag.current = { from: at(event), start, last: start };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    onPointerMove(event: ReactPointerEvent<HTMLElement>) {
+      if (!drag.current) return;
+      const next = Math.max(SIZE_MIN, drag.current.start + direction * (at(event) - drag.current.from));
+      drag.current.last = next;
+      setSize(next);
+    },
+    onPointerUp(event: ReactPointerEvent<HTMLElement>) {
+      if (!drag.current) return;
+      writeSize(key, drag.current.last);
+      drag.current = null;
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    },
+  };
+  return { size, handlers };
 }
 
 /** One button on the activity bar. */
@@ -173,6 +239,9 @@ function DocumentTab({
 export function Shell({ ctx }: { ctx: Context }) {
   const { documents, active, sidebar, panelCollapsed } = useShell(ctx);
   const [pendingClose, setPendingClose] = useState<string | undefined>(undefined);
+  const sidebarSize = useResize(SIZE_KEYS.sidebar, 'x', 1);
+  // Dragging the panel's top edge UP makes it taller, hence the sign.
+  const panelSize = useResize(SIZE_KEYS.panel, 'y', -1);
 
   // The five slot lists below are read straight off `ctx.slots` on every
   // render, and `useShell` only hears from `ctx.shell` — so a contribution
@@ -219,8 +288,15 @@ export function Shell({ ctx }: { ctx: Context }) {
   const pendingDoc =
     pendingClose === undefined ? undefined : documents.find((d) => d.key === pendingClose);
 
+  // Only a dragged or stored size lands inline; otherwise the stylesheet's
+  // own token stays in charge, so the defaults live in one place.
+  const sizes = {
+    '--e8-sidebar-w': sidebarSize.size === undefined ? undefined : `${sidebarSize.size}px`,
+    '--e8-panel-h': panelSize.size === undefined ? undefined : `${panelSize.size}px`,
+  } as CSSProperties;
+
   return (
-    <div className="e8-shell">
+    <div className="e8-shell" data-testid="shell" style={sizes}>
       <nav className="e8-activity" data-testid="activity-bar">
         {activities.map((entry) => (
           <ActivityButton
@@ -233,6 +309,7 @@ export function Shell({ ctx }: { ctx: Context }) {
       </nav>
 
       <aside className="e8-sidebar" data-testid="sidebar">
+        <div className="e8-resize e8-resize-x" data-testid="resize-sidebar" {...sidebarSize.handlers} />
         {sidebar === undefined ? null : activeSidebarEntry ? (
           <div data-testid={`sidebar-${sidebar}`}>
             <activeSidebarEntry.component ctx={ctx} />
@@ -297,6 +374,7 @@ export function Shell({ ctx }: { ctx: Context }) {
       </div>
 
       <div className="e8-panel" data-testid="panel">
+        <div className="e8-resize e8-resize-y" data-testid="resize-panel" {...panelSize.handlers} />
         <div className="e8-panel-header">
           <button
             type="button"
