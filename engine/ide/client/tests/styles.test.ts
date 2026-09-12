@@ -16,6 +16,11 @@ describe('styles.css token guard', () => {
       /:root\s*{[^}]*}|\[data-theme[^{]*{[^}]*}/g,
       '',
     );
-    expect(css.match(/#[0-9a-f]{3,8}\b/gi) ?? []).toEqual([]);
+    // Hex, functional and named forms alike. The named list is the handful
+    // that show up in stylesheets by habit; `transparent` and `currentColor`
+    // are not colours a palette would own and stay allowed.
+    const literal =
+      /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(|\b(?:white|black|red|blue|green|gray|grey|silver|orange|yellow)\b/gi;
+    expect(css.match(literal) ?? []).toEqual([]);
   });
 });

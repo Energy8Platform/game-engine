@@ -109,6 +109,7 @@ not change between themes and live only on `:root`.
   --e8-fg: #cccccc;
   --e8-fg-muted: #969696;
   --e8-accent: #007acc;
+  --e8-on-accent: #ffffff;
   --e8-error: #f14c4c;
   --e8-warning: #cca700;
   --e8-info: #3794ff;
@@ -135,6 +136,7 @@ not change between themes and live only on `:root`.
   --e8-fg: #1f1f1f;
   --e8-fg-muted: #6e6e6e;
   --e8-accent: #005fb8;
+  --e8-on-accent: #ffffff;
   --e8-error: #cd3131;
   --e8-warning: #b58900;
   --e8-info: #1a85ff;
