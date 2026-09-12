@@ -5,7 +5,7 @@ import {
   useEditorDiagnostics,
   useGameComposition,
   useGameDiagnostics,
-  useLayout,
+  useShell,
   useSlot,
 } from '@energy8engine/ide-client';
 import { App } from './App';
@@ -18,16 +18,16 @@ import { App } from './App';
 // before the client context boots, so every plugin's client half reads it
 // off this global instead of importing its own.
 //
-// The hooks travel with it, for the same reason and one more: a screen
-// that can register but cannot SUBSCRIBE is not a first-class screen. A
-// plugin's screen is a React component like any other, and the only way it
-// can watch a service move — the game's composition being fetched, a card
-// arriving in a slot, a game reporting trouble — is these. They are
-// exactly the ones `App` below uses for the two screens the engine ships;
-// nothing is held back for the shipped half.
+// The hooks travel with it, for the same reason and one more: a document
+// that can register but cannot SUBSCRIBE is not a first-class document. A
+// plugin's document is a React component like any other, and the only way
+// it can watch a service move — the game's composition being fetched, a
+// card arriving in a slot, a tab opening, a game reporting trouble — is
+// these. They are exactly the ones `App` below uses for the documents the
+// engine ships; nothing is held back for the shipped half.
 (globalThis as any).__E8_IDE__ = {
   React,
-  useLayout,
+  useShell,
   useSlot,
   useGameComposition,
   useGameDiagnostics,

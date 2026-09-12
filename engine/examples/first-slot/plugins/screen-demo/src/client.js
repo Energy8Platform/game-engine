@@ -1,9 +1,9 @@
 /**
  * The browser half of a plugin nobody on the core team wrote — the proof
- * that `ctx.layout.screen` is a surface a PROJECT plugin can actually use,
- * not only something the shipped composition and preview screens happen to
- * call internally. Written against nothing but that one call, one other
- * service, and the React the shell publishes; see
+ * that the shell's slots are a surface a PROJECT plugin can actually use,
+ * not only something the shipped composition and preview documents happen
+ * to call internally. Written against nothing but `ctx.slots.register`,
+ * one other service, and the React the shell publishes; see
  * `engine/examples/probe-plugin/src/client.js` for the same two rules
  * spelled out in full, which this file follows exactly:
  *
@@ -15,8 +15,13 @@
  *     specifier, and bundling React per plugin would load several copies
  *     and break hooks. React comes off `globalThis.__E8_IDE__` instead,
  *     published once by the shell before any plugin's client half runs
- *     (see `engine/apps/web/src/main.tsx`), and so do the hooks a screen
+ *     (see `engine/apps/web/src/main.tsx`), and so do the hooks a document
  *     needs to watch a service rather than read it once.
+ *
+ * A document is two registrations under ONE key: a button on the activity
+ * bar (`shell.activity`, `opens: 'document'`) and the document it opens
+ * (`shell.document`). The shell pairs them by `key` — nothing in either
+ * meta names the other.
  */
 const { React, useGameComposition } = globalThis.__E8_IDE__;
 
@@ -33,13 +38,9 @@ export const name = 'screen-demo';
  * `@energy8engine/ide-bridge` already read their own flags off
  * (`new URLSearchParams(location.search)`).
  *
- * `engine/apps/web/tests/e2e/screen-demo.spec.ts` already exercises this
- * end to end: a real thrown `Error`, caught by the layout's own error
- * boundary, with the rest of the IDE left working. A later task in this
- * plan is expected to fixture the same crash a second way — a project
- * option a test can turn on, rather than a URL a test navigates to — and
- * the flag stays here, reachable either way, rather than this file
- * guessing at that shape in advance.
+ * `engine/apps/web/tests/e2e/screen-demo.spec.ts` exercises this end to
+ * end: a real thrown `Error`, caught by the shell's own document boundary,
+ * with the rest of the IDE left working.
  */
 function shouldCrash() {
   return new URLSearchParams(location.search).has('screen-demo-crash');
@@ -47,44 +48,65 @@ function shouldCrash() {
 
 /**
  * `apply(ctx)` runs once this module has imported cleanly. The IDE shell
- * never had to know this plugin exists — it only knows the `layout.screen`
- * registry, and this plugin is the one deciding what goes into it.
+ * never had to know this plugin exists — it only knows its slots, and this
+ * plugin is the one deciding what goes into them.
  *
- * **Registered as an effect, not as a bare call.** `ctx` here is this
+ * **Registered as effects, not as bare calls.** `ctx` here is this
  * plugin's own cordis fiber, and disposing that fiber is how the editor
  * takes a plugin's contributions back when its row is switched off or
  * removed from `e8.yml` (see `modules.ts`). An effect's disposer is what
- * cordis runs then; a bare `ctx.layout.screen(...)` would leave the tab on
+ * cordis runs then; a bare `ctx.slots.register(...)` would leave the tab on
  * screen, rendering code from a plugin the composition says is gone.
  *
- * **The screen reads a service, and reads it through THIS `ctx`.** The
- * `ctx` a screen component is handed as a prop is the shell's root
- * context, which can reach everything — so a screen that used it would
+ * **The document reads a service, and reads it through THIS `ctx`.** The
+ * `ctx` a document component is handed as a prop is the shell's root
+ * context, which can reach everything — so a document that used it would
  * prove nothing about what a plugin may reach. The one closed over here is
  * this plugin's own scope, restricted to what `e8.client.inject` in this
- * package's package.json declared: `layout` for the registration, and
+ * package's package.json declared: `slots` for the registrations, and
  * `gameComposition` for the row count below. Take `gameComposition` out of
- * that list and this screen stops rendering, with a diagnostic naming it.
+ * that list and this document stops rendering, with a diagnostic naming it.
  */
 export function apply(ctx) {
   ctx.effect(
     () =>
-      ctx.layout.screen({ id: 'demo', title: 'Демо', order: 50 }, function DemoScreen() {
-        const { rows } = useGameComposition(ctx);
-        if (shouldCrash()) {
-          throw new Error('screen-demo: forced failure (the URL carried ?screen-demo-crash)');
-        }
-        return React.createElement(
-          'div',
-          { 'data-testid': 'demo-screen' },
-          'a screen from a project plugin',
-          React.createElement(
-            'span',
-            { 'data-testid': 'demo-rows' },
-            ` — the game composes ${rows ? rows.length : 0} rows`,
-          ),
-        );
-      }),
-    'screen-demo:screen',
+      ctx.slots.register(
+        {
+          name: 'shell.activity',
+          key: 'demo',
+          title: 'Демо',
+          icon: 'demo',
+          order: 50,
+          opens: 'document',
+        },
+        function NoActivityBody() {
+          return null;
+        },
+      ),
+    'screen-demo:activity',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.register(
+        { name: 'shell.document', key: 'demo', title: 'Демо', closable: true },
+        function DemoDocument() {
+          const { rows } = useGameComposition(ctx);
+          if (shouldCrash()) {
+            throw new Error('screen-demo: forced failure (the URL carried ?screen-demo-crash)');
+          }
+          return React.createElement(
+            'div',
+            { 'data-testid': 'demo-screen' },
+            'a document from a project plugin',
+            React.createElement(
+              'span',
+              { 'data-testid': 'demo-rows' },
+              ` — the game composes ${rows ? rows.length : 0} rows`,
+            ),
+          );
+        },
+      ),
+    'screen-demo:document',
   );
 }

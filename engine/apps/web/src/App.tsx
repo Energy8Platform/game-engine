@@ -1,13 +1,18 @@
 import { useEffect } from 'react';
 import type { Context } from 'cordis';
 import {
-  AssetsScreen,
-  CodeScreen,
   CompositionScreen,
+  DiagnosticsPanel,
+  DirtyStatus,
   Explorer,
-  Layout,
   PreviewWall,
+  ProjectStatus,
+  SessionStatus,
+  Shell,
+  ThemeStatus,
+  useEditorDiagnostics,
   useGameComposition,
+  useGameDiagnostics,
 } from '@energy8engine/ide-client';
 
 /** `shell.activity`'s own `component` is never rendered — `Shell.tsx`'s `ActivityButton` draws `entry.icon` as text and nothing else. */
@@ -16,82 +21,49 @@ function NoActivityBody() {
 }
 
 /**
- * `ctx.layout` mounts a registered screen as `<component ctx={ctx} />` —
- * `ctx` alone, nothing else (see `layout.tsx`'s `ScreenEntry`) — so the
- * GAME's resolved composition rows, which `App` used to read once for
- * itself and hand down, have to be fetched right here instead, one level
- * lower than before this screen became a registration. Handed to
- * `CompositionScreen` exactly as `App` used to hand them.
+ * A document is mounted as `<component ctx={ctx} />` — `ctx` alone — so
+ * the GAME's resolved composition rows, which `App` used to read once for
+ * itself and hand down, are fetched right here instead, one level lower.
  */
-function CompositionScreenEntry({ ctx }: { ctx: Context }) {
+function CompositionDocument({ ctx }: { ctx: Context }) {
   const { rows } = useGameComposition(ctx);
   return <CompositionScreen ctx={ctx} rows={rows ?? undefined} />;
 }
 
 /**
- * The app shell. Registers its screens and draws `<Layout/>` — it does not
- * render a screen itself, and does not know how many are registered; a
- * third screen is another `ctx.layout.screen` call away, made by whichever
- * plugin owns it, not by another edit here. Before this, `App` rendered
- * `CompositionScreen` directly, which made it the one place a second screen
- * would have had to be wired in by hand.
+ * The one diagnostics list (spec §8): the project's own, the game's own
+ * and the editor's, read reactively — a wrapper that read them once at
+ * registration would go stale the moment any of the three updates. This
+ * was `Layout.tsx`'s `DiagnosticsPanelEntry`; as a `shell.panel` entry it
+ * sits under whichever document is active rather than pinned to one.
+ */
+function DiagnosticsDocument({ ctx }: { ctx: Context }) {
+  const { diagnostics: project } = useGameComposition(ctx);
+  const { groups: game, dropped } = useGameDiagnostics(ctx);
+  const editor = useEditorDiagnostics(ctx);
+  return (
+    <DiagnosticsPanel project={project} game={game} droppedFromGame={dropped} editor={editor} />
+  );
+}
+
+/**
+ * The app shell. Registers what the engine ships into the shell's slots and
+ * draws `<Shell/>` — it does not render a document itself, and does not
+ * know how many are registered; a plugin's own document is one more
+ * `ctx.slots.register` away, made by whichever plugin owns it.
  *
- * The PROJECT's own diagnostics (`CompositionScreenEntry`'s own
- * `useGameComposition` fetch) and the GAME's own (`ctx.gameDiagnostics`) do
- * NOT go to `CompositionScreen` at all. `App` used to hand them to
- * `DiagnosticsPanel` here too, via a `composition.card` registration —
- * reachable on the composition tab alone, and gone the moment a crash on
- * some OTHER screen took its own tab's card boundary down. That
- * registration is gone; `DiagnosticsPanel` is drawn by `Layout` itself now,
- * below whichever screen is current rather than pinned to one of them — see
- * `screens/Layout.tsx`'s own `DiagnosticsChrome`. `App` no longer feeds it
- * anything — it reads the same three services on its own.
+ * Every registration is an effect with a disposer, in the order the
+ * activity bar shows them: Explorer, composition, preview. The two shipped
+ * documents are contributed (`shell.document`, not closable) and reached
+ * from the activity bar (`opens: 'document'`); Explorer opens a sidebar.
  *
- * `PreviewWall` needs no wrapper the way `CompositionScreenEntry` does: it
- * fetches nothing of its own to inject as a second prop, so it takes `ctx`
- * alone — already the exact shape `ctx.layout.screen`'s component type
- * asks for — and is registered directly.
- *
- * Both entries below now carry an explicit `order`, not just the second
- * one: `layout.tsx`'s own comparator sorts a screen with NO `order` after
- * EVERY screen that has one, regardless of that one's number (see its
- * `ordered()`, and `layout.test.tsx`'s "a screen with no order sorts after
- * every screen that has one"). Leaving `composition` unordered while giving
- * `preview` any number at all would therefore have put `preview` FIRST —
- * the opposite of "after composition" — so composition's own `order: 0` is
- * part of making that true, not an unrelated tidy-up.
- *
- * The `shell.activity`/`shell.sidebar` registrations below are Task 4's
- * own addition, alongside the `ctx.layout.screen` calls above rather than
- * instead of them: `App` still draws `<Layout/>`, not `<Shell/>`, so these
- * two slots have no reader yet and are inert on screen today — Task 6 is
- * what switches `App` onto `Shell` and gives them one. Proven here only by
- * registration (`App.test.tsx`'s own new case), not by anything rendering.
+ * `ctx.shell.ready()` is the LAST effect, on purpose: effects run in
+ * declaration order, and a deep link like `#/doc/preview` must not be
+ * checked before `preview` is registered — the false "not registered"
+ * diagnostic slice 6 recorded as debt. `ready()` is idempotent, so a
+ * re-run of this effect (a new `ctx`) is harmless.
  */
 export function App({ ctx }: { ctx: Context }) {
-  useEffect(() => {
-    return ctx.layout.screen(
-      { id: 'composition', title: 'Состав', order: 0 },
-      CompositionScreenEntry,
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx]);
-
-  useEffect(() => {
-    return ctx.layout.screen({ id: 'preview', title: 'Превью', order: 1 }, PreviewWall);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx]);
-
-  useEffect(() => {
-    return ctx.layout.screen({ id: 'assets', title: 'Ассеты', order: 2 }, AssetsScreen);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx]);
-
-  useEffect(() => {
-    return ctx.layout.screen({ id: 'code', title: 'Код', order: 3 }, CodeScreen);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx]);
-
   useEffect(() => {
     return ctx.slots.register(
       {
@@ -115,5 +87,94 @@ export function App({ ctx }: { ctx: Context }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  return <Layout ctx={ctx} />;
+  useEffect(() => {
+    return ctx.slots.register(
+      {
+        name: 'shell.activity',
+        key: 'composition',
+        title: 'Состав',
+        icon: '☰',
+        order: 1,
+        opens: 'document',
+      },
+      NoActivityBody,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      { name: 'shell.document', key: 'composition', title: 'Состав', closable: false },
+      CompositionDocument,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      {
+        name: 'shell.activity',
+        key: 'preview',
+        title: 'Превью',
+        icon: '▶',
+        order: 2,
+        opens: 'document',
+      },
+      NoActivityBody,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      { name: 'shell.document', key: 'preview', title: 'Превью', closable: false },
+      PreviewWall,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      { name: 'shell.panel', key: 'diagnostics', title: 'Диагностика' },
+      DiagnosticsDocument,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    const off = [
+      ctx.slots.register(
+        { name: 'shell.status', key: 'project', side: 'left', order: 0 },
+        ProjectStatus,
+      ),
+      ctx.slots.register(
+        { name: 'shell.status', key: 'dirty', side: 'left', order: 1 },
+        DirtyStatus,
+      ),
+      ctx.slots.register(
+        { name: 'shell.status', key: 'session', side: 'right', order: 0 },
+        SessionStatus,
+      ),
+      ctx.slots.register(
+        { name: 'shell.status', key: 'theme', side: 'right', order: 1 },
+        ThemeStatus,
+      ),
+    ];
+    return () => off.forEach((dispose) => dispose());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    ctx.shell.ready();
+    // A fresh load names no document. Five regions around an empty editor
+    // and a bare sidebar would be an unexplained empty pane, so the
+    // composition opens — the way the old layout showed its first screen —
+    // with the Explorer beside it. A deep link, or a sidebar already
+    // chosen, is left alone.
+    if (ctx.shell.active() === undefined) ctx.shell.openContributed('composition');
+    if (ctx.shell.sidebar() === undefined) ctx.shell.showSidebar('explorer');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  return <Shell ctx={ctx} />;
 }

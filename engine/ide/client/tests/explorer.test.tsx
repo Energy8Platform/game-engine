@@ -8,10 +8,10 @@ import { Explorer, Shell, createIdeClient, type FilesService } from '../src/inde
 /**
  * One sidebar view over the project tree, replacing the tree-walking
  * `AssetsScreen` and `CodeScreen` each did on their own. Step 1 below
- * copies the tree/upload/delete tests that pin a property from
- * `assets-screen.test.tsx` (unchanged there — Task 6 still registers
- * `AssetsScreen` and its own tests stay put); Step 2 is what only Explorer
- * does: opening a document, folding, and fetching the tree exactly once.
+ * copies the tree/upload/delete tests that pin a property from the old
+ * `assets-screen.test.tsx` (deleted with `AssetsScreen` in Task 6); Step 2
+ * is what only Explorer does: opening a document, folding, and fetching
+ * the tree exactly once.
  *
  * `harness()`/`harnessWithCalls()` go through the real `createIdeClient`
  * with a fake `fetchFn`, the same precedent `assets-screen.test.tsx` set.
@@ -190,6 +190,86 @@ describe('Explorer — ported from AssetsScreen', () => {
     ctx.files.nextTree(tree(['logo.png']));
     await userEvent.upload(screen.getByTestId('explorer-upload'), new File(['x'], 'logo.png'));
     expect(await screen.findByTestId('explorer-logo.png')).toBeTruthy();
+    // And it went where the tree says: the bytes, under the file's own name.
+    expect(ctx.files.written).toEqual([['logo.png', bytes('x')]]);
+  });
+
+  // --- Ported from `assets-screen.test.tsx` with that file's deletion
+  // (Task 6): each is a property of upload/delete that Explorer carried over
+  // whole and nothing else pinned.
+
+  it('a delete the host refuses leaves the entry where it was', async () => {
+    const ctx = await harness(
+      tree(['logo.png']),
+      {},
+      { removeDiagnostics: [d('"logo.png" was not found: ENOENT')] },
+    );
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-logo.png');
+    // What a refetch WOULD show if the refusal were ignored — a tree with
+    // `logo.png` already gone. Without this the fake tree never changes,
+    // so "leaves the entry where it was" can't tell a gated refresh from
+    // an unconditional one that happens to fetch the same answer back.
+    ctx.files.nextTree(tree([]));
+    await userEvent.click(await screen.findByTestId('explorer-delete-logo.png'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    expect(await screen.findByText(/was not found/)).toBeTruthy();
+    expect(screen.getByTestId('explorer-logo.png')).toBeTruthy();
+  });
+
+  it('a directory has no delete button, since the only answer it could get is no', async () => {
+    const ctx = await harness(tree(['game', 'game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-game');
+    expect(screen.queryByTestId('explorer-delete-game')).toBeNull();
+    expect(screen.getByTestId('explorer-delete-game/spec.json')).toBeTruthy();
+  });
+
+  it('an upload onto a name already there asks before replacing it', async () => {
+    // The host replaces a file whole, without a word. Someone who drags
+    // in `logo.png` twice did not ask to lose the first.
+    const ctx = await harness(tree(['logo.png']));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-logo.png');
+    await userEvent.upload(
+      screen.getByTestId('explorer-upload') as HTMLInputElement,
+      new File(['second'], 'logo.png'),
+    );
+    expect(await screen.findByText(/replace/)).toBeTruthy();
+    expect(ctx.files.written).toEqual([]);
+    await userEvent.click(screen.getByTestId('confirm-no'));
+    expect(ctx.files.written).toEqual([]);
+  });
+
+  it('an upload onto a name nothing claims yet does not ask', async () => {
+    const ctx = await harness(tree(['logo.png']));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-logo.png');
+    await userEvent.upload(
+      screen.getByTestId('explorer-upload') as HTMLInputElement,
+      new File(['x'], 'other.png'),
+    );
+    await waitFor(() => expect(ctx.files.written).toEqual([['other.png', bytes('x')]]));
+    expect(screen.queryByText(/replace/)).toBeNull();
+  });
+
+  it('a delete refusal reaches the one list, not only this view', async () => {
+    // §8 wants ONE diagnostics list, outliving whichever view you are in.
+    const refusal = d('"logo.png" resolves outside the project');
+    const ctx = await harness(tree(['logo.png']), {}, { removeDiagnostics: [refusal] });
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-delete-logo.png'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    await screen.findByText(/outside the project/);
+    expect(ctx.connection.diagnostics).toContainEqual(refusal);
+  });
+
+  it('a tree that could not be read reaches the one list too', async () => {
+    const refusal = d('cannot list ".": EACCES');
+    const ctx = await harness({ diagnostics: [refusal] });
+    render(<Explorer ctx={ctx} />);
+    await screen.findByText(/EACCES/);
+    expect(ctx.connection.diagnostics).toContainEqual(refusal);
   });
 
   it('an upload the host refuses shows the host’s words and leaves the tree alone', async () => {
@@ -343,6 +423,24 @@ describe('Explorer', () => {
     expect(within(body).getByRole('img').getAttribute('src')).toBe('/api/files/art/logo.png');
     expect(within(body).getByRole('img')).toBeVisible();
     expect(editor).not.toBeVisible();
+  });
+
+  it('.lua, .txt, .tsx and .yaml open in the editor too', async () => {
+    // The spec's table left these out; the Lua math script was hand-edited
+    // a slice earlier, and a viewer over it would have been a step back.
+    const paths = ['game/script.lua', 'notes.txt', 'plugins/x/src/ui.tsx', 'e8.yaml'];
+    const ctx = await harness(tree(paths), Object.fromEntries(paths.map((path) => [path, 'text'])));
+    render(
+      <>
+        <Explorer ctx={ctx} />
+        <Shell ctx={ctx} />
+      </>,
+    );
+    for (const path of paths) {
+      await userEvent.click(await screen.findByTestId(`explorer-${path}`));
+      const pane = screen.getByTestId(`doc-pane-f:${path}`);
+      expect(await within(pane).findByTestId('editor')).toBeTruthy();
+    }
   });
 
   it('the tree is one tree() call, not one per fold', async () => {

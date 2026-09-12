@@ -34,7 +34,20 @@ type Pending =
  * editor runs the same binary sniff, so a `.json` that is not text is
  * refused there rather than decoded.
  */
-const EDITABLE_EXTENSIONS = new Set(['.spin', '.ts', '.js', '.json', '.yml', '.md', '.html', '.css']);
+const EDITABLE_EXTENSIONS = new Set([
+  '.spin',
+  '.lua', // the math script, hand-edited one slice before this list existed
+  '.ts',
+  '.tsx',
+  '.js',
+  '.json',
+  '.yml',
+  '.yaml',
+  '.md',
+  '.txt',
+  '.html',
+  '.css',
+]);
 
 /** What Explorer opens for a path: a tab keyed `f:<path>`, holding the editor or the viewer. Same key twice activates. */
 export function openPath(ctx: Context, path: string, entry: FileEntry): void {
