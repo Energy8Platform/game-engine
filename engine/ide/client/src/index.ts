@@ -10,7 +10,6 @@ export * from './plugins/connection';
 // import, so the barrel only needs to re-export the public surface a
 // consumer actually uses.
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
-export { useLayout, type ScreenMeta, type ScreenEntry, type LayoutService } from './plugins/layout';
 export {
   useShell,
   type ActivityOpens,
@@ -49,7 +48,6 @@ export {
   type PreviewWallProps,
 } from './screens/PreviewWall';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
-export { Layout } from './screens/Layout';
 export { Shell } from './shell/Shell';
 export {
   ProjectStatus,
@@ -58,9 +56,7 @@ export {
   ThemeStatus,
   type ThemeName,
 } from './shell/StatusItems';
-export { AssetsScreen, looksBinary } from './screens/AssetsScreen';
-export { CodeScreen } from './screens/CodeScreen';
 export { Explorer, openPath } from './shell/Explorer';
 export { EditorDocument } from './shell/EditorDocument';
-export { ViewerDocument } from './shell/ViewerDocument';
+export { ViewerDocument, looksBinary } from './shell/ViewerDocument';
 export { Monaco, type MonacoProps } from './editor/Monaco';

@@ -9,7 +9,7 @@ import { Preview } from './PreviewWall';
 /**
  * The EDITOR's own diagnostics — its plugin graph, namespace 1 of
  * `Diagnostic.plugin` resolved against the EDITOR's rows. Exported because
- * `Layout.tsx`'s `DiagnosticsPanelEntry` reads it reactively and hands the
+ * `App.tsx`'s diagnostics panel entry reads it reactively and hands the
  * array straight to `DiagnosticsPanel`'s `editor` prop, which renders
  * these as rows now, the same as `project`'s and `game`'s — see
  * `EditorComposition`'s own comment, below, for why this screen no longer

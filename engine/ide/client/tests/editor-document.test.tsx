@@ -13,8 +13,8 @@ import {
 /**
  * One file, edited: what `CodeScreen` did once a file was picked, with the
  * picking itself gone to the Explorer and the tab strip. Step 1 below
- * copies every `code-screen.test.tsx` test that pins a property of the
- * editor (unchanged there — Task 6 still registers `CodeScreen`); Step 2
+ * copies every test from the old `code-screen.test.tsx` (deleted with
+ * `CodeScreen` in Task 6) that pins a property of the editor; Step 2
  * is what only a document does: tell the shell it is dirty, and stay
  * dirty until the host has actually taken the bytes.
  *

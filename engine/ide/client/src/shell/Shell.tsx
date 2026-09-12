@@ -24,15 +24,12 @@ function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
 }
 
 /**
- * Isolates one document from the rest of the shell — the same shape
- * as `Layout.tsx`'s own `ScreenBoundary`, and for the same reason: a
+ * Isolates one document from the rest of the shell — the same shape the
+ * old `Layout.tsx`'s `ScreenBoundary` had, and for the same reason: a
  * document is a plugin's own code (or a file's own content, for Explorer's
  * instance tabs), this shell has no other trust relationship with it, and
  * one bad render must not take the tab strip, the sidebar or the panel down
- * with it. Duplicated here rather than imported from `Layout.tsx` — the two
- * are meant to diverge exactly as far as their owners do, and `Layout.tsx`
- * is on its way out (Task 6); a shared import would tie this file's fate to
- * that deletion for no reason.
+ * with it.
  *
  * One instance per OPEN document, not one for the active one: `Shell`
  * below keeps every open document mounted and hides the inactive ones
@@ -173,7 +170,7 @@ function ActivityButton({
 
 /**
  * One tab on the document strip. The whole tab activates on click — a plain
- * `<button role="tab">`, the same element Layout.tsx's own tab already is —
+ * `<button role="tab">`, the same element the old layout's tab was —
  * and close is a nested `<span role="button">`, not a nested `<button>`
  * (invalid HTML) and not a sibling of it either (a sibling would sit
  * outside the tab's own click target, and closing a tab you never
@@ -225,7 +222,7 @@ function DocumentTab({
  * tabs + body, panel, status bar. Nothing here ever
  * throws: a crashed document is `DocumentBoundary` saying so, and zero
  * contributions anywhere is `shell-empty` saying so — never a blank page
- * either way, the same rule `Layout.tsx` already applies to one screen at a
+ * either way, the same rule the old layout applied to one screen at a
  * time.
  *
  * `shell-empty` replaces the WHOLE shell, not just the document body: five

@@ -7,8 +7,8 @@ import { ViewerDocument, createIdeClient } from '../src/index';
 /**
  * One file, looked at: what `AssetsScreen` showed once an entry was
  * clicked, with the tree itself gone to the Explorer. Every test below is
- * one of `assets-screen.test.tsx`'s preview tests (unchanged there — Task 6
- * still registers `AssetsScreen`), against the document instead of the
+ * one of the old `assets-screen.test.tsx`'s preview tests (deleted with
+ * `AssetsScreen` in Task 6), against the document instead of the
  * screen; the tree/upload/delete tests went to `explorer.test.tsx` in
  * Task 4.
  *

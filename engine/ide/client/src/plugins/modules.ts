@@ -88,8 +88,8 @@ export function apply(ctx: Context, config: ModulesConfig) {
    * fiber is what takes its contributions with it — a screen, a card, a
    * subscription — provided the half registered them as effects, which is
    * cordis's own contract and what `screen-demo` demonstrates. A half that
-   * calls `ctx.layout.screen(...)` bare keeps its screen after its row is
-   * gone, exactly as a runtime plugin that skips `ctx.effect` keeps
+   * calls `ctx.slots.register(...)` bare keeps its document after its row
+   * is gone, exactly as a runtime plugin that skips `ctx.effect` keeps
    * whatever it registered.
    */
   const release = (id: string) => {

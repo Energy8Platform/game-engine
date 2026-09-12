@@ -243,7 +243,7 @@ describe('shell', () => {
   // which key...", "a guard returning false blocks...") lost their
   // subject when fix round 1 replaced `guard()` with `close(key, {force})`
   // — see task-1-report.md's Round 2 entry. The veto semantics they
-  // pinned belong to `layout` and stay there until Task 6 removes it.
+  // pinned went with `layout` itself in Task 6.
 
   it('opening a document notifies subscribers', () => {
     // Ported from "registering a screen notifies subscribers".
@@ -326,6 +326,36 @@ describe('Shell', () => {
     // its own container by accident.
     const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
     expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z']);
+  });
+
+  it('a contribution with no order sorts after every one that has one', () => {
+    // Ported from `layout.test.tsx`'s "a screen with no order sorts after
+    // every screen that has one": registered FIRST, with no order, it
+    // still draws last — and after `z`'s 9, not just after `a`'s 1.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.activity', key: 'n', title: 'N', icon: 'n', opens: 'sidebar' }, Nop);
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'z', title: 'Z', icon: 'z', order: 9, opens: 'sidebar' },
+      Nop,
+    );
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'a', title: 'A', icon: 'a', order: 1, opens: 'sidebar' },
+      Nop,
+    );
+    render(<Shell ctx={ctx} />);
+    const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
+    expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z', 'activity-n']);
+  });
+
+  it('leaves the main landmark to the document that owns one', () => {
+    // Ported from `layout.test.tsx`: `CompositionScreen` and `PreviewWall`
+    // both open with a `<main>`, so the shell's own body must not be one —
+    // a landmark inside a landmark on every shipped document.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <main>OWN</main>, closable: true });
+    render(<Shell ctx={ctx} />);
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getByRole('main')).toHaveTextContent('OWN');
   });
 
   it('an activity button that opens a sidebar shows that sidebar view', async () => {

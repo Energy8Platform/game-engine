@@ -17,6 +17,10 @@ function row(over: Partial<CompositionRow> = {}): CompositionRow {
   };
 }
 
+/** What a half contributes in these tests: one document on the shell, keyed so `list('shell.document')` finds it. */
+type DocMeta = { name: string; key: string; title: string };
+const DOC: DocMeta = { name: 'shell.document', key: 'from-a-plugin', title: 'From a plugin' };
+
 function snapshotWith(clientUrl: string | null, clientInject: string[] = []): Snapshot {
   return { rows: [row({ clientUrl, clientInject })], diagnostics: [] };
 }
@@ -31,7 +35,7 @@ function snapshotWith(clientUrl: string | null, clientInject: string[] = []): Sn
 // `fetchFn` is stubbed for `game-composition`, which fetches `/api/composition`
 // at boot: jsdom has no host to answer it, and a real (failing) fetch would
 // leave an unrelated diagnostic in that service's own list and a pending
-// promise in every test here. `composition` (a service beyond `layout`) is
+// promise in every test here. `composition` (a service beyond `slots`) is
 // what the inject tests below actually reach for, so it has to answer.
 async function harness(
   importModule: (url: string) => Promise<unknown>,
@@ -179,11 +183,11 @@ describe('modules', () => {
  * real, both of them composed by `createIdeClient` two lines away.
  */
 describe('modules — a half declares what it needs, and gets it', () => {
-  it('reaches ctx.layout when its row declares it', async () => {
+  it('reaches ctx.slots when its row declares it', async () => {
     const registered: string[] = [];
     const importModule = vi.fn(async () => ({
-      apply(ctx: { layout: { screen: (meta: { id: string }, component: unknown) => void } }) {
-        ctx.layout.screen({ id: 'from-a-plugin' }, () => null);
+      apply(ctx: { slots: { register: (meta: DocMeta, component: unknown) => void } }) {
+        ctx.slots.register(DOC, () => null);
         registered.push('from-a-plugin');
       },
     }));
@@ -191,20 +195,20 @@ describe('modules — a half declares what it needs, and gets it', () => {
 
     push({
       type: 'snapshot',
-      snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']),
+      snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']),
     });
     await vi.waitFor(() => expect(registered).toEqual(['from-a-plugin']));
 
     expect(ctx.connection.diagnostics).toHaveLength(0);
-    expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin');
+    expect(ctx.slots.list('shell.document').map((s) => s.key)).toContain('from-a-plugin');
   });
 
-  // The claim `layout` alone cannot prove: `layout` was one of the three
+  // The claim `slots` alone cannot prove: `slots` was one of the three
   // names the old hardcoded list held, so a half reaching it would have
   // worked either way. `gameComposition` was never on that list, and this
   // is the test that fails if the inject list on the wire stops being
   // honoured.
-  it('reaches a service beyond layout — one the editor never allowlisted', async () => {
+  it('reaches a service beyond slots — one the editor never allowlisted', async () => {
     const seen: { rows: unknown[] | null }[] = [];
     const importModule = vi.fn(async () => ({
       apply(ctx: { gameComposition: { rows: unknown[] | null } }) {
@@ -235,7 +239,7 @@ describe('modules — a half declares what it needs, and gets it', () => {
     }));
     const { ctx, push } = await harness(importModule);
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await vi.waitFor(() => expect(ctx.connection.diagnostics).toHaveLength(1));
 
     expect(ctx.connection.diagnostics[0].message).toContain('gameComposition');
@@ -279,23 +283,23 @@ describe('modules — a row that goes takes its screen with it', () => {
   const screenHalf = () => ({
     apply(ctx: {
       effect: (execute: () => () => void, label: string) => unknown;
-      layout: { screen: (meta: { id: string }, component: unknown) => () => void };
+      slots: { register: (meta: DocMeta, component: unknown) => () => void };
     }) {
-      ctx.effect(() => ctx.layout.screen({ id: 'from-a-plugin' }, () => null), 'demo');
+      ctx.effect(() => ctx.slots.register(DOC, () => null), 'demo');
     },
   });
 
   it('removes a screen when the row leaves the snapshot', async () => {
     const { ctx, push } = await harness(vi.fn(async () => screenHalf()));
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await vi.waitFor(() =>
-      expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin'),
+      expect(ctx.slots.list('shell.document').map((s) => s.key)).toContain('from-a-plugin'),
     );
 
     push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
     await vi.waitFor(() =>
-      expect(ctx.layout.screens().map((s) => s.id)).not.toContain('from-a-plugin'),
+      expect(ctx.slots.list('shell.document').map((s) => s.key)).not.toContain('from-a-plugin'),
     );
     expect(ctx.modules.loaded()).toEqual([]);
   });
@@ -303,22 +307,22 @@ describe('modules — a row that goes takes its screen with it', () => {
   it('removes a screen when the row is switched off, and brings it back when it returns', async () => {
     const { ctx, push } = await harness(vi.fn(async () => screenHalf()));
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await vi.waitFor(() =>
-      expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin'),
+      expect(ctx.slots.list('shell.document').map((s) => s.key)).toContain('from-a-plugin'),
     );
 
     push({
       type: 'snapshot',
-      snapshot: { rows: [row({ disabled: true, clientInject: ['layout'] })], diagnostics: [] },
+      snapshot: { rows: [row({ disabled: true, clientInject: ['slots'] })], diagnostics: [] },
     });
     await vi.waitFor(() =>
-      expect(ctx.layout.screens().map((s) => s.id)).not.toContain('from-a-plugin'),
+      expect(ctx.slots.list('shell.document').map((s) => s.key)).not.toContain('from-a-plugin'),
     );
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await vi.waitFor(() =>
-      expect(ctx.layout.screens().map((s) => s.id)).toContain('from-a-plugin'),
+      expect(ctx.slots.list('shell.document').map((s) => s.key)).toContain('from-a-plugin'),
     );
   });
 
@@ -344,7 +348,7 @@ describe('modules — a row that goes takes its screen with it', () => {
       module: {
         async apply(ctx: {
           effect: (execute: () => () => void, label: string) => unknown;
-          layout: { screen: (meta: { id: string }, component: unknown) => () => void };
+          slots: { register: (meta: DocMeta, component: unknown) => () => void };
         }) {
           started();
           await gate;
@@ -356,7 +360,7 @@ describe('modules — a row that goes takes its screen with it', () => {
           // branch that used to announce a half had "never started". Both
           // are reachable and both are tested.
           if (!registerAfterAwait) return;
-          ctx.effect(() => ctx.layout.screen({ id: 'from-a-plugin' }, () => null), 'demo');
+          ctx.effect(() => ctx.slots.register(DOC, () => null), 'demo');
         },
       },
     };
@@ -366,7 +370,7 @@ describe('modules — a row that goes takes its screen with it', () => {
     const gated = gatedHalf();
     const { ctx, push } = await harness(vi.fn(async () => gated.module));
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await gated.applying;
 
     push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
@@ -378,19 +382,19 @@ describe('modules — a row that goes takes its screen with it', () => {
     // stopped applying the moment it went.
     expect(ctx.connection.diagnostics).toEqual([]);
     expect(ctx.modules.loaded()).toEqual([]);
-    expect(ctx.layout.screens().map((s) => s.id)).not.toContain('from-a-plugin');
+    expect(ctx.slots.list('shell.document').map((s) => s.key)).not.toContain('from-a-plugin');
   });
 
   it('says nothing when the row is switched off while its half is still settling', async () => {
     const gated = gatedHalf();
     const { ctx, push } = await harness(vi.fn(async () => gated.module));
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await gated.applying;
 
     push({
       type: 'snapshot',
-      snapshot: { rows: [row({ disabled: true, clientInject: ['layout'] })], diagnostics: [] },
+      snapshot: { rows: [row({ disabled: true, clientInject: ['slots'] })], diagnostics: [] },
     });
     gated.open();
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -408,7 +412,7 @@ describe('modules — a row that goes takes its screen with it', () => {
     const gated = gatedHalf(false);
     const { ctx, push } = await harness(vi.fn(async () => gated.module));
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await gated.applying;
 
     push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
@@ -433,7 +437,7 @@ describe('modules — a row that goes takes its screen with it', () => {
     );
     const { ctx, push } = await harness(importModule);
 
-    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['layout']) });
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1', ['slots']) });
     await vi.waitFor(() => expect(importModule).toHaveBeenCalledTimes(1));
 
     push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
@@ -449,7 +453,7 @@ describe('modules — a row that goes takes its screen with it', () => {
 
     push({
       type: 'snapshot',
-      snapshot: { rows: [row({ disabled: true, clientInject: ['layout'] })], diagnostics: [] },
+      snapshot: { rows: [row({ disabled: true, clientInject: ['slots'] })], diagnostics: [] },
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(importModule).not.toHaveBeenCalled();

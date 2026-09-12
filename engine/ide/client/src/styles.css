@@ -399,62 +399,6 @@ label {
   font-size: var(--e8-size-status);
 }
 
-/* Old chrome: `Layout.tsx`'s single-screen top nav + diagnostics band.
-   Stays until Task 6 replaces it with `Shell` — same classes, same
-   structure, restyled onto these tokens instead of the Cal.com palette. */
-.e8-layout {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--e8-bg-0);
-  color: var(--e8-fg);
-}
-.e8-layout-tabs {
-  height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 16px;
-  background: var(--e8-bg-2);
-  border-bottom: 1px solid var(--e8-border);
-}
-.e8-layout-brand {
-  color: var(--e8-fg);
-  font-size: var(--e8-size);
-  font-weight: 600;
-}
-.e8-layout-pills {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--e8-radius);
-  background: var(--e8-bg-1);
-}
-.e8-layout-tab {
-  height: 28px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--e8-radius);
-  background: transparent;
-  color: var(--e8-fg-muted);
-  font-weight: 500;
-}
-.e8-layout-tab[aria-selected='true'] {
-  background: var(--e8-bg-0);
-  color: var(--e8-fg);
-}
-.e8-layout-body {
-  flex: 1;
-  width: 100%;
-  max-width: 1200px;
-  box-sizing: border-box;
-  margin: 0 auto;
-  padding: 32px 24px;
-}
-.e8-layout-screen-error {
-  color: var(--e8-error);
-}
-
 /* Diagnostics band. Rows are one line each; severity is the only colour. */
 .e8-diagnostics-panel {
   background: var(--e8-bg-3);
@@ -616,44 +560,7 @@ label {
   align-items: flex-start;
 }
 
-/* Assets and code: a file list at left, the thing opened at right. */
-.e8-code-body {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-.e8-code-files,
-.e8-assets-tree {
-  list-style: none;
-  margin: 0 0 16px;
-  padding: 0;
-  border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
-  overflow: hidden;
-}
-.e8-code-files button {
-  display: block;
-  width: 100%;
-  height: auto;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 0;
-  border-bottom: 1px solid var(--e8-border);
-  text-align: left;
-  font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
-  color: var(--e8-fg);
-  background: transparent;
-  overflow-wrap: anywhere;
-}
-.e8-code-files li:last-child button {
-  border-bottom: 0;
-}
-.e8-code-files button[aria-pressed='true'] {
-  background: var(--e8-bg-2);
-  color: var(--e8-fg);
-  font-weight: 500;
-}
+/* A document's body: the editor's own frame, and a plain-text viewer. */
 .e8-code-editor {
   min-width: 0;
   border: 1px solid var(--e8-border);
@@ -661,56 +568,6 @@ label {
   padding: 12px;
 }
 .e8-code-editor > button {
-  margin-bottom: 12px;
-}
-.e8-assets-upload {
-  margin-bottom: 16px;
-  color: var(--e8-fg-muted);
-  font-weight: 400;
-}
-.e8-assets-entry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--e8-border);
-  font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
-  color: var(--e8-fg);
-}
-.e8-assets-entry:last-child {
-  border-bottom: 0;
-}
-.e8-assets-dir {
-  color: var(--e8-fg-muted);
-}
-.e8-assets-file {
-  cursor: pointer;
-  color: var(--e8-fg);
-}
-.e8-assets-file-error {
-  color: var(--e8-error);
-}
-.e8-assets-delete,
-.e8-assets-confirm button,
-.e8-code-confirm button {
-  height: 22px;
-  padding: 0 8px;
-  border-radius: var(--e8-radius);
-  font-size: var(--e8-size-status);
-}
-.e8-assets-delete {
-  margin-left: auto;
-  color: var(--e8-fg-muted);
-}
-.e8-assets-confirm,
-.e8-code-confirm {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--e8-fg);
-  font-family: var(--e8-font);
-}
-.e8-code-confirm {
   margin-bottom: 12px;
 }
 .e8-assets-text {
@@ -721,32 +578,16 @@ label {
   max-height: 60vh;
   font-family: var(--e8-font-mono);
 }
-.e8-assets-tree {
-  max-height: 50vh;
-  overflow: auto;
-}
-.e8-assets img {
+.e8-viewer-image {
   border-radius: var(--e8-radius);
   border: 1px solid var(--e8-border);
 }
-.e8-assets-diagnostic,
 .e8-code-diagnostic,
 .e8-code-error {
   color: var(--e8-error);
 }
 
 @media (max-width: 768px) {
-  .e8-layout-tabs {
-    height: auto;
-    flex-wrap: wrap;
-    padding: 8px 12px;
-  }
-  .e8-layout-body {
-    padding: 16px 12px;
-  }
-  .e8-code-body {
-    grid-template-columns: 1fr;
-  }
   .e8-field {
     grid-template-columns: 1fr;
   }

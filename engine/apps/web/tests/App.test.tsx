@@ -135,6 +135,13 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
   });
 
+  it('ctx.layout is gone from the real client', async () => {
+    // Ruling 2: the assertion Task 1 could not make while `layout` and
+    // `shell` overlapped.
+    const { ctx } = await harness();
+    expect((ctx as unknown as { layout?: unknown }).layout).toBeUndefined();
+  });
+
   it('composition.card still works for anything else', async () => {
     // `App` itself registers no `composition.card` any more, but the slot
     // a THIRD PARTY registers still has to reach the composition document
