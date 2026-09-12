@@ -62,21 +62,25 @@ export interface ShellService {
   open(doc: Omit<OpenDocument, 'dirty'>): void;
   /** Opens a CONTRIBUTED document by its slot key. Same key twice activates. */
   openContributed(key: string): void;
-  /** Refuses when the tab is dirty and no guard has let it through. */
-  close(key: string): boolean;
+  /**
+   * Refuses a dirty tab and returns `false` unless `force` says otherwise.
+   * The one call site this ever mattered at was already behind
+   * `if (doc.dirty)`, so a confirm flow is two calls, not a registered
+   * guard: `if (!shell.close(k)) confirm(() => shell.close(k, { force: true }))`.
+   */
+  close(key: string, opts?: { force?: boolean }): boolean;
   activate(key: string): void;
   markDirty(key: string, dirty: boolean): void;
 
   documents(): readonly OpenDocument[];
   active(): OpenDocument | undefined;
+  /** For `beforeunload`: a shell-level fact, not a per-tab guard question. */
+  hasDirtyDocuments(): boolean;
 
   sidebar(): string | undefined; // active sidebar key, or collapsed
   showSidebar(key: string | undefined): void;
   panelCollapsed(): boolean;
   togglePanel(): void;
-
-  /** A dirty-tab guard: return false to keep the tab. Same shape as layout.guard(). */
-  guard(fn: (key: string) => boolean): () => void;
 
   /** Called by the app once every registration effect has run. Until then the
    *  hash is not checked, so a deep link to a contributed document does not
@@ -116,7 +120,6 @@ export function apply(ctx: Context) {
   // ordering trick `slots`/`layout` lean on.
   const documents = new Map<string, OpenDocument>();
   const listeners = new Set<() => void>();
-  const guards = new Set<(key: string) => boolean>();
   let sidebarKey: string | undefined;
   let panelCollapsed = false;
   let ready = false;
@@ -184,18 +187,11 @@ export function apply(ctx: Context) {
       openFoundContributed(found);
     },
 
-    close(key) {
+    close(key, opts) {
       const doc = documents.get(key);
       if (!doc) return false;
       if (!doc.closable) return false;
-      if (doc.dirty) {
-        // Refused unless SOME guard says it may proceed — no guards at
-        // all is the same as every guard refusing.
-        if (guards.size === 0) return false;
-        for (const guard of guards) {
-          if (!guard(key)) return false;
-        }
-      }
+      if (doc.dirty && !opts?.force) return false;
 
       const keys = [...documents.keys()];
       const index = keys.indexOf(key);
@@ -232,6 +228,13 @@ export function apply(ctx: Context) {
       return key === '' ? undefined : documents.get(key);
     },
 
+    hasDirtyDocuments() {
+      for (const doc of documents.values()) {
+        if (doc.dirty) return true;
+      }
+      return false;
+    },
+
     sidebar() {
       return sidebarKey;
     },
@@ -248,13 +251,6 @@ export function apply(ctx: Context) {
     togglePanel() {
       panelCollapsed = !panelCollapsed;
       notify();
-    },
-
-    guard(fn) {
-      guards.add(fn);
-      return () => {
-        guards.delete(fn);
-      };
     },
 
     ready() {

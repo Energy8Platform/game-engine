@@ -119,17 +119,43 @@ describe('shell', () => {
     expect(ctx.shell.active()?.key).toBe('a');
   });
 
-  it('closing a dirty tab is refused until a guard lets it through', () => {
+  it('closing a MIDDLE tab activates the one that slid into its position', () => {
+    // Distinct from the "closing the last tab" case above: there,
+    // "neighbour" and "the first remaining document" happen to be the
+    // same document, so that test alone cannot tell `remaining[index]`
+    // apart from a fixed `remaining[0]`.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    ctx.shell.open({ key: 'b', title: 'B', component: Dummy, closable: true });
+    ctx.shell.open({ key: 'c', title: 'C', component: Dummy, closable: true });
+    ctx.shell.activate('b');
+    expect(ctx.shell.close('b')).toBe(true);
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['a', 'c']);
+    expect(ctx.shell.active()?.key).toBe('c');
+  });
+
+  it('closing a dirty tab is refused unless forced', () => {
     // The slice-6 leave guard, re-homed: the thing that must not happen is
-    // typed math vanishing on a click.
+    // typed math vanishing on a click. `force` replaces a registered
+    // guard — the one call site this ever gated is right here, behind
+    // `doc.dirty`, so a confirm flow is two calls: `close(k)` first,
+    // `close(k, { force: true })` only if the caller means it.
     const ctx = harness();
     ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
     ctx.shell.markDirty('a', true);
     expect(ctx.shell.close('a')).toBe(false);
     expect(ctx.shell.documents()).toHaveLength(1);
-    const off = ctx.shell.guard(() => true);
-    expect(ctx.shell.close('a')).toBe(true);
-    off();
+    expect(ctx.shell.close('a', { force: true })).toBe(true);
+  });
+
+  it('hasDirtyDocuments reports true while any tab is dirty', () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    expect(ctx.shell.hasDirtyDocuments()).toBe(false);
+    ctx.shell.markDirty('a', true);
+    expect(ctx.shell.hasDirtyDocuments()).toBe(true);
+    ctx.shell.markDirty('a', false);
+    expect(ctx.shell.hasDirtyDocuments()).toBe(false);
   });
 
   it('a non-closable contributed document has no close, and close() says so', () => {
@@ -198,40 +224,11 @@ describe('shell', () => {
 
   // --- Ported from layout.test.tsx: properties that outlive the "one
   // screen" form (see task-1-report.md for the full per-test disposition).
-
-  it('a guard is told which key it is being asked about', () => {
-    // Ported from "a guard is told which screen navigation was headed to".
-    const ctx = harness();
-    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
-    ctx.shell.markDirty('a', true);
-    let seen: string | undefined;
-    ctx.shell.guard((key) => {
-      seen = key;
-      return true;
-    });
-    ctx.shell.close('a');
-    expect(seen).toBe('a');
-  });
-
-  it('a guard returning false blocks even when another guard would allow it', () => {
-    // Ported from "go() proceeds once its guard is disposed" — adapted,
-    // not copied verbatim: layout's guard is an opt-in VETO (no guards at
-    // all means allowed), while shell's is documented the other way
-    // around ("refuses ... until a guard lets it through" — see the given
-    // test above), so "dispose the only guard" does not carry the same
-    // meaning here. What does carry over is that EVERY guard is
-    // consulted, not just the first: a lone "yes" is not enough to
-    // override a "no" sitting next to it, and removing the "no" is what
-    // lets the standing "yes" through.
-    const ctx = harness();
-    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
-    ctx.shell.markDirty('a', true);
-    ctx.shell.guard(() => true);
-    const offBlock = ctx.shell.guard(() => false);
-    expect(ctx.shell.close('a')).toBe(false);
-    offBlock();
-    expect(ctx.shell.close('a')).toBe(true);
-  });
+  // The two guard-shaped ports that used to live here ("a guard is told
+  // which key...", "a guard returning false blocks...") lost their
+  // subject when fix round 1 replaced `guard()` with `close(key, {force})`
+  // — see task-1-report.md's Round 2 entry. The veto semantics they
+  // pinned belong to `layout` and stay there until Task 6 removes it.
 
   it('opening a document notifies subscribers', () => {
     // Ported from "registering a screen notifies subscribers".
