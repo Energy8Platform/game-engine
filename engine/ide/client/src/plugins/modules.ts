@@ -10,6 +10,15 @@ declare module 'cordis' {
 export interface ModulesService {
   /** Entry ids whose client half has been imported and applied without error. */
   loaded(): string[];
+  /**
+   * True once a snapshot has been seen and every client half it names has
+   * been attempted — imported and applied, or failed and said so. Until
+   * then a document the address names may still be on its way, and "not
+   * registered" would be a guess about a plugin that has not had its turn.
+   */
+  settled(): boolean;
+  /** Fires when `settled()` may have changed. */
+  subscribe(listener: () => void): () => void;
 }
 
 export interface ModulesConfig {
@@ -75,6 +84,14 @@ export function apply(ctx: Context, config: ModulesConfig) {
   const holding = new Map<string, Fiber>();
   /** Entry ids whose half imported and applied without error — `loaded()`. */
   const loaded = new Set<string>();
+  /** Entry ids with an attempt in flight, whichever way it ends — `settled()`. */
+  const settling = new Set<string>();
+  /** Whether any snapshot has been synced yet; before one, nothing can be settled. */
+  let seen = false;
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
   /** Row ids the latest snapshot says should be running right now. */
   const wanted = new Set<string>();
   const importModule = config.importModule ?? ((url: string) => import(/* @vite-ignore */ url));
@@ -101,6 +118,16 @@ export function apply(ctx: Context, config: ModulesConfig) {
   };
 
   const load = async (id: string, pkg: string, url: string, needs: string[], token: symbol) => {
+    settling.add(id);
+    try {
+      await attempt(id, pkg, url, needs, token);
+    } finally {
+      settling.delete(id);
+      notify();
+    }
+  };
+
+  const attempt = async (id: string, pkg: string, url: string, needs: string[], token: symbol) => {
     let module: unknown;
     try {
       module = await importModule(url);
@@ -233,9 +260,18 @@ export function apply(ctx: Context, config: ModulesConfig) {
       claims.set(row.id, token);
       void load(row.id, row.name, url, row.clientInject ?? [], token);
     }
+    seen = true;
+    notify();
   };
 
-  const service: ModulesService = { loaded: () => [...loaded] };
+  const service: ModulesService = {
+    loaded: () => [...loaded],
+    settled: () => seen && settling.size === 0,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 
   ctx.effect(() => ctx.connection.subscribe(sync), 'modules-sync');
   ctx.provide('modules', service);

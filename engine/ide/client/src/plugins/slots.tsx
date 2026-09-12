@@ -38,13 +38,19 @@ export interface SlotsService {
    * became generic, only the TYPE refused them; nothing in the collection
    * ever dropped them. `SlotMeta` stays the default, so every existing
    * caller (`composition.card`, `sidebar.item`, …) is untouched.
+   *
+   * `component` is optional: a `shell.activity` entry is drawn from its
+   * `icon` and never rendered, so an activity needs no body of its own.
    */
-  register<M extends SlotMeta>(meta: M, component: ComponentType<any>): () => void;
+  register<M extends SlotMeta>(meta: M, component?: ComponentType<any>): () => void;
   list<M extends SlotMeta = SlotMeta>(name: string): (M & { component: ComponentType<any> })[];
   subscribe(listener: () => void): () => void;
 }
 
 export const name = 'slots';
+
+/** The body of an entry that has none — a `shell.activity` button, drawn from its meta alone. */
+const Nothing = () => null;
 
 export function apply(ctx: Context) {
   // Same replace-and-report guarantee as before, now from
@@ -64,7 +70,7 @@ export function apply(ctx: Context) {
   };
 
   const service: SlotsService = {
-    register<M extends SlotMeta>(meta: M, component: ComponentType<any>) {
+    register<M extends SlotMeta>(meta: M, component: ComponentType<any> = Nothing) {
       const id = `${meta.name}::${meta.key}`;
       // Stored as `SlotEntry` — the registry only ever needs `name`/`key`/
       // `component` for itself (collision id, `list()`'s name filter);

@@ -15,11 +15,6 @@ import {
   useGameDiagnostics,
 } from '@energy8engine/ide-client';
 
-/** `shell.activity`'s own `component` is never rendered — `Shell.tsx`'s `ActivityButton` draws `entry.icon` as text and nothing else. */
-function NoActivityBody() {
-  return null;
-}
-
 /**
  * A document is mounted as `<component ctx={ctx} />` — `ctx` alone — so
  * the GAME's resolved composition rows, which `App` used to read once for
@@ -65,17 +60,14 @@ function DiagnosticsDocument({ ctx }: { ctx: Context }) {
  */
 export function App({ ctx }: { ctx: Context }) {
   useEffect(() => {
-    return ctx.slots.register(
-      {
-        name: 'shell.activity',
-        key: 'explorer',
-        title: 'Проводник',
-        icon: 'files',
-        order: 0,
-        opens: 'sidebar',
-      },
-      NoActivityBody,
-    );
+    return ctx.slots.register({
+      name: 'shell.activity',
+      key: 'explorer',
+      title: 'Проводник',
+      icon: 'files',
+      order: 0,
+      opens: 'sidebar',
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
@@ -88,17 +80,14 @@ export function App({ ctx }: { ctx: Context }) {
   }, [ctx]);
 
   useEffect(() => {
-    return ctx.slots.register(
-      {
-        name: 'shell.activity',
-        key: 'composition',
-        title: 'Состав',
-        icon: '☰',
-        order: 1,
-        opens: 'document',
-      },
-      NoActivityBody,
-    );
+    return ctx.slots.register({
+      name: 'shell.activity',
+      key: 'composition',
+      title: 'Состав',
+      icon: '☰',
+      order: 1,
+      opens: 'document',
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
@@ -111,17 +100,14 @@ export function App({ ctx }: { ctx: Context }) {
   }, [ctx]);
 
   useEffect(() => {
-    return ctx.slots.register(
-      {
-        name: 'shell.activity',
-        key: 'preview',
-        title: 'Превью',
-        icon: '▶',
-        order: 2,
-        opens: 'document',
-      },
-      NoActivityBody,
-    );
+    return ctx.slots.register({
+      name: 'shell.activity',
+      key: 'preview',
+      title: 'Превью',
+      icon: '▶',
+      order: 2,
+      opens: 'document',
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
@@ -169,9 +155,12 @@ export function App({ ctx }: { ctx: Context }) {
     // A fresh load names no document. Five regions around an empty editor
     // and a bare sidebar would be an unexplained empty pane, so the
     // composition opens — the way the old layout showed its first screen —
-    // with the Explorer beside it. A deep link, or a sidebar already
-    // chosen, is left alone.
-    if (ctx.shell.active() === undefined) ctx.shell.openContributed('composition');
+    // with the Explorer beside it. A deep link — resolved, or still
+    // pending on a plugin's client half — and a sidebar already chosen are
+    // left alone.
+    if (ctx.shell.active() === undefined && ctx.shell.pending() === undefined) {
+      ctx.shell.openContributed('composition');
+    }
     if (ctx.shell.sidebar() === undefined) ctx.shell.showSidebar('explorer');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);

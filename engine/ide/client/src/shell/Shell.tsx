@@ -234,7 +234,7 @@ function DocumentTab({
  * to show, even though no slot named it.
  */
 export function Shell({ ctx }: { ctx: Context }) {
-  const { documents, active, sidebar, panelCollapsed } = useShell(ctx);
+  const { documents, active, pending, sidebar, panelCollapsed } = useShell(ctx);
   const [pendingClose, setPendingClose] = useState<string | undefined>(undefined);
   const sidebarSize = useResize(SIZE_KEYS.sidebar, 'x', 1);
   // Dragging the panel's top edge UP makes it taller, hence the sign.
@@ -329,6 +329,11 @@ export function Shell({ ctx }: { ctx: Context }) {
           ))}
         </div>
         <div className="e8-editors-body" data-testid="doc-body">
+          {active === undefined && pending !== undefined ? (
+            <p className="e8-empty" data-testid="doc-opening">
+              {`opening "${pending}"…`}
+            </p>
+          ) : null}
           {documents.map((doc) => (
             <div
               key={doc.key}

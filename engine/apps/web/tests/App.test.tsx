@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createIdeClient, useGameComposition } from '@energy8engine/ide-client';
-import type { ServerMessage } from '@energy8engine/contracts';
+import type { CompositionRow, ServerMessage } from '@energy8engine/contracts';
 import { App } from '../src/App';
 
 /**
@@ -55,6 +55,21 @@ async function harness(importModule?: (url: string) => Promise<unknown>) {
       )) as unknown as typeof fetch,
   });
   return { ctx, socket };
+}
+
+/** The composition row the host would broadcast for `first-slot`'s `screen-demo` plugin. */
+function demoRow(): CompositionRow {
+  return {
+    id: 'demo1',
+    name: 'screen-demo',
+    disabled: false,
+    state: 2,
+    config: {},
+    schema: null,
+    hot: true,
+    clientUrl: '/plugin-client/demo1',
+    clientInject: ['slots', 'gameComposition'],
+  };
 }
 
 // `ctx.shell` writes `location.hash`, and a deep-link test below sets it
@@ -164,6 +179,40 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
   });
 
+  it('a cold load on a plugin’s tab opens it once its client half lands — no false diagnostic', async () => {
+    // Fix round 1, item 4: F5 while on `#/doc/demo`. `ready()` runs before
+    // `modules` has imported the plugin; the shell holds the key as
+    // pending, says so in the body, and opens the tab when it registers.
+    location.hash = '#/doc/demo';
+    (globalThis as { __E8_IDE__?: unknown }).__E8_IDE__ = { React, useGameComposition };
+    const { ctx, socket } = await harness(
+      // @ts-expect-error — a plain ES module with no types, imported the way the browser imports it
+      async () => import('../../../examples/first-slot/plugins/screen-demo/src/client.js'),
+    );
+    render(<App ctx={ctx} />);
+    expect(ctx.shell.active()).toBeUndefined();
+    expect(screen.getByTestId('doc-opening')).toHaveTextContent('demo');
+    socket.push({ type: 'snapshot', snapshot: { rows: [demoRow()], diagnostics: [] } });
+    await waitFor(() => expect(ctx.shell.active()?.key).toBe('demo'));
+    expect(await screen.findByTestId('demo-screen')).toBeTruthy();
+    expect(location.hash).toBe('#/doc/demo');
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('a cold load on a key no plugin registers reports once, after the loader settles', async () => {
+    location.hash = '#/doc/ghost';
+    const { ctx, socket } = await harness();
+    render(<App ctx={ctx} />);
+    expect(ctx.connection.diagnostics).toEqual([]); // the loader has not spoken yet
+    socket.push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+    await waitFor(() =>
+      expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+        expect.stringContaining('ghost'),
+      ]),
+    );
+    expect(ctx.shell.active()?.key).toBe('composition');
+  });
+
   it('the demo plugin brings an activity button AND a document', async () => {
     // Through `modules`, the real loader: a fake snapshot names the
     // plugin's client half, and `importModule` hands back its real source.
@@ -175,25 +224,7 @@ describe('App', () => {
       async () => import('../../../examples/first-slot/plugins/screen-demo/src/client.js'),
     );
     render(<App ctx={ctx} />);
-    socket.push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [
-          {
-            id: 'demo1',
-            name: 'screen-demo',
-            disabled: false,
-            state: 2,
-            config: {},
-            schema: null,
-            hot: true,
-            clientUrl: '/plugin-client/demo1',
-            clientInject: ['slots', 'gameComposition'],
-          },
-        ],
-        diagnostics: [],
-      },
-    });
+    socket.push({ type: 'snapshot', snapshot: { rows: [demoRow()], diagnostics: [] } });
     await waitFor(() =>
       expect(ctx.slots.list('shell.activity').map((e) => e.key)).toContain('demo'),
     );

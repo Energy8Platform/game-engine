@@ -25,6 +25,9 @@ const Nop = () => null;
  * (a hard dependency, not a lenient one — see `shell.tsx`'s own doc), so
  * `slotsPlugin` is applied to the same fake first.
  */
+/** Every harness built in a test, disposed after it — see `afterEach` below. */
+const built: Context[] = [];
+
 function harness(): Context {
   let diagnostics: Diagnostic[] = [];
   const diagListeners = new Set<() => void>();
@@ -70,6 +73,7 @@ function harness(): Context {
 
   slotsPlugin.apply(ctx as Context);
   shellPlugin.apply(ctx as Context);
+  built.push(ctx as Context);
   return ctx as Context;
 }
 
@@ -82,6 +86,15 @@ function fakeSocket() {
 // when the next test's `harness()` reads it.
 beforeEach(() => {
   location.hash = '';
+});
+
+// A shell past `ready()` resolves the address on every `hashchange`, and
+// falls back by writing the hash. Two harnesses left alive from earlier
+// tests, with different contributed documents, would answer each other's
+// fallback with their own forever — one shell per page is the rule this
+// suite has to keep by hand.
+afterEach(async () => {
+  for (const ctx of built.splice(0)) await ctx.fiber.dispose();
 });
 
 describe('shell', () => {
@@ -178,12 +191,20 @@ describe('shell', () => {
     expect(ctx.shell.close('composition')).toBe(false);
   });
 
-  it('the hash names the active document, and a hashchange follows it', () => {
+  it('the hash names the active document, and a hashchange NOTIFIES subscribers', () => {
+    // `active()` reads the hash live and would answer right without any
+    // listener at all; what a listener is FOR is telling `useShell` to
+    // re-render on Back. The subscriber count is the assertion that
+    // reaches it — the reviewer deleted the listener with every test
+    // still green (thirty-fourth on this branch).
     const ctx = harness();
     ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
     ctx.shell.open({ key: 'b', title: 'B', component: Dummy, closable: true });
+    const listener = vi.fn();
+    ctx.shell.subscribe(listener);
     location.hash = '#/doc/a';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(listener).toHaveBeenCalledTimes(1);
     expect(ctx.shell.active()?.key).toBe('a');
   });
 
@@ -208,6 +229,91 @@ describe('shell', () => {
     expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
       expect.stringContaining('gone'),
     ]);
+  });
+
+  it('after ready(), a hash naming a closed tab falls back live and says so', () => {
+    // Item 1 of fix round 1: Back onto a tab that was closed left zero
+    // panes and a blank body, because only the `ready()` instant resolved
+    // the address. `hashchange` resolves it too now.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.shell.ready();
+    ctx.shell.open({ key: 'f:x', title: 'x', component: Dummy, closable: true });
+    expect(ctx.shell.close('f:x')).toBe(true);
+    location.hash = '#/doc/f:x'; // the browser's Back
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(ctx.shell.active()?.key).toBe('composition');
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('f:x'),
+    ]);
+  });
+
+  it('after ready(), a hash edited to a contributed-but-unopened document opens it', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.slots.register({ name: 'shell.document', key: 'preview' }, Dummy);
+    ctx.shell.ready();
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual([]);
+    location.hash = '#/doc/preview';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(ctx.shell.active()?.key).toBe('preview');
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('a deep link to a document a plugin has not registered yet waits, then opens it, with no diagnostic', () => {
+    // Item 4: on a cold F5 while on a plugin's tab, `ready()` runs before
+    // `modules` has imported the plugin's client half. Held as pending
+    // while the loader is unsettled; opened the moment the document lands.
+    location.hash = '#/doc/demo';
+    const ctx = harness();
+    let settled = false;
+    const loaderListeners = new Set<() => void>();
+    (ctx as any).modules = {
+      loaded: () => [],
+      settled: () => settled,
+      subscribe(listener: () => void) {
+        loaderListeners.add(listener);
+        return () => loaderListeners.delete(listener);
+      },
+    };
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.shell.ready();
+    expect(ctx.shell.active()).toBeUndefined();
+    expect(ctx.shell.pending()).toBe('demo');
+    expect(ctx.connection.diagnostics).toEqual([]);
+    ctx.slots.register({ name: 'shell.document', key: 'demo' }, Dummy);
+    expect(ctx.shell.active()?.key).toBe('demo');
+    expect(ctx.shell.pending()).toBeUndefined();
+    settled = true;
+    for (const listener of loaderListeners) listener();
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('a deep link nothing ever registers reports exactly once, after the loader settles', () => {
+    location.hash = '#/doc/ghost';
+    const ctx = harness();
+    let settled = false;
+    const loaderListeners = new Set<() => void>();
+    (ctx as any).modules = {
+      loaded: () => [],
+      settled: () => settled,
+      subscribe(listener: () => void) {
+        loaderListeners.add(listener);
+        return () => loaderListeners.delete(listener);
+      },
+    };
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.shell.ready();
+    expect(ctx.connection.diagnostics).toEqual([]); // not yet a guess to make
+    for (const listener of loaderListeners) listener(); // a settle notice that is not settled
+    expect(ctx.connection.diagnostics).toEqual([]);
+    settled = true;
+    for (const listener of loaderListeners) listener();
+    for (const listener of loaderListeners) listener();
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('ghost'),
+    ]);
+    expect(ctx.shell.active()?.key).toBe('composition');
   });
 
   it('showSidebar toggles: the active key again collapses it', () => {
@@ -317,6 +423,13 @@ describe('Shell', () => {
       { name: 'shell.activity', key: 'a', title: 'A', icon: 'a', order: 1, opens: 'sidebar' },
       Nop,
     );
+    // Same order as `z`, registered after it, and sorting before it by
+    // key: only registration order keeps `y` after `z`. A comparator that
+    // broke ties by key would pass without this pair.
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'y', title: 'Y', icon: 'y', order: 9, opens: 'sidebar' },
+      Nop,
+    );
     render(<Shell ctx={ctx} />);
     // Scoped to the bar, not `getAllByTestId(/^activity-/)` — that regex is
     // unanchored on the RIGHT, so it would also match the bar's own
@@ -325,7 +438,7 @@ describe('Shell', () => {
     // are `<button>`, so `getAllByRole('button')` inside it can't pick up
     // its own container by accident.
     const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
-    expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z']);
+    expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z', 'activity-y']);
   });
 
   it('a contribution with no order sorts after every one that has one', () => {
@@ -601,6 +714,16 @@ describe('Shell', () => {
     render(<Shell ctx={ctx} />);
     expect(root().style.getPropertyValue('--e8-sidebar-w')).toBe('300px');
     expect(root().style.getPropertyValue('--e8-panel-h')).toBe('250px');
+  });
+
+  it('a pending deep link is words in the body, not an empty pane', () => {
+    location.hash = '#/doc/demo';
+    const ctx = harness();
+    (ctx as any).modules = { loaded: () => [], settled: () => false, subscribe: () => () => {} };
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.shell.ready();
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('doc-opening')).toHaveTextContent('demo');
   });
 
   it('with nothing registered anywhere it explains itself instead of painting nothing', () => {

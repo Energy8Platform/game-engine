@@ -19,9 +19,8 @@
  *     needs to watch a service rather than read it once.
  *
  * A document is two registrations under ONE key: a button on the activity
- * bar (`shell.activity`, `opens: 'document'`) and the document it opens
- * (`shell.document`). The shell pairs them by `key` — nothing in either
- * meta names the other.
+ * bar (`shell.activity`, `opens: 'document'`, no body of its own) and the
+ * document it opens (`shell.document`). The shell pairs them by `key`.
  */
 const { React, useGameComposition } = globalThis.__E8_IDE__;
 
@@ -70,19 +69,14 @@ function shouldCrash() {
 export function apply(ctx) {
   ctx.effect(
     () =>
-      ctx.slots.register(
-        {
-          name: 'shell.activity',
-          key: 'demo',
-          title: 'Демо',
-          icon: 'demo',
-          order: 50,
-          opens: 'document',
-        },
-        function NoActivityBody() {
-          return null;
-        },
-      ),
+      ctx.slots.register({
+        name: 'shell.activity',
+        key: 'demo',
+        title: 'Демо',
+        icon: 'demo',
+        order: 50,
+        opens: 'document',
+      }),
     'screen-demo:activity',
   );
 

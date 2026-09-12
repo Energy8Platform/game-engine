@@ -268,6 +268,38 @@ describe('modules — a half declares what it needs, and gets it', () => {
   });
 });
 
+describe('modules — settled() says when every client half has had its turn', () => {
+  it('is false before any snapshot, false while an import is in flight, true after — and notifies', async () => {
+    let resolve!: (module: unknown) => void;
+    const importModule = vi.fn(() => new Promise<unknown>((r) => (resolve = r)));
+    const { ctx, push } = await harness(importModule);
+    const listener = vi.fn();
+    ctx.modules.subscribe(listener);
+    expect(ctx.modules.settled()).toBe(false); // nothing has been seen yet
+
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
+    expect(ctx.modules.settled()).toBe(false); // the import is in flight
+    await vi.waitFor(() => expect(importModule).toHaveBeenCalledTimes(1));
+
+    listener.mockClear();
+    resolve({ apply() {} });
+    await vi.waitFor(() => expect(ctx.modules.settled()).toBe(true));
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it('a snapshot naming no client half at all settles at once', async () => {
+    const { ctx, push } = await harness(vi.fn(async () => ({ apply() {} })));
+    push({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+    expect(ctx.modules.settled()).toBe(true);
+  });
+
+  it('a failed import still settles — a failure is an answer', async () => {
+    const { ctx, push } = await harness(vi.fn(async () => { throw new Error('404'); }));
+    push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
+    await vi.waitFor(() => expect(ctx.modules.settled()).toBe(true));
+  });
+});
+
 /**
  * The other half of applying through cordis: a fiber can be disposed, so a
  * row that leaves the composition — deleted from `e8.yml`, or switched off
