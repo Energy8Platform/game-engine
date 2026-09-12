@@ -60,4 +60,5 @@ export {
 } from './shell/StatusItems';
 export { AssetsScreen, looksBinary } from './screens/AssetsScreen';
 export { CodeScreen } from './screens/CodeScreen';
+export { Explorer, openPath } from './shell/Explorer';
 export { Monaco, type MonacoProps } from './editor/Monaco';

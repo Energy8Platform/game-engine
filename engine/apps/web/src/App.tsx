@@ -4,10 +4,16 @@ import {
   AssetsScreen,
   CodeScreen,
   CompositionScreen,
+  Explorer,
   Layout,
   PreviewWall,
   useGameComposition,
 } from '@energy8engine/ide-client';
+
+/** `shell.activity`'s own `component` is never rendered — `Shell.tsx`'s `ActivityButton` draws `entry.icon` as text and nothing else. */
+function NoActivityBody() {
+  return null;
+}
 
 /**
  * `ctx.layout` mounts a registered screen as `<component ctx={ctx} />` —
@@ -54,6 +60,13 @@ function CompositionScreenEntry({ ctx }: { ctx: Context }) {
  * `preview` any number at all would therefore have put `preview` FIRST —
  * the opposite of "after composition" — so composition's own `order: 0` is
  * part of making that true, not an unrelated tidy-up.
+ *
+ * The `shell.activity`/`shell.sidebar` registrations below are Task 4's
+ * own addition, alongside the `ctx.layout.screen` calls above rather than
+ * instead of them: `App` still draws `<Layout/>`, not `<Shell/>`, so these
+ * two slots have no reader yet and are inert on screen today — Task 6 is
+ * what switches `App` onto `Shell` and gives them one. Proven here only by
+ * registration (`App.test.tsx`'s own new case), not by anything rendering.
  */
 export function App({ ctx }: { ctx: Context }) {
   useEffect(() => {
@@ -76,6 +89,29 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.layout.screen({ id: 'code', title: 'Код', order: 3 }, CodeScreen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      {
+        name: 'shell.activity',
+        key: 'explorer',
+        title: 'Проводник',
+        icon: 'files',
+        order: 0,
+        opens: 'sidebar',
+      },
+      NoActivityBody,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      { name: 'shell.sidebar', key: 'explorer', title: 'Проводник' },
+      Explorer,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 

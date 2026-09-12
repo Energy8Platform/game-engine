@@ -120,6 +120,20 @@ describe('App', () => {
     expect(screen.getByText('CARD')).toBeTruthy();
   });
 
+  it('registers the explorer activity and sidebar view, inert until Shell replaces Layout', async () => {
+    // Task 4's own addition, alongside the `ctx.layout.screen` calls above,
+    // not instead of them — `App` still draws `<Layout/>`, so nothing on
+    // screen reads either slot yet (Task 6 is what switches `App` onto
+    // `<Shell/>`). Proven the only way it can be today: the registration
+    // itself, through `ctx.slots.list`, the same primitive
+    // `composition.card still works for anything else` above already
+    // reads.
+    const ctx = await harness();
+    render(<App ctx={ctx} />);
+    expect(ctx.slots.list('shell.activity').map((e) => e.key)).toContain('explorer');
+    expect(ctx.slots.list('shell.sidebar').map((e) => e.key)).toContain('explorer');
+  });
+
   it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
     // The one place in this suite that pins WORDING rather than structure.
     // The reason it used to give — that EVERY visible string in
