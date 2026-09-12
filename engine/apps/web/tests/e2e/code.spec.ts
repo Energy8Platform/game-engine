@@ -96,8 +96,12 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
-/** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
-const IDE_URL = 'http://127.0.0.1:5680/#/code';
+/**
+ * The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide`
+ * to the host on 5679. No `#/code` any more: a file is opened from the
+ * Explorer sidebar, which every fresh load shows, into its own tab.
+ */
+const IDE_URL = 'http://127.0.0.1:5680/';
 
 test.beforeEach(async ({ page }) => {
   // See the module doc's first "found by running the draft" item. Applied
@@ -113,7 +117,7 @@ test.beforeEach(async ({ page }) => {
 
 /** Opens `game/script.spin` and waits for the REAL editor — not merely the host div `<Monaco/>` renders before Monaco has attached anything. See the module doc's second "found by running the draft" item. */
 async function openScriptSpin(page: Page): Promise<void> {
-  await page.getByTestId('file-game/script.spin').click();
+  await page.getByTestId('explorer-game/script.spin').click();
   await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('editor').click();
 }
@@ -418,14 +422,15 @@ test('a refused save reaches the diagnostics panel, on any screen', async ({ pag
   try {
     await page.goto(IDE_URL);
     await provokeRefusedSave(page, dir);
-    // The refused save leaves the screen dirty (the edit never landed),
-    // so the cross-tab leave guard Task 5 added intercepts the tab
-    // switch below exactly as it would for a person — confirmed through,
-    // same as choosing to discard. Landing on a DIFFERENT screen is the
-    // point: the panel has to still be showing the SAME refusal there,
-    // not merely on the Code screen that provoked it.
-    await page.getByTestId('tab-composition').click();
-    await page.getByTestId('confirm-yes').click();
+    // The refused save leaves the editor dirty (the edit never landed).
+    // This used to click through a leave-guard confirm here; the shell
+    // keeps every open document mounted (Ruling 13), so switching tabs
+    // loses nothing and asks nothing — only closing does. Landing on a
+    // DIFFERENT document is still the point: the panel has to be showing
+    // the SAME refusal there, not merely beside the editor that provoked
+    // it.
+    await page.getByTestId('activity-composition').click();
+    await expect(page.getByTestId('doc-composition')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('diagnostics-panel')).toContainText(/outside the project/i);
   } finally {
     await host.stop();
@@ -497,7 +502,7 @@ test('a TypeScript file under plugins/ gets no .spin marker', async ({ page }) =
   });
   try {
     await page.goto(IDE_URL);
-    await page.getByTestId('file-plugins/reel-step/src/step.ts').click();
+    await page.getByTestId('explorer-plugins/reel-step/src/step.ts').click();
     await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });
     await page.getByTestId('editor').click();
     await page.keyboard.type('\nconst game = 1;\n');

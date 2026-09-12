@@ -177,6 +177,19 @@ export function projectCopy(options: ProjectCopyOptions = {}): string {
   return dir;
 }
 
+/**
+ * A real 1x1 PNG — the same bytes `engine/ide/host/tests/fixtures/files
+ * /with-png/art/logo.png` carries — so a real browser hands a screen an
+ * actual image file rather than an empty stub with a `.png` name glued on.
+ * Here rather than in `assets.spec.ts`, where it started, because
+ * `shell.spec.ts` stages the same file on disk.
+ */
+export const PNG_BYTES = Buffer.from(
+  '89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c020000000b' +
+    '4944415478da6364f80f00010501012718e3660000000049454e44ae426082',
+  'hex',
+);
+
 export interface DevHost {
   /** Origin of the running GAME — `dev-game`'s catch-all owns `/` on the host's own port. */
   gameUrl: string;

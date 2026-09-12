@@ -39,10 +39,10 @@
  *
  *  1. The IDE opens ON a screen (not merely lists one), and a second
  *     screen is one real `ctx.layout.go()` round trip away.
- *  2. A deep link — a hard navigation straight to `#/preview`, the way a
- *     bookmark or a typed address would arrive — opens on the screen it
- *     names, not the default. A different code path from #1: this is
- *     `hashId()` read at mount, before any `hashchange` has ever fired.
+ *  2. A deep link — a hard navigation straight to `#/doc/preview`, the way
+ *     a bookmark or a typed address would arrive — opens on the screen it
+ *     names, not the default. A different code path from #1: this is the
+ *     hash read at `ready()`, before any `hashchange` has ever fired.
  *  3. The preview screen is a WALL — several tiles at once — not the old
  *     single zoomed frame. `PreviewWall`'s own default selection is the
  *     first three of `SCREEN_PRESETS`, so this checks for three, not one;
@@ -132,9 +132,9 @@ test('the IDE opens on a screen, and a second screen is one click away', async (
 
     await page.goto(IDE_URL);
     // "Opens ON a screen": the first tab is not just present, it is the
-    // CURRENT one — `layout.current()` picking `list[0]` for an empty
-    // hash, not `Layout` merely listing what got registered.
-    const compositionTab = page.getByTestId('tab-composition');
+    // CURRENT one — `App` opening the composition for an empty hash, not
+    // the shell merely listing what got registered.
+    const compositionTab = page.getByTestId('doc-composition');
     await expect(compositionTab).toBeVisible({ timeout: 20_000 });
     await expect(compositionTab).toHaveAttribute('aria-selected', 'true');
 
@@ -142,8 +142,8 @@ test('the IDE opens on a screen, and a second screen is one click away', async (
     // hash changes, `Layout` re-renders, and the SCREEN'S OWN CONTENT (not
     // just its tab) draws — a wall tile, never the preview screen's own
     // empty or loading state.
-    await page.getByTestId('tab-preview').click();
-    await expect(page.getByTestId('tab-preview')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId('activity-preview').click();
+    await expect(page.getByTestId('doc-preview')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId(/^tile-/).first()).toBeVisible();
   } finally {
     await host.stop();
@@ -160,10 +160,10 @@ test('a deep link opens the screen it names', async ({ page }) => {
 
     // A hard navigation straight to the address, the way a bookmark or a
     // typed URL would arrive — never a click, which is the test above's
-    // own path through `go()`. This one is `hashId()` read on first mount,
-    // before any `hashchange` event has ever fired.
-    await page.goto(`${IDE_URL}#/preview`);
-    await expect(page.getByTestId('tab-preview')).toHaveAttribute('aria-selected', 'true', {
+    // own path through the activity bar. This one is the hash read at
+    // `ready()`, before any `hashchange` event has ever fired.
+    await page.goto(`${IDE_URL}#/doc/preview`);
+    await expect(page.getByTestId('doc-preview')).toHaveAttribute('aria-selected', 'true', {
       timeout: 20_000,
     });
     await expect(page.getByTestId(/^tile-/).first()).toBeVisible();
@@ -180,7 +180,7 @@ test('the preview wall shows several tiles at once', async ({ page }) => {
     await page.goto(host.gameUrl);
     await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
 
-    await page.goto(`${IDE_URL}#/preview`);
+    await page.goto(`${IDE_URL}#/doc/preview`);
     // The wall's own default selection (`DEFAULT_PRESET_NAMES` in
     // `PreviewWall.tsx`) is the first three of `SCREEN_PRESETS` — three,
     // not one, is the claim under test: a regression to the old
@@ -208,7 +208,7 @@ test('the diagnostics panel is visible while the preview wall is open', async ({
     await page.goto(host.gameUrl);
     await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
 
-    await page.goto(`${IDE_URL}#/preview`);
+    await page.goto(`${IDE_URL}#/doc/preview`);
     await expect(page.getByTestId(/^tile-/).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('diagnostics-panel')).toBeVisible();
   } finally {
@@ -248,7 +248,7 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
 
     // The wall's own default selection includes both Desktop and Laptop —
     // no checkbox needed to bring either tile up.
-    await page.goto(`${IDE_URL}#/preview`);
+    await page.goto(`${IDE_URL}#/doc/preview`);
     const desktop = await tileFrame(page, 'Desktop');
     const laptop = await tileFrame(page, 'Laptop');
     await Promise.all([

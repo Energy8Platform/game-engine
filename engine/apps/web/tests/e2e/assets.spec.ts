@@ -11,7 +11,7 @@
  * task-8-report.md for the revert-and-confirm-red check on all four):
  *
  *  1. The screen draws the PROJECT's own tree, not a fixture baked into a
- *     test double — `entry-game/script.spin` is a real file this fixture
+ *     test double — `explorer-game/script.spin` is a real file this fixture
  *     ships, read off disk by the host and rendered by the screen.
  *  2. A file chosen through the real `<input type="file">` in a real
  *     browser lands on disk, where a person's own file manager would look
@@ -108,22 +108,14 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
-
-/** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
-const IDE_URL = 'http://127.0.0.1:5680/';
+import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /**
- * A real 1x1 PNG — the same bytes `engine/ide/host/tests/fixtures/files
- * /with-png/art/logo.png` carries — so a real browser's `setInputFiles`
- * hands the screen an actual image file rather than an empty stub with a
- * `.png` name glued on.
+ * The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide`
+ * to the host on 5679. No `#/assets` any more: the tree is the Explorer
+ * sidebar, open on every fresh load, and its rows are `explorer-<path>`.
  */
-const PNG_BYTES = Buffer.from(
-  '89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c020000000b' +
-    '4944415478da6364f80f00010501012718e3660000000049454e44ae426082',
-  'hex',
-);
+const IDE_URL = 'http://127.0.0.1:5680/';
 
 /**
  * `node:http`'s `path` sent unparsed, straight onto the request line — see
@@ -154,8 +146,8 @@ test('the assets screen shows the real project on disk', async ({ page }) => {
     await page.goto(host.gameUrl);
     await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
 
-    await page.goto(`${IDE_URL}#/assets`);
-    await expect(page.getByTestId('entry-game/script.spin')).toBeVisible({ timeout: 20_000 });
+    await page.goto(IDE_URL);
+    await expect(page.getByTestId('explorer-game/script.spin')).toBeVisible({ timeout: 20_000 });
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -173,13 +165,13 @@ test('a file uploaded through the screen is on disk afterwards', async ({ page }
     await page.goto(host.gameUrl);
     await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
 
-    await page.goto(`${IDE_URL}#/assets`);
-    await expect(page.getByTestId('entry-game/script.spin')).toBeVisible({ timeout: 20_000 });
+    await page.goto(IDE_URL);
+    await expect(page.getByTestId('explorer-game/script.spin')).toBeVisible({ timeout: 20_000 });
 
     await page
-      .getByTestId('upload')
+      .getByTestId('explorer-upload')
       .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: PNG_BYTES });
-    await expect(page.getByTestId('entry-logo.png')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('explorer-logo.png')).toBeVisible({ timeout: 20_000 });
     expect(existsSync(join(dir, 'logo.png'))).toBe(true);
   } finally {
     await host.stop();
@@ -195,12 +187,12 @@ test('a file deleted through the screen is gone from disk', async ({ page }) => 
     await page.goto(host.gameUrl);
     await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
 
-    await page.goto(`${IDE_URL}#/assets`);
-    await expect(page.getByTestId('entry-bye.txt')).toBeVisible({ timeout: 20_000 });
+    await page.goto(IDE_URL);
+    await expect(page.getByTestId('explorer-bye.txt')).toBeVisible({ timeout: 20_000 });
 
-    await page.getByTestId('delete-bye.txt').click();
+    await page.getByTestId('explorer-delete-bye.txt').click();
     await page.getByTestId('confirm-yes').click();
-    await expect(page.getByTestId('entry-bye.txt')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('explorer-bye.txt')).toHaveCount(0, { timeout: 20_000 });
     expect(existsSync(join(dir, 'bye.txt'))).toBe(false);
   } finally {
     await host.stop();

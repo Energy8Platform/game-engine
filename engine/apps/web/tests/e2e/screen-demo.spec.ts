@@ -37,33 +37,37 @@ test('a project plugin brings its own screen, no engine change required', async 
     // Visiting the game first and waiting for it to settle gives that work
     // room to finish on a cold dependency-optimizer cache, the same way
     // `declared.spec.ts`'s editor-diagnostics test does — skipping it here
-    // measured as an occasional 30s timeout on `tab-demo` under the full
+    // measured as an occasional 30s timeout on `activity-demo` under the full
     // suite, the IDE's own vite instance racing the same re-optimize.
     await page.goto(host.gameUrl);
     await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
 
     await page.goto(IDE_URL);
 
-    // Structure: a tab exists for the registered screen, addressed by id —
-    // the same split `apps/web/tests/App.test.tsx` draws between "a tab
-    // exists" (testid) and "it says the right thing" (role name), so a
-    // wording change alone cannot make this half look broken.
-    const tab = page.getByTestId('tab-demo');
-    await expect(tab, "screen-demo's apply(ctx) must have called ctx.layout.screen").toBeVisible({
-      timeout: 20_000,
-    });
+    // Structure: an activity button exists for the registered document,
+    // addressed by key — the same split `apps/web/tests/App.test.tsx`
+    // draws between "it exists" (testid) and "it says the right thing"
+    // (role name), so a wording change alone cannot make this half look
+    // broken. A tab only appears once the document is opened, which is
+    // the click below.
+    const button = page.getByTestId('activity-demo');
+    await expect(
+      button,
+      "screen-demo's apply(ctx) must have registered on shell.activity",
+    ).toBeVisible({ timeout: 20_000 });
 
-    // Wording: screen headings in this IDE are Russian, matching
-    // `Состав`/`Превью` — a plugin nobody on the team wrote follows the
-    // same convention because `ctx.layout.screen`'s `title` is the one
-    // thing that decides it, not a hard-coded position in `Layout.tsx`.
-    await expect(page.getByRole('tab', { name: 'Демо' })).toBeVisible();
+    // Wording: titles in this IDE are Russian, matching `Состав`/`Превью`
+    // — a plugin nobody on the team wrote follows the same convention
+    // because the registration's `title` is the one thing that decides
+    // it, not a hard-coded position in the shell.
+    await expect(page.getByRole('button', { name: 'Демо' })).toBeVisible();
 
     // Content: clicking through actually draws what the plugin registered
     // — `React.createElement` off the shell's own `globalThis.__E8_IDE__`
     // React, not a stub the test would pass against for the wrong reason.
-    await tab.click();
-    await expect(page.getByTestId('demo-screen')).toContainText('a screen from a project plugin');
+    await button.click();
+    await expect(page.getByRole('tab', { name: 'Демо' })).toBeVisible();
+    await expect(page.getByTestId('doc-pane-demo')).toContainText('a document from a project plugin');
 
     // The half of the claim a static `div` could never make: this number
     // comes from `ctx.gameComposition`, read through the plugin's OWN
@@ -96,9 +100,9 @@ test('the demo screen can be made to fail as data, on request, without taking th
     // "configuration" a browser module with no build step can read.
     await page.goto(`${IDE_URL}?screen-demo-crash=1`);
 
-    const tab = page.getByTestId('tab-demo');
-    await expect(tab).toBeVisible({ timeout: 20_000 });
-    await tab.click();
+    const button = page.getByTestId('activity-demo');
+    await expect(button).toBeVisible({ timeout: 20_000 });
+    await button.click();
 
     // What replaces the screen is a message that says what happened, not a
     // blank pane — measured, not assumed: this is the layout's own error
@@ -109,23 +113,20 @@ test('the demo screen can be made to fail as data, on request, without taking th
       'screen-demo: forced failure (the URL carried ?screen-demo-crash)',
     );
 
-    // The rest of the shell is unharmed: the composition tab is still
-    // there and still switchable, which a page-level crash would have
-    // taken down along with everything else.
-    const compositionTab = page.getByTestId('tab-composition');
-    await expect(compositionTab).toBeVisible();
-    await compositionTab.click();
-    await expect(compositionTab).toHaveAttribute('aria-selected', 'true');
+    // The rest of the shell is unharmed: the composition is still there
+    // and still switchable, which a page-level crash would have taken
+    // down along with everything else.
+    await page.getByTestId('activity-composition').click();
+    await expect(page.getByTestId('doc-composition')).toHaveAttribute('aria-selected', 'true');
 
-    // `aria-selected` alone lives in `Layout.tsx`'s `<nav>` and flips on
-    // `current?.id` regardless of whether `<main>` actually recovered — it
-    // would read exactly this way even if `<ScreenBoundary>` stayed stuck
-    // showing the crashed screen's own stale fallback. `key={current.id}`
-    // on that boundary (`Layout.tsx`'s own doc explains why at length) is
-    // what makes React discard the errored instance instead of reusing it,
-    // and this is the one assertion that actually depends on that: the
-    // composition screen's own unconditional heading, which only a fresh,
-    // successfully-rendered `CompositionScreen` puts on the page.
+    // `aria-selected` alone flips on the hash regardless of whether the
+    // body actually recovered — it would read exactly this way even if
+    // the crashed document's own boundary still had the whole body. Each
+    // pane has its own `DocumentBoundary`, keyed by document, so a crash
+    // in one never touches a sibling's; this is the one assertion that
+    // actually depends on that: the composition's own unconditional
+    // heading, which only a successfully-rendered `CompositionScreen`
+    // puts on the page.
     await expect(page.getByRole('heading', { name: 'Состав' })).toBeVisible();
   } finally {
     await host.stop();
