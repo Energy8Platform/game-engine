@@ -18,6 +18,9 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The two things an activity button can open — anything else is a contribution the shell cannot draw. */
+const ACTIVITY_OPENS: readonly string[] = ['sidebar', 'document'];
+
 /** Registration order is what `ctx.slots.list()` already returns; `order` breaks ties on top of it. `Array.prototype.sort` is stable, so entries that never set `order` keep the registration order they came in. */
 function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
   return [...entries].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
@@ -72,6 +75,14 @@ class DocumentBoundary extends Component<
     }
     return this.props.children;
   }
+}
+
+/** Splits `items` into those that pass `test` and those that do not, in order. */
+function partition<T>(items: readonly T[], test: (item: T) => boolean): [T[], T[]] {
+  const yes: T[] = [];
+  const no: T[] = [];
+  for (const item of items) (test(item) ? yes : no).push(item);
+  return [yes, no];
 }
 
 /** Narrower than this and a region is a sliver nobody can grab back. */
@@ -258,7 +269,35 @@ export function Shell({ ctx }: { ctx: Context }) {
     return () => window.removeEventListener('beforeunload', hold);
   }, [ctx]);
 
-  const activities = byOrder(ctx.slots.list<SlotMeta & ActivityMeta>(ctx.shell.slots.activity));
+  // Spec §8: a contribution with an unknown `opens` is a diagnostic. It is
+  // checked here, where the slot is first read, and the button is skipped
+  // — clicking it used to report "no document is registered", a cause the
+  // code did not know. Reported once per entry, from an effect rather than
+  // mid-render: `report()` wakes the panel, and a state update from inside
+  // another component's render is React's own warning.
+  const [validActivities, badActivities] = partition(
+    ctx.slots.list<SlotMeta & ActivityMeta>(ctx.shell.slots.activity),
+    (entry) => ACTIVITY_OPENS.includes(entry.opens),
+  );
+  const reportedOpens = useRef(new Set<string>());
+  useEffect(() => {
+    for (const entry of badActivities) {
+      const id = `${entry.key}::${String(entry.opens)}`;
+      if (reportedOpens.current.has(id)) continue;
+      reportedOpens.current.add(id);
+      const connection = ctx.reflect.get('connection', false) as ConnectionService | undefined;
+      connection?.report(
+        diagnostic(
+          'warning',
+          entry.key,
+          'shell',
+          `the activity button "${entry.key}" opens "${String(entry.opens)}", which the shell does not know — the button is not drawn`,
+          "set opens to 'sidebar' or 'document'",
+        ),
+      );
+    }
+  });
+  const activities = byOrder(validActivities);
   const sidebarEntries = ctx.slots.list<SlotMeta & SidebarMeta>(ctx.shell.slots.sidebar);
   const documentContribs = ctx.slots.list<SlotMeta & DocumentMeta>(ctx.shell.slots.document);
   const panelEntries = ctx.slots.list<SlotMeta & PanelMeta>(ctx.shell.slots.panel);

@@ -592,6 +592,30 @@ describe('Shell', () => {
     expect(screen.getByTestId('doc-body')).toHaveTextContent('COMP');
   });
 
+  it('an activity contribution with an unknown `opens` is one diagnostic and no button', () => {
+    // Spec §8, bullet 4, unimplemented until the final review: `list<M>`
+    // is a cast, so `opens: 'popup'` was drawn and its click reported
+    // "no document is registered for x" — a cause the code did not know.
+    const ctx = harness();
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'ok', title: 'OK', icon: 'o', opens: 'sidebar' },
+      Nop,
+    );
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'odd', title: 'Odd', icon: 'x', opens: 'popup' as any },
+      Nop,
+    );
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('activity-ok')).toBeTruthy();
+    expect(screen.queryByTestId('activity-odd')).toBeNull();
+    const messages = () => ctx.connection.diagnostics.map((d) => d.message);
+    expect(messages()).toEqual([expect.stringMatching(/"odd".*"popup"/)]);
+    // Once, not once per render: a re-render for any reason must not
+    // add a second row for the same contribution.
+    act(() => ctx.shell.showSidebar('ok'));
+    expect(messages()).toHaveLength(1);
+  });
+
   it('an activity button whose sidebar nobody registered explains itself', async () => {
     const ctx = harness();
     ctx.slots.register(
