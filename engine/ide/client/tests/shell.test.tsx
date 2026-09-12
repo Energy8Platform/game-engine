@@ -1,11 +1,16 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Context } from 'cordis';
 import { type Diagnostic } from '@energy8engine/contracts';
 import * as slotsPlugin from '../src/plugins/slots';
 import * as shellPlugin from '../src/plugins/shell';
 import { createIdeClient } from '../src/context';
+import { Shell } from '../src/shell/Shell';
 
 const Dummy = () => <div>x</div>;
+/** Contributes nothing visible — for `shell.activity` registrations, whose own `component` is never rendered. */
+const Nop = () => null;
 
 /**
  * A hand-built `Context`, the same shape `layout.test.tsx`'s own `harness()`
@@ -81,7 +86,12 @@ beforeEach(() => {
 describe('shell', () => {
   it('opening an instance document adds a tab and activates it', () => {
     const ctx = harness();
-    ctx.shell.open({ key: 'f:game/script.spin', title: 'script.spin', component: Dummy, closable: true });
+    ctx.shell.open({
+      key: 'f:game/script.spin',
+      title: 'script.spin',
+      component: Dummy,
+      closable: true,
+    });
     expect(ctx.shell.documents().map((d) => d.key)).toEqual(['f:game/script.spin']);
     expect(ctx.shell.active()?.key).toBe('f:game/script.spin');
     expect(location.hash).toBe('#/doc/f:game/script.spin');
@@ -107,7 +117,9 @@ describe('shell', () => {
     const ctx = harness();
     ctx.shell.openContributed('ghost');
     expect(ctx.shell.documents()).toEqual([]);
-    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([expect.stringContaining('ghost')]);
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('ghost'),
+    ]);
   });
 
   it('closing a clean tab removes it and activates the neighbour', () => {
@@ -192,7 +204,9 @@ describe('shell', () => {
     ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
     ctx.shell.ready();
     expect(ctx.shell.active()?.key).toBe('composition');
-    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([expect.stringContaining('gone')]);
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('gone'),
+    ]);
   });
 
   it('showSidebar toggles: the active key again collapses it', () => {
@@ -276,5 +290,247 @@ describe('shell', () => {
     expect(ctx.shell.documents()).toEqual([]);
     expect(ctx.shell.active()).toBeUndefined();
     expect(ctx.connection.diagnostics).toEqual([]);
+  });
+});
+
+describe('Shell', () => {
+  // Three tests below deliberately throw from inside a render; React's own
+  // error-boundary contract logs that to console.error as it happens (twice,
+  // in a dev build) even though `DocumentBoundary` catches it a line later.
+  // Same noise `layout.test.tsx`'s own `Layout` describe silences, for the
+  // same reason.
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('draws one activity button per contribution, in order', () => {
+    const ctx = harness();
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'z', title: 'Z', icon: 'z', order: 9, opens: 'sidebar' },
+      Nop,
+    );
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'a', title: 'A', icon: 'a', order: 1, opens: 'sidebar' },
+      Nop,
+    );
+    render(<Shell ctx={ctx} />);
+    expect(screen.getAllByTestId(/^activity-/).map((b) => b.dataset.testid)).toEqual([
+      'activity-a',
+      'activity-z',
+    ]);
+  });
+
+  it('an activity button that opens a sidebar shows that sidebar view', async () => {
+    const ctx = harness();
+    ctx.slots.register(
+      {
+        name: 'shell.activity',
+        key: 'explorer',
+        title: 'Проводник',
+        icon: 'files',
+        opens: 'sidebar',
+      },
+      Nop,
+    );
+    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'Проводник' }, () => (
+      <div>TREE</div>
+    ));
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('activity-explorer'));
+    expect(screen.getByTestId('sidebar')).toHaveTextContent('TREE');
+  });
+
+  it('an activity button that opens a document opens ONE tab, and again activates it', async () => {
+    const ctx = harness();
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'composition', title: 'Состав', icon: 'c', opens: 'document' },
+      Nop,
+    );
+    ctx.slots.register({ name: 'shell.document', key: 'composition', title: 'Состав' }, () => (
+      <div>COMP</div>
+    ));
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('activity-composition'));
+    await userEvent.click(screen.getByTestId('activity-composition'));
+    expect(screen.getAllByTestId(/^doc-composition$/)).toHaveLength(1);
+    expect(screen.getByTestId('doc-body')).toHaveTextContent('COMP');
+  });
+
+  it('an activity button whose sidebar nobody registered explains itself', async () => {
+    const ctx = harness();
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'orphan', title: 'O', icon: 'o', opens: 'sidebar' },
+      Nop,
+    );
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('activity-orphan'));
+    expect(screen.getByTestId('sidebar')).toHaveTextContent(/nothing registered/i);
+  });
+
+  it('the panel shows its contribution and collapses on demand', async () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.panel', key: 'diagnostics', title: 'Диагностика' }, () => (
+      <div>DIAG</div>
+    ));
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('panel')).toHaveTextContent('DIAG');
+    await userEvent.click(screen.getByTestId('panel-toggle'));
+    expect(screen.getByTestId('panel')).not.toHaveTextContent('DIAG');
+  });
+
+  it('a dirty tab shows a dot, and its close asks first', async () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <div>A</div>, closable: true });
+    ctx.shell.markDirty('a', true);
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('doc-a')).toHaveTextContent('●');
+    await userEvent.click(screen.getByTestId('doc-close-a'));
+    expect(screen.getByTestId('confirm-yes')).toBeTruthy();
+    expect(ctx.shell.documents()).toHaveLength(1);
+  });
+
+  it('a document that throws does not take the panel or the other tabs with it', () => {
+    const ctx = harness();
+    ctx.shell.open({
+      key: 'bad',
+      title: 'B',
+      component: () => {
+        throw new Error('boom');
+      },
+      closable: true,
+    });
+    ctx.shell.open({ key: 'ok', title: 'O', component: () => <div>OK</div>, closable: true });
+    ctx.slots.register({ name: 'shell.panel', key: 'p', title: 'P' }, () => <div>PANEL</div>);
+    ctx.shell.activate('bad');
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('doc-error')).toHaveTextContent('boom');
+    expect(screen.getByTestId('panel')).toHaveTextContent('PANEL');
+    expect(screen.getByTestId('doc-ok')).toBeTruthy();
+  });
+
+  it('the panel node survives switching documents', async () => {
+    // Lifecycle through identity, not content — the pattern five vacuous
+    // assertions on this branch got wrong.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.panel', key: 'p', title: 'P' }, () => <div>PANEL</div>);
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <div>A</div>, closable: true });
+    ctx.shell.open({ key: 'b', title: 'B', component: () => <div>B</div>, closable: true });
+    render(<Shell ctx={ctx} />);
+    const before = screen.getByTestId('panel');
+    await userEvent.click(screen.getByTestId('doc-a'));
+    expect(screen.getByTestId('panel')).toBe(before);
+  });
+
+  it('status items sit left and right by side, ordered', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.status', key: 'r', side: 'right', order: 1 }, () => (
+      <span>R</span>
+    ));
+    ctx.slots.register({ name: 'shell.status', key: 'l', side: 'left' }, () => <span>L</span>);
+    render(<Shell ctx={ctx} />);
+    const bar = screen.getByTestId('status-bar');
+    expect(bar.querySelector('[data-side=left]')).toHaveTextContent('L');
+    expect(bar.querySelector('[data-side=right]')).toHaveTextContent('R');
+  });
+
+  it('with nothing registered anywhere it explains itself instead of painting nothing', () => {
+    render(<Shell ctx={harness()} />);
+    expect(screen.getByTestId('shell-empty')).toHaveTextContent(/no contributions/i);
+  });
+
+  // --- Ported from Layout.test.tsx (see task-2-brief.md's correction A):
+  // the shape of the crash boundary and the panel's independence from the
+  // active document outlive the "one screen" form just as much as the
+  // properties Step 2's tests above already pin. "screen" becomes
+  // "document" throughout.
+
+  it('a crashed document still lets you navigate away from it', async () => {
+    // Ported from "a crashed screen still lets you navigate away from it".
+    // A boundary that swallows the crash but leaves the tabs unreachable
+    // leaves the IDE just as stuck as no boundary at all — and, unlike the
+    // single-render crash test above, this is the one test that actually
+    // NAVIGATES after the crash, so it is the one that goes red if
+    // `DocumentBoundary` loses its `key={active.key}`: without the key, the
+    // same class instance stays committed to its caught state and keeps
+    // rendering the old error no matter which document becomes active next.
+    const ctx = harness();
+    ctx.shell.open({
+      key: 'bad',
+      title: 'Bad',
+      component: () => {
+        throw new Error('boom');
+      },
+      closable: true,
+    });
+    ctx.shell.open({ key: 'ok', title: 'OK', component: () => <div>OK BODY</div>, closable: true });
+    ctx.shell.activate('bad');
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('doc-error')).toBeTruthy();
+    await userEvent.click(screen.getByTestId('doc-ok'));
+    expect(screen.getByText('OK BODY')).toBeTruthy();
+  });
+
+  it('reports the crashed document, so it reaches the one list', () => {
+    // Ported from "reports the crashed screen, so it reaches the one list".
+    const ctx = harness();
+    ctx.shell.open({
+      key: 'bad',
+      title: 'Bad',
+      component: () => {
+        throw new Error('boom');
+      },
+      closable: true,
+    });
+    render(<Shell ctx={ctx} />);
+    expect(ctx.connection.diagnostics.map((d) => d.plugin)).toContain('bad');
+  });
+
+  it('a crashed document is still data when composed without ctx.connection', async () => {
+    // Ported from "a crashed screen is still data when composed without
+    // ctx.connection". The boundary is the last thing standing when a
+    // document throws, so a direct `ctx.connection` read inside
+    // `componentDidCatch` — instead of the lenient `ctx.reflect.get` read
+    // — would turn the one failure that has to be data into a crash of the
+    // whole page. A real `Context` with `slots`+`shell` composed and no
+    // `connection`, for the reason `shell.test.tsx`'s own "composed
+    // without ctx.connection" test above already gives.
+    const ctx = new Context();
+    await ctx.plugin(slotsPlugin);
+    await ctx.plugin(shellPlugin);
+    ctx.shell.open({
+      key: 'bad',
+      title: 'Bad',
+      component: () => {
+        throw new Error('boom');
+      },
+      closable: true,
+    });
+
+    expect(() => render(<Shell ctx={ctx} />)).not.toThrow();
+    expect(screen.getByTestId('doc-error').textContent).toContain('boom');
+
+    await ctx.fiber.dispose();
+  });
+
+  it('the panel is visible on every document, not only one', async () => {
+    // Ported from "the panel is visible on every screen, not only on
+    // composition" — the diagnostics panel used to be a `composition.card`,
+    // reachable on one screen alone; the panel region here answers no
+    // document in particular, so navigating to an unrelated one must not
+    // hide it.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.panel', key: 'p', title: 'P' }, () => <div>PANEL</div>);
+    ctx.shell.open({
+      key: 'other',
+      title: 'Other',
+      component: () => <div>OTHER</div>,
+      closable: true,
+    });
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('doc-other'));
+    expect(screen.getByTestId('panel')).toHaveTextContent('PANEL');
   });
 });
