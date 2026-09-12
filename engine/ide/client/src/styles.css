@@ -198,6 +198,11 @@ label {
   position: fixed;
   right: 16px;
   bottom: calc(var(--e8-status-h) + 16px);
+  /* Above the panel, which is positioned too and comes later in the DOM —
+     without this it paints over the confirm, and "No" cannot be clicked.
+     Found by the acceptance suite, not by the jsdom test, which never
+     clicked it (Ruling 8). */
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
