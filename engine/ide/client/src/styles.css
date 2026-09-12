@@ -1,43 +1,57 @@
-/* Tokens from DESIGN.md (repo root). Inter stands in for Cal Sans on display
-   sizes: weight 600 with negative tracking, as the substitution note says. */
+/* Tokens from DESIGN.md (repo root) §4 — anatomy of VS Code and its
+   default dark theme, no version claimed. Dark lives on bare :root and
+   needs no attribute; [data-theme="light"] redefines every colour token,
+   name for name. Sizes and fonts do not change between themes and live
+   only on :root. A guard test (tests/styles.test.ts) enforces that every
+   colour anywhere ELSE in this file is one of these custom properties,
+   never a literal hex value — see that test's own doc for why. */
 :root {
-  --ink: #111111;
-  --ink-active: #242424;
-  --body: #374151;
-  --muted: #6b7280;
-  --muted-soft: #898989;
-  --hairline: #e5e7eb;
-  --hairline-soft: #f3f4f6;
-  --canvas: #ffffff;
-  --surface-soft: #f8f9fa;
-  --surface-card: #f5f5f5;
-  --surface-strong: #e5e7eb;
-  --surface-dark: #101010;
-  --surface-dark-elevated: #1a1a1a;
-  --on-dark: #ffffff;
-  --on-dark-soft: #a1a1aa;
-  --accent: #3b82f6;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --badge-orange: #fb923c;
-  --badge-violet: #8b5cf6;
-  --badge-emerald: #34d399;
-  --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --r-xl: 16px;
-  --r-pill: 9999px;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --e8-bg-0: #1e1e1e;
+  --e8-bg-1: #252526;
+  --e8-bg-2: #2d2d2d;
+  --e8-bg-3: #333333;
+  --e8-border: #3c3c3c;
+  --e8-fg: #cccccc;
+  --e8-fg-muted: #969696;
+  --e8-accent: #007acc;
+  --e8-on-accent: #ffffff;
+  --e8-error: #f14c4c;
+  --e8-warning: #cca700;
+  --e8-info: #3794ff;
+  --e8-success: #89d185;
+
+  --e8-radius: 3px;
+  --e8-activity-w: 48px;
+  --e8-sidebar-w: 260px;
+  --e8-panel-h: 200px;
+  --e8-status-h: 22px;
+
+  --e8-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --e8-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --e8-size: 13px;
+  --e8-size-status: 12px;
+}
+
+[data-theme='light'] {
+  --e8-bg-0: #ffffff;
+  --e8-bg-1: #f3f3f3;
+  --e8-bg-2: #ececec;
+  --e8-bg-3: #e0e0e0;
+  --e8-border: #d4d4d4;
+  --e8-fg: #1f1f1f;
+  --e8-fg-muted: #6e6e6e;
+  --e8-accent: #005fb8;
+  --e8-on-accent: #ffffff;
+  --e8-error: #cd3131;
+  --e8-warning: #b58900;
+  --e8-info: #1a85ff;
+  --e8-success: #388a34;
 }
 
 html {
-  background: var(--canvas);
-  color: var(--body);
-  font: 400 14px/1.5 var(--sans);
+  background: var(--e8-bg-0);
+  color: var(--e8-fg);
+  font: 400 var(--e8-size) / 1.5 var(--e8-font);
   -webkit-font-smoothing: antialiased;
 }
 body {
@@ -45,153 +59,360 @@ body {
 }
 h1,
 h2 {
-  color: var(--ink);
+  color: var(--e8-fg);
   font-weight: 600;
-  margin: 0 0 24px;
+  margin: 0 0 16px;
+  font-family: var(--e8-font);
 }
 h1 {
-  font-size: 36px;
-  line-height: 1.15;
-  letter-spacing: -1px;
+  font-size: 20px;
+  line-height: 1.3;
 }
 h2 {
-  font-size: 22px;
+  font-size: 15px;
   line-height: 1.3;
-  letter-spacing: -0.3px;
 }
 strong {
-  color: var(--ink);
+  color: var(--e8-fg);
   font-weight: 600;
 }
 p {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
 }
 pre,
 code {
-  font: 400 14px/1.5 var(--mono);
+  font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
 }
 :focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
+  outline: 2px solid var(--e8-accent);
+  outline-offset: 1px;
 }
 
-/* Controls. Every button is button-secondary; `.e8-primary` is button-primary. */
+/* Controls. Every button is button-secondary; `.e8-primary` is button-primary — same split the previous palette had, flat instead of shadowed. */
 button,
 input,
 select {
-  font: 600 14px/1 var(--sans);
-  color: var(--ink);
+  font: 500 var(--e8-size) / 1 var(--e8-font);
+  color: var(--e8-fg);
 }
 button {
-  height: 40px;
-  padding: 0 20px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  background: var(--canvas);
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
+  background: var(--e8-bg-1);
   cursor: pointer;
 }
+button:hover {
+  background: var(--e8-bg-2);
+}
 button:active {
-  background: var(--surface-soft);
+  background: var(--e8-bg-2);
 }
 button:disabled {
-  background: var(--surface-strong);
-  color: var(--muted);
+  background: var(--e8-bg-1);
+  color: var(--e8-fg-muted);
   cursor: default;
+  opacity: 0.6;
 }
 button.e8-primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--canvas);
+  background: var(--e8-accent);
+  border-color: var(--e8-accent);
+  color: var(--e8-on-accent);
 }
+button.e8-primary:hover,
 button.e8-primary:active {
-  background: var(--ink-active);
+  opacity: 0.85;
 }
 input[type='text'],
 input[type='number'],
 input:not([type]),
 select {
   font-weight: 400;
-  font-size: 16px;
-  height: 40px;
+  font-size: var(--e8-size);
+  height: 28px;
   box-sizing: border-box;
-  padding: 0 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  background: var(--canvas);
+  padding: 0 8px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
+  background: var(--e8-bg-0);
+  color: var(--e8-fg);
 }
 input:focus,
 select:focus {
   outline: none;
-  border-color: var(--ink);
+  border-color: var(--e8-accent);
 }
 input[type='checkbox'] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--ink);
+  width: 14px;
+  height: 14px;
+  accent-color: var(--e8-accent);
   margin: 0;
 }
 label {
-  color: var(--muted);
+  color: var(--e8-fg-muted);
   font-weight: 500;
 }
 
 .e8-empty {
-  color: var(--muted-soft);
+  color: var(--e8-fg-muted);
 }
 .e8-badge {
   display: inline-block;
-  padding: 4px 12px;
-  border-radius: var(--r-pill);
-  background: var(--surface-card);
-  color: var(--ink);
-  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: var(--e8-radius);
+  background: var(--e8-bg-2);
+  color: var(--e8-fg);
+  font-size: var(--e8-size-status);
   font-weight: 500;
   line-height: 1.4;
 }
 
-/* Shell: 64px top nav with the wordmark and a nav-pill-group of screens,
-   the current screen on the canvas, and the diagnostics band closing the
-   page as the one dark surface — the footer's role in the design. */
+/* Shell: activity bar, sidebar, editor group, panel, status bar — five
+   named grid areas, one per `shell` slot (DESIGN.md §2). The activity bar
+   and sidebar run the full height above the status bar; the panel sits
+   only under the editor group, not under the sidebar; the status bar is
+   the one region spanning the whole width. */
+.e8-shell {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto var(--e8-status-h);
+  grid-template-areas:
+    'activity sidebar editors'
+    'activity sidebar panel'
+    'status status status';
+  background: var(--e8-bg-0);
+  color: var(--e8-fg);
+  font: 400 var(--e8-size) / 1.4 var(--e8-font);
+}
+.e8-shell-empty {
+  padding: 48px;
+  color: var(--e8-fg-muted);
+}
+.e8-shell-doc-error {
+  padding: 16px;
+  color: var(--e8-error);
+}
+.e8-shell-confirm {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--e8-status-h) + 16px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--e8-bg-2);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
+  color: var(--e8-fg);
+}
+
+.e8-activity {
+  grid-area: activity;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  background: var(--e8-bg-3);
+  border-right: 1px solid var(--e8-border);
+}
+.e8-activity-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--e8-radius);
+  background: transparent;
+  color: var(--e8-fg-muted);
+  font-size: 11px;
+}
+.e8-activity-button:hover {
+  color: var(--e8-fg);
+}
+.e8-activity-button[aria-pressed='true'] {
+  background: var(--e8-bg-2);
+  color: var(--e8-accent);
+}
+
+.e8-sidebar {
+  grid-area: sidebar;
+  overflow: auto;
+  background: var(--e8-bg-1);
+  border-right: 1px solid var(--e8-border);
+  padding: 12px;
+}
+
+.e8-editors {
+  grid-area: editors;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--e8-bg-0);
+}
+.e8-editors-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 32px;
+  background: var(--e8-bg-2);
+  border-bottom: 1px solid var(--e8-border);
+}
+.e8-doc-tab {
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-right: 1px solid var(--e8-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size);
+}
+.e8-doc-tab[aria-selected='true'] {
+  background: var(--e8-bg-0);
+  color: var(--e8-fg);
+  box-shadow: none;
+  border-bottom: 2px solid var(--e8-accent);
+}
+.e8-doc-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--e8-radius);
+  color: var(--e8-fg-muted);
+}
+.e8-doc-tab-close:hover {
+  background: var(--e8-bg-2);
+  color: var(--e8-fg);
+}
+.e8-editors-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+/* The panel row is `auto` in `.e8-shell`'s own row track, so a collapsed
+   panel (header only, no `.e8-panel-entry` children — see Shell.tsx)
+   shrinks the row with it; `:has()` is what lets a purely-CSS rule tell
+   the two apart without Shell.tsx growing a `data-collapsed` attribute
+   this task has no reason to add. */
+.e8-panel {
+  grid-area: panel;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--e8-bg-1);
+  border-top: 1px solid var(--e8-border);
+}
+.e8-panel:has(.e8-panel-entry) {
+  height: var(--e8-panel-h);
+}
+.e8-panel-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+}
+.e8-panel-header button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--e8-fg-muted);
+}
+.e8-panel-entry {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+
+.e8-status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--e8-status-h);
+  padding: 0 8px;
+  background: var(--e8-bg-2);
+  border-top: 1px solid var(--e8-border);
+  font-size: var(--e8-size-status);
+  color: var(--e8-fg-muted);
+}
+.e8-status [data-side] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.e8-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.e8-theme-toggle {
+  height: 18px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--e8-size-status);
+}
+
+/* Old chrome: `Layout.tsx`'s single-screen top nav + diagnostics band.
+   Stays until Task 6 replaces it with `Shell` — same classes, same
+   structure, restyled onto these tokens instead of the Cal.com palette. */
 .e8-layout {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--e8-bg-0);
+  color: var(--e8-fg);
 }
 .e8-layout-tabs {
-  height: 64px;
+  height: 44px;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 0 32px;
-  border-bottom: 1px solid var(--hairline-soft);
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--e8-bg-2);
+  border-bottom: 1px solid var(--e8-border);
 }
 .e8-layout-brand {
-  color: var(--ink);
-  font-size: 18px;
+  color: var(--e8-fg);
+  font-size: var(--e8-size);
   font-weight: 600;
-  letter-spacing: -0.3px;
 }
 .e8-layout-pills {
   display: inline-flex;
   gap: 2px;
-  padding: 6px;
-  border-radius: var(--r-pill);
-  background: var(--surface-soft);
+  padding: 2px;
+  border-radius: var(--e8-radius);
+  background: var(--e8-bg-1);
 }
 .e8-layout-tab {
-  height: auto;
-  padding: 8px 14px;
+  height: 28px;
+  padding: 0 12px;
   border: 0;
-  border-radius: var(--r-md);
+  border-radius: var(--e8-radius);
   background: transparent;
-  color: var(--muted);
+  color: var(--e8-fg-muted);
   font-weight: 500;
-  line-height: 1.4;
 }
 .e8-layout-tab[aria-selected='true'] {
-  background: var(--canvas);
-  color: var(--ink);
-  box-shadow: var(--shadow-1);
+  background: var(--e8-bg-0);
+  color: var(--e8-fg);
 }
 .e8-layout-body {
   flex: 1;
@@ -199,30 +420,29 @@ label {
   max-width: 1200px;
   box-sizing: border-box;
   margin: 0 auto;
-  padding: 48px 32px;
+  padding: 32px 24px;
 }
 .e8-layout-screen-error {
-  color: var(--error);
+  color: var(--e8-error);
 }
 
 /* Diagnostics band. Rows are one line each; severity is the only colour. */
 .e8-diagnostics-panel {
-  background: var(--surface-dark);
-  color: var(--on-dark-soft);
-  padding: 48px 32px 64px;
+  background: var(--e8-bg-3);
+  color: var(--e8-fg-muted);
+  padding: 32px 24px 48px;
 }
 .e8-diagnostics-panel h2 {
-  color: var(--on-dark);
+  color: var(--e8-fg);
 }
 .e8-diagnostics-panel .e8-empty {
-  color: var(--on-dark-soft);
+  color: var(--e8-fg-muted);
 }
 .e8-diagnostics-panel-list {
   list-style: none;
-  margin: 0;
+  margin: 0 auto;
   padding: 0;
   max-width: 1136px;
-  margin: 0 auto;
 }
 .e8-diagnostics-panel h2,
 .e8-diagnostics-panel > p {
@@ -231,103 +451,102 @@ label {
   margin-right: auto;
 }
 .e8-diagnostic-row {
-  padding: 10px 16px;
-  border-radius: var(--r-md);
-  background: var(--surface-dark-elevated);
-  margin-bottom: 8px;
-  font: 400 14px/1.5 var(--mono);
-  color: var(--on-dark);
+  padding: 6px 12px;
+  border-radius: var(--e8-radius);
+  background: var(--e8-bg-2);
+  margin-bottom: 4px;
+  font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
+  color: var(--e8-fg);
 }
 .e8-diagnostic-origin,
 .e8-diagnostic-speaker,
 .e8-diagnostic-plugin,
 .e8-diagnostic-where {
-  color: var(--on-dark-soft);
+  color: var(--e8-fg-muted);
 }
 .e8-severity {
-  color: var(--on-dark);
+  color: var(--e8-fg);
   text-transform: none;
 }
 [data-severity='error'] .e8-severity {
-  color: var(--error);
+  color: var(--e8-error);
 }
 [data-severity='warning'] .e8-severity {
-  color: var(--warning);
+  color: var(--e8-warning);
 }
 [data-severity='info'] .e8-severity {
-  color: var(--accent);
+  color: var(--e8-info);
 }
 .e8-diagnostics-dropped {
-  color: var(--muted-soft);
-  font-size: 13px;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-status);
 }
 
-/* Preview iframe = hero-app-mockup-card. */
+/* Preview iframe. */
 .e8-preview,
 .e8-preview-tile {
   display: block;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-2);
-  background: var(--canvas);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
+  background: var(--e8-bg-0);
   max-width: 100%;
 }
 .e8-preview {
   width: 100%;
   height: 420px;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
-/* Composition: one surface-card per row; the game's own rows beneath as a
-   plain hairline list — a claim about the running game, not an editor. */
+/* Composition: one row per composition entry; the game's own rows beneath as a plain hairline list — a claim about the running game, not an editor. */
 .e8-row {
-  background: var(--surface-card);
-  border-radius: var(--r-lg);
-  padding: 24px;
-  margin-bottom: 24px;
+  background: var(--e8-bg-1);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
+  padding: 16px;
+  margin-bottom: 16px;
 }
 .e8-row > header,
 .e8-game-row > header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 .e8-row > header strong,
 .e8-game-row > header strong {
-  font-size: 18px;
+  font-size: var(--e8-size);
 }
 .e8-state,
 .e8-layer {
-  color: var(--muted);
+  color: var(--e8-fg-muted);
 }
 .e8-game-composition {
-  margin-top: 48px;
-  border-top: 1px solid var(--hairline);
-  padding-top: 24px;
+  margin-top: 32px;
+  border-top: 1px solid var(--e8-border);
+  padding-top: 16px;
 }
 .e8-game-row > header {
   margin-bottom: 0;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--hairline-soft);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--e8-border);
 }
 .e8-schema-form {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 .e8-field {
   display: grid;
   grid-template-columns: minmax(120px, 200px) minmax(0, 320px) auto;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .e8-field input[type='checkbox'] {
   justify-self: start;
 }
 .e8-unsupported-note {
-  color: var(--muted-soft);
+  color: var(--e8-fg-muted);
   font-style: normal;
-  font-size: 13px;
+  font-size: var(--e8-size-status);
 }
 
 /* Preview wall: controls in one row, tiles wrapping beneath. */
@@ -335,173 +554,171 @@ label {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 32px;
+  gap: 12px;
+  margin-bottom: 24px;
 }
 .e8-preview-wall-presets {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
   margin: 0;
-  padding: 0 14px;
-  height: 40px;
+  padding: 0 10px;
+  height: 32px;
   align-items: center;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
 }
 .e8-preview-wall-presets legend {
   padding: 0 4px;
-  color: var(--muted-soft);
-  font-size: 13px;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-status);
   font-weight: 500;
 }
 .e8-preview-wall-preset-toggle,
 .e8-preview-wall-lang {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .e8-preview-wall-tiles {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
+  gap: 16px;
   align-items: flex-start;
 }
 
 /* Assets and code: a file list at left, the thing opened at right. */
 .e8-code-body {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
   align-items: start;
 }
 .e8-code-files,
 .e8-assets-tree {
   list-style: none;
-  margin: 0 0 24px;
+  margin: 0 0 16px;
   padding: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-lg);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
   overflow: hidden;
 }
 .e8-code-files button {
   display: block;
   width: 100%;
   height: auto;
-  padding: 10px 14px;
+  padding: 6px 10px;
   border: 0;
   border-radius: 0;
-  border-bottom: 1px solid var(--hairline-soft);
+  border-bottom: 1px solid var(--e8-border);
   text-align: left;
-  font: 400 14px/1.5 var(--mono);
-  color: var(--body);
+  font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
+  color: var(--e8-fg);
+  background: transparent;
   overflow-wrap: anywhere;
 }
 .e8-code-files li:last-child button {
   border-bottom: 0;
 }
 .e8-code-files button[aria-pressed='true'] {
-  background: var(--surface-card);
-  color: var(--ink);
+  background: var(--e8-bg-2);
+  color: var(--e8-fg);
   font-weight: 500;
 }
 .e8-code-editor {
   min-width: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-lg);
-  padding: 16px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius);
+  padding: 12px;
 }
 .e8-code-editor > button {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 .e8-assets-upload {
-  margin-bottom: 24px;
-  color: var(--muted);
+  margin-bottom: 16px;
+  color: var(--e8-fg-muted);
   font-weight: 400;
 }
 .e8-assets-entry {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--hairline-soft);
-  font: 400 14px/1.5 var(--mono);
-  color: var(--body);
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--e8-border);
+  font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
+  color: var(--e8-fg);
 }
 .e8-assets-entry:last-child {
   border-bottom: 0;
 }
 .e8-assets-dir {
-  color: var(--muted);
+  color: var(--e8-fg-muted);
 }
 .e8-assets-file {
   cursor: pointer;
-  color: var(--ink);
+  color: var(--e8-fg);
 }
 .e8-assets-file-error {
-  color: var(--error);
+  color: var(--e8-error);
 }
 .e8-assets-delete,
 .e8-assets-confirm button,
 .e8-code-confirm button {
-  height: 28px;
-  padding: 0 12px;
-  border-radius: var(--r-sm);
-  font-size: 13px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--e8-radius);
+  font-size: var(--e8-size-status);
 }
 .e8-assets-delete {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--e8-fg-muted);
 }
 .e8-assets-confirm,
 .e8-code-confirm {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: var(--ink);
-  font-family: var(--sans);
+  gap: 6px;
+  color: var(--e8-fg);
+  font-family: var(--e8-font);
 }
 .e8-code-confirm {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 .e8-assets-text {
-  background: var(--surface-card);
-  border-radius: var(--r-lg);
-  padding: 24px;
+  background: var(--e8-bg-1);
+  border-radius: var(--e8-radius);
+  padding: 16px;
   overflow: auto;
   max-height: 60vh;
+  font-family: var(--e8-font-mono);
 }
 .e8-assets-tree {
   max-height: 50vh;
   overflow: auto;
 }
 .e8-assets img {
-  border-radius: var(--r-lg);
-  border: 1px solid var(--hairline);
+  border-radius: var(--e8-radius);
+  border: 1px solid var(--e8-border);
 }
 .e8-assets-diagnostic,
 .e8-code-diagnostic,
 .e8-code-error {
-  color: var(--error);
+  color: var(--e8-error);
 }
 
 @media (max-width: 768px) {
   .e8-layout-tabs {
     height: auto;
     flex-wrap: wrap;
-    padding: 12px 16px;
+    padding: 8px 12px;
   }
   .e8-layout-body {
-    padding: 24px 16px;
+    padding: 16px 12px;
   }
   .e8-code-body {
     grid-template-columns: 1fr;
   }
   .e8-field {
     grid-template-columns: 1fr;
-  }
-  h1 {
-    font-size: 28px;
-    letter-spacing: -0.5px;
   }
 }

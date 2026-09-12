@@ -51,6 +51,13 @@ export {
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Layout } from './screens/Layout';
 export { Shell } from './shell/Shell';
+export {
+  ProjectStatus,
+  SessionStatus,
+  DirtyStatus,
+  ThemeStatus,
+  type ThemeName,
+} from './shell/StatusItems';
 export { AssetsScreen, looksBinary } from './screens/AssetsScreen';
 export { CodeScreen } from './screens/CodeScreen';
 export { Monaco, type MonacoProps } from './editor/Monaco';
