@@ -3,7 +3,7 @@
  * nobody on the core team wrote can add its own screen to the IDE.**
  *
  * `screen-demo` (`engine/examples/first-slot/plugins/screen-demo/`) is
- * written against nothing but `ctx.layout.screen` and the React the shell
+ * written against nothing but `ctx.slots.register` and the React the shell
  * publishes on `globalThis.__E8_IDE__` — see that plugin's own `src/client
  * .js` for the full account, including why the crash it can be made to
  * throw is reachable through a URL flag rather than hard-coded. This file
@@ -104,11 +104,11 @@ test('the demo screen can be made to fail as data, on request, without taking th
     await expect(button).toBeVisible({ timeout: 20_000 });
     await button.click();
 
-    // What replaces the screen is a message that says what happened, not a
-    // blank pane — measured, not assumed: this is the layout's own error
-    // boundary talking, and its exact words are Layout.tsx's to own, not
-    // this plugin's, so only the part this plugin's own thrown `Error`
-    // actually said is pinned here.
+    // What replaces the document is a message that says what happened, not
+    // a blank pane — measured, not assumed: this is the shell's own
+    // `DocumentBoundary` talking, and its exact words are Shell.tsx's to
+    // own, not this plugin's, so only the part this plugin's own thrown
+    // `Error` actually said is pinned here.
     await expect(page.locator('body')).toContainText(
       'screen-demo: forced failure (the URL carried ?screen-demo-crash)',
     );

@@ -50,7 +50,7 @@ export interface E8ClientHalf {
   entry: string;
   /**
    * Client services this half needs before it can register anything —
-   * `ctx.layout`, `ctx.slots`, `ctx.gameComposition` and so on, named
+   * `ctx.slots`, `ctx.shell`, `ctx.gameComposition` and so on, named
    * exactly as the editor provides them.
    *
    * **This is the one place a client half declares its needs.** The host

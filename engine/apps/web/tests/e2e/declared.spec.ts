@@ -123,17 +123,17 @@ test("a /api/spin failure appears in the game's own log, not only in the IDE", a
  *
  * `duplicateScreenId` (see `./project-fixture`) gives the project a second
  * row naming `screen-demo`, so that one client half is imported twice and
- * registers a screen under one hardcoded id both times — the exact
- * collision `@energy8engine/registry`'s last-wins policy (task 3) reports
- * rather than silently allows. That reaches `ctx.connection`, which is what
- * `useEditorDiagnostics` reads and `DiagnosticsPanelEntry` (`ide-client`'s
- * own `Layout.tsx`, the chrome that replaced `App.tsx`'s composition-tab
- * card) hands to `DiagnosticsPanel`'s `editor` prop — task 7's
- * `editorCount → editor: readonly Diagnostic[]` change, proven here for
- * the first time against a REAL collision reported through the REAL
- * `ctx.layout` registry, rather than a `DiagnosticsPanel` handed a
- * hand-built array directly, or a hook driven through a bare
- * `ctx.connection.report()` call with nothing actually colliding.
+ * registers its button and document under one hardcoded key both times —
+ * the exact collision `@energy8engine/registry`'s last-wins policy (task
+ * 3) reports rather than silently allows. That reaches `ctx.connection`,
+ * which is what `useEditorDiagnostics` reads and `App.tsx`'s
+ * `DiagnosticsDocument` (the `shell.panel` entry) hands to
+ * `DiagnosticsPanel`'s `editor` prop — task 7's `editorCount → editor:
+ * readonly Diagnostic[]` change, proven here for the first time against a
+ * REAL collision reported through the REAL `ctx.slots` registry, rather
+ * than a `DiagnosticsPanel` handed a hand-built array directly, or a hook
+ * driven through a bare `ctx.connection.report()` call with nothing
+ * actually colliding.
  *
  * The second half is the one this suite's own lesson is about: before task
  * 7, `CompositionScreen`'s `EditorComposition` rendered this same list a

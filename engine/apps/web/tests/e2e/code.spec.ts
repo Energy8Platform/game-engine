@@ -71,12 +71,11 @@
  *    reimplemented, by `CodeScreen.tsx` — nothing about crossing a real
  *    socket changes a byte-sniffing decision made entirely in the browser
  *    before any request is sent.
- *  - **Switching FILES with unsaved changes asks first** — the brief's own
- *    test 5 exercises the CROSS-TAB half of the same guard (`ctx.layout
- *    .guard`); the same-screen half (switching to a different file) is
- *    already `code-screen.test.tsx`'s "leaving with unsaved changes asks
- *    first", and nothing about a real browser changes whether a `useState`
- *    comparison notices `text !== savedText`.
+ *  - **Switching FILES with unsaved changes asks first** — under the shell
+ *    every file is its own tab, kept mounted, so switching loses nothing
+ *    and asks nothing; the one door left is closing a dirty tab, which
+ *    `shell.spec.ts` drives (`ctx.shell.close` refusing until forced), and
+ *    `shell.test.tsx` pins the refusal itself.
  *  - **The restart-serialises / dispose-mid-restart guarantees Task 6
  *    built** — that task's own host-level tests
  *    (`engine/ide/host/tests/*.test.ts`) already drive the real

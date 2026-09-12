@@ -40,7 +40,11 @@ function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
  * typed text), so each pane is keyed by its own `doc.key` and a crash in
  * one never touches a sibling's boundary. That per-document key is also
  * what keeps a crashed pane from poisoning the next one, the reason
- * `ScreenBoundary`'s own doc gave for keying on the active id.
+ * `ScreenBoundary`'s own doc gave for keying on the active id. Keeping
+ * every pane mounted is also what pays slice 6's third debt — the leave
+ * guard never caught Back/Forward, because `hashchange` moved the address
+ * before anyone could object: a hash change now hides a pane and unmounts
+ * nothing, so there is nothing left to guard.
  */
 class DocumentBoundary extends Component<
   { ctx: Context; docKey: string; children: ReactNode },

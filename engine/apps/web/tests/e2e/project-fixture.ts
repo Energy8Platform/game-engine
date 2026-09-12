@@ -118,14 +118,14 @@ export interface ProjectCopyOptions {
    * already carries `screendemo1` in its own `e8.yml`, so this makes two
    * rows importing that one client half.
    *
-   * That half registers a screen under an id HARDCODED in it (`'demo'`,
-   * `plugins/screen-demo/src/client.js`), never derived from the row id.
-   * So the second row's `apply` calls `ctx.layout.screen({ id: 'demo' }, …)`
-   * over an id that is already taken, and that is exactly the collision
-   * `@energy8engine/registry`'s last-wins policy (task 3) exists to REPORT
-   * rather than silently allow — see `plugins/layout.tsx`'s own comment for
-   * why that collection stays a replace, not a refusal, and reports the
-   * replace anyway.
+   * That half registers its button and document under a key HARDCODED in
+   * it (`'demo'`, `plugins/screen-demo/src/client.js`), never derived from
+   * the row id. So the second row's `apply` calls `ctx.slots.register({
+   * name: 'shell.activity', key: 'demo', … })` over a key that is already
+   * taken, and that is exactly the collision `@energy8engine/registry`'s
+   * last-wins policy (task 3) exists to REPORT rather than silently allow
+   * — see `plugins/slots.tsx`'s own comment for why that collection stays
+   * a replace, not a refusal, and reports the replace anyway.
    *
    * **Two rows of the same CLIENT-ONLY package, both enabled.** This used
    * to stage the same collision through `e8-example-probe` and its

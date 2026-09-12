@@ -30,15 +30,15 @@
  * `data-testid` and its wording by role name separately (so a translated
  * label cannot make either kind of assertion pass or fail for the wrong
  * reason), and asserts on content a stub could not fake — the plugin's own
- * rendered text, and the layout boundary's own error message. Neither
+ * rendered text, and the document boundary's own error message. Neither
  * needed strengthening.
  *
  * The other five are here, each written to fail without the production
  * change it proves — see task-8-report.md for the revert-and-confirm-red
  * check on all five:
  *
- *  1. The IDE opens ON a screen (not merely lists one), and a second
- *     screen is one real `ctx.layout.go()` round trip away.
+ *  1. The IDE opens ON a document (not merely lists one), and a second
+ *     document is one real `ctx.shell.openContributed()` round trip away.
  *  2. A deep link — a hard navigation straight to `#/doc/preview`, the way
  *     a bookmark or a typed address would arrive — opens on the screen it
  *     names, not the default. A different code path from #1: this is the
@@ -138,10 +138,10 @@ test('the IDE opens on a screen, and a second screen is one click away', async (
     await expect(compositionTab).toBeVisible({ timeout: 20_000 });
     await expect(compositionTab).toHaveAttribute('aria-selected', 'true');
 
-    // "One click away": a real `ctx.layout.go()` round trip — the address
-    // hash changes, `Layout` re-renders, and the SCREEN'S OWN CONTENT (not
-    // just its tab) draws — a wall tile, never the preview screen's own
-    // empty or loading state.
+    // "One click away": a real `ctx.shell.openContributed()` round trip —
+    // the address hash changes, `Shell` re-renders, and the DOCUMENT'S OWN
+    // CONTENT (not just its tab) draws — a wall tile, never the preview
+    // document's own empty or loading state.
     await page.getByTestId('activity-preview').click();
     await expect(page.getByTestId('doc-preview')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId(/^tile-/).first()).toBeVisible();

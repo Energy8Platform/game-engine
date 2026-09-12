@@ -46,16 +46,16 @@ export interface Diagnostic {
    *        contributions that claim one key);
    *      - a card key (`CompositionScreen`'s `CardBoundary`, reporting a
    *        card that crashed while rendering);
-   *      - a screen id (`layout.tsx`, reporting two screens that claim
-   *        one id, and `Layout.tsx`'s `ScreenBoundary`, reporting a
-   *        screen that crashed);
+   *      - a document key (`shell.tsx`, reporting a key nothing answers
+   *        to, and `Shell.tsx`'s `DocumentBoundary`, reporting a document
+   *        that crashed);
    *      - a screen-preset name (`PreviewWall`, reporting a preset the
    *        wall was asked for and `SCREEN_PRESETS` does not define);
    *      - and, widest of all, a raw address fragment a human typed —
-   *        `layout.tsx` passes `hashId()` straight in when the hash names
-   *        no registered screen. That one is not a registry key at all,
-   *        and cannot be: what is being reported is precisely that
-   *        nothing answers to it.
+   *        `shell.tsx` passes the hash's key straight in when it names
+   *        no document. That one is not a registry key at all, and cannot
+   *        be: what is being reported is precisely that nothing answers
+   *        to it.
    *
    *     None of these are row ids and none ever were: the thing being
    *     reported is a key (or a would-be key) in the editor, and the row
