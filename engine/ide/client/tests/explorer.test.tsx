@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
-import { Explorer, createIdeClient, type FilesService } from '../src/index';
+import { Explorer, Shell, createIdeClient, type FilesService } from '../src/index';
 
 /**
  * One sidebar view over the project tree, replacing the tree-walking
@@ -314,6 +314,30 @@ describe('Explorer', () => {
     await userEvent.click(screen.getByTestId('explorer-a.txt'));
     expect(ctx.shell.documents().map((d2) => d2.key)).toEqual(['f:a.txt', 'f:b.txt']);
     expect(ctx.shell.active()?.key).toBe('f:a.txt');
+  });
+
+  it('a .spin opens in the editor and a .png in the viewer', async () => {
+    // Through the real `<Shell/>`, so what is asserted is what the tab
+    // body actually shows, not which component `openPath` meant to pick.
+    // Monaco itself cannot start under jsdom; its host element (or the
+    // pane saying it could not start) carries the `editor` testid either
+    // way, and an image needs no Monaco at all.
+    const ctx = await harness(tree(['game/script.spin', 'art/logo.png']), {
+      'game/script.spin': 'game = Spin',
+    });
+    render(
+      <>
+        <Explorer ctx={ctx} />
+        <Shell ctx={ctx} />
+      </>,
+    );
+    await userEvent.click(await screen.findByTestId('explorer-game/script.spin'));
+    const body = screen.getByTestId('doc-body');
+    expect(await within(body).findByTestId('editor')).toBeTruthy();
+    expect(within(body).queryByRole('img')).toBeNull();
+    await userEvent.click(screen.getByTestId('explorer-art/logo.png'));
+    expect(within(body).getByRole('img').getAttribute('src')).toBe('/api/files/art/logo.png');
+    expect(within(body).queryByTestId('editor')).toBeNull();
   });
 
   it('the tree is one tree() call, not one per fold', async () => {

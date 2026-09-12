@@ -1,6 +1,8 @@
-import { useEffect, useState, type ChangeEvent, type ComponentType } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
+import { EditorDocument } from './EditorDocument';
+import { ViewerDocument, extensionOf } from './ViewerDocument';
 
 /**
  * One sidebar view over the project tree, registered on `shell.sidebar` —
@@ -26,26 +28,25 @@ type Pending =
   { kind: 'delete'; path: string } | { kind: 'overwrite'; path: string; bytes: Uint8Array };
 
 /**
- * What Explorer opens for a path. Task 5 provides the two real document
- * kinds (editor / asset viewer) and picks between them off `entry`; until
- * then this opens a placeholder tab so the shell gets a real key and a real
- * tab to activate — proving the plumbing this task owns without deciding
- * what Task 5 will actually render there.
+ * Extensions a person edits by hand — opened in `EditorDocument`. Anything
+ * else (images first among them) goes to `ViewerDocument`, which decides
+ * for itself whether the bytes are text, binary, or too big to fetch. The
+ * editor runs the same binary sniff, so a `.json` that is not text is
+ * refused there rather than decoded.
  */
+const EDITABLE_EXTENSIONS = new Set(['.spin', '.ts', '.js', '.json', '.yml', '.md', '.html', '.css']);
+
+/** What Explorer opens for a path: a tab keyed `f:<path>`, holding the editor or the viewer. Same key twice activates. */
 export function openPath(ctx: Context, path: string, entry: FileEntry): void {
-  void entry; // unused until Task 5 branches on kind/extension
+  const editable = EDITABLE_EXTENSIONS.has(extensionOf(path));
   ctx.shell.open({
     key: `f:${path}`,
     title: path.split('/').pop() ?? path,
-    component: placeholderDocument(path),
+    component: editable
+      ? ({ ctx: c }) => <EditorDocument ctx={c} path={path} />
+      : ({ ctx: c }) => <ViewerDocument ctx={c} path={path} entry={entry} />,
     closable: true,
   });
-}
-
-function placeholderDocument(path: string): ComponentType<{ ctx: Context }> {
-  return function PlaceholderDocument() {
-    return <p data-testid="explorer-placeholder">{path}</p>;
-  };
 }
 
 export function Explorer({ ctx }: { ctx: Context }): JSX.Element {

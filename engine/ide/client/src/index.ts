@@ -61,4 +61,6 @@ export {
 export { AssetsScreen, looksBinary } from './screens/AssetsScreen';
 export { CodeScreen } from './screens/CodeScreen';
 export { Explorer, openPath } from './shell/Explorer';
+export { EditorDocument } from './shell/EditorDocument';
+export { ViewerDocument } from './shell/ViewerDocument';
 export { Monaco, type MonacoProps } from './editor/Monaco';
