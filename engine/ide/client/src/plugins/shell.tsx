@@ -66,8 +66,13 @@ export interface ShellService {
 
   /** Opens an instance tab — a file from Explorer. Same key twice activates. */
   open(doc: Omit<OpenDocument, 'dirty'>): void;
-  /** Opens a CONTRIBUTED document by its slot key. Same key twice activates. */
-  openContributed(key: string): void;
+  /**
+   * Opens a CONTRIBUTED document by its slot key. Same key twice activates.
+   * `replace` says the shell chose this document, the person did not — the
+   * fresh-load default — so the address is overwritten rather than pushed
+   * and Back never lands on the empty address a default was painted over.
+   */
+  openContributed(key: string, opts?: { replace?: boolean }): void;
   /**
    * Refuses a dirty tab and returns `false` unless `force` says otherwise.
    * The one call site this ever mattered at was already behind
@@ -142,6 +147,9 @@ export function apply(ctx: Context) {
   let panelCollapsed = false;
   let ready = false;
   let pending: string | undefined;
+  // The last key the address named that was an open document — where a
+  // stale link falls back to, so a typo does not lose a person's place.
+  let lastActive: string | undefined;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -155,12 +163,30 @@ export function apply(ctx: Context) {
     connection?.report(diagnostic('warning', where, 'shell', message, fix));
   }
 
+  /**
+   * Points the address at `key` — `''` for none. `replace` means this is
+   * the shell's own choice, not a place a person navigated to: the
+   * fresh-load default, the fallback from a stale link, the neighbour
+   * picked after a close. Those overwrite the current history entry
+   * instead of adding one, so Back lands where the person actually was and
+   * never on an address that answers to nothing (the two empty panes the
+   * final review reproduced). Both forms fire `hashchange`. `'#'` rather
+   * than `''` for the empty case: `location.replace('')` resolves to the
+   * page itself, which is a reload.
+   */
+  function go(key: string, replace: boolean) {
+    const hash = key === '' ? '' : `${HASH_PREFIX}${key}`;
+    if (replace) location.replace(hash === '' ? '#' : hash);
+    else location.hash = hash;
+    if (documents.has(key)) lastActive = key;
+  }
+
   /** Adds the tab if its key is new, then activates it either way. */
-  function openInternal(doc: Omit<OpenDocument, 'dirty'>) {
+  function openInternal(doc: Omit<OpenDocument, 'dirty'>, replace = false) {
     if (!documents.has(doc.key)) {
       documents.set(doc.key, { ...doc, dirty: false });
     }
-    location.hash = `${HASH_PREFIX}${doc.key}`;
+    go(doc.key, replace);
     notify();
   }
 
@@ -176,13 +202,19 @@ export function apply(ctx: Context) {
     return contributedDocuments().find((entry) => entry.key === key);
   }
 
-  function openFoundContributed(found: DocumentMeta & { component: ComponentType<any> }) {
-    openInternal({
-      key: found.key,
-      title: found.title ?? found.key,
-      component: found.component,
-      closable: found.closable ?? false,
-    });
+  function openFoundContributed(
+    found: DocumentMeta & { component: ComponentType<any> },
+    replace = false,
+  ) {
+    openInternal(
+      {
+        key: found.key,
+        title: found.title ?? found.key,
+        component: found.component,
+        closable: found.closable ?? false,
+      },
+      replace,
+    );
   }
 
   /** `modules`, if this was composed with it; the hand-built harnesses are not. */
@@ -193,19 +225,33 @@ export function apply(ctx: Context) {
   /**
    * The address names something real to the browser that answers to no
    * registered document — a stale bookmark, a removed contribution, a
-   * typo. Says so once and falls back to the first contributed document,
-   * the way the old layout fell back to its first screen.
+   * typo. Says so once and falls back to the document that WAS active, so
+   * a mistyped address does not lose a person's place; only when none is
+   * open does it fall back to the first contributed document, the way the
+   * old layout fell back to its first screen. The fallback REPLACES the
+   * stale address: pushing it left Back stuck on the same stale entry,
+   * re-reporting and growing the history on every press.
    */
   function giveUp(key: string) {
     pending = undefined;
+    const previous = lastActive !== undefined && documents.has(lastActive) ? lastActive : undefined;
+    const contributed = contributedDocuments();
+    const fallback = previous ?? contributed[0]?.key;
     report(
       key,
-      `the address names document "${key}", which is not registered — showing the first document instead`,
+      `the address names document "${key}", which is not registered — ${
+        fallback === undefined ? 'nothing else is open' : `showing "${fallback}" instead`
+      }`,
       'open a document from the sidebar',
     );
-    const contributed = contributedDocuments();
-    if (contributed.length > 0) openFoundContributed(contributed[0]);
-    else notify();
+    if (previous !== undefined) {
+      go(previous, true);
+      notify();
+    } else if (contributed.length > 0) {
+      openFoundContributed(contributed[0], true);
+    } else {
+      notify();
+    }
   }
 
   /**
@@ -255,9 +301,10 @@ export function apply(ctx: Context) {
       openInternal(doc);
     },
 
-    openContributed(key) {
+    openContributed(key, opts) {
+      const replace = opts?.replace ?? false;
       if (documents.has(key)) {
-        openInternal({ ...documents.get(key)! });
+        openInternal({ ...documents.get(key)! }, replace);
         return;
       }
       const found = findContributed(key);
@@ -265,7 +312,7 @@ export function apply(ctx: Context) {
         report(key, `no document is registered for "${key}"`, 'register it on the shell.document slot');
         return;
       }
-      openFoundContributed(found);
+      openFoundContributed(found, replace);
     },
 
     close(key, opts) {
@@ -281,15 +328,17 @@ export function apply(ctx: Context) {
 
       if (wasActive) {
         const remaining = [...documents.keys()];
-        location.hash =
-          remaining.length > 0 ? `${HASH_PREFIX}${remaining[Math.min(index, remaining.length - 1)]}` : '';
+        // The neighbour is the shell's pick, so it overwrites the closed
+        // tab's entry: Back goes to where the person was before it, not
+        // onto the tab they just closed.
+        go(remaining.length > 0 ? remaining[Math.min(index, remaining.length - 1)] : '', true);
       }
       notify();
       return true;
     },
 
     activate(key) {
-      location.hash = `${HASH_PREFIX}${key}`;
+      go(key, false);
       notify();
     },
 
@@ -362,6 +411,10 @@ export function apply(ctx: Context) {
   // that was closed, or a link typed by hand, must open something or say
   // why, not leave the body empty.
   const onHashChange = () => {
+    // Back onto an open tab is the one way the address reaches a document
+    // without going through `go()`.
+    const key = docKeyFromHash();
+    if (documents.has(key)) lastActive = key;
     notify();
     if (ready) resolveHash();
   };

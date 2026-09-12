@@ -334,6 +334,15 @@ export function Shell({ ctx }: { ctx: Context }) {
               {`opening "${pending}"…`}
             </p>
           ) : null}
+          {active === undefined && pending === undefined ? (
+            // The address names nothing and nothing is on its way: Back
+            // onto the entry a page was first loaded at, or the last
+            // closable tab closed with nothing contributed open. Every pane
+            // below is hidden then, and the body used to be blank.
+            <p className="e8-empty" data-testid="doc-none">
+              no document is open — pick one from the Explorer
+            </p>
+          ) : null}
           {documents.map((doc) => (
             <div
               key={doc.key}

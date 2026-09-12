@@ -158,8 +158,12 @@ export function App({ ctx }: { ctx: Context }) {
     // with the Explorer beside it. A deep link — resolved, or still
     // pending on a plugin's client half — and a sidebar already chosen are
     // left alone.
+    // `replace`: the default is not a place the person navigated to, so it
+    // overwrites the empty address instead of pushing past it — Back from
+    // the first document a person opens must not land on a pane with
+    // nothing in it.
     if (ctx.shell.active() === undefined && ctx.shell.pending() === undefined) {
-      ctx.shell.openContributed('composition');
+      ctx.shell.openContributed('composition', { replace: true });
     }
     if (ctx.shell.sidebar() === undefined) ctx.shell.showSidebar('explorer');
     // eslint-disable-next-line react-hooks/exhaustive-deps

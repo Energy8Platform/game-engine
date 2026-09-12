@@ -150,6 +150,17 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
   });
 
+  it('the fresh-load default replaces the empty address, so Back has nowhere emptier to go', async () => {
+    // Finding 1 of the final review: the default composition was PUSHED
+    // over the empty address, and Back from it reached a page with three
+    // tabs and no pane. A default is not a place a person navigated to.
+    const before = history.length;
+    const { ctx } = await harness();
+    render(<App ctx={ctx} />);
+    expect(ctx.shell.active()?.key).toBe('composition');
+    expect(history.length).toBe(before);
+  });
+
   it('ctx.layout is gone from the real client', async () => {
     // Ruling 2: the assertion Task 1 could not make while `layout` and
     // `shell` overlapped.

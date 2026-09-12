@@ -316,6 +316,51 @@ describe('shell', () => {
     expect(ctx.shell.active()?.key).toBe('composition');
   });
 
+  it('a stale address falls back to the document that WAS active, and replaces the entry', async () => {
+    // Finding 2 of the final review: `giveUp` pushed `#/doc/composition`
+    // over a typo, so Back landed on the typo again, re-reported, and
+    // pushed again — `history.length` grew by one per press and the
+    // document a person was on was never reached. Two contributed
+    // documents, the SECOND active: a fallback to `contributed[0]` is
+    // told apart from "the previous document" only when they differ.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.slots.register({ name: 'shell.document', key: 'preview' }, Dummy);
+    ctx.shell.ready();
+    ctx.shell.openContributed('composition');
+    ctx.shell.openContributed('preview');
+    location.hash = '#/doc/ghost'; // typed by hand: one entry, the person's own
+    const typed = history.length;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(ctx.shell.active()?.key).toBe('preview');
+    expect(ctx.shell.documents()).toHaveLength(2);
+    expect(history.length).toBe(typed); // replaced, not pushed
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('ghost'),
+    ]);
+    // Back once, through jsdom's own session history: the entry before
+    // the (now overwritten) typo is `preview` itself — nothing stale is
+    // left to re-resolve, so the one diagnostic stays one.
+    history.back();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(location.hash).toBe('#/doc/preview');
+    expect(ctx.shell.active()?.key).toBe('preview');
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+  });
+
+  it('closing the last tab empties the address without adding an entry', () => {
+    // The neighbour (or nothing) after a close is the shell's pick, not a
+    // place the person went, so it overwrites the closed tab's entry.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    const before = history.length;
+    expect(ctx.shell.close('a')).toBe(true);
+    expect(location.hash).toBe('');
+    expect(history.length).toBe(before);
+    expect(ctx.shell.documents()).toHaveLength(0);
+    expect(ctx.shell.active()).toBeUndefined();
+  });
+
   it('showSidebar toggles: the active key again collapses it', () => {
     const ctx = harness();
     ctx.shell.showSidebar('explorer');
@@ -724,6 +769,30 @@ describe('Shell', () => {
     ctx.shell.ready();
     render(<Shell ctx={ctx} />);
     expect(screen.getByTestId('doc-opening')).toHaveTextContent('demo');
+  });
+
+  it('documents open but none named by the address is words in the body, not an empty pane', () => {
+    // Finding 1 of the final review: open A, open B, Back past both — the
+    // address is `''`, every pane is hidden, and the body was blank.
+    // Pinned by state, not content: two documents, no active one, nothing
+    // pending — and the explanation rendered.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.shell.ready();
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <div>A</div>, closable: true });
+    ctx.shell.open({ key: 'b', title: 'B', component: () => <div>B</div>, closable: true });
+    render(<Shell ctx={ctx} />);
+    expect(screen.queryByTestId('doc-none')).toBeNull();
+    act(() => {
+      location.hash = ''; // the browser's Back, past the first document opened
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(ctx.shell.documents()).toHaveLength(2);
+    expect(ctx.shell.active()).toBeUndefined();
+    expect(ctx.shell.pending()).toBeUndefined();
+    expect(screen.getByTestId('doc-none')).toBeVisible();
+    expect(screen.getByTestId('doc-pane-a')).not.toBeVisible();
+    expect(screen.getByTestId('doc-pane-b')).not.toBeVisible();
   });
 
   it('with nothing registered anywhere it explains itself instead of painting nothing', () => {
