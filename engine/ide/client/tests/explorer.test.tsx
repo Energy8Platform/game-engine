@@ -213,6 +213,36 @@ describe('Explorer — ported from AssetsScreen', () => {
     expect(screen.getByTestId('explorer-logo.png')).toBeTruthy();
   });
 
+  it('saying yes to the replace question writes the file the second time', async () => {
+    // Covers `confirm()`'s overwrite branch (`Explorer.tsx`'s
+    // `if (asked.kind === 'overwrite') { upload(...); return; }`) — the one
+    // path from `AssetsScreen` this suite hadn't ported yet, whose only
+    // coverage used to live in `assets-screen.test.tsx` alone.
+    const ctx = await harness(tree(['logo.png']));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-logo.png');
+    await userEvent.upload(
+      screen.getByTestId('explorer-upload') as HTMLInputElement,
+      new File(['second'], 'logo.png'),
+    );
+    await userEvent.click(await screen.findByTestId('confirm-yes'));
+    await waitFor(() => expect(ctx.files.written).toEqual([['logo.png', bytes('second')]]));
+  });
+
+  it('deleting removes the entry from the tree', async () => {
+    // Covers `confirm()`'s delete-completion branch (`Explorer.tsx`'s
+    // `ctx.files.remove(asked.path).then(...)`) — "deleting asks first, and
+    // does nothing when the answer is no" above only ever exercises `cancel()`;
+    // nothing before this proved "yes" actually calls `remove` and refreshes.
+    const ctx = await harness(tree(['logo.png']));
+    render(<Explorer ctx={ctx} />);
+    ctx.files.nextTree(tree([]));
+    await userEvent.click(await screen.findByTestId('explorer-delete-logo.png'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    expect(ctx.files.removed).toEqual(['logo.png']);
+    await waitFor(() => expect(screen.queryByTestId('explorer-logo.png')).toBeNull());
+  });
+
   it('a file the browser itself fails to read off disk says so, instead of doing nothing', async () => {
     const ctx = await harness(tree([]));
     const RealFileReader = globalThis.FileReader;
@@ -243,20 +273,37 @@ describe('Explorer — ported from AssetsScreen', () => {
 
 describe('Explorer', () => {
   it('clicking a file opens a document with that path as key', async () => {
-    const ctx = await harness(tree(['game/script.spin']));
+    // Two files, not one: a fixture with a single file lets a key
+    // hardcoded to that one literal pass this test undetected — see
+    // task-4-report.md's disclosure. Asserting both keys, and that they
+    // differ, is what actually forces the key to be DERIVED from the
+    // clicked path rather than merely equal to it by fixture coincidence.
+    const ctx = await harness(tree(['a.txt', 'b.txt']));
     render(<Explorer ctx={ctx} />);
-    await userEvent.click(await screen.findByTestId('explorer-game/script.spin'));
-    expect(ctx.shell.active()?.key).toBe('f:game/script.spin');
+    await userEvent.click(await screen.findByTestId('explorer-a.txt'));
+    const firstKey = ctx.shell.active()?.key;
+    await userEvent.click(screen.getByTestId('explorer-b.txt'));
+    const secondKey = ctx.shell.active()?.key;
+    expect(firstKey).toBe('f:a.txt');
+    expect(secondKey).toBe('f:b.txt');
+    expect(firstKey).not.toBe(secondKey);
   });
 
   it('clicking a directory folds it, and does not open anything', async () => {
-    const ctx = await harness(tree(['game', 'game/spec.json']));
+    // A sibling FILE, clicked after the directory round-trip: "does not
+    // open anything" is only a directory-specific claim if opening still
+    // works for something else right here — otherwise the same assertion
+    // passes just as well with `openPath` globally broken (see
+    // task-4-report.md's disclosure, reproduced by the reviewer).
+    const ctx = await harness(tree(['game', 'game/spec.json', 'sibling.txt']));
     render(<Explorer ctx={ctx} />);
     await userEvent.click(await screen.findByTestId('explorer-game'));
     expect(screen.queryByTestId('explorer-game/spec.json')).toBeNull(); // folded
     expect(ctx.shell.documents()).toEqual([]);
     await userEvent.click(screen.getByTestId('explorer-game'));
     expect(screen.getByTestId('explorer-game/spec.json')).toBeTruthy(); // unfolded
+    await userEvent.click(screen.getByTestId('explorer-sibling.txt'));
+    expect(ctx.shell.active()?.key).toBe('f:sibling.txt'); // opening still works for a file
   });
 
   it('clicking the same file twice activates the one tab', async () => {
@@ -274,6 +321,11 @@ describe('Explorer', () => {
     render(<Explorer ctx={ctx} />);
     await screen.findByTestId('explorer-a');
     await userEvent.click(screen.getByTestId('explorer-a'));
+    // A no-op fold would pass the call-count assertion below just as well
+    // as a working one — see task-4-report.md's disclosure. This line
+    // fails a broken fold right here, instead of letting the neighbour
+    // "clicking a directory folds it" test be the only one that notices.
+    expect(screen.queryByTestId('explorer-a/x')).toBeNull();
     await userEvent.click(screen.getByTestId('explorer-b'));
     expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(1);
   });
