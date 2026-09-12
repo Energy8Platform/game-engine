@@ -476,6 +476,41 @@ describe('EditorDocument', () => {
     await waitFor(() => expect(ctx.files.written).toHaveLength(2));
   });
 
+  it('Cmd/Ctrl+S saves the ACTIVE editor only, not every open one', async () => {
+    // Every open document stays mounted (Ruling 13), so two editors both
+    // hear the one keystroke. Two dirty editors, one keystroke, one write
+    // — and it is the active tab's file, not the first-mounted one's.
+    const ctx = await harness(files({ 'a.spin': 'x', 'b.spin': 'x' }));
+    openTab(ctx, 'a.spin');
+    openTab(ctx, 'b.spin');
+    // Mounted one after the other, not in one commit: two concurrent
+    // `import()`s of the mocked `monacoSlice` leave the second hanging
+    // under vitest (a browser dedupes module imports natively), so the
+    // second editor would never be created.
+    const { rerender } = render(<EditorDocument ctx={ctx} path="a.spin" />);
+    const first = await screen.findByTestId('editor');
+    await waitFor(() => editorOn(first));
+    rerender(
+      <>
+        <EditorDocument ctx={ctx} path="a.spin" />
+        <EditorDocument ctx={ctx} path="b.spin" />
+      </>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('editor')).toHaveLength(2));
+    const editors = screen.getAllByTestId('editor');
+    await waitFor(() => editors.forEach((el) => editorOn(el)));
+    type(editors[0], 'xa');
+    type(editors[1], 'xb');
+    ctx.shell.activate('f:a.spin');
+    await userEvent.keyboard('{Meta>}s{/Meta}');
+    await waitFor(() => expect(ctx.files.written).toHaveLength(1));
+    expect(ctx.files.written).toEqual([['a.spin', [120, 97]]]);
+    ctx.shell.activate('f:b.spin');
+    await userEvent.keyboard('{Meta>}s{/Meta}');
+    await waitFor(() => expect(ctx.files.written).toHaveLength(2));
+    expect(ctx.files.written[1]).toEqual(['b.spin', [120, 98]]);
+  });
+
   it('unmounting a dirty editor does not lose the guard racing the tab', async () => {
     // The shell closes the tab only after the confirm says yes; the
     // editor's own unmount must not clear dirty before the shell has

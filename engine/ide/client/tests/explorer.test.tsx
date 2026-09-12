@@ -331,13 +331,18 @@ describe('Explorer', () => {
         <Shell ctx={ctx} />
       </>,
     );
+    // Every open document stays mounted and the inactive one is hidden
+    // (Ruling 13), so "the editor is gone" became "the editor is not
+    // visible" — it is still in the DOM, holding whatever was typed.
     await userEvent.click(await screen.findByTestId('explorer-game/script.spin'));
     const body = screen.getByTestId('doc-body');
-    expect(await within(body).findByTestId('editor')).toBeTruthy();
+    const editor = await within(body).findByTestId('editor');
+    expect(editor).toBeVisible();
     expect(within(body).queryByRole('img')).toBeNull();
     await userEvent.click(screen.getByTestId('explorer-art/logo.png'));
     expect(within(body).getByRole('img').getAttribute('src')).toBe('/api/files/art/logo.png');
-    expect(within(body).queryByTestId('editor')).toBeNull();
+    expect(within(body).getByRole('img')).toBeVisible();
+    expect(editor).not.toBeVisible();
   });
 
   it('the tree is one tree() call, not one per fold', async () => {

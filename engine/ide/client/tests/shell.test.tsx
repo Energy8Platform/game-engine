@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Context } from 'cordis';
 import { type Diagnostic } from '@energy8engine/contracts';
@@ -438,6 +438,64 @@ describe('Shell', () => {
     expect(screen.getByTestId('doc-error')).toHaveTextContent('boom');
     expect(screen.getByTestId('panel')).toHaveTextContent('PANEL');
     expect(screen.getByTestId('doc-ok')).toBeTruthy();
+  });
+
+  it('typed text survives a tab switch, in the same editor node', async () => {
+    // Ruling 13: the shell used to mount only the active document, so
+    // switching tabs unmounted the editor and its typed text with it.
+    // Identity, not content — the SAME `<input>` element is still there,
+    // holding what was typed into it; a re-mounted pane re-fed from some
+    // fake would pass a content check and still have lost cursor, scroll
+    // and undo.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <input data-testid="a-input" />, closable: true });
+    ctx.shell.open({ key: 'b', title: 'B', component: () => <div>B</div>, closable: true });
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('doc-a'));
+    const input = screen.getByTestId<HTMLInputElement>('a-input');
+    await userEvent.type(input, 'hello');
+    await userEvent.click(screen.getByTestId('doc-b'));
+    expect(input).not.toBeVisible();
+    await userEvent.click(screen.getByTestId('doc-a'));
+    expect(screen.getByTestId('a-input')).toBe(input);
+    expect(input.value).toBe('hello');
+    expect(input).toBeVisible();
+  });
+
+  it('a contribution registered after mount appears without a reload', () => {
+    // Ported from `layout.test.tsx`'s "a screen registered after mount
+    // appears without a reload": a plugin's client half lands through
+    // `modules` well after `<Shell/>` first drew, and `useShell` alone
+    // hears nothing from `ctx.slots`.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+    expect(screen.queryByTestId('activity-late')).toBeNull();
+    act(() => {
+      ctx.slots.register(
+        { name: 'shell.activity', key: 'late', title: 'Late', icon: 'l', opens: 'sidebar' },
+        Nop,
+      );
+    });
+    expect(screen.getByTestId('activity-late')).toBeTruthy();
+  });
+
+  it("a reload with unsaved changes is held for the browser's own confirm; a clean one is not", () => {
+    // Ported from `code-screen.test.tsx`: `beforeunload` is registered once,
+    // by the shell, off `hasDirtyDocuments()` — not by each editor.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+    const fire = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(fire()).toBe(false);
+    act(() => ctx.shell.markDirty('a', true));
+    expect(fire()).toBe(true);
+    act(() => ctx.shell.markDirty('a', false));
+    expect(fire()).toBe(false);
   });
 
   it('the panel node survives switching documents', async () => {

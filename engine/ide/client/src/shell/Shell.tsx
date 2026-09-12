@@ -1,4 +1,4 @@
-import { Component, useState } from 'react';
+import { Component, useEffect, useReducer, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
@@ -24,7 +24,7 @@ function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
 }
 
 /**
- * Isolates the ACTIVE document from the rest of the shell — the same shape
+ * Isolates one document from the rest of the shell — the same shape
  * as `Layout.tsx`'s own `ScreenBoundary`, and for the same reason: a
  * document is a plugin's own code (or a file's own content, for Explorer's
  * instance tabs), this shell has no other trust relationship with it, and
@@ -34,13 +34,13 @@ function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
  * is on its way out (Task 6); a shared import would tie this file's fate to
  * that deletion for no reason.
  *
- * Mounted with `key={active.key}` in `Shell` below, for the reason
- * `ScreenBoundary`'s own doc already gives: without the key, navigating
- * away from a crashed document re-renders this SAME class instance with new
- * children, and a component whose `render()` already committed to the
- * fallback does not get a second look at them — the next document would
- * render as broken too, and the IDE would stay stuck exactly as if there
- * were no boundary at all.
+ * One instance per OPEN document, not one for the active one: `Shell`
+ * below keeps every open document mounted and hides the inactive ones
+ * (Ruling 13 — switching tabs used to unmount the editor and lose its
+ * typed text), so each pane is keyed by its own `doc.key` and a crash in
+ * one never touches a sibling's boundary. That per-document key is also
+ * what keeps a crashed pane from poisoning the next one, the reason
+ * `ScreenBoundary`'s own doc gave for keying on the active id.
  */
 class DocumentBoundary extends Component<
   { ctx: Context; docKey: string; children: ReactNode },
@@ -174,6 +174,24 @@ export function Shell({ ctx }: { ctx: Context }) {
   const { documents, active, sidebar, panelCollapsed } = useShell(ctx);
   const [pendingClose, setPendingClose] = useState<string | undefined>(undefined);
 
+  // The five slot lists below are read straight off `ctx.slots` on every
+  // render, and `useShell` only hears from `ctx.shell` — so a contribution
+  // landing AFTER mount (a plugin's client half, imported by `modules` once
+  // the snapshot names it) needs this to be drawn at all.
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => ctx.slots.subscribe(bump), [ctx]);
+
+  // Reload and close are the one door no tab's own close button guards.
+  // Registered ONCE, here, off a shell-level fact — not per editor, where
+  // one dirty editor among several would have to know about the others.
+  useEffect(() => {
+    const hold = (event: BeforeUnloadEvent) => {
+      if (ctx.shell.hasDirtyDocuments()) event.preventDefault();
+    };
+    window.addEventListener('beforeunload', hold);
+    return () => window.removeEventListener('beforeunload', hold);
+  }, [ctx]);
+
   const activities = byOrder(ctx.slots.list<SlotMeta & ActivityMeta>(ctx.shell.slots.activity));
   const sidebarEntries = ctx.slots.list<SlotMeta & SidebarMeta>(ctx.shell.slots.sidebar);
   const documentContribs = ctx.slots.list<SlotMeta & DocumentMeta>(ctx.shell.slots.document);
@@ -237,11 +255,18 @@ export function Shell({ ctx }: { ctx: Context }) {
           ))}
         </div>
         <div className="e8-editors-body" data-testid="doc-body">
-          {active ? (
-            <DocumentBoundary key={active.key} ctx={ctx} docKey={active.key}>
-              <active.component ctx={ctx} />
-            </DocumentBoundary>
-          ) : null}
+          {documents.map((doc) => (
+            <div
+              key={doc.key}
+              className="e8-doc-pane"
+              data-testid={`doc-pane-${doc.key}`}
+              hidden={doc.key !== active?.key}
+            >
+              <DocumentBoundary ctx={ctx} docKey={doc.key}>
+                <doc.component ctx={ctx} />
+              </DocumentBoundary>
+            </div>
+          ))}
         </div>
         {pendingDoc ? (
           <div

@@ -157,22 +157,25 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
     });
   }
 
-  // Cmd/Ctrl+S from anywhere in the page while this is mounted — the
-  // shell mounts only the active document, so "anywhere" is this one.
-  // Read through a ref so the listener registered once sees the current
-  // text rather than the text at mount.
+  // Cmd/Ctrl+S from anywhere in the page. The shell keeps EVERY open
+  // document mounted (Ruling 13), so every open editor hears this one
+  // keystroke; only the one whose tab is active answers it, or one save
+  // would write every dirty file at once. Read through a ref so the
+  // listener registered once sees the current text rather than the text
+  // at mount.
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        if (ctx.shell.active()?.key !== key) return;
         event.preventDefault();
         saveRef.current();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [ctx, key]);
 
   if (openError !== null) {
     return (
