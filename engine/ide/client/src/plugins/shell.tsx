@@ -74,6 +74,17 @@ export interface ShellService {
    */
   openContributed(key: string, opts?: { replace?: boolean }): void;
   /**
+   * Opens a project file as an instance tab, keyed `f:<path>`, choosing
+   * editor or viewer the way the Explorer does — through the one chooser
+   * installed with `registerPathOpener`. This is how a plugin's own sidebar
+   * view opens `game/script.spin` without importing anything, and how the
+   * address resolves a `f:` key on a cold load. With no chooser installed it
+   * is a diagnostic, not a throw.
+   */
+  openPath(path: string): void;
+  /** Installs the chooser `openPath` delegates to. Returns a disposer. */
+  registerPathOpener(open: (path: string) => void): () => void;
+  /**
    * Refuses a dirty tab and returns `false` unless `force` says otherwise.
    * The one call site this ever mattered at was already behind
    * `if (doc.dirty)`, so a confirm flow is two calls, not a registered
@@ -130,6 +141,8 @@ const SLOT_NAMES: ShellService['slots'] = {
 };
 
 const HASH_PREFIX = '#/doc/';
+/** What a file's document key starts with; the rest is the project path. */
+export const FILE_KEY_PREFIX = 'f:';
 
 /** The document key the address currently names, or '' when it names none. */
 function docKeyFromHash(): string {
@@ -150,6 +163,7 @@ export function apply(ctx: Context) {
   // The last key the address named that was an open document — where a
   // stale link falls back to, so a typo does not lose a person's place.
   let lastActive: string | undefined;
+  let pathOpener: ((path: string) => void) | undefined;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -265,6 +279,18 @@ export function apply(ctx: Context) {
     const key = docKeyFromHash();
     pending = undefined;
     if (key === '' || documents.has(key)) return;
+    // A file key is never a plugin's contribution, so there is nothing to
+    // wait for: the chooser opens it (F5 on a file tab, the most common
+    // gesture there is — Ruling 18), or, with no chooser, it is given up
+    // on like any other key nobody answers to.
+    if (key.startsWith(FILE_KEY_PREFIX)) {
+      if (pathOpener) {
+        pathOpener(key.slice(FILE_KEY_PREFIX.length));
+        return;
+      }
+      giveUp(key);
+      return;
+    }
     const found = findContributed(key);
     if (found) {
       openFoundContributed(found);
@@ -313,6 +339,25 @@ export function apply(ctx: Context) {
         return;
       }
       openFoundContributed(found, replace);
+    },
+
+    openPath(path) {
+      if (!pathOpener) {
+        report(
+          path,
+          `"${path}" cannot be opened: nothing has registered a file opener on the shell`,
+          'register one with ctx.shell.registerPathOpener',
+        );
+        return;
+      }
+      pathOpener(path);
+    },
+
+    registerPathOpener(open) {
+      pathOpener = open;
+      return () => {
+        if (pathOpener === open) pathOpener = undefined;
+      };
     },
 
     close(key, opts) {

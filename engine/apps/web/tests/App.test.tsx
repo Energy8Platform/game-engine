@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createIdeClient, useGameComposition } from '@energy8engine/ide-client';
 import type { CompositionRow, ServerMessage } from '@energy8engine/contracts';
@@ -44,15 +44,20 @@ async function harness(importModule?: (url: string) => Promise<unknown>) {
     // applies, and the Explorer `App` opens on load fetches `/api/files` —
     // both answered here, empty, so the tests exercise real responses
     // instead of real (and, in this environment, doomed) requests.
-    fetchFn: (async (input: unknown) =>
-      new Response(
+    fetchFn: (async (input: unknown) => {
+      const url = String(input);
+      // One file the editor tests below can open: the bytes, as the host
+      // would serve them.
+      if (url === '/api/files/game%2Fscript.spin' || url === '/api/files/game/script.spin') {
+        return new Response('game = Spin');
+      }
+      return new Response(
         JSON.stringify(
-          String(input) === '/api/files'
-            ? { entries: [], diagnostics: [] }
-            : { rows: [], diagnostics: [] },
+          url === '/api/files' ? { entries: [], diagnostics: [] } : { rows: [], diagnostics: [] },
         ),
         { headers: { 'content-type': 'application/json' } },
-      )) as unknown as typeof fetch,
+      );
+    }) as unknown as typeof fetch,
   });
   return { ctx, socket };
 }
@@ -159,6 +164,37 @@ describe('App', () => {
     render(<App ctx={ctx} />);
     expect(ctx.shell.active()?.key).toBe('composition');
     expect(history.length).toBe(before);
+  });
+
+  it('a cold load on a file opens the editor with a clean panel', async () => {
+    // Ruling 18: F5 on a file tab used to land on the composition with a
+    // false "not registered". The shell now asks the opener `App`
+    // registered, and the Explorer's chooser picks the editor.
+    location.hash = '#/doc/f:game/script.spin';
+    const { ctx } = await harness();
+    render(<App ctx={ctx} />);
+    expect(ctx.shell.active()?.key).toBe('f:game/script.spin');
+    const pane = screen.getByTestId('doc-pane-f:game/script.spin');
+    expect(await within(pane).findByTestId('editor')).toBeTruthy();
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('a sidebar view with no imports opens a file through ctx.shell.openPath', async () => {
+    // Ruling 22's other half: a plugin's own view has only `ctx`, and
+    // `ctx.shell.open()` demands a component it cannot build. `openPath`
+    // is the one call that opens a file for it.
+    const { ctx } = await harness();
+    ctx.slots.register({ name: 'shell.sidebar', key: 'mine', title: 'Mine' }, ({ ctx: c }) => (
+      <button type="button" onClick={() => c.shell.openPath('game/script.spin')}>
+        open the math
+      </button>
+    ));
+    render(<App ctx={ctx} />);
+    act(() => ctx.shell.showSidebar('mine'));
+    fireEvent.click(screen.getByRole('button', { name: 'open the math' }));
+    expect(ctx.shell.active()?.key).toBe('f:game/script.spin');
+    const pane = screen.getByTestId('doc-pane-f:game/script.spin');
+    expect(await within(pane).findByTestId('editor')).toBeTruthy();
   });
 
   it('ctx.layout is gone from the real client', async () => {

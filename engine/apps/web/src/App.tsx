@@ -10,6 +10,7 @@ import {
   SessionStatus,
   Shell,
   ThemeStatus,
+  openPath,
   useEditorDiagnostics,
   useGameComposition,
   useGameDiagnostics,
@@ -147,6 +148,15 @@ export function App({ ctx }: { ctx: Context }) {
       ),
     ];
     return () => off.forEach((dispose) => dispose());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  // The Explorer's chooser of document kinds, handed to the shell so a
+  // plugin's sidebar view can open a file with `ctx.shell.openPath(path)`
+  // and no import, and so `#/doc/f:<path>` resolves on a cold load. Before
+  // `ready()`, which is what first reads the address.
+  useEffect(() => {
+    return ctx.shell.registerPathOpener((path) => openPath(ctx, path));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 

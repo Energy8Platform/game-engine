@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
+import { FILE_KEY_PREFIX } from '../plugins/shell';
 import { Monaco } from '../editor/Monaco';
 import { looksBinary } from './ViewerDocument';
 
@@ -67,7 +68,7 @@ function isSpin(path: string): boolean {
 }
 
 export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): JSX.Element {
-  const key = `f:${path}`;
+  const key = `${FILE_KEY_PREFIX}${path}`;
   // `null` until the read answers — the pane says "reading" rather than
   // showing an empty editor over a file it has not seen yet.
   const [text, setText] = useState<string | null>(null);

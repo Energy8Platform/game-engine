@@ -73,14 +73,18 @@ async function openIde(page: Page, host: DevHost, hash = ''): Promise<void> {
  * mounted, so a bare `getByTestId('editor')` is ambiguous the moment two
  * files are open.
  *
- * Through the Explorer, not `#/doc/f:<path>`: the brief's sketch deep-links
- * an editor, but measured against `shell.tsx`'s `resolveHash`, only a
- * CONTRIBUTED key resolves from the address — a `f:` key answers to no
- * `shell.document` entry, so a cold deep link to one is reported as not
- * registered and falls back to the composition. See task-7-report.md.
+ * Through the Explorer, the way a person first reaches a file. A cold
+ * `#/doc/f:<path>` resolves too, since the final fix pass (Ruling 18/22)
+ * — `resolveHash` hands a `f:` key to the opener `App` registers — and the
+ * reload test below is what pins that.
  */
 async function openInEditor(page: Page, path: string): Promise<void> {
   await page.getByTestId(`explorer-${path}`).click();
+  await editorReady(page, path);
+}
+
+/** Waits for the real Monaco inside `path`'s pane and focuses it. */
+async function editorReady(page: Page, path: string): Promise<void> {
   const pane = page.getByTestId(`doc-pane-f:${path}`);
   await expect(pane.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });
   await pane.getByTestId('editor').click();
@@ -237,6 +241,32 @@ test('Cmd/Ctrl+S saves the active editor and only it', async ({ page }) => {
     await expect(page.getByTestId('doc-f:plugins/reel-step/src/step.ts')).not.toContainText('●');
     await expect(page.getByTestId('doc-f:game/script.spin')).toContainText('●');
     expect(readFileSync(join(dir, 'game/script.spin'), 'utf8')).toBe(spinBefore);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('F5 on a file tab reopens the editor, with a clean panel', async ({ page }) => {
+  // Ruling 18: `f:` keys existed only once the Explorer opened them, so
+  // the most common gesture there is — reload while on a file — landed on
+  // the composition with a false "not registered". The address now asks
+  // the opener `App` registered, and the Explorer's own chooser picks
+  // Monaco.
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await openIde(page, host);
+    await openInEditor(page, 'game/script.spin');
+    await page.reload();
+    await expect(page.getByTestId('doc-f:game/script.spin')).toHaveAttribute('aria-selected', 'true', {
+      timeout: 20_000,
+    });
+    await editorReady(page, 'game/script.spin');
+    await expect(page.getByTestId('doc-pane-f:game/script.spin').locator('.view-lines')).toContainText(
+      'game',
+    );
+    await expect(page.getByTestId('diagnostics-panel')).not.toContainText(/not registered/);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

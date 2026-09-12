@@ -361,6 +361,46 @@ describe('shell', () => {
     expect(ctx.shell.active()).toBeUndefined();
   });
 
+  it('a cold address naming a file asks the registered opener, and waits for nothing', () => {
+    // Ruling 18/22: `f:` keys exist only once something opens them, so a
+    // cold `#/doc/f:<path>` — F5 on a file tab — used to be given up on as
+    // "not registered" and replaced by the composition. A file is never a
+    // plugin's contribution, so an UNSETTLED loader must not hold it
+    // pending either: the opener is asked at once.
+    location.hash = '#/doc/f:game/script.spin';
+    const ctx = harness();
+    (ctx as any).modules = { loaded: () => [], settled: () => false, subscribe: () => () => {} };
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    const opened: string[] = [];
+    ctx.shell.registerPathOpener((path) => {
+      opened.push(path);
+      ctx.shell.open({ key: `f:${path}`, title: path, component: Dummy, closable: true });
+    });
+    ctx.shell.ready();
+    expect(opened).toEqual(['game/script.spin']);
+    expect(ctx.shell.active()?.key).toBe('f:game/script.spin');
+    expect(ctx.shell.pending()).toBeUndefined();
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('openPath hands the path to the registered opener', () => {
+    const ctx = harness();
+    const opened: string[] = [];
+    ctx.shell.registerPathOpener((path) => opened.push(path));
+    ctx.shell.openPath('art/logo.png');
+    expect(opened).toEqual(['art/logo.png']);
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('openPath with no opener registered is a diagnostic, not a throw', () => {
+    const ctx = harness();
+    expect(() => ctx.shell.openPath('game/script.spin')).not.toThrow();
+    expect(ctx.shell.documents()).toEqual([]);
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('game/script.spin'),
+    ]);
+  });
+
   it('showSidebar toggles: the active key again collapses it', () => {
     const ctx = harness();
     ctx.shell.showSidebar('explorer');

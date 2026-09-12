@@ -72,9 +72,10 @@ export function ViewerDocument({
 }: {
   ctx: Context;
   path: string;
-  entry: FileEntry;
+  /** The tree's own row, when the caller has it; without one the size is unknown and the file is read to find out. */
+  entry?: FileEntry;
 }): JSX.Element {
-  const tooBig = entry.size !== undefined && entry.size > TOO_BIG_BYTES;
+  const tooBig = entry?.size !== undefined && entry.size > TOO_BIG_BYTES;
   const image = !tooBig && isImage(path);
   const [view, setView] = useState<View>({ kind: 'loading' });
 
