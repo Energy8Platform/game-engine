@@ -203,12 +203,7 @@ export function Shell({ ctx }: { ctx: Context }) {
 
   return (
     <div className="e8-shell">
-      {/* No `data-testid` on the bar itself: `activity-<key>` on each
-          button is queried with `getAllByTestId(/^activity-/)`, and
-          "activity-bar" would satisfy that same anchored prefix and land
-          in the results as a phantom sixth button — `className` alone is
-          enough for Task 3's CSS to find it. */}
-      <nav className="e8-activity">
+      <nav className="e8-activity" data-testid="activity-bar">
         {activities.map((entry) => (
           <ActivityButton
             key={entry.key}

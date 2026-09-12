@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Context } from 'cordis';
 import { type Diagnostic } from '@energy8engine/contracts';
@@ -317,10 +317,14 @@ describe('Shell', () => {
       Nop,
     );
     render(<Shell ctx={ctx} />);
-    expect(screen.getAllByTestId(/^activity-/).map((b) => b.dataset.testid)).toEqual([
-      'activity-a',
-      'activity-z',
-    ]);
+    // Scoped to the bar, not `getAllByTestId(/^activity-/)` — that regex is
+    // unanchored on the RIGHT, so it would also match the bar's own
+    // `data-testid="activity-bar"` (it starts with "activity-" too) and
+    // count it as a phantom sixth button. The bar is a `<nav>`, the buttons
+    // are `<button>`, so `getAllByRole('button')` inside it can't pick up
+    // its own container by accident.
+    const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
+    expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z']);
   });
 
   it('an activity button that opens a sidebar shows that sidebar view', async () => {
@@ -392,6 +396,31 @@ describe('Shell', () => {
     expect(ctx.shell.documents()).toHaveLength(1);
   });
 
+  it('confirming a dirty close actually force-closes the tab', async () => {
+    // The other half of the test above: the confirm has to be wired to
+    // `close(key, { force: true })`, not just shown.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <div>A</div>, closable: true });
+    ctx.shell.markDirty('a', true);
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('doc-close-a'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    expect(ctx.shell.documents()).toHaveLength(0);
+    expect(screen.queryByTestId('doc-a')).toBeNull();
+  });
+
+  it('declining a dirty close leaves the tab exactly as it was', async () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: () => <div>A</div>, closable: true });
+    ctx.shell.markDirty('a', true);
+    render(<Shell ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('doc-close-a'));
+    await userEvent.click(screen.getByTestId('confirm-no'));
+    expect(ctx.shell.documents()).toHaveLength(1);
+    expect(screen.getByTestId('doc-a')).toHaveTextContent('●');
+    expect(screen.queryByTestId('confirm-yes')).toBeNull();
+  });
+
   it('a document that throws does not take the panel or the other tabs with it', () => {
     const ctx = harness();
     ctx.shell.open({
@@ -425,14 +454,23 @@ describe('Shell', () => {
   });
 
   it('status items sit left and right by side, ordered', () => {
+    // Two entries on the SAME side, registered out of order-sequence
+    // ('l2' order 9 registered before 'l1' order 1) — one entry per side
+    // would pass on bucketing by `side` alone and never exercise `byOrder`
+    // at all.
     const ctx = harness();
     ctx.slots.register({ name: 'shell.status', key: 'r', side: 'right', order: 1 }, () => (
       <span>R</span>
     ));
-    ctx.slots.register({ name: 'shell.status', key: 'l', side: 'left' }, () => <span>L</span>);
+    ctx.slots.register({ name: 'shell.status', key: 'l2', side: 'left', order: 9 }, () => (
+      <span>L2</span>
+    ));
+    ctx.slots.register({ name: 'shell.status', key: 'l1', side: 'left', order: 1 }, () => (
+      <span>L1</span>
+    ));
     render(<Shell ctx={ctx} />);
     const bar = screen.getByTestId('status-bar');
-    expect(bar.querySelector('[data-side=left]')).toHaveTextContent('L');
+    expect(bar.querySelector('[data-side=left]')).toHaveTextContent('L1L2');
     expect(bar.querySelector('[data-side=right]')).toHaveTextContent('R');
   });
 
