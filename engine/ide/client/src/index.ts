@@ -11,6 +11,17 @@ export * from './plugins/connection';
 // consumer actually uses.
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
 export { useLayout, type ScreenMeta, type ScreenEntry, type LayoutService } from './plugins/layout';
+export {
+  useShell,
+  type ActivityOpens,
+  type ActivityMeta,
+  type SidebarMeta,
+  type DocumentMeta,
+  type PanelMeta,
+  type StatusMeta,
+  type OpenDocument,
+  type ShellService,
+} from './plugins/shell';
 export type { ModulesService, ModulesConfig } from './plugins/modules';
 export {
   useGameComposition,

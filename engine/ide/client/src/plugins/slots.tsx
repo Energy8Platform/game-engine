@@ -30,8 +30,17 @@ declare module 'cordis' {
 }
 
 export interface SlotsService {
-  register(meta: SlotMeta, component: ComponentType<any>): () => void;
-  list(name: string): SlotEntry[];
+  /**
+   * Generic over the meta shape, not just `SlotMeta`: a caller registering
+   * to `shell.activity` (say) passes an `ActivityMeta` — `title`/`icon`/
+   * `order`/`opens` alongside `name`/`key` — and `{ ...meta, component }`
+   * below already carries those through to `list()` at runtime. Before this
+   * became generic, only the TYPE refused them; nothing in the collection
+   * ever dropped them. `SlotMeta` stays the default, so every existing
+   * caller (`composition.card`, `sidebar.item`, …) is untouched.
+   */
+  register<M extends SlotMeta>(meta: M, component: ComponentType<any>): () => void;
+  list<M extends SlotMeta = SlotMeta>(name: string): (M & { component: ComponentType<any> })[];
   subscribe(listener: () => void): () => void;
 }
 
@@ -55,9 +64,13 @@ export function apply(ctx: Context) {
   };
 
   const service: SlotsService = {
-    register(meta, component) {
+    register<M extends SlotMeta>(meta: M, component: ComponentType<any>) {
       const id = `${meta.name}::${meta.key}`;
-      const entry: SlotEntry = { ...meta, component };
+      // Stored as `SlotEntry` — the registry only ever needs `name`/`key`/
+      // `component` for itself (collision id, `list()`'s name filter);
+      // the caller's extra fields ride along in the object regardless and
+      // come back out through `list<M>`'s cast below.
+      const entry = { ...meta, component } as SlotEntry;
       // A second registration under a key already taken used to replace
       // the first with nothing anywhere saying so — the same
       // last-writer-wins defect this branch has already found (and fixed)
@@ -106,15 +119,15 @@ export function apply(ctx: Context) {
         if (isCurrent) notify();
       };
     },
-    list(slotName) {
+    list<M extends SlotMeta = SlotMeta>(slotName: string) {
       // `entries.keys()` is insertion-ordered (see
       // `@energy8engine/registry`), and this is the one adopter of the
       // three that actually depends on that: `useSlot` renders every
       // result of this call as a list, in this order.
-      const result: SlotEntry[] = [];
+      const result: (M & { component: ComponentType<any> })[] = [];
       for (const id of entries.keys()) {
         const entry = entries.get(id);
-        if (entry && entry.name === slotName) result.push(entry);
+        if (entry && entry.name === slotName) result.push(entry as M & { component: ComponentType<any> });
       }
       return result;
     },
