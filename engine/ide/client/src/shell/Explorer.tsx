@@ -199,12 +199,24 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
 
   return (
     <div className="e8-explorer">
-      <input
-        type="file"
-        data-testid="explorer-upload"
-        className="e8-explorer-upload"
-        onChange={handleUpload}
-      />
+      <div className="e8-explorer-header">
+        <span className="e8-explorer-title">Проводник</span>
+        {/* The one upload control, as an icon in the view's header — the
+            input itself is visually hidden by the stylesheet and reached
+            through the label. Spec §5's per-directory upload stays
+            narrowed to this (final review, Finding 7b). */}
+        <label className="e8-explorer-upload" title="загрузить файл">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10" />
+          </svg>
+          <input
+            type="file"
+            data-testid="explorer-upload"
+            aria-label="загрузить файл"
+            onChange={handleUpload}
+          />
+        </label>
+      </div>
 
       {treeDiagnostics.length > 0 &&
         treeDiagnostics.map((diag, i) => (
@@ -227,7 +239,8 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       ) : entries.length > 0 ? (
         <ul className="e8-explorer-tree">
           {visible.map((entry) => {
-            const depth = entry.path.split('/').length - 1;
+            const segments = entry.path.split('/');
+            const depth = segments.length - 1;
             const isFile = entry.kind === 'file';
             const isFolded = folded.has(entry.path);
             return (
@@ -236,7 +249,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                 data-testid={`explorer-${entry.path}`}
                 role="button"
                 tabIndex={0}
-                style={{ paddingLeft: 14 + depth * 12 }}
+                style={{ paddingLeft: 8 + depth * 12 }}
                 className={
                   isFile
                     ? 'e8-explorer-entry e8-explorer-file'
@@ -244,8 +257,12 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                 }
                 onClick={() => select(entry)}
               >
-                {isFile ? '' : isFolded ? '▸ ' : '▾ '}
-                {entry.path}
+                {/* Depth is the indent, so the label is the last segment
+                    alone; a file gets an empty chevron cell to line up. */}
+                <span className="e8-explorer-chevron" aria-hidden="true">
+                  {isFile ? '' : isFolded ? '▸' : '▾'}
+                </span>
+                <span className="e8-explorer-name">{segments[segments.length - 1]}</span>
                 {pending?.path === entry.path ? (
                   <span className="e8-explorer-confirm">
                     {' '}
@@ -282,12 +299,14 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                       type="button"
                       data-testid={`explorer-delete-${entry.path}`}
                       className="e8-explorer-delete"
+                      aria-label={`delete ${entry.path}`}
+                      title="удалить"
                       onClick={(e) => {
                         e.stopPropagation();
                         askDelete(entry.path);
                       }}
                     >
-                      delete
+                      ×
                     </button>
                   )
                 )}

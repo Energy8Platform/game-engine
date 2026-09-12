@@ -41,6 +41,11 @@ const SEVERITY: Record<Diagnostic['severity'], keyof Api['MarkerSeverity']> = {
   info: 'Info',
 };
 
+/** Monaco's own two built-in themes, chosen by the shell's `data-theme` (see `StatusItems.tsx`'s `applyTheme`). */
+function themeFor(): 'vs' | 'vs-dark' {
+  return document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark';
+}
+
 /** A code editor. It has no title of its own; the screen around it does. */
 export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -54,13 +59,27 @@ export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) 
 
   useEffect(() => {
     let editor: Editor | undefined;
+    let observer: MutationObserver | undefined;
     let gone = false;
     load()
       .then((monaco) => {
         if (gone) return;
         self.MonacoEnvironment ??= { getWorker: () => new EditorWorker() };
-        editor = monaco.editor.create(host.current!, { value, language, automaticLayout: true });
+        editor = monaco.editor.create(host.current!, {
+          value,
+          language,
+          automaticLayout: true,
+          theme: themeFor(),
+        });
         editor.onDidChangeModelContent(() => change.current(editor!.getValue()));
+        // The theme toggle flips `data-theme` on `<html>`; the editor was
+        // white inside a dark shell until it followed. `setTheme` is
+        // global to every Monaco on the page, which is what a theme is.
+        observer = new MutationObserver(() => monaco.editor.setTheme(themeFor()));
+        observer.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-theme'],
+        });
         setApi({ monaco, editor });
       })
       .catch((error: unknown) => {
@@ -68,6 +87,7 @@ export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) 
       });
     return () => {
       gone = true;
+      observer?.disconnect();
       editor?.dispose();
     };
     // `value`/`language` are creation-time only; later values are synced below.
@@ -118,5 +138,7 @@ export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) 
       </p>
     );
   }
-  return <div ref={host} data-testid="editor" style={{ height: '100%', minHeight: 400 }} />;
+  // Sized by the stylesheet (`.e8-monaco` fills the editor document's
+  // pane); `automaticLayout` above is what makes Monaco follow that box.
+  return <div ref={host} data-testid="editor" className="e8-monaco" />;
 }

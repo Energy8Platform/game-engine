@@ -198,7 +198,12 @@ export function DiagnosticsPanel({
 
   return (
     <section className="e8-diagnostics-panel" data-testid="diagnostics-panel">
-      <h2>Диагностика</h2>
+      {/* The panel's header row (DESIGN.md §2, `Diagnostics (3)`): the
+          heading keeps its own accessible name, the count sits beside it. */}
+      <div className="e8-diagnostics-panel-header">
+        <h2>Диагностика</h2>
+        <span className="e8-badge">{rows.length}</span>
+      </div>
 
       {rows.length > 0 && (
         <ul className="e8-diagnostics-panel-list">

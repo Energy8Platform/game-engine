@@ -85,7 +85,7 @@ export function App({ ctx }: { ctx: Context }) {
       name: 'shell.activity',
       key: 'composition',
       title: 'Состав',
-      icon: '☰',
+      icon: 'layers',
       order: 1,
       opens: 'document',
     });
@@ -105,7 +105,7 @@ export function App({ ctx }: { ctx: Context }) {
       name: 'shell.activity',
       key: 'preview',
       title: 'Превью',
-      icon: '▶',
+      icon: 'eye',
       order: 2,
       opens: 'document',
     });

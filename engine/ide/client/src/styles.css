@@ -236,6 +236,17 @@ label {
   color: var(--e8-fg-muted);
   font-size: 11px;
 }
+.e8-activity-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.e8-activity-letter {
+  font-size: 15px;
+  font-weight: 600;
+}
 .e8-activity-button:hover {
   color: var(--e8-fg);
 }
@@ -250,7 +261,124 @@ label {
   overflow: auto;
   background: var(--e8-bg-1);
   border-right: 1px solid var(--e8-border);
-  padding: 12px;
+}
+
+/* Explorer: a view header with the title and the one upload control, then
+   rows indented by depth — the last path segment is the label, a chevron
+   marks a directory, and a file's delete only shows on hover or focus. */
+.e8-explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 35px;
+  padding: 0 8px 0 20px;
+  color: var(--e8-fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.e8-explorer-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--e8-radius);
+  color: var(--e8-fg-muted);
+  cursor: pointer;
+}
+.e8-explorer-upload:hover {
+  background: var(--e8-bg-2);
+  color: var(--e8-fg);
+}
+.e8-explorer-upload svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.e8-explorer-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.e8-explorer-upload:focus-within {
+  outline: 2px solid var(--e8-accent);
+  outline-offset: 1px;
+}
+.e8-explorer-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.e8-explorer-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding-right: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--e8-fg);
+}
+.e8-explorer-entry:hover {
+  background: var(--e8-bg-2);
+}
+.e8-explorer-chevron {
+  flex: 0 0 12px;
+  text-align: center;
+  color: var(--e8-fg-muted);
+  font-size: 10px;
+}
+.e8-explorer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.e8-explorer-delete {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--e8-radius);
+  background: transparent;
+  color: var(--e8-fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+}
+.e8-explorer-entry:hover .e8-explorer-delete,
+.e8-explorer-delete:focus-visible {
+  opacity: 1;
+}
+.e8-explorer-delete:hover {
+  background: var(--e8-bg-3);
+  color: var(--e8-fg);
+}
+.e8-explorer-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  color: var(--e8-fg-muted);
+}
+.e8-explorer-confirm button {
+  height: 18px;
+  padding: 0 6px;
+}
+.e8-explorer-diagnostic {
+  margin: 4px 8px;
+  color: var(--e8-error);
+}
+.e8-explorer .e8-empty {
+  padding: 4px 20px;
 }
 
 .e8-editors {
@@ -263,12 +391,20 @@ label {
 }
 .e8-editors-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  /* One row, however many tabs: the strip scrolls sideways rather than
+     wrapping into a second row that eats the editor. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
   min-height: 32px;
   background: var(--e8-bg-2);
   border-bottom: 1px solid var(--e8-border);
 }
 .e8-doc-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
   height: 32px;
   padding: 0 10px;
   display: inline-flex;
@@ -303,8 +439,23 @@ label {
 .e8-editors-body {
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+.e8-editors-body > .e8-empty {
+  padding: 16px;
+}
+/* Each open document keeps its own pane (Ruling 13); the active one fills
+   the body and scrolls by itself. The editor document is the one that
+   wants no frame at all — Monaco goes edge to edge. */
+.e8-doc-pane {
+  height: 100%;
+  box-sizing: border-box;
   overflow: auto;
   padding: 16px;
+}
+.e8-doc-pane:has(> .e8-code-editor) {
+  padding: 0;
+  overflow: hidden;
 }
 
 /* The panel row is `auto` in `.e8-shell`'s own row track, so a collapsed
@@ -317,7 +468,7 @@ label {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 28px;
   background: var(--e8-bg-1);
   border-top: 1px solid var(--e8-border);
 }
@@ -351,12 +502,34 @@ label {
 .e8-panel:has(.e8-panel-entry) {
   height: var(--e8-panel-h);
 }
+/* The shell's own strip on the panel's top row: the toggle, and — only
+   while collapsed, when no entry is drawn — the entries' titles. Absolute,
+   so an entry's header row (`.e8-diagnostics-panel-header`) sits on the
+   same 28px line with the toggle at its right. */
 .e8-panel-header {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
+  gap: 8px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 8px 0 12px;
+  /* Only the toggle takes the pointer; the row underneath stays reachable. */
+  pointer-events: none;
+}
+.e8-panel-header button {
+  margin-left: auto;
+  pointer-events: auto;
+}
+.e8-panel-title {
+  color: var(--e8-fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .e8-panel-header button {
   width: 20px;
@@ -370,7 +543,6 @@ label {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0 12px 12px;
 }
 
 .e8-status {
@@ -404,37 +576,45 @@ label {
   font-size: var(--e8-size-status);
 }
 
-/* Diagnostics band. Rows are one line each; severity is the only colour. */
+/* Diagnostics, inside the panel: a 28px header row (title and count), then
+   one line per row; severity is the only colour. No page geometry here —
+   this used to be a band on a screen, with a 1136px centred column that
+   made no sense inside a 200px panel. */
 .e8-diagnostics-panel {
-  background: var(--e8-bg-3);
   color: var(--e8-fg-muted);
-  padding: 32px 24px 48px;
+}
+.e8-diagnostics-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
 }
 .e8-diagnostics-panel h2 {
-  color: var(--e8-fg);
-}
-.e8-diagnostics-panel .e8-empty {
+  margin: 0;
   color: var(--e8-fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.e8-diagnostics-panel .e8-empty,
+.e8-diagnostics-dropped {
+  padding: 2px 12px;
 }
 .e8-diagnostics-panel-list {
   list-style: none;
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
-  max-width: 1136px;
-}
-.e8-diagnostics-panel h2,
-.e8-diagnostics-panel > p {
-  max-width: 1136px;
-  margin-left: auto;
-  margin-right: auto;
 }
 .e8-diagnostic-row {
-  padding: 6px 12px;
-  border-radius: var(--e8-radius);
-  background: var(--e8-bg-2);
-  margin-bottom: 4px;
+  padding: 3px 12px;
   font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
   color: var(--e8-fg);
+  white-space: nowrap;
+}
+.e8-diagnostic-row:hover {
+  background: var(--e8-bg-2);
 }
 .e8-diagnostic-origin,
 .e8-diagnostic-speaker,
@@ -565,15 +745,29 @@ label {
   align-items: flex-start;
 }
 
-/* A document's body: the editor's own frame, and a plain-text viewer. */
+/* The editor document: a thin toolbar (save, and any words the host or the
+   check had), then Monaco filling the rest of the pane. Monaco's own
+   `automaticLayout` follows this box, so the editor is the pane, not a box
+   inside it. */
 .e8-code-editor {
+  height: 100%;
   min-width: 0;
-  border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
 }
 .e8-code-editor > button {
-  margin-bottom: 12px;
+  align-self: flex-start;
+  height: 22px;
+  margin: 4px 8px;
+  padding: 0 8px;
+}
+.e8-code-editor > .e8-code-diagnostic {
+  margin: 0 8px 4px;
+}
+.e8-monaco {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
 }
 .e8-assets-text {
   background: var(--e8-bg-1);

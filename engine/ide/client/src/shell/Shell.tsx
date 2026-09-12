@@ -151,6 +151,33 @@ function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
   return { size, handlers };
 }
 
+/**
+ * The activity icons this shell ships, by `ActivityMeta.icon` name — the
+ * four the shipped contributions use, drawn inline so no icon package is
+ * pulled in for four shapes. A name not listed here draws its first
+ * letter, so a plugin with no icon of its own still gets a button a
+ * person can tell apart. `default` is for a plugin that wants a generic
+ * one rather than a letter.
+ */
+const ICON_PATHS: Record<string, string> = {
+  files: 'M9 3H5.5A1.5 1.5 0 0 0 4 4.5v13M8 7h7l4 4v9.5a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8 20.5v-12A1.5 1.5 0 0 1 9.5 7M15 7v4h4',
+  layers: 'M12 3l9 5-9 5-9-5 9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  default: 'M4 5a1 1 0 0 1 1-1h5v6H4V5zM14 4h5a1 1 0 0 1 1 1v5h-6V4zM4 14h6v6H5a1 1 0 0 1-1-1v-5zM14 14h6v5a1 1 0 0 1-1 1h-5v-6z',
+};
+
+function ActivityIcon({ name }: { name: string }) {
+  const path = ICON_PATHS[name];
+  if (path === undefined) {
+    return <span className="e8-activity-letter">{name.slice(0, 1).toUpperCase()}</span>;
+  }
+  return (
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+      <path d={path} />
+    </svg>
+  );
+}
+
 /** One button on the activity bar. */
 function ActivityButton({
   ctx,
@@ -174,7 +201,7 @@ function ActivityButton({
           : ctx.shell.openContributed(entry.key)
       }
     >
-      {entry.icon}
+      <ActivityIcon name={entry.icon} />
     </button>
   );
 }
@@ -199,8 +226,16 @@ function DocumentTab({
   active: boolean;
   onCloseRefused: (key: string) => void;
 }) {
+  // The strip scrolls sideways once it is full, so the tab that just
+  // became active is brought into view — a selected tab nobody can see
+  // reads as no selection at all. jsdom has no `scrollIntoView`.
+  const tab = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (active) tab.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
   return (
     <button
+      ref={tab}
       type="button"
       role="tab"
       aria-selected={active}
@@ -426,6 +461,17 @@ export function Shell({ ctx }: { ctx: Context }) {
       <div className="e8-panel" data-testid="panel">
         <div className="e8-resize e8-resize-y" data-testid="resize-panel" {...panelSize.handlers} />
         <div className="e8-panel-header">
+          {/* Expanded, the entry's own header row carries the title (and a
+              count only it knows — `Диагностика 3`); this strip overlays its
+              right edge with the toggle. Collapsed, the entry is gone, so
+              the strip names what it is hiding. */}
+          {panelCollapsed
+            ? panelEntries.map((entry) => (
+                <span key={entry.key} className="e8-panel-title">
+                  {entry.title}
+                </span>
+              ))
+            : null}
           <button
             type="button"
             data-testid="panel-toggle"
