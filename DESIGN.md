@@ -52,11 +52,12 @@ the panel sits only under the editor group, the same width as the tabs and
 the document above it — not under the sidebar. The status bar is the one
 region that spans the whole width, at the very bottom.
 
-Sidebar and panel are meant to be resized by dragging their shared border,
-with the chosen width/height kept in `localStorage` for this browser — a
-convenience, not state, so a page that starts with nothing stored still
-draws the defaults above. (The drag interaction itself is a later slice;
-this document specs the sizes it will read and write, all of them tokens.)
+Sidebar and panel are resized by dragging their shared border
+(`Shell.tsx`'s `useResize`), with the chosen width/height kept in
+`localStorage` for this browser — a convenience, not state, so a page that
+starts with nothing stored still draws the defaults above. Clicking the
+active activity button collapses the sidebar to a 0-wide column; the
+panel's toggle collapses it to its 28px header.
 
 ## 3. Principles
 

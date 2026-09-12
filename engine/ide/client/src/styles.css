@@ -262,6 +262,14 @@ label {
   background: var(--e8-bg-1);
   border-right: 1px solid var(--e8-border);
 }
+/* No sidebar chosen: the column is 0, not 260px of empty chrome (DESIGN.md
+   §2). The aside is hidden with it so nothing paints across the editor. */
+.e8-shell.e8-sidebar-collapsed {
+  grid-template-columns: var(--e8-activity-w) 0 minmax(0, 1fr);
+}
+.e8-shell.e8-sidebar-collapsed .e8-sidebar {
+  display: none;
+}
 
 /* Explorer: a view header with the title and the one upload control, then
    rows indented by depth — the last path segment is the label, a chevron

@@ -367,7 +367,13 @@ export function Shell({ ctx }: { ctx: Context }) {
   } as CSSProperties;
 
   return (
-    <div className="e8-shell" data-testid="shell" style={sizes}>
+    <div
+      // No sidebar chosen means its column is 0 wide (DESIGN.md §2), not
+      // 260px of empty chrome.
+      className={sidebar === undefined ? 'e8-shell e8-sidebar-collapsed' : 'e8-shell'}
+      data-testid="shell"
+      style={sizes}
+    >
       <nav className="e8-activity" data-testid="activity-bar">
         {activities.map((entry) => (
           <ActivityButton
