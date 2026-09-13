@@ -95,6 +95,21 @@ describe('Projects', () => {
     expect(screen.queryByTestId('project-confirm')).toBeNull();
   });
 
+  it('a click on the OPEN project does nothing — no request, no question, even with unsaved work', async () => {
+    const { ctx, opened } = await harness();
+    ctx.shell.open({
+      key: 'f:game/script.spin',
+      title: 'script.spin',
+      component: Doc,
+      closable: true,
+    });
+    ctx.shell.markDirty('f:game/script.spin', true);
+    render(<Projects ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('project-alpha'));
+    expect(opened()).toEqual([]);
+    expect(screen.queryByTestId('project-confirm')).toBeNull();
+  });
+
   it('an empty folder says so, and shows the workspace’s own diagnostics', async () => {
     const { ctx } = await harness(
       workspace({

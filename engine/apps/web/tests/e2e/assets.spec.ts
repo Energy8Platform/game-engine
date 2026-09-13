@@ -61,9 +61,11 @@
  * one of those runs `startHost`, never `startDevHost`: no `dev-game`
  * plugin. When the game shared the host's port, `/api/files/*splat` had to
  * win against `dev-game`'s catch-all on the same server; the game now has
- * its own server and the root has no catch-all, so that particular race is
- * gone — #4 stays anyway, run against the real composed host, because it
- * is the one place the route is exercised with a project's game up.
+ * its own server, and the root's only catch-all is `ide-static` (the IDE
+ * shell, registered last and never under `/api`), so that particular race
+ * is gone — #4 stays anyway, run against the real composed host, because
+ * it is the one place the `/api/files` route is exercised with a project's
+ * game up.
  *
  * Cases considered and left OUT, and why each is a genuine "already proven
  * elsewhere" rather than a convenient one:

@@ -95,12 +95,14 @@ export interface E8RuntimeHalf {
   /**
    * Module path inside the package, relative to its root.
    *
-   * **A `.ts` path works under `e8 dev` and not under `e8 ide`, and that is
-   * worth knowing before you pick one.** With `dev-game` composed (i.e.
-   * `e8 dev`) the host hands the browser `/@fs/<realpath>` served through
-   * that plugin's own vite instance, which strips types and rewrites bare
-   * specifiers — so `./src/index.ts` importing `pixi.js` is fine. With no
-   * vite on the origin (`e8 ide`) the host serves `/plugin-runtime/:id`,
+   * **A `.ts` path works only in a project whose `game/spec.json` is
+   * usable, and that is worth knowing before you pick one.** With
+   * `dev-game` composed (the project has a usable spec) the host hands the
+   * browser `/@fs/<realpath>` served through that plugin's own vite
+   * instance, which strips types and rewrites bare specifiers — so
+   * `./src/index.ts` importing `pixi.js` is fine. With no vite on the
+   * origin (no usable spec, so no `dev-game`) the host serves
+   * `/plugin-runtime/:id`,
    * which is the file's bytes verbatim: a browser's native `import()`
    * throws on the first piece of TypeScript syntax or the first bare
    * specifier it meets. Ship a built `.js` for anything that must load

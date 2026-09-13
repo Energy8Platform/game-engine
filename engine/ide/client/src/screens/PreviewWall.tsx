@@ -48,7 +48,14 @@ function Unavailable() {
  * own doc) — so the frame is `loading…`, and only a `null` `previewUrl` from
  * an answered host draws `Unavailable`.
  */
-function Frame({ ctx, children }: { ctx: Context; children: (previewUrl: string) => JSX.Element }) {
+function Frame({
+  ctx,
+  children,
+}: {
+  ctx: Context;
+  /** `active` is part of every iframe's key — see `Preview`'s own doc. */
+  children: (previewUrl: string, active: string | null) => JSX.Element;
+}) {
   const state = useWorkspace(ctx);
   if (state === null) {
     return (
@@ -58,7 +65,7 @@ function Frame({ ctx, children }: { ctx: Context; children: (previewUrl: string)
     );
   }
   if (state.previewUrl === null) return <Unavailable />;
-  return children(state.previewUrl);
+  return children(state.previewUrl, state.active);
 }
 
 /** Config fingerprint of every `hot: false` row — see `Preview`'s doc comment for what this drives. */
@@ -86,8 +93,10 @@ export interface PreviewProps {
  * honest thing to do is reload the iframe rather than silently hope it
  * did. `key={reloadNonce}` forces React to unmount and remount a genuinely
  * new `<iframe>` element — a real navigation — not merely reassign `src`
- * on the same node. A different `previewUrl` (another project opened) is
- * part of that key for the same reason.
+ * on the same node. The active project's id is part of that key for the
+ * same reason: another project opened on the SAME preview port is the same
+ * `previewUrl` serving a different game, and an iframe left mounted would
+ * keep showing the old one until something else reloaded it.
  */
 export function Preview({ ctx }: PreviewProps) {
   const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
@@ -109,9 +118,9 @@ export function Preview({ ctx }: PreviewProps) {
 
   return (
     <Frame ctx={ctx}>
-      {(previewUrl) => (
+      {(previewUrl, active) => (
         <iframe
-          key={`${reloadNonce}:${previewUrl}`}
+          key={`${reloadNonce}:${active}:${previewUrl}`}
           className="e8-preview"
           title="превью игры"
           src={previewUrl}
@@ -273,7 +282,7 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
       </div>
 
       <Frame ctx={ctx}>
-        {(previewUrl) => (
+        {(previewUrl, active) => (
           <div className="e8-preview-wall-tiles">
             {selected.map((name) => {
               const preset = screenPreset(name);
@@ -284,7 +293,7 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
               const height = rotated ? preset.w : preset.h;
               return (
                 <iframe
-                  key={name}
+                  key={`${active}:${name}`}
                   data-testid={`tile-${name}`}
                   title={`preview: ${name}`}
                   className="e8-preview-tile"

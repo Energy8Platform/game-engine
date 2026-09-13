@@ -90,7 +90,9 @@ function gameDiagnosticsHarness(): Context & { socket: FakeSocket } {
  */
 function workspaceHarness(): Context & { socket: FakeSocket } {
   const socket = new FakeSocket();
-  const result = { socket, connection: { report() {} } } as unknown as Context & {
+  // The two members of `ShellService` a project switch reads (`workspace.ts`).
+  const shell = { documents: () => [], close: () => true, hasDirtyDocuments: () => false };
+  const result = { socket, connection: { report() {} }, shell } as unknown as Context & {
     socket: FakeSocket;
   };
   const fakeCtx = {
@@ -99,6 +101,7 @@ function workspaceHarness(): Context & { socket: FakeSocket } {
       (result as unknown as Record<string, unknown>)[key] = value;
     },
     connection: result.connection,
+    shell,
   } as unknown as Context;
   workspacePlugin.apply(fakeCtx, {
     url: 'ws://x/ide',

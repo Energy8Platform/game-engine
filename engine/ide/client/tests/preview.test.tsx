@@ -127,6 +127,16 @@ describe('Preview', () => {
     expect(after.src).toBe('http://other.test:5679/');
   });
 
+  it('a different active project on the SAME previewUrl remounts the iframe — same port, different game', async () => {
+    const { ctx, push } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('превью игры');
+    push({ type: 'workspace', workspace: workspace({ active: 'b' }) });
+    const after = screen.getByTitle('превью игры') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(after.src).toBe(`${PREVIEW_URL}/`);
+  });
+
   it('a workspace change that keeps the same previewUrl does not reload', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
@@ -286,6 +296,16 @@ describe('PreviewWall', () => {
     for (const tile of screen.getAllByTestId(/^tile-/)) {
       expect(new URL(tile.getAttribute('src')!).origin).toBe(new URL(PREVIEW_URL).origin);
     }
+  });
+
+  it('a different active project on the SAME previewUrl gives every tile a new frame', async () => {
+    const { ctx, push } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    const before = screen.getAllByTestId(/^tile-/);
+    push({ type: 'workspace', workspace: workspace({ active: 'b' }) });
+    const after = screen.getAllByTestId(/^tile-/);
+    expect(after).toHaveLength(before.length);
+    for (const tile of after) expect(before).not.toContain(tile);
   });
 
   it('with no project open the wall draws no tiles, only the note', async () => {

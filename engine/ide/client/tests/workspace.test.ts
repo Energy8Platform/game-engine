@@ -175,6 +175,10 @@ describe('workspace (client)', () => {
     socket.raw('null');
     socket.raw('[1]');
     socket.raw('"workspace"');
+    // A `workspace` frame whose state is missing or not a workspace.
+    socket.raw('{"type":"workspace"}');
+    socket.raw('{"type":"workspace","workspace":null}');
+    socket.raw('{"type":"workspace","workspace":{"active":"a"}}');
     expect(ctx.workspace.state()).toBeNull();
     expect(listener).not.toHaveBeenCalled();
   });

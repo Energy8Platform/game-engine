@@ -143,6 +143,38 @@ test('a second click swaps the game process and closes the first project’s fil
   }
 });
 
+test('on a fixed preview port the switch still shows the second game — same url, new frame', async ({
+  page,
+}) => {
+  // `previewPort: 0` above gives every project a fresh port, so a new
+  // `previewUrl` alone remounts the iframe. In production the port is
+  // FIXED (5681): the url does not change across a switch, and only the
+  // active project's id in the frame's key (PreviewWall) makes the iframe
+  // a new element showing the new game rather than the old one, kept.
+  const root = workspaceCopy(2);
+  const host = await startHost(root, { previewPort: 5683 });
+  try {
+    await page.goto(IDE_URL);
+    await openProject(page, host, 'slot-1', 'slot-1');
+    const firstPreview = host.previewUrl();
+    // The «Проекты» sidebar is still up (nothing else was opened); a click
+    // on its activity button would toggle it AWAY (measured).
+    await openProject(page, host, 'slot-2', SECOND_NAME);
+    expect(host.previewUrl()).toBe(firstPreview);
+    await expect
+      .poll(() =>
+        page
+          .frames()
+          .find((f) => f.url().startsWith(host.previewUrl()!))
+          ?.title(),
+      )
+      .toBe(`${SECOND_NAME} — e8 dev`);
+  } finally {
+    await host.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('an unsaved file makes the switch ask; No keeps everything, Yes discards and says so', async ({
   page,
 }) => {

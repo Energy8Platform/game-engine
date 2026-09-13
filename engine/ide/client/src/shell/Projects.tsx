@@ -19,6 +19,7 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   const [asking, setAsking] = useState<string | null>(null);
 
   function select(id: string) {
+    if (id === state?.active) return; // already open: nothing to ask, nothing to do
     if (ctx.shell.hasDirtyDocuments()) {
       setAsking(id);
       return;

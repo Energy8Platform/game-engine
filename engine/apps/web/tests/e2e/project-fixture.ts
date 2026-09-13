@@ -283,11 +283,12 @@ export interface WorkspaceHost {
  * Boots `e8` over `root` — a folder OF projects, so nothing opens at boot
  * and `previewUrl()` starts `null`. Port 5679 for the reason
  * `startDevHost` gives; `previewPort: 0` so the game lands on a free port
- * and never fights another spec's 5681.
+ * and never fights another spec's 5681 — a test that needs the SAME port
+ * across a switch (workspace.spec's fixed-port case) passes its own.
  */
 export async function startHost(
   root: string,
-  options: Pick<Parameters<typeof createIdeHost>[0], 'ideDist'> = {},
+  options: Pick<Parameters<typeof createIdeHost>[0], 'ideDist' | 'previewPort'> = {},
 ): Promise<WorkspaceHost> {
   const host: IdeHost = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
   return {

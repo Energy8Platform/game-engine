@@ -47,8 +47,9 @@ export default defineConfig({
       // No `/plugin-runtime` proxy. Nothing on 5680 imports a runtime
       // half: this document is the IDE, and the only thing that loads
       // runtime halves is the GAME, which lives in the preview iframe on
-      // the host's own origin (5679) where the import is same-origin
-      // already. The proxy existed by symmetry with `/plugin-client`
+      // the PREVIEW server's own origin (`WorkspaceState.previewUrl`,
+      // 5681 by default) where the import is same-origin already. The
+      // proxy existed by symmetry with `/plugin-client`
       // above, which the IDE genuinely does need — that one loads the
       // EDITOR's client halves into this document.
       '/ide': { target: HOST, ws: true },

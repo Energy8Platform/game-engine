@@ -159,7 +159,12 @@ export function apply(ctx: Context, config: WorkspaceClientConfig) {
       // pass JSON.parse but would throw on `.type` outside this try.
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
       if ((parsed as { type?: unknown }).type !== 'workspace') return;
-      workspace = (parsed as { workspace: WorkspaceState }).workspace;
+      const body = (parsed as { workspace?: unknown }).workspace;
+      // A `workspace` frame with no usable state is ignored, the same
+      // way a boot GET of the wrong shape is refused: `set(undefined)`
+      // would make every reader crash on `.active`.
+      if (!isWorkspaceState(body)) return;
+      workspace = body;
     } catch {
       return;
     }

@@ -644,7 +644,7 @@ test('the composition screen lists the rows the profile resolved to', async ({ p
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
-    // Through the IDE on 5680, not the game on 5679 — the screen under
+    // Through the IDE on 5680, not the game on the preview origin — the screen under
     // test is the editor's, and it reaches the host through vite's proxy.
     await page.goto('http://127.0.0.1:5680/');
     for (const id of ['boot1', 'renderer1', 'stage1', 'reels1']) {
