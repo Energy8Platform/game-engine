@@ -965,34 +965,83 @@ describe('ide rpc — on a root with no project open', () => {
   });
 });
 
-describe('ide rpc — across a project switch', () => {
-  it('a connected client is told the new workspace and the new (or empty) snapshot without reconnecting', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ide-host-rpc-switch-'));
+describe('ide rpc — on a folder of projects', () => {
+  let h: IdeHost;
+  let root: string;
+  const clients: WebSocket[] = [];
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'ide-host-rpc-switch-'));
     for (const id of ['one', 'two']) {
       mkdirSync(join(root, id, 'node_modules'), { recursive: true });
       writeFileSync(join(root, id, 'e8.yml'), readFileSync(TEMPLATE_FILE, 'utf8'));
       symlinkSync(PROBE_PLUGIN_DIR, join(root, id, 'node_modules', 'probe-plugin'), 'dir');
     }
     (globalThis as any).__probeApplied = [];
-    const h = await createIdeHost({ root, port: 0 });
+    h = await createIdeHost({ root, port: 0 });
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) c.close();
+    await h.stop();
+  });
+  async function client() {
     const s = new WebSocket(`${h.url.replace('http', 'ws')}/ide`);
+    clients.push(s);
     const box = createInbox(s);
     await new Promise((resolve) => s.once('open', resolve));
-    try {
-      await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
+    return box;
+  }
 
-      await h.ctx.workspace.open('one');
-      await box.waitFor((m) => m.type === 'workspace' && m.workspace.active === 'one');
-      await box.waitFor(
-        (m) => m.type === 'snapshot' && m.snapshot.rows.some((r) => r.name === 'probe-plugin'),
-      );
+  it('greets the FIRST client with the projects as they are, not with an empty list', async () => {
+    // Nothing has been opened, so `workspace/changed` has never fired: the
+    // greeting has to READ the workspace, not replay a broadcast.
+    const first = await (await client()).waitFor(() => true);
+    expect(first.type).toBe('workspace');
+    expect(first.type === 'workspace' && first.workspace.projects.map((p) => p.id)).toEqual([
+      'one',
+      'two',
+    ]);
+    expect(first.type === 'workspace' && first.workspace.active).toBeNull();
+  });
 
-      await h.ctx.workspace.close();
-      await box.waitFor((m) => m.type === 'workspace' && m.workspace.active === null);
-      await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
-    } finally {
-      s.close();
-      await h.stop();
-    }
+  it('a connected client is told the new workspace and the new (or empty) snapshot without reconnecting', async () => {
+    const box = await client();
+    await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
+
+    await h.ctx.workspace.open('one');
+    await box.waitFor((m) => m.type === 'workspace' && m.workspace.active === 'one');
+    await box.waitFor(
+      (m) => m.type === 'snapshot' && m.snapshot.rows.some((r) => r.name === 'probe-plugin'),
+    );
+
+    await h.ctx.workspace.close();
+    await box.waitFor((m) => m.type === 'workspace' && m.workspace.active === null);
+    await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
+  });
+
+  it("the host's own diagnostics about a project go when that project does", async () => {
+    // `one` has a game/spec.json its scope cannot read; `two` has none.
+    mkdirSync(join(root, 'one', 'game'));
+    writeFileSync(join(root, 'one', 'game', 'spec.json'), '{');
+    const box = await client();
+    await box.waitFor((m) => m.type === 'snapshot');
+
+    await h.ctx.workspace.open('one');
+    const about = await box.waitFor((m) => m.type === 'game-diagnostics' && m.source === 'host');
+    expect(about).toMatchObject({ diagnostics: [{ where: 'game/spec.json' }] });
+
+    await h.ctx.workspace.open('two');
+    // The connected panel is told to drop the rows: an empty host frame replaces its host list whole.
+    const cleared = await box.waitFor((m) => m.type === 'game-diagnostics' && m.source === 'host');
+    expect(cleared).toMatchObject({ diagnostics: [], dropped: 0 });
+    // A fresh client is told nothing about `one` at all.
+    const late = await client();
+    await late.waitFor((m) => m.type === 'snapshot');
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(
+      Promise.race([
+        late.waitFor((m) => m.type === 'game-diagnostics'),
+        new Promise((resolve) => setTimeout(() => resolve('nothing'), 200)),
+      ]),
+    ).resolves.toBe('nothing');
   });
 });

@@ -8,6 +8,7 @@ import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
 import * as files from '../src/plugins/files';
+import * as projectScope from '../src/plugins/project-scope';
 import { bootProjectScope } from '../src/plugins/project-scope';
 import * as rpc from '../src/plugins/rpc';
 import * as workspace from '../src/plugins/workspace';
@@ -63,7 +64,7 @@ describe('project-scope: one project, one scope', () => {
     expect((await fetch(`${url(c)}/api/files`)).status).toBe(404);
 
     const handle = await bootProjectScope(c, project(), 0);
-    expect(handle.previewUrl).toBe(url(c));
+    expect(handle.previewUrl).toBeNull(); // no game/ here — nothing to preview
     const [entry] = includeEntries(c);
     expect(entry).toBeDefined();
     expect((await fetch(`${url(c)}/api/files`)).status).toBe(200);
@@ -95,8 +96,9 @@ describe('project-scope: the game', () => {
     cpSync(GAME, join(cwd, 'game'), { recursive: true });
     cpSync(WEB_ROOT, cwd, { recursive: true });
 
-    await bootProjectScope(c, cwd, 0);
+    const handle = await bootProjectScope(c, cwd, 0);
     expect(c.get('devGameRoot')).toBeDefined();
+    expect(handle.previewUrl).toBe(url(c)); // the game is on the root server until Task 4
     const page = await fetch(`${url(c)}/`);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('dev-game fixture root');
@@ -106,8 +108,9 @@ describe('project-scope: the game', () => {
 
   it('a project with no game/ is open, silently, without one', async () => {
     const c = await root();
-    await bootProjectScope(c, project('[]\n'), 0);
+    const handle = await bootProjectScope(c, project('[]\n'), 0);
     expect(c.get('devGameRoot')).toBeUndefined();
+    expect(handle.previewUrl).toBeNull();
     expect((await greeting(c)).filter((m) => m.type === 'game-diagnostics')).toEqual([]);
   });
 
@@ -117,8 +120,9 @@ describe('project-scope: the game', () => {
     mkdirSync(join(cwd, 'game'));
     writeFileSync(join(cwd, 'game', 'spec.json'), JSON.stringify({ betLevels: [1] }));
 
-    await bootProjectScope(c, cwd, 0);
+    const handle = await bootProjectScope(c, cwd, 0);
     expect(c.get('devGameRoot')).toBeUndefined();
+    expect(handle.previewUrl).toBeNull();
     expect((await fetch(`${url(c)}/api/files`)).status).toBe(200);
     const frames = await greeting(c);
     expect(frames.filter((m) => m.type === 'game-diagnostics')).toEqual([
@@ -156,8 +160,13 @@ describe('project-scope: a boot that rejects', () => {
         message: expect.stringMatching(/did not start: service "files" has been registered/),
       }),
     ]);
-    // The plugins the scope managed to register before the throw went with it.
+    // The plugins the scope managed to register before the throw went with
+    // it, and so did the scope's own fiber: cordis drops a plugin from the
+    // registry once its last fiber is disposed (`Fiber`'s dispose effect),
+    // and a FAILED fiber nobody disposes is still counted — so this is red
+    // without `bootProjectScope`'s explicit `fiber.dispose()` on rejection.
     expect(c.get('composition')).toBeUndefined();
     expect(c.get('project')).toBeUndefined();
+    expect(c.registry.get(projectScope)).toBeUndefined();
   });
 });

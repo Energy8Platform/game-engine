@@ -81,7 +81,12 @@ export function bootProjectScope(
     () => {
       // `root` is the workspace's ctx, which injects no `server`; `get` reads the store without the inject check.
       const server = root.get('server')!;
-      return { previewUrl: `http://${server.host}:${server.port}`, dispose: () => fiber.dispose() };
+      // A preview only when a game is actually up (dev-game provides
+      // `devGameRoot` on this scope); an IDE-only project has none.
+      const previewUrl = fiber.ctx.get('devGameRoot')
+        ? `http://${server.host}:${server.port}`
+        : null;
+      return { previewUrl, dispose: () => fiber.dispose() };
     },
     async (error: unknown) => {
       await fiber.dispose();

@@ -200,13 +200,20 @@ export function apply(ctx: Context) {
     for (const socket of clients) send(socket, { type: 'snapshot', snapshot });
   };
 
-  /** What a client is told about the workspace: the last state broadcast, until `workspace` says otherwise. */
-  let lastWorkspace: WorkspaceState = {
-    projects: [],
-    active: null,
-    previewUrl: null,
-    diagnostics: [],
-  };
+  /**
+   * The workspace as it IS, read at connect time — the same lazy read
+   * `compositionOf` does, for the same reason: `workspace` is registered
+   * after this plugin and emits nothing after its boot scan when the root
+   * is a folder of projects, so a copy kept from `workspace/changed` would
+   * greet the first client with an empty list.
+   */
+  const workspaceState = (): WorkspaceState =>
+    ctx.get('workspace')?.state() ?? {
+      projects: [],
+      active: null,
+      previewUrl: null,
+      diagnostics: [],
+    };
 
   /**
    * What a newly connecting client is told about ONE speaker — see
@@ -228,7 +235,7 @@ export function apply(ctx: Context) {
    * own `ctx.diagnostics` is, composed by nobody: it has no cordis
    * dependency for exactly this reason.
    */
-  const hostDiagnostics = createDiagnostics();
+  let hostDiagnostics = createDiagnostics();
 
   const service: IdeRpcService = {
     reportGameDiagnostics(diagnostics) {
@@ -242,7 +249,6 @@ export function apply(ctx: Context) {
       for (const socket of clients) send(socket, message);
     },
     broadcastWorkspace(state) {
-      lastWorkspace = state;
       for (const socket of clients) send(socket, { type: 'workspace', workspace: state });
     },
     attach(server) {
@@ -357,7 +363,7 @@ export function apply(ctx: Context) {
 
     // Workspace first, then the snapshot (spec §9): a client learns WHICH
     // project the rows belong to before it sees any rows.
-    send(socket, { type: 'workspace', workspace: lastWorkspace });
+    send(socket, { type: 'workspace', workspace: workspaceState() });
     send(socket, { type: 'snapshot', snapshot: await currentSnapshot() });
     // A client that (re)connects after a game already reported trouble
     // must not see "nothing has ever gone wrong" just because it wasn't
@@ -392,8 +398,29 @@ export function apply(ctx: Context) {
   ctx.on('loader/config-update', () => void broadcast());
   // A project switch is a new graph (or none): the browser sees the new
   // rows, or an empty snapshot, without waiting for the graph to move.
+  //
+  // The host's own list goes with the project it was ABOUT. "Never
+  // cleared" (see `lastHostDiagnostics`) was written for one project per
+  // process; a `dev-game` that could not read `broken/game/spec.json` must
+  // not haunt `clean`. Reset only when `active` actually changed — a
+  // rescan or a refused open of an unknown id moves nothing — and say so
+  // with an empty host frame, which is what replaces a connected panel's
+  // host list (the client stores a frame's list whole, per source).
+  let lastActive: string | null = workspaceState().active;
   ctx.on('workspace/changed', (state) => {
     service.broadcastWorkspace(state);
+    if (state.active !== lastActive) {
+      lastActive = state.active;
+      hostDiagnostics = createDiagnostics();
+      lastHostDiagnostics = null;
+      const cleared: ServerMessage = {
+        type: 'game-diagnostics',
+        diagnostics: [],
+        dropped: 0,
+        source: 'host',
+      };
+      for (const socket of clients) send(socket, cleared);
+    }
     void broadcast();
   });
 }

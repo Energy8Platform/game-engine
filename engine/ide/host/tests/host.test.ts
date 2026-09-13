@@ -227,7 +227,8 @@ describe('createIdeHost — a folder of projects', () => {
       body: JSON.stringify({ id: 'a-slot' }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ active: 'a-slot', previewUrl: host.url });
+    // No game in this project, so no preview — the game's URL is the scope's to give.
+    expect(await res.json()).toMatchObject({ active: 'a-slot', previewUrl: null });
     expect((await fetch(`${host.url}/api/files`)).status).toBe(200);
     expect(includeEntryIds(host)).toHaveLength(1);
   });
