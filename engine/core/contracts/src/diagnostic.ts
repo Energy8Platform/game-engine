@@ -65,13 +65,16 @@ export interface Diagnostic {
    *     so a key travelled through the id-shaped field without anyone
    *     noticing it was not one.
    *  4. **A fixed name for a piece of the HOST that is not a row at all** —
-   *     `'files'` (the project's file service and its four routes) and
+   *     `'files'` (the project's file service and its four routes),
    *     `'server'` (the host-wide request boundary in `index.ts`, which
-   *     answers for a throw that happened before any handler ran). These
-   *     arrived with the file service and fit none of the three above: a
-   *     read of `art/logo.png` is about no composition row, no running
-   *     seam and no editor key. The `where` carries the requested path or
-   *     the request path; `plugin` names the service that refused. Listed
+   *     answers for a throw that happened before any handler ran) and
+   *     `'workspace'` (the folder-of-projects service: a root it cannot
+   *     list, an id it does not have, a project scope that failed to
+   *     start or stop). These arrived with the file service and fit none
+   *     of the three above: a read of `art/logo.png` is about no
+   *     composition row, no running seam and no editor key. The `where`
+   *     carries the requested path, the request path or the project id;
+   *     `plugin` names the service that refused. Listed
    *     because a doc this specific has to grow the case rather than let
    *     a fourth kind travel undeclared.
    *

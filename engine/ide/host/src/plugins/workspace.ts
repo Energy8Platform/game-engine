@@ -64,7 +64,7 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
   let chain: Promise<unknown> = Promise.resolve();
 
   const state = (): WorkspaceState => ({
-    projects,
+    projects: [...projects],
     active: active?.id ?? null,
     previewUrl: active?.handle.previewUrl ?? null,
     diagnostics: [...scanDiagnostics, ...openDiagnostics],
@@ -110,11 +110,24 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
     return rootIsProject ? config.root : join(config.root, id);
   }
 
+  /** Never rejects: a scope that fails to stop is a diagnostic, and the next open proceeds. */
   async function doClose(): Promise<void> {
     if (!active) return;
     const current = active;
     active = null;
-    await current.handle.dispose();
+    try {
+      await current.handle.dispose();
+    } catch (error) {
+      openDiagnostics = [
+        diagnostic(
+          'error',
+          'workspace',
+          current.id,
+          `project "${current.id}" did not stop cleanly: ${message(error)}`,
+          'the next open proceeds; check the host log',
+        ),
+      ];
+    }
   }
 
   async function doOpen(id: string): Promise<Diagnostic[]> {
@@ -166,9 +179,11 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
 
   await scan();
   ctx.provide('workspace', service);
+  // cordis awaits a disposer's returned thenable: `fiber.dispose()` resolves
+  // only once the open scope is really down.
   ctx.effect(() => () => {
     disposed = true;
-    void enqueue(doClose);
+    return enqueue(doClose);
   }, 'workspace:close-on-dispose');
 
   if (rootIsProject) await service.open(projects[0].id);

@@ -19,13 +19,18 @@ function project(id: string, spec?: unknown) {
 }
 
 /** A scope that records its life; `fail` makes boot reject. */
-function fakeScope(log: string[], opts: { fail?: boolean; previewUrl?: string | null } = {}) {
+function fakeScope(
+  log: string[],
+  opts: { fail?: boolean; failClose?: boolean; slowClose?: boolean; previewUrl?: string | null } = {},
+) {
   return async (_ctx: Context, cwd: string): Promise<ProjectScopeHandle> => {
     log.push(`open ${cwd}`);
     if (opts.fail) throw new Error('boot failed');
     return {
       previewUrl: opts.previewUrl ?? 'http://127.0.0.1:5681',
       dispose: async () => {
+        if (opts.slowClose) await new Promise((r) => setTimeout(r, 20));
+        if (opts.failClose) throw new Error('teardown failed');
         log.push(`close ${cwd}`);
       },
     };
@@ -49,6 +54,8 @@ describe('workspace: what is a project', () => {
     mkdirSync(join(root, 'dir-e8yml', 'e8.yml'), { recursive: true }); // e8.yml is a DIRECTORY here
     const ctx = await boot();
     expect(ctx.workspace.state().projects.map((p) => p.id)).toEqual(['a-slot', 'b-slot', 'file-named-e8']);
+    ctx.workspace.state().projects.length = 0; // a caller's copy, not the service's list
+    expect(ctx.workspace.state().projects).toHaveLength(3);
   });
 
   it('does not follow a symlinked directory', async () => {
@@ -170,10 +177,26 @@ describe('workspace: open, close, switch', () => {
     expect(ctx.workspace.state()).toMatchObject({ active: null, previewUrl: null });
   });
 
-  it('disposing the host disposes the open scope', async () => {
+  it('a scope that fails to stop is a diagnostic; active clears and the next open still boots', async () => {
+    project('one');
+    project('two');
+    const log: string[] = [];
+    const ctx = await boot(log, { failClose: true });
+    await ctx.workspace.open('one');
+    await ctx.workspace.close();
+    expect(ctx.workspace.state().active).toBeNull();
+    expect(ctx.workspace.state().diagnostics).toHaveLength(1);
+    expect(ctx.workspace.state().diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'workspace', where: 'one' });
+    expect(ctx.workspace.state().diagnostics[0].message).toContain('teardown failed');
+    expect(await ctx.workspace.open('two')).toEqual([]);
+    expect(ctx.workspace.state().active).toBe('two');
+    expect(log).toEqual([`open ${join(root, 'one')}`, `open ${join(root, 'two')}`]);
+  });
+
+  it('disposing the host waits for the open scope to close', async () => {
     project('one');
     const log: string[] = [];
-    const ctx = await boot(log);
+    const ctx = await boot(log, { slowClose: true });
     await ctx.workspace.open('one');
     await ctx.fiber.dispose();
     expect(log.at(-1)).toBe(`close ${join(root, 'one')}`);
