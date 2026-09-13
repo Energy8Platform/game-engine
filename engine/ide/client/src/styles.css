@@ -71,7 +71,7 @@
 }
 
 html {
-  background: var(--e8-editor-bg);
+  background: var(--e8-shell-bg);
   color: var(--e8-fg);
   font: 400 var(--e8-size) / 1.5 var(--e8-font);
   -webkit-font-smoothing: antialiased;
@@ -183,7 +183,7 @@ label {
   display: inline-block;
   padding: 2px 8px;
   border-radius: var(--e8-radius-sm);
-  background: var(--e8-hover);
+  background: var(--e8-selected);
   color: var(--e8-fg);
   font-size: var(--e8-size-label);
   font-weight: 500;
@@ -191,12 +191,15 @@ label {
 }
 
 /* Shell: activity bar, sidebar, editor group, panel, status bar — five
-   named grid areas, one per `shell` slot (DESIGN.md §2). The activity bar
-   and sidebar run the full height above the status bar; the panel sits
-   only under the editor group, not under the sidebar; the status bar is
-   the one region spanning the whole width. */
+   named grid areas, one per `shell` slot (DESIGN.md §2). Modern UI: the
+   shell is the window ground; activity bar + sidebar, the editor group and
+   the panel float on it as cards with `--e8-gap` between them and to the
+   window edge; the status bar lies on the ground, not in a card. The
+   activity bar and sidebar are one card with a seam (the sidebar's left
+   border); the panel sits only under the editor group. */
 .e8-shell {
   height: 100vh;
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto var(--e8-status-h);
@@ -204,7 +207,8 @@ label {
     'activity sidebar editors'
     'activity sidebar panel'
     'status status status';
-  background: var(--e8-editor-bg);
+  padding: var(--e8-gap) var(--e8-gap) 0;
+  background: var(--e8-shell-bg);
   color: var(--e8-fg);
   font: 400 var(--e8-size) / 1.4 var(--e8-font);
 }
@@ -229,7 +233,7 @@ label {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: var(--e8-hover);
+  background: var(--e8-surface);
   border: 1px solid var(--e8-border);
   border-radius: var(--e8-radius-sm);
   color: var(--e8-fg);
@@ -240,23 +244,43 @@ label {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding-top: 8px;
+  gap: 0;
+  box-sizing: border-box;
+  padding-top: var(--e8-gap);
+  margin-bottom: var(--e8-gap);
   background: var(--e8-surface);
-  border-right: 1px solid var(--e8-border);
+  border: 1px solid var(--e8-border);
+  border-right: 0;
+  border-radius: var(--e8-radius-lg) 0 0 var(--e8-radius-lg);
 }
+/* 48px wide, 36px tall, like VS Code's action item. The 32×32 rounded
+   indicator VS Code paints behind the icon is a `::before` layer inset 2px
+   top/bottom and 8px left/right, under the icon (z-index -1 against the
+   button's own stacking context, which `isolation: isolate` creates). The
+   button itself stays transparent in every state — the global
+   `button:hover`/`:active` fill would otherwise paint the whole 48×36. */
 .e8-activity-button {
-  width: 32px;
-  height: 32px;
+  position: relative;
+  isolation: isolate;
+  width: 48px;
+  height: 36px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--e8-fg-inactive);
+  font-size: var(--e8-size-small);
+}
+.e8-activity-button::before {
+  content: '';
+  position: absolute;
+  inset: 2px 8px;
   border-radius: var(--e8-radius-sm);
   background: transparent;
-  color: var(--e8-fg-muted);
-  font-size: 11px;
+  z-index: -1;
 }
 .e8-activity-button svg {
   fill: none;
@@ -269,11 +293,16 @@ label {
   font-size: 15px;
   font-weight: 600;
 }
-.e8-activity-button:hover {
-  color: var(--e8-fg);
+.e8-activity-button:hover::before {
+  background: var(--e8-activity-hover);
 }
-.e8-activity-button[aria-pressed='true'] {
+.e8-activity-button[aria-pressed='true']::before {
   background: var(--e8-activity-active);
+}
+.e8-activity-button:hover,
+.e8-activity-button:active,
+.e8-activity-button[aria-pressed='true'] {
+  background: transparent;
   color: var(--e8-fg);
 }
 
@@ -281,16 +310,28 @@ label {
   grid-area: sidebar;
   position: relative;
   overflow: auto;
+  scrollbar-width: thin;
+  box-sizing: border-box;
+  margin: 0 var(--e8-gap) var(--e8-gap) 0;
   background: var(--e8-surface);
-  border-right: 1px solid var(--e8-border);
+  border: 1px solid var(--e8-border);
+  border-radius: 0 var(--e8-radius-lg) var(--e8-radius-lg) 0;
 }
 /* No sidebar chosen: the column is 0, not 260px of empty chrome (DESIGN.md
-   §2). The aside is hidden with it so nothing paints across the editor. */
+   §2). The aside is hidden with it, and the activity bar closes its own
+   card: right border back, all four corners, the gap to the editor. The
+   gap is a margin inside the column, so the column grows by it — the card
+   stays `--e8-activity-w` wide, expanded or not. */
 .e8-shell.e8-sidebar-collapsed {
-  grid-template-columns: var(--e8-activity-w) 0 minmax(0, 1fr);
+  grid-template-columns: calc(var(--e8-activity-w) + var(--e8-gap)) 0 minmax(0, 1fr);
 }
 .e8-shell.e8-sidebar-collapsed .e8-sidebar {
   display: none;
+}
+.e8-shell.e8-sidebar-collapsed .e8-activity {
+  border-right: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-lg);
+  margin-right: var(--e8-gap);
 }
 
 /* Explorer: a view header with the title and the one upload control, then
@@ -300,13 +341,11 @@ label {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 35px;
-  padding: 0 8px 0 20px;
-  color: var(--e8-fg-muted);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  height: var(--e8-title-h);
+  padding: 0 8px 0 12px;
+  color: var(--e8-fg);
+  font-size: var(--e8-size-label);
+  font-weight: 600;
 }
 .e8-explorer-upload {
   display: inline-flex;
@@ -351,7 +390,9 @@ label {
   align-items: center;
   gap: 4px;
   height: 22px;
+  margin: 0 var(--e8-gap);
   padding-right: 8px;
+  border-radius: var(--e8-radius-sm);
   white-space: nowrap;
   cursor: pointer;
   color: var(--e8-fg);
@@ -417,10 +458,16 @@ label {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  box-sizing: border-box;
+  margin-bottom: var(--e8-gap);
   background: var(--e8-editor-bg);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-lg);
+  overflow: hidden;
 }
 .e8-editors-tabs {
   display: flex;
+  align-items: center;
   flex: 0 0 auto;
   /* One row, however many tabs: the strip scrolls sideways rather than
      wrapping into a second row that eats the editor. */
@@ -428,30 +475,34 @@ label {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
-  min-height: 32px;
+  height: var(--e8-title-h);
+  padding-left: 2px;
   background: transparent;
-  border-bottom: 1px solid var(--e8-border);
 }
 .e8-doc-tab {
   flex: 0 0 auto;
   white-space: nowrap;
-  height: 32px;
-  padding: 0 10px;
+  height: var(--e8-tab-h);
+  margin: 0 2px;
+  padding: 0 8px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   border: 0;
-  border-right: 1px solid var(--e8-border);
-  border-radius: 0;
+  border-radius: var(--e8-radius-sm);
   background: transparent;
   color: var(--e8-fg-muted);
   font-size: var(--e8-size);
+  font-weight: 400;
+}
+.e8-doc-tab:hover {
+  background: var(--e8-hover);
+  color: var(--e8-fg);
 }
 .e8-doc-tab[aria-selected='true'] {
-  background: var(--e8-editor-bg);
+  background: var(--e8-selected);
   color: var(--e8-fg);
   box-shadow: none;
-  border-bottom: 2px solid var(--e8-accent);
 }
 .e8-doc-tab-close {
   display: inline-flex;
@@ -463,7 +514,7 @@ label {
   color: var(--e8-fg-muted);
 }
 .e8-doc-tab-close:hover {
-  background: var(--e8-hover);
+  background: var(--e8-activity-active);
   color: var(--e8-fg);
 }
 .e8-editors-body {
@@ -498,18 +549,39 @@ label {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 28px;
+  min-height: var(--e8-header-h);
+  box-sizing: border-box;
+  margin-bottom: var(--e8-gap);
   background: var(--e8-surface);
-  border-top: 1px solid var(--e8-border);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-lg);
+  overflow: hidden;
 }
 /* The two drag handles (Shell.tsx's `useResize`): a thin strip riding the
-   sidebar's right edge and the panel's top edge, on top of whatever the
-   region draws there. `touch-action: none` is what lets a finger drag
-   without the page scrolling under it. */
+   sidebar's right edge and the panel's top edge, inside the card (an
+   `overflow: auto` card clips anything hung outside it). Modern UI draws
+   a grip at the middle and hides it while the pointer is on it; the strip
+   itself never fills. VS Code's grip is three dots drawn with box-shadow,
+   which the shadow guard forbids — one 2px dot reads the same.
+   `touch-action: none` is what lets a finger drag without the page
+   scrolling under it. */
 .e8-resize {
   position: absolute;
   z-index: 1;
   touch-action: none;
+  background: transparent;
+}
+.e8-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  border-radius: var(--e8-radius-sm);
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--e8-fg) 30%, transparent);
+  pointer-events: none;
 }
 .e8-resize-x {
   top: 0;
@@ -525,9 +597,9 @@ label {
   height: 5px;
   cursor: row-resize;
 }
-.e8-resize:hover,
-.e8-resize:active {
-  background: var(--e8-accent);
+.e8-resize:hover::after,
+.e8-resize:active::after {
+  opacity: 0;
 }
 .e8-panel:has(.e8-panel-entry) {
   height: var(--e8-panel-h);
@@ -545,7 +617,7 @@ label {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 28px;
+  height: var(--e8-header-h);
   padding: 0 8px 0 12px;
   /* Only the toggle takes the pointer; the row underneath stays reachable. */
   pointer-events: none;
@@ -555,11 +627,9 @@ label {
   pointer-events: auto;
 }
 .e8-panel-title {
-  color: var(--e8-fg-muted);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--e8-fg);
+  font-size: var(--e8-size-label);
+  font-weight: 600;
 }
 .e8-panel-header button {
   width: 20px;
@@ -581,25 +651,28 @@ label {
   align-items: center;
   justify-content: space-between;
   height: var(--e8-status-h);
-  padding: 0 8px;
+  padding: 0 6px;
   background: var(--e8-shell-bg);
-  border-top: 1px solid var(--e8-border);
   font-size: var(--e8-size-label);
-  color: var(--e8-fg-muted);
+  color: var(--e8-fg);
 }
 .e8-status [data-side] {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
 }
 .e8-status-item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.e8-theme-toggle {
   height: 18px;
   padding: 0 4px;
+  border-radius: var(--e8-radius-sm);
+}
+.e8-status-item:hover {
+  background: var(--e8-status-hover);
+}
+.e8-theme-toggle {
   border: 0;
   background: transparent;
   color: inherit;
@@ -617,16 +690,14 @@ label {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 28px;
+  height: var(--e8-header-h);
   padding: 0 12px;
 }
 .e8-diagnostics-panel h2 {
   margin: 0;
-  color: var(--e8-fg-muted);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--e8-fg);
+  font-size: var(--e8-size-label);
+  font-weight: 600;
 }
 .e8-diagnostics-panel .e8-empty,
 .e8-diagnostics-dropped {
@@ -638,7 +709,9 @@ label {
   padding: 0;
 }
 .e8-diagnostic-row {
-  padding: 3px 12px;
+  margin: 0 var(--e8-gap);
+  padding: 3px 8px;
+  border-radius: var(--e8-radius-sm);
   font: 400 var(--e8-size) / 1.5 var(--e8-font-mono);
   color: var(--e8-fg);
   white-space: nowrap;
