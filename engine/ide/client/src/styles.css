@@ -1,55 +1,77 @@
-/* Tokens from DESIGN.md (repo root) §4 — anatomy of VS Code and its
-   default dark theme, no version claimed. Dark lives on bare :root and
+/* Tokens from DESIGN.md (repo root) §4 — VS Code 1.137.0, Modern UI,
+   default density, measured from its sources. Dark lives on bare :root and
    needs no attribute; [data-theme="light"] redefines every colour token,
    name for name. Sizes and fonts do not change between themes and live
-   only on :root. A guard test (tests/styles.test.ts) enforces that every
-   colour anywhere ELSE in this file is one of these custom properties,
-   never a literal hex value — see that test's own doc for why. */
+   only on :root. Guards in tests/styles.test.ts: every colour anywhere
+   ELSE in this file is one of these custom properties; no retired
+   background-ladder token or bare radius token survives; box-shadow is
+   only ever none; border-radius is only ever the two radius tokens and 0. */
 :root {
-  --e8-bg-0: #1e1e1e;
-  --e8-bg-1: #252526;
-  --e8-bg-2: #2d2d2d;
-  --e8-bg-3: #333333;
-  --e8-border: #3c3c3c;
+  /* surfaces */
+  --e8-shell-bg: #181818;
+  --e8-surface: #181818;
+  --e8-editor-bg: #1f1f1f;
+  --e8-border: #2a2a2a;
+  /* states */
+  --e8-hover: #2a2d2e;
+  --e8-selected: #37373d;
+  --e8-activity-hover: #ffffff11;
+  --e8-activity-active: #ffffff22;
+  --e8-status-hover: #f1f1f133;
+  /* text and accent */
   --e8-fg: #cccccc;
-  --e8-fg-muted: #969696;
-  --e8-accent: #007acc;
+  --e8-fg-muted: #9d9d9d;
+  --e8-fg-inactive: #868686;
+  --e8-accent: #0078d4;
   --e8-on-accent: #ffffff;
-  --e8-error: #f14c4c;
+  --e8-error: #f85149;
   --e8-warning: #cca700;
   --e8-info: #3794ff;
   --e8-success: #89d185;
 
-  --e8-radius: 3px;
-  --e8-activity-w: 48px;
+  /* shape */
+  --e8-gap: 4px;
+  --e8-radius-lg: 8px;
+  --e8-radius-sm: 4px;
+  --e8-activity-w: 56px;
   --e8-sidebar-w: 260px;
   --e8-panel-h: 200px;
   --e8-status-h: 22px;
+  --e8-title-h: 32px;
+  --e8-tab-h: 24px;
+  --e8-header-h: 28px;
 
   --e8-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --e8-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --e8-size: 13px;
-  --e8-size-status: 12px;
+  --e8-size-label: 12px;
+  --e8-size-small: 11px;
+  --e8-size-badge: 10px;
 }
 
 [data-theme='light'] {
-  --e8-bg-0: #ffffff;
-  --e8-bg-1: #f3f3f3;
-  --e8-bg-2: #ececec;
-  --e8-bg-3: #e0e0e0;
-  --e8-border: #d4d4d4;
-  --e8-fg: #1f1f1f;
-  --e8-fg-muted: #6e6e6e;
+  --e8-shell-bg: #f8f8f8;
+  --e8-surface: #ffffff;
+  --e8-editor-bg: #ffffff;
+  --e8-border: #e5e5e5;
+  --e8-hover: #f0f0f0;
+  --e8-selected: #e4e6f1;
+  --e8-activity-hover: #f2f2f2;
+  --e8-activity-active: #e4e6f1;
+  --e8-status-hover: #1f1f1f11;
+  --e8-fg: #3b3b3b;
+  --e8-fg-muted: #616161;
+  --e8-fg-inactive: #616161;
   --e8-accent: #005fb8;
   --e8-on-accent: #ffffff;
-  --e8-error: #cd3131;
+  --e8-error: #f85149;
   --e8-warning: #b58900;
   --e8-info: #1a85ff;
   --e8-success: #388a34;
 }
 
 html {
-  background: var(--e8-bg-0);
+  background: var(--e8-editor-bg);
   color: var(--e8-fg);
   font: 400 var(--e8-size) / 1.5 var(--e8-font);
   -webkit-font-smoothing: antialiased;
@@ -99,18 +121,18 @@ button {
   height: 28px;
   padding: 0 12px;
   border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
-  background: var(--e8-bg-1);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
   cursor: pointer;
 }
 button:hover {
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
 }
 button:active {
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
 }
 button:disabled {
-  background: var(--e8-bg-1);
+  background: var(--e8-surface);
   color: var(--e8-fg-muted);
   cursor: default;
   opacity: 0.6;
@@ -134,8 +156,8 @@ select {
   box-sizing: border-box;
   padding: 0 8px;
   border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
-  background: var(--e8-bg-0);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-editor-bg);
   color: var(--e8-fg);
 }
 input:focus,
@@ -160,10 +182,10 @@ label {
 .e8-badge {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: var(--e8-radius);
-  background: var(--e8-bg-2);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-hover);
   color: var(--e8-fg);
-  font-size: var(--e8-size-status);
+  font-size: var(--e8-size-label);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -182,7 +204,7 @@ label {
     'activity sidebar editors'
     'activity sidebar panel'
     'status status status';
-  background: var(--e8-bg-0);
+  background: var(--e8-editor-bg);
   color: var(--e8-fg);
   font: 400 var(--e8-size) / 1.4 var(--e8-font);
 }
@@ -207,9 +229,9 @@ label {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
   border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   color: var(--e8-fg);
 }
 
@@ -220,7 +242,7 @@ label {
   align-items: center;
   gap: 4px;
   padding-top: 8px;
-  background: var(--e8-bg-3);
+  background: var(--e8-surface);
   border-right: 1px solid var(--e8-border);
 }
 .e8-activity-button {
@@ -231,7 +253,7 @@ label {
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   background: transparent;
   color: var(--e8-fg-muted);
   font-size: 11px;
@@ -251,15 +273,15 @@ label {
   color: var(--e8-fg);
 }
 .e8-activity-button[aria-pressed='true'] {
-  background: var(--e8-bg-2);
-  color: var(--e8-accent);
+  background: var(--e8-activity-active);
+  color: var(--e8-fg);
 }
 
 .e8-sidebar {
   grid-area: sidebar;
   position: relative;
   overflow: auto;
-  background: var(--e8-bg-1);
+  background: var(--e8-surface);
   border-right: 1px solid var(--e8-border);
 }
 /* No sidebar chosen: the column is 0, not 260px of empty chrome (DESIGN.md
@@ -292,12 +314,12 @@ label {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   color: var(--e8-fg-muted);
   cursor: pointer;
 }
 .e8-explorer-upload:hover {
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
   color: var(--e8-fg);
 }
 .e8-explorer-upload svg {
@@ -335,7 +357,7 @@ label {
   color: var(--e8-fg);
 }
 .e8-explorer-entry:hover {
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
 }
 .e8-explorer-chevron {
   flex: 0 0 12px;
@@ -355,7 +377,7 @@ label {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   background: transparent;
   color: var(--e8-fg-muted);
   font-size: 14px;
@@ -367,7 +389,7 @@ label {
   opacity: 1;
 }
 .e8-explorer-delete:hover {
-  background: var(--e8-bg-3);
+  background: var(--e8-hover);
   color: var(--e8-fg);
 }
 .e8-explorer-confirm {
@@ -395,7 +417,7 @@ label {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--e8-bg-0);
+  background: var(--e8-editor-bg);
 }
 .e8-editors-tabs {
   display: flex;
@@ -407,7 +429,7 @@ label {
   overflow-y: hidden;
   scrollbar-width: thin;
   min-height: 32px;
-  background: var(--e8-bg-2);
+  background: transparent;
   border-bottom: 1px solid var(--e8-border);
 }
 .e8-doc-tab {
@@ -426,7 +448,7 @@ label {
   font-size: var(--e8-size);
 }
 .e8-doc-tab[aria-selected='true'] {
-  background: var(--e8-bg-0);
+  background: var(--e8-editor-bg);
   color: var(--e8-fg);
   box-shadow: none;
   border-bottom: 2px solid var(--e8-accent);
@@ -437,11 +459,11 @@ label {
   justify-content: center;
   width: 16px;
   height: 16px;
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   color: var(--e8-fg-muted);
 }
 .e8-doc-tab-close:hover {
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
   color: var(--e8-fg);
 }
 .e8-editors-body {
@@ -477,7 +499,7 @@ label {
   display: flex;
   flex-direction: column;
   min-height: 28px;
-  background: var(--e8-bg-1);
+  background: var(--e8-surface);
   border-top: 1px solid var(--e8-border);
 }
 /* The two drag handles (Shell.tsx's `useResize`): a thin strip riding the
@@ -560,9 +582,9 @@ label {
   justify-content: space-between;
   height: var(--e8-status-h);
   padding: 0 8px;
-  background: var(--e8-bg-2);
+  background: var(--e8-shell-bg);
   border-top: 1px solid var(--e8-border);
-  font-size: var(--e8-size-status);
+  font-size: var(--e8-size-label);
   color: var(--e8-fg-muted);
 }
 .e8-status [data-side] {
@@ -581,7 +603,7 @@ label {
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: var(--e8-size-status);
+  font-size: var(--e8-size-label);
 }
 
 /* Diagnostics, inside the panel: a 28px header row (title and count), then
@@ -622,7 +644,7 @@ label {
   white-space: nowrap;
 }
 .e8-diagnostic-row:hover {
-  background: var(--e8-bg-2);
+  background: var(--e8-hover);
 }
 .e8-diagnostic-origin,
 .e8-diagnostic-speaker,
@@ -645,7 +667,7 @@ label {
 }
 .e8-diagnostics-dropped {
   color: var(--e8-fg-muted);
-  font-size: var(--e8-size-status);
+  font-size: var(--e8-size-label);
 }
 
 /* Preview iframe. */
@@ -653,8 +675,8 @@ label {
 .e8-preview-tile {
   display: block;
   border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
-  background: var(--e8-bg-0);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-editor-bg);
   max-width: 100%;
 }
 .e8-preview {
@@ -665,9 +687,9 @@ label {
 
 /* Composition: one row per composition entry; the game's own rows beneath as a plain hairline list — a claim about the running game, not an editor. */
 .e8-row {
-  background: var(--e8-bg-1);
+  background: var(--e8-surface);
   border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   padding: 16px;
   margin-bottom: 16px;
 }
@@ -712,7 +734,7 @@ label {
 .e8-unsupported-note {
   color: var(--e8-fg-muted);
   font-style: normal;
-  font-size: var(--e8-size-status);
+  font-size: var(--e8-size-label);
 }
 
 /* Preview wall: controls in one row, tiles wrapping beneath. */
@@ -732,12 +754,12 @@ label {
   height: 32px;
   align-items: center;
   border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
 }
 .e8-preview-wall-presets legend {
   padding: 0 4px;
   color: var(--e8-fg-muted);
-  font-size: var(--e8-size-status);
+  font-size: var(--e8-size-label);
   font-weight: 500;
 }
 .e8-preview-wall-preset-toggle,
@@ -778,15 +800,15 @@ label {
   height: 100%;
 }
 .e8-assets-text {
-  background: var(--e8-bg-1);
-  border-radius: var(--e8-radius);
+  background: var(--e8-surface);
+  border-radius: var(--e8-radius-sm);
   padding: 16px;
   overflow: auto;
   max-height: 60vh;
   font-family: var(--e8-font-mono);
 }
 .e8-viewer-image {
-  border-radius: var(--e8-radius);
+  border-radius: var(--e8-radius-sm);
   border: 1px solid var(--e8-border);
 }
 .e8-code-diagnostic,
