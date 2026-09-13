@@ -206,12 +206,30 @@ export interface GameGoneMessage {
   game: string;
 }
 
+/** One project of the workspace. `id` is the directory name; a path never crosses the wire. */
+export interface Project {
+  id: string;
+  /** `game/spec.json`'s `name` when it is a string; otherwise `id`. */
+  name: string;
+}
+
+export interface WorkspaceState {
+  projects: Project[];
+  /** The open project's id, or `null` when none is. */
+  active: string | null;
+  /** Where the active project's game is served, or `null` (no project, or its preview failed to bind). */
+  previewUrl: string | null;
+  /** Scan failures and the last `open()`'s refusals — replaced, never appended, on every change. */
+  diagnostics: Diagnostic[];
+}
+
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: Snapshot }
   | { type: 'diagnostics'; diagnostics: Diagnostic[] }
   | GameDiagnosticsMessage
-  | GameGoneMessage;
+  | GameGoneMessage
+  | { type: 'workspace'; workspace: WorkspaceState };
 
 /** Browser to host. */
 export type ClientMessage =
