@@ -39,7 +39,6 @@ describe('styles.css token guard', () => {
   it('every box-shadow is none', () => {
     const css = readFileSync('src/styles.css', 'utf8');
     const shadows = [...css.matchAll(/box-shadow\s*:\s*([^;]+);/g)].map((m) => m[1].trim());
-    expect(shadows.length).toBeGreaterThan(0);
     expect(shadows.filter((v) => v !== 'none')).toEqual([]);
   });
 

@@ -90,7 +90,9 @@ its 28px header.
 - **Hover and selected are states, not steps.** `--e8-hover` and
   `--e8-selected` are two named colours applied to a row, a tab or a
   section header when it is in that state. They are not a lighter or
-  darker "level" of chrome, and no region is painted with them at rest.
+  darker "level" of chrome, and no region is painted with them at rest; the
+  badge (`.e8-badge`) borrows `--e8-selected` for lack of a token of its
+  own, the way VS Code gives it `badge.background`.
 - **One border.** `--e8-border` draws the card frames and every hairline
   inside them. One line, reused.
 - **One accent.** `--e8-accent` is spent on focus (`:focus-visible` only)
@@ -104,9 +106,10 @@ its 28px header.
   `letter-spacing`.
 - **Type ramp.** `--e8-size` 13px for the body (`body1`), `--e8-size-label`
   12px for titles and the status bar (`label1`), `--e8-size-small` 11px
-  (`label2`), `--e8-size-badge` 10px (`label3`). Weights 400 and 600. The
-  system UI stack for the shell, a monospace stack for the editor and any
-  code fragment inline.
+  (`label2`), `--e8-size-badge` 10px (`label3`). Weights 400 and 600 for
+  text; controls, labels and badges keep 500 from the previous palette
+  (`button`, `label`, `.e8-badge`, `legend`). The system UI stack for the
+  shell, a monospace stack for the editor and any code fragment inline.
 - **Text.** `--e8-fg` for anything meant to be read, `--e8-fg-muted` for a
   hint, a byline, a disabled state; `--e8-fg-inactive` only for an
   unpressed activity icon.

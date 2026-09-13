@@ -185,7 +185,7 @@ label {
   border-radius: var(--e8-radius-sm);
   background: var(--e8-selected);
   color: var(--e8-fg);
-  font-size: var(--e8-size-label);
+  font-size: var(--e8-size-badge);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -243,10 +243,11 @@ label {
   grid-area: activity;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 0;
   box-sizing: border-box;
   padding-top: var(--e8-gap);
+  padding-left: 3px;
   margin-bottom: var(--e8-gap);
   background: var(--e8-surface);
   border: 1px solid var(--e8-border);
@@ -474,7 +475,8 @@ label {
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  /* A classic scrollbar would eat 11px of the fixed 32px strip; wheel and focus still scroll it, as in VS Code. */
+  scrollbar-width: none;
   height: var(--e8-title-h);
   padding-left: 2px;
   background: transparent;
@@ -502,7 +504,6 @@ label {
 .e8-doc-tab[aria-selected='true'] {
   background: var(--e8-selected);
   color: var(--e8-fg);
-  box-shadow: none;
 }
 .e8-doc-tab-close {
   display: inline-flex;
@@ -532,6 +533,7 @@ label {
   height: 100%;
   box-sizing: border-box;
   overflow: auto;
+  scrollbar-width: thin;
   padding: 16px;
 }
 .e8-doc-pane:has(> .e8-code-editor) {
@@ -643,6 +645,7 @@ label {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: thin;
 }
 
 .e8-status {
@@ -877,6 +880,7 @@ label {
   border-radius: var(--e8-radius-sm);
   padding: 16px;
   overflow: auto;
+  scrollbar-width: thin;
   max-height: 60vh;
   font-family: var(--e8-font-mono);
 }
