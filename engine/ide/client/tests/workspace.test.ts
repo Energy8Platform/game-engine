@@ -63,10 +63,11 @@ function fakeFetch(boot: () => Promise<Response>, rest: () => Promise<Response> 
  * `report` spy — `apply()` called directly, the shape `diagnostics.test.ts`
  * and `files.test.ts` already use, so `harness()` returns synchronously.
  */
-function harness(config: Partial<WorkspaceClientConfig> = {}) {
+function harness(config: Partial<WorkspaceClientConfig> = {}, docs: FakeDoc[] = []) {
   const socket = new FakeSocket();
   const report = vi.fn();
-  const result = { connection: { report } } as unknown as Context & {
+  const shell = fakeShell(docs);
+  const result = { connection: { report }, shell } as unknown as Context & {
     connection: { report: typeof report };
   };
   const fakeCtx = {
@@ -75,9 +76,22 @@ function harness(config: Partial<WorkspaceClientConfig> = {}) {
       (result as unknown as Record<string, unknown>)[key] = value;
     },
     connection: result.connection,
+    shell,
   } as unknown as Context;
   apply(fakeCtx, { url: 'ws://x/ide', socketFactory: () => socket, ...config });
-  return { ctx: result, socket, report };
+  return { ctx: result, socket, report, shell };
+}
+
+type FakeDoc = { key: string; dirty: boolean };
+
+/** The two members of `ShellService` the switch reads: the open tabs, and a forced close that drops one. */
+function fakeShell(initial: FakeDoc[]) {
+  let docs = [...initial];
+  const close = vi.fn((key: string, opts?: { force?: boolean }) => {
+    docs = docs.filter((doc) => doc.key !== key);
+    return opts?.force === true;
+  });
+  return { documents: () => docs, close };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -232,12 +246,79 @@ describe('workspace (client)', () => {
     expect(report.mock.calls[0][0]).toEqual(refusals[0]);
   });
 
-  it('is composed by createIdeClient, after connection', async () => {
+  it('is composed by createIdeClient, after connection and shell', async () => {
     const socket = new FakeSocket();
     const { fetchFn } = fakeFetch(() => new Promise(() => {}));
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     expect(typeof ctx.workspace.open).toBe('function');
     socket.receive({ type: 'workspace', workspace: ws() });
     expect(ctx.workspace.state()?.active).toBe('a');
+    // The switch guard reads the real shell's tabs: a file tab open on
+    // project `a` is gone once `b` is the active one.
+    ctx.shell.open({ key: 'f:x.ts', title: 'x.ts', component: () => null, closable: true });
+    socket.receive({ type: 'workspace', workspace: ws({ active: 'b' }) });
+    expect(ctx.shell.documents()).toEqual([]);
+  });
+
+  describe('switching projects', () => {
+    const tabs = (): FakeDoc[] => [
+      { key: 'f:game/script.spin', dirty: false },
+      { key: 'f:a.ts', dirty: false },
+      { key: 'composition', dirty: false },
+    ];
+
+    it('a frame with a different active closes every f: document, by force, and nothing else', () => {
+      const { fetchFn } = fakeFetch(() => new Promise(() => {}));
+      const { socket, shell, report } = harness({ fetchFn }, tabs());
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'b' }) });
+      expect(shell.close.mock.calls).toEqual([
+        ['f:game/script.spin', { force: true }],
+        ['f:a.ts', { force: true }],
+      ]);
+      expect(shell.documents().map((doc) => doc.key)).toEqual(['composition']);
+      expect(report).not.toHaveBeenCalled();
+    });
+
+    it('a dirty f: document lost that way is one warning naming its path', () => {
+      const { fetchFn } = fakeFetch(() => new Promise(() => {}));
+      const docs = tabs();
+      docs[1].dirty = true;
+      const { socket, report } = harness({ fetchFn }, docs);
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'b' }) });
+      expect(report).toHaveBeenCalledTimes(1);
+      const said = report.mock.calls[0][0] as Diagnostic;
+      expect(said.severity).toBe('warning');
+      expect(said.plugin).toBe('workspace');
+      expect(said.where).toBe('b');
+      expect(said.message).toBe('unsaved changes discarded on project switch: a.ts');
+    });
+
+    it('the first state seen closes nothing — it is the baseline, not a switch', () => {
+      const { fetchFn } = fakeFetch(() => new Promise(() => {}));
+      const { socket, shell } = harness({ fetchFn }, tabs());
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
+      expect(shell.close).not.toHaveBeenCalled();
+    });
+
+    it('a frame with the same active closes nothing', () => {
+      const { fetchFn } = fakeFetch(() => new Promise(() => {}));
+      const { socket, shell } = harness({ fetchFn }, tabs());
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
+      socket.receive({
+        type: 'workspace',
+        workspace: ws({ active: 'a', previewUrl: 'http://other' }),
+      });
+      expect(shell.close).not.toHaveBeenCalled();
+    });
+
+    it('a switch to no project at all names "none"', () => {
+      const { fetchFn } = fakeFetch(() => new Promise(() => {}));
+      const { socket, report } = harness({ fetchFn }, [{ key: 'f:a.ts', dirty: true }]);
+      socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
+      socket.receive({ type: 'workspace', workspace: ws({ active: null, previewUrl: null }) });
+      expect((report.mock.calls[0][0] as Diagnostic).where).toBe('none');
+    });
   });
 });

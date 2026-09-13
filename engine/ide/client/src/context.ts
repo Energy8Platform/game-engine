@@ -30,10 +30,6 @@ export async function createIdeClient(
 ): Promise<Context> {
   const ctx = new Context();
   await ctx.plugin(connection, config);
-  // Right after `connection`, which it injects for `report()`. Reads the
-  // same `url`/`socketFactory` (its own socket, see its module doc) and
-  // the same `fetchFn` `files` already takes.
-  await ctx.plugin(workspace, config);
   await ctx.plugin(slots);
   // The shell's regions are the same kind of contribution cards already
   // are (a registry a plugin's client half adds to, `App` merely draws),
@@ -41,6 +37,11 @@ export async function createIdeClient(
   // dependency — and before the plugins that fetch or forward data rather
   // than just hold state.
   await ctx.plugin(shell);
+  // After `shell`, which it injects alongside `connection`: a project
+  // switch closes the shell's `f:` tabs (spec §8). Reads the same
+  // `url`/`socketFactory` (its own socket, see its module doc) and the
+  // same `fetchFn` `files` already takes.
+  await ctx.plugin(workspace, config);
   await ctx.plugin(modules, config);
   await ctx.plugin(gameComposition, config);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its

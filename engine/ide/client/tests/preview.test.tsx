@@ -106,11 +106,12 @@ describe('Preview', () => {
     expect(screen.getByTestId('preview-unavailable')).toHaveTextContent(/no project open/);
   });
 
-  it('before the workspace has answered at all there is no iframe either', async () => {
+  it('before the workspace has answered at all there is no iframe either — it is loading, not unavailable', async () => {
     const { ctx } = await harness(null);
     render(<Preview ctx={ctx} />);
     expect(screen.queryByTitle('превью игры')).toBeNull();
-    expect(screen.getByTestId('preview-unavailable')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-loading')).toHaveTextContent('loading…');
+    expect(screen.queryByTestId('preview-unavailable')).toBeNull();
   });
 
   it('a workspace change to a different previewUrl remounts the iframe — a real navigation', async () => {
@@ -292,6 +293,14 @@ describe('PreviewWall', () => {
     render(<PreviewWall ctx={ctx} />);
     expect(screen.queryAllByTestId(/^tile-/)).toHaveLength(0);
     expect(screen.getByTestId('preview-unavailable')).toHaveTextContent(/no project open/);
+  });
+
+  it('before the workspace has answered the wall is loading, not unavailable', async () => {
+    const { ctx } = await harness(null);
+    render(<PreviewWall ctx={ctx} />);
+    expect(screen.queryAllByTestId(/^tile-/)).toHaveLength(0);
+    expect(screen.getByTestId('preview-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('preview-unavailable')).toBeNull();
   });
 
   it('a project opening after the wall did brings the tiles', async () => {

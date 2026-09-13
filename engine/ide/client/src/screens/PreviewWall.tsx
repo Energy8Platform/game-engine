@@ -43,6 +43,24 @@ function Unavailable() {
   );
 }
 
+/**
+ * No workspace answer yet is not "no project" (`WorkspaceClientService.state`'s
+ * own doc) — so the frame is `loading…`, and only a `null` `previewUrl` from
+ * an answered host draws `Unavailable`.
+ */
+function Frame({ ctx, children }: { ctx: Context; children: (previewUrl: string) => JSX.Element }) {
+  const state = useWorkspace(ctx);
+  if (state === null) {
+    return (
+      <p className="e8-empty" data-testid="preview-loading">
+        loading…
+      </p>
+    );
+  }
+  if (state.previewUrl === null) return <Unavailable />;
+  return children(state.previewUrl);
+}
+
 /** Config fingerprint of every `hot: false` row — see `Preview`'s doc comment for what this drives. */
 function coldSignature(rows: CompositionRow[]): string {
   return JSON.stringify(rows.filter((row) => !row.hot).map((row) => [row.id, row.config]));
@@ -73,7 +91,6 @@ export interface PreviewProps {
  */
 export function Preview({ ctx }: PreviewProps) {
   const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
-  const previewUrl = useWorkspace(ctx)?.previewUrl ?? null;
   const signatureRef = useRef<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -90,14 +107,17 @@ export function Preview({ ctx }: PreviewProps) {
     }
   }, [snapshot]);
 
-  if (previewUrl === null) return <Unavailable />;
   return (
-    <iframe
-      key={`${reloadNonce}:${previewUrl}`}
-      className="e8-preview"
-      title="превью игры"
-      src={previewUrl}
-    />
+    <Frame ctx={ctx}>
+      {(previewUrl) => (
+        <iframe
+          key={`${reloadNonce}:${previewUrl}`}
+          className="e8-preview"
+          title="превью игры"
+          src={previewUrl}
+        />
+      )}
+    </Frame>
   );
 }
 
@@ -185,7 +205,6 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
   );
   const [rotated, setRotated] = useState(false);
   const [lang, setLang] = useState(DEFAULT_LANG);
-  const previewUrl = useWorkspace(ctx)?.previewUrl ?? null;
 
   useEffect(() => {
     // `ctx.connection.report` collapses a byte-identical repeat on its own
@@ -253,31 +272,31 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
         </span>
       </div>
 
-      {previewUrl === null ? (
-        <Unavailable />
-      ) : (
-        <div className="e8-preview-wall-tiles">
-          {selected.map((name) => {
-            const preset = screenPreset(name);
-            // Reported above; drawing nothing here is the other half of
-            // "a diagnostic and a skipped tile, not a crashed screen".
-            if (!preset) return null;
-            const width = rotated ? preset.h : preset.w;
-            const height = rotated ? preset.w : preset.h;
-            return (
-              <iframe
-                key={name}
-                data-testid={`tile-${name}`}
-                title={`preview: ${name}`}
-                className="e8-preview-tile"
-                width={width}
-                height={height}
-                src={tileUrl(previewUrl, name, lang)}
-              />
-            );
-          })}
-        </div>
-      )}
+      <Frame ctx={ctx}>
+        {(previewUrl) => (
+          <div className="e8-preview-wall-tiles">
+            {selected.map((name) => {
+              const preset = screenPreset(name);
+              // Reported above; drawing nothing here is the other half of
+              // "a diagnostic and a skipped tile, not a crashed screen".
+              if (!preset) return null;
+              const width = rotated ? preset.h : preset.w;
+              const height = rotated ? preset.w : preset.h;
+              return (
+                <iframe
+                  key={name}
+                  data-testid={`tile-${name}`}
+                  title={`preview: ${name}`}
+                  className="e8-preview-tile"
+                  width={width}
+                  height={height}
+                  src={tileUrl(previewUrl, name, lang)}
+                />
+              );
+            })}
+          </div>
+        )}
+      </Frame>
     </main>
   );
 }

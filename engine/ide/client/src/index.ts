@@ -57,6 +57,7 @@ export {
   type ThemeName,
 } from './shell/StatusItems';
 export { Explorer, openPath } from './shell/Explorer';
+export { Projects } from './shell/Projects';
 export { EditorDocument } from './shell/EditorDocument';
 export { ViewerDocument, looksBinary } from './shell/ViewerDocument';
 export { Monaco, type MonacoProps } from './editor/Monaco';

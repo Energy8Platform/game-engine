@@ -3,6 +3,7 @@ import type { Context } from 'cordis';
 import { type Diagnostic, type WorkspaceState, diagnostic } from '@energy8engine/contracts';
 import type { ConnectionConfig, WebSocketLike } from './connection';
 import type { FilesConfig } from './files';
+import { FILE_KEY_PREFIX } from './shell';
 
 /**
  * The browser's copy of the host's `WorkspaceState` (spec §8): which
@@ -38,7 +39,7 @@ export interface WorkspaceClientService {
 export type WorkspaceClientConfig = ConnectionConfig & FilesConfig;
 
 export const name = 'workspace';
-export const inject = ['connection'];
+export const inject = ['connection', 'shell'];
 
 /** A 200 with the wrong shape is a failure like any other (see `game-composition`): one diagnostic, not `undefined.find` in a status item later. */
 function isWorkspaceState(body: unknown): body is WorkspaceState {
@@ -69,8 +70,29 @@ export function apply(ctx: Context, config: WorkspaceClientConfig) {
   );
   let state: WorkspaceState | null = null;
 
+  function closeFileDocuments(active: string | null) {
+    const dirty: string[] = [];
+    for (const doc of ctx.shell.documents()) {
+      if (!doc.key.startsWith(FILE_KEY_PREFIX)) continue;
+      if (doc.dirty) dirty.push(doc.key.slice(FILE_KEY_PREFIX.length));
+      ctx.shell.close(doc.key, { force: true });
+    }
+    if (dirty.length > 0) {
+      ctx.connection.report(
+        diagnostic(
+          'warning',
+          'workspace',
+          active ?? 'none',
+          `unsaved changes discarded on project switch: ${dirty.join(', ')}`,
+        ),
+      );
+    }
+  }
+
   function set(next: WorkspaceState) {
+    const switched = state !== null && state.active !== next.active;
     state = next;
+    if (switched) closeFileDocuments(next.active);
     for (const listener of listeners) listener();
   }
 

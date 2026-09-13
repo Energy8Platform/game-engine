@@ -7,6 +7,7 @@ import {
   Explorer,
   PreviewWall,
   ProjectStatus,
+  Projects,
   SessionStatus,
   Shell,
   ThemeStatus,
@@ -49,7 +50,8 @@ function DiagnosticsDocument({ ctx }: { ctx: Context }) {
  * `ctx.slots.register` away, made by whichever plugin owns it.
  *
  * Every registration is an effect with a disposer, in the order the
- * activity bar shows them: Explorer, composition, preview. The two shipped
+ * activity bar shows them — Explorer, composition, preview — plus the
+ * projects list, which `order: -1` draws first. The two shipped
  * documents are contributed (`shell.document`, not closable) and reached
  * from the activity bar (`opens: 'document'`); Explorer opens a sidebar.
  *
@@ -76,6 +78,28 @@ export function App({ ctx }: { ctx: Context }) {
     return ctx.slots.register(
       { name: 'shell.sidebar', key: 'explorer', title: 'Проводник' },
       Explorer,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  // Registered after the Explorer, drawn before it: `order: -1` is what
+  // puts projects first on the bar (spec §8), not registration order.
+  useEffect(() => {
+    return ctx.slots.register({
+      name: 'shell.activity',
+      key: 'workspace',
+      title: 'Проекты',
+      icon: 'workspace',
+      order: -1,
+      opens: 'sidebar',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
+  useEffect(() => {
+    return ctx.slots.register(
+      { name: 'shell.sidebar', key: 'workspace', title: 'Проекты' },
+      Projects,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
@@ -175,7 +199,25 @@ export function App({ ctx }: { ctx: Context }) {
     if (ctx.shell.active() === undefined && ctx.shell.pending() === undefined) {
       ctx.shell.openContributed('composition', { replace: true });
     }
-    if (ctx.shell.sidebar() === undefined) ctx.shell.showSidebar('explorer');
+    // The default sidebar depends on a fact the workspace may not hold yet
+    // (its boot GET, or the host's first frame): with no project open, the
+    // projects list is the one thing worth looking at; otherwise the
+    // Explorer. So: decide now if the answer is in, else on the first
+    // state — and leave alone a sidebar the person chose in between.
+    if (ctx.shell.sidebar() !== undefined) return;
+    const decide = (): boolean => {
+      const state = ctx.workspace.state();
+      if (state === null) return false;
+      if (ctx.shell.sidebar() === undefined) {
+        ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
+      }
+      return true;
+    };
+    if (decide()) return;
+    const off = ctx.workspace.subscribe(() => {
+      if (decide()) off();
+    });
+    return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 

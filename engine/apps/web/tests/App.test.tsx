@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createIdeClient, useGameComposition } from '@energy8engine/ide-client';
-import type { CompositionRow, ServerMessage } from '@energy8engine/contracts';
+import type { CompositionRow, ServerMessage, WorkspaceState } from '@energy8engine/contracts';
 import { App } from '../src/App';
 
 /**
@@ -34,7 +34,10 @@ function fakeSocket() {
   };
 }
 
-async function harness(importModule?: (url: string) => Promise<unknown>) {
+async function harness(
+  importModule?: (url: string) => Promise<unknown>,
+  workspace: WorkspaceState = { projects: [], active: null, previewUrl: null, diagnostics: [] },
+) {
   const socket = fakeSocket();
   const ctx = await createIdeClient({
     url: 'ws://x/ide',
@@ -57,7 +60,7 @@ async function harness(importModule?: (url: string) => Promise<unknown>) {
           url === '/api/files'
             ? { entries: [], diagnostics: [] }
             : url === '/api/workspace'
-              ? { projects: [], active: null, previewUrl: null, diagnostics: [] }
+              ? workspace
               : { rows: [], diagnostics: [] },
         ),
         { headers: { 'content-type': 'application/json' } },
@@ -66,6 +69,14 @@ async function harness(importModule?: (url: string) => Promise<unknown>) {
   });
   return { ctx, socket };
 }
+
+/** What `/api/workspace` answers when a project is open — the harness's default answers with none. */
+const OPEN_PROJECT: WorkspaceState = {
+  projects: [{ id: 'a', name: 'A' }],
+  active: 'a',
+  previewUrl: 'http://game.test:5679',
+  diagnostics: [],
+};
 
 /** The composition row the host would broadcast for `first-slot`'s `screen-demo` plugin. */
 function demoRow(): CompositionRow {
@@ -89,14 +100,29 @@ beforeEach(() => {
 });
 
 describe('App', () => {
-  it('registers explorer, composition and preview in the activity bar, in that order', async () => {
+  it('registers projects, explorer, composition and preview in the activity bar, in that order', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
-    expect(ctx.slots.list('shell.activity').map((e) => e.key)).toEqual([
-      'explorer',
-      'composition',
-      'preview',
+    expect(ctx.slots.list('shell.activity').map((e) => e.key)).toEqual(
+      expect.arrayContaining(['workspace', 'explorer', 'composition', 'preview']),
+    );
+    // What the bar DRAWS is the `order`-sorted list, and projects come first.
+    const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
+    expect(buttons.map((b) => b.getAttribute('data-testid'))).toEqual([
+      'activity-workspace',
+      'activity-explorer',
+      'activity-composition',
+      'activity-preview',
     ]);
+  });
+
+  it('the projects button opens the «Проекты» sidebar', async () => {
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    fireEvent.click(screen.getByTestId('activity-workspace'));
+    expect(ctx.shell.sidebar()).toBe('workspace');
+    expect(await screen.findByText('Проекты')).toBeTruthy();
   });
 
   it('registers composition and preview as documents nobody can close', async () => {
@@ -151,13 +177,30 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Превью' })).toBeTruthy();
   });
 
-  it('a fresh load opens the composition and the Explorer, not five empty regions', async () => {
-    const { ctx } = await harness();
+  it('a fresh load with a project open shows the composition and the Explorer, not five empty regions', async () => {
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
     expect(ctx.shell.active()?.key).toBe('composition');
-    expect(ctx.shell.sidebar()).toBe('explorer');
+    // The sidebar waits for the workspace's answer (the boot GET), then
+    // picks: a project is open, so the Explorer.
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
     expect(screen.getByTestId('sidebar-explorer')).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
+  });
+
+  it('a fresh load with no project open shows the projects list instead', async () => {
+    const { ctx } = await harness();
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('workspace'));
+    expect(screen.getByTestId('sidebar-workspace')).toBeTruthy();
+  });
+
+  it('a sidebar the person chose before the workspace answered is left alone', async () => {
+    const { ctx } = await harness();
+    render(<App ctx={ctx} />);
+    act(() => ctx.shell.showSidebar('explorer'));
+    await waitFor(() => expect(ctx.workspace.state()).not.toBeNull());
+    expect(ctx.shell.sidebar()).toBe('explorer');
   });
 
   it('the fresh-load default replaces the empty address, so Back has nowhere emptier to go', async () => {

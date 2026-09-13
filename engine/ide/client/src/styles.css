@@ -449,6 +449,15 @@ label {
   margin: 4px 8px;
   color: var(--e8-error);
 }
+/* Projects: the same rows, the open one held on the selection ground. */
+.e8-project-id {
+  color: var(--e8-fg-muted);
+  margin-left: 6px;
+  font-size: var(--e8-size-small);
+}
+.e8-project-active {
+  background: var(--e8-selected);
+}
 .e8-explorer .e8-empty {
   padding: 4px 20px;
 }

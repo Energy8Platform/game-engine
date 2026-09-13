@@ -157,13 +157,14 @@ function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
 
 /**
  * The activity icons this shell ships, by `ActivityMeta.icon` name — the
- * four the shipped contributions use, drawn inline so no icon package is
+ * five the shipped contributions use, drawn inline so no icon package is
  * pulled in for four shapes. A name not listed here draws its first
  * letter, so a plugin with no icon of its own still gets a button a
  * person can tell apart. `default` is for a plugin that wants a generic
  * one rather than a letter.
  */
 const ICON_PATHS: Record<string, string> = {
+  workspace: 'M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z',
   files: 'M9 3H5.5A1.5 1.5 0 0 0 4 4.5v13M8 7h7l4 4v9.5a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8 20.5v-12A1.5 1.5 0 0 1 9.5 7M15 7v4h4',
   layers: 'M12 3l9 5-9 5-9-5 9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
