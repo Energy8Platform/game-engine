@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import Server from '@cordisjs/plugin-server';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
@@ -195,6 +196,79 @@ describe('ide rpc', () => {
  * — same connection mechanics, a shape suited to what these four tests
  * actually assert.
  */
+/**
+ * The game's own socket (Task 4): `dev-game` attaches this same handler to
+ * the preview server with `accept: ['game-diagnostics']`. Unrestricted,
+ * any page served from the game's origin could send `update` and rewrite
+ * `e8.yml` — the reach spec §6's own-origin rule exists to deny. A second
+ * server stands in for the preview here, attached the way `dev-game`
+ * attaches it.
+ */
+describe('ide rpc — a send-restricted attachment', () => {
+  async function restrictedSocket(): Promise<{
+    socket: WebSocket;
+    inbox: ReturnType<typeof createInbox>;
+  }> {
+    const fiber = host.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
+    await fiber;
+    host.ctx.ideRpc.attach(fiber.ctx.server, { accept: ['game-diagnostics'] });
+    const gameSocket = new WebSocket(`ws://127.0.0.1:${fiber.ctx.server.port}/ide`);
+    const gameInbox = createInbox(gameSocket);
+    await new Promise((resolve) => gameSocket.once('open', resolve));
+    return { socket: gameSocket, inbox: gameInbox };
+  }
+
+  it('drops an update from the game socket silently; the same update over the root still applies', async () => {
+    const first = await inbox.waitFor((m) => m.type === 'snapshot');
+    const id =
+      first.type === 'snapshot'
+        ? first.snapshot.rows.find((r) => r.name === 'probe-plugin')!.id
+        : '';
+    const before = readFileSync(join(workspace, 'e8.yml'), 'utf8');
+    const game = await restrictedSocket();
+    // Receiving is intact: the greeting still arrives (ide-bridge's hot rebind needs `snapshot`).
+    expect((await game.inbox.waitFor((m) => m.type === 'snapshot')).type).toBe('snapshot');
+
+    const rootFrames: ServerMessage[] = [];
+    socket.on('message', (data) => rootFrames.push(JSON.parse(String(data)) as ServerMessage));
+    game.socket.send(JSON.stringify({ type: 'update', id, config: { speed: 5 } }));
+    // Same socket, so the frames are handled in order: once this relay has
+    // reached the editor, the `update` before it has already been dropped.
+    game.socket.send(
+      JSON.stringify({
+        type: 'game-diagnostics',
+        diagnostics: [{ severity: 'error', plugin: 'session', where: 'x', message: 'marker' }],
+        dropped: 0,
+      }),
+    );
+    await inbox.waitFor((m) => m.type === 'game-diagnostics');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(readFileSync(join(workspace, 'e8.yml'), 'utf8')).toBe(before);
+    expect(rootFrames.map((m) => m.type)).not.toContain('diagnostics');
+    expect(
+      rootFrames.some(
+        (m) =>
+          m.type === 'snapshot' &&
+          JSON.stringify(m.snapshot.rows.find((r) => r.id === id)?.config) ===
+            JSON.stringify({ speed: 5 }),
+      ),
+    ).toBe(false);
+    // And the game socket itself was told nothing — no acknowledgement of any kind.
+    expect(game.socket.readyState).toBe(WebSocket.OPEN);
+
+    // The root's own socket is unrestricted: the editor still edits.
+    socket.send(JSON.stringify({ type: 'update', id, config: { speed: 5 } }));
+    await inbox.waitFor(
+      (m) =>
+        m.type === 'snapshot' &&
+        JSON.stringify(m.snapshot.rows.find((r) => r.id === id)?.config) ===
+          JSON.stringify({ speed: 5 }),
+    );
+    game.socket.close();
+  });
+});
+
 describe('ide rpc — a game reports its own diagnostics', () => {
   function collectMessages(ws: WebSocket): ServerMessage[] {
     const received: ServerMessage[] = [];

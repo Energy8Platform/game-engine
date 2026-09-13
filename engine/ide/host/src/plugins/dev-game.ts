@@ -12,9 +12,11 @@
  * `/api/spin`, the `/@fs/` guard, `/api/composition` + `/plugin-runtime/:id`
  * (`ctx.runtimeAssets.attachGameRoutes`) and the `/ide` socket
  * (`ctx.ideRpc.attach`, the game's `ide-bridge` opens
- * `ws://${location.host}/ide`). The root (`ctx.server`) is the IDE's and
- * gets NO game route, so a game a project author didn't write can't reach
- * the IDE's own session in the browser — a working invariant now, not the
+ * `ws://${location.host}/ide` — accepting only `game-diagnostics` from
+ * it, so the game can report but not `update` e8.yml). The root
+ * (`ctx.server`) is the IDE's and gets NO game route, so a game a project
+ * author didn't write can't reach the IDE's own session in the browser —
+ * a working invariant now, not the
  * accident of `apps/web`'s vite happening to be a different process, which
  * is all that kept the two apart before. The preview server dies with this
  * scope; a port it cannot bind is a diagnostic and `devGamePreview.url ===
@@ -59,10 +61,11 @@
  *     bridge here. `@cordisjs/plugin-server`'s upgrade handler is bound
  *     directly to the raw `http.Server`'s `'upgrade'` event and — unlike
  *     HTTP routes — has no "fall through" path: any upgrade whose path
- *     matches no registered `ctx.server.ws()` route is 404'd and the
- *     socket destroyed immediately. Measured directly: pointing Vite's own
- *     HMR websocket at this same server (`hmr: { server: ctx.server._http
- *     }`) raced that refusal and failed the handshake outright ("Received
+ *     matches no registered `.ws()` route on the server vite is mounted
+ *     on (`preview`) is 404'd and the socket destroyed immediately.
+ *     Measured directly: pointing Vite's own HMR websocket at that same
+ *     server (`hmr: { server: preview._http }`) raced that refusal and
+ *     failed the handshake outright ("Received
  *     network error or non-101 status code"). `hmr: false` avoids relying
  *     on that coexistence — `e8 dev` has no live-reload; a manual browser
  *     reload picks up an edited file on next load (Vite still serves
@@ -231,7 +234,8 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   }
   ctx.provide('devGamePreview', { url: `http://${preview.host}:${preview.port}` });
   // What the page fetches same-origin besides this plugin's own routes.
-  ctx.ideRpc.attach(preview);
+  // The socket is send-restricted: a game reports, it does not edit e8.yml.
+  ctx.ideRpc.attach(preview, { accept: ['game-diagnostics'] });
   ctx.runtimeAssets.attachGameRoutes(preview);
 
   // Resolved once, here, rather than read as `config.gamesDir` at every use

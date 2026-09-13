@@ -54,8 +54,17 @@ export interface IdeRpcService {
   reportGameDiagnostics(diagnostics: Diagnostic[]): void;
   /** Tells every client which projects exist and which is open — also the FIRST frame on connect. */
   broadcastWorkspace(state: WorkspaceState): void;
-  /** Registers the `/ide` websocket route on `server` — the root's by default; the preview's too (Task 4). */
-  attach(server: Server): void;
+  /**
+   * Registers the `/ide` websocket route on `server` — the root's by
+   * default; the preview's too (Task 4). `accept` narrows what a socket on
+   * that server may SEND: the game's origin gets `['game-diagnostics']`,
+   * because the same handler unrestricted would let any page served there
+   * send `update` and rewrite `e8.yml` — the exact reach spec §6 keeps the
+   * game from having. Receiving is untouched (`ide-bridge` needs
+   * `snapshot` for its hot rebind); a frame outside `accept` is dropped
+   * silently, with no acknowledgement for a foreign page to learn from.
+   */
+  attach(server: Server, options?: { accept?: ClientMessage['type'][] }): void;
 }
 
 export const name = 'ide-rpc';
@@ -248,13 +257,18 @@ export function apply(ctx: Context) {
     broadcastWorkspace(state) {
       for (const socket of clients) send(socket, { type: 'workspace', workspace: state });
     },
-    attach(server) {
-      server.ws('/ide', handler);
+    attach(server, options) {
+      server.ws('/ide', (req, accept) => handle(options?.accept, req, accept));
     },
   };
   ctx.provide('ideRpc', service);
 
-  const handler: NonNullable<WsRoute['handle']> = async (_req, accept) => {
+  type Handle = NonNullable<WsRoute['handle']>;
+  async function handle(
+    acceptTypes: ClientMessage['type'][] | undefined,
+    _req: Parameters<Handle>[0],
+    accept: Parameters<Handle>[1],
+  ): Promise<void> {
     const socket = await accept();
     clients.add(socket);
     socket.on('close', () => {
@@ -293,6 +307,7 @@ export function apply(ctx: Context) {
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
         const type = (parsed as { type?: unknown }).type;
         if (type !== 'update' && type !== 'game-diagnostics') return;
+        if (acceptTypes && !acceptTypes.includes(type)) return; // see `attach`
         message = parsed as ClientMessage;
       } catch {
         return; // malformed frames are ignored; the browser is ours
@@ -387,7 +402,7 @@ export function apply(ctx: Context) {
         });
       }
     }
-  };
+  }
   service.attach(ctx.server);
 
   // The graph is the source of truth: whenever it moves, the browser hears about it.
