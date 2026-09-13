@@ -290,12 +290,15 @@ describe('workspace (client)', () => {
       docs[1].dirty = true;
       const { socket, report } = harness({ fetchFn }, docs);
       socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
+      // The production sequence: the host says `null` while it closes `a`,
+      // then names `b`. The warning is about `a` — where the file lived.
+      socket.receive({ type: 'workspace', workspace: ws({ active: null }) });
       socket.receive({ type: 'workspace', workspace: ws({ active: 'b' }) });
       expect(report).toHaveBeenCalledTimes(1);
       const said = report.mock.calls[0][0] as Diagnostic;
       expect(said.severity).toBe('warning');
       expect(said.plugin).toBe('workspace');
-      expect(said.where).toBe('b');
+      expect(said.where).toBe('a');
       expect(said.message).toBe('unsaved changes discarded on project switch: a.ts');
     });
 
@@ -317,12 +320,12 @@ describe('workspace (client)', () => {
       expect(shell.close).not.toHaveBeenCalled();
     });
 
-    it('a switch to no project at all names "none"', () => {
+    it('a close with no project after it still names the project the file belonged to', () => {
       const { fetchFn } = fakeFetch(() => new Promise(() => {}));
       const { socket, report } = harness({ fetchFn }, [{ key: 'f:a.ts', dirty: true }]);
       socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
       socket.receive({ type: 'workspace', workspace: ws({ active: null, previewUrl: null }) });
-      expect((report.mock.calls[0][0] as Diagnostic).where).toBe('none');
+      expect((report.mock.calls[0][0] as Diagnostic).where).toBe('a');
     });
   });
 });

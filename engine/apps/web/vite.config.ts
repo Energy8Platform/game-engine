@@ -41,6 +41,9 @@ export default defineConfig({
     // so the dev server needs to actually listen there.
     host: '127.0.0.1',
     port: 5680,
+    // The host's cross-origin allowlist names this port; a silent move to
+    // 5681+ would leave every write from the dev IDE refused with a 403.
+    strictPort: true,
     proxy: {
       '/api': HOST,
       '/plugin-client': HOST,

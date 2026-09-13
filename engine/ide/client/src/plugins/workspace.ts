@@ -91,8 +91,12 @@ export function apply(ctx: Context, config: WorkspaceClientConfig) {
 
   function set(next: WorkspaceState) {
     const switched = state !== null && state.active !== next.active;
+    // Named after the project the documents BELONGED to: the host sends an
+    // `active: null` frame between projects, so the destination is not yet
+    // known when the tabs go.
+    const previous = state?.active ?? null;
     state = next;
-    if (switched) closeFileDocuments(next.active);
+    if (switched) closeFileDocuments(previous);
     for (const listener of listeners) listener();
   }
 
