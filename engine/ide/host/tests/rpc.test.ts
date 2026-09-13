@@ -998,6 +998,28 @@ describe('ide rpc — several games do not overwrite each other', () => {
   });
 });
 
+describe('ide rpc — the root /ide refuses a cross-origin upgrade (spec §6.2)', () => {
+  /** Resolves with what the handshake did: `greeted` (the workspace frame arrived) or `refused` (an error, no open). */
+  const handshake = (origin: string) =>
+    new Promise<string>((resolve) => {
+      const s = new WebSocket(`${host.url.replace('http', 'ws')}/ide`, { headers: { origin } });
+      s.once('message', () => {
+        s.close();
+        resolve('greeted');
+      });
+      s.once('error', () => resolve('refused'));
+    });
+
+  it('an unknown Origin never completes the handshake; the IDE’s own does', async () => {
+    // The ws handler returns without `accept()`; plugin-server then destroys
+    // the socket, and the client sees the handshake fail (measured: `ws`
+    // emits `error` "socket hang up", never `open`).
+    expect(await handshake('http://evil.example')).toBe('refused');
+    expect(await handshake('http://127.0.0.1:5680')).toBe('greeted');
+    expect(await handshake(host.url)).toBe('greeted');
+  });
+});
+
 describe('ide rpc — on a root with no project open', () => {
   let bare: IdeHost;
   let bareSocket: WebSocket;
@@ -1092,8 +1114,40 @@ describe('ide rpc — on a folder of projects', () => {
     await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
   });
 
+  /** Every `game-diagnostics`/`game-gone` frame a FRESH client is greeted with, once its snapshot has arrived. */
+  async function lateGreeting(): Promise<ServerMessage[]> {
+    const s = new WebSocket(`${h.url.replace('http', 'ws')}/ide`);
+    clients.push(s);
+    const frames: ServerMessage[] = [];
+    s.on('message', (data) => frames.push(JSON.parse(String(data)) as ServerMessage));
+    await new Promise((resolve) => s.once('open', resolve));
+    await expect.poll(() => frames.some((m) => m.type === 'snapshot')).toBe(true);
+    // Retained frames are sent right after the snapshot, but may land in a
+    // later chunk than it did; let the socket settle.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return frames.filter((m) => m.type === 'game-diagnostics' || m.type === 'game-gone');
+  }
+
+  it("what a scope's own boot reports survives that open — a late client is still told", async () => {
+    // `one` has a game/spec.json its scope cannot read. The diagnostic is
+    // reported DURING the boot, before `workspace/changed` says `one` is
+    // active — so a reset keyed on "active changed" would wipe it on the
+    // spot. The reset is keyed on a project LEAVING instead (H1) — and
+    // `two` leaving is announced on its own `active: null` frame BEFORE
+    // `one` boots, so a switch does not wipe the newcomer's report either.
+    mkdirSync(join(root, 'one', 'game'));
+    writeFileSync(join(root, 'one', 'game', 'spec.json'), '{');
+    await h.ctx.workspace.open('two');
+    await h.ctx.workspace.open('one');
+    expect(await lateGreeting()).toEqual([
+      expect.objectContaining({
+        source: 'host',
+        diagnostics: [expect.objectContaining({ plugin: 'dev-game', where: 'game/spec.json' })],
+      }),
+    ]);
+  });
+
   it("the host's own diagnostics about a project go when that project does", async () => {
-    // `one` has a game/spec.json its scope cannot read; `two` has none.
     mkdirSync(join(root, 'one', 'game'));
     writeFileSync(join(root, 'one', 'game', 'spec.json'), '{');
     const box = await client();
@@ -1104,18 +1158,48 @@ describe('ide rpc — on a folder of projects', () => {
     expect(about).toMatchObject({ diagnostics: [{ where: 'game/spec.json' }] });
 
     await h.ctx.workspace.open('two');
-    // The connected panel is told to drop the rows: an empty host frame replaces its host list whole.
+    // The connected panel is told to drop the rows: an empty host frame
+    // replaces its host list whole. It arrives on the `active: null` frame
+    // between the two projects — with `one`'s open, the inbox holds no
+    // earlier host frame this could be mistaken for (the test above).
     const cleared = await box.waitFor((m) => m.type === 'game-diagnostics' && m.source === 'host');
     expect(cleared).toMatchObject({ diagnostics: [], dropped: 0 });
     // A fresh client is told nothing about `one` at all.
-    const late = await client();
-    await late.waitFor((m) => m.type === 'snapshot');
-    await new Promise((resolve) => setImmediate(resolve));
-    await expect(
-      Promise.race([
-        late.waitFor((m) => m.type === 'game-diagnostics'),
-        new Promise((resolve) => setTimeout(() => resolve('nothing'), 200)),
-      ]),
-    ).resolves.toBe('nothing');
+    expect(await lateGreeting()).toEqual([]);
+  });
+
+  it("a game's own reports go with its project too, in the shapes the panel clears on", async () => {
+    await h.ctx.workspace.open('one');
+    const box = await client();
+    await box.waitFor((m) => m.type === 'snapshot');
+    // `one`'s game speaks twice over the root: once as a named tile, once anonymously.
+    const game = new WebSocket(`${h.url.replace('http', 'ws')}/ide`);
+    clients.push(game);
+    await new Promise((resolve) => game.once('open', resolve));
+    const report = (extra: object) =>
+      game.send(
+        JSON.stringify({
+          type: 'game-diagnostics',
+          diagnostics: [{ severity: 'error', plugin: 'x', where: 'y', message: 'z' }],
+          dropped: 0,
+          ...extra,
+        }),
+      );
+    report({ game: 'tile' });
+    report({});
+    await box.waitFor((m) => m.type === 'game-diagnostics' && m.game === 'tile');
+    await box.waitFor((m) => m.type === 'game-diagnostics' && m.game === undefined);
+    expect(await lateGreeting()).toHaveLength(2);
+
+    await h.ctx.workspace.open('two');
+    // The named tile's group is deleted (`game-gone`); the anonymous
+    // game's list is replaced whole (an empty `source: 'game'` frame).
+    await box.waitFor((m) => m.type === 'game-gone' && m.game === 'tile');
+    const anonymous = await box.waitFor(
+      (m) => m.type === 'game-diagnostics' && m.source === 'game',
+    );
+    expect(anonymous).toMatchObject({ diagnostics: [], dropped: 0 });
+    expect(anonymous).not.toHaveProperty('game');
+    expect(await lateGreeting()).toEqual([]);
   });
 });

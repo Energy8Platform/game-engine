@@ -67,10 +67,12 @@ export interface Diagnostic {
    *  4. **A fixed name for a piece of the HOST that is not a row at all** —
    *     `'files'` (the project's file service and its four routes),
    *     `'server'` (the host-wide request boundary in `index.ts`, which
-   *     answers for a throw that happened before any handler ran) and
-   *     `'workspace'` (the folder-of-projects service: a root it cannot
-   *     list, an id it does not have, a project scope that failed to
-   *     start or stop). These arrived with the file service and fit none
+   *     answers for a throw that happened before any handler ran, and
+   *     refuses a cross-origin write), `'workspace'` (the folder-of-projects
+   *     service: a root it cannot list, an id it does not have, a project
+   *     scope that failed to start or stop) and `'ide-static'` (the built
+   *     IDE shell: a path not in the build, a build that is not there).
+   *     These arrived with the file service and fit none
    *     of the three above: a read of `art/logo.png` is about no
    *     composition row, no running seam and no editor key. The `where`
    *     carries the requested path, the request path or the project id;

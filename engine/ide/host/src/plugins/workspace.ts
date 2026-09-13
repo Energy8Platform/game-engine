@@ -110,9 +110,12 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
     return rootIsProject ? config.root : join(config.root, id);
   }
 
-  /** Never rejects: a scope that fails to stop is a diagnostic, and the next open proceeds. */
-  async function doClose(): Promise<void> {
-    if (!active) return;
+  /**
+   * Never rejects: a scope that fails to stop is a diagnostic, and the next
+   * open proceeds. Returns whether anything was closed.
+   */
+  async function doClose(): Promise<boolean> {
+    if (!active) return false;
     const current = active;
     active = null;
     try {
@@ -128,6 +131,7 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
         ),
       ];
     }
+    return true;
   }
 
   async function doOpen(id: string): Promise<Diagnostic[]> {
@@ -140,7 +144,11 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
       changed();
       return openDiagnostics;
     }
-    await doClose();
+    // A frame with `active: null` goes out BETWEEN the two projects, before
+    // the next scope boots: listeners that reset per-project state on
+    // "a project left" (`rpc`) do it here, so nothing the NEXT boot reports
+    // (an unusable spec.json, a busy preview port) is wiped by its own open.
+    if (await doClose()) changed();
     if (disposed) return [];
     try {
       const handle = await config.scope(ctx, cwd);

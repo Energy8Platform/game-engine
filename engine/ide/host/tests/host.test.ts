@@ -300,6 +300,42 @@ describe('createIdeHost — a folder of projects', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ active: null, previewUrl: null });
   });
+
+  it('refuses a cross-origin WRITE with 403 (spec §6.2); the IDE’s own origins and every read pass', async () => {
+    host = await createIdeHost({ root: twoProjects(), port: 0 });
+    const open = (origin: string) =>
+      fetch(`${host!.url}/api/workspace/open`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ id: 'a-slot' }),
+      });
+    // A page on another origin — the game's preview, or anything else the
+    // browser has open — cannot move the workspace.
+    const evil = await open('http://evil.example');
+    expect(evil.status).toBe(403);
+    expect(await evil.json()).toMatchObject({
+      diagnostics: [
+        {
+          plugin: 'server',
+          where: '/api/workspace/open',
+          message: 'cross-origin request from http://evil.example refused',
+        },
+      ],
+    });
+    expect(host.ctx.workspace.state().active).toBeNull();
+    // Reads stay open to it.
+    const read = await fetch(`${host.url}/api/workspace`, {
+      headers: { origin: 'http://evil.example' },
+    });
+    expect(read.status).toBe(200);
+    // The vite dev shell (5680) forwards `Origin` unchanged through its proxy.
+    expect((await open('http://127.0.0.1:5680')).status).toBe(200);
+    expect(host.ctx.workspace.state().active).toBe('a-slot');
+    // The host's own origin, as a browser stamps it on a same-origin POST.
+    await host.ctx.workspace.close();
+    expect((await open(host.url)).status).toBe(200);
+    expect(host.ctx.workspace.state().active).toBe('a-slot');
+  });
 });
 
 describe('createIdeHost — boot failure cleanup', () => {

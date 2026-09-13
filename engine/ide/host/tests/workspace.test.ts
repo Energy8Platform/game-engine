@@ -141,10 +141,16 @@ describe('workspace: open, close, switch', () => {
     project('two');
     const log: string[] = [];
     const ctx = await boot(log);
+    const seen: (string | null)[] = [];
+    ctx.on('workspace/changed', (state) => seen.push(state.active));
     await ctx.workspace.open('one');
     await ctx.workspace.open('two');
     expect(log).toEqual([`open ${join(root, 'one')}`, `close ${join(root, 'one')}`, `open ${join(root, 'two')}`]);
     expect(ctx.workspace.state().active).toBe('two');
+    // An `active: null` frame goes out BETWEEN the two, before `two` boots:
+    // listeners that reset per-project state on a departure (rpc) do it
+    // there, not on top of what `two`'s boot has just reported.
+    expect(seen).toEqual(['one', null, 'two']);
   });
 
   it('two opens in flight run one after the other, not interleaved', async () => {

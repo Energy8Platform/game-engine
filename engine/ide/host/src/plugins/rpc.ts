@@ -63,8 +63,24 @@ export interface IdeRpcService {
    * game from having. Receiving is untouched (`ide-bridge` needs
    * `snapshot` for its hot rebind); a frame outside `accept` is dropped
    * silently, with no acknowledgement for a foreign page to learn from.
+   *
+   * `origins` narrows who may CONNECT at all (spec §6.2, the root's
+   * attachment): an upgrade whose `Origin` header is present and not in
+   * the set is refused — the handler returns without `accept()`, and
+   * plugin-server destroys the socket, so the browser's handshake fails.
+   * No `Origin` (a non-browser client) passes; the preview's attachment
+   * passes no `origins` (the game is same-origin there, and `accept`
+   * already bounds what it may say).
    */
-  attach(server: Server, options?: { accept?: ClientMessage['type'][] }): void;
+  attach(
+    server: Server,
+    options?: { accept?: ClientMessage['type'][]; origins?: Set<string> },
+  ): void;
+}
+
+export interface IdeRpcConfig {
+  /** `origins` for the ROOT attachment — see `IdeRpcService.attach`. */
+  origins?: Set<string>;
 }
 
 export const name = 'ide-rpc';
@@ -75,7 +91,7 @@ export const name = 'ide-rpc';
  */
 export const inject = ['server'];
 
-export function apply(ctx: Context) {
+export function apply(ctx: Context, config: IdeRpcConfig = {}) {
   const clients = new Set<WebSocket>();
 
   /** One source's, or one GAME's, whole reported list, as retained. */
@@ -103,8 +119,8 @@ export function apply(ctx: Context) {
    *     game` — `undefined` included, as a legal key of its own.** This
    *     was one retained frame for the WHOLE `game` speaker, full stop,
    *     because more than one connected GAME socket overwhelmingly meant
-   *     more than one VIEW of the same game in this dev model (`e8 dev`
-   *     serves one project) — the preview iframe alongside a directly
+   *     more than one VIEW of the same game in this dev model (one game is
+   *     open at a time, spec §2) — the preview iframe alongside a directly
    *     opened tab, not two different games. That is still exactly right
    *     for a socket that names no game: every such socket shares the one
    *     `undefined` key, most-recent-wins, unchanged. It stopped being
@@ -129,10 +145,12 @@ export function apply(ctx: Context) {
    *     quiet BECAUSE it crashed is exactly the case retention exists for,
    *     and clearing at the moment of disconnect would erase the failure
    *     at the worst possible time. That argument is untouched for the
-   *     `undefined` key (still shared, still never cleared — the one
-   *     project `e8 dev` serves crashing is still worth remembering after
-   *     its socket drops) and for the host (see `lastHostDiagnostics`,
-   *     which has no disconnect to clear on at all). It does NOT survive
+   *     `undefined` key (still shared, not cleared on disconnect — the
+   *     open project's game crashing is still worth remembering after its
+   *     socket drops; it goes only when the PROJECT leaves, see the
+   *     `workspace/changed` listener at the end of `apply`) and for the
+   *     host (see `lastHostDiagnostics`, which has no disconnect to clear
+   *     on at all). It does NOT survive
    *     for a named game, because the reasoning that made "never clear"
    *     SAFE does not survive either: that reasoning was "there are two
    *     slots, full stop" (the old version of decision 1, above), and a
@@ -184,9 +202,11 @@ export function apply(ctx: Context) {
    * Exactly one slot, never a map keyed by anything: the host is one
    * speaker with no game of its own to further key by
    * (`GameDiagnosticsMessage.game` is always absent on a host frame — see
-   * that field's own doc). Never cleared, unlike a named game's entry:
-   * this plugin IS the host process, so there is no "the host
-   * disconnected" event to clear it on.
+   * that field's own doc). Not cleared on any disconnect, unlike a named
+   * game's entry: this plugin IS the host process, so there is no "the
+   * host disconnected" event to clear it on. It is reset when the project
+   * it was about LEAVES — see the `workspace/changed` listener at the end
+   * of `apply`.
    */
   let lastHostDiagnostics: RetainedFrame | null = null;
 
@@ -258,17 +278,19 @@ export function apply(ctx: Context) {
       for (const socket of clients) send(socket, { type: 'workspace', workspace: state });
     },
     attach(server, options) {
-      server.ws('/ide', (req, accept) => handle(options?.accept, req, accept));
+      server.ws('/ide', (req, accept) => handle(options ?? {}, req, accept));
     },
   };
   ctx.provide('ideRpc', service);
 
   type Handle = NonNullable<WsRoute['handle']>;
   async function handle(
-    acceptTypes: ClientMessage['type'][] | undefined,
-    _req: Parameters<Handle>[0],
+    { accept: acceptTypes, origins }: NonNullable<Parameters<IdeRpcService['attach']>[1]>,
+    req: Parameters<Handle>[0],
     accept: Parameters<Handle>[1],
   ): Promise<void> {
+    const origin = req.headers.get('origin');
+    if (origins && origin !== null && !origins.has(origin)) return; // see `attach`: never accepted
     const socket = await accept();
     clients.add(socket);
     socket.on('close', () => {
@@ -403,7 +425,7 @@ export function apply(ctx: Context) {
       }
     }
   }
-  service.attach(ctx.server);
+  service.attach(ctx.server, { origins: config.origins });
 
   // The graph is the source of truth: whenever it moves, the browser hears about it.
   ctx.on('internal/status', () => void broadcast());
@@ -411,28 +433,46 @@ export function apply(ctx: Context) {
   // A project switch is a new graph (or none): the browser sees the new
   // rows, or an empty snapshot, without waiting for the graph to move.
   //
-  // The host's own list goes with the project it was ABOUT. "Never
-  // cleared" (see `lastHostDiagnostics`) was written for one project per
-  // process; a `dev-game` that could not read `broken/game/spec.json` must
-  // not haunt `clean`. Reset only when `active` actually changed — a
-  // rescan or a refused open of an unknown id moves nothing — and say so
-  // with an empty host frame, which is what replaces a connected panel's
-  // host list (the client stores a frame's list whole, per source).
+  // Every retained frame — the host's own list AND each game's — is about
+  // the project that was open; a `dev-game` that could not read
+  // `broken/game/spec.json` must not haunt `clean`, nor must `broken`'s
+  // socket's last report. Reset ONLY when a project LEAVES: `lastActive`
+  // was something and `active` is no longer it. `workspace` emits an
+  // `active: null` frame between two projects, BEFORE the next scope boots
+  // (`doOpen`), so the reset lands there — and whatever the next boot
+  // reports (an unusable spec.json, a busy preview port) survives, since
+  // its own `active: 'next'` frame is not a departure. A rescan, or a
+  // refused open of an unknown id, moves nothing.
+  //
+  // The clearing is spoken in the shapes the client's store already
+  // understands (`plugins/diagnostics.tsx`): a `game-gone` per NAMED game
+  // deletes that game's whole group; an empty frame per anonymous speaker
+  // (the host; a game that named itself nothing) replaces that speaker's
+  // list whole. Only what was actually retained is cleared — an empty
+  // frame for a speaker that never spoke would turn a panel's "no game
+  // connected yet" into "nothing to report", which is a different claim.
   let lastActive: string | null = workspaceState().active;
   ctx.on('workspace/changed', (state) => {
     service.broadcastWorkspace(state);
-    if (state.active !== lastActive) {
-      lastActive = state.active;
+    if (lastActive !== null && state.active !== lastActive) {
+      const gone: ServerMessage[] = [];
+      for (const game of lastGameDiagnostics.keys()) {
+        gone.push(
+          game === undefined
+            ? { type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'game' }
+            : { type: 'game-gone', game },
+        );
+      }
+      if (lastHostDiagnostics) {
+        gone.push({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' });
+      }
+      lastGameDiagnostics.clear();
+      gameSocket.clear();
       hostDiagnostics = createDiagnostics();
       lastHostDiagnostics = null;
-      const cleared: ServerMessage = {
-        type: 'game-diagnostics',
-        diagnostics: [],
-        dropped: 0,
-        source: 'host',
-      };
-      for (const socket of clients) send(socket, cleared);
+      for (const socket of clients) for (const message of gone) send(socket, message);
     }
+    lastActive = state.active;
     void broadcast();
   });
 }

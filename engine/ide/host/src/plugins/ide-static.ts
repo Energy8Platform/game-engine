@@ -54,8 +54,8 @@ const CONTENT_TYPES: Record<string, string> = {
   '.ttf': 'font/ttf',
 };
 
-/** Everything but the root's own surfaces: `/api/*`, the `/ide` socket, `/plugin-client/*`. */
-const SERVED = /^(?!\/api\/|\/ide|\/plugin-client\/).*$/;
+/** Everything but the root's own surfaces: `/api/*`, the `/ide` socket (the segment, not `/ide-icon.svg`), `/plugin-client/*`. */
+const SERVED = /^(?!\/api\/|\/ide(?:\/|$)|\/plugin-client\/).*$/;
 
 export function apply(ctx: Context, config: IdeStaticConfig = {}): void {
   const dist = resolve(config.dist ?? process.env.IDE_DIST ?? DEFAULT_DIST);
@@ -117,7 +117,10 @@ export function apply(ctx: Context, config: IdeStaticConfig = {}): void {
       return refuse(res, 503, dist, message, BUILD_HINT);
     }
     res.status = 503;
-    res.headers.set('content-type', CONTENT_TYPES['.html']);
-    res.body = `<!doctype html><meta charset="utf-8"><title>e8</title><p>${message}</p>`;
+    send(
+      res,
+      CONTENT_TYPES['.html'],
+      Buffer.from(`<!doctype html><meta charset="utf-8"><title>e8</title><p>${message}</p>`),
+    );
   });
 }

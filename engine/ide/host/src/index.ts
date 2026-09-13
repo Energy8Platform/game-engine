@@ -110,7 +110,50 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
       }
     });
 
-    await ctx.plugin(rpc);
+    // Spec §6.2, enforced: the IDE's API accepts WRITES only from the IDE
+    // itself. A browser stamps `Origin` on every cross-origin request and
+    // every WebSocket upgrade, and the game lives on its own origin (the
+    // preview server) precisely so that it — or anything else a browser
+    // has open — cannot reach these routes. Reads stay open (the IDE's
+    // state is not a secret; the shell on 5680 has always read it); an
+    // absent `Origin` (curl, tests, a same-origin fetch on older engines)
+    // is not a browser page acting cross-origin and passes.
+    //
+    // The root's own origin(s), the vite dev server's (5680 — its proxy
+    // forwards `Origin` unchanged), and whatever `IDE_ORIGINS` adds.
+    const ideOrigins = new Set<string>();
+    for (const h of ['127.0.0.1', 'localhost']) {
+      ideOrigins.add(`http://${h}:${ctx.server.port}`);
+      ideOrigins.add(`http://${h}:5680`);
+    }
+    for (const o of (process.env.IDE_ORIGINS ?? '').split(','))
+      if (o.trim()) ideOrigins.add(o.trim());
+    ctx.server.use(async (req, res, next) => {
+      const origin = req.headers.get('origin');
+      if (
+        origin === null ||
+        ideOrigins.has(origin) ||
+        req.method === 'GET' ||
+        req.method === 'HEAD'
+      ) {
+        return next();
+      }
+      res.status = 403;
+      const refusal: DiagnosticsResponse = {
+        diagnostics: [
+          diagnostic(
+            'error',
+            'server',
+            req.path,
+            `cross-origin request from ${origin} refused`,
+            'the IDE API accepts writes only from the IDE itself',
+          ),
+        ],
+      };
+      res.json(refusal);
+    });
+
+    await ctx.plugin(rpc, { origins: ideOrigins });
     const previewPort = options.previewPort ?? 5681;
     await ctx.plugin(workspace, {
       root: options.root,

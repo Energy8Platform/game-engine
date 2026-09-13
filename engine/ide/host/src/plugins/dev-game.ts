@@ -14,13 +14,17 @@
  * (`ctx.ideRpc.attach`, the game's `ide-bridge` opens
  * `ws://${location.host}/ide` — accepting only `game-diagnostics` from
  * it, so the game can report but not `update` e8.yml). The root
- * (`ctx.server`) is the IDE's and gets NO game route, so a game a project
- * author didn't write can't reach the IDE's own session in the browser —
- * a working invariant now, not the
- * accident of `apps/web`'s vite happening to be a different process, which
- * is all that kept the two apart before. The preview server dies with this
- * scope; a port it cannot bind is a diagnostic and `devGamePreview.url ===
- * null` (the project is open without its game).
+ * (`ctx.server`) is the IDE's and gets NO game route; and it refuses a
+ * cross-origin WRITE (any non-GET/HEAD request, and any `/ide` upgrade,
+ * carrying an `Origin` outside the IDE's own — `createIdeHost`'s
+ * allowlist), so a page on the game's origin cannot move the workspace or
+ * rewrite e8.yml through the browser's own credentials. That is the whole
+ * of what §6.2 enforces: the preview socket accepts only reports; the root
+ * refuses cross-origin writes and upgrades. A working invariant now, not
+ * the accident of `apps/web`'s vite happening to be a different process,
+ * which is all that kept the two apart before. The preview server dies
+ * with this scope; a port it cannot bind is a diagnostic and
+ * `devGamePreview.url === null` (the project is open without its game).
  *
  * **Step 1's spike, measured against the real packages (not guessed —
  * see task-11-report.md for the full transcript):**

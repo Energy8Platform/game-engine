@@ -69,6 +69,15 @@ describe('ide-static', () => {
     expect(css.headers.get('content-type')).toBe('text/css');
   });
 
+  it('serves a file whose name merely STARTS with "ide" — the /ide exclusion is a segment, not a prefix', async () => {
+    writeFileSync(join(dist, 'ide-icon.svg'), '<svg/>');
+    const url = await boot(dist);
+    const icon = await fetch(`${url}/ide-icon.svg`);
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get('content-type')).toBe('image/svg+xml');
+    expect(await icon.text()).toBe('<svg/>');
+  });
+
   it('404s as diagnostics JSON for a missing file with an extension', async () => {
     const url = await boot(dist);
     const res = await fetch(`${url}/assets/nope.js`);
@@ -137,7 +146,9 @@ describe('ide-static', () => {
       const res = await fetch(`${url}/`);
       expect(res.status).toBe(503);
       expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
-      expect(await res.text()).toContain(HINT);
+      const body = await res.text();
+      expect(body).toContain(HINT);
+      expect(res.headers.get('content-length')).toBe(String(Buffer.byteLength(body)));
     });
 
     it('answers the same as diagnostics JSON when the client accepts json', async () => {

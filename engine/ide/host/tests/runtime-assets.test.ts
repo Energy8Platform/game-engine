@@ -669,7 +669,7 @@ describe('GET /plugin-runtime/:id', () => {
     // why cleanup is deliberately skipped.
   });
 
-  it("is on the game server only — the root answers ide-static's SPA fallback, and /api/composition is on both", async () => {
+  it("is on the game server only — the root answers ide-static's not-built page, and /api/composition is on both", async () => {
     const onRoot = await fetch(`${runtimeHost.url}/plugin-runtime/reels1`);
     expect(onRoot.status).toBe(503);
     expect(onRoot.headers.get('content-type')).not.toContain('javascript');

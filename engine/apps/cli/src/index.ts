@@ -38,8 +38,13 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 const state = host.ctx.workspace.state();
 if (command === 'dev' && state.active === null) {
   // Degrades to `e8`, not an exit: the host is up and lists what it found.
+  // Two different reasons for "nothing open": no project here at all, or
+  // one that refused to start — whose refusal `state.diagnostics` (printed
+  // below) already holds.
   console.error(
-    `e8 dev: ${process.cwd()} is not a project (no e8.yml) — listing ${state.projects.length} project(s) instead`,
+    existsSync(join(process.cwd(), 'e8.yml'))
+      ? 'e8 dev: the project did not start — see the diagnostics below'
+      : `e8 dev: ${process.cwd()} is not a project (no e8.yml) — listing ${state.projects.length} project(s) instead`,
   );
 }
 

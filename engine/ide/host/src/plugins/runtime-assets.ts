@@ -125,8 +125,9 @@ export interface RuntimeAssetsConfig {
  * task-8-report.md's appended finding). So each row in `/api/composition`'s
  * response now carries `runtimeUrl`: `/@fs/<realpath of the entry>` when
  * `dev-game` is present, `/plugin-runtime/<id>` (this file's own raw
- * route, unchanged) when it is not — e.g. under `e8 ide`, which never
- * spawns a vite instance for the game at all. `engine/game/loader/src/
+ * route, unchanged) when it is not — a project with no usable
+ * `game/spec.json` opens without `dev-game`, and so without a vite
+ * instance for its game (`project-scope.ts`). `engine/game/loader/src/
  * index.ts`'s `composeFromProject` imports whatever URL it's handed
  * rather than constructing one — the same precedent `clientUrl` already
  * set for the EDITOR's own rows (`composition.ts`, consumed by
@@ -138,12 +139,13 @@ export interface RuntimeAssetsConfig {
  *
  * `dev-game`'s presence is read reactively, not through a static
  * `inject` (which would make `runtime-assets` wait forever for a service
- * that never arrives under `e8 ide`): `ctx.inject(['devGameRoot'], ...)`
- * only ever fires if and when `dev-game` is later composed onto the same
- * `ctx` tree (see `dev-game.ts`'s own `ctx.provide('devGameRoot', ...)` —
- * `e8 dev`'s CLI command adds it to `host.ctx` right after `createIdeHost`
- * returns, so it is normally in place well before the browser's first
- * `/api/composition` fetch).
+ * that never arrives in a project without a usable spec):
+ * `ctx.inject(['devGameRoot'], ...)` only ever fires if and when
+ * `dev-game` is later composed onto the same `ctx` tree (see
+ * `dev-game.ts`'s own `ctx.provide('devGameRoot', ...)` — `project-scope`
+ * plugs it in right after this plugin, in the same scope, so it is
+ * normally in place well before the browser's first `/api/composition`
+ * fetch).
  */
 export function apply(ctx: Context, config: RuntimeAssetsConfig) {
   // Set once `dev-game` (if ever) provides `devGameRoot` — see the module

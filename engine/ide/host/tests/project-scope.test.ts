@@ -43,6 +43,18 @@ function project(e8yml = '- name: some-nonexistent-plugin-xyz\n'): string {
   return dir;
 }
 
+/**
+ * Opens `cwd` the way `createIdeHost` does — through the `workspace`
+ * plugin, with `bootProjectScope` as its factory — so what a boot REPORTS
+ * crosses the same `workspace/changed` wiring production has (rpc resets
+ * its retained frames on that event; a direct `bootProjectScope` call
+ * would never fire it and could not catch a reset that wipes the report).
+ */
+async function openViaWorkspace(c: Context, cwd: string, previewPort: number) {
+  await c.plugin(workspace, { root: cwd, scope: (r, p) => bootProjectScope(r, p, previewPort) });
+  return c.workspace.state();
+}
+
 const includeEntries = (c: Context) =>
   [...c.loader.entries()].filter((e) => e.options.name === '@cordisjs/plugin-include');
 
@@ -148,8 +160,9 @@ describe('project-scope: the game', () => {
     const previewPort = (busy.address() as { port: number }).port;
     try {
       const c = await root();
-      const handle = await bootProjectScope(c, gameProject(), previewPort);
-      expect(handle.previewUrl).toBeNull();
+      const state = await openViaWorkspace(c, gameProject(), previewPort);
+      expect(state.active).not.toBeNull();
+      expect(state.previewUrl).toBeNull();
       expect((await fetch(`${url(c)}/api/files`)).status).toBe(200);
       const frames = await greeting(c);
       expect(frames.filter((m) => m.type === 'game-diagnostics')).toEqual([
@@ -193,9 +206,10 @@ describe('project-scope: the game', () => {
     mkdirSync(join(cwd, 'game'));
     writeFileSync(join(cwd, 'game', 'spec.json'), JSON.stringify({ betLevels: [1] }));
 
-    const handle = await bootProjectScope(c, cwd, 0);
+    const state = await openViaWorkspace(c, cwd, 0);
+    expect(state.active).not.toBeNull();
     expect(c.get('devGameRoot')).toBeUndefined();
-    expect(handle.previewUrl).toBeNull();
+    expect(state.previewUrl).toBeNull();
     expect((await fetch(`${url(c)}/api/files`)).status).toBe(200);
     const frames = await greeting(c);
     expect(frames.filter((m) => m.type === 'game-diagnostics')).toEqual([
