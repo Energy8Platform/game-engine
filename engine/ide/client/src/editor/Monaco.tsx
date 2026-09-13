@@ -41,9 +41,39 @@ const SEVERITY: Record<Diagnostic['severity'], keyof Api['MarkerSeverity']> = {
   info: 'Info',
 };
 
-/** Monaco's own two built-in themes, chosen by the shell's `data-theme` (see `StatusItems.tsx`'s `applyTheme`). */
-function themeFor(): 'vs' | 'vs-dark' {
-  return document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark';
+type ThemeName = 'e8-dark' | 'e8-light';
+
+/** The shell's `data-theme` (see `StatusItems.tsx`'s `applyTheme`) picks the theme name. */
+function themeFor(): ThemeName {
+  return document.documentElement.dataset.theme === 'light' ? 'e8-light' : 'e8-dark';
+}
+
+/** Which themes each Monaco instance has been told about — once per name, per API object, so tests with a fresh fake start empty. */
+const defined = new WeakMap<Api['editor'], Set<ThemeName>>();
+
+/**
+ * Monaco's built-in `vs-dark` paints `#1e1e1e`; the editor card is
+ * `--e8-editor-bg` (`#1f1f1f`), and the 1px seam between them was visible.
+ * Each theme is defined on first use, reading the token AT THAT MOMENT —
+ * `data-theme` has already flipped when the observer fires, so the value
+ * read is the light one for `e8-light`. A missing token (a test with no
+ * stylesheet) defines the theme with no colours: Monaco's own default,
+ * the seam, and no throw.
+ */
+function ensureTheme(monaco: Api, name: ThemeName): ThemeName {
+  let set = defined.get(monaco.editor);
+  if (!set) defined.set(monaco.editor, (set = new Set()));
+  if (!set.has(name)) {
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--e8-editor-bg').trim();
+    monaco.editor.defineTheme(name, {
+      base: name === 'e8-light' ? 'vs' : 'vs-dark',
+      inherit: true,
+      rules: [],
+      colors: bg ? { 'editor.background': bg } : {},
+    });
+    set.add(name);
+  }
+  return name;
 }
 
 /** A code editor. It has no title of its own; the screen around it does. */
@@ -69,13 +99,15 @@ export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) 
           value,
           language,
           automaticLayout: true,
-          theme: themeFor(),
+          theme: ensureTheme(monaco, themeFor()),
         });
         editor.onDidChangeModelContent(() => change.current(editor!.getValue()));
         // The theme toggle flips `data-theme` on `<html>`; the editor was
         // white inside a dark shell until it followed. `setTheme` is
         // global to every Monaco on the page, which is what a theme is.
-        observer = new MutationObserver(() => monaco.editor.setTheme(themeFor()));
+        observer = new MutationObserver(() =>
+          monaco.editor.setTheme(ensureTheme(monaco, themeFor())),
+        );
         observer.observe(document.documentElement, {
           attributes: true,
           attributeFilter: ['data-theme'],

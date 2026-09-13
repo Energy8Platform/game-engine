@@ -82,6 +82,9 @@ const fake = vi.hoisted(() => {
       setModelMarkers(model: Editor['model'], _owner: string, markers: Marker[]) {
         model.markers = markers;
       },
+      // The wrapper defines its own themes on creation; this file does not test them.
+      defineTheme(_name: string, _data: Record<string, unknown>) {},
+      setTheme(_name: string) {},
     },
   };
 });

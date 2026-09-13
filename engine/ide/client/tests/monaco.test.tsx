@@ -1,5 +1,5 @@
-import { act, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import { Monaco } from '../src/editor/Monaco';
 
@@ -37,10 +37,17 @@ const fake = vi.hoisted(() => {
     type(v: string): void;
   };
   const editors: Editor[] = [];
-  return {
-    editors,
-    MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
-    editor: {
+  /** A fresh `editor` API per test: the wrapper remembers which themes it defined per API object, so a new object starts it empty. */
+  const makeEditorApi = () => {
+    const api = {
+      themes: [] as Array<{ name: string; data: Record<string, unknown> }>,
+      applied: [] as string[],
+      defineTheme(name: string, data: Record<string, unknown>) {
+        api.themes.push({ name, data });
+      },
+      setTheme(name: string) {
+        api.applied.push(name);
+      },
       create(el: HTMLElement, options: Record<string, unknown>): Editor {
         const model = {
           value: String(options.value ?? ''),
@@ -77,7 +84,14 @@ const fake = vi.hoisted(() => {
       setModelMarkers(model: Editor['model'], _owner: string, markers: Marker[]) {
         model.markers = markers;
       },
-    },
+    };
+    return api;
+  };
+  return {
+    editors,
+    makeEditorApi,
+    MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
+    editor: makeEditorApi(),
   };
 });
 
@@ -106,6 +120,11 @@ async function mount(props: Partial<React.ComponentProps<typeof Monaco>> = {}) {
 }
 
 describe('Monaco', () => {
+  beforeEach(() => {
+    fake.editors.length = 0;
+    fake.editor = fake.makeEditorApi();
+  });
+
   it('shows the text it was given', async () => {
     await mount({ value: 'game = Spin' });
     expect(await screen.findByTestId('editor')).toHaveTextContent('game = Spin');
@@ -177,5 +196,61 @@ describe('Monaco', () => {
     const editor = editorOn(screen.getByTestId('editor'));
     unmount();
     expect(editor.disposed).toBe(true);
+  });
+
+  it('defines the dark theme on the card colour the stylesheet names, once, and uses it', async () => {
+    document.documentElement.style.setProperty('--e8-editor-bg', '#1f1f1f');
+    delete document.documentElement.dataset.theme;
+    // Two editors, one definition: the theme is per Monaco, not per editor.
+    // Mounted one after the other — see `editor-document.test.tsx` for why
+    // two concurrent `import()`s of the mocked slice leave the second hanging.
+    const { rerender } = render(
+      <Monaco value="" language="spin" diagnostics={[]} onChange={() => {}} />,
+    );
+    await waitFor(() => expect(fake.editors.length).toBe(1));
+    rerender(
+      <>
+        <Monaco value="" language="spin" diagnostics={[]} onChange={() => {}} />
+        <Monaco value="" language="spin" diagnostics={[]} onChange={() => {}} />
+      </>,
+    );
+    await waitFor(() => expect(fake.editors.length).toBe(2));
+    expect(fake.editor.themes).toEqual([
+      {
+        name: 'e8-dark',
+        data: {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [],
+          colors: { 'editor.background': '#1f1f1f' },
+        },
+      },
+    ]);
+    expect(fake.editors.map((e) => e.options.theme)).toEqual(['e8-dark', 'e8-dark']);
+  });
+
+  it('defines the light theme when data-theme flips, on the colour the token has THEN', async () => {
+    document.documentElement.style.setProperty('--e8-editor-bg', '#1f1f1f');
+    delete document.documentElement.dataset.theme;
+    render(<Monaco value="" language="spin" diagnostics={[]} onChange={() => {}} />);
+    await waitFor(() => expect(fake.editors.length).toBe(1));
+    document.documentElement.style.setProperty('--e8-editor-bg', '#ffffff');
+    document.documentElement.dataset.theme = 'light';
+    await waitFor(() =>
+      expect(fake.editor.themes.map((t) => t.name)).toEqual(['e8-dark', 'e8-light']),
+    );
+    expect(fake.editor.themes[1].data).toMatchObject({
+      base: 'vs',
+      colors: { 'editor.background': '#ffffff' },
+    });
+    expect(fake.editor.applied).toEqual(['e8-light']);
+  });
+
+  it('registers a theme without colours when the token is not on :root', async () => {
+    document.documentElement.style.removeProperty('--e8-editor-bg');
+    delete document.documentElement.dataset.theme;
+    render(<Monaco value="" language="spin" diagnostics={[]} onChange={() => {}} />);
+    await waitFor(() => expect(fake.editors.length).toBe(1));
+    expect(fake.editor.themes[0].data).toMatchObject({ base: 'vs-dark', colors: {} });
   });
 });
