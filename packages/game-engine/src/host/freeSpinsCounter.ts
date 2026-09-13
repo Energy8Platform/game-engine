@@ -20,8 +20,11 @@ export interface FreeSpinsView {
 }
 
 export interface FreeSpinsCounter {
-  /** Bonus start: seed the total with the trigger's awarded spins. Resets current + totalWin. */
-  enter(awarded: number): FreeSpinsView;
+  /** Bonus start: seed the total with the trigger's awarded spins and `totalWin` with the round's
+   *  cumulative win so far (the trigger spin's own win, or the parent level's take when a bonus
+   *  nests). Resets current. Opening on 0 hid the carried-in win until the first segment settled
+   *  (Stake QA: "the triggering-spin win should be added to Total Win before the first free spin"). */
+  enter(awarded: number, totalWin?: number): FreeSpinsView;
   /** One free spin presented: count it, fold in any retrigger `awarded`, carry the cumulative win. */
   spin(awarded: number, totalWin: number): FreeSpinsView;
 }
@@ -30,10 +33,10 @@ export function createFreeSpinsCounter(): FreeSpinsCounter {
   let total = 0;
   let current = 0;
   return {
-    enter(awarded: number): FreeSpinsView {
+    enter(awarded: number, totalWin = 0): FreeSpinsView {
       total = awarded;
       current = 0;
-      return { current, total, totalWin: 0 };
+      return { current, total, totalWin };
     },
     spin(awarded: number, totalWin: number): FreeSpinsView {
       current += 1;
