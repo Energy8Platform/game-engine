@@ -17,6 +17,8 @@ export default defineConfig({
   // vite, `e8-server`) for the simple guarantee that only one fixed-port
   // host is ever up at a time.
   workers: 1,
+  // `vite build` once, for the one spec that reads `dist` through the host (workspace.spec.ts).
+  globalSetup: './tests/e2e/global-setup.ts',
   use: { baseURL: 'http://127.0.0.1:5680' },
   webServer: {
     command: 'npm run dev',

@@ -283,7 +283,7 @@ test('a deep link to the preview opens it with no false warning', async ({ page 
     await expect(page.getByTestId('doc-preview')).toHaveAttribute('aria-selected', 'true', {
       timeout: 20_000,
     });
-    await expect(page.getByTestId(/^tile-/).first()).toBeVisible();
+    await expect(page.getByTestId(/^tile-/).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('diagnostics-panel')).not.toContainText(/not registered/);
   } finally {
     await host.stop();

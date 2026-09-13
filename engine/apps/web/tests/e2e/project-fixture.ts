@@ -218,3 +218,81 @@ export async function startDevHost(dir: string): Promise<DevHost> {
     stop: () => host.stop(),
   };
 }
+
+/**
+ * A temp ROOT that is not a project, holding `n` copies of `first-slot` as
+ * `slot-1..n` — what `e8` (no `dev`) in a folder of projects sees (spec
+ * §3/§4). Same place and same reasons as `projectCopy`, plus one thing a
+ * copy one level DEEPER needs: every `tsconfig.json` in the fixture (its
+ * own, and `plugins/reel-step`'s — `TSCONFIGS`) extends
+ * `tsconfig.base.json` by RELATIVE path, which vite's esbuild transform
+ * reads for every `.ts` it serves, so each copy's `extends` is rewritten
+ * to the absolute path (measured: one level off and every module 500s —
+ * `projectCopy`'s doc; the plugin's was the second one to, on the first run).
+ *
+ * The second copy differs in TWO measured ways, one per reader:
+ *  - `game/spec.json` gets `name: 'Second Slot'` — what the HOST's
+ *    `projectName` reads for the sidebar and the status bar. (The
+ *    checked-in spec has no `name` at all, so `slot-1` is listed under
+ *    its id.)
+ *  - `index.html`'s `<title>` becomes `Second Slot — e8 dev` — the one
+ *    thing the running GAME shows that a spec field does not drive:
+ *    `spec.json` is "not read by e8-server or this task's runtime" (its
+ *    own `note`), `#status` reads `ready`/`done` for both, and the only
+ *    spec field the scope forwards (`betLevels[0]`) is never rendered.
+ */
+const TSCONFIGS = ['tsconfig.json', 'plugins/reel-step/tsconfig.json'];
+
+export function workspaceCopy(n: number): string {
+  const root = mkdtempSync(join(EXAMPLES, 'e8-compose-'));
+  for (let i = 1; i <= n; i++) {
+    const dir = join(root, `slot-${i}`);
+    cpSync(FIXTURE, dir, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
+    for (const rel of TSCONFIGS) {
+      const file = join(dir, rel);
+      const tsconfig = JSON.parse(readFileSync(file, 'utf8')) as { extends: string };
+      tsconfig.extends = join(FIXTURE, dirname(rel), tsconfig.extends);
+      writeFileSync(file, JSON.stringify(tsconfig, null, 2));
+    }
+    if (i === 2) {
+      const specFile = join(dir, 'game', 'spec.json');
+      const spec = JSON.parse(readFileSync(specFile, 'utf8')) as Record<string, unknown>;
+      writeFileSync(specFile, JSON.stringify({ ...spec, name: SECOND_NAME }, null, 2));
+      const htmlFile = join(dir, 'index.html');
+      writeFileSync(
+        htmlFile,
+        readFileSync(htmlFile, 'utf8').replace('<title>first-slot', `<title>${SECOND_NAME}`),
+      );
+    }
+  }
+  return root;
+}
+
+/** What `workspaceCopy`'s second project is called — in its spec and in its page title. */
+export const SECOND_NAME = 'Second Slot';
+
+export interface WorkspaceHost {
+  /** The IDE host's own origin (5679). */
+  url: string;
+  /** Where the OPEN project's game is served; `null` while none is. */
+  previewUrl(): string | null;
+  stop(): Promise<void>;
+}
+
+/**
+ * Boots `e8` over `root` — a folder OF projects, so nothing opens at boot
+ * and `previewUrl()` starts `null`. Port 5679 for the reason
+ * `startDevHost` gives; `previewPort: 0` so the game lands on a free port
+ * and never fights another spec's 5681.
+ */
+export async function startHost(
+  root: string,
+  options: Pick<Parameters<typeof createIdeHost>[0], 'ideDist'> = {},
+): Promise<WorkspaceHost> {
+  const host: IdeHost = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
+  return {
+    url: host.url,
+    previewUrl: () => host.ctx.workspace.state().previewUrl,
+    stop: () => host.stop(),
+  };
+}
