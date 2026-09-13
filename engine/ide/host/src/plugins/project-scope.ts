@@ -29,7 +29,7 @@ import type { ProjectScopeHandle } from './workspace';
 
 export interface ProjectScopeConfig {
   cwd: string;
-  /** The game preview's port (spec §6). Task 4 hands it to `dev-game`; until then the game is on the root server. */
+  /** The game preview's port (spec §6) — `dev-game` boots the game's own server there. */
   previewPort: number;
 }
 
@@ -62,7 +62,7 @@ export async function apply(ctx: Context, config: ProjectScopeConfig): Promise<v
   if (game.diagnostics.length) {
     ctx.ideRpc.reportGameDiagnostics(game.diagnostics);
   } else if (game.config) {
-    await ctx.plugin(devGame, { ...game.config, port: 0 });
+    await ctx.plugin(devGame, { ...game.config, port: 0, previewPort: config.previewPort });
   }
 }
 
@@ -79,13 +79,9 @@ export function bootProjectScope(
   // rather than leaving a FAILED fiber in the registry until the root goes.
   return Promise.resolve(fiber).then(
     () => {
-      // `root` is the workspace's ctx, which injects no `server`; `get` reads the store without the inject check.
-      const server = root.get('server')!;
-      // A preview only when a game is actually up (dev-game provides
-      // `devGameRoot` on this scope); an IDE-only project has none.
-      const previewUrl = fiber.ctx.get('devGameRoot')
-        ? `http://${server.host}:${server.port}`
-        : null;
+      // Where dev-game put the game (its own server, spec §6) — `null` for
+      // an IDE-only project, and for a preview port that could not be bound.
+      const previewUrl = fiber.ctx.get('devGamePreview')?.url ?? null;
       return { previewUrl, dispose: () => fiber.dispose() };
     },
     async (error: unknown) => {

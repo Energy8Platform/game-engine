@@ -5,33 +5,20 @@
  * `@energy8engine/game-runtime`'s `createGame` composes it, minus the
  * canvas — there is no canvas on this side of the wire, only the math).
  *
- * **One server, two consumers.** This plugin is registered onto the SAME
- * `ctx` `createIdeHost` already stood up `@cordisjs/plugin-server` on — not
- * a second server. `e8 dev`'s CLI command plugs this in after
- * `createIdeHost()` resolves; `e8 ide` does not, so an ordinary IDE session
- * never spawns an `e8-server` process it has no use for.
- *
- * **The spec's separate-origin rule (§9) holds today only incidentally —
- * do not read that as this plugin keeping the two apart on purpose.** The
- * rule: the game preview must live on a different origin from the IDE
- * itself, so a game a project author didn't write can't reach the IDE's
- * own session/credentials in the browser. In this repo's current setup
- * that separation exists because `engine/apps/web` runs its OWN vite dev
- * server (a different process, a different port) for the IDE's React SPA,
- * while THIS plugin's vite instance — reached through `createIdeHost`'s
- * server, proxied from `apps/web`'s dev server — serves only the game.
- * Two different servers, so two different origins, but nothing here
- * enforces that on purpose. Collapse them into one and the rule silently
- * stops holding: under `e8 dev` *alone* (no `apps/web` vite in front —
- * exactly what `engine/apps/cli`'s `dev` command boots on its own, and
- * what a real deployment of this plugin would look like) there is no IDE
- * SPA served at all, because this plugin's own catch-all route (point 3
- * below) claims `/` outright — `dev-game` was written assuming it owns
- * the whole origin it's mounted on, precisely because nothing else was
- * ever competing for `/` on that origin. The next person wiring a real
- * preview-serving path (the cloud trajectory this spec's §9 describes)
- * needs to keep the origins apart DELIBERATELY, not rely on this
- * accidental two-process arrangement continuing to exist.
+ * **Two servers, on purpose (spec §6).** The game is served from its OWN
+ * origin: this plugin boots a second `@cordisjs/plugin-server` instance
+ * (`config.previewPort`, 5681 by default) inside its scope and hangs
+ * everything the page fetches same-origin on it — vite's catch-all,
+ * `/api/spin`, the `/@fs/` guard, `/api/composition` + `/plugin-runtime/:id`
+ * (`ctx.runtimeAssets.attachGameRoutes`) and the `/ide` socket
+ * (`ctx.ideRpc.attach`, the game's `ide-bridge` opens
+ * `ws://${location.host}/ide`). The root (`ctx.server`) is the IDE's and
+ * gets NO game route, so a game a project author didn't write can't reach
+ * the IDE's own session in the browser — a working invariant now, not the
+ * accident of `apps/web`'s vite happening to be a different process, which
+ * is all that kept the two apart before. The preview server dies with this
+ * scope; a port it cannot bind is a diagnostic and `devGamePreview.url ===
+ * null` (the project is open without its game).
  *
  * **Step 1's spike, measured against the real packages (not guessed —
  * see task-11-report.md for the full transcript):**
@@ -43,7 +30,7 @@
  *     wrappers at all; bridging needs the RAW node objects, which those
  *     wrappers expose as plain (not TS-`private`) fields — `req._req`,
  *     `res._res`.
- *  2. `ctx.server.use(cb)` is `ctx.on('server/request', cb, { prepend:
+ *  2. `server.use(cb)` is `ctx.on('server/request', cb, { prepend:
  *     true })` — it ALWAYS runs before the route-dispatch listener
  *     (registered once, in `Server`'s own constructor, without prepend).
  *     With `appType: 'spa'` (the default), Vite's own SPA fallback
@@ -52,13 +39,12 @@
  *     `/api/health` itself, 200, before our route ever saw the request.
  *     So vite must NOT be a `.use()` middleware here.
  *  3. The fix: register vite as a plain, catch-all ROUTE —
- *     `ctx.server.all(/^.*$/, ...)` — and register it LAST. `HttpRoute`s
+ *     `preview.all(/^.*$/, ...)` — and register it LAST. `HttpRoute`s
  *     registered via `.get()`/`.post()`/`.all()` all land in the same
  *     `httpRoutes` list, checked in REGISTRATION order by the one
  *     dispatch listener; an earlier, more specific route (`/api/spin`,
- *     and whatever the host already registered — `/api/health`,
- *     `/plugin-client/:id`) wins, and only a genuinely unmatched request
- *     falls through to this plugin's catch-all.
+ *     `/api/composition`, `/plugin-runtime/:id`) wins, and only a
+ *     genuinely unmatched request falls through to this plugin's catch-all.
  *  4. Bridging one HTTP request: call `vite.middlewares(req._req, res._res,
  *     next)`, and race two signals for "is this settled yet" — the
  *     Connect `next` callback firing (vite didn't handle it — fall through
@@ -111,10 +97,10 @@
 import { realpathSync } from 'node:fs';
 import { posix, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
+import Server from '@cordisjs/plugin-server';
 import * as session from '@energy8engine/session-dev';
-import type { Diagnostic, SpinResult } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
-import type { IdeRpcService } from './rpc';
 import { runtimeEntryPaths } from './runtime-assets';
 
 /**
@@ -140,9 +126,15 @@ export interface DevGameRootService {
   readonly warmedEntries: readonly string[];
 }
 
+/** Where the game is served (spec §6) — `null` when the preview port could not be bound. */
+export interface DevGamePreviewService {
+  readonly url: string | null;
+}
+
 declare module 'cordis' {
   interface Context {
     devGameRoot: DevGameRootService;
+    devGamePreview: DevGamePreviewService;
   }
 }
 
@@ -161,10 +153,18 @@ export interface DevGameConfig {
   port?: number;
   /** Forwarded to `session-dev` — explicit `e8-server` binary path, mainly for tests. */
   binPath?: string;
+  /** The game's own server's port (spec §6); `0` picks a free one. */
+  previewPort: number;
 }
 
 export const name = 'dev-game';
-export const inject = ['server'];
+/**
+ * `ideRpc` is injected, not read leniently as it once was: `project-scope`
+ * (the one thing that plugs this in) injects it from the root, and this
+ * plugin needs it before anything else — the preview's `/ide` socket and
+ * the bind-failure diagnostic both go through it.
+ */
+export const inject = ['server', 'runtimeAssets', 'ideRpc'];
 
 /** Vite's own prefix for "serve this absolute path off disk". */
 const FS_PREFIX = '/@fs/';
@@ -201,6 +201,39 @@ function isInside(root: string, file: string): boolean {
 }
 
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
+  // The game's own server (spec §6, see the module doc). `isolate('server')`
+  // gives this child context its own `server` binding so the root's stays
+  // the IDE's; the instance is read off the plugin's own fiber ctx — the
+  // one place a freshly provided service is readable without `inject`
+  // (measured in the pre-plan spike; the same rule `session` below
+  // follows). First, before `e8-server` is spawned: a game nothing can
+  // reach needs no math process.
+  const previewFiber = ctx
+    .isolate('server')
+    .plugin(Server, { host: ctx.server.host, port: config.previewPort });
+  let preview: Server;
+  try {
+    await previewFiber;
+    preview = previewFiber.ctx.server;
+  } catch (error) {
+    await previewFiber.dispose();
+    ctx.ideRpc.reportGameDiagnostics([
+      diagnostic(
+        'error',
+        'dev-game',
+        `preview port ${config.previewPort}`,
+        `the preview server could not start: ${error instanceof Error ? error.message : String(error)}`,
+        'free the port, or set PREVIEW_PORT',
+      ),
+    ]);
+    ctx.provide('devGamePreview', { url: null });
+    return;
+  }
+  ctx.provide('devGamePreview', { url: `http://${preview.host}:${preview.port}` });
+  // What the page fetches same-origin besides this plugin's own routes.
+  ctx.ideRpc.attach(preview);
+  ctx.runtimeAssets.attachGameRoutes(preview);
+
   // Resolved once, here, rather than read as `config.gamesDir` at every use
   // below. A trailing slash is an easy way to spell the same directory
   // (`join(cwd, 'game')` never produces one, which is why this was not hit
@@ -290,17 +323,8 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     });
   });
 
-  /**
-   * `ideRpc` is read leniently, per call — `rpc` and `dev-game` are
-   * SIBLING plugin scopes under `e8 dev`'s shared host `ctx`, and this
-   * plugin's own standalone tests compose it with no `rpc` at all, so a
-   * static `inject` would leave this fiber PENDING forever waiting for a
-   * service nobody provides.
-   */
-  function reportToPanel(diagnostics: Diagnostic[]): void {
-    const ideRpc = ctx.reflect.get('ideRpc', false) as IdeRpcService | undefined;
-    ideRpc?.reportGameDiagnostics(diagnostics);
-  }
+  const reportToPanel = (diagnostics: Diagnostic[]) =>
+    ctx.ideRpc.reportGameDiagnostics(diagnostics);
 
   /**
    * The row runtime halves vite's dependency optimizer must see BEFORE the
@@ -361,8 +385,8 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     appType: 'spa',
     server: {
       middlewareMode: true,
-      host: ctx.server.host,
-      port: ctx.server.port,
+      host: preview.host,
+      port: preview.port,
       // See point 5 above — the coexistence with plugin-server's own
       // WS-upgrade dispatcher is racy and was measured to fail; disabled
       // rather than relied on.
@@ -384,7 +408,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     };
   }, 'dev-game:vite');
 
-  ctx.server.post('/api/spin', async (req, res) => {
+  preview.post('/api/spin', async (req, res) => {
     let body: { betLevel?: number } = {};
     try {
       body = (await req.json()) as { betLevel?: number };
@@ -500,7 +524,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     }
   });
 
-  ctx.server.all(/^\/@fs\//, async (req, res, next) => {
+  preview.all(/^\/@fs\//, async (req, res, next) => {
     const requested = fsPathFromRequestUrl(req._req.url ?? '');
     if (requested === null) return next();
 
@@ -531,10 +555,10 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   });
 
   // Registered LAST, deliberately — see point 3 above. Everything this
-  // plugin (and the host it's added to) registers more specifically must
+  // plugin (and `attachGameRoutes` above) registers more specifically must
   // already be in `httpRoutes` by the time this runs, since only an
   // unmatched request reaches it.
-  ctx.server.all(/^.*$/, async (req, res, next) => {
+  preview.all(/^.*$/, async (req, res, next) => {
     let settled = false;
     await new Promise<void>((resolve) => {
       const finish = () => {

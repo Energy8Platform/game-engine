@@ -190,7 +190,9 @@ export const PNG_BYTES = Buffer.from(
 );
 
 export interface DevHost {
-  /** Origin of the running GAME — `dev-game`'s catch-all owns `/` on the host's own port. */
+  /** The IDE host's own origin (5679) — `/api/*`, `/ide`, `/plugin-client`. */
+  url: string;
+  /** Origin of the running GAME — its own server (spec §6), a free port here; never the host's 5679. */
   gameUrl: string;
   stop(): Promise<void>;
 }
@@ -210,6 +212,9 @@ export interface DevHost {
  */
 export async function startDevHost(dir: string): Promise<DevHost> {
   const host: IdeHost = await createIdeHost({ root: dir, port: 5679, previewPort: 0 });
-  // Still the root's own URL until the preview moves to its own origin.
-  return { gameUrl: host.ctx.workspace.state().previewUrl!, stop: () => host.stop() };
+  return {
+    url: host.url,
+    gameUrl: host.ctx.workspace.state().previewUrl!,
+    stop: () => host.stop(),
+  };
 }

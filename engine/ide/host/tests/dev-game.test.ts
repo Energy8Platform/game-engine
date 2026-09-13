@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
@@ -18,6 +19,7 @@ import type { ServerMessage } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as devGame from '../src/plugins/dev-game';
 import * as files from '../src/plugins/files';
+import * as rpc from '../src/plugins/rpc';
 
 /**
  * `dev-game`'s HTTP half — measured in Step 1 (see task-11-report.md for
@@ -27,7 +29,7 @@ import * as files from '../src/plugins/files';
  *  - Vite's `appType: 'spa'` fallback swallows ANY unmatched request —
  *    including ones meant for our own API routes — if it gets first crack.
  *    So vite must be wired as a plain, LAST-registered route
- *    (`ctx.server.all(/^.*$/, ...)`), never via `ctx.server.use()` (which
+ *    (`preview.all(/^.*$/, ...)`), never via `.use()` (which
  *    always prepends ahead of route dispatch, per plugin-server's own
  *    `use()` implementation), and only after every specific route this
  *    plugin (and its host) registers.
@@ -36,6 +38,11 @@ import * as files from '../src/plugins/files';
  *    `ctx.server.ws()` route — it races Vite's own HMR websocket if left
  *    enabled on the same raw `http.Server`. `dev-game` disables Vite's HMR
  *    (`hmr: false`) rather than relying on that coexistence.
+ *
+ * Since Task 4 the game lives on a SECOND server `dev-game` boots for it
+ * (spec §6) — every fetch of a game route below goes to `preview(ctx)`,
+ * never to the root, and the "own origin" block at the end holds the
+ * split itself.
  */
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
 const WEB_ROOT = join(__dirname, 'fixtures', 'dev-game-web');
@@ -54,19 +61,43 @@ afterEach(async () => {
   for (const dir of restartTestDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * A bare root carrying exactly what `dev-game` injects: the IDE's own
+ * server, `rpc` (`/ide`, `reportGameDiagnostics`) and a stand-in
+ * `runtimeAssets` — the real one needs a project; what `dev-game` does
+ * with it (`attachGameRoutes(preview)`) is held by project-scope.test.ts.
+ */
+async function bare(): Promise<Context> {
+  ctx = new Context();
+  await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
+  await ctx.plugin(rpc);
+  await ctx.plugin({
+    name: 'runtime-assets-stub',
+    apply(c: Context) {
+      c.provide('runtimeAssets', { attachGameRoutes() {} });
+    },
+  });
+  return ctx;
+}
+
+/** Where the GAME answers: the preview server `dev-game` booted for it (spec §6). */
+const preview = (c: Context) => c.get('devGamePreview')!.url!;
+/** The IDE's own server — the one `dev-game` was plugged under. */
+const rootUrl = (c: Context) => `http://${c.server.host}:${c.server.port}`;
+
 describe('dev-game — serving the bundle', () => {
   it('serves the game root through vite, transformed', async () => {
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/`);
+    const res = await fetch(`${preview(ctx!)}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const text = await res.text();
@@ -102,33 +133,33 @@ describe('dev-game — serving the bundle', () => {
     // after it for `next()` to actually reach. That narrower gap is
     // recorded, not fixed, the same way the `writableEnded`/`headersSent`
     // OR-vs-AND gap two lines below already is.
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/%zz`);
+    const res = await fetch(`${preview(ctx!)}/%zz`);
     expect(res.status).toBe(405);
     expect(await res.text()).not.toContain('dev-game fixture root');
   });
 
   it('serves a JS module from the game root through vite’s on-demand transform', async () => {
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/main.js`);
+    const res = await fetch(`${preview(ctx!)}/main.js`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('javascript');
     const text = await res.text();
@@ -232,6 +263,7 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
     const body = await (await fetch(`${host.url}/api/composition`)).json();
@@ -239,7 +271,8 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
     const row = body.rows.find((r: { id: string }) => r.id === 'multi1');
     expect(row.runtimeUrl).toMatch(/^\/@fs\/.*runtime\.js$/);
 
-    const entryRes = await fetch(`${host.url}${row.runtimeUrl}`);
+    // Served by dev-game's vite — on the preview server, not the root.
+    const entryRes = await fetch(`${preview(host.ctx)}${row.runtimeUrl}`);
     expect(entryRes.status).toBe(200);
     expect(await entryRes.text()).toContain('helper.js');
 
@@ -247,7 +280,7 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
     // looks at the DECLARED entry — so this confirms vite's own serving of
     // a plain sibling file is unaffected by the new check existing at all.
     const helperUrl = row.runtimeUrl.replace(/runtime\.js$/, 'helper.js');
-    const helperRes = await fetch(`${host.url}${helperUrl}`);
+    const helperRes = await fetch(`${preview(host.ctx)}${helperUrl}`);
     expect(helperRes.status).toBe(200);
     expect(await helperRes.text()).toContain('HELPER_LOADED');
   });
@@ -313,6 +346,7 @@ describe('dev-game — a row added after the server started says so', () => {
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
     // Nothing to say yet: every row was in the crawl.
@@ -380,17 +414,17 @@ describe('dev-game — /@fs/ cannot be walked out of the served roots', () => {
     const link = join(workspace, 'link.js');
     symlinkSync(secret, link);
 
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: workspace,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
     return {
-      base: `http://${ctx.server.host}:${ctx.server.port}`,
+      base: preview(ctx!),
       link,
       secret: join(workspace, 'inside.js'),
     };
@@ -441,17 +475,17 @@ describe('dev-game — /@fs/ cannot be walked out of the served roots', () => {
 
 describe('dev-game — the spin route', () => {
   it('carries a real spin through to ctx.session, shape unchanged', async () => {
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/api/spin`, {
+    const res = await fetch(`${preview(ctx!)}/api/spin`, {
       method: 'POST',
     });
     expect(res.status).toBe(200);
@@ -471,18 +505,18 @@ describe('dev-game — the spin route', () => {
   });
 
   it('reports a spin against a session that never started as diagnostics, not a crash', async () => {
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
       binPath: '/nonexistent/e8-server-binary',
     });
 
-    const res = await fetch(`http://${ctx.server.host}:${ctx.server.port}/api/spin`, {
+    const res = await fetch(`${preview(ctx!)}/api/spin`, {
       method: 'POST',
     });
     expect(res.status).toBe(502);
@@ -516,6 +550,7 @@ describe('dev-game — the spin route', () => {
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
       binPath: '/nonexistent/e8-server-binary',
     });
 
@@ -524,7 +559,7 @@ describe('dev-game — the spin route', () => {
     socket.on('message', (data) => received.push(JSON.parse(String(data)) as ServerMessage));
     await new Promise((resolve) => socket.once('open', resolve));
 
-    const res = await fetch(`${host.url}/api/spin`, { method: 'POST' });
+    const res = await fetch(`${preview(host.ctx)}/api/spin`, { method: 'POST' });
     expect(res.status).toBe(502); // the HTTP response still carries it too — unchanged
 
     await expect.poll(() => received.filter((m) => m.type === 'game-diagnostics')).toHaveLength(1);
@@ -538,46 +573,124 @@ describe('dev-game — the spin route', () => {
   });
 });
 
-describe('dev-game — one server, two consumers', () => {
-  it('leaves /api/health and the composition serving once dev-game is added', async () => {
+/**
+ * Spec §6: the game is served from its OWN origin, on purpose — a second
+ * `@cordisjs/plugin-server` instance `dev-game` boots in its scope. This
+ * used to be "one server, two consumers", and the separation held only
+ * because `apps/web`'s vite happened to be a different process. Now the
+ * root is the IDE's and the preview is the game's, and the split is what
+ * this block asserts — not merely that both keep answering.
+ */
+describe('dev-game — the game on its own origin', () => {
+  const game = { root: WEB_ROOT, gamesDir: GAME, gameId: 'first-slot', betLevel: 1.0, port: 0 };
+
+  it('the game html answers on the preview and NOT on the root; the root keeps its own routes', async () => {
     host = await createIdeHost({ root: WORKSPACE, port: 0 });
-    await host.ctx.plugin(devGame, {
-      root: WEB_ROOT,
-      gamesDir: GAME,
-      gameId: 'first-slot',
-      betLevel: 1.0,
-      port: 0,
-    });
+    await host.ctx.plugin(devGame, { ...game, previewPort: 0 });
+
+    const url = preview(host.ctx);
+    expect(url).not.toBe(host.url);
+    const page = await fetch(`${url}/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('dev-game fixture root');
+
+    // The root has no catch-all any more: cordis's own empty 404.
+    const root = await fetch(`${host.url}/`);
+    expect(root.status).toBe(404);
+    expect(await root.text()).not.toContain('dev-game fixture root');
 
     const health = await fetch(`${host.url}/api/health`);
-    expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ ok: true });
+    expect(await host.ctx.composition.snapshot()).toEqual({ rows: [], diagnostics: [] });
+  });
 
-    const snapshot = await host.ctx.composition.snapshot();
-    expect(snapshot).toEqual({ rows: [], diagnostics: [] });
+  it('/api/spin is on the preview only', async () => {
+    await bare();
+    await ctx!.plugin(devGame, { ...game, previewPort: 0 });
+    expect((await fetch(`${preview(ctx!)}/api/spin`, { method: 'POST' })).status).toBe(200);
+    expect((await fetch(`${rootUrl(ctx!)}/api/spin`, { method: 'POST' })).status).toBe(404);
+  });
 
-    const root = await fetch(`${host.url}/`);
-    expect(root.status).toBe(200);
-    expect(await root.text()).toContain('dev-game fixture root');
+  it("/ide upgrades on both — the game's ide-bridge opens ws://<its own host>/ide", async () => {
+    await bare();
+    await ctx!.plugin(devGame, { ...game, previewPort: 0 });
+    for (const base of [rootUrl(ctx!), preview(ctx!)]) {
+      const socket = new WebSocket(`${base.replace('http', 'ws')}/ide`);
+      const first = await new Promise<ServerMessage>((resolve, reject) => {
+        socket.once('message', (data) => resolve(JSON.parse(String(data)) as ServerMessage));
+        socket.once('error', reject);
+      });
+      expect(first.type).toBe('workspace');
+      socket.close();
+    }
+  });
+
+  it('a busy previewPort is a dev-game diagnostic naming the port; the scope stays up without a preview', async () => {
+    const busy = createNetServer().listen(0, '127.0.0.1');
+    await new Promise((resolve) => busy.once('listening', resolve));
+    const previewPort = (busy.address() as { port: number }).port;
+    try {
+      await bare();
+      const socket = new WebSocket(`${rootUrl(ctx!).replace('http', 'ws')}/ide`);
+      const frames: ServerMessage[] = [];
+      socket.on('message', (data) => frames.push(JSON.parse(String(data)) as ServerMessage));
+      await new Promise((resolve) => socket.once('open', resolve));
+
+      const fiber = ctx!.plugin(devGame, { ...game, previewPort });
+      await fiber;
+      expect(ctx!.get('devGamePreview')).toEqual({ url: null });
+      expect(fiber.ctx.get('devGamePreview')).toEqual({ url: null });
+      await expect.poll(() => frames.filter((m) => m.type === 'game-diagnostics')).toHaveLength(1);
+      expect(frames.find((m) => m.type === 'game-diagnostics')).toMatchObject({
+        source: 'host',
+        diagnostics: [
+          {
+            severity: 'error',
+            plugin: 'dev-game',
+            where: `preview port ${previewPort}`,
+            fix: 'free the port, or set PREVIEW_PORT',
+          },
+        ],
+      });
+      // The root still listens (cordis's own 404, no game html), and no
+      // e8-server was spawned for a game nothing can reach.
+      expect((await fetch(`${rootUrl(ctx!)}/`)).status).toBe(404);
+      expect(ctx!.get('session')).toBeUndefined();
+      socket.close();
+    } finally {
+      await new Promise((resolve) => busy.close(resolve));
+    }
+  });
+
+  it('disposing the scope closes the preview port and leaves the root answering', async () => {
+    await bare();
+    const fiber = ctx!.plugin(devGame, { ...game, previewPort: 0 });
+    await fiber;
+    const url = preview(ctx!);
+    expect((await fetch(`${url}/`)).status).toBe(200);
+
+    await fiber.dispose();
+    await expect(fetch(`${url}/`)).rejects.toThrow();
+    expect((await fetch(`${rootUrl(ctx!)}/`)).status).toBe(404);
   });
 });
 
 describe('dev-game — teardown', () => {
   it('stops the spawned e8-server process on dispose, not just the http server', async () => {
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const pid = ctx.session.pid;
+    const pid = ctx!.session.pid;
     expect(pid).not.toBeNull();
 
-    await ctx.fiber.dispose();
+    await ctx!.fiber.dispose();
     ctx = undefined;
 
     // The OS pid is actually gone — not just "stop() was called" — same
@@ -682,8 +795,8 @@ describe('dev-game — restart on a script.spin write', () => {
     );
   }
 
-  async function spinScriptSha256(port: number): Promise<string | undefined> {
-    const res = await fetch(`http://127.0.0.1:${port}/api/spin`, { method: 'POST' });
+  async function spinScriptSha256(base: string): Promise<string | undefined> {
+    const res = await fetch(`${base}/api/spin`, { method: 'POST' });
     const body = await res.json();
     return body.scriptSha256;
   }
@@ -692,18 +805,18 @@ describe('dev-game — restart on a script.spin write', () => {
     // Two real e8-server spawns (initial boot + the restart under test)
     // plus the poll below — comfortably over vitest's 5s default.
     const projectDir = writableProject();
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(files, { cwd: projectDir });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(files, { cwd: projectDir });
+    await ctx!.plugin(devGame, {
       root: projectDir,
       gamesDir: join(projectDir, 'game'),
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const before = await spinScriptSha256(ctx.server.port);
+    const before = await spinScriptSha256(preview(ctx!));
     expect(before).toBeTruthy();
 
     // Verified by hand against the real binary, through this exact route,
@@ -714,7 +827,7 @@ describe('dev-game — restart on a script.spin write', () => {
     const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
     const edited = `${original}\n-- edited by mouse\n`;
 
-    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/game/script.spin`, {
+    const put = await fetch(`${rootUrl(ctx!)}/api/files/game/script.spin`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ base64: Buffer.from(edited, 'utf8').toString('base64') }),
@@ -729,7 +842,7 @@ describe('dev-game — restart on a script.spin write', () => {
     // is not `before` — this must observe an ACTUAL hash, not merely a
     // different answer.
     await expect
-      .poll(() => spinScriptSha256(ctx!.server.port), { timeout: 15_000 })
+      .poll(() => spinScriptSha256(preview(ctx!)), { timeout: 15_000 })
       .toSatisfy((sha) => typeof sha === 'string' && sha !== before);
   }, 20_000);
 
@@ -754,6 +867,7 @@ describe('dev-game — restart on a script.spin write', () => {
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
       binPath,
     });
     const socket = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
@@ -822,7 +936,7 @@ describe('dev-game — restart on a script.spin write', () => {
       expect(await putScript(projectDir, `${original}\n-- edited by mouse\n`)).toBe(200);
 
       // Inside the window: the caller gets the wait as data.
-      const res = await fetch(`${host!.url}/api/spin`, { method: 'POST' });
+      const res = await fetch(`${preview(host!.ctx)}/api/spin`, { method: 'POST' });
       expect(res.status).toBe(502);
       const body = (await res.json()) as { diagnostics: { message: string }[] };
       expect(body.diagnostics[0].message).toMatch(/restarting/);
@@ -853,20 +967,20 @@ describe('dev-game — restart on a script.spin write', () => {
     // so nothing ever asks the real binary to load it), so it isolates the
     // containment check on its own.
     const projectDir = writableProject();
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(files, { cwd: projectDir });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(files, { cwd: projectDir });
+    await ctx!.plugin(devGame, {
       root: projectDir,
       gamesDir: join(projectDir, 'game'),
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const pidBefore = ctx.session.pid;
+    const pidBefore = ctx!.session.pid;
 
-    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/plugins/x.spin`, {
+    const put = await fetch(`${rootUrl(ctx!)}/api/files/plugins/x.spin`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ base64: Buffer.from('not a game script', 'utf8').toString('base64') }),
@@ -877,27 +991,27 @@ describe('dev-game — restart on a script.spin write', () => {
     // to happen (a restart's own spawn+ready poll runs well under this)
     // before asserting the pid never moved.
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    expect(ctx.session.pid).toBe(pidBefore);
+    expect(ctx!.session.pid).toBe(pidBefore);
   });
 
   it('a write to a NON-.spin file inside gamesDir does not restart the session', async () => {
     const projectDir = writableProject();
-    ctx = new Context();
-    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
-    await ctx.plugin(files, { cwd: projectDir });
-    await ctx.plugin(devGame, {
+    await bare();
+    await ctx!.plugin(files, { cwd: projectDir });
+    await ctx!.plugin(devGame, {
       root: projectDir,
       gamesDir: join(projectDir, 'game'),
       gameId: 'first-slot',
       betLevel: 1.0,
       port: 0,
+      previewPort: 0,
     });
 
-    const pidBefore = ctx.session.pid;
+    const pidBefore = ctx!.session.pid;
 
     // `spec.json` lives inside `gamesDir` too — `.spin` is what makes this
     // NOT a restart trigger, not being outside the directory.
-    const put = await fetch(`http://127.0.0.1:${ctx.server.port}/api/files/game/spec.json`, {
+    const put = await fetch(`${rootUrl(ctx!)}/api/files/game/spec.json`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -910,6 +1024,6 @@ describe('dev-game — restart on a script.spin write', () => {
     expect(put.status).toBe(200);
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    expect(ctx.session.pid).toBe(pidBefore);
+    expect(ctx!.session.pid).toBe(pidBefore);
   });
 });

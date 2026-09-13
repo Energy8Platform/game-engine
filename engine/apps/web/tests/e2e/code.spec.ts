@@ -7,8 +7,10 @@
  * of those tasks' own unit or jsdom-level tests.
  *
  * **Two corrections to the brief, both ruled by the controller before this
- * file was written.** `DevHost` exposes `gameUrl` and `stop()`, never
- * `.url` (`./project-fixture`) — every test below uses those. And the
+ * file was written.** `DevHost` exposed `gameUrl` and `stop()`, and no
+ * `.url`, when this was written — every test below uses those (`.url`, the
+ * IDE host's own origin, arrived with the game's move to its own server;
+ * see `./project-fixture`). And the
  * brief's own sketch calls a `provokeRefusedSave(page)` helper that has
  * never existed anywhere in this suite; `./provokeRefusedSave` below
  * (right here, not imported) is what it stands for — see that function's

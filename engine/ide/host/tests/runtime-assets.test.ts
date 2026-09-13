@@ -2,6 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from 'cordis';
+import Server from '@cordisjs/plugin-server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createIdeHost, type IdeHost } from '../src/index';
 
@@ -529,8 +530,18 @@ describe('GET /api/composition', () => {
  * client-only package with none, and a package whose declared entry walks
  * out of its own directory.
  */
+/**
+ * Since Task 4 (spec §6) the two routes are registered through
+ * `ctx.runtimeAssets.attachGameRoutes(server)` on the GAME's own server —
+ * `dev-game` calls it on the preview it boots. Here a second server stands
+ * in for that preview, so this block measures the service without a vite
+ * or an e8-server; that `dev-game` actually calls it is
+ * project-scope.test.ts's to hold.
+ */
 describe('GET /plugin-runtime/:id', () => {
   let runtimeHost: IdeHost;
+  /** The stand-in game server `attachGameRoutes` was given. */
+  let gameUrl: string;
 
   beforeEach(async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-assets-'));
@@ -640,6 +651,10 @@ describe('GET /plugin-runtime/:id', () => {
     );
 
     runtimeHost = await createIdeHost({ root: workspace, port: 0 });
+    const fiber = runtimeHost.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
+    await fiber;
+    runtimeHost.ctx.get('runtimeAssets')!.attachGameRoutes(fiber.ctx.server);
+    gameUrl = `http://127.0.0.1:${fiber.ctx.server.port}`;
   });
 
   afterEach(async () => {
@@ -648,8 +663,16 @@ describe('GET /plugin-runtime/:id', () => {
     // why cleanup is deliberately skipped.
   });
 
+  it("is on the game server only — the root answers cordis's empty 404, and /api/composition is on both", async () => {
+    const onRoot = await fetch(`${runtimeHost.url}/plugin-runtime/reels1`);
+    expect(onRoot.status).toBe(404);
+    expect(await onRoot.text()).toBe('');
+    expect((await fetch(`${runtimeHost.url}/api/composition`)).status).toBe(200);
+    expect((await fetch(`${gameUrl}/api/composition`)).status).toBe(200);
+  });
+
   it('serves a row runtime half as javascript', async () => {
-    const res = await fetch(`${runtimeHost.url}/plugin-runtime/reels1`);
+    const res = await fetch(`${gameUrl}/plugin-runtime/reels1`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('javascript');
     expect(await res.text()).toContain('export');
@@ -661,17 +684,17 @@ describe('GET /plugin-runtime/:id', () => {
     // `__vite__injectQuery(spec, 'import')`, which appends `?import`. A
     // route that matched the full request string including the query
     // would 404 in a real browser while this exact `fetch` still passed.
-    const res = await fetch(`${runtimeHost.url}/plugin-runtime/reels1?import`);
+    const res = await fetch(`${gameUrl}/plugin-runtime/reels1?import`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('javascript');
   });
 
   it('404s an unknown row id', async () => {
-    expect((await fetch(`${runtimeHost.url}/plugin-runtime/nope`)).status).toBe(404);
+    expect((await fetch(`${gameUrl}/plugin-runtime/nope`)).status).toBe(404);
   });
 
   it('404s a package with no runtime half, naming the package', async () => {
-    const res = await fetch(`${runtimeHost.url}/plugin-runtime/clientonly1`);
+    const res = await fetch(`${gameUrl}/plugin-runtime/clientonly1`);
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toContain('no runtime half');
@@ -679,7 +702,7 @@ describe('GET /plugin-runtime/:id', () => {
   });
 
   it('refuses to serve a path that escapes the package root, even via a symlink', async () => {
-    const res = await fetch(`${runtimeHost.url}/plugin-runtime/escapee1`);
+    const res = await fetch(`${gameUrl}/plugin-runtime/escapee1`);
     expect(res.status).toBe(404);
     const body = await res.text();
     // The file at the symlink's target genuinely exists and genuinely

@@ -39,10 +39,11 @@
  * own `rawGet` helper exists to route around (see its doc comment there),
  * for the identical reason: `node:http`'s `path` option goes onto the
  * request line unparsed. Reused here rather than reinvented, aimed at
- * `host.gameUrl` — `DevHost` has no `.url` (`project-fixture.ts`), but
- * `gameUrl` IS the host's own base URL (`dev-game`'s catch-all owns `/` on
- * the same port `/api/files` answers on), so it is exactly what `rawGet`
- * needs.
+ * `host.url` — the IDE host's own origin, where `/api/files` lives. (It
+ * was aimed at `host.gameUrl` while the game shared that port; since the
+ * game moved to its own server — spec §6 — the game's origin answers
+ * `/api/files/…` with its SPA fallback, 200 and index.html, which is not
+ * the route under test at all.)
  *
  * A second gotcha turned up running this file, not reading it: the brief's
  * own three `..` segments land INSIDE this repo (`projectCopy()` nests
@@ -58,14 +59,11 @@
  * route with the exact same escape path, host-level, and Task 1/2 attacked
  * containment from six more directions the brief never listed. But every
  * one of those runs `startHost`, never `startDevHost`: no `dev-game`
- * plugin, so `/api/files/*splat` never has to win against `dev-game`'s own
- * `ctx.server.all(/^.*$/, ...)` catch-all, registered deliberately LAST and
- * on the very same port (see that file's own comment on why it has to be a
- * route, not `ctx.server.use`). Nothing in this repo had exercised the two
- * together before this file — a plausible way for `/api/files` to quietly
- * lose to the catch-all and 404 through the WRONG branch, the containment
- * check never reached, exactly the shape task-3-report.md already caught
- * once with `fetch()`. So #4 stays, run against the real composed host.
+ * plugin. When the game shared the host's port, `/api/files/*splat` had to
+ * win against `dev-game`'s catch-all on the same server; the game now has
+ * its own server and the root has no catch-all, so that particular race is
+ * gone — #4 stays anyway, run against the real composed host, because it
+ * is the one place the route is exercised with a project's game up.
  *
  * Cases considered and left OUT, and why each is a genuine "already proven
  * elsewhere" rather than a convenient one:
@@ -124,7 +122,7 @@ const IDE_URL = 'http://127.0.0.1:5680/';
  * `fetch()` cannot deliver a literal `..` at all.
  */
 function rawGet(host: DevHost, rawPath: string): Promise<{ status: number; text: string }> {
-  const url = new URL(host.gameUrl);
+  const url = new URL(host.url);
   return new Promise((resolveRequest, reject) => {
     const req = httpRequest(
       { host: url.hostname, port: url.port, path: rawPath, method: 'GET' },

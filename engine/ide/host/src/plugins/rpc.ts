@@ -24,12 +24,9 @@ declare module 'cordis' {
  * `ide-bridge` uses (see the message handler below) — for the ONE producer
  * that is not a browser socket at all: `dev-game.ts`'s `/api/spin` route,
  * which runs in this HOST process and so has no socket of its own to relay
- * from. `dev-game` reads this leniently (`ctx.reflect.get('ideRpc', false)`,
- * same as `ide-bridge` reads `ctx.diagnostics`) — `rpc` and `dev-game` are
- * SIBLING plugin scopes under `e8 dev`'s shared root `ctx`, and `dev-game`'s
- * own standalone tests compose it with no `rpc` at all, so a static
- * `inject` would leave that fiber PENDING forever waiting for a service
- * nobody provides.
+ * from. `dev-game` injects it (`project-scope`, which plugs `dev-game` in,
+ * injects it from the root) — it also needs `attach` for the preview's own
+ * `/ide` socket, see below.
  */
 export interface IdeRpcService {
   /**

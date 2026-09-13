@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
+import type { Server } from '@cordisjs/plugin-server';
 import {
   type Diagnostic,
   diagnostic,
@@ -12,6 +13,26 @@ import { readPackageJson, unresolvedReason } from '../resolvePackage';
 
 export const name = 'runtime-assets';
 export const inject = ['server', 'project', 'spinSchema'];
+
+declare module 'cordis' {
+  interface Context {
+    runtimeAssets: RuntimeAssetsService;
+  }
+}
+
+/**
+ * How the GAME's server gets this plugin's routes (spec §6, Task 4). The
+ * game is served from its own origin — a second server `dev-game` boots
+ * in its scope — and everything the page fetches same-origin has to be
+ * there: `/api/composition` (`@energy8engine/loader`) and
+ * `/plugin-runtime/:id`. A service rather than a free function because
+ * the handlers close over THIS plugin's ctx (`project`, `spinSchema`);
+ * `dev-game` injects it and calls it once the preview is listening.
+ */
+export interface RuntimeAssetsService {
+  /** Registers `/api/composition` and `/plugin-runtime/:id` on `server`, as effects of that server's own scope. */
+  attachGameRoutes(server: Server): void;
+}
 
 /** Vite's own prefix for "serve this absolute path off disk" — the shape `resolveRuntimeUrl` hands out once `dev-game` is composed. */
 const FS_PREFIX = '/@fs/';
@@ -34,17 +55,20 @@ export interface RuntimeAssetsConfig {
  * hands over one row's runtime half so the browser can dynamically
  * `import()` it into the running game.
  *
- * `/plugin-runtime/:id` is NOT "the fallback" — it is the NON-VITE path.
- * It is what a host with no `dev-game` on it (`e8 ide`) serves a runtime
- * half through, raw and untransformed, and it is the only path that could
- * ever serve one without a vite instance in the process. Under `e8 dev` it
- * is currently unexercised: `dev-game` is always composed there, so every
+ * `/plugin-runtime/:id` is NOT "the fallback" — it is the NON-VITE path:
+ * a row's runtime half raw and untransformed, the only way one could be
+ * served without a vite instance in the process. Since Task 4 it lives on
+ * the GAME's own server only (see `RuntimeAssetsService`): the root serves
+ * no game, so nothing on it ever imports a runtime half — `engine/apps/web/
+ * vite.config.ts` says the same from the IDE's side. Under `e8 dev` every
  * `runtimeUrl` comes out `/@fs/<realpath>` and nothing asks for this
- * route. It also carries its own realpath containment check, re-derived at
- * request time from whatever is on disk right now — see task-6-brief.md:
- * that check used to be the ONLY one, and the `/@fs/` URL had none of its
- * own, relying entirely on vite's workspace-wide `server.fs.allow`, which
- * has no notion of "this row's own package" to confine anything to.
+ * route; a host with no `dev-game` hands out `/plugin-runtime/<id>` URLs
+ * that no server answers — and has no page to import them either. It also
+ * carries its own realpath containment check, re-derived at request time
+ * from whatever is on disk right now — see task-6-brief.md: that check
+ * used to be the ONLY one, and the `/@fs/` URL had none of its own,
+ * relying entirely on vite's workspace-wide `server.fs.allow`, which has
+ * no notion of "this row's own package" to confine anything to.
  * `resolveRuntimeUrl` below now performs the equivalent check itself,
  * once, before EITHER url shape is handed out.
  *
@@ -80,7 +104,7 @@ export interface RuntimeAssetsConfig {
  * the other. Both are registered, valid JS MIME types; nothing here reads
  * them and cares which one it gets.
  *
- * Both routes are plain `ctx.server.get(path, handler)` registrations.
+ * Both routes are plain `server.get(path, handler)` registrations.
  * `@cordisjs/plugin-server` matches routes against `req.path`, which is
  * already stripped of the query string (see `Request`'s constructor in
  * `@cordisjs/plugin-server`) — so `/plugin-runtime/reels1?import`, the
@@ -263,7 +287,7 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     return { url: devGamePresent ? `/@fs/${realEntryPath}` : `/plugin-runtime/${row.id}` };
   }
 
-  ctx.server.get('/api/composition', async (_req, res) => {
+  const composition: Parameters<Server['get']>[1] = async (_req, res) => {
     // Re-resolve from disk before answering. `ctx.project` caches its last
     // resolution until something calls `reload()` — nothing did, before
     // this route existed (see `ProjectService.reload`'s doc comment). This
@@ -363,13 +387,14 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     // never heard of a schema at all, and the browser needs to tell those
     // two apart (see task-3-brief.md).
     res.json({ rows, diagnostics, schema: ctx.spinSchema.schema });
-  });
+  };
 
-  ctx.server.get('/plugin-runtime/:id', async (req, res) => {
-    const row = ctx.project.composition.rows.find((candidate) => candidate.id === req.params.id);
+  const pluginRuntime: Parameters<Server['get']>[1] = async (req, res) => {
+    const id = req.params.id as string;
+    const row = ctx.project.composition.rows.find((candidate) => candidate.id === id);
     if (!row) {
       res.status = 404;
-      res.json({ error: `no row with id "${req.params.id}"` });
+      res.json({ error: `no row with id "${id}"` });
       return;
     }
 
@@ -426,6 +451,16 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
 
     res.headers.set('content-type', 'application/javascript; charset=utf-8');
     res.text(source);
+  };
+
+  // The IDE reads the composition off the root; the game reads both off
+  // its own server — see `RuntimeAssetsService`.
+  ctx.server.get('/api/composition', composition);
+  ctx.provide('runtimeAssets', {
+    attachGameRoutes(server) {
+      server.get('/api/composition', composition);
+      server.get('/plugin-runtime/:id', pluginRuntime);
+    },
   });
 }
 /**

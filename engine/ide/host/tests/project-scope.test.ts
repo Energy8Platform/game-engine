@@ -1,4 +1,5 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from 'cordis';
@@ -90,20 +91,92 @@ describe('project-scope: one project, one scope', () => {
 });
 
 describe('project-scope: the game', () => {
-  it('boots dev-game off game/spec.json — the project serves its own page and spins', async () => {
-    const c = await root();
+  /** A project copy with `first-slot`'s game and the dev-game web fixture — the shape that boots a preview. */
+  function gameProject(): string {
     const cwd = project('[]\n');
     cpSync(GAME, join(cwd, 'game'), { recursive: true });
     cpSync(WEB_ROOT, cwd, { recursive: true });
+    return cwd;
+  }
 
-    const handle = await bootProjectScope(c, cwd, 0);
+  it('boots dev-game off game/spec.json — the project serves its own page and spins, on its own origin', async () => {
+    const c = await root();
+    const handle = await bootProjectScope(c, gameProject(), 0);
     expect(c.get('devGameRoot')).toBeDefined();
-    expect(handle.previewUrl).toBe(url(c)); // the game is on the root server until Task 4
-    const page = await fetch(`${url(c)}/`);
+    // Spec §6: the preview is a second server, never the root.
+    expect(handle.previewUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(handle.previewUrl).not.toBe(url(c));
+    const page = await fetch(`${handle.previewUrl}/`);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('dev-game fixture root');
-    const spin = await fetch(`${url(c)}/api/spin`, { method: 'POST' });
-    expect(spin.status).toBe(200);
+    expect((await fetch(`${url(c)}/`)).status).toBe(404);
+    expect((await fetch(`${handle.previewUrl}/api/spin`, { method: 'POST' })).status).toBe(200);
+    expect((await fetch(`${url(c)}/api/spin`, { method: 'POST' })).status).toBe(404);
+  }, 15_000);
+
+  it("the game's same-origin routes: /api/composition on both, /plugin-runtime and /ide on the preview too", async () => {
+    const c = await root();
+    const handle = await bootProjectScope(c, gameProject(), 0);
+    const previewUrl = handle.previewUrl!;
+    for (const base of [url(c), previewUrl]) {
+      const composition = await fetch(`${base}/api/composition`);
+      expect(composition.status).toBe(200);
+      expect(await composition.json()).toMatchObject({ rows: [] });
+    }
+    // Only the game imports a runtime half (runtime-assets.ts): the route
+    // left the root with the game. `nope` is enough to tell the route's
+    // own 404 (a JSON body naming the id) from cordis's empty one.
+    const onPreview = await fetch(`${previewUrl}/plugin-runtime/nope`);
+    expect(onPreview.status).toBe(404);
+    expect(await onPreview.json()).toEqual({ error: 'no row with id "nope"' });
+    const onRoot = await fetch(`${url(c)}/plugin-runtime/nope`);
+    expect(onRoot.status).toBe(404);
+    expect(await onRoot.text()).toBe('');
+
+    const socket = new WebSocket(`${previewUrl.replace('http', 'ws')}/ide`);
+    const first = await new Promise<ServerMessage>((resolve, reject) => {
+      socket.once('message', (data) => resolve(JSON.parse(String(data)) as ServerMessage));
+      socket.once('error', reject);
+    });
+    expect(first.type).toBe('workspace');
+    socket.close();
+  }, 15_000);
+
+  it('a busy preview port: a dev-game diagnostic, previewUrl null, the project open', async () => {
+    const busy = createNetServer().listen(0, '127.0.0.1');
+    await new Promise((resolve) => busy.once('listening', resolve));
+    const previewPort = (busy.address() as { port: number }).port;
+    try {
+      const c = await root();
+      const handle = await bootProjectScope(c, gameProject(), previewPort);
+      expect(handle.previewUrl).toBeNull();
+      expect((await fetch(`${url(c)}/api/files`)).status).toBe(200);
+      const frames = await greeting(c);
+      expect(frames.filter((m) => m.type === 'game-diagnostics')).toEqual([
+        expect.objectContaining({
+          source: 'host',
+          diagnostics: [
+            expect.objectContaining({
+              plugin: 'dev-game',
+              where: `preview port ${previewPort}`,
+              fix: 'free the port, or set PREVIEW_PORT',
+            }),
+          ],
+        }),
+      ]);
+    } finally {
+      await new Promise((resolve) => busy.close(resolve));
+    }
+  }, 15_000);
+
+  it('disposing the scope closes the preview port and leaves the root answering', async () => {
+    const c = await root();
+    const handle = await bootProjectScope(c, gameProject(), 0);
+    const previewUrl = handle.previewUrl!;
+    await handle.dispose();
+    await expect(fetch(`${previewUrl}/`)).rejects.toThrow();
+    expect((await fetch(`${url(c)}/api/files`)).status).toBe(404);
+    expect((await fetch(`${url(c)}/`)).status).toBe(404);
   }, 15_000);
 
   it('a project with no game/ is open, silently, without one', async () => {
