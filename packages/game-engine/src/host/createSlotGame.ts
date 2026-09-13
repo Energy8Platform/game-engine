@@ -689,7 +689,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
           } else {
             const counter = createFreeSpinsCounter();
             const view = overrideView(
-              counter.enter(trigger.freeSpins?.awarded ?? trigger.freeSpins?.total ?? 0),
+              // Carry the round's cumulative in: the trigger's own win opens the Total Win readout,
+              // and a nested level (free spins → boss battle) inherits its parent's take.
+              counter.enter(trigger.freeSpins?.awarded ?? trigger.freeSpins?.total ?? 0, trigger.totalWin ?? 0),
               trigger.freeSpins,
             );
             stack.push({ mode, counter, view });

@@ -30,6 +30,12 @@ describe('createFreeSpinsCounter', () => {
     expect(b).toEqual({ current: 3, total: 18, totalWin: 25 });
   });
 
+  it('enter() carries the trigger win into the Total Win readout', () => {
+    const c = createFreeSpinsCounter();
+    expect(c.enter(10, 2.5)).toEqual({ current: 0, total: 10, totalWin: 2.5 });
+    expect(c.spin(0, 4)).toEqual({ current: 1, total: 10, totalWin: 4 });
+  });
+
   it('enter() resets a previous bonus run', () => {
     const c = createFreeSpinsCounter();
     c.enter(10); c.spin(5, 50);
