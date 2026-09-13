@@ -37,6 +37,8 @@ function snapshotWith(clientUrl: string | null, clientInject: string[] = []): Sn
 // leave an unrelated diagnostic in that service's own list and a pending
 // promise in every test here. `composition` (a service beyond `slots`) is
 // what the inject tests below actually reach for, so it has to answer.
+// `workspace` fetches `/api/workspace` at boot the same way; it gets an
+// empty workspace so its answer lands in no diagnostics list here.
 async function harness(
   importModule: (url: string) => Promise<unknown>,
   rows: unknown[] = [{ id: 'boot1' }],
@@ -54,10 +56,15 @@ async function harness(
     url: 'ws://x/ide',
     socketFactory: () => socket,
     importModule,
-    fetchFn: (async () =>
-      new Response(JSON.stringify({ rows, diagnostics: [] }), {
-        headers: { 'content-type': 'application/json' },
-      })) as unknown as typeof fetch,
+    fetchFn: (async (url: string) =>
+      new Response(
+        JSON.stringify(
+          String(url).includes('/api/workspace')
+            ? { projects: [], active: null, previewUrl: null, diagnostics: [] }
+            : { rows, diagnostics: [] },
+        ),
+        { headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch,
   });
   const push = (message: ServerMessage) => {
     for (const listener of listeners) listener({ data: JSON.stringify(message) });
@@ -294,7 +301,11 @@ describe('modules — settled() says when every client half has had its turn', (
   });
 
   it('a failed import still settles — a failure is an answer', async () => {
-    const { ctx, push } = await harness(vi.fn(async () => { throw new Error('404'); }));
+    const { ctx, push } = await harness(
+      vi.fn(async () => {
+        throw new Error('404');
+      }),
+    );
     push({ type: 'snapshot', snapshot: snapshotWith('/plugin-client/a:probe1') });
     await vi.waitFor(() => expect(ctx.modules.settled()).toBe(true));
   });

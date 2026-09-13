@@ -4,6 +4,9 @@ import { Context } from 'cordis';
 import { createIdeClient, useSlot } from '../src/index';
 import * as slotsPlugin from '../src/plugins/slots';
 
+/** The `workspace` plugin's boot GET must not reach the real `fetch` (jsdom has no host to answer, and the failure would land in `connection.diagnostics`); it never answers here. */
+const fetchFn: typeof fetch = () => new Promise(() => {});
+
 // `createIdeClient` is async (Task 8, Ruling 2) — cordis applies a plugin
 // through a Fiber that is not guaranteed ACTIVE by the time `ctx.plugin()`
 // returns, so every call here awaits it. `readyState: 1` (OPEN) is required
@@ -26,7 +29,7 @@ function Host({ ctx }: { ctx: Context }) {
 
 describe('slots', () => {
   it('renders what a plugin registered', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     ctx.slots.register({ name: 'composition.card', key: 'reels' }, () => <span>reel card</span>);
 
     render(<Host ctx={ctx} />);
@@ -34,7 +37,7 @@ describe('slots', () => {
   });
 
   it('is reversible — unregistering removes it', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     const dispose = ctx.slots.register({ name: 'composition.card', key: 'reels' }, () => (
       <span>x</span>
     ));
@@ -44,7 +47,7 @@ describe('slots', () => {
   });
 
   it('keeps slots apart by name', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     ctx.slots.register({ name: 'composition.card', key: 'a' }, () => null);
     ctx.slots.register({ name: 'sidebar.item', key: 'b' }, () => null);
     expect(ctx.slots.list('composition.card')).toHaveLength(1);
@@ -52,7 +55,7 @@ describe('slots', () => {
   });
 
   it('replaces a registration with the same key instead of duplicating it', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>first</span>);
     ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>second</span>);
     expect(ctx.slots.list('composition.card')).toHaveLength(1);
@@ -67,7 +70,7 @@ describe('slots', () => {
   // fixed: a collision is now reported through `ctx.connection`, the same
   // outlet `CardBoundary` already uses for a crashed card.
   it('reports a collision through ctx.connection instead of swapping the key in silence', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     ctx.slots.register({ name: 'composition.card', key: 'a' }, () => <span>first</span>);
     expect(ctx.connection.diagnostics).toHaveLength(0);
 
@@ -82,7 +85,7 @@ describe('slots', () => {
   });
 
   it('does not throw when the same disposer is called twice', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     const dispose = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => null);
     dispose();
     expect(() => dispose()).not.toThrow();
@@ -90,7 +93,7 @@ describe('slots', () => {
   });
 
   it('a stale disposer from a replaced registration does not evict the replacement', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     // Two registrations under the SAME name+key — the second replaces the
     // first in the map, but both disposers close over the same `id`.
     const disposeFirst = ctx.slots.register({ name: 'composition.card', key: 'a' }, () => (
@@ -119,7 +122,7 @@ describe('slots', () => {
   });
 
   it('a React consumer unmounts cleanly without act() warnings when a slot updates after unmount', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     const { unmount } = render(<Host ctx={ctx} />);
     unmount();
     // Registering after unmount must not touch unmounted React state.
@@ -149,7 +152,7 @@ describe('slots — the adapter seam, not the collection', () => {
     // the composite id is what makes that true, and every test above uses
     // a distinct key whenever it uses a distinct name, so a composite id
     // that silently dropped the name half would still pass all of them.
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     ctx.slots.register({ name: 'composition.card', key: 'shared' }, () => <span>card</span>);
     ctx.slots.register({ name: 'sidebar.item', key: 'shared' }, () => <span>item</span>);
     expect(ctx.slots.list('composition.card')).toHaveLength(1);
@@ -157,7 +160,7 @@ describe('slots — the adapter seam, not the collection', () => {
   });
 
   it('a mounted subscriber sees an entry added after mount, not only what existed at mount time', async () => {
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: fakeSocket, fetchFn });
     render(<Host ctx={ctx} />);
     expect(screen.queryByText('late card')).toBeNull();
     // `act()`, same reason as the stale-disposer test above: `notify()`

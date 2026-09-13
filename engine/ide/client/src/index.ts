@@ -37,16 +37,16 @@ export {
   type GameDiagnosticsConfig,
 } from './plugins/diagnostics';
 export { type FilesService, type FilesConfig } from './plugins/files';
+export {
+  useWorkspace,
+  type WorkspaceClientService,
+  type WorkspaceClientConfig,
+} from './plugins/workspace';
 export { type CheckService, type CheckConfig } from './plugins/check';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, useEditorDiagnostics } from './screens/CompositionScreen';
-export {
-  Preview,
-  PreviewWall,
-  computePreviewUrl,
-  type PreviewWallProps,
-} from './screens/PreviewWall';
+export { Preview, PreviewWall, type PreviewWallProps } from './screens/PreviewWall';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Shell } from './shell/Shell';
 export {

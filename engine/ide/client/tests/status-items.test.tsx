@@ -1,12 +1,12 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type ServerMessage } from '@energy8engine/contracts';
 import * as slotsPlugin from '../src/plugins/slots';
 import * as shellPlugin from '../src/plugins/shell';
 import * as gameDiagnosticsPlugin from '../src/plugins/diagnostics';
-import * as gameCompositionPlugin from '../src/plugins/game-composition';
+import * as workspacePlugin from '../src/plugins/workspace';
 import { ProjectStatus, SessionStatus, DirtyStatus, ThemeStatus } from '../src/shell/StatusItems';
 
 /** These tests only care about `.message`/`.code` — severity/plugin/where are fixed filler. */
@@ -82,20 +82,30 @@ function gameDiagnosticsHarness(): Context & { socket: FakeSocket } {
   return result;
 }
 
-/** `ProjectStatus` reads `ctx.gameComposition`, whose `apply()` kicks off `fetchFn` immediately and provides synchronously before it settles — see that plugin's own module doc. */
-function gameCompositionHarness(fetchFn: typeof fetch): Context {
-  const result = {} as unknown as Context;
+/**
+ * `ProjectStatus` reads `ctx.workspace`, fed by a boot GET and then the
+ * `/ide` socket — the same `FakeSocket` `SessionStatus`'s harness uses.
+ * The boot GET never answers here so every state below is a frame, which
+ * lands synchronously.
+ */
+function workspaceHarness(): Context & { socket: FakeSocket } {
+  const socket = new FakeSocket();
+  const result = { socket, connection: { report() {} } } as unknown as Context & {
+    socket: FakeSocket;
+  };
   const fakeCtx = {
+    effect: (execute: () => unknown) => execute(),
     provide: (key: string, value: unknown) => {
       (result as unknown as Record<string, unknown>)[key] = value;
     },
+    connection: result.connection,
   } as unknown as Context;
-  gameCompositionPlugin.apply(fakeCtx, { fetchFn });
+  workspacePlugin.apply(fakeCtx, {
+    url: 'ws://x/ide',
+    socketFactory: () => socket,
+    fetchFn: () => new Promise<Response>(() => {}),
+  });
   return result;
-}
-
-function jsonResponse(body: unknown): Promise<Response> {
-  return Promise.resolve({ ok: true, status: 200, json: async () => body } as Response);
 }
 
 beforeEach(() => {
@@ -109,24 +119,59 @@ beforeEach(() => {
 });
 
 describe('ProjectStatus', () => {
-  it('says so while the composition fetch is still in flight', () => {
-    const ctx = gameCompositionHarness(() => new Promise<Response>(() => {}));
-    const { container } = render(<ProjectStatus ctx={ctx} />);
+  it('says so before the workspace has answered at all', () => {
+    const { container } = render(<ProjectStatus ctx={workspaceHarness()} />);
     expect(container).toHaveTextContent('loading');
   });
 
-  it("shows the first composition row's id — the closest thing /api/composition actually carries to a project name", async () => {
-    const ctx = gameCompositionHarness(() =>
-      jsonResponse({ rows: [{ id: 'bridge1', name: '@energy8engine/ide-bridge' }], diagnostics: [] }),
-    );
+  it("shows the active project's name, not its id", () => {
+    const ctx = workspaceHarness();
     const { container } = render(<ProjectStatus ctx={ctx} />);
-    await waitFor(() => expect(container).toHaveTextContent('bridge1'));
+    act(() =>
+      ctx.socket.receive({
+        type: 'workspace',
+        workspace: {
+          projects: [
+            { id: 'dir-a', name: 'Game A' },
+            { id: 'dir-b', name: 'Game B' },
+          ],
+          active: 'dir-b',
+          previewUrl: 'http://game.test:5679',
+          diagnostics: [],
+        },
+      }),
+    );
+    expect(container).toHaveTextContent('Game B');
+    expect(container).not.toHaveTextContent('dir-b');
   });
 
-  it('says "no project" for a composition that resolved with zero rows, rather than showing nothing', async () => {
-    const ctx = gameCompositionHarness(() => jsonResponse({ rows: [], diagnostics: [] }));
+  it('says "no project" when none is open, rather than showing nothing', () => {
+    const ctx = workspaceHarness();
     const { container } = render(<ProjectStatus ctx={ctx} />);
-    await waitFor(() => expect(container).toHaveTextContent(/no project/i));
+    act(() =>
+      ctx.socket.receive({
+        type: 'workspace',
+        workspace: {
+          projects: [{ id: 'dir-a', name: 'Game A' }],
+          active: null,
+          previewUrl: null,
+          diagnostics: [],
+        },
+      }),
+    );
+    expect(container).toHaveTextContent(/no project/i);
+  });
+
+  it('falls back to the id when the active project is missing from the list', () => {
+    const ctx = workspaceHarness();
+    const { container } = render(<ProjectStatus ctx={ctx} />);
+    act(() =>
+      ctx.socket.receive({
+        type: 'workspace',
+        workspace: { projects: [], active: 'ghost', previewUrl: null, diagnostics: [] },
+      }),
+    );
+    expect(container).toHaveTextContent('ghost');
   });
 });
 
@@ -134,7 +179,9 @@ describe('SessionStatus', () => {
   it('reads as up once any frame has arrived and none of it is a restart', () => {
     const ctx = gameDiagnosticsHarness();
     const { container } = render(<SessionStatus ctx={ctx} />);
-    act(() => ctx.socket.receive({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' }));
+    act(() =>
+      ctx.socket.receive({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' }),
+    );
     expect(container).not.toHaveTextContent(/restart/i);
     expect(container).toHaveTextContent('●');
   });
@@ -155,7 +202,9 @@ describe('SessionStatus', () => {
       }),
     );
     expect(container).toHaveTextContent(/restart/i);
-    act(() => ctx.socket.receive({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' }));
+    act(() =>
+      ctx.socket.receive({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' }),
+    );
     expect(container).not.toHaveTextContent(/restart/i);
   });
 });

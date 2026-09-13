@@ -41,9 +41,10 @@ async function harness(importModule?: (url: string) => Promise<unknown>) {
     socketFactory: () => socket,
     importModule,
     // `gameComposition` fetches `/api/composition` the moment its plugin
-    // applies, and the Explorer `App` opens on load fetches `/api/files` —
-    // both answered here, empty, so the tests exercise real responses
-    // instead of real (and, in this environment, doomed) requests.
+    // applies, `workspace` fetches `/api/workspace`, and the Explorer `App`
+    // opens on load fetches `/api/files` — all answered here, empty, so the
+    // tests exercise real responses instead of real (and, in this
+    // environment, doomed) requests.
     fetchFn: (async (input: unknown) => {
       const url = String(input);
       // One file the editor tests below can open: the bytes, as the host
@@ -53,7 +54,11 @@ async function harness(importModule?: (url: string) => Promise<unknown>) {
       }
       return new Response(
         JSON.stringify(
-          url === '/api/files' ? { entries: [], diagnostics: [] } : { rows: [], diagnostics: [] },
+          url === '/api/files'
+            ? { entries: [], diagnostics: [] }
+            : url === '/api/workspace'
+              ? { projects: [], active: null, previewUrl: null, diagnostics: [] }
+              : { rows: [], diagnostics: [] },
         ),
         { headers: { 'content-type': 'application/json' } },
       );

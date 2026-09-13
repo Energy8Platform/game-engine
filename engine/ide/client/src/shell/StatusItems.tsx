@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Context } from 'cordis';
 import { useShell } from '../plugins/shell';
 import { useGameDiagnostics } from '../plugins/diagnostics';
-import { useGameComposition } from '../plugins/game-composition';
+import { useWorkspace } from '../plugins/workspace';
 
 /**
  * The four `shell.status` contributions the design spec names (§7):
@@ -24,30 +24,24 @@ import { useGameComposition } from '../plugins/game-composition';
  */
 
 /**
- * Left: the project's own name.
+ * Left: the active project's own name — `Project.name`, off the workspace
+ * the host tells this client about (spec §8). Before the first answer
+ * `loading…`; no project open, `no project`; an active id the list does
+ * not carry (a host mid-change) falls back to the id itself.
  *
- * The brief this shipped from assumed `/api/composition` carried the
- * project's name from `game/spec.json`'s `id`. Measured against
- * `runtime-assets.ts`'s own route handler: it answers `{ rows,
- * diagnostics, schema }` — `rows` built from `ctx.project.composition.rows`
- * (each one a *plugin* the game composes, e.g. `boot1`/`reels1`), never
- * from the game's own `spec.json`, which this route never reads at all.
- * There is no project-level name anywhere in that response.
- *
- * What IS there: the first row's own `id`, which is at least AN id this
- * composition carries, even though it names a plugin rather than the
- * project. Good enough for "which project is this" at a glance, and
- * honest about what it actually shows — nothing here claims it is the
- * game's own name.
+ * This used to show the first composition row's `id` — a PLUGIN's id, the
+ * closest thing `/api/composition` carried to a name before the host had
+ * a workspace at all.
  */
 export function ProjectStatus({ ctx }: { ctx: Context }) {
-  const { rows } = useGameComposition(ctx);
-  const label = rows === null ? 'loading…' : (rows[0]?.id ?? 'no project');
-  return (
-    <span className="e8-status-item">
-      {label}
-    </span>
-  );
+  const workspace = useWorkspace(ctx);
+  const label =
+    workspace === null
+      ? 'loading…'
+      : workspace.active === null
+        ? 'no project'
+        : (workspace.projects.find((p) => p.id === workspace.active)?.name ?? workspace.active);
+  return <span className="e8-status-item">{label}</span>;
 }
 
 /**
@@ -77,23 +71,19 @@ export function SessionStatus({ ctx }: { ctx: Context }) {
   const restarting = (groups ?? []).some((group) =>
     group.diagnostics.some((entry) => entry.diagnostic.code === RESTARTING_CODE),
   );
-  const label = restarting ? 'e8-server restarting' : groups === null ? 'e8-server ○' : 'e8-server ●';
-  return (
-    <span className="e8-status-item">
-      {label}
-    </span>
-  );
+  const label = restarting
+    ? 'e8-server restarting'
+    : groups === null
+      ? 'e8-server ○'
+      : 'e8-server ●';
+  return <span className="e8-status-item">{label}</span>;
 }
 
 /** Right: how many open documents have unsaved edits. */
 export function DirtyStatus({ ctx }: { ctx: Context }) {
   const { documents } = useShell(ctx);
   const dirty = documents.filter((doc) => doc.dirty).length;
-  return (
-    <span className="e8-status-item">
-      {dirty} unsaved
-    </span>
-  );
+  return <span className="e8-status-item">{dirty} unsaved</span>;
 }
 
 export type ThemeName = 'dark' | 'light';

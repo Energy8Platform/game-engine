@@ -29,6 +29,9 @@ const ROWS = [
 
 function answer(body: unknown, init: ResponseInit = {}): typeof fetch {
   return (async (url: string) => {
+    // The `workspace` plugin's own boot GET goes through the same seam; it
+    // never answers here (its own suite covers it).
+    if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
     // Throws rather than answering anything else: a test that silently
     // swallows a request to the wrong place stops being a test.
     if (!String(url).includes('/api/composition')) throw new Error(`unexpected fetch: ${url}`);
@@ -125,7 +128,10 @@ describe('game composition feeder', () => {
   // unrelated editor row is exactly the namespace conflation Task 10
   // separated the two channels to prevent.
   it('keeps its failures out of the editor diagnostics channel', async () => {
-    const ctx = await harness((async () => {
+    // Only the composition fetch fails; the `workspace` plugin's own boot
+    // GET stays pending, so what lands in `connection` below is not its.
+    const ctx = await harness((async (url: string) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
       throw new Error('nope');
     }) as unknown as typeof fetch);
     await vi.waitFor(() => expect(ctx.gameComposition.diagnostics).toHaveLength(1));

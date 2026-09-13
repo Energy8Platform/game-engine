@@ -1,8 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import type { CompositionRow, ServerMessage } from '@energy8engine/contracts';
-import { Preview, PreviewWall, computePreviewUrl, createIdeClient } from '../src/index';
+import type { CompositionRow, ServerMessage, WorkspaceState } from '@energy8engine/contracts';
+import { Preview, PreviewWall, createIdeClient } from '../src/index';
 
 /**
  * Falling tests for Task 12, step 1: the preview panel draws an iframe at
@@ -22,7 +22,36 @@ import { Preview, PreviewWall, computePreviewUrl, createIdeClient } from '../src
  * which plugin produced them.
  */
 
-async function harness() {
+const PREVIEW_URL = 'http://game.test:5679';
+
+/** What the host sends when nothing is open — see `WorkspaceState.previewUrl`. */
+const NO_PROJECT: WorkspaceState = {
+  projects: [{ id: 'a', name: 'Game A' }],
+  active: null,
+  previewUrl: null,
+  diagnostics: [],
+};
+
+function workspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
+  return {
+    projects: [{ id: 'a', name: 'Game A' }],
+    active: 'a',
+    previewUrl: PREVIEW_URL,
+    diagnostics: [],
+    ...overrides,
+  };
+}
+
+/**
+ * One fake socket shared by every plugin `createIdeClient` composes
+ * (`connection`, `workspace`, `game-diagnostics` each open their own; the
+ * factory hands them the same one), so `push` reaches all of them. The
+ * boot fetches never answer — every workspace state below arrives as a
+ * frame, which lands synchronously. `initial` is the first one pushed
+ * before returning: a project open on `PREVIEW_URL` by default; `null`
+ * pushes nothing, so the workspace has not answered at all yet.
+ */
+async function harness(initial: WorkspaceState | null = workspace()) {
   const listeners: ((event: { data: string }) => void)[] = [];
   const socket = {
     readyState: 1,
@@ -32,12 +61,17 @@ async function harness() {
     send() {},
     close() {},
   };
-  const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+  const ctx = await createIdeClient({
+    url: 'ws://x/ide',
+    socketFactory: () => socket,
+    fetchFn: () => new Promise<Response>(() => {}),
+  });
   const push = (message: ServerMessage) => {
     act(() => {
       for (const listener of listeners) listener({ data: JSON.stringify(message) });
     });
   };
+  if (initial) push({ type: 'workspace', workspace: initial });
   return { ctx, push };
 }
 
@@ -56,25 +90,53 @@ function row(overrides: Partial<CompositionRow>): CompositionRow {
   };
 }
 
-describe('computePreviewUrl', () => {
-  it('addresses the ide-host directly, on the fixed dev-game port', () => {
-    // jsdom's default test origin is http://localhost/ — deterministic.
-    expect(computePreviewUrl()).toBe('http://localhost:5679');
-  });
-});
-
 describe('Preview', () => {
-  it('renders an iframe pointed at the same server dev-game serves', async () => {
+  it('renders an iframe pointed where the host says the game is served', async () => {
     const { ctx } = await harness();
-    render(<Preview ctx={ctx} url="http://x:5679" />);
+    render(<Preview ctx={ctx} />);
     const iframe = screen.getByTitle('превью игры') as HTMLIFrameElement;
     expect(iframe.tagName).toBe('IFRAME');
-    expect(iframe.src).toBe('http://x:5679/');
+    expect(iframe.src).toBe(`${PREVIEW_URL}/`);
+  });
+
+  it('with no project open there is no iframe, only the note', async () => {
+    const { ctx } = await harness(NO_PROJECT);
+    render(<Preview ctx={ctx} />);
+    expect(screen.queryByTitle('превью игры')).toBeNull();
+    expect(screen.getByTestId('preview-unavailable')).toHaveTextContent(/no project open/);
+  });
+
+  it('before the workspace has answered at all there is no iframe either', async () => {
+    const { ctx } = await harness(null);
+    render(<Preview ctx={ctx} />);
+    expect(screen.queryByTitle('превью игры')).toBeNull();
+    expect(screen.getByTestId('preview-unavailable')).toBeInTheDocument();
+  });
+
+  it('a workspace change to a different previewUrl remounts the iframe — a real navigation', async () => {
+    const { ctx, push } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('превью игры');
+    push({
+      type: 'workspace',
+      workspace: workspace({ active: 'b', previewUrl: 'http://other.test:5679' }),
+    });
+    const after = screen.getByTitle('превью игры') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(after.src).toBe('http://other.test:5679/');
+  });
+
+  it('a workspace change that keeps the same previewUrl does not reload', async () => {
+    const { ctx, push } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('превью игры');
+    push({ type: 'workspace', workspace: workspace({ diagnostics: [] }) });
+    expect(screen.getByTitle('превью игры')).toBe(before);
   });
 
   it('the first snapshot after connecting establishes a baseline, not a reload', async () => {
     const { ctx, push } = await harness();
-    render(<Preview ctx={ctx} url="http://x:5679" />);
+    render(<Preview ctx={ctx} />);
     const before = screen.getByTitle('превью игры');
 
     push({
@@ -90,7 +152,7 @@ describe('Preview', () => {
 
   it('does NOT reload the iframe when only a hot row config changes', async () => {
     const { ctx, push } = await harness();
-    render(<Preview ctx={ctx} url="http://x:5679" />);
+    render(<Preview ctx={ctx} />);
 
     push({
       type: 'snapshot',
@@ -114,7 +176,7 @@ describe('Preview', () => {
 
   it('DOES reload the iframe — an honest navigation, not a silent no-op — when a hot:false row config changes', async () => {
     const { ctx, push } = await harness();
-    render(<Preview ctx={ctx} url="http://x:5679" />);
+    render(<Preview ctx={ctx} />);
 
     push({
       type: 'snapshot',
@@ -138,7 +200,7 @@ describe('Preview', () => {
 
   it('does not reload again on a snapshot that repeats the same non-hot config', async () => {
     const { ctx, push } = await harness();
-    render(<Preview ctx={ctx} url="http://x:5679" />);
+    render(<Preview ctx={ctx} />);
 
     push({
       type: 'snapshot',
@@ -215,6 +277,29 @@ describe('PreviewWall', () => {
     render(<PreviewWall ctx={ctx} />);
     const urls = screen.getAllByTestId(/^tile-/).map((t) => t.getAttribute('src'));
     expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it('every tile is addressed where the host says the game is served', async () => {
+    const { ctx } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    for (const tile of screen.getAllByTestId(/^tile-/)) {
+      expect(new URL(tile.getAttribute('src')!).origin).toBe(new URL(PREVIEW_URL).origin);
+    }
+  });
+
+  it('with no project open the wall draws no tiles, only the note', async () => {
+    const { ctx } = await harness(NO_PROJECT);
+    render(<PreviewWall ctx={ctx} />);
+    expect(screen.queryAllByTestId(/^tile-/)).toHaveLength(0);
+    expect(screen.getByTestId('preview-unavailable')).toHaveTextContent(/no project open/);
+  });
+
+  it('a project opening after the wall did brings the tiles', async () => {
+    const { ctx, push } = await harness(NO_PROJECT);
+    render(<PreviewWall ctx={ctx} />);
+    push({ type: 'workspace', workspace: workspace() });
+    expect(screen.queryByTestId('preview-unavailable')).toBeNull();
+    expect(screen.getAllByTestId(/^tile-/).length).toBeGreaterThan(1);
   });
 
   it('rotating a tile swaps its width and height', async () => {

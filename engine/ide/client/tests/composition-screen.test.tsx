@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { diagnostic, type ServerMessage } from '@energy8engine/contracts';
 import { CompositionScreen, createIdeClient, useEditorDiagnostics } from '../src/index';
 
+/** The `workspace` plugin's boot GET must not reach the real `fetch` (jsdom has no host to answer, and the failure would land in `connection.diagnostics`); it never answers here. */
+const fetchFn: typeof fetch = () => new Promise(() => {});
+
 const SCHEMA = JSON.parse(
   JSON.stringify(
     Schema.object({
@@ -28,7 +31,7 @@ async function harness() {
     },
     close() {},
   };
-  const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+  const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
   // `act()`: a server push notifies the mounted screen's connection
   // subscription synchronously, outside any testing-library event helper —
   // the same reason the analogous notification in slots.test.tsx's "stale

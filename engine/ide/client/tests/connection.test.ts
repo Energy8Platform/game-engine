@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ServerMessage, Snapshot } from '@energy8engine/contracts';
 import { createIdeClient, type WebSocketLike } from '../src/index';
 
+/** The `workspace` plugin's boot GET must not reach the real `fetch` (jsdom has no host to answer, and the failure would land in `connection.diagnostics`); it never answers here. */
+const fetchFn: typeof fetch = () => new Promise(() => {});
+
 const SNAPSHOT: Snapshot = {
   rows: [
     {
@@ -44,7 +47,7 @@ class FakeSocket implements WebSocketLike {
 describe('connection', () => {
   it('stores the snapshot the host pushes and notifies subscribers', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     const listener = vi.fn();
     ctx.connection.subscribe(listener);
 
@@ -57,7 +60,7 @@ describe('connection', () => {
 
   it('sends an update message shaped for the host', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     socket.open();
     ctx.connection.update('a:probe1', { speed: 3 });
 
@@ -70,7 +73,7 @@ describe('connection', () => {
 
   it('keeps diagnostics from the host without dropping the snapshot', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     socket.open();
     socket.receive({ type: 'snapshot', snapshot: SNAPSHOT });
     socket.receive({
@@ -88,7 +91,7 @@ describe('connection', () => {
   // the moment an unrelated host message arrives.
   it('keeps a client-authored diagnostic when an unrelated host message replaces the host ones', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     socket.open();
 
     const clientDiagnostic = {
@@ -121,7 +124,7 @@ describe('connection', () => {
 
   it('does not send while the socket is not open, and records a diagnostic instead', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     const listener = vi.fn();
     ctx.connection.subscribe(listener);
 
@@ -141,7 +144,7 @@ describe('connection', () => {
 
   it('collapses repeated not-connected failures into a single diagnostic and notifies once', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     const listener = vi.fn();
     ctx.connection.subscribe(listener);
 
@@ -162,7 +165,7 @@ describe('connection', () => {
 
   it("keeps distinct rows' not-connected failures separate instead of collapsing them", async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     const listener = vi.fn();
     ctx.connection.subscribe(listener);
 
@@ -182,7 +185,7 @@ describe('connection', () => {
 
   it('keeps a send-exception and a not-connected failure for the same row side by side', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
 
     // Not connected first — this is the not-open branch.
     ctx.connection.update('a:probe1', { speed: 1 });
@@ -205,7 +208,7 @@ describe('connection', () => {
 
   it('turns a send failure into a diagnostic instead of throwing', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     socket.open();
     const circular: Record<string, unknown> = {};
     circular.self = circular; // JSON.stringify throws synchronously on this
@@ -223,7 +226,7 @@ describe('connection', () => {
 
   it('ignores a well-formed but unrecognised frame instead of throwing', async () => {
     const socket = new FakeSocket();
-    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket });
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
     const listener = vi.fn();
     ctx.connection.subscribe(listener);
     socket.open();

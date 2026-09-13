@@ -307,6 +307,8 @@ function harness(): Context {
       list: () => [],
       subscribe: () => () => {},
     },
+    // `Preview` (inside the screen) reads the workspace; nothing answered yet.
+    workspace: { state: () => null, subscribe: () => () => {} },
   } as unknown as Context;
 }
 

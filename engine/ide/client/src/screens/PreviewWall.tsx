@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic, type CompositionRow } from '@energy8engine/contracts';
+import { useWorkspace } from '../plugins/workspace';
 import { LANGS } from './langs';
 import { SCREEN_PRESETS, screenPreset } from './screenPresets';
 
@@ -27,20 +28,19 @@ import { SCREEN_PRESETS, screenPreset } from './screenPresets';
  */
 
 /**
- * The origin `dev-game`'s catch-all route serves the running game from —
- * the SAME ide-host `e8 dev` boots (see its module doc: "one server, two
- * consumers"). `apps/web/vite.config.ts`'s own dev-server proxy already
- * targets this exact host:port for `/api`, `/plugin-client` and `/ide` —
- * but deliberately NOT for `/` itself (that's this SPA's own root), so the
- * preview iframe has to address the ide-host directly instead of going
- * through that proxy. The host:port pair is hardcoded in three other
- * places already for the same reason (that vite config's own `HOST`
- * constant, `IdeHostOptions`'s default port, every e2e fixture that boots
- * a host) — this is the fourth spelling of the same Slice 0 convention,
- * not a new one.
+ * Where the running game is served comes from the HOST now —
+ * `WorkspaceState.previewUrl`, `null` when no project is open (or its
+ * preview failed to bind). This used to be a `computePreviewUrl()`
+ * hardcoding `:5679` — the fourth spelling of the Slice 0 convention —
+ * which stopped being true the moment a host could hold several projects
+ * and open none. `null` draws this note instead of an iframe.
  */
-export function computePreviewUrl(): string {
-  return `${location.protocol}//${location.hostname}:5679`;
+function Unavailable() {
+  return (
+    <p className="e8-empty" data-testid="preview-unavailable">
+      preview unavailable: no project open
+    </p>
+  );
 }
 
 /** Config fingerprint of every `hot: false` row — see `Preview`'s doc comment for what this drives. */
@@ -50,13 +50,11 @@ function coldSignature(rows: CompositionRow[]): string {
 
 export interface PreviewProps {
   ctx: Context;
-  /** Defaults to `computePreviewUrl()` — overridable so a test never depends on `location`. */
-  url?: string;
 }
 
 /**
- * The running game, in an iframe pointed at the SAME server `dev-game`
- * serves it from — never a second one (see `computePreviewUrl`).
+ * The running game, in an iframe pointed where the host says it is served
+ * (`previewUrl` — see `Unavailable`).
  *
  * A snapshot whose only changes are to `hot: true` rows never touches this
  * component's own state at all: a plugin that declares `hot: true` (today,
@@ -70,10 +68,12 @@ export interface PreviewProps {
  * honest thing to do is reload the iframe rather than silently hope it
  * did. `key={reloadNonce}` forces React to unmount and remount a genuinely
  * new `<iframe>` element — a real navigation — not merely reassign `src`
- * on the same node.
+ * on the same node. A different `previewUrl` (another project opened) is
+ * part of that key for the same reason.
  */
-export function Preview({ ctx, url }: PreviewProps) {
+export function Preview({ ctx }: PreviewProps) {
   const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
+  const previewUrl = useWorkspace(ctx)?.previewUrl ?? null;
   const signatureRef = useRef<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -90,12 +90,13 @@ export function Preview({ ctx, url }: PreviewProps) {
     }
   }, [snapshot]);
 
+  if (previewUrl === null) return <Unavailable />;
   return (
     <iframe
-      key={reloadNonce}
+      key={`${reloadNonce}:${previewUrl}`}
       className="e8-preview"
       title="превью игры"
-      src={url ?? computePreviewUrl()}
+      src={previewUrl}
     />
   );
 }
@@ -124,10 +125,9 @@ function presetInputId(name: string): string {
 }
 
 /**
- * One tile's address: the SAME origin `Preview` resolves (`dev-game`'s
- * catch-all route, on the fixed host:port — see `computePreviewUrl`'s own
- * doc), carrying this ONE tile's own game identity and the wall's current
- * language.
+ * One tile's address: the SAME origin `Preview` resolves (the host's
+ * `previewUrl`), carrying this ONE tile's own game identity and the wall's
+ * current language.
  *
  * The `game` param is what `ide-bridge` reads back from its own page's
  * address (`IdeBridgeConfig.game`'s own doc: "the address this game was
@@ -139,8 +139,8 @@ function presetInputId(name: string): string {
  * legible identity for free — `DiagnosticsPanel` renders it verbatim as
  * `game "Mobile S"`, which tells a human more than an opaque `tile-3` would.
  */
-function tileUrl(name: string, lang: string): string {
-  const url = new URL(computePreviewUrl());
+function tileUrl(base: string, name: string, lang: string): string {
+  const url = new URL(base);
   url.searchParams.set('game', name);
   url.searchParams.set('lang', lang);
   return url.toString();
@@ -185,6 +185,7 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
   );
   const [rotated, setRotated] = useState(false);
   const [lang, setLang] = useState(DEFAULT_LANG);
+  const previewUrl = useWorkspace(ctx)?.previewUrl ?? null;
 
   useEffect(() => {
     // `ctx.connection.report` collapses a byte-identical repeat on its own
@@ -252,27 +253,31 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
         </span>
       </div>
 
-      <div className="e8-preview-wall-tiles">
-        {selected.map((name) => {
-          const preset = screenPreset(name);
-          // Reported above; drawing nothing here is the other half of
-          // "a diagnostic and a skipped tile, not a crashed screen".
-          if (!preset) return null;
-          const width = rotated ? preset.h : preset.w;
-          const height = rotated ? preset.w : preset.h;
-          return (
-            <iframe
-              key={name}
-              data-testid={`tile-${name}`}
-              title={`preview: ${name}`}
-              className="e8-preview-tile"
-              width={width}
-              height={height}
-              src={tileUrl(name, lang)}
-            />
-          );
-        })}
-      </div>
+      {previewUrl === null ? (
+        <Unavailable />
+      ) : (
+        <div className="e8-preview-wall-tiles">
+          {selected.map((name) => {
+            const preset = screenPreset(name);
+            // Reported above; drawing nothing here is the other half of
+            // "a diagnostic and a skipped tile, not a crashed screen".
+            if (!preset) return null;
+            const width = rotated ? preset.h : preset.w;
+            const height = rotated ? preset.w : preset.h;
+            return (
+              <iframe
+                key={name}
+                data-testid={`tile-${name}`}
+                title={`preview: ${name}`}
+                className="e8-preview-tile"
+                width={width}
+                height={height}
+                src={tileUrl(previewUrl, name, lang)}
+              />
+            );
+          })}
+        </div>
+      )}
     </main>
   );
 }
