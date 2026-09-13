@@ -24,7 +24,7 @@ afterEach(async () => {
 
 describe('GET /api/composition', () => {
   it('serves the resolved composition', async () => {
-    host = await createIdeHost({ cwd: fixture('project-simple'), port: 0 });
+    host = await createIdeHost({ root: fixture('project-simple'), port: 0 });
     const res = await fetch(`${host.url}/api/composition`);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -50,7 +50,7 @@ describe('GET /api/composition', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ide-host-runtime-missing-bundle-'));
     writeFileSync(join(dir, 'e8.yml'), '[]\n');
     writeFileSync(join(dir, 'e8.profile.yml'), 'bundles:\n  - does-not-exist\n');
-    host = await createIdeHost({ cwd: dir, port: 0 });
+    host = await createIdeHost({ root: dir, port: 0 });
 
     const body = await (await fetch(`${host.url}/api/composition`)).json();
     expect(body.diagnostics.length).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe('GET /api/composition', () => {
       ].join('\n'),
     );
 
-    host = await createIdeHost({ cwd: workspace, port: 0 });
+    host = await createIdeHost({ root: workspace, port: 0 });
     const body = await (await fetch(`${host.url}/api/composition`)).json();
 
     expect(body.rows.find((r: { id: string }) => r.id === 'renderer1').seam).toEqual({
@@ -197,7 +197,7 @@ describe('GET /api/composition', () => {
       ].join('\n'),
     );
 
-    host = await createIdeHost({ cwd: workspace, port: 0 });
+    host = await createIdeHost({ root: workspace, port: 0 });
     const body = await (await fetch(`${host.url}/api/composition`)).json();
 
     expect(body.rows.find((r: { id: string }) => r.id === 'playloop1').requires).toEqual(['board']);
@@ -276,7 +276,7 @@ describe('GET /api/composition', () => {
         ].join('\n'),
       );
 
-      brokenHost = await createIdeHost({ cwd: workspace, port: 0 });
+      brokenHost = await createIdeHost({ root: workspace, port: 0 });
     });
 
     afterEach(async () => {
@@ -386,7 +386,7 @@ describe('GET /api/composition', () => {
       ].join('\n'),
     );
 
-    host = await createIdeHost({ cwd: workspace, port: 0 });
+    host = await createIdeHost({ root: workspace, port: 0 });
     await host.ctx.plugin({
       name: 'fake-dev-game-root',
       apply(ctx: Context) {
@@ -468,7 +468,7 @@ describe('GET /api/composition', () => {
       ].join('\n'),
     );
 
-    host = await createIdeHost({ cwd: workspace, port: 0 });
+    host = await createIdeHost({ root: workspace, port: 0 });
     const res = await fetch(`${host.url}/api/composition`);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -507,7 +507,7 @@ describe('GET /api/composition', () => {
     // makes directly against `ctx.project.reload()` — this proves the HTTP
     // route makes that same call itself, not just that the service can.
     const dir = copyFixtureToTemp('project-patched');
-    host = await createIdeHost({ cwd: dir, port: 0 });
+    host = await createIdeHost({ root: dir, port: 0 });
 
     const before = await (await fetch(`${host.url}/api/composition`)).json();
     expect(before.rows.find((r: { id: string }) => r.id === 'reels1').config).toEqual({
@@ -639,7 +639,7 @@ describe('GET /plugin-runtime/:id', () => {
       ].join('\n'),
     );
 
-    runtimeHost = await createIdeHost({ cwd: workspace, port: 0 });
+    runtimeHost = await createIdeHost({ root: workspace, port: 0 });
   });
 
   afterEach(async () => {

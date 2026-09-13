@@ -19,7 +19,7 @@ function workspace(yaml: string): string {
 describe('a broken plugin', () => {
   it('does not stop the host from serving', async () => {
     host = await createIdeHost({
-      cwd: workspace('- id: b1\n  name: broken-plugin\n'),
+      root: workspace('- id: b1\n  name: broken-plugin\n'),
       port: 0,
     });
     const res = await fetch(`${host.url}/api/health`);
@@ -28,7 +28,7 @@ describe('a broken plugin', () => {
 
   it('shows up as a failed row with a diagnostic naming it', async () => {
     host = await createIdeHost({
-      cwd: workspace('- id: b1\n  name: broken-plugin\n'),
+      root: workspace('- id: b1\n  name: broken-plugin\n'),
       port: 0,
     });
     const snapshot = await host.ctx.composition.snapshot();
@@ -41,7 +41,7 @@ describe('a broken plugin', () => {
 
   it('reports an unresolvable package instead of crashing the snapshot', async () => {
     host = await createIdeHost({
-      cwd: workspace('- id: g1\n  name: no-such-plugin-anywhere\n'),
+      root: workspace('- id: g1\n  name: no-such-plugin-anywhere\n'),
       port: 0,
     });
     const snapshot = await host.ctx.composition.snapshot();
@@ -52,7 +52,7 @@ describe('a broken plugin', () => {
 
   it('reports a module that fails to import as a diagnostic, not a silent empty row', async () => {
     host = await createIdeHost({
-      cwd: workspace('- id: i1\n  name: import-broken-plugin\n'),
+      root: workspace('- id: i1\n  name: import-broken-plugin\n'),
       port: 0,
     });
     const snapshot = await host.ctx.composition.snapshot();

@@ -57,7 +57,7 @@ const hosts: IdeHost[] = [];
 
 /** Boots a host for `cwd` and returns its `ctx` — `ctx.files` is what these tests exercise. */
 async function hostFor(cwd: string): Promise<Context> {
-  const host = await createIdeHost({ cwd, port: 0 });
+  const host = await createIdeHost({ root: cwd, port: 0 });
   hosts.push(host);
   return host.ctx;
 }
@@ -68,7 +68,7 @@ async function hostFor(cwd: string): Promise<Context> {
  * direct `ctx.files` calls above.
  */
 async function startHost(cwd: string): Promise<IdeHost> {
-  const host = await createIdeHost({ cwd, port: 0 });
+  const host = await createIdeHost({ root: cwd, port: 0 });
   hosts.push(host);
   return host;
 }

@@ -10,7 +10,7 @@ const WORKSPACE = join(__dirname, 'fixtures', 'composition');
 
 let host: IdeHost;
 beforeEach(async () => {
-  host = await createIdeHost({ cwd: WORKSPACE, port: 0 });
+  host = await createIdeHost({ root: WORKSPACE, port: 0 });
 });
 afterEach(async () => {
   await host.stop();
@@ -159,7 +159,7 @@ describe('plugin client assets — failure modes needing a hostile-ish manifest'
       '- id: missing1\n  name: missing-entry-plugin\n- id: traversal1\n  name: traversal-plugin\n- id: symlink1\n  name: symlink-plugin\n',
     );
 
-    securityHost = await createIdeHost({ cwd: workspace, port: 0 });
+    securityHost = await createIdeHost({ root: workspace, port: 0 });
   });
 
   afterEach(async () => {

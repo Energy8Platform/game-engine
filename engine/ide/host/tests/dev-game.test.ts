@@ -225,7 +225,7 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
     // index.ts` passes `root: cwd` to `dev-game` for `e8 dev`), and keeps
     // this row's package inside vite's default `fs.allow` search — the
     // same real-world configuration, not a fixture-only shortcut.
-    host = await createIdeHost({ cwd: workspace, port: 0 });
+    host = await createIdeHost({ root: workspace, port: 0 });
     await host.ctx.plugin(devGame, {
       root: workspace,
       gamesDir: GAME,
@@ -306,7 +306,7 @@ describe('dev-game — a row added after the server started says so', () => {
     const bundleFile = join(bundlesDir, 'e8.bundle.yml');
     writeFileSync(bundleFile, bundle(['  - id: early1', '    name: early-pkg']));
 
-    host = await createIdeHost({ cwd: workspace, port: 0 });
+    host = await createIdeHost({ root: workspace, port: 0 });
     await host.ctx.plugin(devGame, {
       root: workspace,
       gamesDir: GAME,
@@ -509,7 +509,7 @@ describe('dev-game — the spin route', () => {
    * `dev-game.ts` has to actually work against.
    */
   it('also reaches the IDE panel directly, as game-diagnostics on the /ide socket — not only via a page relay', async () => {
-    host = await createIdeHost({ cwd: WORKSPACE, port: 0 });
+    host = await createIdeHost({ root: WORKSPACE, port: 0 });
     await host.ctx.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
@@ -540,7 +540,7 @@ describe('dev-game — the spin route', () => {
 
 describe('dev-game — one server, two consumers', () => {
   it('leaves /api/health and the composition serving once dev-game is added', async () => {
-    host = await createIdeHost({ cwd: WORKSPACE, port: 0 });
+    host = await createIdeHost({ root: WORKSPACE, port: 0 });
     await host.ctx.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
@@ -742,8 +742,12 @@ describe('dev-game — restart on a script.spin write', () => {
    */
   async function hostOverProject(projectDir: string, binPath?: string) {
     // `createIdeHost` needs an e8.yml; `first-slot`'s own is copied with
-    // the rest of the project, not only `game/`.
-    host = await createIdeHost({ cwd: projectDir, port: 0 });
+    // the rest of the project, not only `game/`. Its `game/spec.json` is
+    // NOT kept: the project scope boots its own `dev-game` off that file,
+    // and this test needs the one it composes by hand below — with a
+    // `binPath` the spec cannot carry — to be the only session.
+    rmSync(join(projectDir, 'game', 'spec.json'));
+    host = await createIdeHost({ root: projectDir, port: 0 });
     await host.ctx.plugin(devGame, {
       root: projectDir,
       gamesDir: join(projectDir, 'game'),

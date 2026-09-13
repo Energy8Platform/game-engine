@@ -24,13 +24,13 @@ function copyFixtureToTemp(name: string): string {
 
 describe('project plugin', () => {
   it('resolves a profile that stacks one bundle', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-simple'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-simple'), port: 0 });
     expect(host.ctx.project.composition.rows.map((r) => r.id)).toEqual(['boot1', 'reels1']);
     await host.stop();
   });
 
   it('applies e8.patch.yml on top of the bundles', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-patched'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-patched'), port: 0 });
     const reels = host.ctx.project.composition.rows.find((r) => r.id === 'reels1')!;
     expect(reels.config).toEqual({ grid: { cols: 5, rows: 3 } });
     expect(reels.from).toBe('patch');
@@ -38,7 +38,7 @@ describe('project plugin', () => {
   });
 
   it('a missing e8.profile.yml is a diagnostic and the host still starts', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-none'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-none'), port: 0 });
     expect(host.ctx.project.composition.rows).toEqual([]);
     expect(host.ctx.project.diagnostics.some((d) => d.message.includes('e8.profile.yml'))).toBe(
       true,
@@ -48,7 +48,7 @@ describe('project plugin', () => {
   });
 
   it('malformed YAML is a diagnostic naming the file, not a throw', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-broken-yaml'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-broken-yaml'), port: 0 });
     expect(host.ctx.project.diagnostics.some((d) => d.where.includes('e8.profile.yml'))).toBe(
       true,
     );
@@ -56,14 +56,14 @@ describe('project plugin', () => {
   });
 
   it('a profile that is not an object with a bundles array is a diagnostic', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-wrong-shape'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-wrong-shape'), port: 0 });
     expect(host.ctx.project.diagnostics.some((d) => d.message.includes('bundles'))).toBe(true);
     await host.stop();
   });
 
   it('reload() picks up an edited patch without restarting the host', async () => {
     const dir = copyFixtureToTemp('project-patched');
-    const host = await createIdeHost({ cwd: dir, port: 0 });
+    const host = await createIdeHost({ root: dir, port: 0 });
     writeFileSync(join(dir, 'e8.patch.yml'), 'rows:\n  - id: reels1\n    config: { grid: 9 }\n');
     await host.ctx.project.reload();
     expect(host.ctx.project.composition.rows.find((r) => r.id === 'reels1')!.config).toEqual({
@@ -87,13 +87,13 @@ describe('project plugin', () => {
       "name: e8-nm\nrows:\n  - id: nm1\n    name: '@energy8engine/boot'\n",
     );
 
-    const host = await createIdeHost({ cwd: dir, port: 0 });
+    const host = await createIdeHost({ root: dir, port: 0 });
     expect(host.ctx.project.composition.rows.map((r) => r.id)).toEqual(['nm1']);
     await host.stop();
   });
 
   it('a bundle that fails to parse reports only that, not a false "not found" too', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-broken-bundle'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-broken-bundle'), port: 0 });
     const messages = host.ctx.project.diagnostics.map((d) => d.message);
     expect(messages.some((m) => m.includes('e8-broken') && m.includes('not valid YAML'))).toBe(
       true,

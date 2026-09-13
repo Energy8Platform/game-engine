@@ -45,7 +45,7 @@ beforeEach(async () => {
   mkdirSync(join(workspace, 'node_modules'));
   symlinkSync(PROBE_PLUGIN_DIR, join(workspace, 'node_modules', 'probe-plugin'), 'dir');
   (globalThis as any).__probeApplied = [];
-  host = await createIdeHost({ cwd: workspace, port: 0 });
+  host = await createIdeHost({ root: workspace, port: 0 });
 });
 
 afterEach(async () => {

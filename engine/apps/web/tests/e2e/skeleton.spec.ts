@@ -17,7 +17,7 @@ let original: string;
 // browser cannot tell the difference — it only ever sees port 5679.
 test.beforeAll(async () => {
   original = readFileSync(COMPOSITION, 'utf8');
-  host = await createIdeHost({ cwd: WORKSPACE, port: 5679 });
+  host = await createIdeHost({ root: WORKSPACE, port: 5679 });
 });
 
 test.afterAll(async () => {

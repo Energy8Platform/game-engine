@@ -32,7 +32,7 @@ function checkFixture(): string {
 }
 
 function startHost(cwd: string): Promise<IdeHost> {
-  return createIdeHost({ cwd, port: 0 });
+  return createIdeHost({ root: cwd, port: 0 });
 }
 
 /**
@@ -44,13 +44,13 @@ function startHost(cwd: string): Promise<IdeHost> {
  */
 describe('ctx.spinSchema', () => {
   it('parses the project game/script.spin and exposes it', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-simple'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-simple'), port: 0 });
     expect(host.ctx.spinSchema.schema!.gameId).toBe('demo');
     await host.stop();
   });
 
   it('a missing script.spin is a diagnostic and the host still starts', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-no-spin'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-no-spin'), port: 0 });
     expect(host.ctx.spinSchema.schema).toBeNull();
     expect(host.ctx.spinSchema.diagnostics.some((d) => d.where.includes('script.spin'))).toBe(true);
     expect(host.url).toBeTruthy();
@@ -59,7 +59,7 @@ describe('ctx.spinSchema', () => {
 
   it('an action naming a stage the enum does not declare is a diagnostic', async () => {
     // The judgement task 1's type guard deliberately refused to make.
-    const host = await createIdeHost({ cwd: fixture('project-stage-typo'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-stage-typo'), port: 0 });
     expect(host.ctx.spinSchema.diagnostics.some((d) => d.message.includes('free_spins'))).toBe(
       true,
     );
@@ -85,7 +85,7 @@ describe('ctx.spinSchema', () => {
  */
 describe('ctx.spinSchema — severity: a .spin we cannot read must not stop the game', () => {
   it('a missing script.spin is a warning, never an error', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-no-spin'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-no-spin'), port: 0 });
     const diagnostics = host.ctx.spinSchema.diagnostics;
     expect(diagnostics.length).toBeGreaterThan(0);
     expect(diagnostics.every((d) => d.severity === 'warning')).toBe(true);
@@ -96,7 +96,7 @@ describe('ctx.spinSchema — severity: a .spin we cannot read must not stop the 
     // Half a schema plus a diagnostic beats nothing — but only if the
     // diagnostic does not itself blank the screen. `project-half-spin`'s
     // `.spin` has one unterminated record; everything else in it reads.
-    const host = await createIdeHost({ cwd: fixture('project-half-spin'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-half-spin'), port: 0 });
     // Half a schema: the game block and the stage came through.
     expect(host.ctx.spinSchema.schema!.gameId).toBe('demo');
     expect(Object.keys(host.ctx.spinSchema.schema!.stages)).toEqual(['base_game']);
@@ -111,7 +111,7 @@ describe('ctx.spinSchema — severity: a .spin we cannot read must not stop the 
   });
 
   it('an action naming an undeclared stage stays an error — that one IS about a schema we read', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-stage-typo'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-stage-typo'), port: 0 });
     const stageTypo = host.ctx.spinSchema.diagnostics.find((d) =>
       d.message.includes('free_spins'),
     )!;
@@ -122,7 +122,7 @@ describe('ctx.spinSchema — severity: a .spin we cannot read must not stop the 
   it('/api/composition carries no error-severity diagnostic for a project with no .spin', async () => {
     // The end of the wire this severity actually travels: what the
     // browser receives, not just what the service holds.
-    const host = await createIdeHost({ cwd: fixture('project-no-spin'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-no-spin'), port: 0 });
     const body = await (await fetch(`${host.url}/api/composition`)).json();
     expect(body.diagnostics.length).toBeGreaterThan(0);
     expect(body.diagnostics.filter((d: { severity: string }) => d.severity === 'error')).toEqual(
@@ -134,14 +134,14 @@ describe('ctx.spinSchema — severity: a .spin we cannot read must not stop the 
 
 describe('GET /api/composition carries the schema', () => {
   it('the composition response carries the schema', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-simple'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-simple'), port: 0 });
     const body = await (await fetch(`${host.url}/api/composition`)).json();
     expect(body.schema.gameId).toBe('demo');
     await host.stop();
   });
 
   it('carries a null schema and its diagnostics rather than omitting the field', async () => {
-    const host = await createIdeHost({ cwd: fixture('project-no-spin'), port: 0 });
+    const host = await createIdeHost({ root: fixture('project-no-spin'), port: 0 });
     const body = await (await fetch(`${host.url}/api/composition`)).json();
     expect(body).toHaveProperty('schema');
     expect(body.schema).toBeNull();

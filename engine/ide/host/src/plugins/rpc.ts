@@ -1,11 +1,15 @@
 import type { Context } from 'cordis';
+import type { Server, WsRoute } from '@cordisjs/plugin-server';
 import type { WebSocket } from 'ws';
 import {
   GAME_DIAGNOSTIC_SOURCES,
+  diagnostic,
   type ClientMessage,
   type Diagnostic,
   type GameDiagnosticsSource,
   type ServerMessage,
+  type Snapshot,
+  type WorkspaceState,
 } from '@energy8engine/contracts';
 import { createDiagnostics } from '@energy8engine/diagnostics';
 
@@ -51,10 +55,19 @@ export interface IdeRpcService {
    * collector can use it (see that package's `runtime.ts` doc).
    */
   reportGameDiagnostics(diagnostics: Diagnostic[]): void;
+  /** Tells every client which projects exist and which is open — also the FIRST frame on connect. */
+  broadcastWorkspace(state: WorkspaceState): void;
+  /** Registers the `/ide` websocket route on `server` — the root's by default; the preview's too (Task 4). */
+  attach(server: Server): void;
 }
 
 export const name = 'ide-rpc';
-export const inject = ['composition', 'server'];
+/**
+ * `server` only: `rpc` lives on the ROOT and outlives every project, so the
+ * active project's `composition` is read at call time (`compositionOf`
+ * below), never injected — a root with no project open must still answer.
+ */
+export const inject = ['server'];
 
 export function apply(ctx: Context) {
   const clients = new Set<WebSocket>();
@@ -175,10 +188,24 @@ export function apply(ctx: Context) {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
   };
 
+  /** The active project's composition, or `null` between projects. Read at call time — the root has none. */
+  const compositionOf = () => ctx.get('composition') ?? null;
+  const emptySnapshot = (): Snapshot => ({ rows: [], diagnostics: [] });
+  const currentSnapshot = async (): Promise<Snapshot> =>
+    (await compositionOf()?.snapshot()) ?? emptySnapshot();
+
   const broadcast = async () => {
     if (!clients.size) return;
-    const snapshot = await ctx.composition.snapshot();
+    const snapshot = await currentSnapshot();
     for (const socket of clients) send(socket, { type: 'snapshot', snapshot });
+  };
+
+  /** What a client is told about the workspace: the last state broadcast, until `workspace` says otherwise. */
+  let lastWorkspace: WorkspaceState = {
+    projects: [],
+    active: null,
+    previewUrl: null,
+    diagnostics: [],
   };
 
   /**
@@ -203,7 +230,7 @@ export function apply(ctx: Context) {
    */
   const hostDiagnostics = createDiagnostics();
 
-  ctx.provide('ideRpc', {
+  const service: IdeRpcService = {
     reportGameDiagnostics(diagnostics) {
       for (const d of diagnostics) hostDiagnostics.report(d);
       const frame = {
@@ -214,9 +241,17 @@ export function apply(ctx: Context) {
       const message: ServerMessage = { type: 'game-diagnostics', ...frame, source: 'host' };
       for (const socket of clients) send(socket, message);
     },
-  });
+    broadcastWorkspace(state) {
+      lastWorkspace = state;
+      for (const socket of clients) send(socket, { type: 'workspace', workspace: state });
+    },
+    attach(server) {
+      server.ws('/ide', handler);
+    },
+  };
+  ctx.provide('ideRpc', service);
 
-  ctx.server.ws('/ide', async (_req, accept) => {
+  const handler: NonNullable<WsRoute['handle']> = async (_req, accept) => {
     const socket = await accept();
     clients.add(socket);
     socket.on('close', () => {
@@ -301,7 +336,18 @@ export function apply(ctx: Context) {
         return;
       }
 
-      const diagnostics = await ctx.composition.update(message.id, message.config);
+      const composition = compositionOf();
+      const diagnostics = composition
+        ? await composition.update(message.id, message.config)
+        : [
+            diagnostic(
+              'error',
+              'ide-rpc',
+              message.id,
+              'no project is open',
+              'open a project first',
+            ),
+          ];
       if (diagnostics.length) {
         send(socket, { type: 'diagnostics', diagnostics });
       } else {
@@ -309,7 +355,10 @@ export function apply(ctx: Context) {
       }
     });
 
-    send(socket, { type: 'snapshot', snapshot: await ctx.composition.snapshot() });
+    // Workspace first, then the snapshot (spec §9): a client learns WHICH
+    // project the rows belong to before it sees any rows.
+    send(socket, { type: 'workspace', workspace: lastWorkspace });
+    send(socket, { type: 'snapshot', snapshot: await currentSnapshot() });
     // A client that (re)connects after a game already reported trouble
     // must not see "nothing has ever gone wrong" just because it wasn't
     // listening at the time — see `lastGameDiagnostics`'s own doc. Sent
@@ -335,9 +384,16 @@ export function apply(ctx: Context) {
         });
       }
     }
-  });
+  };
+  service.attach(ctx.server);
 
   // The graph is the source of truth: whenever it moves, the browser hears about it.
   ctx.on('internal/status', () => void broadcast());
   ctx.on('loader/config-update', () => void broadcast());
+  // A project switch is a new graph (or none): the browser sees the new
+  // rows, or an empty snapshot, without waiting for the graph to move.
+  ctx.on('workspace/changed', (state) => {
+    service.broadcastWorkspace(state);
+    void broadcast();
+  });
 }

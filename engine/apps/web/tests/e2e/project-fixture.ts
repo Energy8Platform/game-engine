@@ -17,7 +17,6 @@ import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
-import * as devGame from '@energy8engine/ide-host/dev-game';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -101,8 +100,8 @@ export interface ProjectCopyOptions {
    * places, to stage a failure without touching the composition at all.
    * Generalized here rather than copied a fourth time.
    *
-   * `startDevHost` reads this id straight off the project (see its own
-   * doc) and hands it to `session-dev` as the game to load, so a value
+   * The project scope reads this id straight off the project (the way
+   * the CLI used to) and hands it to `session-dev` as the game to load, so a value
    * nothing under `--games-dir` answers to turns every `POST /api/spin`
    * into a failure INSIDE THE HOST PROCESS — a different producer, and a
    * different kind of failure, than anything a patch row can stage: the
@@ -197,9 +196,10 @@ export interface DevHost {
 }
 
 /**
- * Boots `e8 dev` in `dir`: the same host, with the same `dev-game` on top,
- * that `engine/apps/cli/src/index.ts`'s `dev` command boots — in process
- * rather than by spawning the CLI.
+ * Boots `e8 dev` in `dir`: the same host `engine/apps/cli/src/index.ts`'s
+ * `dev` command boots — in process rather than by spawning the CLI. `dir`
+ * holds `e8.yml`, so it is the one project and opens at boot; its scope
+ * reads `game/spec.json` and brings `dev-game` up itself.
  *
  * Port 5679 is fixed, not incidental: it is the target `vite.config.ts`'s
  * dev-server proxy hardcodes, so a spec that goes through the IDE on 5680
@@ -209,20 +209,7 @@ export interface DevHost {
  * server, so the next spec file may bind 5679 the moment it resolves.
  */
 export async function startDevHost(dir: string): Promise<DevHost> {
-  const gamesDir = join(dir, 'game');
-  // Read from the project, the way the CLI does — not hardcoded here, so
-  // a fixture that renamed its game could not silently keep passing.
-  const spec = JSON.parse(readFileSync(join(gamesDir, 'spec.json'), 'utf8')) as {
-    id: string;
-    betLevels?: number[];
-  };
-  const host: IdeHost = await createIdeHost({ cwd: dir, port: 5679 });
-  await host.ctx.plugin(devGame, {
-    root: dir,
-    gamesDir,
-    gameId: spec.id,
-    betLevel: spec.betLevels?.[0] ?? 1,
-    port: 0,
-  });
-  return { gameUrl: host.url, stop: () => host.stop() };
+  const host: IdeHost = await createIdeHost({ root: dir, port: 5679, previewPort: 0 });
+  // Still the root's own URL until the preview moves to its own origin.
+  return { gameUrl: host.ctx.workspace.state().previewUrl!, stop: () => host.stop() };
 }

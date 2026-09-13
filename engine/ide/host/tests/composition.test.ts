@@ -8,7 +8,7 @@ const WORKSPACE = join(__dirname, 'fixtures', 'composition');
 let host: IdeHost;
 beforeEach(async () => {
   (globalThis as any).__probeApplied = [];
-  host = await createIdeHost({ cwd: WORKSPACE, port: 0 });
+  host = await createIdeHost({ root: WORKSPACE, port: 0 });
 });
 afterEach(async () => {
   await host.stop();

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
@@ -29,6 +29,7 @@ const PROBE_PLUGIN_DIR = dirname(
 );
 
 let host: IdeHost;
+let workspace: string;
 let socket: WebSocket;
 
 /**
@@ -65,13 +66,13 @@ function createInbox(socket: WebSocket) {
 let inbox: ReturnType<typeof createInbox>;
 
 beforeEach(async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'ide-host-rpc-'));
+  workspace = mkdtempSync(join(tmpdir(), 'ide-host-rpc-'));
   writeFileSync(join(workspace, 'e8.yml'), readFileSync(TEMPLATE_FILE, 'utf8'));
   mkdirSync(join(workspace, 'node_modules'));
   symlinkSync(PROBE_PLUGIN_DIR, join(workspace, 'node_modules', 'probe-plugin'), 'dir');
   (globalThis as any).__probeApplied = [];
 
-  host = await createIdeHost({ cwd: workspace, port: 0 });
+  host = await createIdeHost({ root: workspace, port: 0 });
   socket = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
   inbox = createInbox(socket);
   await new Promise((resolve) => socket.once('open', resolve));
@@ -84,7 +85,12 @@ afterEach(async () => {
 });
 
 describe('ide rpc', () => {
-  it('pushes a snapshot as soon as the browser connects', async () => {
+  it('pushes the workspace, then a snapshot, as soon as the browser connects', async () => {
+    // Workspace FIRST (spec §9): the client learns which project the rows
+    // belong to before it sees any rows.
+    const first = await inbox.waitFor(() => true);
+    expect(first.type).toBe('workspace');
+    expect(first.type === 'workspace' && first.workspace.active).toBe(basename(workspace));
     const message = await inbox.waitFor(() => true);
     expect(message.type).toBe('snapshot');
     expect(
@@ -915,5 +921,78 @@ describe('ide rpc — several games do not overwrite each other', () => {
     expect(editor.received.filter((m) => m.type === 'game-gone')).toEqual([]);
 
     editor.ws.close();
+  });
+});
+
+describe('ide rpc — on a root with no project open', () => {
+  let bare: IdeHost;
+  let bareSocket: WebSocket;
+  let bareInbox: ReturnType<typeof createInbox>;
+  beforeEach(async () => {
+    // A folder with nothing in it: a workspace of zero projects, none open.
+    bare = await createIdeHost({
+      root: mkdtempSync(join(tmpdir(), 'ide-host-rpc-bare-')),
+      port: 0,
+    });
+    bareSocket = new WebSocket(`${bare.url.replace('http', 'ws')}/ide`);
+    bareInbox = createInbox(bareSocket);
+    await new Promise((resolve) => bareSocket.once('open', resolve));
+  });
+  afterEach(async () => {
+    bareSocket.close();
+    await bare.stop();
+  });
+
+  it('greets a client with the workspace, then an EMPTY snapshot — not silence', async () => {
+    const first = await bareInbox.waitFor(() => true);
+    expect(first).toEqual({
+      type: 'workspace',
+      workspace: { projects: [], active: null, previewUrl: null, diagnostics: [] },
+    });
+    const second = await bareInbox.waitFor(() => true);
+    expect(second).toEqual({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } });
+  });
+
+  it('answers an update with a diagnostic when there is no project to update', async () => {
+    bareSocket.send(JSON.stringify({ type: 'update', id: 'probe1', config: { speed: 5 } }));
+    const message = await bareInbox.waitFor((m) => m.type === 'diagnostics');
+    expect(message).toMatchObject({
+      diagnostics: [
+        { severity: 'error', plugin: 'ide-rpc', where: 'probe1', message: 'no project is open' },
+      ],
+    });
+    expect(bareSocket.readyState).toBe(bareSocket.OPEN);
+  });
+});
+
+describe('ide rpc — across a project switch', () => {
+  it('a connected client is told the new workspace and the new (or empty) snapshot without reconnecting', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ide-host-rpc-switch-'));
+    for (const id of ['one', 'two']) {
+      mkdirSync(join(root, id, 'node_modules'), { recursive: true });
+      writeFileSync(join(root, id, 'e8.yml'), readFileSync(TEMPLATE_FILE, 'utf8'));
+      symlinkSync(PROBE_PLUGIN_DIR, join(root, id, 'node_modules', 'probe-plugin'), 'dir');
+    }
+    (globalThis as any).__probeApplied = [];
+    const h = await createIdeHost({ root, port: 0 });
+    const s = new WebSocket(`${h.url.replace('http', 'ws')}/ide`);
+    const box = createInbox(s);
+    await new Promise((resolve) => s.once('open', resolve));
+    try {
+      await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
+
+      await h.ctx.workspace.open('one');
+      await box.waitFor((m) => m.type === 'workspace' && m.workspace.active === 'one');
+      await box.waitFor(
+        (m) => m.type === 'snapshot' && m.snapshot.rows.some((r) => r.name === 'probe-plugin'),
+      );
+
+      await h.ctx.workspace.close();
+      await box.waitFor((m) => m.type === 'workspace' && m.workspace.active === null);
+      await box.waitFor((m) => m.type === 'snapshot' && m.snapshot.rows.length === 0);
+    } finally {
+      s.close();
+      await h.stop();
+    }
   });
 });

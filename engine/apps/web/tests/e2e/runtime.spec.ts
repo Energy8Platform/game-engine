@@ -3,7 +3,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Frame } from '@playwright/test';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
-import * as devGame from '@energy8engine/ide-host/dev-game';
 
 /**
  * The plan's own thesis, proven in a real browser: a knob turned in the
@@ -29,12 +28,12 @@ import * as devGame from '@energy8engine/ide-host/dev-game';
  * plan's content against the raw spin data for exactly that reason.
  *
  * Mirrors `skeleton.spec.ts`'s exact pattern (in-process host, fixed port
- * 5679 — the one `vite.config.ts`'s dev-server proxy targets) with one
- * addition: `dev-game` composed onto the SAME host, the way `e8 dev` does.
+ * 5679 — the one `vite.config.ts`'s dev-server proxy targets); the project
+ * is the root, so it opens at boot and its scope brings `dev-game` up off
+ * `game/spec.json`, the way `e8 dev` does.
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT = join(__dirname, '..', '..', '..', '..', 'examples', 'first-slot');
-const GAMES_DIR = join(PROJECT, 'game');
 const COMPOSITION = join(PROJECT, 'e8.yml');
 
 let host: IdeHost;
@@ -42,14 +41,7 @@ let original: string;
 
 test.beforeAll(async () => {
   original = readFileSync(COMPOSITION, 'utf8');
-  host = await createIdeHost({ cwd: PROJECT, port: 5679 });
-  await host.ctx.plugin(devGame, {
-    root: PROJECT,
-    gamesDir: GAMES_DIR,
-    gameId: 'first-slot',
-    betLevel: 1.0,
-    port: 0,
-  });
+  host = await createIdeHost({ root: PROJECT, port: 5679, previewPort: 0 });
 });
 
 test.afterAll(async () => {
