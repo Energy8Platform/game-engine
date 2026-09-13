@@ -3,8 +3,14 @@ import { Context } from 'cordis';
 import Loader from '@cordisjs/plugin-loader';
 import Server from '@cordisjs/plugin-server';
 import { bootProjectScope } from './plugins/project-scope';
+import * as ideStatic from './plugins/ide-static';
 import * as rpc from './plugins/rpc';
 import * as workspace from './plugins/workspace';
+
+export {
+  BUILD_HINT as IDE_BUILD_HINT,
+  DEFAULT_DIST as IDE_DIST_DEFAULT,
+} from './plugins/ide-static';
 
 export interface IdeHostOptions {
   /**
@@ -18,6 +24,12 @@ export interface IdeHostOptions {
   host?: string;
   /** The game preview's port (spec §6); 0 picks a free one. Defaults to 5681. */
   previewPort?: number;
+  /**
+   * Where the built IDE shell is served from (spec §7). Tests pass a temp
+   * dir; the CLI leaves it unset and `ide-static` falls back to `IDE_DIST`,
+   * then this repo's `engine/apps/web/dist`.
+   */
+  ideDist?: string;
 }
 
 export interface IdeHost {
@@ -144,6 +156,10 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     ctx.server.get('/api/health', async (_req, res) => {
       res.json({ ok: true });
     });
+
+    // LAST, deliberately: a catch-all route, and `HttpRoute`s dispatch in
+    // registration order — everything above must already be in the list.
+    await ctx.plugin(ideStatic, { dist: options.ideDist });
 
     return {
       ctx,

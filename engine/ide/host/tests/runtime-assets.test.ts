@@ -650,7 +650,13 @@ describe('GET /plugin-runtime/:id', () => {
       ].join('\n'),
     );
 
-    runtimeHost = await createIdeHost({ root: workspace, port: 0 });
+    // `ideDist` pinned to nothing: the root's catch-all is `ide-static`
+    // (spec §7), and this way its answer is the same on every machine.
+    runtimeHost = await createIdeHost({
+      root: workspace,
+      port: 0,
+      ideDist: join(workspace, 'no-ide-dist'),
+    });
     const fiber = runtimeHost.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
     await fiber;
     runtimeHost.ctx.get('runtimeAssets')!.attachGameRoutes(fiber.ctx.server);
@@ -663,10 +669,11 @@ describe('GET /plugin-runtime/:id', () => {
     // why cleanup is deliberately skipped.
   });
 
-  it("is on the game server only — the root answers cordis's empty 404, and /api/composition is on both", async () => {
+  it("is on the game server only — the root answers ide-static's SPA fallback, and /api/composition is on both", async () => {
     const onRoot = await fetch(`${runtimeHost.url}/plugin-runtime/reels1`);
-    expect(onRoot.status).toBe(404);
-    expect(await onRoot.text()).toBe('');
+    expect(onRoot.status).toBe(503);
+    expect(onRoot.headers.get('content-type')).not.toContain('javascript');
+    expect(await onRoot.text()).not.toContain('export');
     expect((await fetch(`${runtimeHost.url}/api/composition`)).status).toBe(200);
     expect((await fetch(`${gameUrl}/api/composition`)).status).toBe(200);
   });

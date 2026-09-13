@@ -60,6 +60,29 @@ describe('createIdeHost', () => {
     expect(typeof host.ctx.loader.entries).toBe('function');
   });
 
+  it('serves the IDE shell at / from `ideDist`, and a 503 page when it is not built (spec §7)', async () => {
+    const dist = mkdtempSync(join(tmpdir(), 'e8-host-dist-'));
+    try {
+      writeFileSync(join(dist, 'index.html'), '<!doctype html><title>shell</title>');
+      host = await createIdeHost({ root: WORKSPACE, port: 0, ideDist: dist });
+      const built = await fetch(`${host.url}/`);
+      expect(built.status).toBe(200);
+      expect(await built.text()).toContain('<title>shell</title>');
+      await host.stop();
+
+      host = await createIdeHost({ root: WORKSPACE, port: 0, ideDist: join(dist, 'missing') });
+      const unbuilt = await fetch(`${host.url}/`);
+      expect(unbuilt.status).toBe(503);
+      expect(await unbuilt.text()).toContain(
+        'оболочка не собрана: npm run build -w @energy8engine/ide-web',
+      );
+      // the API is untouched either way
+      expect(await (await fetch(`${host.url}/api/health`)).json()).toEqual({ ok: true });
+    } finally {
+      rmSync(dist, { recursive: true, force: true });
+    }
+  });
+
   it('stops cleanly — the port stops answering', async () => {
     host = await createIdeHost({ root: WORKSPACE, port: 0 });
     const url = host.url;

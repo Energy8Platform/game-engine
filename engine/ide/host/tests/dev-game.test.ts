@@ -585,7 +585,14 @@ describe('dev-game — the game on its own origin', () => {
   const game = { root: WEB_ROOT, gamesDir: GAME, gameId: 'first-slot', betLevel: 1.0, port: 0 };
 
   it('the game html answers on the preview and NOT on the root; the root keeps its own routes', async () => {
-    host = await createIdeHost({ root: WORKSPACE, port: 0 });
+    // `ideDist` pinned to nothing so the root's `/` is the IDE's own
+    // "not built" page on every machine, never the game — deterministic
+    // whether or not `apps/web/dist` exists here.
+    host = await createIdeHost({
+      root: WORKSPACE,
+      port: 0,
+      ideDist: join(WORKSPACE, 'no-ide-dist'),
+    });
     await host.ctx.plugin(devGame, { ...game, previewPort: 0 });
 
     const url = preview(host.ctx);
@@ -594,9 +601,9 @@ describe('dev-game — the game on its own origin', () => {
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('dev-game fixture root');
 
-    // The root has no catch-all any more: cordis's own empty 404.
+    // The root's catch-all is `ide-static`'s (spec §7), not the game's.
     const root = await fetch(`${host.url}/`);
-    expect(root.status).toBe(404);
+    expect(root.status).toBe(503);
     expect(await root.text()).not.toContain('dev-game fixture root');
 
     const health = await fetch(`${host.url}/api/health`);

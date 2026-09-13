@@ -1,4 +1,6 @@
-import { createIdeHost } from '@energy8engine/ide-host';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { IDE_BUILD_HINT, IDE_DIST_DEFAULT, createIdeHost } from '@energy8engine/ide-host';
 
 // `e8` alone is `e8 ide`. Both commands boot the same host over `cwd`
 // (spec §3): a `cwd` holding `e8.yml` is the one project and opens at
@@ -23,6 +25,16 @@ const host = await createIdeHost({
   previewPort: process.env.PREVIEW_PORT ? Number(process.env.PREVIEW_PORT) : undefined,
 });
 
+// Before the first line of output: a caller that sends SIGTERM the moment
+// it reads "listening on" (cli-smoke.test.ts does) must find the handler
+// already installed, or the signal's default kills the process with no
+// exit code instead of the clean 0 `host.stop()` earns.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    void host.stop().then(() => process.exit(0));
+  });
+}
+
 const state = host.ctx.workspace.state();
 if (command === 'dev' && state.active === null) {
   // Degrades to `e8`, not an exit: the host is up and lists what it found.
@@ -32,14 +44,13 @@ if (command === 'dev' && state.active === null) {
 }
 
 console.log(`e8 ${command} listening on ${host.url}`);
+console.log(`IDE: ${host.url}/`);
+// The same fallback `ide-static` uses (spec §7): `IDE_DIST`, else the repo's own build.
+if (!existsSync(join(process.env.IDE_DIST ?? IDE_DIST_DEFAULT, 'index.html'))) {
+  console.error(`the IDE shell is not built: ${IDE_BUILD_HINT}`);
+}
 
 for (const diag of state.diagnostics) {
   console.error(`[${diag.severity}] ${diag.plugin} (${diag.where}): ${diag.message}`);
   if (diag.fix) console.error(`  fix: ${diag.fix}`);
-}
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    void host.stop().then(() => process.exit(0));
-  });
 }
