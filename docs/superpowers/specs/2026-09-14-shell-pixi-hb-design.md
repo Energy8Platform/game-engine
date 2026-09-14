@@ -91,13 +91,13 @@ Fixed palette. `theme.scheme` and `theme.accent` from `ShellConfig` are ignored 
 
 ```ts
 export const HB = {
-  orange: '#FEE16C', gold: '#FFF3B0',   // accent (a warm yellow; the token keeps its name) + hover
+  orange: '#FFBC00', gold: '#FFD24D',   // accent (the token keeps its historical name) + hover
   red: '#E0301E',                        // volatility fill, feature (Ante) CTA
   beige: '#F5EFE3', beigeHover: '#E3D8C4', // button faces
   ink: '#051107',                        // borders, glyphs and text on beige/accent
   panel: '#051107',                      // solid modal / popover ground
-  card: 'rgba(245,239,227,.06)',         // blocks inside a frame — no outline
-  bar: 'rgba(5,17,7,.72)',               // control bar
+  card: 'rgba(245,239,227,.06)',         // buy-bonus cards only — game-info blocks draw nothing
+  bar: 'rgba(30,30,30,.97)',             // control bar (#1e1e1ef7)
   fg: '#F5EFE3', muted: 'rgba(245,239,227,.6)', track: 'rgba(245,239,227,.18)',
   backdrop: 'rgba(10,6,4,.55)',
   winOk: '#4ade80', winNo: '#f87171',

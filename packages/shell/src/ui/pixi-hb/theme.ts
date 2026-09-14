@@ -3,19 +3,19 @@ import type { ShellTokens } from '@/core/theme';
 /** The Hellbuddha palette. Fixed by brand: `theme.scheme` / `theme.accent` from ShellConfig are
  *  ignored by this renderer. */
 export const HB = {
-  orange: '#fee16c', // the brand accent (a warm yellow — the token keeps its historical name)
-  gold: '#fff3b0', // accent's hover
+  orange: '#ffbc00', // the brand accent (the token keeps its historical name)
+  gold: '#ffd24d', // accent's hover
   red: '#e0301e', // volatility fill, feature (Ante) CTA
   beige: '#f5efe3',
   beigeHover: '#e3d8c4',
   ink: '#051107', // borders, glyphs and text on beige/accent
   panel: '#051107', // solid modal / popover ground
-  bar: 'rgba(5,17,7,.72)',
+  bar: 'rgba(30,30,30,.97)', // #1e1e1ef7
   fg: '#f5efe3',
   muted: 'rgba(245,239,227,.6)',
   track: 'rgba(245,239,227,.18)',
   line: 'rgba(245,239,227,.25)', // frame borders on the panel ground
-  card: 'rgba(245,239,227,.06)', // block ground inside a frame (no outline)
+  card: 'rgba(245,239,227,.06)', // block ground for bonus cards (game-info blocks draw nothing)
   backdrop: 'rgba(10,6,4,.55)',
   winOk: '#4ade80',
   winNo: '#f87171',

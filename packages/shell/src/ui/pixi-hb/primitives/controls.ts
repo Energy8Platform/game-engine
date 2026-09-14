@@ -54,19 +54,23 @@ export function heading(title: string, size = GI_EM * 1.8): Text {
   return makeText(title, { size, weight: '700', heading: true, color: HB.fg, upper: true, letterSpacing: size * 0.04, align: 'center' });
 }
 
-/** A block on the panel ground — paytable rows, modes, control lists. A faint lighter fill, no
- *  outline (the frame is the only bordered thing in a game-info page). */
+/** A block on the panel ground — paytable rows, modes, control lists. Draws NOTHING of its own
+ *  (no fill, no outline) unless a `fill`/`border` is passed: game-info blocks are pure spacing. */
 export function card(opts: { fill?: string; border?: string; padding?: number; gap?: number; align?: 'start' | 'center' | 'stretch'; direction?: 'row' | 'column' } = {}): FlexBox {
   return new FlexBox({
     direction: opts.direction ?? 'column',
     align: opts.align ?? 'center',
     gap: opts.gap ?? 8,
     padding: opts.padding ?? 12,
-    background: {
-      fill: opts.fill ?? HB.card,
-      radius: RADIUS,
-      ...(opts.border ? { stroke: { color: opts.border, width: BORDER, alignment: 1 } } : {}),
-    },
+    ...(opts.fill || opts.border
+      ? {
+          background: {
+            ...(opts.fill ? { fill: opts.fill } : {}),
+            radius: RADIUS,
+            ...(opts.border ? { stroke: { color: opts.border, width: BORDER, alignment: 1 } } : {}),
+          },
+        }
+      : {}),
   });
 }
 

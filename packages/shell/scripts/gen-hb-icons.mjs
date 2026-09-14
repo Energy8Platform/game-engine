@@ -245,7 +245,7 @@ export interface HbIconColors {
 /** A standalone, parseable SVG document with the colour slots resolved. Used by the Pixi renderer to
  *  build vector geometry via GraphicsContext.svg(). */
 export function iconSVG(name: HbIconName, colors: HbIconColors = {}): string {
-  const { ink = '#1a120a', fill = '#f5efe3', accent = '#fee16c', stroke = ${HB_STROKE} } = colors;
+  const { ink = '#1a120a', fill = '#f5efe3', accent = '#ffbc00', stroke = ${HB_STROKE} } = colors;
   const src = SVGS[name]
     .split('currentColor').join(ink)
     .split('currentFill').join(fill)

@@ -484,7 +484,7 @@ export class SpinDisc extends Container implements Sizable {
   constructor(opts: SpinDiscOpts) {
     super();
     this.size = opts.size ?? 84;
-    this.glyphSize = opts.glyph ?? 60;
+    this.glyphSize = opts.glyph ?? 72;
     this.ticker = opts.ticker;
     this.onSpin = opts.onSpin;
     this.onStop = opts.onStop;
@@ -643,7 +643,7 @@ export class BonusButton extends IconButton {
   constructor(opts: BonusButtonOpts) {
     const size = opts.size ?? 58;
     const icon = opts.icon ?? 'bonus';
-    super(icon, { size, glyph: Math.round(size * (icon === 'close' ? 0.5 : 0.7)), face: opts.face ?? 'orange', onTap: opts.onTap });
+    super(icon, { size, glyph: Math.round(size * (icon === 'close' ? 0.55 : 0.88)), face: opts.face ?? 'orange', onTap: opts.onTap });
   }
 }
 

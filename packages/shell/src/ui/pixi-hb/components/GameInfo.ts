@@ -385,7 +385,6 @@ function paytableCard(host: PixiComponentContext, r: PaytableRow, w: number): Fl
     gap: 8,
     padding: { top: 14, bottom: 14, left: 12, right: 12 },
     width: w,
-    background: { fill: HB.card, radius: 8 },
   });
   const sym = new FlexBox({ direction: 'column', align: 'center', gap: 5 });
   if (r.symbol.image) sym.add(imageBox(r.symbol.image, 56, 56));
