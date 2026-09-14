@@ -5,7 +5,7 @@
  * §7 of the spec draws that line and says why it is drawn early: the
  * server's result is a FACT, the animation is an INTERPRETATION of it, and
  * a step-through debugger or a flow editor needs the first without the
- * second. "Заводим сразу; задним числом такое не вставляется" — a log
+ * second. "Start it at once; it cannot be added after the fact" — a log
  * added later is a log of everything after it was added.
  *
  * So this package holds exactly one thing per spin — what was asked, what

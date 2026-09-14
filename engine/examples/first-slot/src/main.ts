@@ -612,7 +612,7 @@ spinBtn.addEventListener('click', async () => {
       // could: the host had no way of its own to speak about a running
       // game. It has one now — `dev-game`'s route broadcasts the same
       // diagnostics as a `game-diagnostics` frame over `/ide` (see that
-      // route, and `rpc.ts`'s `broadcastGameDiagnostics`) — so relaying
+      // route, and `rpc.ts`'s `reportGameDiagnostics`) — so relaying
       // them here made ONE failure travel twice for this project and only
       // this project: once straight from the host, and once round through
       // this page, `ctx.diagnostics` and `ide-bridge`. The host's is the

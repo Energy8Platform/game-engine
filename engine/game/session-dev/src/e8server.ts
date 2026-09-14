@@ -266,7 +266,18 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     }
     // `ready` is still false for a close the readiness loop turns into a
     // rejection — no handle exists to have listened, and none is told.
-    if (ready) for (const cb of exitListeners) cb({ code, signal });
+    // Each listener on its own: one that throws must not take the rest
+    // with it (nor the `'close'` handler, which would be an uncaught
+    // exception in the host process).
+    if (ready) {
+      for (const cb of exitListeners) {
+        try {
+          cb({ code, signal });
+        } catch {
+          // The listener's own problem, not the process's.
+        }
+      }
+    }
   });
   child.once('error', (e) => {
     exited = true;

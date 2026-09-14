@@ -327,13 +327,31 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * is the retract: the "failed to restart" row leaves the panel with the
    * save that cured it. It used to stay for the life of the project, the
    * list having no retract at all.
+   *
+   * The `spin` speaker's row goes with it: a spin failure was about the
+   * process that just died, and nothing a spin said about the old process
+   * is still true of the new one. Measured before this: a failed spin's
+   * row outlived the save that fixed the math, until someone spun again.
+   *
+   * `alive`: the restart is not awaited, so its `.then` can land after
+   * this scope is gone (a project switch mid-restart). `ctx.ideRpc` is the
+   * root's and outlives the scope, so without the flag the old project's
+   * "gone" answer was reported under whatever project came next.
    */
+  let alive = true;
+  ctx.effect(() => {
+    return () => {
+      alive = false;
+    };
+  }, 'dev-game:alive');
   ctx.on('files/written', ({ path }) => {
     if (!path.endsWith('.spin')) return;
     if (!isInside(gamesDir, resolve(config.root, path))) return;
-    void ctx.session
-      .restart()
-      .then(({ diagnostics }) => ctx.ideRpc.reportGameDiagnostics('session', diagnostics));
+    void ctx.session.restart().then(({ diagnostics }) => {
+      if (!alive) return;
+      ctx.ideRpc.reportGameDiagnostics('session', diagnostics);
+      ctx.ideRpc.reportGameDiagnostics('spin', []);
+    });
   });
 
   // The engine dying is the same speaker's fact, said without waiting for
@@ -459,9 +477,20 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // then. Measured before this: after a fix-and-save the panel still
     // read "the math engine is restarting — wait for the restart to
     // finish" while the game was already playing the fixed math.
+    //
+    // And the session's own fact, whichever it is: a spin against a
+    // process that never started, or died, is answered with THE object
+    // `ctx.session.startupDiagnostic` holds (`play()`'s `!handle` branch
+    // returns it as-is), and the `session` group already carries that row
+    // (`session/exited` above, or the restart report). Said again here as
+    // `spin`'s row it was two rows for one fact — and `spin`'s copy stayed
+    // after the save that cured `session`'s, until the next spin. Identity,
+    // read right after `play()`: `play()` returns synchronously on that
+    // branch, so nothing has swapped the object in between.
+    const own = ctx.session.startupDiagnostic;
     ctx.ideRpc.reportGameDiagnostics(
       'spin',
-      diagnostics.filter((d) => d.code !== session.RESTARTING),
+      diagnostics.filter((d) => d.code !== session.RESTARTING && d !== own),
     );
 
     // `!result` is never actually reachable alongside an empty
@@ -598,12 +627,16 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   });
 
   if (ctx.session.startupDiagnostic) {
-    // Not pushed anywhere further up — `dev-game` has no shared
-    // `diagnostics` array the way `createGame` does. It's already
-    // reachable from `ctx.session.startupDiagnostic` directly, and every
-    // `/api/spin` call surfaces it too (see above); logged here so `e8
-    // dev`'s own console shows it without a spin being clicked first.
+    // The session's own fact, as the `session` speaker — the same group a
+    // restart's failure and the process's death land in (above), so the
+    // rule the spin route relies on holds from the first boot: what a
+    // spin against a session that cannot play is answered with is ALREADY
+    // the `session` group's row, never `spin`'s second copy. It used to
+    // reach the panel only through a spin (as `spin`'s row), and a boot
+    // that failed before anyone clicked was a fact only this console
+    // knew. The next save's clean restart takes it back, like the others.
     const d = ctx.session.startupDiagnostic;
+    ctx.ideRpc.reportGameDiagnostics('session', [d]);
     ctx.logger?.('dev-game').warn(`[${d.severity}] ${d.plugin} (${d.where}): ${d.message}`);
   }
 }

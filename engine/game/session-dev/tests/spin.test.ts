@@ -117,6 +117,21 @@ describe('a real spin through e8-server', () => {
     expect(heard).toHaveLength(3);
     await handle.stop();
   });
+
+  it('a listener that throws does not take the next one with it', async () => {
+    // Final review F5: the `'close'` handler ran the listeners bare, so
+    // one throw was an uncaught exception in the host process and the
+    // listeners after it were never told.
+    const handle = await startE8Server({ gamesDir: GAME, port: 0 });
+    const heard: { code: number | null; signal: string | null }[] = [];
+    handle.onExit(() => {
+      throw new Error('listener bug');
+    });
+    handle.onExit((info) => heard.push(info));
+    process.kill(handle.pid, 'SIGKILL');
+    await expect.poll(() => heard.length).toBe(1);
+    await handle.stop();
+  });
 });
 
 // Rulings from the brief: (1) stage data must include the winning LINES, not

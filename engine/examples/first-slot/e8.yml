@@ -2,7 +2,7 @@
 # same format engine/examples/workspace/e8.yml uses. `@energy8engine/ide-bridge`
 # is the one entry Task 12's SDD plan gives first-slot: registered here so
 # the composition screen renders a row with `stage` and `mechanic` fields
-# (schema-driven, same as `e8-example-probe`'s "скорость барабана"). The
+# (schema-driven, same as `e8-example-probe`'s "reel speed"). The
 # ide-host's own `ctx.loader` composes this entry HOST-SIDE, where
 # `ide-bridge` is an honest no-op (see its own module doc) — its real job
 # happens BROWSER-SIDE, composed directly into the running game by

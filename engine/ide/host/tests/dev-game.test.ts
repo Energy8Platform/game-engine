@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
 import { WebSocket } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as devGame from '../src/plugins/dev-game';
@@ -559,12 +559,23 @@ describe('dev-game — the spin route', () => {
     socket.on('message', (data) => received.push(JSON.parse(String(data)) as ServerMessage));
     await new Promise((resolve) => socket.once('open', resolve));
 
+    // Before any spin: the boot failure is the `session` speaker's row,
+    // retained for a client connecting after it (final review F1 — it
+    // used to reach the panel only as a spin's own row).
+    const frames = () => received.filter((m) => m.type === 'game-diagnostics');
+    await expect.poll(() => frames()).toHaveLength(1);
+    expect(frames()[0]).toMatchObject({
+      type: 'game-diagnostics',
+      diagnostics: [{ severity: 'error', plugin: 'session' }],
+    });
+
     const res = await fetch(`${preview(host.ctx)}/api/spin`, { method: 'POST' });
     expect(res.status).toBe(502); // the HTTP response still carries it too — unchanged
 
-    await expect.poll(() => received.filter((m) => m.type === 'game-diagnostics')).toHaveLength(1);
-    const [message] = received.filter((m) => m.type === 'game-diagnostics');
-    expect(message).toMatchObject({
+    // The spin's frame: `spin`'s group is empty (the row is the session's
+    // own object), so the same one row, not two.
+    await expect.poll(() => frames()).toHaveLength(2);
+    expect(frames()[1]).toMatchObject({
       type: 'game-diagnostics',
       diagnostics: [{ severity: 'error', plugin: 'session' }],
     });
@@ -999,45 +1010,139 @@ describe('dev-game — restart on a script.spin write', () => {
   }, 25_000);
 
   /**
-   * The same rule for the `spin` speaker: every spin reports its own
-   * diagnostics, an empty list when it played cleanly — so a spin failure
-   * (here: the one a broken math answers with) leaves the panel with the
-   * first clean spin after the fix. Measured before this on the original
-   * `dev-game.ts`: a clean spin reported nothing (`if (lasting.length > 0)`
-   * around the only call on that route), so the failed spin's row stayed
-   * for the life of the project.
+   * The `spin` speaker against a session that cannot play: the row it is
+   * answered with IS `ctx.session.startupDiagnostic` — the object the
+   * `session` group already holds — so the route reports it as nobody's
+   * second row (`spin`'s group is EMPTY), and the save that cures the
+   * session takes the whole host list back. Measured before this (final
+   * review, F1): the same "failed to restart" stood twice, and `spin`'s
+   * copy outlived the fixing save until someone spun again.
+   *
+   * Counts, not only contents: every `reportGameDiagnostics` call is one
+   * frame, so "the fixing save sends `session`'s retract AND `spin`'s" is
+   * "two frames more", and the empty `spin` group after the 502 is "one
+   * frame more, still one row".
    */
-  it('a clean spin takes back what an earlier failed spin reported', async () => {
+  it('a spin answered with the session’s own row does not double it, and the fixing save empties the host list', async () => {
     const projectDir = writableProjectWithManifest();
     const { socket, hostFrames } = await hostOverProject(projectDir);
     const spin = () => fetch(`${preview(host!.ctx)}/api/spin`, { method: 'POST' });
     try {
       const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
       expect(await putScript(projectDir, `${original}\nrecord {\n`)).toBe(200);
-      await expect.poll(() => hostFrames().at(-1)?.diagnostics.length, { timeout: 15_000 }).toBe(1);
+      await expect
+        .poll(
+          () =>
+            hostFrames()
+              .at(-1)
+              ?.diagnostics.map((d) => d.message),
+          { timeout: 15_000 },
+        )
+        .toEqual([expect.stringMatching(/failed to restart/)]);
+      const afterBreak = hostFrames().length;
 
-      // The spin fails with the session's own startup diagnostic — reported
-      // as `spin`'s row, next to `session`'s: two speakers, two rows.
+      // The spin fails with the session's own startup diagnostic. One
+      // frame (the `spin` speaker's empty group), still one row.
       expect((await spin()).status).toBe(502);
-      await expect.poll(() => hostFrames().at(-1)?.diagnostics.length).toBe(2);
+      await expect.poll(() => hostFrames().length).toBe(afterBreak + 1);
       expect(
         hostFrames()
           .at(-1)!
           .diagnostics.map((d) => d.message),
-      ).toEqual([
-        expect.stringMatching(/failed to restart/),
-        expect.stringMatching(/failed to restart/),
-      ]);
+      ).toEqual([expect.stringMatching(/failed to restart/)]);
 
-      // The fix retracts `session`'s row; `spin`'s stays until a spin says otherwise…
+      // The fix: `session`'s retract, then `spin`'s — two frames, and the
+      // host list is empty without a spin having said so.
       expect(await putScript(projectDir, original)).toBe(200);
-      await expect.poll(() => hostFrames().at(-1)?.diagnostics.length, { timeout: 15_000 }).toBe(1);
-      // …which the first clean spin does.
-      expect((await spin()).status).toBe(200);
-      await expect.poll(() => hostFrames().at(-1)?.diagnostics).toEqual([]);
+      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBe(afterBreak + 3);
+      expect(hostFrames().at(-1)?.diagnostics).toEqual([]);
     } finally {
       socket.close();
     }
+  }, 25_000);
+
+  it('a spin against a dead engine reports an empty spin group — the exited row is the session’s — and the next save empties the list', async () => {
+    // The `exited` row is not `RESTARTING`-coded, so this is the case
+    // only the identity filter covers: without it the spin would stand
+    // the same "exited" object twice.
+    const projectDir = writableProjectWithManifest();
+    const { socket, hostFrames } = await hostOverProject(projectDir);
+    try {
+      process.kill(host!.ctx.session.pid!, 'SIGKILL');
+      await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(0);
+      expect(
+        hostFrames()
+          .at(-1)!
+          .diagnostics.map((d) => d.code),
+      ).toEqual(['exited']);
+      const afterDeath = hostFrames().length;
+
+      const res = await fetch(`${preview(host!.ctx)}/api/spin`, { method: 'POST' });
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { diagnostics: { code?: string }[] };
+      expect(body.diagnostics.map((d) => d.code)).toEqual(['exited']);
+      await expect.poll(() => hostFrames().length).toBe(afterDeath + 1);
+      expect(
+        hostFrames()
+          .at(-1)!
+          .diagnostics.map((d) => d.code),
+      ).toEqual(['exited']);
+
+      const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      expect(await putScript(projectDir, `${original}\n-- edited by mouse\n`)).toBe(200);
+      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBe(afterDeath + 3);
+      expect(hostFrames().at(-1)?.diagnostics).toEqual([]);
+    } finally {
+      socket.close();
+    }
+  }, 25_000);
+
+  it('a restart still in flight when the scope is disposed reports nothing — not "gone" under the next project', async () => {
+    // Final review F3/F5: the restart is not awaited, `ctx.ideRpc` is the
+    // root's and outlives this scope, so a project switch mid-restart used
+    // to land the old project's "gone" answer in the new project's panel.
+    // The wrapper takes two seconds to exec the real binary once the flag
+    // exists — long enough to dispose while the respawn is in flight.
+    const projectDir = writableProject();
+    const flag = join(projectDir, 'start-slowly-from-now-on');
+    const wrapper = join(projectDir, 'e8-server-slow-start.sh');
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nif [ -e ${JSON.stringify(flag)} ]; then sleep 2; fi\nexec ${JSON.stringify(realBinary())} "$@"\n`,
+      { mode: 0o755 },
+    );
+    // `bare()` composes the real `rpc`; this one wants a stub in its place
+    // so the calls themselves are the assertion, not a socket's frames.
+    const reportGameDiagnostics = vi.fn();
+    ctx = new Context();
+    await ctx.plugin(Server, { host: '127.0.0.1', port: 0 });
+    await ctx.plugin({
+      name: 'stubs',
+      apply(c: Context) {
+        c.provide('runtimeAssets', { attachGameRoutes() {} });
+        c.provide('ideRpc', { reportGameDiagnostics, attach() {} });
+      },
+    });
+    const fiber = ctx!.plugin(devGame, {
+      root: projectDir,
+      gamesDir: join(projectDir, 'game'),
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+      previewPort: 0,
+      binPath: wrapper,
+    });
+    await fiber;
+
+    writeFileSync(flag, '');
+    ctx!.emit('files/written', { path: 'game/script.spin' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    reportGameDiagnostics.mockClear();
+    // Awaits the in-flight restart (session-dev's disposer chains on it),
+    // so by the time this resolves the restart HAS answered — "gone".
+    await fiber.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reportGameDiagnostics).not.toHaveBeenCalled();
   }, 25_000);
 
   /**
