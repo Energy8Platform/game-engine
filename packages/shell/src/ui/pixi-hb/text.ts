@@ -19,7 +19,7 @@ export const FONT_FAMILY = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI'
 export const NUM_FONT_FAMILY = `${HB_NUM_FONT_FAMILY}, ${FONT_FAMILY}`;
 /** Switzer sits close to Inter's width — no size bump needed. */
 export const NUM_FONT_SCALE = 1;
-/** Heading font — Space Grotesk (latin only; Cyrillic falls back to Inter). */
+/** Heading font — Space Grotesk (latin) + Manrope's Cyrillic under the same family name. */
 export const HEAD_FONT_FAMILY = `${HB_HEAD_FONT_FAMILY}, ${FONT_FAMILY}`;
 /** Stroke width (px) around numerals — the "bordered digits" of the brand. */
 export const NUM_STROKE = 3;

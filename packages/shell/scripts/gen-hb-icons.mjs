@@ -17,7 +17,7 @@ const ROOT = join(here, '..');
 const SRC_SVG = join(ROOT, 'icons-hb.svg');
 const OUT = join(ROOT, 'src', 'ui', 'pixi-hb', 'icons.ts');
 
-const HB_STROKE = 2.2; // 24-box units ≈ 3px on a 32px glyph
+const HB_STROKE = 2; // 24-box units — the renderer overrides per glyph size (currentStroke)
 const BOX = 24;
 const PAD = 1;
 
@@ -45,8 +45,10 @@ const DERIVE = {
   chevronRight: { from: 'chevronUp', rot: { a: 0, b: 1, c: -1, d: 0 } },
   back: { from: 'chevronUp', rot: { a: 0, b: -1, c: 1, d: 0 } },
 };
-// per-glyph shape overrides: glyph -> shape index -> style
-const OVERRIDE = { autoplay: { 1: 'accent' } };
+// per-glyph shape overrides: glyph -> shape index -> style. The turbo bolts take their own fill
+// slots (left bolt = shape 1 = `currentBoltA`, right bolt = shape 0 = `currentBoltB`) so the bar can
+// paint them in per level.
+const OVERRIDE = { autoplay: { 1: 'accent' }, turbo: { 1: 'boltA', 0: 'boltB' } };
 
 const round = (n) => {
   const v = Math.round(n * 100) / 100;
@@ -87,11 +89,12 @@ function walkPath(d) {
 
 // --- shapes ----------------------------------------------------------------------------------------
 const attr = (attrs, name) => { const m = attrs.match(new RegExp(`\\b${name}="([^"]+)"`)); return m ? m[1] : null; };
-// class -> style: st0 stroke-only (round caps); st1/2/3 face+stroke; st4 / none = solid ink
+// class -> style (from the sheet's <style>): st4 stroke-only (round caps); st0/st2/st3 face+stroke;
+// st1 / none = solid ink
 function styleOf(attrs) {
   const cls = attr(attrs, 'class');
-  if (cls === 'st0') return 'line';
-  if (cls === 'st1' || cls === 'st2' || cls === 'st3') return 'stroked';
+  if (cls === 'st4') return 'line';
+  if (cls === 'st0' || cls === 'st2' || cls === 'st3') return 'stroked';
   return 'solid';
 }
 function parseShape(tag, attrs) {
@@ -189,6 +192,8 @@ const STYLE_ATTRS = {
   solid: 'fill="currentColor"',
   stroked: `fill="currentFill" stroke="currentColor" stroke-width="currentStroke" stroke-linejoin="round"`,
   accent: `fill="currentAccent" stroke="currentColor" stroke-width="currentStroke" stroke-linejoin="round"`,
+  boltA: `fill="currentBoltA" stroke="currentColor" stroke-width="currentStroke" stroke-linejoin="round"`,
+  boltB: `fill="currentBoltB" stroke="currentColor" stroke-width="currentStroke" stroke-linejoin="round"`,
   line: `fill="none" stroke="currentColor" stroke-width="currentStroke" stroke-linecap="round" stroke-linejoin="round"`,
 };
 function emitShape(s, T) {
@@ -232,16 +237,21 @@ export interface HbIconColors {
   accent?: string;
   /** Stroke width in 24-box units (default ${HB_STROKE}). */
   stroke?: number;
+  /** Turbo only: the left / right bolt faces (default = \`fill\`). */
+  boltA?: string;
+  boltB?: string;
 }
 
 /** A standalone, parseable SVG document with the colour slots resolved. Used by the Pixi renderer to
  *  build vector geometry via GraphicsContext.svg(). */
 export function iconSVG(name: HbIconName, colors: HbIconColors = {}): string {
-  const { ink = '#1a120a', fill = '#f5efe3', accent = '#ff7a00', stroke = ${HB_STROKE} } = colors;
+  const { ink = '#1a120a', fill = '#f5efe3', accent = '#fee16c', stroke = ${HB_STROKE} } = colors;
   const src = SVGS[name]
     .split('currentColor').join(ink)
     .split('currentFill').join(fill)
     .split('currentAccent').join(accent)
+    .split('currentBoltA').join(colors.boltA ?? fill)
+    .split('currentBoltB').join(colors.boltB ?? fill)
     .split('currentStroke').join(String(stroke));
   return \`<svg viewBox="0 0 24 24">\${src}</svg>\`;
 }

@@ -49,21 +49,29 @@ export function section(_host: PixiComponentContext, title?: string): FlexBox {
   return sec;
 }
 
-/** Space Grotesk section heading. */
-export function heading(title: string, size = 16): Text {
+/** Space Grotesk section heading (1.8em of the game-info scale). */
+export function heading(title: string, size = GI_EM * 1.8): Text {
   return makeText(title, { size, weight: '700', heading: true, color: HB.fg, upper: true, letterSpacing: size * 0.04, align: 'center' });
 }
 
-/** A bordered card on the panel ground — paytable rows, modes, keycaps. */
+/** A block on the panel ground — paytable rows, modes, control lists. A faint lighter fill, no
+ *  outline (the frame is the only bordered thing in a game-info page). */
 export function card(opts: { fill?: string; border?: string; padding?: number; gap?: number; align?: 'start' | 'center' | 'stretch'; direction?: 'row' | 'column' } = {}): FlexBox {
   return new FlexBox({
     direction: opts.direction ?? 'column',
     align: opts.align ?? 'center',
     gap: opts.gap ?? 8,
     padding: opts.padding ?? 12,
-    background: { fill: opts.fill ?? HB.panel, radius: RADIUS, stroke: { color: opts.border ?? HB.line, width: BORDER, alignment: 1 } },
+    background: {
+      fill: opts.fill ?? HB.card,
+      radius: RADIUS,
+      ...(opts.border ? { stroke: { color: opts.border, width: BORDER, alignment: 1 } } : {}),
+    },
   });
 }
+
+/** Game-info type scale: body 1em, section titles 1.8em, the frame title 2em. */
+export const GI_EM = 14;
 
 /** A full-width glass row — `.ge-ov-row`. `button` adds hover (glass-hover bg + accent label). */
 export class GlassRow extends Container implements Sizable {

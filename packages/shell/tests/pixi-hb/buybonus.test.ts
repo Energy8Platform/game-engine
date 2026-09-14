@@ -15,40 +15,38 @@ function page(over: Record<string, unknown> = {}) {
 }
 
 describe('hb buy bonus page', () => {
-  it('flattens groups: the arrows walk every option and wrap', () => {
+  it('one card per slot; a grouped slot flips through its members with wrap', () => {
     const { page: p } = page();
-    expect(p.current.id).toBe('a1');
-    p.step(1);
-    expect(p.current.id).toBe('a2');
-    p.step(1);
-    p.step(1);
-    expect(p.current.id).toBe('a1');
-    p.step(-1);
-    expect(p.current.id).toBe('fs');
+    expect(p.slots.length).toBe(2);
+    expect(p.current(0).id).toBe('a1');
+    p.step(0, 1);
+    expect(p.current(0).id).toBe('a2');
+    p.step(0, 1);
+    expect(p.current(0).id).toBe('a1');
+    p.step(1, 1); // a single-member slot does not move
+    expect(p.current(1).id).toBe('fs');
   });
 
-  it('feature options get the red Activate CTA, bonus options the orange Buy', () => {
+  it('feature cards get the red Activate CTA, bonus cards the accent Buy — price on the label', () => {
     const { page: p } = page();
-    expect(p.cta!.labelText.text).toBe('ACTIVATE');
-    p.step(-1);
-    expect(p.cta!.labelText.text).toBe('BUY');
+    expect(p.ctas[0].labelText.text).toBe('ACTIVATE · €1.25');
+    expect(p.ctas[1].labelText.text).toBe('BUY · €10.00');
   });
 
-  it('Enter opens the confirm and a second Enter commits the current option', () => {
+  it('tapping a CTA opens the confirm; Enter commits it', () => {
     const { page: p, emit, host } = page();
     const closeLayer = vi.spyOn(host, 'closeLayer');
-    p.step(-1); // fs
-    p.onKey({ code: 'Enter' } as KeyboardEvent);
+    p.ctas[1].emit('pointertap');
     expect((p as unknown as { confirm?: unknown }).confirm).toBeDefined();
     p.onKey({ code: 'Enter' } as KeyboardEvent);
     expect(emit).toHaveBeenCalledWith('buyBonusSelect', { id: 'fs' });
     expect(closeLayer).toHaveBeenCalled();
   });
 
-  it('an unaffordable option disables the CTA', () => {
+  it('an unaffordable option disables its CTA', () => {
     const { page: p, host } = page();
     host.state.balance = 1;
-    p.step(-1);
-    expect(p.cta!.disabled).toBe(true);
+    (p as unknown as { rebuild(): void }).rebuild();
+    expect(p.ctas[1].disabled).toBe(true);
   });
 });

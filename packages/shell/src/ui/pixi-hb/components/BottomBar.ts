@@ -4,7 +4,6 @@ import type { Rect } from '@/core/popover';
 import { FlexBox } from '../../pixi/primitives/flex';
 import { IconButton, Readout, SpinDisc, BonusButton, FsHero } from '../primitives/widgets';
 import type { SpinAutoplayMode } from '../primitives/widgets';
-import { makeIcon } from '../pixi-icon';
 import { bonusBuyLocked } from '@/core/state';
 import { HB } from '../theme';
 import { plaque } from '../primitives/plaque';
@@ -31,7 +30,7 @@ const WIDE_PAD_BOTTOM = 8;
 export const WIDE_BAR_H = WIDE_PAD_BOTTOM + SPIN; // ≈92
 
 const BUY_W = 64; // bonus plaque on desktop
-const SQ = 46; // square plaque buttons (auto/turbo)
+const SQ = 40; // square plaque buttons (auto/turbo) — stacked beside SPIN, two fit in its height
 const STEP = 28; // bet ± plaques
 const FS_BOX = 96; // fixed bet-value box width
 
@@ -45,16 +44,9 @@ const M_BUY = 50;
 const M_SQ = 40;
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H;
 
-/** Turbo has one glyph in the HB sheet; the level shows on the plaque: off = beige/ink, L1 = orange
- *  border + ink (active), L2+ = orange face. */
+/** Turbo: the level paints the bolts in — L1 the first bolt, L2 both. */
 function makeTurboButton(level: number, onTap: () => void, size = SQ, glyph = 28): IconButton {
-  return new IconButton('turbo', {
-    size,
-    glyph,
-    face: level >= 2 ? 'orange' : 'beige',
-    active: level === 1,
-    onTap,
-  });
+  return new IconButton('turbo', { size, glyph, bolts: Math.min(2, Math.max(0, level)), onTap });
 }
 
 /** A readout in the bar (stroked Switzer value, muted heading-font label). */
@@ -167,19 +159,6 @@ export class BottomBar extends Container {
       group.add(bet);
       return group;
     }
-    if (feature) {
-      // locked by the feature: one big cross where the stepper was
-      const cross = makeIcon('close', step * 2 + 2, { ink: HB.fg, fill: HB.panel });
-      cross.label = 'bet-locked';
-      if (stacked) {
-        group.add(bet);
-        group.add(cross);
-      } else {
-        group.add(cross);
-        group.add(bet);
-      }
-      return group;
-    }
     this.betUp = new IconButton('plus', { size: step, glyph: Math.round(step * 0.64), onTap: () => this.onBet(1) });
     this.betDown = new IconButton('minus', { size: step, glyph: Math.round(step * 0.64), onTap: () => this.onBet(-1) });
     if (stacked) {
@@ -223,6 +202,7 @@ export class BottomBar extends Container {
     return b;
   }
 
+  /** The bonus plaque; with a feature active it turns red and shows a cross (tap = deactivate). */
   private buildBuy(size: number): BonusButton | undefined {
     const { state, config } = this.host;
     if (config.features.buyBonus === false && !config.onBonusBuy) return undefined;
@@ -230,6 +210,7 @@ export class BottomBar extends Container {
     return new BonusButton({
       size,
       face: feature ? 'red' : 'orange',
+      icon: feature ? 'close' : 'bonus',
       onTap: () => (feature ? this.host.actions.deactivateFeature() : this.host.actions.openBuyBonus()),
     });
   }
@@ -267,7 +248,7 @@ export class BottomBar extends Container {
     bet.layout();
     this.betZone = bet;
 
-    // HERO cluster — outside-right of the panel: SPIN (or the FS counter) · auto · turbo
+    // HERO cluster — outside-right of the panel: SPIN (or the FS counter) · [auto over turbo]
     const hero = new FlexBox({ direction: 'row', align: 'center', gap: ROW_GAP });
     if (isBase) {
       this.spin = this.buildSpin();
@@ -275,14 +256,16 @@ export class BottomBar extends Container {
     } else if (showFsBlocks) {
       hero.add(this.buildFsHero());
     }
+    const stack = new FlexBox({ direction: 'column', align: 'center', gap: 4 });
     if (isBase && config.features.autoplay) {
       this.autoBtn = this.buildAuto(SQ, 30);
-      hero.add(this.autoBtn);
+      stack.add(this.autoBtn);
     }
     if (config.features.turbo > 0) {
       this.turboBtn = makeTurboButton(state.turbo, () => this.onTurbo());
-      hero.add(this.turboBtn);
+      stack.add(this.turboBtn);
     }
+    if (this.autoBtn || this.turboBtn) hero.add(stack);
     hero.layout();
     this.heroZone = hero;
 
@@ -416,7 +399,7 @@ export class BottomBar extends Container {
   private applyBusy(): void {
     const { state } = this.host;
     const auto = state.autoplay.active;
-    const lockBet = state.busy || auto;
+    const lockBet = state.busy || auto || !!state.activeFeature;
     const i = state.availableBets.indexOf(state.bet);
     if (this.betUp) this.betUp.disabled = lockBet || i >= state.availableBets.length - 1;
     if (this.betDown) this.betDown.disabled = lockBet || i <= 0;

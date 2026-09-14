@@ -16,7 +16,7 @@ import { Overlay } from '../primitives/overlay';
 import { makeText, textBaseline } from '../text';
 import { makeIcon } from '../pixi-icon';
 import { FlexBox } from '../../pixi/primitives/flex';
-import { section, paragraph, Spacer, card } from '../primitives/controls';
+import { section, paragraph, Spacer, card, GI_EM } from '../primitives/controls';
 import { IconButton, BonusButton } from '../primitives/widgets';
 import { PACKAGE_VERSION } from '@/core/version';
 import { HB } from '../theme';
@@ -150,7 +150,7 @@ function modeRow(host: PixiComponentContext, m: GameMode, inner: number): FlexBo
     }
   }
 
-  if (m.description) row.add(paragraph(host, m.description, inner, { size: 14, color: HB.muted }));
+  if (m.description) row.add(paragraph(host, m.description, inner, { size: GI_EM, color: HB.muted }));
   return row;
 }
 
@@ -236,7 +236,7 @@ function ctlBlock(host: PixiComponentContext, label: string, rows: CtlRow[], inn
     const row = new FlexBox({ direction: 'row', align: 'center', gap: 14, padding: { top: 6, bottom: 6 } });
     const tx = new FlexBox({ direction: 'column', align: 'start', gap: 2 });
     tx.add(makeText(host.t(r.name), { size: 15, weight: '700', heading: true, color: HB.fg }));
-    tx.add(paragraph(host, host.t(r.desc), w - 48 - 14, { size: 13, color: HB.muted, align: 'left' }));
+    tx.add(paragraph(host, host.t(r.desc), w - 48 - 14, { size: GI_EM, color: HB.muted, align: 'left' }));
     row.add(r.vis);
     row.add(tx);
     block.add(row);
@@ -385,7 +385,7 @@ function paytableCard(host: PixiComponentContext, r: PaytableRow, w: number): Fl
     gap: 8,
     padding: { top: 14, bottom: 14, left: 12, right: 12 },
     width: w,
-    background: { fill: HB.panel, radius: 8, stroke: { color: HB.line, width: 3, alignment: 1 } },
+    background: { fill: HB.card, radius: 8 },
   });
   const sym = new FlexBox({ direction: 'column', align: 'center', gap: 5 });
   if (r.symbol.image) sym.add(imageBox(r.symbol.image, 56, 56));
@@ -416,12 +416,12 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
   const sec = section(host);
   // header (title + optional "min N" badge)
   const header = new FlexBox({ direction: 'row', align: 'center', gap: 10 });
-  header.add(makeText(title, { size: 16, weight: '700', heading: true, color: HB.fg, letterSpacing: 0.64, upper: true }));
+  header.add(makeText(title, { size: GI_EM * 1.8, weight: '700', heading: true, color: HB.fg, letterSpacing: 0.64, upper: true }));
   if ((s.kind === 'cluster' || s.kind === 'anywhere') && 'minCount' in s) header.add(badgePill(host, `min ${s.minCount}`));
   sec.add(header);
 
   if (s.kind === 'classic') {
-    if (s.description) sec.add(paragraph(host, s.description, inner, { size: 14, color: HB.muted }));
+    if (s.description) sec.add(paragraph(host, s.description, inner, { size: GI_EM, color: HB.muted }));
     const gap = 12;
     const cols = Math.max(1, Math.floor((inner + gap) / (72 + gap)));
     const itemW = (inner - gap * (cols - 1)) / cols;
@@ -442,10 +442,10 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
     const example = s.example ?? (s.kind === 'cluster' ? clusterExample(s.grid, s.minCount) : anywhereExample(s.grid, s.minCount));
     const row = new FlexBox({ direction: 'row', align: 'start', gap: 16 });
     row.add(gridIllustration(host, s.grid, example, 140));
-    if (s.description) row.add(paragraph(host, s.description, inner - 156, { size: 14, color: HB.muted }));
+    if (s.description) row.add(paragraph(host, s.description, inner - 156, { size: GI_EM, color: HB.muted }));
     sec.add(row);
   } else if (s.kind === 'shapes') {
-    if (s.description) sec.add(paragraph(host, s.description, inner, { size: 14, color: HB.muted }));
+    if (s.description) sec.add(paragraph(host, s.description, inner, { size: GI_EM, color: HB.muted }));
     s.shapes.forEach((sh) => {
       const c = card({ align: 'stretch', padding: 12 });
       c.add(shapeRow(host, s.grid, sh, inner - 24));
@@ -453,7 +453,7 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
       sec.add(c);
     });
   } else {
-    if (s.description) sec.add(paragraph(host, s.description, inner, { size: 14, color: HB.muted }));
+    if (s.description) sec.add(paragraph(host, s.description, inner, { size: GI_EM, color: HB.muted }));
     // two example grids side by side; clamp each to the available width and stack them when both
     // won't fit on one row (mirrors the DOM `.ge-gi-win-two { flex-wrap:wrap }` — prevents the grids
     // running off-screen on mobile-s).
@@ -488,7 +488,7 @@ function shapeRow(host: PixiComponentContext, grid: { cols: number; rows: number
   row.add(gridIllustration(host, grid, sh.cells, 96));
   const tx = new FlexBox({ direction: 'column', align: 'start', gap: 4 });
   tx.add(makeText(sh.name, { size: 16, weight: '700', heading: true, color: HB.fg }));
-  if (sh.description) tx.add(paragraph(host, sh.description, inner - 112, { size: 14, color: HB.muted, align: 'left' }));
+  if (sh.description) tx.add(paragraph(host, sh.description, inner - 112, { size: GI_EM, color: HB.muted, align: 'left' }));
   row.add(tx);
   return row;
 }
@@ -522,7 +522,7 @@ function sectionCustom(host: PixiComponentContext, s: Extract<GameInfoSection, {
     sec.add(persistentSlot(s.node as Container)); // game-supplied Pixi content owns its own layout
   } else if (s.html) {
     const text = s.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (text) sec.add(paragraph(host, text, inner, { size: 15 }));
+    if (text) sec.add(paragraph(host, text, inner, { size: GI_EM }));
   }
   return sec;
 }

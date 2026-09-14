@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
-import { createPixiHbShell } from '@energy8platform/shell/pixi-hb';
+import { createPixiHbShell, makeIcon, HB_ICON_NAMES } from '@energy8platform/shell/pixi-hb';
 import type { PixiGameShell, ShellMode } from '@energy8platform/shell/pixi-hb';
 
 // ─── Screen presets (game viewport sizes, width × height) ──────────────────
@@ -346,9 +346,23 @@ if (params.get('kiosk')) {
   fit();
   window.addEventListener('resize', fit);
 }
+const turboParam = params.get('turbo');
+if (turboParam) shell.setTurbo(Number(turboParam));
+(window as unknown as { __shell: unknown }).__shell = shell;
 const modeParam = params.get('mode') as ShellMode | null;
 if (modeParam) applyMode(modeParam);
 if (params.get('ante')) shell.activateFeature({ id: 'ante-warrior', type: 'feature', title: 'Warrior Ante', description: '', priceMultiplier: 1.25 });
+if (params.get('icons')) {
+  // contact sheet: every hb glyph at 64px as Pixi draws it
+  const sheet = new Container();
+  HB_ICON_NAMES.forEach((name, i) => {
+    const size = Number(params.get('icons')) || 64;
+    const v = makeIcon(name, size, { boltA: '#fee16c', boltB: '#e0301e' });
+    v.position.set(20 + (i % 10) * (size + 16), 20 + Math.floor(i / 10) * (size + 16));
+    sheet.addChild(v);
+  });
+  app.stage.addChild(sheet);
+}
 const open = params.get('open');
 if (open === 'settings') shell.openSettings();
 else if (open === 'info') shell.openInfo();

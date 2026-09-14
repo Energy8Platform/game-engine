@@ -7,11 +7,13 @@ import { HB } from './theme';
 // button size, so flatten curves as finely as Pixi allows.
 GraphicsContextSystem.defaultOptions.bezierSmoothness = 0.99;
 
+type IconColors = Required<Pick<HbIconColors, 'ink' | 'fill' | 'accent' | 'stroke'>> & Pick<HbIconColors, 'boltA' | 'boltB'>;
+
 const VIEWBOX = 24;
 /** On-screen border of a glyph, in px: grows with the glyph (the sheet's strokes are ~2% of a glyph's
  *  width) but never past the brand's 3px, and never so thin it stops reading as a border. */
 export function strokePx(size: number): number {
-  return Math.max(1.5, Math.min(3, size * 0.055));
+  return Math.max(1.2, Math.min(2.4, size * 0.04));
 }
 function strokeUnits(size: number): number {
   return (strokePx(size) * VIEWBOX) / size;
@@ -20,8 +22,8 @@ function strokeUnits(size: number): number {
 // Cache parsed contexts by `name|ink|fill|accent` — the bar repeats glyphs at the same colours.
 const cache = new Map<string, GraphicsContext>();
 
-function context(name: HbIconName, c: Required<HbIconColors>): GraphicsContext {
-  const key = `${name}|${c.ink}|${c.fill}|${c.accent}|${c.stroke.toFixed(2)}`;
+function context(name: HbIconName, c: IconColors): GraphicsContext {
+  const key = `${name}|${c.ink}|${c.fill}|${c.accent}|${c.boltA ?? ''}|${c.boltB ?? ''}|${c.stroke.toFixed(2)}`;
   let ctx = cache.get(key);
   if (!ctx) {
     ctx = new GraphicsContext().svg(iconSVG(name, c));
@@ -35,7 +37,7 @@ function context(name: HbIconName, c: Required<HbIconColors>): GraphicsContext {
 export class IconView extends Container implements Sizable {
   private gfx: Graphics;
   private _size: number;
-  private _colors: Required<HbIconColors>;
+  private _colors: IconColors;
   private _iconName: HbIconName;
 
   constructor(name: HbIconName, size: number, colors: HbIconColors = {}) {
@@ -63,14 +65,15 @@ export class IconView extends Container implements Sizable {
     return this._iconName;
   }
 
-  get colors(): Required<HbIconColors> {
+  get colors(): IconColors {
     return this._colors;
   }
 
   /** Recolour any subset of the slots (rebuilds from the context cache). */
   setColors(colors: HbIconColors): void {
     const next = { ...this._colors, ...colors };
-    if (next.ink === this._colors.ink && next.fill === this._colors.fill && next.accent === this._colors.accent && next.stroke === this._colors.stroke) return;
+    const same = (['ink', 'fill', 'accent', 'stroke', 'boltA', 'boltB'] as const).every((k) => next[k] === this._colors[k]);
+    if (same) return;
     this._colors = next;
     this.gfx.context = context(this._iconName, next);
   }

@@ -65,6 +65,7 @@ export type Face = 'beige' | 'orange' | 'red' | 'panel';
 const FACE = {
   beige: { fill: HB.beige, hover: HB.beigeHover, ink: HB.ink, glyphFill: HB.beige },
   orange: { fill: HB.orange, hover: HB.gold, ink: HB.ink, glyphFill: HB.beige },
+  // ink text/glyphs on the accent (a light yellow) — beige wouldn't read on it
   red: { fill: HB.red, hover: HB.orange, ink: HB.ink, glyphFill: HB.beige },
   panel: { fill: HB.panel, hover: '#2a1c16', ink: HB.beige, glyphFill: HB.panel },
 } as const;
@@ -80,8 +81,10 @@ export interface IconButtonOpts {
   glyph?: number; // glyph px (default 24)
   face?: Face; // default beige
   round?: boolean;
-  /** Engaged state (autoplay running, turbo on): orange border + orange glyph ink. */
+  /** Engaged state (autoplay running): accent border + accent glyph ink. */
   active?: boolean;
+  /** Turbo only: how many bolts are painted in (0–2). */
+  bolts?: number;
   /** Bare glyph, no plaque (the bet-lock cross, chevrons in text rows). */
   bare?: boolean;
   onTap?: () => void;
@@ -95,6 +98,7 @@ export class IconButton extends Container implements Sizable {
   private round: boolean;
   private bare: boolean;
   private _active: boolean;
+  private _bolts = 0;
   private _disabled = false;
   private _name: HbIconName;
   private hovering = false;
@@ -107,6 +111,7 @@ export class IconButton extends Container implements Sizable {
     this.round = opts.round ?? false;
     this.bare = opts.bare ?? false;
     this._active = opts.active ?? false;
+    this._bolts = opts.bolts ?? 0;
     const glyph = opts.glyph ?? 24;
     if (!this.bare) this.addChild(this.bg);
     this.view = makeIcon(name, glyph);
@@ -129,7 +134,13 @@ export class IconButton extends Container implements Sizable {
     // on a beige face the glyph's own face is the button face (so a stroked glyph reads as an outline
     // on the button); on orange/red the glyph face is beige — the glyph IS a little beige button.
     const glyphFill = this.face === 'beige' ? (hot ? f.hover : f.fill) : f.glyphFill;
-    this.view.setColors({ ink, fill: glyphFill, accent: HB.orange });
+    this.view.setColors({
+      ink,
+      fill: glyphFill,
+      accent: HB.orange,
+      boltA: this._bolts >= 1 ? HB.orange : glyphFill,
+      boltB: this._bolts >= 2 ? HB.orange : glyphFill,
+    });
     if (!this.bare) {
       plaque(this.bg, this.box, this.box, {
         fill: hot ? f.hover : f.fill,
@@ -158,6 +169,14 @@ export class IconButton extends Container implements Sizable {
   set active(v: boolean) {
     this._active = v;
     this.paint();
+  }
+
+  set bolts(n: number) {
+    this._bolts = n;
+    this.paint();
+  }
+  get bolts(): number {
+    return this._bolts;
   }
   get active(): boolean {
     return this._active;
@@ -215,7 +234,7 @@ export class TextButton extends Container implements Sizable {
       weight: '700',
       heading: true,
       upper: true,
-      color: this.face === 'beige' ? HB.ink : HB.beige,
+      color: this.face === 'red' || this.face === 'panel' ? HB.beige : HB.ink,
       align: 'center',
       letterSpacing: 0.5,
     });
@@ -240,7 +259,7 @@ export class TextButton extends Container implements Sizable {
 
   setFace(face: Face): void {
     this.face = face;
-    this.labelText.style.fill = face === 'beige' ? HB.ink : HB.beige;
+    this.labelText.style.fill = face === 'red' || face === 'panel' ? HB.beige : HB.ink;
     this.paint();
   }
 
@@ -293,11 +312,10 @@ export class BetStrip extends Container implements Sizable {
   private paint(): void {
     this.g.clear();
     if (this.count < 2) return;
-    const gap = 2;
-    const seg = (this.w - gap * (this.count - 1)) / this.count;
-    for (let i = 0; i < this.count; i++) {
-      this.g.roundRect(i * (seg + gap), 0, seg, BetStrip.H, 2).fill(i <= this.index ? HB.orange : HB.track);
-    }
+    // one solid bar, filled to (index + 1) / count
+    this.g.roundRect(0, 0, this.w, BetStrip.H, 2).fill(HB.track);
+    const filled = (this.w * this.filled) / this.count;
+    if (filled > 0) this.g.roundRect(0, 0, filled, BetStrip.H, 2).fill(HB.orange);
   }
 
   set(index: number, count = this.count): void {
@@ -491,7 +509,7 @@ export class SpinDisc extends Container implements Sizable {
     const hot = this.hovering && !this._disabled;
     plaque(this.disc, this.size, this.size, { fill: hot ? HB.gold : HB.orange, round: true });
     this.glyph.setColors({ ink: HB.ink, fill: HB.beige });
-    if (this.countText) this.countText.style.fill = this.mode === 'stop' ? HB.ink : HB.beige;
+    if (this.countText) this.countText.style.fill = HB.ink;
     this.dim.clear();
     if (this._disabled) {
       this.dim.circle(this.size / 2, this.size / 2, this.size / 2).fill({ color: 0x000000, alpha: 0.4 });
@@ -525,7 +543,7 @@ export class SpinDisc extends Container implements Sizable {
     }
     if (!this.countText) {
       // running: ink digits on the beige STOP face; halted: stroked beige digits on the orange disc
-      this.countText = makeText('', { size: 22, align: 'center', stroke: running ? false : true, color: running ? HB.ink : HB.beige });
+      this.countText = makeText('', { size: 22, align: 'center', stroke: false, color: HB.ink });
       this.addChild(this.countText);
     }
     setText(this.countText, Number.isFinite(remaining) ? String(remaining) : '∞');
@@ -616,13 +634,16 @@ export interface BonusButtonOpts {
   size?: number;
   /** red = an active feature (tap deactivates). */
   face?: 'orange' | 'red';
+  /** `close` while a feature is active. */
+  icon?: 'bonus' | 'close';
   onTap: () => void;
 }
 
 export class BonusButton extends IconButton {
   constructor(opts: BonusButtonOpts) {
     const size = opts.size ?? 58;
-    super('bonus', { size, glyph: Math.round(size * 0.7), face: opts.face ?? 'orange', onTap: opts.onTap });
+    const icon = opts.icon ?? 'bonus';
+    super(icon, { size, glyph: Math.round(size * (icon === 'close' ? 0.5 : 0.7)), face: opts.face ?? 'orange', onTap: opts.onTap });
   }
 }
 

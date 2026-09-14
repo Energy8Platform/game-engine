@@ -53,4 +53,7 @@ export function removePixiHbShell(): Promise<void> {
 }
 
 export { PixiHbRenderer };
+export { makeIcon, IconView } from './pixi-icon';
+export { HB_ICON_NAMES, iconSVG, type HbIconName, type HbIconColors } from './icons';
+export { HB } from './theme';
 export * from '@/core';

@@ -60,7 +60,7 @@ export class Frame extends Container implements ShellLayer {
     this.veil.clear().rect(0, 0, w, h).fill(HB.backdrop);
     this.veil.hitArea = new Rectangle(0, 0, w, h);
     this.frame = frameRect(w, h);
-    this.headerH = clamp(40, this.frame.height * 0.1, 52);
+    this.headerH = clamp(44, this.frame.height * 0.12, 60);
     const f = this.frame;
     plaque(this.panel, f.width, f.height, { fill: HB.panel, border: HB.line });
     // header rule — the "highlighted" band is closed by an ink line at its bottom edge
@@ -78,7 +78,7 @@ export class Frame extends Container implements ShellLayer {
     const pad = (this.headerH - BORDER - nav) / 2;
     const left = this.frameOpts.onBack ? navButton(this.host, 'back', () => this.frameOpts.onBack!(), nav) : null;
     const close = navButton(this.host, 'close', () => this.frameOpts.onClose(), nav);
-    const titleSize = clamp(14, this.headerH * 0.4, 20);
+    const titleSize = clamp(16, this.headerH * 0.5, 28); // 2em of the game-info scale at full size
     const title = makeText(this.frameOpts.title, {
       size: titleSize,
       weight: '700',

@@ -72,8 +72,10 @@ Colour slots (string placeholders substituted at build time, like `currentColor`
 - `currentFill` — inner fill of stroked shapes (default beige).
 - `currentAccent` — the autoplay triangle (default orange).
 
-Stroke width is fixed in the 24-unit box: `HB_STROKE = 2.2` (≈3 px on a 32 px glyph), with
-`stroke-linejoin="round"`; `musicOn/Off` keep `stroke-linecap="round"`. Fit rule unchanged from the
+Stroke width is a slot (`currentStroke`) the renderer fills per glyph size — `clamp(1.2, size·0.04,
+2.4)` px — with `stroke-linejoin="round"`; `musicOn/Off` keep `stroke-linecap="round"`. The turbo
+glyph's two bolts get their own face slots (`currentBoltA` left, `currentBoltB` right) so the bar
+paints them in per level (L1 = left, L2 = both). Fit rule unchanged from the
 existing generator (largest dimension → 24 − 2·PAD, centred), but the bbox is expanded by half the
 stroke so a stroked glyph never clips.
 
@@ -89,17 +91,18 @@ Fixed palette. `theme.scheme` and `theme.accent` from `ShellConfig` are ignored 
 
 ```ts
 export const HB = {
-  orange: '#FF7A00', gold: '#F5B800',   // accent + its hover
+  orange: '#FEE16C', gold: '#FFF3B0',   // accent (a warm yellow; the token keeps its name) + hover
   red: '#E0301E',                        // volatility fill, feature (Ante) CTA
   beige: '#F5EFE3', beigeHover: '#E3D8C4', // button faces
-  ink: '#1A120A',                        // borders, glyphs and text on beige/orange
-  panel: '#1E1410',                      // solid modal / popover ground
-  bar: 'rgba(30,20,16,.72)',             // control bar
+  ink: '#051107',                        // borders, glyphs and text on beige/accent
+  panel: '#051107',                      // solid modal / popover ground
+  card: 'rgba(245,239,227,.06)',         // blocks inside a frame — no outline
+  bar: 'rgba(5,17,7,.72)',               // control bar
   fg: '#F5EFE3', muted: 'rgba(245,239,227,.6)', track: 'rgba(245,239,227,.18)',
   backdrop: 'rgba(10,6,4,.55)',
   winOk: '#4ade80', winNo: '#f87171',
 } as const;
-export const BORDER = 3;
+export const BORDER = 2;
 export const RADIUS = 8;
 ```
 
@@ -120,7 +123,8 @@ card, popover and modal frame calls it.
 - **Space Grotesk** variable (300–700), latin subset, from
   `https://cdn.jsdelivr.net/npm/@fontsource-variable/space-grotesk` (OFL). Family alias
   `SpaceGroteskHB`. Headings, section titles, bet-mode chip, CTA labels, emphasised captions.
-  No Cyrillic — RU/UK headings fall back to Inter (documented in the file header).
+  Space Grotesk has no Cyrillic: Manrope's cyrillic subset (OFL, fontsource) is registered under the
+  same family name for U+0400–04FF, so RU/UK headings stay in a matching grotesk.
 - **Switzer** 700, full woff2 from Fontshare (ITF Free Font License, web embedding permitted).
   Family alias `SwitzerHB`. All numeric readouts (balance / bet / win / FS counter / autoplay
   countdown / prices), rendered with `TextStyle.stroke = { color: HB.ink, width: 3 }`.
@@ -135,31 +139,29 @@ card, popover and modal frame calls it.
 Desktop (wide):
 
 ```
-[bonus]   ┌──────────────────────────────────────────┐   (spin)  [auto] [turbo]
-          │ [menu]  BALANCE  WIN   BET ▂▂▂▂▂ [+][−]    │
+[bonus]   ┌──────────────────────────────────────────┐   (spin)  [auto]
+          │ [menu]  BALANCE  WIN   BET ▬▬▬▬▬ [+][−]    │           [turbo]
           └──────────────────────────────────────────┘
 ```
 
-- Panel: `plaque(HB.bar)` — semi-transparent dark ground, 3 px ink border, radius 8. Holds menu,
+- Panel: `plaque(HB.bar)` — semi-transparent dark ground, 2 px ink border, radius 8. Holds menu,
   balance, win, bet readouts and the ± stepper. Heights / zoom / fit-scale rules are the existing
   ones (`BAR_H`, `BAR_REF_W`, `BAR_MIN_SCALE`, mobile `M_*`).
 - Outside the panel, right: **spin** — circle, `HB.orange` face, beige glyph, hover `HB.gold`;
-  the autoplay counter / stop faces of `SpinDisc` are kept. Then **autoplay** and **turbo** —
-  square plaques, beige face, ink glyph, hover `beigeHover`; the autoplay triangle is orange;
-  active state = orange border + orange glyph (no glow). Turbo levels keep the glyph swap
-  (off/1/2 → `turbo` with level shown by the ink/orange colour; only one turbo glyph exists in the
-  hb sheet, so level 2 draws the glyph with `fill = orange`).
-- Outside the panel, left: **bonus** — square plaque, orange face, beige `bonus` glyph, hover gold.
-  Disabled = 50 % alpha. When a feature is active the face turns red (deactivate).
+  the autoplay counter / stop faces of `SpinDisc` are kept. Then **autoplay** stacked over
+  **turbo** — square plaques, beige face, ink glyph, hover `beigeHover`; the autoplay triangle is
+  accent; active state = accent border + accent glyph (no glow). Turbo paints its two bolts in per
+  level: L1 the left bolt, L2 both.
+- Outside the panel, left: **bonus** — square plaque, accent face, beige `bonus` glyph, hover gold.
+  Disabled = 50 % alpha. While a feature is active the plaque turns red and shows a `close` cross
+  (tap = deactivate).
 - Readouts: label Inter 600 11 px muted uppercase; value Switzer 700 with ink stroke. Bet value
-  gets a **bet strip** below it: `availableBets.length` segments (gap 2, height 4, radius 2),
-  segments `0..index` filled orange, rest `HB.track`. Width = the bet box width. When
-  `availableBets` has 1 entry the strip is hidden.
+  gets a **bet strip** below it: one solid 4 px bar, filled accent to `(index + 1) / count` over
+  `HB.track`. Width = the bet box width. When `availableBets` has 1 entry the strip is hidden.
 - ±: square plaques 28 px stacked (as today's stack, styled).
-- **Ante / feature active**: the "Bet" label is replaced by a chip — orange plaque, ink Space
-  Grotesk 700 text = `feature.title` (uppercase); the ± stack is replaced by one `close` glyph
-  (ink, 24 px) that is not interactive — the bet is locked by the active feature, and the cross
-  says so instead of a dimmed stepper.
+- **Ante / feature active**: the "Bet" label is replaced by a chip — accent plaque, ink Space
+  Grotesk 700 text = `feature.title` (uppercase); the ± stepper is disabled; the cross lives on
+  the bonus plaque (see above).
 - Mobile: existing two-row structure (info row above, controls row with bet− / spin / bet+) with
   hb styling; autoplay / turbo / bonus become square plaques flanking the controls row exactly
   where the current mobile layout places them.
@@ -204,48 +206,34 @@ it is `HB.backdrop`).
 
 ## 8. Buy bonus
 
-`components/BuyBonus.ts` is rewritten as a single-option **page** inside the same 80 % × 80 %
-frame (`plaque(HB.panel)`, same header rule: title "Buy bonus" + orange close plaque).
-
-Option list = `config.features.buyBonus` flattened: `groupedBy` groups are expanded into their
-members in config order, so the ‹ › arrows walk every option. Index kept across bet steps /
-resizes (`this.index`).
-
-Layout (desktop, inner area under the header):
+`components/BuyBonus.ts` renders inside the same 80 % × 80 % frame: a vertical, always-scrolling
+list of mode **cards** (two per row when the content width ≥ 640 px, else one) above a balance /
+bet band. Slots come from `groupBonusSlots` — a `groupedBy` group is one card whose ‹ › flip
+through its members (index kept across bet steps / resizes).
 
 ```
-┌────────────┬──────────────────────────────────────────┐
-│            │  ‹   BONUS TITLE   ›                       │
-│   HERO     │  volatility  🐦🐦🐦🐦🐦                    │
-│   33 %     │  description (Inter, wrap)                 │
-│            │                                            │
-│            │  [ price ]   [   BUY / ACTIVATE   ]        │  ← pinned bottom of right column
-├────────────┴──────────────────────────────────────────┤
-│  BALANCE 1,000.00     BET 2.00  [+][−]                 │  ← bet block, full width
-└───────────────────────────────────────────────────────┘
+┌──────────┬───────────────────────┐ ┌──────────┬───────────────────────┐
+│          │  ‹  WARRIOR ANTE   ›   │ │          │      REEL BOOST       │
+│  HERO    │  🐦🐦🐦🐦🐦            │ │  HERO    │  🐦🐦🐦🐦🐦            │
+│  33 %    │  description…          │ │  33 %    │  description…         │
+│          │ [ ACTIVATE · €1.25 ]   │ │          │ [ ACTIVATE · €5.00 ]  │
+└──────────┴───────────────────────┘ └──────────┴───────────────────────┘
+────────────────────────────────────────────────────────────────────────
+ BALANCE 1,000.00                                    BET 2.00  [−][+]
 ```
 
-- Hero: left 33 % of the inner width, full height of the upper band, separated by a 3 px ink
-  vertical divider. Content: `bonus.custom(ctx)` node if given, else `bonus.art` image, else the
-  thumb art from `buy-bonus-art.ts`; fitted (contain) and centred.
-- Right column (padding 20): title row — Space Grotesk 700 22 px beige, centred, flanked by
-  `back` / `chevronRight` square plaques (only when > 1 option; wrap around). Volatility row:
-  five `volatility` glyphs 22 px, `fill = red` for `i < level`, `fill = panel` otherwise, ink
-  stroke; hidden when `volatility` is undefined. Description: Inter 14 px beige, left-aligned,
-  scrollable via the page's ScrollBox if it overflows. Bottom-pinned action row: price text
-  (Switzer, stroked) and the CTA plaque — `feature` type → red face, label
-  `Activate` / `Deactivate` when it is the active feature; `bonus` type → orange face, label
-  `Buy`. CTA text beige Space Grotesk 700. Disabled (unaffordable / `disabled`) = 50 % alpha,
-  non-interactive.
-- Bet block (bottom band, height 64): balance readout, bet readout with the same bet strip as the
-  bar, ± square plaques. Bet changes go through `host.actions.setBet` like the existing footer.
-- Confirm step: existing `CardModal` flow restyled (`plaque(HB.panel)` frame, orange primary
-  button, beige ghost secondary). `onBonusBuy` / `featureActivate` / `featureDeactivate` emission
-  is unchanged.
-- Mobile (`host.layout === 'mobile'`) keeps the same left/right split (33 % / 67 %); the right
-  column scrolls. Short landscape popouts: whole page fit-scaled like the current overlay's
-  `chromeScale`.
-- Keyboard: ←/→ step options, Enter = CTA, Escape = close (through `onKey`).
+- Card: `HB.card` fill, radius 8, no outline. Hero = left 33 % behind a 2 px `HB.line` divider:
+  `bonus.custom(ctx)` node, else `bonus.thumbnail`, else the `bonus` glyph (red for a feature,
+  accent for a bonus). Right column: title (Space Grotesk, shrinks to fit), volatility birds (red up
+  to the level), description (clipped), and a bottom-pinned CTA plaque — red `Activate` /
+  `Deactivate` for a feature, accent `Buy` for a bonus, the price on the label. Disabled
+  (unaffordable / busy) = 50 % alpha.
+- Bet band (bottom): balance readout, bet readout with the bet strip, ± plaques (locked while busy,
+  in autoplay, or with a feature active).
+- Confirm step: `CardModal` (description + stroked price, Cancel / Buy·Activate). Emission of
+  `buyBonusSelect` / `featureActivate` / `featureDeactivate` is unchanged.
+- Keyboard: ↑/↓ scroll, Shift+↑/↓ and =/− step the bet, Enter commits an open confirm, Escape
+  closes (the confirm first).
 
 ## 9. Other surfaces
 
@@ -271,8 +259,8 @@ Vitest + jsdom like `tests/pixi/`:
 - `menu.test.ts` — `sound` preset rows are absent; tapping the music mute icon sets `music` to 0
   and restores the previous value on the second tap.
 - `bet-strip.test.ts` — with 5 bets and `bet = availableBets[2]`, three segments are orange.
-- `buybonus-page.test.ts` — 3 options (one `groupedBy` pair) → 4 pages; › wraps; the CTA emits
-  `bonusBuy` for the current option; feature option shows the red CTA.
+- `buybonus.test.ts` — 3 options (one `groupedBy` pair) → 2 cards; the group's › wraps; the CTA
+  opens the confirm and Enter emits `buyBonusSelect`; feature cards carry the red CTA.
 - Copies of `autoplay-halted.test.ts` and `safeArea.test.ts` targeting `createPixiHbShell`.
 
 ## 12. Out of scope
