@@ -5,7 +5,7 @@ import { diagnostic, type ServerMessage, type WorkspaceState } from '@energy8eng
 import { Projects, createIdeClient } from '../src/index';
 
 /**
- * The «Проекты» sidebar (spec §8): the folder's projects by name, the open
+ * The «Projects» sidebar (spec §8): the folder's projects by name, the open
  * one marked, a click asking the host to open another — but only after a
  * person has agreed to lose whatever is unsaved, when something is.
  *
@@ -67,7 +67,7 @@ describe('Projects', () => {
   it('lists every project by name, with the id beside it when the two differ', async () => {
     const { ctx } = await harness();
     render(<Projects ctx={ctx} />);
-    expect(screen.getByText('Проекты')).toBeInTheDocument();
+    expect(screen.getByText('Projects')).toBeInTheDocument();
     const beta = screen.getByTestId('project-beta');
     expect(beta).toHaveTextContent('Beta Slot');
     expect(within(beta).getByText('beta')).toHaveClass('e8-project-id');
@@ -120,7 +120,7 @@ describe('Projects', () => {
       }),
     );
     render(<Projects ctx={ctx} />);
-    expect(screen.getByTestId('projects-empty')).toHaveTextContent('нет проектов в этой папке');
+    expect(screen.getByTestId('projects-empty')).toHaveTextContent('no projects in this folder');
     expect(screen.getByText('manifest.json is not JSON')).toHaveClass('e8-explorer-diagnostic');
   });
 

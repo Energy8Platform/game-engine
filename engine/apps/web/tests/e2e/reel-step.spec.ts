@@ -87,7 +87,7 @@ interface Step {
  * `ElementHandle.contentFrame()` hands back the real `Frame`.
  */
 async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator('iframe[title="превью игры"]').elementHandle();
+  const handle = await page.locator('iframe[title="game preview"]').elementHandle();
   const frame = await handle?.contentFrame();
   if (!frame) throw new Error('preview iframe has no content frame');
   return frame;
@@ -112,7 +112,7 @@ test('the same spin, presented a third way, by a plugin from the project', async
     // The stage field beside it is left empty throughout: this project's
     // composition binds exactly one stage, and `ide-bridge` resolves an
     // unnamed stage to that one (see `IdeBridgeSettableConfig.stage`).
-    const mechanicField = page.getByLabel('механика стадии');
+    const mechanicField = page.getByLabel('stage mechanic');
 
     // The game boots on `reel-step` — its own `e8.patch.yml` binds it — so
     // every rebind below is a real change driven from the IDE, and the

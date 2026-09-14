@@ -72,7 +72,7 @@ export function apply(ctx) {
       ctx.slots.register({
         name: 'shell.activity',
         key: 'demo',
-        title: 'Демо',
+        title: 'Demo',
         icon: 'demo',
         order: 50,
         opens: 'document',
@@ -83,7 +83,7 @@ export function apply(ctx) {
   ctx.effect(
     () =>
       ctx.slots.register(
-        { name: 'shell.document', key: 'demo', title: 'Демо', closable: true },
+        { name: 'shell.document', key: 'demo', title: 'Demo', closable: true },
         function DemoDocument() {
           const { rows } = useGameComposition(ctx);
           if (shouldCrash()) {

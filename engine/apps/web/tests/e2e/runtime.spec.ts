@@ -56,7 +56,7 @@ async function gameFrame(page: import('@playwright/test').Page): Promise<Frame> 
   // `Locator.contentFrame()` returns a `FrameLocator` (no `.evaluate()`) —
   // the real `Frame` object this suite needs `window.__e8` access via
   // comes from `ElementHandle.contentFrame()` instead.
-  const handle = await page.locator('iframe[title="превью игры"]').elementHandle();
+  const handle = await page.locator('iframe[title="game preview"]').elementHandle();
   const frame = await handle?.contentFrame();
   if (!frame) throw new Error('preview iframe has no content frame');
   return frame;
@@ -133,8 +133,8 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   // names it), schema-driven form and all — the same proven path
   // `composition-screen.test.tsx`/`skeleton.spec.ts` already exercise.
   await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
-  const mechanicField = page.getByLabel('механика стадии');
-  const stageField = page.getByLabel('стадия (пусто — та единственная, что связал состав)');
+  const mechanicField = page.getByLabel('stage mechanic');
+  const stageField = page.getByLabel('stage (empty — the single one the composition bound)');
   // Both empty, and both free text boxes rather than closed `<select>`s.
   // Which mechanics exist is what a composition registered at runtime, and
   // which stages a game has is what its math declares — so neither is an

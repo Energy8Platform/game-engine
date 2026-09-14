@@ -20,8 +20,8 @@
  *     `ctx.get('mechanics')` returns `undefined` there, and `apply()`
  *     returns immediately: no bind, no socket, no throw. (`inject:
  *     ['mechanics']` was considered and rejected — it would leave this
- *     row's fiber PENDING forever on the host, reading as "ждёт" instead of
- *     the true "there's nothing for this row to do here.")
+ *     row's fiber PENDING forever on the host, reading as "pending" instead
+ *     of the true "there's nothing for this row to do here.")
  *  2. **Browser-side**, composed directly by `main.ts` into the SAME `ctx`
  *     `createGame` already put `mechanics` on. `ctx.get('mechanics')`
  *     resolves it as an ancestor-provided service (cordis's ordinary,
@@ -240,8 +240,8 @@ export const name = 'ide-bridge';
  * is fill it in on their behalf and then act on it.
  */
 export const Config = Schema.object({
-  stage: Schema.string().description('стадия (пусто — та единственная, что связал состав)'),
-  mechanic: Schema.string().description('механика стадии'),
+  stage: Schema.string().description('stage (empty — the single one the composition bound)'),
+  mechanic: Schema.string().description('stage mechanic'),
 });
 
 /**

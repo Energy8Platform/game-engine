@@ -72,7 +72,7 @@ export function SchemaForm({ rowId, schema, value, onChange }: SchemaFormProps) 
                 `composition.ts`'s `update()`), so the badge marks the
                 plugin author's stated intent, not a distinct code path
                 today. */}
-            {needsRestart(child) ? <span className="e8-badge">перезапуск</span> : null}
+            {needsRestart(child) ? <span className="e8-badge">restart</span> : null}
           </div>
         );
       })}

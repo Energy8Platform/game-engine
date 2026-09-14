@@ -41,12 +41,12 @@ export function useEditorDiagnostics(ctx: Context): Diagnostic[] {
 }
 
 const STATE_LABEL: Record<number, string> = {
-  0: 'ждёт',
-  1: 'грузится',
-  2: 'активен',
-  3: 'сбой',
-  4: 'выгружен',
-  5: 'выгружается',
+  0: 'pending',
+  1: 'loading',
+  2: 'active',
+  3: 'failed',
+  4: 'disposed',
+  5: 'disposing',
 };
 
 /**
@@ -126,9 +126,9 @@ function EditorComposition({ ctx }: { ctx: Context }) {
       <Preview ctx={ctx} />
 
       {snapshot === null ? (
-        <p className="e8-empty">подключение…</p>
+        <p className="e8-empty">connecting…</p>
       ) : rows.length === 0 ? (
-        <p className="e8-empty">состав пуст</p>
+        <p className="e8-empty">the composition is empty</p>
       ) : (
         rows.map((row) => (
           <section className="e8-row" key={row.id}>
@@ -137,7 +137,7 @@ function EditorComposition({ ctx }: { ctx: Context }) {
               <span className="e8-state">
                 {row.state === null ? '—' : (STATE_LABEL[row.state] ?? row.state)}
               </span>
-              {row.hot ? <span className="e8-badge">горячий</span> : null}
+              {row.hot ? <span className="e8-badge">hot</span> : null}
             </header>
             <SchemaForm
               rowId={row.id}
@@ -176,8 +176,8 @@ interface GameCompositionProps {
  * malformed `e8.profile.yml`, a bundle not found, a row whose package
  * could not be resolved), resolving each one's `plugin` id to the row's
  * package name. Removed once `DiagnosticsPanel` (Task 8) existed: §8 of
- * the design spec names the panel as THE list ("список в панели
- * диагностик"), and this screen's own copy — standalone, not attached to
+ * the design spec names the panel as THE list ("the list in the
+ * diagnostics panel"), and this screen's own copy — standalone, not attached to
  * the row it was about — was pure duplication of what the panel already
  * shows, not a second legitimate view of it. The row-name resolution this
  * used to do is a real capability the panel does not (yet) replicate —
@@ -209,7 +209,7 @@ export interface CompositionScreenProps {
 export function CompositionScreen({ ctx, rows }: CompositionScreenProps) {
   return (
     <main className="e8-composition">
-      <h1>Состав</h1>
+      <h1>Composition</h1>
       {ctx ? <EditorComposition ctx={ctx} /> : null}
       {rows ? <GameComposition rows={rows} /> : null}
     </main>

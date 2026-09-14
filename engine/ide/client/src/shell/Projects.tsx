@@ -4,7 +4,7 @@ import { useWorkspace } from '../plugins/workspace';
 import { activateOnKey } from './activate';
 
 /**
- * The «Проекты» sidebar (spec §8): every project the host's folder holds,
+ * The «Projects» sidebar (spec §8): every project the host's folder holds,
  * by name, the open one marked; a click asks the host to open another.
  * Drawn with the Explorer's own rules (`.e8-explorer-*`) — same header,
  * same rows — so the two sidebars read as one family.
@@ -32,7 +32,7 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   return (
     <div className="e8-explorer">
       <div className="e8-explorer-header">
-        <span className="e8-explorer-title">Проекты</span>
+        <span className="e8-explorer-title">Projects</span>
       </div>
 
       {state === null ? (
@@ -46,7 +46,7 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
           ))}
           {state.projects.length === 0 ? (
             <p className="e8-empty" data-testid="projects-empty">
-              нет проектов в этой папке
+              no projects in this folder
             </p>
           ) : (
             <ul className="e8-explorer-tree">

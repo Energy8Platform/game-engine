@@ -1,7 +1,7 @@
 /**
  * The acceptance test for the "one place to look" slice: **the game, the
- * IDE and the agent see the same list** (§8 of the design spec, "Тот же
- * список видят игра, IDE и агент").
+ * IDE and the agent see the same list** (§8 of the design spec, "the game,
+ * the IDE and the agent see the same list").
  *
  * The debt this closes was recorded, not imagined: the IDE's composition
  * screen could show six healthy rows beside a game sitting under its own
@@ -356,8 +356,8 @@ const BOOT_FAILURES: BootFailure[] = [
   },
   {
     what: 'a seam with two default providers',
-    // §11: "Конфликт провайдера шва — ноль кандидатов или двое: error с
-    // перечислением кандидатов и их матчеров." A second row of the same
+    // §11: "Seam provider conflict — zero candidates or two: error listing
+    // the candidates and their matchers." A second row of the same
     // renderer package is the cheapest way for a project to reach it, and
     // it is a plausible mistake: a patch that adds a renderer without
     // removing the bundle's.
@@ -370,8 +370,8 @@ const BOOT_FAILURES: BootFailure[] = [
   },
   {
     what: 'a mechanic expecting a field the math never declares',
-    // §11: "`expects` механики не сходится со `SpinSchema` — error с именем
-    // стадии, ожидаемым полем и его формой." Checked before the first spin
+    // §11: "a mechanic's `expects` does not match `SpinSchema` — error naming
+    // the stage, the expected field and its shape." Checked before the first spin
     // by `checkAgainstSchema`, so it is a BOOT diagnostic — and `bonus_wild`
     // is genuinely absent from the schema rather than dropped by the parser,
     // which is the case that is deliberately NOT reported (see

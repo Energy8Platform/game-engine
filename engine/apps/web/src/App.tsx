@@ -66,7 +66,7 @@ export function App({ ctx }: { ctx: Context }) {
     return ctx.slots.register({
       name: 'shell.activity',
       key: 'explorer',
-      title: 'Проводник',
+      title: 'Explorer',
       icon: 'files',
       order: 0,
       opens: 'sidebar',
@@ -76,7 +76,7 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.slots.register(
-      { name: 'shell.sidebar', key: 'explorer', title: 'Проводник' },
+      { name: 'shell.sidebar', key: 'explorer', title: 'Explorer' },
       Explorer,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,7 +88,7 @@ export function App({ ctx }: { ctx: Context }) {
     return ctx.slots.register({
       name: 'shell.activity',
       key: 'workspace',
-      title: 'Проекты',
+      title: 'Projects',
       icon: 'workspace',
       order: -1,
       opens: 'sidebar',
@@ -98,7 +98,7 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.slots.register(
-      { name: 'shell.sidebar', key: 'workspace', title: 'Проекты' },
+      { name: 'shell.sidebar', key: 'workspace', title: 'Projects' },
       Projects,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,7 +108,7 @@ export function App({ ctx }: { ctx: Context }) {
     return ctx.slots.register({
       name: 'shell.activity',
       key: 'composition',
-      title: 'Состав',
+      title: 'Composition',
       icon: 'layers',
       order: 1,
       opens: 'document',
@@ -118,7 +118,7 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.slots.register(
-      { name: 'shell.document', key: 'composition', title: 'Состав', closable: false },
+      { name: 'shell.document', key: 'composition', title: 'Composition', closable: false },
       CompositionDocument,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,7 +128,7 @@ export function App({ ctx }: { ctx: Context }) {
     return ctx.slots.register({
       name: 'shell.activity',
       key: 'preview',
-      title: 'Превью',
+      title: 'Preview',
       icon: 'eye',
       order: 2,
       opens: 'document',
@@ -138,7 +138,7 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.slots.register(
-      { name: 'shell.document', key: 'preview', title: 'Превью', closable: false },
+      { name: 'shell.document', key: 'preview', title: 'Preview', closable: false },
       PreviewWall,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,7 +146,7 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.slots.register(
-      { name: 'shell.panel', key: 'diagnostics', title: 'Диагностика' },
+      { name: 'shell.panel', key: 'diagnostics', title: 'Diagnostics' },
       DiagnosticsDocument,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps

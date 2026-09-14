@@ -42,7 +42,7 @@ function serverPids(): number[] {
 }
 
 /**
- * Opens `id` from the «Проекты» sidebar and waits until its game is really
+ * Opens `id` from the «Projects» sidebar and waits until its game is really
  * up: `status-project` carries the name (the host answered `open`), the
  * preview iframe points where `/api/workspace` says, and `#status` inside
  * it is non-empty (the game booted — which is also what makes `stop()`
@@ -82,7 +82,7 @@ test('two projects: both listed, none open, the projects sidebar first', async (
     await expect(page.locator('[aria-current="true"]')).toHaveCount(0);
     await expect(page.getByTestId('status-project')).toHaveText('no project');
     // Spec §5 (4): with no project open the document group is empty and
-    // points at Projects — not a composition saying «подключение…».
+    // points at Projects — not a composition saying «connecting…».
     await expect(page.getByTestId('doc-none')).toContainText('open a project from Projects');
     await expect(page.locator('[role="tab"]')).toHaveCount(0);
     expect(host.previewUrl()).toBeNull();
@@ -160,7 +160,7 @@ test('on a fixed preview port the switch still shows the second game — same ur
     await page.goto(IDE_URL);
     await openProject(page, host, 'slot-1', 'slot-1');
     const firstPreview = host.previewUrl();
-    // The «Проекты» sidebar is still up (nothing else was opened); a click
+    // The «Projects» sidebar is still up (nothing else was opened); a click
     // on its activity button would toggle it AWAY (measured).
     await openProject(page, host, 'slot-2', SECOND_NAME);
     expect(host.previewUrl()).toBe(firstPreview);
@@ -239,7 +239,7 @@ test('without dist the host says so on / and still answers /api', async ({ reque
   try {
     const page = await request.get(HOST_URL);
     expect(page.status()).toBe(503);
-    expect(await page.text()).toContain('оболочка не собрана');
+    expect(await page.text()).toContain('shell not built');
     const api = await request.get(`${HOST_URL}api/workspace`);
     expect(api.status()).toBe(200);
     expect(((await api.json()) as { projects: unknown[] }).projects).toHaveLength(2);

@@ -2,7 +2,7 @@
  * Task 7's acceptance suite — the last task of "the math is edited by
  * mouse" (`.superpowers/sdd/2026-09-11-the-math-is-edited-by-mouse/`),
  * proving what Tasks 1-6 built (`Diagnostic.at`, `POST /api/check`,
- * `ctx.check`, `<Monaco/>`, the `Код` screen, the save-restarts-`e8-server`
+ * `ctx.check`, `<Monaco/>`, the `Code` screen, the save-restarts-`e8-server`
  * wiring) through a live `e8 dev` host and a real browser, rather than any
  * of those tasks' own unit or jsdom-level tests.
  *

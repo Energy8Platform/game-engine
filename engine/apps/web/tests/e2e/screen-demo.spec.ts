@@ -56,17 +56,17 @@ test('a project plugin brings its own screen, no engine change required', async 
       "screen-demo's apply(ctx) must have registered on shell.activity",
     ).toBeVisible({ timeout: 20_000 });
 
-    // Wording: titles in this IDE are Russian, matching `Состав`/`Превью`
+    // Wording: titles in this IDE are English, matching `Composition`/`Preview`
     // — a plugin nobody on the team wrote follows the same convention
     // because the registration's `title` is the one thing that decides
     // it, not a hard-coded position in the shell.
-    await expect(page.getByRole('button', { name: 'Демо' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Demo' })).toBeVisible();
 
     // Content: clicking through actually draws what the plugin registered
     // — `React.createElement` off the shell's own `globalThis.__E8_IDE__`
     // React, not a stub the test would pass against for the wrong reason.
     await button.click();
-    await expect(page.getByRole('tab', { name: 'Демо' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Demo' })).toBeVisible();
     await expect(page.getByTestId('doc-pane-demo')).toContainText('a document from a project plugin');
 
     // The half of the claim a static `div` could never make: this number
@@ -127,7 +127,7 @@ test('the demo screen can be made to fail as data, on request, without taking th
     // actually depends on that: the composition's own unconditional
     // heading, which only a successfully-rendered `CompositionScreen`
     // puts on the page.
-    await expect(page.getByRole('heading', { name: 'Состав' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Composition' })).toBeVisible();
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

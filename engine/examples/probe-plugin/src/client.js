@@ -38,8 +38,8 @@ export function apply(ctx) {
         React.createElement(
           'aside',
           { className: 'e8-card' },
-          React.createElement('h2', null, 'Проба'),
-          React.createElement('p', null, 'Эта карточка пришла из плагина, а не из оболочки.'),
+          React.createElement('h2', null, 'Probe'),
+          React.createElement('p', null, 'This card came from a plugin, not the shell.'),
         ),
       ),
     'probe:card',

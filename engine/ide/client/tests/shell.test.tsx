@@ -620,13 +620,13 @@ describe('Shell', () => {
       {
         name: 'shell.activity',
         key: 'explorer',
-        title: 'Проводник',
+        title: 'Explorer',
         icon: 'files',
         opens: 'sidebar',
       },
       Nop,
     );
-    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'Проводник' }, () => (
+    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'Explorer' }, () => (
       <div>TREE</div>
     ));
     render(<Shell ctx={ctx} />);
@@ -637,10 +637,10 @@ describe('Shell', () => {
   it('an activity button that opens a document opens ONE tab, and again activates it', async () => {
     const ctx = harness();
     ctx.slots.register(
-      { name: 'shell.activity', key: 'composition', title: 'Состав', icon: 'c', opens: 'document' },
+      { name: 'shell.activity', key: 'composition', title: 'Composition', icon: 'c', opens: 'document' },
       Nop,
     );
-    ctx.slots.register({ name: 'shell.document', key: 'composition', title: 'Состав' }, () => (
+    ctx.slots.register({ name: 'shell.document', key: 'composition', title: 'Composition' }, () => (
       <div>COMP</div>
     ));
     render(<Shell ctx={ctx} />);
@@ -687,7 +687,7 @@ describe('Shell', () => {
 
   it('the panel shows its contribution and collapses on demand', async () => {
     const ctx = harness();
-    ctx.slots.register({ name: 'shell.panel', key: 'diagnostics', title: 'Диагностика' }, () => (
+    ctx.slots.register({ name: 'shell.panel', key: 'diagnostics', title: 'Diagnostics' }, () => (
       <div>DIAG</div>
     ));
     render(<Shell ctx={ctx} />);

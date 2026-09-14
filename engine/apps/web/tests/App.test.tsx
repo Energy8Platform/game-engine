@@ -116,13 +116,13 @@ describe('App', () => {
     ]);
   });
 
-  it('the projects button opens the «Проекты» sidebar', async () => {
+  it('the projects button opens the «Projects» sidebar', async () => {
     const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
     await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
     fireEvent.click(screen.getByTestId('activity-workspace'));
     expect(ctx.shell.sidebar()).toBe('workspace');
-    expect(await screen.findByText('Проекты')).toBeTruthy();
+    expect(await screen.findByText('Projects')).toBeTruthy();
   });
 
   it('registers composition and preview as documents nobody can close', async () => {
@@ -174,7 +174,7 @@ describe('App', () => {
     render(<App ctx={ctx} />);
     expect(ctx.connection.diagnostics).toEqual([]);
     expect(ctx.shell.active()?.key).toBe('preview');
-    expect(screen.getByRole('tab', { name: 'Превью' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Preview' })).toBeTruthy();
   });
 
   it('a fresh load with a project open shows the composition and the Explorer, not five empty regions', async () => {
@@ -185,11 +185,11 @@ describe('App', () => {
     await waitFor(() => expect(ctx.shell.active()?.key).toBe('composition'));
     await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
     expect(screen.getByTestId('sidebar-explorer')).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Composition' })).toBeTruthy();
   });
 
   it('a fresh load with no project open shows the projects list instead, and opens no document', async () => {
-    // A4: the composition with no project behind it said «подключение…»
+    // A4: the composition with no project behind it said «connecting…»
     // forever. An empty group that points at Projects is the honest one.
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
@@ -325,14 +325,14 @@ describe('App', () => {
     expect(await screen.findByText('CARD')).toBeTruthy();
   });
 
-  it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
+  it('the composition tab reads "Composition", matching the document it opens', async () => {
     // The one place in this suite that pins WORDING rather than structure:
     // the NAVIGATION reads in the same language as the document it opens,
-    // and `CompositionScreen`'s own `<h1>` says `Состав`. Addressed by the
+    // and `CompositionScreen`'s own `<h1>` says `Composition`. Addressed by the
     // tab's accessible name, the one thing that carries the wording.
     const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
-    expect(await screen.findByRole('tab', { name: 'Состав' })).toBeTruthy();
+    expect(await screen.findByRole('tab', { name: 'Composition' })).toBeTruthy();
   });
 
   it('a cold load on a plugin’s tab opens it once its client half lands — no false diagnostic', async () => {

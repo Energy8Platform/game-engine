@@ -119,6 +119,8 @@ its 28px header.
   same custom property as the stylesheet, never a duplicated literal.
 - **Density is `default`.** VS Code's `compact` density (0px gaps, one
   shared frame, gradient corners) exists and is out.
+- **Copy is English throughout.** Localisation, when it comes, is a
+  dictionary — not a second set of strings in the components.
 
 ## 4. Tokens
 

@@ -74,7 +74,7 @@ describe('createIdeHost', () => {
       const unbuilt = await fetch(`${host.url}/`);
       expect(unbuilt.status).toBe(503);
       expect(await unbuilt.text()).toContain(
-        'оболочка не собрана: npm run build -w @energy8engine/ide-web',
+        'shell not built: npm run build -w @energy8engine/ide-web',
       );
       // the API is untouched either way
       expect(await (await fetch(`${host.url}/api/health`)).json()).toEqual({ ok: true });

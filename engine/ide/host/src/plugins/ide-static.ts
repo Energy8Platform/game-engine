@@ -112,7 +112,7 @@ export function apply(ctx: Context, config: IdeStaticConfig = {}): void {
     const index = await readInside('index.html');
     if (index) return send(res, CONTENT_TYPES['.html'], index);
 
-    const message = `оболочка не собрана: ${BUILD_HINT}`;
+    const message = `shell not built: ${BUILD_HINT}`;
     if ((req.headers.get('accept') ?? '').includes('application/json')) {
       return refuse(res, 503, dist, message, BUILD_HINT);
     }

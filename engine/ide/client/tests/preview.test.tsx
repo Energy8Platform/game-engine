@@ -94,7 +94,7 @@ describe('Preview', () => {
   it('renders an iframe pointed where the host says the game is served', async () => {
     const { ctx } = await harness();
     render(<Preview ctx={ctx} />);
-    const iframe = screen.getByTitle('превью игры') as HTMLIFrameElement;
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(iframe.tagName).toBe('IFRAME');
     expect(iframe.src).toBe(`${PREVIEW_URL}/`);
   });
@@ -102,14 +102,14 @@ describe('Preview', () => {
   it('with no project open there is no iframe, only the note', async () => {
     const { ctx } = await harness(NO_PROJECT);
     render(<Preview ctx={ctx} />);
-    expect(screen.queryByTitle('превью игры')).toBeNull();
+    expect(screen.queryByTitle('game preview')).toBeNull();
     expect(screen.getByTestId('preview-unavailable')).toHaveTextContent(/no project open/);
   });
 
   it('before the workspace has answered at all there is no iframe either — it is loading, not unavailable', async () => {
     const { ctx } = await harness(null);
     render(<Preview ctx={ctx} />);
-    expect(screen.queryByTitle('превью игры')).toBeNull();
+    expect(screen.queryByTitle('game preview')).toBeNull();
     expect(screen.getByTestId('preview-loading')).toHaveTextContent('loading…');
     expect(screen.queryByTestId('preview-unavailable')).toBeNull();
   });
@@ -117,12 +117,12 @@ describe('Preview', () => {
   it('a workspace change to a different previewUrl remounts the iframe — a real navigation', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
-    const before = screen.getByTitle('превью игры');
+    const before = screen.getByTitle('game preview');
     push({
       type: 'workspace',
       workspace: workspace({ active: 'b', previewUrl: 'http://other.test:5679' }),
     });
-    const after = screen.getByTitle('превью игры') as HTMLIFrameElement;
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(after).not.toBe(before);
     expect(after.src).toBe('http://other.test:5679/');
   });
@@ -130,9 +130,9 @@ describe('Preview', () => {
   it('a different active project on the SAME previewUrl remounts the iframe — same port, different game', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
-    const before = screen.getByTitle('превью игры');
+    const before = screen.getByTitle('game preview');
     push({ type: 'workspace', workspace: workspace({ active: 'b' }) });
-    const after = screen.getByTitle('превью игры') as HTMLIFrameElement;
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(after).not.toBe(before);
     expect(after.src).toBe(`${PREVIEW_URL}/`);
   });
@@ -140,15 +140,15 @@ describe('Preview', () => {
   it('a workspace change that keeps the same previewUrl does not reload', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
-    const before = screen.getByTitle('превью игры');
+    const before = screen.getByTitle('game preview');
     push({ type: 'workspace', workspace: workspace({ diagnostics: [] }) });
-    expect(screen.getByTitle('превью игры')).toBe(before);
+    expect(screen.getByTitle('game preview')).toBe(before);
   });
 
   it('the first snapshot after connecting establishes a baseline, not a reload', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
-    const before = screen.getByTitle('превью игры');
+    const before = screen.getByTitle('game preview');
 
     push({
       type: 'snapshot',
@@ -158,7 +158,7 @@ describe('Preview', () => {
       },
     });
 
-    expect(screen.getByTitle('превью игры')).toBe(before);
+    expect(screen.getByTitle('game preview')).toBe(before);
   });
 
   it('does NOT reload the iframe when only a hot row config changes', async () => {
@@ -172,7 +172,7 @@ describe('Preview', () => {
         diagnostics: [],
       },
     });
-    const before = screen.getByTitle('превью игры');
+    const before = screen.getByTitle('game preview');
 
     push({
       type: 'snapshot',
@@ -182,7 +182,7 @@ describe('Preview', () => {
       },
     });
 
-    expect(screen.getByTitle('превью игры')).toBe(before);
+    expect(screen.getByTitle('game preview')).toBe(before);
   });
 
   it('DOES reload the iframe — an honest navigation, not a silent no-op — when a hot:false row config changes', async () => {
@@ -196,7 +196,7 @@ describe('Preview', () => {
         diagnostics: [],
       },
     });
-    const before = screen.getByTitle('превью игры');
+    const before = screen.getByTitle('game preview');
 
     push({
       type: 'snapshot',
@@ -206,7 +206,7 @@ describe('Preview', () => {
       },
     });
 
-    expect(screen.getByTitle('превью игры')).not.toBe(before);
+    expect(screen.getByTitle('game preview')).not.toBe(before);
   });
 
   it('does not reload again on a snapshot that repeats the same non-hot config', async () => {
@@ -220,7 +220,7 @@ describe('Preview', () => {
         diagnostics: [],
       },
     });
-    const first = screen.getByTitle('превью игры');
+    const first = screen.getByTitle('game preview');
     push({
       type: 'snapshot',
       snapshot: {
@@ -228,7 +228,7 @@ describe('Preview', () => {
         diagnostics: [],
       },
     });
-    const second = screen.getByTitle('превью игры');
+    const second = screen.getByTitle('game preview');
     expect(second).not.toBe(first);
 
     // Same non-hot config repeated verbatim — nothing changed, no reload.
@@ -239,7 +239,7 @@ describe('Preview', () => {
         diagnostics: [],
       },
     });
-    expect(screen.getByTitle('превью игры')).toBe(second);
+    expect(screen.getByTitle('game preview')).toBe(second);
   });
 });
 

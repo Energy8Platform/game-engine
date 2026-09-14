@@ -7,7 +7,7 @@ import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as ideStatic from '../src/plugins/ide-static';
 
-const HINT = 'оболочка не собрана: npm run build -w @energy8engine/ide-web';
+const HINT = 'shell not built: npm run build -w @energy8engine/ide-web';
 const OUTSIDE = 'SENTINEL: this file lives outside dist and must never be served';
 
 let tmp: string;

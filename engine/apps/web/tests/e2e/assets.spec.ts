@@ -2,7 +2,7 @@
  * Task 8's acceptance suite: the last task of "the project is editable"
  * (`.superpowers/sdd/2026-09-10-the-project-is-editable/`), proving what
  * Tasks 1-7 built — a host `files` service, four routes over it, a client
- * service, and the `Ассеты` screen with upload/delete — through a live
+ * service, and the `Assets` screen with upload/delete — through a live
  * `e8 dev` host, a real browser, and the real filesystem, rather than the
  * host-level `files.test.ts`, the client's `assets-screen.test.tsx`, or
  * either one's fakes.

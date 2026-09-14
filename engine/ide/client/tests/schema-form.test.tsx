@@ -88,7 +88,7 @@ describe('SchemaForm', () => {
 
   it('marks fields that need a restart, so the cost is visible before the click', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{}} onChange={() => {}} />);
-    expect(screen.getByText('перезапуск')).toBeTruthy();
+    expect(screen.getByText('restart')).toBeTruthy();
   });
 
   it('falls back to the schema default when the value has no entry', () => {

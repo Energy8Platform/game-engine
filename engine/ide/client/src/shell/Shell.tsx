@@ -489,7 +489,7 @@ export function Shell({ ctx }: { ctx: Context }) {
         <div className="e8-resize e8-resize-y" data-testid="resize-panel" {...panelSize.handlers} />
         <div className="e8-panel-header">
           {/* Expanded, the entry's own header row carries the title (and a
-              count only it knows — `Диагностика 3`); this strip overlays its
+              count only it knows — `Diagnostics 3`); this strip overlays its
               right edge with the toggle. Collapsed, the entry is gone, so
               the strip names what it is hiding. */}
           {panelCollapsed

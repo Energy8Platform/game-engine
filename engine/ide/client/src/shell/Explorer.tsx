@@ -201,19 +201,19 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   return (
     <div className="e8-explorer">
       <div className="e8-explorer-header">
-        <span className="e8-explorer-title">Проводник</span>
+        <span className="e8-explorer-title">Explorer</span>
         {/* The one upload control, as an icon in the view's header — the
             input itself is visually hidden by the stylesheet and reached
             through the label. Spec §5's per-directory upload stays
             narrowed to this (final review, Finding 7b). */}
-        <label className="e8-explorer-upload" title="загрузить файл">
+        <label className="e8-explorer-upload" title="upload file">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
             <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10" />
           </svg>
           <input
             type="file"
             data-testid="explorer-upload"
-            aria-label="загрузить файл"
+            aria-label="upload file"
             onChange={handleUpload}
           />
         </label>
@@ -302,7 +302,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                       data-testid={`explorer-delete-${entry.path}`}
                       className="e8-explorer-delete"
                       aria-label={`delete ${entry.path}`}
-                      title="удалить"
+                      title="delete"
                       onClick={(e) => {
                         e.stopPropagation();
                         askDelete(entry.path);

@@ -122,7 +122,7 @@ export function Preview({ ctx }: PreviewProps) {
         <iframe
           key={`${reloadNonce}:${active}:${previewUrl}`}
           className="e8-preview"
-          title="превью игры"
+          title="game preview"
           src={previewUrl}
         />
       )}
@@ -243,7 +243,7 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
 
   return (
     <main className="e8-preview-wall">
-      <h1>Превью</h1>
+      <h1>Preview</h1>
 
       <div className="e8-preview-wall-controls">
         <fieldset className="e8-preview-wall-presets">

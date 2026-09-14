@@ -10,15 +10,15 @@ export interface Config {
 export const name = 'probe';
 
 export const Config: Schema<Config> = Schema.object({
-  speed: Schema.number().min(1).max(20).step(1).default(8).description('скорость барабана'),
+  speed: Schema.number().min(1).max(20).step(1).default(8).description('reel speed'),
   direction: Schema.union(['up', 'down'] as const)
     .default('up')
-    .description('направление заполнения'),
+    .description('fill direction'),
   holdSpins: Schema.number()
     .min(0)
     .max(10)
     .default(1)
-    .description('удержаний')
+    .description('holds')
     .extra('extra', { applies: 'restart' }),
 });
 

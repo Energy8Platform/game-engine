@@ -329,7 +329,7 @@ test('a document that throws leaves the panel and the other tabs usable', async 
 
     await page.getByTestId('activity-composition').click();
     await expect(page.getByTestId('doc-composition')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('heading', { name: 'Состав' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Composition' })).toBeVisible();
     // The crashed tab is still on the strip, its pane hidden — not gone.
     await expect(page.getByTestId('doc-demo')).toBeVisible();
     await expect(page.getByTestId('doc-error')).toBeHidden();

@@ -37,17 +37,17 @@ test.afterAll(async () => {
 test('a third-party plugin brings its own UI without the shell being rebuilt', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('e8-example-probe')).toBeVisible();
-  await expect(page.getByText('Эта карточка пришла из плагина, а не из оболочки.')).toBeVisible();
+  await expect(page.getByText('This card came from a plugin, not the shell.')).toBeVisible();
 });
 
 test('a field the plugin declared restart-requiring shows the restart badge', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText('перезапуск')).toBeVisible();
+  await expect(page.getByText('restart')).toBeVisible();
 });
 
 test('turning a knob lands on disk', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('скорость барабана').fill('5');
+  await page.getByLabel('reel speed').fill('5');
   await expect
     .poll(() => readFileSync(COMPOSITION, 'utf8'), { timeout: 10_000 })
     .toContain('speed: 5');

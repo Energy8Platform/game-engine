@@ -4,8 +4,7 @@ import type { GameDiagnosticsGroup } from '../plugins/diagnostics';
 /**
  * One list of everything that has gone wrong, each row saying which side
  * it came from. §8 of the design spec states the principle this closes:
- * "Тот же список видят игра, IDE и агент" — the game, the IDE and the
- * agent see the same list. The debt this answers: the composition screen
+ * "the game, the IDE and the agent see the same list". The debt this answers: the composition screen
  * could show six healthy rows next to a game sitting under its own
  * failure screen, in a browser tab the IDE never looked at. `project`
  * (namespace 1 of `Diagnostic.plugin` — composing/resolving the game),
@@ -201,7 +200,7 @@ export function DiagnosticsPanel({
       {/* The panel's header row (DESIGN.md §2, `Diagnostics (3)`): the
           heading keeps its own accessible name, the count sits beside it. */}
       <div className="e8-diagnostics-panel-header">
-        <h2>Диагностика</h2>
+        <h2>Diagnostics</h2>
         <span className="e8-badge">{rows.length}</span>
       </div>
 
