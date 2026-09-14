@@ -1029,16 +1029,18 @@ describe('dev-game — restart on a script.spin write', () => {
     const spin = () => fetch(`${preview(host!.ctx)}/api/spin`, { method: 'POST' });
     try {
       const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      const before = hostFrames().length;
       expect(await putScript(projectDir, `${original}\nrecord {\n`)).toBe(200);
-      await expect
-        .poll(
-          () =>
-            hostFrames()
-              .at(-1)
-              ?.diagnostics.map((d) => d.message),
-          { timeout: 15_000 },
-        )
-        .toEqual([expect.stringMatching(/failed to restart/)]);
+      // The breaking save sends TWO frames from one synchronous block —
+      // `session`'s failure, then `spin`'s empty retract — so the count is
+      // what is waited for; polling the last frame's content alone could
+      // land between the two and put every count below off by one.
+      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBe(before + 2);
+      expect(
+        hostFrames()
+          .at(-1)!
+          .diagnostics.map((d) => d.message),
+      ).toEqual([expect.stringMatching(/failed to restart/)]);
       const afterBreak = hostFrames().length;
 
       // The spin fails with the session's own startup diagnostic. One
