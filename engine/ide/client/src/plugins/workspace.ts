@@ -70,10 +70,20 @@ export function apply(ctx: Context, config: WorkspaceClientConfig) {
   );
   let state: WorkspaceState | null = null;
 
+  /**
+   * Every CLOSABLE document goes with the project — the `f:` tabs the
+   * Explorer opened, and a plugin's own closable document alike: a tab of
+   * the project that was just left has nothing to show over the next one
+   * (final review F2: it used to stay until its plugin was unloaded, and
+   * then leave as a "withdrawn" warning on every switch). A document
+   * contributed `closable: false` is the app's own (composition, preview)
+   * and stays. Only `f:` documents can be dirty, so the warning names
+   * their paths, as before.
+   */
   function closeFileDocuments(active: string | null) {
     const dirty: string[] = [];
     for (const doc of ctx.shell.documents()) {
-      if (!doc.key.startsWith(FILE_KEY_PREFIX)) continue;
+      if (!doc.closable) continue;
       if (doc.dirty) dirty.push(doc.key.slice(FILE_KEY_PREFIX.length));
       ctx.shell.close(doc.key, { force: true });
     }

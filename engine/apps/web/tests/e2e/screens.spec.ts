@@ -235,11 +235,6 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
   page,
   context,
 }) => {
-  // Two real Pixi instances booting inside the wall, on top of the usual
-  // cold-vite settle wait — `reel-step.spec.ts`/`runtime.spec.ts` reach for
-  // the same extension for the same reason on their own heaviest cases.
-  test.setTimeout(60_000);
-
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {

@@ -32,9 +32,12 @@ import { looksBinary } from './ViewerDocument';
  * runs them when the answer is outgrown: a new check answer retracts the
  * previous check's rows before reporting its own (an answer of `[]`
  * leaves nothing); a refused save retracts the previous refusal; a save
- * that succeeds retracts the refusal; and unmount runs every retract it
- * still holds — a closed editor's rows go with it, since nothing is left
- * to take them back later. Until debt B1 gave `report()` a retract, checks
+ * that succeeds retracts the refusal; a read that fails holds its rows
+ * the same way (in `checkRetracts` — an editor that never opened never
+ * checks); and unmount runs every retract it still holds — a closed
+ * editor's rows go with it, since nothing is left to take them back
+ * later — and an answer that lands after it reports nothing (`gone`).
+ * Until debt B1 gave `report()` a retract, checks
  * stayed out of the list on purpose; that deviation is retired. The
  * paragraph beside the editor is not optional: a stage no variant
  * declares, a deleted `game {}` block and `check.ts`'s own dead-network
@@ -88,6 +91,9 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
   // list — see the module doc for when each set is run.
   const checkRetracts = useRef<Array<() => void>>([]);
   const saveRetracts = useRef<Array<() => void>>([]);
+  // Set by the unmount cleanup: an answer (the read, a save) that resolves
+  // after it reports nothing — there is no editor left to take it back.
+  const gone = useRef(false);
 
   const dirty = text !== null && text !== savedText;
 
@@ -117,14 +123,16 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
   }
 
   useEffect(() => {
-    let gone = false;
+    gone.current = false;
     ctx.files.read(path).then(({ bytes, diagnostics }) => {
-      if (gone) return;
+      if (gone.current) return;
       if (!bytes) {
         // The tree is a snapshot; the file can be gone by the time this
-        // resolves. The host's own diagnostic says why.
+        // resolves. The host's own diagnostic says why — held with the
+        // check rows (a file that did not open is never checked, so the
+        // set is free), and gone with the editor like them.
         setOpenError(diagnostics[0]?.message ?? `"${path}" could not be read`);
-        for (const diag of diagnostics) ctx.connection.report(diag);
+        replaceReported(checkRetracts, diagnostics);
         return;
       }
       if (looksBinary(bytes)) {
@@ -143,7 +151,7 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
       if (isSpin(path)) runCheck(source);
     });
     return () => {
-      gone = true;
+      gone.current = true;
       // Nothing asked for this file may land after it: a timer still
       // pending is dropped, and any answer in flight fails the `seq` test.
       checkSeq.current += 1;
@@ -167,6 +175,7 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
     if (text === null) return;
     const saving = text;
     ctx.files.write(path, new TextEncoder().encode(saving)).then(({ diagnostics }) => {
+      if (gone.current) return;
       setSaveDiagnostics(diagnostics);
       // A refusal replaces the previous refusal's rows; a success (an
       // empty answer) retracts them and reports nothing.

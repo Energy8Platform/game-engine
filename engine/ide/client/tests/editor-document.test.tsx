@@ -595,6 +595,32 @@ describe('EditorDocument', () => {
       unmount();
       expect(listed(ctx)).toEqual([]);
     });
+
+    it('unmounting an editor that failed to open takes the open error with it', async () => {
+      // Final review F3: the read's refusal was reported bare, with no
+      // retract held — the one row of this editor's that stayed after it.
+      const ctx = await harness(files({}));
+      const { unmount } = render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+      await screen.findByText(/was not found/);
+      expect(listed(ctx)).toEqual([expect.stringMatching(/was not found/)]);
+      unmount();
+      expect(listed(ctx)).toEqual([]);
+    });
+
+    it('a save that resolves after the editor unmounted reports nothing', async () => {
+      // Nothing is left to take the row back — an answer landing after
+      // the unmount used to stand for the life of the page.
+      let answer!: (result: { diagnostics: Diagnostic[] }) => void;
+      const ctx = await harness(files({ 'game/script.spin': 'x' }));
+      ctx.files.write = () => new Promise((resolve) => (answer = resolve));
+      const { unmount } = render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+      await screen.findByTestId('editor');
+      await userEvent.click(screen.getByRole('button', { name: /save/i }));
+      unmount();
+      answer({ diagnostics: [d('too late')] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(listed(ctx)).toEqual([]);
+    });
   });
 
   it('unmounting a dirty editor does not lose the guard racing the tab', async () => {

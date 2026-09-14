@@ -238,20 +238,16 @@ describe('SessionStatus', () => {
     expect(container).toHaveTextContent('e8-server ●');
   });
 
-  it('a restart in flight wins over an exit it is about to cure', () => {
-    const ctx = gameDiagnosticsHarness();
-    const { container } = render(<SessionStatus ctx={ctx} />);
-    act(() =>
-      ctx.socket.receive(
-        frame([
-          d('the math engine exited', { code: 'exited' }),
-          d('the math engine is restarting', { code: 'restarting' }),
-        ]),
-      ),
-    );
-    expect(container).toHaveTextContent('e8-server restarting');
-    expect(container).not.toHaveTextContent(/exited/);
-  });
+  // There is no "a restart in flight wins over an exit" test here, on
+  // purpose (final review F4). The label prefers `restarting` over
+  // `exited`, but no frame carries a `restarting`-coded row today:
+  // `dev-game.ts`'s `/api/spin` route filters the session's wait out of
+  // its report, and its restart report lands once the restart has
+  // settled. A frame carrying both codes would have to be invented — a
+  // test of a property with no producer, passing for the wrong reason.
+  // The label is inline in the component, not a function, so a
+  // pure-function test of the precedence has nothing to call either. If a
+  // speaker ever says `restarting` on the wire, the test comes back with it.
 });
 
 describe('DirtyStatus', () => {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Context } from 'cordis';
+import { useShell } from '../plugins/shell';
 import { useWorkspace } from '../plugins/workspace';
 import { activateOnKey } from './activate';
 
@@ -13,12 +14,13 @@ import { activateOnKey } from './activate';
  * way the Explorer asks before a delete — not a shell-level confirm API
  * (there is none, and one caller does not earn one). «No» leaves every
  * tab where it is; «Yes» calls `open()`, and the `workspace` plugin then
- * closes the `f:` tabs when the new state lands. Nothing here closes a tab.
+ * closes the closable tabs when the new state lands. Nothing here closes a tab.
  */
 export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   const state = useWorkspace(ctx);
   const [asking, setAsking] = useState<string | null>(null);
-  const dirty = ctx.shell.documents().filter((doc) => doc.dirty).length;
+  const { documents } = useShell(ctx);
+  const dirty = documents.filter((doc) => doc.dirty).length;
 
   function select(id: string) {
     if (id === state?.active) return; // already open: nothing to ask, nothing to do

@@ -44,6 +44,11 @@ function harness(): Context {
     report(next: Diagnostic) {
       diagnostics = [...diagnostics, next];
       for (const listener of diagListeners) listener();
+      // The real `connection.report`'s retract, by identity.
+      return () => {
+        diagnostics = diagnostics.filter((d) => d !== next);
+        for (const listener of diagListeners) listener();
+      };
     },
   };
 
@@ -171,18 +176,23 @@ describe('shell', () => {
     expect(ctx.connection.diagnostics).toEqual([]);
   });
 
-  it('a contribution registered again after a withdrawal opens fresh on the next click', () => {
+  it('a contribution registered again after a withdrawal opens fresh on the next click, and takes the warning back', () => {
     const ctx = harness();
     const off = ctx.slots.register({ name: 'shell.document', key: 'demo' }, Dummy);
     ctx.shell.openContributed('demo');
     off();
     expect(ctx.shell.documents()).toEqual([]);
+    expect(ctx.connection.diagnostics).toHaveLength(1);
     const Again = () => <div>AGAIN</div>;
     ctx.slots.register({ name: 'shell.document', key: 'demo' }, Again);
+    // Final review F2: the plugin is back, so "was unloaded" is no longer
+    // the case — the warning used to stand for the life of the page, one
+    // more per project switch.
+    expect(ctx.connection.diagnostics).toHaveLength(0);
     ctx.shell.openContributed('demo');
     expect(ctx.shell.active()?.key).toBe('demo');
     expect(ctx.shell.documents()[0]?.component).toBe(Again);
-    expect(ctx.connection.diagnostics).toHaveLength(1);
+    expect(ctx.connection.diagnostics).toHaveLength(0);
   });
 
   it('opening a contributed key nobody registered is a diagnostic, not a blank tab', () => {

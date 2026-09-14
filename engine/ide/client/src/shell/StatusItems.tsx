@@ -61,10 +61,14 @@ const EXITED_CODE = 'exited';
  * Fed by `ctx.gameDiagnostics` — the live `/ide` stream, not a boot-time
  * read — because `pid` on the host side is a getter for exactly this
  * reason (Slice 6): a status item that read it once would keep showing a
- * dead process as alive across a restart. `dev-game.ts`'s `/api/spin`
- * route tags a spin that landed mid-restart with a `restarting`-coded
- * diagnostic on the `host` source; as long as ANY group still carries one,
- * the restart is still in flight. An `exited`-coded row is the host saying
+ * dead process as alive across a restart. A `restarting`-coded row in ANY
+ * group reads as a restart still in flight — `session-dev` tags the
+ * answer a spin gets mid-restart with it, but today no frame carries it:
+ * `dev-game.ts`'s `/api/spin` route filters that wait out of what it
+ * reports (a wait is not a failure), and its restart report lands only
+ * once the restart has settled. The branch stays for a speaker that
+ * says it; its precedence over `exited` has no producer to test against
+ * (see status-items.test.tsx). An `exited`-coded row is the host saying
  * the process died (`session/exited`, relayed by `dev-game.ts`) — the dot
  * hollows and says why, until the next save's clean restart takes the row
  * back. `groups === null` (nothing has spoken yet) reads as "not

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The newest mtime under `path` (a file, or a directory walked in full); `-Infinity` when nothing is there. */
+/** The newest mtime under `path` (a file, or a directory walked in full); `Infinity` when nothing is there. */
 function newest(path: string): number {
   let stat;
   try {

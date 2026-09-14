@@ -82,7 +82,7 @@ function harness(config: Partial<WorkspaceClientConfig> = {}, docs: FakeDoc[] = 
   return { ctx: result, socket, report, shell };
 }
 
-type FakeDoc = { key: string; dirty: boolean };
+type FakeDoc = { key: string; dirty: boolean; closable: boolean };
 
 /** The two members of `ShellService` the switch reads: the open tabs, and a forced close that drops one. */
 function fakeShell(initial: FakeDoc[]) {
@@ -265,13 +265,17 @@ describe('workspace (client)', () => {
   });
 
   describe('switching projects', () => {
+    // `demo`: a plugin's own document, contributed closable — it goes with
+    // the project like an `f:` tab does (final review F2). `composition`
+    // is the app's, contributed `closable: false`, and stays.
     const tabs = (): FakeDoc[] => [
-      { key: 'f:game/script.spin', dirty: false },
-      { key: 'f:a.ts', dirty: false },
-      { key: 'composition', dirty: false },
+      { key: 'f:game/script.spin', dirty: false, closable: true },
+      { key: 'f:a.ts', dirty: false, closable: true },
+      { key: 'demo', dirty: false, closable: true },
+      { key: 'composition', dirty: false, closable: false },
     ];
 
-    it('a frame with a different active closes every f: document, by force, and nothing else', () => {
+    it('a frame with a different active closes every closable document, by force, and nothing else', () => {
       const { fetchFn } = fakeFetch(() => new Promise(() => {}));
       const { socket, shell, report } = harness({ fetchFn }, tabs());
       socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
@@ -279,6 +283,7 @@ describe('workspace (client)', () => {
       expect(shell.close.mock.calls).toEqual([
         ['f:game/script.spin', { force: true }],
         ['f:a.ts', { force: true }],
+        ['demo', { force: true }],
       ]);
       expect(shell.documents().map((doc) => doc.key)).toEqual(['composition']);
       expect(report).not.toHaveBeenCalled();
@@ -322,7 +327,9 @@ describe('workspace (client)', () => {
 
     it('a close with no project after it still names the project the file belonged to', () => {
       const { fetchFn } = fakeFetch(() => new Promise(() => {}));
-      const { socket, report } = harness({ fetchFn }, [{ key: 'f:a.ts', dirty: true }]);
+      const { socket, report } = harness({ fetchFn }, [
+        { key: 'f:a.ts', dirty: true, closable: true },
+      ]);
       socket.receive({ type: 'workspace', workspace: ws({ active: 'a' }) });
       socket.receive({ type: 'workspace', workspace: ws({ active: null, previewUrl: null }) });
       expect((report.mock.calls[0][0] as Diagnostic).where).toBe('a');

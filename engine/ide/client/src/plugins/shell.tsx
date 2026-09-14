@@ -168,17 +168,21 @@ export function apply(ctx: Context) {
   // instance tabs): the ones a plugin's unload can pull the component out
   // from under — see `onSlotsChange`.
   const contributed = new Set<string>();
+  // The retract of each "withdrawn" warning still standing, by key — run
+  // when the same key is contributed again (its plugin came back: a
+  // project switch reloads every client half), see `onSlotsChange`.
+  const withdrawn = new Map<string, () => void>();
 
   const notify = () => {
     for (const listener of listeners) listener();
   };
 
-  function report(where: string, message: string, fix: string) {
+  function report(where: string, message: string, fix: string): () => void {
     // Read leniently — `shell` has no static dependency on `connection`
     // and must keep working (silently) if this is ever composed without
     // it, the same rule `slots` already applies to its own reports.
     const connection = ctx.reflect.get('connection', false) as ConnectionService | undefined;
-    connection?.report(diagnostic('warning', where, 'shell', message, fix));
+    return connection?.report(diagnostic('warning', where, 'shell', message, fix)) ?? (() => {});
   }
 
   /**
@@ -317,17 +321,27 @@ export function apply(ctx: Context) {
    * address is waiting for, open it. Left while open (its plugin was
    * unloaded): the tab used to stay, non-closable, painting a component
    * that no longer exists — force-closed instead, and said once. A
-   * contribution registered again later opens fresh on the next click.
+   * contribution registered again later opens fresh on the next click,
+   * and its return takes the warning back: the plugin is here again, so
+   * "was unloaded" is no longer the case.
    */
   function onSlotsChange() {
     for (const key of contributed) {
       if (findContributed(key) !== undefined) continue;
       remove(key);
-      report(
+      withdrawn.set(
         key,
-        'document withdrawn by its plugin',
-        'the plugin that contributed it was unloaded',
+        report(
+          key,
+          'document withdrawn by its plugin',
+          'the plugin that contributed it was unloaded',
+        ),
       );
+    }
+    for (const [key, retract] of withdrawn) {
+      if (findContributed(key) === undefined) continue;
+      retract();
+      withdrawn.delete(key);
     }
     if (pending === undefined) return;
     const found = findContributed(pending);

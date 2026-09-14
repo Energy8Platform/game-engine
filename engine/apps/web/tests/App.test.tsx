@@ -220,18 +220,42 @@ describe('App', () => {
     expect(ctx.shell.active()).toBeUndefined();
     act(() => socket.push({ type: 'workspace', workspace: OPEN_PROJECT }));
     expect(ctx.shell.active()).toBeUndefined();
-    // Not an `f:` tab: `workspace` itself closes those on a switch, which
-    // would move the address for a reason that is not this rule.
-    ctx.shell.open({ key: 'other', title: 'Other', component: () => null, closable: true });
-    expect(ctx.shell.active()?.key).toBe('other');
+    // A switch, the way the host actually sends it: `a → null → y` (the
+    // `null` frame while it closes `a`). The active document is `preview`
+    // — contributed `closable: false`, so `workspace` leaves it where it
+    // is on the switch (it closes every CLOSABLE tab) — and the rule must
+    // not paint the composition over it on the `null → y` edge: a
+    // document IS active. With only file tabs open the outcome differs
+    // for a reason that is not this rule: `workspace` closes them on the
+    // `null` frame, nothing is active on the `y` frame, and the
+    // composition opens — the fresh-project default, for a project that
+    // has just become the open one.
+    act(() => ctx.shell.openContributed('preview'));
+    expect(ctx.shell.active()?.key).toBe('preview');
+    const switched = { ...OPEN_PROJECT, projects: [{ id: 'y', name: 'Y' }], active: 'y' };
+    act(() => socket.push({ type: 'workspace', workspace: { ...switched, active: null } }));
+    act(() => socket.push({ type: 'workspace', workspace: switched }));
+    expect(ctx.shell.active()?.key).toBe('preview');
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']);
+  });
+
+  it('the sidebar is decided once — a collapsed sidebar is not re-opened by a later frame', async () => {
+    // Task 4's deferred pin: the default sidebar is chosen on the FIRST
+    // state only. `showSidebar(undefined)` collapses it (the API toggles:
+    // the current key again, or `undefined`, is "none"); a frame after
+    // that — a project switch, here — must leave it collapsed.
+    const { ctx, socket } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    act(() => ctx.shell.showSidebar(undefined));
+    expect(ctx.shell.sidebar()).toBeUndefined();
     act(() =>
       socket.push({
         type: 'workspace',
         workspace: { ...OPEN_PROJECT, projects: [{ id: 'y', name: 'Y' }], active: 'y' },
       }),
     );
-    expect(ctx.shell.active()?.key).toBe('other');
-    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'other']);
+    expect(ctx.shell.sidebar()).toBeUndefined();
   });
 
   it('a resolved deep link is left alone by the composition default', async () => {
