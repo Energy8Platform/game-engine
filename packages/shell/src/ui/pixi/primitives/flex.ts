@@ -22,7 +22,8 @@ export interface BgStyle {
   radius?: number;
   /** per-corner radii [tl, tr, br, bl] override `radius`. */
   corners?: [number, number, number, number];
-  stroke?: { color: string; width: number };
+  /** `alignment` 1 = inside the box (default Pixi 0.5 = centred on the edge). */
+  stroke?: { color: string; width: number; alignment?: number };
 }
 
 export interface FlexOpts {
@@ -309,7 +310,7 @@ export class FlexBox extends Container implements Sizable {
       g.roundRect(0, 0, this.outW, this.outH, this.bgStyle.radius ?? 0);
     }
     if (this.bgStyle.fill) g.fill(this.bgStyle.fill);
-    if (this.bgStyle.stroke) g.stroke({ color: this.bgStyle.stroke.color, width: this.bgStyle.stroke.width });
+    if (this.bgStyle.stroke) g.stroke({ color: this.bgStyle.stroke.color, width: this.bgStyle.stroke.width, alignment: this.bgStyle.stroke.alignment ?? 0.5 });
   }
 }
 
