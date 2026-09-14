@@ -138,8 +138,9 @@ function buildRow(
   const isVolume = row.id === 'music' || row.id === 'sfx';
   const mute = isVolume
     ? new IconButton(muteIcon(row.id, row.get()), {
-        size: 36,
-        glyph: 22,
+        // as tall as the label + slider stack beside it, so both sit inside the plaque's height
+        size: 44,
+        glyph: 26,
         onTap: () => {
           if (row.disabled) return;
           const next = toggleMute(row.id, row.get(), row.max);
@@ -154,7 +155,7 @@ function buildRow(
   } else if (isHbIcon(row.icon)) {
     box.add(makeIcon(row.icon, 20, { ink: HB.fg, fill: HB.panel }));
   }
-  const stack = new FlexBox({ direction: 'column', align: 'stretch', gap: 4 });
+  const stack = new FlexBox({ direction: 'column', align: 'stretch', gap: 2 });
   stack.add(label(row.label));
   const slider = new Slider(host, toUnit(row.get()), row.disabled ? () => {} : (u) => {
     const v = fromUnit(u);
