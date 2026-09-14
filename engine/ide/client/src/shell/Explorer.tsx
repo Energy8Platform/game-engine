@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
 import { FILE_KEY_PREFIX } from '../plugins/shell';
+import { activateOnKey } from './activate';
 import { EditorDocument } from './EditorDocument';
 import { ViewerDocument, extensionOf } from './ViewerDocument';
 
@@ -256,6 +257,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                     : 'e8-explorer-entry e8-explorer-dir'
                 }
                 onClick={() => select(entry)}
+                onKeyDown={activateOnKey(() => select(entry))}
               >
                 {/* Depth is the indent, so the label is the last segment
                     alone; a file gets an empty chevron cell to line up. */}

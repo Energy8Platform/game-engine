@@ -127,6 +127,64 @@ describe('shell', () => {
     expect(ctx.shell.active()?.key).toBe('composition');
   });
 
+  it('a contribution withdrawn while open closes its tab, moves on, and says so once', () => {
+    // A3: the plugin that contributed the document was unloaded. The tab
+    // used to stay — non-closable, painting a component that no longer
+    // exists. Force-closed, the neighbour takes over, and one warning
+    // names the key.
+    const ctx = harness();
+    const off = ctx.slots.register({ name: 'shell.document', key: 'demo' }, Dummy);
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    ctx.shell.openContributed('demo');
+    expect(ctx.shell.active()?.key).toBe('demo');
+    off();
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['a']);
+    expect(ctx.shell.active()?.key).toBe('a');
+    // `plugin: <document key>, where: 'shell'` — case 3 of the contract's
+    // own `Diagnostic.plugin` doc, the shape every other shell report has.
+    expect(ctx.connection.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        plugin: 'demo',
+        where: 'shell',
+        message: 'document withdrawn by its plugin',
+      }),
+    ]);
+  });
+
+  it('an open contributed document survives an unrelated contribution landing or leaving', () => {
+    // Every slot change runs the withdrawal check; only a key whose OWN
+    // contribution is gone is withdrawn.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'demo' }, Dummy);
+    ctx.shell.openContributed('demo');
+    const off = ctx.slots.register({ name: 'shell.panel', key: 'p', title: 'P' }, Dummy);
+    off();
+    expect(ctx.shell.active()?.key).toBe('demo');
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('a contribution withdrawn before anyone opened it is nothing to report', () => {
+    const ctx = harness();
+    const off = ctx.slots.register({ name: 'shell.document', key: 'demo' }, Dummy);
+    off();
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
+  it('a contribution registered again after a withdrawal opens fresh on the next click', () => {
+    const ctx = harness();
+    const off = ctx.slots.register({ name: 'shell.document', key: 'demo' }, Dummy);
+    ctx.shell.openContributed('demo');
+    off();
+    expect(ctx.shell.documents()).toEqual([]);
+    const Again = () => <div>AGAIN</div>;
+    ctx.slots.register({ name: 'shell.document', key: 'demo' }, Again);
+    ctx.shell.openContributed('demo');
+    expect(ctx.shell.active()?.key).toBe('demo');
+    expect(ctx.shell.documents()[0]?.component).toBe(Again);
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+  });
+
   it('opening a contributed key nobody registered is a diagnostic, not a blank tab', () => {
     const ctx = harness();
     ctx.shell.openContributed('ghost');
@@ -833,6 +891,44 @@ describe('Shell', () => {
     ctx.shell.ready();
     render(<Shell ctx={ctx} />);
     expect(screen.getByTestId('doc-opening')).toHaveTextContent('demo');
+  });
+
+  it('Cmd+S and Ctrl+S on a document that is not an editor are swallowed, not the browser\'s save-page dialog', () => {
+    // A2: the editor's own listener answers only on its tab; on any other
+    // tab the keystroke used to reach the browser. The shell swallows it
+    // once, for every tab; the editor still saves on its own.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.shell.openContributed('composition');
+    render(<Shell ctx={ctx} />);
+    const fire = (init: KeyboardEventInit) => {
+      const event = new KeyboardEvent('keydown', { ...init, cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(fire({ key: 's', metaKey: true })).toBe(true);
+    expect(fire({ key: 'S', ctrlKey: true })).toBe(true);
+    expect(fire({ key: 's' })).toBe(false);
+    expect(fire({ key: 'a', metaKey: true })).toBe(false);
+  });
+
+  it('a reload with unsaved changes also sets returnValue, the form Safari listens to', () => {
+    // jsdom's `Event` carries `returnValue` as the legacy boolean alias of
+    // the canceled flag, so `= ''` would read back as `false` and a
+    // `preventDefault` alone would pass. An own data property on the event
+    // is what makes the assignment itself observable.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+    const fire = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      Object.defineProperty(event, 'returnValue', { value: true, writable: true });
+      window.dispatchEvent(event);
+      return (event as { returnValue: unknown }).returnValue;
+    };
+    expect(fire()).toBe(true);
+    act(() => ctx.shell.markDirty('a', true));
+    expect(fire()).toBe('');
   });
 
   it('documents open but none named by the address is words in the body, not an empty pane', () => {

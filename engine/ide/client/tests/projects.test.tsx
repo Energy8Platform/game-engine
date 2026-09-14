@@ -143,8 +143,49 @@ describe('Projects', () => {
     render(<Projects ctx={ctx} />);
     await userEvent.click(screen.getByTestId('project-beta'));
     const confirm = within(screen.getByTestId('project-beta')).getByTestId('project-confirm');
-    expect(confirm).toHaveTextContent('unsaved changes will be lost — switch?');
+    expect(confirm).toHaveTextContent('unsaved changes in 1 document will be lost — switch?');
     expect(opened()).toEqual([]);
+  });
+
+  it('the question counts the dirty documents, not the open ones', async () => {
+    const { ctx } = await harness();
+    ctx.shell.open({ key: 'f:a.ts', title: 'a.ts', component: Doc, closable: true });
+    ctx.shell.open({ key: 'f:b.ts', title: 'b.ts', component: Doc, closable: true });
+    ctx.shell.open({ key: 'f:c.ts', title: 'c.ts', component: Doc, closable: true });
+    ctx.shell.markDirty('f:a.ts', true);
+    ctx.shell.markDirty('f:b.ts', true);
+    render(<Projects ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('project-beta'));
+    expect(screen.getByTestId('project-confirm')).toHaveTextContent(
+      'unsaved changes in 2 documents will be lost — switch?',
+    );
+  });
+
+  it('Enter on the inline «No» answers the question, and does not re-ask it as a row click', async () => {
+    // The buttons sit inside the row; their keydown bubbles up to it.
+    const { ctx, opened } = await harness();
+    ctx.shell.open({ key: 'f:a.ts', title: 'a.ts', component: Doc, closable: true });
+    ctx.shell.markDirty('f:a.ts', true);
+    render(<Projects ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('project-beta'));
+    screen.getByTestId('confirm-no').focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByTestId('project-confirm')).toBeNull();
+    expect(opened()).toEqual([]);
+  });
+
+  it('Enter and Space on a row open the project, the way a click does; other keys do not', async () => {
+    // A5: the rows are `role=button` with a tabindex, and the keyboard
+    // used to reach them and do nothing.
+    const { opened, ctx } = await harness();
+    render(<Projects ctx={ctx} />);
+    screen.getByTestId('project-beta').focus();
+    await userEvent.keyboard('a');
+    expect(opened()).toEqual([]);
+    await userEvent.keyboard('{Enter}');
+    expect(opened()).toEqual(['beta']);
+    await userEvent.keyboard(' ');
+    expect(opened()).toEqual(['beta', 'beta']);
   });
 
   it('«No» keeps the current project and asks nothing of the host', async () => {

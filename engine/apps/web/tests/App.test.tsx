@@ -180,19 +180,46 @@ describe('App', () => {
   it('a fresh load with a project open shows the composition and the Explorer, not five empty regions', async () => {
     const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
-    expect(ctx.shell.active()?.key).toBe('composition');
-    // The sidebar waits for the workspace's answer (the boot GET), then
-    // picks: a project is open, so the Explorer.
+    // Both wait for the workspace's answer (the boot GET), then pick: a
+    // project is open, so the composition and the Explorer.
+    await waitFor(() => expect(ctx.shell.active()?.key).toBe('composition'));
     await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
     expect(screen.getByTestId('sidebar-explorer')).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
   });
 
-  it('a fresh load with no project open shows the projects list instead', async () => {
+  it('a fresh load with no project open shows the projects list instead, and opens no document', async () => {
+    // A4: the composition with no project behind it said «подключение…»
+    // forever. An empty group that points at Projects is the honest one.
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     await waitFor(() => expect(ctx.shell.sidebar()).toBe('workspace'));
     expect(screen.getByTestId('sidebar-workspace')).toBeTruthy();
+    expect(ctx.shell.documents()).toEqual([]);
+    expect(ctx.shell.active()).toBeUndefined();
+    expect(screen.getByTestId('doc-none')).toHaveTextContent('open a project from Projects');
+  });
+
+  it('a resolved deep link is left alone by the composition default', async () => {
+    location.hash = '#/doc/preview';
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    expect(ctx.shell.active()?.key).toBe('preview');
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['preview']);
+  });
+
+  it('a deep link still pending when the workspace answers is left alone too', async () => {
+    // The project is open, so the composition WOULD be the default — but
+    // the address names a plugin's document whose client half has not
+    // landed, and the default must not paint over that wait.
+    location.hash = '#/doc/demo';
+    const { ctx } = await harness(() => new Promise(() => {}), OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    expect(ctx.shell.pending()).toBe('demo');
+    expect(ctx.shell.active()).toBeUndefined();
+    expect(ctx.shell.documents()).toEqual([]);
   });
 
   it('a sidebar the person chose before the workspace answered is left alone', async () => {
@@ -208,9 +235,9 @@ describe('App', () => {
     // over the empty address, and Back from it reached a page with three
     // tabs and no pane. A default is not a place a person navigated to.
     const before = history.length;
-    const { ctx } = await harness();
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
-    expect(ctx.shell.active()?.key).toBe('composition');
+    await waitFor(() => expect(ctx.shell.active()?.key).toBe('composition'));
     expect(history.length).toBe(before);
   });
 
@@ -258,10 +285,10 @@ describe('App', () => {
     // — rendered through the real `<App/>`, the actual path a registration
     // takes: App → Shell → the composition document → `CompositionScreen`'s
     // own `EditorComposition`, the one thing here that reads it.
-    const { ctx } = await harness();
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
     ctx.slots.register({ name: 'composition.card', key: 'other' }, () => <div>CARD</div>);
     render(<App ctx={ctx} />);
-    expect(screen.getByText('CARD')).toBeTruthy();
+    expect(await screen.findByText('CARD')).toBeTruthy();
   });
 
   it('the composition tab reads in the IDE’s own language, not a stray English one', async () => {
@@ -269,9 +296,9 @@ describe('App', () => {
     // the NAVIGATION reads in the same language as the document it opens,
     // and `CompositionScreen`'s own `<h1>` says `Состав`. Addressed by the
     // tab's accessible name, the one thing that carries the wording.
-    const { ctx } = await harness();
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
-    expect(screen.getByRole('tab', { name: 'Состав' })).toBeTruthy();
+    expect(await screen.findByRole('tab', { name: 'Состав' })).toBeTruthy();
   });
 
   it('a cold load on a plugin’s tab opens it once its client half lands — no false diagnostic', async () => {

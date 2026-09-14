@@ -164,6 +164,10 @@ export function apply(ctx: Context) {
   // stale link falls back to, so a typo does not lose a person's place.
   let lastActive: string | undefined;
   let pathOpener: ((path: string) => void) | undefined;
+  // Keys open through a `shell.document` CONTRIBUTION (not `open()`'s
+  // instance tabs): the ones a plugin's unload can pull the component out
+  // from under — see `onSlotsChange`.
+  const contributed = new Set<string>();
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -220,6 +224,7 @@ export function apply(ctx: Context) {
     found: DocumentMeta & { component: ComponentType<any> },
     replace = false,
   ) {
+    contributed.add(found.key);
     openInternal(
       {
         key: found.key,
@@ -305,14 +310,43 @@ export function apply(ctx: Context) {
     giveUp(key);
   }
 
-  /** A `shell.document` landed: if it is the one the address is waiting for, open it. */
+  /**
+   * A `shell.document` landed or left. Landed: if it is the one the
+   * address is waiting for, open it. Left while open (its plugin was
+   * unloaded): the tab used to stay, non-closable, painting a component
+   * that no longer exists — force-closed instead, and said once. A
+   * contribution registered again later opens fresh on the next click.
+   */
   function onSlotsChange() {
+    for (const key of contributed) {
+      if (findContributed(key) !== undefined) continue;
+      remove(key);
+      report(key, 'document withdrawn by its plugin', 'the plugin that contributed it was unloaded');
+    }
     if (pending === undefined) return;
     const found = findContributed(pending);
     if (found) {
       pending = undefined;
       openFoundContributed(found);
     }
+  }
+
+  /** Takes the tab out, the neighbour taking over if it was the active one. */
+  function remove(key: string) {
+    const keys = [...documents.keys()];
+    const index = keys.indexOf(key);
+    const wasActive = docKeyFromHash() === key;
+    documents.delete(key);
+    contributed.delete(key);
+
+    if (wasActive) {
+      const remaining = [...documents.keys()];
+      // The neighbour is the shell's pick, so it overwrites the closed
+      // tab's entry: Back goes to where the person was before it, not
+      // onto the tab they just closed.
+      go(remaining.length > 0 ? remaining[Math.min(index, remaining.length - 1)] : '', true);
+    }
+    notify();
   }
 
   /** The loader settled: whatever is still pending is not coming. */
@@ -365,20 +399,7 @@ export function apply(ctx: Context) {
       if (!doc) return false;
       if (!doc.closable) return false;
       if (doc.dirty && !opts?.force) return false;
-
-      const keys = [...documents.keys()];
-      const index = keys.indexOf(key);
-      const wasActive = docKeyFromHash() === key;
-      documents.delete(key);
-
-      if (wasActive) {
-        const remaining = [...documents.keys()];
-        // The neighbour is the shell's pick, so it overwrites the closed
-        // tab's entry: Back goes to where the person was before it, not
-        // onto the tab they just closed.
-        go(remaining.length > 0 ? remaining[Math.min(index, remaining.length - 1)] : '', true);
-      }
-      notify();
+      remove(key);
       return true;
     },
 
@@ -439,7 +460,6 @@ export function apply(ctx: Context) {
       ready = true;
       // Subscribed here, not at apply time: `modules` composes after this
       // plugin, and until `ready()` there is nothing pending to hear about.
-      ctx.effect(() => ctx.slots.subscribe(onSlotsChange), 'shell-pending-slots');
       const loader = modules();
       if (loader) ctx.effect(() => loader.subscribe(onModulesChange), 'shell-pending-modules');
       resolveHash();
@@ -467,6 +487,10 @@ export function apply(ctx: Context) {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, 'shell-hashchange');
+  // From apply time, not `ready()`: a contribution can be withdrawn from
+  // under an open tab before the app ever says it is ready, and `slots`
+  // is a hard dependency that is already there.
+  ctx.effect(() => ctx.slots.subscribe(onSlotsChange), 'shell-slots');
 
   ctx.provide('shell', service);
 }

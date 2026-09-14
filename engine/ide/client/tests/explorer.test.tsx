@@ -386,6 +386,19 @@ describe('Explorer', () => {
     expect(ctx.shell.active()?.key).toBe('f:sibling.txt'); // opening still works for a file
   });
 
+  it('Enter on a directory folds it, and Enter on a file opens it', async () => {
+    // A5: same rows, from the keyboard.
+    const ctx = await harness(tree(['game', 'game/spec.json', 'sibling.txt']));
+    render(<Explorer ctx={ctx} />);
+    (await screen.findByTestId('explorer-game')).focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByTestId('explorer-game/spec.json')).toBeNull(); // folded
+    expect(ctx.shell.documents()).toEqual([]);
+    screen.getByTestId('explorer-sibling.txt').focus();
+    await userEvent.keyboard('{Enter}');
+    expect(ctx.shell.active()?.key).toBe('f:sibling.txt');
+  });
+
   it('clicking the same file twice activates the one tab', async () => {
     const ctx = await harness(tree(['a.txt', 'b.txt']));
     render(<Explorer ctx={ctx} />);

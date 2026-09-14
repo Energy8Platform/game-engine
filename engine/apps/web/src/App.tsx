@@ -187,27 +187,30 @@ export function App({ ctx }: { ctx: Context }) {
   useEffect(() => {
     ctx.shell.ready();
     // A fresh load names no document. Five regions around an empty editor
-    // and a bare sidebar would be an unexplained empty pane, so the
-    // composition opens — the way the old layout showed its first screen —
-    // with the Explorer beside it. A deep link — resolved, or still
-    // pending on a plugin's client half — and a sidebar already chosen are
-    // left alone.
+    // and a bare sidebar would be an unexplained empty pane, so with a
+    // project open the composition opens — the way the old layout showed
+    // its first screen — with the Explorer beside it. With no project open
+    // there is nothing for a composition to show, so nothing opens and
+    // the empty group points at Projects (A4). A deep link — resolved, or
+    // still pending on a plugin's client half — and a sidebar already
+    // chosen are left alone.
+    // Both defaults depend on a fact the workspace may not hold yet (its
+    // boot GET, or the host's first frame), so: decide now if the answer
+    // is in, else on the first state.
     // `replace`: the default is not a place the person navigated to, so it
     // overwrites the empty address instead of pushing past it — Back from
     // the first document a person opens must not land on a pane with
     // nothing in it.
-    if (ctx.shell.active() === undefined && ctx.shell.pending() === undefined) {
-      ctx.shell.openContributed('composition', { replace: true });
-    }
-    // The default sidebar depends on a fact the workspace may not hold yet
-    // (its boot GET, or the host's first frame): with no project open, the
-    // projects list is the one thing worth looking at; otherwise the
-    // Explorer. So: decide now if the answer is in, else on the first
-    // state — and leave alone a sidebar the person chose in between.
-    if (ctx.shell.sidebar() !== undefined) return;
     const decide = (): boolean => {
       const state = ctx.workspace.state();
       if (state === null) return false;
+      if (
+        state.active !== null &&
+        ctx.shell.active() === undefined &&
+        ctx.shell.pending() === undefined
+      ) {
+        ctx.shell.openContributed('composition', { replace: true });
+      }
       if (ctx.shell.sidebar() === undefined) {
         ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
       }

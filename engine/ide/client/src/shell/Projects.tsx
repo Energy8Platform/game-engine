@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Context } from 'cordis';
 import { useWorkspace } from '../plugins/workspace';
+import { activateOnKey } from './activate';
 
 /**
  * The «Проекты» sidebar (spec §8): every project the host's folder holds,
@@ -17,6 +18,7 @@ import { useWorkspace } from '../plugins/workspace';
 export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   const state = useWorkspace(ctx);
   const [asking, setAsking] = useState<string | null>(null);
+  const dirty = ctx.shell.documents().filter((doc) => doc.dirty).length;
 
   function select(id: string) {
     if (id === state?.active) return; // already open: nothing to ask, nothing to do
@@ -60,6 +62,7 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
                     className={active ? 'e8-explorer-entry e8-project-active' : 'e8-explorer-entry'}
                     style={{ paddingLeft: 12 }}
                     onClick={() => select(project.id)}
+                    onKeyDown={activateOnKey(() => select(project.id))}
                   >
                     <span className="e8-explorer-name">
                       {project.name}
@@ -69,7 +72,7 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
                     </span>
                     {asking === project.id && (
                       <span className="e8-explorer-confirm" data-testid="project-confirm">
-                        unsaved changes will be lost — switch?{' '}
+                        {`unsaved changes in ${dirty} document${dirty === 1 ? '' : 's'} will be lost — switch?`}{' '}
                         <button
                           type="button"
                           data-testid="confirm-yes"

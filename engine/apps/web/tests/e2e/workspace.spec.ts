@@ -52,6 +52,10 @@ async function openProject(page: Page, host: WorkspaceHost, id: string, name: st
   await page.getByTestId(`project-${id}`).click();
   await expect(page.getByTestId('status-project')).toHaveText(name, { timeout: 20_000 });
   await expect(page.getByTestId(`project-${id}`)).toHaveAttribute('aria-current', 'true');
+  // The composition opens by itself only on a load that already has a
+  // project open (A4); a project opened from the list is looked at by
+  // choice, so the frame below is reached through its own button.
+  await page.getByTestId('activity-composition').click();
   const previewUrl = host.previewUrl();
   expect(previewUrl).not.toBeNull();
   const body = (await (await page.request.get(`${HOST_URL}api/workspace`)).json()) as {
@@ -81,7 +85,10 @@ test('two projects: both listed, none open, the projects sidebar first', async (
     await expect(page.getByTestId('project-slot-2')).toContainText(SECOND_NAME);
     await expect(page.locator('[aria-current="true"]')).toHaveCount(0);
     await expect(page.getByTestId('status-project')).toHaveText('no project');
-    await expect(page.getByTestId('preview-unavailable').first()).toBeVisible();
+    // Spec §5 (4): with no project open the document group is empty and
+    // points at Projects — not a composition saying «подключение…».
+    await expect(page.getByTestId('doc-none')).toContainText('open a project from Projects');
+    await expect(page.locator('[role="tab"]')).toHaveCount(0);
     expect(host.previewUrl()).toBeNull();
   } finally {
     await host.stop();

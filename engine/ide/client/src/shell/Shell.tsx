@@ -301,12 +301,28 @@ export function Shell({ ctx }: { ctx: Context }) {
   // Reload and close are the one door no tab's own close button guards.
   // Registered ONCE, here, off a shell-level fact — not per editor, where
   // one dirty editor among several would have to know about the others.
+  // `returnValue` beside `preventDefault`: Safari holds the page on the
+  // one, the rest on the other.
+  //
+  // Cmd/Ctrl+S is swallowed here for EVERY tab: the editor's own listener
+  // saves only when its tab is active, so on any other tab the keystroke
+  // reached the browser and opened its save-page dialog, which an IDE
+  // never wants.
   useEffect(() => {
     const hold = (event: BeforeUnloadEvent) => {
-      if (ctx.shell.hasDirtyDocuments()) event.preventDefault();
+      if (!ctx.shell.hasDirtyDocuments()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const swallowSave = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') event.preventDefault();
     };
     window.addEventListener('beforeunload', hold);
-    return () => window.removeEventListener('beforeunload', hold);
+    window.addEventListener('keydown', swallowSave);
+    return () => {
+      window.removeEventListener('beforeunload', hold);
+      window.removeEventListener('keydown', swallowSave);
+    };
   }, [ctx]);
 
   // Spec §8: a contribution with an unknown `opens` is a diagnostic. It is
@@ -425,7 +441,7 @@ export function Shell({ ctx }: { ctx: Context }) {
             // closable tab closed with nothing contributed open. Every pane
             // below is hidden then, and the body used to be blank.
             <p className="e8-empty" data-testid="doc-none">
-              no document is open — pick one from the Explorer
+              no document is open — open a project from Projects, or a file from the Explorer
             </p>
           ) : null}
           {documents.map((doc) => (
