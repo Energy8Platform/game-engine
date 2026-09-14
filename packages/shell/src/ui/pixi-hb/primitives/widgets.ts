@@ -81,7 +81,7 @@ export interface IconButtonOpts {
   glyph?: number; // glyph px (default 24)
   face?: Face; // default beige
   round?: boolean;
-  /** Engaged state (autoplay running): accent border + accent glyph ink. */
+  /** Engaged state (autoplay running): solid ink glyph + accent border. */
   active?: boolean;
   /** Turbo only: how many bolts are painted in (0–2). */
   bolts?: number;
@@ -130,10 +130,12 @@ export class IconButton extends Container implements Sizable {
   private paint(): void {
     const f = FACE[this.face];
     const hot = this.hovering && !this._disabled;
-    const ink = this._active ? HB.orange : f.ink;
     // on a beige face the glyph's own face is the button face (so a stroked glyph reads as an outline
     // on the button); on orange/red the glyph face is beige — the glyph IS a little beige button.
-    const glyphFill = this.face === 'beige' ? (hot ? f.hover : f.fill) : f.glyphFill;
+    // Engaged (autoplay running): the glyph fills solid ink, its accent part (the triangle) stays
+    // accent with an ink outline, and the plaque takes an accent border.
+    const ink = f.ink;
+    const glyphFill = this._active ? HB.ink : this.face === 'beige' ? (hot ? f.hover : f.fill) : f.glyphFill;
     this.view.setColors({
       ink,
       fill: glyphFill,
@@ -543,7 +545,7 @@ export class SpinDisc extends Container implements Sizable {
     }
     if (!this.countText) {
       // running: ink digits on the beige STOP face; halted: stroked beige digits on the orange disc
-      this.countText = makeText('', { size: 22, align: 'center', stroke: false, color: HB.ink });
+      this.countText = makeText('', { size: 24, weight: '600', heading: true, align: 'center', stroke: false, color: HB.ink });
       this.addChild(this.countText);
     }
     setText(this.countText, Number.isFinite(remaining) ? String(remaining) : '∞');
@@ -555,8 +557,9 @@ export class SpinDisc extends Container implements Sizable {
   private stopGlyphView?: IconView;
   private stopGlyph(): void {
     if (!this.stopGlyphView) {
-      this.stopGlyphView = makeIcon('stop', this.glyphSize);
-      this.stopGlyphView.position.set((this.size - this.glyphSize) / 2, (this.size - this.glyphSize) / 2);
+      const sq = Math.round(this.size * 0.74); // the square must stay inside the disc
+      this.stopGlyphView = makeIcon('stop', sq);
+      this.stopGlyphView.position.set((this.size - sq) / 2, (this.size - sq) / 2);
       this.addChild(this.stopGlyphView);
       if (this.countText) this.addChild(this.countText); // keep the count on top
     }
