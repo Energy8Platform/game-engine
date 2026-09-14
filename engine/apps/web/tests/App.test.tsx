@@ -200,6 +200,40 @@ describe('App', () => {
     expect(screen.getByTestId('doc-none')).toHaveTextContent('open a project from Projects');
   });
 
+  it('a project opened later, from the list, opens the composition then — once per null → id', async () => {
+    // Fix round 1 of task 4: with no project on load nothing opens; a
+    // click on Projects makes `active` go null → id on a later frame, and
+    // THAT is when the composition opens. A repeated frame is not a second
+    // open, and a switch between two projects touches nothing.
+    const { ctx, socket } = await harness();
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('workspace'));
+    expect(ctx.shell.documents()).toEqual([]);
+    act(() => socket.push({ type: 'workspace', workspace: OPEN_PROJECT }));
+    expect(ctx.shell.active()?.key).toBe('composition');
+    // Back past it: no active document, nothing pending — the one state a
+    // repeated `x` frame could wrongly re-open into.
+    act(() => {
+      location.hash = '';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(ctx.shell.active()).toBeUndefined();
+    act(() => socket.push({ type: 'workspace', workspace: OPEN_PROJECT }));
+    expect(ctx.shell.active()).toBeUndefined();
+    // Not an `f:` tab: `workspace` itself closes those on a switch, which
+    // would move the address for a reason that is not this rule.
+    ctx.shell.open({ key: 'other', title: 'Other', component: () => null, closable: true });
+    expect(ctx.shell.active()?.key).toBe('other');
+    act(() =>
+      socket.push({
+        type: 'workspace',
+        workspace: { ...OPEN_PROJECT, projects: [{ id: 'y', name: 'Y' }], active: 'y' },
+      }),
+    );
+    expect(ctx.shell.active()?.key).toBe('other');
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'other']);
+  });
+
   it('a resolved deep link is left alone by the composition default', async () => {
     location.hash = '#/doc/preview';
     const { ctx } = await harness(undefined, OPEN_PROJECT);

@@ -52,10 +52,6 @@ async function openProject(page: Page, host: WorkspaceHost, id: string, name: st
   await page.getByTestId(`project-${id}`).click();
   await expect(page.getByTestId('status-project')).toHaveText(name, { timeout: 20_000 });
   await expect(page.getByTestId(`project-${id}`)).toHaveAttribute('aria-current', 'true');
-  // The composition opens by itself only on a load that already has a
-  // project open (A4); a project opened from the list is looked at by
-  // choice, so the frame below is reached through its own button.
-  await page.getByTestId('activity-composition').click();
   const previewUrl = host.previewUrl();
   expect(previewUrl).not.toBeNull();
   const body = (await (await page.request.get(`${HOST_URL}api/workspace`)).json()) as {

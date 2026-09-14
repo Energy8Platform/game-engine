@@ -187,40 +187,46 @@ export function App({ ctx }: { ctx: Context }) {
   useEffect(() => {
     ctx.shell.ready();
     // A fresh load names no document. Five regions around an empty editor
-    // and a bare sidebar would be an unexplained empty pane, so with a
-    // project open the composition opens — the way the old layout showed
-    // its first screen — with the Explorer beside it. With no project open
-    // there is nothing for a composition to show, so nothing opens and
-    // the empty group points at Projects (A4). A deep link — resolved, or
-    // still pending on a plugin's client half — and a sidebar already
-    // chosen are left alone.
+    // and a bare sidebar would be an unexplained empty pane, so once a
+    // project is open the composition opens — the way the old layout
+    // showed its first screen — with the Explorer beside it. With no
+    // project open there is nothing for a composition to show, so nothing
+    // opens and the empty group points at Projects (A4); the moment a
+    // project becomes active — on the first state, or a later frame after
+    // a click on Projects — the composition opens then, once per
+    // null → id transition. A switch between two projects, a deep link —
+    // resolved, or still pending on a plugin's client half — and a
+    // sidebar already chosen are left alone.
     // Both defaults depend on a fact the workspace may not hold yet (its
-    // boot GET, or the host's first frame), so: decide now if the answer
-    // is in, else on the first state.
+    // boot GET, or the host's first frame): the sidebar decides on the
+    // first state; the composition rule listens to every frame.
     // `replace`: the default is not a place the person navigated to, so it
     // overwrites the empty address instead of pushing past it — Back from
     // the first document a person opens must not land on a pane with
     // nothing in it.
-    const decide = (): boolean => {
+    let sidebarDecided = false;
+    let previousActive: string | null = null;
+    const decide = () => {
       const state = ctx.workspace.state();
-      if (state === null) return false;
+      if (state === null) return;
       if (
+        previousActive === null &&
         state.active !== null &&
         ctx.shell.active() === undefined &&
         ctx.shell.pending() === undefined
       ) {
         ctx.shell.openContributed('composition', { replace: true });
       }
-      if (ctx.shell.sidebar() === undefined) {
-        ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
+      previousActive = state.active;
+      if (!sidebarDecided) {
+        sidebarDecided = true;
+        if (ctx.shell.sidebar() === undefined) {
+          ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
+        }
       }
-      return true;
     };
-    if (decide()) return;
-    const off = ctx.workspace.subscribe(() => {
-      if (decide()) off();
-    });
-    return off;
+    decide();
+    return ctx.workspace.subscribe(decide);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
