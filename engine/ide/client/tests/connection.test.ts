@@ -122,6 +122,91 @@ describe('connection', () => {
     expect(ctx.connection.diagnostics).toEqual([clientDiagnostic]);
   });
 
+  // Debt B1 (client half): `report()` hands back a retract bound to the
+  // stored entry, so a speaker whose failure has passed (an editor whose
+  // text was fixed, a save that later succeeded) can take its row back.
+  it('report() returns a retract that removes the stored entry and notifies', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+    const listener = vi.fn();
+    ctx.connection.subscribe(listener);
+    const d = { severity: 'error' as const, plugin: 'a:probe1', where: 'check', message: 'boom' };
+
+    const off = ctx.connection.report(d);
+    expect(ctx.connection.diagnostics).toEqual([d]);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    off();
+    expect(ctx.connection.diagnostics).toEqual([]);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('a second retract is a no-op: nothing removed, nobody notified, nothing thrown', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+    const listener = vi.fn();
+    ctx.connection.subscribe(listener);
+    const d = { severity: 'error' as const, plugin: 'a:probe1', where: 'check', message: 'boom' };
+    const other = { severity: 'error' as const, plugin: 'a:probe1', where: 'check', message: 'x' };
+
+    const off = ctx.connection.report(d);
+    ctx.connection.report(other);
+    off();
+    expect(ctx.connection.diagnostics).toEqual([other]);
+    const notified = listener.mock.calls.length;
+
+    expect(() => off()).not.toThrow();
+    expect(ctx.connection.diagnostics).toEqual([other]);
+    expect(listener).toHaveBeenCalledTimes(notified);
+  });
+
+  it('a host frame between report and retract neither removes the entry nor breaks the retract', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+    socket.open();
+    const d = { severity: 'error' as const, plugin: 'a:probe1', where: 'check', message: 'boom' };
+    const hostD = {
+      severity: 'error' as const,
+      plugin: 'a:probe2',
+      where: 'config',
+      message: 'no',
+    };
+
+    const off = ctx.connection.report(d);
+    socket.receive({ type: 'diagnostics', diagnostics: [hostD] });
+    expect(ctx.connection.diagnostics).toEqual([hostD, d]);
+
+    off();
+    expect(ctx.connection.diagnostics).toEqual([hostD]);
+  });
+
+  it('two reports of equal diagnostics share one stored entry, so either retract removes it', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+    const make = () => ({
+      severity: 'error' as const,
+      plugin: 'a:probe1',
+      where: 'check',
+      message: 'boom',
+    });
+
+    const offFirst = ctx.connection.report(make());
+    const offSecond = ctx.connection.report(make());
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+
+    offFirst();
+    expect(ctx.connection.diagnostics).toEqual([]);
+
+    // And the other way round, on a fresh pair: the second's retract works too.
+    const offA = ctx.connection.report(make());
+    const offB = ctx.connection.report(make());
+    expect(ctx.connection.diagnostics).toHaveLength(1);
+    offB();
+    expect(ctx.connection.diagnostics).toEqual([]);
+    offA();
+    expect(ctx.connection.diagnostics).toEqual([]);
+  });
+
   it('does not send while the socket is not open, and records a diagnostic instead', async () => {
     const socket = new FakeSocket();
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });

@@ -22,21 +22,24 @@ import { looksBinary } from './ViewerDocument';
  * BEFORE it closes the tab; an unmount that cleared dirty would answer it
  * on the person's behalf.
  *
- * **Both readers, one report.** A save the host refuses goes to the
- * paragraph next to the button AND to `ctx.connection.report()`, the one
- * list that outlives this tab — the same rule the Explorer applies to
- * upload and delete.
- *
- * **Check diagnostics are NOT sent to the one list.** `connection.report()`
- * has no retract: a check answers for text that changes on every
- * keystroke, and a list that cannot forget would fill with "record block
- * has no name" for a record named two keystrokes later. A check's answer
- * lives only as long as the text it answered — as a marker when it has
- * `at`, as a paragraph beside the editor when it does not. The paragraph
- * is not optional: a stage no variant declares, a deleted `game {}`
- * block and `check.ts`'s own dead-network diagnostic all come with no
- * line, and "markers only" left the pane empty with the host having said
- * exactly what was wrong.
+ * **Both readers, one report — and the report is taken back.** A save the
+ * host refuses and a check's answer both go to the paragraph beside the
+ * button (or a marker, when the diagnostic has `at`) AND to
+ * `ctx.connection.report()`, the one list that outlives this tab — the
+ * same rule the Explorer applies to upload and delete (spec §8). A check
+ * answers for text that changes on every keystroke, so this keeps the
+ * retracts `report()` hands back (`checkRetracts`, `saveRetracts`) and
+ * runs them when the answer is outgrown: a new check answer retracts the
+ * previous check's rows before reporting its own (an answer of `[]`
+ * leaves nothing); a refused save retracts the previous refusal; a save
+ * that succeeds retracts the refusal; and unmount runs every retract it
+ * still holds — a closed editor's rows go with it, since nothing is left
+ * to take them back later. Until debt B1 gave `report()` a retract, checks
+ * stayed out of the list on purpose; that deviation is retired. The
+ * paragraph beside the editor is not optional: a stage no variant
+ * declares, a deleted `game {}` block and `check.ts`'s own dead-network
+ * diagnostic all come with no line, and "markers only" left the pane
+ * empty with the host having said exactly what was wrong.
  *
  * **Only `.spin` is checked.** `ctx.check` runs the `.spin` grammar; over
  * TypeScript it finds `\bgame\b` in a variable name and draws "game block
@@ -81,18 +84,26 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
   const [openError, setOpenError] = useState<string | null>(null);
   const checkSeq = useRef(0);
   const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The retracts for the rows this editor currently holds in the one
+  // list — see the module doc for when each set is run.
+  const checkRetracts = useRef<Array<() => void>>([]);
+  const saveRetracts = useRef<Array<() => void>>([]);
 
   const dirty = text !== null && text !== savedText;
 
-  function report(diagnostics: Diagnostic[]) {
-    for (const diag of diagnostics) ctx.connection.report(diag);
+  /** Runs and forgets every retract in `held`, then reports `diagnostics` and holds their retracts instead. */
+  function replaceReported(held: { current: Array<() => void> }, diagnostics: Diagnostic[]) {
+    for (const retract of held.current) retract();
+    held.current = diagnostics.map((diag) => ctx.connection.report(diag));
   }
 
   /** Issues a check for `source`, applying the answer only if nothing newer has been asked since. */
   function runCheck(source: string) {
     const seq = ++checkSeq.current;
     ctx.check.check(source).then(({ diagnostics }) => {
-      if (seq === checkSeq.current) setCheckDiagnostics(diagnostics);
+      if (seq !== checkSeq.current) return;
+      setCheckDiagnostics(diagnostics);
+      replaceReported(checkRetracts, diagnostics);
     });
   }
 
@@ -113,7 +124,7 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
         // The tree is a snapshot; the file can be gone by the time this
         // resolves. The host's own diagnostic says why.
         setOpenError(diagnostics[0]?.message ?? `"${path}" could not be read`);
-        report(diagnostics);
+        for (const diag of diagnostics) ctx.connection.report(diag);
         return;
       }
       if (looksBinary(bytes)) {
@@ -137,6 +148,10 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
       // pending is dropped, and any answer in flight fails the `seq` test.
       checkSeq.current += 1;
       if (checkTimer.current !== null) clearTimeout(checkTimer.current);
+      // A closed editor's rows go with it: nothing is left to take them
+      // back later, and a check answers only for text someone can see.
+      replaceReported(checkRetracts, []);
+      replaceReported(saveRetracts, []);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, path]);
@@ -153,7 +168,9 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
     const saving = text;
     ctx.files.write(path, new TextEncoder().encode(saving)).then(({ diagnostics }) => {
       setSaveDiagnostics(diagnostics);
-      report(diagnostics);
+      // A refusal replaces the previous refusal's rows; a success (an
+      // empty answer) retracts them and reports nothing.
+      replaceReported(saveRetracts, diagnostics);
       if (diagnostics.length === 0) setSavedText(saving);
     });
   }

@@ -514,6 +514,87 @@ describe('EditorDocument', () => {
     expect(ctx.files.written[1]).toEqual(['b.spin', [120, 98]]);
   });
 
+  // Debt B2: check diagnostics go to the one list too (spec §8 restored).
+  // The module doc used to say they did NOT, because `report()` had no
+  // retract; now it has one (debt B1), so a check's rows live exactly as
+  // long as the text they answered — replaced by the next check's rows,
+  // cleared by a clean check, gone with the editor.
+  describe('check diagnostics in the one list', () => {
+    /**
+     * The messages `connection.diagnostics` holds from THIS editor, in
+     * order — `d()` stamps `where: 'test'`; the harness's fake `fetch`
+     * also 404s an unrelated boot GET, whose row is not the point here.
+     */
+    const listed = (ctx: Context) =>
+      ctx.connection.diagnostics.filter((x) => x.where === 'test').map((x) => x.message);
+
+    it("a second check replaces the first check's rows", async () => {
+      const ctx = await harness(files({ 'game/script.spin': '' }), {
+        checkResponder: async (source) => (source === '' ? [] : [d(`bad: ${source}`, { line: 1 })]),
+      });
+      render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+      const editorEl = await screen.findByTestId('editor');
+
+      type(editorEl, 'a');
+      await waitFor(() => expect(listed(ctx)).toEqual(['bad: a']));
+      type(editorEl, 'ab');
+      await waitFor(() => expect(listed(ctx)).toEqual(['bad: ab']));
+    });
+
+    it('a check that answers [] leaves nothing in the list', async () => {
+      const ctx = await harness(files({ 'game/script.spin': '' }), {
+        checkResponder: async (source) => (source === 'a' ? [d('bad: a'), d('also bad: a')] : []),
+      });
+      render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+      const editorEl = await screen.findByTestId('editor');
+
+      type(editorEl, 'a');
+      await waitFor(() => expect(listed(ctx)).toEqual(['bad: a', 'also bad: a']));
+      type(editorEl, 'ab');
+      await waitFor(() => expect(listed(ctx)).toEqual([]));
+    });
+
+    it('a refused save is in the list until a later save succeeds', async () => {
+      let refuse = true;
+      const ctx = await harness(files({ 'game/script.spin': 'x' }));
+      // `harness` answers PUT from a fixed `writeDiagnostics`; this test
+      // needs the answer to change between two saves, so it swaps the
+      // write path itself.
+      const realWrite = ctx.files.write.bind(ctx.files);
+      ctx.files.write = async (path, bytes) =>
+        refuse ? { diagnostics: [d('outside the project')] } : realWrite(path, bytes);
+      render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+      await screen.findByTestId('editor');
+
+      await userEvent.click(screen.getByRole('button', { name: /save/i }));
+      await waitFor(() => expect(listed(ctx)).toEqual(['outside the project']));
+
+      refuse = false;
+      await userEvent.click(screen.getByRole('button', { name: /save/i }));
+      await waitFor(() => expect(listed(ctx)).toEqual([]));
+      expect(screen.queryByText('outside the project')).toBeNull();
+    });
+
+    it('unmounting the editor takes its check and save rows with it', async () => {
+      let refuse = true;
+      const ctx = await harness(files({ 'game/script.spin': 'x' }), {
+        checkDiagnostics: [d('bad on open', { line: 1 })],
+      });
+      const realWrite = ctx.files.write.bind(ctx.files);
+      ctx.files.write = async (path, bytes) =>
+        refuse ? { diagnostics: [d('outside the project')] } : realWrite(path, bytes);
+      const { unmount } = render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+      await screen.findByTestId('editor');
+      await userEvent.click(screen.getByRole('button', { name: /save/i }));
+      await waitFor(() =>
+        expect(listed(ctx).sort()).toEqual(['bad on open', 'outside the project']),
+      );
+
+      unmount();
+      expect(listed(ctx)).toEqual([]);
+    });
+  });
+
   it('unmounting a dirty editor does not lose the guard racing the tab', async () => {
     // The shell closes the tab only after the confirm says yes; the
     // editor's own unmount must not clear dirty before the shell has

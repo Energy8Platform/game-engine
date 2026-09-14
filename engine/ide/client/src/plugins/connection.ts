@@ -58,8 +58,17 @@ export interface ConnectionService {
    * Diagnostics reported here survive the next host `snapshot`/`diagnostics`
    * message — see the split between host- and client-authored diagnostics
    * on `diagnostics` below for why.
+   *
+   * Returns a retract bound to the STORED entry: calling it removes that
+   * entry (if it is still there) and notifies; a second call is a no-op.
+   * Two reports of equal diagnostics share one entry, so either retract
+   * removes it. A retract is the speaker's property, not the row's — an
+   * editor takes back the rows of a check its text has outgrown; a save
+   * that later succeeds takes back its refusal. Callers whose failure has
+   * no "later" (`Explorer`, `ViewerDocument`, `workspace`, `modules`)
+   * ignore the return value.
    */
-  report(diagnostic: Diagnostic): void;
+  report(diagnostic: Diagnostic): () => void;
 }
 
 export interface ConnectionConfig {
@@ -182,9 +191,20 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       const sameIdentity = (d: Diagnostic) =>
         d.plugin === next.plugin && d.where === next.where && d.message === next.message;
       const existing = clientDiagnostics.find(sameIdentity);
-      if (existing && diagnosticsEqual(existing, next)) return;
-      clientDiagnostics = [...clientDiagnostics.filter((d) => !sameIdentity(d)), next];
-      for (const listener of listeners) listener();
+      // The retract is bound to whichever object ends up stored — the
+      // earlier equal entry, or `next` — and removes by identity, so a
+      // retract for an entry already replaced or already retracted finds
+      // nothing and does nothing.
+      const entry = existing && diagnosticsEqual(existing, next) ? existing : next;
+      if (entry === next) {
+        clientDiagnostics = [...clientDiagnostics.filter((d) => !sameIdentity(d)), next];
+        for (const listener of listeners) listener();
+      }
+      return () => {
+        if (!clientDiagnostics.includes(entry)) return;
+        clientDiagnostics = clientDiagnostics.filter((d) => d !== entry);
+        for (const listener of listeners) listener();
+      };
     },
   };
 
