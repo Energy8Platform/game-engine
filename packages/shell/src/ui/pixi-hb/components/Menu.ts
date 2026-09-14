@@ -125,10 +125,9 @@ function buildRow(
     }
     return box;
   }
-  // range: [mute icon] label ── value, then the slider under it
-  const box = rowBox(`menu-row-${row.id}`, true);
-  const head = new FlexBox({ direction: 'row', align: 'center', gap: 10 });
-  const value = makeText(row.format(row.get()), { size: 12, weight: '700', color: HB.muted });
+  // range: [mute plaque] [ label / slider ] — the slider sits under the label, beside the plaque;
+  // no percentage readout (the slider's fill says it).
+  const box = rowBox(`menu-row-${row.id}`);
   const toUnit = (v: number): number => (row.max === row.min ? 0 : (v - row.min) / (row.max - row.min));
   const fromUnit = (u: number): number => {
     const raw = row.min + u * (row.max - row.min);
@@ -139,8 +138,8 @@ function buildRow(
   const isVolume = row.id === 'music' || row.id === 'sfx';
   const mute = isVolume
     ? new IconButton(muteIcon(row.id, row.get()), {
-        size: 32,
-        glyph: 20,
+        size: 36,
+        glyph: 22,
         onTap: () => {
           if (row.disabled) return;
           const next = toggleMute(row.id, row.get(), row.max);
@@ -151,29 +150,24 @@ function buildRow(
     : null;
   if (mute) {
     mute.label = `menu-mute-${row.id}`;
-    head.add(mute);
+    box.add(mute);
   } else if (isHbIcon(row.icon)) {
-    head.add(makeIcon(row.icon, 20, { ink: HB.fg, fill: HB.panel }));
+    box.add(makeIcon(row.icon, 20, { ink: HB.fg, fill: HB.panel }));
   }
-  head.add(label(row.label));
-  head.add(new Spacer(), { grow: 1 });
-  head.add(value);
+  const stack = new FlexBox({ direction: 'column', align: 'stretch', gap: 4 });
+  stack.add(label(row.label));
   const slider = new Slider(host, toUnit(row.get()), row.disabled ? () => {} : (u) => {
     const v = fromUnit(u);
-    value.text = row.format(v);
     mute?.setIcon(muteIcon(row.id, v));
-    head.layout();
     row.set(v);
   });
+  stack.add(slider);
+  box.add(stack, { grow: 1 });
   updaters[row.id] = (v) => {
     const n = Number(v);
-    value.text = row.format(n);
     mute?.setIcon(muteIcon(row.id, n));
-    head.layout();
     slider.setValue(toUnit(n));
   };
-  box.add(head);
-  box.add(slider);
   if (row.disabled) {
     box.alpha = 0.5;
     slider.eventMode = 'none';

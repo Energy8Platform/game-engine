@@ -27,10 +27,10 @@ describe('hb buy bonus page', () => {
     expect(p.current(1).id).toBe('fs');
   });
 
-  it('feature cards get the red Activate CTA, bonus cards the accent Buy — price on the label', () => {
+  it('feature cards get the red Activate CTA, bonus cards the accent Buy', () => {
     const { page: p } = page();
-    expect(p.ctas[0].labelText.text).toBe('ACTIVATE · €1.25');
-    expect(p.ctas[1].labelText.text).toBe('BUY · €10.00');
+    expect(p.ctas[0].labelText.text).toBe('ACTIVATE');
+    expect(p.ctas[1].labelText.text).toBe('BUY');
   });
 
   it('tapping a CTA opens the confirm; Enter commits it', () => {

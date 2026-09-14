@@ -165,23 +165,23 @@ export class BuyBonusPage extends Container implements ShellLayer {
     const colW = w - colX - pad;
     let y = pad;
 
-    // title row (‹ › when the slot is a group)
+    // right column, everything flush right: [‹ ›] … TITLE / birds / description … price / [CTA]
     const nav = members.length > 1;
     const arrow = clamp(24, em * 2, 30);
+    const right = colX + colW;
     const title = makeText(bonus.title, {
       size: em * 1.3,
-      weight: '700',
       heading: true,
       color: HB.fg,
       upper: true,
-      align: 'center',
+      align: 'right',
       letterSpacing: em * 0.05,
     });
-    const titleRoom = colW - (nav ? (arrow + 6) * 2 : 0);
+    const titleRoom = colW - (nav ? arrow * 2 + 6 + 10 : 0);
     if (title.width > titleRoom) title.scale.set(titleRoom / title.width);
     const rowH = Math.max(title.height, nav ? arrow : 0);
-    title.anchor.set(0.5, 0.5);
-    title.position.set(colX + colW / 2, y + rowH / 2);
+    title.anchor.set(1, 0.5);
+    title.position.set(right, y + rowH / 2);
     card.addChild(title);
     if (nav) {
       const prev = new IconButton('back', { size: arrow, glyph: Math.round(arrow * 0.5), onTap: () => this.step(slot, -1) });
@@ -189,24 +189,28 @@ export class BuyBonusPage extends Container implements ShellLayer {
       prev.label = `bb-prev-${slot}`;
       next.label = `bb-next-${slot}`;
       prev.position.set(colX, y + (rowH - arrow) / 2);
-      next.position.set(colX + colW - arrow, y + (rowH - arrow) / 2);
+      next.position.set(colX + arrow + 6, y + (rowH - arrow) / 2);
       card.addChild(prev, next);
     }
     y += rowH + pad * 0.5;
 
     if (bonus.volatility) {
       const vol = volatilityRow(bonus.volatility, em * 1.4);
-      vol.position.set(colX + (colW - vol.width) / 2, y);
+      vol.position.set(right - vol.width, y);
       card.addChild(vol);
       y += em * 1.4 + pad * 0.5;
     }
 
-    // bottom-pinned CTA (price on its label)
+    // bottom-pinned: the price over the CTA, both flush right
     const ctaH = clamp(30, em * 2.6, 40);
     const ctaY = h - pad - ctaH;
     const ctaLabel = bonus.type === 'feature' ? (active ? 'Deactivate' : 'Activate') : 'Buy';
-    const cta = new TextButton(`${this.host.t(ctaLabel)} · ${this.host.fmt(price)}`, {
-      w: colW,
+    const ctaText = this.host.t(ctaLabel);
+    const probe = makeText(ctaText, { size: em * 0.95, heading: true, upper: true, letterSpacing: 0.5 });
+    const ctaW = Math.min(colW, Math.max(120, probe.width + em * 2.4));
+    probe.destroy();
+    const cta = new TextButton(ctaText, {
+      w: ctaW,
       h: ctaH,
       face: bonus.type === 'feature' ? 'red' : 'orange',
       size: em * 0.95,
@@ -214,17 +218,22 @@ export class BuyBonusPage extends Container implements ShellLayer {
     });
     cta.label = `bb-cta-${slot}`;
     cta.disabled = !affordable && !active;
-    cta.position.set(colX, ctaY);
+    cta.position.set(right - ctaW, ctaY);
     card.addChild(cta);
     this.ctas.push(cta);
+    const priceText = makeText(this.host.fmt(price), { size: em * 1.3, color: HB.fg, stroke: true });
+    if (priceText.width > colW) priceText.scale.set(colW / priceText.width);
+    priceText.position.set(right - priceText.width, ctaY - pad * 0.4 - priceText.height);
+    card.addChild(priceText);
 
-    // description fills what's left (clipped to the card)
-    const descH = ctaY - pad * 0.5 - y;
+    // description fills what's left (clipped to the card), flush right
+    const descH = priceText.y - pad * 0.5 - y;
     if (descH >= em * 1.3) {
-      const desc = makeText(bonus.description, { size: em * 0.95, color: HB.fg, wrapWidth: colW, lineHeight: em * 1.35, align: 'left' });
+      const desc = makeText(bonus.description, { size: em * 0.95, color: HB.fg, wrapWidth: colW, lineHeight: em * 1.35, align: 'right' });
       const clip = new Graphics().rect(0, 0, colW, descH).fill(0xffffff);
       const wrap = new Container();
       wrap.position.set(colX, y);
+      desc.position.x = colW - desc.width;
       wrap.addChild(desc, clip);
       desc.mask = clip;
       card.addChild(wrap);
