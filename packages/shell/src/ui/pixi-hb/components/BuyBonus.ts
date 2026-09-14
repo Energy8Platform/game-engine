@@ -157,8 +157,8 @@ export class BuyBonusPage extends Container implements ShellLayer {
     card.addChild(plaque(new Graphics(), w, h, { fill: HB.panel }));
 
     const heroW = Math.round(w * HERO_FRACTION);
-    card.addChild(new Graphics().rect(heroW, 0, BORDER, h).fill(HB.line));
     card.addChild(this.buildHero(bonus, heroW, h, em, price, affordable));
+    card.addChild(new Graphics().rect(heroW, 0, BORDER, h).fill(HB.line));
 
     const pad = clamp(8, em * 0.9, 14);
     const colX = heroW + BORDER + pad;
@@ -247,13 +247,17 @@ export class BuyBonusPage extends Container implements ShellLayer {
   private buildHero(bonus: BonusOption, w: number, h: number, em: number, price: number, affordable: boolean): Container {
     const hero = new Container();
     hero.addChild(new Graphics().rect(0, 0, w, h).fill({ color: 0, alpha: 0 }));
-    const clip = new Graphics().roundRect(0, 0, w + RADIUS, h, RADIUS).fill(0xffffff); // square right edge
+    // the art stays INSIDE the card's border: the clip is inset by it (rounded to match the corners)
+    const ix = BORDER;
+    const iw = w - BORDER; // the divider on the right is drawn over the hero
+    const ih = h - BORDER * 2;
+    const clip = new Graphics().roundRect(ix, ix, iw + RADIUS, ih, Math.max(0, RADIUS - BORDER)).fill(0xffffff);
     hero.addChild(clip);
     hero.mask = clip;
     const cover = (node: Container, nw: number, nh: number): void => {
-      const s = Math.max(w / nw, h / nh);
+      const s = Math.max(iw / nw, ih / nh);
       node.scale.set(s);
-      node.position.set((w - nw * s) / 2, (h - nh * s) / 2);
+      node.position.set(ix + (iw - nw * s) / 2, ix + (ih - nh * s) / 2);
     };
     if (bonus.custom) {
       const node = bonus.custom({
@@ -283,9 +287,9 @@ export class BuyBonusPage extends Container implements ShellLayer {
         })
         .catch(() => {});
     } else {
-      const size = Math.max(w, h) * 0.95;
+      const size = Math.max(iw, ih) * 0.95;
       const bird = makeIcon('bonus', size, { fill: bonus.type === 'feature' ? HB.red : HB.orange });
-      bird.position.set((w - size) / 2, (h - size) / 2);
+      bird.position.set(ix + (iw - size) / 2, ix + (ih - size) / 2);
       hero.addChild(bird);
     }
     return hero;
