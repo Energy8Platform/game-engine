@@ -13,7 +13,7 @@ packages/shell/
 ├── icons-hb.svg                         ← authored HB icon sheet (stroke glyphs)
 ├── scripts/
 │   ├── gen-hb-icons.mjs                 ← icons-hb.svg → src/ui/pixi-hb/icons.ts
-│   └── build-hb-fonts.mjs               ← Space Grotesk + Switzer → src/ui/pixi-hb/fonts.ts
+│   └── build-hb-fonts.mjs               ← fonts/clash-regular.woff2 → src/ui/pixi-hb/fonts.ts
 └── src/ui/pixi-hb/
     ├── index.ts                         ← createPixiHbShell / removePixiHbShell (+ types)
     ├── PixiHbRenderer.ts                ← copy of PixiRenderer, wired to hb components
@@ -120,12 +120,11 @@ card, popover and modal frame calls it.
 
 ## 4. Fonts — `scripts/build-hb-fonts.mjs` → `pixi-hb/fonts.ts`
 
-- **Clash Display** variable (200–700), from Fontshare (ITF Free Font License, web embedding
-  permitted). Family alias `ClashDisplayHB`. Headings, section titles, bet-mode chip, CTA labels
-  AND all numeric readouts (balance / bet / win / FS counter / autoplay countdown / prices — the
-  numbers rendered with `TextStyle.stroke = { color: HB.ink, width: 2 }`). Clash has no Cyrillic:
-  Manrope's cyrillic subset (OFL, fontsource) is registered under the same family name for
-  U+0400–04FF, so RU/UK headings stay in a matching geometric grotesk.
+- **Clash** — the brand's own display face (`packages/shell/fonts/clash-regular.woff2`: heavy
+  rounded caps, Latin + Cyrillic, one static weight). Family alias `ClashHB`, always drawn at 400.
+  Headings, section titles, bet-mode chip, CTA labels AND all numeric readouts (balance / bet / win /
+  FS counter / autoplay countdown / prices — the numbers rendered with
+  `TextStyle.stroke = { color: HB.ink, width: 2 }`).
 - **Inter** — reused from `@/core/fonts` for body text.
 
 `pixi-hb/text.ts` mirrors `pixi/text.ts` with three stacks (`FONT_FAMILY`, `HEAD_FONT_FAMILY`,

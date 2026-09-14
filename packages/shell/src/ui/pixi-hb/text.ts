@@ -4,9 +4,9 @@ import { HB_FONT_CSS, HB_HEAD_FONT_FAMILY } from './fonts';
 import { HB } from './theme';
 
 // The HB shell renders text on canvas with two bundled faces registered in `document.fonts`: Inter
-// (body, shared with every shell) and Clash Display (headings, emphasis and numerals — the numbers
-// drawn with an ink stroke). All @font-face CSS is injected once; text measured before a face swaps
-// in is re-laid-out on `whenFontReady`.
+// (body, shared with every shell) and Clash (the brand's display face — headings, emphasis and
+// numerals, the numbers drawn with an ink stroke). All @font-face CSS is injected once; text measured
+// before a face swaps in is re-laid-out on `whenFontReady`.
 
 const STYLE_ID = '__ge-pixi-hb-font__';
 
@@ -14,13 +14,15 @@ const STYLE_ID = '__ge-pixi-hb-font__';
  *  the system fonts stay as graceful fallback if the webfont ever fails to load. */
 export const FONT_FAMILY = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
-/** Heading font — Clash Display (latin) + Manrope's Cyrillic under the same family name. */
+/** Heading font — Clash (Latin + Cyrillic, one heavy weight). */
 export const HEAD_FONT_FAMILY = `${HB_HEAD_FONT_FAMILY}, ${FONT_FAMILY}`;
-/** Numeric font — the same Clash Display. Readout VALUES (balance/bet/win/FS counter, autoplay
- *  countdown, prices), always drawn with `stroke: true`. */
+/** Numeric font — the same Clash. Readout VALUES (balance/bet/win/FS counter, autoplay countdown,
+ *  prices), always drawn with `stroke: true`. */
 export const NUM_FONT_FAMILY = HEAD_FONT_FAMILY;
-/** Clash's numerals sit a touch narrower than Inter's — a small bump keeps readouts the same size. */
-export const NUM_FONT_SCALE = 1.05;
+/** Clash is a static 400 — the weight every heading/number is drawn at (a 700 request would only
+ *  make the browser fake-bold an already heavy face). */
+export const HEAD_FONT_WEIGHT = '400';
+export const NUM_FONT_SCALE = 1;
 /** Stroke width (px) around numerals — the "bordered digits" of the brand. */
 export const NUM_STROKE = 2;
 
@@ -43,7 +45,7 @@ export function installShellFont(): void {
   try {
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
     fonts?.load('1em Inter')?.catch(() => {/* ignore — fallback fonts render meanwhile */});
-    fonts?.load(`700 1em ${HB_HEAD_FONT_FAMILY}`)?.catch(() => {/* ignore — fallback fonts render meanwhile */});
+    fonts?.load(`1em ${HB_HEAD_FONT_FAMILY}`)?.catch(() => {/* ignore — fallback fonts render meanwhile */});
   } catch {
     /* ignore — fonts API access threw synchronously */
   }
@@ -78,7 +80,8 @@ export interface TextOpts {
   lineHeight?: number;
   /** drop shadow (the floating readouts use `text-shadow:0 1px 3px rgba(0,0,0,.65)`). */
   shadow?: boolean;
-  /** Clash Display instead of Inter (headings, CTA labels, the bet-mode chip). */
+  /** Clash instead of Inter (headings, CTA labels, the bet-mode chip). Drawn at the face's one
+   *  weight whatever `weight` says. */
   heading?: boolean;
   /** Numerals with an ink stroke — readouts. `true` = NUM_STROKE px in HB.ink; a string = that stroke
    *  colour. A number ON beige wants no stroke — pass `false`/omit. */
@@ -106,7 +109,7 @@ export function makeText(str: string, opts: TextOpts): Text {
   const style = new TextStyle({
     fontFamily: opts.family ?? (opts.stroke ? NUM_FONT_FAMILY : opts.heading ? HEAD_FONT_FAMILY : FONT_FAMILY),
     fontSize: opts.size,
-    fontWeight: opts.weight ?? (opts.stroke ? '700' : '400'),
+    fontWeight: opts.stroke || opts.heading ? HEAD_FONT_WEIGHT : opts.weight ?? '400',
     fill: opts.color ?? HB.fg,
     letterSpacing: opts.letterSpacing ?? 0,
     align: opts.align ?? 'left',
