@@ -1,6 +1,9 @@
 import { HB } from '../theme';
 import { plaque } from './plaque';
 import { Container, Graphics, Rectangle } from 'pixi.js';
+
+/** How much closer to the bar the HB popover sits than the shared placement puts it (px). */
+const HB_PULL = 6;
 import { placePopover, popoverWidth, POPOVER, type Rect } from '@/core/popover';
 import type { PixiComponentContext, ShellLayer } from '../../pixi/context';
 import { ScrollBox } from './scroll';
@@ -97,7 +100,10 @@ export class Popover extends Container implements ShellLayer {
     const localW = s > 0 ? screenW / s : screenW;
     const content = this.opts.build(localW - pad * 2);
     if (content instanceof FlexBox) content.setLayoutSize(localW - pad * 2, undefined);
-    const contentH = content.getSize().height; // local units
+    // outerHeight, not getSize(): a FlexBox's local bounds start at its first child (below its top
+    // padding), so getSize() under-reports by that padding and the ScrollBox — which measures
+    // bounds + y — saw a few px of overflow and drew a scrollbar for three rows.
+    const contentH = content instanceof FlexBox ? content.outerHeight : content.getSize().height; // local units
 
     // The plate falls back to the pointer when it can't be resolved (no distinct plaque), and to the
     // centred/arrow-less layout when neither resolves — placePopover itself already defaults the
@@ -133,7 +139,9 @@ export class Popover extends Container implements ShellLayer {
     // Arrow: a 14×7 triangle (local units — it lives inside the scaled card) on the edge that faces
     // the plate.
     this.arrow.clear();
-    this.arrow.visible = p.arrowX >= 0;
+    // HB: no pointer arrow — the plaque sits flat, a touch closer to the bar (POPOVER.gap is shared
+    // with the other renderers, so the pull-down happens here).
+    this.arrow.visible = false;
     if (this.arrow.visible) {
       const arrowXLocal = s > 0 ? p.arrowX / s : p.arrowX;
       const edge = p.below ? 0 : cardH;      // the card edge the arrow sits on
@@ -154,7 +162,7 @@ export class Popover extends Container implements ShellLayer {
     // regardless of `s`, and every local size above (background rect, scroll viewport, arrow) scales
     // with it automatically.
     this.card.scale.set(s);
-    this.card.position.set(p.x, p.y);
+    this.card.position.set(p.x, p.y + (p.below ? -HB_PULL : HB_PULL));
     this._cardX = p.x;
     this._cardY = p.y;
     this._cardW = screenW;
