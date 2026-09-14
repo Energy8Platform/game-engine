@@ -47,6 +47,15 @@ declare module 'cordis' {
   interface Context {
     session: SessionService;
   }
+  interface Events {
+    /**
+     * The current `e8-server` ended without being asked to — see `EXITED`.
+     * Fired once per death, with the same `Diagnostic` `startupDiagnostic`
+     * and every `play()` now answer with; a deliberate stop (disposal, a
+     * restart's own kill) is not this.
+     */
+    'session/exited'(diagnostic: Diagnostic): void;
+  }
 }
 
 /** This plugin's config is exactly what `startE8Server` needs — the seam
@@ -76,7 +85,8 @@ export interface SessionService {
    * first boot it is the specific reason startup failed; after that it is
    * whatever `restart()` last left — "restarting" (tagged `RESTARTING`)
    * while a respawn is in flight, the respawn's failure if it did not come
-   * up, or the plugin's own disposal. Identical to what a `play()` call
+   * up, or the plugin's own disposal — or the process's own death (tagged
+   * `EXITED`, announced once as `session/exited`). Identical to what a `play()` call
    * against this same service returns when `handle` is absent — exposed
    * here too so a caller that needs to know *before* ever calling
    * `play()` (e.g. `createGame`, which must not attempt a canvas after a
@@ -128,6 +138,13 @@ export const name = 'session';
  * stops being true two seconds later.
  */
 export const RESTARTING = 'restarting';
+
+/**
+ * `Diagnostic.code` on the answer `play()` gives after the process DIED —
+ * came up, then ended without `stop()` asking. The status bar reads this
+ * code to hollow its dot; the next `restart()` (a `.spin` save) clears it.
+ */
+export const EXITED = 'exited';
 
 /**
  * What a `restart()` resolves to once the plugin is disposed — said as
@@ -198,6 +215,28 @@ export async function apply(ctx: Context, config: SessionConfig) {
       }
       handle = spawned;
       startupDiagnostic = null;
+      spawned.onExit((info) => {
+        // Not a death when the process was told to stop: disposal keeps
+        // `handle` pointing at it while stopping (hence `disposed`), a
+        // restart nulls `handle` before its `dying.stop()`, and the
+        // too-late spawn above never became `handle` at all.
+        if (handle !== spawned || disposed) return;
+        handle = null;
+        // Nothing else will: the disposer stops `handle`, and that is
+        // null now. Past `exited`, `stop()` only closes the gRPC channel.
+        void spawned.stop().catch(() => {});
+        startupDiagnostic = {
+          ...diagnostic(
+            'error',
+            'session',
+            'e8-server',
+            `the math engine exited (exit code=${info.code} signal=${info.signal})`,
+            'save the .spin again to restart it, or restart the dev host',
+          ),
+          code: EXITED,
+        };
+        ctx.emit('session/exited', startupDiagnostic);
+      });
     } catch (error) {
       handle = null;
       const message = error instanceof Error ? error.message : String(error);

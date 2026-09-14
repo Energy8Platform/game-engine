@@ -234,7 +234,9 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   // red herring. See that branch's own comment.
   let spawnFailed = false;
   let exitInfo = '';
+  let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
+  const exitListeners: ((info: { code: number | null; signal: string | null }) => void)[] = [];
   const output: string[] = [];
   child.stdout?.on('data', (c) => output.push(String(c)));
   child.stderr?.on('data', (c) => output.push(String(c)));
@@ -259,8 +261,12 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
     // "exit code=-2" tells a person nothing.
     if (!spawnFailed) {
       exitInfo = `exit code=${code} signal=${signal}`;
+      exitCode = code;
       exitSignal = signal;
     }
+    // `ready` is still false for a close the readiness loop turns into a
+    // rejection — no handle exists to have listened, and none is told.
+    if (ready) for (const cb of exitListeners) cb({ code, signal });
   });
   child.once('error', (e) => {
     exited = true;
@@ -412,7 +418,12 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
   // (Node only leaves `pid` undefined when the process never spawned at
   // all — the `exited`/'error' branch above, which returns before this
   // point).
-  return { port, pid: child.pid!, play, stop };
+  function onExit(cb: (info: { code: number | null; signal: string | null }) => void): void {
+    if (exited) cb({ code: exitCode, signal: exitSignal });
+    else exitListeners.push(cb);
+  }
+
+  return { port, pid: child.pid!, play, stop, onExit };
 }
 
 export type { E8Handle, SpinRequest, SpinResult, StartE8ServerOptions } from './types';

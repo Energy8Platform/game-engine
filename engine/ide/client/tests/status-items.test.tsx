@@ -210,6 +210,48 @@ describe('SessionStatus', () => {
     );
     expect(container).not.toHaveTextContent(/restart/i);
   });
+
+  /**
+   * Debt slice A1: the four labels, by code. A dead engine used to keep
+   * the dot filled — nothing on the wire said it was gone.
+   */
+  const frame = (diagnostics: ReturnType<typeof d>[]): ServerMessage => ({
+    type: 'game-diagnostics',
+    diagnostics,
+    dropped: 0,
+    source: 'host',
+  });
+
+  it('shows the hollow dot before anything has spoken', () => {
+    const ctx = gameDiagnosticsHarness();
+    const { container } = render(<SessionStatus ctx={ctx} />);
+    expect(container).toHaveTextContent('e8-server ○');
+    expect(container).not.toHaveTextContent(/exited|restart|●/);
+  });
+
+  it('says the engine exited on an exited-coded row, and takes it back on the retract', () => {
+    const ctx = gameDiagnosticsHarness();
+    const { container } = render(<SessionStatus ctx={ctx} />);
+    act(() => ctx.socket.receive(frame([d('the math engine exited', { code: 'exited' })])));
+    expect(container).toHaveTextContent('e8-server ○ exited');
+    act(() => ctx.socket.receive(frame([])));
+    expect(container).toHaveTextContent('e8-server ●');
+  });
+
+  it('a restart in flight wins over an exit it is about to cure', () => {
+    const ctx = gameDiagnosticsHarness();
+    const { container } = render(<SessionStatus ctx={ctx} />);
+    act(() =>
+      ctx.socket.receive(
+        frame([
+          d('the math engine exited', { code: 'exited' }),
+          d('the math engine is restarting', { code: 'restarting' }),
+        ]),
+      ),
+    );
+    expect(container).toHaveTextContent('e8-server restarting');
+    expect(container).not.toHaveTextContent(/exited/);
+  });
 });
 
 describe('DirtyStatus', () => {

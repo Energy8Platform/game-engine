@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { Context } from 'cordis';
 import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import * as session from '../src/index';
+import type { Diagnostic } from '@energy8engine/contracts';
 
 // Same fixture and the same `--games-dir` gotcha as spin.test.ts: e8-server's
 // --games-dir is not recursive, it must point at the folder holding the
@@ -669,4 +670,96 @@ describe('the session plugin: reporting to the diagnostics service', () => {
 
     expect(ctx.diagnostics.list()).toEqual([]);
   });
+});
+
+/**
+ * Debt slice A1: a process that came up and then DIED. Before this, the
+ * handle only ever reported a close that happened before ready (as
+ * `startE8Server`'s rejection); a later death left `handle` pointing at a
+ * corpse, `pid` a number, and the status bar's dot filled. Now the death is
+ * data — the same `startupDiagnostic` a boot failure is, tagged `EXITED`,
+ * announced once as `session/exited` — and the process is killed here for
+ * real (`process.kill`), not simulated: `'close'` fires after the OS reaps
+ * it, so every assertion below polls for the effect.
+ *
+ * The three deliberate stops (disposal, a restart's `dying.stop()`, the
+ * too-late spawn) also close the process, and none of them is a death:
+ * the first is guarded by `disposed`, the other two by the handle no longer
+ * being the current one.
+ */
+describe('the session plugin: the process dies', () => {
+  const ROUTE = { gameId: 'first-slot', action: 'spin', betLevel: 1.0 } as const;
+
+  it('an unexpected exit of the current process is a diagnostic, an event, and the answer to the next play()', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+    const seen: Diagnostic[] = [];
+    ctx.on('session/exited', (d) => seen.push(d));
+    const pid = ctx.session.pid!;
+
+    process.kill(pid, 'SIGKILL');
+
+    await expect.poll(() => ctx!.session.startupDiagnostic?.code).toBe(session.EXITED);
+    const dead = ctx.session.startupDiagnostic!;
+    expect(dead.message).toMatch(/the math engine exited \(exit code=null signal=SIGKILL\)/);
+    expect(dead.fix).toMatch(/save the \.spin again/);
+    expect(ctx.session.pid).toBeNull();
+    expect(seen).toEqual([dead]);
+    expect(await ctx.session.play(ROUTE)).toEqual({ diagnostics: [dead] });
+    // Said once — a second play() against the corpse repeats the answer, not the event.
+    await ctx.session.play(ROUTE);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('the exit a disposal causes is not a death', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+    const service = ctx.session;
+    const seen: Diagnostic[] = [];
+    ctx.on('session/exited', (d) => seen.push(d));
+    const pid = service.pid!;
+
+    await ctx.fiber.dispose();
+    ctx = undefined;
+    await expect.poll(() => isProcessAlive(pid)).toBe(false);
+    // `stop()` resolves on `'exit'`; `'close'` — what `onExit` fires on —
+    // lands a beat later, once stdio has drained. Give it that beat.
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(seen).toEqual([]);
+    expect(service.startupDiagnostic).toBeNull();
+  });
+
+  it('the exit a restart causes is not a death, and the fresh process is the one watched', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+    const seen: Diagnostic[] = [];
+    ctx.on('session/exited', (d) => seen.push(d));
+    const old = ctx.session.pid!;
+
+    expect(await ctx.session.restart()).toEqual({ diagnostics: [] });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(seen).toEqual([]);
+    expect(ctx.session.startupDiagnostic).toBeNull();
+    const fresh = ctx.session.pid!;
+    expect(fresh).not.toBe(old);
+
+    process.kill(fresh, 'SIGKILL');
+    await expect.poll(() => seen.length).toBe(1);
+    expect(ctx.session.startupDiagnostic?.code).toBe(session.EXITED);
+  }, 15_000);
+
+  it('restart() after a death boots clean: the diagnostic is gone and spins work again', async () => {
+    ctx = new Context();
+    await ctx.plugin(session, { gamesDir: GAME, port: 0 });
+    process.kill(ctx.session.pid!, 'SIGKILL');
+    await expect.poll(() => ctx!.session.startupDiagnostic?.code).toBe(session.EXITED);
+
+    expect(await ctx.session.restart()).toEqual({ diagnostics: [] });
+    expect(ctx.session.startupDiagnostic).toBeNull();
+    expect(isProcessAlive(ctx.session.pid!)).toBe(true);
+    const { result, diagnostics } = await ctx.session.play(ROUTE);
+    expect(diagnostics).toEqual([]);
+    expect(result?.roundId).toBeTruthy();
+  }, 15_000);
 });

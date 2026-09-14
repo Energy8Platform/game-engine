@@ -52,6 +52,8 @@ export function ProjectStatus({ ctx }: { ctx: Context }) {
  * one string this client only ever compares, never re-derives.
  */
 const RESTARTING_CODE = 'restarting';
+/** `session-dev`'s `EXITED` (`'exited'`) — the same arrangement as above. */
+const EXITED_CODE = 'exited';
 
 /**
  * Right: whether the game's own process is up.
@@ -62,20 +64,27 @@ const RESTARTING_CODE = 'restarting';
  * dead process as alive across a restart. `dev-game.ts`'s `/api/spin`
  * route tags a spin that landed mid-restart with a `restarting`-coded
  * diagnostic on the `host` source; as long as ANY group still carries one,
- * the restart is still in flight. `groups === null` (nothing has spoken
- * yet) reads as "not connected" rather than "restarting" — those are
- * different facts and the dot says so.
+ * the restart is still in flight. An `exited`-coded row is the host saying
+ * the process died (`session/exited`, relayed by `dev-game.ts`) — the dot
+ * hollows and says why, until the next save's clean restart takes the row
+ * back. `groups === null` (nothing has spoken yet) reads as "not
+ * connected" rather than either — those are different facts and the dot
+ * says so.
  */
 export function SessionStatus({ ctx }: { ctx: Context }) {
   const { groups } = useGameDiagnostics(ctx);
-  const restarting = (groups ?? []).some((group) =>
-    group.diagnostics.some((entry) => entry.diagnostic.code === RESTARTING_CODE),
-  );
-  const label = restarting
+  const has = (code: string) =>
+    (groups ?? []).some((group) =>
+      group.diagnostics.some((entry) => entry.diagnostic.code === code),
+    );
+  // A restart in flight outranks the death it is about to cure.
+  const label = has(RESTARTING_CODE)
     ? 'e8-server restarting'
-    : groups === null
-      ? 'e8-server ○'
-      : 'e8-server ●';
+    : has(EXITED_CODE)
+      ? 'e8-server ○ exited'
+      : groups === null
+        ? 'e8-server ○'
+        : 'e8-server ●';
   return <span className="e8-status-item">{label}</span>;
 }
 

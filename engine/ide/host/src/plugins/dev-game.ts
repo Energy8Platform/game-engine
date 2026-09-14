@@ -332,6 +332,11 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       .then(({ diagnostics }) => ctx.ideRpc.reportGameDiagnostics('session', diagnostics));
   });
 
+  // The engine dying is the same speaker's fact, said without waiting for
+  // a spin to find the corpse — and the next clean restart above is what
+  // takes it back.
+  ctx.on('session/exited', (d) => ctx.ideRpc.reportGameDiagnostics('session', [d]));
+
   /**
    * The row runtime halves vite's dependency optimizer must see BEFORE the
    * browser loads anything.

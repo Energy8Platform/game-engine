@@ -1040,6 +1040,37 @@ describe('dev-game — restart on a script.spin write', () => {
     }
   }, 25_000);
 
+  /**
+   * Debt slice A1: the math engine dying is a fact of the HOST, and the
+   * host says so on the wire without waiting for a spin to find the
+   * corpse — `session-dev` emits `session/exited`, this plugin relays it
+   * as the `session` speaker's row. The next save's clean restart is the
+   * retract, the same way it already takes "failed to restart" back.
+   */
+  it('the math engine dying reaches the panel as the session speaker, and the next clean save takes it back', async () => {
+    const projectDir = writableProjectWithManifest();
+    const { socket, hostFrames } = await hostOverProject(projectDir);
+    try {
+      process.kill(host!.ctx.session.pid!, 'SIGKILL');
+      await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(0);
+      expect(hostFrames().at(-1)!.diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          plugin: 'session',
+          code: 'exited',
+          message: expect.stringMatching(/the math engine exited/),
+        }),
+      ]);
+
+      const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      expect(await putScript(projectDir, `${original}\n-- edited by mouse\n`)).toBe(200);
+      await expect.poll(() => hostFrames().at(-1)?.diagnostics, { timeout: 15_000 }).toEqual([]);
+      expect(host!.ctx.session.pid).not.toBeNull();
+    } finally {
+      socket.close();
+    }
+  }, 25_000);
+
   it('a write to a .spin file OUTSIDE gamesDir does not restart the session — the containment axis, not just the extension one', async () => {
     // `notes.txt` (the first version of this test) fails BOTH conjuncts at
     // once — it is neither inside `gamesDir` nor named `*.spin` — so it

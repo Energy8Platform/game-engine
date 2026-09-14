@@ -108,4 +108,12 @@ export interface E8Handle {
   readonly pid: number;
   play(req: SpinRequest): Promise<SpinResult>;
   stop(): Promise<void>;
+  /**
+   * Hears the process end AFTER it became ready — a death `stop()` did
+   * not ask for, or the one it did; the caller tells them apart. A close
+   * before ready is not this: that is `startE8Server`'s own rejection, and
+   * no handle ever exists for it. Every callback fires, in registration
+   * order, once; one registered after the exit is told at once.
+   */
+  onExit(cb: (info: { code: number | null; signal: string | null }) => void): void;
 }

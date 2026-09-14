@@ -100,6 +100,23 @@ describe('a real spin through e8-server', () => {
     const after = readdirSync(tmpdir()).filter((name) => name.startsWith('e8proto-'));
     expect(after).toEqual(before);
   });
+
+  it('onExit hears a death that happens after ready — every listener, and a late one at once', async () => {
+    // Debt slice A1: the handle only ever reported a close that happened
+    // BEFORE ready (as `startE8Server`'s own rejection). A process that
+    // came up and then died was a fact nobody was told.
+    const handle = await startE8Server({ gamesDir: GAME, port: 0 });
+    const heard: { code: number | null; signal: string | null }[] = [];
+    handle.onExit((info) => heard.push(info));
+    handle.onExit((info) => heard.push(info));
+    process.kill(handle.pid, 'SIGKILL');
+    await expect.poll(() => heard.length).toBe(2);
+    expect(heard[0]).toEqual({ code: null, signal: 'SIGKILL' });
+    // Registered after the fact: told immediately, not never.
+    handle.onExit((info) => heard.push(info));
+    expect(heard).toHaveLength(3);
+    await handle.stop();
+  });
 });
 
 // Rulings from the brief: (1) stage data must include the winning LINES, not
