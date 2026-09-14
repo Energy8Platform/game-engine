@@ -1,12 +1,12 @@
 import { CanvasTextMetrics, Text, TextStyle } from 'pixi.js';
 import { SHELL_FONT_CSS } from '@/core/fonts';
-import { HB_FONT_CSS, HB_HEAD_FONT_FAMILY, HB_NUM_FONT_FAMILY } from './fonts';
+import { HB_FONT_CSS, HB_HEAD_FONT_FAMILY } from './fonts';
 import { HB } from './theme';
 
-// The HB shell renders text on canvas with three bundled faces registered in `document.fonts`:
-// Inter (body, shared with every shell), Space Grotesk (headings / emphasis) and Switzer (numbers,
-// drawn with an ink stroke). All @font-face CSS is injected once; text measured before a face
-// swaps in is re-laid-out on `whenFontReady`.
+// The HB shell renders text on canvas with two bundled faces registered in `document.fonts`: Inter
+// (body, shared with every shell) and Clash Display (headings, emphasis and numerals — the numbers
+// drawn with an ink stroke). All @font-face CSS is injected once; text measured before a face swaps
+// in is re-laid-out on `whenFontReady`.
 
 const STYLE_ID = '__ge-pixi-hb-font__';
 
@@ -14,15 +14,15 @@ const STYLE_ID = '__ge-pixi-hb-font__';
  *  the system fonts stay as graceful fallback if the webfont ever fails to load. */
 export const FONT_FAMILY = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
-/** Numeric font — Switzer 700 leads, falling back to Inter. Readout VALUES (balance/bet/win/FS
- *  counter, autoplay countdown, prices), always drawn with `stroke: true`. */
-export const NUM_FONT_FAMILY = `${HB_NUM_FONT_FAMILY}, ${FONT_FAMILY}`;
-/** Switzer sits close to Inter's width — no size bump needed. */
-export const NUM_FONT_SCALE = 1;
-/** Heading font — Space Grotesk (latin) + Manrope's Cyrillic under the same family name. */
+/** Heading font — Clash Display (latin) + Manrope's Cyrillic under the same family name. */
 export const HEAD_FONT_FAMILY = `${HB_HEAD_FONT_FAMILY}, ${FONT_FAMILY}`;
+/** Numeric font — the same Clash Display. Readout VALUES (balance/bet/win/FS counter, autoplay
+ *  countdown, prices), always drawn with `stroke: true`. */
+export const NUM_FONT_FAMILY = HEAD_FONT_FAMILY;
+/** Clash's numerals sit a touch narrower than Inter's — a small bump keeps readouts the same size. */
+export const NUM_FONT_SCALE = 1.05;
 /** Stroke width (px) around numerals — the "bordered digits" of the brand. */
-export const NUM_STROKE = 3;
+export const NUM_STROKE = 2;
 
 let installed = false;
 
@@ -43,8 +43,7 @@ export function installShellFont(): void {
   try {
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
     fonts?.load('1em Inter')?.catch(() => {/* ignore — fallback fonts render meanwhile */});
-    fonts?.load(`1em ${HB_HEAD_FONT_FAMILY}`)?.catch(() => {/* ignore — fallback fonts render meanwhile */});
-    fonts?.load(`700 1em ${HB_NUM_FONT_FAMILY}`)?.catch(() => {/* ignore — fallback fonts render meanwhile */});
+    fonts?.load(`700 1em ${HB_HEAD_FONT_FAMILY}`)?.catch(() => {/* ignore — fallback fonts render meanwhile */});
   } catch {
     /* ignore — fonts API access threw synchronously */
   }
@@ -79,11 +78,10 @@ export interface TextOpts {
   lineHeight?: number;
   /** drop shadow (the floating readouts use `text-shadow:0 1px 3px rgba(0,0,0,.65)`). */
   shadow?: boolean;
-  /** Space Grotesk instead of Inter (headings, CTA labels, the bet-mode chip). */
+  /** Clash Display instead of Inter (headings, CTA labels, the bet-mode chip). */
   heading?: boolean;
-  /** Switzer with an ink stroke — numeric readouts. `true` = NUM_STROKE px in HB.ink; a string = that
-   *  stroke colour (e.g. beige digits on an orange face get an ink stroke either way, but a number
-   *  ON beige wants no stroke — pass `false`/omit). */
+  /** Numerals with an ink stroke — readouts. `true` = NUM_STROKE px in HB.ink; a string = that stroke
+   *  colour. A number ON beige wants no stroke — pass `false`/omit. */
   stroke?: boolean | string;
   /** Trim to ink bounds (default true). Set false when bottom-/baseline-aligning a row of
    *  same-size texts: trimmed glyph-tight boxes vary per content (e.g. a comma's descent), so

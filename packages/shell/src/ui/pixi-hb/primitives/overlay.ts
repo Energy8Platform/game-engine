@@ -13,7 +13,7 @@ export function clamp(min: number, pref: number, max: number): number {
 
 /** Header nav button — an orange square plaque with a beige glyph. */
 export function navButton(_host: PixiComponentContext, iconName: 'close' | 'back', onTap: () => void, size = 36): IconButton {
-  return new IconButton(iconName, { size, glyph: Math.round(size * 0.5), face: 'orange', onTap });
+  return new IconButton(iconName, { size, glyph: Math.round(size * 0.72), face: 'orange', onTap });
 }
 
 /** Where the 80 % frame lands on a `w × h` screen: at most 80 % per axis, at least screen − 16. */
@@ -26,6 +26,7 @@ export function frameRect(w: number, h: number): Rectangle {
 export interface FrameOpts {
   title: string;
   onClose: () => void;
+  /** Accepted for API parity; the HB frame draws no back chevron (Escape / the ✕ close it). */
   onBack?: () => void;
   tag?: string;
 }
@@ -76,7 +77,6 @@ export class Frame extends Container implements ShellLayer {
     const f = this.frame;
     const nav = clamp(30, this.headerH - 12, 36);
     const pad = (this.headerH - BORDER - nav) / 2;
-    const left = this.frameOpts.onBack ? navButton(this.host, 'back', () => this.frameOpts.onBack!(), nav) : null;
     const close = navButton(this.host, 'close', () => this.frameOpts.onClose(), nav);
     const titleSize = clamp(16, this.headerH * 0.5, 28); // 2em of the game-info scale at full size
     const title = makeText(this.frameOpts.title, {
@@ -94,10 +94,6 @@ export class Frame extends Container implements ShellLayer {
     title.position.set(f.x + f.width / 2, f.y + (this.headerH - BORDER) / 2);
     close.position.set(f.x + f.width - BORDER - pad - nav, f.y + BORDER + pad - BORDER / 2);
     this.header.addChild(title, close);
-    if (left) {
-      left.position.set(f.x + BORDER + pad, close.y);
-      this.header.addChild(left);
-    }
   }
 
   resize(w: number, h: number): void {

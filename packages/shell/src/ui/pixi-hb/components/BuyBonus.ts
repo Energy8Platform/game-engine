@@ -1,20 +1,22 @@
-import { Assets, Container, Graphics, Sprite, Texture } from 'pixi.js';
+import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { PixiComponentContext, ShellLayer } from '../../pixi/context';
 import type { BonusOption } from '@/core/types';
 import { groupBonusSlots } from '@/core/bonusGroups';
 import { betDir } from '@/core/keyboard';
 import { makeText } from '../text';
 import { makeIcon } from '../pixi-icon';
-import { Frame, clamp } from '../primitives/overlay';
+import { clamp, navButton } from '../primitives/overlay';
+import { plaque } from '../primitives/plaque';
 import { CardModal } from '../primitives/card';
 import { ScrollBox } from '../primitives/scroll';
 import { IconButton, Readout, TextButton } from '../primitives/widgets';
-import { HB, BORDER, RADIUS } from '../theme';
+import { HB, BORDER } from '../theme';
 
-/** Buy-bonus in the HB frame: a vertical, always-scrolling list of mode CARDS (two per row on a wide
- *  frame, one otherwise) over a balance / bet band. Each card: hero on its left third behind a
- *  divider, then the title (with ‹ › when the slot is a `groupedBy` group), volatility, description
- *  and a bottom-pinned CTA. Returns null when there are no bonus options. */
+/** Buy-bonus: no frame — over the frosted game a ✕ in the top-right corner, a vertical,
+ *  always-scrolling list of mode CARDS (two per row on a wide screen, one otherwise) and a balance /
+ *  bet band pinned to the bottom. Each card: hero on its left third behind a divider, then the title
+ *  (with ‹ › when the slot is a `groupedBy` group), volatility, description and a bottom-pinned CTA.
+ *  Returns null when there are no bonus options. */
 export function openBuyBonus(host: PixiComponentContext): ShellLayer | null {
   const bonuses = host.config.features.buyBonus;
   if (bonuses === false || bonuses.length === 0) return null;
@@ -27,7 +29,11 @@ const CARD_GAP = 12;
 /** Two cards per row from this content width up. */
 const TWO_UP_MIN_W = 640;
 
-export class BuyBonusPage extends Frame {
+export class BuyBonusPage extends Container implements ShellLayer {
+  readonly tag = 'buybonus';
+  private host: PixiComponentContext;
+  private veil = new Graphics();
+  private closeBtn?: Container;
   /** Card slots — a `groupedBy` group is one slot with several members. */
   readonly slots: BonusOption[][];
   /** Which member each group slot shows; kept across rebuilds (bet steps, resizes). */
@@ -40,9 +46,11 @@ export class BuyBonusPage extends Frame {
   ctas: TextButton[] = [];
 
   constructor(host: PixiComponentContext, bonuses: BonusOption[]) {
-    super(host, { tag: 'buybonus', title: host.t('Buy bonus'), onClose: () => host.closeLayer() });
+    super();
+    this.host = host;
     this.slots = groupBonusSlots(bonuses);
-    this.addChildAt(this.band, 2);
+    this.veil.eventMode = 'static'; // swallow taps to the game behind
+    this.addChild(this.veil, this.band);
     this.resize(host.screenW, host.screenH);
   }
 
@@ -60,10 +68,20 @@ export class BuyBonusPage extends Frame {
     this.rebuild();
   }
 
+  private w = 0;
+  private h = 0;
+
   resize(w: number, h: number): void {
-    this.layoutFrame(w, h);
+    this.w = w;
+    this.h = h;
+    this.veil.clear().rect(0, 0, w, h).fill(HB.backdrop);
+    this.veil.hitArea = new Rectangle(0, 0, w, h);
     this.removeConfirm();
     this.rebuild();
+  }
+
+  fit(): void {
+    /* re-laid out on resize */
   }
 
   private isAffordable(bonus: BonusOption): boolean {
@@ -78,11 +96,18 @@ export class BuyBonusPage extends Frame {
 
   // ── page ────────────────────────────────────────────────────────────────────
   private rebuild(): void {
-    const r = this.inner;
-    const em = clamp(11, r.height / 30, 15);
-    const betH = Math.min(BET_BAND_H, r.height * 0.22);
-    const listH = r.height - betH - BORDER;
-    const pad = clamp(10, em, 16);
+    const em = clamp(11, this.h / 36, 15);
+    const pad = clamp(12, em * 1.2, 20);
+    const nav = clamp(36, this.h * 0.08, 48);
+    // ✕ in the top-right corner; the cards start below it
+    this.closeBtn?.destroy({ children: true });
+    this.closeBtn = navButton(this.host, 'close', () => this.host.closeLayer(), nav);
+    this.closeBtn.position.set(this.w - pad - nav, pad);
+    this.addChild(this.closeBtn);
+    const top = pad + nav + pad * 0.5;
+    const betH = Math.min(BET_BAND_H, this.h * 0.16);
+    const listH = this.h - top - betH - pad;
+    const r = new Rectangle(0, top, this.w, listH);
 
     // the card list scrolls
     if (this.scroll) {
@@ -91,32 +116,33 @@ export class BuyBonusPage extends Frame {
     }
     const scroll = new ScrollBox(this.host.canvas, this.host.ticker);
     this.scroll = scroll;
-    this.addChildAt(scroll, 2);
+    this.addChildAt(scroll, 1);
     scroll.position.set(r.x, r.y);
     scroll.setViewport(r.width, listH);
-    const contentW = r.width - pad * 2 - ScrollBox.GUTTER;
+    const contentW = Math.min(1100, r.width - pad * 2 - ScrollBox.GUTTER);
+    const left = (r.width - ScrollBox.GUTTER - contentW) / 2;
     const cols = contentW >= TWO_UP_MIN_W ? 2 : 1;
     const cardW = (contentW - CARD_GAP * (cols - 1)) / cols;
     const cardH = clamp(150, listH * (cols === 2 ? 0.6 : 0.55), 240);
     this.ctas = [];
     this.slots.forEach((_, i) => {
       const card = this.buildCard(i, cardW, cardH, em);
-      card.position.set(pad + (i % cols) * (cardW + CARD_GAP), pad + Math.floor(i / cols) * (cardH + CARD_GAP));
+      card.position.set(left + (i % cols) * (cardW + CARD_GAP), Math.floor(i / cols) * (cardH + CARD_GAP));
       scroll.content.addChild(card);
     });
     // bottom padding so the last row clears the band
     const tail = new Graphics().rect(0, 0, 1, 1).fill({ color: 0, alpha: 0 });
-    tail.position.set(0, pad + Math.ceil(this.slots.length / cols) * (cardH + CARD_GAP));
+    tail.position.set(0, Math.ceil(this.slots.length / cols) * (cardH + CARD_GAP));
     scroll.content.addChild(tail);
     scroll.refresh();
 
-    // bet band
+    // bet band — a bar-like plaque pinned to the bottom edge
     this.band.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const rule = new Graphics().rect(0, 0, r.width, BORDER).fill(HB.line);
-    rule.position.set(r.x, r.y + listH);
-    this.band.addChild(rule);
-    const band = this.buildBetBand(r.width, betH, em);
-    band.position.set(r.x, r.y + listH + BORDER);
+    const bandW = Math.min(this.w - pad * 2, 900);
+    const bg = plaque(new Graphics(), bandW, betH, { fill: HB.bar });
+    const band = this.buildBetBand(bandW, betH, em);
+    band.addChildAt(bg, 0);
+    band.position.set((this.w - bandW) / 2, this.h - betH - pad * 0.5);
     this.band.addChild(band);
   }
 
@@ -128,7 +154,7 @@ export class BuyBonusPage extends Frame {
     const active = this.isActive(bonus);
     const card = new Container();
     card.label = `bb-card-${slot}`;
-    card.addChild(new Graphics().roundRect(0, 0, w, h, RADIUS).fill(HB.card));
+    card.addChild(plaque(new Graphics(), w, h, { fill: HB.panel }));
 
     const heroW = Math.round(w * HERO_FRACTION);
     card.addChild(new Graphics().rect(heroW, 0, BORDER, h).fill(HB.line));

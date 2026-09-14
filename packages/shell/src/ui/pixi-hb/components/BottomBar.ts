@@ -16,8 +16,9 @@ function autoplayDiscMode(state: { autoplay: { active: boolean; remaining: numbe
 }
 
 const BAR_H = 68; // the plaque panel
-const SPIN = 84; // hero disc — pops above/below the panel
+const SPIN = 92; // hero disc — pops above/below the panel (= 2·SQ + STACK_GAP)
 const SPIN_POP = (SPIN - BAR_H) / 2;
+const STACK_GAP = 4; // auto over turbo: 2·SQ + STACK_GAP = SPIN, so the stack matches the disc
 const MAX_BAR_W = 900;
 const OUTER_PAD = 14;
 const PANEL_PAD = 14;
@@ -30,7 +31,7 @@ const WIDE_PAD_BOTTOM = 8;
 export const WIDE_BAR_H = WIDE_PAD_BOTTOM + SPIN; // ≈92
 
 const BUY_W = 64; // bonus plaque on desktop
-const SQ = 40; // square plaque buttons (auto/turbo) — stacked beside SPIN, two fit in its height
+const SQ = 44; // square plaque buttons (auto/turbo) — stacked beside SPIN, two fit in its height
 const STEP = 28; // bet ± plaques
 const FS_BOX = 96; // fixed bet-value box width
 
@@ -45,7 +46,7 @@ const M_SQ = 40;
 export const MOBILE_BAR_H = M_PAD_BOTTOM + SPIN + M_GAP + M_INFO_H;
 
 /** Turbo: the level paints the bolts in — L1 the first bolt, L2 both. */
-function makeTurboButton(level: number, onTap: () => void, size = SQ, glyph = 28): IconButton {
+function makeTurboButton(level: number, onTap: () => void, size = SQ, glyph = 40): IconButton {
   return new IconButton('turbo', { size, glyph, bolts: Math.min(2, Math.max(0, level)), onTap });
 }
 
@@ -179,6 +180,7 @@ export class BottomBar extends Container {
     const { state } = this.host;
     const spin = new SpinDisc({
       size: SPIN,
+      glyph: Math.round(SPIN * 0.86),
       ticker: this.host.ticker,
       onSpin: () => this.host.actions.spin(),
       onStop: () => this.stopAutoplay(),
@@ -210,7 +212,7 @@ export class BottomBar extends Container {
     return new BonusButton({
       size,
       face: feature ? 'red' : 'orange',
-      icon: feature ? 'close' : 'bonus',
+      icon: feature ? 'close' : 'volatility',
       onTap: () => (feature ? this.host.actions.deactivateFeature() : this.host.actions.openBuyBonus()),
     });
   }
@@ -256,9 +258,9 @@ export class BottomBar extends Container {
     } else if (showFsBlocks) {
       hero.add(this.buildFsHero());
     }
-    const stack = new FlexBox({ direction: 'column', align: 'center', gap: 4 });
+    const stack = new FlexBox({ direction: 'column', align: 'center', gap: STACK_GAP });
     if (isBase && config.features.autoplay) {
-      this.autoBtn = this.buildAuto(SQ, 30);
+      this.autoBtn = this.buildAuto(SQ, 42);
       stack.add(this.autoBtn);
     }
     if (config.features.turbo > 0) {
@@ -292,8 +294,8 @@ export class BottomBar extends Container {
 
     const menu = new IconButton('menu', { size: M_SQ, glyph: 24, onTap: () => this.host.actions.openMenu() });
     this.menuBtn = menu;
-    if (isBase && config.features.autoplay) this.autoBtn = this.buildAuto(M_SQ, 24);
-    if (config.features.turbo > 0) this.turboBtn = makeTurboButton(state.turbo, () => this.onTurbo(), M_SQ, 24);
+    if (isBase && config.features.autoplay) this.autoBtn = this.buildAuto(M_SQ, 36);
+    if (config.features.turbo > 0) this.turboBtn = makeTurboButton(state.turbo, () => this.onTurbo(), M_SQ, 36);
     this.buy = isBase ? this.buildBuy(M_BUY) : undefined;
 
     // level 1 — controls row

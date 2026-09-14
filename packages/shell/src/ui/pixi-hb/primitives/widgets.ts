@@ -66,7 +66,7 @@ const FACE = {
   beige: { fill: HB.beige, hover: HB.beigeHover, ink: HB.ink, glyphFill: HB.beige },
   orange: { fill: HB.orange, hover: HB.gold, ink: HB.ink, glyphFill: HB.beige },
   // ink text/glyphs on the accent (a light yellow) — beige wouldn't read on it
-  red: { fill: HB.red, hover: HB.orange, ink: HB.ink, glyphFill: HB.beige },
+  red: { fill: HB.red, hover: '#b8261a', ink: HB.ink, glyphFill: HB.beige },
   panel: { fill: HB.panel, hover: '#2a2a2a', ink: HB.beige, glyphFill: HB.panel },
 } as const;
 
@@ -634,16 +634,16 @@ export interface BonusButtonOpts {
   size?: number;
   /** red = an active feature (tap deactivates). */
   face?: 'orange' | 'red';
-  /** `close` while a feature is active. */
-  icon?: 'bonus' | 'close';
+  /** `close` while a feature is active; the big volatility head otherwise. */
+  icon?: 'volatility' | 'close';
   onTap: () => void;
 }
 
 export class BonusButton extends IconButton {
   constructor(opts: BonusButtonOpts) {
     const size = opts.size ?? 58;
-    const icon = opts.icon ?? 'bonus';
-    super(icon, { size, glyph: Math.round(size * (icon === 'close' ? 0.55 : 0.88)), face: opts.face ?? 'orange', onTap: opts.onTap });
+    const icon = opts.icon ?? 'volatility';
+    super(icon, { size, glyph: Math.round(size * (icon === 'close' ? 0.8 : 0.92)), face: opts.face ?? 'orange', onTap: opts.onTap });
   }
 }
 
@@ -655,6 +655,8 @@ export interface FsHeroOpts {
   minWidth?: number;
 }
 
+/** The SPIN slot during free spins: the same round accent plaque, a STOP square on it, and inside
+ *  the square the label ("SPINS") over the counter. */
 export class FsHero extends Container implements Sizable {
   private w: number;
   private h: number;
@@ -663,22 +665,23 @@ export class FsHero extends Container implements Sizable {
   constructor(opts: FsHeroOpts) {
     super();
     this.h = opts.height ?? 84;
-    const minW = opts.minWidth ?? 96;
-    const padX = 18;
-    const gap = 3;
-    const label = makeText(opts.label, {
-      size: 9, weight: '700', heading: true, color: HB.ink, letterSpacing: 0.72, upper: true,
-      align: 'center', wrapWidth: minW - padX * 2,
-    });
-    const num = makeText(opts.value, { size: 30, color: HB.ink, stroke: false, align: 'center' });
-    const contentW = Math.max(label.width, num.width);
-    this.w = Math.max(minW, contentW + padX * 2);
-    plaque(this.bgG, this.w, this.h, { fill: HB.beige });
+    this.w = this.h;
+    const size = this.h;
+    plaque(this.bgG, size, size, { fill: HB.orange, round: true });
+    const sq = Math.round(size * 0.74);
+    const square = makeIcon('stop', sq);
+    square.position.set((size - sq) / 2, (size - sq) / 2);
+    const innerW = sq * 0.68;
+    const label = makeText(opts.label, { size: 9, weight: '700', heading: true, color: HB.ink, letterSpacing: 0.5, upper: true, align: 'center' });
+    if (label.width > innerW) label.scale.set(innerW / label.width);
+    const num = makeText(opts.value, { size: 20, color: HB.ink, stroke: false, align: 'center' });
+    if (num.width > innerW) num.scale.set(innerW / num.width);
+    const gap = 2;
     const stackH = label.height + gap + num.height;
-    const top = (this.h - stackH) / 2;
-    label.position.set((this.w - label.width) / 2, top);
-    num.position.set((this.w - num.width) / 2, top + label.height + gap);
-    this.addChild(this.bgG, label, num);
+    const top = (size - stackH) / 2;
+    label.position.set((size - label.width) / 2, top);
+    num.position.set((size - num.width) / 2, top + label.height + gap);
+    this.addChild(this.bgG, square, label, num);
   }
 
   measureSize(): { w: number; h: number } {

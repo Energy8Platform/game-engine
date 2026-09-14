@@ -4,10 +4,10 @@ import type { ShellTokens } from '@/core/theme';
  *  ignored by this renderer. */
 export const HB = {
   orange: '#ffbc00', // the brand accent (the token keeps its historical name)
-  gold: '#ffd24d', // accent's hover
+  gold: '#e0a600', // accent's hover (darker)
   red: '#e0301e', // volatility fill, feature (Ante) CTA
   beige: '#f5efe3',
-  beigeHover: '#e3d8c4',
+  beigeHover: '#d6c9ae',
   ink: '#000000', // borders (black everywhere), glyph strokes, text on beige/accent
   panel: '#1e1e1e', // solid modal / popover ground — the bar's colour, opaque
   bar: 'rgba(30,30,30,.97)', // #1e1e1ef7
