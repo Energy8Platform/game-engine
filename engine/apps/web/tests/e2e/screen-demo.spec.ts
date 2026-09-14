@@ -60,13 +60,13 @@ test('a project plugin brings its own screen, no engine change required', async 
     // — a plugin nobody on the team wrote follows the same convention
     // because the registration's `title` is the one thing that decides
     // it, not a hard-coded position in the shell.
-    await expect(page.getByRole('button', { name: 'Demo' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Demo', exact: true })).toBeVisible();
 
     // Content: clicking through actually draws what the plugin registered
     // — `React.createElement` off the shell's own `globalThis.__E8_IDE__`
     // React, not a stub the test would pass against for the wrong reason.
     await button.click();
-    await expect(page.getByRole('tab', { name: 'Demo' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Demo', exact: true })).toBeVisible();
     await expect(page.getByTestId('doc-pane-demo')).toContainText('a document from a project plugin');
 
     // The half of the claim a static `div` could never make: this number
