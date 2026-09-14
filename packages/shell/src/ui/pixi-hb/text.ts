@@ -1,5 +1,6 @@
 import { CanvasTextMetrics, Text, TextStyle } from 'pixi.js';
 import { SHELL_FONT_CSS } from '@/core/fonts';
+import { installFontFaces } from '@/core/fontface';
 import { HB_FONT_CSS, HB_HEAD_FONT_FAMILY } from './fonts';
 import { HB } from './theme';
 
@@ -32,11 +33,8 @@ let installed = false;
 export function installShellFont(): void {
   if (installed || typeof document === 'undefined') return;
   installed = true;
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = SHELL_FONT_CSS + HB_FONT_CSS;
-  document.head.appendChild(style);
+  // FontFace-from-bytes, not a data: <style> — Stake's CSP (font-src 'self') blocks data: URLs.
+  installFontFaces(SHELL_FONT_CSS + HB_FONT_CSS, STYLE_ID);
   // Nudge the browser to actually fetch/decode the faces so text measured later is correct.
   // `.load()` returns a PROMISE — a try/catch only traps a synchronous throw, NOT a rejection.
   // WebKit rejects this with `NetworkError: A network error occurred.` when the (base64) face
