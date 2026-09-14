@@ -52,6 +52,12 @@ describe('powered-by splash', () => {
     expect(container.querySelector('#ge-st-loader-rect')).not.toBeNull();
   });
 
+  it('is skipped by a variant that opts out — hellbuddha carries its own intro', () => {
+    createCSSPreloader(container, { preloaderVariant: 'hellbuddha' });
+    expect(splash(container)).toBeNull();
+    expect(container.querySelector('#ge-hb-loader-rect')).not.toBeNull();
+  });
+
   it('plays over custom preloader HTML too (it is not opt-out)', () => {
     createCSSPreloader(container, { cssPreloaderHTML: '<p id="mine">hi</p>' });
     expect(container.querySelector('#mine')).not.toBeNull();
