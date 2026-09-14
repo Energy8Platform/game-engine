@@ -8,13 +8,13 @@ export const HB = {
   red: '#e0301e', // volatility fill, feature (Ante) CTA
   beige: '#f5efe3',
   beigeHover: '#e3d8c4',
-  ink: '#051107', // borders, glyphs and text on beige/accent
-  panel: '#051107', // solid modal / popover ground
+  ink: '#000000', // borders (black everywhere), glyph strokes, text on beige/accent
+  panel: '#1e1e1e', // solid modal / popover ground — the bar's colour, opaque
   bar: 'rgba(30,30,30,.97)', // #1e1e1ef7
   fg: '#f5efe3',
   muted: 'rgba(245,239,227,.6)',
   track: 'rgba(245,239,227,.18)',
-  line: 'rgba(245,239,227,.25)', // frame borders on the panel ground
+  line: '#000000', // rules inside a frame (header rule, hero divider) — black like the borders
   card: 'rgba(245,239,227,.06)', // block ground for bonus cards (game-info blocks draw nothing)
   backdrop: 'rgba(10,6,4,.55)',
   winOk: '#4ade80',
@@ -42,7 +42,7 @@ export function resolveHbTokens(): ShellTokens {
     spinFg: HB.beige,
     plaqueDark: HB.panel,
     plaqueGlass: HB.panel,
-    plaqueGlassHover: '#0f1f12',
+    plaqueGlassHover: '#2a2a2a',
     plaqueSolid: HB.panel,
     plaqueLine: HB.line,
     plaqueLabel: HB.muted,

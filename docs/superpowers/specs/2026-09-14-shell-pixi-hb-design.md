@@ -94,8 +94,8 @@ export const HB = {
   orange: '#FFBC00', gold: '#FFD24D',   // accent (the token keeps its historical name) + hover
   red: '#E0301E',                        // volatility fill, feature (Ante) CTA
   beige: '#F5EFE3', beigeHover: '#E3D8C4', // button faces
-  ink: '#051107',                        // borders, glyphs and text on beige/accent
-  panel: '#051107',                      // solid modal / popover ground
+  ink: '#000000',                        // borders (black), glyph strokes, text on beige/accent
+  panel: '#1e1e1e',                      // solid modal / popover ground — the bar's colour
   card: 'rgba(245,239,227,.06)',         // buy-bonus cards only — game-info blocks draw nothing
   bar: 'rgba(30,30,30,.97)',             // control bar (#1e1e1ef7)
   fg: '#F5EFE3', muted: 'rgba(245,239,227,.6)', track: 'rgba(245,239,227,.18)',

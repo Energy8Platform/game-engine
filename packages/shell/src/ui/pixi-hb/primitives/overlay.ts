@@ -62,7 +62,7 @@ export class Frame extends Container implements ShellLayer {
     this.frame = frameRect(w, h);
     this.headerH = clamp(44, this.frame.height * 0.12, 60);
     const f = this.frame;
-    plaque(this.panel, f.width, f.height, { fill: HB.panel, border: HB.line });
+    plaque(this.panel, f.width, f.height, { fill: HB.panel });
     // header rule — the "highlighted" band is closed by an ink line at its bottom edge
     this.panel.rect(BORDER, this.headerH - BORDER, f.width - BORDER * 2, BORDER).fill(HB.line);
     this.panel.position.set(f.x, f.y);

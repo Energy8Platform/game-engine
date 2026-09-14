@@ -76,6 +76,6 @@ export function buildReplayModal(host: PixiComponentContext, opts: ReplayModalOp
 
 function hairline(host: PixiComponentContext, width: number): Graphics {
   const g = new Graphics();
-  g.rect(0, 0, width, 1).fill(HB.line);
+  g.rect(0, 0, width, 1).fill(HB.track);
   return g;
 }

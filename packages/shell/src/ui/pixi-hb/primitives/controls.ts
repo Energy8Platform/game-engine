@@ -111,7 +111,7 @@ export class GlassRow extends Container implements Sizable {
   }
 
   private paint(hover: boolean): void {
-    plaque(this.bg, this.w || 1, this.h, { fill: hover && this.isButton ? '#2a1c16' : HB.panel, border: HB.line });
+    plaque(this.bg, this.w || 1, this.h, { fill: hover && this.isButton ? '#2a2a2a' : HB.panel });
     for (const l of this.hoverLabels) l.style.fill = hover ? HB.orange : HB.fg;
   }
 

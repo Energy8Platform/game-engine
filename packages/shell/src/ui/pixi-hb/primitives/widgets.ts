@@ -67,7 +67,7 @@ const FACE = {
   orange: { fill: HB.orange, hover: HB.gold, ink: HB.ink, glyphFill: HB.beige },
   // ink text/glyphs on the accent (a light yellow) — beige wouldn't read on it
   red: { fill: HB.red, hover: HB.orange, ink: HB.ink, glyphFill: HB.beige },
-  panel: { fill: HB.panel, hover: '#2a1c16', ink: HB.beige, glyphFill: HB.panel },
+  panel: { fill: HB.panel, hover: '#2a2a2a', ink: HB.beige, glyphFill: HB.panel },
 } as const;
 
 /** Text colour that reads on a face. */
@@ -253,7 +253,7 @@ export class TextButton extends Container implements Sizable {
 
   private paint(): void {
     const f = FACE[this.face];
-    plaque(this.bg, this.w, this.h, { fill: this.hovering && !this._disabled ? f.hover : f.fill, border: f.ink === HB.beige ? HB.line : HB.ink });
+    plaque(this.bg, this.w, this.h, { fill: this.hovering && !this._disabled ? f.hover : f.fill, border: HB.ink });
     if (this.labelText.width > this.w - 16) this.labelText.scale.set((this.w - 16) / (this.labelText.width / this.labelText.scale.x));
   }
 

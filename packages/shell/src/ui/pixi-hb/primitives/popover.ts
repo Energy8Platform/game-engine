@@ -128,7 +128,7 @@ export class Popover extends Container implements ShellLayer {
       this.scroll.refresh();
     }
 
-    plaque(this.bg, localW, cardH, { fill: HB.panel, border: HB.line });
+    plaque(this.bg, localW, cardH, { fill: HB.panel });
 
     // Arrow: a 14×7 triangle (local units — it lives inside the scaled card) on the edge that faces
     // the plate.
@@ -142,7 +142,7 @@ export class Popover extends Container implements ShellLayer {
       this.arrow.moveTo(arrowXLocal - 10, edge);
       this.arrow.lineTo(arrowXLocal + 10, edge);
       this.arrow.lineTo(arrowXLocal, p.below ? tip - 3 : tip + 3);
-      this.arrow.fill(HB.line);
+      this.arrow.fill(HB.ink);
       this.arrow.moveTo(arrowXLocal - 6, edge);
       this.arrow.lineTo(arrowXLocal + 6, edge);
       this.arrow.lineTo(arrowXLocal, tip);

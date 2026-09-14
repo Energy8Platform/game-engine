@@ -128,7 +128,7 @@ export class CardModal extends Container implements ShellLayer {
     const bodyH = this.body.outerHeight;
     this.cardH = bodyH + this.actionsH;
 
-    plaque(this.bg, this.cardW, this.cardH, { fill: HB.panel, border: HB.line });
+    plaque(this.bg, this.cardW, this.cardH, { fill: HB.panel });
 
     this.body.position.set(0, 0);
     this.actionsRow.position.set(0, bodyH);
