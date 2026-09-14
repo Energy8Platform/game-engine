@@ -10,7 +10,7 @@ import { plaque } from '../primitives/plaque';
 import { CardModal } from '../primitives/card';
 import { ScrollBox } from '../primitives/scroll';
 import { IconButton, Readout, TextButton } from '../primitives/widgets';
-import { HB, BORDER } from '../theme';
+import { HB, BORDER, RADIUS } from '../theme';
 
 /** Buy-bonus: no frame — over the frosted game a ✕ in the top-right corner, a vertical,
  *  always-scrolling list of mode CARDS (two per row on a wide screen, one otherwise) and a balance /
@@ -241,12 +241,20 @@ export class BuyBonusPage extends Container implements ShellLayer {
     return card;
   }
 
+  /** The hero fills its whole third like `object-fit: cover` — the art keeps its aspect and is
+   *  cropped (top/bottom or sides) to the zone, clipped to the card's rounded left edge. A custom
+   *  node is the game's own layout and is fitted (contain) instead. */
   private buildHero(bonus: BonusOption, w: number, h: number, em: number, price: number, affordable: boolean): Container {
     const hero = new Container();
     hero.addChild(new Graphics().rect(0, 0, w, h).fill({ color: 0, alpha: 0 }));
-    const pad = em * 0.8;
-    const boxW = w - pad * 2;
-    const boxH = h - pad * 2;
+    const clip = new Graphics().roundRect(0, 0, w + RADIUS, h, RADIUS).fill(0xffffff); // square right edge
+    hero.addChild(clip);
+    hero.mask = clip;
+    const cover = (node: Container, nw: number, nh: number): void => {
+      const s = Math.max(w / nw, h / nh);
+      node.scale.set(s);
+      node.position.set((w - nw * s) / 2, (h - nh * s) / 2);
+    };
     if (bonus.custom) {
       const node = bonus.custom({
         bonus,
@@ -257,29 +265,27 @@ export class BuyBonusPage extends Container implements ShellLayer {
         accent: HB.orange,
         select: () => this.select(bonus),
       }) as Container;
+      const pad = em * 0.8;
       const b = node.getLocalBounds();
-      const s = b.width > 0 && b.height > 0 ? Math.min(1, boxW / b.width, boxH / b.height) : 1;
+      const s = b.width > 0 && b.height > 0 ? Math.min(1, (w - pad * 2) / b.width, (h - pad * 2) / b.height) : 1;
       node.scale.set(s);
-      node.position.set(pad + (boxW - b.width * s) / 2 - b.x * s, pad + (boxH - b.height * s) / 2 - b.y * s);
+      node.position.set((w - b.width * s) / 2 - b.x * s, (h - b.height * s) / 2 - b.y * s);
       hero.addChild(persistent(node));
     } else if (bonus.thumbnail) {
       const slot = new Container();
-      slot.position.set(pad, pad);
       hero.addChild(slot);
       Assets.load(bonus.thumbnail)
         .then((tex: Texture) => {
           if (slot.destroyed) return;
           const sp = new Sprite(tex);
-          const s = Math.min(boxW / tex.width, boxH / tex.height);
-          sp.scale.set(s);
-          sp.position.set((boxW - tex.width * s) / 2, (boxH - tex.height * s) / 2);
+          cover(sp, tex.width, tex.height);
           slot.addChild(sp);
         })
         .catch(() => {});
     } else {
-      const size = Math.min(boxW, boxH) * 0.85;
+      const size = Math.max(w, h) * 0.95;
       const bird = makeIcon('bonus', size, { fill: bonus.type === 'feature' ? HB.red : HB.orange });
-      bird.position.set(pad + (boxW - size) / 2, pad + (boxH - size) / 2);
+      bird.position.set((w - size) / 2, (h - size) / 2);
       hero.addChild(bird);
     }
     return hero;
