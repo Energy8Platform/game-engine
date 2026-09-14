@@ -13,6 +13,7 @@
  *    down with the project. (`Loader.write()` on the root tree is a no-op
  *    — measured — so the remove touches no file.)
  */
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Context } from 'cordis';
@@ -42,7 +43,10 @@ export async function apply(ctx: Context, config: ProjectScopeConfig): Promise<v
   if (entryId !== undefined) {
     ctx.effect(() => () => ctx.loader.remove(entryId), 'project-scope:include');
   }
-  await ctx.plugin(composition, { cwd, bootDiagnostics });
+  // A fresh nonce per boot, not per host: reopening the same project is a
+  // new boot too, and its client halves may have been edited meanwhile.
+  const clientNonce = randomUUID().slice(0, 8);
+  await ctx.plugin(composition, { cwd, bootDiagnostics, clientNonce });
   // The GAME's composition (e8.profile.yml + bundles + e8.patch.yml) is a
   // different format from e8.yml above and lives on its own service —
   // see plugins/project.ts's doc comment for why the two are not merged.

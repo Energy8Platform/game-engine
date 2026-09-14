@@ -123,8 +123,6 @@ test('the spin that played is written down, and re-presenting it is not a second
 test('switching base_game from classic to cascade in the IDE presents the SAME spin result differently — live, with no reload', async ({
   page,
 }) => {
-  test.setTimeout(60_000);
-
   await page.goto('/');
   const frame = await gameFrame(page);
   await expect

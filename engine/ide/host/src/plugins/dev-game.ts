@@ -108,13 +108,14 @@ import Server from '@cordisjs/plugin-server';
 import * as session from '@energy8engine/session-dev';
 import { diagnostic, type SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
+import { installErrorBoundary } from '../error-boundary';
 import { runtimeEntryPaths } from './runtime-assets';
 
 /**
  * `runtime-assets.ts` reads this service twice over: its mere PRESENCE
- * switches `/api/composition`'s `runtimeUrl` from the raw
- * `/plugin-runtime/:id` route to `/@fs/<realpath>` served through THIS
- * plugin's own vite instance, and `warmedEntries` lets it say when a row
+ * switches `/api/composition`'s `runtimeUrl` from `null` (nothing to
+ * import into) to `/@fs/<realpath>` served through THIS plugin's own vite
+ * instance, and `warmedEntries` lets it say when a row
  * arrived too late for that vite's dependency crawl.
  *
  * It was empty, deliberately — it used to carry `root`, provided and never
@@ -237,6 +238,9 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     return;
   }
   ctx.provide('devGamePreview', { url: `http://${preview.host}:${preview.port}` });
+  // The root's `URIError → 400` boundary, on this server too: without it a
+  // `/plugin-runtime/%zz` here was the empty 500 the root had already closed.
+  installErrorBoundary(preview);
   // What the page fetches same-origin besides this plugin's own routes.
   // The socket is send-restricted: a game reports, it does not edit e8.yml.
   ctx.ideRpc.attach(preview, { accept: ['game-diagnostics'] });

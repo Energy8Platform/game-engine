@@ -9,8 +9,22 @@ import { IDE_BUILD_HINT, IDE_DIST_DEFAULT, createIdeHost } from '@energy8engine/
 // project folders lists them and opens none.
 const [command = 'ide'] = process.argv.slice(2);
 
+const USAGE = [
+  'usage: e8 [ide|dev]',
+  '',
+  'environment:',
+  '  PORT          the IDE host (default 5679; 0 picks a free port)',
+  '  PREVIEW_PORT  the game preview (default 5681; 0 picks a free port)',
+  "  IDE_DIST      where the built IDE shell is served from (default: this repo's engine/apps/web/dist)",
+  '  IDE_ORIGINS   comma-separated extra origins allowed to write to the IDE API',
+].join('\n');
+
+if (command === '--help' || command === '-h') {
+  console.log(USAGE);
+  process.exit(0);
+}
 if (command !== 'ide' && command !== 'dev') {
-  console.error('usage: e8 [ide|dev]');
+  console.error(USAGE);
   process.exit(1);
 }
 

@@ -10,12 +10,26 @@ import { describe, expect, it } from 'vitest';
  * default) and `[data-theme="light"]` (the light override) — everything
  * else in the file must reference a token, never spell one out.
  */
+/**
+ * Anchored to the start of a line: the two token blocks sit at column 0,
+ * and nothing else does. The earlier `\[data-theme[^{]*{` also swallowed
+ * any rule that merely STARTS with the attribute (`[data-theme='light']
+ * .e8-x { color: #fff }`), which is exactly where a literal would hide.
+ */
+const TOKEN_BLOCKS = /^:root\s*{[^}]*}|^\[data-theme='light'\]\s*{[^}]*}/gm;
+
 describe('styles.css token guard', () => {
-  it('every colour in the stylesheet is a token, not a literal', () => {
-    const css = readFileSync('src/styles.css', 'utf8').replace(
-      /:root\s*{[^}]*}|\[data-theme[^{]*{[^}]*}/g,
-      '',
+  it('strips only the two token blocks, not a themed rule', () => {
+    const themedRule = "[data-theme='light'] .e8-x { color: #fff }";
+    expect(themedRule.replace(TOKEN_BLOCKS, '')).toBe(themedRule);
+    expect(`:root {\n  --e8-fg: #fff;\n}\n${themedRule}`.replace(TOKEN_BLOCKS, '')).toBe(
+      `\n${themedRule}`,
     );
+    expect("[data-theme='light'] {\n  --e8-fg: #000;\n}".replace(TOKEN_BLOCKS, '')).toBe('');
+  });
+
+  it('every colour in the stylesheet is a token, not a literal', () => {
+    const css = readFileSync('src/styles.css', 'utf8').replace(TOKEN_BLOCKS, '');
     // Hex, functional and named forms alike. The named list is the handful
     // that show up in stylesheets by habit; `transparent` and `currentColor`
     // are not colours a palette would own and stay allowed — and neither is
@@ -40,6 +54,19 @@ describe('styles.css token guard', () => {
     const css = readFileSync('src/styles.css', 'utf8');
     const shadows = [...css.matchAll(/box-shadow\s*:\s*([^;]+);/g)].map((m) => m[1].trim());
     expect(shadows.filter((v) => v !== 'none')).toEqual([]);
+  });
+
+  // The sash grip is VS Code's three dots, drawn as a repeating
+  // radial-gradient — the one way to get three of them under the
+  // no-shadow rule above without three elements.
+  it('the sash grip is three gradient dots, not one', () => {
+    const css = readFileSync('src/styles.css', 'utf8');
+    const rule = /\.e8-resize::after\s*{([^}]*)}/.exec(css)![1];
+    expect(rule).toMatch(/radial-gradient\(circle,\s*currentColor/);
+    expect(rule).toMatch(/repeat-y/);
+    expect(rule).not.toMatch(/box-shadow/);
+    const horizontal = /\.e8-resize-y::after\s*{([^}]*)}/.exec(css)![1];
+    expect(horizontal).toMatch(/repeat-x/);
   });
 
   // Two shapes, both tokens: 8px for a card, 4px for a thing inside one.

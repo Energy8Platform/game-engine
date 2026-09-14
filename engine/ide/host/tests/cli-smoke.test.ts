@@ -115,4 +115,24 @@ describe('the real e8 binary', () => {
     expect(stderr).toContain('listing 0 project(s)');
     await expectCleanShutdown();
   }, 20000);
+
+  it('`e8 --help` (and a bad argument) prints the usage naming every environment knob', async () => {
+    const usage = async (arg: string, code: number) => {
+      const { out, exit } = await new Promise<{ out: string; exit: number | null }>((resolve) => {
+        const c = spawn(process.execPath, [CLI_BIN, arg], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        c.stdout!.on('data', (d) => (out += d));
+        c.stderr!.on('data', (d) => (out += d));
+        c.once('exit', (exit) => resolve({ out, exit }));
+      });
+      expect(exit, arg).toBe(code);
+      expect(out, arg).toContain('usage: e8 [ide|dev]');
+      for (const env of ['PORT', 'PREVIEW_PORT', 'IDE_DIST', 'IDE_ORIGINS']) {
+        expect(out, arg).toMatch(new RegExp(`^\\s*${env}\\b.*$`, 'm'));
+      }
+    };
+    await usage('--help', 0);
+    await usage('-h', 0);
+    await usage('bogus', 1);
+  }, 20000);
 });

@@ -573,7 +573,10 @@ label {
    `overflow: auto` card clips anything hung outside it). Modern UI draws
    a grip at the middle and hides it while the pointer is on it; the strip
    itself never fills. VS Code's grip is three dots drawn with box-shadow,
-   which the shadow guard forbids — one 2px dot reads the same.
+   which the shadow guard forbids — a 2px-per-4px repeating radial
+   gradient draws the same three on a 2×12 box, no shadow (a 5px pitch
+   clips the third dot at 12px — rendered and checked). The colour
+   goes through `color` so one gradient serves both orientations.
    `touch-action: none` is what lets a finger drag without the page
    scrolling under it. */
 .e8-resize {
@@ -581,6 +584,7 @@ label {
   z-index: 1;
   touch-action: none;
   background: transparent;
+  color: color-mix(in srgb, var(--e8-fg) 30%, transparent);
 }
 .e8-resize::after {
   content: '';
@@ -588,10 +592,9 @@ label {
   top: 50%;
   left: 50%;
   width: 2px;
-  height: 2px;
-  border-radius: var(--e8-radius-sm);
+  height: 12px;
   transform: translate(-50%, -50%);
-  background: color-mix(in srgb, var(--e8-fg) 30%, transparent);
+  background: radial-gradient(circle, currentColor 1px, transparent 1px) 0 0 / 2px 4px repeat-y;
   pointer-events: none;
 }
 .e8-resize-x {
@@ -607,6 +610,12 @@ label {
   width: 100%;
   height: 5px;
   cursor: row-resize;
+}
+.e8-resize-y::after {
+  width: 12px;
+  height: 2px;
+  background-size: 4px 2px;
+  background-repeat: repeat-x;
 }
 .e8-resize:hover::after,
 .e8-resize:active::after {

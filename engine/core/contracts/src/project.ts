@@ -64,10 +64,10 @@ export interface GameCompositionRow extends ResolvedRow {
   /**
    * `/@fs/<realpath>` when `dev-game` is composed (served straight through
    * its vite instance — TypeScript stripped, bare specifiers rewritten to
-   * resolvable URLs); `/plugin-runtime/<id>` otherwise (the host's own
-   * route, raw bytes, no transform); `null` when there is nothing to load.
+   * resolvable URLs); `null` when there is nothing to load — including a
+   * host with no `dev-game` at all, where the raw bytes would not import.
    *
-   * `null` alone does not say WHY, and the three reasons are not alike:
+   * `null` alone does not say WHY, and the reasons are not alike:
    * a package that declares no runtime half is legal and silent, while an
    * unresolvable package name or an `entry` that is not on disk are
    * author mistakes. The host distinguishes them and puts a `Diagnostic`

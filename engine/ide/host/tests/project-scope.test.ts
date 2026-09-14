@@ -16,6 +16,7 @@ import * as workspace from '../src/plugins/workspace';
 
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
 const WEB_ROOT = join(__dirname, 'fixtures', 'dev-game-web');
+const COMPOSITION = join(__dirname, 'fixtures', 'composition');
 
 let ctx: Context | undefined;
 let dir: string | undefined;
@@ -91,6 +92,25 @@ describe('project-scope: one project, one scope', () => {
     expect(c.get('composition')).toBeUndefined();
   });
 
+  it("every boot mints its own clientNonce, so a browser cannot serve one project's client half to the next from cache", async () => {
+    // `fixtures/composition`'s `probe1` is a row with a client half;
+    // `clientUrl` is what `modules.ts` hands to `import()`, and the
+    // browser's module cache is keyed by that URL alone (spec §2 A6c).
+    const c = await root();
+    const nonces: string[] = [];
+    for (let boot = 0; boot < 2; boot++) {
+      const handle = await bootProjectScope(c, COMPOSITION, 0);
+      const row = (await c.get('composition')!.snapshot()).rows.find(
+        (r) => r.name === 'probe-plugin',
+      )!;
+      const m = /^\/plugin-client\/[0-9a-f]{8}:probe1\?v=([0-9a-f]{8})$/.exec(row.clientUrl!);
+      expect(m, row.clientUrl!).not.toBeNull();
+      nonces.push(m![1]);
+      await handle.dispose();
+    }
+    expect(nonces[0]).not.toBe(nonces[1]);
+  });
+
   it("an e8.yml that is not a composition is the scope's boot diagnostic, and the project still opens", async () => {
     const c = await root();
     await bootProjectScope(c, project('foo: bar\n'), 0);
@@ -152,6 +172,21 @@ describe('project-scope: the game', () => {
     });
     expect(first.type).toBe('workspace');
     socket.close();
+  }, 15_000);
+
+  it('the preview has the same error boundary as the root: a malformed escape is a 400 with a body, not an empty 500', async () => {
+    // `/plugin-runtime/:id` is the one preview route with a named param —
+    // the router `decodeURIComponent`s it while MATCHING (see the boundary's
+    // own doc in src/index.ts), so `%zz` throws before any handler runs.
+    // A path with no param route to match (`/%zz`) never decodes and is
+    // dev-game.test.ts's 405, not this.
+    const c = await root();
+    const handle = await bootProjectScope(c, gameProject(), 0);
+    const res = await fetch(`${handle.previewUrl}/plugin-runtime/%zz`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.diagnostics).toHaveLength(1);
+    expect(body.diagnostics[0].message).toContain('/plugin-runtime/%zz');
   }, 15_000);
 
   it('a busy preview port: a dev-game diagnostic, previewUrl null, the project open', async () => {

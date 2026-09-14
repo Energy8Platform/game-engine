@@ -1,7 +1,11 @@
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Schema from 'schemastery';
+import { Context } from 'cordis';
+import Loader from '@cordisjs/plugin-loader';
 import { createIdeHost, type IdeHost } from '../src/index';
+import { loadComposition } from '../src/composition-file';
+import * as composition from '../src/plugins/composition';
 
 const WORKSPACE = join(__dirname, 'fixtures', 'composition');
 
@@ -56,7 +60,9 @@ describe('composition.snapshot', () => {
     const snapshot = await host.ctx.composition.snapshot();
     const row = snapshot.rows.find((r) => r.name === 'probe-plugin')!;
     expect(row.hot).toBe(true);
-    expect(row.clientUrl).toBe(`/plugin-client/${row.id}`);
+    // Through the real factory the URL carries project-scope's per-boot
+    // nonce — the `clientNonce` block below holds the bare shape.
+    expect(row.clientUrl).toMatch(new RegExp(`^/plugin-client/${row.id}\\?v=[0-9a-f]{8}$`));
   });
 
   // The browser applies a client half through `ctx.plugin()`, and cordis
@@ -108,7 +114,7 @@ describe('composition.snapshot', () => {
     expect(row).toBeDefined();
     // The client half itself is unaffected — this row still resolves and
     // still serves, so the fix is scoped to the schema probe alone.
-    expect(row!.clientUrl).toBe(`/plugin-client/${row!.id}`);
+    expect(row!.clientUrl).toMatch(new RegExp(`^/plugin-client/${row!.id}\\?v=[0-9a-f]{8}$`));
     expect(row!.schema).toBeNull();
     const schemaDiagnostics = snapshot.diagnostics.filter(
       (d) => d.plugin === row!.id && d.where === 'schema',
@@ -222,5 +228,27 @@ describe('composition.snapshot', () => {
     );
     expect(schemaDiagnostics).toHaveLength(1);
     expect(schemaDiagnostics[0].message).toContain('conditional-exports-missing');
+  });
+});
+
+describe('composition: clientNonce', () => {
+  /** The plugin on its own, no project-scope around it — the nonce is whatever the caller passes, or nothing. */
+  async function plugged(clientNonce?: string) {
+    const ctx = new Context();
+    await ctx.plugin(Loader);
+    await loadComposition(ctx, WORKSPACE);
+    await ctx.plugin(composition, { cwd: WORKSPACE, clientNonce });
+    await ctx.loader.await();
+    const row = (await ctx.composition.snapshot()).rows.find((r) => r.name === 'probe-plugin')!;
+    await ctx.fiber.dispose();
+    return row.clientUrl;
+  }
+
+  it('is appended as ?v= when given', async () => {
+    expect(await plugged('abcd1234')).toMatch(/^\/plugin-client\/[0-9a-f]{8}:probe1\?v=abcd1234$/);
+  });
+
+  it('is absent when none is given', async () => {
+    expect(await plugged()).toMatch(/^\/plugin-client\/[0-9a-f]{8}:probe1$/);
   });
 });

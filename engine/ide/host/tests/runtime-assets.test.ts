@@ -31,17 +31,29 @@ describe('GET /api/composition', () => {
     const body = await res.json();
     expect(body.rows.map((r: { id: string }) => r.id)).toEqual(['boot1', 'reels1']);
     // No `dev-game` composed in this test (`e8 ide`-shaped host, not
-    // `e8 dev`) — `runtimeUrl` falls back to the raw route. Both rows
-    // resolve to the real `@energy8engine/boot`/`reels` packages (this
-    // fixture references them by their real names — see
-    // `fixtures/project-simple/bundles/e8-base/e8.bundle.yml`), and both
-    // now declare `e8.runtime`, so neither comes back `null`.
-    expect(body.rows.find((r: { id: string }) => r.id === 'boot1').runtimeUrl).toBe(
-      '/plugin-runtime/boot1',
-    );
-    expect(body.rows.find((r: { id: string }) => r.id === 'reels1').runtimeUrl).toBe(
-      '/plugin-runtime/reels1',
-    );
+    // `e8 dev`) — there is no vite to serve a row's TypeScript, so
+    // `runtimeUrl` is `null` (the loader's "nothing to load"), NOT the
+    // raw `/plugin-runtime/<id>` route a browser's native `import()`
+    // would choke on. Both rows resolve to the real `@energy8engine/boot`/
+    // `reels` packages and declare `e8.runtime`, so the `null` is the
+    // missing preview alone — no diagnostic rides along.
+    for (const id of ['boot1', 'reels1']) {
+      expect(body.rows.find((r: { id: string }) => r.id === id).runtimeUrl).toBeNull();
+    }
+    expect(body.diagnostics).toEqual([]);
+
+    // Once `devGameRoot` shows up (a stand-in here; the real plugin is
+    // dev-game.test.ts's), the same rows get vite's `/@fs/` URL.
+    await host.ctx.plugin({
+      name: 'fake-dev-game-root',
+      apply(ctx: Context) {
+        ctx.provide('devGameRoot', {});
+      },
+    });
+    const after = await (await fetch(`${host.url}/api/composition`)).json();
+    for (const id of ['boot1', 'reels1']) {
+      expect(after.rows.find((r: { id: string }) => r.id === id).runtimeUrl).toMatch(/^\/@fs\//);
+    }
   });
 
   it('carries the project diagnostics with the composition', async () => {
@@ -499,7 +511,8 @@ describe('GET /api/composition', () => {
     // dropped, not corrupted by the broken row ahead of it in the same
     // `.map()`.
     const healthyRow = body.rows.find((r: { id: string }) => r.id === 'healthy1');
-    expect(healthyRow.runtimeUrl).toBe('/plugin-runtime/healthy1');
+    expect(healthyRow.name).toBe('healthy-plugin');
+    expect(healthyRow.runtimeUrl).toBeNull(); // no dev-game here — see the first test above
     expect(body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'healthy1')).toEqual([]);
   });
 

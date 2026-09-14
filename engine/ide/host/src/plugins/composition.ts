@@ -44,6 +44,14 @@ export interface CompositionConfig {
    * blameless screen.
    */
   bootDiagnostics?: Diagnostic[];
+  /**
+   * Appended to every `clientUrl` as `?v=<nonce>`. The browser's module
+   * cache is keyed by URL alone, so a row whose id repeats across boots
+   * (another project, or this one reopened after an edit) would otherwise
+   * get the earlier boot's client half from cache; `project-scope` mints
+   * one per boot (spec §2 A6c).
+   */
+  clientNonce?: string;
 }
 
 /**
@@ -442,7 +450,9 @@ export function apply(ctx: Context, config: CompositionConfig) {
           config: entry.options.config ?? {},
           schema: schemaResult.schema,
           hot: parsed.manifest?.hot ?? false,
-          clientUrl: parsed.manifest?.client ? `/plugin-client/${entry.id}` : null,
+          clientUrl: parsed.manifest?.client
+            ? `/plugin-client/${entry.id}${config.clientNonce ? `?v=${config.clientNonce}` : ''}`
+            : null,
           // Sent even for a row the composition has switched off. The
           // browser needs both facts, and they are different ones: a null
           // `clientUrl` means "this package has no client half at all",

@@ -62,8 +62,8 @@ export interface RuntimeAssetsConfig {
  * no game, so nothing on it ever imports a runtime half — `engine/apps/web/
  * vite.config.ts` says the same from the IDE's side. Under `e8 dev` every
  * `runtimeUrl` comes out `/@fs/<realpath>` and nothing asks for this
- * route; a host with no `dev-game` hands out `/plugin-runtime/<id>` URLs
- * that no server answers — and has no page to import them either. It also
+ * route; a host with no `dev-game` hands out `null` — it has no page to
+ * import anything into, and the raw bytes would not import anyway. It also
  * carries its own realpath containment check, re-derived at request time
  * from whatever is on disk right now — see task-6-brief.md: that check
  * used to be the ONLY one, and the `/@fs/` URL had none of its own,
@@ -124,10 +124,10 @@ export interface RuntimeAssetsConfig {
  * rewritten to vite's optimized-deps URLs; measured directly, see
  * task-8-report.md's appended finding). So each row in `/api/composition`'s
  * response now carries `runtimeUrl`: `/@fs/<realpath of the entry>` when
- * `dev-game` is present, `/plugin-runtime/<id>` (this file's own raw
- * route, unchanged) when it is not — a project with no usable
+ * `dev-game` is present, `null` when it is not — a project with no usable
  * `game/spec.json` opens without `dev-game`, and so without a vite
- * instance for its game (`project-scope.ts`). `engine/game/loader/src/
+ * instance for its game (`project-scope.ts`), and a URL nothing could
+ * import is worse than none (spec §2 A6a). `engine/game/loader/src/
  * index.ts`'s `composeFromProject` imports whatever URL it's handed
  * rather than constructing one — the same precedent `clientUrl` already
  * set for the EDITOR's own rows (`composition.ts`, consumed by
@@ -283,10 +283,14 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       };
     }
 
-    // Both branches need the entry to exist and stay contained, so the
-    // checks above are not conditional on `dev-game`; only which URL can
-    // serve it is.
-    return { url: devGamePresent ? `/@fs/${realEntryPath}` : `/plugin-runtime/${row.id}` };
+    // The checks above are not conditional on `dev-game` — a mistake is a
+    // mistake whether or not anything could serve the entry. Whether
+    // anything CAN is: without dev-game's vite there is no URL a browser's
+    // native `import()` survives (the raw `/plugin-runtime/:id` bytes are
+    // TypeScript with bare specifiers — the module doc's own measurement),
+    // so the row loads nothing, and `null` is the loader's word for that
+    // (`composeFromProject`: "no runtime half — nothing to load").
+    return { url: devGamePresent ? `/@fs/${realEntryPath}` : null };
   }
 
   const composition: Parameters<Server['get']>[1] = async (_req, res) => {
