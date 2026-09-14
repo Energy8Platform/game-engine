@@ -4,15 +4,19 @@
  * under `e8 dev` semantics, untouched). Every test here fails without the
  * production change it proves; task-7-report.md has the mutation table.
  *
- * `e8-server` is counted by pid through `pgrep`, run WITHOUT a shell and
- * on the binary's own argv shape (`--games-dir` follows the name): a bare
- * `e8-server` pattern also matched the shell that launched Playwright
- * whenever ITS command line mentioned the word (measured: two extra pids).
+ * `e8-server` is counted by pid through `serverPids` (`./project-fixture`,
+ * where its `pgrep` shape is explained) — moved there once `debts.spec.ts`
+ * needed the same pid to kill.
  */
-import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { SECOND_NAME, startHost, workspaceCopy, type WorkspaceHost } from './project-fixture';
+import {
+  SECOND_NAME,
+  serverPids,
+  startHost,
+  workspaceCopy,
+  type WorkspaceHost,
+} from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying to the host on 5679 (every case but 6). */
 const IDE_URL = 'http://127.0.0.1:5680/';
@@ -26,20 +30,6 @@ test.beforeEach(async ({ page }) => {
     delete window.EditContext;
   });
 });
-
-function serverPids(): number[] {
-  try {
-    // POSIX ERE — macOS pgrep has no `\S`/`\d`.
-    return execFileSync('pgrep', ['-f', 'e8-server[^ ]* --port [0-9]+ --games-dir '], {
-      encoding: 'utf8',
-    })
-      .split('\n')
-      .filter(Boolean)
-      .map(Number);
-  } catch {
-    return []; // pgrep exits 1 when nothing matches
-  }
-}
 
 /**
  * Opens `id` from the «Projects» sidebar and waits until its game is really

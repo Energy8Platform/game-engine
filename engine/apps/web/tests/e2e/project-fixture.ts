@@ -13,6 +13,7 @@
  * whose name ends in `.spec` or `.test`, so this one is importable from a
  * spec without becoming one.
  */
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -296,4 +297,26 @@ export async function startHost(
     previewUrl: () => host.ctx.workspace.state().previewUrl,
     stop: () => host.stop(),
   };
+}
+
+/**
+ * The pids of every `e8-server` alive right now — counted by
+ * `workspace.spec.ts` across a switch, and killed by `debts.spec.ts` to
+ * stage a death. `pgrep` runs WITHOUT a shell and on the binary's own argv
+ * shape (`--games-dir` follows the name): a bare `e8-server` pattern also
+ * matched the shell that launched Playwright whenever ITS command line
+ * mentioned the word (measured: two extra pids).
+ */
+export function serverPids(): number[] {
+  try {
+    // POSIX ERE — macOS pgrep has no `\S`/`\d`.
+    return execFileSync('pgrep', ['-f', 'e8-server[^ ]* --port [0-9]+ --games-dir '], {
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean)
+      .map(Number);
+  } catch {
+    return []; // pgrep exits 1 when nothing matches
+  }
 }

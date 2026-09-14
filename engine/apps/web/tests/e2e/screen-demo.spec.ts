@@ -66,7 +66,11 @@ test('a project plugin brings its own screen, no engine change required', async 
     // — `React.createElement` off the shell's own `globalThis.__E8_IDE__`
     // React, not a stub the test would pass against for the wrong reason.
     await button.click();
-    await expect(page.getByRole('tab', { name: 'Demo', exact: true })).toBeVisible();
+    // Not `exact`: the tab's accessible name is computed from its content,
+    // and its close button's `aria-label` (`close Demo`) is part of that —
+    // `Demo close Demo`, measured. Only the BUTTON above shares its word
+    // with the Explorer's rows; the tablist holds one `Demo`.
+    await expect(page.getByRole('tab', { name: 'Demo' })).toBeVisible();
     await expect(page.getByTestId('doc-pane-demo')).toContainText(
       'a document from a project plugin',
     );
