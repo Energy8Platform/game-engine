@@ -106,7 +106,7 @@ import { posix, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
 import * as session from '@energy8engine/session-dev';
-import { diagnostic, type Diagnostic, type SpinResult } from '@energy8engine/contracts';
+import { diagnostic, type SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { runtimeEntryPaths } from './runtime-assets';
 
@@ -224,7 +224,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     preview = previewFiber.ctx.server;
   } catch (error) {
     await previewFiber.dispose();
-    ctx.ideRpc.reportGameDiagnostics([
+    ctx.ideRpc.reportGameDiagnostics('dev-game', [
       diagnostic(
         'error',
         'dev-game',
@@ -317,22 +317,20 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * diagnostics already take — see the route below for why that road is
    * `report`, not `broadcast`.
    *
-   * A clean restart reports nothing. Reporting its empty list would only
-   * re-send the host's list unchanged (`reportGameDiagnostics` records
-   * into a list with no retract, then sends the whole of it), so an
-   * earlier "failed to restart" row stays in the panel after the fix that
-   * cured it — a limit of the primitive, stated rather than papered over.
+   * Every restart reports its result, a clean one included — as the
+   * `session` speaker, whose group the call REPLACES (see
+   * `IdeRpcService.reportGameDiagnostics`). So a clean restart's empty list
+   * is the retract: the "failed to restart" row leaves the panel with the
+   * save that cured it. It used to stay for the life of the project, the
+   * list having no retract at all.
    */
   ctx.on('files/written', ({ path }) => {
     if (!path.endsWith('.spin')) return;
     if (!isInside(gamesDir, resolve(config.root, path))) return;
-    void ctx.session.restart().then(({ diagnostics }) => {
-      if (diagnostics.length > 0) reportToPanel(diagnostics);
-    });
+    void ctx.session
+      .restart()
+      .then(({ diagnostics }) => ctx.ideRpc.reportGameDiagnostics('session', diagnostics));
   });
-
-  const reportToPanel = (diagnostics: Diagnostic[]) =>
-    ctx.ideRpc.reportGameDiagnostics(diagnostics);
 
   /**
    * The row runtime halves vite's dependency optimizer must see BEFORE the
@@ -430,6 +428,33 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       betLevel: body.betLevel ?? config.betLevel,
     });
 
+    // This route runs in the HOST process, not the browser, so nothing on
+    // the game's own side can write these into `ctx.diagnostics` the way
+    // an in-page seam does — the HTTP response below is read by whatever
+    // page made the request, and ONLY a page that relays what it reads
+    // (`first-slot/src/main.ts` does) would otherwise get this any
+    // further. Speaking `game-diagnostics` here too means the IDE panel
+    // sees it unconditionally, the same way it would for a game that
+    // never wires that relay. Reported as the `spin` speaker on EVERY
+    // spin, the clean ones included: a spin's list replaces the last
+    // spin's (see `IdeRpcService.reportGameDiagnostics`), so the first
+    // clean spin after a fix takes the failed one's row back — and
+    // `session`'s own account of a restart is a different speaker, never
+    // overwritten from here.
+    //
+    // Except the one answer that is a WAIT, not a failure: a spin that
+    // lands while `restart()` is between the old process and the new one.
+    // The page that asked gets it as data (the 502 below), and that is
+    // where it stops — the next spin may be minutes away, and a state that
+    // stops being true two seconds later must not sit in the panel until
+    // then. Measured before this: after a fix-and-save the panel still
+    // read "the math engine is restarting — wait for the restart to
+    // finish" while the game was already playing the fixed math.
+    ctx.ideRpc.reportGameDiagnostics(
+      'spin',
+      diagnostics.filter((d) => d.code !== session.RESTARTING),
+    );
+
     // `!result` is never actually reachable alongside an empty
     // `diagnostics` — `SessionService.play()`'s own contract pairs them —
     // but the return type doesn't encode that, and typing this crossing
@@ -440,29 +465,6 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     if (diagnostics.length > 0 || !result) {
       res.status = 502;
       res.json({ diagnostics });
-      // This route runs in the HOST process, not the browser, so nothing
-      // on the game's own side can write these into `ctx.diagnostics` the
-      // way an in-page seam does — the HTTP response above is read by
-      // whatever page made the request, and ONLY a page that relays what
-      // it reads (`first-slot/src/main.ts` does) would otherwise get this
-      // any further. Speaking `game-diagnostics` here too means the IDE
-      // panel sees it unconditionally, the same way it would for a game
-      // that never wires that relay. `report`, not `broadcast`: this route
-      // hands over what just went wrong and `rpc` keeps the HOST's whole
-      // list — otherwise a second failed spin would replace the first on a
-      // reader that replaces per source, with the panel asserting nothing
-      // had been lost.
-      //
-      // Except the one answer that is a WAIT, not a failure: a spin that
-      // lands while `restart()` is between the old process and the new
-      // one. The page that asked gets it as data (the 502 above), and
-      // that is where it stops — the host's list has no retract, so a
-      // state that stops being true two seconds later must not enter it.
-      // Measured before this: after a fix-and-save the panel still read
-      // "the math engine is restarting — wait for the restart to finish"
-      // while the game was already playing the fixed math.
-      const lasting = diagnostics.filter((d) => d.code !== session.RESTARTING);
-      if (lasting.length > 0) reportToPanel(lasting);
       return;
     }
 

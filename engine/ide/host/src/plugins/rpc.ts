@@ -11,7 +11,7 @@ import {
   type Snapshot,
   type WorkspaceState,
 } from '@energy8engine/contracts';
-import { createDiagnostics } from '@energy8engine/diagnostics';
+import { createDiagnostics, type DiagnosticsService } from '@energy8engine/diagnostics';
 
 declare module 'cordis' {
   interface Context {
@@ -30,10 +30,10 @@ declare module 'cordis' {
  */
 export interface IdeRpcService {
   /**
-   * Records what the HOST has just found wrong with the running game, and
-   * sends this host's WHOLE list to every connected client. Unlike the
-   * relay below, there is no "sender" socket to exclude — the host itself
-   * is the origin, not a client passing something on.
+   * Records what one part of the HOST (`speaker`) has just found wrong with
+   * the running game, and sends this host's WHOLE list to every connected
+   * client. Unlike the relay below, there is no "sender" socket to exclude
+   * — the host itself is the origin, not a client passing something on.
    *
    * **Records, not just sends, and the difference is the whole point.**
    * This was `broadcastGameDiagnostics(diagnostics, dropped?)` — it shipped
@@ -45,13 +45,26 @@ export interface IdeRpcService {
    * little believes it has everything. The mechanism built so a panel
    * cannot lie did not cover one of its two sources.
    *
-   * So the host keeps a list of its own, with the same bound, the same
-   * honest `dropped`, and the same "a byte-identical repeat is one entry"
-   * rule the GAME's list uses — it is literally the same
-   * `createDiagnostics()`, which is cordis-free precisely so a host-side
-   * collector can use it (see that package's `runtime.ts` doc).
+   * **Records BY SPEAKER, so a row can be taken back.** The list that fixed
+   * that only ever grew: "failed to restart" outlived the save that cured
+   * it, because nothing could retract a row. The host is not one voice —
+   * `session` (a restart's result), `spin` (one `/api/spin`'s), `dev-game`
+   * (a boot's) each know when what they said stops being true, and only
+   * they do. So the list is a group per speaker: a call REPLACES the
+   * caller's group with the list it hands over, an empty list DELETES the
+   * group, every other speaker's group is untouched, and the frame sent
+   * is the groups concatenated in the order they were first heard (a
+   * deleted-then-heard-again speaker is new again, and goes last). A
+   * caller reports its whole current truth every time — a clean restart
+   * reports `[]`, and that IS the retract.
+   *
+   * Each group is its own `createDiagnostics()` — the same bound, the same
+   * "a byte-identical repeat is one entry" rule the GAME's list uses, and
+   * cordis-free precisely so a host-side collector can use it (see that
+   * package's `runtime.ts` doc). `dropped` is the sum over groups, so the
+   * frame still says honestly how much the whole list forgot.
    */
-  reportGameDiagnostics(diagnostics: Diagnostic[]): void;
+  reportGameDiagnostics(speaker: string, diagnostics: Diagnostic[]): void;
   /** Tells every client which projects exist and which is open — also the FIRST frame on connect. */
   broadcastWorkspace(state: WorkspaceState): void;
   /**
@@ -200,13 +213,15 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
   /**
    * The host's own last frame — see `IdeRpcService.reportGameDiagnostics`.
    * Exactly one slot, never a map keyed by anything: the host is one
-   * speaker with no game of its own to further key by
+   * speaker ON THE WIRE with no game of its own to further key by
    * (`GameDiagnosticsMessage.game` is always absent on a host frame — see
-   * that field's own doc). Not cleared on any disconnect, unlike a named
-   * game's entry: this plugin IS the host process, so there is no "the
-   * host disconnected" event to clear it on. It is reset when the project
-   * it was about LEAVES — see the `workspace/changed` listener at the end
-   * of `apply`.
+   * that field's own doc); its several speakers WITHIN the process
+   * (`groups` below) are folded into this one frame before it leaves. Not
+   * cleared on any disconnect, unlike a named game's entry: this plugin IS
+   * the host process, so there is no "the host disconnected" event to
+   * clear it on. It is `null` again once every group has been retracted,
+   * and reset when the project it was about LEAVES — see the
+   * `workspace/changed` listener at the end of `apply`.
    */
   let lastHostDiagnostics: RetainedFrame | null = null;
 
@@ -256,21 +271,31 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
   };
 
   /**
-   * What the HOST itself has found wrong with the running game, kept whole
-   * — see `IdeRpcService.reportGameDiagnostics`. The same service a game's
-   * own `ctx.diagnostics` is, composed by nobody: it has no cordis
+   * What the HOST itself has found wrong with the running game, one group
+   * per speaker, in first-heard order — see
+   * `IdeRpcService.reportGameDiagnostics`. Each group is the same service a
+   * game's own `ctx.diagnostics` is, composed by nobody: it has no cordis
    * dependency for exactly this reason.
    */
-  let hostDiagnostics = createDiagnostics();
+  const groups = new Map<string, DiagnosticsService>();
 
   const service: IdeRpcService = {
-    reportGameDiagnostics(diagnostics) {
-      for (const d of diagnostics) hostDiagnostics.report(d);
+    reportGameDiagnostics(speaker, diagnostics) {
+      if (!diagnostics.length) groups.delete(speaker);
+      else {
+        const group = createDiagnostics();
+        for (const d of diagnostics) group.report(d);
+        groups.set(speaker, group);
+      }
+      const all = [...groups.values()];
       const frame = {
-        diagnostics: [...hostDiagnostics.list()],
-        dropped: hostDiagnostics.dropped(),
+        diagnostics: all.flatMap((g) => [...g.list()]),
+        dropped: all.reduce((sum, g) => sum + g.dropped(), 0),
       };
-      lastHostDiagnostics = frame;
+      // Retained only while some speaker still has something to say: a
+      // late client is told nothing, not an empty report, once every row
+      // has been taken back (the greeting below draws that line).
+      lastHostDiagnostics = groups.size ? frame : null;
       const message: ServerMessage = { type: 'game-diagnostics', ...frame, source: 'host' };
       for (const socket of clients) send(socket, message);
     },
@@ -468,7 +493,7 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       }
       lastGameDiagnostics.clear();
       gameSocket.clear();
-      hostDiagnostics = createDiagnostics();
+      groups.clear();
       lastHostDiagnostics = null;
       for (const socket of clients) for (const message of gone) send(socket, message);
     }

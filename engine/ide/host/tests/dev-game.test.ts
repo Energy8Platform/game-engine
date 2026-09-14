@@ -949,21 +949,96 @@ describe('dev-game — restart on a script.spin write', () => {
       expect(body.diagnostics[0].message).toMatch(/restarting/);
 
       // After the window: the failure reaches the panel, the wait never did.
-      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBeGreaterThan(0);
+      // (The mid-restart spin itself reports an EMPTY `spin` group — its
+      // retract, see the route — so "a frame arrived" is not "the failure
+      // arrived"; wait for the row.)
+      await expect
+        .poll(() => hostFrames().flatMap((f) => f.diagnostics.map((d) => d.message)), {
+          timeout: 15_000,
+        })
+        .toContainEqual(expect.stringMatching(/failed to restart/));
       for (const frame of hostFrames()) {
         expect(frame.diagnostics.map((d) => d.message)).not.toContainEqual(
           expect.stringMatching(/restarting/),
         );
       }
-      expect(
-        hostFrames()
-          .at(-1)!
-          .diagnostics.map((d) => d.message),
-      ).toContainEqual(expect.stringMatching(/failed to restart/));
     } finally {
       socket.close();
     }
   }, 20_000);
+
+  /**
+   * Debt slice B1: the host's list has speakers, and a speaker's next report
+   * REPLACES its last. `session` reports every restart's result — an empty
+   * list on a clean one, which is the retract: "failed to restart" leaves
+   * the panel with the save that cured it. Measured before this on the
+   * original `dev-game.ts`: a clean restart reported nothing at all (its
+   * own comment said so — "a limit of the primitive"), and the row stayed.
+   */
+  it('a save that fixes the math takes the "failed to restart" row back', async () => {
+    const projectDir = writableProjectWithManifest();
+    const { socket, hostFrames } = await hostOverProject(projectDir);
+    try {
+      const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      expect(await putScript(projectDir, `${original}\nrecord {\n`)).toBe(200);
+      await expect
+        .poll(
+          () =>
+            hostFrames()
+              .at(-1)
+              ?.diagnostics.map((d) => d.message),
+          { timeout: 15_000 },
+        )
+        .toEqual([expect.stringMatching(/failed to restart/)]);
+
+      expect(await putScript(projectDir, original)).toBe(200);
+      await expect.poll(() => hostFrames().at(-1)?.diagnostics, { timeout: 15_000 }).toEqual([]);
+    } finally {
+      socket.close();
+    }
+  }, 25_000);
+
+  /**
+   * The same rule for the `spin` speaker: every spin reports its own
+   * diagnostics, an empty list when it played cleanly — so a spin failure
+   * (here: the one a broken math answers with) leaves the panel with the
+   * first clean spin after the fix. Measured before this on the original
+   * `dev-game.ts`: a clean spin reported nothing (`if (lasting.length > 0)`
+   * around the only call on that route), so the failed spin's row stayed
+   * for the life of the project.
+   */
+  it('a clean spin takes back what an earlier failed spin reported', async () => {
+    const projectDir = writableProjectWithManifest();
+    const { socket, hostFrames } = await hostOverProject(projectDir);
+    const spin = () => fetch(`${preview(host!.ctx)}/api/spin`, { method: 'POST' });
+    try {
+      const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
+      expect(await putScript(projectDir, `${original}\nrecord {\n`)).toBe(200);
+      await expect.poll(() => hostFrames().at(-1)?.diagnostics.length, { timeout: 15_000 }).toBe(1);
+
+      // The spin fails with the session's own startup diagnostic — reported
+      // as `spin`'s row, next to `session`'s: two speakers, two rows.
+      expect((await spin()).status).toBe(502);
+      await expect.poll(() => hostFrames().at(-1)?.diagnostics.length).toBe(2);
+      expect(
+        hostFrames()
+          .at(-1)!
+          .diagnostics.map((d) => d.message),
+      ).toEqual([
+        expect.stringMatching(/failed to restart/),
+        expect.stringMatching(/failed to restart/),
+      ]);
+
+      // The fix retracts `session`'s row; `spin`'s stays until a spin says otherwise…
+      expect(await putScript(projectDir, original)).toBe(200);
+      await expect.poll(() => hostFrames().at(-1)?.diagnostics.length, { timeout: 15_000 }).toBe(1);
+      // …which the first clean spin does.
+      expect((await spin()).status).toBe(200);
+      await expect.poll(() => hostFrames().at(-1)?.diagnostics).toEqual([]);
+    } finally {
+      socket.close();
+    }
+  }, 25_000);
 
   it('a write to a .spin file OUTSIDE gamesDir does not restart the session — the containment axis, not just the extension one', async () => {
     // `notes.txt` (the first version of this test) fails BOTH conjuncts at

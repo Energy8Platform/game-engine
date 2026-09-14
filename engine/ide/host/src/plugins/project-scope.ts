@@ -60,7 +60,7 @@ export async function apply(ctx: Context, config: ProjectScopeConfig): Promise<v
   // cannot be used is reported, and the project is still open.
   const game = await readGameConfig(cwd);
   if (game.diagnostics.length) {
-    ctx.ideRpc.reportGameDiagnostics(game.diagnostics);
+    ctx.ideRpc.reportGameDiagnostics('dev-game', game.diagnostics);
   } else if (game.config) {
     await ctx.plugin(devGame, { ...game.config, port: 0, previewPort: config.previewPort });
   }
