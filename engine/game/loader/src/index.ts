@@ -125,7 +125,10 @@ interface RuntimeHalf {
   apply?: (ctx: Context, config: Record<string, unknown>) => void;
 }
 
-export async function composeFromProject(ctx: Context, options: LoadOptions = {}): Promise<Diagnostic[]> {
+export async function composeFromProject(
+  ctx: Context,
+  options: LoadOptions = {},
+): Promise<Diagnostic[]> {
   // `location` only exists in a real browser; falling back to '' (a
   // relative fetch, resolved by whatever loaded this page) keeps this
   // usable from a test/node context that never passes `origin` either.

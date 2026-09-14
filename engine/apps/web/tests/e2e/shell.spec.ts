@@ -90,9 +90,7 @@ async function editorReady(page: Page, path: string): Promise<void> {
   await pane.getByTestId('editor').click();
 }
 
-test('a project plugin brings an activity button and a document, both usable', async ({
-  page,
-}) => {
+test('a project plugin brings an activity button and a document, both usable', async ({ page }) => {
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
@@ -104,7 +102,9 @@ test('a project plugin brings an activity button and a document, both usable', a
     await page.getByTestId('activity-demo').click({ timeout: 20_000 });
     await expect(page.getByTestId('doc-demo')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('doc-pane-f:demo')).toHaveCount(0); // a contributed key, not a file
-    await expect(page.getByTestId('doc-pane-demo')).toContainText('a document from a project plugin');
+    await expect(page.getByTestId('doc-pane-demo')).toContainText(
+      'a document from a project plugin',
+    );
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -259,13 +259,17 @@ test('F5 on a file tab reopens the editor, with a clean panel', async ({ page })
     await openIde(page, host);
     await openInEditor(page, 'game/script.spin');
     await page.reload();
-    await expect(page.getByTestId('doc-f:game/script.spin')).toHaveAttribute('aria-selected', 'true', {
-      timeout: 20_000,
-    });
-    await editorReady(page, 'game/script.spin');
-    await expect(page.getByTestId('doc-pane-f:game/script.spin').locator('.view-lines')).toContainText(
-      'game',
+    await expect(page.getByTestId('doc-f:game/script.spin')).toHaveAttribute(
+      'aria-selected',
+      'true',
+      {
+        timeout: 20_000,
+      },
     );
+    await editorReady(page, 'game/script.spin');
+    await expect(
+      page.getByTestId('doc-pane-f:game/script.spin').locator('.view-lines'),
+    ).toContainText('game');
     await expect(page.getByTestId('diagnostics-panel')).not.toContainText(/not registered/);
   } finally {
     await host.stop();
@@ -376,7 +380,9 @@ test('the sidebar can be dragged wider, and stays so after a reload', async ({ p
     await page.mouse.move(x + 150, y, { steps: 5 });
     await page.mouse.up();
 
-    await expect.poll(async () => (await sidebar.boundingBox())!.width).toBeCloseTo(before + 150, -1);
+    await expect
+      .poll(async () => (await sidebar.boundingBox())!.width)
+      .toBeCloseTo(before + 150, -1);
     await page.reload();
     await expect(page.getByTestId('sidebar')).toBeVisible();
     expect((await page.getByTestId('sidebar').boundingBox())!.width).toBeCloseTo(before + 150, -1);

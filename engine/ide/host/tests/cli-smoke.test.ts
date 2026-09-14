@@ -50,7 +50,9 @@ async function spawnUntilListening(args: string[], cwd: string) {
 
   const exitedEarly = new Promise<never>((_, reject) => {
     child!.once('exit', (code, signal) => {
-      reject(new Error(`process exited early (code=${code}, signal=${signal}); stderr:\n${out.stderr}`));
+      reject(
+        new Error(`process exited early (code=${code}, signal=${signal}); stderr:\n${out.stderr}`),
+      );
     });
   });
   const listening = new Promise<void>((resolvePromise) => {
@@ -64,7 +66,10 @@ async function spawnUntilListening(args: string[], cwd: string) {
     listening,
     exitedEarly,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`timed out waiting for "listening on"; stderr:\n${out.stderr}`)), 15000),
+      setTimeout(
+        () => reject(new Error(`timed out waiting for "listening on"; stderr:\n${out.stderr}`)),
+        15000,
+      ),
     ),
   ]);
   return out;
@@ -72,9 +77,11 @@ async function spawnUntilListening(args: string[], cwd: string) {
 
 /** SIGTERM → the CLI's own handler calls host.stop() then process.exit(0): a clean code, not a signal-killed one. */
 async function expectCleanShutdown(): Promise<void> {
-  const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
-    child!.once('exit', (code, signal) => resolvePromise({ code, signal }));
-  });
+  const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolvePromise) => {
+      child!.once('exit', (code, signal) => resolvePromise({ code, signal }));
+    },
+  );
   child!.kill('SIGTERM');
   const result = await Promise.race([
     exit,

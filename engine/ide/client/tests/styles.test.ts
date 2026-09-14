@@ -73,7 +73,9 @@ describe('styles.css token guard', () => {
   // A literal `px` in a radius is a third shape nobody decided on.
   it('every border-radius is built from the two radius tokens and 0', () => {
     const css = readFileSync('src/styles.css', 'utf8');
-    const radii = [...css.matchAll(/border-(?:[a-z]+-)*radius\s*:\s*([^;]+);/g)].map((m) => m[1].trim());
+    const radii = [...css.matchAll(/border-(?:[a-z]+-)*radius\s*:\s*([^;]+);/g)].map((m) =>
+      m[1].trim(),
+    );
     expect(radii.length).toBeGreaterThan(0);
     const part = /^(?:var\(--e8-radius-(?:sm|lg)\)|0)$/;
     const bad = radii.filter((v) => !v.split(/\s+/).every((p) => part.test(p)));

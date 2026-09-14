@@ -63,7 +63,7 @@ const SINGLE_ROUND = {
 };
 
 describe('cascade', () => {
-  it('spins to the pre-cascade board (data.grid), not any round\'s post-collapse board', () => {
+  it("spins to the pre-cascade board (data.grid), not any round's post-collapse board", () => {
     expect(plan(CHAIN)[0]).toEqual({ kind: 'spinTo', board: CHAIN.grid });
   });
 

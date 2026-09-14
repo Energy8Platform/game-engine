@@ -21,7 +21,12 @@ function project(id: string, spec?: unknown) {
 /** A scope that records its life; `fail` makes boot reject. */
 function fakeScope(
   log: string[],
-  opts: { fail?: boolean; failClose?: boolean; slowClose?: boolean; previewUrl?: string | null } = {},
+  opts: {
+    fail?: boolean;
+    failClose?: boolean;
+    slowClose?: boolean;
+    previewUrl?: string | null;
+  } = {},
 ) {
   return async (_ctx: Context, cwd: string): Promise<ProjectScopeHandle> => {
     log.push(`open ${cwd}`);
@@ -53,7 +58,11 @@ describe('workspace: what is a project', () => {
     writeFileSync(join(root, 'file-named-e8', 'e8.yml'), '[]');
     mkdirSync(join(root, 'dir-e8yml', 'e8.yml'), { recursive: true }); // e8.yml is a DIRECTORY here
     const ctx = await boot();
-    expect(ctx.workspace.state().projects.map((p) => p.id)).toEqual(['a-slot', 'b-slot', 'file-named-e8']);
+    expect(ctx.workspace.state().projects.map((p) => p.id)).toEqual([
+      'a-slot',
+      'b-slot',
+      'file-named-e8',
+    ]);
     ctx.workspace.state().projects.length = 0; // a caller's copy, not the service's list
     expect(ctx.workspace.state().projects).toHaveLength(3);
   });
@@ -73,7 +82,12 @@ describe('workspace: what is a project', () => {
     writeFileSync(join(root, 'bad-json', 'game', 'spec.json'), '{');
     const ctx = await boot();
     const byId = Object.fromEntries(ctx.workspace.state().projects.map((p) => [p.id, p.name]));
-    expect(byId).toEqual({ named: 'First Slot', unnamed: 'unnamed', 'bad-name': 'bad-name', 'bad-json': 'bad-json' });
+    expect(byId).toEqual({
+      named: 'First Slot',
+      unnamed: 'unnamed',
+      'bad-name': 'bad-name',
+      'bad-json': 'bad-json',
+    });
     expect(ctx.workspace.state().diagnostics).toEqual([]);
   });
 
@@ -95,7 +109,10 @@ describe('workspace: what is a project', () => {
     const ctx = await boot();
     expect(ctx.workspace.state().projects).toEqual([]);
     expect(ctx.workspace.state().diagnostics).toHaveLength(1);
-    expect(ctx.workspace.state().diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'workspace' });
+    expect(ctx.workspace.state().diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'workspace',
+    });
   });
 });
 
@@ -107,7 +124,10 @@ describe('workspace: open, close, switch', () => {
     const changes: string[] = [];
     ctx.on('workspace/changed', (s) => changes.push(String(s.active)));
     expect(await ctx.workspace.open('one')).toEqual([]);
-    expect(ctx.workspace.state()).toMatchObject({ active: 'one', previewUrl: 'http://127.0.0.1:5681' });
+    expect(ctx.workspace.state()).toMatchObject({
+      active: 'one',
+      previewUrl: 'http://127.0.0.1:5681',
+    });
     expect(log).toEqual([`open ${join(root, 'one')}`]);
     expect(changes).toEqual(['one']);
   });
@@ -145,7 +165,11 @@ describe('workspace: open, close, switch', () => {
     ctx.on('workspace/changed', (state) => seen.push(state.active));
     await ctx.workspace.open('one');
     await ctx.workspace.open('two');
-    expect(log).toEqual([`open ${join(root, 'one')}`, `close ${join(root, 'one')}`, `open ${join(root, 'two')}`]);
+    expect(log).toEqual([
+      `open ${join(root, 'one')}`,
+      `close ${join(root, 'one')}`,
+      `open ${join(root, 'two')}`,
+    ]);
     expect(ctx.workspace.state().active).toBe('two');
     // An `active: null` frame goes out BETWEEN the two, before `two` boots:
     // listeners that reset per-project state on a departure (rpc) do it
@@ -159,7 +183,11 @@ describe('workspace: open, close, switch', () => {
     const log: string[] = [];
     const ctx = await boot(log);
     await Promise.all([ctx.workspace.open('one'), ctx.workspace.open('two')]);
-    expect(log).toEqual([`open ${join(root, 'one')}`, `close ${join(root, 'one')}`, `open ${join(root, 'two')}`]);
+    expect(log).toEqual([
+      `open ${join(root, 'one')}`,
+      `close ${join(root, 'one')}`,
+      `open ${join(root, 'two')}`,
+    ]);
   });
 
   it('a scope that fails to boot leaves active null, previewUrl null, and says why', async () => {
@@ -192,7 +220,11 @@ describe('workspace: open, close, switch', () => {
     await ctx.workspace.close();
     expect(ctx.workspace.state().active).toBeNull();
     expect(ctx.workspace.state().diagnostics).toHaveLength(1);
-    expect(ctx.workspace.state().diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'workspace', where: 'one' });
+    expect(ctx.workspace.state().diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'workspace',
+      where: 'one',
+    });
     expect(ctx.workspace.state().diagnostics[0].message).toContain('teardown failed');
     expect(await ctx.workspace.open('two')).toEqual([]);
     expect(ctx.workspace.state().active).toBe('two');

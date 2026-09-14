@@ -85,7 +85,10 @@ export function ViewerDocument({
     ctx.files.read(path).then(({ bytes, diagnostics }) => {
       if (gone) return;
       if (!bytes) {
-        setView({ kind: 'error', message: diagnostics[0]?.message ?? `"${path}" could not be read` });
+        setView({
+          kind: 'error',
+          message: diagnostics[0]?.message ?? `"${path}" could not be read`,
+        });
         for (const diag of diagnostics as Diagnostic[]) ctx.connection.report(diag);
         return;
       }
@@ -117,8 +120,8 @@ export function ViewerDocument({
     case 'binary':
       return (
         <p className="e8-code-error" data-testid="binary">
-          "{path}" doesn't look like text (it contains a NUL byte) and isn't a recognized image,
-          so it isn't shown here.
+          "{path}" doesn't look like text (it contains a NUL byte) and isn't a recognized image, so
+          it isn't shown here.
         </p>
       );
     case 'error':

@@ -104,7 +104,10 @@ describe('createGame — session-dev is imported lazily, not statically', () => 
   });
 
   it('does resolve (and apply) session-dev once config.session is set — proves the mock is genuinely wired, not vacuously passing', async () => {
-    game = await createGame({ session: { gamesDir: '/tmp/unused', port: 0 }, loader: noComposition });
+    game = await createGame({
+      session: { gamesDir: '/tmp/unused', port: 0 },
+      loader: noComposition,
+    });
     expect(moduleEvaluatedSpy).toHaveBeenCalledTimes(1);
     expect(applySpy).toHaveBeenCalledTimes(1);
   });

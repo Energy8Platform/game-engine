@@ -2,10 +2,28 @@ import { describe, expect, it } from 'vitest';
 import { expects, plan } from '../src/index';
 
 const WON = {
-  grid: [[1, 2, 3], [4, 5, 6], [7, 8, 9], [1, 2, 3], [4, 5, 6]],
+  grid: [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
   win: 1.5,
   base_win: 0.5,
-  lines: [{ line: 0, symbol: 1, count: 3, win: 0.5, positions: [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }] }],
+  lines: [
+    {
+      line: 0,
+      symbol: 1,
+      count: 3,
+      win: 0.5,
+      positions: [
+        { col: 0, row: 0 },
+        { col: 1, row: 0 },
+        { col: 2, row: 0 },
+      ],
+    },
+  ],
   cascade_history: [{ grid: [[1]], removed: [{ col: 0, row: 0 }], win: 0.5 }],
 };
 

@@ -20,7 +20,12 @@
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Context } from 'cordis';
-import { type Diagnostic, type Project, type WorkspaceState, diagnostic } from '@energy8engine/contracts';
+import {
+  type Diagnostic,
+  type Project,
+  type WorkspaceState,
+  diagnostic,
+} from '@energy8engine/contracts';
 
 declare module 'cordis' {
   interface Context {
@@ -139,7 +144,13 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
     const cwd = pathOf(id);
     if (cwd === null) {
       openDiagnostics = [
-        diagnostic('error', 'workspace', id, `no project "${id}" in ${config.root}`, 'pick one of the listed projects'),
+        diagnostic(
+          'error',
+          'workspace',
+          id,
+          `no project "${id}" in ${config.root}`,
+          'pick one of the listed projects',
+        ),
       ];
       changed();
       return openDiagnostics;
@@ -156,14 +167,20 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
       openDiagnostics = [];
     } catch (error) {
       openDiagnostics = [
-        diagnostic('error', 'workspace', id, `project "${id}" did not start: ${message(error)}`, 'fix the project and open it again'),
+        diagnostic(
+          'error',
+          'workspace',
+          id,
+          `project "${id}" did not start: ${message(error)}`,
+          'fix the project and open it again',
+        ),
       ];
     }
     changed();
     return openDiagnostics;
   }
 
-  const enqueue = <T,>(task: () => Promise<T>): Promise<T> => {
+  const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
     const next = chain.then(task, task);
     chain = next.catch(() => undefined);
     return next;
@@ -189,10 +206,13 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
   ctx.provide('workspace', service);
   // cordis awaits a disposer's returned thenable: `fiber.dispose()` resolves
   // only once the open scope is really down.
-  ctx.effect(() => () => {
-    disposed = true;
-    return enqueue(doClose);
-  }, 'workspace:close-on-dispose');
+  ctx.effect(
+    () => () => {
+      disposed = true;
+      return enqueue(doClose);
+    },
+    'workspace:close-on-dispose',
+  );
 
   if (rootIsProject) await service.open(projects[0].id);
 }

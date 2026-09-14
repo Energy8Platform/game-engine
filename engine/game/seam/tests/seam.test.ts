@@ -9,9 +9,21 @@ import { selectProvider, type SeamCandidate } from '../src/index';
 // happens to contain the matcher's value (as `session-stake` /
 // `{ buildTarget: 'stake' }` did in an earlier draft of these fixtures —
 // caught by mutation-testing the diagnostic renderer, not by inspection).
-const alpha: SeamCandidate = { seam: 'session', provider: 'session-alpha', matcher: { buildTarget: 'kiosk' } };
-const beta: SeamCandidate = { seam: 'session', provider: 'session-beta', matcher: { default: true } };
-const gamma: SeamCandidate = { seam: 'session', provider: 'session-gamma', matcher: { urlParam: 'sessionToken' } };
+const alpha: SeamCandidate = {
+  seam: 'session',
+  provider: 'session-alpha',
+  matcher: { buildTarget: 'kiosk' },
+};
+const beta: SeamCandidate = {
+  seam: 'session',
+  provider: 'session-beta',
+  matcher: { default: true },
+};
+const gamma: SeamCandidate = {
+  seam: 'session',
+  provider: 'session-gamma',
+  matcher: { urlParam: 'sessionToken' },
+};
 
 describe('selectProvider', () => {
   it('picks the single matching provider', () => {
@@ -21,7 +33,9 @@ describe('selectProvider', () => {
   });
 
   it('a specific matcher beats { default: true }', () => {
-    const { provider, diagnostics } = selectProvider('session', [beta, alpha], { buildTarget: 'kiosk' });
+    const { provider, diagnostics } = selectProvider('session', [beta, alpha], {
+      buildTarget: 'kiosk',
+    });
     expect(provider).toBe('session-alpha');
     expect(diagnostics).toEqual([]);
   });
@@ -32,7 +46,9 @@ describe('selectProvider', () => {
   });
 
   it('zero candidates lists what was considered, and why each was rejected', () => {
-    const { provider, diagnostics } = selectProvider('session', [alpha], { buildTarget: 'showroom' });
+    const { provider, diagnostics } = selectProvider('session', [alpha], {
+      buildTarget: 'showroom',
+    });
     expect(provider).toBeNull();
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message).toContain('session-alpha');
@@ -48,8 +64,14 @@ describe('selectProvider', () => {
   });
 
   it('two equally-specific candidates is a diagnostic naming BOTH', () => {
-    const delta: SeamCandidate = { seam: 'session', provider: 'session-delta', matcher: { buildTarget: 'kiosk' } };
-    const { provider, diagnostics } = selectProvider('session', [alpha, delta], { buildTarget: 'kiosk' });
+    const delta: SeamCandidate = {
+      seam: 'session',
+      provider: 'session-delta',
+      matcher: { buildTarget: 'kiosk' },
+    };
+    const { provider, diagnostics } = selectProvider('session', [alpha, delta], {
+      buildTarget: 'kiosk',
+    });
     expect(provider).toBeNull();
     // Neither name is a substring of the other, so each assertion below
     // can only pass if that specific provider is actually listed.
@@ -60,13 +82,19 @@ describe('selectProvider', () => {
   });
 
   it('two defaults are also ambiguous — "default" is not a tiebreak', () => {
-    const epsilon: SeamCandidate = { seam: 'session', provider: 'session-epsilon', matcher: { default: true } };
+    const epsilon: SeamCandidate = {
+      seam: 'session',
+      provider: 'session-epsilon',
+      matcher: { default: true },
+    };
     const { provider } = selectProvider('session', [beta, epsilon], {});
     expect(provider).toBeNull();
   });
 
   it('urlParam matcher reads the passed env, never a global location', () => {
-    const { provider } = selectProvider('session', [gamma, beta], { urlParams: { sessionToken: 'abc' } });
+    const { provider } = selectProvider('session', [gamma, beta], {
+      urlParams: { sessionToken: 'abc' },
+    });
     expect(provider).toBe('session-gamma');
   });
 
@@ -92,7 +120,9 @@ describe('selectProvider', () => {
 describe('selectProvider — malformed matchers', () => {
   it('a matcher with no discriminator set is illegal, not merely inert', () => {
     const zeta: SeamCandidate = { seam: 'session', provider: 'session-zeta', matcher: {} };
-    const { provider, diagnostics } = selectProvider('session', [zeta, alpha], { buildTarget: 'kiosk' });
+    const { provider, diagnostics } = selectProvider('session', [zeta, alpha], {
+      buildTarget: 'kiosk',
+    });
     // The well-formed candidate still resolves...
     expect(provider).toBe('session-alpha');
     // ...but the malformed one is named, with its (empty) matcher shown,
@@ -159,7 +189,9 @@ describe('selectProvider — malformed matchers', () => {
       provider: 'session-kappa',
       matcher: { urlParam: 'sessionRef', default: true },
     };
-    const { provider, diagnostics } = selectProvider('session', [kappa], { urlParams: { sessionRef: 'abc' } });
+    const { provider, diagnostics } = selectProvider('session', [kappa], {
+      urlParams: { sessionRef: 'abc' },
+    });
     expect(provider).toBeNull();
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message).toContain('session-kappa');
@@ -178,7 +210,9 @@ describe('selectProvider — malformed matchers', () => {
       provider: 'session-iota',
       matcher: { buildTarget: 'lobby', default: true },
     };
-    const { provider, diagnostics } = selectProvider('session', [iota, beta], { buildTarget: 'lobby' });
+    const { provider, diagnostics } = selectProvider('session', [iota, beta], {
+      buildTarget: 'lobby',
+    });
     // The malformed candidate is excluded; the genuine default wins instead.
     expect(provider).toBe('session-beta');
     expect(diagnostics).toHaveLength(1);

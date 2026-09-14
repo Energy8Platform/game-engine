@@ -133,7 +133,8 @@ export function apply(ctx: Context) {
       const result: (M & { component: ComponentType<any> })[] = [];
       for (const id of entries.keys()) {
         const entry = entries.get(id);
-        if (entry && entry.name === slotName) result.push(entry as M & { component: ComponentType<any> });
+        if (entry && entry.name === slotName)
+          result.push(entry as M & { component: ComponentType<any> });
       }
       return result;
     },

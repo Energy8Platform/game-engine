@@ -581,7 +581,11 @@ describe('Shell', () => {
     // are `<button>`, so `getAllByRole('button')` inside it can't pick up
     // its own container by accident.
     const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
-    expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z', 'activity-y']);
+    expect(buttons.map((b) => b.dataset.testid)).toEqual([
+      'activity-a',
+      'activity-z',
+      'activity-y',
+    ]);
   });
 
   it('a contribution with no order sorts after every one that has one', () => {
@@ -589,7 +593,10 @@ describe('Shell', () => {
     // every screen that has one": registered FIRST, with no order, it
     // still draws last — and after `z`'s 9, not just after `a`'s 1.
     const ctx = harness();
-    ctx.slots.register({ name: 'shell.activity', key: 'n', title: 'N', icon: 'n', opens: 'sidebar' }, Nop);
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'n', title: 'N', icon: 'n', opens: 'sidebar' },
+      Nop,
+    );
     ctx.slots.register(
       { name: 'shell.activity', key: 'z', title: 'Z', icon: 'z', order: 9, opens: 'sidebar' },
       Nop,
@@ -600,7 +607,11 @@ describe('Shell', () => {
     );
     render(<Shell ctx={ctx} />);
     const buttons = within(screen.getByTestId('activity-bar')).getAllByRole('button');
-    expect(buttons.map((b) => b.dataset.testid)).toEqual(['activity-a', 'activity-z', 'activity-n']);
+    expect(buttons.map((b) => b.dataset.testid)).toEqual([
+      'activity-a',
+      'activity-z',
+      'activity-n',
+    ]);
   });
 
   it('leaves the main landmark to the document that owns one', () => {
@@ -637,7 +648,13 @@ describe('Shell', () => {
   it('an activity button that opens a document opens ONE tab, and again activates it', async () => {
     const ctx = harness();
     ctx.slots.register(
-      { name: 'shell.activity', key: 'composition', title: 'Composition', icon: 'c', opens: 'document' },
+      {
+        name: 'shell.activity',
+        key: 'composition',
+        title: 'Composition',
+        icon: 'c',
+        opens: 'document',
+      },
       Nop,
     );
     ctx.slots.register({ name: 'shell.document', key: 'composition', title: 'Composition' }, () => (
@@ -759,7 +776,12 @@ describe('Shell', () => {
     // fake would pass a content check and still have lost cursor, scroll
     // and undo.
     const ctx = harness();
-    ctx.shell.open({ key: 'a', title: 'A', component: () => <input data-testid="a-input" />, closable: true });
+    ctx.shell.open({
+      key: 'a',
+      title: 'A',
+      component: () => <input data-testid="a-input" />,
+      closable: true,
+    });
     ctx.shell.open({ key: 'b', title: 'B', component: () => <div>B</div>, closable: true });
     render(<Shell ctx={ctx} />);
     await userEvent.click(screen.getByTestId('doc-a'));
@@ -865,14 +887,22 @@ describe('Shell', () => {
     const root = () => screen.getByTestId('shell');
     expect(root().style.getPropertyValue('--e8-sidebar-w')).toBe('');
     await userEvent.pointer([
-      { keys: '[MouseLeft>]', target: screen.getByTestId('resize-sidebar'), coords: { x: 10, y: 0 } },
+      {
+        keys: '[MouseLeft>]',
+        target: screen.getByTestId('resize-sidebar'),
+        coords: { x: 10, y: 0 },
+      },
       { coords: { x: 310, y: 0 } },
       { keys: '[/MouseLeft]' },
     ]);
     // jsdom measures every box as 0, so the start is 0 and the drag alone is the width.
     expect(root().style.getPropertyValue('--e8-sidebar-w')).toBe('300px');
     await userEvent.pointer([
-      { keys: '[MouseLeft>]', target: screen.getByTestId('resize-panel'), coords: { x: 0, y: 500 } },
+      {
+        keys: '[MouseLeft>]',
+        target: screen.getByTestId('resize-panel'),
+        coords: { x: 0, y: 500 },
+      },
       { coords: { x: 0, y: 250 } }, // up = taller
       { keys: '[/MouseLeft]' },
     ]);
@@ -893,7 +923,7 @@ describe('Shell', () => {
     expect(screen.getByTestId('doc-opening')).toHaveTextContent('demo');
   });
 
-  it('Cmd+S and Ctrl+S on a document that is not an editor are swallowed, not the browser\'s save-page dialog', () => {
+  it("Cmd+S and Ctrl+S on a document that is not an editor are swallowed, not the browser's save-page dialog", () => {
     // A2: the editor's own listener answers only on its tab; on any other
     // tab the keystroke used to reach the browser. The shell swallows it
     // once, for every tab; the editor still saves on its own.

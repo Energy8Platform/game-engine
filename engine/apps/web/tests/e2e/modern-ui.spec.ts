@@ -27,7 +27,10 @@ async function openIde(page: Page, host: DevHost, hash = ''): Promise<void> {
 
 /** A `:root` token as the browser resolved it. */
 function token(page: Page, name: string): Promise<string> {
-  return page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
+  return page.evaluate(
+    (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(),
+    name,
+  );
 }
 
 /** `#rrggbb` → the `rgb(r, g, b)` form `getComputedStyle` returns for backgrounds. */
@@ -40,10 +43,15 @@ function style(page: Page, selector: string, prop: string, pseudo?: string): Pro
   return page
     .locator(selector)
     .first()
-    .evaluate((el, [p, ps]) => getComputedStyle(el, ps || null).getPropertyValue(p), [prop, pseudo ?? '']);
+    .evaluate(
+      (el, [p, ps]) => getComputedStyle(el, ps || null).getPropertyValue(p),
+      [prop, pseudo ?? ''],
+    );
 }
 
-test('activity bar and sidebar are one card, the editor another, the panel a third — 4px apart, 8px corners', async ({ page }) => {
+test('activity bar and sidebar are one card, the editor another, the panel a third — 4px apart, 8px corners', async ({
+  page,
+}) => {
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
@@ -57,7 +65,9 @@ test('activity bar and sidebar are one card, the editor another, the panel a thi
     expect(activity.width).toBe(56);
     expect(await style(page, '.e8-editors', 'border-top-left-radius')).toBe('8px');
     expect(await style(page, '[data-testid="activity-bar"]', 'border-top-left-radius')).toBe('8px');
-    expect(await style(page, '[data-testid="activity-bar"]', 'border-top-right-radius')).toBe('0px');
+    expect(await style(page, '[data-testid="activity-bar"]', 'border-top-right-radius')).toBe(
+      '0px',
+    );
     expect(await style(page, '[data-testid="activity-bar"]', 'border-right-width')).toBe('0px');
     expect(await style(page, '[data-testid="sidebar"]', 'border-top-left-radius')).toBe('0px');
     expect(await style(page, '[data-testid="sidebar"]', 'border-top-right-radius')).toBe('8px');
@@ -75,7 +85,9 @@ test('with the sidebar collapsed the activity bar closes its own card', async ({
     await page.getByTestId('activity-explorer').click();
     await expect(page.getByTestId('sidebar')).toBeHidden();
     for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
-      expect(await style(page, '[data-testid="activity-bar"]', `border-${corner}-radius`)).toBe('8px');
+      expect(await style(page, '[data-testid="activity-bar"]', `border-${corner}-radius`)).toBe(
+        '8px',
+      );
     }
     expect(await style(page, '[data-testid="activity-bar"]', 'border-right-width')).toBe('1px');
     const activity = (await page.getByTestId('activity-bar').boundingBox())!;
@@ -87,7 +99,9 @@ test('with the sidebar collapsed the activity bar closes its own card', async ({
   }
 });
 
-test('the active tab is a pill on the selected colour, with no line under it or the strip', async ({ page }) => {
+test('the active tab is a pill on the selected colour, with no line under it or the strip', async ({
+  page,
+}) => {
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
@@ -97,7 +111,9 @@ test('the active tab is a pill on the selected colour, with no line under it or 
     expect(await style(page, tab, 'border-bottom-width')).toBe('0px');
     expect(await style(page, tab, 'border-right-width')).toBe('0px');
     expect(await style(page, tab, 'border-top-left-radius')).toBe('4px');
-    expect(await style(page, tab, 'background-color')).toBe(rgb(await token(page, '--e8-selected')));
+    expect(await style(page, tab, 'background-color')).toBe(
+      rgb(await token(page, '--e8-selected')),
+    );
     expect(await style(page, '[data-testid="doc-tabs"]', 'border-bottom-width')).toBe('0px');
     const strip = (await page.getByTestId('doc-tabs').boundingBox())!;
     const pill = (await page.locator(tab).boundingBox())!;
@@ -136,8 +152,12 @@ test('the status bar lies on the window ground with no line above it', async ({ 
   try {
     await openIde(page, host, '#/doc/composition');
     expect(await style(page, '[data-testid="status-bar"]', 'border-top-width')).toBe('0px');
-    expect(await style(page, '[data-testid="status-bar"]', 'background-color')).toBe(rgb(await token(page, '--e8-shell-bg')));
-    expect(await style(page, '[data-testid="shell"]', 'background-color')).toBe(rgb(await token(page, '--e8-shell-bg')));
+    expect(await style(page, '[data-testid="status-bar"]', 'background-color')).toBe(
+      rgb(await token(page, '--e8-shell-bg')),
+    );
+    expect(await style(page, '[data-testid="shell"]', 'background-color')).toBe(
+      rgb(await token(page, '--e8-shell-bg')),
+    );
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -149,7 +169,15 @@ test('nothing in the shell casts a shadow', async ({ page }) => {
   const host = await startDevHost(dir);
   try {
     await openIde(page, host, '#/doc/composition');
-    for (const sel of ['[data-testid="shell"]', '[data-testid="sidebar"]', '.e8-editors', '[data-testid="panel"]', '[data-testid="status-bar"]', '[data-testid="doc-composition"]', '[data-testid="activity-bar"]']) {
+    for (const sel of [
+      '[data-testid="shell"]',
+      '[data-testid="sidebar"]',
+      '.e8-editors',
+      '[data-testid="panel"]',
+      '[data-testid="status-bar"]',
+      '[data-testid="doc-composition"]',
+      '[data-testid="activity-bar"]',
+    ]) {
       expect(await style(page, sel, 'box-shadow'), sel).toBe('none');
     }
   } finally {
@@ -166,7 +194,11 @@ test('the light theme repaints the ground, the cards and Monaco together', async
     await page.getByTestId('explorer-game/script.spin').click();
     const pane = page.getByTestId('doc-pane-f:game/script.spin');
     await expect(pane.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });
-    const monacoBg = () => pane.locator('.monaco-editor').first().evaluate((el) => getComputedStyle(el).backgroundColor);
+    const monacoBg = () =>
+      pane
+        .locator('.monaco-editor')
+        .first()
+        .evaluate((el) => getComputedStyle(el).backgroundColor);
 
     expect(await token(page, '--e8-shell-bg')).toBe('#181818');
     expect(await style(page, '.e8-editors', 'background-color')).toBe('rgb(31, 31, 31)');
@@ -176,7 +208,9 @@ test('the light theme repaints the ground, the cards and Monaco together', async
     await expect.poll(() => token(page, '--e8-shell-bg')).toBe('#f8f8f8');
     expect(await style(page, '.e8-editors', 'background-color')).toBe('rgb(255, 255, 255)');
     await expect.poll(monacoBg).toBe('rgb(255, 255, 255)');
-    expect(await style(page, '[data-testid="status-bar"]', 'background-color')).toBe('rgb(248, 248, 248)');
+    expect(await style(page, '[data-testid="status-bar"]', 'background-color')).toBe(
+      'rgb(248, 248, 248)',
+    );
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

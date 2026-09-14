@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { resolveComposition } from '../src/index';
 
-const base = { name: 'e8-base', rows: [
-  { id: 'boot1', name: '@energy8engine/boot' },
-  { id: 'reels1', name: '@energy8engine/reels', config: { speed: 1 } },
-]};
+const base = {
+  name: 'e8-base',
+  rows: [
+    { id: 'boot1', name: '@energy8engine/boot' },
+    { id: 'reels1', name: '@energy8engine/reels', config: { speed: 1 } },
+  ],
+};
 
 describe('resolveComposition', () => {
   it('stacks bundles in profile order', () => {
     const extra = { name: 'e8-extra', rows: [{ id: 'x1', name: '@e/x' }] };
     const { composition } = resolveComposition({
       profile: { bundles: ['e8-base', 'e8-extra'] },
-      bundles: new Map([['e8-base', base], ['e8-extra', extra]]),
+      bundles: new Map([
+        ['e8-base', base],
+        ['e8-extra', extra],
+      ]),
       patches: [],
     });
     expect(composition.rows.map((r) => r.id)).toEqual(['boot1', 'reels1', 'x1']);
@@ -19,7 +25,9 @@ describe('resolveComposition', () => {
 
   it('records which bundle placed each row', () => {
     const { composition } = resolveComposition({
-      profile: { bundles: ['e8-base'] }, bundles: new Map([['e8-base', base]]), patches: [],
+      profile: { bundles: ['e8-base'] },
+      bundles: new Map([['e8-base', base]]),
+      patches: [],
     });
     expect(composition.rows[0].from).toBe('bundle:e8-base');
   });
@@ -31,7 +39,7 @@ describe('resolveComposition', () => {
       patches: [{ layer: 'patch', rows: [{ id: 'reels1', config: { grid: 5 } }] }],
     });
     const reels = composition.rows.find((r) => r.id === 'reels1')!;
-    expect(reels.config).toEqual({ grid: 5 });   // NOT { speed: 1, grid: 5 }
+    expect(reels.config).toEqual({ grid: 5 }); // NOT { speed: 1, grid: 5 }
     expect(reels.from).toBe('patch');
   });
 
@@ -91,7 +99,10 @@ describe('resolveComposition', () => {
     const clash = { name: 'e8-clash', rows: [{ id: 'reels1', name: '@e/other' }] };
     const { composition, diagnostics } = resolveComposition({
       profile: { bundles: ['e8-base', 'e8-clash'] },
-      bundles: new Map([['e8-base', base], ['e8-clash', clash]]),
+      bundles: new Map([
+        ['e8-base', base],
+        ['e8-clash', clash],
+      ]),
       patches: [],
     });
     expect(composition.rows.find((r) => r.id === 'reels1')!.name).toBe('@e/other');
@@ -102,14 +113,17 @@ describe('resolveComposition', () => {
     const clash = { name: 'e8-clash', rows: [{ id: 'reels1', name: '@e/other' }] };
     const { composition, diagnostics } = resolveComposition({
       profile: { bundles: ['e8-base', 'e8-clash'] },
-      bundles: new Map([['e8-base', base], ['e8-clash', clash]]),
+      bundles: new Map([
+        ['e8-base', base],
+        ['e8-clash', clash],
+      ]),
       patches: [],
     });
     const reels = composition.rows.find((r) => r.id === 'reels1')!;
     expect(reels.name).toBe('@e/other');
-    expect(reels.from).toBe('bundle:e8-clash');          // the winner, not the first placer
+    expect(reels.from).toBe('bundle:e8-clash'); // the winner, not the first placer
     const message = diagnostics.find((d) => d.plugin === 'reels1')!.message;
-    expect(message).toContain('e8-base');                // the loser is named too
+    expect(message).toContain('e8-base'); // the loser is named too
     expect(message).toContain('e8-clash');
   });
 

@@ -473,7 +473,9 @@ describe('EditorDocument', () => {
     render(<EditorDocument ctx={ctx} path="game/script.spin" />);
     type(await screen.findByTestId('editor'), 'xy');
     await userEvent.keyboard('{Meta>}s{/Meta}');
-    await waitFor(() => expect(calls.some((u) => u.includes('/api/files/game/script.spin'))).toBe(true));
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('/api/files/game/script.spin'))).toBe(true),
+    );
     expect(ctx.files.written).toEqual([['game/script.spin', [120, 121]]]);
     await userEvent.keyboard('{Control>}s{/Control}');
     await waitFor(() => expect(ctx.files.written).toHaveLength(2));

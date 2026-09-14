@@ -55,9 +55,9 @@ describe('reels runtime half', () => {
     // No `assets` provided anywhere, and no `resolve` in the config —
     // this throws, which is how a row reports failure: the loader turns
     // it into a Diagnostic naming the row.
-    await expect(
-      ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } }),
-    ).rejects.toThrow(/resolver/i);
+    await expect(ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } })).rejects.toThrow(
+      /resolver/i,
+    );
 
     await ctx.fiber.dispose();
   });

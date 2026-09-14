@@ -55,7 +55,10 @@ describe('createGame composes from the project', () => {
     const mount = document.createElement('div');
     const game = await createGame({
       mount,
-      loader: { fetchFn: fakeFetch({ rows: [row('reels1')], diagnostics: [] }), importModule: importHalf },
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('reels1')], diagnostics: [] }),
+        importModule: importHalf,
+      },
     });
     expect(game.ctx.renderer).toBeUndefined();
     // Visible text, not a field: `boot` already knows how to draw the reason,
@@ -121,7 +124,9 @@ describe('createGame composes from the project', () => {
     expect((game.ctx as unknown as { renderer: { gl?: boolean } }).renderer.gl).toBe(true);
     // And the row that reads the seam saw it — the winner applied BEFORE
     // it, in the losing candidate's position, not after it at the end.
-    expect((game.ctx as unknown as { stageRenderer: { gl?: boolean } }).stageRenderer.gl).toBe(true);
+    expect((game.ctx as unknown as { stageRenderer: { gl?: boolean } }).stageRenderer.gl).toBe(
+      true,
+    );
     // Nothing was drawn over the game.
     expect(mount.textContent).toBe('');
   });

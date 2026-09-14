@@ -67,7 +67,9 @@ test('a project plugin brings its own screen, no engine change required', async 
     // React, not a stub the test would pass against for the wrong reason.
     await button.click();
     await expect(page.getByRole('tab', { name: 'Demo', exact: true })).toBeVisible();
-    await expect(page.getByTestId('doc-pane-demo')).toContainText('a document from a project plugin');
+    await expect(page.getByTestId('doc-pane-demo')).toContainText(
+      'a document from a project plugin',
+    );
 
     // The half of the claim a static `div` could never make: this number
     // comes from `ctx.gameComposition`, read through the plugin's OWN

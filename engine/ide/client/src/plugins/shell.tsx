@@ -216,7 +216,9 @@ export function apply(ctx: Context) {
     return ctx.slots.list<SlotMeta & DocumentMeta>(SLOT_NAMES.document);
   }
 
-  function findContributed(key: string): (DocumentMeta & { component: ComponentType<any> }) | undefined {
+  function findContributed(
+    key: string,
+  ): (DocumentMeta & { component: ComponentType<any> }) | undefined {
     return contributedDocuments().find((entry) => entry.key === key);
   }
 
@@ -321,7 +323,11 @@ export function apply(ctx: Context) {
     for (const key of contributed) {
       if (findContributed(key) !== undefined) continue;
       remove(key);
-      report(key, 'document withdrawn by its plugin', 'the plugin that contributed it was unloaded');
+      report(
+        key,
+        'document withdrawn by its plugin',
+        'the plugin that contributed it was unloaded',
+      );
     }
     if (pending === undefined) return;
     const found = findContributed(pending);
@@ -369,7 +375,11 @@ export function apply(ctx: Context) {
       }
       const found = findContributed(key);
       if (!found) {
-        report(key, `no document is registered for "${key}"`, 'register it on the shell.document slot');
+        report(
+          key,
+          `no document is registered for "${key}"`,
+          'register it on the shell.document slot',
+        );
         return;
       }
       openFoundContributed(found, replace);

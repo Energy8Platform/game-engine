@@ -131,7 +131,8 @@ function writeSize(key: string, value: number) {
 function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
   const [size, setSize] = useState(() => readSize(key));
   const drag = useRef<{ from: number; start: number; last: number } | null>(null);
-  const at = (event: ReactPointerEvent<HTMLElement>) => (axis === 'x' ? event.clientX : event.clientY);
+  const at = (event: ReactPointerEvent<HTMLElement>) =>
+    axis === 'x' ? event.clientX : event.clientY;
   const handlers = {
     onPointerDown(event: ReactPointerEvent<HTMLElement>) {
       const region = event.currentTarget.parentElement?.getBoundingClientRect();
@@ -141,7 +142,10 @@ function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
     },
     onPointerMove(event: ReactPointerEvent<HTMLElement>) {
       if (!drag.current) return;
-      const next = Math.max(SIZE_MIN, drag.current.start + direction * (at(event) - drag.current.from));
+      const next = Math.max(
+        SIZE_MIN,
+        drag.current.start + direction * (at(event) - drag.current.from),
+      );
       drag.current.last = next;
       setSize(next);
     },
@@ -165,10 +169,12 @@ function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
  */
 const ICON_PATHS: Record<string, string> = {
   workspace: 'M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z',
-  files: 'M9 3H5.5A1.5 1.5 0 0 0 4 4.5v13M8 7h7l4 4v9.5a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8 20.5v-12A1.5 1.5 0 0 1 9.5 7M15 7v4h4',
+  files:
+    'M9 3H5.5A1.5 1.5 0 0 0 4 4.5v13M8 7h7l4 4v9.5a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8 20.5v-12A1.5 1.5 0 0 1 9.5 7M15 7v4h4',
   layers: 'M12 3l9 5-9 5-9-5 9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-  default: 'M4 5a1 1 0 0 1 1-1h5v6H4V5zM14 4h5a1 1 0 0 1 1 1v5h-6V4zM4 14h6v6H5a1 1 0 0 1-1-1v-5zM14 14h6v5a1 1 0 0 1-1 1h-5v-6z',
+  default:
+    'M4 5a1 1 0 0 1 1-1h5v6H4V5zM14 4h5a1 1 0 0 1 1 1v5h-6V4zM4 14h6v6H5a1 1 0 0 1-1-1v-5zM14 14h6v5a1 1 0 0 1-1 1h-5v-6z',
 };
 
 function ActivityIcon({ name }: { name: string }) {
@@ -315,7 +321,8 @@ export function Shell({ ctx }: { ctx: Context }) {
       event.returnValue = '';
     };
     const swallowSave = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') event.preventDefault();
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's')
+        event.preventDefault();
     };
     window.addEventListener('beforeunload', hold);
     window.addEventListener('keydown', swallowSave);
@@ -407,7 +414,11 @@ export function Shell({ ctx }: { ctx: Context }) {
       </nav>
 
       <aside className="e8-sidebar" data-testid="sidebar">
-        <div className="e8-resize e8-resize-x" data-testid="resize-sidebar" {...sidebarSize.handlers} />
+        <div
+          className="e8-resize e8-resize-x"
+          data-testid="resize-sidebar"
+          {...sidebarSize.handlers}
+        />
         {sidebar === undefined ? null : activeSidebarEntry ? (
           <div data-testid={`sidebar-${sidebar}`}>
             <activeSidebarEntry.component ctx={ctx} />

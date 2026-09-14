@@ -795,7 +795,7 @@ describe('mechanics: reporting to the diagnostics service', () => {
     await ctx.fiber.dispose();
   });
 
-  it("present(): its OWN failure (present() throws) reaches the service once", async () => {
+  it('present(): its OWN failure (present() throws) reaches the service once', async () => {
     const { ctx } = await registryWithDiagnostics();
     ctx.mechanics.register({
       id: 'boom',

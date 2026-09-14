@@ -49,9 +49,7 @@ describe('project plugin', () => {
 
   it('malformed YAML is a diagnostic naming the file, not a throw', async () => {
     const host = await createIdeHost({ root: fixture('project-broken-yaml'), port: 0 });
-    expect(host.ctx.project.diagnostics.some((d) => d.where.includes('e8.profile.yml'))).toBe(
-      true,
-    );
+    expect(host.ctx.project.diagnostics.some((d) => d.where.includes('e8.profile.yml'))).toBe(true);
     await host.stop();
   });
 

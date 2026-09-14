@@ -14,7 +14,10 @@ function fixture(name: string): string {
  * here: retyping it would give `/api/check`'s "nothing wrong" test its own,
  * independently-driftable copy of "known good".
  */
-const GOOD_SPIN = readFileSync(join(__dirname, 'fixtures', 'project-simple', 'game', 'script.spin'), 'utf8');
+const GOOD_SPIN = readFileSync(
+  join(__dirname, 'fixtures', 'project-simple', 'game', 'script.spin'),
+  'utf8',
+);
 
 /**
  * A fresh temp copy of `fixtures/files/plain` (an `e8.yml: []` project, so
