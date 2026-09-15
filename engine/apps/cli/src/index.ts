@@ -1,16 +1,23 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { IDE_BUILD_HINT, IDE_DIST_DEFAULT, createIdeHost } from '@energy8engine/ide-host';
+import { check, spin } from '@energy8engine/ide-host/compute';
 
 // `e8` alone is `e8 ide`. Both commands boot the same host over `cwd`
 // (spec §3): a `cwd` holding `e8.yml` is the one project and opens at
 // boot — which is what `e8 dev` in a project folder always meant, and
 // its `dev-game` now comes up inside that project's scope; a `cwd` of
 // project folders lists them and opens none.
-const [command = 'ide'] = process.argv.slice(2);
+const [command = 'ide', ...rest] = process.argv.slice(2);
 
 const USAGE = [
   'usage: e8 [ide|dev]',
+  '       e8 check [file]                       parse a .spin (default game/script.spin)',
+  '       e8 spin [--n N] [--bet B] [--seed S] [--action A] [--quiet]',
+  '                                             play N spins through e8-server',
+  '',
+  'check and spin print one JSON document on stdout, progress on stderr, and',
+  'exit 1 when a diagnostic is an error.',
   '',
   'environment:',
   '  PORT          the IDE host (default 5679; 0 picks a free port)',
@@ -22,6 +29,26 @@ const USAGE = [
 if (command === '--help' || command === '-h') {
   console.log(USAGE);
   process.exit(0);
+}
+if (command === 'check' || command === 'spin') {
+  const { flags, rest: positional } = parseFlags(rest);
+  const quiet = flags.quiet !== undefined;
+  const result =
+    command === 'check'
+      ? await check({ file: positional[0] ?? join('game', 'script.spin') })
+      : await spin({
+          cwd: process.cwd(),
+          n: num(flags.n),
+          bet: num(flags.bet),
+          seed: flags.seed,
+          action: flags.action,
+          onProgress(done, n) {
+            const step = Math.ceil(n / 10);
+            if (!quiet && (done % step === 0 || done === n)) console.error(`${done}/${n}`);
+          },
+        });
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(result.diagnostics.some((d) => d.severity === 'error') ? 1 : 0);
 }
 if (command !== 'ide' && command !== 'dev') {
   console.error(USAGE);
@@ -72,4 +99,25 @@ if (!existsSync(join(process.env.IDE_DIST ?? IDE_DIST_DEFAULT, 'index.html'))) {
 for (const diag of state.diagnostics) {
   console.error(`[${diag.severity}] ${diag.plugin} (${diag.where}): ${diag.message}`);
   if (diag.fix) console.error(`  fix: ${diag.fix}`);
+}
+
+/** `--k v` pairs and bare positionals; a `--flag` before another `--` or the end is `''`. */
+function parseFlags(args: string[]): { flags: Record<string, string | undefined>; rest: string[] } {
+  const flags: Record<string, string | undefined> = {};
+  const rest: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i].startsWith('--')) {
+      rest.push(args[i]);
+    } else if (args[i + 1] !== undefined && !args[i + 1].startsWith('--')) {
+      flags[args[i].slice(2)] = args[++i];
+    } else {
+      flags[args[i].slice(2)] = '';
+    }
+  }
+  return { flags, rest };
+}
+
+/** An absent flag stays absent; anything else is `Number`ed — `spin` reports a NaN as a diagnostic. */
+function num(v: string | undefined): number | undefined {
+  return v === undefined ? undefined : Number(v);
 }

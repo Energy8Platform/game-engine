@@ -72,6 +72,20 @@ describe('a real spin through e8-server', () => {
     expect(JSON.stringify(a.data.grid)).not.toBe(JSON.stringify(b.data.grid));
   });
 
+  it('the same serverSeed replays the same first spin across two processes', async () => {
+    const play = async () => {
+      const handle = await startE8Server({ gamesDir: GAME, port: 0, serverSeed: 'compute-seed' });
+      try {
+        return await handle.play({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
+      } finally {
+        await handle.stop();
+      }
+    };
+    const [a, b] = [await play(), await play()];
+    expect(b.data.grid).toEqual(a.data.grid);
+    expect(b.win).toBe(a.win);
+  }, 30_000);
+
   it('stops cleanly — the port is released', async () => {
     const handle = await startE8Server({ gamesDir: GAME, port: 0 });
     const port = handle.port;

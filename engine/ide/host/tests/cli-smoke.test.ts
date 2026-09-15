@@ -13,12 +13,13 @@
  * spawning the production entry point in a real `node` process can.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const CLI_BIN = resolve(__dirname, '../../../../engine/apps/cli/bin/e8.mjs');
+const FIRST_SLOT_GAME = resolve(__dirname, '../../../examples/first-slot/game');
 
 let child: ReturnType<typeof spawn> | undefined;
 afterEach(async () => {
@@ -134,6 +135,8 @@ describe('the real e8 binary', () => {
       });
       expect(exit, arg).toBe(code);
       expect(out, arg).toContain('usage: e8 [ide|dev]');
+      expect(out, arg).toContain('e8 check [file]');
+      expect(out, arg).toContain('e8 spin [--n N]');
       for (const env of ['PORT', 'PREVIEW_PORT', 'IDE_DIST', 'IDE_ORIGINS']) {
         expect(out, arg).toMatch(new RegExp(`^\\s*${env}\\b.*$`, 'm'));
       }
@@ -142,4 +145,59 @@ describe('the real e8 binary', () => {
     await usage('-h', 0);
     await usage('bogus', 1);
   }, 20000);
+
+  /** Runs `e8 <args>` in `cwd` to completion — the one-shot commands, not the listening ones. */
+  async function run(args: string[], cwd: string) {
+    return new Promise<{ stdout: string; stderr: string; exit: number | null }>(
+      (resolvePromise) => {
+        const c = spawn(process.execPath, [CLI_BIN, ...args], {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        c.stdout!.on('data', (d) => (stdout += d));
+        c.stderr!.on('data', (d) => (stderr += d));
+        c.once('exit', (exit) => resolvePromise({ stdout, stderr, exit }));
+      },
+    );
+  }
+
+  /** A copy of `first-slot`'s `game/` — the one folder `check` and `spin` read. */
+  function gameProject(): string {
+    const cwd = mkdtempSync(join(tmpdir(), 'e8-cli-smoke-game-'));
+    cpSync(FIRST_SLOT_GAME, join(cwd, 'game'), { recursive: true });
+    return cwd;
+  }
+
+  it('`e8 check` prints one JSON document and exits by its diagnostics', async () => {
+    const cwd = gameProject();
+    const ok = await run(['check'], cwd);
+    expect(ok.exit).toBe(0);
+    const okReport = JSON.parse(ok.stdout);
+    expect(
+      okReport.diagnostics.filter((d: { severity: string }) => d.severity === 'error'),
+    ).toEqual([]);
+
+    writeFileSync(join(cwd, 'game', 'broken.spin'), 'game "x" {\n');
+    const broken = await run(['check', 'game/broken.spin'], cwd);
+    expect(broken.exit).toBe(1);
+    const brokenReport = JSON.parse(broken.stdout);
+    expect(brokenReport.diagnostics.some((d: { severity: string }) => d.severity === 'error')).toBe(
+      true,
+    );
+  }, 20000);
+
+  it('`e8 spin --n 5` plays five spins; `--n x` is a compute diagnostic and exit 1', async () => {
+    const cwd = gameProject();
+    const five = await run(['spin', '--n', '5', '--seed', 'abc'], cwd);
+    expect(five.exit, five.stderr).toBe(0);
+    expect(JSON.parse(five.stdout).spins).toBe(5);
+    expect(five.stderr).toContain('5/5');
+
+    const bad = await run(['spin', '--n', 'x', '--quiet'], cwd);
+    expect(bad.exit).toBe(1);
+    expect(bad.stderr).toBe('');
+    expect(JSON.parse(bad.stdout).diagnostics).toMatchObject([{ plugin: 'compute' }]);
+  }, 30000);
 });

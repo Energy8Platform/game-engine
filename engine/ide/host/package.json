@@ -4,8 +4,15 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": "./src/index.ts", "./dev-game": "./src/plugins/dev-game.ts" },
-  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./dev-game": "./src/plugins/dev-game.ts",
+    "./compute": "./src/compute/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@cordisjs/plugin-include": "1.0.4",
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
