@@ -190,6 +190,22 @@ export const PNG_BYTES = Buffer.from(
   'hex',
 );
 
+/**
+ * How long a game may take to come up: `page.goto(gameUrl)` → `#status`
+ * holds text (spec §9's readiness — the same span `e8 shot` reports as
+ * `loadMs`). A number from a measurement, not from a head (spec §3):
+ * `runtime.spec.ts`'s first test, run three times alone on 2026-09-16
+ * (Apple M4 Max, 36 GB, macOS 26.6.2, node 22.16, Playwright 1.63.0,
+ * the checked-in `first-slot` with a warm vite cache): **819, 808, 809
+ * ms**. Median 809 × 3 = 2427, rounded up to the nearest 500. Shared by
+ * `runtime.spec.ts` (Playwright's own load) and `headless.spec.ts` (the
+ * CLI's `loadMs`), so both measure against one number.
+ *
+ * Halving it (1250) would still clear the median, so a budget mutation
+ * that is meant to go red has to go well under 809, not to half.
+ */
+export const LOAD_BUDGET_MS = 2500;
+
 export interface DevHost {
   /** The IDE host's own origin (5679) — `/api/*`, `/ide`, `/plugin-client`. */
   url: string;

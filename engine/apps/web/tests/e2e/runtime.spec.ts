@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Frame } from '@playwright/test';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
+import { LOAD_BUDGET_MS } from './project-fixture';
 
 /**
  * The plan's own thesis, proven in a real browser: a knob turned in the
@@ -63,6 +64,19 @@ async function gameFrame(page: import('@playwright/test').Page): Promise<Frame> 
 }
 
 test('the running game is visible in the IDE preview, and a spin plays', async ({ page }) => {
+  // The load budget, measured the way `e8 shot` measures `loadMs`: the
+  // game's own URL, not the IDE page around it, from navigation to
+  // `#status` holding text. This is the first load after the host booted,
+  // so vite's cold transform is inside the number — as it is for `shot`.
+  const t0 = Date.now();
+  await page.goto(host.ctx.workspace.state().previewUrl!);
+  await expect.poll(() => page.locator('#status').textContent(), { timeout: 30_000 }).toBeTruthy();
+  const loadMs = Date.now() - t0;
+  expect(
+    loadMs,
+    `load took ${loadMs} ms; budget ${LOAD_BUDGET_MS} (median × 3, measured 819/808/809 ms on 2026-09-16 — see LOAD_BUDGET_MS)`,
+  ).toBeLessThanOrEqual(LOAD_BUDGET_MS);
+
   await page.goto('/');
 
   const frame = await gameFrame(page);
