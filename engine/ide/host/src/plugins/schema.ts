@@ -132,7 +132,7 @@ export async function apply(ctx: Context, config: SpinSchemaConfig): Promise<voi
      * `parseSpinSchema` is pure (see its own doc comment), so this route
      * needs no temp file and touches nothing on disk.
      *
-     * Deliberately calls `parseSpinSchema` and `toDiagnostics` directly
+     * Deliberately calls `checkSource` directly
      * rather than `service.reload()`: `spinSchema` is what the composition
      * screen reads, and a keystroke in an unsaved editor must never rewrite
      * what the rest of the IDE believes about the file that IS saved.
