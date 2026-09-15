@@ -33,4 +33,23 @@ export interface PreloaderVariant {
     overlay: HTMLElement,
     config?: LoadingScreenConfig,
   ): PreloaderVariantHandle | null;
+  /**
+   * `false` skips the platform's "POWERED BY ENERGY8 ENGINE" pre-roll for this
+   * identity. Deliberately a property of the variant, not of
+   * `LoadingScreenConfig`: a game cannot opt out of the attribution, only the
+   * registry can. Default `true`.
+   */
+  splash?: boolean;
+  /**
+   * How long the variant's own intro animation runs after mount, in ms. The
+   * brand gate keeps the preloader up until it has played (plus the brand
+   * floor), so a fast boot can't cut it short. Default 0.
+   */
+  introMs?: number;
+  /**
+   * Fixed overlay background for this identity (any CSS `background` value).
+   * Overrides the game's `backgroundColor` / `backgroundGradient` — for
+   * artwork that only reads on one backdrop.
+   */
+  background?: string;
 }

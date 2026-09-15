@@ -34,7 +34,7 @@ Sub-paths:
 - `@energy8platform/platform-core/vite` — `devBridgePlugin`, `luaPlugin`
 - `@energy8platform/platform-core/loading` — `createCSSPreloader`, `removeCSSPreloader`, `buildLogoSVG` (the Energy8 brand frame, renderer-agnostic)
 
-> The branded game shell moved out of platform-core into its own package, **`@energy8platform/shell`** — a renderer-agnostic logic core with pluggable renderers: `@energy8platform/shell/html` (DOM `createGameShell`) and `@energy8platform/shell/pixi` (`createPixiShell`). The i18n helpers (`socialize`/`createI18n`/`Lang`) live on its `.` (core) entry. game-engine's `/shell` re-exports `/html`.
+> The branded game shell moved out of platform-core into its own package, **`@energy8platform/shell`** — a renderer-agnostic logic core with pluggable renderers: `@energy8platform/shell/html` (DOM `createGameShell`), `@energy8platform/shell/pixi` (`createPixiShell`) and `@energy8platform/shell/pixi-hb` (`createPixiHbShell` — the Hellbuddha-branded Pixi skin: fixed orange/beige/ink palette, 3px-border plaques, Space Grotesk + Switzer; `src/ui/pixi-hb/`, icons from `icons-hb.svg` via `scripts/gen-hb-icons.mjs`, fonts via `scripts/build-hb-fonts.mjs`; demo `examples/pixi-hb-shell-demo`). The i18n helpers (`socialize`/`createI18n`/`Lang`) live on its `.` (core) entry. game-engine's `/shell` re-exports `/html`.
 >
 > The burger on the bar opens a **configurable popover menu** (`ShellConfig.menu`: preset ids
 > `sound`/`music`/`sfx`/`gameInfo` plus custom `toggle`/`range`/`button`/`separator` rows), whose
@@ -102,7 +102,8 @@ Slot games get their chrome (control bar, balance/bet/win, menu, settings, buy-b
 - `/animation` — Tween, Timeline, Easing
 - `/lua` — re-exports `@energy8platform/platform-core/lua`
 - `/debug` — re-exports DevBridge from platform-core; adds local FPSOverlay
-- `/vite` — re-exports plugins from platform-core/vite; adds pixi-flavored `defineGameConfig`
+- `/vite` — re-exports plugins from platform-core/vite; adds pixi-flavored `defineGameConfig` (always includes `stripRigHistory`)
+- `/golem` — `loadRig`/`loadRigs` + re-exports of `@energy8platform/golem/runtime` (optional peer); holds the compile-time contract that `RigSymbol` is a `SymbolView`
 - `/shell` — re-exports the DOM game shell (+ `Lang`) from `@energy8platform/shell/html`
 - `/assets`, `/audio`, `/game-spec`
 

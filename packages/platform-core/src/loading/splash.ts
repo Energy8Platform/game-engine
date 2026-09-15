@@ -2,10 +2,12 @@
  * The "POWERED BY ENERGY8 ENGINE" pre-roll shown at the very start of every
  * boot, above whatever preloader variant the game selected.
  *
- * This is deliberately NOT configurable: it is the platform's attribution and
- * plays for every game, on every boot. `CSSPreloader` mounts it as a layer
- * inside the same overlay it already owns, so there is still exactly one
- * element to tear down and no gap where the page shows through.
+ * This is deliberately NOT configurable per game: it is the platform's
+ * attribution and plays on every boot. Only a preloader variant — i.e. the
+ * registry, not a game — may opt out (`PreloaderVariant.splash: false`;
+ * hellbuddha does). `CSSPreloader` mounts it as a layer inside the same overlay
+ * it already owns, so there is still exactly one element to tear down and no
+ * gap where the page shows through.
  */
 
 /** Total splash length: logo fades in, holds, fades out, then the black backdrop lifts. */

@@ -32,7 +32,7 @@ import type { ReelSystem, WinTier } from '@energy8platform/game-engine/slot';
 import { mountReelDevBridge } from '@energy8platform/game-engine/devtools';
 import type { ReelDevBridge } from '@energy8platform/game-engine/devtools';
 import type { SlotSceneController, RenderContext, SceneApi } from '@energy8platform/game-engine/host';
-import { resolveSymbol } from '../slot/symbols';
+import { resolveSymbol, loadSymbolRigs } from '../slot/symbols';
 import { reelConfig } from '../slot/reelConfig';
 import type { SpinData } from '../game/normalize';
 
@@ -65,6 +65,7 @@ export class GameScene extends Scene implements SlotSceneController<SpinData> {
   ];
 
   async onEnter(): Promise<void> {
+    await loadSymbolRigs(); // golem rigs (public/assets/rigs) before the first resolveSymbol
     this.system = createReelSystem({ resolve: resolveSymbol, config: reelConfig });
     this.container.addChild(this.system.view);
     // Dev-only: lets the harness "Reels" sidebar tune the reels live (no-op in production / outside the harness).

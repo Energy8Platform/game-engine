@@ -21,6 +21,7 @@ const external = [
   '@energy8platform/shell/html',
   '@energy8platform/shell/pixi',
   '@esotericsoftware/spine-pixi-v8',
+  '@energy8platform/golem/runtime',
   '@pixi/sound',
   'vite',
   'fengari',
@@ -29,10 +30,11 @@ const external = [
 ];
 
 function createBundle(input, outputName, opts = {}) {
+  const ext = opts.node ? [...external, ...nodeBuiltins] : external;
   return [
     {
       input,
-      external,
+      external: ext,
       treeshake: opts.treeshake ?? true,
       output: [
         {
@@ -58,7 +60,7 @@ function createBundle(input, outputName, opts = {}) {
     },
     {
       input,
-      external,
+      external: ext,
       output: {
         file: `dist/${outputName}.d.ts`,
         format: 'esm',
@@ -77,7 +79,8 @@ export default defineConfig([
   ...createBundle('src/animation/index.ts', 'animation'),
   ...createBundle('src/debug/index.ts', 'debug'),
   ...createBundle('src/shell/index.ts', 'shell'),
-  ...createBundle('src/vite/index.ts', 'vite'),
+  ...createBundle('src/vite/index.ts', 'vite', { node: true }),
+  ...createBundle('src/golem/index.ts', 'golem'),
   ...createBundle('src/lua/index.ts', 'lua'),
   ...createBundle('src/game-spec/index.ts', 'game-spec'),
   // host inlines dynamic imports: createSlotGame lazy-imports internal modules (./slotPlay, ./shellConfig, ./replay); without this Rollup splits them into chunks that conflict with output.file. External deps (@energy8platform/shell, stake-bridge) stay lazy.

@@ -5,7 +5,11 @@ export const SHELL_ROOT_ID = '__ge-game-shell__';
 
 // Inter (bundled, base64) leads the stack so the shell renders identically on every
 // platform; the system fonts stay as graceful fallback if the webfont ever fails to load.
-export const SHELL_CSS = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS + `
+/** The embedded @font-face rules — installed via `installFontFaces` (FontFace-from-bytes, which a
+ *  `font-src 'self'` CSP allows), NOT as part of the injected <style> (a `data:` URL there is blocked). */
+export const SHELL_FONT_FACES = SHELL_FONT_CSS + SHELL_DIGIT_FONT_CSS;
+
+export const SHELL_CSS = `
 #${SHELL_ROOT_ID} {
   position: absolute; inset: 0;
   container-type: size;   /* query container → centred modals size in cq units (responsive on every screen) */

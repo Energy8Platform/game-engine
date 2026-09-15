@@ -1,9 +1,11 @@
 import type { UserConfig, Plugin } from 'vite';
 import { devBridgePlugin, spinPlugin } from '@energy8platform/platform-core/vite';
+import { stripRigHistory } from './stripRigHistory';
 
 // Re-export so users importing from `@energy8platform/game-engine/vite`
 // can still grab the plugins directly without a separate platform-core import.
 export { devBridgePlugin, spinPlugin } from '@energy8platform/platform-core/vite';
+export { stripRigHistory } from './stripRigHistory';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -61,7 +63,8 @@ export interface GameConfig {
  * ```
  */
 export function defineGameConfig(config: GameConfig = {}): UserConfig {
-  const plugins: Plugin[] = [];
+  // golem rigs under public/ carry editor history — never ship it (see stripRigHistory)
+  const plugins: Plugin[] = [stripRigHistory()];
 
   if (config.devBridge) {
     const configPath = config.devBridgeConfig ?? './dev.config';

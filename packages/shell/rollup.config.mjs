@@ -29,4 +29,5 @@ export default defineConfig([
   ...bundle('src/core/index.ts', 'index', [SOCIAL]),
   ...bundle('src/ui/html/index.ts', 'html', [SOCIAL]),
   ...bundle('src/ui/pixi/index.ts', 'pixi', ['pixi.js', SOCIAL]),
+  ...bundle('src/ui/pixi-hb/index.ts', 'pixi-hb', ['pixi.js', SOCIAL]),
 ]);

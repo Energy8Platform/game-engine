@@ -25,8 +25,10 @@ interface PreloaderState {
   splashEl: HTMLDivElement | null;
   /** Pending detach of `splashEl` — cleared on removal so it can't fire late. */
   splashTimer: ReturnType<typeof setTimeout> | null;
-  /** Mount time, the origin the splash + brand-floor gate is measured from. */
+  /** Mount time, the origin the brand gate is measured from. */
   startedAt: number;
+  /** Ms after mount before the game may take over — see {@link brandGateDelay}. */
+  gateMs: number;
   showPercentage: boolean;
   tapToStart: boolean;
   tapToStartText: string;
@@ -45,14 +47,15 @@ function clampProgress(p: number): number {
 }
 
 /**
- * Milliseconds still owed before the game may take over: the powered-by splash
- * plus the floor that keeps the game's own brand readable behind it. Zero once
- * that window has passed, so a slow boot pays nothing.
+ * Milliseconds still owed before the game may take over: whichever pre-roll
+ * runs longer — the powered-by splash or the variant's own intro (both start at
+ * mount) — plus the floor that keeps the settled brand readable after it. Zero
+ * once that window has passed, so a slow boot pays nothing.
  */
 function brandGateDelay(): number {
   if (!state) return 0;
   const elapsed = Date.now() - state.startedAt;
-  return Math.max(0, SPLASH_DURATION_MS + BRAND_FLOOR_MS - elapsed);
+  return Math.max(0, state.gateMs - elapsed);
 }
 
 export function createCSSPreloader(
@@ -68,9 +71,6 @@ export function createCSSPreloader(
         ? `#${config.backgroundColor.toString(16).padStart(6, '0')}`
         : '#0a0a1a';
 
-  const bgGradient =
-    config?.backgroundGradient ?? `linear-gradient(135deg, ${bgColor} 0%, #1a1a3e 100%)`;
-
   const customHTML = config?.cssPreloaderHTML ?? '';
 
   // Pick the visual identity. Unknown names fall back to the default so a bad
@@ -78,6 +78,11 @@ export function createCSSPreloader(
   const variant =
     VARIANTS[config?.preloaderVariant ?? DEFAULT_VARIANT_NAME] ??
     VARIANTS[DEFAULT_VARIANT_NAME];
+
+  const bgGradient =
+    variant.background ??
+    config?.backgroundGradient ??
+    `linear-gradient(135deg, ${bgColor} 0%, #1a1a3e 100%)`;
 
   const overlay = document.createElement('div');
   overlay.id = PRELOADER_ID;
@@ -88,9 +93,13 @@ export function createCSSPreloader(
   // page shows through between the two. Appended last so it wins the stacking
   // order. The variant content is still mounted underneath from the first
   // frame, so `setCSSPreloaderProgress` has a live target throughout the
-  // splash and nothing has to be buffered and replayed on handover.
-  overlay.insertAdjacentHTML('beforeend', buildSplashHTML());
-  const splashEl = overlay.lastElementChild as HTMLDivElement;
+  // splash and nothing has to be buffered and replayed on handover. A variant
+  // that carries its own intro instead (`splash: false`) skips it.
+  const withSplash = variant.splash !== false;
+  if (withSplash) overlay.insertAdjacentHTML('beforeend', buildSplashHTML());
+  const splashEl = withSplash
+    ? (overlay.lastElementChild as HTMLDivElement)
+    : null;
 
   const styleEl = document.createElement('style');
   // Shared overlay infrastructure (positioning / background / fade) plus the
@@ -139,13 +148,15 @@ ${SPLASH_CSS}
   // Detach the splash once its CSS timeline has played out. Keeping a spent,
   // fully-transparent layer in the tree would otherwise sit over the content
   // for the rest of the boot.
-  const splashTimer = setTimeout(() => {
-    splashEl.remove();
-    if (state) {
-      state.splashEl = null;
-      state.splashTimer = null;
-    }
-  }, SPLASH_DURATION_MS);
+  const splashTimer = splashEl
+    ? setTimeout(() => {
+        splashEl.remove();
+        if (state) {
+          state.splashEl = null;
+          state.splashTimer = null;
+        }
+      }, SPLASH_DURATION_MS)
+    : null;
 
   state = {
     container,
@@ -156,6 +167,9 @@ ${SPLASH_CSS}
     splashEl,
     splashTimer,
     startedAt: Date.now(),
+    gateMs:
+      Math.max(withSplash ? SPLASH_DURATION_MS : 0, variant.introMs ?? 0) +
+      BRAND_FLOOR_MS,
     showPercentage: config?.showPercentage === true,
     tapToStart: config?.tapToStart !== false,
     tapToStartText: config?.tapToStartText ?? 'TAP TO START',

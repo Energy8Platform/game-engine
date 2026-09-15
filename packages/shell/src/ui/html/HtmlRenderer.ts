@@ -1,6 +1,7 @@
 import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle } from '@/core/renderer';
 import type { ShellTokens } from '@/core/theme';
-import { SHELL_CSS, SHELL_ROOT_ID } from './shell.css';
+import { SHELL_CSS, SHELL_FONT_FACES, SHELL_ROOT_ID } from './shell.css';
+import { installFontFaces } from '@/core/fontface';
 import { buildThemeVars } from './theme-css';
 import { countUp } from './motion-dom';
 import { renderBottomBar } from './components/BottomBar';
@@ -56,6 +57,7 @@ export class HtmlRenderer implements ShellRenderer {
   mount(host: ShellHost): void {
     this.host = host;
     this.styleEl = document.createElement('style');
+    installFontFaces(SHELL_FONT_FACES, `${SHELL_ROOT_ID}-fonts`);
     this.styleEl.textContent = SHELL_CSS;
     this.root = document.createElement('div');
     this.root.id = SHELL_ROOT_ID;
