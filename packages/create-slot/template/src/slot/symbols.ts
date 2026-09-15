@@ -14,7 +14,8 @@ let rigs: Record<string, Rig> = {};
 
 /** Call once before the first resolveSymbol (GameScene.onEnter does). */
 export async function loadSymbolRigs(): Promise<void> {
-  rigs = await loadRigs(Object.fromEntries(RIGGED.map((id) => [id, `assets/rigs/${id}/rig.json`])));
+  // string concatenation on purpose: the scaffolder substitutes dollar-brace placeholders in template files
+  rigs = await loadRigs(Object.fromEntries(RIGGED.map((rig) => [rig, 'assets/rigs/' + rig + '/rig.json'])));
 }
 
 // Placeholder resolver: every symbol is a blank tile. Swap in real textures from public/assets/symbols.
