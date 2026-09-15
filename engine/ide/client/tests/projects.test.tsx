@@ -336,6 +336,58 @@ describe('Projects', () => {
       expect(created()).toEqual([{ template: 'slot-basic', id: 'my-slot' }]);
     });
 
+    it('one question at a time: the form’s replaces a pending row’s, and Yes answers the form', async () => {
+      const { ctx, created, opened } = await harness(workspace({ templates: templates() }));
+      ctx.shell.open({ key: 'f:a.ts', title: 'a.ts', component: Doc, closable: true });
+      ctx.shell.markDirty('f:a.ts', true);
+      render(<Projects ctx={ctx} />);
+      await userEvent.click(screen.getByTestId('project-beta'));
+      expect(
+        within(screen.getByTestId('project-beta')).getByTestId('project-confirm'),
+      ).toBeVisible();
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot{Enter}');
+      const confirms = screen.getAllByTestId('project-confirm');
+      expect(confirms).toHaveLength(1);
+      expect(confirms[0].closest('form')).not.toBeNull();
+      await userEvent.click(screen.getByTestId('confirm-yes'));
+      expect(created()).toEqual([{ template: 'slot-basic', id: 'my-slot' }]);
+      expect(opened()).toEqual([]);
+    });
+
+    it('one question at a time: a row’s replaces the form’s, and Yes opens the row', async () => {
+      const { ctx, created, opened } = await harness(workspace({ templates: templates() }));
+      ctx.shell.open({ key: 'f:a.ts', title: 'a.ts', component: Doc, closable: true });
+      ctx.shell.markDirty('f:a.ts', true);
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot{Enter}');
+      expect(screen.getByTestId('project-confirm').closest('form')).not.toBeNull();
+      await userEvent.click(screen.getByTestId('project-beta'));
+      const confirms = screen.getAllByTestId('project-confirm');
+      expect(confirms).toHaveLength(1);
+      expect(confirms[0].closest('[data-testid="project-beta"]')).not.toBeNull();
+      await userEvent.click(screen.getByTestId('confirm-yes'));
+      expect(opened()).toEqual(['beta']);
+      expect(created()).toEqual([]);
+    });
+
+    it('a new request clears the last refusal at once, and holds the fields while it waits', async () => {
+      // Other plugins fetch too: count only the form's own POSTs.
+      let posts = 0;
+      const { ctx } = await harness(workspace({ templates: templates() }), async (url) =>
+        url !== '/api/workspace/create' || ++posts > 1
+          ? new Promise<Response>(() => {})
+          : json({ diagnostics: [diagnostic('error', 'workspace', 'x', 'nope')] }, 400),
+      );
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot{Enter}');
+      await screen.findByTestId('new-project-refusal');
+      await userEvent.click(screen.getByTestId('new-project-create'));
+      expect(screen.queryByTestId('new-project-refusal')).toBeNull();
+      expect(screen.getByTestId('new-project-id')).toBeDisabled();
+      expect(screen.getByTestId('new-project-template')).toBeDisabled();
+      expect(screen.getByTestId('new-project-create')).toBeDisabled();
+    });
+
     it('a refusal is shown under the form, and the id stays for a fix', async () => {
       const { ctx } = await harness(workspace({ templates: templates() }), async () =>
         json(

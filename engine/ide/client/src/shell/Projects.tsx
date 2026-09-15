@@ -24,16 +24,19 @@ import { activateOnKey } from './activate';
  * closable tab the way a row click does — so with something unsaved it
  * asks the same inline question first.
  */
+/** Which question is pending — one at a time, so the form's replaces a row's and vice versa. */
+type Asking = { kind: 'row'; id: string } | { kind: 'form' } | null;
+
 export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   const state = useWorkspace(ctx);
-  const [asking, setAsking] = useState<string | null>(null);
+  const [asking, setAsking] = useState<Asking>(null);
   const { documents } = useShell(ctx);
   const dirty = documents.filter((doc) => doc.dirty).length;
 
   function select(id: string) {
     if (id === state?.active) return; // already open: nothing to ask, nothing to do
     if (ctx.shell.hasDirtyDocuments()) {
-      setAsking(id);
+      setAsking({ kind: 'row', id });
       return;
     }
     void ctx.workspace.open(id);
@@ -80,7 +83,7 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
                         <span className="e8-project-id">{project.id}</span>
                       )}
                     </span>
-                    {asking === project.id && (
+                    {asking?.kind === 'row' && asking.id === project.id && (
                       <Confirm
                         dirty={dirty}
                         onYes={() => {
@@ -96,7 +99,13 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
             </ul>
           )}
           {state.templates.length > 0 && (
-            <NewProject ctx={ctx} templates={state.templates} dirty={dirty} />
+            <NewProject
+              ctx={ctx}
+              templates={state.templates}
+              dirty={dirty}
+              asking={asking?.kind === 'form'}
+              setAsking={(on) => setAsking(on ? { kind: 'form' } : null)}
+            />
           )}
         </>
       )}
@@ -138,15 +147,19 @@ function NewProject({
   ctx,
   templates,
   dirty,
+  asking,
+  setAsking,
 }: {
   ctx: Context;
   templates: Template[];
   dirty: number;
+  /** The question is `Projects`' state, so only one of row/form can be pending. */
+  asking: boolean;
+  setAsking: (on: boolean) => void;
 }): JSX.Element {
   const [template, setTemplate] = useState(templates[0].id);
   const [id, setId] = useState('');
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
   const [refusals, setRefusals] = useState<Diagnostic[]>([]);
   const valid = PROJECT_ID_PATTERN.test(id);
   // The chosen template may have left the list with a newer state; fall back to the first.
@@ -165,6 +178,7 @@ function NewProject({
   async function create() {
     setAsking(false);
     setBusy(true);
+    setRefusals([]);
     const said = await ctx.workspace.create({ template: chosen.id, id });
     setBusy(false);
     setRefusals(said);
@@ -182,6 +196,7 @@ function NewProject({
           <select
             data-testid="new-project-template"
             value={chosen.id}
+            disabled={busy}
             onChange={(e) => setTemplate(e.target.value)}
           >
             {templates.map((t) => (
@@ -200,6 +215,7 @@ function NewProject({
             data-testid="new-project-id"
             placeholder="my-slot"
             value={id}
+            disabled={busy}
             onChange={(e) => setId(e.target.value)}
           />
         </label>
