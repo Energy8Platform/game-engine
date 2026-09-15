@@ -14,7 +14,15 @@
  * spec without becoming one.
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
@@ -244,17 +252,19 @@ export async function startDevHost(dir: string): Promise<DevHost> {
  */
 const TSCONFIGS = ['tsconfig.json', 'plugins/reel-step/tsconfig.json'];
 
+/** Rewrites `file`'s relative `extends` to where it resolved from `originalDir`. */
+function absolutizeExtends(file: string, originalDir: string): void {
+  const tsconfig = JSON.parse(readFileSync(file, 'utf8')) as { extends: string };
+  tsconfig.extends = join(originalDir, tsconfig.extends);
+  writeFileSync(file, JSON.stringify(tsconfig, null, 2));
+}
+
 export function workspaceCopy(n: number): string {
   const root = mkdtempSync(join(EXAMPLES, 'e8-compose-'));
   for (let i = 1; i <= n; i++) {
     const dir = join(root, `slot-${i}`);
     cpSync(FIXTURE, dir, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
-    for (const rel of TSCONFIGS) {
-      const file = join(dir, rel);
-      const tsconfig = JSON.parse(readFileSync(file, 'utf8')) as { extends: string };
-      tsconfig.extends = join(FIXTURE, dirname(rel), tsconfig.extends);
-      writeFileSync(file, JSON.stringify(tsconfig, null, 2));
-    }
+    for (const rel of TSCONFIGS) absolutizeExtends(join(dir, rel), join(FIXTURE, dirname(rel)));
     if (i === 2) {
       const specFile = join(dir, 'game', 'spec.json');
       const spec = JSON.parse(readFileSync(specFile, 'utf8')) as Record<string, unknown>;
@@ -271,6 +281,31 @@ export function workspaceCopy(n: number): string {
 
 /** What `workspaceCopy`'s second project is called — in its spec and in its page title. */
 export const SECOND_NAME = 'Second Slot';
+
+/** This repo's shipped templates — what the host lists when nothing points it elsewhere. */
+export const TEMPLATES = join(EXAMPLES, '..', 'templates');
+
+/**
+ * A copy of `engine/templates` at `<root>/.templates`, for `startHost`'s
+ * `templatesDir`. Needed for the same measured reason `workspaceCopy`
+ * rewrites its copies' `tsconfig.json`: a template's `extends` is relative
+ * to the depth of `engine/examples/<id>` (spec §8 — the workspace the
+ * product is aimed at), and a project the host creates under a temp root
+ * here sits one level deeper, where vite's esbuild transform 500s every
+ * module on the unresolved `extends` (measured: `#status` stayed empty
+ * for 40 s, 83 polls). No `e8.yml` sits directly under `.templates`, so
+ * the host's scan never mistakes it for a project. `rmSync(root)` removes
+ * it with the rest.
+ */
+export function templatesCopy(root: string): string {
+  const dir = join(root, '.templates');
+  cpSync(TEMPLATES, dir, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
+  for (const template of readdirSync(dir)) {
+    const file = join(dir, template, 'tsconfig.json');
+    if (existsSync(file)) absolutizeExtends(file, join(TEMPLATES, template));
+  }
+  return dir;
+}
 
 export interface WorkspaceHost {
   /** The IDE host's own origin (5679). */
@@ -289,9 +324,28 @@ export interface WorkspaceHost {
  */
 export async function startHost(
   root: string,
-  options: Pick<Parameters<typeof createIdeHost>[0], 'ideDist' | 'previewPort'> = {},
+  {
+    templatesDir,
+    ...options
+  }: Pick<Parameters<typeof createIdeHost>[0], 'ideDist' | 'previewPort'> & {
+    /**
+     * Where the host lists templates from; default the repo's
+     * `engine/templates`. Handed over through `E8_TEMPLATES` — the seam
+     * `workspace.ts` already reads and `host.test.ts` already drives —
+     * set only for the span of `createIdeHost`, where the plugin reads it.
+     */
+    templatesDir?: string;
+  } = {},
 ): Promise<WorkspaceHost> {
-  const host: IdeHost = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
+  const saved = process.env.E8_TEMPLATES;
+  if (templatesDir) process.env.E8_TEMPLATES = templatesDir;
+  let host: IdeHost;
+  try {
+    host = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
+  } finally {
+    if (saved === undefined) delete process.env.E8_TEMPLATES;
+    else process.env.E8_TEMPLATES = saved;
+  }
   return {
     url: host.url,
     previewUrl: () => host.ctx.workspace.state().previewUrl,
