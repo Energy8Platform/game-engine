@@ -20,8 +20,9 @@ import { activateOnKey } from './activate';
  * Under the list, when the host offers templates: the «New project» form
  * (spec §5). It sits OUTSIDE the rows, so its keys never reach a row's
  * `activateOnKey`; a native `<form>` makes Enter submit and `disabled`
- * hold the gate. No unsaved-work question here: creating opens the new
- * project, and the plugin's own warning names what that closed.
+ * hold the gate. Creating OPENS the new project, which closes every
+ * closable tab the way a row click does — so with something unsaved it
+ * asks the same inline question first.
  */
 export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   const state = useWorkspace(ctx);
@@ -80,56 +81,89 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
                       )}
                     </span>
                     {asking === project.id && (
-                      <span className="e8-explorer-confirm" data-testid="project-confirm">
-                        {`unsaved changes in ${dirty} document${dirty === 1 ? '' : 's'} will be lost — switch?`}{' '}
-                        <button
-                          type="button"
-                          data-testid="confirm-yes"
-                          className="e8-primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAsking(null);
-                            void ctx.workspace.open(project.id);
-                          }}
-                        >
-                          Yes
-                        </button>{' '}
-                        <button
-                          type="button"
-                          data-testid="confirm-no"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAsking(null);
-                          }}
-                        >
-                          No
-                        </button>
-                      </span>
+                      <Confirm
+                        dirty={dirty}
+                        onYes={() => {
+                          setAsking(null);
+                          void ctx.workspace.open(project.id);
+                        }}
+                        onNo={() => setAsking(null)}
+                      />
                     )}
                   </li>
                 );
               })}
             </ul>
           )}
-          {state.templates.length > 0 && <NewProject ctx={ctx} templates={state.templates} />}
+          {state.templates.length > 0 && (
+            <NewProject ctx={ctx} templates={state.templates} dirty={dirty} />
+          )}
         </>
       )}
     </div>
   );
 }
 
-function NewProject({ ctx, templates }: { ctx: Context; templates: Template[] }): JSX.Element {
+/** The inline «unsaved changes … — switch?» question, under a row or under the form. */
+function Confirm({ dirty, onYes, onNo }: { dirty: number; onYes: () => void; onNo: () => void }) {
+  return (
+    <span className="e8-explorer-confirm" data-testid="project-confirm">
+      {`unsaved changes in ${dirty} document${dirty === 1 ? '' : 's'} will be lost — switch?`}{' '}
+      <button
+        type="button"
+        data-testid="confirm-yes"
+        className="e8-primary"
+        onClick={(e) => {
+          e.stopPropagation();
+          onYes();
+        }}
+      >
+        Yes
+      </button>{' '}
+      <button
+        type="button"
+        data-testid="confirm-no"
+        onClick={(e) => {
+          e.stopPropagation();
+          onNo();
+        }}
+      >
+        No
+      </button>
+    </span>
+  );
+}
+
+function NewProject({
+  ctx,
+  templates,
+  dirty,
+}: {
+  ctx: Context;
+  templates: Template[];
+  dirty: number;
+}): JSX.Element {
   const [template, setTemplate] = useState(templates[0].id);
   const [id, setId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [refusals, setRefusals] = useState<Diagnostic[]>([]);
   const valid = PROJECT_ID_PATTERN.test(id);
   // The chosen template may have left the list with a newer state; fall back to the first.
   const chosen = templates.find((t) => t.id === template) ?? templates[0];
 
-  async function submit(event: FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault();
     if (!valid || busy) return;
+    if (ctx.shell.hasDirtyDocuments()) {
+      setAsking(true);
+      return;
+    }
+    void create();
+  }
+
+  async function create() {
+    setAsking(false);
     setBusy(true);
     const said = await ctx.workspace.create({ template: chosen.id, id });
     setBusy(false);
@@ -142,7 +176,7 @@ function NewProject({ ctx, templates }: { ctx: Context; templates: Template[] })
       <div className="e8-explorer-header">
         <span className="e8-explorer-title">New project</span>
       </div>
-      <form className="e8-new-project" onSubmit={(e) => void submit(e)}>
+      <form className="e8-new-project" onSubmit={submit}>
         <label>
           Template
           <select
@@ -172,6 +206,9 @@ function NewProject({ ctx, templates }: { ctx: Context; templates: Template[] })
         <button type="submit" data-testid="new-project-create" disabled={!valid || busy}>
           Create
         </button>
+        {asking && (
+          <Confirm dirty={dirty} onYes={() => void create()} onNo={() => setAsking(false)} />
+        )}
         {refusals.map((diag, i) => (
           <p className="e8-explorer-diagnostic" data-testid="new-project-refusal" key={i}>
             {diag.message}

@@ -314,6 +314,28 @@ describe('Projects', () => {
       expect(created()).toEqual([]);
     });
 
+    it('with unsaved work Create asks first, under the form; No creates nothing, Yes creates once', async () => {
+      // Creating opens the new project, and that force-closes every
+      // closable tab — the same loss a row click risks, so the same question.
+      const { ctx, created } = await harness(workspace({ templates: templates() }));
+      ctx.shell.open({ key: 'f:a.ts', title: 'a.ts', component: Doc, closable: true });
+      ctx.shell.markDirty('f:a.ts', true);
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot{Enter}');
+      const form = screen.getByTestId('new-project-create').closest('form')!;
+      expect(within(form).getByTestId('project-confirm')).toHaveTextContent(
+        'unsaved changes in 1 document will be lost — switch?',
+      );
+      expect(created()).toEqual([]);
+      await userEvent.click(screen.getByTestId('confirm-no'));
+      expect(screen.queryByTestId('project-confirm')).toBeNull();
+      expect(created()).toEqual([]);
+      await userEvent.click(screen.getByTestId('new-project-create'));
+      await userEvent.click(screen.getByTestId('confirm-yes'));
+      expect(screen.queryByTestId('project-confirm')).toBeNull();
+      expect(created()).toEqual([{ template: 'slot-basic', id: 'my-slot' }]);
+    });
+
     it('a refusal is shown under the form, and the id stays for a fix', async () => {
       const { ctx } = await harness(workspace({ templates: templates() }), async () =>
         json(
