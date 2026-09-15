@@ -17,6 +17,7 @@ function d(message: string): Diagnostic {
 function ws(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
   return {
     projects: [{ id: 'a', name: 'Game A' }],
+    templates: [],
     active: 'a',
     previewUrl: 'http://game.test:5679',
     diagnostics: [],

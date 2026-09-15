@@ -1,8 +1,16 @@
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Fiber } from 'cordis';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createIdeHost, type IdeHost } from '../src/index';
 
 const WORKSPACE = join(__dirname, 'fixtures', 'workspace');
@@ -100,12 +108,15 @@ describe('createIdeHost — boot diagnostics', () => {
       const res = await fetch(`${host.url}/api/health`);
       expect(res.status).toBe(200);
 
-      expect(host.ctx.workspace.state()).toEqual({
+      const state = host.ctx.workspace.state();
+      expect(state).toMatchObject({
         projects: [],
         active: null,
         previewUrl: null,
         diagnostics: [],
       });
+      // With no override, the templates are this repo's `engine/templates`.
+      expect(state.templates.map((t) => t.id)).toContain('slot-basic');
     });
   });
 
@@ -291,6 +302,76 @@ describe('createIdeHost — a folder of projects', () => {
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ diagnostics: [{ plugin: 'workspace' }] });
     expect(host.ctx.workspace.state().active).toBeNull();
+  });
+
+  describe('POST /api/workspace/create', () => {
+    let templatesDir: string;
+    beforeEach(() => {
+      templatesDir = mkdtempSync(join(tmpdir(), 'e8-host-tpl-'));
+      mkdirSync(join(templatesDir, 'tpl', 'game'), { recursive: true });
+      writeFileSync(join(templatesDir, 'tpl', 'e8.template.yml'), 'name: Tpl\n');
+      cpSync(join(NONEMPTY_WORKSPACE, 'e8.yml'), join(templatesDir, 'tpl', 'e8.yml'));
+      writeFileSync(join(templatesDir, 'tpl', 'game', 'spec.json'), '{ "name": "{{id}}" }');
+      process.env.E8_TEMPLATES = templatesDir;
+    });
+    afterEach(() => {
+      delete process.env.E8_TEMPLATES;
+      rmSync(templatesDir, { recursive: true, force: true });
+    });
+    const create = (body: BodyInit | undefined) =>
+      fetch(`${host!.url}/api/workspace/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+
+    it('creates and opens: 200 with the new project active', async () => {
+      host = await createIdeHost({ root: twoProjects(), port: 0 });
+      expect(host.ctx.workspace.state().templates).toEqual([
+        { id: 'tpl', name: 'Tpl', description: '' },
+      ]);
+      const res = await create(JSON.stringify({ template: 'tpl', id: 'c-slot' }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        active: 'c-slot',
+        projects: [{ id: 'a-slot' }, { id: 'b-slot' }, { id: 'c-slot', name: 'c-slot' }],
+      });
+      expect((await fetch(`${host.url}/api/files`)).status).toBe(200);
+    });
+
+    it('refuses a bad body, an unknown template, a bad id and a taken id with 400', async () => {
+      host = await createIdeHost({ root: twoProjects(), port: 0 });
+      for (const body of [
+        undefined,
+        JSON.stringify({ template: 'tpl' }),
+        JSON.stringify({ id: 1 }),
+      ]) {
+        const res = await create(body);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ diagnostics: [{ plugin: 'workspace' }] });
+      }
+      for (const [body, code] of [
+        [{ template: 'nope', id: 'c-slot' }, 'unknown-template'],
+        [{ template: 'tpl', id: 'C' }, 'invalid'],
+        [{ template: 'tpl', id: 'a-slot' }, 'exists'],
+      ] as const) {
+        const res = await create(JSON.stringify(body));
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ diagnostics: [{ code }] });
+      }
+      expect(host.ctx.workspace.state().active).toBeNull();
+      expect(existsSync(join(root, 'c-slot'))).toBe(false);
+    });
+
+    it('a copy that fails is 500, and the half-made project is gone', async () => {
+      chmodSync(join(templatesDir, 'tpl', 'game', 'spec.json'), 0);
+      host = await createIdeHost({ root: twoProjects(), port: 0 });
+      const res = await create(JSON.stringify({ template: 'tpl', id: 'c-slot' }));
+      expect(res.status).toBe(500);
+      expect(await res.json()).toMatchObject({ diagnostics: [{ code: 'copy-failed' }] });
+      expect(existsSync(join(root, 'c-slot'))).toBe(false);
+      expect(host.ctx.workspace.state().projects.map((p) => p.id)).toEqual(['a-slot', 'b-slot']);
+    });
   });
 
   it('closes over the wire', async () => {

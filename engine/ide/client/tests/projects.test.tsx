@@ -21,6 +21,7 @@ function workspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
       { id: 'alpha', name: 'alpha' },
       { id: 'beta', name: 'Beta Slot' },
     ],
+    templates: [],
     active: 'alpha',
     previewUrl: 'http://game.test:5679',
     diagnostics: [],
@@ -114,6 +115,7 @@ describe('Projects', () => {
     const { ctx } = await harness(
       workspace({
         projects: [],
+        templates: [],
         active: null,
         previewUrl: null,
         diagnostics: [diagnostic('error', 'workspace', 'x', 'manifest.json is not JSON')],

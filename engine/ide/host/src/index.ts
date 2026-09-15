@@ -14,6 +14,9 @@ export {
 } from './plugins/ide-static';
 export { installErrorBoundary } from './error-boundary';
 
+/** `workspace.create` refusal codes that are the request's fault, not the host's. */
+const CALLER_FAULT = new Set(['invalid', 'exists', 'unknown-template', 'single-project']);
+
 export interface IdeHostOptions {
   /**
    * The workspace folder. A `root` that itself holds `e8.yml` is the one
@@ -143,6 +146,42 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
         // A known project that did not come up is the host's failure (500);
         // an id nobody listed is the caller's (400). Spec §9.
         res.status = ctx.workspace.state().projects.some((p) => p.id === id) ? 500 : 400;
+        const refusal: DiagnosticsResponse = { diagnostics: refused };
+        res.json(refusal);
+        return;
+      }
+      res.json(ctx.workspace.state());
+    });
+    ctx.server.post('/api/workspace/create', async (req, res) => {
+      let body: { template?: unknown; id?: unknown } = {};
+      try {
+        body = (await req.json()) as typeof body;
+      } catch {
+        // no body: refused below
+      }
+      if (typeof body.template !== 'string' || typeof body.id !== 'string') {
+        res.status = 400;
+        const refusal: DiagnosticsResponse = {
+          diagnostics: [
+            diagnostic(
+              'error',
+              'workspace',
+              '/api/workspace/create',
+              'body must be { template: string, id: string }',
+            ),
+          ],
+        };
+        res.json(refusal);
+        return;
+      }
+      const refused = await ctx.workspace.create({ template: body.template, id: body.id });
+      if (refused.length) {
+        // The caller's fault is a coded validation refusal (400); anything
+        // else — the copy failed, the new project did not boot — is the
+        // host's (500). By `code`, never by prose. Spec §3.
+        res.status = refused.every((d) => d.code !== undefined && CALLER_FAULT.has(d.code))
+          ? 400
+          : 500;
         const refusal: DiagnosticsResponse = { diagnostics: refused };
         res.json(refusal);
         return;

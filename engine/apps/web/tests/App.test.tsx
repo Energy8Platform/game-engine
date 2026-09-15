@@ -36,7 +36,13 @@ function fakeSocket() {
 
 async function harness(
   importModule?: (url: string) => Promise<unknown>,
-  workspace: WorkspaceState = { projects: [], active: null, previewUrl: null, diagnostics: [] },
+  workspace: WorkspaceState = {
+    projects: [],
+    templates: [],
+    active: null,
+    previewUrl: null,
+    diagnostics: [],
+  },
 ) {
   const socket = fakeSocket();
   const ctx = await createIdeClient({
@@ -73,6 +79,7 @@ async function harness(
 /** What `/api/workspace` answers when a project is open — the harness's default answers with none. */
 const OPEN_PROJECT: WorkspaceState = {
   projects: [{ id: 'a', name: 'A' }],
+  templates: [],
   active: 'a',
   previewUrl: 'http://game.test:5679',
   diagnostics: [],

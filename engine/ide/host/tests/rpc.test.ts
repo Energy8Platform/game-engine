@@ -1111,7 +1111,8 @@ describe('ide rpc — on a root with no project open', () => {
 
   it('greets a client with the workspace, then an EMPTY snapshot — not silence', async () => {
     const first = await bareInbox.waitFor(() => true);
-    expect(first).toEqual({
+    // `templates` is whatever this repo's engine/templates holds — not this test's subject.
+    expect(first).toMatchObject({
       type: 'workspace',
       workspace: { projects: [], active: null, previewUrl: null, diagnostics: [] },
     });

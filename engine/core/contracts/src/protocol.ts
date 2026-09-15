@@ -213,8 +213,19 @@ export interface Project {
   name: string;
 }
 
+/** One project template the host can copy. `id` is its directory name under the templates folder. */
+export interface Template {
+  id: string;
+  /** `e8.template.yml`'s `name`. */
+  name: string;
+  /** `e8.template.yml`'s `description`, `''` when absent. */
+  description: string;
+}
+
 export interface WorkspaceState {
   projects: Project[];
+  /** What `create` accepts. `[]` when creating is impossible (the root is itself a project). */
+  templates: Template[];
   /** The open project's id, or `null` when none is. */
   active: string | null;
   /** Where the active project's game is served, or `null` (no project, or its preview failed to bind). */

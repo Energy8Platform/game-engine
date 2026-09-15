@@ -138,6 +138,7 @@ describe('ProjectStatus', () => {
             { id: 'dir-a', name: 'Game A' },
             { id: 'dir-b', name: 'Game B' },
           ],
+          templates: [],
           active: 'dir-b',
           previewUrl: 'http://game.test:5679',
           diagnostics: [],
@@ -156,6 +157,7 @@ describe('ProjectStatus', () => {
         type: 'workspace',
         workspace: {
           projects: [{ id: 'dir-a', name: 'Game A' }],
+          templates: [],
           active: null,
           previewUrl: null,
           diagnostics: [],
@@ -171,7 +173,13 @@ describe('ProjectStatus', () => {
     act(() =>
       ctx.socket.receive({
         type: 'workspace',
-        workspace: { projects: [], active: 'ghost', previewUrl: null, diagnostics: [] },
+        workspace: {
+          projects: [],
+          templates: [],
+          active: 'ghost',
+          previewUrl: null,
+          diagnostics: [],
+        },
       }),
     );
     expect(container).toHaveTextContent('ghost');

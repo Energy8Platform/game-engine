@@ -27,6 +27,7 @@ const PREVIEW_URL = 'http://game.test:5679';
 /** What the host sends when nothing is open — see `WorkspaceState.previewUrl`. */
 const NO_PROJECT: WorkspaceState = {
   projects: [{ id: 'a', name: 'Game A' }],
+  templates: [],
   active: null,
   previewUrl: null,
   diagnostics: [],
@@ -35,6 +36,7 @@ const NO_PROJECT: WorkspaceState = {
 function workspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
   return {
     projects: [{ id: 'a', name: 'Game A' }],
+    templates: [],
     active: 'a',
     previewUrl: PREVIEW_URL,
     diagnostics: [],

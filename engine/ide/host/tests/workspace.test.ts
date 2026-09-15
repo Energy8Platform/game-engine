@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { Context } from 'cordis';
@@ -7,10 +16,16 @@ import * as workspace from '../src/plugins/workspace';
 import type { ProjectScopeHandle } from '../src/plugins/workspace';
 
 let root: string;
+/** Empty unless a test fills it with `templates()`. */
+let templatesDir: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'e8-ws-'));
+  templatesDir = mkdtempSync(join(tmpdir(), 'e8-tpl-'));
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+  rmSync(templatesDir, { recursive: true, force: true });
+});
 
 function project(id: string, spec?: unknown) {
   mkdirSync(join(root, id, 'game'), { recursive: true });
@@ -44,8 +59,34 @@ function fakeScope(
 
 async function boot(log: string[] = [], opts?: Parameters<typeof fakeScope>[1]) {
   const ctx = new Context();
-  await ctx.plugin(workspace, { root, scope: fakeScope(log, opts) });
+  await ctx.plugin(workspace, { root, templatesDir, scope: fakeScope(log, opts) });
   return ctx;
+}
+
+/**
+ * `good/` — a real template: manifest, `{{id}}` where a project id belongs,
+ * a `src/x.ts` whose `{{id}}` is code and must survive, and a
+ * `node_modules` that must not travel. `nomanifest/` and `noname/` are the
+ * two ways a directory fails to be a template.
+ */
+function templates() {
+  const good = join(templatesDir, 'good');
+  mkdirSync(join(good, 'game'), { recursive: true });
+  mkdirSync(join(good, 'src'));
+  mkdirSync(join(good, 'node_modules'));
+  writeFileSync(join(good, 'e8.template.yml'), 'name: Good\ndescription: A good one\n');
+  writeFileSync(join(good, 'e8.yml'), '[]\n');
+  writeFileSync(
+    join(good, 'package.json'),
+    '{\n  "name": "e8-template-good",\n  "private": true\n}\n',
+  );
+  writeFileSync(join(good, 'game', 'spec.json'), '{ "id": "{{id}}", "name": "{{id}}" }\n');
+  writeFileSync(join(good, 'index.html'), '<title>{{id}} — e8 dev</title>\n');
+  writeFileSync(join(good, 'src', 'x.ts'), 'export const placeholder = "{{id}}";\n');
+  writeFileSync(join(good, 'node_modules', 'junk'), 'junk');
+  mkdirSync(join(templatesDir, 'nomanifest'));
+  mkdirSync(join(templatesDir, 'noname'));
+  writeFileSync(join(templatesDir, 'noname', 'e8.template.yml'), 'description: nameless\n');
 }
 
 describe('workspace: what is a project', () => {
@@ -248,5 +289,157 @@ describe('workspace: open, close, switch', () => {
     await ctx.workspace.rescan();
     expect(ctx.workspace.state().projects.map((p) => p.id)).toEqual(['one', 'two']);
     expect(ctx.workspace.state().active).toBe('one');
+  });
+});
+
+describe('workspace: templates and create', () => {
+  it('lists directories holding e8.template.yml with a name; a nameless one is a diagnostic', async () => {
+    templates();
+    const ctx = await boot();
+    const state = ctx.workspace.state();
+    expect(state.templates).toEqual([{ id: 'good', name: 'Good', description: 'A good one' }]);
+    expect(state.diagnostics).toHaveLength(1);
+    expect(state.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'workspace' });
+    expect(state.diagnostics[0].message).toContain('noname');
+  });
+
+  it('an unreadable templates dir is an empty list and one diagnostic', async () => {
+    rmSync(templatesDir, { recursive: true, force: true });
+    const ctx = await boot();
+    expect(ctx.workspace.state().templates).toEqual([]);
+    expect(ctx.workspace.state().diagnostics).toHaveLength(1);
+    expect(ctx.workspace.state().diagnostics[0].message).toContain(templatesDir);
+  });
+
+  it('rescan picks up a template added after boot', async () => {
+    const ctx = await boot();
+    expect(ctx.workspace.state().templates).toEqual([]);
+    templates();
+    await ctx.workspace.rescan();
+    expect(ctx.workspace.state().templates.map((t) => t.id)).toEqual(['good']);
+  });
+
+  it('create copies the template, substitutes the id, skips node_modules, and opens the project', async () => {
+    templates();
+    project('old');
+    const log: string[] = [];
+    const ctx = await boot(log);
+    expect(await ctx.workspace.create({ template: 'good', id: 'new-one' })).toEqual([]);
+    const dest = join(root, 'new-one');
+    const read = (rel: string) => readFileSync(join(dest, rel), 'utf8');
+    expect(JSON.parse(read('package.json'))).toEqual({ name: 'new-one', private: true });
+    expect(read('package.json')).toBe('{\n  "name": "new-one",\n  "private": true\n}\n');
+    expect(JSON.parse(read('game/spec.json'))).toEqual({ id: 'new-one', name: 'new-one' });
+    expect(read('index.html')).toBe('<title>new-one — e8 dev</title>\n');
+    expect(read('src/x.ts')).toContain('{{id}}');
+    expect(existsSync(join(dest, 'node_modules'))).toBe(false);
+    expect(existsSync(join(dest, 'e8.yml'))).toBe(true);
+    expect(ctx.workspace.state().projects.map((p) => p.id)).toEqual(['new-one', 'old']);
+    expect(ctx.workspace.state().active).toBe('new-one');
+    expect(log).toEqual([`open ${dest}`]);
+  });
+
+  it('a created project whose scope fails to boot exists but is not active; the refusal is the boot one', async () => {
+    templates();
+    const ctx = await boot([], { fail: true });
+    const refusal = await ctx.workspace.create({ template: 'good', id: 'new-one' });
+    expect(refusal).toHaveLength(1);
+    expect(refusal[0].message).toContain('boot failed');
+    expect(refusal[0].code).toBeUndefined();
+    expect(existsSync(join(root, 'new-one', 'e8.yml'))).toBe(true);
+    expect(ctx.workspace.state().active).toBeNull();
+  });
+
+  it.each(['', 'A', '-x', 'a b', 'a'.repeat(65)])(
+    'refuses the id %j and creates nothing',
+    async (id) => {
+      templates();
+      const ctx = await boot();
+      const refusal = await ctx.workspace.create({ template: 'good', id });
+      expect(refusal).toHaveLength(1);
+      expect(refusal[0]).toMatchObject({ plugin: 'workspace', code: 'invalid' });
+      expect(ctx.workspace.state().projects).toEqual([]);
+      expect(ctx.workspace.state().active).toBeNull();
+      if (id) expect(existsSync(join(root, id))).toBe(false);
+    },
+  );
+
+  it('accepts a 64-character id', async () => {
+    templates();
+    const ctx = await boot();
+    const id = 'a'.repeat(64);
+    expect(await ctx.workspace.create({ template: 'good', id })).toEqual([]);
+    expect(ctx.workspace.state().active).toBe(id);
+  });
+
+  it('refuses an id that is already a project, or already a file or folder under root', async () => {
+    templates();
+    project('taken');
+    mkdirSync(join(root, 'plain-dir'));
+    writeFileSync(join(root, 'plain-file'), '');
+    const ctx = await boot();
+    for (const id of ['taken', 'plain-dir', 'plain-file']) {
+      const refusal = await ctx.workspace.create({ template: 'good', id });
+      expect(refusal).toHaveLength(1);
+      expect(refusal[0]).toMatchObject({ code: 'exists' });
+      expect(refusal[0].message).toContain('already exists');
+    }
+    expect(existsSync(join(root, 'plain-dir', 'e8.yml'))).toBe(false);
+    expect(ctx.workspace.state().active).toBeNull();
+  });
+
+  it('refuses an unknown template, including one listed as a directory but excluded', async () => {
+    templates();
+    const ctx = await boot();
+    for (const template of ['nope', 'noname', 'nomanifest']) {
+      const refusal = await ctx.workspace.create({ template, id: 'new-one' });
+      expect(refusal).toHaveLength(1);
+      expect(refusal[0]).toMatchObject({ code: 'unknown-template' });
+    }
+    expect(existsSync(join(root, 'new-one'))).toBe(false);
+  });
+
+  it('a root that is itself a project lists no templates and refuses to create', async () => {
+    templates();
+    writeFileSync(join(root, 'e8.yml'), '[]');
+    const ctx = await boot();
+    expect(ctx.workspace.state().templates).toEqual([]);
+    expect(ctx.workspace.state().diagnostics).toEqual([]);
+    const refusal = await ctx.workspace.create({ template: 'good', id: 'new-one' });
+    expect(refusal).toHaveLength(1);
+    expect(refusal[0]).toMatchObject({ code: 'single-project' });
+    expect(existsSync(join(root, 'new-one'))).toBe(false);
+  });
+
+  it('a copy that fails leaves no half-made project and says why', async () => {
+    templates();
+    chmodSync(join(templatesDir, 'good', 'src', 'x.ts'), 0);
+    const log: string[] = [];
+    const ctx = await boot(log);
+    const refusal = await ctx.workspace.create({ template: 'good', id: 'new-one' });
+    expect(refusal).toHaveLength(1);
+    expect(refusal[0]).toMatchObject({ code: 'copy-failed' });
+    expect(refusal[0].message).toContain('EACCES');
+    expect(existsSync(join(root, 'new-one'))).toBe(false);
+    expect(ctx.workspace.state().projects).toEqual([]);
+    expect(ctx.workspace.state().diagnostics).toContainEqual(refusal[0]);
+    expect(log).toEqual([]);
+  });
+
+  it('create waits behind an in-flight open', async () => {
+    templates();
+    project('one');
+    const log: string[] = [];
+    const ctx = await boot(log);
+    await Promise.all([
+      ctx.workspace.open('one'),
+      ctx.workspace.create({ template: 'good', id: 'new-one' }),
+    ]);
+    expect(log).toEqual([
+      `open ${join(root, 'one')}`,
+      `close ${join(root, 'one')}`,
+      `open ${join(root, 'new-one')}`,
+    ]);
+    expect(ctx.workspace.state().active).toBe('new-one');
   });
 });

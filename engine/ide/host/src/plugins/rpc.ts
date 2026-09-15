@@ -251,6 +251,7 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
   const workspaceState = (): WorkspaceState =>
     ctx.get('workspace')?.state() ?? {
       projects: [],
+      templates: [],
       active: null,
       previewUrl: null,
       diagnostics: [],
