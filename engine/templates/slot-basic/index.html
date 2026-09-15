@@ -43,14 +43,13 @@
       <button id="spin">Spin</button>
       <label>
         mechanic:
-        <!-- `reel-step` is not one of the engine's own: it comes from this
-             project's plugins/reel-step. Which of the three is selected at
-             boot is not decided here — src/main.ts reads it off the
-             composition, so e8.patch.yml stays the one place that says. -->
+        <!-- The two mechanics the e8-base bundle ships. Which one is
+             selected at boot is not decided here — src/main.ts reads it
+             off the composition, so e8.patch.yml stays the one place that
+             says. A project plugin that brings a third adds it here. -->
         <select id="mechanic">
           <option value="classic">classic</option>
           <option value="cascade">cascade</option>
-          <option value="reel-step">reel-step</option>
         </select>
       </label>
       <span id="status"></span>
