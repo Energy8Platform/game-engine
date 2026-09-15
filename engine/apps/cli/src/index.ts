@@ -32,9 +32,19 @@ if (command === '--help' || command === '-h') {
 }
 if (command === 'check' || command === 'spin') {
   const { flags, rest: positional } = parseFlags(rest);
+  const known = command === 'check' ? [] : ['n', 'bet', 'seed', 'action', 'quiet'];
+  const unknown = Object.keys(flags).filter((flag) => !known.includes(flag));
   const quiet = flags.quiet !== undefined;
-  const result =
-    command === 'check'
+  const result = unknown.length
+    ? {
+        diagnostics: unknown.map((flag) => ({
+          severity: 'error' as const,
+          plugin: 'compute',
+          where: `--${flag}`,
+          message: `e8 ${command} does not take --${flag}`,
+        })),
+      }
+    : command === 'check'
       ? await check({ file: positional[0] ?? join('game', 'script.spin') })
       : await spin({
           cwd: process.cwd(),

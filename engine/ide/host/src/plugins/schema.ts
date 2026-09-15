@@ -164,7 +164,7 @@ export async function apply(ctx: Context, config: SpinSchemaConfig): Promise<voi
         return;
       }
 
-      const response: DiagnosticsResponse = { diagnostics: toDiagnostics(parseSpinSchema(source)) };
+      const response: DiagnosticsResponse = { diagnostics: checkSource(source).diagnostics };
       res.json(response);
     });
   });
@@ -192,8 +192,26 @@ async function readSpinSchema(
     };
   }
 
-  const parsed = parseSpinSchema(content);
-  return { schema: parsed.schema, diagnostics: toDiagnostics(parsed) };
+  const { schema, diagnostics } = checkSource(content);
+  return { schema: schema ?? null, diagnostics };
+}
+
+/**
+ * THE verdict on a `.spin` text — what `/api/check` answers, what this
+ * plugin holds after `reload()`, and what `e8 check` prints
+ * (`../compute/check.ts`). One function so the three can never disagree
+ * about the same source: every parser diagnostic degrades to a `warning`
+ * and `checkActionStages` adds its own `error`s, exactly as the module doc
+ * argues. `where` names the file in the stage diagnostics; the parser's own
+ * carry `line N` and are left alone.
+ */
+export function checkSource(
+  source: string,
+  where = SPIN_FILENAME,
+): { schema?: SpinSchema; diagnostics: Diagnostic[] } {
+  const parsed = parseSpinSchema(source);
+  const diagnostics = toDiagnostics(parsed, where);
+  return parsed.schema ? { schema: parsed.schema, diagnostics } : { diagnostics };
 }
 
 /**
@@ -203,21 +221,21 @@ async function readSpinSchema(
  * module doc), plus `checkActionStages`'s own `error`-severity judgement
  * about a schema that WAS read cleanly.
  *
- * The one function both `readSpinSchema` (a file on disk) and `/api/check`
- * (a string an editor is still typing) route through, so the two can never
- * report the same input two different ways — see the module doc's
- * "Severity, and why it is not decoration" section.
+ * Reached only through `checkSource`, which `readSpinSchema` (a file on
+ * disk), `/api/check` (a string an editor is still typing) and `e8 check`
+ * all route through, so none can report the same input two different
+ * ways — see the module doc's "Severity, and why it is not decoration".
  */
-function toDiagnostics(parsed: {
-  schema: SpinSchema | null;
-  diagnostics: Diagnostic[];
-}): Diagnostic[] {
+function toDiagnostics(
+  parsed: { schema: SpinSchema | null; diagnostics: Diagnostic[] },
+  where: string,
+): Diagnostic[] {
   if (parsed.schema === null) {
     // The parser's own diagnostic already names what was missing — see
     // `parseSpinSchema`'s doc. Nothing to add but the severity.
     return parsed.diagnostics.map(asWarning);
   }
-  return [...parsed.diagnostics.map(asWarning), ...checkActionStages(parsed.schema)];
+  return [...parsed.diagnostics.map(asWarning), ...checkActionStages(parsed.schema, where)];
 }
 
 /**
@@ -238,7 +256,7 @@ function asWarning(d: Diagnostic): Diagnostic {
 }
 
 /** See this module's doc comment for the full reasoning. */
-function checkActionStages(schema: SpinSchema): Diagnostic[] {
+function checkActionStages(schema: SpinSchema, where: string): Diagnostic[] {
   const stageNames = Object.keys(schema.stages);
   const diagnostics: Diagnostic[] = [];
   for (const action of schema.actions) {
@@ -247,8 +265,8 @@ function checkActionStages(schema: SpinSchema): Diagnostic[] {
       diagnostic(
         'error',
         'schema',
-        SPIN_FILENAME,
-        `action "${action.name}" names stage "${action.stage}", which "${SPIN_FILENAME}" does not declare — it declares: ${
+        where,
+        `action "${action.name}" names stage "${action.stage}", which "${where}" does not declare — it declares: ${
           stageNames.length > 0 ? stageNames.join(', ') : '(none)'
         }`,
         `fix the stage name on action "${action.name}", or add "${action.stage}" to the SpinData enum`,

@@ -1,13 +1,14 @@
 /**
- * `e8 check` — "what is wrong with this `.spin`", as data. The parser's
- * own severities travel untouched: unlike the host's `schema` plugin,
- * which demotes a parse loss to a `warning` because a half-read schema
- * must not stop a running game, this is the reading a person asked for
- * outright, and a dropped declaration is exactly what they want to hear.
+ * `e8 check` — "what is wrong with this `.spin`", as data. One rule: the
+ * CLI gives the SAME verdict as the IDE's panel. It calls the host's
+ * `checkSource` (`plugins/schema.ts`, the function `/api/check` answers
+ * with) and adds no severity policy of its own — a parse loss is a
+ * `warning` and an action naming an undeclared stage an `error`, in both
+ * places, for the reasons that module's doc argues once.
  */
 import { readFile } from 'node:fs/promises';
 import { diagnostic, type Diagnostic, type SpinSchema } from '@energy8engine/contracts';
-import { parseSpinSchema } from '@energy8engine/spin-parser';
+import { checkSource } from '../plugins/schema';
 
 export interface CheckInput {
   /** Absolute or cwd-relative path to a `.spin`. */
@@ -37,6 +38,5 @@ export async function check(input: CheckInput): Promise<CheckResult> {
       ],
     };
   }
-  const { schema, diagnostics } = parseSpinSchema(source);
-  return schema ? { file: input.file, diagnostics, schema } : { file: input.file, diagnostics };
+  return { file: input.file, ...checkSource(source, input.file) };
 }

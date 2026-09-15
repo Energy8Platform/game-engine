@@ -131,16 +131,21 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
 
 /**
  * The game's id and first bet level — from `game/spec.json` the way the
- * project scope reads it, else from the `.spin`'s own `game` block.
+ * project scope reads it, else from the `game` block of the `.spin` the
+ * spec's `scriptPath` names (default `script.spin`).
  */
 async function readGame(
   cwd: string,
 ): Promise<{ gameId: string; betLevel: number } | { diagnostic: Diagnostic }> {
+  const gamesDir = join(cwd, 'game');
+  let scriptPath = 'script.spin';
   try {
-    const spec = JSON.parse(await readFile(join(cwd, 'game', 'spec.json'), 'utf8')) as {
+    const spec = JSON.parse(await readFile(join(gamesDir, 'spec.json'), 'utf8')) as {
       id?: unknown;
       betLevels?: unknown;
+      scriptPath?: unknown;
     };
+    if (typeof spec.scriptPath === 'string') scriptPath = spec.scriptPath;
     if (typeof spec.id === 'string') {
       const first = Array.isArray(spec.betLevels) ? spec.betLevels[0] : undefined;
       return { gameId: spec.id, betLevel: typeof first === 'number' ? first : 1 };
@@ -148,7 +153,7 @@ async function readGame(
   } catch {
     // No usable spec.json — the .spin declares the same two facts.
   }
-  const { schema, diagnostics } = await check({ file: join(cwd, 'game', 'script.spin') });
+  const { schema, diagnostics } = await check({ file: join(gamesDir, scriptPath) });
   if (schema) return { gameId: schema.gameId, betLevel: schema.betLevels[0] ?? 1 };
   return {
     diagnostic: diagnostics[0] ?? diagnostic('error', 'compute', cwd, 'no game found here'),

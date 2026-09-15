@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const CLI_BIN = resolve(__dirname, '../../../../engine/apps/cli/bin/e8.mjs');
 const FIRST_SLOT_GAME = resolve(__dirname, '../../../examples/first-slot/game');
+const STAGE_TYPO = resolve(__dirname, 'fixtures/project-stage-typo/game/script.spin');
 
 let child: ReturnType<typeof spawn> | undefined;
 afterEach(async () => {
@@ -179,13 +180,23 @@ describe('the real e8 binary', () => {
       okReport.diagnostics.filter((d: { severity: string }) => d.severity === 'error'),
     ).toEqual([]);
 
+    // A parse loss is a warning (exit 0), an undeclared stage an error
+    // (exit 1) — the panel's verdict, see compute-check.test.ts.
     writeFileSync(join(cwd, 'game', 'broken.spin'), 'game "x" {\n');
     const broken = await run(['check', 'game/broken.spin'], cwd);
-    expect(broken.exit).toBe(1);
+    expect(broken.exit).toBe(0);
     const brokenReport = JSON.parse(broken.stdout);
-    expect(brokenReport.diagnostics.some((d: { severity: string }) => d.severity === 'error')).toBe(
-      true,
-    );
+    expect(brokenReport.diagnostics.length).toBeGreaterThan(0);
+    expect(
+      brokenReport.diagnostics.every((d: { severity: string }) => d.severity === 'warning'),
+    ).toBe(true);
+
+    cpSync(STAGE_TYPO, join(cwd, 'game', 'typo.spin'));
+    const typo = await run(['check', 'game/typo.spin'], cwd);
+    expect(typo.exit).toBe(1);
+    expect(JSON.parse(typo.stdout).diagnostics).toMatchObject([
+      { severity: 'error', where: 'game/typo.spin' },
+    ]);
   }, 20000);
 
   it('`e8 spin --n 5` plays five spins; `--n x` is a compute diagnostic and exit 1', async () => {
@@ -199,5 +210,11 @@ describe('the real e8 binary', () => {
     expect(bad.exit).toBe(1);
     expect(bad.stderr).toBe('');
     expect(JSON.parse(bad.stdout).diagnostics).toMatchObject([{ plugin: 'compute' }]);
+
+    const unknown = await run(['spin', '--bogus', '--n', '1'], cwd);
+    expect(unknown.exit).toBe(1);
+    expect(JSON.parse(unknown.stdout).diagnostics).toMatchObject([
+      { plugin: 'compute', where: '--bogus' },
+    ]);
   }, 30000);
 });

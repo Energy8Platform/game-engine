@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { cpSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -71,6 +71,45 @@ describe('spin on a real e8-server', () => {
     expect(r.diagnostics).toHaveLength(1);
     expect(r.diagnostics[0].plugin).toBe('session');
     expect(e8Servers()).toBe(before);
+  }, 30_000);
+
+  it('a spin refused mid-run ends the loop: the report covers what was played, plus why', async () => {
+    // Measured: the in-flight gRPC call rejects at once (`14 UNAVAILABLE`,
+    // ~100ms end to end) rather than hanging on a dead socket.
+    const r = await spin({
+      cwd,
+      n: 20,
+      seed: 'abc',
+      onProgress(done) {
+        if (done !== 3) return;
+        const pid = execSync(`pgrep -f 'e8-server.*--games-dir ${join(cwd, 'game')}'`)
+          .toString()
+          .trim();
+        process.kill(Number(pid), 'SIGKILL');
+      },
+    });
+    expect(r.spins).toBe(3);
+    expect(Object.values(r.stages).reduce((a, b) => a + b, 0)).toBe(3);
+    expect(r.diagnostics).toHaveLength(1);
+    expect(r.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'session' });
+    expect(e8Servers()).toBe(0);
+  }, 30_000);
+
+  it("without an id in spec.json, the game comes from the .spin the spec's scriptPath names", async () => {
+    const other = realpathSync(mkdtempSync(join(tmpdir(), 'e8-spin-')));
+    cpSync(join(GAME, 'script.spin'), join(other, 'game', 'math.spin'));
+    writeFileSync(
+      join(other, 'game', 'spec.json'),
+      JSON.stringify({ scriptPath: 'math.spin', betLevels: [5] }),
+    );
+    try {
+      const r = await spin({ cwd: other, n: 2, seed: 'abc' });
+      expect(r.diagnostics).toEqual([]);
+      expect(r.spins).toBe(2);
+      expect(r.bet).toBe(0.2); // the .spin's first bet level, not the id-less spec's
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
   }, 30_000);
 
   it('n below 1 is a compute diagnostic, before any server is spawned', async () => {
