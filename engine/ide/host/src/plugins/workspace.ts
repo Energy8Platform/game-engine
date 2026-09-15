@@ -12,9 +12,10 @@
  * opened at boot — this is what `e8 dev` in a project folder means, and
  * what every existing e2e fixture relies on.
  *
- * A template is a directory under `templatesDir` holding a FILE named
- * `e8.template.yml` with a `name`. `create` copies one (minus
- * `node_modules`), writes the new id where the template left `{{id}}`
+ * A template is a directory under `templatesDir` that is itself a project
+ * (a FILE `e8.yml`) and holds a FILE named `e8.template.yml` with a
+ * `name`. `create` copies one (minus `node_modules`, the manifest, and any
+ * symlink), writes the new id where the template left `{{id}}`
  * (`game/spec.json`, `index.html`) and into `package.json`'s `name` (a
  * JSON edit — a literal `{{id}}` there would break the monorepo's own
  * workspace glob), then rescans and opens the result.
@@ -22,9 +23,12 @@
  * `open`/`close`/`rescan`/`create` are serialized on one promise chain: two
  * clicks in a row are two operations in order, never one scope booting
  * while another is still tearing down. Nothing here throws; every refusal
- * is a `Diagnostic` in the returned list and in `state().diagnostics`.
+ * is a `Diagnostic` in the returned list. A refused `open` (and a boot that
+ * failed) is also workspace state, in `state().diagnostics`; a refused
+ * `create` is not — nothing changed, so nothing is published, and the
+ * caller (the route, then the form) shows it where it was asked.
  */
-import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -163,12 +167,33 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
     for (const id of entries.sort()) {
       const dir = join(templatesDir, id);
       if (!(await hasFile(dir, TEMPLATE_MANIFEST))) continue;
+      if (!(await isProjectDir(dir))) {
+        problems.push(
+          diagnostic(
+            'error',
+            'workspace',
+            id,
+            `template "${id}" (${dir}) has no ${COMPOSITION_FILENAME}; not listed`,
+            'a template is a project: give it a composition file',
+          ),
+        );
+        continue;
+      }
       let manifest: TemplateManifest = {};
       try {
         manifest = (yaml.load(await readFile(join(dir, TEMPLATE_MANIFEST), 'utf8')) ??
           {}) as TemplateManifest;
-      } catch {
-        // an unreadable/malformed manifest is "no name" below
+      } catch (error) {
+        problems.push(
+          diagnostic(
+            'error',
+            'workspace',
+            id,
+            `template "${id}" (${dir}) has an unreadable ${TEMPLATE_MANIFEST}: ${message(error)}; not listed`,
+            `make ${TEMPLATE_MANIFEST} valid YAML`,
+          ),
+        );
+        continue;
       }
       const name = manifest.name;
       if (typeof name !== 'string' || name.length === 0) {
@@ -266,11 +291,9 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
     template: string;
     id: string;
   }): Promise<Diagnostic[]> {
-    const refuse = (code: string, text: string, fix: string): Diagnostic[] => {
-      openDiagnostics = [{ ...diagnostic('error', 'workspace', id, text, fix), code }];
-      changed();
-      return openDiagnostics;
-    };
+    const refuse = (code: string, text: string, fix: string): Diagnostic[] => [
+      { ...diagnostic('error', 'workspace', id, text, fix), code },
+    ];
     if (rootIsProject) {
       return refuse(
         'single-project',
@@ -299,7 +322,10 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
     try {
       cpSync(join(templatesDir, template), dest, {
         recursive: true,
-        filter: (p) => basename(p) !== 'node_modules',
+        filter: (p) =>
+          basename(p) !== 'node_modules' &&
+          basename(p) !== TEMPLATE_MANIFEST &&
+          !lstatSync(p).isSymbolicLink(),
       });
       for (const rel of SUBSTITUTED) {
         const file = join(dest, rel);
@@ -313,11 +339,16 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
         writeFileSync(pkg, `${JSON.stringify(json, null, 2)}\n`);
       }
     } catch (error) {
-      rmSync(dest, { recursive: true, force: true });
+      let text = `could not create "${id}" from template "${template}": ${message(error)}`;
+      try {
+        rmSync(dest, { recursive: true, force: true });
+      } catch (rmError) {
+        text += `; and the partial copy at ${dest} could not be removed: ${message(rmError)}`;
+      }
       return refuse(
         'copy-failed',
-        `could not create "${id}" from template "${template}": ${message(error)}`,
-        'check that the template is readable and the workspace writable',
+        text,
+        "check that the template is readable and the workspace writable; make the template's files writable — cpSync keeps their modes",
       );
     }
     await scan();

@@ -363,15 +363,19 @@ describe('createIdeHost — a folder of projects', () => {
       expect(existsSync(join(root, 'c-slot'))).toBe(false);
     });
 
-    it('a copy that fails is 500, and the half-made project is gone', async () => {
-      chmodSync(join(templatesDir, 'tpl', 'game', 'spec.json'), 0);
-      host = await createIdeHost({ root: twoProjects(), port: 0 });
-      const res = await create(JSON.stringify({ template: 'tpl', id: 'c-slot' }));
-      expect(res.status).toBe(500);
-      expect(await res.json()).toMatchObject({ diagnostics: [{ code: 'copy-failed' }] });
-      expect(existsSync(join(root, 'c-slot'))).toBe(false);
-      expect(host.ctx.workspace.state().projects.map((p) => p.id)).toEqual(['a-slot', 'b-slot']);
-    });
+    // Non-root only: root reads a mode-0 file, so the copy would succeed.
+    it.skipIf(process.getuid?.() === 0)(
+      'a copy that fails is 500, and the half-made project is gone',
+      async () => {
+        chmodSync(join(templatesDir, 'tpl', 'game', 'spec.json'), 0);
+        host = await createIdeHost({ root: twoProjects(), port: 0 });
+        const res = await create(JSON.stringify({ template: 'tpl', id: 'c-slot' }));
+        expect(res.status).toBe(500);
+        expect(await res.json()).toMatchObject({ diagnostics: [{ code: 'copy-failed' }] });
+        expect(existsSync(join(root, 'c-slot'))).toBe(false);
+        expect(host.ctx.workspace.state().projects.map((p) => p.id)).toEqual(['a-slot', 'b-slot']);
+      },
+    );
   });
 
   it('closes over the wire', async () => {

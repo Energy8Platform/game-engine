@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -57,6 +58,15 @@ function fakeScope(
   };
 }
 
+/** `existsSync` follows links; this sees a dangling or a live symlink alike. */
+function lstatSafe(path: string) {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+}
+
 async function boot(log: string[] = [], opts?: Parameters<typeof fakeScope>[1]) {
   const ctx = new Context();
   await ctx.plugin(workspace, { root, templatesDir, scope: fakeScope(log, opts) });
@@ -65,10 +75,13 @@ async function boot(log: string[] = [], opts?: Parameters<typeof fakeScope>[1]) 
 
 /**
  * `good/` — a real template: manifest, `{{id}}` where a project id belongs,
- * a `src/x.ts` whose `{{id}}` is code and must survive, and a
- * `node_modules` that must not travel. `nomanifest/` and `noname/` are the
- * two ways a directory fails to be a template.
+ * a `src/x.ts` whose `{{id}}` is code and must survive, a `node_modules`
+ * that must not travel, and two symlinks (a file, a directory) that must
+ * not either. `nomanifest/`, `noname/`, `noe8yml/` and `malformed/` are
+ * the four ways a directory fails to be a template — the first silently,
+ * the other three with a diagnostic each.
  */
+const EXCLUDED_TEMPLATES = ['noname', 'noe8yml', 'malformed'];
 function templates() {
   const good = join(templatesDir, 'good');
   mkdirSync(join(good, 'game'), { recursive: true });
@@ -84,10 +97,19 @@ function templates() {
   writeFileSync(join(good, 'index.html'), '<title>{{id}} — e8 dev</title>\n');
   writeFileSync(join(good, 'src', 'x.ts'), 'export const placeholder = "{{id}}";\n');
   writeFileSync(join(good, 'node_modules', 'junk'), 'junk');
+  symlinkSync(join(good, 'src', 'x.ts'), join(good, 'link.ts'));
+  symlinkSync(join(good, 'src'), join(good, 'linkdir'));
   mkdirSync(join(templatesDir, 'nomanifest'));
-  mkdirSync(join(templatesDir, 'noname'));
+  for (const id of EXCLUDED_TEMPLATES) mkdirSync(join(templatesDir, id));
   writeFileSync(join(templatesDir, 'noname', 'e8.template.yml'), 'description: nameless\n');
+  writeFileSync(join(templatesDir, 'noname', 'e8.yml'), '[]\n');
+  writeFileSync(join(templatesDir, 'noe8yml', 'e8.template.yml'), 'name: No composition\n');
+  writeFileSync(join(templatesDir, 'malformed', 'e8.template.yml'), 'name: [unclosed\n');
+  writeFileSync(join(templatesDir, 'malformed', 'e8.yml'), '[]\n');
 }
+
+/** Non-root only: root writes through any mode, so a 0/0o444 file stages nothing. */
+const notRoot = process.getuid?.() !== 0;
 
 describe('workspace: what is a project', () => {
   it('lists directories with e8.yml, by id, sorted; nothing else', async () => {
@@ -293,14 +315,23 @@ describe('workspace: open, close, switch', () => {
 });
 
 describe('workspace: templates and create', () => {
-  it('lists directories holding e8.template.yml with a name; a nameless one is a diagnostic', async () => {
+  it('lists projects holding e8.template.yml with a name; nameless, no-e8.yml and malformed are one diagnostic each', async () => {
     templates();
     const ctx = await boot();
     const state = ctx.workspace.state();
     expect(state.templates).toEqual([{ id: 'good', name: 'Good', description: 'A good one' }]);
-    expect(state.diagnostics).toHaveLength(1);
-    expect(state.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'workspace' });
-    expect(state.diagnostics[0].message).toContain('noname');
+    expect(state.diagnostics).toHaveLength(3);
+    for (const diag of state.diagnostics) {
+      expect(diag).toMatchObject({ severity: 'error', plugin: 'workspace' });
+    }
+    const byWhere = Object.fromEntries(state.diagnostics.map((d) => [d.where, d.message]));
+    expect(Object.keys(byWhere).sort()).toEqual([...EXCLUDED_TEMPLATES].sort());
+    expect(byWhere.noname).toContain('has no name');
+    expect(byWhere.noe8yml).toContain(
+      `template "noe8yml" (${join(templatesDir, 'noe8yml')}) has no e8.yml`,
+    );
+    expect(byWhere.malformed).toContain(join(templatesDir, 'malformed'));
+    expect(byWhere.malformed).toContain('unexpected end of the stream'); // js-yaml's own words
   });
 
   it('an unreadable templates dir is an empty list and one diagnostic', async () => {
@@ -319,7 +350,7 @@ describe('workspace: templates and create', () => {
     expect(ctx.workspace.state().templates.map((t) => t.id)).toEqual(['good']);
   });
 
-  it('create copies the template, substitutes the id, skips node_modules, and opens the project', async () => {
+  it('create copies the template, substitutes the id, skips node_modules, the manifest and symlinks, and opens the project', async () => {
     templates();
     project('old');
     const log: string[] = [];
@@ -333,6 +364,9 @@ describe('workspace: templates and create', () => {
     expect(read('index.html')).toBe('<title>new-one — e8 dev</title>\n');
     expect(read('src/x.ts')).toContain('{{id}}');
     expect(existsSync(join(dest, 'node_modules'))).toBe(false);
+    expect(existsSync(join(dest, 'e8.template.yml'))).toBe(false);
+    expect(lstatSafe(join(dest, 'link.ts'))).toBeNull();
+    expect(lstatSafe(join(dest, 'linkdir'))).toBeNull();
     expect(existsSync(join(dest, 'e8.yml'))).toBe(true);
     expect(ctx.workspace.state().projects.map((p) => p.id)).toEqual(['new-one', 'old']);
     expect(ctx.workspace.state().active).toBe('new-one');
@@ -391,7 +425,7 @@ describe('workspace: templates and create', () => {
   it('refuses an unknown template, including one listed as a directory but excluded', async () => {
     templates();
     const ctx = await boot();
-    for (const template of ['nope', 'noname', 'nomanifest']) {
+    for (const template of ['nope', 'nomanifest', ...EXCLUDED_TEMPLATES]) {
       const refusal = await ctx.workspace.create({ template, id: 'new-one' });
       expect(refusal).toHaveLength(1);
       expect(refusal[0]).toMatchObject({ code: 'unknown-template' });
@@ -411,20 +445,94 @@ describe('workspace: templates and create', () => {
     expect(existsSync(join(root, 'new-one'))).toBe(false);
   });
 
-  it('a copy that fails leaves no half-made project and says why', async () => {
+  it('a refusal is returned, not published: state().diagnostics and the change stream stay as they were', async () => {
+    templates();
+    project('taken');
+    const ctx = await boot();
+    let events = 0;
+    ctx.on('workspace/changed', () => events++);
+    const before = ctx.workspace.state().diagnostics;
+    for (const input of [
+      { template: 'good', id: 'taken' },
+      { template: 'good', id: 'Bad' },
+      { template: 'nope', id: 'new-one' },
+    ]) {
+      expect(await ctx.workspace.create(input)).toHaveLength(1);
+    }
+    expect(ctx.workspace.state().diagnostics).toEqual(before);
+    expect(events).toBe(0);
+  });
+
+  it.skipIf(!notRoot)('a copy that fails leaves no half-made project and says why', async () => {
     templates();
     chmodSync(join(templatesDir, 'good', 'src', 'x.ts'), 0);
     const log: string[] = [];
     const ctx = await boot(log);
+    const before = ctx.workspace.state().diagnostics;
     const refusal = await ctx.workspace.create({ template: 'good', id: 'new-one' });
     expect(refusal).toHaveLength(1);
     expect(refusal[0]).toMatchObject({ code: 'copy-failed' });
     expect(refusal[0].message).toContain('EACCES');
     expect(existsSync(join(root, 'new-one'))).toBe(false);
     expect(ctx.workspace.state().projects).toEqual([]);
-    expect(ctx.workspace.state().diagnostics).toContainEqual(refusal[0]);
+    expect(ctx.workspace.state().diagnostics).toEqual(before);
     expect(log).toEqual([]);
   });
+
+  /**
+   * `cpSync` keeps the template's modes, so a read-only `game/spec.json`
+   * copies fine and then refuses the `{{id}}` write (EACCES, non-root).
+   * The refusal's fix says so. Here `zz/` is ALSO copied read-only, so
+   * the cleanup's `rmSync` cannot unlink what is inside it — that failure
+   * rides along in the message instead of replacing the first one, and
+   * the partial copy stays where it is (the test opens it up again so
+   * `afterEach` can remove it).
+   */
+  it.skipIf(!notRoot)(
+    "a substitution that fails names cpSync's kept modes; a cleanup that fails says so too",
+    async () => {
+      templates();
+      const good = join(templatesDir, 'good');
+      chmodSync(join(good, 'game', 'spec.json'), 0o444);
+      mkdirSync(join(good, 'zz'));
+      writeFileSync(join(good, 'zz', 'a'), 'a');
+      chmodSync(join(good, 'zz'), 0o555);
+      const ctx = await boot();
+      const dest = join(root, 'new-one');
+      try {
+        const refusal = await ctx.workspace.create({ template: 'good', id: 'new-one' });
+        expect(refusal).toHaveLength(1);
+        expect(refusal[0]).toMatchObject({ code: 'copy-failed' });
+        expect(refusal[0].message).toContain(`EACCES`);
+        expect(refusal[0].message).toContain(
+          `; and the partial copy at ${dest} could not be removed: EACCES`,
+        );
+        expect(refusal[0].fix).toContain(
+          "make the template's files writable — cpSync keeps their modes",
+        );
+        expect(existsSync(join(dest, 'zz', 'a'))).toBe(true);
+        expect(ctx.workspace.state().projects).toEqual([]);
+      } finally {
+        chmodSync(join(good, 'zz'), 0o755);
+        if (existsSync(join(dest, 'zz'))) chmodSync(join(dest, 'zz'), 0o755);
+      }
+    },
+  );
+
+  it.skipIf(!notRoot)(
+    'a substitution that fails with a removable partial copy removes it',
+    async () => {
+      templates();
+      chmodSync(join(templatesDir, 'good', 'game', 'spec.json'), 0o444);
+      const ctx = await boot();
+      const refusal = await ctx.workspace.create({ template: 'good', id: 'new-one' });
+      expect(refusal).toHaveLength(1);
+      expect(refusal[0]).toMatchObject({ code: 'copy-failed' });
+      expect(refusal[0].message).toContain('EACCES');
+      expect(refusal[0].message).not.toContain('could not be removed');
+      expect(existsSync(join(root, 'new-one'))).toBe(false);
+    },
+  );
 
   it('create waits behind an in-flight open', async () => {
     templates();
