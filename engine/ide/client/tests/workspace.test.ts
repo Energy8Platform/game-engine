@@ -251,6 +251,66 @@ describe('workspace (client)', () => {
     expect(report.mock.calls[0][0]).toEqual(refusals[0]);
   });
 
+  describe('create()', () => {
+    const input = { template: 'slot-basic', id: 'my-slot' };
+
+    it('POSTs the template and id to /api/workspace/create; a 200 is no refusal and the body is the new state', async () => {
+      const created = ws({
+        active: 'my-slot',
+        projects: [
+          { id: 'a', name: 'Game A' },
+          { id: 'my-slot', name: 'my-slot' },
+        ],
+      });
+      const { fetchFn, calls } = fakeFetch(
+        async () => jsonResponse(ws()),
+        async () => jsonResponse(created),
+      );
+      const { ctx, report } = harness({ fetchFn });
+      await settle();
+      const refusals = await ctx.workspace.create(input);
+      expect(refusals).toEqual([]);
+      expect(calls).toHaveLength(2);
+      expect(calls[1].url).toBe('/api/workspace/create');
+      expect(calls[1].init?.method).toBe('POST');
+      expect(JSON.parse(calls[1].init?.body as string)).toEqual(input);
+      expect(ctx.workspace.state()).toEqual(created);
+      expect(report).not.toHaveBeenCalled();
+    });
+
+    it('a refusal (400 with diagnostics) is returned AND reported, and the state stays', async () => {
+      const said = [d('project "my-slot" already exists')];
+      const { fetchFn } = fakeFetch(
+        async () => jsonResponse(ws()),
+        async () => jsonResponse({ diagnostics: said }, 400),
+      );
+      const { ctx, report } = harness({ fetchFn });
+      await settle();
+      const before = ctx.workspace.state();
+      const refusals = await ctx.workspace.create(input);
+      expect(refusals).toEqual(said);
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(report.mock.calls[0][0]).toEqual(said[0]);
+      expect(ctx.workspace.state()).toBe(before);
+    });
+
+    it('a network failure is one workspace diagnostic, returned and reported', async () => {
+      const { fetchFn } = fakeFetch(
+        async () => jsonResponse(ws()),
+        () => Promise.reject(new Error('offline')),
+      );
+      const { ctx, report } = harness({ fetchFn });
+      await settle();
+      const refusals = await ctx.workspace.create(input);
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0].plugin).toBe('workspace');
+      expect(refusals[0].where).toBe('/api/workspace/create');
+      expect(refusals[0].message).toContain('offline');
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(report.mock.calls[0][0]).toEqual(refusals[0]);
+    });
+  });
+
   it('is composed by createIdeClient, after connection and shell', async () => {
     const socket = new FakeSocket();
     const { fetchFn } = fakeFetch(() => new Promise(() => {}));

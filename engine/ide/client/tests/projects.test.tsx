@@ -1,7 +1,12 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { diagnostic, type ServerMessage, type WorkspaceState } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type ServerMessage,
+  type Template,
+  type WorkspaceState,
+} from '@energy8engine/contracts';
 import { Projects, createIdeClient } from '../src/index';
 
 /**
@@ -29,7 +34,15 @@ function workspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
   };
 }
 
-async function harness(initial: WorkspaceState | null = workspace()) {
+/**
+ * `respond` answers every call after the boot GET; the default never
+ * answers, which is all the `open()` tests need — they watch the POST.
+ */
+async function harness(
+  initial: WorkspaceState | null = workspace(),
+  respond: (url: string, init?: RequestInit) => Promise<Response> = () =>
+    new Promise<Response>(() => {}),
+) {
   const listeners: ((event: { data: string }) => void)[] = [];
   const socket = {
     readyState: 1,
@@ -45,7 +58,7 @@ async function harness(initial: WorkspaceState | null = workspace()) {
     socketFactory: () => socket,
     fetchFn: ((url: string, init?: RequestInit) => {
       calls.push({ url, init });
-      return new Promise<Response>(() => {});
+      return calls.length === 1 ? new Promise<Response>(() => {}) : respond(url, init);
     }) as unknown as typeof fetch,
   });
   const push = (message: ServerMessage) => {
@@ -59,8 +72,24 @@ async function harness(initial: WorkspaceState | null = workspace()) {
     calls
       .filter((call) => call.url === '/api/workspace/open')
       .map((call) => (JSON.parse(call.init?.body as string) as { id: string }).id);
-  return { ctx, push, opened };
+  /** The bodies `create()` POSTed, in order. */
+  const created = () =>
+    calls
+      .filter((call) => call.url === '/api/workspace/create')
+      .map((call) => JSON.parse(call.init?.body as string) as { template: string; id: string });
+  return { ctx, push, opened, created };
 }
+
+const templates = (): Template[] => [
+  { id: 'slot-basic', name: 'Basic slot', description: 'Five reels, three rows, lines.' },
+  { id: 'slot-cluster', name: 'Cluster slot', description: 'Seven by seven, tumbling.' },
+];
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 
 const Doc = () => <div />;
 
@@ -211,5 +240,121 @@ describe('Projects', () => {
     await userEvent.click(screen.getByTestId('confirm-yes'));
     expect(screen.queryByTestId('project-confirm')).toBeNull();
     expect(opened()).toEqual(['beta']);
+  });
+
+  describe('New project', () => {
+    it('is offered only when the host has templates', async () => {
+      const { ctx } = await harness(workspace({ templates: templates() }));
+      const { unmount } = render(<Projects ctx={ctx} />);
+      expect(screen.getByText('New project')).toHaveClass('e8-explorer-title');
+      expect(screen.getByTestId('new-project-template')).toBeInTheDocument();
+      expect(screen.getByTestId('new-project-id')).toHaveAttribute('placeholder', 'my-slot');
+      expect(screen.getByTestId('new-project-create')).toHaveTextContent('Create');
+      unmount();
+      const bare = await harness(workspace({ templates: [] }));
+      render(<Projects ctx={bare.ctx} />);
+      expect(screen.queryByText('New project')).toBeNull();
+      expect(screen.queryByTestId('new-project-create')).toBeNull();
+    });
+
+    it('lists the templates by name and describes the chosen one', async () => {
+      const { ctx } = await harness(workspace({ templates: templates() }));
+      render(<Projects ctx={ctx} />);
+      const select = screen.getByTestId('new-project-template') as HTMLSelectElement;
+      expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+        ['slot-basic', 'Basic slot'],
+        ['slot-cluster', 'Cluster slot'],
+      ]);
+      expect(screen.getByText('Five reels, three rows, lines.')).toHaveClass(
+        'e8-template-description',
+      );
+      await userEvent.selectOptions(select, 'slot-cluster');
+      expect(screen.getByText('Seven by seven, tumbling.')).toBeInTheDocument();
+      expect(screen.queryByText('Five reels, three rows, lines.')).toBeNull();
+    });
+
+    it('Create is disabled until the id matches the pattern', async () => {
+      const { ctx } = await harness(workspace({ templates: templates() }));
+      render(<Projects ctx={ctx} />);
+      const create = screen.getByTestId('new-project-create');
+      const input = screen.getByTestId('new-project-id');
+      expect(create).toBeDisabled();
+      await userEvent.type(input, 'A');
+      expect(create).toBeDisabled();
+      await userEvent.clear(input);
+      await userEvent.type(input, 'my-slot');
+      expect(create).toBeEnabled();
+      await userEvent.clear(input);
+      await userEvent.type(input, '-my-slot');
+      expect(create).toBeDisabled();
+    });
+
+    it('a click on Create asks the host for that template under that id, and disables the button while it waits', async () => {
+      const { ctx, created } = await harness(workspace({ templates: templates() }));
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot');
+      await userEvent.click(screen.getByTestId('new-project-create'));
+      expect(created()).toEqual([{ template: 'slot-basic', id: 'my-slot' }]);
+      expect(screen.getByTestId('new-project-create')).toBeDisabled();
+    });
+
+    it('Enter in the id field submits the same way, and does not reach the rows', async () => {
+      const { ctx, created, opened } = await harness(workspace({ templates: templates() }));
+      render(<Projects ctx={ctx} />);
+      await userEvent.selectOptions(screen.getByTestId('new-project-template'), 'slot-cluster');
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot{Enter}');
+      expect(created()).toEqual([{ template: 'slot-cluster', id: 'my-slot' }]);
+      expect(opened()).toEqual([]);
+    });
+
+    it('Enter with an id that does not match submits nothing', async () => {
+      const { ctx, created } = await harness(workspace({ templates: templates() }));
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'A{Enter}');
+      expect(created()).toEqual([]);
+    });
+
+    it('a refusal is shown under the form, and the id stays for a fix', async () => {
+      const { ctx } = await harness(workspace({ templates: templates() }), async () =>
+        json(
+          {
+            diagnostics: [
+              diagnostic('error', 'workspace', 'my-slot', 'project "my-slot" already exists'),
+            ],
+          },
+          400,
+        ),
+      );
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'my-slot{Enter}');
+      const refusal = await screen.findByTestId('new-project-refusal');
+      expect(refusal).toHaveTextContent('project "my-slot" already exists');
+      expect(refusal).toHaveClass('e8-explorer-diagnostic');
+      expect(screen.getByTestId('new-project-id')).toHaveValue('my-slot');
+      expect(screen.getByTestId('new-project-create')).toBeEnabled();
+    });
+
+    it('success clears the id and any earlier refusal', async () => {
+      let status = 400;
+      const { ctx } = await harness(workspace({ templates: templates() }), async () =>
+        status === 400
+          ? json({ diagnostics: [diagnostic('error', 'workspace', 'x', 'nope')] }, 400)
+          : json(
+              workspace({
+                templates: templates(),
+                projects: [...workspace().projects, { id: 'x', name: 'x' }],
+                active: 'x',
+              }),
+            ),
+      );
+      render(<Projects ctx={ctx} />);
+      await userEvent.type(screen.getByTestId('new-project-id'), 'x{Enter}');
+      await screen.findByTestId('new-project-refusal');
+      status = 200;
+      await userEvent.click(screen.getByTestId('new-project-create'));
+      await waitFor(() => expect(screen.getByTestId('new-project-id')).toHaveValue(''));
+      expect(screen.queryByTestId('new-project-refusal')).toBeNull();
+      expect(screen.getByTestId('project-x')).toHaveAttribute('aria-current', 'true');
+    });
   });
 });

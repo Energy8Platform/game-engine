@@ -32,6 +32,7 @@ import type { Context } from 'cordis';
 import * as yaml from 'js-yaml';
 import {
   type Diagnostic,
+  PROJECT_ID_PATTERN,
   type Project,
   type Template,
   type WorkspaceState,
@@ -80,8 +81,6 @@ export const name = 'workspace';
 const COMPOSITION_FILENAME = 'e8.yml';
 const TEMPLATE_MANIFEST = 'e8.template.yml';
 const REPO_TEMPLATES_DIR = fileURLToPath(new URL('../../../../templates', import.meta.url));
-/** A directory name and a `game_id`: spec §3. */
-const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Files where the template writes `{{id}}` literally. `package.json` is a JSON edit instead. */
 const SUBSTITUTED = ['game/spec.json', 'index.html'];
 
@@ -279,7 +278,7 @@ export async function apply(ctx: Context, config: WorkspaceConfig): Promise<void
         'start e8 one folder up',
       );
     }
-    if (!ID_PATTERN.test(id)) {
+    if (!PROJECT_ID_PATTERN.test(id)) {
       return refuse(
         'invalid',
         `"${id}" is not a project id`,

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import type { Context } from 'cordis';
+import { type Diagnostic, PROJECT_ID_PATTERN, type Template } from '@energy8engine/contracts';
 import { useShell } from '../plugins/shell';
 import { useWorkspace } from '../plugins/workspace';
 import { activateOnKey } from './activate';
@@ -15,6 +16,12 @@ import { activateOnKey } from './activate';
  * (there is none, and one caller does not earn one). «No» leaves every
  * tab where it is; «Yes» calls `open()`, and the `workspace` plugin then
  * closes the closable tabs when the new state lands. Nothing here closes a tab.
+ *
+ * Under the list, when the host offers templates: the «New project» form
+ * (spec §5). It sits OUTSIDE the rows, so its keys never reach a row's
+ * `activateOnKey`; a native `<form>` makes Enter submit and `disabled`
+ * hold the gate. No unsaved-work question here: creating opens the new
+ * project, and the plugin's own warning names what that closed.
  */
 export function Projects({ ctx }: { ctx: Context }): JSX.Element {
   const state = useWorkspace(ctx);
@@ -104,8 +111,73 @@ export function Projects({ ctx }: { ctx: Context }): JSX.Element {
               })}
             </ul>
           )}
+          {state.templates.length > 0 && <NewProject ctx={ctx} templates={state.templates} />}
         </>
       )}
     </div>
+  );
+}
+
+function NewProject({ ctx, templates }: { ctx: Context; templates: Template[] }): JSX.Element {
+  const [template, setTemplate] = useState(templates[0].id);
+  const [id, setId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [refusals, setRefusals] = useState<Diagnostic[]>([]);
+  const valid = PROJECT_ID_PATTERN.test(id);
+  // The chosen template may have left the list with a newer state; fall back to the first.
+  const chosen = templates.find((t) => t.id === template) ?? templates[0];
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!valid || busy) return;
+    setBusy(true);
+    const said = await ctx.workspace.create({ template: chosen.id, id });
+    setBusy(false);
+    setRefusals(said);
+    if (said.length === 0) setId('');
+  }
+
+  return (
+    <>
+      <div className="e8-explorer-header">
+        <span className="e8-explorer-title">New project</span>
+      </div>
+      <form className="e8-new-project" onSubmit={(e) => void submit(e)}>
+        <label>
+          Template
+          <select
+            data-testid="new-project-template"
+            value={chosen.id}
+            onChange={(e) => setTemplate(e.target.value)}
+          >
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          {chosen.description && (
+            <span className="e8-template-description">{chosen.description}</span>
+          )}
+        </label>
+        <label>
+          Id
+          <input
+            data-testid="new-project-id"
+            placeholder="my-slot"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+          />
+        </label>
+        <button type="submit" data-testid="new-project-create" disabled={!valid || busy}>
+          Create
+        </button>
+        {refusals.map((diag, i) => (
+          <p className="e8-explorer-diagnostic" data-testid="new-project-refusal" key={i}>
+            {diag.message}
+          </p>
+        ))}
+      </form>
+    </>
   );
 }

@@ -18,7 +18,7 @@ import { FILE_KEY_PREFIX } from './shell';
  * widening that filter from outside would blur the one guarantee the
  * protocol makes a reader — the frame TYPE is what tells them apart. Its
  * own fetch wrapper, after `files.ts`. Refusals (a 400/500 `{ diagnostics }`
- * from `open`, or a network that did not answer) are BOTH returned to the
+ * from `open` or `create`, or a network that did not answer) are BOTH returned to the
  * caller and reported through `ctx.connection.report`, so the panel shows
  * them even when the caller does nothing with the return value.
  */
@@ -33,6 +33,8 @@ export interface WorkspaceClientService {
   state(): WorkspaceState | null;
   /** `[]` on success; the host's refusals otherwise (also reported to `connection`). */
   open(id: string): Promise<Diagnostic[]>;
+  /** Copy `template` into a new project `id` and open it. Refusals as `open`'s. */
+  create(input: { template: string; id: string }): Promise<Diagnostic[]>;
   subscribe(listener: () => void): () => void;
 }
 
@@ -115,42 +117,45 @@ export function apply(ctx: Context, config: WorkspaceClientConfig) {
     return diagnostics;
   }
 
+  /** `open` and `create` are the same exchange: POST a body, a 200 is the new state, anything else is refusals. */
+  async function post(where: string, payload: object): Promise<Diagnostic[]> {
+    let res: Response;
+    try {
+      res = await fetchFn(where, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      return reportAll([ownDiagnostic(where, error)]);
+    }
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch (error) {
+      return reportAll([ownDiagnostic(where, error)]);
+    }
+    if (res.ok) {
+      if (!isWorkspaceState(body)) return reportAll([ownDiagnostic(where, WRONG_SHAPE)]);
+      set(body);
+      return [];
+    }
+    const carried = (body as { diagnostics?: unknown }).diagnostics;
+    return reportAll(
+      Array.isArray(carried)
+        ? (carried as Diagnostic[])
+        : [ownDiagnostic(where, `the host answered ${res.status} with no "diagnostics" array`)],
+    );
+  }
+
   const service: WorkspaceClientService = {
     state: () => state,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    async open(id) {
-      const where = '/api/workspace/open';
-      let res: Response;
-      try {
-        res = await fetchFn(where, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ id }),
-        });
-      } catch (error) {
-        return reportAll([ownDiagnostic(where, error)]);
-      }
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch (error) {
-        return reportAll([ownDiagnostic(where, error)]);
-      }
-      if (res.ok) {
-        if (!isWorkspaceState(body)) return reportAll([ownDiagnostic(where, WRONG_SHAPE)]);
-        set(body);
-        return [];
-      }
-      const carried = (body as { diagnostics?: unknown }).diagnostics;
-      return reportAll(
-        Array.isArray(carried)
-          ? (carried as Diagnostic[])
-          : [ownDiagnostic(where, `the host answered ${res.status} with no "diagnostics" array`)],
-      );
-    },
+    open: (id) => post('/api/workspace/open', { id }),
+    create: (input) => post('/api/workspace/create', input),
   };
 
   void (async () => {

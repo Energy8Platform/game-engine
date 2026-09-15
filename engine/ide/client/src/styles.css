@@ -459,6 +459,26 @@ label {
 .e8-project-active {
   background: var(--e8-selected);
 }
+/* New project: label-over-control rows under the list, the description a muted line. */
+.e8-new-project {
+  display: grid;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--e8-border);
+}
+.e8-new-project label {
+  display: grid;
+  gap: 2px;
+  font-size: var(--e8-size-small);
+  color: var(--e8-fg-muted);
+}
+.e8-new-project .e8-template-description {
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-small);
+}
+.e8-new-project .e8-explorer-diagnostic {
+  margin: 0;
+}
 .e8-explorer .e8-empty {
   padding: 4px 20px;
 }

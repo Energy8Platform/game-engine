@@ -213,6 +213,9 @@ export interface Project {
   name: string;
 }
 
+/** What a project id (its directory name, its `game_id`) may look like — spec §3. The host refuses anything else; the form does not offer it. */
+export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 /** One project template the host can copy. `id` is its directory name under the templates folder. */
 export interface Template {
   id: string;
