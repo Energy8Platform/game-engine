@@ -3,6 +3,7 @@ import type { Answers } from '../answers';
 export interface DepVersions {
   'platform-core': string; 'game-engine': string; 'stake-kit': string; 'stake-bridge': string;
   'stake-math-tools': string; 'harness': string; 'artube-bridge': string; 'artube-server': string;
+  golem: string;
 }
 
 export function genPackageJson(a: Answers, v: DepVersions): string {
@@ -19,6 +20,8 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     curate: 'e8-math curate --config ./math.config.ts',
     books: 'e8-math books --config ./math.config.ts',
     math: 'e8-math all --config ./math.config.ts',
+    // the golem rig editor over public/assets/rigs — edits reload the running `npm run dev` game
+    rigs: 'golem editor --root public/assets/rigs',
   };
   if (a.stake) {
     scripts['dev:stake'] = 'BUILD_TARGET=stake vite';
@@ -59,6 +62,8 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
       // — so there is NO Artube package to install, no private registry to configure and no token.
       // A plain `npm install` resolves everything this game needs.
       ...(a.artube ? { '@energy8platform/artube-bridge': v['artube-bridge'] } : {}),
+      // rigged symbols / characters (runtime) and the `rigs` editor script — one package, both roles
+      '@energy8platform/golem': v.golem,
       'pixi.js': '^8.16.0',
       '@pixi/sound': '^6.0.0',
       '@esotericsoftware/spine-pixi-v8': '~4.2.0',

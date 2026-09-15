@@ -21,6 +21,8 @@ const LOCAL = {
   'harness': 'file:' + join(REPO, 'packages/harness'),
   'artube-bridge': 'file:' + join(REPO, 'packages/artube-bridge'),
   'artube-server': 'file:' + join(REPO, 'packages/artube-server'),
+  // golem is not a workspace package: the copy the monorepo's own install put in node_modules
+  golem: 'file:' + join(REPO, 'node_modules/@energy8platform/golem'),
 };
 
 describe('scaffold anti-drift', () => {

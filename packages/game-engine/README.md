@@ -41,6 +41,7 @@ npm install pixi.js @energy8platform/game-sdk @energy8platform/game-engine
 # Optional peer dependencies
 npm install @pixi/sound                           # Audio
 npm install @esotericsoftware/spine-pixi-v8       # Spine animations
+npm install @energy8platform/golem                # golem rigs (skeletal symbols / characters + the editor)
 npm install react react-dom react-reconciler      # React integration
 ```
 
@@ -95,6 +96,7 @@ bootstrap();
 | `@energy8platform/game-sdk` | `^2.7.0` | Yes |
 | `@pixi/sound` | `^6.0.0` | Optional — audio |
 | `@esotericsoftware/spine-pixi-v8` | `~4.2.0` | Optional — Spine animations |
+| `@energy8platform/golem` | `>=0.1.0` | Optional — golem rigs (`/golem` entry) |
 | `react`, `react-dom` | `>=18.0.0` | Optional — ReactScene |
 | `react-reconciler` | `>=0.29.0` | Optional — ReactScene (custom PixiJS reconciler) |
 
@@ -394,6 +396,25 @@ import { SpineHelper } from '@energy8platform/game-engine';
 const spine = await SpineHelper.create('character-skel', 'character-atlas', { scale: 0.5 });
 await SpineHelper.playAnimation(spine, 'idle', true);
 SpineHelper.setSkin(spine, 'warrior');
+```
+
+### Golem Rigs
+
+Requires `@energy8platform/golem`. A rig is a `rig.json` plus its PNG layers under `public/`
+(`public/assets/rigs/<id>/`); `npm run rigs` (`golem editor --root public/assets/rigs`) edits them
+in the browser and the dev game reloads on every save. `defineGameConfig` strips the editor's
+`.rig-history/` from `vite build`.
+
+```typescript
+import { loadRigs, RigSymbol, RigPlayer } from '@energy8platform/game-engine/golem';
+
+const rigs = await loadRigs({ h1: 'assets/rigs/h1/rig.json', hero: 'assets/rigs/hero/rig.json' });
+// in a reel cell — RigSymbol is a SymbolView (playIdle / playWin / showStatic / resize)
+const resolve = (id: string) => rigs[id] ? new RigSymbol(rigs[id].doc, rigs[id].textures, { size: 110 }) : null;
+// anywhere on stage — hero.tick(seconds) from the scene's onUpdate
+const hero = new RigPlayer(rigs.hero.doc, rigs.hero.textures);
+scene.container.addChild(hero.view);
+hero.state.setBase('idle');
 ```
 
 ---

@@ -102,7 +102,8 @@ Slot games get their chrome (control bar, balance/bet/win, menu, settings, buy-b
 - `/animation` — Tween, Timeline, Easing
 - `/lua` — re-exports `@energy8platform/platform-core/lua`
 - `/debug` — re-exports DevBridge from platform-core; adds local FPSOverlay
-- `/vite` — re-exports plugins from platform-core/vite; adds pixi-flavored `defineGameConfig`
+- `/vite` — re-exports plugins from platform-core/vite; adds pixi-flavored `defineGameConfig` (always includes `stripRigHistory`)
+- `/golem` — `loadRig`/`loadRigs` + re-exports of `@energy8platform/golem/runtime` (optional peer); holds the compile-time contract that `RigSymbol` is a `SymbolView`
 - `/shell` — re-exports the DOM game shell (+ `Lang`) from `@energy8platform/shell/html`
 - `/assets`, `/audio`, `/game-spec`
 

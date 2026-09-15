@@ -17,6 +17,8 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   // test/versions.test.ts fails the moment these drift from the workspace's own versions.
   'artube-bridge': '^0.4.0',
   'artube-server': '^0.3.1',
+  // lives outside this workspace (github.com/Energy8Platform/golem); not covered by versions.test.ts
+  golem: '^0.1.0',
 };
 
 async function main(): Promise<void> {

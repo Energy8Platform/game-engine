@@ -7,6 +7,7 @@ Generated with `npm create @energy8platform/slot`. Built on @energy8platform gam
 - `npm run dev` — runs the game in a browser (Vite + DevBridge; math served by e8-server with `.spin` hot reload)
 - Edit `src/game.spec.ts` (symbols/paytable/bet levels/actions) and `src/game/script.spin` (math).
 - Swap placeholder art in `public/assets/` (see NAMING.md) and wire it in `src/slot/symbols.ts`.
+- `npm run rigs` — the golem rig editor over `public/assets/rigs/` (animated symbols and characters); the dev game reloads on every edit.
 
 ${artube}## Verify
 - `npm run typecheck`
