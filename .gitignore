@@ -42,6 +42,9 @@ idea.md
 /engine/apps/web/test-results/
 /engine/apps/web/playwright-report/
 
+# `e8 shot`'s default output (`<project>/.e8/shots/*.png`)
+.e8/
+
 # Projects created by the IDE (and the Playwright copies) live beside the
 # shipped examples; only the three shipped ones are tracked.
 /engine/examples/*

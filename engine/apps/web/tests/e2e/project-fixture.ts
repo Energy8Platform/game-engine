@@ -203,8 +203,12 @@ export const PNG_BYTES = Buffer.from(
  *
  * Halving it (1250) would still clear the median, so a budget mutation
  * that is meant to go red has to go well under 809, not to half.
+ *
+ * `E8_LOAD_BUDGET_MS` overrides it for a machine this number was not
+ * measured on (CI, a laptop on battery) — an override, not a re-measure:
+ * the number in the file stays the one from the measurement above.
  */
-export const LOAD_BUDGET_MS = 2500;
+export const LOAD_BUDGET_MS = Number(process.env.E8_LOAD_BUDGET_MS) || 2500;
 
 export interface DevHost {
   /** The IDE host's own origin (5679) — `/api/*`, `/ide`, `/plugin-client`. */

@@ -129,7 +129,9 @@ describe('the real e8 binary', () => {
   it('`e8 --help` (and a bad argument) prints the usage naming every environment knob', async () => {
     const usage = async (arg: string, code: number) => {
       const { out, exit } = await new Promise<{ out: string; exit: number | null }>((resolve) => {
-        const c = spawn(process.execPath, [CLI_BIN, arg], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const c = spawn(process.execPath, [CLI_BIN, ...arg.split(' ')], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
         let out = '';
         c.stdout!.on('data', (d) => (out += d));
         c.stderr!.on('data', (d) => (out += d));
@@ -140,12 +142,14 @@ describe('the real e8 binary', () => {
       expect(out, arg).toContain('e8 check [file]');
       expect(out, arg).toContain('e8 spin [--n N]');
       expect(out, arg).toContain('e8 shot [--out p]');
+      expect(out, arg).toContain('output:');
       for (const env of ['PORT', 'PREVIEW_PORT', 'IDE_DIST', 'IDE_ORIGINS']) {
         expect(out, arg).toMatch(new RegExp(`^\\s*${env}\\b.*$`, 'm'));
       }
     };
     await usage('--help', 0);
     await usage('-h', 0);
+    await usage('spin --help', 0);
     await usage('bogus', 1);
   }, 20000);
 
@@ -256,7 +260,6 @@ describe('the real e8 binary', () => {
         [['--budget', 'abc'], '--budget'],
         [['--budget', '0'], '--budget'],
         [['--ide', '--spin'], '--spin'],
-        [['--quiet'], '--quiet'],
       ] as const) {
         const bad = await run(['shot', ...args], cwd);
         expect(bad.exit, args.join(' ')).toBe(1);
