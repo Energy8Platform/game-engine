@@ -32,7 +32,7 @@ export interface PageLike {
     arg: string,
     options: { timeout: number },
   ): Promise<unknown>;
-  screenshot(options: { path: string }): Promise<unknown>;
+  screenshot(options: { path: string; fullPage: boolean }): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -50,7 +50,7 @@ export interface ShotInput {
   viewport?: { width: number; height: number };
   /** Click `#spin` and wait for `#status` to settle (`done` or a failure text) before shooting. */
   spin?: boolean;
-  /** Shoot the IDE shell at the host's root instead of the game (needs `dist`). */
+  /** Shoot the IDE shell at the host's root instead of the game (needs `dist`); refused with `spin`. */
   ide?: boolean;
   /** Readiness budget, default 30000. */
   budgetMs?: number;
@@ -60,6 +60,7 @@ export interface ShotInput {
 
 export interface ShotResult {
   path: string | null;
+  /** The viewport — the PNG itself is the whole page (`fullPage`), so it may be taller. */
   width: number;
   height: number;
   /** `goto` → readiness, or `null` when readiness missed the budget. */
@@ -107,6 +108,11 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
     diagnostics,
   });
 
+  if (input.ide && input.spin) {
+    diagnostics.push(diagnostic('error', 'compute', '--spin', '--spin has no meaning with --ide'));
+    return result(null, null);
+  }
+
   const host = await createIdeHost({ root: input.cwd, port: 0, previewPort: 0 });
   let browser: BrowserLike | undefined;
   let page: PageLike | undefined;
@@ -152,10 +158,23 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
       );
       return result(null, null);
     }
-    page = await browser.newPage({ viewport: { width, height } });
 
     const t0 = Date.now();
-    const response = await page.goto(url);
+    let response: Awaited<ReturnType<PageLike['goto']>>;
+    try {
+      page = await browser.newPage({ viewport: { width, height } });
+      response = await page.goto(url);
+    } catch (error) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          'compute',
+          url,
+          `cannot open ${url}: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+      return result(null, null);
+    }
     if (input.ide && response?.status() === 503) {
       diagnostics.push(
         diagnostic('error', 'compute', url, 'the IDE shell is not built', IDE_BUILD_HINT),
@@ -224,7 +243,7 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
     );
     try {
       await mkdir(dirname(path), { recursive: true });
-      await page.screenshot({ path });
+      await page.screenshot({ path, fullPage: true });
     } catch (error) {
       diagnostics.push(
         diagnostic(

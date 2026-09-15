@@ -72,9 +72,13 @@ export interface Diagnostic {
    *     service: a root it cannot list, an id it does not have, a project
    *     scope that failed to start or stop), `'ide-static'` (the built
    *     IDE shell: a path not in the build, a build that is not there)
-   *     and `'compute'` (the headless `e8 check`/`e8 spin` functions in
-   *     `ide-host/src/compute`: a file they cannot read, an `n` or `bet`
-   *     or flag they cannot use; `where` is the path or the flag).
+   *     and `'compute'` (the headless `e8 check`/`e8 spin`/`e8 shot`
+   *     functions in `ide-host/src/compute`: a file they cannot read, an
+   *     `n` or `bet` or flag they cannot use; `where` is the path or the
+   *     flag). `shot`'s `where` is likewise whatever it was working on:
+   *     the PNG path it could not write, the url it could not open or
+   *     that was not ready, `playwright` when there is no browser,
+   *     `#spin`/`#status` when the spin it clicked did not settle.
    *     These arrived with the file service and fit none
    *     of the three above: a read of `art/logo.png` is about no
    *     composition row, no running seam and no editor key. The `where`

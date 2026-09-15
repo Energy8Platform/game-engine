@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Context } from 'cordis';
-import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type SpinResult } from '@energy8engine/contracts';
 import * as session from '@energy8engine/session-dev';
 import { check } from './check';
 
@@ -45,6 +45,13 @@ export interface SpinReport {
   avgWin: number;
   stages: Record<string, number>;
   wins: { p50: number; p90: number; p99: number };
+  /**
+   * Rounds whose first response was not `roundComplete` — a bonus entry,
+   * a cascade the server steps on request. `spin` plays one response per
+   * round and never steps, so `rtp` and `wins` cover those first responses
+   * only; a count above 0 also carries a `warning` in `diagnostics`.
+   */
+  incompleteRounds: number;
   seed: string;
   scriptSha256: string | null;
   diagnostics: Diagnostic[];
@@ -57,30 +64,56 @@ export function percentiles(values: number[]): SpinReport['wins'] {
   return { p50: at(50), p90: at(90), p99: at(99) };
 }
 
+/**
+ * The numbers of a report from the responses played — the part of `spin`
+ * that is pure, so it can be tested with results no fixture produces
+ * (`first-slot` completes every round on its first response). Its
+ * `diagnostics` hold at most the incomplete-rounds warning; `spin`
+ * prepends its own (session, input).
+ */
+export function summarise(results: SpinResult[]): Omit<SpinReport, 'bet' | 'seed'> {
+  const wins = results.map((r) => r.win);
+  const sum = wins.reduce((a, b) => a + b, 0);
+  const stages: Record<string, number> = {};
+  for (const r of results) stages[r.stage] = (stages[r.stage] ?? 0) + 1;
+  const incomplete = results.filter((r) => !r.roundComplete);
+  const diagnostics: Diagnostic[] = [];
+  if (incomplete.length) {
+    const next = [...new Set(incomplete.flatMap((r) => r.nextActions))].sort().join(', ');
+    diagnostics.push(
+      diagnostic(
+        'warning',
+        'compute',
+        'roundComplete',
+        `${incomplete.length} of ${results.length} rounds did not complete on the first response (nextActions: ${next}); rtp covers first responses only`,
+        'a later e8 spin will step rounds to completion',
+      ),
+    );
+  }
+  return {
+    spins: wins.length,
+    rtp: wins.length ? sum / wins.length : 0,
+    hitRate: wins.length ? wins.filter((w) => w > 0).length / wins.length : 0,
+    maxWin: wins.length ? Math.max(...wins) : 0,
+    avgWin: wins.length ? sum / wins.length : 0,
+    stages,
+    wins: percentiles(wins),
+    incompleteRounds: incomplete.length,
+    scriptSha256: results.at(-1)?.scriptSha256 ?? null,
+    diagnostics,
+  };
+}
+
 export async function spin(input: SpinInput): Promise<SpinReport> {
   const n = input.n ?? 100;
   const seed = input.seed ?? randomBytes(8).toString('hex');
-  const wins: number[] = [];
-  const stages: Record<string, number> = {};
+  const results: SpinResult[] = [];
   const diagnostics: Diagnostic[] = [];
-  let scriptSha256: string | null = null;
   let bet = input.bet ?? 0;
 
   const report = (): SpinReport => {
-    const sum = wins.reduce((a, b) => a + b, 0);
-    return {
-      spins: wins.length,
-      bet,
-      rtp: wins.length ? sum / wins.length : 0,
-      hitRate: wins.length ? wins.filter((w) => w > 0).length / wins.length : 0,
-      maxWin: wins.length ? Math.max(...wins) : 0,
-      avgWin: wins.length ? sum / wins.length : 0,
-      stages,
-      wins: percentiles(wins),
-      seed,
-      scriptSha256,
-      diagnostics,
-    };
+    const summary = summarise(results);
+    return { ...summary, bet, seed, diagnostics: [...diagnostics, ...summary.diagnostics] };
   };
 
   if (!Number.isInteger(n) || n < 1) {
@@ -118,9 +151,7 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
         diagnostics.push(...played.diagnostics);
         break;
       }
-      wins.push(played.result.win);
-      stages[played.result.stage] = (stages[played.result.stage] ?? 0) + 1;
-      scriptSha256 = played.result.scriptSha256;
+      results.push(played.result);
       input.onProgress?.(i, n);
     }
     return report();

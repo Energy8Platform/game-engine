@@ -52,6 +52,8 @@ interface Fake {
   calls: string[];
   gotos: string[];
   shots: string[];
+  /** The `fullPage` option of every screenshot, in order. */
+  fullPages: boolean[];
   /** What `#status` read each time a wait resolved. */
   resolvedOn: string[];
 }
@@ -63,8 +65,8 @@ interface Fake {
  * false answer — so the predicate `shot` sends to the browser is the
  * thing under test; out of statuses (or `hang`), it never resolves.
  */
-function fake(options: { hang?: boolean; statuses?: string[] } = {}): Fake {
-  const f: Fake = { calls: [], gotos: [], shots: [], resolvedOn: [], launch };
+function fake(options: { hang?: boolean; statuses?: string[]; gotoThrows?: string } = {}): Fake {
+  const f: Fake = { calls: [], gotos: [], shots: [], fullPages: [], resolvedOn: [], launch };
   const statuses = [...(options.statuses ?? ['ready'])];
   let status = statuses.shift() ?? '';
   (globalThis as { document?: unknown }).document = {
@@ -75,6 +77,7 @@ function fake(options: { hang?: boolean; statuses?: string[] } = {}): Fake {
     const page: PageLike = {
       async goto(url) {
         f.gotos.push(url);
+        if (options.gotoThrows) throw new Error(options.gotoThrows);
         const res = await fetch(url);
         return { status: () => res.status };
       },
@@ -101,8 +104,9 @@ function fake(options: { hang?: boolean; statuses?: string[] } = {}): Fake {
           status = statuses.shift()!;
         }
       },
-      async screenshot({ path }) {
+      async screenshot({ path, fullPage }) {
         f.shots.push(path);
+        f.fullPages.push(fullPage);
         f.calls.push('screenshot');
         // A real file, so the caller's `existsSync` means what it says.
         await import('node:fs/promises').then((fs) => fs.writeFile(path, 'png'));
@@ -137,6 +141,8 @@ describe('shot over a real host, with a fake browser', () => {
     expect(r.height).toBe(288);
     expect(r.path).toMatch(new RegExp(`^${join(cwd, '.e8', 'shots')}/.+\\.png$`));
     expect(f.shots).toEqual([r.path]);
+    // The whole page, not the viewport: a game taller than 288px is not cropped.
+    expect(f.fullPages).toEqual([true]);
     expect(existsSync(r.path!)).toBe(true);
     expect(f.calls.slice(-2)).toEqual(['page.close', 'browser.close']);
     expect(e8Servers()).toBe(before);
@@ -224,6 +230,41 @@ describe('shot over a real host, with a fake browser', () => {
     });
     expect(await portFree(f.gotos[0])).toBe(true);
   }, 30_000);
+
+  it('a page that cannot be opened is a diagnostic naming the url, and everything is closed', async () => {
+    const f = fake({ gotoThrows: 'net::ERR_CONNECTION_REFUSED' });
+    const r = await shot({ cwd, launch: f.launch });
+    expect(r.path).toBeNull();
+    expect(r.loadMs).toBeNull();
+    expect(f.shots).toEqual([]);
+    expect(r.diagnostics).toEqual([
+      {
+        severity: 'error',
+        plugin: 'compute',
+        where: f.gotos[0],
+        message: `cannot open ${f.gotos[0]}: net::ERR_CONNECTION_REFUSED`,
+      },
+    ]);
+    expect(f.calls.slice(-2)).toEqual(['page.close', 'browser.close']);
+    expect(await portFree(f.gotos[0])).toBe(true);
+  }, 30_000);
+
+  it('`ide` with `spin` is refused as data, before any host or browser', async () => {
+    const f = fake();
+    const before = e8Servers();
+    const r = await shot({ cwd, ide: true, spin: true, launch: f.launch });
+    expect(r.path).toBeNull();
+    expect(r.diagnostics).toEqual([
+      {
+        severity: 'error',
+        plugin: 'compute',
+        where: '--spin',
+        message: '--spin has no meaning with --ide',
+      },
+    ]);
+    expect(f.calls).toEqual([]);
+    expect(e8Servers()).toBe(before);
+  });
 
   it('no browser is a compute diagnostic naming the install, and the host is gone', async () => {
     const before = e8Servers();

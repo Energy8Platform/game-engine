@@ -3,7 +3,8 @@ import { cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { percentiles, spin } from '../src/compute';
+import type { SpinResult } from '@energy8engine/contracts';
+import { percentiles, spin, summarise } from '../src/compute';
 
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
 
@@ -42,6 +43,7 @@ describe('spin on a real e8-server', () => {
     for (const p of Object.values(r.wins)) expect(r.maxWin).toBeGreaterThanOrEqual(p);
     expect(Object.values(r.stages).reduce((a, b) => a + b, 0)).toBe(20);
     expect(r.scriptSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.incompleteRounds).toBe(0); // first-slot: every action is round_complete at once
     expect(progress.at(-1)).toEqual([20, 20]);
     expect(e8Servers()).toBe(before);
   }, 30_000);
@@ -125,5 +127,72 @@ describe('percentiles', () => {
     expect(percentiles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toEqual({ p50: 5, p90: 9, p99: 10 });
     expect(percentiles([3, 1, 2])).toEqual({ p50: 2, p90: 3, p99: 3 });
     expect(percentiles([])).toEqual({ p50: 0, p90: 0, p99: 0 });
+  });
+});
+
+describe('summarise', () => {
+  /** A first response — `first-slot`'s shape, with only what the summary reads varied. */
+  function result(win: number, over: Partial<SpinResult> = {}): SpinResult {
+    return {
+      win,
+      totalWin: win,
+      bet: 1,
+      stage: 'base_game',
+      data: {},
+      vars: {},
+      nextActions: ['spin'],
+      roundComplete: true,
+      spinsRemaining: 0,
+      spinsPlayed: 1,
+      scriptSha256: 'a'.repeat(64),
+      roundId: 'r',
+      ...over,
+    };
+  }
+
+  it('counts rounds that did not complete on the first response, and says what they wait for', () => {
+    const s = summarise([
+      result(0),
+      result(2, { roundComplete: false, nextActions: ['bonus_spin'], stage: 'bonus' }),
+      result(1, { roundComplete: false, nextActions: ['cascade', 'bonus_spin'] }),
+      result(0.5),
+    ]);
+    expect(s.spins).toBe(4);
+    expect(s.incompleteRounds).toBe(2);
+    expect(s.rtp).toBe(3.5 / 4); // first responses only — nothing is stepped
+    expect(s.hitRate).toBe(0.75);
+    expect(s.maxWin).toBe(2);
+    expect(s.stages).toEqual({ base_game: 3, bonus: 1 });
+    expect(s.scriptSha256).toBe('a'.repeat(64));
+    expect(s.diagnostics).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'compute',
+        where: 'roundComplete',
+        message:
+          '2 of 4 rounds did not complete on the first response (nextActions: bonus_spin, cascade); rtp covers first responses only',
+        fix: 'a later e8 spin will step rounds to completion',
+      },
+    ]);
+  });
+
+  it('complete rounds carry no warning; no rounds is all zeros', () => {
+    expect(summarise([result(1), result(0)])).toMatchObject({
+      incompleteRounds: 0,
+      diagnostics: [],
+      rtp: 0.5,
+    });
+    expect(summarise([])).toEqual({
+      spins: 0,
+      rtp: 0,
+      hitRate: 0,
+      maxWin: 0,
+      avgWin: 0,
+      stages: {},
+      wins: { p50: 0, p90: 0, p99: 0 },
+      incompleteRounds: 0,
+      scriptSha256: null,
+      diagnostics: [],
+    });
   });
 });
