@@ -249,11 +249,21 @@ describe('the real e8 binary', () => {
         Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       );
 
-      const bad = await run(['shot', '--viewport', 'wide'], cwd);
-      expect(bad.exit).toBe(1);
-      expect(JSON.parse(bad.stdout).diagnostics).toMatchObject([
-        { plugin: 'compute', where: '--viewport' },
-      ]);
+      // Refused flags: one JSON document, exit 1, no host booted (fast).
+      for (const [args, where] of [
+        [['--viewport', 'wide'], '--viewport'],
+        [['--viewport', '0x0'], '--viewport'],
+        [['--budget', 'abc'], '--budget'],
+        [['--budget', '0'], '--budget'],
+        [['--ide', '--spin'], '--spin'],
+        [['--quiet'], '--quiet'],
+      ] as const) {
+        const bad = await run(['shot', ...args], cwd);
+        expect(bad.exit, args.join(' ')).toBe(1);
+        expect(JSON.parse(bad.stdout).diagnostics, args.join(' ')).toMatchObject([
+          { plugin: 'compute', where },
+        ]);
+      }
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

@@ -17,8 +17,9 @@
  * the evidence. The host and the browser are closed in `finally`, so a
  * `shot` that fails leaves no process behind.
  */
+import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import { IDE_BUILD_HINT, createIdeHost } from '../index';
 
@@ -47,7 +48,7 @@ export interface ShotInput {
   out?: string;
   /** Default 480×288. */
   viewport?: { width: number; height: number };
-  /** Click `#spin` and wait for `#status` to change before shooting. */
+  /** Click `#spin` and wait for `#status` to settle (`done` or a failure text) before shooting. */
   spin?: boolean;
   /** Shoot the IDE shell at the host's root instead of the game (needs `dist`). */
   ide?: boolean;
@@ -116,7 +117,14 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
       if (state.active === null) {
         diagnostics.push(
           ...state.diagnostics,
-          diagnostic('error', 'compute', input.cwd, `${input.cwd} is not a project (no e8.yml)`),
+          existsSync(join(input.cwd, 'e8.yml'))
+            ? diagnostic('error', 'compute', input.cwd, 'the project did not start')
+            : diagnostic(
+                'error',
+                'compute',
+                input.cwd,
+                `${input.cwd} is not a project (no e8.yml)`,
+              ),
         );
         return result(null, null);
       }
@@ -174,18 +182,27 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
       try {
         const before = (await page.locator('#status').textContent()) ?? '';
         await page.locator('#spin').click();
-        const changed = page.waitForFunction(
-          (prev) => document.querySelector('#status')?.textContent !== prev,
+        // Settled: neither what it said before the click nor `spinning…`
+        // — `done`, or one of the game's failure texts.
+        const settled = page.waitForFunction(
+          (prev) => {
+            const text = document.querySelector('#status')?.textContent ?? '';
+            return text !== prev && !text.startsWith('spinning');
+          },
           before,
           { timeout: budgetMs },
         );
-        if (!(await within(changed, budgetMs))) {
+        if (await within(settled, budgetMs)) {
+          const after = (await page.locator('#status').textContent()) ?? '';
+          if (after !== 'done')
+            diagnostics.push(diagnostic('warning', 'compute', '#status', after));
+        } else {
           diagnostics.push(
             diagnostic(
               'warning',
               'compute',
               '#spin',
-              `#status did not change within ${budgetMs}ms`,
+              `#status did not settle within ${budgetMs}ms`,
             ),
           );
         }
@@ -205,8 +222,20 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
       input.cwd,
       input.out ?? `.e8/shots/${new Date().toISOString().replace(/[:.]/g, '-')}.png`,
     );
-    await mkdir(dirname(path), { recursive: true });
-    await page.screenshot({ path });
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      await page.screenshot({ path });
+    } catch (error) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          'compute',
+          path,
+          `cannot write the screenshot: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+      return result(null, loadMs);
+    }
     return result(path, loadMs);
   } finally {
     await page?.close().catch(() => {});

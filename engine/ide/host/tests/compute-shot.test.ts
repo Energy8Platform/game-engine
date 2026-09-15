@@ -4,7 +4,7 @@
  * Chromium run lives in cli-smoke.test.ts.
  */
 import { execSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +20,10 @@ cpSync(FIRST_SLOT, cwd, {
   recursive: true,
   filter: (src) => !src.includes('node_modules') && !src.endsWith('tsconfig.json'),
 });
-afterAll(() => rmSync(cwd, { recursive: true, force: true }));
+afterAll(() => {
+  rmSync(cwd, { recursive: true, force: true });
+  delete (globalThis as { document?: unknown }).document;
+});
 
 /** Live `e8-server` processes serving this copy's `game/` — 0 when none. */
 function e8Servers(): number {
@@ -49,14 +52,24 @@ interface Fake {
   calls: string[];
   gotos: string[];
   shots: string[];
+  /** What `#status` read each time a wait resolved. */
+  resolvedOn: string[];
 }
 
 /**
- * Records every call; `goto` really fetches (so a 503 from the host is
- * real); `waitForFunction` resolves unless `hang` says otherwise.
+ * Records every call. `goto` really fetches (so a 503 from the host is
+ * real). `waitForFunction` really runs the page function — against a
+ * `document` stub whose `#status` steps through `statuses` on each
+ * false answer — so the predicate `shot` sends to the browser is the
+ * thing under test; out of statuses (or `hang`), it never resolves.
  */
-function fake(options: { hang?: boolean; status?: string } = {}): Fake {
-  const f: Fake = { calls: [], gotos: [], shots: [], launch };
+function fake(options: { hang?: boolean; statuses?: string[] } = {}): Fake {
+  const f: Fake = { calls: [], gotos: [], shots: [], resolvedOn: [], launch };
+  const statuses = [...(options.statuses ?? ['ready'])];
+  let status = statuses.shift() ?? '';
+  (globalThis as { document?: unknown }).document = {
+    querySelector: () => ({ textContent: status }),
+  };
   async function launch(): Promise<BrowserLike> {
     f.calls.push('launch');
     const page: PageLike = {
@@ -69,16 +82,24 @@ function fake(options: { hang?: boolean; status?: string } = {}): Fake {
         return {
           async textContent() {
             f.calls.push(`text ${selector}`);
-            return options.status ?? 'ready';
+            return status;
           },
           async click() {
             f.calls.push(`click ${selector}`);
           },
         };
       },
-      waitForFunction() {
+      waitForFunction(fn, arg) {
         f.calls.push('wait');
-        return options.hang ? new Promise(() => {}) : Promise.resolve(true);
+        if (options.hang) return new Promise(() => {});
+        for (;;) {
+          if (fn(arg)) {
+            f.resolvedOn.push(status);
+            return Promise.resolve(true);
+          }
+          if (!statuses.length) return new Promise(() => {});
+          status = statuses.shift()!;
+        }
       },
       async screenshot({ path }) {
         f.shots.push(path);
@@ -122,8 +143,8 @@ describe('shot over a real host, with a fake browser', () => {
     expect(await portFree(f.gotos[0])).toBe(true);
   }, 30_000);
 
-  it('`out` and `viewport` are honoured; `spin` clicks #spin and waits a second time', async () => {
-    const f = fake();
+  it('`out` and `viewport` are honoured; `spin` clicks #spin and waits until #status settles', async () => {
+    const f = fake({ statuses: ['ready', 'spinning…', 'done'] });
     const out = join(cwd, 'custom', 'a.png');
     const r = await shot({
       cwd,
@@ -143,10 +164,41 @@ describe('shot over a real host, with a fake browser', () => {
       'text #status',
       'click #spin',
       'wait',
+      'text #status',
       'screenshot',
       'page.close',
       'browser.close',
     ]);
+    // Readiness resolved on `ready`; the spin wait only once past `spinning…`.
+    expect(f.resolvedOn).toEqual(['ready', 'done']);
+  }, 30_000);
+
+  it('a spin that settles on a failure text is a warning carrying that text; the shot is still taken', async () => {
+    const f = fake({ statuses: ['ready', 'spinning…', 'error — see log'] });
+    const r = await shot({ cwd, out: 'custom/b.png', spin: true, launch: f.launch });
+    expect(f.resolvedOn).toEqual(['ready', 'error — see log']);
+    expect(r.path).toBe(join(cwd, 'custom', 'b.png'));
+    expect(f.shots).toHaveLength(1);
+    expect(r.diagnostics).toEqual([
+      { severity: 'warning', plugin: 'compute', where: '#status', message: 'error — see log' },
+    ]);
+  }, 30_000);
+
+  it('a screenshot that cannot be written is a diagnostic, not a throw', async () => {
+    const f = fake();
+    // `index.html` is a file, so its "subdirectory" cannot be made.
+    const r = await shot({ cwd, out: 'index.html/a.png', launch: f.launch });
+    expect(r.path).toBeNull();
+    expect(typeof r.loadMs).toBe('number');
+    expect(f.shots).toEqual([]);
+    expect(r.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        plugin: 'compute',
+        where: join(cwd, 'index.html', 'a.png'),
+      }),
+    ]);
+    expect(await portFree(f.gotos[0])).toBe(true);
   }, 30_000);
 
   it('`ide` opens the host root; without a dist that is a 503 and no screenshot', async () => {
@@ -204,13 +256,32 @@ describe('shot over a real host, with a fake browser', () => {
     expect(await portFree(f.gotos[0])).toBe(true);
   }, 30_000);
 
-  it('a folder that is not a project is a diagnostic before any browser', async () => {
+  it('a folder that is not a project, or one without a game, is a diagnostic before any browser', async () => {
     const empty = mkdtempSync(join(tmpdir(), 'e8-shot-empty-'));
     const f = fake();
     try {
       const r = await shot({ cwd: empty, launch: f.launch });
       expect(r.path).toBeNull();
-      expect(r.diagnostics).toMatchObject([{ severity: 'error', plugin: 'compute' }]);
+      expect(r.diagnostics).toEqual([
+        expect.objectContaining({
+          plugin: 'compute',
+          message: expect.stringContaining('no e8.yml'),
+        }),
+      ]);
+      expect(f.calls).toEqual([]);
+
+      // With an e8.yml the folder IS a project: the scope opens (measured in
+      // project-scope.test.ts: no project-shaped failure makes it reject,
+      // so `did not start` cannot be staged from disk) but brings no game.
+      writeFileSync(join(empty, 'e8.yml'), '[]\n');
+      const gameless = await shot({ cwd: empty, launch: f.launch });
+      expect(gameless.path).toBeNull();
+      expect(gameless.diagnostics).toEqual([
+        expect.objectContaining({
+          plugin: 'compute',
+          message: expect.stringContaining('no running game'),
+        }),
+      ]);
       expect(f.calls).toEqual([]);
     } finally {
       rmSync(empty, { recursive: true, force: true });

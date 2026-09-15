@@ -15,7 +15,7 @@ const USAGE = [
   '       e8 check [file]                       parse a .spin (default game/script.spin)',
   '       e8 spin [--n N] [--bet B] [--seed S] [--action A] [--quiet]',
   '                                             play N spins through e8-server',
-  '       e8 shot [--out p] [--viewport WxH] [--spin] [--ide] [--budget ms] [--quiet]',
+  '       e8 shot [--out p] [--viewport WxH] [--spin] [--ide] [--budget ms]',
   '                                             screenshot the running game (or the IDE)',
   '',
   'check, spin and shot print one JSON document on stdout, progress on stderr,',
@@ -37,24 +37,32 @@ if (command === 'check' || command === 'spin' || command === 'shot') {
   const known: string[] = {
     check: [],
     spin: ['n', 'bet', 'seed', 'action', 'quiet'],
-    shot: ['out', 'viewport', 'spin', 'ide', 'budget', 'quiet'],
+    shot: ['out', 'viewport', 'spin', 'ide', 'budget'],
   }[command];
-  const unknown = Object.keys(flags).filter((flag) => !known.includes(flag));
   const quiet = flags.quiet !== undefined;
+  const problems = Object.keys(flags)
+    .filter((flag) => !known.includes(flag))
+    .map((flag) => problem(`--${flag}`, `e8 ${command} does not take --${flag}`));
   const viewport = flags.viewport?.match(/^(\d+)x(\d+)$/);
-  if (command === 'shot' && flags.viewport !== undefined && !viewport) unknown.push('viewport');
-  const result = unknown.length
-    ? {
-        diagnostics: unknown.map((flag) => ({
-          severity: 'error' as const,
-          plugin: 'compute',
-          where: `--${flag}`,
-          message:
-            flag === 'viewport' && flags.viewport !== undefined
-              ? `--viewport must be WxH, got ${flags.viewport}`
-              : `e8 ${command} does not take --${flag}`,
-        })),
-      }
+  if (command === 'shot') {
+    if (
+      flags.viewport !== undefined &&
+      !(viewport && Number(viewport[1]) > 0 && Number(viewport[2]) > 0)
+    ) {
+      problems.push(problem('--viewport', `--viewport must be WxH, got ${flags.viewport}`));
+    }
+    const budget = num(flags.budget);
+    if (budget !== undefined && !(Number.isInteger(budget) && budget >= 1)) {
+      problems.push(
+        problem('--budget', `--budget must be a whole number of ms ≥ 1, got ${flags.budget}`),
+      );
+    }
+    if (flags.ide !== undefined && flags.spin !== undefined) {
+      problems.push(problem('--spin', '--spin has no meaning with --ide'));
+    }
+  }
+  const result = problems.length
+    ? { diagnostics: problems }
     : command === 'check'
       ? await check({ file: positional[0] ?? join('game', 'script.spin') })
       : command === 'shot'
@@ -147,6 +155,11 @@ function parseFlags(args: string[]): { flags: Record<string, string | undefined>
     }
   }
   return { flags, rest };
+}
+
+/** A flag the command refuses — an `error` `compute` diagnostic, so the JSON and exit code are the same shape as any other failure. */
+function problem(where: string, message: string) {
+  return { severity: 'error' as const, plugin: 'compute', where, message };
 }
 
 /** An absent flag stays absent; anything else is `Number`ed — `spin` reports a NaN as a diagnostic. */
