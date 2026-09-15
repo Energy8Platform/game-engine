@@ -14,15 +14,7 @@
  * spec without becoming one.
  */
 import { execFileSync } from 'node:child_process';
-import {
-  appendFileSync,
-  cpSync,
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
@@ -238,6 +230,9 @@ export async function startDevHost(dir: string): Promise<DevHost> {
  * reads for every `.ts` it serves, so each copy's `extends` is rewritten
  * to the absolute path (measured: one level off and every module 500s —
  * `projectCopy`'s doc; the plugin's was the second one to, on the first run).
+ * The shipped template needs none of this: its `tsconfig.json` is
+ * self-contained (`template.test.ts` pins it), so a project the host
+ * creates under this root boots as it is.
  *
  * The second copy differs in TWO measured ways, one per reader:
  *  - `game/spec.json` gets `name: 'Second Slot'` — what the HOST's
@@ -282,31 +277,6 @@ export function workspaceCopy(n: number): string {
 /** What `workspaceCopy`'s second project is called — in its spec and in its page title. */
 export const SECOND_NAME = 'Second Slot';
 
-/** This repo's shipped templates — what the host lists when nothing points it elsewhere. */
-export const TEMPLATES = join(EXAMPLES, '..', 'templates');
-
-/**
- * A copy of `engine/templates` at `<root>/.templates`, for `startHost`'s
- * `templatesDir`. Needed for the same measured reason `workspaceCopy`
- * rewrites its copies' `tsconfig.json`: a template's `extends` is relative
- * to the depth of `engine/examples/<id>` (spec §8 — the workspace the
- * product is aimed at), and a project the host creates under a temp root
- * here sits one level deeper, where vite's esbuild transform 500s every
- * module on the unresolved `extends` (measured: `#status` stayed empty
- * for 40 s, 83 polls). No `e8.yml` sits directly under `.templates`, so
- * the host's scan never mistakes it for a project. `rmSync(root)` removes
- * it with the rest.
- */
-export function templatesCopy(root: string): string {
-  const dir = join(root, '.templates');
-  cpSync(TEMPLATES, dir, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
-  for (const template of readdirSync(dir)) {
-    const file = join(dir, template, 'tsconfig.json');
-    if (existsSync(file)) absolutizeExtends(file, join(TEMPLATES, template));
-  }
-  return dir;
-}
-
 export interface WorkspaceHost {
   /** The IDE host's own origin (5679). */
   url: string;
@@ -324,28 +294,9 @@ export interface WorkspaceHost {
  */
 export async function startHost(
   root: string,
-  {
-    templatesDir,
-    ...options
-  }: Pick<Parameters<typeof createIdeHost>[0], 'ideDist' | 'previewPort'> & {
-    /**
-     * Where the host lists templates from; default the repo's
-     * `engine/templates`. Handed over through `E8_TEMPLATES` — the seam
-     * `workspace.ts` already reads and `host.test.ts` already drives —
-     * set only for the span of `createIdeHost`, where the plugin reads it.
-     */
-    templatesDir?: string;
-  } = {},
+  options: Pick<Parameters<typeof createIdeHost>[0], 'ideDist' | 'previewPort'> = {},
 ): Promise<WorkspaceHost> {
-  const saved = process.env.E8_TEMPLATES;
-  if (templatesDir) process.env.E8_TEMPLATES = templatesDir;
-  let host: IdeHost;
-  try {
-    host = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
-  } finally {
-    if (saved === undefined) delete process.env.E8_TEMPLATES;
-    else process.env.E8_TEMPLATES = saved;
-  }
+  const host: IdeHost = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
   return {
     url: host.url,
     previewUrl: () => host.ctx.workspace.state().previewUrl,

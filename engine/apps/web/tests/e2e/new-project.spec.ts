@@ -9,21 +9,16 @@
  * takes it with it; the last assertion of every test proves
  * `engine/examples/` is back to exactly what is checked in.
  *
- * Templates are the repo's own, copied by `templatesCopy` for the one
- * depth reason its doc gives — the same concession `workspaceCopy` makes
- * for its two projects.
+ * Templates are the repo's own, used where they ship: the created project
+ * sits one level deeper than `engine/examples/<id>` and boots anyway,
+ * because the template's `tsconfig.json` is self-contained — the
+ * concession `workspaceCopy` makes for its two `first-slot` copies is one
+ * a template must never need.
  */
 import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import {
-  EXAMPLES,
-  projectCopy,
-  startDevHost,
-  startHost,
-  templatesCopy,
-  workspaceCopy,
-} from './project-fixture';
+import { EXAMPLES, projectCopy, startDevHost, startHost, workspaceCopy } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying to the host on 5679. */
 const IDE_URL = 'http://127.0.0.1:5680/';
@@ -41,7 +36,7 @@ test('Create over two projects: the third is born, opened, and spins; then refus
   page,
 }) => {
   const root = workspaceCopy(2);
-  const host = await startHost(root, { templatesDir: templatesCopy(root) });
+  const host = await startHost(root);
   try {
     await page.goto(IDE_URL);
     await expect(page.getByTestId('sidebar-workspace')).toBeVisible();

@@ -31,10 +31,30 @@ function walk(dir: string): string[] {
 }
 
 describe('engine/templates/slot-basic', () => {
-  it('carries main.ts, script.spin, tsconfig.json and e8.profile.yml byte-for-byte from first-slot', () => {
-    for (const rel of ['src/main.ts', 'game/script.spin', 'tsconfig.json', 'e8.profile.yml']) {
+  it('carries main.ts, script.spin and e8.profile.yml byte-for-byte from first-slot', () => {
+    for (const rel of ['src/main.ts', 'game/script.spin', 'e8.profile.yml']) {
       expect(readFileSync(join(TEMPLATE, rel))).toEqual(readFileSync(join(EXAMPLE, rel)));
     }
+  });
+
+  /**
+   * NOT byte-identical to `first-slot`'s, on purpose: that one `extends`
+   * `tsconfig.base.json` by a relative path that only resolves at the
+   * depth of `engine/examples/<id>`, and a project the host creates lands
+   * wherever the workspace root is — one level deeper under a temp root,
+   * anywhere at all outside this repo. vite's esbuild transform reads
+   * this file for every `.ts` it serves, and an unresolved `extends`
+   * 500s each of them (measured: `#status` empty for 40 s). So the base
+   * options are inlined here, and the file must stay self-contained.
+   */
+  it('tsconfig.json is self-contained: no extends, bundler resolution, vite/client types', () => {
+    const tsconfig = JSON.parse(readFileSync(join(TEMPLATE, 'tsconfig.json'), 'utf8')) as {
+      extends?: unknown;
+      compilerOptions: { moduleResolution?: unknown; types?: unknown };
+    };
+    expect(tsconfig.extends).toBeUndefined();
+    expect(tsconfig.compilerOptions.moduleResolution).toBe('bundler');
+    expect(tsconfig.compilerOptions.types).toContain('vite/client');
   });
 
   it('e8.template.yml is a manifest with a name and a description', () => {
