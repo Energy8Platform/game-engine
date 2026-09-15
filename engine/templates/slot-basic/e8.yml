@@ -1,0 +1,5 @@
+# The one entry the IDE editor composes for this project — see
+# engine/examples/first-slot/e8.yml for the full explanation of this file.
+- id: bridge1
+  name: '@energy8engine/ide-bridge'
+  config: {}

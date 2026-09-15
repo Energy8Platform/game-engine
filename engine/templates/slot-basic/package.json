@@ -1,0 +1,17 @@
+{
+  "name": "e8-template-slot-basic",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@energy8engine/contracts": "*",
+    "@energy8engine/diagnostics": "*",
+    "@energy8engine/game-runtime": "*",
+    "@energy8engine/ide-bridge": "*",
+    "@energy8engine/play-loop": "*",
+    "@energy8engine/reels": "*",
+    "@energy8engine/spin-log": "*",
+    "@energy8platform/game-engine": "^0.41.0",
+    "pixi.js": "^8.20.1"
+  }
+}

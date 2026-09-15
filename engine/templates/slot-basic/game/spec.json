@@ -1,0 +1,20 @@
+{
+  "id": "{{id}}",
+  "name": "{{id}}",
+  "description": "A 5x3 lines slot from the slot-basic template.",
+  "scriptPath": "script.spin",
+  "grid": { "cols": 5, "rows": 3 },
+  "betLevels": [0.2, 1.0, 5.0],
+  "maxWin": 500.0,
+  "symbols": [
+    { "id": 1, "name": "sym-1", "weight": 5 },
+    { "id": 2, "name": "sym-2", "weight": 10 },
+    { "id": 3, "name": "sym-3", "weight": 15 },
+    { "id": 4, "name": "sym-4", "weight": 20 },
+    { "id": 5, "name": "sym-5", "weight": 25 },
+    { "id": 6, "name": "sym-6", "weight": 30 }
+  ],
+  "actions": { "spin": { "stage": "base_game", "cost": 1.0 } },
+  "mechanics": ["classic", "cascade"],
+  "note": "Not read by e8-server or this task's runtime — --games-dir loads .spin files directly. Descriptive metadata for later IDE tasks (composition screen, symbol legend)."
+}

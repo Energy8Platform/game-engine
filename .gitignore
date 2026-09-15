@@ -42,6 +42,9 @@ idea.md
 /engine/apps/web/test-results/
 /engine/apps/web/playwright-report/
 
-# Playwright acceptance test: writable copies of a project fixture. They sit
-# beside the original so the project's own relative paths still resolve.
-/engine/examples/e8-compose-*/
+# Projects created by the IDE (and the Playwright copies) live beside the
+# shipped examples; only the three shipped ones are tracked.
+/engine/examples/*
+!/engine/examples/first-slot/
+!/engine/examples/probe-plugin/
+!/engine/examples/workspace/

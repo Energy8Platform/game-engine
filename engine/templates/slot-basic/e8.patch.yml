@@ -1,0 +1,52 @@
+# The delta on top of the `e8-base` bundle: everything `src/main.ts`
+# currently passes as a JS object straight into `createGame` — renderer
+# size, the reel grid, the stage's design resolution, and which mechanic
+# `base_game` is bound to. A patch row replaces its target row's `config`
+# WHOLESALE (not a merge) and addresses it by the id `e8-base`'s own
+# `e8.bundle.yml` assigns; none of these rows need a `name` here because
+# the bundle already placed them.
+#
+# Two things have NO home in this file, on purpose — a function and a live
+# DOM element. Both now reach their rows the same way, as SERVICES the page
+# provides before the first row applies (`createGame({ provide })`), rather
+# than as row config:
+#
+#  - `reels.resolve` (a `SymbolResolver` function — first-slot's coloured-
+#    square placeholder art) — YAML cannot carry a function. `reels1`'s
+#    row below configures everything ELSE `createReelSystem` needs, and
+#    reads the resolver off the `assets` service (see
+#    `@energy8engine/reels`'s `src/runtime.ts`). That is the "art-supplying
+#    service `reels1` reads off `ctx`" this comment used to name as a
+#    future possibility; `main.ts` supplies it today, an `assets` ROW could
+#    supply it tomorrow with no change to `reels1`.
+#  - `mount` (the live `#mount` DOM element) — a page-level handle, not
+#    composition data. Provided as the `mount` service: `renderer1`
+#    attaches its canvas to it, and `createGame` draws the failure screen
+#    on it.
+rows:
+  - id: renderer1
+    config:
+      width: 480
+      height: 288
+      background: '#10121a'
+  - id: stage1
+    config:
+      design:
+        width: 480
+        height: 288
+  # NOT a typo: `reels1`'s own row `config` IS `CreateReelSystemOptions`
+  # (`@energy8platform/game-engine/slot`'s options for `createReelSystem`,
+  # `resolve` aside — see above) — and that type's OWN field for reel
+  # settings happens to also be named `config` (`ReelSystemConfig`, holding
+  # `grid` among others). The outer key is this row's config; the inner
+  # one is the reel system's. Two different things that share a name.
+  - id: reels1
+    config:
+      config:
+        grid:
+          cols: 5
+          rows: 3
+  - id: mechanics1
+    config:
+      stages:
+        base_game: classic
