@@ -5,7 +5,7 @@
   "type": "module",
   "bin": { "e8": "./bin/e8.mjs" },
   "scripts": { "typecheck": "tsc --noEmit" },
-  "dependencies": { "@energy8engine/ide-host": "*", "tsx": "^4.19.0" },
+  "dependencies": { "@energy8engine/ide-host": "*", "playwright": "1.63.0", "tsx": "^4.19.0" },
   "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.6.0" },
   "license": "MIT"
 }

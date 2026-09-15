@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { IDE_BUILD_HINT, IDE_DIST_DEFAULT, createIdeHost } from '@energy8engine/ide-host';
-import { check, spin } from '@energy8engine/ide-host/compute';
+import { check, shot, spin } from '@energy8engine/ide-host/compute';
 
 // `e8` alone is `e8 ide`. Both commands boot the same host over `cwd`
 // (spec §3): a `cwd` holding `e8.yml` is the one project and opens at
@@ -15,9 +15,11 @@ const USAGE = [
   '       e8 check [file]                       parse a .spin (default game/script.spin)',
   '       e8 spin [--n N] [--bet B] [--seed S] [--action A] [--quiet]',
   '                                             play N spins through e8-server',
+  '       e8 shot [--out p] [--viewport WxH] [--spin] [--ide] [--budget ms] [--quiet]',
+  '                                             screenshot the running game (or the IDE)',
   '',
-  'check and spin print one JSON document on stdout, progress on stderr, and',
-  'exit 1 when a diagnostic is an error.',
+  'check, spin and shot print one JSON document on stdout, progress on stderr,',
+  'and exit 1 when a diagnostic is an error.',
   '',
   'environment:',
   '  PORT          the IDE host (default 5679; 0 picks a free port)',
@@ -30,33 +32,53 @@ if (command === '--help' || command === '-h') {
   console.log(USAGE);
   process.exit(0);
 }
-if (command === 'check' || command === 'spin') {
+if (command === 'check' || command === 'spin' || command === 'shot') {
   const { flags, rest: positional } = parseFlags(rest);
-  const known = command === 'check' ? [] : ['n', 'bet', 'seed', 'action', 'quiet'];
+  const known: string[] = {
+    check: [],
+    spin: ['n', 'bet', 'seed', 'action', 'quiet'],
+    shot: ['out', 'viewport', 'spin', 'ide', 'budget', 'quiet'],
+  }[command];
   const unknown = Object.keys(flags).filter((flag) => !known.includes(flag));
   const quiet = flags.quiet !== undefined;
+  const viewport = flags.viewport?.match(/^(\d+)x(\d+)$/);
+  if (command === 'shot' && flags.viewport !== undefined && !viewport) unknown.push('viewport');
   const result = unknown.length
     ? {
         diagnostics: unknown.map((flag) => ({
           severity: 'error' as const,
           plugin: 'compute',
           where: `--${flag}`,
-          message: `e8 ${command} does not take --${flag}`,
+          message:
+            flag === 'viewport' && flags.viewport !== undefined
+              ? `--viewport must be WxH, got ${flags.viewport}`
+              : `e8 ${command} does not take --${flag}`,
         })),
       }
     : command === 'check'
       ? await check({ file: positional[0] ?? join('game', 'script.spin') })
-      : await spin({
-          cwd: process.cwd(),
-          n: num(flags.n),
-          bet: num(flags.bet),
-          seed: flags.seed,
-          action: flags.action,
-          onProgress(done, n) {
-            const step = Math.ceil(n / 10);
-            if (!quiet && (done % step === 0 || done === n)) console.error(`${done}/${n}`);
-          },
-        });
+      : command === 'shot'
+        ? await shot({
+            cwd: process.cwd(),
+            out: flags.out,
+            viewport: viewport
+              ? { width: Number(viewport[1]), height: Number(viewport[2]) }
+              : undefined,
+            spin: flags.spin !== undefined,
+            ide: flags.ide !== undefined,
+            budgetMs: num(flags.budget),
+          })
+        : await spin({
+            cwd: process.cwd(),
+            n: num(flags.n),
+            bet: num(flags.bet),
+            seed: flags.seed,
+            action: flags.action,
+            onProgress(done, n) {
+              const step = Math.ceil(n / 10);
+              if (!quiet && (done % step === 0 || done === n)) console.error(`${done}/${n}`);
+            },
+          });
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.diagnostics.some((d) => d.severity === 'error') ? 1 : 0);
 }

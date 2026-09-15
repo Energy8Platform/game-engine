@@ -13,13 +13,14 @@
  * spawning the production entry point in a real `node` process can.
  */
 import { spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const CLI_BIN = resolve(__dirname, '../../../../engine/apps/cli/bin/e8.mjs');
-const FIRST_SLOT_GAME = resolve(__dirname, '../../../examples/first-slot/game');
+const FIRST_SLOT = resolve(__dirname, '../../../examples/first-slot');
+const FIRST_SLOT_GAME = join(FIRST_SLOT, 'game');
 const STAGE_TYPO = resolve(__dirname, 'fixtures/project-stage-typo/game/script.spin');
 
 let child: ReturnType<typeof spawn> | undefined;
@@ -138,6 +139,7 @@ describe('the real e8 binary', () => {
       expect(out, arg).toContain('usage: e8 [ide|dev]');
       expect(out, arg).toContain('e8 check [file]');
       expect(out, arg).toContain('e8 spin [--n N]');
+      expect(out, arg).toContain('e8 shot [--out p]');
       for (const env of ['PORT', 'PREVIEW_PORT', 'IDE_DIST', 'IDE_ORIGINS']) {
         expect(out, arg).toMatch(new RegExp(`^\\s*${env}\\b.*$`, 'm'));
       }
@@ -217,4 +219,43 @@ describe('the real e8 binary', () => {
       { plugin: 'compute', where: '--bogus' },
     ]);
   }, 30000);
+
+  it('`e8 shot` writes a PNG of the real game and reports how long it took', async () => {
+    // Beside the example, not in tmp — the project resolves its packages
+    // from its own directory and vite serves them via `/@fs/` under the
+    // repo root; see engine/apps/web/tests/e2e/project-fixture.ts.
+    const cwd = mkdtempSync(join(resolve(FIRST_SLOT, '..'), 'e8-compose-shot-'));
+    cpSync(FIRST_SLOT, cwd, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
+    try {
+      const out = join(cwd, 'shots', 'a.png');
+      const r = await run(['shot', '--out', out, '--viewport', '320x200'], cwd);
+      const report = JSON.parse(r.stdout);
+      // The e2e suite uses Playwright's Chromium, so on a developer's
+      // machine it is installed; a checkout without it gets the CLI's own
+      // diagnostic, and this test says so instead of failing on the environment.
+      if (report.diagnostics[0]?.fix === 'npx playwright install chromium') {
+        console.warn(`skipping the real-browser shot: ${report.diagnostics[0].message}`);
+        return;
+      }
+      expect(r.exit, r.stderr).toBe(0);
+      expect(report.diagnostics).toEqual([]);
+      expect(report.path).toBe(out);
+      expect(report.width).toBe(320);
+      expect(report.height).toBe(200);
+      expect(typeof report.loadMs).toBe('number');
+      expect(report.loadMs).toBeLessThanOrEqual(30000);
+      expect(existsSync(out)).toBe(true);
+      expect(readFileSync(out).subarray(0, 8)).toEqual(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+
+      const bad = await run(['shot', '--viewport', 'wide'], cwd);
+      expect(bad.exit).toBe(1);
+      expect(JSON.parse(bad.stdout).diagnostics).toMatchObject([
+        { plugin: 'compute', where: '--viewport' },
+      ]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 60000);
 });
