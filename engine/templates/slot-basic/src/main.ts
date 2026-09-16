@@ -750,4 +750,47 @@ spinBtn.addEventListener('click', async () => {
   bound(stage: string): string | null {
     return currentMechanics()?.forStage(stage)?.id ?? null;
   },
+  /**
+   * The LIVE board's grid size — a read of `currentBoard()`, the same lazy
+   * read the play loop makes, never the boot-time capture. It exists for
+   * the same reason `bound()` does: a hot edit to `reels1` (`cols` 5 → 4)
+   * lands asynchronously, and a test needs something to wait on that is
+   * the edit itself rather than the spin it is about to assert about.
+   * `null` when nothing provides a board.
+   */
+  gridSize(): { cols: number; rows: number } | null {
+    const grid = liveGrid();
+    return grid ? { cols: grid.cols, rows: grid.rows } : null;
+  },
+  /**
+   * What the LIVE board shows, `symbols[col][row]` (`null` for an empty
+   * cell). The other half of `gridSize()`: a spin `play.execute`d on a
+   * board that has since been destroyed still resolves and still gets
+   * recorded (measured — the test-side mutation for it stayed green), so
+   * "the spin played" is only true if the board on stage is the one that
+   * changed. A fresh board after a hot re-apply is all `null` until the
+   * next spin draws on it.
+   */
+  symbols(): (string | null)[][] | null {
+    const grid = liveGrid();
+    if (!grid) return null;
+    return Array.from({ length: grid.cols }, (_, col) =>
+      Array.from({ length: grid.rows }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null),
+    );
+  },
 };
+
+/**
+ * The live board's grid, as the `ReelGrid` it really is (`cols`/`rows`
+ * getters, `getCell(col, row).data`); `GridLike` names only `getCell`,
+ * hence the cast. `undefined` when nothing provides a board.
+ */
+function liveGrid():
+  | {
+      cols: number;
+      rows: number;
+      getCell(col: number, row: number): { data: { symbol: string | null } } | undefined;
+    }
+  | undefined {
+  return currentBoard()?.grid as unknown as ReturnType<typeof liveGrid>;
+}
