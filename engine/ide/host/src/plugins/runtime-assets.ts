@@ -320,8 +320,28 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     const path = manifest?.runtime?.schema;
     if (!pkg || !path) return { schema: null };
     const file = resolve(pkg.dir, path);
+    const refuse = (message: string): { schema: null; diagnostic: Diagnostic } => ({
+      schema: null,
+      diagnostic: diagnostic(
+        'error',
+        row.id,
+        'schema',
+        `row "${row.id}" (${row.name}) declares e8.runtime.schema "${path}", but ${file} could not be read as a config schema: ${message}`,
+        `fix "e8.runtime.schema" in ${row.name}'s package.json, or make that module \`export const Config = Schema.object({...})\` importing only schemastery`,
+      ),
+    });
     try {
-      const mod = (await import(pathToFileURL(file).href)) as {
+      // The same realpath containment `resolveRuntimeUrl` applies to
+      // `entry`, and here it matters MORE: an entry is handed to a
+      // browser as a URL, a schema is imported — evaluated — by THIS
+      // process. A `../` path or a symlink pointing out of the package
+      // is refused before the import ever happens.
+      const realFile = realpathSync(file);
+      const realPackageRoot = realpathSync(resolve(pkg.dir));
+      if (realFile !== realPackageRoot && !realFile.startsWith(realPackageRoot + sep)) {
+        return refuse('schema path escapes the package');
+      }
+      const mod = (await import(pathToFileURL(realFile).href)) as {
         Config?: { toJSON?: () => unknown };
       };
       if (typeof mod.Config?.toJSON !== 'function') {
@@ -329,18 +349,7 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       }
       return { schema: mod.Config.toJSON() };
     } catch (error) {
-      return {
-        schema: null,
-        diagnostic: diagnostic(
-          'error',
-          row.id,
-          'schema',
-          `row "${row.id}" (${row.name}) declares e8.runtime.schema "${path}", but ${file} could not be read as a config schema: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          `fix "e8.runtime.schema" in ${row.name}'s package.json, or make that module \`export const Config = Schema.object({...})\` importing only schemastery`,
-        ),
-      };
+      return refuse(error instanceof Error ? error.message : String(error));
     }
   }
 

@@ -574,6 +574,18 @@ describe('GET /api/composition', () => {
       runtime: { entry: './runtime.js', schema: './schema.js' },
     });
     writeFileSync(join(noConfig, 'schema.js'), 'export const notConfig = 1;\n');
+    // A perfectly good schema module that lives OUTSIDE the package, and
+    // two ways of pointing at it — a `../` path, and a symlink sitting
+    // inside the package. Importing a file is running it, so this is the
+    // one place the containment check is a real boundary rather than a
+    // packaging nicety: refused, with the same-shaped diagnostic.
+    const outside = join(workspace, 'outside.js');
+    writeFileSync(outside, "export const Config = { toJSON() { return { type: 'object' }; } };\n");
+    pkg('dotdot-pkg', { runtime: { entry: './runtime.js', schema: '../../outside.js' } });
+    const linked = pkg('symlink-pkg', {
+      runtime: { entry: './runtime.js', schema: './schema.js' },
+    });
+    symlinkSync(outside, join(linked, 'schema.js'));
 
     writeFileSync(join(workspace, 'e8.yml'), '[]\n');
     writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-schema-fixture\n');
@@ -588,6 +600,10 @@ describe('GET /api/composition', () => {
         '    name: noschema-pkg',
         '  - id: noconfig1',
         '    name: noconfig-pkg',
+        '  - id: dotdot1',
+        '    name: dotdot-pkg',
+        '  - id: symlink1',
+        '    name: symlink-pkg',
         '',
       ].join('\n'),
     );
@@ -601,6 +617,8 @@ describe('GET /api/composition', () => {
     expect(byId('noschema1').schema).toBeNull();
     expect(byId('noschema1').hot).toBe(true);
     expect(byId('noconfig1').schema).toBeNull();
+    expect(byId('dotdot1').schema).toBeNull();
+    expect(byId('symlink1').schema).toBeNull();
     const schemaDiagnostics = body.diagnostics.filter(
       (d: { where: string }) => d.where === 'schema',
     );
@@ -609,9 +627,13 @@ describe('GET /api/composition', () => {
     ).toEqual([
       ['noschema1', 'error'],
       ['noconfig1', 'error'],
+      ['dotdot1', 'error'],
+      ['symlink1', 'error'],
     ]);
     expect(schemaDiagnostics[0].message).toContain('./schema.js');
     expect(schemaDiagnostics[1].message).toContain('no schemastery `Config`');
+    expect(schemaDiagnostics[2].message).toContain('schema path escapes the package');
+    expect(schemaDiagnostics[3].message).toContain('schema path escapes the package');
   });
 
   it('reloads from disk on every call, so an edit is reflected without restarting the host', async () => {
