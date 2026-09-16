@@ -5,7 +5,7 @@
  * config files and report what they mean. Three of the IDE's five screens
  * (spec, code editor is more general than that) need the actual tree and
  * actual file contents, not a resolved summary of them — this plugin is
- * that: list, read, write, make, and remove — one entry at a time.
+ * that: list, read, write, make, move, and remove — one entry at a time.
  */
 import {
   closeSync,
@@ -82,8 +82,12 @@ export interface FilesService {
   remove(path: string): Promise<DiagnosticsResponse>;
   /**
    * Renames or moves a file or directory. Never overwrites (`exists`); a
-   * directory never moves into its own subtree (`into-self`); atomic — one
-   * `rename(2)`.
+   * directory never moves into its own subtree (`into-self`). One
+   * `rename(2)` — but the "never overwrites" rule is the `refuseExisting`
+   * pre-check, not the syscall: Node has no `RENAME_NOREPLACE`, so an
+   * external writer racing between the check and the rename could be
+   * overwritten. The host itself is single-threaded and synchronous here,
+   * so no request of its own can be that writer.
    */
   move(from: string, to: string): Promise<DiagnosticsResponse>;
 }

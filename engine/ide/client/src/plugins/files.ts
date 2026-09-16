@@ -11,9 +11,9 @@ import {
 } from '@energy8engine/contracts';
 
 /**
- * The browser side of `engine/ide/host/src/plugins/files.ts`'s four
- * routes. That plugin's own comment already spells out the one trap in
- * this pairing: `@cordisjs/plugin-server` decodes a path capture with
+ * The browser side of `engine/ide/host/src/plugins/files.ts`'s six
+ * routes (GET tree, GET file, PUT, POST, PATCH, DELETE). That plugin's
+ * own comment already spells out the one trap in this pairing: `@cordisjs/plugin-server` decodes a path capture with
  * `decodeURIComponent(capture.replace(/\+/g, ' '))` — the query-string
  * reading of `+`, applied unconditionally to a path segment too. A file
  * named `a+b.txt` requested as a literal, unencoded `+` reads as
@@ -26,7 +26,7 @@ import {
  * failures folded into a `diagnostics` array instead of a throw. What
  * differs is WHOSE diagnostics: `game-composition` only ever authors its
  * own (`/api/composition` has none of its own to carry). Every one of
- * these four routes already answers with a diagnostics body of its OWN,
+ * these six routes already answers with a diagnostics body of its OWN,
  * written by the host, which knows the actual cause (outside the
  * project, not found, a directory where a file was wanted) — a 400 or
  * 404 is the host's ordinary way of refusing, not this client's failure
