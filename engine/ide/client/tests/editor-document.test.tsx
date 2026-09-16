@@ -32,6 +32,7 @@ const fake = vi.hoisted(() => {
   type Marker = { startLineNumber: number; message: string };
   type Editor = {
     el: HTMLElement;
+    options: Record<string, unknown>;
     model: { value: string; markers: Marker[]; getValue(): string };
     disposed: boolean;
     listeners: Array<() => void>;
@@ -44,9 +45,32 @@ const fake = vi.hoisted(() => {
     type(v: string): void;
   };
   const editors: Editor[] = [];
+  /** The `monaco.languages` surface the wrapper drives; fresh per test, same as `editor`. */
+  const makeLanguagesApi = () => {
+    const api = {
+      registered: [] as Array<{ id: string; extensions?: string[] }>,
+      providers: {} as Record<string, unknown>,
+      configurations: {} as Record<string, unknown>,
+      /** Ids whose `setMonarchTokensProvider` throws — the compile-failure seam. */
+      broken: new Set<string>(),
+      register(def: { id: string; extensions?: string[] }) {
+        api.registered.push(def);
+      },
+      setMonarchTokensProvider(id: string, grammar: unknown) {
+        if (api.broken.has(id)) throw new Error(`cannot compile ${id}`);
+        api.providers[id] = grammar;
+      },
+      setLanguageConfiguration(id: string, conf: unknown) {
+        api.configurations[id] = conf;
+      },
+    };
+    return api;
+  };
   return {
     editors,
     MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
+    makeLanguagesApi,
+    languages: makeLanguagesApi(),
     editor: {
       create(el: HTMLElement, options: Record<string, unknown>): Editor {
         const model = {
@@ -56,6 +80,7 @@ const fake = vi.hoisted(() => {
         };
         const editor: Editor = {
           el,
+          options,
           model,
           disposed: false,
           listeners: [],
@@ -225,6 +250,7 @@ async function harness(
 // hits the identical leak and resets it the same way.
 beforeEach(() => {
   location.hash = '';
+  fake.languages = fake.makeLanguagesApi();
 });
 
 describe('EditorDocument — ported from CodeScreen', () => {
@@ -638,5 +664,56 @@ describe('EditorDocument', () => {
     expect(ctx.shell.close('f:game/script.spin')).toBe(false);
     expect(ctx.shell.documents()).toHaveLength(1);
     expect(ctx.shell.close('f:game/script.spin', { force: true })).toBe(true);
+  });
+});
+
+describe('EditorDocument language', () => {
+  it('asks ctx.languages for the language of the path', async () => {
+    const ctx = await harness(files({ 'src/main.ts': 'const a = 1' }));
+    ctx.languages.register({
+      id: 'typescript',
+      extensions: ['.ts'],
+      load: async () => ({ language: { tokenizer: { root: [] } } }),
+    });
+    openTab(ctx, 'src/main.ts');
+    render(<EditorDocument ctx={ctx} path="src/main.ts" />);
+    const el = await screen.findByTestId('editor');
+    await waitFor(() => expect(editorOn(el).options.language).toBe('typescript'));
+  });
+
+  it('a path no language claims is plaintext', async () => {
+    const ctx = await harness(files({ 'notes.txt': 'hi' }));
+    openTab(ctx, 'notes.txt');
+    render(<EditorDocument ctx={ctx} path="notes.txt" />);
+    const el = await screen.findByTestId('editor');
+    await waitFor(() => expect(editorOn(el).options.language).toBe('plaintext'));
+  });
+
+  it('hands the languages service to the editor', async () => {
+    const ctx = await harness(files({ 'game/script.spin': 'game "x" {}' }));
+    const grammar = { tokenizer: { root: [] } };
+    ctx.languages.register({
+      id: 'spin',
+      extensions: ['.spin'],
+      load: async () => ({ language: grammar }),
+    });
+    openTab(ctx, 'game/script.spin');
+    render(<EditorDocument ctx={ctx} path="game/script.spin" />);
+    await screen.findByTestId('editor');
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(grammar));
+  });
+
+  it('still checks only .spin files', async () => {
+    const ctx = await harness(files({ 'src/main.ts': 'const a = 1' }));
+    ctx.languages.register({
+      id: 'typescript',
+      extensions: ['.ts'],
+      load: async () => ({ language: { tokenizer: { root: [] } } }),
+    });
+    openTab(ctx, 'src/main.ts');
+    render(<EditorDocument ctx={ctx} path="src/main.ts" />);
+    await screen.findByTestId('editor');
+    await act(async () => {});
+    expect(ctx.check.calls).toEqual([]);
   });
 });

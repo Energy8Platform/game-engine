@@ -68,7 +68,12 @@ import { looksBinary } from './ViewerDocument';
  */
 const CHECK_DEBOUNCE_MS = 300;
 
-/** What `ctx.check` knows how to read; everything else is edited, never checked. */
+/**
+ * What `ctx.check` knows how to read; everything else is edited, never
+ * checked. The DOCUMENT's language — what Monaco highlights it as — comes
+ * from `ctx.languages.languageFor(path)` instead; this predicate only
+ * gates `ctx.check`.
+ */
 function isSpin(path: string): boolean {
   return path.endsWith('.spin');
 }
@@ -232,7 +237,8 @@ export function EditorDocument({ ctx, path }: { ctx: Context; path: string }): J
         ))}
       <Monaco
         value={text}
-        language={isSpin(path) ? 'spin' : 'plaintext'}
+        language={ctx.languages.languageFor(path)}
+        languages={ctx.languages}
         diagnostics={checkDiagnostics}
         onChange={(next) => {
           setText(next);
