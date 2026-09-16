@@ -32,8 +32,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterEach(async () => {
-  await host.stop();
-  rmSync(dir, { recursive: true, force: true });
+  if (host) await host.stop();
+  if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
 const row = (page: Page, path: string) => page.getByTestId(`explorer-${path}`);
@@ -120,5 +120,7 @@ test('renaming the maths inside game/ keeps the engine alive', async ({ page }) 
   await page.getByTestId('explorer-input').fill('script.spin');
   await page.keyboard.press('Enter');
   await expect(row(page, 'game/script.spin')).toBeVisible();
+  expect(existsSync(join(dir, 'game', 'script.spin'))).toBe(true);
+  expect(existsSync(join(dir, 'game', 'main.spin'))).toBe(false);
   await expect(status).toHaveText('e8-server ●', { timeout: 20_000 });
 });
