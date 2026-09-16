@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { Explorer } from '../src/index';
+import { Explorer, Shell } from '../src/index';
 import { bytes, d, harness, tree } from './explorer-harness';
 
 /**
@@ -80,6 +80,32 @@ describe('Explorer — drag and drop', () => {
     fireEvent.drop(await screen.findByTestId('explorer-assets'), transfer({ files: [file] }));
     expect(await screen.findByText(/replace "assets\/logo.png"\?/)).toBeVisible();
     expect(ctx.files.written).toEqual([]);
+  });
+
+  it('a row whose tab has unsaved edits refuses to be dropped anywhere', async () => {
+    const ctx = await harness(tree(['a.txt', 'dir']), { 'a.txt': 'a' });
+    render(
+      <>
+        <Explorer ctx={ctx} />
+        <Shell ctx={ctx} />
+      </>,
+    );
+    fireEvent.click(await screen.findByTestId('explorer-a.txt'));
+    await waitFor(() => expect(ctx.shell.documents().map((doc) => doc.key)).toEqual(['f:a.txt']));
+    ctx.shell.markDirty('f:a.txt', true);
+    fireEvent.drop(screen.getByTestId('explorer-dir'), transfer({ path: 'a.txt' }));
+    expect(await screen.findByText(/"a.txt" has unsaved changes/)).toBeVisible();
+    expect(ctx.files.moved).toEqual([]);
+  });
+
+  it('two files dropped at once upload the first and say so', async () => {
+    const ctx = await harness(tree(['assets']));
+    render(<Explorer ctx={ctx} />);
+    const one = new File([new Uint8Array(bytes('1'))], 'one.png');
+    const two = new File([new Uint8Array(bytes('2'))], 'two.png');
+    fireEvent.drop(await screen.findByTestId('explorer-assets'), transfer({ files: [one, two] }));
+    expect(await screen.findByText(/only "one.png" was uploaded/)).toBeVisible();
+    await waitFor(() => expect(ctx.files.written).toEqual([['assets/one.png', bytes('1')]]));
   });
 
   it('a refused move shows the host’s words and moves nothing in the tree', async () => {

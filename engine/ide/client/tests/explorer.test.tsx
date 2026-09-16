@@ -433,6 +433,27 @@ describe('Explorer — verbs', () => {
     );
   });
 
+  it('a rename of a file whose tab has unsaved edits is refused before any request', async () => {
+    // `followMove` closes the old tab with `force` — the old path no longer
+    // exists to save to — so a rename used to discard unsaved edits silently.
+    const ctx = await harness(tree(['game/spec.json']), { 'game/spec.json': '{}' });
+    render(
+      <>
+        <Explorer ctx={ctx} />
+        <Shell ctx={ctx} />
+      </>,
+    );
+    await userEvent.click(await screen.findByTestId('explorer-game/spec.json'));
+    ctx.shell.markDirty('f:game/spec.json', true);
+    fireEvent.contextMenu(screen.getByTestId('explorer-game/spec.json'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    await userEvent.clear(screen.getByTestId('explorer-input'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'spec2.json{Enter}');
+    expect(await screen.findByText(/"game\/spec.json" has unsaved changes/)).toBeVisible();
+    expect(ctx.files.moved).toEqual([]);
+    expect(ctx.shell.documents().map((doc) => doc.key)).toEqual(['f:game/spec.json']);
+  });
+
   it('moving a directory reopens every document under it at the new path', async () => {
     const ctx = await harness(tree(['game/spec.json', 'game/sub/x.txt']), {
       'game/spec.json': '{}',

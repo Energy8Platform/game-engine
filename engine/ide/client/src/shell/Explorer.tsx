@@ -47,7 +47,8 @@ const DRAG_TYPE = 'text/x-e8-path';
 
 /** What a confirm row is currently asking about — one state for both irreversible actions, same shape `AssetsScreen` used. */
 type Pending =
-  { kind: 'delete'; path: string } | { kind: 'overwrite'; path: string; bytes: Uint8Array };
+  | { kind: 'delete'; path: string }
+  | { kind: 'overwrite'; path: string; bytes: Uint8Array; also: Diagnostic[] };
 
 /** Which inline input is up: a new entry inside `dir`, or a new name for `path`. */
 type Editing =
@@ -202,15 +203,16 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     return ctx.files.tree().then(applyTree);
   }
 
-  /** The host's answer to a verb: shown, reported, and a refetch only when it is clean. */
+  /** The host's answer to a verb: shown, reported, and a refetch unless something failed (a warning rides along with a change that happened). */
   function finish(diagnostics: Diagnostic[]) {
     setActionDiagnostics(diagnostics);
     report(diagnostics);
-    if (diagnostics.length === 0) void refreshTree();
+    if (!diagnostics.some((diag) => diag.severity === 'error')) void refreshTree();
   }
 
-  function upload(path: string, bytes: Uint8Array) {
-    ctx.files.write(path, bytes).then(({ diagnostics }) => finish(diagnostics));
+  /** `also`: this view's own words about the upload, shown next to the host's answer once it lands. */
+  function upload(path: string, bytes: Uint8Array, also: Diagnostic[] = []) {
+    ctx.files.write(path, bytes).then(({ diagnostics }) => finish([...diagnostics, ...also]));
   }
 
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -221,7 +223,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   }
 
   /** A `File` off disk goes into `dir` under its own name — after the replace question when that name is taken. */
-  function readAndUpload(file: File, dir: string) {
+  function readAndUpload(file: File, dir: string, also: Diagnostic[] = []) {
     const path = joinPath(dir, file.name);
     // `FileReader`, not `file.arrayBuffer()` — see `AssetsScreen`'s own
     // comment: jsdom's shim only implements the callback-style reader.
@@ -230,10 +232,10 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
       if (entries?.some((entry) => entry.kind === 'file' && entry.path === path)) {
         setActionDiagnostics([]);
-        setPending({ kind: 'overwrite', path, bytes });
+        setPending({ kind: 'overwrite', path, bytes, also });
         return;
       }
-      upload(path, bytes);
+      upload(path, bytes, also);
     };
     reader.onerror = () => {
       const own = [
@@ -262,7 +264,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   function confirm(asked: Pending) {
     setPending(null);
     if (asked.kind === 'overwrite') {
-      upload(asked.path, asked.bytes);
+      upload(asked.path, asked.bytes, asked.also);
       return;
     }
     ctx.files.remove(asked.path).then(({ diagnostics }) => {
@@ -315,6 +317,34 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     }
   }
 
+  /**
+   * The one move both the rename input and a drop go through. Refused
+   * here, before any request, when a tab at `from` (or under it) has
+   * unsaved edits — `followMove` closes with `force`, so the move would
+   * otherwise discard them silently.
+   */
+  function move(from: string, to: string) {
+    const oldKey = `${FILE_KEY_PREFIX}${from}`;
+    const dirty = ctx.shell
+      .documents()
+      .some((doc) => doc.dirty && (doc.key === oldKey || doc.key.startsWith(`${oldKey}/`)));
+    if (dirty) {
+      finish([
+        diagnostic(
+          'error',
+          'files',
+          from,
+          `"${from}" has unsaved changes — save or close it before renaming or moving`,
+        ),
+      ]);
+      return;
+    }
+    void ctx.files.move(from, to).then(({ diagnostics }) => {
+      finish(diagnostics);
+      if (diagnostics.length === 0) followMove(from, to);
+    });
+  }
+
   /** Enter in the inline input. Returns whether the name was accepted — a bad one is refused here, before any request. */
   function submitEditing(e: Editing, name: string): boolean {
     const bad = invalidName(name);
@@ -332,11 +362,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       return true;
     }
     const to = joinPath(dirOf(e.path), name);
-    if (to === e.path) return true;
-    void ctx.files.move(e.path, to).then(({ diagnostics }) => {
-      finish(diagnostics);
-      if (diagnostics.length === 0) followMove(e.path, to);
-    });
+    if (to !== e.path) move(e.path, to);
     return true;
   }
 
@@ -372,14 +398,26 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       // Dropping a directory on itself or into its own subtree: the host
       // would answer into-self; nothing to ask.
       if (to === from || target === from || target.startsWith(`${from}/`)) return;
-      void ctx.files.move(from, to).then(({ diagnostics }) => {
-        finish(diagnostics);
-        if (diagnostics.length === 0) followMove(from, to);
-      });
+      move(from, to);
       return;
     }
-    const file = e.dataTransfer.files[0];
-    if (file) readAndUpload(file, target);
+    const files = e.dataTransfer.files;
+    const file = files[0];
+    if (!file) return;
+    // ponytail: one upload per drop — the replace question is per-file and
+    // modal; a batch would need a queue. Said, not swallowed.
+    const also =
+      files.length > 1
+        ? [
+            diagnostic(
+              'warning',
+              'files',
+              target || '.',
+              `only "${file.name}" was uploaded — drop files one at a time`,
+            ),
+          ]
+        : [];
+    readAndUpload(file, target, also);
   }
 
   function toggleFold(path: string) {
