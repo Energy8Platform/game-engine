@@ -11,6 +11,8 @@ export * from './plugins/connection';
 // consumer actually uses.
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
 export { type LanguageDef, type LanguagesService } from './plugins/languages';
+export { type ViewerDef, type ViewerProps, type ViewersService } from './plugins/viewers';
+export { IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS } from './plugins/viewers-media';
 export {
   useShell,
   type ActivityOpens,

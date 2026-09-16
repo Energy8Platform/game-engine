@@ -12,6 +12,9 @@
   --e8-surface: #181818;
   --e8-editor-bg: #1f1f1f;
   --e8-border: #2a2a2a;
+  /* Video letterbox — stays black in both themes, like a real screen; not
+     redefined under [data-theme='light']. */
+  --e8-video-bg: #000000;
   /* states */
   --e8-hover: #2a2d2e;
   --e8-selected: #37373d;
@@ -960,6 +963,17 @@ label {
 .e8-viewer-image {
   border-radius: var(--e8-radius-sm);
   border: 1px solid var(--e8-border);
+}
+.e8-viewer-audio {
+  width: 100%;
+  max-width: 480px;
+  margin: 16px;
+}
+.e8-viewer-video {
+  max-width: 100%;
+  max-height: 100%;
+  margin: 16px;
+  background: var(--e8-video-bg);
 }
 .e8-code-diagnostic,
 .e8-code-error {

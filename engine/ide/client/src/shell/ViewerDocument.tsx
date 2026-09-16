@@ -5,17 +5,20 @@ import type { Diagnostic, FileEntry } from '@energy8engine/contracts';
 /**
  * One file, looked at, as a shell document: what `AssetsScreen` showed
  * once an entry was clicked, with the tree gone to the Explorer. Anything
- * the Explorer does not hand to `EditorDocument` lands here — images, and
- * whatever else a project holds.
+ * the Explorer does not hand to `EditorDocument` or a registered `viewers`
+ * component lands here — a catch-all: text, binary, or too big.
  *
- * Three answers, decided in this order, and a file is fetched only for
- * the last: an entry the tree already says is too big is refused without
- * a read; an image goes into `<img>` through `ctx.files.urlFor`, so the
- * browser fetches and decodes it and this never reads the bytes; anything
- * else is read once and is either text, refused as binary, or — the tree
- * being a snapshot — gone by the time the read answers, in which case the
- * host's own diagnostic is shown unchanged and reported to the one list.
- * Every failure is words in the pane; nothing here throws or stays blank.
+ * Two answers, decided in this order, and a file is fetched only for the
+ * last: an entry the tree already says is too big is refused without a
+ * read; anything else is read once and is either text, refused as binary,
+ * or — the tree being a snapshot — gone by the time the read answers, in
+ * which case the host's own diagnostic is shown unchanged and reported to
+ * the one list. Every failure is words in the pane; nothing here throws or
+ * stays blank.
+ *
+ * Media (images, audio, video) no longer lands here — it is picked up by
+ * the `viewers` contribution (`plugins/viewers-media.tsx`) before
+ * `openPath` ever reaches this component.
  */
 
 /**
@@ -29,18 +32,11 @@ import type { Diagnostic, FileEntry } from '@energy8engine/contracts';
  */
 const TOO_BIG_BYTES = 5_000_000;
 
-/** Extensions this can put in an `<img>` — the same list the host's own `CONTENT_TYPES` recognizes as an image. */
-const IMAGE_EXTENSIONS = new Set(['.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico']);
-
 /** The lower-cased extension of the last path segment, dot included; '' for none. */
 export function extensionOf(path: string): string {
   const base = path.split('/').pop() ?? path;
   const dot = base.lastIndexOf('.');
   return dot <= 0 ? '' : base.slice(dot).toLowerCase();
-}
-
-function isImage(path: string): boolean {
-  return IMAGE_EXTENSIONS.has(extensionOf(path));
 }
 
 /** How many leading bytes `looksBinary` samples — enough to catch a real binary file's header without reading the whole thing. */
@@ -76,11 +72,10 @@ export function ViewerDocument({
   entry?: FileEntry;
 }): JSX.Element {
   const tooBig = entry?.size !== undefined && entry.size > TOO_BIG_BYTES;
-  const image = !tooBig && isImage(path);
   const [view, setView] = useState<View>({ kind: 'loading' });
 
   useEffect(() => {
-    if (tooBig || image) return undefined; // nothing to fetch either way
+    if (tooBig) return undefined; // nothing to fetch
     let gone = false;
     ctx.files.read(path).then(({ bytes, diagnostics }) => {
       if (gone) return;
@@ -101,7 +96,7 @@ export function ViewerDocument({
     return () => {
       gone = true;
     };
-  }, [ctx, path, tooBig, image]);
+  }, [ctx, path, tooBig]);
 
   if (tooBig) {
     return (
@@ -111,7 +106,6 @@ export function ViewerDocument({
       </p>
     );
   }
-  if (image) return <img className="e8-viewer-image" src={ctx.files.urlFor(path)} alt={path} />;
   switch (view.kind) {
     case 'loading':
       return <p className="e8-empty">reading {path}…</p>;
@@ -120,8 +114,7 @@ export function ViewerDocument({
     case 'binary':
       return (
         <p className="e8-code-error" data-testid="binary">
-          "{path}" doesn't look like text (it contains a NUL byte) and isn't a recognized image, so
-          it isn't shown here.
+          "{path}" doesn't look like text (it contains a NUL byte), so it isn't shown here.
         </p>
       );
     case 'error':

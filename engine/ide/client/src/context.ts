@@ -4,6 +4,8 @@ import type { ConnectionConfig } from './plugins/connection';
 import * as workspace from './plugins/workspace';
 import * as slots from './plugins/slots';
 import * as languages from './plugins/languages';
+import * as viewers from './plugins/viewers';
+import * as viewersMedia from './plugins/viewers-media';
 import * as shell from './plugins/shell';
 import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
@@ -44,6 +46,10 @@ export async function createIdeClient(
   // dependency — and before the plugins that fetch or forward data rather
   // than just hold state.
   await ctx.plugin(shell);
+  // A contribution the Explorer reads, like `languages` — composed right
+  // after `shell` since `openPath` (which `Explorer` calls) needs
+  // `ctx.viewers` at hand.
+  await ctx.plugin(viewers);
   // After `shell`, which it injects alongside `connection`: a project
   // switch closes the shell's `f:` tabs (spec §8). Reads the same
   // `url`/`socketFactory` (its own socket, see its module doc) and the
@@ -69,5 +75,10 @@ export async function createIdeClient(
   // may replace either by registering the same id.
   await ctx.plugin(languagesBasic);
   await ctx.plugin(languageSpin);
+  // The built-in media viewers (image/audio/video) — a pure contribution
+  // to `viewers`, composed last so a project plugin composed earlier may
+  // still be overridden by registering the same id later, same rule the
+  // two language providers above follow for `languages`.
+  await ctx.plugin(viewersMedia);
   return ctx;
 }

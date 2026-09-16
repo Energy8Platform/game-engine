@@ -438,6 +438,22 @@ describe('Explorer', () => {
     expect(editor).not.toBeVisible();
   });
 
+  it('an .mp3 opens in an audio player and an .mp4 in a video player', async () => {
+    const ctx = await harness(tree(['sfx/win.mp3', 'clips/intro.mp4']));
+    const { container } = render(
+      <>
+        <Explorer ctx={ctx} />
+        <Shell ctx={ctx} />
+      </>,
+    );
+    await userEvent.click(await screen.findByTestId('explorer-sfx/win.mp3'));
+    expect(container.querySelector('audio')?.getAttribute('src')).toBe('/api/files/sfx/win.mp3');
+    await userEvent.click(screen.getByTestId('explorer-clips/intro.mp4'));
+    expect(container.querySelector('video')?.getAttribute('src')).toBe(
+      '/api/files/clips/intro.mp4',
+    );
+  });
+
   it('.lua, .txt, .tsx and .yaml open in the editor too', async () => {
     // The spec's table left these out; the Lua math script was hand-edited
     // a slice earlier, and a viewer over it would have been a step back.

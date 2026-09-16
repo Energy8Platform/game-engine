@@ -10,11 +10,12 @@ import { ViewerDocument, createIdeClient } from '../src/index';
  * one of the old `assets-screen.test.tsx`'s preview tests (deleted with
  * `AssetsScreen` in Task 6), against the document instead of the
  * screen; the tree/upload/delete tests went to `explorer.test.tsx` in
- * Task 4.
+ * Task 4. The image case moved to `viewers.test.tsx` in Task 4 too, once
+ * `ViewerDocument` stopped handling images itself (see `plugins/viewers-
+ * media.tsx`).
  *
  * `harnessWithCalls()` goes through the real `createIdeClient` with a fake
- * `fetchFn`, same precedent `explorer.test.tsx` set; `calls` is what lets
- * the image test say "without reading its bytes" rather than assume it.
+ * `fetchFn`, same precedent `explorer.test.tsx` set.
  */
 function d(message: string): Diagnostic {
   return diagnostic('error', 'files', 'test', message);
@@ -67,16 +68,6 @@ async function harness(contents: Record<string, string> = {}): Promise<Context> 
 }
 
 describe('ViewerDocument — ported from AssetsScreen', () => {
-  it('an image is shown through urlFor, without reading its bytes', async () => {
-    // This is exactly what `urlFor` is for: the browser fetches and
-    // decodes the image itself. `calls` proves no GET for the bytes was
-    // made on top of that.
-    const { ctx, calls } = await harnessWithCalls();
-    render(<ViewerDocument ctx={ctx} path="art/logo.png" entry={file('art/logo.png')} />);
-    expect(screen.getByRole('img').getAttribute('src')).toBe('/api/files/art/logo.png');
-    expect(calls.filter((u) => u.startsWith('/api/files/'))).toEqual([]);
-  });
-
   it('a text file that is not the editor’s is shown as text', async () => {
     const ctx = await harness({ 'notes.txt': 'first-slot notes' });
     render(<ViewerDocument ctx={ctx} path="notes.txt" entry={file('notes.txt')} />);

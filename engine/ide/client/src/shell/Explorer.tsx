@@ -52,22 +52,28 @@ const EDITABLE_EXTENSIONS = new Set([
 ]);
 
 /**
- * What opens for a path: a tab keyed `f:<path>`, holding the editor or the
- * viewer. Same key twice activates. The Explorer calls this with the tree's
- * own `entry`, so a file the tree already says is too big is refused
- * without a read; `App` installs it on the shell (`registerPathOpener`)
- * for everyone else — a plugin's `ctx.shell.openPath(path)`, and the
- * address resolving `#/doc/f:<path>` on a cold load — where no entry is at
- * hand and the viewer reads to find out.
+ * What opens for a path: a tab keyed `f:<path>`, holding a registered
+ * viewer, the editor, or the catch-all viewer, in that order. Same key
+ * twice activates. The Explorer calls this with the tree's own `entry`, so
+ * a `viewers` match can see the size and a file the tree already says is
+ * too big is refused without a read; `App` installs it on the shell
+ * (`registerPathOpener`) for everyone else — a plugin's
+ * `ctx.shell.openPath(path)`, and the address resolving `#/doc/f:<path>`
+ * on a cold load — where no entry is at hand and the fallback viewer reads
+ * to find out.
  */
 export function openPath(ctx: Context, path: string, entry?: FileEntry): void {
+  const viewer = ctx.viewers.pick(path, entry);
   const editable = EDITABLE_EXTENSIONS.has(extensionOf(path));
+  const Viewer = viewer?.component;
   ctx.shell.open({
     key: `${FILE_KEY_PREFIX}${path}`,
     title: path.split('/').pop() ?? path,
-    component: editable
-      ? ({ ctx: c }) => <EditorDocument ctx={c} path={path} />
-      : ({ ctx: c }) => <ViewerDocument ctx={c} path={path} entry={entry} />,
+    component: Viewer
+      ? ({ ctx: c }) => <Viewer ctx={c} path={path} entry={entry} />
+      : editable
+        ? ({ ctx: c }) => <EditorDocument ctx={c} path={path} />
+        : ({ ctx: c }) => <ViewerDocument ctx={c} path={path} entry={entry} />,
     closable: true,
   });
 }
