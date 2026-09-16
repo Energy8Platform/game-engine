@@ -51,6 +51,8 @@ export function row(id: string, config: Record<string, unknown> = {}): GameCompo
     config,
     from: 'patch',
     runtimeUrl: `/plugin-runtime/${id}`,
+    schema: null,
+    hot: false,
     ...(seam ? { seam } : {}),
     ...(requires ? { requires } : {}),
   };

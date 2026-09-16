@@ -6,13 +6,15 @@
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./runtime": "./src/runtime.ts"
+    "./runtime": "./src/runtime.ts",
+    "./schema": "./src/schema.ts"
   },
   "e8": {
     "runtime": {
-      "entry": "./src/runtime.ts"
+      "entry": "./src/runtime.ts",
+      "schema": "./src/schema.ts"
     },
-    "hot": false
+    "hot": true
   },
   "scripts": {
     "test": "vitest run",
@@ -28,7 +30,8 @@
     "@energy8engine/registry": "*",
     "@energy8engine/seam": "*",
     "@energy8engine/session-dev": "*",
-    "cordis": "4.0.0-rc.8"
+    "cordis": "4.0.0-rc.8",
+    "schemastery": "3.18.0"
   },
   "devDependencies": {
     "@energy8engine/spin-parser": "*",

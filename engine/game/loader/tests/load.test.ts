@@ -5,7 +5,15 @@ import { composeFromProject } from '../src/index';
 
 /** A minimal `GameCompositionRow`, shaped like `runtime-assets.ts`'s `/api/composition` would emit it (no dev-game — the raw route). */
 function row(id: string): GameCompositionRow {
-  return { id, name: `@e/${id}`, config: {}, from: 'patch', runtimeUrl: `/plugin-runtime/${id}` };
+  return {
+    id,
+    name: `@e/${id}`,
+    config: {},
+    from: 'patch',
+    runtimeUrl: `/plugin-runtime/${id}`,
+    schema: null,
+    hot: false,
+  };
 }
 
 /** A `fetchFn` that answers `GET /api/composition` with a fixed body, whatever URL it's asked for. */
@@ -296,6 +304,8 @@ describe('composeFromProject', () => {
             name: '@e/a',
             config: { speed: 7 },
             from: 'patch',
+            schema: null,
+            hot: false,
             runtimeUrl: '/plugin-runtime/a',
           },
         ],

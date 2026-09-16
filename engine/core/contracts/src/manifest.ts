@@ -134,6 +134,18 @@ export interface E8RuntimeHalf {
    * reading, the other is probably not the one you meant.
    */
   requires?: string[];
+  /**
+   * Module path inside the package, relative to its root, of a module
+   * exporting `Config` — a schemastery schema for this row's `config`,
+   * the same contract a CLIENT half's main entry already keeps
+   * (`composition.ts`'s `schemaOf`). The host imports THIS file, not
+   * `entry`, so it must import only `schemastery`: the entry pulls in
+   * `pixi.js` and the rest of a browser, and the host is a node process.
+   * `Config.toJSON()` reaches the IDE as `GameCompositionRow.schema`; a
+   * path that does not import, or a module with no `Config`, is
+   * `schema: null` plus a diagnostic on the row. Absent means no form.
+   */
+  schema?: string;
 }
 
 /**
@@ -282,6 +294,22 @@ export function parseManifest(
           if (validRequires.length > 0) {
             runtimeHalf.requires = validRequires;
           }
+        }
+      }
+
+      if (runtime.schema !== undefined) {
+        if (typeof runtime.schema === 'string') {
+          runtimeHalf.schema = runtime.schema;
+        } else {
+          diagnostics.push(
+            diagnostic(
+              'warning',
+              pluginId,
+              'e8.runtime.schema',
+              'the runtime half\'s "schema" must be a module path',
+              'set e8.runtime.schema to a path like "./src/schema.ts", or remove it',
+            ),
+          );
         }
       }
 

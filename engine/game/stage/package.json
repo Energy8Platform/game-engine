@@ -4,13 +4,27 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": "./src/index.ts", "./runtime": "./src/runtime.ts" },
-  "e8": { "runtime": { "entry": "./src/runtime.ts" }, "hot": false },
-  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "e8": {
+    "runtime": {
+      "entry": "./src/runtime.ts",
+      "schema": "./src/schema.ts"
+    },
+    "hot": false
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@energy8engine/renderer-pixi": "*",
     "cordis": "4.0.0-rc.8",
-    "pixi.js": "^8.20.1"
+    "pixi.js": "^8.20.1",
+    "schemastery": "3.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

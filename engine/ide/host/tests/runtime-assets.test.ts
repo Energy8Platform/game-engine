@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
+import Schema from 'schemastery';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createIdeHost, type IdeHost } from '../src/index';
 
@@ -516,6 +517,103 @@ describe('GET /api/composition', () => {
     expect(body.diagnostics.filter((d: { plugin: string }) => d.plugin === 'healthy1')).toEqual([]);
   });
 
+  it("carries each row's config schema and hot flag, read off its package manifest", async () => {
+    // The real `e8-base` (repo fallback — see the fixture's profile), so
+    // the four rows `first-slot`'s patch edits carry a form the IDE can
+    // draw, and a row whose package declares no `e8.runtime.schema`
+    // (`spinlog1`) carries `null` with nothing said about it.
+    host = await createIdeHost({ root: fixture('project-e8-base'), port: 0 });
+    const body = await (await fetch(`${host.url}/api/composition`)).json();
+    const byId = (id: string) => body.rows.find((r: { id: string }) => r.id === id);
+
+    for (const id of ['renderer1', 'stage1', 'reels1', 'mechanics1']) {
+      expect(byId(id).schema, id).toBeTypeOf('object');
+      expect(byId(id).schema, id).not.toBeNull();
+    }
+    expect(byId('spinlog1').schema).toBeNull();
+    // The wire carries schemastery's own `toJSON()` graph; the form
+    // rebuilds it and reads the restart meta off the field.
+    const renderer = new Schema(byId('renderer1').schema) as Schema;
+    expect(renderer.dict!.width.meta.extra?.applies).toBe('restart');
+    const stage = new Schema(byId('stage1').schema) as Schema;
+    expect(stage.dict!.design.dict!.width.meta.extra?.applies).toBe('restart');
+
+    expect(byId('reels1').hot).toBe(true);
+    expect(byId('mechanics1').hot).toBe(true);
+    expect(byId('renderer1').hot).toBe(false);
+    expect(byId('stage1').hot).toBe(false);
+    expect(body.diagnostics.filter((d: { where: string }) => d.where === 'schema')).toEqual([]);
+  });
+
+  it('a schema path that does not import is schema: null plus a diagnostic on the row, not a 500', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-schema-'));
+    const nodeModules = join(workspace, 'node_modules');
+    mkdirSync(nodeModules);
+    const pkg = (name: string, e8: unknown) => {
+      const dir = join(nodeModules, name);
+      mkdirSync(dir);
+      writeFileSync(
+        join(dir, 'package.json'),
+        JSON.stringify({
+          name,
+          version: '1.0.0',
+          type: 'module',
+          main: 'index.js',
+          exports: { '.': './index.js', './package.json': './package.json' },
+          e8,
+        }),
+      );
+      writeFileSync(join(dir, 'index.js'), 'export function apply() {}\n');
+      writeFileSync(join(dir, 'runtime.js'), 'export function apply() {}\n');
+      return dir;
+    };
+    // Declares a schema module nobody wrote.
+    pkg('noschema-pkg', { runtime: { entry: './runtime.js', schema: './schema.js' }, hot: true });
+    // The module is there but exports no `Config` — also a broken promise.
+    const noConfig = pkg('noconfig-pkg', {
+      runtime: { entry: './runtime.js', schema: './schema.js' },
+    });
+    writeFileSync(join(noConfig, 'schema.js'), 'export const notConfig = 1;\n');
+
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-schema-fixture\n');
+    const bundlesDir = join(workspace, 'bundles', 'e8-schema-fixture');
+    mkdirSync(bundlesDir, { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'e8.bundle.yml'),
+      [
+        'name: e8-schema-fixture',
+        'rows:',
+        '  - id: noschema1',
+        '    name: noschema-pkg',
+        '  - id: noconfig1',
+        '    name: noconfig-pkg',
+        '',
+      ].join('\n'),
+    );
+
+    host = await createIdeHost({ root: workspace, port: 0 });
+    const res = await fetch(`${host.url}/api/composition`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const byId = (id: string) => body.rows.find((r: { id: string }) => r.id === id);
+
+    expect(byId('noschema1').schema).toBeNull();
+    expect(byId('noschema1').hot).toBe(true);
+    expect(byId('noconfig1').schema).toBeNull();
+    const schemaDiagnostics = body.diagnostics.filter(
+      (d: { where: string }) => d.where === 'schema',
+    );
+    expect(
+      schemaDiagnostics.map((d: { plugin: string; severity: string }) => [d.plugin, d.severity]),
+    ).toEqual([
+      ['noschema1', 'error'],
+      ['noconfig1', 'error'],
+    ]);
+    expect(schemaDiagnostics[0].message).toContain('./schema.js');
+    expect(schemaDiagnostics[1].message).toContain('no schemastery `Config`');
+  });
+
   it('reloads from disk on every call, so an edit is reflected without restarting the host', async () => {
     // Same edit `project.test.ts`'s "reload() picks up an edited patch"
     // makes directly against `ctx.project.reload()` — this proves the HTTP
@@ -689,6 +787,18 @@ describe('GET /plugin-runtime/:id', () => {
     expect(await onRoot.text()).not.toContain('export');
     expect((await fetch(`${runtimeHost.url}/api/composition`)).status).toBe(200);
     expect((await fetch(`${gameUrl}/api/composition`)).status).toBe(200);
+  });
+
+  it('the game server answers the same rows as the root, schema and hot included', async () => {
+    // One `composition` handler registered on both servers — so what the
+    // IDE reads and what the game composes from cannot drift apart.
+    const root = await (await fetch(`${runtimeHost.url}/api/composition`)).json();
+    const game = await (await fetch(`${gameUrl}/api/composition`)).json();
+    expect(game.rows).toEqual(root.rows);
+    for (const row of game.rows) {
+      expect(row).toHaveProperty('schema');
+      expect(typeof row.hot).toBe('boolean');
+    }
   });
 
   it('serves a row runtime half as javascript', async () => {

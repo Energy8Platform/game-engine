@@ -1,11 +1,13 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { Context } from 'cordis';
 import type { Server } from '@cordisjs/plugin-server';
 import {
   type Diagnostic,
   diagnostic,
   type E8Manifest,
+  type GameCompositionRow,
   parseManifest,
   type ResolvedRow,
 } from '@energy8engine/contracts';
@@ -293,6 +295,55 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     return { url: devGamePresent ? `/@fs/${realEntryPath}` : null };
   }
 
+  /**
+   * `GameCompositionRow.schema` — the row's `Config.toJSON()`, off the
+   * module `e8.runtime.schema` names. The same contract `composition.ts`'s
+   * `schemaOf` keeps for the EDITOR's rows, with one deliberate difference:
+   * that one imports the package's MAIN entry through the loader, and a
+   * game row's main entry imports `pixi.js`, which this node process
+   * cannot load — so a runtime half names a second, schemastery-only
+   * module for the host, and the host imports THAT by absolute file URL
+   * (the host runs under tsx, so a `.ts` path imports — measured).
+   *
+   * No `schema` declared is legal and silent; a declared path that does
+   * not import, or a module with no `Config`, is an author's broken
+   * promise and comes back as `null` PLUS a diagnostic, like a bad
+   * `entry`. Recomputed per request like everything else in this handler
+   * — but note Node's module cache: the file is evaluated once per host
+   * process, so an edit to `schema.ts` needs a host restart to show.
+   */
+  async function schemaOf(
+    row: ResolvedRow,
+    manifest: E8Manifest | null,
+    pkg: { dir: string } | null,
+  ): Promise<{ schema: unknown | null; diagnostic?: Diagnostic }> {
+    const path = manifest?.runtime?.schema;
+    if (!pkg || !path) return { schema: null };
+    const file = resolve(pkg.dir, path);
+    try {
+      const mod = (await import(pathToFileURL(file).href)) as {
+        Config?: { toJSON?: () => unknown };
+      };
+      if (typeof mod.Config?.toJSON !== 'function') {
+        throw new Error('the module exports no schemastery `Config`');
+      }
+      return { schema: mod.Config.toJSON() };
+    } catch (error) {
+      return {
+        schema: null,
+        diagnostic: diagnostic(
+          'error',
+          row.id,
+          'schema',
+          `row "${row.id}" (${row.name}) declares e8.runtime.schema "${path}", but ${file} could not be read as a config schema: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          `fix "e8.runtime.schema" in ${row.name}'s package.json, or make that module \`export const Config = Schema.object({...})\` importing only schemastery`,
+        ),
+      };
+    }
+  }
+
   const composition: Parameters<Server['get']>[1] = async (_req, res) => {
     // Re-resolve from disk before answering. `ctx.project` caches its last
     // resolution until something calls `reload()` — nothing did, before
@@ -325,18 +376,29 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     // "what is wrong with my game", not for which layer of the host
     // noticed it.
     const diagnostics: Diagnostic[] = [...ctx.project.diagnostics, ...ctx.spinSchema.diagnostics];
-    const rows = ctx.project.composition.rows.map((row) => {
-      const pkg = readPackageJson(config.cwd, row.name);
+    // `map` over an async body, then one `Promise.all`: a schema import is
+    // the only await in here, and rows are independent — nothing in one
+    // row's resolution reads another's, so the order of the collected
+    // diagnostics is the only thing concurrency could touch, and each
+    // row's own pushes still happen in row order below (see the loop).
+    const perRow = await Promise.all(
+      ctx.project.composition.rows.map(async (row) => {
+        const pkg = readPackageJson(config.cwd, row.name);
+        const parsed = pkg
+          ? parseManifest(pkg.json, row.id)
+          : { manifest: null, diagnostics: [] as Diagnostic[] };
+        return { row, pkg, parsed, schema: await schemaOf(row, parsed.manifest, pkg) };
+      }),
+    );
+    const rows: GameCompositionRow[] = perRow.map(({ row, pkg, parsed, schema }) => {
       // The manifest's OWN complaints (an `e8.runtime` with no string
       // `entry`, say) travel too. They were being parsed and dropped on
       // the same floor `resolveRuntimeUrl`'s were.
-      const parsed = pkg
-        ? parseManifest(pkg.json, row.id)
-        : { manifest: null, diagnostics: [] as Diagnostic[] };
       diagnostics.push(...parsed.diagnostics);
 
       const runtime = resolveRuntimeUrl(row, parsed.manifest, pkg);
       if (runtime.diagnostic) diagnostics.push(runtime.diagnostic);
+      if (schema.diagnostic) diagnostics.push(schema.diagnostic);
 
       // A row that joined the composition after `e8 dev` started.
       //
@@ -381,11 +443,16 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       // own to fall back on. `requires` is `@energy8engine/game-runtime`'s
       // to enforce, after every row has applied — see `GameCompositionRow
       // .requires` and `E8RuntimeHalf.requires`.
+      // `schema` and `hot` for the same reason again — and both are what
+      // the IDE's composition screen draws a form from and decides "reload
+      // or re-apply" by (`GameCompositionRow`'s docs).
       return {
         ...row,
         runtimeUrl: runtime.url,
         seam: parsed.manifest?.seam,
         requires: parsed.manifest?.runtime?.requires,
+        schema: schema.schema,
+        hot: parsed.manifest?.hot === true,
       };
     });
     // `schema` always rides here, even `null` — omitting the field on a

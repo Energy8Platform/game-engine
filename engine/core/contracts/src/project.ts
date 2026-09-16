@@ -96,4 +96,20 @@ export interface GameCompositionRow extends ResolvedRow {
    * here either.
    */
   requires?: string[];
+  /**
+   * A schemastery schema's raw `toJSON()` output — its own deduped
+   * `{ uid, refs }` graph, not a flat `{ type, dict, meta }` object — or
+   * null when the row's package declares no `e8.runtime.schema`, or
+   * declared one the host could not import (then a `Diagnostic` with
+   * `where: 'schema'` rides in the same response). A reader must rebuild
+   * it with `new Schema(json)` before reading `.type`/`.dict`/`.meta` —
+   * the same rule as `CompositionRow.schema` (`protocol.ts`).
+   */
+  schema: unknown | null;
+  /**
+   * Whether a config change re-applies the row in place (`e8.hot`); a
+   * cold row's change means reloading the game. Same word as
+   * `CompositionRow.hot`, read off the manifest by the host.
+   */
+  hot: boolean;
 }

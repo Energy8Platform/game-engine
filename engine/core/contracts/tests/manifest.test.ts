@@ -84,6 +84,32 @@ describe('parseManifest', () => {
     expect(manifest!.runtime!.requires).toEqual(['board']);
   });
 
+  it('reads a schema module path off the runtime half', () => {
+    const { manifest, diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', schema: './src/schema.ts' } } },
+      'row1',
+    );
+    expect(diagnostics).toEqual([]);
+    expect(manifest!.runtime!.schema).toBe('./src/schema.ts');
+  });
+
+  it('a runtime half with no schema is legal and means none', () => {
+    const { manifest } = parseManifest({ e8: { runtime: { entry: './r.ts' } } }, 'row1');
+    expect(manifest!.runtime!.schema).toBeUndefined();
+  });
+
+  it('a schema that is not a string is a diagnostic naming the row, and the entry still parses', () => {
+    const { manifest, diagnostics } = parseManifest(
+      { e8: { runtime: { entry: './r.ts', schema: 7 } } },
+      'row1',
+    );
+    expect(manifest!.runtime!.entry).toBe('./r.ts');
+    expect(manifest!.runtime!.schema).toBeUndefined();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].plugin).toBe('row1');
+    expect(diagnostics[0].where).toBe('e8.runtime.schema');
+  });
+
   it('a runtime half with no requires is legal and means none', () => {
     const { manifest, diagnostics } = parseManifest(
       { e8: { runtime: { entry: './r.ts' } } },
