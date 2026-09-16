@@ -146,6 +146,10 @@ describe('language-spin', () => {
     expect(visible(lexer, 'x.y')).toEqual(['identifier', 'delimiter', 'identifier']);
   });
 
+  it('the optional type suffix `?` is a delimiter, not an unmatched character', () => {
+    expect(visible(lexer, 'x: int?')).toEqual(['identifier', 'delimiter', 'type', 'delimiter']);
+  });
+
   it('nothing in the reference script falls to no rule', async () => {
     const { readFileSync } = await import('node:fs');
     // Node's own URL, not the jsdom-environment global: Vitest's jsdom

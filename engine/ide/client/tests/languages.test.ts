@@ -82,6 +82,15 @@ describe('languages', () => {
     expect(ctx.languages.languageFor('a.spinml')).toBe('spin');
   });
 
+  it('a re-registered id moves to the end, so it wins later extension collisions too', async () => {
+    const ctx = await boot();
+    ctx.languages.register(def('javascript', ['.js', '.mjs']));
+    ctx.languages.register(def('typescript', ['.ts']));
+    ctx.languages.register(def('typescript', ['.ts', '.mjs']));
+    expect(ctx.languages.languageFor('x.mjs')).toBe('typescript');
+    expect(ctx.languages.list().map((d) => d.id)).toEqual(['javascript', 'typescript']);
+  });
+
   it('a retract removes the definition; a stale retract removes nothing', async () => {
     const ctx = await boot();
     const off = ctx.languages.register(def('spin', ['.spin']));

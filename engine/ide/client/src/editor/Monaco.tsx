@@ -90,6 +90,9 @@ function applyLanguages(monaco: Api, source: LanguageSource): void {
         if (conf) monaco.languages.setLanguageConfiguration(def.id, conf);
       })
       .catch((error: unknown) => {
+        // Same guard as the success path: a stale load rejecting after this
+        // id was replaced must not report failure against the replacement.
+        if (seen!.get(def.id) !== def) return;
         source.failed(def.id, error instanceof Error ? error.message : String(error));
       });
   }
@@ -172,8 +175,11 @@ export function Monaco({ value, language, diagnostics, languages, onChange }: Mo
       unsubscribe?.();
       editor?.dispose();
     };
-    // `value`/`language`/`languages` are creation-time only; later values are synced below,
-    // and the source object is stable for the life of a document.
+    // `value` is synced below; `language` and `languages` are creation-time
+    // only, and the source object is stable for the life of a document. A
+    // language registered after a document is open reaches Monaco, but the
+    // open model stays on its creation-time language until the document is
+    // reopened (`EditorDocument` reads `languageFor` at render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

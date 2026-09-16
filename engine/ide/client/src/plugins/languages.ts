@@ -46,6 +46,16 @@ function extensionOf(path: string): string {
 
 export function apply(ctx: Context) {
   const entries = createRegistry<LanguageDef>({ policy: 'last-wins' });
+  // `entries.add` under 'last-wins' is a `Map.set`, which keeps an existing
+  // key's original iteration position — so a same-id re-registration would
+  // otherwise stay wherever it first landed, not move to the end, and
+  // `languageFor`'s "last registration for an extension wins" (and the
+  // collision warning's "the later registration wins") would be false for
+  // an id re-registered before some other id it now also collides with.
+  // Retracting the old slot first (without touching `createRegistry`, which
+  // has no reorder operation) makes the re-add a fresh `Map.set` on an
+  // absent key, which does land at the end.
+  const offs = new Map<string, () => void>();
   const listeners = new Set<() => void>();
   const failures = new Map<string, () => void>();
   const notify = () => {
@@ -73,7 +83,9 @@ export function apply(ctx: Context) {
       }
       failures.get(def.id)?.();
       failures.delete(def.id);
+      offs.get(def.id)?.();
       const off = entries.add(def.id, def);
+      offs.set(def.id, off);
       notify();
       return () => {
         const isCurrent = entries.get(def.id) === def;

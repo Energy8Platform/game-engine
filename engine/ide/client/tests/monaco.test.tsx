@@ -37,6 +37,8 @@ const fake = vi.hoisted(() => {
     type(v: string): void;
   };
   const editors: Editor[] = [];
+  /** Cross-API call order, for the one test that cares about it: `register:<id>` (languages) and `create` (editor), reset per test. A `const` so both `makeEditorApi` and `makeLanguagesApi` close over the same array across `beforeEach`'s fresh API objects. */
+  const log: string[] = [];
   /** A fresh `editor` API per test: the wrapper remembers which themes it defined per API object, so a new object starts it empty. */
   const makeEditorApi = () => {
     const api = {
@@ -49,6 +51,7 @@ const fake = vi.hoisted(() => {
         api.applied.push(name);
       },
       create(el: HTMLElement, options: Record<string, unknown>): Editor {
+        log.push('create');
         const model = {
           value: String(options.value ?? ''),
           markers: [] as Marker[],
@@ -96,6 +99,7 @@ const fake = vi.hoisted(() => {
       /** Ids whose `setMonarchTokensProvider` throws — the compile-failure seam. */
       broken: new Set<string>(),
       register(def: { id: string; extensions?: string[] }) {
+        log.push(`register:${def.id}`);
         api.registered.push(def);
       },
       setMonarchTokensProvider(id: string, grammar: unknown) {
@@ -110,6 +114,7 @@ const fake = vi.hoisted(() => {
   };
   return {
     editors,
+    log,
     makeEditorApi,
     MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
     editor: makeEditorApi(),
@@ -149,6 +154,7 @@ async function mount(props: Partial<React.ComponentProps<typeof Monaco>> = {}) {
 describe('Monaco', () => {
   beforeEach(() => {
     fake.editors.length = 0;
+    fake.log.length = 0;
     fake.editor = fake.makeEditorApi();
     fake.languages = fake.makeLanguagesApi();
   });
@@ -325,6 +331,7 @@ describe('Monaco', () => {
     expect(fake.languages.registered[0].extensions).toEqual(['.spin']);
     // `registered` is filled inside `load().then(...)` before `create` — the fake records creation order through `editors`.
     expect(fake.editors).toHaveLength(1);
+    expect(fake.log).toEqual(['register:spin', 'register:yaml', 'create']);
   });
 
   it('hands each grammar and configuration to Monaco once loaded', async () => {
@@ -406,6 +413,33 @@ describe('Monaco', () => {
     src.defs.length = 0;
     src.add({ id: 'spin', extensions: ['.spin'], load: async () => ({ language: next }) });
     await waitFor(() => expect(fake.languages.providers.spin).toBe(next));
+  });
+
+  it('a stale load rejecting after its id was replaced is not reported as a failure', async () => {
+    // A's load never settles on its own — it stays pending until `rejectA`
+    // is called, which happens only after B (same id) has already replaced
+    // it. Without the same stale guard the success path has, A's rejection
+    // would report `failed()` against B's now-current registration.
+    let rejectA!: (error: Error) => void;
+    const src = source([
+      {
+        id: 'spin',
+        extensions: ['.spin'],
+        load: () =>
+          new Promise((_resolve, reject) => {
+            rejectA = reject;
+          }),
+      },
+    ]);
+    await mount({ languages: src });
+    const nextGrammar = { tokenizer: { root: [] } };
+    src.defs.length = 0;
+    src.add({ id: 'spin', extensions: ['.spin'], load: async () => ({ language: nextGrammar }) });
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(nextGrammar));
+    rejectA(new Error('stale failure'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(src.failures).toEqual([]);
+    expect(fake.languages.providers.spin).toBe(nextGrammar);
   });
 
   it('works without a languages source, as before', async () => {
