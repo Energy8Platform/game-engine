@@ -804,3 +804,123 @@ describe('files routes — POST', () => {
     expect(res.headers.get('content-type')).toBe('video/mp4');
   });
 });
+
+describe('files service — move', () => {
+  it('moves a file, and the tree and the disk agree', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, 'assets'));
+    const ctx = await hostFor(dir);
+    const { diagnostics } = await ctx.files.move('game/spec.json', 'assets/spec.json');
+    expect(diagnostics).toEqual([]);
+    expect(existsSync(join(dir, 'assets', 'spec.json'))).toBe(true);
+    expect(existsSync(join(dir, 'game', 'spec.json'))).toBe(false);
+  });
+
+  it('renames within the same directory', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.move('game/spec.json', 'game/spec2.json')).diagnostics).toEqual([]);
+    const { entries } = await ctx.files.tree();
+    expect(entries.map((e) => e.path)).toContain('game/spec2.json');
+    expect(entries.map((e) => e.path)).not.toContain('game/spec.json');
+  });
+
+  it('moves a directory with its contents', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.move('game', 'maths')).diagnostics).toEqual([]);
+    const { entries } = await ctx.files.tree();
+    expect(entries.map((e) => e.path)).toEqual(
+      expect.arrayContaining(['maths', 'maths/spec.json', 'maths/script.spin']),
+    );
+  });
+
+  it('never overwrites: an occupied destination is exists', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.move('game/spec.json', 'e8.yml');
+    expect(diagnostics[0]).toMatchObject({ code: 'exists' });
+    expect((await ctx.files.read('e8.yml')).bytes?.length).toBeGreaterThan(0);
+  });
+
+  it('a directory cannot move into itself', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.move('game', 'game/inner')).diagnostics[0]).toMatchObject({
+      code: 'into-self',
+    });
+    expect((await ctx.files.move('game', 'game')).diagnostics[0]).toMatchObject({
+      code: 'into-self',
+    });
+  });
+
+  it('a missing source is not-found; a missing destination directory is not-found', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.move('game/nope.json', 'x.json')).diagnostics[0]).toMatchObject({
+      code: 'not-found',
+    });
+    expect(
+      (await ctx.files.move('game/spec.json', 'nowhere/spec.json')).diagnostics[0],
+    ).toMatchObject({ code: 'not-found' });
+  });
+
+  it('both ends are contained and protected', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.move('game/spec.json', '../spec.json')).diagnostics[0]).toMatchObject({
+      code: 'outside-project',
+    });
+    expect(
+      (await ctx.files.move('game/spec.json', 'node_modules/spec.json')).diagnostics[0],
+    ).toMatchObject({ code: 'protected-path' });
+    expect((await ctx.files.move('.git', 'git')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+  });
+
+  it('refuses a symlink at the source leaf', async () => {
+    const dir = fixture('plain');
+    symlinkSync(join(dir, 'e8.yml'), join(dir, 'alias.yml'));
+    const ctx = await hostFor(dir);
+    expect((await ctx.files.move('alias.yml', 'other.yml')).diagnostics[0]).toMatchObject({
+      code: 'is-symlink',
+    });
+  });
+
+  it('emits files/removed for the old path and files/written for the new one, in that order', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const seen: string[] = [];
+    ctx.on('files/removed', ({ path }) => seen.push(`removed:${path}`));
+    ctx.on('files/written', ({ path }) => seen.push(`written:${path}`));
+    await ctx.files.move('game/script.spin', 'game/main.spin');
+    expect(seen).toEqual(['removed:game/script.spin', 'written:game/main.spin']);
+  });
+
+  it('remove emits files/removed too, and a refused move emits nothing', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const seen: string[] = [];
+    ctx.on('files/removed', ({ path }) => seen.push(path));
+    await ctx.files.remove('game/spec.json');
+    await ctx.files.move('game/script.spin', 'e8.yml');
+    expect(seen).toEqual(['game/spec.json']);
+  });
+});
+
+describe('files routes — PATCH', () => {
+  it('PATCH {to} moves; a body without to is malformed-request', async () => {
+    const host = await startHost(fixture('plain'));
+    const ok = await fetch(`${host.url}/api/files/game/spec.json`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to: 'game/spec2.json' }),
+    });
+    expect(ok.status).toBe(200);
+    const bad = await fetch(`${host.url}/api/files/game/spec2.json`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(bad.status).toBe(400);
+    const missing = await fetch(`${host.url}/api/files/game/nope.json`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to: 'x.json' }),
+    });
+    expect(missing.status).toBe(404);
+  });
+});

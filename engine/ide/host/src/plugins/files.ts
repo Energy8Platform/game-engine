@@ -17,6 +17,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -29,6 +30,7 @@ import {
   type FileCreateRequest,
   type FileEntry,
   type FileFailure,
+  type FileMoveRequest,
   type FileTreeResponse,
   type FileWriteRequest,
   fileDiagnostic,
@@ -51,8 +53,12 @@ declare module 'cordis' {
      * This service does not name a payload beyond the path, and does not
      * know or care who, if anyone, is listening — see this file's own doc
      * comment on why `schema.ts` staying unknown to this file is the point.
+     *
+     * Also fired by `move()` for the destination.
      */
     'files/written'(payload: { path: string }): void;
+    /** Fired once an entry is gone from disk — by `remove()`, or as the first half of a `move()` (then `files/written` names where it went). */
+    'files/removed'(payload: { path: string }): void;
   }
 }
 
@@ -74,6 +80,12 @@ export interface FilesService {
    * something surprising.
    */
   remove(path: string): Promise<DiagnosticsResponse>;
+  /**
+   * Renames or moves a file or directory. Never overwrites (`exists`); a
+   * directory never moves into its own subtree (`into-self`); atomic — one
+   * `rename(2)`.
+   */
+  move(from: string, to: string): Promise<DiagnosticsResponse>;
 }
 
 export interface FilesConfig {
@@ -138,11 +150,23 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
     },
     mkdir: (path) => Promise.resolve(mkdirOne(config.cwd, path)),
     create: (path) => Promise.resolve(createOne(config.cwd, path)),
-    remove: (path) => Promise.resolve(removeOne(config.cwd, path)),
+    remove: (path) => {
+      const result = removeOne(config.cwd, path);
+      if (result.diagnostics.length === 0) ctx.emit('files/removed', { path });
+      return Promise.resolve(result);
+    },
+    move: (from, to) => {
+      const result = moveOne(config.cwd, from, to);
+      if (result.diagnostics.length === 0) {
+        ctx.emit('files/removed', { path: from });
+        ctx.emit('files/written', { path: to });
+      }
+      return Promise.resolve(result);
+    },
   };
   ctx.provide('files', service);
 
-  // Five routes over `service` above — they carry ITS diagnostics outward,
+  // Six routes over `service` above — they carry ITS diagnostics outward,
   // never invent their own containment story. `*splat` (path-to-regexp's
   // wildcard) is what makes `/api/files/*splat` match a multi-segment path
   // at all; `@cordisjs/plugin-server` decodes it exactly once — percent
@@ -249,6 +273,34 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
 
   ctx.server.delete('/api/files/*splat', async (req, res) => {
     const { diagnostics } = await service.remove(req.params.splat);
+    res.status = statusFor(diagnostics);
+    res.json({ diagnostics });
+  });
+
+  ctx.server.patch('/api/files/*splat', async (req, res) => {
+    const path = req.params.splat;
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      body = undefined;
+    }
+    const to = (body as Partial<FileMoveRequest> | null | undefined)?.to;
+    if (typeof to !== 'string' || to === '') {
+      res.status = 400;
+      res.json({
+        diagnostics: [
+          fileDiagnostic(
+            'error',
+            'malformed-request',
+            path,
+            `PATCH ${req.path} needs a JSON body shaped {"to": string}`,
+          ),
+        ],
+      } satisfies DiagnosticsResponse);
+      return;
+    }
+    const { diagnostics } = await service.move(path, to);
     res.status = statusFor(diagnostics);
     res.json({ diagnostics });
   });
@@ -644,6 +696,67 @@ function removeOne(cwd: string, requestedPath: string): DiagnosticsResponse {
           'io-error',
           requestedPath,
           `cannot remove "${requestedPath}": ${errorMessage(error)}`,
+        ),
+      ],
+    };
+  }
+}
+
+/**
+ * `describeRefusal` at both ends — the source has to exist and be
+ * contained/unprotected/not-a-symlink, and the destination has to be
+ * contained/unprotected too, even though it is about to be checked again
+ * for `exists`/parent-missing below. `target === source` for a plain file
+ * lands in `refuseExisting` as `exists` (moving a file onto itself), which
+ * is fine; a directory has to be caught as `into-self` FIRST, before that
+ * same check would otherwise call it `exists` too — the `stat.isDirectory()`
+ * check below runs before `refuseExisting` for exactly that reason.
+ */
+function moveOne(cwd: string, fromPath: string, toPath: string): DiagnosticsResponse {
+  const source = resolve(cwd, fromPath);
+  const target = resolve(cwd, toPath);
+  const refusal = describeRefusal(cwd, fromPath, source) ?? describeRefusal(cwd, toPath, target);
+  if (refusal) return { diagnostics: [refusal] };
+  let stat;
+  try {
+    stat = lstatSync(source);
+  } catch (error) {
+    return {
+      diagnostics: [
+        fileDiagnostic(
+          'error',
+          'not-found',
+          fromPath,
+          `"${fromPath}" was not found: ${errorMessage(error)}`,
+        ),
+      ],
+    };
+  }
+  if (stat.isDirectory() && (target === source || target.startsWith(source + sep))) {
+    return {
+      diagnostics: [
+        fileDiagnostic(
+          'error',
+          'into-self',
+          fromPath,
+          `"${fromPath}" cannot move into itself ("${toPath}")`,
+        ),
+      ],
+    };
+  }
+  const blocked = refuseExisting(toPath, target) ?? refuseMissingParent(toPath, target);
+  if (blocked) return { diagnostics: [blocked] };
+  try {
+    renameSync(source, target);
+    return { diagnostics: [] };
+  } catch (error) {
+    return {
+      diagnostics: [
+        fileDiagnostic(
+          'error',
+          'io-error',
+          fromPath,
+          `cannot move "${fromPath}" to "${toPath}": ${errorMessage(error)}`,
         ),
       ],
     };
