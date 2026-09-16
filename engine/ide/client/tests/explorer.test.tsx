@@ -695,6 +695,50 @@ describe('Explorer — verbs', () => {
     expect(screen.getByTestId('explorer-input')).toBeTruthy();
   });
 
+  it('a cancelled "Upload here" does not redirect the next header upload', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Upload here' }));
+    // The picker was dismissed: no change event. Then the header control.
+    await userEvent.click(screen.getByTitle('upload file'));
+    await userEvent.upload(screen.getByTestId('explorer-upload'), new File(['x'], 'notes.txt'));
+    await waitFor(() => expect(ctx.files.written).toEqual([['notes.txt', bytes('x')]]));
+  });
+
+  it('switching the create target starts a fresh input', async () => {
+    const ctx = await harness(tree(['game/spec.json', 'art/logo.png']));
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-game'));
+    await userEvent.click(screen.getByTestId('explorer-new-file'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'abc');
+    fireEvent.contextMenu(screen.getByTestId('explorer-art'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New file' })); // no blur
+    expect((screen.getByTestId('explorer-input') as HTMLInputElement).value).toBe('');
+  });
+
+  it('deleting the selected entry clears the selection', async () => {
+    const ctx = await harness(tree(['game/spec.json']), { 'game/spec.json': '{}' });
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-game/spec.json'));
+    ctx.files.nextTree(tree(['game']));
+    await userEvent.click(screen.getByTestId('explorer-delete-game/spec.json'));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    await waitFor(() => expect(screen.queryByTestId('explorer-game/spec.json')).toBeNull());
+    await userEvent.click(screen.getByTestId('explorer-new-file'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'x{Enter}');
+    await waitFor(() => expect(ctx.files.created).toEqual([['x', 'file']]));
+  });
+
+  it('a mousedown outside the menu closes it', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
+    expect(screen.getByRole('menu')).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('a click selects the row', async () => {
     const ctx = await harness(tree(['game/spec.json']));
     render(<Explorer ctx={ctx} />);

@@ -247,7 +247,14 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       upload(asked.path, asked.bytes);
       return;
     }
-    ctx.files.remove(asked.path).then(({ diagnostics }) => finish(diagnostics));
+    ctx.files.remove(asked.path).then(({ diagnostics }) => {
+      finish(diagnostics);
+      // A gone entry can't stay the target for "new file"/"new folder".
+      if (diagnostics.length === 0)
+        setSelected((prev) =>
+          prev !== null && (prev === asked.path || prev.startsWith(`${asked.path}/`)) ? null : prev,
+        );
+    });
   }
 
   /** Where "new file"/"new folder" from the header go: the selected directory, a selected file's directory, or the root. */
@@ -368,7 +375,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     if (editing?.kind !== 'create' || editing.dir !== dir) return null;
     const depth = dir === '' ? 0 : dir.split('/').length;
     return (
-      <li key="/new" className="e8-explorer-entry" style={{ paddingLeft: 8 + depth * 12 }}>
+      <li key={`/new:${dir}`} className="e8-explorer-entry" style={{ paddingLeft: 8 + depth * 12 }}>
         <span className="e8-explorer-chevron" aria-hidden="true" />
         <InlineInput
           initial=""
@@ -419,7 +426,19 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
           {/* The one upload control, as an icon in the view's header — the
               input itself is visually hidden by the stylesheet and reached
               through the label, or clicked by a directory's "Upload here". */}
-          <label className="e8-explorer-upload" title="upload file">
+          <label
+            className="e8-explorer-upload"
+            title="upload file"
+            onClick={(e) => {
+              // The header control always uploads to the root. A dismissed
+              // "Upload here" picker fires no change, so `uploadDir` would
+              // still name that folder — reset it before the browser's
+              // synthesized click on the input. That synthesized click (and
+              // "Upload here"'s own `input.click()`) bubbles back through
+              // here with the input as target, and must not undo the folder.
+              if (e.target !== uploadInput.current) setUploadDir('');
+            }}
+          >
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
               <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10" />
             </svg>
