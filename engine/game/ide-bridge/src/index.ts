@@ -447,7 +447,16 @@ export function attachDiagnosticsForwarding(
 }
 
 export function apply(ctx: Context, config: IdeBridgeConfig): void {
-  const mechanics = ctx.get('mechanics') as MechanicsBinder | undefined;
+  /**
+   * Read per use, never captured: `mechanics1` is a HOT row. A live edit
+   * to it re-applies that row's fiber, which disposes the registry this
+   * module would have captured (its bindings and registrations were that
+   * run's effects — it answers nothing afterwards) and provides a new one.
+   * `reflect.get(…, false)` because this module never injects it: the
+   * registry's absence is an answer here, not an exception.
+   */
+  const currentMechanics = () => ctx.reflect.get('mechanics', false) as MechanicsBinder | undefined;
+  const mechanics = currentMechanics();
   if (!mechanics) {
     // Host-side registration only — see the module doc, point 1.
     return;
@@ -497,6 +506,11 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   };
 
   const bind = (stage: string, mechanicId: string) => {
+    const mechanics = currentMechanics();
+    // Between a hot re-apply's dispose and its re-provide there is no
+    // registry to bind on; a frame landing in that gap is dropped, and the
+    // row's own config (which the re-apply reads) is what stands.
+    if (!mechanics) return;
     // Skips a rebind that would be a no-op — cheap insurance against
     // `mechanics.bind()` re-registering a `ctx.effect` on every broadcast
     // snapshot (not just ones that actually touch the binding; `rpc.ts`

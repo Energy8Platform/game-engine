@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
+import * as mechanicsRuntime from '../src/runtime';
 import { fakeFetch, row } from './helpers';
 import { createGame, type GameApp } from '../src/index';
 
@@ -94,5 +95,63 @@ describe('gameRows.update', () => {
 
     // And the row is not stuck: the next good config applies again.
     expect(await game.ctx.gameRows.update('reels1', { grid: { cols: 3 } })).toBe('updated');
+  });
+
+  it("a row whose `inject` is still unmet answers 'failed', with a diagnostic saying what it waits for", async () => {
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({ rows: [...ROWS, row('stage1')], diagnostics: [] }),
+        importModule: async (url) => {
+          const id = url.split('/').pop()!;
+          if (id === 'diagnostics1') return diagnosticsRuntime;
+          if (id === 'stage1') return { inject: ['never'], apply: () => {} };
+          return { apply: () => {} };
+        },
+      },
+    });
+    // The boot-time complaint about the same thing, from the loader.
+    expect(game.diagnostics.map((d) => d.plugin)).toEqual(['stage1']);
+
+    expect(await game.ctx.gameRows.update('stage1', {})).toBe('failed');
+
+    const hot = game.ctx.diagnostics.list().filter((d) => d.where === 'hot update');
+    expect(hot).toHaveLength(1);
+    expect(hot[0].plugin).toBe('stage1');
+    expect(hot[0].message).toContain('"never"');
+  });
+
+  it('a hot update of mechanics1 re-provides `mechanics`, and a fresh read resolves against the new one', async () => {
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [
+            row('diagnostics1'),
+            row('renderer1'),
+            row('mechanics1', { stages: { base_game: 'classic' } }),
+          ],
+          diagnostics: [],
+        }),
+        importModule: async (url) => {
+          const id = url.split('/').pop()!;
+          if (id === 'diagnostics1') return diagnosticsRuntime;
+          if (id === 'mechanics1') return mechanicsRuntime;
+          return { apply: () => {} };
+        },
+      },
+    });
+    const before = game.ctx.reflect.get('mechanics', false) as typeof game.ctx.mechanics;
+    expect(before.forStage('base_game')?.id).toBe('classic');
+
+    expect(await game.ctx.gameRows.update('mechanics1', { stages: { base_game: 'cascade' } })).toBe(
+      'updated',
+    );
+
+    const after = game.ctx.reflect.get('mechanics', false) as typeof game.ctx.mechanics;
+    expect(after).not.toBe(before);
+    expect(after.forStage('base_game')?.id).toBe('cascade');
+    // The captured one is dead — its bindings and registrations were
+    // effects of the old fiber run, and the re-apply disposed them — so
+    // anything still holding it presents nothing, not even the old thing.
+    expect(before.forStage('base_game')).toBeNull();
   });
 });

@@ -90,7 +90,8 @@ export interface GameRowsService {
    * `'updated'` once the row has re-applied with `config`; `'unknown'` for
    * an id with no fiber (a row that never composed — lost its seam, had no
    * runtime half, or failed to import) — silent, by design; `'failed'` when
-   * the re-apply threw, which is also an `error` diagnostic on
+   * the re-apply threw, or when the row still could not apply because its
+   * `inject` is unmet — either way an `error` diagnostic on
    * `ctx.diagnostics` naming the row. A failed row keeps its fiber: the
    * next `update` runs `apply` again.
    */
@@ -113,6 +114,9 @@ declare module 'cordis' {
  * noise.
  */
 const REQUIRED_SEAMS = ['renderer'];
+
+/** `cordis`'s `FiberState.PENDING` — a `const enum`, so no runtime value to import. */
+const FIBER_PENDING = 0;
 
 const SESSION_SEAM = 'session';
 
@@ -621,6 +625,20 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
           // clears again before the next try).
           fiber.update(config);
           await fiber.await();
+          // Resolved without applying: the row's `inject` is still unmet
+          // (the loader said so at boot; this is the same fact, live).
+          if (fiber.state === FIBER_PENDING) {
+            const missing = Object.keys(fiber.inject).filter(
+              (name) => ctx.reflect.get(name, false) === undefined,
+            );
+            throw new Error(
+              `the row did not apply: it injects ${missing
+                .map((name) => `"${name}"`)
+                .join(
+                  ', ',
+                )}, and nothing in the composition provides ${missing.length === 1 ? 'it' : 'them'}`,
+            );
+          }
           return 'updated';
         } catch (error) {
           reportHotFailure(ctx, id, error);

@@ -442,4 +442,54 @@ describe('composeFromProject — one fiber per row', () => {
     expect(diags).toEqual([]);
     expect(applied).toEqual(['stage1 saw object']);
   });
+
+  it('a half listed BEFORE the row that provides its `inject` applies late, once the service lands', async () => {
+    const ctx = new Context();
+    const applied: string[] = [];
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('stage1'), row('renderer1')], diagnostics: [] }),
+      importModule: async (url) =>
+        url.endsWith('stage1')
+          ? {
+              inject: ['renderer'],
+              apply: (c: Context) => {
+                applied.push(`stage1 saw ${typeof (c as any).renderer}`);
+              },
+            }
+          : {
+              apply: (c: Context) => {
+                applied.push('renderer1');
+                c.provide('renderer', { app: {} });
+              },
+            },
+    });
+
+    expect(diags).toEqual([]);
+    expect(applied).toEqual(['renderer1', 'stage1 saw object']);
+  });
+
+  it('a late apply that throws is a diagnostic naming the row, same as an on-time one', async () => {
+    const ctx = new Context();
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('stage1'), row('renderer1')], diagnostics: [] }),
+      importModule: async (url) =>
+        url.endsWith('stage1')
+          ? {
+              inject: ['renderer'],
+              apply: () => {
+                throw new Error('stage refused, late');
+              },
+            }
+          : {
+              apply: (c: Context) => {
+                c.provide('renderer', { app: {} });
+              },
+            },
+    });
+
+    expect(diags).toHaveLength(1);
+    expect(diags[0].plugin).toBe('stage1');
+    expect(diags[0].where).toBe('runtime');
+    expect(diags[0].message).toContain('stage refused, late');
+  });
 });

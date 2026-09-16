@@ -1367,4 +1367,28 @@ describe('ide-bridge — re-applying game rows from a game-composition frame', (
       }),
     ).not.toThrow();
   });
+
+  it('binds on the registry that is there NOW — a hot mechanics1 re-apply replaces it under this module', async () => {
+    ctx = new Context();
+    const stale = fakeMechanics();
+    stale.bind('base_game', 'classic');
+    const offStale = ctx.provide('mechanics' as never, stale as never);
+    const socket = fakeSocket();
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    stale.bind.mockClear();
+
+    // What `gameRows.update('mechanics1', …)` does to the context: the old
+    // provide is disposed, a new registry object is provided.
+    await offStale();
+    const fresh = fakeMechanics();
+    fresh.bind('base_game', 'classic');
+    ctx.provide('mechanics' as never, fresh as never);
+
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { mechanic: 'cascade' } }]),
+    );
+
+    expect(fresh.bind).toHaveBeenCalledWith('base_game', 'cascade');
+    expect(stale.bind).not.toHaveBeenCalled();
+  });
 });

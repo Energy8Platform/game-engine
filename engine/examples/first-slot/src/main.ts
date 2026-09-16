@@ -185,8 +185,8 @@ function need(descriptor: PageNeedDescriptor): unknown {
  * exists, fully typed, under its own name — so this is the file's own
  * decision to route every other read through the narrower view, not a
  * wall the language builds unasked. What that decision buys: the three
- * consts right below (`mechanics`, `play`, and `currentBoard()` — see
- * why that one is a read, not a capture) are the only way this file
+ * consts right below (`play`, and the `currentMechanics()`/`currentBoard()`
+ * reads — see why those two are reads, not captures) are the only way this file
  * reaches those services from here down, because `need()` and
  * `game.ctx.reflect` are the only things still holding a reference wide
  * enough to read them.
@@ -206,19 +206,30 @@ const ctx: PageCtx = game.ctx;
 // unlike that file this is not also a `.test.ts`; it lives here, right
 // next to the type it is a claim about, and is checked on every
 // `npm run typecheck --workspace e8-example-first-slot`.
-// @ts-expect-error `mechanics` is a page need — read it through the `mechanics` const below, never off `ctx` directly
+// @ts-expect-error `mechanics` is a page need — read it through `currentMechanics()` below, never off `ctx` directly
 void ctx.mechanics;
 // @ts-expect-error `play` is a page need — read it through the `play` const below, never off `ctx` directly
 void ctx.play;
 // @ts-expect-error `board` is a page need — read it through `currentBoard()` below, never off `ctx` directly
 void ctx.board;
 
-const mechanics = need({
+need({
   service: 'mechanics',
   row: 'mechanics1',
   pkg: '@energy8engine/game-runtime',
   what: 'a mechanic registry to turn a spin result into a presentation',
-}) as typeof game.ctx.mechanics | undefined;
+});
+
+/**
+ * Read per use, like `currentBoard()` below and for the same reason:
+ * `mechanics1` is a HOT row. A live edit to its `stages` re-applies the
+ * row's fiber, which disposes the registry this page would have captured
+ * — its bindings were that run's effects; it answers nothing afterwards —
+ * and provides a new one. `need()` above records the boot-time answer,
+ * for its diagnostic; this is the live one.
+ */
+const currentMechanics = () =>
+  game.ctx.reflect.get('mechanics', false) as typeof game.ctx.mechanics | undefined;
 
 const play = need({
   service: 'play',
@@ -423,7 +434,7 @@ diagnosticsLog?.subscribe(renderDiagnostics);
  * in the composition — and this line must not turn the absence into a
  * `TypeError` that stops the page before those reports are drawn.
  */
-const bound = mechanics?.forStage('base_game')?.id;
+const bound = currentMechanics()?.forStage('base_game')?.id;
 if (bound) mechanicSelect.value = bound;
 
 /**
@@ -451,7 +462,7 @@ if (bound) mechanicSelect.value = bound;
 ideBridge.apply(game.ctx, {});
 
 mechanicSelect.addEventListener('change', () => {
-  mechanics!.bind('base_game', mechanicSelect.value);
+  currentMechanics()!.bind('base_game', mechanicSelect.value);
 });
 
 /**
@@ -504,7 +515,8 @@ async function presentStage(
   // Read before presenting, and tolerant of `null`: a stage bound to
   // nothing is exactly a case `present` reports, and this control has
   // nothing to say about it.
-  const bound = mechanics!.forStage(stage);
+  const mechanics = currentMechanics()!;
+  const bound = mechanics.forStage(stage);
   if (bound && [...mechanicSelect.options].some((option) => option.value === bound.id)) {
     mechanicSelect.value = bound.id;
   }
@@ -518,7 +530,7 @@ async function presentStage(
   // same event told twice, in a format only this page used, in a place only
   // this page could see. The `<pre>` shows them now because the service
   // does, and it shows the message the producer actually wrote.
-  const { plan, diagnostics: presentProblems } = mechanics!.present(stage, data);
+  const { plan, diagnostics: presentProblems } = mechanics.present(stage, data);
   if (presentProblems.length > 0) {
     statusEl.textContent = 'presentation failed — see log';
     // `null`, not `[]`. An empty plan is a legal thing for a mechanic to
@@ -736,6 +748,6 @@ spinBtn.addEventListener('click', async () => {
    * nothing has registered (see `MechanicsService.forStage`).
    */
   bound(stage: string): string | null {
-    return mechanics?.forStage(stage)?.id ?? null;
+    return currentMechanics()?.forStage(stage)?.id ?? null;
   },
 };

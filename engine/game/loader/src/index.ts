@@ -231,8 +231,27 @@ export async function composeFromProject(
     }
   }
 
-  /** Each applied row with its fiber, for the "never became active" check after the loop. */
+  /** Each row whose fiber resolved in the loop — settled again, and checked, after it. */
   const fibers: { row: GameCompositionRow; module: RuntimeHalf; fiber: Fiber }[] = [];
+
+  const reportRuntimeFailure = (row: GameCompositionRow, error: unknown) => {
+    // The URL is interpolated, not left to the caught error to mention:
+    // a native `import()` failure says something like "Failed to fetch
+    // dynamically imported module" and a throw out of `apply` says
+    // nothing about where the module came from at all. With the host now
+    // reporting the rows it could not resolve at all, this row-level
+    // diagnostic is often the only ADDRESS a person gets for a row that
+    // did resolve and then broke — and `row.runtimeUrl` is right here.
+    diagnostics.push(
+      diagnostic(
+        'error',
+        row.id,
+        'runtime',
+        `${row.runtimeUrl}: ${error instanceof Error ? error.message : String(error)}`,
+        'check the plugin runtime entry in its package.json',
+      ),
+    );
+  };
 
   for (const row of rows) {
     if (row.runtimeUrl === null) continue; // no runtime half — nothing to load, not a failure
@@ -263,7 +282,6 @@ export async function composeFromProject(
         },
         row.config,
       );
-      fibers.push({ row, module, fiber });
       try {
         options.onApplied?.(row.id, fiber);
       } catch {
@@ -271,34 +289,32 @@ export async function composeFromProject(
       }
       // Resolves once the row's `apply` has run, or rejects with what it
       // threw. A row whose `inject` is not yet satisfied resolves at once
-      // WITHOUT applying — it stays pending until the service shows up;
-      // the check after the loop reports the ones still waiting then.
+      // WITHOUT applying — it stays pending until the service shows up,
+      // which a LATER row may well do: that apply then runs outside this
+      // iteration, and is settled and checked after the loop instead.
       await fiber;
+      fibers.push({ row, module, fiber });
     } catch (error) {
-      // The URL is interpolated, not left to the caught error to mention:
-      // a native `import()` failure says something like "Failed to fetch
-      // dynamically imported module" and a throw out of `apply` says
-      // nothing about where the module came from at all. With the host now
-      // reporting the rows it could not resolve at all, this row-level
-      // diagnostic is often the only ADDRESS a person gets for a row that
-      // did resolve and then broke — and `row.runtimeUrl` is right here.
-      diagnostics.push(
-        diagnostic(
-          'error',
-          row.id,
-          'runtime',
-          `${row.runtimeUrl}: ${error instanceof Error ? error.message : String(error)}`,
-          'check the plugin runtime entry in its package.json',
-        ),
-      );
+      reportRuntimeFailure(row, error);
     }
   }
+
+  // Second settle, for the rows that applied LATE — listed before the row
+  // providing their `inject`, and started by that row's provide, after
+  // their own `await` above had already resolved. Their `apply` throwing
+  // is not visible to the loop's catch; it is the fiber's recorded error,
+  // which `await()` rethrows here. Rows that failed in the loop are not
+  // in `fibers` at all, so nothing is reported twice.
+  const settled = await Promise.allSettled(fibers.map(({ fiber }) => fiber.await()));
+  settled.forEach((result, index) => {
+    if (result.status === 'rejected') reportRuntimeFailure(fibers[index].row, result.reason);
+  });
 
   // A row still PENDING after the whole composition applied declared an
   // `inject` nothing provided. Checked after the loop, not per row, because
   // a row may legitimately wait for a LATER row's service and apply then.
   // Rows in any other state already said their piece (ACTIVE: fine;
-  // FAILED: the catch above; LOADING: became active late and is on its way).
+  // FAILED: the settle just above, or the loop's catch).
   for (const { row, module, fiber } of fibers) {
     if (fiber.state !== FIBER_PENDING) continue;
     const missing = (module.inject ?? []).filter(
