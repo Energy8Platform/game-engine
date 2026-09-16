@@ -83,12 +83,17 @@ describe('languages', () => {
   });
 
   it('a re-registered id moves to the end, so it wins later extension collisions too', async () => {
+    // typescript registers FIRST here, so a re-registration that merely kept
+    // its original Map position (the bug) would leave it ahead of
+    // javascript — `list()` would stay ['typescript', 'javascript'] and
+    // `languageFor('x.mjs')` would answer 'javascript', contradicting the
+    // collision warning's own "the later registration wins".
     const ctx = await boot();
-    ctx.languages.register(def('javascript', ['.js', '.mjs']));
     ctx.languages.register(def('typescript', ['.ts']));
+    ctx.languages.register(def('javascript', ['.js', '.mjs']));
     ctx.languages.register(def('typescript', ['.ts', '.mjs']));
-    expect(ctx.languages.languageFor('x.mjs')).toBe('typescript');
     expect(ctx.languages.list().map((d) => d.id)).toEqual(['javascript', 'typescript']);
+    expect(ctx.languages.languageFor('x.mjs')).toBe('typescript');
   });
 
   it('a retract removes the definition; a stale retract removes nothing', async () => {
