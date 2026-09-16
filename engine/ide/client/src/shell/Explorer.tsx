@@ -1,9 +1,10 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
 import { FILE_KEY_PREFIX } from '../plugins/shell';
 import { activateOnKey } from './activate';
 import { EditorDocument } from './EditorDocument';
+import { ExplorerMenu } from './ExplorerMenu';
 import { ViewerDocument, extensionOf } from './ViewerDocument';
 
 /**
@@ -23,11 +24,32 @@ import { ViewerDocument, extensionOf } from './ViewerDocument';
  * view exactly as they outlived `AssetsScreen`.
  *
  * Clicking a directory toggles its fold; clicking a file calls `openPath`.
+ * Either click also selects the row: the header's "new file"/"new folder"
+ * create inside the selected directory (a selected file means its own
+ * directory; nothing selected means the root). Right-click opens a menu
+ * of what the row can do; rename and create both edit inline, in a row
+ * that holds an `<input>` until Enter or Escape. A name is checked here
+ * before any request — one segment, no `/`, not `.` or `..` — since the
+ * host would refuse it anyway and the words are clearer up front.
  */
 
 /** What a confirm row is currently asking about — one state for both irreversible actions, same shape `AssetsScreen` used. */
 type Pending =
   { kind: 'delete'; path: string } | { kind: 'overwrite'; path: string; bytes: Uint8Array };
+
+/** Which inline input is up: a new entry inside `dir`, or a new name for `path`. */
+type Editing =
+  { kind: 'create'; what: 'dir' | 'file'; dir: string } | { kind: 'rename'; path: string };
+
+const joinPath = (dir: string, name: string) => (dir === '' ? name : `${dir}/${name}`);
+const dirOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+const baseOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+
+export function invalidName(name: string): string | undefined {
+  if (name === '' || name.includes('/') || name === '.' || name === '..')
+    return `"${name}" is not a valid name — one segment, no "/"`;
+  return undefined;
+}
 
 /**
  * Extensions a person edits by hand — opened in `EditorDocument`. Anything
@@ -78,15 +100,65 @@ export function openPath(ctx: Context, path: string, entry?: FileEntry): void {
   });
 }
 
+/**
+ * The one text field the Explorer ever shows: Enter submits, Escape or
+ * leaving it cancels. An accepted submit unmounts the input, which fires
+ * `onBlur` on the way out — `submitted` keeps that blur from cancelling
+ * what Enter just did. A refused one (`onSubmit` returns false: the name
+ * was bad) keeps the input up, with the text, to be fixed.
+ */
+function InlineInput({
+  initial,
+  onSubmit,
+  onCancel,
+}: {
+  initial: string;
+  onSubmit(value: string): boolean;
+  onCancel(): void;
+}): JSX.Element {
+  const [value, setValue] = useState(initial);
+  const submitted = useRef(false);
+  return (
+    <input
+      data-testid="explorer-input"
+      className="e8-explorer-input"
+      autoFocus
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitted.current = onSubmit(value.trim());
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      onBlur={() => {
+        if (!submitted.current) onCancel();
+      }}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
 export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [treeDiagnostics, setTreeDiagnostics] = useState<Diagnostic[]>([]);
-  // The host's answer to the most recent upload or delete — separate from
+  // The host's answer to the most recent verb — separate from
   // `treeDiagnostics`, same split `AssetsScreen` made, for the same reason:
   // it's about an action, not the listing.
   const [actionDiagnostics, setActionDiagnostics] = useState<Diagnostic[]>([]);
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null);
+  // Where the next upload lands: the root from the header, a directory
+  // from its own menu's "Upload here".
+  const [uploadDir, setUploadDir] = useState('');
+  const uploadInput = useRef<HTMLInputElement>(null);
 
   function applyTree(result: { entries: FileEntry[]; diagnostics: Diagnostic[] }) {
     setEntries(result.entries);
@@ -109,36 +181,41 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  // Shared by upload and delete: the only path that ever changes what
-  // `entries` shows, and only ever called once the host has confirmed the
-  // change actually happened.
+  // Shared by every verb: the only path that ever changes what `entries`
+  // shows, and only ever called once the host has confirmed the change
+  // actually happened.
   function refreshTree(): Promise<void> {
     return ctx.files.tree().then(applyTree);
   }
 
+  /** The host's answer to a verb: shown, reported, and a refetch only when it is clean. */
+  function finish(diagnostics: Diagnostic[]) {
+    setActionDiagnostics(diagnostics);
+    report(diagnostics);
+    if (diagnostics.length === 0) void refreshTree();
+  }
+
   function upload(path: string, bytes: Uint8Array) {
-    ctx.files.write(path, bytes).then(({ diagnostics }) => {
-      setActionDiagnostics(diagnostics);
-      report(diagnostics);
-      if (diagnostics.length === 0) void refreshTree();
-    });
+    ctx.files.write(path, bytes).then(({ diagnostics }) => finish(diagnostics));
   }
 
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = ''; // lets the same name be picked again
+    const path = joinPath(uploadDir, file?.name ?? '');
+    setUploadDir('');
     if (!file) return;
     // `FileReader`, not `file.arrayBuffer()` — see `AssetsScreen`'s own
     // comment: jsdom's shim only implements the callback-style reader.
     const reader = new FileReader();
     reader.onload = () => {
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
-      if (entries?.some((entry) => entry.kind === 'file' && entry.path === file.name)) {
+      if (entries?.some((entry) => entry.kind === 'file' && entry.path === path)) {
         setActionDiagnostics([]);
-        setPending({ kind: 'overwrite', path: file.name, bytes });
+        setPending({ kind: 'overwrite', path, bytes });
         return;
       }
-      upload(file.name, bytes);
+      upload(path, bytes);
     };
     reader.onerror = () => {
       const own = [
@@ -170,11 +247,72 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       upload(asked.path, asked.bytes);
       return;
     }
-    ctx.files.remove(asked.path).then(({ diagnostics }) => {
-      setActionDiagnostics(diagnostics);
-      report(diagnostics);
-      if (diagnostics.length === 0) void refreshTree();
+    ctx.files.remove(asked.path).then(({ diagnostics }) => finish(diagnostics));
+  }
+
+  /** Where "new file"/"new folder" from the header go: the selected directory, a selected file's directory, or the root. */
+  function targetDir(): string {
+    if (selected === null) return '';
+    return entries?.find((e) => e.path === selected)?.kind === 'dir' ? selected : dirOf(selected);
+  }
+
+  function startCreate(what: 'dir' | 'file', dir: string) {
+    setActionDiagnostics([]);
+    setEditing({ kind: 'create', what, dir });
+    // The input row sits under `dir`; a folded one would swallow it.
+    setFolded((prev) => {
+      if (!prev.has(dir)) return prev;
+      const next = new Set(prev);
+      next.delete(dir);
+      return next;
     });
+  }
+
+  function startRename(path: string) {
+    setActionDiagnostics([]);
+    setEditing({ kind: 'rename', path });
+  }
+
+  /**
+   * A moved path takes its open tabs along: the document at `from`, and
+   * — for a directory — every document under it, each closed (force: the
+   * old path no longer exists to save to) and reopened at the new one.
+   * No `entry` for `openPath`: the tree is being refetched right now, and
+   * `viewers.pick` falls back to the extension.
+   */
+  function followMove(from: string, to: string) {
+    const oldKey = `${FILE_KEY_PREFIX}${from}`;
+    for (const doc of ctx.shell.documents()) {
+      if (doc.key !== oldKey && !doc.key.startsWith(`${oldKey}/`)) continue;
+      const newPath = to + doc.key.slice(oldKey.length);
+      ctx.shell.close(doc.key, { force: true });
+      openPath(ctx, newPath);
+    }
+  }
+
+  /** Enter in the inline input. Returns whether the name was accepted — a bad one is refused here, before any request. */
+  function submitEditing(e: Editing, name: string): boolean {
+    const bad = invalidName(name);
+    if (bad) {
+      const own = [{ ...diagnostic('error', 'files', name, bad), code: 'malformed-request' }];
+      setActionDiagnostics(own);
+      report(own);
+      return false;
+    }
+    setEditing(null);
+    if (e.kind === 'create') {
+      const path = joinPath(e.dir, name);
+      const request = e.what === 'dir' ? ctx.files.mkdir(path) : ctx.files.create(path);
+      void request.then(({ diagnostics }) => finish(diagnostics));
+      return true;
+    }
+    const to = joinPath(dirOf(e.path), name);
+    if (to === e.path) return true;
+    void ctx.files.move(e.path, to).then(({ diagnostics }) => {
+      finish(diagnostics);
+      if (diagnostics.length === 0) followMove(e.path, to);
+    });
+    return true;
   }
 
   function toggleFold(path: string) {
@@ -195,6 +333,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   }
 
   function select(entry: FileEntry) {
+    setSelected(entry.path);
     if (entry.kind === 'dir') {
       toggleFold(entry.path);
       return;
@@ -202,27 +341,97 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     openPath(ctx, entry.path, entry);
   }
 
+  function menuItems(entry: FileEntry) {
+    const own = [
+      { label: 'Rename', onPick: () => startRename(entry.path) },
+      { label: 'Delete', onPick: () => askDelete(entry.path) },
+    ];
+    if (entry.kind === 'file') return own;
+    return [
+      { label: 'New file', onPick: () => startCreate('file', entry.path) },
+      { label: 'New folder', onPick: () => startCreate('dir', entry.path) },
+      {
+        label: 'Upload here',
+        onPick: () => {
+          setUploadDir(entry.path);
+          uploadInput.current?.click();
+        },
+      },
+      ...own,
+    ];
+  }
+
   const visible = (entries ?? []).filter((entry) => !isHidden(entry));
+
+  /** The row that holds the "new file"/"new folder" input, indented one level under `dir`. */
+  function createRow(dir: string) {
+    if (editing?.kind !== 'create' || editing.dir !== dir) return null;
+    const depth = dir === '' ? 0 : dir.split('/').length;
+    return (
+      <li key="/new" className="e8-explorer-entry" style={{ paddingLeft: 8 + depth * 12 }}>
+        <span className="e8-explorer-chevron" aria-hidden="true" />
+        <InlineInput
+          initial=""
+          onSubmit={(name) => submitEditing(editing, name)}
+          onCancel={() => setEditing(null)}
+        />
+      </li>
+    );
+  }
+
+  /** What the delete confirm asks: a directory's count is everything under it, the directory itself excluded. */
+  function confirmText(entry: FileEntry): string {
+    if (pending?.kind === 'overwrite') return `replace "${entry.path}"?`;
+    if (entry.kind === 'file') return `delete "${entry.path}"?`;
+    const count = (entries ?? []).filter((e) => e.path.startsWith(`${entry.path}/`)).length;
+    return `delete folder "${entry.path}" and ${count} entries?`;
+  }
 
   return (
     <div className="e8-explorer">
       <div className="e8-explorer-header">
         <span className="e8-explorer-title">Explorer</span>
-        {/* The one upload control, as an icon in the view's header — the
-            input itself is visually hidden by the stylesheet and reached
-            through the label. Spec §5's per-directory upload stays
-            narrowed to this (final review, Finding 7b). */}
-        <label className="e8-explorer-upload" title="upload file">
-          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-            <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10" />
-          </svg>
-          <input
-            type="file"
-            data-testid="explorer-upload"
-            aria-label="upload file"
-            onChange={handleUpload}
-          />
-        </label>
+        <span className="e8-explorer-actions">
+          <button
+            type="button"
+            className="e8-explorer-action"
+            data-testid="explorer-new-file"
+            title="new file"
+            aria-label="new file"
+            onClick={() => startCreate('file', targetDir())}
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path d="M9 2H4v12h8V5zM9 2v3h3M6 9h4M8 7v4" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="e8-explorer-action"
+            data-testid="explorer-new-folder"
+            title="new folder"
+            aria-label="new folder"
+            onClick={() => startCreate('dir', targetDir())}
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path d="M2 4v9h12V6H8L6.5 4zM8 8v3M6.5 9.5h3" />
+            </svg>
+          </button>
+          {/* The one upload control, as an icon in the view's header — the
+              input itself is visually hidden by the stylesheet and reached
+              through the label, or clicked by a directory's "Upload here". */}
+          <label className="e8-explorer-upload" title="upload file">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10" />
+            </svg>
+            <input
+              ref={uploadInput}
+              type="file"
+              data-testid="explorer-upload"
+              aria-label="upload file"
+              onChange={handleUpload}
+            />
+          </label>
+        </span>
       </div>
 
       {treeDiagnostics.length > 0 &&
@@ -239,42 +448,59 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
           </p>
         ))}
 
-      {entries === null ? null : entries.length === 0 && treeDiagnostics.length === 0 ? (
+      {entries !== null && entries.length === 0 && treeDiagnostics.length === 0 && (
         <p className="e8-empty" data-testid="explorer-empty">
           the project has no files yet
         </p>
-      ) : entries.length > 0 ? (
+      )}
+
+      {entries !== null && (entries.length > 0 || editing !== null) && (
         <ul className="e8-explorer-tree">
-          {visible.map((entry) => {
+          {createRow('')}
+          {visible.flatMap((entry) => {
             const segments = entry.path.split('/');
             const depth = segments.length - 1;
             const isFile = entry.kind === 'file';
             const isFolded = folded.has(entry.path);
-            return (
+            const row = (
               <li
                 key={entry.path}
                 data-testid={`explorer-${entry.path}`}
                 role="button"
                 tabIndex={0}
                 style={{ paddingLeft: 8 + depth * 12 }}
-                className={
-                  isFile
-                    ? 'e8-explorer-entry e8-explorer-file'
-                    : 'e8-explorer-entry e8-explorer-dir'
-                }
+                className={[
+                  'e8-explorer-entry',
+                  isFile ? 'e8-explorer-file' : 'e8-explorer-dir',
+                  selected === entry.path ? 'e8-explorer-selected' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onClick={() => select(entry)}
                 onKeyDown={activateOnKey(() => select(entry))}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, entry });
+                }}
               >
                 {/* Depth is the indent, so the label is the last segment
                     alone; a file gets an empty chevron cell to line up. */}
                 <span className="e8-explorer-chevron" aria-hidden="true">
                   {isFile ? '' : isFolded ? '▸' : '▾'}
                 </span>
-                <span className="e8-explorer-name">{segments[segments.length - 1]}</span>
+                {editing?.kind === 'rename' && editing.path === entry.path ? (
+                  <InlineInput
+                    initial={baseOf(entry.path)}
+                    onSubmit={(name) => submitEditing(editing, name)}
+                    onCancel={() => setEditing(null)}
+                  />
+                ) : (
+                  <span className="e8-explorer-name">{segments[segments.length - 1]}</span>
+                )}
                 {pending?.path === entry.path ? (
                   <span className="e8-explorer-confirm">
                     {' '}
-                    {pending.kind === 'delete' ? 'delete' : 'replace'} "{entry.path}"?{' '}
+                    {confirmText(entry)}{' '}
                     <button
                       type="button"
                       data-testid="confirm-yes"
@@ -298,31 +524,36 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                     </button>
                   </span>
                 ) : (
-                  // Files only — a directory row's only possible answer is a
-                  // refusal (`remove()` does not remove directories), same
-                  // rule `AssetsScreen` already applies to its own delete
-                  // button.
-                  isFile && (
-                    <button
-                      type="button"
-                      data-testid={`explorer-delete-${entry.path}`}
-                      className="e8-explorer-delete"
-                      aria-label={`delete ${entry.path}`}
-                      title="delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        askDelete(entry.path);
-                      }}
-                    >
-                      ×
-                    </button>
-                  )
+                  <button
+                    type="button"
+                    data-testid={`explorer-delete-${entry.path}`}
+                    className="e8-explorer-delete"
+                    aria-label={`delete ${entry.path}`}
+                    title="delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      askDelete(entry.path);
+                    }}
+                  >
+                    ×
+                  </button>
                 )}
               </li>
             );
+            const created = isFile ? null : createRow(entry.path);
+            return created ? [row, created] : [row];
           })}
         </ul>
-      ) : null}
+      )}
+
+      {menu && (
+        <ExplorerMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems(menu.entry)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }

@@ -340,9 +340,12 @@ label {
   margin-right: var(--e8-gap);
 }
 
-/* Explorer: a view header with the title and the one upload control, then
-   rows indented by depth — the last path segment is the label, a chevron
-   marks a directory, and a file's delete only shows on hover or focus. */
+/* Explorer: a view header with the title and three actions (new file, new
+   folder, upload), then rows indented by depth — the last path segment is
+   the label, a chevron marks a directory, and a row's delete only shows on
+   hover or focus. The selected row sits on the selection ground; an inline
+   input (new entry, rename) takes the label's place for as long as it is
+   up; the row menu is a flat card, separated by its border, no shadow. */
 .e8-explorer-header {
   display: flex;
   align-items: center;
@@ -453,6 +456,77 @@ label {
 .e8-explorer-diagnostic {
   margin: 4px 8px;
   color: var(--e8-error);
+}
+.e8-explorer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.e8-explorer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--e8-radius-sm);
+  background: none;
+  color: var(--e8-fg-muted);
+  cursor: pointer;
+}
+.e8-explorer-action:hover {
+  background: var(--e8-hover);
+  color: var(--e8-fg);
+}
+.e8-explorer-action svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.e8-explorer-selected,
+.e8-explorer-selected:hover {
+  background: var(--e8-selected);
+}
+.e8-explorer-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--e8-accent);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-editor-bg);
+  color: var(--e8-fg);
+  font: inherit;
+  outline: none;
+}
+.e8-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-lg);
+  background: var(--e8-surface);
+  box-shadow: none;
+  z-index: 100;
+}
+.e8-menu-item {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--e8-radius-sm);
+  background: none;
+  color: var(--e8-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.e8-menu-item:hover,
+.e8-menu-item:focus-visible {
+  background: var(--e8-hover);
+  outline: none;
 }
 /* Projects: the same rows, the open one held on the selection ground. */
 .e8-project-id {

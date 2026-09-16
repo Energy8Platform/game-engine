@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
@@ -73,7 +73,16 @@ function decodeBase64(value: string): number[] {
 type TestFiles = FilesService & {
   written: [string, number[]][];
   removed: string[];
+  created: [string, 'dir' | 'file'][];
+  moved: [string, string][];
   nextTree(result: TreeResult): void;
+};
+
+type HostAnswers = {
+  writeDiagnostics?: Diagnostic[];
+  removeDiagnostics?: Diagnostic[];
+  createDiagnostics?: Diagnostic[];
+  moveDiagnostics?: Diagnostic[];
 };
 
 /**
@@ -86,14 +95,18 @@ type TestFiles = FilesService & {
 async function harnessWithCalls(
   result: TreeResult,
   contents: Record<string, string> = {},
-  hostAnswers: { writeDiagnostics?: Diagnostic[]; removeDiagnostics?: Diagnostic[] } = {},
+  hostAnswers: HostAnswers = {},
 ): Promise<{ ctx: Context & { files: TestFiles }; calls: string[] }> {
   let entries = 'entries' in result ? result.entries : [];
   let treeDiagnostics = 'diagnostics' in result ? result.diagnostics : [];
   const writeDiagnostics = hostAnswers.writeDiagnostics ?? [];
   const removeDiagnostics = hostAnswers.removeDiagnostics ?? [];
+  const createDiagnostics = hostAnswers.createDiagnostics ?? [];
+  const moveDiagnostics = hostAnswers.moveDiagnostics ?? [];
   const written: [string, number[]][] = [];
   const removed: string[] = [];
+  const created: [string, 'dir' | 'file'][] = [];
+  const moved: [string, string][] = [];
   const calls: string[] = [];
 
   const fetchFn = (async (input: unknown, init?: RequestInit) => {
@@ -130,6 +143,24 @@ async function harnessWithCalls(
       });
     }
 
+    if (method === 'POST') {
+      const body = JSON.parse((init?.body as string | undefined) ?? '{}') as {
+        kind: 'dir' | 'file';
+      };
+      created.push([path, body.kind]);
+      return new Response(JSON.stringify({ diagnostics: createDiagnostics }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    if (method === 'PATCH') {
+      const body = JSON.parse((init?.body as string | undefined) ?? '{}') as { to: string };
+      moved.push([path, body.to]);
+      return new Response(JSON.stringify({ diagnostics: moveDiagnostics }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     if (Object.prototype.hasOwnProperty.call(contents, path)) {
       return new Response(contents[path]);
     }
@@ -145,6 +176,8 @@ async function harnessWithCalls(
   const testFiles = ctx.files as TestFiles;
   testFiles.written = written;
   testFiles.removed = removed;
+  testFiles.created = created;
+  testFiles.moved = moved;
   testFiles.nextTree = (next) => {
     entries = 'entries' in next ? next.entries : [];
     treeDiagnostics = 'diagnostics' in next ? next.diagnostics : [];
@@ -156,7 +189,7 @@ async function harnessWithCalls(
 async function harness(
   result: TreeResult,
   contents: Record<string, string> = {},
-  hostAnswers: { writeDiagnostics?: Diagnostic[]; removeDiagnostics?: Diagnostic[] } = {},
+  hostAnswers: HostAnswers = {},
 ): Promise<Context & { files: TestFiles }> {
   const { ctx } = await harnessWithCalls(result, contents, hostAnswers);
   return ctx;
@@ -165,7 +198,9 @@ async function harness(
 describe('Explorer — ported from AssetsScreen', () => {
   it('draws the project tree, directories before their files', async () => {
     render(<Explorer ctx={await harness(tree(['game', 'game/spec.json', 'index.html']))} />);
-    const entries = await screen.findAllByTestId(/^explorer-(?!upload$|delete-|empty$)/);
+    const entries = await screen.findAllByTestId(
+      /^explorer-(?!upload$|delete-|empty$|new-|input$)/,
+    );
     expect(entries.map((el) => el.getAttribute('data-testid'))).toEqual([
       'explorer-game',
       'explorer-game/spec.json',
@@ -217,11 +252,12 @@ describe('Explorer — ported from AssetsScreen', () => {
     expect(screen.getByTestId('explorer-logo.png')).toBeTruthy();
   });
 
-  it('a directory has no delete button, since the only answer it could get is no', async () => {
+  it('a directory has a delete button too', async () => {
+    // The host removes directories now (Task 1), so the row offers it.
     const ctx = await harness(tree(['game', 'game/spec.json']));
     render(<Explorer ctx={ctx} />);
     await screen.findByTestId('explorer-game');
-    expect(screen.queryByTestId('explorer-delete-game')).toBeNull();
+    expect(screen.getByTestId('explorer-delete-game')).toBeTruthy();
     expect(screen.getByTestId('explorer-delete-game/spec.json')).toBeTruthy();
   });
 
@@ -484,5 +520,187 @@ describe('Explorer', () => {
     expect(screen.queryByTestId('explorer-a/x')).toBeNull();
     await userEvent.click(screen.getByTestId('explorer-b'));
     expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(1);
+  });
+});
+
+describe('Explorer — verbs', () => {
+  it('new folder at the root: the header button, an inline input, Enter → mkdir, tree refreshed', async () => {
+    const ctx = await harness(tree(['e8.yml']));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-e8.yml');
+    await userEvent.click(screen.getByTestId('explorer-new-folder'));
+    const input = screen.getByTestId('explorer-input');
+    ctx.files.nextTree(tree(['e8.yml', 'assets']));
+    await userEvent.type(input, 'assets{Enter}');
+    await waitFor(() => expect(ctx.files.created).toEqual([['assets', 'dir']]));
+    await screen.findByTestId('explorer-assets');
+    expect(screen.queryByTestId('explorer-input')).toBeNull();
+  });
+
+  it('new file inside the selected directory', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-game'));
+    await userEvent.click(screen.getByTestId('explorer-new-file'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'notes.txt{Enter}');
+    await waitFor(() => expect(ctx.files.created).toEqual([['game/notes.txt', 'file']]));
+  });
+
+  it('a selected file means its directory', async () => {
+    const ctx = await harness(tree(['game/spec.json']), { 'game/spec.json': '{}' });
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-game/spec.json'));
+    await userEvent.click(screen.getByTestId('explorer-new-folder'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'sub{Enter}');
+    await waitFor(() => expect(ctx.files.created).toEqual([['game/sub', 'dir']]));
+  });
+
+  it('Escape cancels; an empty name, a slash, and dots are refused before any request', async () => {
+    const ctx = await harness(tree(['e8.yml']));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-e8.yml');
+    await userEvent.click(screen.getByTestId('explorer-new-file'));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByTestId('explorer-input')).toBeNull();
+    for (const bad of ['a/b', '..', '.']) {
+      await userEvent.click(screen.getByTestId('explorer-new-file'));
+      await userEvent.type(screen.getByTestId('explorer-input'), `${bad}{Enter}`);
+      expect(screen.getByText(/is not a valid name/)).toBeVisible();
+    }
+    await userEvent.click(screen.getByTestId('explorer-new-file'));
+    await userEvent.keyboard('{Enter}');
+    expect(ctx.files.created).toEqual([]);
+  });
+
+  it('right-click opens a menu whose items fit the row', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
+    const menu = screen.getByRole('menu');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((b) => b.textContent),
+    ).toEqual(['New file', 'New folder', 'Upload here', 'Rename', 'Delete']);
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('explorer-game/spec.json'));
+    expect(
+      within(screen.getByRole('menu'))
+        .getAllByRole('menuitem')
+        .map((b) => b.textContent),
+    ).toEqual(['Rename', 'Delete']);
+  });
+
+  it('rename: the menu, an inline input with the old name, Enter → move, the open tab follows', async () => {
+    const ctx = await harness(tree(['game/spec.json']), { 'game/spec.json': '{}' });
+    render(
+      <>
+        <Explorer ctx={ctx} />
+        <Shell ctx={ctx} />
+      </>,
+    );
+    await userEvent.click(await screen.findByTestId('explorer-game/spec.json'));
+    expect(ctx.shell.documents().map((doc) => doc.key)).toContain('f:game/spec.json');
+    fireEvent.contextMenu(screen.getByTestId('explorer-game/spec.json'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = screen.getByTestId('explorer-input') as HTMLInputElement;
+    expect(input.value).toBe('spec.json');
+    ctx.files.nextTree(tree(['game/spec2.json']));
+    await userEvent.clear(input);
+    await userEvent.type(input, 'spec2.json{Enter}');
+    await waitFor(() => expect(ctx.files.moved).toEqual([['game/spec.json', 'game/spec2.json']]));
+    await waitFor(() =>
+      expect(ctx.shell.documents().map((doc) => doc.key)).toEqual(['f:game/spec2.json']),
+    );
+  });
+
+  it('moving a directory reopens every document under it at the new path', async () => {
+    const ctx = await harness(tree(['game/spec.json', 'game/sub/x.txt']), {
+      'game/spec.json': '{}',
+      'game/sub/x.txt': 'x',
+    });
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-game/spec.json'));
+    await userEvent.click(screen.getByTestId('explorer-game/sub/x.txt'));
+    fireEvent.contextMenu(screen.getByTestId('explorer-game'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    ctx.files.nextTree(tree(['play/spec.json', 'play/sub/x.txt']));
+    await userEvent.clear(screen.getByTestId('explorer-input'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'play{Enter}');
+    await waitFor(() => expect(ctx.files.moved).toEqual([['game', 'play']]));
+    await waitFor(() =>
+      expect(ctx.shell.documents().map((doc) => doc.key)).toEqual([
+        'f:play/spec.json',
+        'f:play/sub/x.txt',
+      ]),
+    );
+  });
+
+  it('deleting a folder asks with the count of what is inside, then removes', async () => {
+    const ctx = await harness(tree(['game/spec.json', 'game/script.spin', 'game/sub/x.txt']));
+    render(<Explorer ctx={ctx} />);
+    fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(screen.getByText('delete folder "game" and 4 entries?')).toBeVisible();
+    ctx.files.nextTree(tree([]));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    await waitFor(() => expect(ctx.files.removed).toEqual(['game']));
+  });
+
+  it('a refused verb shows the host’s words and leaves the tree alone', async () => {
+    const ctx = await harness(
+      tree(['e8.yml']),
+      {},
+      { createDiagnostics: [d('"x" is already there')] },
+    );
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-e8.yml');
+    ctx.files.nextTree(tree(['e8.yml', 'x']));
+    await userEvent.click(screen.getByTestId('explorer-new-folder'));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'x{Enter}');
+    expect(await screen.findByText('"x" is already there')).toBeVisible();
+    expect(screen.queryByTestId('explorer-x')).toBeNull();
+  });
+
+  it('Upload here writes into that directory', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Upload here' }));
+    const file = new File([new Uint8Array(bytes('hi'))], 'notes.txt');
+    await userEvent.upload(screen.getByTestId('explorer-upload'), file);
+    await waitFor(() => expect(ctx.files.written).toEqual([['game/notes.txt', bytes('hi')]]));
+  });
+
+  it('new file in an empty project still shows the input', async () => {
+    const ctx = await harness(tree([]));
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-empty');
+    await userEvent.click(screen.getByTestId('explorer-new-file'));
+    ctx.files.nextTree(tree(['e8.yml']));
+    await userEvent.type(screen.getByTestId('explorer-input'), 'e8.yml{Enter}');
+    await waitFor(() => expect(ctx.files.created).toEqual([['e8.yml', 'file']]));
+    await screen.findByTestId('explorer-e8.yml');
+  });
+
+  it('new file under a folded directory unfolds it', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-game'));
+    expect(screen.queryByTestId('explorer-game/spec.json')).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('explorer-game'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New file' }));
+    expect(screen.getByTestId('explorer-game/spec.json')).toBeTruthy();
+    expect(screen.getByTestId('explorer-input')).toBeTruthy();
+  });
+
+  it('a click selects the row', async () => {
+    const ctx = await harness(tree(['game/spec.json']));
+    render(<Explorer ctx={ctx} />);
+    const row = await screen.findByTestId('explorer-game');
+    expect(row.classList.contains('e8-explorer-selected')).toBe(false);
+    await userEvent.click(row);
+    expect(row.classList.contains('e8-explorer-selected')).toBe(true);
   });
 });
