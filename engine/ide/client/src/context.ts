@@ -14,6 +14,7 @@ import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
 import * as check from './plugins/check';
 import type { CheckConfig } from './plugins/check';
+import * as languagesBasic from './plugins/languages-basic';
 
 /**
  * Boot the browser-side cordis application.
@@ -61,5 +62,10 @@ export async function createIdeClient(
   // Same kind of plain fetch wrapper as `files`, nothing here depends on
   // it either — the editor two tasks from now is the first consumer.
   await ctx.plugin(check, config);
+  // The two core language providers: Monaco's own grammars for the files
+  // a project is made of, and `.spin`. Composed last — they are pure
+  // contributions to `languages`, and a project plugin composed later
+  // may replace either by registering the same id.
+  await ctx.plugin(languagesBasic);
   return ctx;
 }
