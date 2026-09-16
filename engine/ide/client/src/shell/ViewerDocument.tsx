@@ -23,14 +23,17 @@ import type { Diagnostic, FileEntry } from '@energy8engine/contracts';
 
 /**
  * Bytes past which this refuses to fetch a file rather than decode a huge
- * buffer on the main thread.
+ * buffer on the main thread. Images never reach this check any more — the
+ * `viewers` contribution's media viewer (`plugins/viewers-media.tsx`)
+ * claims them first, and its `<img src>` streams and decodes off the main
+ * thread instead of being read here.
  *
  * ponytail: a fixed threshold, not a streaming reader — nothing this IDE
  * shows (specs, scripts, sprites) is meant to sit above a few MB; a proper
  * asset pipeline (audio, video) is the upgrade path once that stops being
  * true.
  */
-const TOO_BIG_BYTES = 5_000_000;
+export const TOO_BIG_BYTES = 5_000_000;
 
 /** The lower-cased extension of the last path segment, dot included; '' for none. */
 export function extensionOf(path: string): string {

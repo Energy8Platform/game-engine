@@ -12,8 +12,7 @@
   --e8-surface: #181818;
   --e8-editor-bg: #1f1f1f;
   --e8-border: #2a2a2a;
-  /* Video letterbox — stays black in both themes, like a real screen; not
-     redefined under [data-theme='light']. */
+  /* Video letterbox — stays black in both themes, like a real screen. */
   --e8-video-bg: #000000;
   /* states */
   --e8-hover: #2a2d2e;
@@ -58,6 +57,8 @@
   --e8-surface: #ffffff;
   --e8-editor-bg: #ffffff;
   --e8-border: #e5e5e5;
+  /* Same black in both themes — a video stays on black regardless. */
+  --e8-video-bg: #000000;
   --e8-hover: #f0f0f0;
   --e8-selected: #e4e6f1;
   --e8-activity-hover: #f2f2f2;

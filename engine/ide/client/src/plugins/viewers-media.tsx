@@ -16,7 +16,17 @@ export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(['.mp4', '.webm', '
 
 const byExtension = (set: ReadonlySet<string>) => (path: string) => set.has(extensionOf(path));
 
-/** The three native players. `urlFor` is what turns a project path into something a `src` can fetch — encoding included. */
+/**
+ * The three native players. `urlFor` is what turns a project path into
+ * something a `src` can fetch — encoding included.
+ *
+ * `Image`'s `match` ignores `entry.size` on purpose — `ViewerDocument`'s
+ * `TOO_BIG_BYTES` guards reading a file's bytes onto the main thread for
+ * the text/binary sniff; an `<img src>` never does that read at all, it
+ * streams and decodes off the main thread in the browser's own image
+ * pipeline, so a large image is the browser's business, not this
+ * component's.
+ */
 function Image({ ctx, path }: ViewerProps) {
   return <img className="e8-viewer-image" src={ctx.files.urlFor(path)} alt={path} />;
 }

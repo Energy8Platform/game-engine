@@ -4,6 +4,7 @@ import { Context } from 'cordis';
 import type { Diagnostic } from '@energy8engine/contracts';
 import * as viewers from '../src/plugins/viewers';
 import * as media from '../src/plugins/viewers-media';
+import { TOO_BIG_BYTES } from '../src/shell/ViewerDocument';
 
 function fakeConnection() {
   const reported: Diagnostic[] = [];
@@ -64,6 +65,12 @@ describe('viewers-media', () => {
     expect(ctx.viewers.pick('a/win.mp3')?.id).toBe('audio');
     expect(ctx.viewers.pick('a/intro.webm')?.id).toBe('video');
     expect(ctx.viewers.pick('a/script.spin')).toBeUndefined();
+  });
+  it('a big image still opens as an image — TOO_BIG_BYTES guards reading bytes, not <img src>', async () => {
+    const { ctx } = await boot(true);
+    expect(
+      ctx.viewers.pick('big.png', { path: 'big.png', kind: 'file', size: TOO_BIG_BYTES + 1 })?.id,
+    ).toBe('image');
   });
   it('the three components render native elements pointed at files.urlFor', async () => {
     const { ctx } = await boot(true);
