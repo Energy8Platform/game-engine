@@ -450,6 +450,124 @@ describe('SchemaForm', () => {
       expect(onChange).toHaveBeenCalledTimes(1);
     });
 
+    // Fix round 2: another tab's frame moves the `value` prop while this
+    // field is FOCUSED. The draft must survive it — and the blur commits
+    // the draft because it differs from the LATEST prop.
+    it('an external value change while focused does not touch the draft; blur commits it against the latest value', () => {
+      const onChange = vi.fn();
+      const form = (speed: number) => (
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed }}
+          onChange={onChange}
+          commit="blur"
+        />
+      );
+      const { rerender } = render(form(8));
+      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: '4' } });
+      rerender(form(99));
+      expect(input.value).toBe('4');
+      fireEvent.blur(input);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ speed: 4 });
+    });
+
+    it('typing the very value another tab just set commits nothing on blur — it is the latest value already', () => {
+      const onChange = vi.fn();
+      const form = (speed: number) => (
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed }}
+          onChange={onChange}
+          commit="blur"
+        />
+      );
+      const { rerender } = render(form(8));
+      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: '99' } });
+      rerender(form(99));
+      fireEvent.blur(input);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('an external value change while NOT focused re-syncs the draft', () => {
+      const form = (speed: number) => (
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed }}
+          onChange={() => {}}
+          commit="blur"
+        />
+      );
+      const { rerender } = render(form(8));
+      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      rerender(form(99));
+      expect(input.value).toBe('99');
+    });
+
+    it('a string field keeps its draft across an external change while focused, too', () => {
+      const onChange = vi.fn();
+      const form = (title: string) => (
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ title }}
+          onChange={onChange}
+          commit="blur"
+        />
+      );
+      const { rerender } = render(form('Moon'));
+      const input = screen.getByLabelText('game title') as HTMLInputElement;
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: 'Sun' } });
+      rerender(form('Mars'));
+      expect(input.value).toBe('Sun');
+      fireEvent.blur(input);
+      expect(onChange).toHaveBeenCalledWith({ title: 'Sun' });
+    });
+
+    it('focus, no typing, external change, blur: nothing committed and the latest value is shown', () => {
+      const onChange = vi.fn();
+      const form = (speed: number) => (
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed }}
+          onChange={onChange}
+          commit="blur"
+        />
+      );
+      const { rerender } = render(form(8));
+      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      fireEvent.focus(input);
+      rerender(form(99));
+      fireEvent.blur(input);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(input.value).toBe('99');
+    });
+
+    it('Enter prevents the default (a future <form> must not submit)', () => {
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed: 8 }}
+          onChange={() => {}}
+          commit="blur"
+        />,
+      );
+      const input = screen.getByLabelText('reel speed');
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      input.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    });
+
     it("the default stays 'change': the IDE's rows commit per keystroke", () => {
       const onChange = vi.fn();
       render(<SchemaForm rowId="row" schema={schema} value={{ speed: 8 }} onChange={onChange} />);

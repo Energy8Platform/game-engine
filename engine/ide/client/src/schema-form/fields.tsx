@@ -185,111 +185,139 @@ export function Field({ id, node, value, onChange, commit }: FieldProps) {
 }
 
 /**
- * A number field buffers the raw input text in local state instead of
- * deriving it straight from `value`/`node.meta.default`. `Number('')` is
- * `0`, so a naively controlled input would commit `0` the instant the user
- * selects-all-deletes to type a fresh number, and — because the parent's
- * `value` prop would then equal that committed `0` — the field could never
- * actually show empty. Buffering locally and only calling `onChange` once
- * the buffer parses to a real number keeps "empty" a reachable, typable
- * state.
+ * The draft behind a text-like field. Buffers the raw input text in local
+ * state instead of deriving it straight from `value`/`node.meta.default`:
+ * `Number('')` is `0`, so a naively controlled number input would commit
+ * `0` the instant the user selects-all-deletes to type a fresh number, and
+ * — because the parent's `value` prop would then equal that committed `0`
+ * — the field could never actually show empty.
+ *
+ * Three facts ride alongside the draft. `committed` — what this field
+ * last handed up (or the latest `value` prop, whichever moved last), so a
+ * blur followed by Enter before an async `PUT` answer lands is one commit,
+ * not two, and a blur commits only what differs from the LATEST prop.
+ * `focused` — while the field has focus, an external `value` change
+ * (another tab's frame) updates `committed` but does NOT touch the draft:
+ * the keystrokes are the user's, and the blur decides. `dirty` — whether
+ * the user typed since focusing; a focus-and-blur with no typing commits
+ * nothing and re-syncs the draft to the latest prop on the way out.
  */
-function NumberField({ id, node, value, onChange, commit }: FieldProps) {
-  const current = value ?? node.meta?.default;
-  const [raw, setRaw] = useState(current === undefined ? '' : String(current));
-
-  // Re-sync when the committed value changes for a reason other than this
-  // field's own edit (e.g. the surrounding form resets it) — but not on
-  // every render, so an in-progress empty buffer isn't clobbered back to
-  // the last committed number.
-  // What this field last handed up, so a blur followed by Enter before the
-  // committed `value` prop has caught up (a game row's `PUT` is async) is
-  // one commit, not two. Reset whenever the prop moves.
+function useDraft<T>({
+  dep,
+  current,
+  show,
+  parse,
+  onChange,
+  commit,
+}: {
+  /** The committed prop, for the re-sync effect's dependency (not `current`, which also depends on the default). */
+  dep: unknown;
+  current: T;
+  show: (value: T) => string;
+  /** `null` when the draft is not committable (a cleared number, or not parseable yet). */
+  parse: (raw: string) => T | null;
+  onChange: (next: T) => void;
+  commit: CommitMode;
+}) {
+  const [raw, setRaw] = useState(show(current));
   const committed = useRef(current);
+  const focused = useRef(false);
+  const dirty = useRef(false);
+
   useEffect(() => {
-    setRaw(current === undefined ? '' : String(current));
     committed.current = current;
-    // Intentionally keyed on `value` (the committed prop), not `current`
-    // (which also depends on `node.meta?.default`) — re-deriving `current`
-    // here just reads the same `value` this effect already depends on.
-  }, [value]);
-
-  /** `null` when the draft is not a committable number (cleared, or not parseable yet). */
-  const parse = (text: string): number | null => {
-    if (text === '') return null;
-    const parsed = Number(text);
-    return Number.isNaN(parsed) ? null : parsed;
-  };
-
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const next = e.target.value;
-    setRaw(next);
-    if (commit !== 'change') return;
-    const parsed = parse(next);
-    if (parsed !== null) onChange(parsed);
-  };
+    if (focused.current) return;
+    setRaw(show(current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dep]);
 
   const flush = () => {
+    if (!dirty.current) return;
     const parsed = parse(raw);
     if (parsed === null || parsed === committed.current) return;
     committed.current = parsed;
     onChange(parsed);
   };
 
+  return {
+    raw,
+    onFocus: () => {
+      focused.current = true;
+      dirty.current = false;
+    },
+    onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      setRaw(e.target.value);
+      dirty.current = true;
+      if (commit !== 'change') return;
+      const parsed = parse(e.target.value);
+      if (parsed !== null) onChange(parsed);
+    },
+    onBlur: () => {
+      focused.current = false;
+      if (commit === 'blur') flush();
+      if (!dirty.current) setRaw(show(current));
+    },
+    onKeyDown:
+      commit === 'blur'
+        ? (e: KeyboardEvent<HTMLInputElement>) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault(); // cheap insurance against a future `<form>`
+            flush();
+          }
+        : undefined,
+  };
+}
+
+function NumberField({ id, node, value, onChange, commit }: FieldProps) {
+  const draft = useDraft<number | undefined>({
+    dep: value,
+    current: (value ?? node.meta?.default) as number | undefined,
+    show: (v) => (v === undefined ? '' : String(v)),
+    parse: (text) => {
+      if (text === '') return null;
+      const parsed = Number(text);
+      return Number.isNaN(parsed) ? null : parsed;
+    },
+    onChange,
+    commit,
+  });
   return (
     <input
       id={id}
       type="number"
-      value={raw}
+      value={draft.raw}
       min={node.meta?.min}
       max={node.meta?.max}
       step={node.meta?.step}
-      onChange={handleChange}
-      onBlur={commit === 'blur' ? flush : undefined}
-      onKeyDown={commit === 'blur' ? onEnter(flush) : undefined}
+      onFocus={draft.onFocus}
+      onChange={draft.onChange}
+      onBlur={draft.onBlur}
+      onKeyDown={draft.onKeyDown}
     />
   );
 }
 
-/** A text field; under `commit: 'blur'` it keeps a draft the same way `NumberField` does. */
 function StringField({ id, node, value, onChange, commit }: FieldProps) {
   const current = value ?? node.meta?.default;
-  const shown = current === undefined ? '' : String(current);
-  const [raw, setRaw] = useState(shown);
-  const committed = useRef(shown); // as `NumberField`'s
-
-  useEffect(() => {
-    setRaw(shown);
-    committed.current = shown;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  const flush = () => {
-    if (raw === committed.current) return;
-    committed.current = raw;
-    onChange(raw);
-  };
-
+  const draft = useDraft<string>({
+    dep: value,
+    current: current === undefined ? '' : String(current),
+    show: (v) => v,
+    parse: (text) => text,
+    onChange,
+    commit,
+  });
   return (
     <input
       id={id}
       type="text"
-      value={raw}
-      onChange={(e: ChangeEvent<HTMLInputElement>) => {
-        setRaw(e.target.value);
-        if (commit === 'change') onChange(e.target.value);
-      }}
-      onBlur={commit === 'blur' ? flush : undefined}
-      onKeyDown={commit === 'blur' ? onEnter(flush) : undefined}
+      value={draft.raw}
+      onFocus={draft.onFocus}
+      onChange={draft.onChange}
+      onBlur={draft.onBlur}
+      onKeyDown={draft.onKeyDown}
     />
   );
-}
-
-/** Enter commits the draft without leaving the field. */
-function onEnter(flush: () => void) {
-  return (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') flush();
-  };
 }
 
 /**
