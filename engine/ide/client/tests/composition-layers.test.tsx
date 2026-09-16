@@ -28,7 +28,7 @@ import { CompositionScreen } from '../src/index';
 const rows = [
   { id: 'boot1', name: '@energy8engine/boot', config: {}, from: 'bundle:e8-base' },
   { id: 'reels1', name: '@energy8engine/reels', config: { grid: 5 }, from: 'patch' },
-];
+].map((row) => ({ ...row, runtimeUrl: null, schema: null, hot: false }));
 
 describe('composition screen — layers', () => {
   it('shows which layer placed each row', () => {

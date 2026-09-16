@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import type { Context } from 'cordis';
-import { diagnostic, type CompositionRow } from '@energy8engine/contracts';
+import { diagnostic } from '@energy8engine/contracts';
+import { useGameComposition } from '../plugins/game-composition';
 import { useWorkspace } from '../plugins/workspace';
 import { LANGS } from './langs';
 import { SCREEN_PRESETS, screenPreset } from './screenPresets';
@@ -68,11 +69,6 @@ function Frame({
   return children(state.previewUrl, state.active);
 }
 
-/** Config fingerprint of every `hot: false` row — see `Preview`'s doc comment for what this drives. */
-function coldSignature(rows: CompositionRow[]): string {
-  return JSON.stringify(rows.filter((row) => !row.hot).map((row) => [row.id, row.config]));
-}
-
 export interface PreviewProps {
   ctx: Context;
 }
@@ -81,46 +77,32 @@ export interface PreviewProps {
  * The running game, in an iframe pointed where the host says it is served
  * (`previewUrl` — see `Unavailable`).
  *
- * A snapshot whose only changes are to `hot: true` rows never touches this
- * component's own state at all: a plugin that declares `hot: true` (today,
- * `@energy8engine/ide-bridge`) pushes its own update straight into the
- * already-running game over the SAME `/ide` websocket this screen itself
- * uses — `rpc.ts` broadcasts to every connected socket, not just the IDE's
- * own tab — with no reload anywhere. A change to any `hot: false` row's
- * config, though, is one the host could only apply by tearing that plugin
- * down and re-applying it (see `composition.ts`'s `update()`); nothing
- * guarantees the ALREADY-RUNNING game picked that up on its own, so the
- * honest thing to do is reload the iframe rather than silently hope it
- * did. `key={reloadNonce}` forces React to unmount and remount a genuinely
- * new `<iframe>` element — a real navigation — not merely reassign `src`
- * on the same node. The active project's id is part of that key for the
- * same reason: another project opened on the SAME preview port is the same
- * `previewUrl` serving a different game, and an iframe left mounted would
- * keep showing the old one until something else reloaded it.
+ * Whether an edit needs this frame reloaded is the HOST's verdict:
+ * `GameCompositionMessage.reload`, decided from the edited row's `hot`
+ * and the changed keys' `applies: 'restart'` (`runtime-assets.ts`'s
+ * `PUT`). `gameComposition.reloads` counts the `true` frames, and that
+ * count is part of the iframe's key — so every such frame unmounts and
+ * remounts a genuinely new `<iframe>` element, a real navigation, not
+ * merely a `src` reassignment on the same node. A `false` frame is one
+ * the game applied in place (`ide-bridge` re-applies the row's fiber),
+ * and touches nothing here: the session and the balance live on.
+ *
+ * This used to fingerprint the EDITOR's own `hot: false` rows out of every
+ * `snapshot` (`coldSignature`) and reload on a change. No editor row of the
+ * reference project is cold, and the editor's rows never reach the game
+ * except through `ide-bridge` (hot by definition), so it guarded nothing;
+ * the one verdict is the host's now. The active project's id is part of
+ * the key for the same reason as before: another project opened on the
+ * SAME preview port is the same `previewUrl` serving a different game.
  */
 export function Preview({ ctx }: PreviewProps) {
-  const snapshot = useSyncExternalStore(ctx.connection.subscribe, () => ctx.connection.snapshot);
-  const signatureRef = useRef<string | null>(null);
-  const [reloadNonce, setReloadNonce] = useState(0);
-
-  useEffect(() => {
-    if (!snapshot) return;
-    const next = coldSignature(snapshot.rows);
-    if (signatureRef.current === null) {
-      signatureRef.current = next; // first snapshot — establishes the baseline, not a change to react to
-      return;
-    }
-    if (next !== signatureRef.current) {
-      signatureRef.current = next;
-      setReloadNonce((n) => n + 1);
-    }
-  }, [snapshot]);
+  const { reloads } = useGameComposition(ctx);
 
   return (
     <Frame ctx={ctx}>
       {(previewUrl, active) => (
         <iframe
-          key={`${reloadNonce}:${active}:${previewUrl}`}
+          key={`${reloads}:${active}:${previewUrl}`}
           className="e8-preview"
           title="game preview"
           src={previewUrl}
@@ -214,6 +196,8 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
   );
   const [rotated, setRotated] = useState(false);
   const [lang, setLang] = useState(DEFAULT_LANG);
+  // Every tile is a whole game: the host's `reload` verdict (see `Preview`) applies to each.
+  const { reloads } = useGameComposition(ctx);
 
   useEffect(() => {
     // `ctx.connection.report` collapses a byte-identical repeat on its own
@@ -293,7 +277,7 @@ export function PreviewWall({ ctx, chosen }: PreviewWallProps) {
               const height = rotated ? preset.w : preset.h;
               return (
                 <iframe
-                  key={`${active}:${name}`}
+                  key={`${reloads}:${active}:${name}`}
                   data-testid={`tile-${name}`}
                   title={`preview: ${name}`}
                   className="e8-preview-tile"

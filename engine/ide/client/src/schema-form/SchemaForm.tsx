@@ -1,5 +1,5 @@
 import Schema from 'schemastery';
-import { Field, label, needsRestart, type SchemaNode } from './fields';
+import { ObjectFields, type SchemaNode } from './fields';
 
 export interface SchemaFormProps {
   /**
@@ -43,39 +43,9 @@ export function SchemaForm({ rowId, schema, value, onChange }: SchemaFormProps) 
   const node = rebuild(schema);
   if (!node?.dict) return null;
 
-  // A dict entry can point at a uid that isn't in the graph's `refs` (a
-  // dangling reference from a truncated or hand-edited schema) — rebuilding
-  // then leaves that entry `undefined` rather than dropping the key. Reading
-  // it as a live SchemaNode further down (`label()` etc.) would throw, so
-  // filter those out here and render every entry that actually resolved.
-  const fields = Object.entries(node.dict).filter(
-    (entry): entry is [string, SchemaNode] => entry[1] != null,
-  );
-
   return (
     <div className="e8-schema-form">
-      {fields.map(([key, child]) => {
-        const id = `field-${rowId}-${key}`;
-        return (
-          <div className="e8-field" key={key}>
-            <label htmlFor={id}>{label(child, key)}</label>
-            <Field
-              id={id}
-              node={child}
-              value={value[key]}
-              onChange={(next) => onChange({ ...value, [key]: next })}
-            />
-            {/* This badge reflects what the plugin declared via
-                `extra: { applies: 'restart' }` — not a difference in host
-                behaviour. The host currently tears down and re-applies the
-                fiber for every edit, flagged field or not (see
-                `composition.ts`'s `update()`), so the badge marks the
-                plugin author's stated intent, not a distinct code path
-                today. */}
-            {needsRestart(child) ? <span className="e8-badge">restart</span> : null}
-          </div>
-        );
-      })}
+      <ObjectFields idPrefix={`field-${rowId}`} node={node} value={value} onChange={onChange} />
     </div>
   );
 }

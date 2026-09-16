@@ -8,18 +8,31 @@ import { createIdeClient } from '../src/index';
  * was missing — something actually asking the host.
  */
 async function harness(fetchFn: typeof fetch) {
+  const listeners: ((event: { data: string }) => void)[] = [];
   const socket = {
     readyState: 1,
-    addEventListener() {},
+    addEventListener(type: string, listener: (event: { data: string }) => void) {
+      if (type === 'message') listeners.push(listener);
+    },
     send() {},
     close() {},
   };
-  return createIdeClient({
+  const ctx = await createIdeClient({
     url: 'ws://x/ide',
     socketFactory: () => socket,
     importModule: async () => ({}),
     fetchFn,
   });
+  /** Push a raw frame to every listener the client registered on `/ide` (this plugin's included). */
+  const push = (data: string) => {
+    for (const listener of listeners) listener({ data });
+  };
+  return { ctx, push };
+}
+
+/** A frame `rpc.ts` broadcasts after a `PUT` — see `GameCompositionMessage`. */
+function frame(rows: unknown[], reload: boolean, changed: string[] = []): string {
+  return JSON.stringify({ type: 'game-composition', rows, reload, changed });
 }
 
 const ROWS = [
@@ -44,7 +57,7 @@ function answer(body: unknown, init: ResponseInit = {}): typeof fetch {
 
 describe('game composition feeder', () => {
   it('fetches the composition and exposes the rows the host resolved', async () => {
-    const ctx = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    const { ctx } = await harness(answer({ rows: ROWS, diagnostics: [] }));
     await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
     expect(ctx.gameComposition.rows?.map((row) => row.from)).toEqual(['bundle:e8-base', 'patch']);
     expect(ctx.gameComposition.diagnostics).toEqual([]);
@@ -54,7 +67,7 @@ describe('game composition feeder', () => {
     const project = [
       { severity: 'error', plugin: 'e8-base', where: 'profile', message: 'bundle not found' },
     ];
-    const ctx = await harness(answer({ rows: [], diagnostics: project }));
+    const { ctx } = await harness(answer({ rows: [], diagnostics: project }));
     await vi.waitFor(() => expect(ctx.gameComposition.diagnostics).toEqual(project));
   });
 
@@ -70,7 +83,7 @@ describe('game composition feeder', () => {
     const inFlight = new Promise<Response>((resolvePromise) => {
       deliver = resolvePromise;
     });
-    const ctx = await harness((async (url: string) => {
+    const { ctx } = await harness((async (url: string) => {
       if (!String(url).includes('/api/composition')) throw new Error(`unexpected fetch: ${url}`);
       return inFlight;
     }) as unknown as typeof fetch);
@@ -96,7 +109,7 @@ describe('game composition feeder', () => {
   });
 
   it('a host that is not there is a diagnostic on screen, not a throw', async () => {
-    const ctx = await harness((async () => {
+    const { ctx } = await harness((async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof fetch);
     await vi.waitFor(() => expect(ctx.gameComposition.diagnostics).toHaveLength(1));
@@ -110,13 +123,13 @@ describe('game composition feeder', () => {
   });
 
   it('a non-2xx is a diagnostic naming the status', async () => {
-    const ctx = await harness(answer({}, { status: 500 }));
+    const { ctx } = await harness(answer({}, { status: 500 }));
     await vi.waitFor(() => expect(ctx.gameComposition.diagnostics).toHaveLength(1));
     expect(ctx.gameComposition.diagnostics[0].message).toContain('500');
   });
 
   it('a 200 with the wrong shape is a diagnostic, not an undefined row list', async () => {
-    const ctx = await harness(answer({ rows: 5 }));
+    const { ctx } = await harness(answer({ rows: 5 }));
     await vi.waitFor(() => expect(ctx.gameComposition.diagnostics).toHaveLength(1));
     expect(ctx.gameComposition.rows).toEqual([]);
     expect(ctx.gameComposition.diagnostics[0].message).toContain('"rows"');
@@ -130,7 +143,7 @@ describe('game composition feeder', () => {
   it('keeps its failures out of the editor diagnostics channel', async () => {
     // Only the composition fetch fails; the `workspace` plugin's own boot
     // GET stays pending, so what lands in `connection` below is not its.
-    const ctx = await harness((async (url: string) => {
+    const { ctx } = await harness((async (url: string) => {
       if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
       throw new Error('nope');
     }) as unknown as typeof fetch);
@@ -151,5 +164,203 @@ describe('game composition feeder', () => {
     };
     ctx.connection.report(editorSide);
     expect(ctx.connection.diagnostics).toEqual([editorSide]);
+  });
+});
+
+/**
+ * The half Task 3 of the hot-fork slice adds: the feeder LISTENS on `/ide`
+ * for the host's `game-composition` frame (sent to every socket after a
+ * `PUT`), and it is the one that sends that `PUT`. `reloads` is the count
+ * of frames that said `reload: true` — what `Preview` remounts on.
+ */
+describe('game composition feeder — frames and edits', () => {
+  const CHANGED = [
+    { id: 'boot1', name: '@energy8engine/boot', config: {}, from: 'bundle:e8-base' },
+    { id: 'reels1', name: '@energy8engine/reels', config: { grid: 4 }, from: 'patch' },
+  ];
+
+  it('a game-composition frame replaces the rows and notifies', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    const listener = vi.fn();
+    ctx.gameComposition.subscribe(listener);
+
+    push(frame(CHANGED, false, ['reels1']));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(ctx.gameComposition.rows?.[1].config).toEqual({ grid: 4 });
+  });
+
+  it('a frame that lands before the boot GET answers is the newer fact — the GET does not overwrite it', async () => {
+    let deliver!: (res: Response) => void;
+    const inFlight = new Promise<Response>((resolvePromise) => {
+      deliver = resolvePromise;
+    });
+    const { ctx, push } = await harness((async (url: string) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      return inFlight;
+    }) as unknown as typeof fetch);
+
+    push(frame(CHANGED, false, ['reels1']));
+    expect(ctx.gameComposition.rows?.[1].config).toEqual({ grid: 4 });
+
+    deliver(
+      new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    // Let the GET settle; the rows must still be the frame's.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ctx.gameComposition.rows?.[1].config).toEqual({ grid: 4 });
+  });
+
+  it('ignores frames of other types and malformed data', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    const listener = vi.fn();
+    ctx.gameComposition.subscribe(listener);
+
+    push(JSON.stringify({ type: 'snapshot', snapshot: { rows: [], diagnostics: [] } }));
+    push('not json');
+    push('null');
+    push(JSON.stringify({ type: 'game-composition', rows: 5, reload: true, changed: [] }));
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(ctx.gameComposition.rows).toHaveLength(2);
+    expect(ctx.gameComposition.reloads).toBe(0);
+  });
+
+  it('counts reloads only on frames that say reload: true', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    expect(ctx.gameComposition.reloads).toBe(0);
+
+    push(frame(CHANGED, false, ['reels1']));
+    expect(ctx.gameComposition.reloads).toBe(0);
+
+    push(frame(CHANGED, true, ['renderer1']));
+    expect(ctx.gameComposition.reloads).toBe(1);
+
+    push(frame(CHANGED, true, ['renderer1']));
+    expect(ctx.gameComposition.reloads).toBe(2);
+  });
+
+  it('update PUTs the config to the row’s route and takes the rows from the answer', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      if (init?.method === 'PUT') {
+        calls.push({ url: String(url), init });
+        return new Response(JSON.stringify({ rows: CHANGED, reload: false, diagnostics: [] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch);
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    const listener = vi.fn();
+    ctx.gameComposition.subscribe(listener);
+
+    const result = await ctx.gameComposition.update('reels1', { grid: 4 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('/api/composition/rows/reels1');
+    expect(calls[0].init?.headers).toEqual({ 'content-type': 'application/json' });
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ config: { grid: 4 } });
+    expect(result).toEqual({ reload: false, diagnostics: [] });
+    expect(ctx.gameComposition.rows?.[1].config).toEqual({ grid: 4 });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('update returns the answer’s reload verdict without touching the counter — the frame does that', async () => {
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      const body =
+        init?.method === 'PUT'
+          ? { rows: CHANGED, reload: true, diagnostics: [] }
+          : { rows: ROWS, diagnostics: [] };
+      return new Response(JSON.stringify(body), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch);
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    const result = await ctx.gameComposition.update('renderer1', { width: 500 });
+
+    expect(result.reload).toBe(true);
+    expect(ctx.gameComposition.reloads).toBe(0);
+  });
+
+  it('a refusal with diagnostics is returned AND reported to the connection', async () => {
+    const refused = [
+      { severity: 'error', plugin: 'reels1', where: 'e8.patch.yml', message: 'cannot write' },
+    ];
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      if (init?.method === 'PUT') {
+        return new Response(JSON.stringify({ diagnostics: refused }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch);
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    const result = await ctx.gameComposition.update('reels1', { grid: 4 });
+
+    expect(result).toEqual({ reload: false, diagnostics: refused });
+    expect(ctx.connection.diagnostics).toEqual(refused);
+    // The rows the host last resolved stay: a refused write changed nothing.
+    expect(ctx.gameComposition.rows?.[1].config).toEqual({});
+  });
+
+  it('a 400 that carries only an error string becomes one diagnostic naming it', async () => {
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      if (init?.method === 'PUT') {
+        return new Response(JSON.stringify({ error: 'no row with id "nope"' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch);
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    const result = await ctx.gameComposition.update('nope', {});
+
+    expect(result.reload).toBe(false);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'composition',
+      where: '/api/composition/rows/nope',
+    });
+    expect(result.diagnostics[0].message).toContain('no row with id "nope"');
+    expect(ctx.connection.diagnostics).toEqual(result.diagnostics);
+  });
+
+  it('a network failure on update is one diagnostic, not a throw', async () => {
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      if (init?.method === 'PUT') throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch);
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    const result = await ctx.gameComposition.update('reels1', { grid: 4 });
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].message).toContain('Failed to fetch');
+    expect(ctx.connection.diagnostics).toHaveLength(1);
   });
 });

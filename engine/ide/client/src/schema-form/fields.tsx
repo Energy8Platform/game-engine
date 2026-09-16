@@ -6,6 +6,8 @@ export interface SchemaNode {
   value?: unknown;
   list?: SchemaNode[];
   dict?: Record<string, SchemaNode>;
+  /** A `dict` node's value schema. */
+  inner?: SchemaNode;
   meta?: {
     default?: unknown;
     description?: string;
@@ -38,8 +40,90 @@ function constants(node: SchemaNode): string[] | null {
   return values.every((value) => typeof value === 'string') ? (values as string[]) : null;
 }
 
+/**
+ * One labelled field per entry of an `object` node's `dict` — the body of
+ * `SchemaForm`, and of every nested object inside it. Emits the WHOLE
+ * `value` with the one key replaced, never a copy schemastery has filled
+ * with defaults: the host replaces the row's config with what it is
+ * handed, so what goes out is what the user has, plus the edit.
+ */
+export function ObjectFields({
+  idPrefix,
+  node,
+  value,
+  onChange,
+}: {
+  idPrefix: string;
+  node: SchemaNode;
+  value: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+}) {
+  // A dict entry can point at a uid that isn't in the graph's `refs` (a
+  // dangling reference from a truncated or hand-edited schema) — rebuilding
+  // then leaves that entry `undefined` rather than dropping the key. Reading
+  // it as a live SchemaNode further down (`label()` etc.) would throw, so
+  // filter those out here and render every entry that actually resolved.
+  const fields = Object.entries(node.dict ?? {}).filter(
+    (entry): entry is [string, SchemaNode] => entry[1] != null,
+  );
+  return (
+    <>
+      {fields.map(([key, child]) => {
+        const id = `${idPrefix}-${key}`;
+        const nested = child.type === 'object' && child.dict;
+        const control = (
+          <Field
+            id={id}
+            node={child}
+            value={value[key]}
+            onChange={(next) => onChange({ ...value, [key]: next })}
+          />
+        );
+        // A nested object or a dict is a group of its own fields, so its
+        // name goes on a `<legend>` rather than a `<label for>` — there is
+        // no single control for the label to point at.
+        return (
+          <div className="e8-field" key={key}>
+            {nested || child.type === 'dict' ? (
+              <fieldset className="e8-field-group" id={id}>
+                <legend>{label(child, key)}</legend>
+                {control}
+              </fieldset>
+            ) : (
+              <>
+                <label htmlFor={id}>{label(child, key)}</label>
+                {control}
+              </>
+            )}
+            {/* This badge reflects what the plugin declared via
+                `extra: { applies: 'restart' }` — not a difference in host
+                behaviour: the host decides `reload` from the row's `hot`
+                and the changed top-level keys (see `runtime-assets.ts`). */}
+            {needsRestart(child) ? <span className="e8-badge">restart</span> : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function Field({ id, node, value, onChange }: FieldProps) {
   const current = value ?? node.meta?.default;
+
+  if (node.type === 'object' && node.dict) {
+    return (
+      <ObjectFields
+        idPrefix={id}
+        node={node}
+        value={(value ?? {}) as Record<string, unknown>}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (node.type === 'dict' && node.inner?.type === 'string') {
+    return <DictField id={id} node={node} value={value} onChange={onChange} />;
+  }
 
   const options = constants(node);
   if (options) {
@@ -84,8 +168,8 @@ export function Field({ id, node, value, onChange }: FieldProps) {
     );
   }
 
-  // Any field kind Slice 0 has no editor for (object, array, a non-string
-  // union, …). Rendering it editable would let a keystroke silently replace
+  // Any field kind this form has no editor for (`any`, an array, a dict
+  // of non-strings, a non-string union, …). Rendering it editable would let a keystroke silently replace
   // a structured value with a plain string — read-only-and-labelled is the
   // honest gap; a later task can upgrade it to a real editor.
   return <UnsupportedField id={id} node={node} value={current} />;
@@ -135,6 +219,83 @@ function NumberField({ id, node, value, onChange }: FieldProps) {
       step={node.meta?.step}
       onChange={handleChange}
     />
+  );
+}
+
+/**
+ * A dict of strings (`mechanics1`'s `stages`): one key → value row per
+ * entry, `+` adds an empty row, `×` removes one. Rows are buffered locally
+ * — a key typed one character at a time must not commit each prefix as a
+ * key of its own — and a blur commits the whole object, minus rows whose
+ * key is still empty. Only string values, per Slice 0's scope; a dict of
+ * anything else stays `UnsupportedField`.
+ */
+function DictField({ id, node, value, onChange }: FieldProps) {
+  const current = (value ?? node.meta?.default ?? {}) as Record<string, string>;
+  const toRows = (source: Record<string, string>) =>
+    Object.entries(source).map(([key, entry]) => ({ key, value: String(entry ?? '') }));
+  const [rows, setRows] = useState(() => toRows(current));
+
+  // Re-sync on a committed value that changed for a reason other than this
+  // field's own edit — the same rule `NumberField` follows.
+  useEffect(() => {
+    setRows(toRows(current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const build = (from: typeof rows) =>
+    Object.fromEntries(from.filter((row) => row.key !== '').map((row) => [row.key, row.value]));
+  const commit = (from: typeof rows) => {
+    const next = build(from);
+    if (JSON.stringify(next) !== JSON.stringify(current)) onChange(next);
+  };
+  const edit = (index: number, patch: Partial<{ key: string; value: string }>) =>
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+
+  return (
+    <div className="e8-dict">
+      {rows.map((row, index) => (
+        <div className="e8-dict-row" key={index}>
+          <input
+            type="text"
+            data-dict="key"
+            aria-label="key"
+            value={row.key}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => edit(index, { key: e.target.value })}
+            onBlur={() => commit(rows)}
+          />
+          <span className="e8-dict-arrow">→</span>
+          <input
+            type="text"
+            data-dict="value"
+            aria-label="value"
+            value={row.value}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => edit(index, { value: e.target.value })}
+            onBlur={() => commit(rows)}
+          />
+          <button
+            type="button"
+            aria-label="×"
+            title="remove"
+            onClick={() => {
+              const next = rows.filter((_, i) => i !== index);
+              setRows(next);
+              commit(next);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        aria-label="+"
+        title="add"
+        onClick={() => setRows((prev) => [...prev, { key: '', value: '' }])}
+      >
+        +
+      </button>
+    </div>
   );
 }
 

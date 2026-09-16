@@ -6,20 +6,9 @@ import { Preview, PreviewWall, createIdeClient } from '../src/index';
 
 /**
  * Falling tests for Task 12, step 1: the preview panel draws an iframe at
- * `dev-game`'s address; a snapshot with a changed setting must reach the
- * running game without a reload of the IDE page; a row that declared
- * `hot: false` must cause an honest RELOAD of the iframe rather than a
- * silent no-op (the host tears the plugin down and re-applies it — nothing
- * guarantees an already-running game picked that up on its own).
- *
- * `hot: true` here stands in for `@energy8engine/ide-bridge` (declared
- * `hot: true` in its own package.json) — genuinely hot means it pushes its
- * own update straight into the running game over the SAME `/ide` websocket
- * this screen uses (see ide-bridge's module doc), so `Preview` itself has
- * nothing to do for that case. This suite fabricates rows directly rather
- * than depending on a second real plugin package — `Preview`'s reload
- * logic reacts to `CompositionRow.hot`/`config` generically, independent of
- * which plugin produced them.
+ * `dev-game`'s address, and reloads it when — and only when — the host's
+ * `game-composition` frame says `reload: true` (see the block of four
+ * below for what that replaced).
  */
 
 const PREVIEW_URL = 'http://game.test:5679';
@@ -147,93 +136,60 @@ describe('Preview', () => {
     expect(screen.getByTitle('game preview')).toBe(before);
   });
 
-  it('the first snapshot after connecting establishes a baseline, not a reload', async () => {
+  /**
+   * Whether an edit needs the game reloaded is the HOST's verdict now —
+   * `GameCompositionMessage.reload`, decided from the row's `hot` and the
+   * changed keys' `applies: 'restart'` (hot-fork slice, spec §2 "Клиент").
+   * The four cases that used to sit here fingerprinted the EDITOR's own
+   * `hot: false` rows out of `snapshot` frames (`coldSignature`); no editor
+   * row of the reference project is cold (`bridge1`, `screendemo1`, `probe1`
+   * all declare `hot: true`), so that property guarded nothing a person
+   * could reach, and the one it stood for — "a cold change reloads" — is
+   * the host's `reload` now, pinned host-side. What the client pins is:
+   * it follows `reload`.
+   */
+  it('a game-composition frame with reload: true remounts the iframe — a real navigation', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
     const before = screen.getByTitle('game preview');
 
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:bridge', hot: false, config: { base_game: 'classic' } })],
-        diagnostics: [],
-      },
-    });
+    push({ type: 'game-composition', rows: [], reload: true, changed: ['renderer1'] });
+
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(after.src).toBe(`${PREVIEW_URL}/`);
+  });
+
+  it('a game-composition frame with reload: false keeps the same iframe — the game re-applied the row itself', async () => {
+    const { ctx, push } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview');
+
+    push({ type: 'game-composition', rows: [], reload: false, changed: ['reels1'] });
 
     expect(screen.getByTitle('game preview')).toBe(before);
   });
 
-  it('does NOT reload the iframe when only a hot row config changes', async () => {
+  it('every reload: true frame remounts again — two edits, two navigations', async () => {
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
-
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:bridge', hot: true, config: { base_game: 'classic' } })],
-        diagnostics: [],
-      },
-    });
-    const before = screen.getByTitle('game preview');
-
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:bridge', hot: true, config: { base_game: 'cascade' } })],
-        diagnostics: [],
-      },
-    });
-
-    expect(screen.getByTitle('game preview')).toBe(before);
-  });
-
-  it('DOES reload the iframe — an honest navigation, not a silent no-op — when a hot:false row config changes', async () => {
-    const { ctx, push } = await harness();
-    render(<Preview ctx={ctx} />);
-
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:res', hot: false, config: { resolution: '720p' } })],
-        diagnostics: [],
-      },
-    });
-    const before = screen.getByTitle('game preview');
-
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:res', hot: false, config: { resolution: '1080p' } })],
-        diagnostics: [],
-      },
-    });
-
-    expect(screen.getByTitle('game preview')).not.toBe(before);
-  });
-
-  it('does not reload again on a snapshot that repeats the same non-hot config', async () => {
-    const { ctx, push } = await harness();
-    render(<Preview ctx={ctx} />);
-
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:res', hot: false, config: { resolution: '720p' } })],
-        diagnostics: [],
-      },
-    });
+    push({ type: 'game-composition', rows: [], reload: true, changed: ['renderer1'] });
     const first = screen.getByTitle('game preview');
-    push({
-      type: 'snapshot',
-      snapshot: {
-        rows: [row({ id: 'a:res', hot: false, config: { resolution: '1080p' } })],
-        diagnostics: [],
-      },
-    });
-    const second = screen.getByTitle('game preview');
-    expect(second).not.toBe(first);
+    push({ type: 'game-composition', rows: [], reload: true, changed: ['renderer1'] });
+    expect(screen.getByTitle('game preview')).not.toBe(first);
+  });
 
-    // Same non-hot config repeated verbatim — nothing changed, no reload.
+  it('a snapshot of the EDITOR’s rows, cold or not, never reloads on its own', async () => {
+    const { ctx, push } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview');
+    push({
+      type: 'snapshot',
+      snapshot: {
+        rows: [row({ id: 'a:res', hot: false, config: { resolution: '720p' } })],
+        diagnostics: [],
+      },
+    });
     push({
       type: 'snapshot',
       snapshot: {
@@ -241,7 +197,7 @@ describe('Preview', () => {
         diagnostics: [],
       },
     });
-    expect(screen.getByTitle('game preview')).toBe(second);
+    expect(screen.getByTitle('game preview')).toBe(before);
   });
 });
 
@@ -305,6 +261,18 @@ describe('PreviewWall', () => {
     render(<PreviewWall ctx={ctx} />);
     const before = screen.getAllByTestId(/^tile-/);
     push({ type: 'workspace', workspace: workspace({ active: 'b' }) });
+    const after = screen.getAllByTestId(/^tile-/);
+    expect(after).toHaveLength(before.length);
+    for (const tile of after) expect(before).not.toContain(tile);
+  });
+
+  it('a reload: true frame gives every tile a new frame; reload: false leaves them', async () => {
+    const { ctx, push } = await harness();
+    render(<PreviewWall ctx={ctx} />);
+    const before = screen.getAllByTestId(/^tile-/);
+    push({ type: 'game-composition', rows: [], reload: false, changed: ['reels1'] });
+    expect(screen.getAllByTestId(/^tile-/)).toEqual(before);
+    push({ type: 'game-composition', rows: [], reload: true, changed: ['renderer1'] });
     const after = screen.getAllByTestId(/^tile-/);
     expect(after).toHaveLength(before.length);
     for (const tile of after) expect(before).not.toContain(tile);

@@ -306,8 +306,10 @@ function harness(): Context {
       list: () => [],
       subscribe: () => () => {},
     },
-    // `Preview` (inside the screen) reads the workspace; nothing answered yet.
+    // `Preview` (inside the screen) reads the workspace and the game's
+    // composition; nothing answered yet.
     workspace: { state: () => null, subscribe: () => () => {} },
+    gameComposition: { rows: null, diagnostics: [], reloads: 0, subscribe: () => () => {} },
   } as unknown as Context;
 }
 

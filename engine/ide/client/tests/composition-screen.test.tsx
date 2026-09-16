@@ -1,7 +1,7 @@
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import Schema from 'schemastery';
 import { describe, expect, it, vi } from 'vitest';
-import { diagnostic, type ServerMessage } from '@energy8engine/contracts';
+import { diagnostic, type GameCompositionRow, type ServerMessage } from '@energy8engine/contracts';
 import { CompositionScreen, createIdeClient, useEditorDiagnostics } from '../src/index';
 
 /** The `workspace` plugin's boot GET must not reach the real `fetch` (jsdom has no host to answer, and the failure would land in `connection.diagnostics`); it never answers here. */
@@ -15,7 +15,7 @@ const SCHEMA = JSON.parse(
   ),
 );
 
-async function harness() {
+async function harness(fetchImpl: typeof fetch = fetchFn) {
   const listeners: ((event: any) => void)[] = [];
   const sent: string[] = [];
   const socket = {
@@ -31,7 +31,11 @@ async function harness() {
     },
     close() {},
   };
-  const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+  const ctx = await createIdeClient({
+    url: 'ws://x/ide',
+    socketFactory: () => socket,
+    fetchFn: fetchImpl,
+  });
   // `act()`: a server push notifies the mounted screen's connection
   // subscription synchronously, outside any testing-library event helper —
   // the same reason the analogous notification in slots.test.tsx's "stale
@@ -202,5 +206,103 @@ describe('useEditorDiagnostics', () => {
     const settled = result.current;
     rerender();
     expect(result.current).toBe(settled);
+  });
+});
+
+/**
+ * The GAME's rows, Task 3 of the hot-fork slice: a row whose package
+ * declared a schema gets the SAME form the editor's rows use (badge
+ * included), submitted through `ctx.gameComposition.update`; a row
+ * without one stays name + layer; a cold row says so.
+ */
+describe('CompositionScreen — game rows', () => {
+  const RENDERER_SCHEMA = JSON.parse(
+    JSON.stringify(
+      Schema.object({
+        width: Schema.natural()
+          .description('canvas width, px')
+          .extra('extra', { applies: 'restart' }),
+        height: Schema.natural().description('canvas height, px'),
+      }).toJSON(),
+    ),
+  );
+
+  function gameRow(overrides: Partial<GameCompositionRow>): GameCompositionRow {
+    return {
+      id: 'x1',
+      name: '@energy8engine/x',
+      config: {},
+      from: 'patch',
+      runtimeUrl: null,
+      schema: null,
+      hot: true,
+      ...overrides,
+    };
+  }
+
+  it('a row with a schema renders the form; one without stays name + layer', async () => {
+    const { ctx } = await harness();
+    render(
+      <CompositionScreen
+        ctx={ctx}
+        rows={[
+          gameRow({ id: 'renderer1', schema: RENDERER_SCHEMA, config: { width: 1280 } }),
+          gameRow({ id: 'boot1', name: '@energy8engine/boot', from: 'bundle:e8-base' }),
+        ]}
+      />,
+    );
+    expect(screen.getByLabelText('canvas width, px')).toHaveValue(1280);
+    expect(screen.getByTestId('row-boot1').querySelector('input')).toBeNull();
+    expect(screen.getByTestId('row-boot1')).toHaveTextContent('e8-base');
+  });
+
+  it('a restart badge sits on renderer1.width, not on height', async () => {
+    const { ctx } = await harness();
+    render(
+      <CompositionScreen
+        ctx={ctx}
+        rows={[gameRow({ id: 'renderer1', schema: RENDERER_SCHEMA })]}
+      />,
+    );
+    const badges = screen.getAllByText('restart');
+    expect(badges).toHaveLength(1);
+    expect(badges[0].parentElement).toContainElement(screen.getByLabelText('canvas width, px'));
+  });
+
+  it('a cold row wears a cold badge; a hot one does not', async () => {
+    const { ctx } = await harness();
+    render(
+      <CompositionScreen
+        ctx={ctx}
+        rows={[gameRow({ id: 'renderer1', hot: false }), gameRow({ id: 'reels1', hot: true })]}
+      />,
+    );
+    expect(screen.getByTestId('row-renderer1-cold')).toHaveTextContent('cold');
+    expect(screen.queryByTestId('row-reels1-cold')).toBeNull();
+  });
+
+  it('an edit submits the user’s object with one key replaced — no defaults filled in', async () => {
+    const puts: { url: string; body: unknown }[] = [];
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        puts.push({ url: String(url), body: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ rows: [], reload: true, diagnostics: [] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Promise<Response>(() => {});
+    }) as unknown as typeof fetch);
+    render(
+      <CompositionScreen
+        ctx={ctx}
+        rows={[gameRow({ id: 'renderer1', schema: RENDERER_SCHEMA, config: { width: 1280 } })]}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('canvas width, px'), { target: { value: '500' } });
+    await vi.waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0].url).toBe('/api/composition/rows/renderer1');
+    // `height` has no value and gains none: the patch row is replaced by
+    // exactly this object.
+    expect(puts[0].body).toEqual({ config: { width: 500 } });
   });
 });

@@ -851,6 +851,40 @@ label {
   font-style: normal;
   font-size: var(--e8-size-label);
 }
+/* A game row's form sits under its header rule; the editor's rows have
+   their own card padding already. */
+.e8-game-row > .e8-schema-form {
+  padding: 12px 0;
+}
+/* A nested object or a dict: its own fields, boxed, spanning the field
+   grid; the `restart` badge, if any, wraps beneath. */
+.e8-field-group {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px 12px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+}
+.e8-field-group > legend {
+  padding: 0 4px;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-label);
+}
+.e8-dict {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.e8-dict-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.e8-dict-arrow {
+  color: var(--e8-fg-muted);
+}
 
 /* Preview wall: controls in one row, tiles wrapping beneath. */
 .e8-preview-wall-controls {

@@ -30,10 +30,47 @@ function ControlledForm({ initial }: { initial: Record<string, unknown> }) {
 const nestedSchema = JSON.parse(
   JSON.stringify(
     Schema.object({
-      wave: Schema.object({ amplitude: Schema.number() }).description('wave envelope'),
+      wave: Schema.object({
+        amplitude: Schema.number(),
+        phase: Schema.number().extra('extra', { applies: 'restart' }),
+      }).description('wave envelope'),
     }).toJSON(),
   ),
 );
+
+const anySchema = JSON.parse(
+  JSON.stringify(Schema.object({ board: Schema.any().description('initial board') }).toJSON()),
+);
+
+/** `mechanics1`'s `stages: dict(string)` — a stage id bound to a mechanic id. */
+const dictSchema = JSON.parse(
+  JSON.stringify(
+    Schema.object({
+      stages: Schema.dict(Schema.string()).description('stage id → mechanic id'),
+    }).toJSON(),
+  ),
+);
+
+function DictForm({
+  initial,
+  onChange,
+}: {
+  initial: Record<string, unknown>;
+  onChange: (v: unknown) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <SchemaForm
+      rowId="row"
+      schema={dictSchema}
+      value={value}
+      onChange={(next) => {
+        setValue(next);
+        onChange(next);
+      }}
+    />
+  );
+}
 
 /** A dict entry whose uid isn't in `refs` — the shape a truncated or
  * hand-edited schema graph produces. `new Schema(...)` rebuilds this dict
@@ -112,21 +149,51 @@ describe('SchemaForm', () => {
     expect(input.value).toBe('5');
   });
 
-  it('renders an unsupported field kind (a nested object) read-only and labelled, without corrupting the value', () => {
+  it('renders an unsupported field kind (any) read-only and labelled, without corrupting the value', () => {
+    const onChange = vi.fn();
+    render(
+      <SchemaForm rowId="row" schema={anySchema} value={{ board: [[1]] }} onChange={onChange} />,
+    );
+    const input = screen.getByLabelText('initial board') as HTMLInputElement;
+    expect(input.readOnly).toBe(true);
+    expect(screen.getByText(/unsupported \(any\)/)).toBeTruthy();
+    fireEvent.change(input, { target: { value: 'x' } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // `reels1`'s `config.grid.{cols,rows}` and `stage1`'s `design.{width,height}`
+  // are nested objects: without this, the reference project's rows would
+  // have nothing editable on them at all.
+  it('renders a nested object as its own fields and emits the whole value with the nested path replaced', () => {
     const onChange = vi.fn();
     render(
       <SchemaForm
         rowId="row"
         schema={nestedSchema}
-        value={{ wave: { amplitude: 2 } }}
+        value={{ wave: { amplitude: 2, phase: 1 }, other: 'kept' }}
         onChange={onChange}
       />,
     );
-    const input = screen.getByLabelText('wave envelope') as HTMLInputElement;
-    expect(input.readOnly).toBe(true);
-    expect(screen.getByText(/unsupported/)).toBeTruthy();
-    fireEvent.change(input, { target: { value: 'x' } });
-    expect(onChange).not.toHaveBeenCalled();
+    const group = screen.getByRole('group', { name: 'wave envelope' });
+    expect(group).toBeTruthy();
+    const input = screen.getByLabelText('amplitude') as HTMLInputElement;
+    expect(input.type).toBe('number');
+    expect(input.value).toBe('2');
+    fireEvent.change(input, { target: { value: '5' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ wave: { amplitude: 5, phase: 1 }, other: 'kept' });
+  });
+
+  it('a nested object with no value yet starts from an empty object, not from undefined', () => {
+    const onChange = vi.fn();
+    render(<SchemaForm rowId="row" schema={nestedSchema} value={{}} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('amplitude'), { target: { value: '5' } });
+    expect(onChange).toHaveBeenCalledWith({ wave: { amplitude: 5 } });
+  });
+
+  it('a restart badge on a nested field is visible too', () => {
+    render(<SchemaForm rowId="row" schema={nestedSchema} value={{}} onChange={() => {}} />);
+    expect(screen.getByText('restart')).toBeTruthy();
   });
 
   it('renders nothing for a null schema, without throwing', () => {
@@ -196,5 +263,78 @@ describe('SchemaForm', () => {
     fireEvent.change(inputs[1], { target: { value: '9' } });
     expect(onChangeB).toHaveBeenCalledWith({ speed: 9 });
     expect(onChangeA).not.toHaveBeenCalled();
+  });
+
+  describe('dict of strings', () => {
+    it('renders one key → value row per entry', () => {
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={dictSchema}
+          value={{ stages: { main: 'lines', bonus: 'cascade' } }}
+          onChange={() => {}}
+        />,
+      );
+      const group = screen.getByRole('group', { name: 'stage id → mechanic id' });
+      const keys = group.querySelectorAll<HTMLInputElement>('input[data-dict="key"]');
+      const values = group.querySelectorAll<HTMLInputElement>('input[data-dict="value"]');
+      expect([...keys].map((k) => k.value)).toEqual(['main', 'bonus']);
+      expect([...values].map((v) => v.value)).toEqual(['lines', 'cascade']);
+    });
+
+    it('editing a value commits on blur, with the whole object', () => {
+      const onChange = vi.fn();
+      render(<DictForm initial={{ stages: { main: 'lines' }, other: 1 }} onChange={onChange} />);
+      const value = screen.getByDisplayValue('lines');
+      fireEvent.change(value, { target: { value: 'ways' } });
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.blur(value);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ stages: { main: 'ways' }, other: 1 });
+    });
+
+    it('+ adds an empty row that is not committed until it has a key', () => {
+      const onChange = vi.fn();
+      render(<DictForm initial={{ stages: { main: 'lines' } }} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: '+' }));
+      const keys = screen
+        .getAllByRole('textbox')
+        .filter((i) => i.getAttribute('data-dict') === 'key');
+      expect(keys).toHaveLength(2);
+      // Blur with the key still empty: nothing to commit.
+      fireEvent.blur(keys[1]);
+      expect(onChange).not.toHaveBeenCalled();
+
+      fireEvent.change(keys[1], { target: { value: 'bonus' } });
+      fireEvent.blur(keys[1]);
+      expect(onChange).toHaveBeenCalledWith({ stages: { main: 'lines', bonus: '' } });
+    });
+
+    it('renaming a key moves its value', () => {
+      const onChange = vi.fn();
+      render(<DictForm initial={{ stages: { main: 'lines' } }} onChange={onChange} />);
+      const key = screen.getByDisplayValue('main');
+      fireEvent.change(key, { target: { value: 'base' } });
+      fireEvent.blur(key);
+      expect(onChange).toHaveBeenCalledWith({ stages: { base: 'lines' } });
+    });
+
+    it('× removes the row and commits at once', () => {
+      const onChange = vi.fn();
+      render(
+        <DictForm initial={{ stages: { main: 'lines', bonus: 'cascade' } }} onChange={onChange} />,
+      );
+      fireEvent.click(screen.getAllByRole('button', { name: '×' })[0]);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ stages: { bonus: 'cascade' } });
+      expect(screen.queryByDisplayValue('lines')).toBeNull();
+    });
+
+    it('a blur that changed nothing does not commit', () => {
+      const onChange = vi.fn();
+      render(<DictForm initial={{ stages: { main: 'lines' } }} onChange={onChange} />);
+      fireEvent.blur(screen.getByDisplayValue('lines'));
+      expect(onChange).not.toHaveBeenCalled();
+    });
   });
 });

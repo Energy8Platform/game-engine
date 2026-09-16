@@ -1,7 +1,7 @@
 import { Component, useRef, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { Context } from 'cordis';
-import { diagnostic, type Diagnostic, type ResolvedRow } from '@energy8engine/contracts';
+import { diagnostic, type Diagnostic, type GameCompositionRow } from '@energy8engine/contracts';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { useSlot } from '../plugins/slots';
 import { Preview } from './PreviewWall';
@@ -164,12 +164,19 @@ function layerLabel(from: string): string {
 }
 
 interface GameCompositionProps {
+  /** Absent in a rows-only render (see `CompositionScreenProps.ctx`): the rows are then read-only, since there is nothing to submit an edit through. */
+  ctx?: Context;
   /** The GAME's resolved composition — one row per plugin, in layering order, each carrying which layer placed it. */
-  rows: ResolvedRow[];
+  rows: GameCompositionRow[];
 }
 
 /**
- * The GAME's resolved composition — which layer placed each row.
+ * The GAME's resolved composition — which layer placed each row, and, for
+ * a row whose package declared `e8.runtime.schema`, the SAME `SchemaForm`
+ * the editor's rows get (the `restart` badge comes with it). An edit goes
+ * out through `ctx.gameComposition.update` — a `PUT` that replaces the
+ * patch row with the user's object — and the host's frame brings the rows
+ * back. A `hot: false` row says `cold`: its edit reloads the preview.
  *
  * Used to also render the PROJECT's own diagnostics here as a standalone
  * list above the rows (`GET /api/composition`'s own `diagnostics` — a
@@ -184,7 +191,7 @@ interface GameCompositionProps {
  * `DiagnosticsPanel` shows the raw `plugin` id — named here rather than
  * silently dropped, for whoever next has reason to add it there instead.
  */
-function GameComposition({ rows }: GameCompositionProps) {
+function GameComposition({ ctx, rows }: GameCompositionProps) {
   return (
     <section className="e8-game-composition">
       {rows.map((row) => (
@@ -192,7 +199,20 @@ function GameComposition({ rows }: GameCompositionProps) {
           <header>
             <strong>{row.name}</strong>
             <span className="e8-layer">{layerLabel(row.from)}</span>
+            {row.hot ? null : (
+              <span className="e8-badge" data-testid={`row-${row.id}-cold`}>
+                cold
+              </span>
+            )}
           </header>
+          {ctx && row.schema ? (
+            <SchemaForm
+              rowId={row.id}
+              schema={row.schema}
+              value={row.config ?? {}}
+              onChange={(next) => void ctx.gameComposition.update(row.id, next)}
+            />
+          ) : null}
         </section>
       ))}
     </section>
@@ -203,7 +223,7 @@ export interface CompositionScreenProps {
   /** The IDE's own plugin graph — omit in a game-composition-only render (see `GameComposition`). */
   ctx?: Context;
   /** The GAME's resolved composition — omit when only the editor's own rows are being shown. */
-  rows?: ResolvedRow[];
+  rows?: GameCompositionRow[];
 }
 
 export function CompositionScreen({ ctx, rows }: CompositionScreenProps) {
@@ -211,7 +231,7 @@ export function CompositionScreen({ ctx, rows }: CompositionScreenProps) {
     <main className="e8-composition">
       <h1>Composition</h1>
       {ctx ? <EditorComposition ctx={ctx} /> : null}
-      {rows ? <GameComposition rows={rows} /> : null}
+      {rows ? <GameComposition ctx={ctx} rows={rows} /> : null}
     </main>
   );
 }
