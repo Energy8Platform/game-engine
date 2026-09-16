@@ -2,7 +2,9 @@ import type { Context } from 'cordis';
 import {
   type Diagnostic,
   type DiagnosticsResponse,
+  type FileCreateRequest,
   type FileEntry,
+  type FileMoveRequest,
   type FileTreeResponse,
   type FileWriteRequest,
   diagnostic,
@@ -44,6 +46,12 @@ export interface FilesService {
   read(path: string): Promise<{ bytes?: Uint8Array; diagnostics: Diagnostic[] }>;
   write(path: string, bytes: Uint8Array): Promise<DiagnosticsResponse>;
   remove(path: string): Promise<DiagnosticsResponse>;
+  /** Creates a directory at `path`. */
+  mkdir(path: string): Promise<DiagnosticsResponse>;
+  /** Creates an empty file at `path`. */
+  create(path: string): Promise<DiagnosticsResponse>;
+  /** Renames/moves the file or directory at `from` to `to`. */
+  move(from: string, to: string): Promise<DiagnosticsResponse>;
   /** Address for `<img src>` — reading the bytes just to show them is wasted work. */
   urlFor(path: string): string;
 }
@@ -175,5 +183,35 @@ export function apply(ctx: Context, config: FilesConfig = {}): void {
     return { diagnostics: await diagnosticsFromBody(res, path) };
   }
 
-  ctx.provide('files', { tree, read, write, remove, urlFor });
+  async function post(path: string, body: FileCreateRequest): ReturnType<FilesService['write']> {
+    let res: Response;
+    try {
+      res = await fetchFn(urlFor(path), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      return { diagnostics: [ownDiagnostic(path, describeError(error))] };
+    }
+    return { diagnostics: await diagnosticsFromBody(res, path) };
+  }
+  const mkdir = (path: string) => post(path, { kind: 'dir' });
+  const create = (path: string) => post(path, { kind: 'file' });
+
+  async function move(from: string, to: string): ReturnType<FilesService['move']> {
+    let res: Response;
+    try {
+      res = await fetchFn(urlFor(from), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ to } satisfies FileMoveRequest),
+      });
+    } catch (error) {
+      return { diagnostics: [ownDiagnostic(from, describeError(error))] };
+    }
+    return { diagnostics: await diagnosticsFromBody(res, from) };
+  }
+
+  ctx.provide('files', { tree, read, write, remove, mkdir, create, move, urlFor });
 }

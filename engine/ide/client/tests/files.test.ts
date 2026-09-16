@@ -188,7 +188,7 @@ describe('files', () => {
   });
 
   it('a remove the host refuses passes the refusal through unchanged', async () => {
-    const said = d('"a.txt" is a directory, not a file — remove() does not remove directories');
+    const said = d('"a.txt" is a symlink, and this editor changes only files it lists');
     const ctx = harness({ fetchFn: jsonOnce({ diagnostics: [said] }, { status: 400 }) });
     const { diagnostics } = await ctx.files.remove('a.txt');
     expect(diagnostics).toEqual([said]);
@@ -200,5 +200,65 @@ describe('files', () => {
     // `createIdeClient`. This goes through the real thing, not a harness.
     const ctx = await createIdeClient({ url: 'ws://localhost:1/ide' });
     expect(typeof ctx.files.tree).toBe('function');
+  });
+});
+
+describe('files — mkdir, create, move', () => {
+  /** Records each call's URL, method and parsed JSON body instead of answering from a fixed fixture. */
+  function recordingHarness(
+    answer: { status?: number; diagnostics?: Diagnostic[]; throws?: boolean } = {},
+  ) {
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(init.body as string) : undefined,
+      });
+      if (answer.throws) throw new Error('offline');
+      return new Response(JSON.stringify({ diagnostics: answer.diagnostics ?? [] }), {
+        status: answer.status ?? 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    return { ctx: harness({ fetchFn }), calls };
+  }
+
+  it('mkdir POSTs {kind:"dir"} to the encoded path', async () => {
+    const { ctx, calls } = recordingHarness();
+    const { diagnostics } = await ctx.files.mkdir('art/new dir');
+    expect(diagnostics).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      url: '/api/files/art/new%20dir',
+      method: 'POST',
+      body: { kind: 'dir' },
+    });
+  });
+
+  it('create POSTs {kind:"file"}', async () => {
+    const { ctx, calls } = recordingHarness();
+    await ctx.files.create('art/a+b.txt');
+    expect(calls[0]).toMatchObject({
+      url: '/api/files/art/a%2Bb.txt',
+      method: 'POST',
+      body: { kind: 'file' },
+    });
+  });
+
+  it('move PATCHes {to} — the destination unencoded in the body, the source encoded in the URL', async () => {
+    const { ctx, calls } = recordingHarness();
+    await ctx.files.move('game/spec.json', 'assets/spec 2.json');
+    expect(calls[0]).toMatchObject({
+      url: '/api/files/game/spec.json',
+      method: 'PATCH',
+      body: { to: 'assets/spec 2.json' },
+    });
+  });
+
+  it('a host refusal comes back as its diagnostics; a network failure as one of our own', async () => {
+    const refused = recordingHarness({ status: 400, diagnostics: [d('no')] });
+    expect((await refused.ctx.files.move('a', 'b')).diagnostics[0].message).toBe('no');
+    const down = recordingHarness({ throws: true });
+    expect((await down.ctx.files.mkdir('a')).diagnostics[0].plugin).toBe('files');
   });
 });
