@@ -9,7 +9,13 @@
  * whatever the language, and the language edited here is `.spin`, which
  * none of the four has heard of. This module imports the bare API plus
  * the editor features a `.spin` author touches, so the build carries one
- * worker and no grammars.
+ * worker and no eager grammars.
+ *
+ * Grammars arrive another way since the highlighting slice: the
+ * `languages` plugin holds definitions, `languages-basic` registers
+ * Monaco's own Monarch tokenizers (lazily, one chunk each) and
+ * `language-spin` ours, and `Monaco.tsx` hands them over after this
+ * module has loaded. Still no language services, still one worker.
  *
  * Every specifier is spelled `monaco-editor/<path under esm/vs>`, never
  * `monaco-editor/esm/vs/<path>`: the package's exports map is

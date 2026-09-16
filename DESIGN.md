@@ -38,13 +38,13 @@ record is `docs/superpowers/specs/2026-09-13-modern-ui-design.md`.
 └────────────────────────────────────────────────────────────┘
 ```
 
-| Region | Class | Default size | Slot |
-|---|---|---|---|
-| Activity bar | `.e8-activity` | `--e8-activity-w` (56px) | `shell.activity` |
-| Sidebar | `.e8-sidebar` | `--e8-sidebar-w` (260px), collapses to 0 | `shell.sidebar` |
-| Editor group | `.e8-editors` | remaining width | `shell.document` |
-| Panel | `.e8-panel` | `--e8-panel-h` (200px), collapses to its header | `shell.panel` |
-| Status bar | `.e8-status` | `--e8-status-h` (22px) | `shell.status` |
+| Region       | Class          | Default size                                    | Slot             |
+| ------------ | -------------- | ----------------------------------------------- | ---------------- |
+| Activity bar | `.e8-activity` | `--e8-activity-w` (56px)                        | `shell.activity` |
+| Sidebar      | `.e8-sidebar`  | `--e8-sidebar-w` (260px), collapses to 0        | `shell.sidebar`  |
+| Editor group | `.e8-editors`  | remaining width                                 | `shell.document` |
+| Panel        | `.e8-panel`    | `--e8-panel-h` (200px), collapses to its header | `shell.panel`    |
+| Status bar   | `.e8-status`   | `--e8-status-h` (22px)                          | `shell.status`   |
 
 Three cards and one strip:
 
@@ -167,7 +167,8 @@ name. Sizes and fonts do not change between themes and live only on
   --e8-header-h: 28px;
 
   --e8-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --e8-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --e8-font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --e8-size: 13px;
   --e8-size-label: 12px;
   --e8-size-small: 11px;
@@ -198,12 +199,12 @@ name. Sizes and fonts do not change between themes and live only on
 
 Four guards in `engine/ide/client/tests/styles.test.ts` hold this in place:
 
-1. *every colour in the stylesheet is a token, not a literal* — outside the
+1. _every colour in the stylesheet is a token, not a literal_ — outside the
    two blocks above, a colour is a `var(--e8-*)` reference or it fails;
-2. *no rule reads a retired token name* — no `--e8-bg-<n>`, no bare
+2. _no rule reads a retired token name_ — no `--e8-bg-<n>`, no bare
    `--e8-radius`;
-3. *every box-shadow is none*;
-4. *every border-radius is built from the two radius tokens and 0* — a
+3. _every box-shadow is none_;
+4. _every border-radius is built from the two radius tokens and 0_ — a
    literal `px` in a radius is a third shape nobody decided on.
 
 None of them can tell whether a screen uses the right token for the right
@@ -226,7 +227,9 @@ dark one is a visible 1px seam against the editor card's `#1f1f1f`. So
 `--e8-editor-bg` from `:root` at that moment and setting it as
 `editor.background`; `data-theme` picks which one an editor gets. Without
 the token (a test with no stylesheet) the theme is defined with no
-colours — Monaco's default, the seam, no throw.
+colours — Monaco's default, the seam, no throw. Token colours come from
+Monaco's `vs-dark`/`vs` themes through `e8-dark`/`e8-light`'s `inherit:
+true`; the shell defines no token rules of its own.
 
 ## 6. What this replaces
 
