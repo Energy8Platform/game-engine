@@ -115,25 +115,49 @@ async function tokenClasses(page: Page): Promise<string[]> {
 }
 
 /**
- * The `mtk*` class of the first painted span whose text, trimmed, is
+ * The `mtk*` class of the first painted span, WITHIN the `.view-line`
+ * whose trimmed text starts with `line`, whose own text (trimmed) is
  * exactly `word` — trimmed because Monaco merges a same-coloured token
  * with its neighbouring whitespace into one span (see the module doc's
  * correction 4); an untrimmed compare never matches such a span.
+ *
+ * Scoped to `line` rather than searched across every rendered line: an
+ * unscoped search returns the FIRST matching span in DOM order, so it
+ * would pass for the wrong reason the day the fixture's header comment
+ * happens to contain the bare word `record` or `Vars` above line 39 —
+ * `null` if `line` itself is not rendered, so a scroll that misses the
+ * target line fails loudly instead of quietly matching an earlier one.
  */
-async function classOf(page: Page, word: string): Promise<string | null> {
-  return page.evaluate((w) => {
-    for (const span of document.querySelectorAll('.view-line span')) {
-      if (span.textContent?.trim() === w) {
-        const cls = [...span.classList].find((c) => /^mtk\d+$/.test(c));
-        if (cls) return cls;
+async function classOf(page: Page, line: string, word: string): Promise<string | null> {
+  return page.evaluate(
+    ({ line, word }) => {
+      // Monaco renders a plain space as an nbsp entity (code point
+      // 160), so a concatenated `.view-line`'s textContent carries
+      // non-breaking spaces BETWEEN words, not just at its ends --
+      // normalised to a plain space (String.fromCharCode, not a
+      // unicode escape, to keep the literal byte out of the source
+      // file) before comparing against `line`, which is written with
+      // ordinary ones.
+      const nbsp = String.fromCharCode(160);
+      const normalize = (s: string | null) => s?.split(nbsp).join(' ').trim();
+      const viewLine = [...document.querySelectorAll('.view-line')].find((el) =>
+        normalize(el.textContent)?.startsWith(line),
+      );
+      if (!viewLine) return null;
+      for (const span of viewLine.querySelectorAll('span')) {
+        if (span.textContent?.trim() === word) {
+          const cls = [...span.classList].find((c) => /^mtk\d+$/.test(c));
+          if (cls) return cls;
+        }
       }
-    }
-    return null;
-  }, word);
+      return null;
+    },
+    { line, word },
+  );
 }
 
 for (const path of ['game/script.spin', 'e8.yml', 'src/main.ts', 'game/spec.json']) {
-  test(`${path} opens with more than one token colour`, async ({ page }) => {
+  test(`${path} is painted in more than one token colour`, async ({ page }) => {
     await page.goto(IDE_URL);
     await open(page, path);
     // See the module doc's correction 3: two of these four files open on
@@ -157,10 +181,13 @@ test('in .spin a keyword and a name are painted differently', async ({ page }) =
   // the brief's own `Control+End` + `fn pay_for(`.
   await page.getByTestId('editor').click();
   await moveCursorToDocumentTop(page);
+  // 38 presses: `engine/examples/first-slot/game/script.spin`'s
+  // `record Vars {` is line 39, and the caret starts at line 1.
   for (let i = 0; i < 38; i++) await page.keyboard.press('ArrowDown');
-  await expect.poll(() => classOf(page, 'record'), { timeout: 10_000 }).not.toBeNull();
-  const keyword = await classOf(page, 'record');
-  const name = await classOf(page, 'Vars');
+  const LINE = 'record Vars {';
+  await expect.poll(() => classOf(page, LINE, 'record'), { timeout: 10_000 }).not.toBeNull();
+  const keyword = await classOf(page, LINE, 'record');
+  const name = await classOf(page, LINE, 'Vars');
   expect(
     name,
     'Vars should be visible after moving to line 39 (record Vars { is line 39)',
