@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as MonacoApi from './monacoSlice';
 import type { Diagnostic } from '@energy8engine/contracts';
+import type { LanguageDef, LanguagesService } from '../plugins/languages';
 // Monaco runs its heavier text work in a web worker, and asks the page
 // for one through `MonacoEnvironment.getWorker`. This `?worker` import is
 // vite's way of bundling that worker as its own chunk — the reference to
@@ -11,11 +12,16 @@ import type { Diagnostic } from '@energy8engine/contracts';
 // segment on purpose — see `./monacoSlice.ts` for the exports-map reason.
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 
+/** What the wrapper reads from `ctx.languages` — a source of definitions, and somewhere to report a grammar that failed. */
+export type LanguageSource = Pick<LanguagesService, 'list' | 'subscribe' | 'failed'>;
+
 export interface MonacoProps {
   value: string;
   language: string;
   /** Markers, placed by `Diagnostic.at`. A diagnostic without `at` is not drawn. */
   diagnostics: readonly Diagnostic[];
+  /** Where languages come from; without it the editor knows only Monaco's own `plaintext`. */
+  languages?: LanguageSource;
   onChange(next: string): void;
 }
 
@@ -52,6 +58,44 @@ function themeFor(): ThemeName {
 const defined = new WeakMap<Api['editor'], Set<ThemeName>>();
 
 /**
+ * Which definition each language id was last applied FROM, per Monaco API
+ * object — `monaco.languages` is global to the page, so two editors must
+ * not register (or load) the same definition twice, while a REPLACED
+ * definition (same id, new object) must be loaded again. Keyed by the API
+ * object for the same reason `defined` is: a test with a fresh fake starts
+ * empty. Monaco cannot unregister a language, so a retracted definition
+ * simply stops being re-applied; its id stays known to Monaco.
+ */
+const applied = new WeakMap<Api['languages'], Map<string, LanguageDef>>();
+
+/**
+ * Registers every id Monaco has not seen (synchronously — a model created
+ * for an unknown id is plaintext for good), then loads each grammar and
+ * hands it over; a grammar that cannot be loaded or compiled goes to
+ * `source.failed`, and the other languages are unaffected.
+ */
+function applyLanguages(monaco: Api, source: LanguageSource): void {
+  let seen = applied.get(monaco.languages);
+  if (!seen) applied.set(monaco.languages, (seen = new Map()));
+  for (const def of source.list()) {
+    if (seen.get(def.id) === def) continue;
+    seen.set(def.id, def);
+    monaco.languages.register({ id: def.id, extensions: def.extensions });
+    def
+      .load()
+      .then(({ language, conf }) => {
+        // Replaced while loading: the newer definition's own load applies.
+        if (seen!.get(def.id) !== def) return;
+        monaco.languages.setMonarchTokensProvider(def.id, language);
+        if (conf) monaco.languages.setLanguageConfiguration(def.id, conf);
+      })
+      .catch((error: unknown) => {
+        source.failed(def.id, error instanceof Error ? error.message : String(error));
+      });
+  }
+}
+
+/**
  * Monaco's built-in `vs-dark` paints `#1e1e1e`; the editor card is
  * `--e8-editor-bg` (`#1f1f1f`), and the 1px seam between them was visible.
  * Each theme is defined on first use, reading the token AT THAT MOMENT —
@@ -77,7 +121,7 @@ function ensureTheme(monaco: Api, name: ThemeName): ThemeName {
 }
 
 /** A code editor. It has no title of its own; the screen around it does. */
-export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) {
+export function Monaco({ value, language, diagnostics, languages, onChange }: MonacoProps) {
   const host = useRef<HTMLDivElement>(null);
   const [api, setApi] = useState<{ monaco: Api; editor: Editor } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -90,11 +134,16 @@ export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) 
   useEffect(() => {
     let editor: Editor | undefined;
     let observer: MutationObserver | undefined;
+    let unsubscribe: (() => void) | undefined;
     let gone = false;
     load()
       .then((monaco) => {
         if (gone) return;
         self.MonacoEnvironment ??= { getWorker: () => new EditorWorker() };
+        if (languages) {
+          applyLanguages(monaco, languages);
+          unsubscribe = languages.subscribe(() => applyLanguages(monaco, languages));
+        }
         editor = monaco.editor.create(host.current!, {
           value,
           language,
@@ -120,9 +169,11 @@ export function Monaco({ value, language, diagnostics, onChange }: MonacoProps) 
     return () => {
       gone = true;
       observer?.disconnect();
+      unsubscribe?.();
       editor?.dispose();
     };
-    // `value`/`language` are creation-time only; later values are synced below.
+    // `value`/`language`/`languages` are creation-time only; later values are synced below,
+    // and the source object is stable for the life of a document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

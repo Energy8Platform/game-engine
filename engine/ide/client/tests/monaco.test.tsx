@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import { Monaco } from '../src/editor/Monaco';
@@ -87,11 +87,34 @@ const fake = vi.hoisted(() => {
     };
     return api;
   };
+  /** The `monaco.languages` surface the wrapper drives; fresh per test, same as `editor`. */
+  const makeLanguagesApi = () => {
+    const api = {
+      registered: [] as Array<{ id: string; extensions?: string[] }>,
+      providers: {} as Record<string, unknown>,
+      configurations: {} as Record<string, unknown>,
+      /** Ids whose `setMonarchTokensProvider` throws — the compile-failure seam. */
+      broken: new Set<string>(),
+      register(def: { id: string; extensions?: string[] }) {
+        api.registered.push(def);
+      },
+      setMonarchTokensProvider(id: string, grammar: unknown) {
+        if (api.broken.has(id)) throw new Error(`cannot compile ${id}`);
+        api.providers[id] = grammar;
+      },
+      setLanguageConfiguration(id: string, conf: unknown) {
+        api.configurations[id] = conf;
+      },
+    };
+    return api;
+  };
   return {
     editors,
     makeEditorApi,
     MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
     editor: makeEditorApi(),
+    makeLanguagesApi,
+    languages: makeLanguagesApi(),
   };
 });
 
@@ -114,7 +137,11 @@ async function mount(props: Partial<React.ComponentProps<typeof Monaco>> = {}) {
   const result = render(
     <Monaco value="a\nb\nc" language="spin" diagnostics={[]} onChange={() => {}} {...props} />,
   );
-  await screen.findByTestId('editor');
+  // Scoped to this render's own container, not the global `screen`: two
+  // `mount()` calls in one test (two editors on one page, sharing a
+  // `languages` source) each get their own div in `document.body`, and a
+  // page-wide query would find both and call it ambiguous.
+  await within(result.container).findByTestId('editor');
   await act(async () => {});
   return result;
 }
@@ -123,6 +150,7 @@ describe('Monaco', () => {
   beforeEach(() => {
     fake.editors.length = 0;
     fake.editor = fake.makeEditorApi();
+    fake.languages = fake.makeLanguagesApi();
   });
 
   it('shows the text it was given', async () => {
@@ -252,5 +280,136 @@ describe('Monaco', () => {
     render(<Monaco value="" language="spin" diagnostics={[]} onChange={() => {}} />);
     await waitFor(() => expect(fake.editors.length).toBe(1));
     expect(fake.editor.themes[0].data).toMatchObject({ base: 'vs-dark', colors: {} });
+  });
+
+  /** A stand-in for `ctx.languages`: the three members the wrapper reads. */
+  function source(defs: Array<{ id: string; extensions: string[]; load: () => Promise<any> }>) {
+    const listeners = new Set<() => void>();
+    const failures: [string, string][] = [];
+    return {
+      defs,
+      failures,
+      list: () => defs,
+      subscribe(fn: () => void) {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+      failed(id: string, message: string) {
+        failures.push([id, message]);
+      },
+      add(def: { id: string; extensions: string[]; load: () => Promise<any> }) {
+        defs.push(def);
+        listeners.forEach((fn) => fn());
+      },
+    };
+  }
+
+  const spinGrammar = { tokenizer: { root: [] } };
+  const spinConf = { comments: { lineComment: '--' } };
+
+  it('registers every language id before creating the editor', async () => {
+    const src = source([
+      {
+        id: 'spin',
+        extensions: ['.spin'],
+        load: async () => ({ language: spinGrammar, conf: spinConf }),
+      },
+      {
+        id: 'yaml',
+        extensions: ['.yml'],
+        load: async () => ({ language: { tokenizer: { root: [] } } }),
+      },
+    ]);
+    await mount({ languages: src });
+    expect(fake.languages.registered.map((d) => d.id)).toEqual(['spin', 'yaml']);
+    expect(fake.languages.registered[0].extensions).toEqual(['.spin']);
+    // `registered` is filled inside `load().then(...)` before `create` — the fake records creation order through `editors`.
+    expect(fake.editors).toHaveLength(1);
+  });
+
+  it('hands each grammar and configuration to Monaco once loaded', async () => {
+    const src = source([
+      {
+        id: 'spin',
+        extensions: ['.spin'],
+        load: async () => ({ language: spinGrammar, conf: spinConf }),
+      },
+      {
+        id: 'yaml',
+        extensions: ['.yml'],
+        load: async () => ({ language: { tokenizer: { root: [] } } }),
+      },
+    ]);
+    await mount({ languages: src });
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(spinGrammar));
+    expect(fake.languages.configurations.spin).toBe(spinConf);
+    expect(fake.languages.providers.yaml).toBeDefined();
+    expect(fake.languages.configurations.yaml).toBeUndefined();
+    expect(src.failures).toEqual([]);
+  });
+
+  it('a language registered after the editor exists is applied too', async () => {
+    const src = source([]);
+    await mount({ languages: src });
+    src.add({ id: 'late', extensions: ['.late'], load: async () => ({ language: spinGrammar }) });
+    await waitFor(() => expect(fake.languages.providers.late).toBe(spinGrammar));
+    expect(fake.languages.registered.map((d) => d.id)).toEqual(['late']);
+  });
+
+  it('a grammar that fails to load is reported through failed(); the others still apply', async () => {
+    const src = source([
+      {
+        id: 'bad',
+        extensions: ['.bad'],
+        load: async () => {
+          throw new Error('no such module');
+        },
+      },
+      { id: 'spin', extensions: ['.spin'], load: async () => ({ language: spinGrammar }) },
+    ]);
+    await mount({ languages: src });
+    await waitFor(() => expect(src.failures).toEqual([['bad', 'no such module']]));
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(spinGrammar));
+    expect(fake.languages.registered.map((d) => d.id)).toEqual(['bad', 'spin']);
+  });
+
+  it('a grammar Monaco cannot compile is reported the same way', async () => {
+    fake.languages.broken.add('spin');
+    const src = source([
+      { id: 'spin', extensions: ['.spin'], load: async () => ({ language: spinGrammar }) },
+    ]);
+    await mount({ languages: src });
+    await waitFor(() => expect(src.failures).toEqual([['spin', 'cannot compile spin']]));
+  });
+
+  it('the same definition is not applied twice across two editors on one page', async () => {
+    const def = {
+      id: 'spin',
+      extensions: ['.spin'],
+      load: vi.fn(async () => ({ language: spinGrammar })),
+    };
+    const src = source([def]);
+    await mount({ languages: src });
+    await mount({ languages: src });
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(spinGrammar));
+    expect(def.load).toHaveBeenCalledTimes(1);
+    expect(fake.languages.registered).toHaveLength(1);
+  });
+
+  it('a replaced definition (same id, new object) is loaded again', async () => {
+    const src = source([
+      { id: 'spin', extensions: ['.spin'], load: async () => ({ language: spinGrammar }) },
+    ]);
+    await mount({ languages: src });
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(spinGrammar));
+    const next = { tokenizer: { root: [[/x/, 'x']] } };
+    src.defs.length = 0;
+    src.add({ id: 'spin', extensions: ['.spin'], load: async () => ({ language: next }) });
+    await waitFor(() => expect(fake.languages.providers.spin).toBe(next));
+  });
+
+  it('works without a languages source, as before', async () => {
+    await mount();
+    expect(fake.languages.registered).toEqual([]);
   });
 });
