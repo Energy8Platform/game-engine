@@ -92,8 +92,8 @@ Escape), меню по правому клику, rename закрывает и �
 delete папки с N, DnD (`fireEvent.dragStart/dragOver/drop` с
 `dataTransfer` — внутренний и с `files`), отказ хоста не меняет дерево.
 Playwright (`explorer.spec.ts`): new folder `assets` → new file в ней →
-rename → `dragTo` `concept.png`… нет: `game/spec.json` в `assets` — на
-диске переехал → drop из ОС (`DataTransfer` с `File`, `page.evaluate`)
+rename → `dragTo` файла `game/spec.json` в `assets` — на диске переехал
+→ drop из ОС (`DataTransfer` с `File`, `page.evaluate`)
 → `.mp3` открывается `<audio>` → delete папки с confirm → перенос
 `game/script.spin` в другую папку даёт `e8-server restarting` в статус-баре.
 Полная сюита.
