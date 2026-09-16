@@ -48,7 +48,8 @@ export interface ProjectService {
    * `id`; a missing or empty file is a patch with no rows. Written to a
    * `.tmp` beside the file and renamed over it, so a failure mid-write
    * leaves the old bytes intact. Never throws: an unparsable patch, or a
-   * disk error, is the returned diagnostic and the file is untouched.
+   * disk error, or a document that is not `{ rows: [...] }`, is the
+   * returned diagnostic and the file is untouched.
    *
    * Comments in the file do NOT survive — `js-yaml` dumps data, the same
    * way `e8.yml` is rewritten by `@cordisjs/plugin-include`. The reference
@@ -440,10 +441,22 @@ async function writePatchRow(
       ),
     ];
   }
-  // Anything but `{ rows: [...] }` is treated as an empty patch — `readPatch`
-  // already reports that shape as a diagnostic on every reload; refusing
-  // the write too would leave a person with no way out but a text editor.
-  const rows: unknown[] = isRecord(data) && Array.isArray(data.rows) ? [...data.rows] : [];
+  // Empty (or missing) is a patch with no rows; a document that parses to
+  // anything else but `{ rows: [...] }` is refused, like a syntax error —
+  // rewriting it would silently discard whatever the person meant, and
+  // the diagnostic already names the fix.
+  if (data !== undefined && data !== null && !(isRecord(data) && Array.isArray(data.rows))) {
+    return [
+      diagnostic(
+        'error',
+        'patch',
+        PATCH_FILENAME,
+        `${PATCH_FILENAME} must be an object with a "rows" array, so "${id}" was not written; found ${describeShape(data)}`,
+        `edit ${filename} so it has a "rows" array`,
+      ),
+    ];
+  }
+  const rows: unknown[] = isRecord(data) ? [...(data.rows as unknown[])] : [];
   const index = rows.findIndex((row) => isRecord(row) && row.id === id);
   if (index === -1) rows.push({ id, config });
   else rows[index] = { ...(rows[index] as Record<string, unknown>), config };

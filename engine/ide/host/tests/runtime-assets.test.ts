@@ -945,12 +945,15 @@ describe('PUT /api/composition/rows/:id', () => {
     expect(rowOf(body.rows, 'reels1').config).toEqual({ config: { grid: { cols: 6, rows: 3 } } });
   });
 
-  it('a hot row reloads exactly when a restart field changed', async () => {
-    // A package that is hot but has ONE field the game cannot re-apply in
-    // place — the case neither `renderer1` (all restart, cold) nor `reels1`
-    // (hot, no restart) covers. The schema module's `toJSON()` is a real
-    // schemastery graph, inlined so the temp package needs no resolution
-    // of `schemastery` from a bare OS temp dir.
+  /**
+   * A package that is hot but has ONE field the game cannot re-apply in
+   * place (`port`, `applies: 'restart'`) next to one it can (`speed`) —
+   * the case neither `renderer1` (all restart, cold) nor `reels1` (hot,
+   * no restart) covers. The schema module's `toJSON()` is a real
+   * schemastery graph, inlined so the temp package needs no resolution of
+   * `schemastery` from a bare OS temp dir. Patched to `{ port: 1, speed: 1 }`.
+   */
+  const hotRestartWorkspace = () => {
     const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-hot-restart-'));
     const dir = join(workspace, 'node_modules', 'hot-pkg');
     mkdirSync(dir, { recursive: true });
@@ -986,6 +989,16 @@ describe('PUT /api/composition/rows/:id', () => {
       join(workspace, 'e8.patch.yml'),
       'rows:\n  - id: hot1\n    config: { port: 1, speed: 1 }\n',
     );
+    return workspace;
+  };
+
+  it('a hot row reloads exactly when a restart field changed', async () => {
+    // A package that is hot but has ONE field the game cannot re-apply in
+    // place — the case neither `renderer1` (all restart, cold) nor `reels1`
+    // (hot, no restart) covers. The schema module's `toJSON()` is a real
+    // schemastery graph, inlined so the temp package needs no resolution
+    // of `schemastery` from a bare OS temp dir.
+    const workspace = hotRestartWorkspace();
     host = await createIdeHost({ root: workspace, port: 0 });
 
     const speed = await (await put(host.url, 'hot1', { config: { port: 1, speed: 2 } })).json();
@@ -1043,6 +1056,24 @@ describe('PUT /api/composition/rows/:id', () => {
       { id: 'renderer1', config: { width: 1 } },
       { id: 'stage1', config: { design: { width: 2 } } },
     ]);
+  });
+
+  it('two writes on the same id fired together each diff against what the one before left', async () => {
+    // Both are queued before either applies. The first changes the
+    // restart key (`port` 1 → 2): reload. The second changes only `speed`
+    // RELATIVE TO THE FIRST — but relative to the state both saw when
+    // queued, `port` changed too. `prev` captured at request time would
+    // say reload for both; captured inside the chain, only for the first.
+    const workspace = hotRestartWorkspace();
+    host = await createIdeHost({ root: workspace, port: 0 });
+    const [a, b] = await Promise.all([
+      put(host.url, 'hot1', { config: { port: 2, speed: 1 } }),
+      put(host.url, 'hot1', { config: { port: 2, speed: 2 } }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect((await a.json()).reload).toBe(true);
+    expect((await b.json()).reload).toBe(false);
+    expect(rowOf(patchOf(workspace).rows, 'hot1').config).toEqual({ port: 2, speed: 2 });
   });
 
   it('tells every /ide socket — root and preview — which row changed and whether to reload', async () => {

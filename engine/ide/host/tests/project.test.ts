@@ -172,6 +172,32 @@ describe('project.writePatchRow', () => {
     await host.stop();
   });
 
+  it('refuses a document that is not { rows: [...] }, byte-for-byte untouched', async () => {
+    for (const wrong of ['rows: "x"\n', '- id: reels1\n']) {
+      const dir = copyFixtureToTemp('project-patched');
+      writeFileSync(join(dir, 'e8.patch.yml'), wrong);
+      const host = await createIdeHost({ root: dir, port: 0 });
+      const diagnostics = await host.ctx.project.writePatchRow('reels1', { grid: 9 });
+      expect(diagnostics, wrong).toHaveLength(1);
+      expect(diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'patch' });
+      expect(diagnostics[0].message).toContain('"rows" array');
+      expect(readFileSync(join(dir, 'e8.patch.yml'), 'utf8')).toBe(wrong);
+      expect(existsSync(join(dir, 'e8.patch.yml.tmp'))).toBe(false);
+      await host.stop();
+    }
+  });
+
+  it('an empty file is a patch with no rows and gets the row', async () => {
+    for (const empty of ['', '# only a comment\n', 'null\n']) {
+      const dir = copyFixtureToTemp('project-patched');
+      writeFileSync(join(dir, 'e8.patch.yml'), empty);
+      const host = await createIdeHost({ root: dir, port: 0 });
+      expect(await host.ctx.project.writePatchRow('reels1', { grid: 1 }), empty).toEqual([]);
+      expect(patchOf(dir)).toEqual({ rows: [{ id: 'reels1', config: { grid: 1 } }] });
+      await host.stop();
+    }
+  });
+
   it('never leaves a .tmp behind when the rename fails', async () => {
     // A DIRECTORY where the patch file should be: reading it fails like a
     // missing file (an empty patch), the temp file writes fine, and the
@@ -202,6 +228,21 @@ describe('project.writePatchRow', () => {
       await host.stop();
     },
   );
+
+  it("slot-basic's template patch still resolves to the same rows after its comments moved to README.md", () => {
+    expect(
+      yaml.load(
+        readFileSync(join(__dirname, '../../../templates/slot-basic/e8.patch.yml'), 'utf8'),
+      ),
+    ).toEqual({
+      rows: [
+        { id: 'renderer1', config: { width: 480, height: 288, background: '#10121a' } },
+        { id: 'stage1', config: { design: { width: 480, height: 288 } } },
+        { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
+        { id: 'mechanics1', config: { stages: { base_game: 'classic' } } },
+      ],
+    });
+  });
 
   it("first-slot's reference patch still resolves to the same rows after its comments moved to README.md", () => {
     // The IDE rewrites this file without comments (the writer above), so

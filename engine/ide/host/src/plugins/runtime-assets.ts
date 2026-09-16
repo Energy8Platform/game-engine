@@ -495,8 +495,9 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
    * `reload` is decided HERE, from data: a cold row (`hot: false`) always
    * reloads; a hot row reloads only when a changed top-level key carries
    * `applies: 'restart'` in its schema. "Changed" compares the row's
-   * config BEFORE the write (captured first) with the one after the
-   * reload, per top-level key, by JSON — a dropped key is a change too.
+   * config BEFORE the write (captured inside the chained task, so it is
+   * the state the previous write left) with the one after the reload, per
+   * top-level key, by JSON — a dropped key is a change too.
    */
   let chain: Promise<unknown> = Promise.resolve();
   const putRow: Parameters<Server['put']>[1] = async (req, res) => {
@@ -513,14 +514,16 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       res.json({ error: `PUT ${req.path} needs a JSON body shaped { config: object }` });
       return;
     }
-    const row = ctx.project.composition.rows.find((candidate) => candidate.id === id);
-    if (!row) {
+    if (!ctx.project.composition.rows.some((candidate) => candidate.id === id)) {
       res.status = 400;
       res.json({ error: `no row with id "${id}"` });
       return;
     }
     const task = async () => {
-      const prev = row.config;
+      // Read INSIDE the chain: a second PUT on the same id must diff
+      // against the state the first one left, not the one both saw queued.
+      const prev =
+        ctx.project.composition.rows.find((candidate) => candidate.id === id)?.config ?? {};
       const written = await ctx.project.writePatchRow(id, next as Record<string, unknown>);
       if (written.length) {
         res.status = 500;
