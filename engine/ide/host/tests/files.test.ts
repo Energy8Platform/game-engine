@@ -771,7 +771,7 @@ describe('files service — remove, now directories too', () => {
     // `rmSync`-ed the whole project. `.` and `game/..` both resolve to
     // `cwd`, which is inside itself and inside no protected directory —
     // so every earlier check passed it. Only the writing verbs are
-    // asserted; `read('.')` keeps answering `is-directory`.
+    // asserted; `read('.')` meets the same guard and answers `protected-path`.
     const dir = fixture('plain');
     const ctx = await hostFor(dir);
     const protectedPath = { code: 'protected-path' };
