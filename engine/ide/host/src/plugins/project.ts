@@ -49,7 +49,10 @@ export interface ProjectService {
    * `.tmp` beside the file and renamed over it, so a failure mid-write
    * leaves the old bytes intact. Never throws: an unparsable patch, or a
    * disk error, or a document that is not `{ rows: [...] }`, is the
-   * returned diagnostic and the file is untouched.
+   * returned diagnostic and the file is untouched. An entry INSIDE `rows`
+   * that is not an `{ id, … }` object is not refused, though — it is kept
+   * verbatim (it can never match `id`, so it is neither replaced nor
+   * dropped); `readPatch` is what reports it, on every read.
    *
    * Comments in the file do NOT survive — `js-yaml` dumps data, the same
    * way `e8.yml` is rewritten by `@cordisjs/plugin-include`. The reference

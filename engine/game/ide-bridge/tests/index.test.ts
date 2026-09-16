@@ -701,7 +701,7 @@ describe('ide-bridge — naming a stage the module was never told about', () => 
     expect(bind).not.toHaveBeenCalled();
   });
 
-  it('the stage the composition binds is read once, before this module binds anything', () => {
+  it('the stage the composition binds is read once, before this module binds anything', async () => {
     // Otherwise the fallback would depend on what the human had already
     // typed: binding a second stage from the IDE would make
     // `bindings()` report two, and a later row naming no stage would stop
@@ -719,6 +719,11 @@ describe('ide-bridge — naming a stage the module was never told about', () => 
       bridgeUrl: 'ws://x/ide',
       socketFactory: () => socket as never,
     });
+
+    // Past the tick on which this module's own `inject(['mechanics'])`
+    // first fires (cordis runs it asynchronously) — it must not re-read
+    // the stages off a registry this module has already bound on.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Now the row stops naming a stage. The fallback must still be
     // `only_stage`, not "ambiguous, there are two". A mechanic that is not
@@ -1390,5 +1395,151 @@ describe('ide-bridge — re-applying game rows from a game-composition frame', (
 
     expect(fresh.bind).toHaveBeenCalledWith('base_game', 'cascade');
     expect(stale.bind).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The override this module holds — the last (stage, mechanic) it applied
+ * from its row or a snapshot — must outlive the registry it was applied
+ * to. A hot `mechanics1` re-apply (`gameRows.update`) restarts that row's
+ * fiber: the old registry, with this module's bind on it, is disposed, and
+ * a fresh one is provided with only the composition's own `stages`. Nothing
+ * re-broadcasts a snapshot on a game-row PUT, so without a replay the
+ * override silently reverted until the next unrelated composition change.
+ *
+ * Real cordis here, not `ctx.provide` by hand: what is under test is that a
+ * sibling `ctx.inject(['mechanics'])` on the same ctx re-fires when the
+ * providing fiber restarts (measured on rc.8 — the provide's disposer and
+ * the ACTIVE transition both notify), and that a row which registers into
+ * the registry from its OWN `inject` (the way `reelstep1` does) has done so
+ * before this module's replay lands, because it injected first.
+ */
+describe('ide-bridge — replaying its override when `mechanics` is re-provided', () => {
+  /** A registry the shape of the real one for `bind`/`register`/`forStage`: a bind resolves only once the id is registered. */
+  function registry(stages: Record<string, string>) {
+    const bound = new Map(Object.entries(stages));
+    const registered = new Set<string>();
+    return {
+      bind: vi.fn((stage: string, id: string) => {
+        bound.set(stage, id);
+      }),
+      register: (id: string) => {
+        registered.add(id);
+      },
+      forStage: (stage: string) => {
+        const id = bound.get(stage);
+        return id !== undefined && registered.has(id) ? { id } : null;
+      },
+      bindings: () => Object.fromEntries([...bound].map(([stage]) => [stage, {}])),
+    };
+  }
+  type Registry = ReturnType<typeof registry>;
+
+  /** A `mechanics1`-shaped row: provides a fresh registry per apply, exactly what a fiber restart does. */
+  const mechanicsRow = {
+    name: 'mechanics',
+    apply(c: Context, config: { stages: Record<string, string> }) {
+      c.provide('mechanics' as never, registry(config.stages) as never);
+    },
+  };
+  /** A `reelstep1`-shaped row: registers its mechanic into WHATEVER registry is current, from its own `inject`. */
+  const reelStepRow = {
+    name: 'reelstep',
+    apply(c: Context) {
+      c.inject(['mechanics'], (ic) => {
+        (ic.reflect.get('mechanics', false) as Registry).register('reel-step');
+      });
+    },
+  };
+  const current = () => ctx!.reflect.get('mechanics', false) as Registry;
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  async function booted() {
+    ctx = new Context();
+    const fiber = ctx.plugin(mechanicsRow, { stages: { base_game: 'classic' } });
+    await fiber.await();
+    ctx.plugin(reelStepRow);
+    await tick();
+    const socket = fakeSocket();
+    const reported: { message: string }[] = [];
+    ideBridge.apply(ctx, {
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => socket as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+    await tick();
+    return { fiber, socket, reported };
+  }
+
+  it('re-binds the last snapshot binding onto the registry a hot mechanics1 re-apply provides', async () => {
+    const { fiber, socket } = await booted();
+    socket.emit(
+      snapshotMessage([{ name: '@energy8engine/ide-bridge', config: { mechanic: 'reel-step' } }]),
+    );
+    expect(current().forStage('base_game')).toEqual({ id: 'reel-step' });
+    const stale = current();
+
+    // What `gameRows.update('mechanics1', …)` does: the row's own fiber restarts with the new config.
+    fiber.update({ stages: { base_game: 'cascade' } });
+    await fiber.await();
+    await tick();
+
+    expect(current()).not.toBe(stale);
+    expect(current().forStage('base_game')).toEqual({ id: 'reel-step' });
+  });
+
+  it('re-binds the row’s own boot-time binding too, and finds the id reelstep1 re-registered first', async () => {
+    ctx = new Context();
+    const fiber = ctx.plugin(mechanicsRow, { stages: { base_game: 'classic' } });
+    await fiber.await();
+    ctx.plugin(reelStepRow);
+    await tick();
+    const reported: { message: string }[] = [];
+    ideBridge.apply(ctx, {
+      mechanic: 'reel-step',
+      bridgeUrl: 'ws://x/ide',
+      socketFactory: () => fakeSocket() as never,
+      onDiagnostic: (d) => reported.push(d),
+    });
+    await tick();
+    expect(reported).toEqual([]);
+
+    fiber.update({ stages: { base_game: 'cascade' } });
+    await fiber.await();
+    await tick();
+
+    // Bound, AND resolved — `reelstep1`'s inject ran before this module's replay, so `forStage` sees a registered id and no "no mechanic with that id" diagnostic is raised.
+    expect(current().forStage('base_game')).toEqual({ id: 'reel-step' });
+    expect(reported).toEqual([]);
+  });
+
+  it('reads the composition’s stages from the NEW registry — a hot stages change is not the old warning', async () => {
+    const { fiber, socket, reported } = await booted();
+
+    fiber.update({ stages: { free_spins: 'classic' } });
+    await fiber.await();
+    await tick();
+    socket.emit(
+      snapshotMessage([
+        {
+          name: '@energy8engine/ide-bridge',
+          config: { stage: 'free_spins', mechanic: 'reel-step' },
+        },
+      ]),
+    );
+
+    expect(current().forStage('free_spins')).toEqual({ id: 'reel-step' });
+    expect(reported).toEqual([]);
+  });
+
+  it('replays nothing when it never applied a binding', async () => {
+    const { fiber } = await booted();
+
+    fiber.update({ stages: { base_game: 'cascade' } });
+    await fiber.await();
+    await tick();
+
+    expect(current().bind).not.toHaveBeenCalled();
+    expect(current().forStage('base_game')).toBeNull(); // `cascade` was never registered here — nothing else bound it either
   });
 });

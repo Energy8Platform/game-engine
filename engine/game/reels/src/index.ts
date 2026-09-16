@@ -170,11 +170,29 @@ export interface ReelsBoard extends BoardApi {
 export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
   const reelSystem: ReelSystem = createReelSystem(options);
   const api = boardFromReelSystem(reelSystem);
+  // A hot `reels1` re-apply (`gameRows.update`) runs `destroy()` on THIS
+  // board and provides a new one; a caller still holding this one (a spin
+  // in flight, a page that read `ctx.board` once) would otherwise drive a
+  // torn-down reel system — measured: the legacy `spin` resolved on it and
+  // the spin was recorded as presented, silently. Refused instead, on every
+  // `BoardApi` method: `executePlan` turns the throw into a diagnostic and
+  // the page paints "presentation failed".
+  let destroyed = false;
+  const guarded =
+    <S>(run: (step: S) => Promise<void>) =>
+    async (step: S) => {
+      if (destroyed) throw new Error('board destroyed — reels1 was re-applied; spin again');
+      await run(step);
+    };
   return {
-    ...api,
+    spinTo: guarded(api.spinTo),
+    revealWins: guarded(api.revealWins),
+    remove: guarded(api.remove),
+    refill: guarded(api.refill),
     view: reelSystem.view,
     grid: reelSystem.grid,
     destroy() {
+      destroyed = true;
       reelSystem.destroy();
     },
   };

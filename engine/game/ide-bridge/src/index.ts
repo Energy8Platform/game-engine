@@ -40,12 +40,25 @@
  *     a broadcast snapshot contains a row named after this package naming
  *     a different mechanic, it rebinds — live, no reload, anywhere.
  *
- * A `hot:false` row is a different, legitimate story this module has no
- * part in: `engine/ide/client/src/screens/PreviewWall.tsx`'s `Preview`
- * component reloads the iframe for THAT case instead. This
- * package declares `"e8": { "hot": true }` in its own package.json — a
- * config change here genuinely never needs the iframe to reload, because
- * this is the mechanism that makes that true.
+ *     The same socket also carries the host's `{type:'game-composition',
+ *     rows, changed, reload}` frame, sent after `PUT /api/composition/
+ *     rows/:id` wrote a GAME row. With `reload: false` this module hands
+ *     each changed row's config to the runtime's `gameRows.update`, which
+ *     restarts that row's own fiber in place — the second half of the
+ *     hot fork, for every row, not just this one's. And because a hot
+ *     `mechanics1` re-apply replaces the registry this module bound on, it
+ *     remembers the last (stage, mechanic) it applied and puts it back on
+ *     the new registry when `mechanics` is provided again (`lastApplied`).
+ *
+ * Whether an edit needs the iframe reloaded instead is the HOST's verdict,
+ * not this module's: `game-composition.reload` is `true` for a `hot:false`
+ * row and for a changed field the row's schema marks `applies: 'restart'`,
+ * and the IDE (`engine/ide/client/src/screens/PreviewWall.tsx`'s `Preview`)
+ * reloads the frame on it — this module does nothing with such a frame,
+ * since any re-apply would be thrown away with the page. This package
+ * declares `"e8": { "hot": true }` in its own package.json — a config
+ * change here genuinely never needs the iframe to reload, because this is
+ * the mechanism that makes that true.
  */
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
@@ -463,15 +476,18 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   }
 
   /**
-   * The stages this COMPOSITION binds, read once, before this module has
-   * bound anything itself.
+   * The stages this COMPOSITION binds, read once per registry, before this
+   * module has bound anything on it.
    *
-   * Once, and up front, for a reason: this module's own binds land in
-   * `mechanics.bindings()` too, so reading it fresh each time would make
-   * the answer depend on what the human had already typed. Reading it at
-   * boot — after `createGame` has resolved, so every row that was going to
-   * bind has — makes it a fact about the project rather than about this
-   * session.
+   * Once per registry, and up front, for a reason: this module's own binds
+   * land in `mechanics.bindings()` too, so reading it fresh each time would
+   * make the answer depend on what the human had already typed. Reading it
+   * at boot — after `createGame` has resolved, so every row that was going
+   * to bind has — makes it a fact about the project rather than about this
+   * session. And again whenever `mechanics` is re-provided (the `inject`
+   * at the bottom of this function): a hot `mechanics1` re-apply that
+   * changes `stages` is a new fact about the project, and the old list
+   * would warn about a stage the composition now does bind.
    *
    * It is also the only list of stage names available on this side of the
    * wire. The math's own list lives in `SpinSchema.stages`, which
@@ -479,8 +495,19 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
    * declares but binds to nothing is therefore invisible here, which is
    * exactly why the check below is a warning and not a refusal.
    */
-  const composedStages = Object.keys(mechanics.bindings());
-  const soleComposedStage = composedStages.length === 1 ? composedStages[0] : null;
+  let composedStages = Object.keys(mechanics.bindings());
+  let soleComposedStage = composedStages.length === 1 ? composedStages[0] : null;
+  /**
+   * The binding this module last put on a registry — from its own row at
+   * boot, or from the latest snapshot naming one. Replayed onto the NEXT
+   * registry: a hot `mechanics1` re-apply disposes the one this was bound
+   * on, and the fresh one carries only the composition's own `stages`.
+   * Nothing re-broadcasts a snapshot on a game-row PUT (the host sends a
+   * `game-composition` frame, which names the changed row, not this one),
+   * so without the replay the human's override silently reverted until the
+   * next unrelated composition change (measured — Task 4's review, (e)).
+   */
+  let lastApplied: { stage: string; mechanic: string } | null = null;
 
   // The last id this module complained about, per stage. Only ever
   // suppresses a repeat of the same SENTENCE — never a bind, which stays
@@ -651,10 +678,34 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       return;
     }
     reportedNoStage = false;
+    lastApplied = { stage, mechanic: mechanicId };
     bind(stage, mechanicId);
   };
 
   applyRow(config);
+
+  // Re-fires whenever `mechanics` is provided again — a hot `mechanics1`
+  // re-apply restarts that row's fiber, which disposes the registry this
+  // module bound on and provides a fresh one (see `lastApplied`). A row
+  // that registers its mechanic from its OWN `inject` (`reelstep1`) was
+  // composed before this module and so re-registers first: by the time
+  // this runs, the id `lastApplied` names resolves again.
+  //
+  // Fires once at boot too, and asynchronously (measured: cordis runs the
+  // callback on a later tick) — AFTER `applyRow(config)` above has bound on
+  // the registry `composedStages` was read from. Re-reading it then would
+  // count this module's own bind as one of the composition's, which is
+  // exactly what the read-once rule exists to prevent; so a registry that
+  // was already read is skipped, by identity.
+  let readFrom = mechanics;
+  ctx.inject(['mechanics'], () => {
+    const fresh = currentMechanics();
+    if (!fresh || fresh === readFrom) return;
+    readFrom = fresh;
+    composedStages = Object.keys(fresh.bindings());
+    soleComposedStage = composedStages.length === 1 ? composedStages[0] : null;
+    if (lastApplied) bind(lastApplied.stage, lastApplied.mechanic);
+  });
 
   const url =
     config.bridgeUrl ?? (typeof location !== 'undefined' ? `ws://${location.host}/ide` : undefined);

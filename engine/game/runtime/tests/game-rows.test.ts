@@ -154,4 +154,42 @@ describe('gameRows.update', () => {
     // anything still holding it presents nothing, not even the old thing.
     expect(before.forStage('base_game')).toBeNull();
   });
+
+  it('two updates of one row back-to-back both apply, in order — the second is not dropped on the first’s in-flight restart', async () => {
+    // Measured on cordis rc.8: `fiber.update(v2)` while v1's async `apply`
+    // is still running is DROPPED — the fiber restores v1's epoch and v2
+    // never applies. A form committing twice in quick succession (blur,
+    // then Enter) would lose its last value. `gameRows` serialises per row.
+    const applied: unknown[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({ rows: ROWS, diagnostics: [] }),
+        importModule: async (url) => {
+          const id = url.split('/').pop()!;
+          if (id === 'diagnostics1') return diagnosticsRuntime;
+          if (id !== 'reels1') return { apply: () => {} };
+          return {
+            apply: async (_ctx: unknown, config: { grid?: { cols?: number } }) => {
+              applied.push(config);
+              // The BOOT apply (`cols: 5`) must not wait — only the re-applies do.
+              if (config.grid?.cols !== 5) await gate;
+            },
+          };
+        },
+      },
+    });
+    applied.length = 0;
+
+    const first = game.ctx.gameRows.update('reels1', { grid: { cols: 4 } });
+    const second = game.ctx.gameRows.update('reels1', { grid: { cols: 3 } });
+    release();
+
+    expect(await Promise.all([first, second])).toEqual(['updated', 'updated']);
+    expect(applied).toEqual([{ grid: { cols: 4 } }, { grid: { cols: 3 } }]);
+    expect(game.ctx.diagnostics.list()).toEqual([]);
+  });
 });

@@ -540,7 +540,15 @@ async function presentStage(
     return null;
   }
 
-  await play!.execute(plan, currentBoard());
+  // Same rule for a plan that did not RUN as for one that could not be
+  // made: `execute` never throws, and a step that failed is a diagnostic
+  // it already wrote — a spin against a board `reels1` had just torn down
+  // (a hot re-apply mid-flight) refuses this way, and was read as `done`
+  // here before this line.
+  if ((await play!.execute(plan, currentBoard())).length > 0) {
+    statusEl.textContent = 'presentation failed — see log';
+    return null;
+  }
   return plan;
 }
 

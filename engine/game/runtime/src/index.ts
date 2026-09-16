@@ -614,38 +614,60 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
       { global: true },
     );
 
+    // One chain per row. Measured on cordis rc.8: two overlapping
+    // `fiber.update`s keep ONE — a second call before the first's restart
+    // has begun replaces it (only v2 ever applies), and one landing while
+    // v1's async `apply` is in flight is dropped (the fiber restores v1's
+    // epoch) — so a second edit before the first settled would silently
+    // lose either way. Each row's updates run one after another; different
+    // rows still run concurrently.
+    const chains = new Map<string, Promise<unknown>>();
     ctx.provide('gameRows', {
-      async update(id, config) {
+      update(id, config) {
         const fiber = fibers.get(id);
-        if (!fiber) return 'unknown';
-        try {
-          // `update` is synchronous and only SCHEDULES the restart; what
-          // the re-run `apply` threw surfaces from `await()` (measured:
-          // cordis rc.8 stores it as the fiber's error, which `update`
-          // clears again before the next try).
-          fiber.update(config);
-          await fiber.await();
-          // Resolved without applying: the row's `inject` is still unmet
-          // (the loader said so at boot; this is the same fact, live).
-          if (fiber.state === FIBER_PENDING) {
-            const missing = Object.keys(fiber.inject).filter(
-              (name) => ctx.reflect.get(name, false) === undefined,
-            );
-            throw new Error(
-              `the row did not apply: it injects ${missing
-                .map((name) => `"${name}"`)
-                .join(
-                  ', ',
-                )}, and nothing in the composition provides ${missing.length === 1 ? 'it' : 'them'}`,
-            );
-          }
-          return 'updated';
-        } catch (error) {
-          reportHotFailure(ctx, id, error);
-          return 'failed';
-        }
+        if (!fiber) return Promise.resolve('unknown');
+        const task = () => reapply(fiber, id, config);
+        const prev = chains.get(id) ?? Promise.resolve();
+        const run = prev.then(task, task);
+        chains.set(id, run);
+        return run;
       },
     } satisfies GameRowsService);
+
+    // `reapply` never rejects — a throw is a `'failed'` verdict — so the
+    // chain above cannot be poisoned.
+    async function reapply(
+      fiber: Fiber,
+      id: string,
+      config: Record<string, unknown>,
+    ): Promise<'updated' | 'failed'> {
+      try {
+        // `update` is synchronous and only SCHEDULES the restart; what
+        // the re-run `apply` threw surfaces from `await()` (measured:
+        // cordis rc.8 stores it as the fiber's error, which `update`
+        // clears again before the next try).
+        fiber.update(config);
+        await fiber.await();
+        // Resolved without applying: the row's `inject` is still unmet
+        // (the loader said so at boot; this is the same fact, live).
+        if (fiber.state === FIBER_PENDING) {
+          const missing = Object.keys(fiber.inject).filter(
+            (name) => ctx.reflect.get(name, false) === undefined,
+          );
+          throw new Error(
+            `the row did not apply: it injects ${missing
+              .map((name) => `"${name}"`)
+              .join(
+                ', ',
+              )}, and nothing in the composition provides ${missing.length === 1 ? 'it' : 'them'}`,
+          );
+        }
+        return 'updated';
+      } catch (error) {
+        reportHotFailure(ctx, id, error);
+        return 'failed';
+      }
+    }
 
     // §7.1's pre-flight: a mechanic's `requires` checked against what the
     // math's schema actually declares, before the first spin — not just

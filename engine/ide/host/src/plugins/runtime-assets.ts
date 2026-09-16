@@ -33,7 +33,7 @@ declare module 'cordis' {
  * `dev-game` injects it and calls it once the preview is listening.
  */
 export interface RuntimeAssetsService {
-  /** Registers `/api/composition` and `/plugin-runtime/:id` on `server`, as effects of that server's own scope. */
+  /** Registers `/api/composition` and `/plugin-runtime/:id` on `server`, as effects of that server's own scope. `PUT /api/composition/rows/:id` is NOT among them — the root server only, see `putRow`. */
   attachGameRoutes(server: Server): void;
 }
 
@@ -57,6 +57,12 @@ export interface RuntimeAssetsConfig {
  * `plugins/schema.ts`'s sibling task-3 brief). `GET /plugin-runtime/:id`
  * hands over one row's runtime half so the browser can dynamically
  * `import()` it into the running game.
+ *
+ * `PUT /api/composition/rows/:id { config }` — on the ROOT server only —
+ * is the IDE's one way of editing a GAME row: validated against the row's
+ * schema, written to `e8.patch.yml`, and answered with the fresh rows plus
+ * the host's `reload` verdict, which every `/ide` socket also hears as a
+ * `game-composition` frame (see `putRow`).
  *
  * `/plugin-runtime/:id` is NOT "the fallback" — it is the NON-VITE path:
  * a row's runtime half raw and untransformed, the only way one could be
@@ -514,10 +520,41 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
       res.json({ error: `PUT ${req.path} needs a JSON body shaped { config: object }` });
       return;
     }
-    if (!ctx.project.composition.rows.some((candidate) => candidate.id === id)) {
+    const row = ctx.project.composition.rows.find((candidate) => candidate.id === id);
+    if (!row) {
       res.status = 400;
       res.json({ error: `no row with id "${id}"` });
       return;
+    }
+    // Checked against the row's own schema BEFORE anything is written: a
+    // value cordis would refuse at apply time is not worth a disk write, a
+    // reload, and a frame telling the game to re-apply what cannot apply.
+    // The same graph `GET` serves and the form was drawn from; a row with
+    // no schema is written unchecked, as before.
+    const pkg = readPackageJson(config.cwd, row.name);
+    const { schema } = await schemaOf(
+      row,
+      pkg ? parseManifest(pkg.json, row.id).manifest : null,
+      pkg,
+    );
+    if (schema) {
+      try {
+        new Schema(schema as Schema)(next);
+      } catch (error) {
+        res.status = 400;
+        res.json({
+          diagnostics: [
+            diagnostic(
+              'error',
+              id,
+              'config',
+              error instanceof Error ? error.message : String(error),
+              'fix the value',
+            ),
+          ],
+        });
+        return;
+      }
     }
     const task = async () => {
       // Read INSIDE the chain: a second PUT on the same id must diff

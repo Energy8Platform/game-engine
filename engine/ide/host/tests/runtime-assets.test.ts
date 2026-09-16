@@ -1,6 +1,7 @@
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -1021,6 +1022,33 @@ describe('PUT /api/composition/rows/:id', () => {
     expect((await put(host.url, 'reels1', { config: [1] })).status).toBe(400);
     expect((await put(host.url, 'reels1', 'not json')).status).toBe(400);
     expect(readFileSync(join(dir, 'e8.patch.yml'), 'utf8')).toBe(before);
+  });
+
+  it('400s a config the row’s own schema refuses, naming the field, and writes nothing', async () => {
+    // Checked BEFORE the write: a value cordis would refuse at apply time
+    // is not worth a disk write, a reload, and a game-composition frame
+    // telling the game to re-apply something that cannot apply. The row's
+    // real config shape is `{ config: { grid } }` (see `@energy8engine/reels`'s
+    // `Config`); a stray key the schema does not know passes through, as
+    // schemastery's objects are not strict — only a WRONG value is refused.
+    const dir = e8BaseWorkspace();
+    host = await createIdeHost({ root: dir, port: 0 });
+    expect(existsSync(join(dir, 'e8.patch.yml'))).toBe(false); // the fixture has none: a write would create it
+
+    const res = await put(host.url, 'reels1', { config: { config: { grid: { cols: 'x' } } } });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.diagnostics).toHaveLength(1);
+    expect(body.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      plugin: 'reels1',
+      where: 'config',
+    });
+    expect(body.diagnostics[0].message).toContain('cols');
+    expect(existsSync(join(dir, 'e8.patch.yml'))).toBe(false);
+    // And a row with no schema at all is still written unchecked.
+    expect((await put(host.url, 'spinlog1', { config: { anything: 'x' } })).status).toBe(200);
   });
 
   it.skipIf(process.getuid?.() === 0)(

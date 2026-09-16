@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Container } from 'pixi.js';
 import type { SymbolResolver } from '@energy8platform/game-engine/slot';
+import { executePlan } from '@energy8engine/play-loop';
 import { createReelsBoard } from '../src/index';
 
 /**
@@ -49,5 +50,44 @@ describe('createReelsBoard (real createReelSystem, synchronous paths only)', () 
     const cell = board.grid.getCell(0, 0) as unknown as { frameStyleKey: string };
     expect(cell.frameStyleKey).toBe('removed');
     board.destroy();
+  });
+});
+
+/**
+ * A hot `reels1` re-apply (`gameRows.update`) disposes the row's effects —
+ * `board.destroy()` among them — and provides a NEW board. A caller that
+ * captured the old one (a spin already in flight, a page that read
+ * `ctx.board` once) would otherwise drive a torn-down reel system: the
+ * legacy `spin` resolved `done` on it and the spin was recorded as
+ * presented, silently (measured — Task 5's product defect). A destroyed
+ * board refuses instead, and `executePlan` turns that refusal into the
+ * diagnostic the page paints.
+ */
+describe('createReelsBoard — after destroy()', () => {
+  const plan = [{ kind: 'spinTo' as const, board: [[1]] }];
+
+  it('every BoardApi method throws, naming the cause', async () => {
+    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    board.destroy();
+
+    for (const call of [
+      () => board.spinTo({ kind: 'spinTo', board: [[1]] }),
+      () => board.revealWins({ kind: 'revealWins', total: 0, lines: [] }),
+      () => board.remove({ kind: 'remove', cells: [] }),
+      () => board.refill({ kind: 'refill', board: [[1]] }),
+    ]) {
+      await expect(call()).rejects.toThrow('board destroyed — reels1 was re-applied; spin again');
+    }
+  });
+
+  it('a plan run against it is a play-loop diagnostic, not a throw and not a silent "done"', async () => {
+    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    board.destroy();
+
+    const problems = await executePlan(plan, board);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0].plugin).toBe('play-loop');
+    expect(problems[0].message).toContain('board destroyed');
   });
 });
