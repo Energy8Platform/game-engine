@@ -90,11 +90,15 @@ async function startHost(cwd: string): Promise<IdeHost> {
  * that isn't routing the path through a URL parser first — sends the
  * literal bytes, unresolved, same as this helper does.
  */
-function rawGet(host: IdeHost, rawPath: string): Promise<{ status: number; text: string }> {
+function rawGet(
+  host: IdeHost,
+  rawPath: string,
+  method = 'GET',
+): Promise<{ status: number; text: string }> {
   const url = new URL(host.url);
   return new Promise((resolveRequest, reject) => {
     const req = httpRequest(
-      { host: url.hostname, port: url.port, path: rawPath, method: 'GET' },
+      { host: url.hostname, port: url.port, path: rawPath, method },
       (res) => {
         let text = '';
         res.on('data', (chunk) => (text += chunk));
@@ -760,6 +764,32 @@ describe('files service — remove, now directories too', () => {
     expect(
       (await ctx.files.write('node_modules/x/y.txt', bytes('a'))).diagnostics[0],
     ).toMatchObject({ code: 'protected-path' });
+  });
+
+  it('refuses the project directory itself, however it is spelled', async () => {
+    // Measured before this existed: `DELETE /api/files/.` answered 200 and
+    // `rmSync`-ed the whole project. `.` and `game/..` both resolve to
+    // `cwd`, which is inside itself and inside no protected directory —
+    // so every earlier check passed it. Only the writing verbs are
+    // asserted; `read('.')` keeps answering `is-directory`.
+    const dir = fixture('plain');
+    const ctx = await hostFor(dir);
+    const protectedPath = { code: 'protected-path' };
+    expect((await ctx.files.remove('.')).diagnostics[0]).toMatchObject(protectedPath);
+    expect((await ctx.files.remove('game/..')).diagnostics[0]).toMatchObject(protectedPath);
+    expect((await ctx.files.move('.', 'x')).diagnostics[0]).toMatchObject(protectedPath);
+    expect((await ctx.files.mkdir('.')).diagnostics[0]).toMatchObject(protectedPath);
+    expect((await ctx.files.create('.')).diagnostics[0]).toMatchObject(protectedPath);
+    expect(existsSync(join(dir, 'e8.yml'))).toBe(true);
+  });
+
+  it('DELETE /api/files/game/.. over raw HTTP is a 400 and the project is still there', async () => {
+    const dir = fixture('plain');
+    const host = await startHost(dir);
+    const res = await rawGet(host, '/api/files/game/..', 'DELETE');
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.text).diagnostics[0].code).toBe('protected-path');
+    expect(existsSync(join(dir, 'e8.yml'))).toBe(true);
   });
 });
 

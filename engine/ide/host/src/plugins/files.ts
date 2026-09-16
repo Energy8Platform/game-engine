@@ -814,6 +814,21 @@ function describeRefusal(
   requestedPath: string,
   target: string,
 ): Diagnostic | undefined {
+  // The project directory itself is inside itself and inside no protected
+  // directory, so every check below passes it — and `remove('.')` then
+  // `rmSync`-ed the whole project (measured: `DELETE /api/files/.`,
+  // `/game/..` and `/%2E` all answered 200). Checked on the spelled path
+  // before any realpath work, since `resolve` has already collapsed the
+  // `.` and `..` spellings into the one string this compares against.
+  if (target === resolve(cwd)) {
+    return fileDiagnostic(
+      'error',
+      'protected-path',
+      requestedPath,
+      'the project directory itself is not an entry this editor changes',
+    );
+  }
+
   const ancestor = nearestExistingAncestor(target);
 
   let realAncestor: string;
