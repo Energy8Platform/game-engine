@@ -1214,6 +1214,36 @@ describe('dev-game — restart on a script.spin write', () => {
     expect(ctx!.session.pid).toBe(pidBefore);
   });
 
+  it('a .spin removed from gamesDir, or gamesDir itself going away, restarts the session too — a moved or removed game/ must not leave e8-server on stale math', async () => {
+    // Emitted directly, the way the in-flight test above does, and the
+    // restart counted on a spy rather than through a pid: three events
+    // in one test would mean three real respawns and three readiness
+    // polls, for a predicate that is one string comparison.
+    const projectDir = writableProject();
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: projectDir,
+      gamesDir: join(projectDir, 'game'),
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      port: 0,
+      previewPort: 0,
+    });
+    const restart = vi.spyOn(ctx!.session, 'restart').mockResolvedValue({ diagnostics: [] });
+
+    ctx!.emit('files/removed', { path: 'game/script.spin' });
+    expect(restart).toHaveBeenCalledTimes(1);
+
+    ctx!.emit('files/removed', { path: 'assets/x.png' });
+    expect(restart).toHaveBeenCalledTimes(1);
+
+    // `game` renamed to `game2`: `files/removed` for the old name is what
+    // restarts (the new name is outside gamesDir and says nothing).
+    ctx!.emit('files/removed', { path: 'game' });
+    ctx!.emit('files/written', { path: 'game2' });
+    expect(restart).toHaveBeenCalledTimes(2);
+  });
+
   it('a write to a NON-.spin file inside gamesDir does not restart the session', async () => {
     const projectDir = writableProject();
     await bare();

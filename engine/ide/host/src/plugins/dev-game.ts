@@ -344,15 +344,27 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       alive = false;
     };
   }, 'dev-game:alive');
-  ctx.on('files/written', ({ path }) => {
-    if (!path.endsWith('.spin')) return;
-    if (!isInside(gamesDir, resolve(config.root, path))) return;
+  //
+  // `files/removed` too, with the same predicate: a `.spin` moved or
+  // removed out of `gamesDir` is as much a change to the math as a save
+  // into it, and a removed or renamed `game/` directory (the path IS
+  // `gamesDir`, or an ancestor of it) takes every `.spin` with it. Before
+  // this, both left e8-server answering spins from a script that was no
+  // longer in the project.
+  const mathChanged = (path: string): boolean => {
+    const abs = resolve(config.root, path);
+    return (path.endsWith('.spin') && isInside(gamesDir, abs)) || isInside(abs, gamesDir);
+  };
+  const restartOn = ({ path }: { path: string }) => {
+    if (!mathChanged(path)) return;
     void ctx.session.restart().then(({ diagnostics }) => {
       if (!alive) return;
       ctx.ideRpc.reportGameDiagnostics('session', diagnostics);
       ctx.ideRpc.reportGameDiagnostics('spin', []);
     });
-  });
+  };
+  ctx.on('files/written', restartOn);
+  ctx.on('files/removed', restartOn);
 
   // The engine dying is the same speaker's fact, said without waiting for
   // a spin to find the corpse — and the next clean restart above is what
