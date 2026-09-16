@@ -485,13 +485,15 @@ describe('files service — remove', () => {
     expect(diagnostics[0].message).toContain('never-existed.txt');
   });
 
-  it('refuses to remove a directory, naming what it is', async () => {
-    // Removing a directory is a different intent with a different cost.
+  it('removes a directory, not only a file', async () => {
+    // `remove` used to refuse a directory, naming what it is; it now takes
+    // it, recursively — see "files service — remove, now directories too"
+    // below for the fuller coverage (protected dirs, everything under it).
     const dir = fixture('plain');
     const ctx = await hostFor(dir);
     const { diagnostics } = await ctx.files.remove('game');
-    expect(diagnostics[0].message).toMatch(/directory/i);
-    expect(existsSync(join(dir, 'game'))).toBe(true);
+    expect(diagnostics).toEqual([]);
+    expect(existsSync(join(dir, 'game'))).toBe(false);
   });
 
   it('refuses to remove outside the project', async () => {
@@ -677,5 +679,128 @@ describe('files routes', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.diagnostics[0].message).toContain('/api/files/%zz');
+  });
+});
+
+describe('files service — mkdir and create', () => {
+  it('mkdir makes a directory the tree then lists', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.mkdir('assets');
+    expect(diagnostics).toEqual([]);
+    const { entries } = await ctx.files.tree();
+    expect(entries).toContainEqual({ path: 'assets', kind: 'dir' });
+  });
+
+  it('mkdir refuses a path that is already there, file or directory', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.mkdir('game')).diagnostics[0]).toMatchObject({ code: 'exists' });
+    expect((await ctx.files.mkdir('e8.yml')).diagnostics[0]).toMatchObject({ code: 'exists' });
+  });
+
+  it('mkdir does not create parents', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.mkdir('a/b/c');
+    expect(diagnostics[0]).toMatchObject({ code: 'not-found' });
+    expect((await ctx.files.tree()).entries.some((e) => e.path === 'a')).toBe(false);
+  });
+
+  it('create makes an empty file and refuses to make it twice', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.create('game/notes.txt')).diagnostics).toEqual([]);
+    const { bytes: read } = await ctx.files.read('game/notes.txt');
+    expect(read).toEqual(new Uint8Array());
+    expect((await ctx.files.create('game/notes.txt')).diagnostics[0]).toMatchObject({
+      code: 'exists',
+    });
+  });
+
+  it('create does not create parents either', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.create('nope/x.txt')).diagnostics[0]).toMatchObject({
+      code: 'not-found',
+    });
+  });
+
+  it('both refuse to climb out, and both refuse the protected directories', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    expect((await ctx.files.mkdir('../out')).diagnostics[0]).toMatchObject({
+      code: 'outside-project',
+    });
+    for (const p of ['.git/x', 'node_modules/x', '.e8/x']) {
+      expect((await ctx.files.mkdir(p)).diagnostics[0], p).toMatchObject({
+        code: 'protected-path',
+      });
+      expect((await ctx.files.create(p)).diagnostics[0], p).toMatchObject({
+        code: 'protected-path',
+      });
+    }
+  });
+});
+
+describe('files service — remove, now directories too', () => {
+  it('removes a directory and everything under it', async () => {
+    const ctx = await hostFor(fixture('plain'));
+    const { diagnostics } = await ctx.files.remove('game');
+    expect(diagnostics).toEqual([]);
+    const { entries } = await ctx.files.tree();
+    expect(entries.some((e) => e.path.startsWith('game'))).toBe(false);
+  });
+
+  it('still refuses node_modules and .e8, like .git', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, 'node_modules', 'x'), { recursive: true });
+    mkdirSync(join(dir, '.e8'), { recursive: true });
+    const ctx = await hostFor(dir);
+    expect((await ctx.files.remove('node_modules/x')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect((await ctx.files.remove('.e8')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect(
+      (await ctx.files.write('node_modules/x/y.txt', bytes('a'))).diagnostics[0],
+    ).toMatchObject({ code: 'protected-path' });
+  });
+});
+
+describe('files routes — POST', () => {
+  it('POST {kind:"dir"} makes a directory, {kind:"file"} an empty file', async () => {
+    const host = await startHost(fixture('plain'));
+    const post = (path: string, body: unknown) =>
+      fetch(`${host.url}/api/files/${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect((await post('assets', { kind: 'dir' })).status).toBe(200);
+    expect((await post('assets/readme.txt', { kind: 'file' })).status).toBe(200);
+    const tree = (await (await fetch(`${host.url}/api/files`)).json()) as {
+      entries: { path: string; kind: string }[];
+    };
+    expect(tree.entries).toContainEqual({ path: 'assets', kind: 'dir' });
+    expect(tree.entries).toContainEqual({ path: 'assets/readme.txt', kind: 'file', size: 0 });
+  });
+
+  it('POST without a usable body is a 400 malformed-request; an existing path is a 400 exists', async () => {
+    const host = await startHost(fixture('plain'));
+    const bad = await fetch(`${host.url}/api/files/x`, { method: 'POST', body: 'nope' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { diagnostics: { code: string }[] }).diagnostics[0].code).toBe(
+      'malformed-request',
+    );
+    const dup = await fetch(`${host.url}/api/files/game`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'dir' }),
+    });
+    expect(dup.status).toBe(400);
+  });
+
+  it('serves video with a video mime', async () => {
+    const dir = fixture('plain');
+    writeFileSync(join(dir, 'clip.mp4'), bytes('not really'));
+    const host = await startHost(dir);
+    const res = await fetch(`${host.url}/api/files/clip.mp4`);
+    expect(res.headers.get('content-type')).toBe('video/mp4');
   });
 });

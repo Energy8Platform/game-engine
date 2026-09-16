@@ -5,7 +5,7 @@
  * config files and report what they mean. Three of the IDE's five screens
  * (spec, code editor is more general than that) need the actual tree and
  * actual file contents, not a resolved summary of them — this plugin is
- * that: list, read, and now write and remove one file at a time.
+ * that: list, read, write, make, and remove — one entry at a time.
  */
 import {
   closeSync,
@@ -26,6 +26,7 @@ import type { Context } from 'cordis';
 import {
   type Diagnostic,
   type DiagnosticsResponse,
+  type FileCreateRequest,
   type FileEntry,
   type FileFailure,
   type FileTreeResponse,
@@ -62,10 +63,15 @@ export interface FilesService {
   read(path: string): Promise<{ bytes?: Uint8Array; diagnostics: Diagnostic[] }>;
   /** Creates or replaces a file. Missing directories are created. */
   write(path: string, bytes: Uint8Array): Promise<DiagnosticsResponse>;
+  /** Makes an empty directory at a path nothing occupies yet. Does not create parents. */
+  mkdir(path: string): Promise<DiagnosticsResponse>;
+  /** Makes an empty file at a path nothing occupies yet. Does not create parents. */
+  create(path: string): Promise<DiagnosticsResponse>;
   /**
-   * Removes a file. Not a directory, and not a symlink — both are a
-   * different intent with a different cost, and `describeRefusal` says so
-   * in the diagnostic rather than doing something surprising.
+   * Removes a file, or a directory with everything under it. Not a
+   * symlink — that is a different intent with a different cost, and
+   * `describeRefusal` says so in the diagnostic rather than doing
+   * something surprising.
    */
   remove(path: string): Promise<DiagnosticsResponse>;
 }
@@ -91,17 +97,16 @@ export const inject = ['server'];
 const SKIPPED_DIRS = new Set(['node_modules', '.git']);
 
 /**
- * Directory names no read, write or remove may reach through, wherever
- * they occur. Only `.git` — and not for tidiness, which is what
- * `SKIPPED_DIRS` above is for. `.git/hooks/pre-commit` is a file the
- * browser could write and the developer's own shell would then run at
- * their next commit, and `SKIPPED_DIRS` would keep it out of the tree
- * afterwards, so nothing on any screen would ever show it again.
- * `.git/config` is the other half: it can carry a credential in a remote
- * URL, and nothing in this editor has a reason to read it.
- * `node_modules` stays writable: untidy, not dangerous.
+ * Directory names no read, write, mkdir, create or remove may reach
+ * through, wherever they occur. `.git` can hold a credential —
+ * `.git/config` in a remote URL — and `.git/hooks/pre-commit` is a file
+ * the browser could write that the developer's own shell would then run
+ * at their next commit. `node_modules` is not the project, and this
+ * editor never writes into it — reinstalling it is one `npm install`
+ * away, but nothing here should be the reason a reinstall is needed.
+ * `.e8` is the host's own scratch, not project source.
  */
-const PROTECTED_DIRS = new Set(['.git']);
+const PROTECTED_DIRS = new Set(['.git', 'node_modules', '.e8']);
 
 /**
  * Both sets are matched against a lowercased segment. This repo's own
@@ -131,11 +136,13 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
       if (result.diagnostics.length === 0) ctx.emit('files/written', { path });
       return Promise.resolve(result);
     },
+    mkdir: (path) => Promise.resolve(mkdirOne(config.cwd, path)),
+    create: (path) => Promise.resolve(createOne(config.cwd, path)),
     remove: (path) => Promise.resolve(removeOne(config.cwd, path)),
   };
   ctx.provide('files', service);
 
-  // Four routes over `service` above — they carry ITS diagnostics outward,
+  // Five routes over `service` above — they carry ITS diagnostics outward,
   // never invent their own containment story. `*splat` (path-to-regexp's
   // wildcard) is what makes `/api/files/*splat` match a multi-segment path
   // at all; `@cordisjs/plugin-server` decodes it exactly once — percent
@@ -208,6 +215,34 @@ export async function apply(ctx: Context, config: FilesConfig): Promise<void> {
     }
 
     const { diagnostics } = await service.write(path, decoded);
+    res.status = statusFor(diagnostics);
+    res.json({ diagnostics });
+  });
+
+  ctx.server.post('/api/files/*splat', async (req, res) => {
+    const path = req.params.splat;
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      body = undefined;
+    }
+    const kind = (body as Partial<FileCreateRequest> | null | undefined)?.kind;
+    if (kind !== 'dir' && kind !== 'file') {
+      res.status = 400;
+      res.json({
+        diagnostics: [
+          fileDiagnostic(
+            'error',
+            'malformed-request',
+            path,
+            `POST ${req.path} needs a JSON body shaped {"kind": "dir" | "file"}`,
+          ),
+        ],
+      } satisfies DiagnosticsResponse);
+      return;
+    }
+    const { diagnostics } = kind === 'dir' ? await service.mkdir(path) : await service.create(path);
     res.status = statusFor(diagnostics);
     res.json({ diagnostics });
   });
@@ -285,6 +320,10 @@ const CONTENT_TYPES: Record<string, string> = {
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.ogv': 'video/ogg',
+  '.m4a': 'audio/mp4',
 };
 
 function contentTypeFor(path: string): string {
@@ -478,6 +517,98 @@ function writeOne(cwd: string, requestedPath: string, bytes: Uint8Array): Diagno
   }
 }
 
+/** `exists` when a leaf is already there (file, directory, anything); `undefined` when the path is free. */
+function refuseExisting(requestedPath: string, target: string): Diagnostic | undefined {
+  if (!existsSync(target)) return undefined;
+  return fileDiagnostic(
+    'error',
+    'exists',
+    requestedPath,
+    `"${requestedPath}" is already there — nothing here overwrites`,
+    'pick another name, or remove it first',
+  );
+}
+
+/** `not-found` when the parent directory is missing: these verbs make exactly one entry, never a chain of parents. */
+function refuseMissingParent(requestedPath: string, target: string): Diagnostic | undefined {
+  const parent = dirname(target);
+  let stat;
+  try {
+    stat = statSync(parent);
+  } catch {
+    return fileDiagnostic(
+      'error',
+      'not-found',
+      requestedPath,
+      `the directory for "${requestedPath}" does not exist`,
+      'create the directory first',
+    );
+  }
+  if (!stat.isDirectory())
+    return fileDiagnostic(
+      'error',
+      'not-found',
+      requestedPath,
+      `the parent of "${requestedPath}" is not a directory`,
+    );
+  return undefined;
+}
+
+function mkdirOne(cwd: string, requestedPath: string): DiagnosticsResponse {
+  const target = resolve(cwd, requestedPath);
+  const refusal =
+    describeRefusal(cwd, requestedPath, target) ??
+    refuseExisting(requestedPath, target) ??
+    refuseMissingParent(requestedPath, target);
+  if (refusal) return { diagnostics: [refusal] };
+  try {
+    mkdirSync(target);
+    return { diagnostics: [] };
+  } catch (error) {
+    return {
+      diagnostics: [
+        fileDiagnostic(
+          'error',
+          'io-error',
+          requestedPath,
+          `cannot create "${requestedPath}": ${errorMessage(error)}`,
+        ),
+      ],
+    };
+  }
+}
+
+function createOne(cwd: string, requestedPath: string): DiagnosticsResponse {
+  const target = resolve(cwd, requestedPath);
+  const refusal =
+    describeRefusal(cwd, requestedPath, target) ??
+    refuseExisting(requestedPath, target) ??
+    refuseMissingParent(requestedPath, target);
+  if (refusal) return { diagnostics: [refusal] };
+  let fd: number | undefined;
+  try {
+    // `O_EXCL` says "only if absent" at the syscall, the same way `writeOne`'s `O_NOFOLLOW` puts its rule at the syscall.
+    fd = openSync(
+      target,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    );
+    return { diagnostics: [] };
+  } catch (error) {
+    return {
+      diagnostics: [
+        fileDiagnostic(
+          'error',
+          'io-error',
+          requestedPath,
+          `cannot create "${requestedPath}": ${errorMessage(error)}`,
+        ),
+      ],
+    };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 function removeOne(cwd: string, requestedPath: string): DiagnosticsResponse {
   const target = resolve(cwd, requestedPath);
   const refusal = describeRefusal(cwd, requestedPath, target);
@@ -502,21 +633,8 @@ function removeOne(cwd: string, requestedPath: string): DiagnosticsResponse {
     };
   }
 
-  if (stat.isDirectory()) {
-    return {
-      diagnostics: [
-        fileDiagnostic(
-          'error',
-          'is-directory',
-          requestedPath,
-          `"${requestedPath}" is a directory, not a file — remove() does not remove directories`,
-        ),
-      ],
-    };
-  }
-
   try {
-    rmSync(target);
+    rmSync(target, { recursive: stat.isDirectory() });
     return { diagnostics: [] };
   } catch (error) {
     return {

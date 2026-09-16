@@ -54,6 +54,16 @@ export interface FileWriteRequest {
   base64: string;
 }
 
+/** `POST /api/files/<path>` — make an empty directory or an empty file at a path nothing occupies yet. */
+export interface FileCreateRequest {
+  kind: 'dir' | 'file';
+}
+
+/** `PATCH /api/files/<path>` — move (rename) the entry at `<path>` to `to`, another project-relative path nothing occupies yet. */
+export interface FileMoveRequest {
+  to: string;
+}
+
 /**
  * Why a file operation refused, as a tag instead of prose. The host's
  * routes pick an HTTP status from this, and the reason it is a tag: they
@@ -68,7 +78,11 @@ export type FileFailure =
   | 'is-symlink'
   | 'is-directory'
   | 'io-error'
-  | 'malformed-request';
+  | 'malformed-request'
+  /** the destination (or the path to create) is already there; nothing here overwrites */
+  | 'exists'
+  /** a directory cannot move into its own subtree */
+  | 'into-self';
 
 /** A files diagnostic, tagged with the machine-readable reason above. */
 export function fileDiagnostic(
