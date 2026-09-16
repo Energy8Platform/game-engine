@@ -1102,12 +1102,12 @@ Styles (`styles.css`, after `.e8-explorer-diagnostic`):
 .e8-explorer-action:hover { background: var(--e8-hover); color: var(--e8-fg); }
 .e8-explorer-selected { background: var(--e8-selected); }
 .e8-explorer-input { flex: 1; min-width: 0; font: inherit; color: var(--e8-fg); background: var(--e8-editor-bg); border: 1px solid var(--e8-accent); border-radius: var(--e8-radius-sm); padding: 0 4px; outline: none; }
-.e8-menu { background: var(--e8-surface); border: 1px solid var(--e8-border); border-radius: var(--e8-radius-lg); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); padding: 4px; min-width: 140px; z-index: 100; display: flex; flex-direction: column; }
+.e8-menu { background: var(--e8-surface); border: 1px solid var(--e8-border); border-radius: var(--e8-radius-lg); box-shadow: none; padding: 4px; min-width: 140px; z-index: 100; display: flex; flex-direction: column; }
 .e8-menu-item { background: none; border: 0; color: var(--e8-fg); text-align: left; padding: 4px 10px; border-radius: var(--e8-radius-sm); cursor: pointer; font: inherit; }
 .e8-menu-item:hover, .e8-menu-item:focus-visible { background: var(--e8-hover); outline: none; }
 ```
 
-Check `tests/styles.test.ts` guards (e.g. "box-shadow none") — if a guard forbids `box-shadow`, use `border` only and say so in the report.
+`tests/styles.test.ts` guards that every `box-shadow` is `none` (Modern UI: cards are flat, separated by gaps and borders) — the menu keeps `box-shadow: none` and relies on its border.
 
 - [ ] **Step 4: GREEN, typecheck, prettier, commit**
 
