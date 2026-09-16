@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react';
 
 /**
  * When a text-like field hands its value up. `'change'` — every keystroke
@@ -324,34 +331,81 @@ function StringField({ id, node, value, onChange, commit }: FieldProps) {
  * A dict of strings (`mechanics1`'s `stages`): one key → value row per
  * entry, `+` adds an empty row, `×` removes one. Rows are buffered locally
  * — a key typed one character at a time must not commit each prefix as a
- * key of its own — and a blur commits the whole object, minus rows whose
- * key is still empty. Only string values, per Slice 0's scope; a dict of
- * anything else stays `UnsupportedField`.
+ * key of its own — and leaving the dict (focus moves outside it) commits
+ * the rows the user touched, minus those whose key is still empty. Only
+ * string values, per Slice 0's scope; a dict of anything else stays
+ * `UnsupportedField`.
+ *
+ * The same focused rule as `useDraft`: while focus is inside the dict, an
+ * external `value` change (another tab's frame) leaves the rows alone.
+ * A commit is the touched rows MERGED over the LATEST value — each dirty
+ * row drops the key it came from (`origin`) and sets its current key —
+ * so a sibling another tab changed meanwhile is kept, not overwritten by
+ * a stale copy. An untouched focus-and-leave commits nothing and re-syncs.
+ * A `commit` of `'change'` is not honoured here: a key is only meaningful
+ * whole, so the dict commits on leave in either mode.
  */
+interface DictRow {
+  key: string;
+  value: string;
+  /** The key this row came from in the committed value; `null` for a `+` row. */
+  origin: string | null;
+  /** Touched by the user since the last sync. */
+  dirty: boolean;
+}
+
 function DictField({ id, node, value, onChange }: FieldProps) {
   const current = (value ?? node.meta?.default ?? {}) as Record<string, string>;
-  const toRows = (source: Record<string, string>) =>
-    Object.entries(source).map(([key, entry]) => ({ key, value: String(entry ?? '') }));
+  const toRows = (source: Record<string, string>): DictRow[] =>
+    Object.entries(source).map(([key, entry]) => ({
+      key,
+      value: String(entry ?? ''),
+      origin: key,
+      dirty: false,
+    }));
   const [rows, setRows] = useState(() => toRows(current));
+  const container = useRef<HTMLDivElement>(null);
+  const focused = useRef(false);
 
-  // Re-sync on a committed value that changed for a reason other than this
-  // field's own edit — the same rule `NumberField` follows.
   useEffect(() => {
+    if (focused.current) return;
     setRows(toRows(current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  const build = (from: typeof rows) =>
-    Object.fromEntries(from.filter((row) => row.key !== '').map((row) => [row.key, row.value]));
-  const commit = (from: typeof rows) => {
-    const next = build(from);
-    if (JSON.stringify(next) !== JSON.stringify(current)) onChange(next);
+  /** The dirty rows over the latest value; `null` when that changes nothing. */
+  const merge = (from: DictRow[]): Record<string, string> | null => {
+    const next = { ...current };
+    for (const row of from) {
+      if (!row.dirty) continue;
+      if (row.origin !== null) delete next[row.origin];
+      if (row.key !== '') next[row.key] = row.value;
+    }
+    return JSON.stringify(next) === JSON.stringify(current) ? null : next;
   };
-  const edit = (index: number, patch: Partial<{ key: string; value: string }>) =>
-    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  const edit = (index: number, patch: Partial<Pick<DictRow, 'key' | 'value'>>) =>
+    setRows((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, ...patch, dirty: true } : row)),
+    );
+  const leave = (e: FocusEvent<HTMLDivElement>) => {
+    if (e.relatedTarget instanceof Node && container.current?.contains(e.relatedTarget)) return;
+    focused.current = false;
+    const next = merge(rows);
+    if (next) onChange(next);
+    // Nothing committed: the rows may be stale against a change that landed
+    // while focused. Re-sync, keeping any `+` row still waiting for a key.
+    else setRows([...toRows(current), ...rows.filter((row) => row.origin === null)]);
+  };
 
   return (
-    <div className="e8-dict">
+    <div
+      className="e8-dict"
+      ref={container}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={leave}
+    >
       {rows.map((row, index) => (
         <div className="e8-dict-row" key={index}>
           <input
@@ -360,7 +414,6 @@ function DictField({ id, node, value, onChange }: FieldProps) {
             aria-label="key"
             value={row.key}
             onChange={(e: ChangeEvent<HTMLInputElement>) => edit(index, { key: e.target.value })}
-            onBlur={() => commit(rows)}
           />
           <span className="e8-dict-arrow">→</span>
           <input
@@ -369,16 +422,18 @@ function DictField({ id, node, value, onChange }: FieldProps) {
             aria-label="value"
             value={row.value}
             onChange={(e: ChangeEvent<HTMLInputElement>) => edit(index, { value: e.target.value })}
-            onBlur={() => commit(rows)}
           />
           <button
             type="button"
             aria-label="×"
             title="remove"
             onClick={() => {
-              const next = rows.filter((_, i) => i !== index);
-              setRows(next);
-              commit(next);
+              const removed = rows[index];
+              setRows(rows.filter((_, i) => i !== index));
+              if (removed.origin === null) return; // never committed — nothing to remove
+              const next = { ...current };
+              delete next[removed.origin];
+              onChange(next);
             }}
           >
             ×
@@ -389,7 +444,9 @@ function DictField({ id, node, value, onChange }: FieldProps) {
         type="button"
         aria-label="+"
         title="add"
-        onClick={() => setRows((prev) => [...prev, { key: '', value: '' }])}
+        onClick={() =>
+          setRows((prev) => [...prev, { key: '', value: '', origin: null, dirty: false }])
+        }
       >
         +
       </button>

@@ -330,6 +330,74 @@ describe('SchemaForm', () => {
       expect(screen.queryByDisplayValue('lines')).toBeNull();
     });
 
+    // Fix round 3: another tab's frame moves the `value` prop while one of
+    // the dict's inputs is FOCUSED. The partial edit must survive it, and
+    // the blur commits that edit MERGED over the latest value — the
+    // sibling change is kept, not overwritten by the stale draft.
+    it('an external change to a sibling key while focused keeps the partial edit; blur merges it over the latest value', () => {
+      const onChange = vi.fn();
+      const form = (stages: Record<string, string>) => (
+        <SchemaForm
+          rowId="row"
+          schema={dictSchema}
+          value={{ stages }}
+          onChange={onChange}
+          commit="blur"
+        />
+      );
+      const { rerender } = render(form({ main: 'lines', bonus: 'cascade' }));
+      const main = screen.getByDisplayValue('lines') as HTMLInputElement;
+      fireEvent.focus(main);
+      fireEvent.change(main, { target: { value: 'wa' } });
+      rerender(form({ main: 'lines', bonus: 'tumble' }));
+      expect(main.value).toBe('wa');
+      fireEvent.blur(main);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ stages: { main: 'wa', bonus: 'tumble' } });
+    });
+
+    it('tabbing from the key input to its value input is not leaving the dict — no commit, draft kept', () => {
+      const onChange = vi.fn();
+      const form = (stages: Record<string, string>) => (
+        <SchemaForm rowId="row" schema={dictSchema} value={{ stages }} onChange={onChange} />
+      );
+      const { rerender } = render(form({ main: 'lines' }));
+      const key = screen.getByDisplayValue('main') as HTMLInputElement;
+      const val = screen.getByDisplayValue('lines') as HTMLInputElement;
+      fireEvent.focus(key);
+      fireEvent.change(key, { target: { value: 'ma' } });
+      fireEvent.blur(key, { relatedTarget: val });
+      expect(onChange).not.toHaveBeenCalled();
+      rerender(form({ main: 'lines', bonus: 'cascade' }));
+      expect(key.value).toBe('ma');
+      fireEvent.blur(val);
+      expect(onChange).toHaveBeenCalledWith({ stages: { ma: 'lines', bonus: 'cascade' } });
+    });
+
+    it('an external change while NOT focused re-syncs the rows', () => {
+      const form = (stages: Record<string, string>) => (
+        <SchemaForm rowId="row" schema={dictSchema} value={{ stages }} onChange={() => {}} />
+      );
+      const { rerender } = render(form({ main: 'lines' }));
+      rerender(form({ main: 'ways' }));
+      expect(screen.getByDisplayValue('ways')).toBeTruthy();
+      expect(screen.queryByDisplayValue('lines')).toBeNull();
+    });
+
+    it('focus, no typing, external change, blur: nothing committed and the latest value is shown', () => {
+      const onChange = vi.fn();
+      const form = (stages: Record<string, string>) => (
+        <SchemaForm rowId="row" schema={dictSchema} value={{ stages }} onChange={onChange} />
+      );
+      const { rerender } = render(form({ main: 'lines' }));
+      const main = screen.getByDisplayValue('lines');
+      fireEvent.focus(main);
+      rerender(form({ main: 'ways' }));
+      fireEvent.blur(main);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue('ways')).toBeTruthy();
+    });
+
     it('a blur that changed nothing does not commit', () => {
       const onChange = vi.fn();
       render(<DictForm initial={{ stages: { main: 'lines' } }} onChange={onChange} />);
