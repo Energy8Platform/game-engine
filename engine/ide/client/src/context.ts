@@ -3,6 +3,7 @@ import * as connection from './plugins/connection';
 import type { ConnectionConfig } from './plugins/connection';
 import * as workspace from './plugins/workspace';
 import * as slots from './plugins/slots';
+import * as languages from './plugins/languages';
 import * as shell from './plugins/shell';
 import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
@@ -31,6 +32,10 @@ export async function createIdeClient(
   const ctx = new Context();
   await ctx.plugin(connection, config);
   await ctx.plugin(slots);
+  // Languages are a contribution like slots: a registry a plugin's client
+  // half adds to. Composed before `shell` so that anything composed after
+  // — a project plugin included — can register one.
+  await ctx.plugin(languages);
   // The shell's regions are the same kind of contribution cards already
   // are (a registry a plugin's client half adds to, `App` merely draws),
   // so it composes right after `slots` — which it reads directly, a hard
