@@ -16,7 +16,7 @@
  * already established for `e8.yml` (and, before that, `createIdeHost`'s
  * Slice 0 fix for exactly this class of first-run mistake).
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Context } from 'cordis';
@@ -41,6 +41,22 @@ export interface ProjectService {
   readonly diagnostics: Diagnostic[];
   /** Re-reads the files and re-resolves. Never throws. */
   reload(): Promise<void>;
+  /**
+   * Sets one row's `config` in `<cwd>/e8.patch.yml` — WHOLESALE, the
+   * patch's own semantics (a patch row replaces its target's config, it
+   * does not merge). The row is appended when the patch has none by that
+   * `id`; a missing or empty file is a patch with no rows. Written to a
+   * `.tmp` beside the file and renamed over it, so a failure mid-write
+   * leaves the old bytes intact. Never throws: an unparsable patch, or a
+   * disk error, is the returned diagnostic and the file is untouched.
+   *
+   * Comments in the file do NOT survive — `js-yaml` dumps data, the same
+   * way `e8.yml` is rewritten by `@cordisjs/plugin-include`. The reference
+   * project keeps its prose in `README.md` for exactly that reason. Does
+   * not `reload()` — the caller (`runtime-assets.ts`'s `PUT`) does, once,
+   * together with the spin schema.
+   */
+  writePatchRow(id: string, config: Record<string, unknown>): Promise<Diagnostic[]>;
 }
 
 export interface ProjectConfig {
@@ -91,6 +107,7 @@ export async function apply(ctx: Context, config: ProjectConfig): Promise<void> 
       return diagnostics;
     },
     reload: load,
+    writePatchRow: (id, rowConfig) => writePatchRow(config.cwd, id, rowConfig),
   };
 
   await load();
@@ -393,6 +410,61 @@ async function readPatch(cwd: string): Promise<{ rows: PatchRow[]; diagnostics: 
   });
 
   return { rows, diagnostics };
+}
+
+/** See `ProjectService.writePatchRow`. */
+async function writePatchRow(
+  cwd: string,
+  id: string,
+  config: Record<string, unknown>,
+): Promise<Diagnostic[]> {
+  const filename = join(cwd, PATCH_FILENAME);
+  let content = '';
+  try {
+    content = await readFile(filename, 'utf8');
+  } catch {
+    // Missing (or unreadable as a file) — an empty patch; the write below
+    // says so itself if the path is really something else.
+  }
+  let data: unknown;
+  try {
+    data = yaml.load(content);
+  } catch (error) {
+    return [
+      diagnostic(
+        'error',
+        'patch',
+        PATCH_FILENAME,
+        `${PATCH_FILENAME} is not valid YAML, so "${id}" was not written: ${errorMessage(error)}`,
+        `fix the YAML syntax in ${filename}`,
+      ),
+    ];
+  }
+  // Anything but `{ rows: [...] }` is treated as an empty patch — `readPatch`
+  // already reports that shape as a diagnostic on every reload; refusing
+  // the write too would leave a person with no way out but a text editor.
+  const rows: unknown[] = isRecord(data) && Array.isArray(data.rows) ? [...data.rows] : [];
+  const index = rows.findIndex((row) => isRecord(row) && row.id === id);
+  if (index === -1) rows.push({ id, config });
+  else rows[index] = { ...(rows[index] as Record<string, unknown>), config };
+
+  const tmp = `${filename}.tmp`;
+  try {
+    await writeFile(tmp, yaml.dump({ rows }, { lineWidth: -1, noRefs: true }), 'utf8');
+    await rename(tmp, filename);
+    return [];
+  } catch (error) {
+    await unlink(tmp).catch(() => undefined);
+    return [
+      diagnostic(
+        'error',
+        'patch',
+        PATCH_FILENAME,
+        `cannot write ${PATCH_FILENAME}: ${errorMessage(error)}`,
+        `check that ${cwd} is writable and ${filename} is a file`,
+      ),
+    ];
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

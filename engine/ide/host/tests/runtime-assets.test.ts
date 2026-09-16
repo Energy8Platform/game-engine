@@ -1,10 +1,21 @@
-import { cpSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import * as yaml from 'js-yaml';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
 import Schema from 'schemastery';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ServerMessage } from '@energy8engine/contracts';
+import { WebSocket } from 'ws';
 import { createIdeHost, type IdeHost } from '../src/index';
 
 function fixture(name: string): string {
@@ -864,5 +875,226 @@ describe('GET /plugin-runtime/:id', () => {
     // the check is removed instead of passing by accident through some
     // other 404 branch.
     expect(body).not.toContain('ESCAPED_SECRET');
+  });
+});
+
+/**
+ * The IDE's one way of editing a GAME row (spec §2 "Правка"/"Запись"/"После
+ * записи"): the config lands in `e8.patch.yml` through
+ * `project.writePatchRow`, the project and the spin schema re-read, and
+ * the host — not the client, not the game — decides whether the change is
+ * hot (`reload: false`, the game re-applies the row) or needs the page
+ * reloaded (`reload: true`: a cold row, or a `restart` field changed).
+ */
+describe('PUT /api/composition/rows/:id', () => {
+  type Row = { id: string; config: Record<string, unknown> };
+  /**
+   * `project-e8-base` copied to a temp dir, with the repo's own
+   * `node_modules/@energy8engine` linked in: a bare OS temp dir resolves
+   * none of `e8-base`'s packages, and a row nothing resolves is `hot:
+   * false` with no schema — every `reload` would come out `true` for the
+   * wrong reason. (The GET tests above use the checked-in fixture in place;
+   * these write to it, so they cannot.)
+   */
+  const e8BaseWorkspace = () => {
+    const dir = copyFixtureToTemp('project-e8-base');
+    mkdirSync(join(dir, 'node_modules'));
+    symlinkSync(
+      join(__dirname, '..', '..', '..', '..', 'node_modules', '@energy8engine'),
+      join(dir, 'node_modules', '@energy8engine'),
+      'dir',
+    );
+    return dir;
+  };
+  const put = (url: string, id: string, body: unknown) =>
+    fetch(`${url}/api/composition/rows/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    });
+  const patchOf = (dir: string) =>
+    yaml.load(readFileSync(join(dir, 'e8.patch.yml'), 'utf8')) as { rows: Row[] };
+  const rowOf = (rows: Row[], id: string) => rows.find((r) => r.id === id)!;
+
+  it('writes the config to the patch, answers the fresh rows, and a cold row means reload', async () => {
+    const dir = e8BaseWorkspace();
+    host = await createIdeHost({ root: dir, port: 0 });
+    const res = await put(host.url, 'renderer1', { config: { width: 640, height: 360 } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(rowOf(body.rows, 'renderer1').config).toEqual({ width: 640, height: 360 });
+    expect(rowOf(body.rows, 'renderer1')).toMatchObject({ hot: false });
+    expect(rowOf(body.rows, 'reels1')).toMatchObject({ hot: true }); // the packages resolve
+    expect(body.reload).toBe(true); // `renderer1` is `hot: false`
+    expect(body.diagnostics.filter((d: { where: string }) => d.where === 'schema')).toEqual([]);
+    expect(rowOf(patchOf(dir).rows, 'renderer1').config).toEqual({ width: 640, height: 360 });
+    // A later GET agrees — the write went through the same reload path.
+    const after = await (await fetch(`${host.url}/api/composition`)).json();
+    expect(rowOf(after.rows, 'renderer1').config).toEqual({ width: 640, height: 360 });
+  });
+
+  it('a hot row with no restart field changed does not reload', async () => {
+    const dir = e8BaseWorkspace();
+    host = await createIdeHost({ root: dir, port: 0 });
+    const res = await put(host.url, 'reels1', {
+      config: { config: { grid: { cols: 6, rows: 3 } } },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reload).toBe(false);
+    expect(rowOf(body.rows, 'reels1').config).toEqual({ config: { grid: { cols: 6, rows: 3 } } });
+  });
+
+  it('a hot row reloads exactly when a restart field changed', async () => {
+    // A package that is hot but has ONE field the game cannot re-apply in
+    // place — the case neither `renderer1` (all restart, cold) nor `reels1`
+    // (hot, no restart) covers. The schema module's `toJSON()` is a real
+    // schemastery graph, inlined so the temp package needs no resolution
+    // of `schemastery` from a bare OS temp dir.
+    const workspace = mkdtempSync(join(tmpdir(), 'ide-host-runtime-hot-restart-'));
+    const dir = join(workspace, 'node_modules', 'hot-pkg');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'hot-pkg',
+        version: '1.0.0',
+        type: 'module',
+        main: 'index.js',
+        exports: { '.': './index.js', './package.json': './package.json' },
+        e8: { runtime: { entry: './runtime.js', schema: './schema.js' }, hot: true },
+      }),
+    );
+    writeFileSync(join(dir, 'index.js'), 'export function apply() {}\n');
+    writeFileSync(join(dir, 'runtime.js'), 'export function apply() {}\n');
+    const graph = Schema.object({
+      port: Schema.natural().extra('extra', { applies: 'restart' }),
+      speed: Schema.number(),
+    }).toJSON();
+    writeFileSync(
+      join(dir, 'schema.js'),
+      `export const Config = { toJSON: () => (${JSON.stringify(graph)}) };\n`,
+    );
+    writeFileSync(join(workspace, 'e8.yml'), '[]\n');
+    writeFileSync(join(workspace, 'e8.profile.yml'), 'bundles:\n  - e8-hot\n');
+    mkdirSync(join(workspace, 'bundles', 'e8-hot'), { recursive: true });
+    writeFileSync(
+      join(workspace, 'bundles', 'e8-hot', 'e8.bundle.yml'),
+      'name: e8-hot\nrows:\n  - id: hot1\n    name: hot-pkg\n',
+    );
+    writeFileSync(
+      join(workspace, 'e8.patch.yml'),
+      'rows:\n  - id: hot1\n    config: { port: 1, speed: 1 }\n',
+    );
+    host = await createIdeHost({ root: workspace, port: 0 });
+
+    const speed = await (await put(host.url, 'hot1', { config: { port: 1, speed: 2 } })).json();
+    expect(speed.reload).toBe(false);
+    const port = await (await put(host.url, 'hot1', { config: { port: 2, speed: 2 } })).json();
+    expect(port.reload).toBe(true);
+    // Dropping a restart key is a change to it too.
+    const dropped = await (await put(host.url, 'hot1', { config: { speed: 2 } })).json();
+    expect(dropped.reload).toBe(true);
+    expect(rowOf(patchOf(workspace).rows, 'hot1').config).toEqual({ speed: 2 });
+  });
+
+  it('400s an unknown row id and a body that is not { config: object }, touching nothing', async () => {
+    const dir = copyFixtureToTemp('project-patched');
+    host = await createIdeHost({ root: dir, port: 0 });
+    const before = readFileSync(join(dir, 'e8.patch.yml'), 'utf8');
+    expect((await put(host.url, 'nope1', { config: {} })).status).toBe(400);
+    expect((await put(host.url, 'reels1', {})).status).toBe(400);
+    expect((await put(host.url, 'reels1', { config: 5 })).status).toBe(400);
+    expect((await put(host.url, 'reels1', { config: [1] })).status).toBe(400);
+    expect((await put(host.url, 'reels1', 'not json')).status).toBe(400);
+    expect(readFileSync(join(dir, 'e8.patch.yml'), 'utf8')).toBe(before);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    '500s with the diagnostic when the patch cannot be written',
+    async () => {
+      const dir = copyFixtureToTemp('project-patched');
+      host = await createIdeHost({ root: dir, port: 0 });
+      chmodSync(dir, 0o555);
+      try {
+        const res = await put(host.url, 'reels1', { config: { grid: 1 } });
+        expect(res.status).toBe(500);
+        const body = await res.json();
+        expect(body.diagnostics).toHaveLength(1);
+        expect(body.diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'patch' });
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+      expect(patchOf(dir).rows).toEqual([{ id: 'reels1', config: { grid: { cols: 5, rows: 3 } } }]);
+    },
+  );
+
+  it('two writes fired together both land, in order — the second sees the first', async () => {
+    const dir = e8BaseWorkspace();
+    host = await createIdeHost({ root: dir, port: 0 });
+    const [a, b] = await Promise.all([
+      put(host.url, 'renderer1', { config: { width: 1 } }),
+      put(host.url, 'stage1', { config: { design: { width: 2 } } }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const second = await b.json();
+    expect(rowOf(second.rows, 'renderer1').config).toEqual({ width: 1 });
+    expect(patchOf(dir).rows).toEqual([
+      { id: 'renderer1', config: { width: 1 } },
+      { id: 'stage1', config: { design: { width: 2 } } },
+    ]);
+  });
+
+  it('tells every /ide socket — root and preview — which row changed and whether to reload', async () => {
+    const dir = e8BaseWorkspace();
+    host = await createIdeHost({ root: dir, port: 0 });
+    const fiber = host.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
+    await fiber;
+    host.ctx.ideRpc.attach(fiber.ctx.server, { accept: ['game-diagnostics'] });
+    const listen = async (url: string) => {
+      const socket = new WebSocket(url);
+      const frames: ServerMessage[] = [];
+      socket.on('message', (data) => frames.push(JSON.parse(String(data)) as ServerMessage));
+      await new Promise((resolve) => socket.once('open', resolve));
+      return { socket, frames };
+    };
+    const root = await listen(`${host.url.replace('http', 'ws')}/ide`);
+    const preview = await listen(`ws://127.0.0.1:${fiber.ctx.server.port}/ide`);
+
+    const body = await (
+      await put(host.url, 'reels1', { config: { config: { grid: { cols: 4, rows: 3 } } } })
+    ).json();
+    const frameOf = async ({ frames }: { frames: ServerMessage[] }) => {
+      for (let i = 0; i < 50 && !frames.some((m) => m.type === 'game-composition'); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return frames.find((m) => m.type === 'game-composition');
+    };
+    const expected = {
+      type: 'game-composition',
+      rows: body.rows,
+      reload: false,
+      changed: ['reels1'],
+    };
+    expect(await frameOf(root)).toEqual(expected);
+    expect(await frameOf(preview)).toEqual(expected);
+    root.socket.close();
+    preview.socket.close();
+  });
+
+  it('is on the root only — the game server does not take a write', async () => {
+    // The game's origin may read its composition; rewriting the patch is
+    // the IDE's reach alone (the same rule `ide-rpc`'s `accept` keeps for
+    // the socket).
+    const dir = copyFixtureToTemp('project-patched');
+    host = await createIdeHost({ root: dir, port: 0 });
+    const fiber = host.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
+    await fiber;
+    host.ctx.get('runtimeAssets')!.attachGameRoutes(fiber.ctx.server);
+    const gameUrl = `http://127.0.0.1:${fiber.ctx.server.port}`;
+    expect((await fetch(`${gameUrl}/api/composition`)).status).toBe(200);
+    const res = await put(gameUrl, 'reels1', { config: { grid: 1 } });
+    expect([404, 405]).toContain(res.status);
+    expect(patchOf(dir).rows).toEqual([{ id: 'reels1', config: { grid: { cols: 5, rows: 3 } } }]);
   });
 });

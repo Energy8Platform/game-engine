@@ -1,28 +1,5 @@
-# The delta on top of the `e8-base` bundle: everything `src/main.ts`
-# currently passes as a JS object straight into `createGame` — renderer
-# size, the reel grid, the stage's design resolution, and which mechanic
-# `base_game` is bound to. A patch row replaces its target row's `config`
-# WHOLESALE (not a merge) and addresses it by the id `e8-base`'s own
-# `e8.bundle.yml` assigns; none of these rows need a `name` here because
-# the bundle already placed them.
-#
-# Two things have NO home in this file, on purpose — a function and a live
-# DOM element. Both now reach their rows the same way, as SERVICES the page
-# provides before the first row applies (`createGame({ provide })`), rather
-# than as row config:
-#
-#  - `reels.resolve` (a `SymbolResolver` function — first-slot's coloured-
-#    square placeholder art) — YAML cannot carry a function. `reels1`'s
-#    row below configures everything ELSE `createReelSystem` needs, and
-#    reads the resolver off the `assets` service (see
-#    `@energy8engine/reels`'s `src/runtime.ts`). That is the "art-supplying
-#    service `reels1` reads off `ctx`" this comment used to name as a
-#    future possibility; `main.ts` supplies it today, an `assets` ROW could
-#    supply it tomorrow with no change to `reels1`.
-#  - `mount` (the live `#mount` DOM element) — a page-level handle, not
-#    composition data. Provided as the `mount` service: `renderer1`
-#    attaches its canvas to it, and `createGame` draws the failure screen
-#    on it.
+# The delta on top of the e8-base bundle. Rewritten by the IDE on every
+# edit — comments do not survive; see README.md.
 rows:
   - id: renderer1
     config:
@@ -34,12 +11,7 @@ rows:
       design:
         width: 480
         height: 288
-  # NOT a typo: `reels1`'s own row `config` IS `CreateReelSystemOptions`
-  # (`@energy8platform/game-engine/slot`'s options for `createReelSystem`,
-  # `resolve` aside — see above) — and that type's OWN field for reel
-  # settings happens to also be named `config` (`ReelSystemConfig`, holding
-  # `grid` among others). The outer key is this row's config; the inner
-  # one is the reel system's. Two different things that share a name.
+  # The inner `config` is the reel system's own, not a typo — README.md.
   - id: reels1
     config:
       config:
@@ -49,25 +21,8 @@ rows:
   - id: mechanics1
     config:
       stages:
-        # Bound to a mechanic NO row in `e8-base` ships and nothing in the
-        # engine has heard of. That is legal, and `MechanicsService.bind`
-        # says why in its own doc: a binding to an unregistered id is not a
-        # failure, because the row that registers it may not have applied
-        # yet — `reelstep1` below is appended after this one, and the
-        # binding resolves the moment it lands.
         base_game: reel-step
-  # The third mechanic, and the row this whole slice was built to make
-  # possible. `reel-step` is not installed and not published: it is
-  # `plugins/reel-step/` in this project, a directory placed by hand, which
-  # the host resolves ahead of `node_modules` (see `readProjectPlugin` in
-  # the IDE host's `resolvePackage.ts`). A patch row with a `name` INSERTS a
-  # row the bundle never placed, and it lands last — after `mechanics1`,
-  # which is exactly the order the comment above is about.
-  #
-  # It brings two things the engine does not have: a mechanic that emits a
-  # `reelStep` step, and the handler that performs one. `classic` and
-  # `cascade` needed only the first, because the six built-in step kinds
-  # already covered them.
+  # Inserted by name: `plugins/reel-step/` in this project — README.md.
   - id: reelstep1
     name: reel-step
     config: {}

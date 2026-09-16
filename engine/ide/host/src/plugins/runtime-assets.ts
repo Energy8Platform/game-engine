@@ -3,6 +3,7 @@ import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Context } from 'cordis';
 import type { Server } from '@cordisjs/plugin-server';
+import Schema from 'schemastery';
 import {
   type Diagnostic,
   diagnostic,
@@ -14,7 +15,7 @@ import {
 import { readPackageJson, unresolvedReason } from '../resolvePackage';
 
 export const name = 'runtime-assets';
-export const inject = ['server', 'project', 'spinSchema'];
+export const inject = ['server', 'project', 'spinSchema', 'ideRpc'];
 
 declare module 'cordis' {
   interface Context {
@@ -353,31 +354,13 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     }
   }
 
-  const composition: Parameters<Server['get']>[1] = async (_req, res) => {
-    // Re-resolve from disk before answering. `ctx.project` caches its last
-    // resolution until something calls `reload()` — nothing did, before
-    // this route existed (see `ProjectService.reload`'s doc comment). This
-    // is the one place in the wire where staleness would be a real bug: a
-    // project author edits e8.patch.yml, reopens the IDE, and the browser's
-    // very first question is "what does the game look like right now".
-    // Answering from a snapshot that predates the edit would be wrong in
-    // the same way `client-assets.ts` already decided a cached manifest
-    // would be wrong (see its doc comment).
-    //
-    // `/plugin-runtime/:id` below deliberately does NOT also reload: the
-    // browser's flow is "fetch composition once, then fetch N runtime
-    // halves", and re-reading the profile, patch, and every bundle file on
-    // each of those N follow-up requests would multiply the disk cost for
-    // a staleness window measured in milliseconds, not reduce a real risk.
-    // The trade-off this leaves: an edit landing in the gap between the
-    // composition fetch and a runtime-half fetch it drove serves the half
-    // for the id the browser already committed to asking for, which is a
-    // reasonable reading of "the request that's in flight."
-    await ctx.project.reload();
-    // Same freshness rule as the composition itself, for the same reason:
-    // an edit to `game/script.spin` between page loads must not answer
-    // from a schema that predates it.
-    await ctx.spinSchema.reload();
+  /**
+   * The rows `GET /api/composition` serves, computed from `ctx.project`'s
+   * CURRENT resolution — the caller reloads first (see `composition`
+   * below for why on every call). Shared with `PUT` so what the IDE reads
+   * after a write is exactly what a GET would say.
+   */
+  async function buildRows(): Promise<{ rows: GameCompositionRow[]; diagnostics: Diagnostic[] }> {
     // Starts as the project's own (a malformed profile, a bundle that was
     // not found, …) plus the schema's own (a missing or unparseable
     // `.spin`), and gains one per row that could not be resolved — one
@@ -464,11 +447,99 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
         hot: parsed.manifest?.hot === true,
       };
     });
+    return { rows, diagnostics };
+  }
+
+  const composition: Parameters<Server['get']>[1] = async (_req, res) => {
+    // Re-resolve from disk before answering. `ctx.project` caches its last
+    // resolution until something calls `reload()` — nothing did, before
+    // this route existed (see `ProjectService.reload`'s doc comment). This
+    // is the one place in the wire where staleness would be a real bug: a
+    // project author edits e8.patch.yml, reopens the IDE, and the browser's
+    // very first question is "what does the game look like right now".
+    // Answering from a snapshot that predates the edit would be wrong in
+    // the same way `client-assets.ts` already decided a cached manifest
+    // would be wrong (see its doc comment).
+    //
+    // `/plugin-runtime/:id` below deliberately does NOT also reload: the
+    // browser's flow is "fetch composition once, then fetch N runtime
+    // halves", and re-reading the profile, patch, and every bundle file on
+    // each of those N follow-up requests would multiply the disk cost for
+    // a staleness window measured in milliseconds, not reduce a real risk.
+    // The trade-off this leaves: an edit landing in the gap between the
+    // composition fetch and a runtime-half fetch it drove serves the half
+    // for the id the browser already committed to asking for, which is a
+    // reasonable reading of "the request that's in flight."
+    await ctx.project.reload();
+    // Same freshness rule as the composition itself, for the same reason:
+    // an edit to `game/script.spin` between page loads must not answer
+    // from a schema that predates it.
+    await ctx.spinSchema.reload();
+    const { rows, diagnostics } = await buildRows();
     // `schema` always rides here, even `null` — omitting the field on a
     // parse failure would be indistinguishable from an old host that has
     // never heard of a schema at all, and the browser needs to tell those
     // two apart (see task-3-brief.md).
     res.json({ rows, diagnostics, schema: ctx.spinSchema.schema });
+  };
+
+  /**
+   * `PUT /api/composition/rows/:id { config }` — the IDE edits a GAME row
+   * (spec §2 "Правка"/"Запись"/"После записи"). Root server ONLY, never
+   * through `attachGameRoutes`: the game's origin reads its composition
+   * and writes nothing (the same reach `ide-rpc`'s `accept` keeps for the
+   * socket). Serialized on one chain, like `workspace`: two edits in
+   * flight must not interleave a read-modify-write of the same file, and
+   * the second must answer with rows that include the first.
+   *
+   * `reload` is decided HERE, from data: a cold row (`hot: false`) always
+   * reloads; a hot row reloads only when a changed top-level key carries
+   * `applies: 'restart'` in its schema. "Changed" compares the row's
+   * config BEFORE the write (captured first) with the one after the
+   * reload, per top-level key, by JSON — a dropped key is a change too.
+   */
+  let chain: Promise<unknown> = Promise.resolve();
+  const putRow: Parameters<Server['put']>[1] = async (req, res) => {
+    const id = req.params.id as string;
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      body = undefined;
+    }
+    const next = (body as { config?: unknown } | null | undefined)?.config;
+    if (typeof next !== 'object' || next === null || Array.isArray(next)) {
+      res.status = 400;
+      res.json({ error: `PUT ${req.path} needs a JSON body shaped { config: object }` });
+      return;
+    }
+    const row = ctx.project.composition.rows.find((candidate) => candidate.id === id);
+    if (!row) {
+      res.status = 400;
+      res.json({ error: `no row with id "${id}"` });
+      return;
+    }
+    const task = async () => {
+      const prev = row.config;
+      const written = await ctx.project.writePatchRow(id, next as Record<string, unknown>);
+      if (written.length) {
+        res.status = 500;
+        res.json({ diagnostics: written });
+        return;
+      }
+      await ctx.project.reload();
+      await ctx.spinSchema.reload();
+      const { rows, diagnostics } = await buildRows();
+      const after = rows.find((candidate) => candidate.id === id);
+      const restart = restartKeys(after?.schema);
+      const reload =
+        !after?.hot || changedTopLevelKeys(prev, after.config).some((key) => restart.has(key));
+      res.json({ rows, reload, diagnostics });
+      ctx.ideRpc.broadcastGameComposition({ rows, reload, changed: [id] });
+    };
+    const run = chain.then(task, task);
+    chain = run.catch(() => undefined);
+    await run;
   };
 
   const pluginRuntime: Parameters<Server['get']>[1] = async (req, res) => {
@@ -538,6 +609,7 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
   // The IDE reads the composition off the root; the game reads both off
   // its own server — see `RuntimeAssetsService`.
   ctx.server.get('/api/composition', composition);
+  ctx.server.put('/api/composition/rows/:id', putRow);
   ctx.provide('runtimeAssets', {
     attachGameRoutes(server) {
       server.get('/api/composition', composition);
@@ -545,6 +617,35 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     },
   });
 }
+/** Top-level keys whose value differs by JSON, over the union of both key sets. */
+export function changedTopLevelKeys(
+  prev: Record<string, unknown>,
+  next: Record<string, unknown>,
+): string[] {
+  return [...new Set([...Object.keys(prev), ...Object.keys(next)])].filter(
+    (key) => JSON.stringify(prev[key]) !== JSON.stringify(next[key]),
+  );
+}
+
+/**
+ * The top-level keys of a row's schema (`GameCompositionRow.schema`, a
+ * schemastery `toJSON()` graph) whose field is `applies: 'restart'` — the
+ * same `meta.extra.applies` the IDE's schema-form reads as `needsRestart`.
+ * Rebuilt with `new Schema(json)` rather than read off the raw graph: the
+ * graph is schemastery's own deduped `{ uid, refs }` shape, and schemastery
+ * is already this host's dependency. Empty for no schema, or one that is
+ * not an object at the top.
+ */
+export function restartKeys(schema: unknown): Set<string> {
+  if (!schema) return new Set();
+  const dict = (new Schema(schema as Schema) as Schema).dict ?? {};
+  return new Set(
+    Object.keys(dict).filter(
+      (key) => (dict[key].meta.extra as { applies?: string } | undefined)?.applies === 'restart',
+    ),
+  );
+}
+
 /**
  * The real, contained runtime-entry paths of a composition's rows — the
  * files a browser will dynamically `import()` once `/api/composition` has

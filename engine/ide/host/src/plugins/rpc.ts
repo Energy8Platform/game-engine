@@ -6,6 +6,7 @@ import {
   diagnostic,
   type ClientMessage,
   type Diagnostic,
+  type GameCompositionMessage,
   type GameDiagnosticsSource,
   type ServerMessage,
   type Snapshot,
@@ -67,6 +68,13 @@ export interface IdeRpcService {
   reportGameDiagnostics(speaker: string, diagnostics: Diagnostic[]): void;
   /** Tells every client which projects exist and which is open — also the FIRST frame on connect. */
   broadcastWorkspace(state: WorkspaceState): void;
+  /**
+   * A game row was rewritten (`runtime-assets.ts`'s `PUT`): every socket,
+   * root and preview alike, gets the frame — the editor redraws, the game
+   * re-applies or waits to be reloaded (`GameCompositionMessage`). Not
+   * retained: a late client fetches `GET /api/composition` itself.
+   */
+  broadcastGameComposition(frame: Omit<GameCompositionMessage, 'type'>): void;
   /**
    * Registers the `/ide` websocket route on `server` — the root's by
    * default; the preview's too (Task 4). `accept` narrows what a socket on
@@ -302,6 +310,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     },
     broadcastWorkspace(state) {
       for (const socket of clients) send(socket, { type: 'workspace', workspace: state });
+    },
+    broadcastGameComposition(frame) {
+      for (const socket of clients) send(socket, { type: 'game-composition', ...frame });
     },
     attach(server, options) {
       server.ws('/ide', (req, accept) => handle(options ?? {}, req, accept));

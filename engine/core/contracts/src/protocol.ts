@@ -1,4 +1,5 @@
 import type { Diagnostic } from './diagnostic';
+import type { GameCompositionRow } from './project';
 
 /** One row of the composition: a plugin as the IDE shows it. */
 export interface CompositionRow {
@@ -237,12 +238,33 @@ export interface WorkspaceState {
   diagnostics: Diagnostic[];
 }
 
+/**
+ * A GAME row's config was rewritten (`PUT /api/composition/rows/:id`) and
+ * the patch re-read — sent to EVERY `/ide` socket, the editor's and the
+ * game's alike. `rows` is the whole fresh composition, the same shape
+ * `GET /api/composition` serves; `changed` names the row(s) edited.
+ *
+ * `reload` is the HOST's verdict, decided once from data (the row's `hot`
+ * and which fields carry `applies: 'restart'`) so the two readers cannot
+ * disagree: `false` — the game re-applies the changed rows in place
+ * (`ide-bridge`), the session lives on; `true` — the IDE reloads the
+ * preview, and the game does nothing on its own. Not retained for a
+ * late-connecting client: the rows are one `GET` away.
+ */
+export interface GameCompositionMessage {
+  type: 'game-composition';
+  rows: GameCompositionRow[];
+  reload: boolean;
+  changed: string[];
+}
+
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: Snapshot }
   | { type: 'diagnostics'; diagnostics: Diagnostic[] }
   | GameDiagnosticsMessage
   | GameGoneMessage
+  | GameCompositionMessage
   | { type: 'workspace'; workspace: WorkspaceState };
 
 /** Browser to host. */

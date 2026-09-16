@@ -1,8 +1,19 @@
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import * as yaml from 'js-yaml';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createIdeHost } from '../src/index';
+
+const FIRST_SLOT_PATCH = join(__dirname, '../../../examples/first-slot/e8.patch.yml');
 
 function fixture(name: string): string {
   return join(__dirname, 'fixtures', name);
@@ -100,5 +111,109 @@ describe('project plugin', () => {
     // reporting "not found" for a bundle that WAS found, just broken.
     expect(messages.some((m) => m.includes('was not found'))).toBe(false);
     await host.stop();
+  });
+});
+
+/**
+ * `writePatchRow` is the ONE writer of `e8.patch.yml` (spec §2 "Запись"):
+ * the IDE's composition screen edits a game row through it. Wholesale
+ * replace, insert at the end when absent, never a throw — a failure is a
+ * diagnostic and the file on disk is whatever it was.
+ */
+describe('project.writePatchRow', () => {
+  const patchOf = (dir: string) => yaml.load(readFileSync(join(dir, 'e8.patch.yml'), 'utf8'));
+
+  it('replaces an existing row config wholesale and the next reload sees it', async () => {
+    const dir = copyFixtureToTemp('project-patched');
+    const host = await createIdeHost({ root: dir, port: 0 });
+    expect(await host.ctx.project.writePatchRow('reels1', { grid: 9 })).toEqual([]);
+    // `grid: { cols, rows }` is GONE, not merged under — a patch row
+    // replaces its target's config, and the file says exactly that.
+    expect(patchOf(dir)).toEqual({ rows: [{ id: 'reels1', config: { grid: 9 } }] });
+    await host.ctx.project.reload();
+    expect(host.ctx.project.composition.rows.find((r) => r.id === 'reels1')!.config).toEqual({
+      grid: 9,
+    });
+    await host.stop();
+  });
+
+  it('inserts a row the patch did not have, after the existing ones', async () => {
+    const dir = copyFixtureToTemp('project-patched');
+    const host = await createIdeHost({ root: dir, port: 0 });
+    expect(await host.ctx.project.writePatchRow('boot1', { verbose: true })).toEqual([]);
+    expect(patchOf(dir)).toEqual({
+      rows: [
+        { id: 'reels1', config: { grid: { cols: 5, rows: 3 } } },
+        { id: 'boot1', config: { verbose: true } },
+      ],
+    });
+    await host.stop();
+  });
+
+  it('creates the file when there is none', async () => {
+    const dir = copyFixtureToTemp('project-simple');
+    expect(existsSync(join(dir, 'e8.patch.yml'))).toBe(false);
+    const host = await createIdeHost({ root: dir, port: 0 });
+    expect(await host.ctx.project.writePatchRow('reels1', { grid: 1 })).toEqual([]);
+    expect(patchOf(dir)).toEqual({ rows: [{ id: 'reels1', config: { grid: 1 } }] });
+    await host.stop();
+  });
+
+  it('leaves an unparsable patch byte-for-byte alone and says so', async () => {
+    const dir = copyFixtureToTemp('project-patched');
+    const broken = 'rows: [\n  - id: reels1\n';
+    writeFileSync(join(dir, 'e8.patch.yml'), broken);
+    const host = await createIdeHost({ root: dir, port: 0 });
+    const diagnostics = await host.ctx.project.writePatchRow('reels1', { grid: 9 });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'patch' });
+    expect(readFileSync(join(dir, 'e8.patch.yml'), 'utf8')).toBe(broken);
+    expect(existsSync(join(dir, 'e8.patch.yml.tmp'))).toBe(false);
+    await host.stop();
+  });
+
+  it('never leaves a .tmp behind when the rename fails', async () => {
+    // A DIRECTORY where the patch file should be: reading it fails like a
+    // missing file (an empty patch), the temp file writes fine, and the
+    // `rename` over a non-empty directory is what fails.
+    const dir = copyFixtureToTemp('project-simple');
+    mkdirSync(join(dir, 'e8.patch.yml', 'occupied'), { recursive: true });
+    const host = await createIdeHost({ root: dir, port: 0 });
+    const diagnostics = await host.ctx.project.writePatchRow('reels1', { grid: 1 });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ severity: 'error', plugin: 'patch' });
+    expect(existsSync(join(dir, 'e8.patch.yml.tmp'))).toBe(false);
+    await host.stop();
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'replaces the file whole by rename — a read-only patch is still replaced, never half-written',
+    async () => {
+      // The property atomicity buys: the new bytes land as one rename over
+      // the old file, so the old file's own permissions (or a crash mid-way)
+      // cannot leave a truncated patch behind. An in-place write would fail
+      // here with EACCES — that is the mutation this pins.
+      const dir = copyFixtureToTemp('project-patched');
+      chmodSync(join(dir, 'e8.patch.yml'), 0o444);
+      const host = await createIdeHost({ root: dir, port: 0 });
+      expect(await host.ctx.project.writePatchRow('reels1', { grid: 2 })).toEqual([]);
+      expect(patchOf(dir)).toEqual({ rows: [{ id: 'reels1', config: { grid: 2 } }] });
+      expect(existsSync(join(dir, 'e8.patch.yml.tmp'))).toBe(false);
+      await host.stop();
+    },
+  );
+
+  it("first-slot's reference patch still resolves to the same rows after its comments moved to README.md", () => {
+    // The IDE rewrites this file without comments (the writer above), so
+    // the header's prose moved out. The DATA must not have moved with it.
+    expect(yaml.load(readFileSync(FIRST_SLOT_PATCH, 'utf8'))).toEqual({
+      rows: [
+        { id: 'renderer1', config: { width: 480, height: 288, background: '#10121a' } },
+        { id: 'stage1', config: { design: { width: 480, height: 288 } } },
+        { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
+        { id: 'mechanics1', config: { stages: { base_game: 'reel-step' } } },
+        { id: 'reelstep1', name: 'reel-step', config: {} },
+      ],
+    });
   });
 });

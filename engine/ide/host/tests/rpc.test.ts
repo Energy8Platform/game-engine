@@ -1274,3 +1274,43 @@ describe('ide rpc — on a folder of projects', () => {
     expect(await lateGreeting()).toEqual([]);
   });
 });
+
+/**
+ * A row's config rewritten through `PUT /api/composition/rows/:id`
+ * (`runtime-assets.ts`) is announced to EVERY socket — the editor on the
+ * root and the game on the preview alike: the editor redraws its rows, the
+ * game's `ide-bridge` re-applies (or, on `reload: true`, waits to be
+ * reloaded). One client set behind both attachments, so one loop.
+ */
+describe('ide rpc — broadcastGameComposition reaches the root and the preview', () => {
+  it('sends the same frame to a root socket and a preview socket', async () => {
+    const fiber = host.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
+    await fiber;
+    host.ctx.ideRpc.attach(fiber.ctx.server, { accept: ['game-diagnostics'] });
+    const preview = new WebSocket(`ws://127.0.0.1:${fiber.ctx.server.port}/ide`);
+    const previewInbox = createInbox(preview);
+    await new Promise((resolve) => preview.once('open', resolve));
+
+    const frame = {
+      rows: [
+        {
+          id: 'reels1',
+          name: '@energy8engine/reels',
+          config: { config: { grid: { cols: 6, rows: 3 } } },
+          from: 'patch',
+          runtimeUrl: null,
+          schema: null,
+          hot: true,
+        },
+      ],
+      reload: false,
+      changed: ['reels1'],
+    };
+    host.ctx.ideRpc.broadcastGameComposition(frame);
+
+    const expected = { type: 'game-composition', ...frame };
+    expect(await inbox.waitFor((m) => m.type === 'game-composition')).toEqual(expected);
+    expect(await previewInbox.waitFor((m) => m.type === 'game-composition')).toEqual(expected);
+    preview.close();
+  });
+});

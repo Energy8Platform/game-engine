@@ -78,3 +78,28 @@ describe('protocol — game-diagnostics is its own message, not a reuse of diagn
     expect(ordinary.game).toBeUndefined();
   });
 });
+
+describe('protocol — game-composition tells the IDE and the game that a row was rewritten', () => {
+  it('carries the rows, the reload verdict, and which ids changed', () => {
+    // Compile-time claim: the variant exists on `ServerMessage` with all
+    // three fields; the host decides `reload`, the readers only obey it.
+    const frame: ServerMessage = {
+      type: 'game-composition',
+      rows: [
+        {
+          id: 'reels1',
+          name: '@energy8engine/reels',
+          config: {},
+          from: 'patch',
+          runtimeUrl: null,
+          schema: null,
+          hot: true,
+        },
+      ],
+      reload: false,
+      changed: ['reels1'],
+    };
+    expect(frame.type).toBe('game-composition');
+    expect(frame.changed).toEqual(['reels1']);
+  });
+});
