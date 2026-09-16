@@ -15,6 +15,7 @@ import type { FilesConfig } from './plugins/files';
 import * as check from './plugins/check';
 import type { CheckConfig } from './plugins/check';
 import * as languagesBasic from './plugins/languages-basic';
+import * as languageSpin from './plugins/language-spin';
 
 /**
  * Boot the browser-side cordis application.
@@ -67,5 +68,6 @@ export async function createIdeClient(
   // contributions to `languages`, and a project plugin composed later
   // may replace either by registering the same id.
   await ctx.plugin(languagesBasic);
+  await ctx.plugin(languageSpin);
   return ctx;
 }
