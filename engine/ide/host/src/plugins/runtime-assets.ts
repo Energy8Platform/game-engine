@@ -640,6 +640,9 @@ export function changedTopLevelKeys(
  * not an object at the top.
  */
 export function restartKeys(schema: unknown): Set<string> {
+  // Top-level keys only: a `restart` on a nested field (`stage1`'s
+  // `design.width`) is not seen here — harmless while every such row is
+  // `hot: false` (always reloads), wrong for a hot row with a nested one.
   if (!schema) return new Set();
   const dict = (new Schema(schema as Schema) as Schema).dict ?? {};
   return new Set(

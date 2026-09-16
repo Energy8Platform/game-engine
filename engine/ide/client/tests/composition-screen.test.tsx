@@ -298,7 +298,11 @@ describe('CompositionScreen — game rows', () => {
         rows={[gameRow({ id: 'renderer1', schema: RENDERER_SCHEMA, config: { width: 1280 } })]}
       />,
     );
-    fireEvent.change(screen.getByLabelText('canvas width, px'), { target: { value: '500' } });
+    const width = screen.getByLabelText('canvas width, px');
+    // Three keystrokes, one PUT: a game row commits on blur (review ruling 2).
+    for (const text of ['5', '50', '500']) fireEvent.change(width, { target: { value: text } });
+    expect(puts).toHaveLength(0);
+    fireEvent.blur(width);
     await vi.waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].url).toBe('/api/composition/rows/renderer1');
     // `height` has no value and gains none: the patch row is replaced by

@@ -1,4 +1,15 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+
+/**
+ * When a text-like field hands its value up. `'change'` — every keystroke
+ * (the IDE's own rows: an `update` frame over the socket is cheap).
+ * `'blur'` — a draft while focused, one `onChange` on blur or Enter when
+ * the value differs (a GAME row: each commit is a `PUT`, and on a cold row
+ * a preview reload — typing `480` must not be three of them).
+ * Boolean, union and dict fields are unaffected: a click is already one
+ * commit, and the dict commits on blur regardless.
+ */
+export type CommitMode = 'change' | 'blur';
 
 /** The parts of a rebuilt schemastery schema the form reads. */
 export interface SchemaNode {
@@ -23,6 +34,7 @@ export interface FieldProps {
   node: SchemaNode;
   value: unknown;
   onChange: (next: unknown) => void;
+  commit: CommitMode;
 }
 
 export function label(node: SchemaNode, key: string): string {
@@ -52,11 +64,13 @@ export function ObjectFields({
   node,
   value,
   onChange,
+  commit,
 }: {
   idPrefix: string;
   node: SchemaNode;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  commit: CommitMode;
 }) {
   // A dict entry can point at a uid that isn't in the graph's `refs` (a
   // dangling reference from a truncated or hand-edited schema) — rebuilding
@@ -77,6 +91,7 @@ export function ObjectFields({
             node={child}
             value={value[key]}
             onChange={(next) => onChange({ ...value, [key]: next })}
+            commit={commit}
           />
         );
         // A nested object or a dict is a group of its own fields, so its
@@ -107,7 +122,7 @@ export function ObjectFields({
   );
 }
 
-export function Field({ id, node, value, onChange }: FieldProps) {
+export function Field({ id, node, value, onChange, commit }: FieldProps) {
   const current = value ?? node.meta?.default;
 
   if (node.type === 'object' && node.dict) {
@@ -117,12 +132,13 @@ export function Field({ id, node, value, onChange }: FieldProps) {
         node={node}
         value={(value ?? {}) as Record<string, unknown>}
         onChange={onChange}
+        commit={commit}
       />
     );
   }
 
   if (node.type === 'dict' && node.inner?.type === 'string') {
-    return <DictField id={id} node={node} value={value} onChange={onChange} />;
+    return <DictField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
   }
 
   const options = constants(node);
@@ -143,7 +159,7 @@ export function Field({ id, node, value, onChange }: FieldProps) {
   }
 
   if (node.type === 'number') {
-    return <NumberField id={id} node={node} value={value} onChange={onChange} />;
+    return <NumberField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
   }
 
   if (node.type === 'boolean') {
@@ -158,14 +174,7 @@ export function Field({ id, node, value, onChange }: FieldProps) {
   }
 
   if (node.type === 'string') {
-    return (
-      <input
-        id={id}
-        type="text"
-        value={current === undefined ? '' : String(current)}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-      />
-    );
+    return <StringField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
   }
 
   // Any field kind this form has no editor for (`any`, an array, a dict
@@ -185,7 +194,7 @@ export function Field({ id, node, value, onChange }: FieldProps) {
  * the buffer parses to a real number keeps "empty" a reachable, typable
  * state.
  */
-function NumberField({ id, node, value, onChange }: FieldProps) {
+function NumberField({ id, node, value, onChange, commit }: FieldProps) {
   const current = value ?? node.meta?.default;
   const [raw, setRaw] = useState(current === undefined ? '' : String(current));
 
@@ -193,19 +202,37 @@ function NumberField({ id, node, value, onChange }: FieldProps) {
   // field's own edit (e.g. the surrounding form resets it) — but not on
   // every render, so an in-progress empty buffer isn't clobbered back to
   // the last committed number.
+  // What this field last handed up, so a blur followed by Enter before the
+  // committed `value` prop has caught up (a game row's `PUT` is async) is
+  // one commit, not two. Reset whenever the prop moves.
+  const committed = useRef(current);
   useEffect(() => {
     setRaw(current === undefined ? '' : String(current));
+    committed.current = current;
     // Intentionally keyed on `value` (the committed prop), not `current`
     // (which also depends on `node.meta?.default`) — re-deriving `current`
     // here just reads the same `value` this effect already depends on.
   }, [value]);
 
+  /** `null` when the draft is not a committable number (cleared, or not parseable yet). */
+  const parse = (text: string): number | null => {
+    if (text === '') return null;
+    const parsed = Number(text);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     const next = e.target.value;
     setRaw(next);
-    if (next === '') return; // cleared — do not commit anything yet
-    const parsed = Number(next);
-    if (Number.isNaN(parsed)) return; // not a parseable number yet
+    if (commit !== 'change') return;
+    const parsed = parse(next);
+    if (parsed !== null) onChange(parsed);
+  };
+
+  const flush = () => {
+    const parsed = parse(raw);
+    if (parsed === null || parsed === committed.current) return;
+    committed.current = parsed;
     onChange(parsed);
   };
 
@@ -218,8 +245,51 @@ function NumberField({ id, node, value, onChange }: FieldProps) {
       max={node.meta?.max}
       step={node.meta?.step}
       onChange={handleChange}
+      onBlur={commit === 'blur' ? flush : undefined}
+      onKeyDown={commit === 'blur' ? onEnter(flush) : undefined}
     />
   );
+}
+
+/** A text field; under `commit: 'blur'` it keeps a draft the same way `NumberField` does. */
+function StringField({ id, node, value, onChange, commit }: FieldProps) {
+  const current = value ?? node.meta?.default;
+  const shown = current === undefined ? '' : String(current);
+  const [raw, setRaw] = useState(shown);
+  const committed = useRef(shown); // as `NumberField`'s
+
+  useEffect(() => {
+    setRaw(shown);
+    committed.current = shown;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const flush = () => {
+    if (raw === committed.current) return;
+    committed.current = raw;
+    onChange(raw);
+  };
+
+  return (
+    <input
+      id={id}
+      type="text"
+      value={raw}
+      onChange={(e: ChangeEvent<HTMLInputElement>) => {
+        setRaw(e.target.value);
+        if (commit === 'change') onChange(e.target.value);
+      }}
+      onBlur={commit === 'blur' ? flush : undefined}
+      onKeyDown={commit === 'blur' ? onEnter(flush) : undefined}
+    />
+  );
+}
+
+/** Enter commits the draft without leaving the field. */
+function onEnter(flush: () => void) {
+  return (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') flush();
+  };
 }
 
 /**

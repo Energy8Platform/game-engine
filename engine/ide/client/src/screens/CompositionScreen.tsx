@@ -211,6 +211,7 @@ function GameComposition({ ctx, rows }: GameCompositionProps) {
               schema={row.schema}
               value={row.config ?? {}}
               onChange={(next) => void ctx.gameComposition.update(row.id, next)}
+              commit="blur"
             />
           ) : null}
         </section>

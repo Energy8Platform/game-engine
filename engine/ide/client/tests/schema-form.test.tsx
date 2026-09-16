@@ -337,4 +337,142 @@ describe('SchemaForm', () => {
       expect(onChange).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * Review ruling 2: a GAME row's edit is a `PUT` and, for a cold row, a
+   * preview reload — typing `480` must not be three of them. `commit:
+   * 'blur'` keeps a draft while the field is focused and commits once, on
+   * blur or Enter, when the value actually differs. The IDE's own rows
+   * keep the default `'change'` (per keystroke over the socket).
+   */
+  describe("commit: 'blur'", () => {
+    const type = (input: HTMLElement, chars: string) => {
+      let text = '';
+      for (const ch of chars) {
+        text += ch;
+        fireEvent.change(input, { target: { value: text } });
+      }
+    };
+
+    it('a number field: three keystrokes commit nothing; blur commits once with the final value', () => {
+      const onChange = vi.fn();
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed: 8 }}
+          onChange={onChange}
+          commit="blur"
+        />,
+      );
+      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      type(input, '480');
+      expect(onChange).not.toHaveBeenCalled();
+      expect(input.value).toBe('480');
+      fireEvent.blur(input);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ speed: 480 });
+    });
+
+    it('blur then Enter before the value prop caught up is still one commit', () => {
+      const onChange = vi.fn();
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed: 8 }}
+          onChange={onChange}
+          commit="blur"
+        />,
+      );
+      const input = screen.getByLabelText('reel speed');
+      type(input, '12');
+      fireEvent.blur(input);
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
+
+    it('Enter commits too, once', () => {
+      const onChange = vi.fn();
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed: 8 }}
+          onChange={onChange}
+          commit="blur"
+        />,
+      );
+      const input = screen.getByLabelText('reel speed');
+      type(input, '12');
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ speed: 12 });
+    });
+
+    it('a blur with no change commits nothing; a cleared field commits nothing either', () => {
+      const onChange = vi.fn();
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ speed: 8 }}
+          onChange={onChange}
+          commit="blur"
+        />,
+      );
+      const input = screen.getByLabelText('reel speed');
+      fireEvent.blur(input);
+      fireEvent.change(input, { target: { value: '' } });
+      fireEvent.blur(input);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('a string field behaves the same: draft while typing, one commit on blur', () => {
+      const onChange = vi.fn();
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={schema}
+          value={{ title: 'Moon' }}
+          onChange={onChange}
+          commit="blur"
+        />,
+      );
+      const input = screen.getByLabelText('game title') as HTMLInputElement;
+      type(input, 'Sun');
+      expect(onChange).not.toHaveBeenCalled();
+      expect(input.value).toBe('Sun');
+      fireEvent.blur(input);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ title: 'Sun' });
+      fireEvent.blur(input);
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("the default stays 'change': the IDE's rows commit per keystroke", () => {
+      const onChange = vi.fn();
+      render(<SchemaForm rowId="row" schema={schema} value={{ speed: 8 }} onChange={onChange} />);
+      type(screen.getByLabelText('reel speed'), '48');
+      expect(onChange).toHaveBeenCalledTimes(2);
+      type(screen.getByLabelText('game title'), 'ab');
+      expect(onChange).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  it('dict: two rows with the same key — the later one wins (pinned so it cannot change silently)', () => {
+    const onChange = vi.fn();
+    render(<DictForm initial={{ stages: { main: 'lines' } }} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '+' }));
+    const keys = screen
+      .getAllByRole('textbox')
+      .filter((i) => i.getAttribute('data-dict') === 'key');
+    const values = screen
+      .getAllByRole('textbox')
+      .filter((i) => i.getAttribute('data-dict') === 'value');
+    fireEvent.change(values[1], { target: { value: 'ways' } });
+    fireEvent.change(keys[1], { target: { value: 'main' } });
+    fireEvent.blur(keys[1]);
+    expect(onChange).toHaveBeenCalledWith({ stages: { main: 'ways' } });
+  });
 });

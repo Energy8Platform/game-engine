@@ -1,5 +1,5 @@
 import Schema from 'schemastery';
-import { ObjectFields, type SchemaNode } from './fields';
+import { ObjectFields, type CommitMode, type SchemaNode } from './fields';
 
 export interface SchemaFormProps {
   /**
@@ -22,6 +22,8 @@ export interface SchemaFormProps {
   schema: unknown;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  /** When number/string fields hand their value up — see `CommitMode`. Default `'change'`. */
+  commit?: CommitMode;
 }
 
 /**
@@ -39,13 +41,19 @@ function rebuild(schema: unknown): SchemaNode | null {
   }
 }
 
-export function SchemaForm({ rowId, schema, value, onChange }: SchemaFormProps) {
+export function SchemaForm({ rowId, schema, value, onChange, commit = 'change' }: SchemaFormProps) {
   const node = rebuild(schema);
   if (!node?.dict) return null;
 
   return (
     <div className="e8-schema-form">
-      <ObjectFields idPrefix={`field-${rowId}`} node={node} value={value} onChange={onChange} />
+      <ObjectFields
+        idPrefix={`field-${rowId}`}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+      />
     </div>
   );
 }
