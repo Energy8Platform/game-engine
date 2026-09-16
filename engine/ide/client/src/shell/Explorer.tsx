@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/contracts';
 import { FILE_KEY_PREFIX } from '../plugins/shell';
@@ -31,7 +31,19 @@ import { ViewerDocument, extensionOf } from './ViewerDocument';
  * that holds an `<input>` until Enter or Escape. A name is checked here
  * before any request — one segment, no `/`, not `.` or `..` — since the
  * host would refuse it anyway and the words are clearer up front.
+ *
+ * Rows drag. A row dropped on a directory (or on a file, meaning that
+ * file's directory, or on the tree's empty space, meaning the root) is a
+ * move to the same name there, through the same `move` the rename uses —
+ * so a refusal shows the host's words and the tree stays put, and open
+ * tabs follow. A directory dropped on itself or into its own subtree is
+ * dropped silently: the host would only answer into-self. A file dragged
+ * in from the desktop is an upload into that directory, with the same
+ * overwrite question the header control asks.
  */
+
+/** The type an internal drag carries: the dragged row's path. Anything else on a drop is the OS's `Files`. */
+const DRAG_TYPE = 'text/x-e8-path';
 
 /** What a confirm row is currently asking about — one state for both irreversible actions, same shape `AssetsScreen` used. */
 type Pending =
@@ -158,6 +170,8 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   // Where the next upload lands: the root from the header, a directory
   // from its own menu's "Upload here".
   const [uploadDir, setUploadDir] = useState('');
+  // The directory a drag is hovering, '' for the root; drawn as `e8-drop-target`.
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
 
   function applyTree(result: { entries: FileEntry[]; diagnostics: Diagnostic[] }) {
@@ -202,9 +216,13 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = ''; // lets the same name be picked again
-    const path = joinPath(uploadDir, file?.name ?? '');
+    if (file) readAndUpload(file, uploadDir);
     setUploadDir('');
-    if (!file) return;
+  }
+
+  /** A `File` off disk goes into `dir` under its own name — after the replace question when that name is taken. */
+  function readAndUpload(file: File, dir: string) {
+    const path = joinPath(dir, file.name);
     // `FileReader`, not `file.arrayBuffer()` — see `AssetsScreen`'s own
     // comment: jsdom's shim only implements the callback-style reader.
     const reader = new FileReader();
@@ -320,6 +338,48 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       if (diagnostics.length === 0) followMove(e.path, to);
     });
     return true;
+  }
+
+  /** Where a drop on `entry` lands: the directory itself, or a file's directory. (The tree's own space is the root, `''`.) */
+  const dropDirFor = (entry: FileEntry) => (entry.kind === 'dir' ? entry.path : dirOf(entry.path));
+
+  function onDragStart(entry: FileEntry, e: DragEvent<HTMLElement>) {
+    e.dataTransfer.setData(DRAG_TYPE, entry.path);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onDragOver(target: string, e: DragEvent<HTMLElement>) {
+    // Only what this view knows how to take: its own rows, or files from outside.
+    const types = Array.from(e.dataTransfer.types);
+    if (!types.includes(DRAG_TYPE) && !types.includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = types.includes(DRAG_TYPE) ? 'move' : 'copy';
+    if (dropTarget !== target) setDropTarget(target);
+  }
+
+  function onDragLeave(target: string) {
+    if (dropTarget === target) setDropTarget(null);
+  }
+
+  function onDrop(target: string, e: DragEvent<HTMLElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+    const from = e.dataTransfer.getData(DRAG_TYPE);
+    if (from) {
+      const to = joinPath(target, baseOf(from));
+      // Dropping a directory on itself or into its own subtree: the host
+      // would answer into-self; nothing to ask.
+      if (to === from || target === from || target.startsWith(`${from}/`)) return;
+      void ctx.files.move(from, to).then(({ diagnostics }) => {
+        finish(diagnostics);
+        if (diagnostics.length === 0) followMove(from, to);
+      });
+      return;
+    }
+    const file = e.dataTransfer.files[0];
+    if (file) readAndUpload(file, target);
   }
 
   function toggleFold(path: string) {
@@ -474,28 +534,44 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       )}
 
       {entries !== null && (entries.length > 0 || editing !== null) && (
-        <ul className="e8-explorer-tree">
+        <ul
+          className={dropTarget === '' ? 'e8-explorer-tree e8-drop-target' : 'e8-explorer-tree'}
+          data-testid="explorer-root"
+          onDragOver={(e) => onDragOver('', e)}
+          onDragLeave={() => onDragLeave('')}
+          onDrop={(e) => onDrop('', e)}
+        >
           {createRow('')}
           {visible.flatMap((entry) => {
             const segments = entry.path.split('/');
             const depth = segments.length - 1;
             const isFile = entry.kind === 'file';
             const isFolded = folded.has(entry.path);
+            const renaming = editing?.kind === 'rename' && editing.path === entry.path;
             const row = (
               <li
                 key={entry.path}
                 data-testid={`explorer-${entry.path}`}
                 role="button"
                 tabIndex={0}
+                // A draggable ancestor takes the mouse from the rename input
+                // (no caret, no selection, in Firefox) — not while it is up.
+                draggable={!renaming}
                 style={{ paddingLeft: 8 + depth * 12 }}
                 className={[
                   'e8-explorer-entry',
                   isFile ? 'e8-explorer-file' : 'e8-explorer-dir',
                   selected === entry.path ? 'e8-explorer-selected' : '',
+                  // A file row highlights nothing itself: its directory's row does.
+                  !isFile && dropTarget === entry.path ? 'e8-drop-target' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
                 onClick={() => select(entry)}
+                onDragStart={(e) => onDragStart(entry, e)}
+                onDragOver={(e) => onDragOver(dropDirFor(entry), e)}
+                onDragLeave={() => onDragLeave(dropDirFor(entry))}
+                onDrop={(e) => onDrop(dropDirFor(entry), e)}
                 onKeyDown={activateOnKey(() => select(entry))}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -507,7 +583,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
                 <span className="e8-explorer-chevron" aria-hidden="true">
                   {isFile ? '' : isFolded ? '▸' : '▾'}
                 </span>
-                {editing?.kind === 'rename' && editing.path === entry.path ? (
+                {renaming ? (
                   <InlineInput
                     initial={baseOf(entry.path)}
                     onSubmit={(name) => submitEditing(editing, name)}

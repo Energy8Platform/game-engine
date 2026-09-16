@@ -490,6 +490,11 @@ label {
 .e8-explorer-selected:hover {
   background: var(--e8-selected);
 }
+.e8-drop-target {
+  outline: 1px solid var(--e8-accent);
+  outline-offset: -1px;
+  background: var(--e8-hover);
+}
 .e8-explorer-input {
   flex: 1 1 auto;
   min-width: 0;
