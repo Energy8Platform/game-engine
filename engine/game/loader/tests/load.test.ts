@@ -1,4 +1,4 @@
-import { Context } from 'cordis';
+import { Context, type Fiber } from 'cordis';
 import { describe, expect, it } from 'vitest';
 import type { GameCompositionRow } from '@energy8engine/contracts';
 import { composeFromProject } from '../src/index';
@@ -318,5 +318,128 @@ describe('composeFromProject', () => {
       }),
     });
     expect(seen).toEqual({ speed: 7 });
+  });
+});
+
+/**
+ * Every row is applied through its own cordis fiber (`ctx.plugin`), not a
+ * plain `apply(ctx, config)` call. That is what makes a row hot-updatable
+ * later (`fiber.update(config)` disposes the row's effects and re-runs
+ * `apply`) and what makes the root's dispose take every row down with it.
+ * `onApplied` hands each fiber to the caller as it is created.
+ */
+describe('composeFromProject — one fiber per row', () => {
+  it('hands the caller a fiber per applied row, keyed by row id, in order', async () => {
+    const ctx = new Context();
+    const seen: string[] = [];
+    const fibers = new Map<string, Fiber>();
+    await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a'), row('b')], diagnostics: [] }),
+      importModule: async () => ({ apply: () => {} }),
+      onApplied: (id, fiber) => {
+        seen.push(`${id}:${fiber.state}`);
+        fibers.set(id, fiber);
+      },
+    });
+    // Handed over while LOADING (1) — before `apply` ran — and ACTIVE (2)
+    // once the composition returns. (`FiberState` is a const enum: no
+    // runtime value to import, so the numbers are spelled out.)
+    expect(seen).toEqual(['a:1', 'b:1']);
+    expect([...fibers.values()].map((f) => f.state)).toEqual([2, 2]);
+  });
+
+  it('fiber.update(config) runs the row effect disposers, then apply again with the new config', async () => {
+    const ctx = new Context();
+    const log: string[] = [];
+    let fiber!: Fiber;
+    await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a')], diagnostics: [] }),
+      importModule: async () => ({
+        apply: (c: Context, cfg: { n?: number }) => {
+          log.push(`apply:${cfg.n ?? 0}`);
+          c.effect(() => () => {
+            log.push(`dispose:${cfg.n ?? 0}`);
+          });
+        },
+      }),
+      onApplied: (_id, f) => {
+        fiber = f;
+      },
+    });
+
+    fiber.update({ n: 1 });
+    await fiber.await();
+
+    expect(log).toEqual(['apply:0', 'dispose:0', 'apply:1']);
+  });
+
+  it('disposing the root disposes every row fiber', async () => {
+    const ctx = new Context();
+    const disposed: string[] = [];
+    await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('a'), row('b')], diagnostics: [] }),
+      importModule: async (url) => ({
+        apply: (c: Context) => {
+          c.effect(() => () => {
+            disposed.push(url);
+          });
+        },
+      }),
+    });
+
+    await ctx.fiber.dispose();
+
+    expect(disposed.sort()).toEqual(['/plugin-runtime/a', '/plugin-runtime/b']);
+  });
+
+  it('a half declaring `inject` waits for that service; one whose service never comes is a diagnostic, not silence', async () => {
+    const ctx = new Context();
+    const applied: string[] = [];
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('stage1'), row('renderer1')], diagnostics: [] }),
+      importModule: async (url) =>
+        url.endsWith('stage1')
+          ? {
+              inject: ['renderer', 'never'],
+              apply: (c: Context) => {
+                applied.push(`stage1 saw ${typeof (c as any).renderer}`);
+              },
+            }
+          : {
+              apply: (c: Context) => {
+                c.provide('renderer', { app: {} });
+              },
+            },
+    });
+
+    expect(applied).toEqual([]);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].plugin).toBe('stage1');
+    expect(diags[0].message).toContain('"never"');
+    expect(diags[0].message).not.toContain('"renderer"');
+  });
+
+  it('a half declaring `inject` on a service an EARLIER row provided reads it strictly', async () => {
+    const ctx = new Context();
+    const applied: string[] = [];
+    const diags = await composeFromProject(ctx, {
+      fetchFn: fakeFetch({ rows: [row('renderer1'), row('stage1')], diagnostics: [] }),
+      importModule: async (url) =>
+        url.endsWith('stage1')
+          ? {
+              inject: ['renderer'],
+              apply: (c: Context) => {
+                applied.push(`stage1 saw ${typeof (c as any).renderer}`);
+              },
+            }
+          : {
+              apply: (c: Context) => {
+                c.provide('renderer', { app: {} });
+              },
+            },
+    });
+
+    expect(diags).toEqual([]);
+    expect(applied).toEqual(['stage1 saw object']);
   });
 });

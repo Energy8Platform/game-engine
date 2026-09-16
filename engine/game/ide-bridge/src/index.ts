@@ -206,6 +206,11 @@ interface MechanicsBinder {
 }
 
 /** This package's OWN name — how the live-update branch recognises its row inside a broadcast `Snapshot` (see the module doc, point 2). Slice 0 assumes at most one `ide-bridge` entry per project. */
+/** The one method of the runtime's `gameRows` service this module calls — see `@energy8engine/game-runtime`'s `GameRowsService`. */
+interface GameRowsUpdater {
+  update(id: string, config: Record<string, unknown>): Promise<unknown>;
+}
+
 const PACKAGE_NAME = '@energy8engine/ide-bridge';
 
 /** A config field a human has not filled in — absent, or cleared back to empty in the form. */
@@ -707,6 +712,38 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       // form cannot produce this key, but a file can.
       base_game: rowConfig.base_game,
     });
+  });
+
+  // The host's word on a GAME row edit (`PUT /api/composition/rows/:id`):
+  // the rows as they now stand, which ids changed, and whether the change
+  // is one a running game can take in place. `reload: true` is the IDE's
+  // to act on — it reloads the iframe, and any re-apply done here first
+  // would only be thrown away with it. `reload: false` re-applies each
+  // changed row through the runtime's `gameRows` (the row's own fiber:
+  // cordis disposes its effects and runs `apply` again with the frame's
+  // config), in the order the host listed them. A row `gameRows` does not
+  // know answers `'unknown'` and stays silent (spec §4); one whose
+  // re-apply threw is reported by `gameRows` itself, onto the same
+  // diagnostics this socket already forwards. Read leniently, so a game
+  // built on a runtime without `gameRows` ignores the frame, not throws.
+  socket.addEventListener('message', (event) => {
+    let message: Extract<ServerMessage, { type: 'game-composition' }>;
+    try {
+      const parsed: unknown = JSON.parse(event.data);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      if ((parsed as { type?: unknown }).type !== 'game-composition') return;
+      message = parsed as Extract<ServerMessage, { type: 'game-composition' }>;
+    } catch {
+      return;
+    }
+    if (message.reload) return;
+    const gameRows = ctx.reflect.get('gameRows', false) as GameRowsUpdater | undefined;
+    if (!gameRows) return;
+    for (const id of message.changed) {
+      const row = message.rows.find((candidate) => candidate.id === id);
+      if (!row) continue;
+      void gameRows.update(id, row.config);
+    }
   });
 
   ctx.effect(() => () => socket.close(), 'ide-bridge-socket');

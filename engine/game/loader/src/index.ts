@@ -60,9 +60,17 @@
  *  - The caller may narrow the row list first (`options.plan`) — a seam
  *    has exactly one provider, and choosing between candidates is a rule
  *    this file deliberately does not hold. See `LoadOptions.plan`.
+ *  - Each row applies in its OWN cordis fiber (`ctx.plugin`), handed to
+ *    the caller through `options.onApplied` — so a hot row can be
+ *    re-applied in place later (`fiber.update(config)`) without anything
+ *    else in the game restarting. See the loop below for what that
+ *    changes about how a half reads its siblings' services.
  */
-import type { Context } from 'cordis';
+import type { Context, Fiber } from 'cordis';
 import { type Diagnostic, diagnostic, type GameCompositionRow } from '@energy8engine/contracts';
+
+/** `cordis`'s `FiberState` is a `const enum` — no runtime object to import, so the one value read here is spelled out. */
+const FIBER_PENDING = 0;
 
 /** What a `plan` step answers: which rows actually compose, and what deciding that produced. */
 export interface RowPlan {
@@ -113,6 +121,16 @@ export interface LoadOptions {
    * that fails is not a reason for the game to go blank.
    */
   onHostDiagnostics?: (diagnostics: readonly Diagnostic[]) => void;
+  /**
+   * Called with each row's fiber the moment it is created — BEFORE it has
+   * applied, so a row whose `apply` then throws is handed over too. That
+   * is deliberate: `fiber.update(config)` clears the failure and re-runs
+   * `apply`, so a row that broke on a bad config can be fixed live rather
+   * than only by a reload. Rows with no runtime half (`runtimeUrl: null`)
+   * and rows whose module failed to import never reach this hook — there
+   * is no fiber to hand over.
+   */
+  onApplied?: (rowId: string, fiber: Fiber) => void;
 }
 
 interface CompositionResponse {
@@ -120,9 +138,19 @@ interface CompositionResponse {
   diagnostics: Diagnostic[];
 }
 
-/** The shape a runtime half's module is expected to have — `apply` is optional (see the no-op rule above). */
+/**
+ * The shape a runtime half's module is expected to have — `apply` is
+ * optional (see the no-op rule above). `inject` is the plugin's own
+ * declaration of the services it reads strictly (`ctx.renderer`, not
+ * `ctx.reflect.get('renderer', false)`) — cordis's usual `export const
+ * inject = [...]`. It is forwarded to the row's fiber unchanged: a plugin
+ * scope may only read a service strictly if it declared it, and the
+ * ROOT context's leniency (which the old plain `apply(ctx, config)` call
+ * relied on) does not reach into a fiber.
+ */
 interface RuntimeHalf {
-  apply?: (ctx: Context, config: Record<string, unknown>) => void;
+  inject?: string[];
+  apply?: (ctx: Context, config: Record<string, unknown>) => void | Promise<void>;
 }
 
 export async function composeFromProject(
@@ -203,22 +231,49 @@ export async function composeFromProject(
     }
   }
 
+  /** Each applied row with its fiber, for the "never became active" check after the loop. */
+  const fibers: { row: GameCompositionRow; module: RuntimeHalf; fiber: Fiber }[] = [];
+
   for (const row of rows) {
     if (row.runtimeUrl === null) continue; // no runtime half — nothing to load, not a failure
 
     try {
       const module = (await importModule(row.runtimeUrl)) as RuntimeHalf;
-      // Awaited on purpose. A synchronous throw from `apply` lands in this
-      // same try/catch either way (the call is still inside the `try`),
-      // but an ASYNC `apply` — `renderer-pixi`'s among them, and every
-      // other row in `e8-base` could reasonably become one — returns a
-      // pending promise that a bare, un-awaited call lets float free. An
-      // unawaited rejection is not "no diagnostic": it is an unhandled
-      // promise rejection, invisible to this function's own try/catch and
-      // to anyone reading the screen. Measured directly: `boot1` failed
-      // exactly this way before both this fix and its own row config bug
-      // were corrected (see task-8-report.md).
-      await module.apply?.(ctx, row.config);
+      // Each row is its own cordis fiber (`ctx.plugin`), not a plain
+      // `apply(ctx, config)` call on the root: that is what lets a row be
+      // re-applied in place later (`fiber.update(config)` disposes every
+      // effect the row made — `ctx.effect`, `ctx.provide`, `ctx.inject`,
+      // `ctx.on` — and runs `apply` again with the new config), and what
+      // ties the row's lifetime to the root's (`ctx.fiber.dispose()` takes
+      // every row down). The wrapper is `async` and swallows `apply`'s
+      // return value on purpose: cordis reads a plugin's return as an
+      // EFFECT (a disposer, or a promise of one), so a half whose `apply`
+      // happens to return, say, an array's new length would be "Invalid
+      // effect" — while an async `apply` (`renderer-pixi`'s among them)
+      // still has its rejection land here, as a diagnostic, rather than
+      // floating free as an unhandled rejection (measured: `boot1` failed
+      // exactly that way once — see task-8-report.md).
+      const fiber = ctx.plugin(
+        {
+          name: row.id,
+          inject: module.inject,
+          apply: async (c: Context, cfg: Record<string, unknown>) => {
+            await module.apply?.(c, cfg);
+          },
+        },
+        row.config,
+      );
+      fibers.push({ row, module, fiber });
+      try {
+        options.onApplied?.(row.id, fiber);
+      } catch {
+        // The caller's bookkeeping failing is not this row's failure.
+      }
+      // Resolves once the row's `apply` has run, or rejects with what it
+      // threw. A row whose `inject` is not yet satisfied resolves at once
+      // WITHOUT applying — it stays pending until the service shows up;
+      // the check after the loop reports the ones still waiting then.
+      await fiber;
     } catch (error) {
       // The URL is interpolated, not left to the caught error to mention:
       // a native `import()` failure says something like "Failed to fetch
@@ -237,6 +292,29 @@ export async function composeFromProject(
         ),
       );
     }
+  }
+
+  // A row still PENDING after the whole composition applied declared an
+  // `inject` nothing provided. Checked after the loop, not per row, because
+  // a row may legitimately wait for a LATER row's service and apply then.
+  // Rows in any other state already said their piece (ACTIVE: fine;
+  // FAILED: the catch above; LOADING: became active late and is on its way).
+  for (const { row, module, fiber } of fibers) {
+    if (fiber.state !== FIBER_PENDING) continue;
+    const missing = (module.inject ?? []).filter(
+      (name) => ctx.reflect.get(name, false) === undefined,
+    );
+    const names = missing.map((name) => `"${name}"`).join(', ');
+    const pronoun = missing.length === 1 ? 'it' : 'them';
+    diagnostics.push(
+      diagnostic(
+        'error',
+        row.id,
+        'runtime',
+        `${row.runtimeUrl}: never applied — it injects ${names}, and nothing in the composition provided ${pronoun}`,
+        `add a row that provides ${names}, or check whether "${row.id}" still needs ${pronoun}`,
+      ),
+    );
   }
 
   return diagnostics;

@@ -56,7 +56,7 @@
  * there is a mount — puts that same text where a person can read it,
  * rather than leaving a blank rectangle.
  */
-import { Context } from 'cordis';
+import { Context, type Fiber } from 'cordis';
 import {
   diagnostic,
   type Diagnostic,
@@ -74,6 +74,34 @@ import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import { checkAgainstSchema } from './plugins/mechanics';
 
 export type { MechanicsService } from './plugins/mechanics';
+
+/**
+ * The game's one door for a live row edit. The IDE (through `ide-bridge`)
+ * names a row and hands over that row's WHOLE new config — a patch row
+ * replaces, it does not merge — and the row's own fiber re-applies in
+ * place: cordis disposes every effect the row made and runs its `apply`
+ * again, and nothing else in the game restarts, so the session, the
+ * balance and the spin log all live on. Every row `composeFromProject`
+ * applied has a fiber here, the ones whose `apply` threw included: a bad
+ * config fixed live is exactly the case that wants a re-apply.
+ */
+export interface GameRowsService {
+  /**
+   * `'updated'` once the row has re-applied with `config`; `'unknown'` for
+   * an id with no fiber (a row that never composed — lost its seam, had no
+   * runtime half, or failed to import) — silent, by design; `'failed'` when
+   * the re-apply threw, which is also an `error` diagnostic on
+   * `ctx.diagnostics` naming the row. A failed row keeps its fiber: the
+   * next `update` runs `apply` again.
+   */
+  update(id: string, config: Record<string, unknown>): Promise<'updated' | 'unknown' | 'failed'>;
+}
+
+declare module 'cordis' {
+  interface Context {
+    gameRows: GameRowsService;
+  }
+}
 
 /**
  * Seams a game is expected to have even when nothing offers one. A game
@@ -191,6 +219,21 @@ function renderFailure(ctx: Context, mount: HTMLElement, diagnostics: Diagnostic
     }
   }
   renderBootFailure(mount, diagnostics);
+}
+
+/** A row's re-apply threw: the row stays on its old effects-less fiber (cordis does not roll back), and the person hears why. */
+function reportHotFailure(ctx: Context, rowId: string, error: unknown): void {
+  const d = diagnostic(
+    'error',
+    rowId,
+    'hot update',
+    `re-applying "${rowId}" with the edited config threw: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+    'fix the value, or reload the game to go back to the composition on disk',
+  );
+  const log = ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
+  log?.report(d);
 }
 
 /** The page's own query string, for matchers that key off one. Empty anywhere there is no `location`. */
@@ -364,6 +407,8 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
    * is after it.
    */
   const fromHost = new Set<Diagnostic>();
+  /** Every applied row's fiber, by row id — what `gameRows.update` re-applies. */
+  const fibers = new Map<string, Fiber>();
 
   try {
     // Everything the caller supplies goes on the context first, so a row
@@ -546,8 +591,43 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
         onHostDiagnostics: (list) => {
           for (const d of list) fromHost.add(d);
         },
+        onApplied: (id, fiber) => fibers.set(id, fiber),
       })),
     );
+
+    // cordis rc.8's `Fiber.update` schedules the restart and drops its
+    // promise, so a re-apply that throws is an UNHANDLED rejection on top
+    // of the fiber's own recorded error (measured: vitest flagged it).
+    // Listening on the update waterfall — `global`, or cordis scopes the
+    // listener to the ROOT fiber's own updates — and settling that promise
+    // here keeps the failure to the one place it is read from,
+    // `fiber.await()` below, without hiding it: the fiber still records it.
+    ctx.on(
+      'internal/update',
+      function (_config, _noSave, next) {
+        return Promise.resolve(next()).catch(() => undefined) as unknown as void;
+      },
+      { global: true },
+    );
+
+    ctx.provide('gameRows', {
+      async update(id, config) {
+        const fiber = fibers.get(id);
+        if (!fiber) return 'unknown';
+        try {
+          // `update` is synchronous and only SCHEDULES the restart; what
+          // the re-run `apply` threw surfaces from `await()` (measured:
+          // cordis rc.8 stores it as the fiber's error, which `update`
+          // clears again before the next try).
+          fiber.update(config);
+          await fiber.await();
+          return 'updated';
+        } catch (error) {
+          reportHotFailure(ctx, id, error);
+          return 'failed';
+        }
+      },
+    } satisfies GameRowsService);
 
     // §7.1's pre-flight: a mechanic's `requires` checked against what the
     // math's schema actually declares, before the first spin — not just

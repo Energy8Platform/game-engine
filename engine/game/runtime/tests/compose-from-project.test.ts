@@ -10,26 +10,31 @@ import { createGame } from '../src/index';
 
 // Stands in for the real network + dynamic import: each row resolves to a
 // half that marks the context, so the test observes composition ORDER and
-// CONTENT without needing a server or a bundler.
+// CONTENT without needing a server or a bundler. Each half runs inside its
+// own row fiber now (see the loader), where a plain `ctx.foo = …` is not
+// allowed — so they `provide`, exactly as the real halves do.
 const halves: Record<string, (ctx: any, cfg: any) => void> = {
   reels1: (ctx, cfg) => {
-    ctx.reels = { config: cfg };
+    ctx.provide('reels', { config: cfg });
   },
   renderer1: (ctx) => {
-    ctx.renderer = { app: { canvas: document.createElement('canvas') } };
+    ctx.provide('renderer', { app: { canvas: document.createElement('canvas') } });
   },
   // A competing renderer provider — the canonical third-party story: an
   // `@acme/gl` package declaring `e8.seam: { renderer, matcher: { urlParam } }`,
   // ADDED as a row rather than replacing `renderer1` in place.
   renderer2: (ctx) => {
-    ctx.renderer = { app: { canvas: document.createElement('canvas') }, gl: true };
+    ctx.provide('renderer', { app: { canvas: document.createElement('canvas') }, gl: true });
   },
   // Stands in for every row that reads a seam's service — `stage1` is the
-  // real one. Throws exactly the way the real `stage` runtime half does
-  // when nothing has provided `renderer` yet.
+  // real one. The real half declares `inject: ['renderer']` and would WAIT
+  // for the service; this one reads leniently and throws when nothing has
+  // provided `renderer` yet, so a wrong order fails loudly here rather
+  // than pending quietly.
   stage1: (ctx) => {
-    if (!ctx.renderer) throw new Error('stage needs a renderer');
-    ctx.stageRenderer = ctx.renderer;
+    const renderer = ctx.reflect.get('renderer', false);
+    if (!renderer) throw new Error('stage needs a renderer');
+    ctx.provide('stageRenderer', renderer);
   },
 };
 const importHalf = async (url: string) => ({ apply: halves[url.split('/').pop()!] });

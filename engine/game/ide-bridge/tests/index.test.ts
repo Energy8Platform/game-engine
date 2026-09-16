@@ -1271,3 +1271,100 @@ describe('ide-bridge forwards the game diagnostics', () => {
     });
   });
 });
+
+/**
+ * A `game-composition` frame is the host saying "these GAME rows changed,
+ * and here is whether that needs a reload". With `reload: false` the game
+ * re-applies each changed row in place through `gameRows` (the service
+ * `createGame` provides; faked here); with `reload: true` it does nothing,
+ * because the IDE is about to reload the iframe and any in-place work
+ * would be thrown away with it. An id with no fiber answers `'unknown'`
+ * and stays silent (spec §4) — that is `gameRows`'s call, not this one's.
+ */
+describe('ide-bridge — re-applying game rows from a game-composition frame', () => {
+  function gameRow(id: string, config: Record<string, unknown>) {
+    return {
+      id,
+      name: `@e/${id}`,
+      config,
+      from: 'patch' as const,
+      runtimeUrl: null,
+      schema: null,
+      hot: true,
+    };
+  }
+
+  function bridged() {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const update = vi.fn(async () => 'updated' as const);
+    ctx.provide('gameRows' as never, { update } as never);
+    const socket = fakeSocket();
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    return { socket, update };
+  }
+
+  it('re-applies each changed row, in the order the frame lists them, with that row’s config from the frame', () => {
+    const { socket, update } = bridged();
+
+    socket.emit({
+      type: 'game-composition',
+      reload: false,
+      changed: ['reels1', 'mechanics1'],
+      rows: [
+        gameRow('mechanics1', { stages: { base_game: 'cascade' } }),
+        gameRow('reels1', { config: { grid: { cols: 4, rows: 3 } } }),
+        gameRow('renderer1', { width: 1280 }),
+      ],
+    });
+
+    expect(update.mock.calls).toEqual([
+      ['reels1', { config: { grid: { cols: 4, rows: 3 } } }],
+      ['mechanics1', { stages: { base_game: 'cascade' } }],
+    ]);
+  });
+
+  it('does nothing on reload: true — the IDE is reloading the iframe', () => {
+    const { socket, update } = bridged();
+
+    socket.emit({
+      type: 'game-composition',
+      reload: true,
+      changed: ['renderer1'],
+      rows: [gameRow('renderer1', { width: 1280 })],
+    });
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('skips a changed id the frame carries no row for, and still re-applies the rest', () => {
+    const { socket, update } = bridged();
+
+    socket.emit({
+      type: 'game-composition',
+      reload: false,
+      changed: ['ghost1', 'reels1'],
+      rows: [gameRow('reels1', { config: {} })],
+    });
+
+    expect(update.mock.calls).toEqual([['reels1', { config: {} }]]);
+  });
+
+  it('a game with no gameRows service (an older runtime) ignores the frame without throwing', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeSocket();
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+
+    expect(() =>
+      socket.emit({
+        type: 'game-composition',
+        reload: false,
+        changed: ['reels1'],
+        rows: [gameRow('reels1', { config: {} })],
+      }),
+    ).not.toThrow();
+  });
+});

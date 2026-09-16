@@ -185,9 +185,11 @@ function need(descriptor: PageNeedDescriptor): unknown {
  * exists, fully typed, under its own name — so this is the file's own
  * decision to route every other read through the narrower view, not a
  * wall the language builds unasked. What that decision buys: the three
- * consts right below (`mechanics`, `play`, `board`) are the only way this
- * file reaches those services from here down, because `need()` is the
- * only thing still holding a reference wide enough to read them.
+ * consts right below (`mechanics`, `play`, and `currentBoard()` — see
+ * why that one is a read, not a capture) are the only way this file
+ * reaches those services from here down, because `need()` and
+ * `game.ctx.reflect` are the only things still holding a reference wide
+ * enough to read them.
  * `diagnostics`, `boot` and `spinLog` are untouched by the narrowing —
  * genuinely optional, not page needs — and still read straight off `ctx`
  * a few lines down, the same guarded way they always did.
@@ -208,7 +210,7 @@ const ctx: PageCtx = game.ctx;
 void ctx.mechanics;
 // @ts-expect-error `play` is a page need — read it through the `play` const below, never off `ctx` directly
 void ctx.play;
-// @ts-expect-error `board` is a page need — read it through the `board` const below, never off `ctx` directly
+// @ts-expect-error `board` is a page need — read it through `currentBoard()` below, never off `ctx` directly
 void ctx.board;
 
 const mechanics = need({
@@ -238,12 +240,25 @@ const play = need({
  * here does not replace `playloop1`'s own check; it means this page no
  * longer depends on that other row's phrasing to explain itself.
  */
-const board = need({
+need({
   service: 'board',
   row: 'reels1',
   pkg: '@energy8engine/reels',
   what: 'a board for the play loop to run its presentation against',
-}) as typeof game.ctx.board | undefined;
+});
+
+/**
+ * `board` is read at SPIN time, not captured here the way `mechanics` and
+ * `play` are: `reels1` is a HOT row. An edit to it in the IDE re-applies
+ * the row's fiber in place — the board this page would have captured is
+ * destroyed and a new one provided — so a capture would leave the play
+ * loop running against a dead board after the first live edit. `need()`
+ * above still records the boot-time answer, for its diagnostic; this is
+ * the live one. `undefined` when nothing provides it, and `play.execute`
+ * says so itself ("no board to run it on").
+ */
+const currentBoard = () =>
+  game.ctx.reflect.get('board', false) as typeof game.ctx.board | undefined;
 
 /**
  * The game's own live diagnostics list — the service the `diagnostics1` row
@@ -513,7 +528,7 @@ async function presentStage(
     return null;
   }
 
-  await play!.execute(plan, board!);
+  await play!.execute(plan, currentBoard());
   return plan;
 }
 

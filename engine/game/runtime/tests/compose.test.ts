@@ -30,7 +30,7 @@ function recordingHalf(applied: string[]) {
     apply: (ctx: any, config: unknown) => {
       const id = url.split('/').pop()!;
       applied.push(id);
-      ctx[id] = { config };
+      ctx.provide(id, { config });
     },
   });
 }
@@ -801,7 +801,7 @@ describe('createGame — requires: checked after composition, never as an orderi
               }
             : {
                 apply: (ctx: any) => {
-                  ctx.play = {};
+                  ctx.provide('play', {});
                 },
               },
       },

@@ -87,4 +87,37 @@ describe('reels runtime half', () => {
 
     await ctx.fiber.dispose();
   });
+
+  /**
+   * The hot path: the IDE edits `reels1`'s config and the row's fiber
+   * re-applies in place. What that has to mean for this half: a NEW board
+   * with the new geometry, the old one destroyed (its effect disposer),
+   * and the stage holding exactly one board view — not the dead one next
+   * to the live one.
+   */
+  it('re-applies on fiber.update: a new board with the new grid, the old destroyed, one view on the stage', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(fakeStage);
+    const fiber = await ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } });
+
+    // `cols` is the real `ReelGrid`'s own field, not part of the `GridLike`
+    // slice the board is typed against — read through a cast on purpose.
+    const cols = (board: typeof ctx.board) => (board.grid as unknown as { cols: number }).cols;
+    const before = ctx.board;
+    const destroy = vi.spyOn(before, 'destroy');
+    expect(cols(before)).toBe(2);
+    expect(ctx.stage.container.children).toEqual([before.view]);
+
+    fiber.update({ config: { grid: { cols: 4, rows: 3 } } });
+    await fiber.await();
+
+    const after = ctx.board;
+    expect(after).not.toBe(before);
+    expect(cols(after)).toBe(4);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(ctx.stage.container.children).toEqual([after.view]);
+
+    await ctx.fiber.dispose();
+  });
 });
