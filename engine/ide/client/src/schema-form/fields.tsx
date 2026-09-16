@@ -392,9 +392,16 @@ function DictField({ id, node, value, onChange }: FieldProps) {
     focused.current = false;
     const next = merge(rows);
     if (next) onChange(next);
-    // Nothing committed: the rows may be stale against a change that landed
-    // while focused. Re-sync, keeping any `+` row still waiting for a key.
-    else setRows([...toRows(current), ...rows.filter((row) => row.origin === null)]);
+    // Re-sync either way, keeping any `+` row still waiting for a key. After
+    // a commit the baseline is what was just sent — the caller's `value`
+    // may not have round-tripped yet (a PUT is async), and a no-op
+    // focus/blur before it does must not re-send the same delta; with no
+    // commit, the rows may be stale against a change that landed while
+    // focused.
+    setRows([
+      ...toRows(next ?? current),
+      ...rows.filter((row) => row.origin === null && row.key === ''),
+    ]);
   };
 
   return (

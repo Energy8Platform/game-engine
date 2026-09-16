@@ -293,6 +293,28 @@ describe('SchemaForm', () => {
       expect(onChange).toHaveBeenCalledWith({ stages: { main: 'ways' }, other: 1 });
     });
 
+    it('a committed edit is not sent again by a later no-op focus and blur, even before the value round-trips', () => {
+      // No state echo: the caller is an async PUT whose answer has not landed.
+      const onChange = vi.fn();
+      render(
+        <SchemaForm
+          rowId="row"
+          schema={dictSchema}
+          value={{ stages: { main: 'lines' } }}
+          onChange={onChange}
+        />,
+      );
+      const value = screen.getByDisplayValue('lines');
+      fireEvent.focus(value);
+      fireEvent.change(value, { target: { value: 'ways' } });
+      fireEvent.blur(value);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const again = screen.getByDisplayValue('ways');
+      fireEvent.focus(again);
+      fireEvent.blur(again);
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
+
     it('+ adds an empty row that is not committed until it has a key', () => {
       const onChange = vi.fn();
       render(<DictForm initial={{ stages: { main: 'lines' } }} onChange={onChange} />);
