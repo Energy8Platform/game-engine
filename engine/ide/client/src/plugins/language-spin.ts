@@ -46,7 +46,7 @@ export const spin: languages.IMonarchLanguage = {
       [/\d+\.\d+/, 'number.float'],
       [/\d+/, 'number'],
       [/[{}()[\]]/, '@brackets'],
-      [/->|&&|\|\||[!=<>]=|[!=<>+\-*/%]/, 'operator'],
+      [/\.\.|->|&&|\|\||[!=<>]=|[!=<>+\-*/%]/, 'operator'],
       [/[;,.:]/, 'delimiter'],
       [/\s+/, 'white'],
     ],

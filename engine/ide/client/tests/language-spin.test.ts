@@ -131,12 +131,27 @@ describe('language-spin', () => {
     ]);
   });
 
+  it('the range operator `..` is one token; a lone `.` stays a delimiter', () => {
+    expect(visible(lexer, 'for col in 0..5 {')).toEqual([
+      'keyword',
+      'identifier',
+      'keyword',
+      'number',
+      'operator',
+      'number',
+      '@brackets',
+    ]);
+    // A lone `.` is unaffected: `c.rand` stays `function` (see the context-method
+    // test above) and a plain field/module access reads as delimiter.
+    expect(visible(lexer, 'x.y')).toEqual(['identifier', 'delimiter', 'identifier']);
+  });
+
   it('nothing in the reference script falls to no rule', async () => {
     const { readFileSync } = await import('node:fs');
-    // Node's own URL, not the jsdom-environment global: jsdom's `URL` resolves
-    // a relative URL against `window.location`, not the `base` argument, so
-    // `new URL('.', import.meta.url)` under this package's jsdom test
-    // environment silently drops the file: scheme.
+    // Node's own URL, not the jsdom-environment global: Vitest's jsdom
+    // environment serves modules through its dev-server `@fs/` mount, so an
+    // `import.meta.url`-relative resolution done via the global `URL` lands
+    // on `http://localhost:3000/@fs/…` instead of a `file:` URL.
     const { fileURLToPath, URL: NodeURL } = await import('node:url');
     const here = fileURLToPath(new NodeURL('.', import.meta.url));
     const text = readFileSync(`${here}/../../../examples/first-slot/game/script.spin`, 'utf8');
