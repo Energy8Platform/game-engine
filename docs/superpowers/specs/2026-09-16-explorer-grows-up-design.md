@@ -29,7 +29,7 @@ Finder на папку.
 |---|---|---|
 | Новые глаголы хоста | `FilesService += mkdir(path)`, `create(path)` (пустой файл), `move(from, to)`; `remove(path)` удаляет папку рекурсивно | Четыре операции проводника; `rename` = `move` в ту же папку |
 | Провод | `POST /api/files/*splat` `{ kind: 'dir' \| 'file' }` → `mkdir`/`create`; `PATCH /api/files/*splat` `{ to }` → `move`; `DELETE` без изменений (папка теперь разрешена) | REST по существующему префиксу; тело JSON как у `PUT` |
-| Правила `move` | Оба пути через `describeRefusal`; `to` существует → `exists`; `to` внутри `from` (папка) → `into-self`; лист-симлинк → `is-symlink` (как сейчас); `renameSync` (один том — проект одна папка, симлинки отвергнуты); после успеха `ctx.emit('files/removed', { path: from })`, `ctx.emit('files/written', { path: to })` | Перенос `.spin` перезапускает `e8-server` тем же слушателем |
+| Правила `move` | Оба пути через `describeRefusal`; `to` существует → `exists`; `to` внутри `from` (папка) → `into-self`; лист-симлинк → `is-symlink` (как сейчас); `renameSync` (один том — проект одна папка, симлинки отвергнуты); после успеха `ctx.emit('files/removed', { path: from })`, `ctx.emit('files/written', { path: to })` | `dev-game` слушает оба события: перенос/удаление `.spin` из `game/`, или самой папки `game/`, перезапускает `e8-server` |
 | Правила `mkdir`/`create` | Родитель должен существовать (`not-found`), путь занят → `exists`; `create` пишет 0 байт через тот же `O_NOFOLLOW`-путь, что `writeOne` | Без `recursive`: проводник создаёт по одному уровню |
 | Защита | `PROTECTED_DIRS = {.git, node_modules, .e8}` — для write/move/remove/mkdir/create; чтение `tree` пропускает как раньше | Дыра группы C закрывается тем же множеством |
 | Mime | `+ .mp4 video/mp4`, `.webm video/webm`, `.m4a audio/mp4`, `.ogv video/ogg` | Что реально кладут в слоты |
@@ -37,12 +37,12 @@ Finder на папку.
 | Клиент `ctx.files` | `+= mkdir(path)`, `create(path)`, `move(from, to)` — те же `DiagnosticsResponse` | Тонкие обёртки как `write`/`remove` |
 | Контрибуция `viewers` | Новый клиентский плагин `plugins/viewers.ts`: `register({ id, match(path, entry?) → boolean, component: ComponentType<{ ctx; path; entry? }> }) → retract`; `pick(path, entry?)` — последний зарегистрированный подошедший; `list/subscribe`; повтор `id` — замена с warning (как `slots`) | «Всё — плагин»: проектный плагин добавляет свой viewer (spine и т.п.) |
 | Выбор документа | `openPath`: `viewers.pick` → его компонент; иначе `EDITABLE_EXTENSIONS` → `EditorDocument`; иначе `ViewerDocument` (текст/binary) | Viewer'ы впереди редактора: `.svg` — картинка, не текст (как сейчас) |
-| Viewer'ы ядра | Плагин `plugins/viewers-media.ts`: `image` (`IMAGE_EXTENSIONS`, переносится из `ViewerDocument`), `audio` (`.mp3 .wav .ogg .m4a` → `<audio controls src={urlFor}>`), `video` (`.mp4 .webm .ogv` → `<video controls>`); `ViewerDocument` остаётся текст/binary | Нативные элементы, ноль зависимостей |
-| Explorer: создание | Кнопки заголовка «new file», «new folder»; целевая папка — выбранная строка (папка или папка файла), иначе корень; inline-инпут в дереве, Enter — вызов, Escape — отмена, пустое/`/`/`..` — отказ на клиенте с той же формулировкой, что у хоста | Как VS Code |
+| Viewer'ы ядра | Плагин `plugins/viewers-media.ts`: `image` (`IMAGE_EXTENSIONS`, переносится из `ViewerDocument`), `audio` (`.mp3 .wav .ogg .m4a` → `<audio controls src={urlFor}>`), `video` (`.mp4 .webm .ogv` → `<video controls>`); `ViewerDocument` остаётся текст/binary; картинки открываются без ограничения размера (`<img>` стримит по `src`; `TOO_BIG_BYTES` — про чтение байт для текста) | Нативные элементы, ноль зависимостей |
+| Explorer: создание | Кнопки заголовка «new file», «new folder»; целевая папка — выбранная строка (папка или папка файла), иначе корень; inline-инпут в дереве, Enter — вызов, Escape — отмена, пустое/`/`/`.`/`..` — отказ на клиенте со своей проверкой имени, до запроса | Как VS Code |
 | Explorer: меню | Правый клик по строке → меню (`role="menu"`): папка — New file, New folder, Upload here, Rename, Delete; файл — Rename, Delete; Escape/клик вне — закрыть | Глаголы там, где объект |
-| Rename | Inline-инпут с текущим именем; Enter → `move(path, dir/newName)`; открытая вкладка старого пути закрывается (`force`) и открывается по новому | Ключ вкладки — путь; перевесить ключ шелл не умеет |
+| Rename | Inline-инпут с текущим именем; Enter → `move(path, dir/newName)`; открытая вкладка старого пути закрывается (`force`) и открывается по новому; если у открытой вкладки (или любой под переносимой папкой) есть несохранённые правки — перенос отказан с диагностикой до запроса | Ключ вкладки — путь; перевесить ключ шелл не умеет; `force` не должен терять правки |
 | Delete папки | Confirm-ряд: `delete folder "x" and N entries?` (N из `entries`) | Необратимо — как у файла |
-| DnD внутри | Строки `draggable`; `dragstart` кладёт `text/x-e8-path`; папки и корневая область — drop-цели с классом `e8-drop-target` на `dragover`; drop → `move(from, dir/basename)`; drop на себя/в своё поддерево — ничего (хост всё равно откажет `into-self`) | HTML5 DnD, без библиотек |
+| DnD внутри | Строки `draggable`, кроме строки в режиме переименования; `dragstart` кладёт `text/x-e8-path`; папки, строки файлов и корневая область — drop-цели с классом `e8-drop-target` на `dragover`; drop на строку файла = в папку этого файла; drop → `move(from, dir/basename)`; drop на себя/в своё поддерево — ничего (хост всё равно откажет `into-self`) | HTML5 DnD, без библиотек |
 | DnD из ОС | `dataTransfer.files` на папку/корень → существующий `upload(dir/name, bytes)` с overwrite-confirm | Тот же путь загрузки |
 | После действия | Дерево перечитывается `tree()` только по ответу хоста без диагностик; отказ — в action-ряд, дерево не меняется | Правило «показываем, что подтвердил хост» |
 | Вне | Мультивыбор, copy/paste, undo, ленивое дерево, «open with», spine-viewer, копирование (Alt-drag) | Следующие срезы |
@@ -94,15 +94,16 @@ delete папки с N, DnD (`fireEvent.dragStart/dragOver/drop` с
 Playwright (`explorer.spec.ts`): new folder `assets` → new file в ней →
 rename → `dragTo` файла `game/spec.json` в `assets` — на диске переехал
 → drop из ОС (`DataTransfer` с `File`, `page.evaluate`)
-→ `.mp3` открывается `<audio>` → delete папки с confirm → перенос
-`game/script.spin` в другую папку даёт `e8-server restarting` в статус-баре.
-Полная сюита.
+→ `.mp3` открывается `<audio>` → delete папки с confirm; пятый e2e —
+переименование `.spin` внутри `game/` оставляет движок живым (перезапуск
+слишком быстр для опроса статус-бара; цепочку событие → перезапуск
+доказывают юниты `dev-game.test.ts`). Полная сюита.
 
 ## 6. Риски
 
 | Риск | Что делаем |
 |---|---|
-| Перенос `game/script.spin` ломает `e8.yml`/спецификацию проекта | e2e проверяет только событие; спека не запрещает — это ошибка пользователя, диагностика `session` покажет |
+| Перенос `game/script.spin` ломает `e8.yml`/спецификацию проекта | Перенос/удаление `.spin` или папки `game/` перезапускает движок (`files/removed` и `files/written` — один слушатель); спека не запрещает — это ошибка пользователя, диагностика `session` покажет |
 | HTML5 DnD в Playwright (`dragTo`) не даёт `dataTransfer.files` | OS-drop в e2e через сконструированный `DataTransfer` в `page.evaluate`; в юнитах — `fireEvent.drop` |
 | `renameSync` через тома (проект на другом томе относительно…) | Оба пути внутри одной папки проекта; симлинки отвергнуты — EXDEV невозможен; при `io-error` — диагностика |
 | `IMAGE_EXTENSIONS` в двух местах (`ViewerDocument`, `viewers-media`) | Переезжает в `viewers-media`, `ViewerDocument` больше не знает о картинках |
