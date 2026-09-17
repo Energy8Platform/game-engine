@@ -53,3 +53,14 @@ rather than as row config:
   `resolvePackage.ts`). It brings a mechanic that emits a `reelStep` step, and
   the handler that performs one — `classic` and `cascade` needed only the
   first, because the six built-in step kinds already covered them.
+
+## `editor.html` / `src/editor.ts`
+
+A second browser entry, next to `index.html`: the IDE loads this one, not
+`index.html`, inside a scene tab. It runs the same composed game but swaps
+the spin-loop page for `@energy8engine/scene-edit`, which draws the
+selection gizmo over whichever scene the tab names (`?scene=` in the URL)
+and reports pointer moves back to the IDE over `postMessage` — the IDE
+remains the only writer of `scenes/*.scene.yml`. `assets/logo.png` is this
+project's first shipped raster asset, referenced from the new `logo` node at
+the top of `scenes/base_game.scene.yml`.

@@ -50,3 +50,12 @@ rather than as row config:
   `resolve` aside), and that type's own field for reel settings is also named
   `config` (`ReelSystemConfig`, holding `grid` among others). The outer key is
   the row's config; the inner one is the reel system's.
+
+## `editor.html`
+
+The page the IDE opens in a scene tab, not the game — it boots the same
+composition through `createGame` but applies `@energy8engine/scene-edit`
+instead of the spin loop and the `#controls` chrome, so a scene renders with
+a pickable gizmo and no `Spin` button. `scenes/base_game.scene.yml` now opens
+with a `logo` node (`assets/logo.png`, a small filled-circle placeholder) so
+there is a real image on the board to select, not just the reel grid.
