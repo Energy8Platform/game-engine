@@ -116,6 +116,20 @@ describe('ScenesSidebar', () => {
     expect(screen.getByTestId('scene-add-input')).toBeTruthy();
   });
 
+  it('an empty id on Enter is refused locally, without a request', async () => {
+    const user = userEvent.setup();
+    const { ctx, calls } = await harness({ 'GET /api/scenes': boot() });
+    renderSidebar(ctx);
+    await screen.findByTestId('scene-a');
+
+    await user.click(screen.getByTestId('scene-add'));
+    await user.type(screen.getByTestId('scene-add-input'), '{Enter}');
+
+    expect(screen.getByTestId('scene-add-error')).toHaveTextContent('type a scene id');
+    expect(calls).toEqual([{ method: 'GET', url: '/api/scenes', body: undefined }]);
+    expect(screen.getByTestId('scene-add-input')).toBeTruthy();
+  });
+
   it('clicking a row selects it and previews it', async () => {
     const user = userEvent.setup();
     const { ctx, calls } = await harness({
@@ -169,5 +183,32 @@ describe('ScenesSidebar', () => {
       expect(calls).toContainEqual({ method: 'DELETE', url: '/api/scenes/a', body: undefined }),
     );
     await waitFor(() => expect(screen.queryByTestId('scene-a')).toBeNull());
+  });
+
+  it('confirm-no cancels the delete: the row stays, nothing is sent', async () => {
+    const user = userEvent.setup();
+    const { ctx, calls } = await harness({ 'GET /api/scenes': boot() });
+    renderSidebar(ctx);
+    await screen.findByTestId('scene-a');
+
+    await user.click(screen.getByTestId('scene-remove-a'));
+    await user.click(screen.getByTestId('confirm-no'));
+
+    expect(screen.getByTestId('scene-a')).toBeTruthy();
+    expect(calls).toEqual([{ method: 'GET', url: '/api/scenes', body: undefined }]);
+  });
+
+  it('a click on the confirm row itself does not select-and-preview the scene being deleted', async () => {
+    const user = userEvent.setup();
+    const { ctx, calls } = await harness({ 'GET /api/scenes': boot() });
+    renderSidebar(ctx);
+    await screen.findByTestId('scene-a');
+
+    await user.click(screen.getByTestId('scene-remove-a'));
+    await user.click(screen.getByText('delete scene "a"?'));
+
+    expect(ctx.scenes.selected()).toBeNull();
+    expect(calls).toEqual([{ method: 'GET', url: '/api/scenes', body: undefined }]);
+    expect(screen.getByTestId('confirm-yes')).toBeTruthy();
   });
 });

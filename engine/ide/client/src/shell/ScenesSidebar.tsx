@@ -28,13 +28,20 @@ export function ScenesSidebar({ ctx }: { ctx: Context }) {
   const open = (id: string) => ctx.scenes.open(id);
 
   const pick = (id: string) => {
+    // The confirm row sits in the scene's own row: a click on its question
+    // (or Enter/Space while it's focused) must not select-and-preview the
+    // scene being deleted.
+    if (pending === id) return;
     ctx.scenes.select({ scene: id, node: null });
     void ctx.scenes.preview(id);
   };
 
   /** Enter in the new-scene row. Returns false so the input stays up — the create's answer decides whether it closes. */
   const add = (id: string): boolean => {
-    if (!id) return false;
+    if (!id) {
+      setAddError('type a scene id');
+      return false;
+    }
     setAddError(null);
     void ctx.scenes.create(id).then((refused) => {
       if (refused.length > 0) setAddError(refused[0].message);
