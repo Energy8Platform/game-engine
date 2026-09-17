@@ -3,16 +3,22 @@ import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { Diagnostic, GameCompositionRow } from '@energy8engine/contracts';
 import { useGameComposition } from '../plugins/game-composition';
+import { useGameDiagnostics } from '../plugins/diagnostics';
 
 /**
  * Which layers each scene shows, in what z-order, with what transition —
  * a view over the STAGE row's config (`@energy8engine/stage/schema`), not
- * a store of its own. Every edit builds the whole next config from
- * `stageRow.config` and `PUT`s it through `ctx.gameComposition.update`,
- * exactly as the Composition screen's form would; the host's frame brings
- * the rows back and this screen re-renders from them. The stage row is
- * found by its schema (the one whose `dict` has `scenes`), not by name —
- * a fork of the stage package keeps its screen.
+ * a store of its own. Every edit builds the whole next config from the
+ * stage row's EFFECTIVE config — the raw patch run through the row's own
+ * schema, so `layers: [{id:'reels',z:0}]` and `scenes: {}` exist here even
+ * when `e8.patch.yml` only says `{ design }` — and `PUT`s it through
+ * `ctx.gameComposition.update`, exactly as the Composition screen's form
+ * would; the host's frame brings the rows back and this screen re-renders
+ * from them. The first edit therefore makes every schema default explicit
+ * in the patch (`transition: cut`, `transitionMs: 300`, …): acceptable,
+ * and what the form's own PUT already does. The stage row is found by its
+ * schema (the one whose `dict` has `scenes`), not by name — a fork of the
+ * stage package keeps its screen.
  */
 interface Layer {
   id: string;
@@ -43,8 +49,25 @@ export function findStageRow(rows: GameCompositionRow[]): GameCompositionRow | u
   return rows.find((row) => hasScenes(row.schema));
 }
 
+/**
+ * The row's config with its schema defaults filled in (schemastery's
+ * validate returns the config with defaults applied). A config the schema
+ * rejects is shown as it is, with the rejection as a warning of this
+ * screen's own — editing on top of a config the host itself would refuse
+ * is not this screen's call to make quietly.
+ */
+function materialise(row: GameCompositionRow): { config: StageConfig; warning: string | null } {
+  const raw = (row.config ?? {}) as StageConfig;
+  try {
+    return { config: new Schema(row.schema as never)(raw) as StageConfig, warning: null };
+  } catch (error) {
+    return { config: raw, warning: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export function ScenesScreen({ ctx }: { ctx: Context }) {
   const { rows, diagnostics, stages, transitions } = useGameComposition(ctx);
+  const { groups } = useGameDiagnostics(ctx);
   const [picked, setPicked] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   // Pinned to the scene it was asked for: a frame that drops the picked
@@ -69,7 +92,7 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
     );
   }
 
-  const config = (stageRow.config ?? {}) as StageConfig;
+  const { config, warning } = materialise(stageRow);
   const layers: Layer[] = Array.isArray(config.layers) ? config.layers : [];
   const scenes: Record<string, SceneConfig> = config.scenes ?? {};
   const sceneIds = Object.keys(scenes);
@@ -130,13 +153,24 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
     setPreview({ scene: selected, diagnostics: await ctx.gameComposition.previewScene(selected) });
   };
 
+  // `checkScenes` reports through the host's `game-diagnostics` frame
+  // (`source: 'host'`), not the composition's own list — both are read.
+  const fromHost = (groups ?? []).flatMap((group) =>
+    group.diagnostics.filter((entry) => entry.source === 'host').map((entry) => entry.diagnostic),
+  );
   const sceneDiagnostics = [
-    ...diagnostics.filter((d) => d.plugin === 'scenes' && d.where === selected),
+    ...[...diagnostics, ...fromHost].filter((d) => d.plugin === 'scenes' && d.where === selected),
     ...(preview?.scene === selected ? preview.diagnostics : []),
   ];
 
   return (
     <main className="e8-scenes" data-testid="scenes-screen">
+      {warning !== null ? (
+        <p className="e8-diagnostic-row" data-severity="warning" data-testid="scenes-warning">
+          <span className="e8-severity">warning</span> stage config does not match its schema —
+          shown as written: {warning}
+        </p>
+      ) : null}
       <ul className="e8-scenes-list">
         {sceneIds.map((id) => (
           <li

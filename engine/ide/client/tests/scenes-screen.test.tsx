@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Config } from '@energy8engine/stage/schema';
-import type { Diagnostic, GameCompositionRow } from '@energy8engine/contracts';
+import type { Diagnostic, GameCompositionRow, ServerMessage } from '@energy8engine/contracts';
 import { ScenesScreen, createIdeClient } from '../src/index';
 
 /**
@@ -9,9 +9,12 @@ import { ScenesScreen, createIdeClient } from '../src/index';
  * schema (`@energy8engine/stage/schema`'s `Config.toJSON()`, the same
  * bytes the host puts on `GET /api/composition`): which layers each scene
  * shows, in what z-order, with what transition — every edit a `PUT` of the
- * whole stage config, recorded here and asserted whole. The DOM contract
- * (testids, labels) is what the e2e suite (Task 7) drives, so the names
- * here are the names there.
+ * whole stage config, recorded here and asserted whole. What gets written
+ * is the EFFECTIVE config — the row's config run through its schema, so
+ * every schema default is in the body (`EFFECTIVE`), even when the row
+ * only carried `{ design }` (the first-slot patch as the host serves it).
+ * The DOM contract (testids, labels) is what the e2e suite (Task 7)
+ * drives, so the names here are the names there.
  */
 const STAGE_SCHEMA = JSON.parse(JSON.stringify(Config.toJSON()));
 
@@ -23,6 +26,9 @@ const STAGE_CONFIG = {
   ],
   scenes: { base_game: { layers: ['bg', 'reels'] } },
 };
+
+/** `STAGE_CONFIG` with the stage schema's defaults made explicit — what every PUT carries. */
+const EFFECTIVE = { ...STAGE_CONFIG, transition: 'cut', transitionMs: 300 };
 
 function stageRow(config: Record<string, unknown> = STAGE_CONFIG): GameCompositionRow {
   return {
@@ -78,12 +84,7 @@ async function harness({
     // `workspace`'s boot GET and anything else: never answered, never wrong.
     return new Promise<Response>(() => {});
   }) as unknown as typeof fetch;
-  const socket = {
-    readyState: 1,
-    addEventListener() {},
-    send() {},
-    close() {},
-  };
+  const socket = new FakeSocket();
   const ctx = await createIdeClient({
     url: 'ws://x/ide',
     socketFactory: () => socket,
@@ -91,7 +92,21 @@ async function harness({
     fetchFn,
   });
   render(<ScenesScreen ctx={ctx} />);
-  return { ctx, puts, posts };
+  return { ctx, puts, posts, socket };
+}
+
+/** Every plugin dials the same socket here; `receive()` pushes one server frame to all of them. */
+class FakeSocket {
+  private listeners: ((event: { data: string }) => void)[] = [];
+  readyState = 1;
+  addEventListener(type: string, listener: (event: { data: string }) => void) {
+    if (type === 'message') this.listeners.push(listener);
+  }
+  send() {}
+  close() {}
+  receive(message: ServerMessage) {
+    for (const listener of this.listeners) listener({ data: JSON.stringify(message) });
+  }
 }
 
 describe('ScenesScreen', () => {
@@ -122,7 +137,7 @@ describe('ScenesScreen', () => {
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].url).toBe('/api/composition/rows/stage1');
     expect(puts[0].body).toEqual({
-      config: { ...STAGE_CONFIG, scenes: { base_game: { layers: ['bg'] } } },
+      config: { ...EFFECTIVE, scenes: { base_game: { layers: ['bg'] } } },
     });
 
     // Re-rendered from the host's answer; checking it back follows the
@@ -141,7 +156,7 @@ describe('ScenesScreen', () => {
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].body).toEqual({
       config: {
-        ...STAGE_CONFIG,
+        ...EFFECTIVE,
         layers: [
           { id: 'bg', z: 10 },
           { id: 'reels', z: 0 },
@@ -188,7 +203,7 @@ describe('ScenesScreen', () => {
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].body).toEqual({
       config: {
-        ...STAGE_CONFIG,
+        ...EFFECTIVE,
         scenes: { base_game: { layers: ['bg', 'reels'], transition: 'fade' } },
       },
     });
@@ -196,7 +211,7 @@ describe('ScenesScreen', () => {
     await waitFor(() => expect(screen.getByTestId('scene-transition')).toHaveValue('fade'));
     fireEvent.change(screen.getByTestId('scene-transition'), { target: { value: '' } });
     await waitFor(() => expect(puts).toHaveLength(2));
-    expect(puts[1].body).toEqual({ config: STAGE_CONFIG });
+    expect(puts[1].body).toEqual({ config: EFFECTIVE });
   });
 
   it('adding a scene from a stage the script declares creates it with every layer', async () => {
@@ -213,13 +228,72 @@ describe('ScenesScreen', () => {
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].body).toEqual({
       config: {
-        ...STAGE_CONFIG,
+        ...EFFECTIVE,
         scenes: { base_game: { layers: ['bg', 'reels'] }, free_spins: { layers: ['bg', 'reels'] } },
       },
     });
     // The new scene is listed, and selected.
     expect(await screen.findByTestId('scene-free_spins')).toBeTruthy();
     expect(screen.getByLabelText('bg in free_spins')).toBeChecked();
+  });
+
+  it('a row carrying only what the patch says still shows the schema-default layers', async () => {
+    // `GET /api/composition` serves the patch as written: first-slot's
+    // stage row is `{ design }` alone; `layers`/`scenes` are schema defaults.
+    const { puts } = await harness({
+      rows: [stageRow({ design: { width: 1280, height: 720 } })],
+    });
+    const input = await screen.findByTestId('scene-add-input');
+    expect(screen.queryByTestId('layer-reels')).toBeNull();
+    expect(screen.getByText('No scenes yet — add one from the list.')).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: 'base_game' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0].body).toEqual({
+      config: {
+        design: { width: 1280, height: 720 },
+        layers: [{ id: 'reels', z: 0 }],
+        scenes: { base_game: { layers: ['reels'] } },
+        transition: 'cut',
+        transitionMs: 300,
+      },
+    });
+    expect(await screen.findByTestId('layer-reels')).toBeTruthy();
+    expect(screen.getByLabelText('reels in base_game')).toBeChecked();
+    expect(screen.queryByTestId('scenes-warning')).toBeNull();
+  });
+
+  it('a config the schema rejects is shown as written, with the rejection as a warning', async () => {
+    await harness({ rows: [stageRow({ ...STAGE_CONFIG, transitionMs: 'slow' })] });
+    const warning = await screen.findByTestId('scenes-warning');
+    expect(warning).toHaveTextContent('transitionMs');
+    expect(screen.getByTestId('layer-reels')).toBeTruthy();
+  });
+
+  it("the host's scenes diagnostics (a game-diagnostics frame) show under their scene", async () => {
+    const { socket } = await harness({
+      rows: [
+        stageRow({
+          ...STAGE_CONFIG,
+          scenes: { base_game: { layers: ['reels'] }, bonus: { layers: ['reels'] } },
+        }),
+      ],
+    });
+    const scenes = await screen.findByTestId('scenes-screen');
+    const message = 'scene "bonus" has no stage of that name in the script';
+    act(() =>
+      socket.receive({
+        type: 'game-diagnostics',
+        source: 'host',
+        dropped: 0,
+        diagnostics: [{ severity: 'warning', plugin: 'scenes', where: 'bonus', message }],
+      }),
+    );
+    fireEvent.click(screen.getByTestId('scene-bonus'));
+    await waitFor(() => expect(scenes).toHaveTextContent(message));
+    fireEvent.click(screen.getByTestId('scene-base_game'));
+    expect(scenes).not.toHaveTextContent(message);
   });
 
   it('Show in preview POSTs the scene', async () => {
