@@ -1,12 +1,12 @@
 import type { Context } from 'cordis';
-import { ScenesScreen } from '../screens/ScenesScreen';
+import { ScenesSidebar } from '../shell/ScenesSidebar';
 
 /**
- * The Scenes screen as a contribution — the same two registrations under
- * one key that `engine/examples/first-slot/plugins/screen-demo` makes: a
- * button on the activity bar and the document it opens. Registered as
- * effects so disposing this fiber takes the tab back. `inject` names every
- * service the document reads through this ctx — cordis refuses the rest.
+ * The Scenes sidebar as a contribution — the same two registrations under
+ * one key that `App` makes for the Explorer: a button on the activity bar
+ * and the sidebar view it shows. Registered as effects so disposing this
+ * fiber takes the view back. `inject` names every service the view reads
+ * through this ctx — cordis refuses the rest.
  */
 export const name = 'scenes';
 export const inject = ['slots', 'gameComposition', 'gameDiagnostics'];
@@ -20,18 +20,18 @@ export function apply(ctx: Context) {
         title: 'Scenes',
         icon: 'layers',
         order: 35,
-        opens: 'document',
+        opens: 'sidebar',
       }),
     'scenes:activity',
   );
   ctx.effect(
     () =>
       ctx.slots.register(
-        { name: 'shell.document', key: 'scenes', title: 'Scenes', closable: true },
-        function ScenesDocument() {
-          return <ScenesScreen ctx={ctx} />;
+        { name: 'shell.sidebar', key: 'scenes', title: 'Scenes' },
+        function ScenesView() {
+          return <ScenesSidebar ctx={ctx} />;
         },
       ),
-    'scenes:document',
+    'scenes:sidebar',
   );
 }

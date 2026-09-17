@@ -2,10 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it } from 'vitest';
 import { Config } from '@energy8engine/stage/schema';
 import type { Diagnostic, GameCompositionRow, ServerMessage } from '@energy8engine/contracts';
-import { ScenesScreen, createIdeClient } from '../src/index';
+import { ScenesSidebar, Shell, createIdeClient } from '../src/index';
 
 /**
- * The Scenes screen against a real `createIdeClient` and the real stage
+ * The Scenes sidebar against a real `createIdeClient` and the real stage
  * schema (`@energy8engine/stage/schema`'s `Config.toJSON()`, the same
  * bytes the host puts on `GET /api/composition`): which layers each scene
  * shows, in what z-order, with what transition — every edit a `PUT` of the
@@ -47,9 +47,12 @@ interface HarnessOptions {
   diagnostics?: Diagnostic[];
   stages?: string[];
   transitions?: string[];
-  previewDiagnostics?: Diagnostic[];
-  /** Render the document the `scenes` plugin registered — on the plugin's own scoped ctx — instead of `ScenesScreen` on the root ctx. */
+  /** What `POST /api/scenes/preview` answers for a scene. */
+  previewDiagnostics?: (scene: string) => Diagnostic[];
+  /** Render the sidebar view the `scenes` plugin registered — on the plugin's own scoped ctx — instead of `ScenesSidebar` on the root ctx. */
   viaPlugin?: boolean;
+  /** Render the whole `Shell` (activity bar and all) instead of the view alone. */
+  viaShell?: boolean;
 }
 
 async function harness({
@@ -57,8 +60,9 @@ async function harness({
   diagnostics = [],
   stages = ['base_game', 'free_spins'],
   transitions = ['cut', 'fade'],
-  previewDiagnostics = [],
+  previewDiagnostics = () => [],
   viaPlugin = false,
+  viaShell = false,
 }: HarnessOptions = {}) {
   const puts: { url: string; body: { config: Record<string, unknown> } }[] = [];
   const posts: { url: string; body: unknown }[] = [];
@@ -77,8 +81,9 @@ async function harness({
       return json({ rows: current, reload: false, diagnostics: [] });
     }
     if (init?.method === 'POST' && path.includes('/api/scenes/preview')) {
-      posts.push({ url: path, body: JSON.parse(String(init.body)) });
-      return json({ diagnostics: previewDiagnostics });
+      const body = JSON.parse(String(init.body)) as { scene: string };
+      posts.push({ url: path, body });
+      return json({ diagnostics: previewDiagnostics(body.scene) });
     }
     if (path.includes('/api/composition')) {
       const schema = { stages: Object.fromEntries(stages.map((s) => [s, {}])) };
@@ -94,14 +99,24 @@ async function harness({
     importModule: async () => ({}),
     fetchFn,
   });
-  if (viaPlugin) {
-    const doc = ctx.slots.list('shell.document').find((entry) => entry.key === 'scenes');
-    if (!doc) throw new Error('the scenes plugin registered no document');
-    render(<doc.component />);
+  if (viaShell) {
+    render(<Shell ctx={ctx} />);
+  } else if (viaPlugin) {
+    const view = ctx.slots.list('shell.sidebar').find((entry) => entry.key === 'scenes');
+    if (!view) throw new Error('the scenes plugin registered no sidebar view');
+    render(<view.component ctx={ctx} />);
   } else {
-    render(<ScenesScreen ctx={ctx} />);
+    render(<ScenesSidebar ctx={ctx} />);
   }
   return { ctx, puts, posts, socket };
+}
+
+/** Presses `+` and types `id` into the row it opens; Enter is the caller's. */
+async function typeScene(id: string) {
+  fireEvent.click(await screen.findByTestId('scene-add'));
+  const input = screen.getByTestId('scene-add-input');
+  fireEvent.change(input, { target: { value: id } });
+  return input;
 }
 
 /** Every plugin dials the same socket here; `receive()` pushes one server frame to all of them. */
@@ -118,7 +133,16 @@ class FakeSocket {
   }
 }
 
-describe('ScenesScreen', () => {
+describe('ScenesSidebar', () => {
+  it('the activity button shows the view in the sidebar', async () => {
+    const { ctx } = await harness({ viaShell: true });
+    fireEvent.click(await screen.findByTestId('activity-scenes'));
+    expect(ctx.shell.sidebar()).toBe('scenes');
+    expect(within(screen.getByTestId('sidebar-scenes')).getByTestId('scenes-screen')).toBeTruthy();
+    expect(screen.queryByTestId('doc-scenes')).toBeNull();
+    expect(await screen.findByTestId('scene-base_game')).toBeTruthy();
+  });
+
   it('lists scenes and layers, checks the layers the selected scene shows', async () => {
     await harness({
       rows: [
@@ -223,16 +247,17 @@ describe('ScenesScreen', () => {
     expect(puts[1].body).toEqual({ config: EFFECTIVE });
   });
 
-  it('adding a scene from a stage the script declares creates it with every layer', async () => {
+  it('+ opens an input; a stage the script declares makes a scene with every layer, selected', async () => {
     const { puts } = await harness();
-    const input = await screen.findByTestId('scene-add-input');
+    expect(await screen.findByTestId('scene-add')).toBeTruthy();
+    expect(screen.queryByTestId('scene-add-input')).toBeNull();
+    const input = await typeScene('free_spins');
     // Only the stages that are not scenes yet are suggested.
-    const offered = Array.from(
-      screen.getByTestId('scene-add').querySelectorAll('datalist option'),
-    ).map((o) => (o as HTMLOptionElement).value);
+    const offered = Array.from(document.querySelectorAll('#e8-scene-add-stages option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
     expect(offered).toEqual(['free_spins']);
 
-    fireEvent.change(input, { target: { value: 'free_spins' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].body).toEqual({
@@ -241,9 +266,63 @@ describe('ScenesScreen', () => {
         scenes: { base_game: { layers: ['bg', 'reels'] }, free_spins: { layers: ['bg', 'reels'] } },
       },
     });
-    // The new scene is listed, and selected.
+    // The new scene is listed, and selected; the input row is gone.
     expect(await screen.findByTestId('scene-free_spins')).toBeTruthy();
+    expect(screen.getByTestId('scene-free_spins')).toHaveClass('e8-explorer-selected');
     expect(screen.getByLabelText('bg in free_spins')).toBeChecked();
+    expect(screen.queryByTestId('scene-add-input')).toBeNull();
+  });
+
+  it('an empty or taken id is refused inline, and the input stays up; Escape cancels', async () => {
+    const { puts } = await harness();
+    const input = await typeScene('');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('scenes-screen')).toHaveTextContent('type a scene id');
+    fireEvent.change(input, { target: { value: 'base_game' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('scenes-screen')).toHaveTextContent('"base_game" already exists');
+    expect(screen.getByTestId('scene-add-input')).toBeTruthy();
+    expect(puts).toHaveLength(0);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByTestId('scene-add-input')).toBeNull();
+    expect(screen.getByTestId('scenes-screen')).not.toHaveTextContent('already exists');
+  });
+
+  it('× asks first; yes PUTs the config with the scene gone, no leaves it', async () => {
+    const { puts } = await harness({
+      rows: [
+        stageRow({
+          ...STAGE_CONFIG,
+          scenes: { base_game: { layers: ['bg', 'reels'] }, free_spins: { layers: ['reels'] } },
+        }),
+      ],
+    });
+    const row = await screen.findByTestId('scene-free_spins');
+    fireEvent.click(within(row).getByRole('button', { name: 'delete scene free_spins' }));
+    expect(row).toHaveTextContent('delete scene "free_spins"?');
+    fireEvent.click(within(row).getByTestId('confirm-no'));
+    expect(row).not.toHaveTextContent('delete scene');
+    expect(puts).toHaveLength(0);
+
+    fireEvent.click(within(row).getByRole('button', { name: 'delete scene free_spins' }));
+    fireEvent.click(within(row).getByTestId('confirm-yes'));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0].body).toEqual({ config: EFFECTIVE });
+    await waitFor(() => expect(screen.queryByTestId('scene-free_spins')).toBeNull());
+    // Asking never selected the row, and nothing was pushed to the preview.
+    expect(screen.getByTestId('scene-base_game')).toHaveClass('e8-explorer-selected');
+  });
+
+  it('a scene with a transition wears it as a badge', async () => {
+    await harness({
+      rows: [
+        stageRow({
+          ...STAGE_CONFIG,
+          scenes: { base_game: { layers: ['bg'], transition: 'fade' } },
+        }),
+      ],
+    });
+    expect(await screen.findByTestId('scene-base_game')).toHaveTextContent('fade');
   });
 
   it('a row carrying only what the patch says still shows the schema-default layers', async () => {
@@ -252,11 +331,15 @@ describe('ScenesScreen', () => {
     const { puts } = await harness({
       rows: [stageRow({ design: { width: 1280, height: 720 } })],
     });
-    const input = await screen.findByTestId('scene-add-input');
-    expect(screen.queryByTestId('layer-reels')).toBeNull();
-    expect(screen.getByText('No scenes yet — add one from the list.')).toBeTruthy();
+    expect(await screen.findByTestId('scenes-none')).toHaveTextContent(
+      'No scenes yet — press + to add one',
+    );
+    // The layers are listed already, disabled: nothing to show them in.
+    expect(screen.getByLabelText('reels')).toBeDisabled();
+    expect(screen.getByTestId('scene-transition')).toBeDisabled();
+    expect(screen.getByTestId('scenes-screen')).toHaveTextContent('select a scene');
 
-    fireEvent.change(input, { target: { value: 'base_game' } });
+    const input = await typeScene('base_game');
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].body).toEqual({
@@ -268,8 +351,8 @@ describe('ScenesScreen', () => {
         transitionMs: 300,
       },
     });
-    expect(await screen.findByTestId('layer-reels')).toBeTruthy();
-    expect(screen.getByLabelText('reels in base_game')).toBeChecked();
+    expect(await screen.findByLabelText('reels in base_game')).toBeChecked();
+    expect(screen.queryByTestId('scenes-none')).toBeNull();
     expect(screen.queryByTestId('scenes-warning')).toBeNull();
   });
 
@@ -305,10 +388,10 @@ describe('ScenesScreen', () => {
     expect(scenes).not.toHaveTextContent(message);
   });
 
-  it('the document the plugin registers renders on the plugin ctx — every service it reads is injected', async () => {
-    // What the browser does: `scenes.tsx`'s document closes over its OWN
+  it('the view the plugin registers renders on the plugin ctx — every service it reads is injected', async () => {
+    // What the browser does: `scenes.tsx`'s view closes over its OWN
     // scoped ctx, and cordis refuses `ctx.<service>` there unless the
-    // plugin's `inject` names it — `ScenesScreen` on the root ctx (every
+    // plugin's `inject` names it — `ScenesSidebar` on the root ctx (every
     // other test here) would never notice a missing entry.
     const { socket } = await harness({ viaPlugin: true });
     expect(await screen.findByTestId('scene-base_game')).toBeTruthy();
@@ -325,18 +408,32 @@ describe('ScenesScreen', () => {
     expect(await screen.findByText('via plugin')).toBeTruthy();
   });
 
-  it('Show in preview POSTs the scene', async () => {
+  it('clicking a scene selects it and POSTs it to the preview; a refusal shows under it', async () => {
     const { posts } = await harness({
-      previewDiagnostics: [
-        { severity: 'warning', plugin: 'scenes', where: 'base_game', message: 'no preview is up' },
+      rows: [
+        stageRow({
+          ...STAGE_CONFIG,
+          scenes: { base_game: { layers: ['bg', 'reels'] }, free_spins: { layers: ['reels'] } },
+        }),
       ],
+      previewDiagnostics: (scene) =>
+        scene === 'free_spins'
+          ? [{ severity: 'warning', plugin: 'scenes', where: scene, message: 'no preview is up' }]
+          : [],
     });
-    fireEvent.click(await screen.findByTestId('scene-show'));
+    fireEvent.click(await screen.findByTestId('scene-free_spins'));
+    expect(screen.getByTestId('scene-free_spins')).toHaveClass('e8-explorer-selected');
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0].url).toBe('/api/scenes/preview');
-    expect(posts[0].body).toEqual({ scene: 'base_game' });
-    // The host's answer is shown, not swallowed.
+    expect(posts[0].body).toEqual({ scene: 'free_spins' });
+    // The host's answer is shown, not swallowed — and pinned to the scene
+    // it was asked for: selecting another scene takes it off screen.
     expect(await screen.findByText('no preview is up')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('scene-base_game'));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getByTestId('scenes-screen')).not.toHaveTextContent('no preview is up'),
+    );
   });
 
   it('without a stage row the screen says so', async () => {

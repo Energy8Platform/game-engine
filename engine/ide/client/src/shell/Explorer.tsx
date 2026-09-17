@@ -114,27 +114,36 @@ export function openPath(ctx: Context, path: string, entry?: FileEntry): void {
 }
 
 /**
- * The one text field the Explorer ever shows: Enter submits, Escape or
- * leaving it cancels. An accepted submit unmounts the input, which fires
- * `onBlur` on the way out — `submitted` keeps that blur from cancelling
- * what Enter just did. A refused one (`onSubmit` returns false: the name
- * was bad) keeps the input up, with the text, to be fixed.
+ * The one text field the Explorer ever shows (and the Scenes sidebar's
+ * "new scene" row borrows): Enter submits, Escape or leaving it cancels.
+ * An accepted submit unmounts the input, which fires `onBlur` on the way
+ * out — `submitted` keeps that blur from cancelling what Enter just did.
+ * A refused one (`onSubmit` returns false: the name was bad) keeps the
+ * input up, with the text, to be fixed.
  */
-function InlineInput({
+export function InlineInput({
   initial,
   onSubmit,
   onCancel,
+  testId = 'explorer-input',
+  list,
+  placeholder,
 }: {
   initial: string;
   onSubmit(value: string): boolean;
   onCancel(): void;
+  testId?: string;
+  list?: string;
+  placeholder?: string;
 }): JSX.Element {
   const [value, setValue] = useState(initial);
   const submitted = useRef(false);
   return (
     <input
-      data-testid="explorer-input"
+      data-testid={testId}
       className="e8-explorer-input"
+      list={list}
+      placeholder={placeholder}
       autoFocus
       value={value}
       onChange={(e) => setValue(e.target.value)}

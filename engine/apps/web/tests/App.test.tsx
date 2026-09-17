@@ -107,7 +107,7 @@ beforeEach(() => {
 });
 
 describe('App', () => {
-  it('registers projects, explorer, composition and preview in the activity bar, in that order', async () => {
+  it('registers projects, explorer, composition and preview in the activity bar, in that order, and the scenes plugin after them', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     expect(ctx.slots.list('shell.activity').map((e) => e.key)).toEqual(
@@ -120,6 +120,7 @@ describe('App', () => {
       'activity-explorer',
       'activity-composition',
       'activity-preview',
+      'activity-scenes',
     ]);
   });
 
@@ -132,7 +133,7 @@ describe('App', () => {
     expect(await screen.findByText('Projects')).toBeTruthy();
   });
 
-  it('registers composition and preview as documents nobody can close', async () => {
+  it('registers composition and preview as the only documents, neither closable', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     const docs = ctx.slots.list<{ name: string; key: string; closable?: boolean }>(

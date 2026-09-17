@@ -883,56 +883,31 @@ label {
   margin-bottom: 24px;
 }
 
-/* Scenes: the stage's scenes down the left (explorer-style entries), the
-   selected scene's layers in z-order on the right — a view over the stage
-   row's config, every edit a PUT of the whole thing. */
-.e8-scenes {
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 16px;
-  align-items: start;
-}
-.e8-scenes > .e8-empty {
-  grid-column: 1 / -1;
-}
-.e8-scenes-list,
-.e8-scenes-layers {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.e8-scenes-selected,
-.e8-scenes-selected:hover {
-  background: var(--e8-selected);
-}
-.e8-scenes-add {
-  margin: var(--e8-gap);
-}
-.e8-scenes-add input {
-  width: 100%;
-  box-sizing: border-box;
-}
-.e8-scenes-detail > header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 0;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--e8-border);
-}
-.e8-scenes-detail > header label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--e8-fg-muted);
-}
-.e8-scenes-layers .e8-explorer-entry {
-  cursor: default;
-  gap: 8px;
-}
-.e8-scenes-z {
+/* Scenes: one sidebar column in the Explorer's idiom — its header, rows,
+   hover buttons, inline input and confirm row are the Explorer's own
+   classes. What is added is the column's own: a section title over the
+   layers, a badge (a scene's transition, a layer's z), the up/down pair
+   that shows on hover like the delete does, and the transition row. */
+.e8-scenes-section-title {
+  padding: 10px 12px 2px;
   color: var(--e8-fg-muted);
   font-size: var(--e8-size-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.e8-scenes-badge {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-selected);
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-badge);
+  line-height: 16px;
+}
+.e8-scenes-layer {
+  cursor: default;
+  gap: 8px;
 }
 .e8-scenes-move {
   width: 18px;
@@ -943,13 +918,34 @@ label {
   background: transparent;
   color: var(--e8-fg-muted);
   line-height: 1;
+  opacity: 0;
+}
+.e8-explorer-entry:hover .e8-scenes-move,
+.e8-scenes-move:focus-visible {
+  opacity: 1;
 }
 .e8-scenes-move:hover:not(:disabled) {
   background: var(--e8-hover);
   color: var(--e8-fg);
 }
-.e8-scenes-move:disabled {
+.e8-explorer-entry:hover .e8-scenes-move:disabled {
   opacity: 0.3;
+}
+.e8-scenes-transition {
+  gap: 8px;
+  cursor: default;
+}
+.e8-scenes-transition:hover {
+  background: transparent;
+}
+.e8-scenes-transition select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+}
+.e8-explorer-diagnostic[data-severity='warning'] {
+  color: var(--e8-warning);
 }
 
 /* Composition: one row per composition entry; the game's own rows beneath as a plain hairline list — a claim about the running game, not an editor. */
