@@ -1,5 +1,6 @@
 import type { Diagnostic } from './diagnostic';
 import type { GameCompositionRow } from './project';
+import type { SpinSchema } from './spin-schema';
 
 /** One row of the composition: a plugin as the IDE shows it. */
 export interface CompositionRow {
@@ -258,6 +259,46 @@ export interface GameCompositionMessage {
   changed: string[];
 }
 
+/**
+ * "Show this scene" — the IDE's Scenes screen asked the host
+ * (`POST /api/scenes/preview { scene }`) and the host tells every `/ide`
+ * socket. Only the running game's `ide-bridge` acts on it (it enters the
+ * scene on the stage); the IDE's own sockets ignore the type. Not
+ * retained: a game that connects later starts on its own first stage.
+ */
+export interface ScenePreviewMessage {
+  type: 'scene-preview';
+  scene: string;
+}
+
+/**
+ * The running game's `transitions` registry, as ids — sent by its
+ * `ide-bridge` once the stage row has applied, so the IDE can offer a
+ * scene's `transition` as a pick rather than a free string. Replaces the
+ * host's last list whole; the host mirrors it on `GET /api/composition`
+ * (`GameCompositionResponse.transitions`).
+ */
+export interface GameTransitionsMessage {
+  type: 'game-transitions';
+  ids: string[];
+}
+
+/**
+ * What `GET /api/composition` answers (`runtime-assets.ts`, on the root
+ * and the preview alike): the GAME's rows, the host's own diagnostics
+ * about them, the `.spin` schema (`null` when there is none to read — the
+ * field always rides, so a browser can tell "no schema" from an old host
+ * that never heard of one), and `transitions` — the transition ids the
+ * running game's `transitions` registry reported (`game-transitions`),
+ * empty until a game connects.
+ */
+export interface GameCompositionResponse {
+  rows: GameCompositionRow[];
+  diagnostics: Diagnostic[];
+  schema: SpinSchema | null;
+  transitions: string[];
+}
+
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: Snapshot }
@@ -265,8 +306,9 @@ export type ServerMessage =
   | GameDiagnosticsMessage
   | GameGoneMessage
   | GameCompositionMessage
+  | ScenePreviewMessage
   | { type: 'workspace'; workspace: WorkspaceState };
 
 /** Browser to host. */
 export type ClientMessage =
-  { type: 'update'; id: string; config: unknown } | GameDiagnosticsMessage;
+  { type: 'update'; id: string; config: unknown } | GameDiagnosticsMessage | GameTransitionsMessage;

@@ -1314,3 +1314,52 @@ describe('ide rpc — broadcastGameComposition reaches the root and the preview'
     preview.close();
   });
 });
+
+describe('ide rpc — the game reports its transitions', () => {
+  async function previewSocket(accept: Parameters<typeof host.ctx.ideRpc.attach>[1]) {
+    const fiber = host.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });
+    await fiber;
+    host.ctx.ideRpc.attach(fiber.ctx.server, accept);
+    const ws = new WebSocket(`ws://127.0.0.1:${fiber.ctx.server.port}/ide`);
+    await new Promise((resolve) => ws.once('open', resolve));
+    return ws;
+  }
+
+  it('mirrors the last list a socket sent, a later socket replaces it, and it survives the game leaving', async () => {
+    expect(host.ctx.ideRpc.transitions()).toEqual([]);
+    const game = await previewSocket({ accept: ['game-diagnostics', 'game-transitions'] });
+    game.send(JSON.stringify({ type: 'game-transitions', ids: ['cut', 'fade', 'wipe'] }));
+    await expect.poll(() => host.ctx.ideRpc.transitions()).toEqual(['cut', 'fade', 'wipe']);
+    // Not an array of strings: ignored, the last list stands.
+    game.send(JSON.stringify({ type: 'game-transitions', ids: [1, 'x'] }));
+    game.send(JSON.stringify({ type: 'game-transitions', ids: 'cut' }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(host.ctx.ideRpc.transitions()).toEqual(['cut', 'fade', 'wipe']);
+
+    const later = await previewSocket({ accept: ['game-diagnostics', 'game-transitions'] });
+    later.send(JSON.stringify({ type: 'game-transitions', ids: ['cut'] }));
+    await expect.poll(() => host.ctx.ideRpc.transitions()).toEqual(['cut']);
+    game.close();
+    later.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(host.ctx.ideRpc.transitions()).toEqual(['cut']); // last known
+  });
+
+  it('is dropped on a socket whose attachment does not accept it', async () => {
+    const game = await previewSocket({ accept: ['game-diagnostics'] });
+    game.send(JSON.stringify({ type: 'game-transitions', ids: ['cut'] }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(host.ctx.ideRpc.transitions()).toEqual([]);
+    game.close();
+  });
+
+  it('broadcastScenePreview reaches every socket', async () => {
+    const preview = await previewSocket({ accept: ['game-diagnostics'] });
+    const previewInbox = createInbox(preview);
+    host.ctx.ideRpc.broadcastScenePreview({ scene: 'bonus' });
+    const expected = { type: 'scene-preview', scene: 'bonus' };
+    expect(await inbox.waitFor((m) => m.type === 'scene-preview')).toEqual(expected);
+    expect(await previewInbox.waitFor((m) => m.type === 'scene-preview')).toEqual(expected);
+    preview.close();
+  });
+});

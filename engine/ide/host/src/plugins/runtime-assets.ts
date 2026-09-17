@@ -8,6 +8,7 @@ import {
   type Diagnostic,
   diagnostic,
   type E8Manifest,
+  type GameCompositionResponse,
   type GameCompositionRow,
   parseManifest,
   type ResolvedRow,
@@ -20,6 +21,10 @@ export const inject = ['server', 'project', 'spinSchema', 'ideRpc'];
 declare module 'cordis' {
   interface Context {
     runtimeAssets: RuntimeAssetsService;
+  }
+  interface Events {
+    /** A game row's config landed in `e8.patch.yml` and `project`/`spinSchema` were re-read (`putRow`) — `scenes.ts` re-checks on it. */
+    'game-composition/written'(payload: { id: string }): void;
   }
 }
 
@@ -486,7 +491,13 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
     // parse failure would be indistinguishable from an old host that has
     // never heard of a schema at all, and the browser needs to tell those
     // two apart (see task-3-brief.md).
-    res.json({ rows, diagnostics, schema: ctx.spinSchema.schema });
+    const response: GameCompositionResponse = {
+      rows,
+      diagnostics,
+      schema: ctx.spinSchema.schema,
+      transitions: ctx.ideRpc.transitions(),
+    };
+    res.json(response);
   };
 
   /**
@@ -576,6 +587,7 @@ export function apply(ctx: Context, config: RuntimeAssetsConfig) {
         !after?.hot || changedTopLevelKeys(prev, after.config).some((key) => restart.has(key));
       res.json({ rows, reload, diagnostics });
       ctx.ideRpc.broadcastGameComposition({ rows, reload, changed: [id] });
+      ctx.emit('game-composition/written', { id });
     };
     const run = chain.then(task, task);
     chain = run.catch(() => undefined);
@@ -669,24 +681,30 @@ export function changedTopLevelKeys(
 
 /**
  * The top-level keys of a row's schema (`GameCompositionRow.schema`, a
- * schemastery `toJSON()` graph) whose field is `applies: 'restart'` — the
- * same `meta.extra.applies` the IDE's schema-form reads as `needsRestart`.
- * Rebuilt with `new Schema(json)` rather than read off the raw graph: the
- * graph is schemastery's own deduped `{ uid, refs }` shape, and schemastery
- * is already this host's dependency. Empty for no schema, or one that is
- * not an object at the top.
+ * schemastery `toJSON()` graph) that reload the game when they change: a
+ * key whose field, or anything under it (an object's fields, an array's
+ * or a dict's item), is `applies: 'restart'` — the same `meta.extra.
+ * applies` the IDE's schema-form reads as `needsRestart`. `stage1`'s
+ * `design` is the case that made this nested: the row is hot, and only
+ * `design.width`/`height` restart. Rebuilt with `new Schema(json)` rather
+ * than read off the raw graph: the graph is schemastery's own deduped
+ * `{ uid, refs }` shape, and schemastery is already this host's
+ * dependency. Empty for no schema, or one that is not an object at the top.
  */
 export function restartKeys(schema: unknown): Set<string> {
-  // Top-level keys only: a `restart` on a nested field (`stage1`'s
-  // `design.width`) is not seen here — harmless while every such row is
-  // `hot: false` (always reloads), wrong for a hot row with a nested one.
   if (!schema) return new Set();
   const dict = (new Schema(schema as Schema) as Schema).dict ?? {};
-  return new Set(
-    Object.keys(dict).filter(
-      (key) => (dict[key].meta.extra as { applies?: string } | undefined)?.applies === 'restart',
-    ),
-  );
+  const hasRestart = (node: Schema): boolean => {
+    if ((node.meta.extra as { applies?: string } | undefined)?.applies === 'restart') return true;
+    if (node.type === 'object' && node.dict) {
+      return Object.values(node.dict).some((child) => hasRestart(child as Schema));
+    }
+    if ((node.type === 'array' || node.type === 'dict') && node.inner) {
+      return hasRestart(node.inner as Schema);
+    }
+    return false;
+  };
+  return new Set(Object.keys(dict).filter((key) => hasRestart(dict[key] as Schema)));
 }
 
 /**

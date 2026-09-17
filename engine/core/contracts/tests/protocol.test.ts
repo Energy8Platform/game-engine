@@ -103,3 +103,14 @@ describe('protocol — game-composition tells the IDE and the game that a row wa
     expect(frame.changed).toEqual(['reels1']);
   });
 });
+
+describe('protocol — scenes: a preview push down, a transitions mirror up', () => {
+  it('scene-preview is a server frame; game-transitions a client one', () => {
+    // Compile-time claims, like the block above: each only type-checks
+    // against its own direction's union.
+    const push: ServerMessage = { type: 'scene-preview', scene: 'base_game' };
+    const mirror: ClientMessage = { type: 'game-transitions', ids: ['cut', 'fade'] };
+    expect(push.scene).toBe('base_game');
+    expect(mirror.ids).toEqual(['cut', 'fade']);
+  });
+});

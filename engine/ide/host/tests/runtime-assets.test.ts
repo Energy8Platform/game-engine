@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerMessage } from '@energy8engine/contracts';
 import { WebSocket } from 'ws';
 import { createIdeHost, type IdeHost } from '../src/index';
+import { restartKeys } from '../src/plugins/runtime-assets';
 
 function fixture(name: string): string {
   return join(__dirname, 'fixtures', name);
@@ -553,7 +554,7 @@ describe('GET /api/composition', () => {
     expect(byId('reels1').hot).toBe(true);
     expect(byId('mechanics1').hot).toBe(true);
     expect(byId('renderer1').hot).toBe(false);
-    expect(byId('stage1').hot).toBe(false);
+    expect(byId('stage1').hot).toBe(true); // layers, scenes and transitions re-apply in place; `design` alone restarts
     expect(body.diagnostics.filter((d: { where: string }) => d.where === 'schema')).toEqual([]);
   });
 
@@ -1012,6 +1013,24 @@ describe('PUT /api/composition/rows/:id', () => {
     expect(rowOf(patchOf(workspace).rows, 'hot1').config).toEqual({ speed: 2 });
   });
 
+  it('PUT on a hot stage row: layers → reload false, design.width → reload true', async () => {
+    // `stage1` is hot with ONE nested restart field (`design.width`) —
+    // the case that made `restartKeys` walk below the top level.
+    const dir = e8BaseWorkspace();
+    host = await createIdeHost({ root: dir, port: 0 });
+    const layers = await (
+      await put(host.url, 'stage1', { config: { layers: [{ id: 'bg' }, { id: 'reels' }] } })
+    ).json();
+    expect(rowOf(layers.rows, 'stage1')).toMatchObject({ hot: true });
+    expect(layers.reload).toBe(false);
+    const design = await (
+      await put(host.url, 'stage1', {
+        config: { layers: [{ id: 'bg' }, { id: 'reels' }], design: { width: 1 } },
+      })
+    ).json();
+    expect(design.reload).toBe(true);
+  });
+
   it('400s an unknown row id and a body that is not { config: object }, touching nothing', async () => {
     const dir = copyFixtureToTemp('project-patched');
     host = await createIdeHost({ root: dir, port: 0 });
@@ -1155,5 +1174,25 @@ describe('PUT /api/composition/rows/:id', () => {
     const res = await put(gameUrl, 'reels1', { config: { grid: 1 } });
     expect([404, 405]).toContain(res.status);
     expect(patchOf(dir).rows).toEqual([{ id: 'reels1', config: { grid: { cols: 5, rows: 3 } } }]);
+  });
+});
+
+describe('restartKeys', () => {
+  it('sees a restart field nested under a top-level object', () => {
+    const schema = Schema.object({
+      design: Schema.object({ width: Schema.natural().extra('extra', { applies: 'restart' }) }),
+      layers: Schema.array(Schema.object({ id: Schema.string() })),
+    }).toJSON();
+    expect([...restartKeys(schema)]).toEqual(['design']);
+  });
+  it('sees one under an array item or a dict value too', () => {
+    const schema = Schema.object({
+      rows: Schema.array(
+        Schema.object({ port: Schema.natural().extra('extra', { applies: 'restart' }) }),
+      ),
+      byId: Schema.dict(Schema.string().extra('extra', { applies: 'restart' })),
+      plain: Schema.string(),
+    }).toJSON();
+    expect([...restartKeys(schema)]).toEqual(['rows', 'byId']);
   });
 });

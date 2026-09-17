@@ -8,6 +8,7 @@ import {
   type Diagnostic,
   type GameCompositionMessage,
   type GameDiagnosticsSource,
+  type ScenePreviewMessage,
   type ServerMessage,
   type Snapshot,
   type WorkspaceState,
@@ -75,6 +76,22 @@ export interface IdeRpcService {
    * retained: a late client fetches `GET /api/composition` itself.
    */
   broadcastGameComposition(frame: Omit<GameCompositionMessage, 'type'>): void;
+  /**
+   * "Show this scene" (`POST /api/scenes/preview`, `scenes.ts`) — sent to
+   * EVERY socket, not only the preview's: the IDE's own sockets ignore a
+   * type they do not handle (`connection.ts` filters by type), and the
+   * root has no way to tell a game socket from an editor one. Not retained.
+   */
+  broadcastScenePreview(frame: Omit<ScenePreviewMessage, 'type'>): void;
+  /**
+   * The transition ids the running game last reported (`game-transitions`,
+   * from its `ide-bridge`) — a copy of the LAST KNOWN list: a later frame
+   * replaces it whole, and a game leaving keeps it (the IDE's pick list
+   * should not go blank while the preview reloads). Empty until a game
+   * has spoken; reset when the project leaves, with the rest of what was
+   * retained about it.
+   */
+  transitions(): string[];
   /**
    * Registers the `/ide` websocket route on `server` — the root's by
    * default; the preview's too (Task 4). `accept` narrows what a socket on
@@ -233,6 +250,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
    */
   let lastHostDiagnostics: RetainedFrame | null = null;
 
+  /** See `IdeRpcService.transitions`. */
+  let lastTransitions: string[] = [];
+
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
   };
@@ -314,6 +334,10 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     broadcastGameComposition(frame) {
       for (const socket of clients) send(socket, { type: 'game-composition', ...frame });
     },
+    broadcastScenePreview(frame) {
+      for (const socket of clients) send(socket, { type: 'scene-preview', ...frame });
+    },
+    transitions: () => [...lastTransitions],
     attach(server, options) {
       server.ws('/ide', (req, accept) => handle(options ?? {}, req, accept));
     },
@@ -365,11 +389,23 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
         // unhandled rejection instead of a no-op.
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
         const type = (parsed as { type?: unknown }).type;
-        if (type !== 'update' && type !== 'game-diagnostics') return;
+        if (type !== 'update' && type !== 'game-diagnostics' && type !== 'game-transitions') {
+          return;
+        }
         if (acceptTypes && !acceptTypes.includes(type)) return; // see `attach`
         message = parsed as ClientMessage;
       } catch {
         return; // malformed frames are ignored; the browser is ours
+      }
+
+      if (message.type === 'game-transitions') {
+        // The game's registry, mirrored — see `IdeRpcService.transitions`.
+        // Anything but a list of strings is a malformed frame, ignored
+        // like any other; the last good list stands.
+        if (Array.isArray(message.ids) && message.ids.every((id) => typeof id === 'string')) {
+          lastTransitions = [...message.ids];
+        }
+        return;
       }
 
       if (message.type === 'game-diagnostics') {
@@ -507,6 +543,7 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       gameSocket.clear();
       groups.clear();
       lastHostDiagnostics = null;
+      lastTransitions = [];
       for (const socket of clients) for (const message of gone) send(socket, message);
     }
     lastActive = state.active;

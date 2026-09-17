@@ -12,8 +12,9 @@
  * `/api/spin`, the `/@fs/` guard, `/api/composition` + `/plugin-runtime/:id`
  * (`ctx.runtimeAssets.attachGameRoutes`) and the `/ide` socket
  * (`ctx.ideRpc.attach`, the game's `ide-bridge` opens
- * `ws://${location.host}/ide` — accepting only `game-diagnostics` from
- * it, so the game can report but not `update` e8.yml). The root
+ * `ws://${location.host}/ide` — accepting only `game-diagnostics` and
+ * `game-transitions` from it, so the game can report but not `update`
+ * e8.yml). The root
  * (`ctx.server`) is the IDE's and gets NO game route; and it refuses a
  * cross-origin WRITE (any non-GET/HEAD request, and any `/ide` upgrade,
  * carrying an `Origin` outside the IDE's own — `createIdeHost`'s
@@ -243,7 +244,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   installErrorBoundary(preview);
   // What the page fetches same-origin besides this plugin's own routes.
   // The socket is send-restricted: a game reports, it does not edit e8.yml.
-  ctx.ideRpc.attach(preview, { accept: ['game-diagnostics'] });
+  ctx.ideRpc.attach(preview, { accept: ['game-diagnostics', 'game-transitions'] });
   ctx.runtimeAssets.attachGameRoutes(preview);
 
   // Resolved once, here, rather than read as `config.gamesDir` at every use

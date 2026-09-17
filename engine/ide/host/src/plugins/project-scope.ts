@@ -25,6 +25,7 @@ import * as devGame from './dev-game';
 import * as files from './files';
 import * as project from './project';
 import * as runtimeAssets from './runtime-assets';
+import * as scenes from './scenes';
 import * as schema from './schema';
 import type { ProjectScopeHandle } from './workspace';
 
@@ -55,6 +56,7 @@ export async function apply(ctx: Context, config: ProjectScopeConfig): Promise<v
   await ctx.plugin(files, { cwd });
   await ctx.plugin(clientAssets, { cwd });
   await ctx.plugin(runtimeAssets, { cwd });
+  await ctx.plugin(scenes);
   await ctx.loader.await();
 
   // dev-game: what `e8 dev` used to add after the host. Its config is read
