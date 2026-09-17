@@ -12,6 +12,7 @@ import type { ModulesConfig } from './plugins/modules';
 import * as gameComposition from './plugins/game-composition';
 import type { GameCompositionConfig } from './plugins/game-composition';
 import * as scenes from './plugins/scenes';
+import type { ScenesConfig } from './plugins/scenes';
 import * as gameDiagnostics from './plugins/diagnostics';
 import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
@@ -32,7 +33,12 @@ import * as languageSpin from './plugins/language-spin';
  * every caller gets a `Context` with both services already provided.
  */
 export async function createIdeClient(
-  config: ConnectionConfig & ModulesConfig & GameCompositionConfig & FilesConfig & CheckConfig,
+  config: ConnectionConfig &
+    ModulesConfig &
+    GameCompositionConfig &
+    ScenesConfig &
+    FilesConfig &
+    CheckConfig,
 ): Promise<Context> {
   const ctx = new Context();
   await ctx.plugin(connection, config);
@@ -58,9 +64,9 @@ export async function createIdeClient(
   await ctx.plugin(workspace, config);
   await ctx.plugin(modules, config);
   await ctx.plugin(gameComposition, config);
-  // The Scenes screen: a contribution to `slots` over `gameComposition`,
-  // so right after the service it reads.
-  await ctx.plugin(scenes);
+  // The scene documents: reads `connection` (frames) and `shell` (tabs),
+  // and the same `fetchFn`/`origin` `gameComposition` takes.
+  await ctx.plugin(scenes, config);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
   // own doc) — no new field for this signature to carry, just another
   // plugin reading the same `url`/`socketFactory` this function's caller

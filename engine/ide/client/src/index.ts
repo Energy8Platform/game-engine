@@ -32,6 +32,12 @@ export {
   type GameCompositionConfig,
 } from './plugins/game-composition';
 export {
+  useScenes,
+  type SceneSelection,
+  type ScenesService,
+  type ScenesConfig,
+} from './plugins/scenes';
+export {
   useGameDiagnostics,
   type GameDiagnosticsEntry,
   type GameDiagnosticsGroup,
