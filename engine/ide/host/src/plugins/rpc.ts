@@ -8,7 +8,10 @@ import {
   type Diagnostic,
   type GameCompositionMessage,
   type GameDiagnosticsSource,
+  type NodeTypeInfo,
   type ScenePreviewMessage,
+  type ScenesMessage,
+  type SceneSelectMessage,
   type ServerMessage,
   type Snapshot,
   type WorkspaceState,
@@ -18,6 +21,10 @@ import { createDiagnostics, type DiagnosticsService } from '@energy8engine/diagn
 declare module 'cordis' {
   interface Context {
     ideRpc: IdeRpcService;
+  }
+  interface Events {
+    /** Fired whenever a fresh `node-types` list lands from a socket — see `IdeRpcService.nodeTypes`. */
+    'game/node-types'(types: NodeTypeInfo[]): void;
   }
 }
 
@@ -93,6 +100,18 @@ export interface IdeRpcService {
    * and the list greets a late client (see the message handler below).
    */
   transitions(): string[];
+  /**
+   * The node types the running game last registered (`node-types`, mirrored
+   * the same way `transitions()` is — see that method's own doc for the
+   * "last known list, relayed, retained, reset on project switch" shape,
+   * which this repeats verbatim for a different wire type). Empty until a
+   * game has spoken; reset when the project leaves.
+   */
+  nodeTypes(): NodeTypeInfo[];
+  /** "Here are the scenes" — sent to every socket, root and preview alike. Not retained. */
+  broadcastScenes(frame: Omit<ScenesMessage, 'type'>): void;
+  /** "Highlight this node" — sent to every socket, root and preview alike. Not retained. */
+  broadcastSceneSelect(frame: Omit<SceneSelectMessage, 'type'>): void;
   /**
    * Registers the `/ide` websocket route on `server` — the root's by
    * default; the preview's too (Task 4). `accept` narrows what a socket on
@@ -253,6 +272,8 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
 
   /** See `IdeRpcService.transitions`. */
   let lastTransitions: string[] = [];
+  /** See `IdeRpcService.nodeTypes`. */
+  let lastNodeTypes: NodeTypeInfo[] = [];
 
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
@@ -339,6 +360,13 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       for (const socket of clients) send(socket, { type: 'scene-preview', ...frame });
     },
     transitions: () => [...lastTransitions],
+    nodeTypes: () => [...lastNodeTypes],
+    broadcastScenes(frame) {
+      for (const socket of clients) send(socket, { type: 'scenes', ...frame });
+    },
+    broadcastSceneSelect(frame) {
+      for (const socket of clients) send(socket, { type: 'scene-select', ...frame });
+    },
     attach(server, options) {
       server.ws('/ide', (req, accept) => handle(options ?? {}, req, accept));
     },
@@ -390,7 +418,12 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
         // unhandled rejection instead of a no-op.
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
         const type = (parsed as { type?: unknown }).type;
-        if (type !== 'update' && type !== 'game-diagnostics' && type !== 'game-transitions') {
+        if (
+          type !== 'update' &&
+          type !== 'game-diagnostics' &&
+          type !== 'game-transitions' &&
+          type !== 'node-types'
+        ) {
           return;
         }
         if (acceptTypes && !acceptTypes.includes(type)) return; // see `attach`
@@ -412,6 +445,28 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
           for (const other of clients) {
             if (other !== socket) send(other, relayed);
           }
+        }
+        return;
+      }
+
+      if (message.type === 'node-types') {
+        // The game's node-type registry, mirrored — see
+        // `IdeRpcService.nodeTypes`. Anything but a list of objects each
+        // carrying a string `type` is a malformed frame, ignored like any
+        // other; the last good list stands. Relayed to every OTHER socket
+        // as it lands, and announced via `ctx.emit` for a same-process
+        // listener (e.g. a future scenes editor) that has no socket to
+        // read the relay off of.
+        if (
+          Array.isArray(message.types) &&
+          message.types.every((t) => t && typeof t.type === 'string')
+        ) {
+          lastNodeTypes = [...message.types];
+          const relayed: ServerMessage = { type: 'node-types', types: [...lastNodeTypes] };
+          for (const other of clients) {
+            if (other !== socket) send(other, relayed);
+          }
+          ctx.emit('game/node-types', [...lastNodeTypes]);
         }
         return;
       }
@@ -511,6 +566,10 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     if (lastTransitions.length) {
       send(socket, { type: 'game-transitions', ids: [...lastTransitions] });
     }
+    // The last known node-type list, same reasoning as `lastTransitions` above.
+    if (lastNodeTypes.length) {
+      send(socket, { type: 'node-types', types: [...lastNodeTypes] });
+    }
   }
   service.attach(ctx.server, { origins: config.origins });
 
@@ -558,6 +617,14 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       groups.clear();
       lastHostDiagnostics = null;
       lastTransitions = [];
+      lastNodeTypes = [];
+      // Unlike the diagnostics/game-gone frames above (sent only when
+      // something was actually retained), these two always go: a client
+      // that connected before anything had ever been reported still holds
+      // whatever pick list / node palette it built from an earlier
+      // project's `game-transitions`/`node-types` frame, and has no other
+      // way to learn the game behind it is gone. Closes slice-16 debt 2.
+      gone.push({ type: 'game-transitions', ids: [] }, { type: 'node-types', types: [] });
       for (const socket of clients) for (const message of gone) send(socket, message);
     }
     lastActive = state.active;

@@ -1393,3 +1393,55 @@ describe('ide rpc — the game reports its transitions', () => {
     preview.close();
   });
 });
+
+describe('ide rpc — the game reports its node types', () => {
+  it('mirrors node-types from one socket to the others, greets a late socket with it, and clears on project switch', async () => {
+    expect(host.ctx.ideRpc.nodeTypes()).toEqual([]);
+    const b = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const bInbox = createInbox(b);
+    await new Promise((resolve) => b.once('open', resolve));
+
+    // `socket` (top-level) is the sender; `b` is the other socket it relays to.
+    socket.send(
+      JSON.stringify({ type: 'node-types', types: [{ type: 'image', schema: { uid: 1 } }] }),
+    );
+    expect(await bInbox.waitFor((m) => m.type === 'node-types')).toEqual({
+      type: 'node-types',
+      types: [{ type: 'image', schema: { uid: 1 } }],
+    });
+    expect(host.ctx.ideRpc.nodeTypes()).toEqual([{ type: 'image', schema: { uid: 1 } }]);
+
+    // A late-connecting socket is greeted with the retained list.
+    const c = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const cInbox = createInbox(c);
+    await new Promise((resolve) => c.once('open', resolve));
+    expect(await cInbox.waitFor((m) => m.type === 'node-types')).toEqual({
+      type: 'node-types',
+      types: [{ type: 'image', schema: { uid: 1 } }],
+    });
+
+    // A project switch (the `active` leaving) clears the retained list.
+    host.ctx.emit('workspace/changed', { ...host.ctx.workspace.state(), active: null });
+    await expect.poll(() => host.ctx.ideRpc.nodeTypes()).toEqual([]);
+
+    b.close();
+    c.close();
+  });
+});
+
+describe('ide rpc — broadcastScenes and broadcastSceneSelect', () => {
+  it('reach every socket', async () => {
+    host.ctx.ideRpc.broadcastScenes({ scenes: [{ id: 'a', nodes: [] }], diagnostics: [] });
+    host.ctx.ideRpc.broadcastSceneSelect({ scene: 'a', node: null });
+    expect(await inbox.waitFor((m) => m.type === 'scenes')).toEqual({
+      type: 'scenes',
+      scenes: [{ id: 'a', nodes: [] }],
+      diagnostics: [],
+    });
+    expect(await inbox.waitFor((m) => m.type === 'scene-select')).toEqual({
+      type: 'scene-select',
+      scene: 'a',
+      node: null,
+    });
+  });
+});
