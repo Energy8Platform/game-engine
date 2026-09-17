@@ -11,6 +11,7 @@ import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
 import * as gameComposition from './plugins/game-composition';
 import type { GameCompositionConfig } from './plugins/game-composition';
+import * as scenes from './plugins/scenes';
 import * as gameDiagnostics from './plugins/diagnostics';
 import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
@@ -57,6 +58,9 @@ export async function createIdeClient(
   await ctx.plugin(workspace, config);
   await ctx.plugin(modules, config);
   await ctx.plugin(gameComposition, config);
+  // The Scenes screen: a contribution to `slots` over `gameComposition`,
+  // so right after the service it reads.
+  await ctx.plugin(scenes);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
   // own doc) — no new field for this signature to carry, just another
   // plugin reading the same `url`/`socketFactory` this function's caller

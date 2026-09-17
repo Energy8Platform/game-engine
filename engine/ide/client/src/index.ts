@@ -49,6 +49,7 @@ export { type CheckService, type CheckConfig } from './plugins/check';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, useEditorDiagnostics } from './screens/CompositionScreen';
+export { ScenesScreen, findStageRow } from './screens/ScenesScreen';
 export { Preview, PreviewWall, type PreviewWallProps } from './screens/PreviewWall';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Shell } from './shell/Shell';

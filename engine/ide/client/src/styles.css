@@ -883,6 +883,75 @@ label {
   margin-bottom: 24px;
 }
 
+/* Scenes: the stage's scenes down the left (explorer-style entries), the
+   selected scene's layers in z-order on the right — a view over the stage
+   row's config, every edit a PUT of the whole thing. */
+.e8-scenes {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.e8-scenes > .e8-empty {
+  grid-column: 1 / -1;
+}
+.e8-scenes-list,
+.e8-scenes-layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.e8-scenes-selected,
+.e8-scenes-selected:hover {
+  background: var(--e8-selected);
+}
+.e8-scenes-add {
+  margin: var(--e8-gap);
+}
+.e8-scenes-add input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.e8-scenes-detail > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--e8-border);
+}
+.e8-scenes-detail > header label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--e8-fg-muted);
+}
+.e8-scenes-layers .e8-explorer-entry {
+  cursor: default;
+  gap: 8px;
+}
+.e8-scenes-z {
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-small);
+}
+.e8-scenes-move {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--e8-radius-sm);
+  background: transparent;
+  color: var(--e8-fg-muted);
+  line-height: 1;
+}
+.e8-scenes-move:hover:not(:disabled) {
+  background: var(--e8-hover);
+  color: var(--e8-fg);
+}
+.e8-scenes-move:disabled {
+  opacity: 0.3;
+}
+
 /* Composition: one row per composition entry; the game's own rows beneath as a plain hairline list — a claim about the running game, not an editor. */
 .e8-row {
   background: var(--e8-surface);
