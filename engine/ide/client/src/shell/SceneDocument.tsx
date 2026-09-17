@@ -24,7 +24,7 @@ import { activateOnKey } from './activate';
 const DRAG_TYPE = 'text/e8-node';
 const ID_FROM_PATH = /^scenes\/([a-z0-9_]+)\.scene\.yml$/;
 
-function* walk(
+export function* walk(
   nodes: readonly SceneNode[],
   depth = 0,
 ): Generator<{ node: SceneNode; depth: number }> {
@@ -48,7 +48,7 @@ export function nextId(doc: SceneDoc, type: string): string {
 }
 
 /** Rebuilds the tree, `f` deciding each node's children. */
-function map(
+export function map(
   nodes: readonly SceneNode[],
   f: (node: SceneNode, children: SceneNode[]) => SceneNode[],
 ): SceneNode[] {

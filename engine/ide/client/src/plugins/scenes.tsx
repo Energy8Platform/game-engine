@@ -10,6 +10,7 @@ import {
 import type { ConnectionConfig } from './connection';
 import { ScenesSidebar } from '../shell/ScenesSidebar';
 import { SceneDocument } from '../shell/SceneDocument';
+import { PropertiesSidebar } from '../shell/PropertiesSidebar';
 
 /**
  * The scene documents, client half: the set the host keeps
@@ -38,7 +39,8 @@ import { SceneDocument } from '../shell/SceneDocument';
  * alone.
  *
  * The sidebar, the viewer (`scenes/<id>.scene.yml` as a tab) and the
- * inspector register here too (Tasks 11–13).
+ * inspector (`shell.sideRight`, shown while something is selected and
+ * hidden when the selection clears) register here too.
  */
 declare module 'cordis' {
   interface Context {
@@ -243,9 +245,12 @@ export function apply(ctx: Context, config: ScenesConfig) {
 
   ctx.effect(
     () =>
-      ctx.slots.register({ name: 'shell.sidebar', key: 'scenes', title: 'Scenes' }, function ScenesView() {
-        return <ScenesSidebar ctx={ctx} />;
-      }),
+      ctx.slots.register(
+        { name: 'shell.sidebar', key: 'scenes', title: 'Scenes' },
+        function ScenesView() {
+          return <ScenesSidebar ctx={ctx} />;
+        },
+      ),
     'scenes:sidebar',
   );
 
@@ -257,6 +262,27 @@ export function apply(ctx: Context, config: ScenesConfig) {
         component: SceneDocument,
       }),
     'scenes:viewer',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.register(
+        { name: 'shell.sideRight', key: 'scenes', title: 'Properties' },
+        function PropertiesView() {
+          return <PropertiesSidebar ctx={ctx} />;
+        },
+      ),
+    'scenes:side-right',
+  );
+
+  ctx.effect(
+    () =>
+      service.subscribe(() => {
+        const shown = ctx.shell.sideRight() === 'scenes';
+        if (selected && !shown) ctx.shell.showSideRight('scenes');
+        else if (!selected && shown) ctx.shell.hideSideRight();
+      }),
+    'scenes:side-right-shown',
   );
 
   ctx.provide('scenes', service);

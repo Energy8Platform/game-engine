@@ -1175,3 +1175,36 @@ label {
     grid-template-columns: 1fr;
   }
 }
+
+/* Properties (right sidebar): the schema form's three-column field grid
+   is built for the wide composition rows; in a 280px column each field
+   stacks label over control instead. The id input takes the header's
+   title slot; the type sits after it, muted. */
+.e8-properties-body {
+  padding: 8px 12px;
+}
+.e8-properties .e8-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+.e8-properties .e8-explorer-header .e8-explorer-input {
+  flex: 1;
+  min-width: 0;
+}
+.e8-properties .e8-explorer-header .e8-explorer-title {
+  color: var(--e8-fg-muted);
+}
+.e8-properties dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+}
+.e8-properties dt {
+  color: var(--e8-fg-muted);
+}
+.e8-properties dd,
+.e8-properties ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
