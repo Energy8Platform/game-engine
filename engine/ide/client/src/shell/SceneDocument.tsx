@@ -7,6 +7,7 @@ import {
   type SceneNode,
 } from '@energy8engine/contracts';
 import type { ViewerProps } from '../plugins/viewers';
+import { extOf } from '../plugins/asset-node-types';
 import { useScenes } from '../plugins/scenes';
 import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
@@ -236,6 +237,10 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
   // Created synchronously (once, via `useState`'s lazy initializer) rather
   // than in the mount effect below: the iframe's ref callback fires during
   // commit, BEFORE that effect runs, and needs an rpc to attach to already.
+  // (`useState`'s initializer, unlike an effect, is not re-run under
+  // StrictMode's double-invoke — this app does not use StrictMode today, so
+  // a real double-init leaking a second `CanvasRpc`'s window listener is
+  // not a live risk, but would be if that changed.)
   const [rpc] = useState<CanvasRpc>(() => createCanvasRpc());
   const rpcRef = useRef<CanvasRpc | null>(rpc);
   // The canvas' handlers are registered once per mount: they read the
@@ -271,12 +276,12 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
 
   /** A path with no registered node type: warned to `connection` and shown inline, same message both places. */
   const noNodeType = (path: string) => {
-    const ext = path.slice(path.lastIndexOf('.') + 1);
+    const ext = extOf(path);
     const warn = diagnostic(
       'warning',
       'scenes',
       path,
-      `no node type for .${ext}`,
+      ext ? `no node type for .${ext}` : `no node type for "${path}"`,
       'register one with ctx.assetNodeTypes',
     );
     ctx.connection.report(warn);

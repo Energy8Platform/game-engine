@@ -24,7 +24,7 @@ declare module 'cordis' {
 export const name = 'assetNodeTypes';
 
 /** Just the basename's extension, lower-cased; `undefined` for no dot or a dotfile ("no real extension"). */
-function extOf(path: string): string | undefined {
+export function extOf(path: string): string | undefined {
   const base = path.slice(path.lastIndexOf('/') + 1);
   const dot = base.lastIndexOf('.');
   if (dot <= 0) return undefined; // no dot, or dot is the basename's first char (".hidden")

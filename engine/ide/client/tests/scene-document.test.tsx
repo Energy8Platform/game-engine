@@ -626,6 +626,20 @@ describe('SceneDocument', () => {
     expect(puts()).toHaveLength(0);
   });
 
+  it('a drop of a path with no extension warns by the whole path, not a bogus ".<path>"', async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'drop', { path: 'assets/README', x: 0, y: 0 });
+    expect(await screen.findByTestId('scene-doc-error')).toHaveTextContent(
+      'no node type for "assets/README"',
+    );
+    expect(
+      ctx.connection.diagnostics.some((d) => d.message === 'no node type for "assets/README"'),
+    ).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
   it('a dropped File is written into assets/ before it becomes a node', async () => {
     const { ctx, calls } = await harness({
       'PUT /api/files/assets/pic.png': () => ({ body: { diagnostics: [] } }),
