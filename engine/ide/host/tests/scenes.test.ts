@@ -49,6 +49,17 @@ describe('checkScenes', () => {
       expect.objectContaining({ severity: 'error', where: 'a' }),
     ]);
   });
+  it('a row that leaves `layers` out has the schema default, `reels`, for its scenes to name', () => {
+    expect(checkScenes({ scenes: { base_game: { layers: ['reels'] } } }, ['base_game'])).toEqual(
+      [],
+    );
+    const d = checkScenes({ scenes: { base_game: { layers: ['bg'] } } }, ['base_game']);
+    expect(d).toEqual([expect.objectContaining({ severity: 'error', where: 'base_game' })]);
+    // An explicit empty list declares no layers at all.
+    expect(
+      checkScenes({ layers: [], scenes: { base_game: { layers: ['reels'] } } }, ['base_game']),
+    ).toEqual([expect.objectContaining({ severity: 'error', where: 'base_game' })]);
+  });
   it('a config with no scenes and no layers (an older stage row) says nothing', () => {
     expect(checkScenes({ design: { width: 1, height: 1 } }, ['base_game'])).toEqual([]);
   });

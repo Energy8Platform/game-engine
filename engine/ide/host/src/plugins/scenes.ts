@@ -25,7 +25,8 @@ import { diagnostic, type Diagnostic, type DiagnosticsResponse } from '@energy8e
 
 /**
  * Every scene is a stage, every stage a scene, every scene's layers
- * declared, layer ids unique. Silent for a config with neither `layers`
+ * declared (the schema's default `reels` when the row declares none),
+ * layer ids unique. Silent for a config with neither `layers`
  * nor `scenes` (an older stage row); and "stage has no scene" is only
  * said once at least one scene IS declared — a row with none has opted
  * out of scenes, and there is nothing to cross-check its stages against.
@@ -35,10 +36,14 @@ export function checkScenes(stageConfig: unknown, stageNames: string[]): Diagnos
   if (!Array.isArray(cfg.layers) && !cfg.scenes) return [];
   const out: Diagnostic[] = [];
   // A hand-typed `layers: bg` or `scenes: x` is not this check's subject
-  // (the row's own schema refuses it on a PUT): read as empty, never thrown on.
+  // (the row's own schema refuses it on a PUT): read as empty, never thrown
+  // on. No `layers` key at all is the schema default — one layer, `reels`
+  // (mirrors `@energy8engine/stage`'s schema); an explicit `[]` stays empty.
   const ids = Array.isArray(cfg.layers)
     ? cfg.layers.map((l) => String((l as { id?: unknown } | null)?.id ?? ''))
-    : [];
+    : cfg.layers === undefined
+      ? ['reels']
+      : [];
   for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) {
     out.push(
       diagnostic(
