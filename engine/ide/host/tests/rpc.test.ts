@@ -1420,9 +1420,28 @@ describe('ide rpc — the game reports its node types', () => {
       types: [{ type: 'image', schema: { uid: 1 } }],
     });
 
-    // A project switch (the `active` leaving) clears the retained list.
+    // A project switch (the `active` leaving) clears the retained list —
+    // and every connected socket is told so, not just the in-process copy:
+    // both `b` and `c` already hold a stale `node-types` list built from
+    // the frame above, and a stale `game-transitions` pick list from
+    // whatever an earlier test in this run left `lastTransitions` at.
     host.ctx.emit('workspace/changed', { ...host.ctx.workspace.state(), active: null });
     await expect.poll(() => host.ctx.ideRpc.nodeTypes()).toEqual([]);
+    for (const box of [bInbox, cInbox]) {
+      // `createInbox`'s `waitFor` discards non-matching frames as it scans
+      // rather than requeuing them, so these two must be awaited in the
+      // order the departure block actually sends them (`game-transitions`
+      // before `node-types` — see the `gone.push` call in rpc.ts) or the
+      // first `waitFor` silently eats the frame the second is waiting for.
+      expect(await box.waitFor((m) => m.type === 'game-transitions')).toEqual({
+        type: 'game-transitions',
+        ids: [],
+      });
+      expect(await box.waitFor((m) => m.type === 'node-types')).toEqual({
+        type: 'node-types',
+        types: [],
+      });
+    }
 
     b.close();
     c.close();
