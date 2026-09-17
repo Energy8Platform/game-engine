@@ -77,7 +77,7 @@ describe('mounting', () => {
     expect(byId(scenes, 'a', 'in')!.parent).toBe(byId(scenes, 'a', 'grp'));
   });
 
-  it('an unknown type is an error diagnostic and the node is skipped; the rest mounts', () => {
+  it('an unknown type skips the node and the rest mounts; the error comes when the scene shows', async () => {
     const { scenes, report } = boot([
       {
         id: 'a',
@@ -89,6 +89,39 @@ describe('mounting', () => {
     ]);
     expect(byId(scenes, 'a', 'x')).toBeUndefined();
     expect(byId(scenes, 'a', 'y')).toBeDefined();
+    // Not yet: nothing is on screen, and the type may still be on its way.
+    expect(report).not.toHaveBeenCalled();
+    await scenes.show('a');
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', plugin: 'scenes', where: 'a/x' }),
+    );
+  });
+
+  it('a type registered after replace but before show is no error: the remount mounts the node', async () => {
+    // The boot order in a real composition: `scenes1` replaces the boot
+    // set first, `reels1` registers `reels` from an `inject` callback later.
+    const { scenes, nodeTypes, report } = boot([
+      { id: 'a', nodes: [{ id: 'x', type: 'spine', props: {} }] },
+    ]);
+    nodeTypes.register({ type: 'spine', schema: Schema.object({}), mount: () => new Container() });
+    expect(byId(scenes, 'a', 'x')).toBeDefined();
+    await scenes.show('a');
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('a type taken away while the scene is visible is an error on the remount', async () => {
+    const { scenes, nodeTypes, report } = boot([
+      { id: 'a', nodes: [{ id: 'x', type: 'spine', props: {} }] },
+    ]);
+    const dispose = nodeTypes.register({
+      type: 'spine',
+      schema: Schema.object({}),
+      mount: () => new Container(),
+    });
+    await scenes.show('a');
+    expect(report).not.toHaveBeenCalled();
+    dispose();
+    expect(byId(scenes, 'a', 'x')).toBeUndefined();
     expect(report).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'error', plugin: 'scenes', where: 'a/x' }),
     );

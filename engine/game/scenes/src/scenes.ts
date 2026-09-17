@@ -85,6 +85,16 @@ interface Mount {
   all: Entry[];
   /** Type identities at mount time, unknown ones as `undefined` — a change remounts. */
   types: Map<string, NodeType | undefined>;
+  /**
+   * Nodes skipped because their type was not registered when this mount
+   * was built. Reported when the scene is ON SCREEN (`show`, or a remount
+   * while visible) — never at mount time: a row registers its type
+   * whenever `nodeTypes` appears (`@energy8engine/reels`' `ctx.inject`),
+   * which is after `replace` has already mounted the boot set, and the
+   * registry change remounts (measured: every boot of `first-slot` said
+   * `reels` was unregistered, then drew the board anyway).
+   */
+  missing: { where: string; type: string }[];
 }
 
 /** Views this package builds itself, so destroys itself. */
@@ -150,11 +160,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     const type = nodeTypes.get(node.type);
     building?.types.set(node.type, type);
     if (!type) {
-      error(
-        where,
-        `node type "${node.type}" is not registered — the node is skipped`,
-        'register it, or pick a type that is',
-      );
+      building?.missing.push({ where, type: node.type });
       return;
     }
     let view: Container;
@@ -178,10 +184,20 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen);
   }
 
+  /** The skipped nodes of a mount that is on screen: each one an error, now that a person can see the gap. */
+  const reportMissing = (m: Mount) => {
+    for (const { where, type } of m.missing)
+      error(
+        where,
+        `node type "${type}" is not registered — the node is skipped`,
+        'register it, or pick a type that is',
+      );
+  };
+
   function mountTop(id: string): void {
     const view = new Container();
     view.label = id;
-    const m: Mount = { view, nodes: new Map(), all: [], types: new Map() };
+    const m: Mount = { view, nodes: new Map(), all: [], types: new Map(), missing: [] };
     building = m;
     const seen = new Set<string>();
     for (const node of docs.get(id)!.nodes) mountNode(node, view, id, [], seen);
@@ -190,6 +206,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     for (const e of m.all)
       if (e.type.type === 'scene' && shownNested.has(e.props.scene as string))
         e.view.visible = true;
+    if (visibleIds.includes(id)) reportMissing(m);
   }
 
   function unmountTop(id: string): void {
@@ -347,6 +364,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       if (shownNested.has(id)) settleHosts(nestingEntries(id), true);
       return;
     }
+    reportMissing(mounted.get(id)!);
     const view = mounted.get(id)!.view;
     container.addChildAt(view, container.getChildIndex(highlightBox));
     visibleIds.push(id);
