@@ -6,7 +6,7 @@ one bundle, and `e8.patch.yml` is the delta on top of it.
 ## `e8.patch.yml`
 
 The patch carries everything `src/main.ts` used to pass as a JS object
-straight into `createGame` — renderer size, the reel grid, the stage's design
+straight into `createGame` — renderer size, the reel grid, `scenes1`'s design
 resolution, and which mechanic `base_game` is bound to. A patch row replaces
 its target row's `config` **wholesale** (not a merge) and addresses it by the
 id `e8-base`'s own `e8.bundle.yml` assigns; a row that a bundle already

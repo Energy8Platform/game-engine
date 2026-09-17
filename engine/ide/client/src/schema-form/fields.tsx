@@ -499,7 +499,7 @@ function defaults(node: SchemaNode): unknown {
 }
 
 /**
- * An array (`stage1`'s `layers: array(object{id,z})`, a scene's `layers:
+ * An array (a row's `layers: array(object{id,z})`, a scene's `layers:
  * array(string)`): one row per item, each a nested `Field` of the item
  * schema — so an object item shows its children's labels — with up/down/
  * remove, and `add` after the rows. Structural changes commit at once with
@@ -584,7 +584,7 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
 }
 
 /**
- * A dict whose values are not plain strings (`stage1`'s `scenes:
+ * A dict whose values are not plain strings (a row's `scenes:
  * dict(object{…})`): a `key` input plus a nested `Field` of the value
  * schema per entry. Only the KEY is buffered here — typed one character at
  * a time, it must not commit each prefix as an entry of its own — and it

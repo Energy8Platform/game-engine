@@ -81,6 +81,46 @@ describe('checkScenes', () => {
     // The props failure names the field.
     expect(out.find((d) => d.where === 'bad/d')?.message).toContain('src');
   });
+  it('a common prop off its type is a props error naming the node and the field', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'n', type: 'container', props: { x: 'abc' } }])],
+      types,
+      () => true,
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'a/n', message: expect.stringContaining('x') }),
+    ]);
+  });
+  it('an empty image src (a fresh image) is one error, worded for it', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'i', type: 'image', props: { src: '' } }])],
+      types,
+      () => false,
+      false,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ severity: 'error', where: 'a/i' });
+    expect(out[0].message).toContain('src');
+  });
+  it('more than one reels node across the documents is a warning: the board can be on screen once', () => {
+    const out = checkScenes(
+      [
+        doc('a', [{ id: 'r', type: 'reels', props: {} }]),
+        doc('b', [{ id: 'r2', type: 'reels', props: {} }]),
+      ],
+      types,
+      () => true,
+      true,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        where: 'reels1',
+        message: expect.stringContaining('a/r, b/r2'),
+      }),
+    ]);
+  });
   it('unknown types are not reported until the game has reported its node types', () => {
     expect(
       checkScenes([doc('a', [{ id: 'n', type: 'spine', props: {} }])], [], () => true, false),
@@ -323,6 +363,39 @@ describe('/api/scenes', () => {
     expect(body.diagnostics).toContainEqual(
       expect.objectContaining({ severity: 'error', where: 'bad/a' }),
     );
+    close();
+  });
+});
+
+describe('scenes across a project switch', () => {
+  it('a root socket that stays up across an open is told the new set', async () => {
+    // Two projects under one root; the plugin boots per project inside
+    // `project-scope` while the socket stays connected.
+    const root = mkdtempSync(join(tmpdir(), 'ide-host-scenes-switch-'));
+    for (const [id, fixture] of [
+      ['one', 'project-scenes'],
+      ['two', 'project-e8-base'],
+    ] as const) {
+      cpSync(join(__dirname, 'fixtures', fixture), join(root, id), { recursive: true });
+      mkdirSync(join(root, id, 'node_modules'));
+      symlinkSync(
+        join(__dirname, '..', '..', '..', '..', 'node_modules', '@energy8engine'),
+        join(root, id, 'node_modules', '@energy8engine'),
+        'dir',
+      );
+    }
+    host = await createIdeHost({ root, port: 0 });
+    const { frames, close } = await listen(host);
+    const ids = (f: ServerMessage) => (f.type === 'scenes' ? f.scenes.map((s) => s.id).sort() : null);
+    expect(await host.ctx.workspace.open('one')).toEqual([]);
+    await expect
+      .poll(() => frames.some((f) => JSON.stringify(ids(f)) === '["bad","base_game","big_win"]'))
+      .toBe(true);
+    const seen = frames.length;
+    expect(await host.ctx.workspace.open('two')).toEqual([]);
+    await expect
+      .poll(() => frames.slice(seen).some((f) => JSON.stringify(ids(f)) === '[]'))
+      .toBe(true);
     close();
   });
 });

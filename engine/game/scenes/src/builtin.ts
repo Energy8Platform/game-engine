@@ -39,7 +39,8 @@ export const image: NodeType<{ src: string }> = {
   update(view, props, ctx) {
     (view as Sprite).texture = textureOf(ctx, props.src) ?? Texture.EMPTY;
   },
-  assets: (props) => [props.src],
+  // A fresh image has `src: ''` — nothing to request (`''` would resolve to `/`).
+  assets: (props) => (props.src ? [props.src] : []),
 };
 
 /** The referenced document, mounted as a child. `mountDoc` is the runtime's; the cycle guard is its chain of ids. */

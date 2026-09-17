@@ -912,7 +912,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   forwardTransitions();
 
   // Re-arms the subscription (and re-states the list) whenever `transitions`
-  // is provided again — a hot `stage1` re-apply disposes the registry this
+  // is provided again — a hot `scenes1` re-apply disposes the registry this
   // subscribed to and provides a fresh one, the same story `mechanics`'s own
   // `ctx.inject` above tells. `fresh === readFromTransitions` skips both the
   // initial, asynchronous fire (cordis runs this callback on a later tick,

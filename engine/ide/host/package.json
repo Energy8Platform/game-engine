@@ -20,6 +20,7 @@
     "@energy8engine/contracts": "*",
     "@energy8engine/diagnostics": "*",
     "@energy8engine/project": "*",
+    "@energy8engine/scenes": "*",
     "@energy8engine/session-dev": "*",
     "@energy8engine/spin-parser": "*",
     "cordis": "4.0.0-rc.8",

@@ -109,7 +109,21 @@ describe('mounting', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
-  it('a type taken away while the scene is visible is an error on the remount', async () => {
+  it('a type taken away and registered again while the scene is visible (a hot re-apply) is no error', async () => {
+    const { scenes, nodeTypes, report } = boot([
+      { id: 'a', nodes: [{ id: 'x', type: 'spine', props: {} }] },
+    ]);
+    const spine = { type: 'spine', schema: Schema.object({}), mount: () => new Container() };
+    const dispose = nodeTypes.register(spine);
+    await scenes.show('a');
+    dispose();
+    expect(byId(scenes, 'a', 'x')).toBeUndefined();
+    nodeTypes.register(spine);
+    expect(byId(scenes, 'a', 'x')).toBeDefined();
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('a type taken away for good is an error on the next show', async () => {
     const { scenes, nodeTypes, report } = boot([
       { id: 'a', nodes: [{ id: 'x', type: 'spine', props: {} }] },
     ]);
@@ -119,12 +133,38 @@ describe('mounting', () => {
       mount: () => new Container(),
     });
     await scenes.show('a');
-    expect(report).not.toHaveBeenCalled();
     dispose();
-    expect(byId(scenes, 'a', 'x')).toBeUndefined();
+    expect(report).not.toHaveBeenCalled();
+    await scenes.hide('a');
+    await scenes.show('a');
+    expect(report).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'error', plugin: 'scenes', where: 'a/x' }),
     );
+  });
+
+  it('a common prop off its type fails that node alone; the rest mounts and shows', async () => {
+    const { scenes, report } = boot([
+      {
+        id: 'a',
+        nodes: [
+          { id: 'x', type: 'container', props: { x: 'abc' } },
+          { id: 'y', type: 'container', props: { x: 1 } },
+        ],
+      },
+    ]);
+    expect(byId(scenes, 'a', 'x')).toBeUndefined();
+    expect(byId(scenes, 'a', 'y')!.x).toBe(1);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/x',
+        message: expect.stringContaining('failed to mount'),
+      }),
+    );
+    await scenes.show('a');
+    expect(scenes.visible()).toEqual(['a']);
   });
 
   it('a duplicate node id: the later node is skipped with an error', () => {
@@ -352,6 +392,20 @@ describe('show / hide', () => {
     expect(top.visible).toBe(true);
     scenes.highlight(null);
     expect(scenes.container.children.at(-1)!.visible).toBe(false);
+  });
+
+  it('the highlight box follows the node through a remount', () => {
+    const { scenes } = boot([
+      { id: 'a', nodes: [{ id: 'n', type: 'image', props: { src: 'w.png', x: 0 } }] },
+    ]);
+    scenes.highlight({ scene: 'a', node: 'n' });
+    const box = scenes.container.children.at(-1)!;
+    const before = box.getLocalBounds().minX;
+    scenes.replace([{ id: 'a', nodes: [{ id: 'n', type: 'image', props: { src: 'w.png', x: 40 } }] }]);
+    expect(box.visible).toBe(true);
+    expect(box.getLocalBounds().minX).toBe(before + 40);
+    scenes.replace([]);
+    expect(box.visible).toBe(false);
   });
 });
 

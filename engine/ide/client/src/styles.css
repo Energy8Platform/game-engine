@@ -208,7 +208,8 @@ label {
   box-sizing: border-box;
   display: grid;
   grid-template-columns:
-    var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr) var(--e8-side-right-w);
+    var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr)
+    calc(var(--e8-side-right-w) + var(--e8-gap));
   grid-template-rows: minmax(0, 1fr) auto var(--e8-status-h);
   grid-template-areas:
     'activity sidebar editors right'
@@ -332,7 +333,8 @@ label {
    stays `--e8-activity-w` wide, expanded or not. */
 .e8-shell.e8-sidebar-collapsed {
   grid-template-columns:
-    calc(var(--e8-activity-w) + var(--e8-gap)) 0 minmax(0, 1fr) var(--e8-side-right-w);
+    calc(var(--e8-activity-w) + var(--e8-gap)) 0 minmax(0, 1fr)
+    calc(var(--e8-side-right-w) + var(--e8-gap));
 }
 .e8-shell.e8-sidebar-collapsed .e8-sidebar {
   display: none;
@@ -343,11 +345,18 @@ label {
   margin-right: var(--e8-gap);
 }
 
+/* The same floating card as `.e8-sidebar`, mirrored: the gap to the editor
+   is a margin inside the column, so the shown column is
+   `--e8-side-right-w` plus it. */
 .e8-side-right {
   grid-area: right;
   overflow: auto;
-  border-left: 1px solid var(--e8-border);
+  scrollbar-width: thin;
+  box-sizing: border-box;
+  margin: 0 0 var(--e8-gap) var(--e8-gap);
   background: var(--e8-surface);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-lg);
 }
 /* Same collapse rule as the left sidebar: nothing shown, or a shown key
    nobody (any longer) registers, and the column is 0 rather than
@@ -533,6 +542,14 @@ label {
   color: var(--e8-fg);
   font: inherit;
   outline: none;
+}
+/* In the Explorer the accent border means "rename in progress"; the
+   Properties id input is a plain field that only lights up focused. */
+.e8-properties .e8-explorer-input {
+  border-color: var(--e8-border);
+}
+.e8-properties .e8-explorer-input:focus {
+  border-color: var(--e8-accent);
 }
 .e8-menu {
   display: flex;

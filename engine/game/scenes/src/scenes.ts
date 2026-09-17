@@ -168,6 +168,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     try {
       props = type.schema(node.props) as Record<string, unknown>;
       view = type.mount(props, mountCtx([...chain, sceneId]));
+      // Inside the try: a common prop off its type (`x: 'abc'`) is this
+      // node's failure, not the whole set's.
+      applyCommon(view, node.props);
     } catch (e) {
       error(
         where,
@@ -175,7 +178,6 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       );
       return;
     }
-    applyCommon(view, node.props);
     view.label = node.id;
     parent.addChild(view);
     const entry: Entry = { view, node, props, type };
@@ -194,19 +196,34 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       );
   };
 
+  /**
+   * Types a mount had that a registry change took away, by scene id. A
+   * hot re-apply of the row owning a type (`reels1`) unregisters, then
+   * registers again a few microtasks later: the remount in between must
+   * not say the type is missing. It is reported only if it was ALSO
+   * missing at the previous mount; the next `show()` still reports it if
+   * it truly stays gone (`reportMissing` reads the mount's own list).
+   */
+  let vanished: Map<string, Set<string>> | null = null;
+
   function mountTop(id: string): void {
     const view = new Container();
     view.label = id;
     const m: Mount = { view, nodes: new Map(), all: [], types: new Map(), missing: [] };
     building = m;
-    const seen = new Set<string>();
-    for (const node of docs.get(id)!.nodes) mountNode(node, view, id, [], seen);
-    building = null;
+    try {
+      const seen = new Set<string>();
+      for (const node of docs.get(id)!.nodes) mountNode(node, view, id, [], seen);
+    } finally {
+      building = null;
+    }
     mounted.set(id, m);
     for (const e of m.all)
       if (e.type.type === 'scene' && shownNested.has(e.props.scene as string))
         e.view.visible = true;
-    if (visibleIds.includes(id)) reportMissing(m);
+    if (!visibleIds.includes(id)) return;
+    const gap = vanished?.get(id);
+    reportMissing(gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m);
   }
 
   function unmountTop(id: string): void {
@@ -240,6 +257,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       }
     }
     refresh();
+    redraw();
     // A visible document may now name assets nothing loaded yet (an edited `src`).
     if (shown.length > 0)
       void enqueue(async () => {
@@ -322,6 +340,19 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
 
   const enqueue = (run: () => Promise<void>): Promise<void> => (queue = queue.then(run, run));
 
+  /** What `highlight` last asked for; redrawn after a remount or a load, since the view (and its bounds) may be new. */
+  let current: SceneRef | null = null;
+  function redraw(): void {
+    highlightBox.clear();
+    const view = current && service.view(current);
+    highlightBox.visible = !!view;
+    if (!view) return;
+    const b = view.getBounds();
+    const tl = container.toLocal({ x: b.minX, y: b.minY });
+    const br = container.toLocal({ x: b.maxX, y: b.maxY });
+    highlightBox.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y).stroke({ width: 2, color: 0x38bdf8 });
+  }
+
   /** Loads what `id` needs and is not loaded yet; a failure is reported per path, never thrown. */
   async function load(id: string): Promise<void> {
     const need = assetsOf(id).filter((p) => !loaded.has(p));
@@ -336,6 +367,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         error(id, `asset "${p}" failed to load: ${why}`, 'check the path under the project');
     }
     refresh();
+    redraw();
   }
 
   const notDeclared = (id: string) =>
@@ -401,10 +433,20 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   }
 
   const offTypes = nodeTypes.subscribe(() => {
-    const stale = [...mounted]
-      .filter(([, m]) => [...m.types].some(([t, was]) => nodeTypes.get(t) !== was))
-      .map(([id]) => id);
-    remount(stale);
+    const stale = [...mounted].filter(([, m]) =>
+      [...m.types].some(([t, was]) => nodeTypes.get(t) !== was),
+    );
+    vanished = new Map(
+      stale.map(([id, m]) => [
+        id,
+        new Set([...m.types].filter(([t, was]) => was && !nodeTypes.get(t)).map(([t]) => t)),
+      ]),
+    );
+    try {
+      remount(stale.map(([id]) => id));
+    } finally {
+      vanished = null;
+    }
   });
 
   const service: ScenesService = {
@@ -433,14 +475,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       remount([...changed]);
     },
     highlight(ref) {
-      highlightBox.clear();
-      const view = ref && service.view(ref);
-      highlightBox.visible = !!view;
-      if (!view) return;
-      const b = view.getBounds();
-      const tl = container.toLocal({ x: b.minX, y: b.minY });
-      const br = container.toLocal({ x: b.maxX, y: b.maxY });
-      highlightBox.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y).stroke({ width: 2, color: 0x38bdf8 });
+      current = ref;
+      redraw();
     },
     assetsOf: (id) => assetsOf(id),
     mountDoc(id, chain) {

@@ -12,9 +12,10 @@
  * Re-read on ANY `files/written`/`files/removed` (an image may have
  * appeared, not only a document), on `game/node-types`, and on a game row
  * write (`game-composition/written` — the `reels1` warning depends on the
- * rows). Every re-read broadcasts the set as a `scenes` frame to every
- * `/ide` socket, root and preview alike; the boot read does not (nobody
- * is connected yet, and both sides fetch `GET /api/scenes` on boot).
+ * rows). Every read broadcasts the set as a `scenes` frame to every
+ * `/ide` socket, root and preview alike — the boot read too: the plugin
+ * boots once per project inside `project-scope` while root sockets stay
+ * up across a switch, and only that frame tells them the new set.
  *
  * `POST /api/scenes/preview { scene }` is the sidebar's "show me": the
  * frame goes to every `/ide` socket (`broadcastScenePreview`), and the
@@ -26,6 +27,8 @@ import type { Context } from 'cordis';
 import type { Server } from '@cordisjs/plugin-server';
 import yaml from 'js-yaml';
 import Schema from 'schemastery';
+// pixi-free: `./common-schema` imports schemastery and nothing else.
+import { COMMON } from '@energy8engine/scenes/common-schema';
 import {
   diagnostic,
   type Diagnostic,
@@ -57,11 +60,10 @@ const SCENE_FILE = /^scenes\/([a-z0-9_]+)\.scene\.yml$/;
 const ID = /^[a-z0-9_]+$/;
 /**
  * The props every node accepts, applied by the runtime — a type's own
- * schema never lists them, so they are set aside before the schema sees
- * the props. Mirrors `@energy8engine/scenes/common-schema` (`COMMON`);
- * not imported, so the host stays free of the runtime package.
+ * schema never lists them, so they are split off before the schema sees
+ * the props, and checked through `COMMON` itself.
  */
-const COMMON_PROPS = ['x', 'y', 'scale', 'rotation', 'alpha', 'visible', 'anchor'];
+const COMMON_PROPS = Object.keys(COMMON.dict ?? {});
 
 export interface ParsedDoc {
   /** Project-relative, `scenes/<id>.scene.yml`. */
@@ -92,7 +94,7 @@ export function checkScenes(
   const schemas = new Map(nodeTypes.map((t) => [t.type, t.schema]));
   // scene → the scenes its `scene` nodes name (known ones only).
   const refs = new Map<string, Set<string>>();
-  let reelsNode = false;
+  const reelsNodes: string[] = [];
 
   for (const { file, doc } of docs) {
     const scene = sceneId(file);
@@ -115,7 +117,7 @@ export function checkScenes(
       if (seen.has(node.id))
         err(where, `node "${node.id}" is declared twice`, 'give each node one id');
       seen.add(node.id);
-      if (node.type === 'reels') reelsNode = true;
+      if (node.type === 'reels') reelsNodes.push(where);
       const schema = schemas.get(node.type);
       if (nodeTypes.length && schema === undefined) {
         err(
@@ -124,10 +126,12 @@ export function checkScenes(
           'use a registered type',
         );
       } else if (schema !== undefined) {
-        const own = Object.fromEntries(
-          Object.entries(node.props).filter(([k]) => !COMMON_PROPS.includes(k)),
-        );
+        const own: Record<string, unknown> = {};
+        const common: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(node.props))
+          (COMMON_PROPS.includes(k) ? common : own)[k] = v;
         try {
+          COMMON(common as never);
           new Schema(schema as Schema)(own);
         } catch (error) {
           err(
@@ -137,11 +141,14 @@ export function checkScenes(
           );
         }
       }
+      // `required()` lets `''` through (a fresh image): one message, worded for it.
       if (node.type === 'image' && typeof node.props.src === 'string' && !hasFile(node.props.src)) {
         err(
           where,
-          `image "${node.props.src}" is not in the project`,
-          'add the file, or point at one that is there',
+          node.props.src === ''
+            ? 'image has no src'
+            : `image "${node.props.src}" is not in the project`,
+          'pick a file under the project',
         );
       }
       if (node.type === 'scene' && typeof node.props.scene === 'string') {
@@ -180,7 +187,18 @@ export function checkScenes(
     }
   }
 
-  if (hasReelsRow && !reelsNode) {
+  if (reelsNodes.length > 1) {
+    out.push(
+      diagnostic(
+        'warning',
+        'scenes',
+        'reels1',
+        `${reelsNodes.length} nodes are \`reels\` (${reelsNodes.join(', ')}) — the board can be on screen once`,
+        'keep one `reels` node',
+      ),
+    );
+  }
+  if (hasReelsRow && reelsNodes.length === 0) {
     out.push(
       diagnostic(
         'warning',
@@ -287,10 +305,13 @@ export function apply(ctx: Context): void {
     reported = key;
     if (broadcast) ctx.ideRpc.broadcastScenes({ scenes, diagnostics: found });
   };
-  void refresh(false);
-  // Every listener is `void refresh(true)`; `refresh` itself never throws
-  // (`tree`/`read` do not), and the catch covers a refresh racing a dispose.
+  // Every refresh is `void refresh(true)`, the boot one too: a project
+  // switch re-applies this plugin while root sockets stay connected, and
+  // the frame is what replaces their stale set (to zero sockets it is a
+  // no-op). `refresh` itself never throws (`tree`/`read` do not); the
+  // catch covers a refresh racing a dispose.
   const again = () => void refresh(true).catch(() => {});
+  again();
   ctx.on('files/written', again);
   ctx.on('files/removed', again);
   ctx.on('game/node-types', again);
