@@ -105,6 +105,20 @@ function renderForm(
   return onChange;
 }
 
+/** The real consumer's shape: `value` only moves when a PUT's frame lands — here never. */
+function renderStaticForm(
+  schema: Schema,
+  value: Record<string, unknown>,
+  opts: { commit?: CommitMode } = {},
+) {
+  const onChange = vi.fn();
+  const json = JSON.parse(JSON.stringify(schema.toJSON()));
+  render(
+    <SchemaForm rowId="row" schema={json} value={value} onChange={onChange} commit={opts.commit} />,
+  );
+  return onChange;
+}
+
 /** A dict entry whose uid isn't in `refs` — the shape a truncated or
  * hand-edited schema graph produces. `new Schema(...)` rebuilds this dict
  * entry as `undefined` rather than dropping the key. */
@@ -768,6 +782,30 @@ describe('SchemaForm — arrays of objects', () => {
     await userEvent.tab();
     expect(onChange).toHaveBeenLastCalledWith({ layers: [{ id: 'a', z: 5 }] });
   });
+  // Fix round 1: `value` has not moved when the click lands (the PUT is in
+  // flight), so the swap must build on what was just flushed, not the prop.
+  it('a structural click right after typing keeps the flushed draft, even before the value catches up', async () => {
+    const onChange = renderStaticForm(
+      schema,
+      {
+        layers: [
+          { id: 'a', z: 0 },
+          { id: 'b', z: 1 },
+        ],
+      },
+      { commit: 'blur' },
+    );
+    const z = screen.getAllByLabelText('z')[1];
+    await userEvent.clear(z);
+    await userEvent.type(z, '5');
+    await userEvent.click(screen.getAllByRole('button', { name: 'up' })[1]);
+    expect(onChange).toHaveBeenLastCalledWith({
+      layers: [
+        { id: 'b', z: 5 },
+        { id: 'a', z: 0 },
+      ],
+    });
+  });
 });
 
 describe('SchemaForm — dicts of objects', () => {
@@ -788,11 +826,23 @@ describe('SchemaForm — dicts of objects', () => {
     await userEvent.type(screen.getAllByLabelText('key')[1], 'free_spins');
     await userEvent.tab();
     expect(onChange).toHaveBeenLastCalledWith({
-      scenes: { base_game: { layers: ['bg'] }, free_spins: {} },
+      scenes: { base_game: { layers: ['bg'] }, free_spins: { layers: [] } },
+    });
+  });
+  it('two entries keyed in a row both land, even before the value catches up', async () => {
+    const onChange = renderStaticForm(schema, { scenes: {} });
+    for (const key of ['x', 'y']) {
+      await userEvent.click(screen.getAllByRole('button', { name: 'add' }).at(-1)!);
+      await userEvent.type(screen.getAllByLabelText('key').at(-1)!, key);
+      await userEvent.tab();
+    }
+    expect(onChange).toHaveBeenLastCalledWith({
+      scenes: { x: { layers: [] }, y: { layers: [] } },
     });
   });
   it('an array of strings inside renders as a comma-free list of string inputs with add/remove', async () => {
     const onChange = renderForm(schema, { scenes: { base_game: { layers: ['bg'] } } });
+    expect(screen.getByLabelText('item 1')).toHaveValue('bg');
     await userEvent.click(screen.getAllByRole('button', { name: 'add' })[0]);
     expect(onChange).toHaveBeenLastCalledWith({ scenes: { base_game: { layers: ['bg', ''] } } });
   });

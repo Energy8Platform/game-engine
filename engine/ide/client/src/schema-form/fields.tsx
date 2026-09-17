@@ -42,6 +42,8 @@ export interface FieldProps {
   value: unknown;
   onChange: (next: unknown) => void;
   commit: CommitMode;
+  /** For a control with no `<label for>` of its own — a string item in an array. */
+  ariaLabel?: string;
 }
 
 export function label(node: SchemaNode, key: string): string {
@@ -129,7 +131,7 @@ export function ObjectFields({
   );
 }
 
-export function Field({ id, node, value, onChange, commit }: FieldProps) {
+export function Field({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
   const current = value ?? node.meta?.default;
 
   if (node.type === 'object' && node.dict) {
@@ -191,7 +193,16 @@ export function Field({ id, node, value, onChange, commit }: FieldProps) {
   }
 
   if (node.type === 'string') {
-    return <StringField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
+    return (
+      <StringField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        ariaLabel={ariaLabel}
+      />
+    );
   }
 
   // Any field kind this form has no editor for (`any`, a non-string union,
@@ -314,7 +325,7 @@ function NumberField({ id, node, value, onChange, commit }: FieldProps) {
   );
 }
 
-function StringField({ id, node, value, onChange, commit }: FieldProps) {
+function StringField({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
   const current = value ?? node.meta?.default;
   const draft = useDraft<string>({
     dep: value,
@@ -328,6 +339,7 @@ function StringField({ id, node, value, onChange, commit }: FieldProps) {
     <input
       id={id}
       type="text"
+      aria-label={ariaLabel}
       value={draft.raw}
       onFocus={draft.onFocus}
       onChange={draft.onChange}
@@ -493,15 +505,29 @@ function defaults(node: SchemaNode): unknown {
  * remove, and `add` after the rows. Structural changes commit at once with
  * the whole array; an edit inside a row goes through the inner field,
  * which already buffers under `commit: 'blur'` and keeps its draft across
- * an external change while focused. No local state: the rows ARE `value`.
+ * an external change while focused. The rows render from `value`, but
+ * every commit builds on `latest` — what this field last handed up, or
+ * the latest prop, whichever moved last: a structural click right after
+ * typing blurs the input first (its flush is one commit) and the click is
+ * a second, and the host's `value` only moves when the PUT lands, so the
+ * second must not be built from the prop or it drops the first.
  */
 function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
   const items = (value ?? node.meta?.default ?? []) as unknown[];
   const inner = node.inner!;
-  const swap = (a: number, b: number) => {
-    const next = [...items];
-    [next[a], next[b]] = [next[b], next[a]];
+  const latest = useRef(items);
+  useEffect(() => {
+    latest.current = items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const send = (next: unknown[]) => {
+    latest.current = next;
     onChange(next);
+  };
+  const swap = (a: number, b: number) => {
+    const next = [...latest.current];
+    [next[a], next[b]] = [next[b], next[a]];
+    send(next);
   };
   return (
     <div className="e8-array" data-testid={`array-${id}`}>
@@ -511,8 +537,9 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
             id={`${id}-${i}`}
             node={inner}
             value={item}
-            onChange={(next) => onChange(items.map((it, j) => (j === i ? next : it)))}
+            onChange={(next) => send(latest.current.map((it, j) => (j === i ? next : it)))}
             commit={commit}
+            ariaLabel={inner.type === 'string' ? `item ${i + 1}` : undefined}
           />
           <span className="e8-array-tools">
             <button
@@ -537,7 +564,7 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
               type="button"
               aria-label="remove"
               title="remove"
-              onClick={() => onChange(items.filter((_, j) => j !== i))}
+              onClick={() => send(latest.current.filter((_, j) => j !== i))}
             >
               ×
             </button>
@@ -548,7 +575,7 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
         type="button"
         aria-label="add"
         title="add"
-        onClick={() => onChange([...items, defaults(inner)])}
+        onClick={() => send([...latest.current, defaults(inner)])}
       >
         +
       </button>
@@ -564,12 +591,16 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
  * lands when its input blurs, renaming the entry (the old key dropped).
  * Value edits go straight through as the whole dict with that entry
  * replaced; the inner fields buffer themselves under `commit: 'blur'`.
- * `add` appends a row with an empty key and an empty value that is not an
+ * `add` appends a row with an empty key and the inner defaults, not an
  * entry until the key is non-empty on blur; `remove` commits at once.
  *
  * Same focused rule as `DictField`: while focus is inside, an external
- * `value` change leaves the rows alone; leaving re-syncs to the latest
- * baseline (the last commit, or the latest prop), keeping pending rows.
+ * `value` change leaves the rows alone; leaving re-syncs to `baseline`.
+ * Every commit builds on `baseline` too — the last commit, or the latest
+ * prop, whichever moved last — never on the `value` prop: the host's
+ * value only moves when a PUT lands, and two commits in a row (a key
+ * blur then a click, or two keys typed back to back) must stack, not
+ * have the second drop the first.
  */
 interface DictObjectRow {
   key: string;
@@ -612,15 +643,16 @@ function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
   const editValue = (index: number, next: unknown) => {
     patch(index, { value: next });
     const row = rows[index];
-    if (row.origin !== null) commitRows({ ...current, [row.origin]: next });
+    if (row.origin !== null) commitRows({ ...baseline.current, [row.origin]: next });
   };
   const leaveKey = (index: number) => {
     const row = rows[index];
     if (!row.dirty) return;
-    const next = { ...current };
+    const base = baseline.current;
+    const next = { ...base };
     if (row.origin !== null) delete next[row.origin];
     if (row.key !== '') next[row.key] = row.value;
-    if (JSON.stringify(next) !== JSON.stringify(current)) commitRows(next);
+    if (JSON.stringify(next) !== JSON.stringify(base)) commitRows(next);
     setRows([...toRows(next), ...pending(rows)]);
   };
   const leave = (e: FocusEvent<HTMLDivElement>) => {
@@ -664,7 +696,7 @@ function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
             onClick={() => {
               setRows(rows.filter((_, i) => i !== index));
               if (row.origin === null) return; // never committed — nothing to remove
-              const next = { ...current };
+              const next = { ...baseline.current };
               delete next[row.origin];
               commitRows(next);
             }}
@@ -680,12 +712,7 @@ function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
         onClick={() =>
           setRows((prev) => [
             ...prev,
-            {
-              key: '',
-              value: inner.type === 'object' ? {} : defaults(inner),
-              origin: null,
-              dirty: false,
-            },
+            { key: '', value: defaults(inner), origin: null, dirty: false },
           ])
         }
       >
