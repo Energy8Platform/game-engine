@@ -12,11 +12,15 @@ export type HandleId = 'nw' | 'ne' | 'se' | 'sw' | 'rotate' | 'body';
 export interface GizmoTarget {
   node: string;
   view: Container;
+  /** Typed carrier only — a gesture's base is read from the VIEW at pointer-down. */
   props: { x: number; y: number; scale: number; rotation: number };
 }
 
 export interface GizmoOptions {
-  /** Where the gizmo draws (above the scene root). */
+  /**
+   * Where the gizmo draws (above the scene root). Must have an identity world transform:
+   * the frame and hit areas are drawn in global (screen) coords as layer-local.
+   */
   layer: Container;
   /** Screen→design: the scene root's world scale (1/scale). */
   designPerPixel(): number;
@@ -99,8 +103,10 @@ export function createGizmo(o: GizmoOptions): Gizmo {
 
   let target: GizmoTarget | null = null;
   let drag:
-    | { handle: HandleId; start: Point; anchor: Point; startAngle: number; mods: Mods; moved: boolean }
+    | { handle: HandleId; start: Point; anchor: Point; startAngle: number; mods: Mods; moved: boolean; base: GizmoTarget['props'] }
     | null = null;
+  const gfx = [frame, body, ...handleGfx.values()];
+  const baseOf = (view: Container): GizmoTarget['props'] => ({ x: view.position.x, y: view.position.y, scale: view.scale.x, rotation: view.rotation });
 
   const boxOf = (t: GizmoTarget): Box => {
     const b = t.view.getBounds();
@@ -120,6 +126,7 @@ export function createGizmo(o: GizmoOptions): Gizmo {
       startAngle: Math.atan2(at.y - center.y, at.x - center.x),
       mods: { shift: !!mods.shift, alt: !!mods.alt },
       moved: false,
+      base: baseOf(target.view),
     };
   };
 
@@ -127,7 +134,8 @@ export function createGizmo(o: GizmoOptions): Gizmo {
     if (!drag || !target) return;
     if (!drag.moved && Math.hypot(at.x - drag.start.x, at.y - drag.start.y) >= CLICK_SLOP) drag.moved = true;
     if (!drag.moved) return; // a press that has not travelled yet is still a potential click
-    const { view, props } = target;
+    const { view } = target;
+    const props = drag.base;
     if (drag.handle === 'body') {
       const s = o.designPerPixel();
       const p = o.snap({ x: props.x + (at.x - drag.start.x) * s, y: props.y + (at.y - drag.start.y) * s }, !!drag.mods.alt);
@@ -164,7 +172,7 @@ export function createGizmo(o: GizmoOptions): Gizmo {
   layer.on('pointerupoutside', onPointerUp);
 
   const redraw = (): void => {
-    for (const c of layer.children) c.visible = target !== null;
+    for (const g of gfx) g.visible = target !== null;
     if (!target) return;
     const box = boxOf(target);
     frame.clear();
@@ -194,8 +202,8 @@ export function createGizmo(o: GizmoOptions): Gizmo {
     refresh: redraw,
     nudge(dxDesign, dyDesign) {
       if (!target) return;
-      const { node, view, props } = target;
-      const p = { x: props.x + dxDesign, y: props.y + dyDesign };
+      const { node, view } = target;
+      const p = { x: view.position.x + dxDesign, y: view.position.y + dyDesign };
       view.position.set(p.x, p.y);
       o.onEdit(node, p);
       redraw();
@@ -209,7 +217,7 @@ export function createGizmo(o: GizmoOptions): Gizmo {
       layer.off('globalpointermove', onPointerMove);
       layer.off('pointerup', onPointerUp);
       layer.off('pointerupoutside', onPointerUp);
-      for (const g of [frame, body, ...handleGfx.values()]) g.destroy();
+      for (const g of gfx) g.destroy();
     },
   };
 }

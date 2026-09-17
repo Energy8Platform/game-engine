@@ -45,12 +45,30 @@ describe('gizmo', () => {
     expect(t.view.position.x).toBe(110);
     expect(onEdit).toHaveBeenCalledWith('n', { x: 110, y: 100 });
   });
+  it('consecutive gestures re-base on the view, not the props snapshot', () => {
+    const { gizmo, onEdit } = boot(); const t = target(); gizmo.attach(t);
+    gizmo.nudge(1, 0); gizmo.nudge(1, 0);
+    expect(onEdit).toHaveBeenLastCalledWith('n', { x: 102, y: 100 });
+    gizmo.drag('body', { x: 100, y: 100 }, { x: 110, y: 100 });
+    gizmo.drag('body', { x: 110, y: 100 }, { x: 120, y: 100 });
+    expect(onEdit).toHaveBeenLastCalledWith('n', { x: 122, y: 100 });
+    expect(t.view.position.x).toBe(122);
+  });
+  it('alt reaches snap', () => {
+    const layer = new Container(); const snap = vi.fn((p) => p);
+    const gizmo = createGizmo({ layer, designPerPixel: () => 1, snap, onEdit: vi.fn(), onBodyClick: vi.fn() });
+    gizmo.attach(target());
+    gizmo.drag('body', { x: 100, y: 100 }, { x: 120, y: 100 }, { alt: true });
+    expect(snap).toHaveBeenCalledWith(expect.anything(), true);
+  });
   it('attach(null) hides; the frame follows the view on refresh', () => {
     const { gizmo, layer } = boot(); const t = target(); gizmo.attach(t);
     expect(layer.children.some((c) => c.visible)).toBe(true);
     t.view.position.set(300, 300); gizmo.refresh();
     const frame = layer.getChildByLabel?.('gizmo-frame') ?? layer.children[0];
     expect(frame.getBounds().x).toBeGreaterThan(250);
-    gizmo.attach(null); expect(layer.children.every((c) => !c.visible)).toBe(true);
+    const stranger = layer.addChild(new Container());
+    gizmo.attach(null); expect(layer.children.filter((c) => c !== stranger).every((c) => !c.visible)).toBe(true);
+    expect(stranger.visible).toBe(true);
   });
 });
