@@ -9,6 +9,8 @@ import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
+import * as assetNodeTypes from '../src/plugins/asset-node-types';
+import * as files from '../src/plugins/files';
 
 /**
  * The Properties sidebar, rendered through the plugin's OWN
@@ -100,9 +102,11 @@ async function harness(extra: Record<string, Route> = {}) {
   await ctx.plugin(slots);
   await ctx.plugin(shell);
   await ctx.plugin(viewers);
-  // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these two.
+  // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these four.
   ctx.provide('workspace', { state: () => null, subscribe: () => () => {} });
   ctx.provide('gameComposition', { rows: null, reloads: 0, subscribe: () => () => {} });
+  await ctx.plugin(assetNodeTypes);
+  await ctx.plugin(files, { fetchFn });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([BASE, BONUS]));
   const puts = () => calls.filter((c) => c.method === 'PUT').map((c) => c.body as SceneDoc);

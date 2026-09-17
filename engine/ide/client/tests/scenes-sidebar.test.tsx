@@ -9,6 +9,8 @@ import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
+import * as assetNodeTypes from '../src/plugins/asset-node-types';
+import * as files from '../src/plugins/files';
 
 /**
  * `ScenesSidebar`, rendered through the plugin's OWN `shell.sidebar`
@@ -61,9 +63,11 @@ async function harness(routes: Record<string, Route>) {
   await ctx.plugin(slots);
   await ctx.plugin(shell);
   await ctx.plugin(viewers);
-  // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these two.
+  // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these four.
   ctx.provide('workspace', { state: () => null, subscribe: () => () => {} });
   ctx.provide('gameComposition', { rows: null, reloads: 0, subscribe: () => () => {} });
+  await ctx.plugin(assetNodeTypes);
+  await ctx.plugin(files, { fetchFn });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   return { ctx, calls, fetchFn };
 }
@@ -88,7 +92,9 @@ describe('ScenesSidebar', () => {
   });
 
   it('an empty set says so', async () => {
-    const { ctx } = await harness({ 'GET /api/scenes': boot({ scenes: [], diagnostics: [], nodeTypes: [] }) });
+    const { ctx } = await harness({
+      'GET /api/scenes': boot({ scenes: [], diagnostics: [], nodeTypes: [] }),
+    });
     renderSidebar(ctx);
     expect(await screen.findByTestId('scenes-empty')).toHaveTextContent(
       'no scenes yet — press + to add one',
@@ -97,7 +103,12 @@ describe('ScenesSidebar', () => {
 
   it('+ then Enter calls create(id); a refusal shows scene-add-error', async () => {
     const user = userEvent.setup();
-    const refusal: Diagnostic = { severity: 'error', plugin: 'scenes', where: 'intro', message: 'taken' };
+    const refusal: Diagnostic = {
+      severity: 'error',
+      plugin: 'scenes',
+      where: 'intro',
+      message: 'taken',
+    };
     const { ctx, calls } = await harness({
       'GET /api/scenes': boot({ scenes: [A], diagnostics: [], nodeTypes: [] }),
       'POST /api/scenes': (body) =>

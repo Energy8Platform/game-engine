@@ -10,6 +10,8 @@ import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
+import * as assetNodeTypes from '../src/plugins/asset-node-types';
+import * as files from '../src/plugins/files';
 import { addNode, moveNode, nextId, removeNode, shiftNode } from '../src/shell/SceneDocument';
 
 /**
@@ -79,6 +81,7 @@ async function harness(extra: Record<string, Route> = {}, previewUrl: string | n
     }),
     'POST /api/scenes/select': () => ({ body: { diagnostics: [] } }),
     'POST /api/scenes/preview': () => ({ body: { diagnostics: [] } }),
+    'GET /api/files': () => ({ body: { entries: [], diagnostics: [] } }),
     ...extra,
   };
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -99,6 +102,8 @@ async function harness(extra: Record<string, Route> = {}, previewUrl: string | n
   await ctx.plugin(slots);
   await ctx.plugin(shell);
   await ctx.plugin(viewers);
+  await ctx.plugin(assetNodeTypes);
+  await ctx.plugin(files, { fetchFn });
   // The canvas reads two services the tab never did before: where the game
   // is served, and the design size the `scenes1` row declares. Minimal
   // fakes of each plugin's own shape, provided the way `viewers.test` does.
@@ -140,16 +145,17 @@ function renderTab(ctx: Context, path = PATH) {
 }
 
 /**
- * The canvas iframe, its `load` fired (which is when the tab attaches the
- * RPC to it) and `contentWindow.postMessage` stubbed so requests can be
- * read back. jsdom hands out a `contentWindow` once the iframe is in the
- * document, and never loads the `src` itself.
+ * The canvas iframe, with `contentWindow.postMessage` stubbed so requests
+ * can be read back. The tab attaches the RPC from the iframe's ref
+ * callback — by the time `render`/`renderTab` returns, it is already
+ * attached, since jsdom hands out a `contentWindow` as soon as the iframe
+ * is in the document (and never loads the `src` itself, so `load` never
+ * fires on its own).
  */
 function canvas() {
   const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
   const win = iframe.contentWindow as Window & { postMessage: ReturnType<typeof vi.fn> };
   win.postMessage = vi.fn();
-  fireEvent.load(iframe);
   const posted = () => win.postMessage.mock.calls.map((c) => c[0]);
   const reqs = (method: string) =>
     posted()
@@ -587,5 +593,83 @@ describe('SceneDocument', () => {
     );
     expect(ctx.scenes.selected()).toBeNull();
     expect(calls.filter((c) => c.url === '/api/scenes/select')).toEqual([]);
+  });
+
+  it('a drop of an asset with a registered node type adds a node where it landed, and selects it', async () => {
+    const { ctx, calls, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'drop', { path: 'assets/logo.png', x: 10, y: 20 });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.at(-1)).toEqual({
+      id: 'image-1',
+      type: 'image',
+      props: { src: 'assets/logo.png', x: 10, y: 20, anchor: 0.5 },
+    });
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/scenes/select').at(-1)?.body).toEqual({
+        scene: 'base_game',
+        node: 'image-1',
+      }),
+    );
+  });
+
+  it('a drop of an asset with no registered node type warns instead of adding a node', async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'drop', { path: 'a.mp4', x: 0, y: 0 });
+    expect(await screen.findByTestId('scene-doc-error')).toHaveTextContent('no node type for .mp4');
+    expect(ctx.connection.diagnostics.some((d) => d.message === 'no node type for .mp4')).toBe(
+      true,
+    );
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a dropped File is written into assets/ before it becomes a node', async () => {
+    const { ctx, calls } = await harness({
+      'PUT /api/files/assets/pic.png': () => ({ body: { diagnostics: [] } }),
+    });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    const file = new File([new Uint8Array([1, 2, 3])], 'pic.png', { type: 'image/png' });
+    frame(iframe, 'drop', { file, x: 5, y: 6 });
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'PUT' && c.url === '/api/files/assets/pic.png')).toBe(
+        true,
+      ),
+    );
+    const scenePuts = () =>
+      calls
+        .filter((c) => c.method === 'PUT' && c.url === '/api/scenes/base_game')
+        .map((c) => c.body as SceneDoc);
+    await waitFor(() => expect(scenePuts()).toHaveLength(1));
+    expect(scenePuts()[0].nodes.at(-1)).toEqual({
+      id: 'image-1',
+      type: 'image',
+      props: { src: 'assets/pic.png', x: 5, y: 6, anchor: 0.5 },
+    });
+    // The file's bytes landed before the doc write.
+    const fileWriteIndex = calls.findIndex((c) => c.url === '/api/files/assets/pic.png');
+    const docPutIndex = calls.findIndex((c) => c.url === '/api/scenes/base_game');
+    expect(fileWriteIndex).toBeGreaterThanOrEqual(0);
+    expect(docPutIndex).toBeGreaterThan(fileWriteIndex);
+  });
+
+  it('a dropped File whose name already exists in assets/ is refused before any write', async () => {
+    const { ctx, calls, puts } = await harness({
+      'GET /api/files': () => ({
+        body: { entries: [{ path: 'assets/pic.png', kind: 'file', size: 3 }], diagnostics: [] },
+      }),
+    });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    const file = new File([new Uint8Array([1, 2, 3])], 'pic.png', { type: 'image/png' });
+    frame(iframe, 'drop', { file, x: 0, y: 0 });
+    expect(await screen.findByTestId('scene-doc-error')).toHaveTextContent(
+      'assets/pic.png exists — rename the file',
+    );
+    expect(calls.some((c) => c.method === 'PUT' && c.url.startsWith('/api/files'))).toBe(false);
+    expect(puts()).toHaveLength(0);
   });
 });

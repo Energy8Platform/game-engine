@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import Schema from 'schemastery';
-import type { NodeTypeInfo, SceneDoc, SceneNode } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type NodeTypeInfo,
+  type SceneDoc,
+  type SceneNode,
+} from '@energy8engine/contracts';
 import type { ViewerProps } from '../plugins/viewers';
 import { useScenes } from '../plugins/scenes';
 import { useWorkspace } from '../plugins/workspace';
@@ -20,10 +25,14 @@ import { CanvasToolbar, clampZoom, type GridState } from './CanvasToolbar';
  * answer, or the host's `scenes` frame). A refusal, or the canvas'
  * `error`, shows inline.
  *
- * The canvas talks through `canvas-rpc` (attached on the iframe's `load`):
- * its `selected`/`edit`/`remove`/`zorder` events become the same
- * `ctx.scenes` calls the tree makes, and the selection and the grid are
- * mirrored back to it (`select`/`grid` requests; re-sent on `ready`).
+ * The canvas talks through `canvas-rpc` (attached from the iframe's ref
+ * callback, not its `load` event: `contentWindow` exists as soon as the
+ * element is inserted, so a `ready` the canvas emits ahead of `load`
+ * finishing is not dropped). Its `selected`/`edit`/`remove`/`zorder`/`drop`
+ * events become the same `ctx.scenes` (and, for a dropped asset,
+ * `ctx.assetNodeTypes`/`ctx.files`) calls the tree makes, and the
+ * selection and the grid are mirrored back to it (`select`/`grid`
+ * requests; re-sent on `ready`).
  * Selection stays one fact — `ctx.scenes.selected()` — so a pick the
  * service already holds is not re-told. The iframe is remounted on the
  * same rule `PreviewWall` uses: a host `reload` verdict, or another
@@ -223,8 +232,12 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
   const scale = zoom ?? fit;
 
   const stageRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const rpcRef = useRef<CanvasRpc | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Created synchronously (once, via `useState`'s lazy initializer) rather
+  // than in the mount effect below: the iframe's ref callback fires during
+  // commit, BEFORE that effect runs, and needs an rpc to attach to already.
+  const [rpc] = useState<CanvasRpc>(() => createCanvasRpc());
+  const rpcRef = useRef<CanvasRpc | null>(rpc);
   // The canvas' handlers are registered once per mount: they read the
   // service (the live fact, ahead of this render) and this ref for the grid.
   const gridRef = useRef(grid);
@@ -256,8 +269,59 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
     void rpcRef.current?.call(method, params).catch(() => {});
   };
 
+  /** A path with no registered node type: warned to `connection` and shown inline, same message both places. */
+  const noNodeType = (path: string) => {
+    const ext = path.slice(path.lastIndexOf('.') + 1);
+    const warn = diagnostic(
+      'warning',
+      'scenes',
+      path,
+      `no node type for .${ext}`,
+      'register one with ctx.assetNodeTypes',
+    );
+    ctx.connection.report(warn);
+    setError(warn.message);
+  };
+
+  /** A dropped asset already in the project: a node where it landed, then selected. */
+  const dropAsset = async (path: string, x: number, y: number) => {
+    const current = liveDoc();
+    if (!current) return;
+    const def = ctx.assetNodeTypes.pick(path);
+    if (!def) {
+      noNodeType(path);
+      return;
+    }
+    const { type, props } = def.node(path, { x, y });
+    const newId = nextId(current, type);
+    const refused = await ctx.scenes.update(addNode(current, type, props, null));
+    setError(refused[0]?.message ?? null);
+    if (refused.length === 0) ctx.scenes.select({ scene: id, node: newId });
+  };
+
+  /** A dropped `File`: written into `assets/` first (refusing a name already there), then the same as `dropAsset`. */
+  const dropFile = async (file: File, x: number, y: number) => {
+    const bytes = await new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error ?? new Error('could not read the file'));
+      reader.readAsArrayBuffer(file);
+    });
+    const path = `assets/${file.name}`;
+    const tree = await ctx.files.tree();
+    if (tree.entries.some((e) => e.kind === 'file' && e.path === path)) {
+      setError(`${path} exists — rename the file`);
+      return;
+    }
+    const written = await ctx.files.write(path, bytes);
+    if (written.diagnostics.length > 0) {
+      setError(written.diagnostics[0].message);
+      return;
+    }
+    await dropAsset(path, x, y);
+  };
+
   useEffect(() => {
-    const rpc = createCanvasRpc();
     rpcRef.current = rpc;
     rpc.on('ready', () => {
       tell('select', { node: liveNode() });
@@ -279,12 +343,31 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       commit(current && shiftNode(current, node, delta > 0 ? 1 : -1));
     });
     rpc.on('error', (payload) => setError((payload as { message: string }).message));
+    rpc.on('drop', (payload) => {
+      const { path, file, x, y } = payload as {
+        path?: string;
+        file?: File;
+        x: number;
+        y: number;
+      };
+      if (file) void dropFile(file, x, y);
+      else if (path) void dropAsset(path, x, y);
+    });
     return () => {
       rpc.dispose();
       rpcRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, id]);
+  }, [ctx, id, rpc]);
+
+  /** The iframe's own ref, not its `load` event: `contentWindow` is there as soon as it's inserted. */
+  const attachIframe = useCallback(
+    (el: HTMLIFrameElement | null) => {
+      iframeRef.current = el;
+      if (el && previewUrl) rpc.attach(el, new URL(previewUrl).origin);
+    },
+    [rpc, previewUrl],
+  );
 
   const mirrored = selected?.scene === id ? selected.node : null;
   useEffect(() => tell('select', { node: mirrored }), [mirrored]);
@@ -498,13 +581,12 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
           >
             <iframe
               key={`${reloads}:${workspace.active}:${previewUrl}`}
-              ref={iframeRef}
+              ref={attachIframe}
               title="scene canvas"
               src={`${previewUrl}/editor.html?scene=${encodeURIComponent(id)}`}
               width={design.width}
               height={design.height}
               style={{ transform: `scale(${scale})` }}
-              onLoad={(e) => rpcRef.current?.attach(e.currentTarget, new URL(previewUrl).origin)}
             />
           </div>
         )}

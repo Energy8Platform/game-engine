@@ -82,7 +82,19 @@ export interface ScenesConfig extends ConnectionConfig {
 export const name = 'scenes';
 // `workspace` and `gameComposition` are the canvas' (`SceneDocument`): where
 // the editor page is served, and the design size the `scenes1` row declares.
-export const inject = ['slots', 'connection', 'shell', 'viewers', 'workspace', 'gameComposition'];
+// `assetNodeTypes` and `files` are the canvas' too — turning a dropped asset
+// into a node (`ctx.assetNodeTypes.pick`) and, for a raw `File`, writing it
+// into the project first (`ctx.files.write`/`ctx.files.tree`).
+export const inject = [
+  'slots',
+  'connection',
+  'shell',
+  'viewers',
+  'workspace',
+  'gameComposition',
+  'assetNodeTypes',
+  'files',
+];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
   return diagnostic(
