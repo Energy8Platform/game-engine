@@ -87,7 +87,7 @@ import { projectCopy, startDevHost } from './project-fixture';
  *
  * Spelled out in full rather than written as the single removal row
  * alone, because everything else has to stay identical for the test to
- * mean anything. Drop `renderer1`'s size and `stage1`'s design along with
+ * mean anything. Drop `renderer1`'s size and `scenes1`'s design along with
  * it and the game would change for those reasons too — a screen that went
  * empty could no longer be attributed to the reels row, and the test
  * would be passing through a branch other than the one it names.
@@ -98,7 +98,7 @@ const PATCH_WITHOUT_REELS = `rows:
       width: 480
       height: 288
       background: '#10121a'
-  - id: stage1
+  - id: scenes1
     config:
       design:
         width: 480
@@ -130,7 +130,7 @@ const PATCH_WITH_MISSPELLED_REELS = `rows:
       width: 480
       height: 288
       background: '#10121a'
-  - id: stage1
+  - id: scenes1
     config:
       design:
         width: 480
@@ -155,7 +155,7 @@ const PATCH_WITH_NOTHING_BOUND = `rows:
       width: 480
       height: 288
       background: '#10121a'
-  - id: stage1
+  - id: scenes1
     config:
       design:
         width: 480
@@ -186,7 +186,7 @@ const PATCH_WITHOUT_MECHANICS = `rows:
       width: 480
       height: 288
       background: '#10121a'
-  - id: stage1
+  - id: scenes1
     config:
       design:
         width: 480
@@ -298,8 +298,14 @@ test('removing the reels row from the patch takes the board off the screen', asy
     await expect(page.locator('#status')).toHaveText('ready');
 
     // The board is DRAWN: four quadrants of the canvas, four different
-    // pictures. This is the 5x3 grid of reel cells a person sees before
-    // ever pressing Spin.
+    // pictures. This is the 5x3 grid of reel cells a person sees — after
+    // ONE spin, not before: the board is a node of the `base_game` scene
+    // now (`scenes/base_game.scene.yml`), and nothing shows a scene at
+    // boot; the spin's own stage shows it (the scene editor spec's
+    // temporary rule, until the flow editor drives the game). Before
+    // that spin the canvas is one flat colour and measures nothing.
+    await page.locator('#spin').click();
+    await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
     const withBoard = await canvasQuadrants(page);
     expect(new Set(withBoard).size, 'the board should be drawn on the canvas').toBeGreaterThan(1);
 
@@ -647,7 +653,7 @@ test('the composition screen lists the rows the profile resolved to', async ({ p
     // Through the IDE on 5680, not the game on the preview origin — the screen under
     // test is the editor's, and it reaches the host through vite's proxy.
     await page.goto('http://127.0.0.1:5680/');
-    for (const id of ['boot1', 'renderer1', 'stage1', 'reels1']) {
+    for (const id of ['boot1', 'renderer1', 'scenes1', 'reels1']) {
       await expect(
         page.getByTestId(`row-${id}`),
         `acceptance criterion: the composition screen must list the resolved row ${id}`,

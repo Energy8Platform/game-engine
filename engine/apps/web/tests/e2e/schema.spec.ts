@@ -85,13 +85,19 @@ async function expectSpinRuns(page: Page, errors: string[]): Promise<void> {
   await page.locator('#spin').click();
   await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
   expect(errors, 'a spin should raise nothing on the page').toEqual([]);
-}
-
-/** The game is on screen and playable — board drawn, Spin live, no failure text. */
-async function expectPlayable(page: Page): Promise<void> {
-  await expect(page.locator('canvas')).toBeVisible();
+  // The board is DRAWN — four quadrants, four different pictures. Measured
+  // here, after the spin, rather than in `expectPlayable`: the board is a
+  // node of the `base_game` scene (`scenes/base_game.scene.yml`), nothing
+  // shows a scene at boot, and the spin's own stage is what shows it (the
+  // scene editor spec's temporary rule). Before that the canvas is one
+  // flat colour and measures nothing.
   const quadrants = await canvasQuadrants(page);
   expect(new Set(quadrants).size, 'the board should be drawn on the canvas').toBeGreaterThan(1);
+}
+
+/** The game is on screen and playable — a canvas, Spin live, no failure text. (The board itself: `expectSpinRuns`.) */
+async function expectPlayable(page: Page): Promise<void> {
+  await expect(page.locator('canvas')).toBeVisible();
   await expect(page.locator('#spin')).toBeEnabled();
   await expect(page.locator('#mount')).not.toContainText('This game could not start');
 }

@@ -1,29 +1,26 @@
 /**
- * Scenes and layers, proven in a real browser (spec §5, Playwright): the
- * Scenes sidebar edits `stage1`'s `layers`/`scenes`, the host writes them
- * to `e8.patch.yml` and re-applies the stage row IN PLACE (no reload), the
- * running game enters the scene on the next spin and hides the layers it
- * leaves out, and clicking a scene pushes it into the game without a spin
- * at all. The Composition screen shows the same row as a form — `layers`
- * as array rows, `design.width` still a `restart` field whose edit reloads
- * the preview.
+ * The scene editor, proven in a real browser (scene editor spec, Task 15):
+ * the Scenes SIDEBAR lists `scenes/*.scene.yml`, adds one (a file the
+ * Explorer then shows) and opens one as a tab; the tab adds a node whose
+ * properties appear on the RIGHT and land in the file; clicking a scene
+ * pushes it into the running game without a spin; and a spin still shows
+ * the scene named after its stage (the temporary rule in `first-slot`'s
+ * `main.ts`, until the flow editor drives the game).
  *
  * Same iframe, same readers as `hot-fork.spec.ts`: the composition
- * document's `Preview` (`iframe[title="game preview"]`), stamped with
- * `data-e8-marker` so a remount is visible, and the game's own
- * `window.__e8` (`spin()`, `spins()`, `sceneCurrent()`, `layerVisible()`).
- * The Scenes view is a SIDEBAR beside the composition document, which
- * stays in front the whole time — so the frame a Scenes edit is measured
- * against is the one the composition screen booted, never a fresh one,
- * and it keeps getting animation frames while the sidebar is used.
+ * document's `Preview` (`iframe[title="game preview"]`) and the game's own
+ * `window.__e8` — here `scenesVisible()` (the top-level scenes shown, in
+ * show order) and `nodeVisible(scene, node)` (a top-level node of a
+ * mounted scene; `big_win` is nested INTO `base_game` as a `scene` node,
+ * so "showing big_win" is that node flipping visible, not a second
+ * top-level scene). The Scenes view is a sidebar beside the composition
+ * document, which stays in front the whole time.
  *
- * **Knowing a hot edit landed.** A stage re-apply builds a NEW stage
- * (`current()` starts `null`), so the protocol is: spin first (`current`
- * becomes `base_game`), edit, then wait for `current` to read `null` —
- * that null is THIS edit's re-apply, and only then is the next spin (or
- * the next preview push) made against the stage that has the new config.
+ * What lands in the game arrives asynchronously (a PUT → the host's
+ * `scenes` frame → `ide-bridge`; a click → `POST /api/scenes/preview` →
+ * a `scene-preview` frame), so every game-side claim is a poll.
  */
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
@@ -31,16 +28,28 @@ import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 const IDE_URL = 'http://127.0.0.1:5680/';
 const PREVIEW = 'iframe[title="game preview"]';
 
+let dir: string;
+let host: DevHost;
+
+test.beforeEach(async () => {
+  dir = projectCopy();
+  host = await startDevHost(dir);
+});
+
+test.afterEach(async () => {
+  if (host) await host.stop();
+  if (dir) rmSync(dir, { recursive: true, force: true });
+});
+
 /**
  * The game up once on its own URL, then the IDE on its composition document
- * (as `hot-fork.spec.ts`). `settle: false` skips that first visit: the IDE
- * boots the game itself, the way a person opening the IDE does.
+ * (as `hot-fork.spec.ts`). The first visit is what registers the game's
+ * node types with the host, so the IDE's boot `GET /api/scenes` already
+ * carries them.
  */
-async function openComposition(page: Page, host: DevHost, settle = true): Promise<void> {
-  if (settle) {
-    await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
-  }
+async function openComposition(page: Page): Promise<void> {
+  await page.goto(host.gameUrl);
+  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
   await page.goto(`${IDE_URL}#/doc/composition`);
 }
 
@@ -51,206 +60,137 @@ async function gameFrame(page: Page): Promise<Frame> {
   return frame;
 }
 
-const status = (frame: Frame) => frame.locator('#status').textContent();
-const spins = (frame: Frame) => frame.evaluate(() => (window as any).__e8.spins().length);
-const current = (frame: Frame) =>
-  frame.evaluate(() => (window as any).__e8.sceneCurrent() as string | null);
-const visible = (frame: Frame, id: string) =>
-  frame.evaluate((layer) => (window as any).__e8.layerVisible(layer) as boolean | null, id);
+/** The composition's preview, booted to `ready`. */
+async function readyFrame(page: Page): Promise<Frame> {
+  const frame = await gameFrame(page);
+  await expect
+    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
+    .toBe('ready');
+  return frame;
+}
+
+const scenesVisible = (frame: Frame) =>
+  frame.evaluate(() => (window as any).__e8.scenesVisible() as string[]);
+const nodeVisible = (frame: Frame, scene: string, node: string) =>
+  frame.evaluate(
+    ([s, n]) => (window as any).__e8.nodeVisible(s, n) as boolean | null,
+    [scene, node],
+  );
 
 /** Shows the Scenes sidebar. The activity button TOGGLES, so only a hidden one is clicked. */
 async function showScenes(page: Page): Promise<void> {
   const scenes = page.getByTestId('scenes-screen');
   if (!(await scenes.isVisible())) await page.getByTestId('activity-scenes').click();
-  await expect(scenes).toBeVisible();
   await expect(page.getByTestId('sidebar').getByTestId('scenes-screen')).toBeVisible();
+  await expect(page.getByTestId('scene-base_game')).toBeVisible();
 }
 
-/** One real spin through the harness; the composition document (and its iframe) is in front throughout. */
-async function spin(page: Page, frame: Frame): Promise<void> {
-  await frame.evaluate(() => (window as any).__e8.spin().then(() => null));
-  expect(await current(frame)).toBe('base_game');
-}
+const sceneFile = (id: string) => join(dir, 'scenes', `${id}.scene.yml`);
 
-/** The stage row was re-applied in place: a new stage, in no scene yet. */
-async function reapplied(frame: Frame): Promise<void> {
-  await expect.poll(() => current(frame), { timeout: 10_000 }).toBeNull();
-}
-
-/** Boots to `ready`, stamps the iframe, spins once (the stage in `base_game`), and opens the Scenes sidebar. */
-async function openScenes(page: Page, host: DevHost, settle = true): Promise<Frame> {
-  await openComposition(page, host, settle);
-  const frame = await gameFrame(page);
-  await expect.poll(() => status(frame), { timeout: 20_000 }).toBe('ready');
-  await page.locator(PREVIEW).evaluate((el) => {
-    el.setAttribute('data-e8-marker', 'kept');
-  });
-  await spin(page, frame);
+test('the Scenes sidebar adds a scene, the Explorer shows the file, a double-click opens the tree', async ({
+  page,
+}) => {
+  await page.goto(`${IDE_URL}#/doc/composition`);
   await showScenes(page);
-  return frame;
-}
+  await expect(page.getByTestId('scene-big_win')).toBeVisible();
 
-/** `+`, then the id, then Enter — the row is listed once the host's frame is back. */
-async function addScene(page: Page, id: string): Promise<void> {
   await page.getByTestId('scene-add').click();
-  const input = page.getByTestId('scene-add-input');
-  await input.fill(id);
-  await input.press('Enter');
-  await expect(page.getByTestId(`scene-${id}`)).toBeVisible({ timeout: 10_000 });
-}
+  await page.getByTestId('scene-add-input').fill('intro');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('scene-intro')).toBeVisible({ timeout: 10_000 });
+  expect(existsSync(sceneFile('intro'))).toBe(true);
+  expect(readFileSync(sceneFile('intro'), 'utf8')).toBe('id: intro\nnodes: []\n');
 
-const patch = (dir: string) => readFileSync(join(dir, 'e8.patch.yml'), 'utf8');
+  // The Explorer is a sidebar of its own; switching to it mounts it afresh
+  // and it reads the tree — which now holds the file the host wrote.
+  await page.getByTestId('activity-explorer').click();
+  await expect(page.getByTestId('explorer-scenes/intro.scene.yml')).toBeVisible();
 
-test('the Scenes sidebar adds a scene: the layer is listed, the patch holds it, the preview was not reloaded', async ({
-  page,
-}) => {
-  const dir = projectCopy();
-  const host = await startDevHost(dir);
-  try {
-    const frame = await openScenes(page, host);
-
-    // Nothing is a scene yet; the layer is listed but has nothing to be shown in.
-    await expect(page.getByTestId('scenes-none')).toBeVisible();
-    await expect(page.getByLabel('reels', { exact: true })).toBeDisabled();
-    // The script's one stage is offered once the input is up.
-    await page.getByTestId('scene-add').click();
-    await expect(page.locator('#e8-scene-add-stages option[value="base_game"]')).toHaveCount(1);
-    await page.getByTestId('scene-add-input').press('Escape');
-
-    await addScene(page, 'base_game');
-    await expect(page.getByTestId('scenes-none')).toHaveCount(0);
-    await expect(page.getByLabel('reels in base_game')).toBeChecked();
-
-    await expect.poll(() => patch(dir), { timeout: 10_000 }).toContain('scenes:');
-    const written = patch(dir);
-    expect(written).toContain('base_game:');
-    expect(written).toMatch(/layers:\n\s+- reels/);
-
-    // The edit reached the game in place: a new stage, the same frame, the same log.
-    await reapplied(frame);
-    await expect(page.locator(PREVIEW)).toHaveAttribute('data-e8-marker', 'kept');
-    expect(await spins(frame)).toBe(1);
-  } finally {
-    await host.stop();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  await showScenes(page);
+  await page.getByTestId('scene-intro').dblclick();
+  await expect(page.getByTestId('scene-doc-intro')).toBeVisible();
+  await expect(page.getByTestId('scene-doc-empty')).toBeVisible();
 });
 
-test('a layer left out of a scene is hidden after the next spin, and shown again once it is back', async ({
-  page,
-}) => {
-  const dir = projectCopy();
-  const host = await startDevHost(dir);
-  try {
-    const frame = await openScenes(page, host);
-    await addScene(page, 'base_game');
-    await reapplied(frame);
-    await spin(page, frame);
-    expect(await visible(frame, 'reels')).toBe(true);
+test('adding a node shows its properties on the right and writes the file', async ({ page }) => {
+  await openComposition(page);
+  await showScenes(page);
+  await page.getByTestId('scene-base_game').dblclick();
+  const doc = page.getByTestId('scene-doc-base_game');
+  await expect(doc).toBeVisible();
+  await expect(doc.getByTestId('node-board')).toBeVisible();
+  await expect(doc.getByTestId('node-big_win')).toBeVisible();
 
-    // `click`, not `uncheck`: the box is controlled by the host's rows, so
-    // it flips only when the PUT's frame comes back — `uncheck` would
-    // fail on "clicking did not change its state" (measured).
-    const reels = page.getByLabel('reels in base_game');
-    await reels.click();
-    await expect(reels).not.toBeChecked({ timeout: 10_000 });
-    await reapplied(frame);
-    await expect(page.locator(PREVIEW)).toHaveAttribute('data-e8-marker', 'kept');
+  // The type list is the running game's own (`node-types`), relayed by the host.
+  await doc.getByTestId('node-add').click();
+  const type = doc.getByTestId('node-add-type');
+  await expect(type.locator('option[value="container"]')).toHaveCount(1, { timeout: 10_000 });
+  await type.selectOption('container');
+  await doc.getByTestId('node-add-ok').click();
+  const row = doc.getByTestId('node-container-1');
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await expect
+    .poll(() => readFileSync(sceneFile('base_game'), 'utf8'))
+    .toContain('id: container-1');
 
-    await spin(page, frame);
-    expect(await visible(frame, 'reels')).toBe(false);
-    expect(await current(frame)).toBe('base_game');
+  await row.click();
+  const right = page.getByTestId('side-right-scenes');
+  await expect(right).toBeVisible();
+  await expect(right.getByTestId('prop-id')).toHaveValue('container-1');
+  await expect(right.getByTestId('prop-type')).toHaveText('container');
 
-    await reels.click();
-    await expect(reels).toBeChecked({ timeout: 10_000 });
-    await reapplied(frame);
-    await spin(page, frame);
-    expect(await visible(frame, 'reels')).toBe(true);
-  } finally {
-    await host.stop();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('a scene the script has no stage for is warned about, takes a transition, and a click shows it in the preview', async ({
-  page,
-}) => {
-  const dir = projectCopy();
-  const host = await startDevHost(dir);
-  try {
-    // No settling visit: the game must boot AFTER the IDE's boot GET, so
-    // the transitions below can only have come over the socket.
-    const frame = await openScenes(page, host, false);
-
-    await addScene(page, 'free_spins');
-    // Not a stage the script declares: never offered, but taken.
-    await page.getByTestId('scene-add').click();
-    await expect(page.locator('#e8-scene-add-stages option')).toHaveCount(1);
-    await expect(page.locator('#e8-scene-add-stages option[value="free_spins"]')).toHaveCount(0);
-    await page.getByTestId('scene-add-input').press('Escape');
-    await expect(page.getByTestId('scenes-screen')).toContainText('has no stage of that name', {
+  // `commit="blur"`: the PUT goes on Enter (or blur), not per keystroke.
+  const x = right.getByLabel('x, design px');
+  await expect(x).toHaveValue('0');
+  await x.fill('12');
+  await x.press('Enter');
+  await expect
+    .poll(() => readFileSync(sceneFile('base_game'), 'utf8'), {
       timeout: 10_000,
-    });
-    await reapplied(frame);
+    })
+    .toMatch(/id: container-1\n\s+type: container\n\s+props:\n\s+x: 12\n/);
+  await expect(x).toHaveValue('12');
 
-    await spin(page, frame);
-    // The game's transitions reached the pick list over the socket, no reload.
-    await expect
-      .poll(() => page.getByTestId('scene-transition').locator('option').allTextContents(), {
-        timeout: 10_000,
-      })
-      .toEqual(['stage default', 'cut', 'fade']);
-    await page.getByTestId('scene-transition').selectOption('fade');
-    await expect(page.getByTestId('scene-transition')).toHaveValue('fade', { timeout: 10_000 });
-    await expect.poll(() => patch(dir), { timeout: 10_000 }).toContain('transition: fade');
-    await reapplied(frame);
-
-    await page.getByTestId('scene-free_spins').click();
-    await expect.poll(() => current(frame), { timeout: 2_000 }).toBe('free_spins');
-    await expect(page.getByTestId('scene-free_spins')).toHaveText(/fade/);
-    await expect(page.locator(PREVIEW)).toHaveAttribute('data-e8-marker', 'kept');
-  } finally {
-    await host.stop();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  // And taken out again: the row goes, and so does the file's node.
+  await doc.getByTestId('node-remove-container-1').click();
+  await expect(row).toHaveCount(0, { timeout: 10_000 });
+  await expect
+    .poll(() => readFileSync(sceneFile('base_game'), 'utf8'))
+    .not.toContain('container-1');
 });
 
-test('the Composition form shows the stage layers as rows, and design.width still restarts the preview', async ({
+test('clicking a scene shows it in the preview; showing big_win flips its node visible', async ({
   page,
 }) => {
-  const dir = projectCopy();
-  const host = await startDevHost(dir);
-  try {
-    await openComposition(page, host);
-    const first = await gameFrame(page);
-    await expect.poll(() => status(first), { timeout: 20_000 }).toBe('ready');
+  await openComposition(page);
+  const frame = await readyFrame(page);
+  expect(await scenesVisible(frame)).toEqual([]);
+  await showScenes(page);
 
-    const stage = page.getByTestId('row-stage1');
-    await expect(stage.getByTestId('array-row-field-stage1-layers-0')).toBeVisible({
-      timeout: 20_000,
-    });
-    await expect(stage.locator('#field-stage1-layers-0-id')).toHaveValue('reels');
-    // The innermost field: `design` (the group) carries a badge of its own.
-    await expect(
-      stage.locator('.e8-field:has(> label[for="field-stage1-design-width"]) > .e8-badge'),
-    ).toHaveText('restart');
+  await page.getByTestId('scene-base_game').click();
+  await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toEqual(['base_game']);
+  await expect(page.getByTestId('scene-base_game')).toHaveClass(/e8-explorer-selected/);
+  // The scene with no node picked: its id and node count on the right.
+  await expect(page.getByTestId('prop-scene-id')).toHaveText('base_game');
+  await expect(page.getByTestId('prop-node-count')).toHaveText('2');
+  expect(await nodeVisible(frame, 'base_game', 'big_win')).toBe(false);
 
-    await page.locator(PREVIEW).evaluate((el) => {
-      el.setAttribute('data-e8-marker', 'kept');
-    });
-    const width = page.locator('#field-stage1-design-width');
-    await width.fill('500');
-    await width.blur();
+  // `big_win` is nested into `base_game`, so showing it is that node
+  // turning visible — the top-level list does not grow.
+  await page.getByTestId('scene-big_win').click();
+  await expect
+    .poll(() => nodeVisible(frame, 'base_game', 'big_win'), { timeout: 10_000 })
+    .toBe(true);
+  expect(await scenesVisible(frame)).toEqual(['base_game']);
+});
 
-    // A remount: a new element without the stamp, and a fresh game behind it.
-    await expect(page.locator(PREVIEW)).not.toHaveAttribute('data-e8-marker', 'kept', {
-      timeout: 10_000,
-    });
-    const second = await gameFrame(page);
-    await expect.poll(() => status(second), { timeout: 20_000 }).toBe('ready');
-    expect(patch(dir)).toContain('width: 500');
-  } finally {
-    await host.stop();
-    rmSync(dir, { recursive: true, force: true });
-  }
+test('a spin still presents under the temporary rule', async ({ page }) => {
+  await openComposition(page);
+  const frame = await readyFrame(page);
+  expect(await scenesVisible(frame)).toEqual([]);
+
+  await frame.evaluate(() => (window as any).__e8.spin().then(() => null));
+  await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toContain('base_game');
+  expect(await frame.evaluate(() => (window as any).__e8.spins().length)).toBe(1);
+  await expect(frame.locator('#status')).not.toHaveText('');
 });
