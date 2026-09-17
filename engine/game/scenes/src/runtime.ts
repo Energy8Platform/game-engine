@@ -81,7 +81,28 @@ export function apply(ctx: Context, config: ScenesConfig): void {
     ctx,
     report,
   });
-  ctx.effect(() => () => scenes.destroy(), 'scenes:root');
+  // The boot GET below races anything else that can call `replace` first —
+  // `ide-bridge`'s own `scenes` frame handler, chiefly. Whichever lands
+  // first wins: a `replace` that landed already is a fresher, human-driven
+  // fact than a GET kicked off at boot, so the GET's own result is simply
+  // dropped rather than clobbering it. `alive` is the same story for a
+  // dispose that lands mid-flight: nothing should touch a `scenes` service
+  // that has already been torn down.
+  let replaced = false;
+  let alive = true;
+  const originalReplace = scenes.replace;
+  scenes.replace = (docs) => {
+    replaced = true;
+    originalReplace(docs);
+  };
+
+  ctx.effect(
+    () => () => {
+      alive = false;
+      scenes.destroy();
+    },
+    'scenes:root',
+  );
   ctx.provide('scenes', scenes);
 
   const fetchFn = config.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
@@ -91,8 +112,9 @@ export function apply(ctx: Context, config: ScenesConfig): void {
       if (!res.ok) throw new Error(`the host answered ${res.status}`);
       const body = (await res.json()) as Partial<ScenesResponse>;
       if (!Array.isArray(body.scenes)) throw new Error('the response has no "scenes" array');
-      scenes.replace(body.scenes);
+      if (!replaced && alive) scenes.replace(body.scenes);
     } catch (error) {
+      if (!alive) return;
       report(diagnostic('error', 'scenes', '/api/scenes',
         `could not read the scene documents: ${error instanceof Error ? error.message : String(error)}`,
         'the host serves this route; the game shows no scene until it answers'));

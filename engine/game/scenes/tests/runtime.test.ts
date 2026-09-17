@@ -32,6 +32,29 @@ describe('scenes row', () => {
     expect(ctx.get('scenes')).toBeDefined();
   });
 
+  it('a `replace` that lands before the gated /api/scenes fetch resolves wins over it', async () => {
+    let resolveFetch!: (v: { ok: boolean; json: () => Promise<unknown> }) => void;
+    const gatedFetch = vi.fn(
+      () => new Promise((resolve) => { resolveFetch = resolve; }),
+    ) as unknown as typeof fetch;
+    const { ctx, fiber } = boot(gatedFetch);
+    await fiber;
+
+    ctx.get('scenes')!.replace([{ id: 'x', nodes: [] }]);
+    expect(ctx.get('scenes')!.docs().has('x')).toBe(true);
+
+    resolveFetch({
+      ok: true,
+      json: async () => ({ scenes: [{ id: 'a', nodes: [] }], diagnostics: [], nodeTypes: [] }),
+    });
+    // Flush the fetch/json microtasks the runtime's own async IIFE awaits.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ctx.get('scenes')!.docs().has('x')).toBe(true);
+    expect(ctx.get('scenes')!.docs().has('a')).toBe(false);
+  });
+
   it('disposing the fiber detaches the design root without destroying foreign views', async () => {
     const { ctx, app, fiber } = boot();
     await fiber;

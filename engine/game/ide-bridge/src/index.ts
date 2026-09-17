@@ -792,32 +792,63 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // diagnostics this socket already forwards. Read leniently, so a game
   // built on a runtime without `gameRows` ignores the frame, not throws.
   //
-  // The IDE's Scenes screen preview (`scene-preview`) rides the same
-  // listener rather than a separate one: both frames are the host telling
-  // this ONE running game to do something right now, and both are read
-  // leniently against a service that may not be on this `ctx` at all — a
-  // game with no `stage` row (or an older runtime) simply has nothing to
-  // do with a `scene-preview` frame, the same way one with no `gameRows`
-  // has nothing to do with a `game-composition` one.
+  // The IDE's Scenes screen (`scenes`/`scene-select`/`scene-preview`) rides
+  // the same listener rather than three separate ones: every one of these
+  // frames is the host telling this ONE running game to do something right
+  // now, and all are read leniently against a service that may not be on
+  // this `ctx` at all — a game with no `scenes` row (or an older runtime)
+  // simply has nothing to do with them, the same way one with no
+  // `gameRows` has nothing to do with a `game-composition` frame.
   socket.addEventListener('message', (event) => {
-    let message: Extract<ServerMessage, { type: 'game-composition' } | { type: 'scene-preview' }>;
+    let message: Extract<
+      ServerMessage,
+      | { type: 'game-composition' }
+      | { type: 'scene-preview' }
+      | { type: 'scenes' }
+      | { type: 'scene-select' }
+    >;
     try {
       const parsed: unknown = JSON.parse(event.data);
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
       const type = (parsed as { type?: unknown }).type;
-      if (type !== 'game-composition' && type !== 'scene-preview') return;
+      if (
+        type !== 'game-composition' &&
+        type !== 'scene-preview' &&
+        type !== 'scenes' &&
+        type !== 'scene-select'
+      )
+        return;
       message = parsed as Extract<
         ServerMessage,
-        { type: 'game-composition' } | { type: 'scene-preview' }
+        | { type: 'game-composition' }
+        | { type: 'scene-preview' }
+        | { type: 'scenes' }
+        | { type: 'scene-select' }
       >;
     } catch {
       return;
     }
 
+    const scenes = ctx.reflect.get('scenes', false) as
+      | {
+          replace?(docs: unknown[]): void;
+          show?(id: string): Promise<void>;
+          highlight?(ref: { scene: string; node: string } | null): void;
+        }
+      | undefined;
     if (message.type === 'scene-preview') {
-      const stage = ctx.reflect.get('stage', false) as
-        { enter?(scene: string): Promise<void> } | undefined;
-      if (stage?.enter) void stage.enter(message.scene);
+      if (scenes?.show) void scenes.show(message.scene);
+      return;
+    }
+    if (message.type === 'scenes') {
+      if (scenes?.replace && Array.isArray(message.scenes)) scenes.replace(message.scenes);
+      return;
+    }
+    if (message.type === 'scene-select') {
+      if (scenes?.highlight)
+        scenes.highlight(
+          message.node === null ? null : { scene: message.scene, node: message.node },
+        );
       return;
     }
 
@@ -896,6 +927,71 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     forwardTransitions();
   });
   ctx.effect(() => () => unsubscribeTransitions?.(), 'ide-bridge-transitions-forwarding');
+
+  /**
+   * The mirror of the transitions-forwarding block above, for the running
+   * game's node-type registry: its ids and each type's own props schema,
+   * so the IDE's Scenes screen can render a node's fields and offer its
+   * type as a pick (`NodeTypesMessage`). Same shape, same reasons — see
+   * `currentTransitions`/`forwardTransitions`/`subscribeTransitions`'s own
+   * doc just above for "state it now, not only on the next change" and for
+   * why the `ctx.inject(['nodeTypes'])` re-arm is needed at all.
+   *
+   * `JSON.parse(JSON.stringify(t.schema))`: a schemastery `Schema` is not
+   * itself JSON — `JSON.stringify` calls its own `toJSON()`, producing the
+   * same deduped `{ uid, refs }` shape `CompositionRow.schema` already
+   * sends. A reader rebuilds it with `new Schema(json)` before reading
+   * `.type`/`.dict`/`.meta`.
+   *
+   * Read leniently (`ctx.reflect.get('nodeTypes', false)`): a composition
+   * with no `scenes` row sends nothing here, never throws.
+   */
+  const currentNodeTypes = () =>
+    ctx.reflect.get('nodeTypes', false) as
+      | {
+          list(): { type: string; schema: unknown }[];
+          subscribe(listener: () => void): () => void;
+        }
+      | undefined;
+
+  const forwardNodeTypes = () => {
+    const nodeTypes = currentNodeTypes();
+    if (!nodeTypes) return;
+    if (socket.readyState !== WEBSOCKET_OPEN) return;
+    try {
+      const message: ClientMessage = {
+        type: 'node-types',
+        types: nodeTypes
+          .list()
+          .map((t) => ({ type: t.type, schema: JSON.parse(JSON.stringify(t.schema)) })),
+      };
+      socket.send(JSON.stringify(message));
+    } catch {
+      // See `attachDiagnosticsForwarding`'s own doc: nowhere safe to report
+      // a send failure that would not loop straight back through this same
+      // path.
+    }
+  };
+
+  let unsubscribeNodeTypes: (() => void) | undefined;
+  const subscribeNodeTypes = () => {
+    unsubscribeNodeTypes?.();
+    unsubscribeNodeTypes = currentNodeTypes()?.subscribe(forwardNodeTypes);
+  };
+
+  socket.addEventListener('open', forwardNodeTypes);
+  subscribeNodeTypes();
+  forwardNodeTypes();
+
+  let readFromNodeTypes = currentNodeTypes();
+  ctx.inject(['nodeTypes'], () => {
+    const fresh = currentNodeTypes();
+    if (!fresh || fresh === readFromNodeTypes) return;
+    readFromNodeTypes = fresh;
+    subscribeNodeTypes();
+    forwardNodeTypes();
+  });
+  ctx.effect(() => () => unsubscribeNodeTypes?.(), 'ide-bridge-node-types-forwarding');
 
   ctx.effect(() => () => socket.close(), 'ide-bridge-socket');
 }

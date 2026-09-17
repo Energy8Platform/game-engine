@@ -1545,41 +1545,58 @@ describe('ide-bridge — replaying its override when `mechanics` is re-provided'
 });
 
 /**
- * `scene-preview` is the IDE's Scenes screen asking a running game to show
- * one scene right now (`POST /api/scenes/preview`, relayed to every `/ide`
- * socket — `protocol.ts`'s `ScenePreviewMessage`). This module's whole job
- * is to hand `message.scene` to `ctx.stage.enter`, read leniently: a game
- * with no `stage` row (an older runtime, or one that never composed
- * `stage`) ignores the frame instead of throwing.
+ * `scenes`/`scene-select`/`scene-preview` are the host telling this one
+ * running game about the IDE's Scenes screen — the document set
+ * (`ScenesMessage`), which node is selected (`SceneSelectMessage`), and
+ * which scene to show right now (`POST /api/scenes/preview`, relayed as
+ * `ScenePreviewMessage`). All three are handed to `ctx.scenes`
+ * (`replace`/`highlight`/`show`), read leniently: a game with no `scenes`
+ * row (an older runtime, or one that never composed it) ignores the frame
+ * instead of throwing.
  */
-describe('ide-bridge — a scene-preview frame enters that scene on the stage', () => {
-  function bridged(stage?: { enter(scene: string): Promise<void> }) {
+describe('ide-bridge — scenes frames from the host', () => {
+  function bridged(scenes?: {
+    replace?: ReturnType<typeof vi.fn>;
+    show?: ReturnType<typeof vi.fn>;
+    highlight?: ReturnType<typeof vi.fn>;
+  }) {
     ctx = new Context();
     const { bind, forStage, bindings } = fakeMechanics();
     ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
-    if (stage) ctx.provide('stage' as never, stage as never);
+    if (scenes) ctx.provide('scenes' as never, scenes as never);
     const socket = fakeSocket();
     ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
     return socket;
   }
 
-  it('a scene-preview frame enters that scene on the stage', async () => {
-    const entered: string[] = [];
-    const socket = bridged({
-      enter: async (scene) => {
-        entered.push(scene);
-      },
-    });
+  it('a `scenes` frame replaces the documents; `scene-select` highlights; `scene-preview` shows', async () => {
+    const scenes = { replace: vi.fn(), show: vi.fn(async () => {}), highlight: vi.fn() };
+    const socket = bridged(scenes);
 
-    socket.emit({ type: 'scene-preview', scene: 'free_spins' });
-    await Promise.resolve(); // `enter`'s own promise is not awaited by this module — let it settle
+    socket.emit({ type: 'scenes', scenes: [{ id: 'a', nodes: [] }], diagnostics: [] });
+    expect(scenes.replace).toHaveBeenCalledWith([{ id: 'a', nodes: [] }]);
 
-    expect(entered).toEqual(['free_spins']);
+    socket.emit({ type: 'scene-select', scene: 'a', node: 'n' });
+    expect(scenes.highlight).toHaveBeenCalledWith({ scene: 'a', node: 'n' });
+
+    socket.emit({ type: 'scene-select', scene: 'a', node: null });
+    expect(scenes.highlight).toHaveBeenCalledWith(null);
+
+    socket.emit({ type: 'scene-preview', scene: 'a' });
+    await Promise.resolve(); // `show`'s own promise is not awaited by this module — let it settle
+
+    expect(scenes.show).toHaveBeenCalledWith('a');
   });
 
-  it('without a stage, a scene-preview frame is ignored', () => {
+  it('without scenes composed, scenes/scene-select/scene-preview frames are ignored', () => {
     const socket = bridged();
 
+    expect(() =>
+      socket.emit({ type: 'scenes', scenes: [{ id: 'a', nodes: [] }], diagnostics: [] }),
+    ).not.toThrow();
+    expect(() =>
+      socket.emit({ type: 'scene-select', scene: 'a', node: null }),
+    ).not.toThrow();
     expect(() => socket.emit({ type: 'scene-preview', scene: 'free_spins' })).not.toThrow();
   });
 });
@@ -1662,5 +1679,126 @@ describe('ide-bridge — forwards game-transitions', () => {
     ).not.toThrow();
     expect(() => socket.open()).not.toThrow();
     expect(transitionFrames(socket)).toEqual([]);
+  });
+});
+
+/**
+ * `node-types` is the mirror of `game-transitions`, for the running game's
+ * node-type registry: its ids and each type's own props schema, so the
+ * IDE's Scenes screen can render a node's fields and offer its type as a
+ * pick (`protocol.ts`'s `NodeTypesMessage`). Same shape as
+ * `attachDiagnosticsForwarding`/the transitions block: state it as soon as
+ * there is an open socket and a registry to read, again on every
+ * `nodeTypes.subscribe` notification, and again once `nodeTypes` is
+ * provided at all — a composition with no `scenes` row sends nothing,
+ * never throws.
+ */
+describe('ide-bridge — forwards node-types', () => {
+  /** Same shape as `forwards game-transitions`' own `fakeOpenableSocket`. */
+  function fakeOpenableSocket() {
+    const sent: string[] = [];
+    const openListeners: ((event: { data: string }) => void)[] = [];
+    const socket = {
+      readyState: 0, // CONNECTING
+      send(frame: string) {
+        sent.push(frame);
+      },
+      sent,
+      addEventListener(type: string, listener: (event: { data: string }) => void) {
+        if (type === 'open') openListeners.push(listener);
+      },
+      close() {},
+      open() {
+        socket.readyState = 1;
+        for (const listener of openListeners) listener({ data: '' });
+      },
+    };
+    return socket;
+  }
+  const nodeTypeFrames = (socket: { sent: string[] }) =>
+    socket.sent.map((raw) => JSON.parse(raw)).filter((m) => m.type === 'node-types');
+
+  it('sends node-types on open, and again when the registry changes', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const listeners = new Set<() => void>();
+    let types: { type: string; schema: unknown }[] = [{ type: 'container', schema: { a: 1 } }];
+    ctx.provide(
+      'nodeTypes' as never,
+      {
+        list: () => [...types],
+        subscribe: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+      } as never,
+    );
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    expect(socket.sent, 'nothing can be said on a socket that is not open yet').toEqual([]);
+
+    socket.open();
+    expect(nodeTypeFrames(socket)).toEqual([
+      { type: 'node-types', types: [{ type: 'container', schema: { a: 1 } }] },
+    ]);
+
+    types = [...types, { type: 'image', schema: { src: 'string' } }];
+    listeners.forEach((fn) => fn());
+    expect(nodeTypeFrames(socket).at(-1)).toEqual({
+      type: 'node-types',
+      types: [
+        { type: 'container', schema: { a: 1 } },
+        { type: 'image', schema: { src: 'string' } },
+      ],
+    });
+  });
+
+  it('starts forwarding once nodeTypes is provided, even after apply already ran', async () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    socket.open();
+    expect(nodeTypeFrames(socket)).toEqual([]);
+
+    const listeners = new Set<() => void>();
+    let types = [{ type: 'container', schema: {} }];
+    ctx.provide(
+      'nodeTypes' as never,
+      {
+        list: () => [...types],
+        subscribe: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+      } as never,
+    );
+    // cordis runs a sibling `ctx.inject(['nodeTypes'])` asynchronously.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(nodeTypeFrames(socket)).toEqual([
+      { type: 'node-types', types: [{ type: 'container', schema: {} }] },
+    ]);
+
+    types = [...types, { type: 'image', schema: {} }];
+    listeners.forEach((fn) => fn());
+    expect(nodeTypeFrames(socket)).toHaveLength(2);
+  });
+
+  it('sends nothing when there is no nodeTypes registry, and does not throw', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeOpenableSocket();
+
+    expect(() =>
+      ideBridge.apply(ctx!, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never }),
+    ).not.toThrow();
+    expect(() => socket.open()).not.toThrow();
+    expect(nodeTypeFrames(socket)).toEqual([]);
   });
 });
