@@ -25,13 +25,14 @@ import { diagnostic, type Diagnostic, type DiagnosticsResponse } from '@energy8e
 
 /** Every scene is a stage, every stage a scene, every scene's layers declared, layer ids unique. Silent for a config with neither `layers` nor `scenes` (an older stage row). */
 export function checkScenes(stageConfig: unknown, stageNames: string[]): Diagnostic[] {
-  const cfg = (stageConfig ?? {}) as {
-    layers?: { id?: unknown }[];
-    scenes?: Record<string, { layers?: unknown[] }>;
-  };
+  const cfg = (stageConfig ?? {}) as { layers?: unknown; scenes?: unknown };
   if (!Array.isArray(cfg.layers) && !cfg.scenes) return [];
   const out: Diagnostic[] = [];
-  const ids = (cfg.layers ?? []).map((l) => String(l?.id ?? ''));
+  // A hand-typed `layers: bg` or `scenes: x` is not this check's subject
+  // (the row's own schema refuses it on a PUT): read as empty, never thrown on.
+  const ids = Array.isArray(cfg.layers)
+    ? cfg.layers.map((l) => String((l as { id?: unknown } | null)?.id ?? ''))
+    : [];
   for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) {
     out.push(
       diagnostic(
@@ -44,7 +45,11 @@ export function checkScenes(stageConfig: unknown, stageNames: string[]): Diagnos
     );
   }
   const known = new Set(ids);
-  const scenes = cfg.scenes ?? {};
+  const scenes = (
+    typeof cfg.scenes === 'object' && cfg.scenes !== null && !Array.isArray(cfg.scenes)
+      ? cfg.scenes
+      : {}
+  ) as Record<string, { layers?: unknown } | null>;
   for (const [scene, spec] of Object.entries(scenes)) {
     const layers = Array.isArray(spec?.layers) ? spec.layers : [];
     const missing = layers.map(String).filter((l) => !known.has(l));
@@ -107,7 +112,12 @@ export function apply(ctx: Context): void {
   recheck();
   ctx.on('game-composition/written', recheck);
   const onSpin = ({ path }: { path: string }) => {
-    if (path.endsWith('.spin')) void ctx.spinSchema.reload().then(recheck);
+    // `reload` never throws; the catch covers `recheck` racing a dispose.
+    if (path.endsWith('.spin'))
+      void ctx.spinSchema
+        .reload()
+        .then(recheck)
+        .catch(() => {});
   };
   ctx.on('files/written', onSpin);
   ctx.on('files/removed', onSpin);

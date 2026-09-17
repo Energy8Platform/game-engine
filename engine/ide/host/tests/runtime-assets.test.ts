@@ -1195,4 +1195,13 @@ describe('restartKeys', () => {
     }).toJSON();
     expect([...restartKeys(schema)]).toEqual(['rows', 'byId']);
   });
+  it('sees one inside a union member', () => {
+    const schema = Schema.object({
+      size: Schema.union([
+        Schema.natural().extra('extra', { applies: 'restart' }),
+        Schema.const('auto'),
+      ]),
+    }).toJSON();
+    expect([...restartKeys(schema)]).toEqual(['size']);
+  });
 });

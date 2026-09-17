@@ -37,6 +37,10 @@ describe('checkScenes', () => {
     const dup = checkScenes(cfg({ layers: [{ id: 'a' }, { id: 'a' }], scenes: {} }), []);
     expect(dup).toEqual([expect.objectContaining({ severity: 'error', where: 'a' })]);
   });
+  it('a malformed layers or scenes value is read as empty, never thrown on', () => {
+    expect(checkScenes({ layers: 'bg', scenes: 'x' }, [])).toEqual([]);
+    expect(checkScenes({ layers: [null], scenes: { a: null } }, ['a'])).toEqual([]);
+  });
   it('a config with no scenes and no layers (an older stage row) says nothing', () => {
     expect(checkScenes({ design: { width: 1, height: 1 } }, ['base_game'])).toEqual([]);
   });

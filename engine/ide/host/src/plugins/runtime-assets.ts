@@ -683,7 +683,7 @@ export function changedTopLevelKeys(
  * The top-level keys of a row's schema (`GameCompositionRow.schema`, a
  * schemastery `toJSON()` graph) that reload the game when they change: a
  * key whose field, or anything under it (an object's fields, an array's
- * or a dict's item), is `applies: 'restart'` — the same `meta.extra.
+ * or a dict's item, a union's members), is `applies: 'restart'` — the same `meta.extra.
  * applies` the IDE's schema-form reads as `needsRestart`. `stage1`'s
  * `design` is the case that made this nested: the row is hot, and only
  * `design.width`/`height` restart. Rebuilt with `new Schema(json)` rather
@@ -702,6 +702,7 @@ export function restartKeys(schema: unknown): Set<string> {
     if ((node.type === 'array' || node.type === 'dict') && node.inner) {
       return hasRestart(node.inner as Schema);
     }
+    if (node.list) return node.list.some((member) => hasRestart(member as Schema));
     return false;
   };
   return new Set(Object.keys(dict).filter((key) => hasRestart(dict[key] as Schema)));
