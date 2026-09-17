@@ -44,4 +44,20 @@ describe('wire', () => {
     receive({ type: 'e8:ide:req', id: 1, method: 'grid', params: {} }, 'http://anything');
     return vi.waitFor(() => expect(posted).toHaveLength(2));
   });
+  it('dispose() silences an in-flight handler that resolves after teardown', async () => {
+    const { wire, posted, receive } = fakeWindow();
+    wire.handle('slow', () => new Promise((resolve) => setTimeout(() => resolve('late'), 10)));
+    receive({ type: 'e8:ide:req', id: 1, method: 'slow', params: {} });
+    wire.dispose();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posted).toHaveLength(0);
+  });
+  it('an unknown-method response does not leapfrog an earlier known-method response', async () => {
+    const { wire, posted, receive } = fakeWindow();
+    wire.handle('known', (p) => p);
+    receive({ type: 'e8:ide:req', id: 1, method: 'known', params: {} });
+    receive({ type: 'e8:ide:req', id: 2, method: 'nope', params: {} });
+    await vi.waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted.map((p) => (p.msg as { id: number }).id)).toEqual([1, 2]);
+  });
 });

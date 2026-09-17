@@ -40,22 +40,30 @@ function isReqFrame(data: unknown): data is ReqFrame {
 
 export function createWire(o: WireOptions): Wire {
   const handlers = new Map<string, (params: unknown) => unknown | Promise<unknown>>();
+  let disposed = false;
 
-  const post = (msg: unknown): void => o.post(msg, o.parentOrigin);
+  // Guards every outbound post: a response or emit racing a torn-down wire (an in-flight
+  // handler resolving after `dispose()`) must not reach the transport.
+  const post = (msg: unknown): void => {
+    if (disposed) return;
+    o.post(msg, o.parentOrigin);
+  };
 
   const onMessage = (e: { data: unknown; origin: string }): void => {
     if (o.parentOrigin !== '*' && e.origin !== o.parentOrigin) return;
     if (!isReqFrame(e.data)) return;
     const { id, method, params } = e.data;
     const fn = handlers.get(method);
-    if (!fn) {
-      post({ type: RES, id, ok: false, error: `unknown method "${method}"` });
-      return;
-    }
-    // Dispatched asynchronously so a handler that throws synchronously still answers ok:false
-    // through this same catch, instead of throwing out of the message listener.
+    // Both branches resolve through the same Promise.resolve().then(...) hop, so an
+    // unknown-method response can never leapfrog an earlier known-method response that is
+    // still one microtask away — response order tracks request order either way. It also
+    // means a handler that throws synchronously still answers ok:false through this same
+    // catch, instead of throwing out of the message listener.
     Promise.resolve()
-      .then(() => fn(params))
+      .then(() => {
+        if (!fn) throw new Error(`unknown method "${method}"`);
+        return fn(params);
+      })
       .then(
         (result) => post({ type: RES, id, ok: true, result }),
         (err) => post({ type: RES, id, ok: false, error: String((err as Error)?.message ?? err) }),
@@ -72,6 +80,7 @@ export function createWire(o: WireOptions): Wire {
       handlers.set(method, fn);
     },
     dispose() {
+      disposed = true;
       stopListening();
       handlers.clear();
     },
