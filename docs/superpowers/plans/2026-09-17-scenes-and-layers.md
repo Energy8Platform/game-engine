@@ -611,6 +611,18 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   if (scenes?.enter) await scenes.enter(stage);
 ```
 
+Also extend the page's test-only `window.__e8` object (both files, identical) with two readers the e2e uses — find the `(window as unknown as { __e8: unknown }).__e8 = { … }` literal near the end and add:
+
+```ts
+  /** Slice 16: the scene the stage is in, `null` before the first spin or without a stage row. */
+  sceneCurrent: () => (ctx.reflect.get('stage', false) as { current?(): string | null } | undefined)?.current?.() ?? null,
+  /** Slice 16: whether the named layer is visible; `null` when there is no such layer (or no stage). */
+  layerVisible: (id: string) => {
+    const stage = ctx.reflect.get('stage', false) as { layer?(id: string): { visible: boolean } | undefined } | undefined;
+    return stage?.layer?.(id)?.visible ?? null;
+  },
+```
+
 Run `cd engine/ide/host && npx vitest run tests/template.test.ts` — the byte-identity test must stay green (`cmp` the two files).
 
 - [ ] **Step 4: GREEN, typecheck, prettier, commit**
@@ -1002,7 +1014,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Create: `engine/apps/web/tests/e2e/scenes.spec.ts`
-- Modify (if needed): `engine/examples/first-slot/e8.patch.yml` — NOT modified: the stage row's `layers`/`scenes` come from schema defaults (`layers: [{id:'reels'}]`, `scenes: {}`); the e2e adds a scene through the screen. `first-slot/src/main.ts` exposes on `window.__e8` (already there from slice 13 — extend in Task 2 if not present): `sceneCurrent(): string | null` and `layerVisible(id): boolean | null` reading `ctx.reflect.get('stage')`. If Task 2 did not add these, add them now in BOTH main.ts files (byte-identical) and re-run `tests/template.test.ts`.
+- Modify (if needed): `engine/examples/first-slot/e8.patch.yml` — NOT modified: the stage row's `layers`/`scenes` come from schema defaults (`layers: [{id:'reels'}]`, `scenes: {}`); the e2e adds a scene through the screen. `first-slot/src/main.ts` exposes `window.__e8.sceneCurrent()` and `window.__e8.layerVisible(id)` since Task 2.
 
 **Tests** (host per test via `projectCopy`/`startDevHost`; open the IDE at `http://127.0.0.1:5680/`; the preview iframe is `page.frameLocator('iframe')` — read `hot-fork.spec.ts` for how it reads `__e8` and counts spins/reloads):
 
