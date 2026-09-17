@@ -207,21 +207,27 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
 
   /** Unmounts and mounts `ids` again; a visible one stays visible. */
   function remount(ids: Iterable<string>): void {
+    const shown: string[] = [];
     for (const id of ids) {
+      const wasAt = visibleIds.includes(id) ? container.getChildIndex(mounted.get(id)!.view) : -1;
       unmountTop(id);
       if (!docs.has(id)) {
-        const at = visibleIds.indexOf(id);
-        if (at >= 0) visibleIds.splice(at, 1);
+        if (wasAt >= 0) visibleIds.splice(visibleIds.indexOf(id), 1);
         shownNested.delete(id);
         continue;
       }
       mountTop(id);
-      if (visibleIds.includes(id)) {
-        container.addChild(mounted.get(id)!.view);
-        container.addChild(highlightBox);
+      if (wasAt >= 0) {
+        container.addChildAt(mounted.get(id)!.view, wasAt);
+        shown.push(id);
       }
     }
     refresh();
+    // A visible document may now name assets nothing loaded yet (an edited `src`).
+    if (shown.length > 0)
+      void enqueue(async () => {
+        for (const id of shown) if (docs.has(id)) await load(id);
+      });
   }
 
   /** Scene ids a document's tree references, one level deep. */
@@ -295,60 +301,74 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         `transition "${transition.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
-    for (const c of [...run.from, ...run.to]) c.alpha = 1;
   }
 
   const enqueue = (run: () => Promise<void>): Promise<void> => (queue = queue.then(run, run));
 
+  /** Loads what `id` needs and is not loaded yet; a failure is reported per path, never thrown. */
+  async function load(id: string): Promise<void> {
+    const need = assetsOf(id).filter((p) => !loaded.has(p));
+    if (need.length === 0) return;
+    try {
+      await loader.load(need);
+      for (const p of need) loaded.add(p);
+    } catch (e) {
+      // ponytail: the loader fails as one batch, so every path in it is named — per-path precision needs a per-path loader.
+      const why = e instanceof Error ? e.message : String(e);
+      for (const p of need)
+        error(id, `asset "${p}" failed to load: ${why}`, 'check the path under the project');
+    }
+    refresh();
+  }
+
+  const notDeclared = (id: string) =>
+    error(id, `scene "${id}" is not declared`, `add scenes/${id}.scene.yml`);
+
+  /** A nested host keeps its own common props (alpha above all) once a transition is over. */
+  const settleHosts = (hosts: Entry[], visible: boolean) => {
+    for (const e of hosts) {
+      applyCommon(e.view, e.node.props);
+      e.view.visible = visible;
+    }
+  };
+
   async function show(id: string, opts?: { transition?: string }): Promise<void> {
-    if (!docs.has(id)) {
-      error(id, `scene "${id}" is not declared`, `add scenes/${id}.scene.yml`);
+    if (!docs.has(id)) return notDeclared(id);
+    if (visibleIds.includes(id) || shownNested.has(id)) return;
+    await load(id);
+    // `replace` may have run during the load: read everything again.
+    if (!docs.has(id)) return notDeclared(id);
+    const wanted = opts?.transition ?? options.transition ?? 'cut';
+    const hosts = nestingEntries(id);
+    if (hosts.length > 0) {
+      shownNested.add(id);
+      for (const e of hosts) e.view.visible = true;
+      await runTransition(wanted, { from: [], to: hosts.map((e) => e.view) });
+      if (shownNested.has(id)) settleHosts(nestingEntries(id), true);
       return;
     }
-    if (visibleIds.includes(id) || shownNested.has(id)) return;
-    const need = assetsOf(id).filter((p) => !loaded.has(p));
-    if (need.length > 0) {
-      try {
-        await loader.load(need);
-        for (const p of need) loaded.add(p);
-      } catch (e) {
-        // ponytail: the loader fails as one batch, so every path in it is named — per-path precision needs a per-path loader.
-        const why = e instanceof Error ? e.message : String(e);
-        for (const p of need)
-          error(id, `asset "${p}" failed to load: ${why}`, 'check the path under the project');
-      }
-      refresh();
-    }
-    const hosts = nestingEntries(id);
-    let to: Container[];
-    if (hosts.length > 0) {
-      to = hosts.map((e) => e.view);
-      shownNested.add(id);
-    } else {
-      const view = mounted.get(id)!.view;
-      container.addChild(view);
-      container.addChild(highlightBox);
-      visibleIds.push(id);
-      to = [view];
-    }
-    for (const c of to) c.visible = true;
-    await runTransition(opts?.transition ?? options.transition ?? 'cut', { from: [], to });
+    const view = mounted.get(id)!.view;
+    container.addChildAt(view, container.getChildIndex(highlightBox));
+    visibleIds.push(id);
+    view.visible = true;
+    await runTransition(wanted, { from: [], to: [view] });
+    if (visibleIds.includes(id)) mounted.get(id)!.view.alpha = 1;
   }
 
   async function hide(id: string): Promise<void> {
-    let from: Container[];
-    if (visibleIds.includes(id)) {
-      from = [mounted.get(id)!.view];
-    } else if (shownNested.has(id)) {
-      from = nestingEntries(id).map((e) => e.view);
-    } else return;
+    const nested = shownNested.has(id);
+    if (!nested && !visibleIds.includes(id)) return;
+    const from = nested ? nestingEntries(id).map((e) => e.view) : [mounted.get(id)!.view];
     await runTransition(options.transition ?? 'cut', { from, to: [] });
-    if (visibleIds.includes(id)) {
-      visibleIds.splice(visibleIds.indexOf(id), 1);
-      container.removeChild(from[0]);
-    } else {
+    // `replace` may have remounted (or dropped) the document meanwhile: act on what is mounted NOW.
+    if (nested) {
+      if (shownNested.has(id)) settleHosts(nestingEntries(id), false);
       shownNested.delete(id);
-      for (const c of from) c.visible = false;
+    } else if (visibleIds.includes(id)) {
+      visibleIds.splice(visibleIds.indexOf(id), 1);
+      const view = mounted.get(id)!.view;
+      container.removeChild(view);
+      view.alpha = 1;
     }
     const needed = new Set(visibleIds.flatMap((v) => assetsOf(v)));
     const orphans = [...loaded].filter((p) => !needed.has(p));

@@ -16,6 +16,7 @@ export interface NodeType<P = Record<string, unknown>> {
   /** Own props only; the common ones (`COMMON`) are the runtime's. */
   schema: Schema<P>;
   mount(props: P, ctx: Context): Container;
+  /** Re-syncs the view from `ctx`/the loader (after a load or an unload); `props` may be unchanged. */
   update?(view: Container, props: P, ctx: Context): void;
   /** The runtime never destroys a view it did not build; `unmount` is the type's chance to detach its own. */
   unmount?(view: Container): void;

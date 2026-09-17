@@ -6,6 +6,26 @@ import type { Diagnostic, SceneDoc } from '@energy8engine/contracts';
 import { createNodeTypes } from '../src/node-types';
 import { container, image, scene, type AssetLoader } from '../src/builtin';
 import { createScenes, type ScenesService } from '../src/scenes';
+import { createTransitions, fade, type TickerLike } from '../src/transitions';
+
+/** A ticker the test drives by hand — `transitions.test.ts` has the same. */
+function fakeTicker(): TickerLike & { tick(ms: number): void } {
+  const fns = new Set<(t: { deltaMS: number }) => void>();
+  return {
+    add: (fn) => fns.add(fn),
+    remove: (fn) => fns.delete(fn),
+    tick: (ms) => [...fns].forEach((fn) => fn({ deltaMS: ms })),
+  };
+}
+
+/** A promise the test resolves by hand. */
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 const loader: AssetLoader = {
   load: vi.fn(async () => {}),
@@ -149,14 +169,17 @@ describe('mounting', () => {
   it('a view the type did not build survives an unmount: `unmount` detaches, the runtime never destroys', () => {
     const foreign = new Container();
     const { scenes, nodeTypes } = boot();
+    const unmount = vi.fn((v: Container) => v.parent?.removeChild(v));
     nodeTypes.register({
       type: 'foreign',
       schema: Schema.object({}),
       mount: () => foreign,
-      unmount: (v) => v.parent?.removeChild(v),
+      unmount,
     });
     scenes.replace([{ id: 'a', nodes: [{ id: 'f', type: 'foreign', props: {} }] }]);
     scenes.replace([]);
+    expect(unmount).toHaveBeenCalledTimes(1);
+    expect(unmount).toHaveBeenCalledWith(foreign);
     expect(foreign.destroyed).toBe(false);
     expect(foreign.parent).toBeNull();
   });
@@ -263,8 +286,9 @@ describe('show / hide', () => {
     const order: string[] = [];
     const slow: AssetLoader = {
       ...loader,
+      // `a` is the slow one: only a queue still yields it first.
       load: vi.fn(async (urls) => {
-        await new Promise((r) => setTimeout(r, 5));
+        await new Promise((r) => setTimeout(r, urls[0] === 'a.png' ? 10 : 1));
         order.push(urls.join());
       }),
     };
@@ -295,5 +319,129 @@ describe('show / hide', () => {
     expect(top.visible).toBe(true);
     scenes.highlight(null);
     expect(scenes.container.children.at(-1)!.visible).toBe(false);
+  });
+});
+
+describe('show / hide under change', () => {
+  it('a nested host keeps its own alpha after a fade in and out', async () => {
+    const ticker = fakeTicker();
+    const transitions = createTransitions();
+    transitions.register(fade);
+    const nodeTypes = createNodeTypes();
+    for (const t of [container, scene]) nodeTypes.register(t);
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 1, height: 1 },
+      nodeTypes,
+      loader,
+      ctx: new Context(),
+      transitions,
+      transition: 'fade',
+      transitionMs: 100,
+      ticker,
+    });
+    scenes.replace([
+      { id: 'big', nodes: [] },
+      {
+        id: 'base',
+        nodes: [{ id: 'bw', type: 'scene', props: { scene: 'big', alpha: 0.5, visible: false } }],
+      },
+    ]);
+    const showBase = scenes.show('base');
+    await tick();
+    ticker.tick(100);
+    await showBase;
+    const host = byId(scenes, 'base', 'bw')!;
+    const showBig = scenes.show('big');
+    await tick();
+    ticker.tick(100);
+    await showBig;
+    expect(host.visible).toBe(true);
+    expect(host.alpha).toBe(0.5);
+    const hideBig = scenes.hide('big');
+    await tick();
+    ticker.tick(100);
+    await hideBig;
+    expect(host.visible).toBe(false);
+    expect(host.alpha).toBe(0.5);
+  });
+
+  it('a replace that drops the document during its load: "not declared", nothing shown', async () => {
+    const gate = deferred();
+    const gated: AssetLoader = { ...loader, load: vi.fn(() => gate.promise) };
+    const report = vi.fn<(d: Diagnostic) => void>();
+    const nodeTypes = createNodeTypes();
+    nodeTypes.register(image);
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 1, height: 1 },
+      nodeTypes,
+      loader: gated,
+      ctx: new Context(),
+      report,
+    });
+    scenes.replace([{ id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'a.png' } }] }]);
+    const showing = scenes.show('a');
+    await tick(); // the queue reached the load
+    expect(gated.load).toHaveBeenCalled();
+    scenes.replace([]);
+    gate.resolve();
+    await showing;
+    expect(scenes.visible()).toEqual([]);
+    expect(scenes.container.children.map((c) => c.label)).toEqual(['highlight']);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a',
+        message: expect.stringContaining('not declared'),
+      }),
+    );
+  });
+
+  it('a replace that remounts the document during its hide transition leaves no ghost', async () => {
+    const gate = deferred();
+    const transitions = createTransitions();
+    transitions.register({ id: 'slow', run: () => gate.promise });
+    const nodeTypes = createNodeTypes();
+    nodeTypes.register(container);
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 1, height: 1 },
+      nodeTypes,
+      loader,
+      ctx: new Context(),
+      transitions,
+      transition: 'slow',
+    });
+    scenes.replace([{ id: 'a', nodes: [{ id: 'n', type: 'container', props: {} }] }]);
+    await scenes.show('a', { transition: 'cut' });
+    const hiding = scenes.hide('a');
+    await tick(); // the transition is running
+    scenes.replace([{ id: 'a', nodes: [{ id: 'n', type: 'container', props: { x: 1 } }] }]);
+    gate.resolve();
+    await hiding;
+    expect(scenes.visible()).toEqual([]);
+    expect(scenes.container.children.map((c) => c.label)).toEqual(['highlight']);
+    expect(scenes.sceneView('a')!.parent).toBeNull();
+  });
+
+  it('editing an asset path of a visible scene loads the new asset', async () => {
+    const seen: string[][] = [];
+    const spy: AssetLoader = { ...loader, load: vi.fn(async (urls) => void seen.push([...urls])) };
+    const nodeTypes = createNodeTypes();
+    nodeTypes.register(image);
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 1, height: 1 },
+      nodeTypes,
+      loader: spy,
+      ctx: new Context(),
+    });
+    scenes.replace([{ id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'x.png' } }] }]);
+    await scenes.show('a');
+    scenes.replace([{ id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'y.png' } }] }]);
+    await tick();
+    expect(seen).toEqual([['x.png'], ['y.png']]);
+    expect(scenes.visible()).toEqual(['a']);
   });
 });
