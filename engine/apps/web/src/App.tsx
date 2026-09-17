@@ -109,7 +109,7 @@ export function App({ ctx }: { ctx: Context }) {
       name: 'shell.activity',
       key: 'composition',
       title: 'Composition',
-      icon: 'layers',
+      icon: 'puzzle',
       order: 1,
       opens: 'document',
     });
