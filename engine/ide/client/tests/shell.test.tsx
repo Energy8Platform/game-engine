@@ -384,6 +384,37 @@ describe('shell', () => {
     expect(ctx.shell.active()?.key).toBe('composition');
   });
 
+  it('a stale address with nothing open falls back to the lowest activity order, not the first registered', () => {
+    // A plugin's document lands during `createIdeClient`, before the app's
+    // core screens register theirs, so it sorts first by registration;
+    // the fallback is the bar's first document instead.
+    location.hash = '#/doc/ghost';
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'scenes', title: 'Scenes' }, Dummy);
+    ctx.slots.register({
+      name: 'shell.activity',
+      key: 'scenes',
+      title: 'Scenes',
+      icon: 'x',
+      order: 35,
+      opens: 'document',
+    });
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.slots.register({
+      name: 'shell.activity',
+      key: 'composition',
+      title: 'Composition',
+      icon: 'x',
+      order: 10,
+      opens: 'document',
+    });
+    ctx.shell.ready();
+    expect(ctx.shell.active()?.key).toBe('composition');
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('showing "composition" instead'),
+    ]);
+  });
+
   it('a stale address falls back to the document that WAS active, and replaces the entry', async () => {
     // Finding 2 of the final review: `giveUp` pushed `#/doc/composition`
     // over a typo, so Back landed on the typo again, re-reported, and

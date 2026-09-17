@@ -253,14 +253,22 @@ export function apply(ctx: Context) {
    * typo. Says so once and falls back to the document that WAS active, so
    * a mistyped address does not lose a person's place; only when none is
    * open does it fall back to the first contributed document, the way the
-   * old layout fell back to its first screen. The fallback REPLACES the
-   * stale address: pushing it left Back stuck on the same stale entry,
-   * re-reporting and growing the history on every press.
+   * old layout fell back to its first screen. "First" is the bar's order,
+   * not registration order: the document whose `shell.activity` (same
+   * key) has the lowest `order`, documents without one last, ties by
+   * registration — a plugin's document registered before the app's core
+   * screens must not become the fallback by arriving early. The fallback
+   * REPLACES the stale address: pushing it left Back stuck on the same
+   * stale entry, re-reporting and growing the history on every press.
    */
   function giveUp(key: string) {
     pending = undefined;
     const previous = lastActive !== undefined && documents.has(lastActive) ? lastActive : undefined;
-    const contributed = contributedDocuments();
+    const activities = ctx.slots.list<SlotMeta & ActivityMeta>(SLOT_NAMES.activity);
+    const rank = (key: string) =>
+      activities.find((entry) => entry.key === key)?.order ?? Number.MAX_SAFE_INTEGER;
+    // A stable sort, so ties keep registration order on their own.
+    const contributed = [...contributedDocuments()].sort((a, b) => rank(a.key) - rank(b.key));
     const fallback = previous ?? contributed[0]?.key;
     report(
       key,
