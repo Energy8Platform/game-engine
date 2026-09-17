@@ -313,6 +313,24 @@ describe('ScenesSidebar', () => {
     expect(screen.getByTestId('scene-base_game')).toHaveClass('e8-explorer-selected');
   });
 
+  it('a click on the confirm question does not push the scene being deleted', async () => {
+    const { posts } = await harness({
+      rows: [
+        stageRow({
+          ...STAGE_CONFIG,
+          scenes: { base_game: { layers: ['bg', 'reels'] }, free_spins: { layers: ['reels'] } },
+        }),
+      ],
+    });
+    const row = await screen.findByTestId('scene-free_spins');
+    fireEvent.click(within(row).getByRole('button', { name: 'delete scene free_spins' }));
+    fireEvent.click(within(row).getByText('delete scene "free_spins"?'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(posts).toHaveLength(0);
+    expect(row).toHaveTextContent('delete scene "free_spins"?');
+    expect(screen.getByTestId('scene-base_game')).toHaveClass('e8-explorer-selected');
+  });
+
   it('a scene with a transition wears it as a badge', async () => {
     await harness({
       rows: [

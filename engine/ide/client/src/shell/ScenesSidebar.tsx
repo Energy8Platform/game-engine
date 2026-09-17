@@ -211,6 +211,9 @@ export function ScenesSidebar({ ctx }: { ctx: Context }) {
   };
 
   const select = async (id: string) => {
+    // The confirm row sits in the scene's own row: a click on its question
+    // must not push the scene being deleted into the preview.
+    if (pending === id) return;
     setPicked(id);
     setPreview({ scene: id, diagnostics: await ctx.gameComposition.previewScene(id) });
   };
@@ -268,6 +271,7 @@ export function ScenesSidebar({ ctx }: { ctx: Context }) {
             tabIndex={0}
             className={`e8-explorer-entry${id === selected ? ' e8-explorer-selected' : ''}`}
             data-testid={`scene-${id}`}
+            title="select and show in preview"
             onClick={() => void select(id)}
             onKeyDown={activateOnKey(() => void select(id))}
           >
