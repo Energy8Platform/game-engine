@@ -237,7 +237,7 @@ describe('project.writePatchRow', () => {
     ).toEqual({
       rows: [
         { id: 'renderer1', config: { width: 480, height: 288, background: '#10121a' } },
-        { id: 'stage1', config: { design: { width: 480, height: 288 } } },
+        { id: 'scenes1', config: { design: { width: 480, height: 288 } } },
         { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
         { id: 'mechanics1', config: { stages: { base_game: 'classic' } } },
       ],
@@ -250,7 +250,7 @@ describe('project.writePatchRow', () => {
     expect(yaml.load(readFileSync(FIRST_SLOT_PATCH, 'utf8'))).toEqual({
       rows: [
         { id: 'renderer1', config: { width: 480, height: 288, background: '#10121a' } },
-        { id: 'stage1', config: { design: { width: 480, height: 288 } } },
+        { id: 'scenes1', config: { design: { width: 480, height: 288 } } },
         { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
         { id: 'mechanics1', config: { stages: { base_game: 'reel-step' } } },
         { id: 'reelstep1', name: 'reel-step', config: {} },

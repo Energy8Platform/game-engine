@@ -516,13 +516,12 @@ async function presentStage(
   // nothing is exactly a case `present` reports, and this control has
   // nothing to say about it.
   const mechanics = currentMechanics()!;
-  // Scenes (slice 16): a stage row that declares scenes shows this spin
-  // stage's layers before anything is presented on them. Read leniently —
-  // a game composed without a stage row, or on an older stage, has no
-  // scenes and presents exactly as before.
-  const scenes = ctx.reflect.get('stage', false) as
-    { enter?(scene: string): Promise<void> } | undefined;
-  if (scenes?.enter) await scenes.enter(stage);
+  // Scenes (slice 17, the temporary rule until the flow editor drives the
+  // game): show the scene named after this spin stage when one exists.
+  // Read leniently — a composition without a scenes row presents as before.
+  const scenes = ctx.reflect.get('scenes', false) as
+    { show?(id: string): Promise<void>; docs?(): ReadonlyMap<string, unknown> } | undefined;
+  if (scenes?.show && scenes.docs?.().has(stage)) await scenes.show(stage);
   const bound = mechanics.forStage(stage);
   if (bound && [...mechanicSelect.options].some((option) => option.value === bound.id)) {
     mechanicSelect.value = bound.id;
@@ -793,15 +792,15 @@ spinBtn.addEventListener('click', async () => {
       Array.from({ length: grid.rows }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null),
     );
   },
-  /** Slice 16: the scene the stage is in, `null` before the first spin or without a stage row. */
-  sceneCurrent: () =>
-    (ctx.reflect.get('stage', false) as { current?(): string | null } | undefined)?.current?.() ??
-    null,
-  /** Slice 16: whether the named layer is visible; `null` when there is no such layer (or no stage). */
-  layerVisible: (id: string) => {
-    const stage = ctx.reflect.get('stage', false) as
-      { layer?(id: string): { visible: boolean } | undefined } | undefined;
-    return stage?.layer?.(id)?.visible ?? null;
+  /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
+  scenesVisible(): string[] {
+    return (ctx.reflect.get('scenes', false) as { visible?(): string[] } | undefined)?.visible?.() ?? [];
+  },
+  /** Whether a node of a mounted top-level scene is visible; `null` when there is no such node. */
+  nodeVisible(scene: string, node: string): boolean | null {
+    const s = ctx.reflect.get('scenes', false) as { view?(ref: { scene: string; node: string }): { visible: boolean } | undefined } | undefined;
+    const v = s?.view?.({ scene, node });
+    return v ? v.visible : null;
   },
 };
 

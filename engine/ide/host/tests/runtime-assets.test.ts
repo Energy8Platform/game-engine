@@ -539,7 +539,7 @@ describe('GET /api/composition', () => {
     const body = await (await fetch(`${host.url}/api/composition`)).json();
     const byId = (id: string) => body.rows.find((r: { id: string }) => r.id === id);
 
-    for (const id of ['renderer1', 'stage1', 'reels1', 'mechanics1']) {
+    for (const id of ['renderer1', 'scenes1', 'reels1', 'mechanics1']) {
       expect(byId(id).schema, id).toBeTypeOf('object');
       expect(byId(id).schema, id).not.toBeNull();
     }
@@ -548,13 +548,13 @@ describe('GET /api/composition', () => {
     // rebuilds it and reads the restart meta off the field.
     const renderer = new Schema(byId('renderer1').schema) as Schema;
     expect(renderer.dict!.width.meta.extra?.applies).toBe('restart');
-    const stage = new Schema(byId('stage1').schema) as Schema;
-    expect(stage.dict!.design.dict!.width.meta.extra?.applies).toBe('restart');
+    const scenes = new Schema(byId('scenes1').schema) as Schema;
+    expect(scenes.dict!.design.dict!.width.meta.extra?.applies).toBe('restart');
 
     expect(byId('reels1').hot).toBe(true);
     expect(byId('mechanics1').hot).toBe(true);
     expect(byId('renderer1').hot).toBe(false);
-    expect(byId('stage1').hot).toBe(true); // layers, scenes and transitions re-apply in place; `design` alone restarts
+    expect(byId('scenes1').hot).toBe(true); // documents, node types and transitions re-apply in place; `design` alone restarts
     expect(body.diagnostics.filter((d: { where: string }) => d.where === 'schema')).toEqual([]);
   });
 
@@ -1013,19 +1013,19 @@ describe('PUT /api/composition/rows/:id', () => {
     expect(rowOf(patchOf(workspace).rows, 'hot1').config).toEqual({ speed: 2 });
   });
 
-  it('PUT on a hot stage row: layers → reload false, design.width → reload true', async () => {
-    // `stage1` is hot with ONE nested restart field (`design.width`) —
+  it('PUT on a hot scenes row: transition → reload false, design.width → reload true', async () => {
+    // `scenes1` is hot with ONE nested restart field (`design.width`) —
     // the case that made `restartKeys` walk below the top level.
     const dir = e8BaseWorkspace();
     host = await createIdeHost({ root: dir, port: 0 });
-    const layers = await (
-      await put(host.url, 'stage1', { config: { layers: [{ id: 'bg' }, { id: 'reels' }] } })
+    const transition = await (
+      await put(host.url, 'scenes1', { config: { transition: 'fade', transitionMs: 500 } })
     ).json();
-    expect(rowOf(layers.rows, 'stage1')).toMatchObject({ hot: true });
-    expect(layers.reload).toBe(false);
+    expect(rowOf(transition.rows, 'scenes1')).toMatchObject({ hot: true });
+    expect(transition.reload).toBe(false);
     const design = await (
-      await put(host.url, 'stage1', {
-        config: { layers: [{ id: 'bg' }, { id: 'reels' }], design: { width: 1 } },
+      await put(host.url, 'scenes1', {
+        config: { transition: 'fade', transitionMs: 500, design: { width: 1 } },
       })
     ).json();
     expect(design.reload).toBe(true);
@@ -1094,14 +1094,14 @@ describe('PUT /api/composition/rows/:id', () => {
     host = await createIdeHost({ root: dir, port: 0 });
     const [a, b] = await Promise.all([
       put(host.url, 'renderer1', { config: { width: 1 } }),
-      put(host.url, 'stage1', { config: { design: { width: 2 } } }),
+      put(host.url, 'scenes1', { config: { design: { width: 2 } } }),
     ]);
     expect([a.status, b.status]).toEqual([200, 200]);
     const second = await b.json();
     expect(rowOf(second.rows, 'renderer1').config).toEqual({ width: 1 });
     expect(patchOf(dir).rows).toEqual([
       { id: 'renderer1', config: { width: 1 } },
-      { id: 'stage1', config: { design: { width: 2 } } },
+      { id: 'scenes1', config: { design: { width: 2 } } },
     ]);
   });
 

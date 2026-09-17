@@ -31,8 +31,14 @@ function walk(dir: string): string[] {
 }
 
 describe('engine/templates/slot-basic', () => {
-  it('carries main.ts, script.spin and e8.profile.yml byte-for-byte from first-slot', () => {
-    for (const rel of ['src/main.ts', 'game/script.spin', 'e8.profile.yml']) {
+  it('carries main.ts, script.spin, e8.profile.yml and the two scene files byte-for-byte from first-slot', () => {
+    for (const rel of [
+      'src/main.ts',
+      'game/script.spin',
+      'e8.profile.yml',
+      'scenes/base_game.scene.yml',
+      'scenes/big_win.scene.yml',
+    ]) {
       expect(readFileSync(join(TEMPLATE, rel))).toEqual(readFileSync(join(EXAMPLE, rel)));
     }
   });
@@ -104,12 +110,12 @@ describe('engine/templates/slot-basic', () => {
   /**
    * The template's own top level, ignoring `node_modules` (an install-time
    * hoist, not shipped content — see `walk`'s doc comment): exactly the
-   * ten files plus their two parent directories, and in particular no
+   * eleven files plus their three parent directories, and in particular no
    * `plugins/` — `first-slot` has one, `slot-basic` does not. `README.md`
    * holds the patch's prose: the IDE rewrites `e8.patch.yml` without
    * comments, so a created project keeps the explanation here.
    */
-  it('ships exactly the ten template files, no plugins/ directory', () => {
+  it('ships exactly the eleven template files, no plugins/ directory', () => {
     const topLevel = readdirSync(TEMPLATE)
       .filter((name) => name !== 'node_modules')
       .sort();
@@ -122,6 +128,7 @@ describe('engine/templates/slot-basic', () => {
       'game',
       'index.html',
       'package.json',
+      'scenes',
       'src',
       'tsconfig.json',
     ]);

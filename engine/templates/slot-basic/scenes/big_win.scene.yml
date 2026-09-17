@@ -1,0 +1,5 @@
+id: big_win
+nodes:
+  - id: banner
+    type: container
+    props: { x: 240, y: 144 }

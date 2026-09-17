@@ -798,14 +798,10 @@ describe('dev-game — restart on a script.spin write', () => {
       recursive: true,
       filter: (src) => !src.includes('node_modules') && !src.endsWith('tsconfig.json'),
     });
-    // A scene with the board in it, so the host's `scenes` speaker has
-    // nothing to say about this copy and every host frame below is the
-    // session's alone (`first-slot` itself gets its scenes in a later slice).
-    mkdirSync(join(dir, 'scenes'));
-    writeFileSync(
-      join(dir, 'scenes', 'base_game.scene.yml'),
-      'id: base_game\nnodes:\n  - id: board\n    type: reels\n    props: {}\n',
-    );
+    // `first-slot`'s own `scenes/base_game.scene.yml` already has the board
+    // in it, so the copy above carries it and the host's `scenes` speaker
+    // has nothing to say about this copy — every host frame below is the
+    // session's alone.
     restartTestDirs.push(dir);
     return dir;
   }

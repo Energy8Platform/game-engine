@@ -1,0 +1,8 @@
+id: base_game
+nodes:
+  - id: board
+    type: reels
+    props: { row: reels1 }
+  - id: big_win
+    type: scene
+    props: { scene: big_win, visible: false }

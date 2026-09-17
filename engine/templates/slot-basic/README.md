@@ -4,6 +4,15 @@ A 5x3 lines game on the `e8-base` bundle with the `classic` mechanic and a
 placeholder art set. `e8.profile.yml` stacks that one bundle; `e8.patch.yml`
 is the delta on top of it.
 
+## `scenes/`
+
+Scene documents live here, one file per scene: `scenes/base_game.scene.yml`
+and `scenes/big_win.scene.yml`. `main.ts` shows the scene named after the
+spin's stage when one is declared (the temporary rule until the flow editor
+drives the game) — `base_game`'s board is a `reels` node, and `big_win` is a
+nested scene it can show. `scenes1`'s row (below) sets the design resolution
+these documents are laid out against.
+
 ## `e8.patch.yml`
 
 The patch carries everything `src/main.ts` used to pass as a JS object

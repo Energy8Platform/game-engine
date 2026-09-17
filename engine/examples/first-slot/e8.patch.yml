@@ -6,7 +6,7 @@ rows:
       width: 480
       height: 288
       background: '#10121a'
-  - id: stage1
+  - id: scenes1
     config:
       design:
         width: 480
