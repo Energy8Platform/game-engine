@@ -161,6 +161,7 @@ function NodeProperties({
           schema={schema}
           value={node.props}
           onChange={onChange}
+          commit="blur"
         />
       </div>
     </>

@@ -136,7 +136,13 @@ describe('PropertiesSidebar', () => {
     expect((screen.getByLabelText('x, design px') as HTMLInputElement).value).toBe('10');
     expect((screen.getByLabelText('src') as HTMLInputElement).value).toBe('logo.png');
 
-    fireEvent.change(screen.getByLabelText('x, design px'), { target: { value: '25' } });
+    // A PUT re-reads and revalidates the whole project: typing is a draft,
+    // blur (or Enter) is the one write.
+    const x = screen.getByLabelText('x, design px');
+    fireEvent.change(x, { target: { value: '2' } });
+    fireEvent.change(x, { target: { value: '25' } });
+    expect(puts()).toHaveLength(0);
+    fireEvent.blur(x);
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes[0].children?.[0]).toEqual({
       id: 'logo',
@@ -179,6 +185,27 @@ describe('PropertiesSidebar', () => {
     await waitFor(() =>
       expect((screen.getByTestId('prop-id') as HTMLInputElement).value).toBe('hero'),
     );
+  });
+
+  it("rename: the host's refusal shows inline and the selection stays", async () => {
+    const { ctx, puts, selects } = await harness({
+      'PUT /api/scenes/base_game': () => ({
+        status: 400,
+        body: { diagnostics: [{ severity: 'error', where: 'scenes', message: 'bad id "hero"' }] },
+      }),
+    });
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
+    renderSide(ctx);
+    const before = selects().length;
+    const input = screen.getByTestId('prop-id') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'hero' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('prop-id-error')).toHaveTextContent('bad id "hero"'),
+    );
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: 'logo' });
+    expect(selects()).toHaveLength(before);
   });
 
   it('a scene: id, the node count (nested included), assets through nested scenes, deduped, cycle-safe', async () => {
