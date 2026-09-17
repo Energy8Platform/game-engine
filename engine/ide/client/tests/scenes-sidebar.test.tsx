@@ -7,6 +7,7 @@ import type { WebSocketLike } from '../src/plugins/connection';
 import * as connection from '../src/plugins/connection';
 import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
+import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 
 /**
@@ -59,6 +60,7 @@ async function harness(routes: Record<string, Route>) {
   await ctx.plugin(connection, { url: 'ws://x/ide', socketFactory: () => socket });
   await ctx.plugin(slots);
   await ctx.plugin(shell);
+  await ctx.plugin(viewers);
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   return { ctx, calls, fetchFn };
 }

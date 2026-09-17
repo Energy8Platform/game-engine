@@ -9,6 +9,7 @@ import {
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
 import { ScenesSidebar } from '../shell/ScenesSidebar';
+import { SceneDocument } from '../shell/SceneDocument';
 
 /**
  * The scene documents, client half: the set the host keeps
@@ -36,7 +37,8 @@ import { ScenesSidebar } from '../shell/ScenesSidebar';
  * open for it: a selection made from the sidebar with no tab is left
  * alone.
  *
- * The sidebar, viewer and inspector register here too (Tasks 11–13).
+ * The sidebar, the viewer (`scenes/<id>.scene.yml` as a tab) and the
+ * inspector register here too (Tasks 11–13).
  */
 declare module 'cordis' {
   interface Context {
@@ -75,7 +77,7 @@ export interface ScenesConfig extends ConnectionConfig {
 }
 
 export const name = 'scenes';
-export const inject = ['slots', 'connection', 'shell'];
+export const inject = ['slots', 'connection', 'shell', 'viewers'];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
   return diagnostic(
@@ -245,6 +247,16 @@ export function apply(ctx: Context, config: ScenesConfig) {
         return <ScenesSidebar ctx={ctx} />;
       }),
     'scenes:sidebar',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.viewers.register({
+        id: 'scene',
+        match: (p) => /^scenes\/[a-z0-9_]+\.scene\.yml$/.test(p),
+        component: SceneDocument,
+      }),
+    'scenes:viewer',
   );
 
   ctx.provide('scenes', service);

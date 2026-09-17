@@ -5,11 +5,12 @@ import * as connection from '../src/plugins/connection';
 import type { WebSocketLike } from '../src/plugins/connection';
 import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
+import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 
 /**
  * The `scenes` service booted on a real `Context` with the real
- * `connection` (fake socket), `slots` and `shell` — the plugins it
+ * `connection` (fake socket), `slots`, `shell` and `viewers` — the plugins it
  * injects — and a `fetchFn` that routes on method + URL and records every
  * call, so each test asserts the path, method and body that went out.
  */
@@ -59,6 +60,7 @@ async function harness(routes: Record<string, Route>) {
   await ctx.plugin(connection, { url: 'ws://x/ide', socketFactory: () => socket });
   await ctx.plugin(slots);
   await ctx.plugin(shell);
+  await ctx.plugin(viewers);
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   return { ctx, socket, calls, fetchFn };
 }
