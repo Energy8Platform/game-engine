@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Container } from 'pixi.js';
 import type { Diagnostic } from '@energy8engine/contracts';
-import { createStage, createTransitions, cut, fitStage } from '../src/index';
+import { createStage, createTransitions, cut, fitStage, type LayerView } from '../src/index';
 
 describe('fitStage: contain', () => {
   it('scales by height and letterboxes left/right when the viewport is wider than the design aspect', () => {
@@ -208,6 +208,23 @@ describe('createStage — layers and scenes', () => {
     await stage.enter('b');
     expect(seen[1]).toEqual({ from: [true], to: [true] });
     expect(stage.layer('bg')!.visible).toBe(false);
+  });
+
+  it('destroy detaches what rows mounted on the root container too — a root mount stays legal', () => {
+    const root = new Container();
+    const stage = createStage({ root, design, layers });
+    const view = new Container();
+    stage.container.addChild(view);
+    stage.destroy();
+    expect(view.destroyed).toBe(false);
+    expect(view.parent).toBeNull();
+    expect(root.children).toEqual([]);
+  });
+
+  it('layers() cannot be spliced from outside', () => {
+    const stage = createStage({ root: new Container(), design, layers });
+    expect(() => (stage.layers() as LayerView[]).splice(0, 1)).toThrow();
+    expect(stage.layers()).toHaveLength(3);
   });
 
   it('destroy detaches what rows mounted into layers instead of destroying it', () => {

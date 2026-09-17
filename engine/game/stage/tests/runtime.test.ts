@@ -114,6 +114,21 @@ describe('stage runtime half', () => {
     await ctx.fiber.dispose();
   });
 
+  it('re-applies on fiber.update: a child mounted on the root stage container survives too', async () => {
+    const ctx = new Context();
+    const root = new Container();
+    await ctx.plugin(fakeRenderer(root));
+    const fiber = await ctx.plugin(runtime, { design: { width: 1, height: 1 } });
+    const view = new Container();
+    ctx.stage.container.addChild(view);
+    fiber.update({ design: { width: 1, height: 1 }, layers: [{ id: 'bg', z: 0 }] });
+    await fiber.await();
+    expect(view.destroyed).toBe(false);
+    expect(view.parent).toBeNull();
+    expect(root.children).toEqual([ctx.stage.container]);
+    await ctx.fiber.dispose();
+  });
+
   it('reports through ctx.diagnostics when present', async () => {
     const ctx = new Context();
     const reported: Diagnostic[] = [];

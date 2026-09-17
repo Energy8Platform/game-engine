@@ -205,6 +205,7 @@ export function createStage(options: CreateStageOptions): Stage {
     .map((spec, index) => ({ id: spec.id, z: spec.z ?? 0, index, container: new Container() }))
     .sort((a, b) => a.z - b.z || a.index - b.index)
     .map(({ id, z, container: c }) => ({ id, z, container: c }));
+  Object.freeze(views);
   for (const view of views) container.addChild(view.container);
   const transitions = options.transitions ?? createTransitions(report);
   if (!transitions.get('cut')) transitions.register(cut);
@@ -247,6 +248,9 @@ export function createStage(options: CreateStageOptions): Stage {
         );
         transition = cut;
       }
+      // ponytail: concurrent `enter` calls are not queued — the play loop
+      // enters scenes one after another; a promise chain is the upgrade if
+      // a second caller ever races this one.
       current = scene;
       // `to` shows before the run (a fade-in is seen); `from` hides only
       // after it (a fade-out is seen).
@@ -284,11 +288,16 @@ export function createStage(options: CreateStageOptions): Stage {
       return fit;
     },
     destroy() {
-      // Never destroy what other rows mounted: detach first, then destroy
-      // only the containers this stage built.
-      for (const v of views) v.container.removeChildren();
+      // Never destroy what other rows mounted — into a layer, or straight
+      // onto the root (where `reels` mounts today): detach it all first,
+      // then destroy only the containers this stage built.
+      for (const v of views) {
+        v.container.removeChildren();
+        v.container.destroy();
+      }
+      container.removeChildren();
       options.root.removeChild(container);
-      container.destroy({ children: true });
+      container.destroy();
     },
   };
 }
