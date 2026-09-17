@@ -8,6 +8,7 @@ import {
   type ScenesResponse,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
+import { ScenesSidebar } from '../shell/ScenesSidebar';
 
 /**
  * The scene documents, client half: the set the host keeps
@@ -236,6 +237,14 @@ export function apply(ctx: Context, config: ScenesConfig) {
         opens: 'sidebar',
       }),
     'scenes:activity',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.register({ name: 'shell.sidebar', key: 'scenes', title: 'Scenes' }, function ScenesView() {
+        return <ScenesSidebar ctx={ctx} />;
+      }),
+    'scenes:sidebar',
   );
 
   ctx.provide('scenes', service);

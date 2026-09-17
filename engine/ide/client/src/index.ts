@@ -66,7 +66,7 @@ export {
   type ThemeName,
 } from './shell/StatusItems';
 export { Explorer, openPath } from './shell/Explorer';
-export { ScenesSidebar, findStageRow } from './shell/ScenesSidebar';
+export { ScenesSidebar } from './shell/ScenesSidebar';
 export { Projects } from './shell/Projects';
 export { EditorDocument } from './shell/EditorDocument';
 export { ViewerDocument, looksBinary } from './shell/ViewerDocument';
