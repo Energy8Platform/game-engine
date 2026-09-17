@@ -366,28 +366,24 @@ describe('game composition feeder — frames and edits', () => {
 });
 
 /**
- * The two fields the Scenes screen reads off the same GET (Task 3's
- * `GameCompositionResponse`): the `.spin` stages — the scene ids a game can
- * have — and the transition ids the running game reported. Frames carry
- * rows only, so both survive one.
+ * The transition ids the Scenes screen reads off the same GET (Task 3's
+ * `GameCompositionResponse`) — reported by the running game. Frames carry
+ * rows only, so it survives one.
  */
-describe('game composition feeder — stages and transitions', () => {
-  it('exposes the .spin stages and the transitions the GET carries', async () => {
+describe('game composition feeder — transitions', () => {
+  it('exposes the transitions the GET carries', async () => {
     const { ctx, push } = await harness(
       answer({
         rows: ROWS,
         diagnostics: [],
-        schema: { stages: { base_game: {}, free_spins: {} } },
         transitions: ['cut', 'fade'],
       }),
     );
     await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
-    expect(ctx.gameComposition.stages).toEqual(['base_game', 'free_spins']);
     expect(ctx.gameComposition.transitions).toEqual(['cut', 'fade']);
 
     push(frame([], false));
     expect(ctx.gameComposition.rows).toEqual([]);
-    expect(ctx.gameComposition.stages).toEqual(['base_game', 'free_spins']);
     expect(ctx.gameComposition.transitions).toEqual(['cut', 'fade']);
   });
 
@@ -411,7 +407,6 @@ describe('game composition feeder — stages and transitions', () => {
   it('missing fields read as empty lists', async () => {
     const { ctx } = await harness(answer({ rows: ROWS, diagnostics: [] }));
     await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
-    expect(ctx.gameComposition.stages).toEqual([]);
     expect(ctx.gameComposition.transitions).toEqual([]);
   });
 });

@@ -517,10 +517,10 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
        * This is what makes the documented third-party story the working
        * one. `resolveComposition` APPENDS a row a patch adds, so shipping
        * `@acme/gl` with `e8.seam: { renderer, … }` and adding it as a row
-       * puts it LAST — after `stage1`, which reads `ctx.renderer`. A plain
-       * filter would then compose `boot1, stage1, …, renderer2`:
-       * `renderer1` dropped for losing, `stage1` applied against a context
-       * with no renderer on it, and a failure screen blaming `stage1` for
+       * puts it LAST — after `scenes1`, which reads `ctx.renderer`. A plain
+       * filter would then compose `boot1, scenes1, …, renderer2`:
+       * `renderer1` dropped for losing, `scenes1` applied against a context
+       * with no renderer on it, and a failure screen blaming `scenes1` for
        * a mistake nobody made. The only arrangement that worked was
        * replacing `renderer1` in place, which abandons the competition the
        * seam exists for.

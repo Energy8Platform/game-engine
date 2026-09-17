@@ -684,7 +684,7 @@ export function changedTopLevelKeys(
  * schemastery `toJSON()` graph) that reload the game when they change: a
  * key whose field, or anything under it (an object's fields, an array's
  * or a dict's item, a union's members), is `applies: 'restart'` — the same `meta.extra.
- * applies` the IDE's schema-form reads as `needsRestart`. `stage1`'s
+ * applies` the IDE's schema-form reads as `needsRestart`. `scenes1`'s
  * `design` is the case that made this nested: the row is hot, and only
  * `design.width`/`height` restart. Rebuilt with `new Schema(json)` rather
  * than read off the raw graph: the graph is schemastery's own deduped

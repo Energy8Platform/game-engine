@@ -3,7 +3,6 @@ import type { Context } from 'cordis';
 import {
   diagnostic,
   type Diagnostic,
-  type DiagnosticsResponse,
   type GameCompositionMessage,
   type GameCompositionResponse,
   type GameCompositionRow,
@@ -84,12 +83,6 @@ export interface GameCompositionState {
   /** How many `game-composition` frames said `reload: true` — the preview remounts when this moves. */
   reloads: number;
   /**
-   * The `.spin` stages (`GameCompositionResponse.schema.stages`' keys) —
-   * the scene ids a game can have. From the boot GET only; a
-   * `game-composition` frame carries rows and leaves these standing.
-   */
-  stages: string[];
-  /**
    * The transition ids the running game reported: the boot GET's
    * `GameCompositionResponse.transitions`, then every `game-transitions`
    * frame the host relays (the game boots after the GET, so the frame is
@@ -110,13 +103,6 @@ export interface GameCompositionService extends GameCompositionState {
     id: string,
     config: Record<string, unknown>,
   ): Promise<{ reload: boolean; diagnostics: Diagnostic[] }>;
-  /**
-   * `POST /api/scenes/preview { scene }` — "show this scene" to the
-   * running game. Answers the host's diagnostics (a warning when no
-   * preview is up); a network that did not answer is one diagnostic too,
-   * never a throw.
-   */
-  previewScene(scene: string): Promise<Diagnostic[]>;
 }
 
 export interface GameCompositionConfig extends ConnectionConfig {
@@ -183,7 +169,6 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
     rows: null,
     diagnostics: [],
     reloads: 0,
-    stages: [],
     transitions: [],
     subscribe(listener) {
       listeners.add(listener);
@@ -230,23 +215,6 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
             ],
       );
     },
-    async previewScene(scene) {
-      const where = '/api/scenes/preview';
-      try {
-        const res = await fetchFn(`${origin}${where}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ scene }),
-        });
-        const body = (await res.json()) as Partial<DiagnosticsResponse>;
-        if (!Array.isArray(body.diagnostics)) {
-          throw new Error(`the host answered ${res.status} without a "diagnostics" array`);
-        }
-        return body.diagnostics;
-      } catch (error) {
-        return [ownDiagnostic(where, `could not show the scene: ${reason(error)}`)];
-      }
-    },
   };
 
   void (async () => {
@@ -257,8 +225,7 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
       // A 200 with the wrong shape is a failure like any other: better one
       // diagnostic naming it than a screen that renders `undefined.map`.
       if (!Array.isArray(body.rows)) throw new Error('the response has no "rows" array');
-      // Only the GET carries these; a frame that beat it says nothing about them.
-      service.stages = Object.keys(body.schema?.stages ?? {});
+      // Only the GET carries this; a frame that beat it says nothing about it.
       service.transitions = Array.isArray(body.transitions) ? body.transitions : [];
       // A frame (or a PUT answer) that landed first is the newer fact.
       if (service.rows !== null) {
@@ -315,7 +282,6 @@ export function useGameComposition(ctx: Context): GameCompositionState {
     rows: ctx.gameComposition.rows,
     diagnostics: ctx.gameComposition.diagnostics,
     reloads: ctx.gameComposition.reloads,
-    stages: ctx.gameComposition.stages,
     transitions: ctx.gameComposition.transitions,
   });
   // A fresh object per notification on purpose: the service mutates its
