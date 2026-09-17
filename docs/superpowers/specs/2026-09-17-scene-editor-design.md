@@ -404,3 +404,22 @@ preserving visibility), 2 (stale lists — closed by clearing on project
 switch), 6 (queued `show`) are closed by this design. Debt 3 (anonymous
 game diagnostics bucket), 10 (`TS7016`), and the four un-reconnecting
 `/ide` sockets stay.
+
+## 12. Amendments made while planning
+
+- **No root fallback for the reels board.** §4 said the reels row keeps
+  mounting to the renderer root when no `scenes` service appears. The row
+  now mounts nothing on its own and only registers the `reels` node type;
+  the host warns (`where: reels1`) when a reels row exists and no scene
+  has a `reels` node. Smaller, and the fact lives in data.
+- **The scene tab IS the file's viewer.** Its key is `f:scenes/<id>.scene.yml`
+  (the `viewers` route), so there is no separate text tab, no "Open as
+  text", and no dirty-refusal — §8.3's last two sentences do not apply.
+- **No `scenes` greeting on `/ide`.** The IDE and the game both fetch
+  `GET /api/scenes` at boot (as they do `/api/composition`); only
+  `node-types` greets a late socket, like `game-transitions`.
+- **`nodeVisible`/`view()` address top-level scenes only.** A nested
+  scene's inner nodes are not addressable from outside; the `scene` node
+  itself is.
+- **`ctx.assetLoader`** is provided by the `scenes1` row (pixi `Assets` in
+  the game, a fake in tests); `image` reads it leniently.
