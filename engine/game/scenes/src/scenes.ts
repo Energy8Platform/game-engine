@@ -65,6 +65,13 @@ export interface ScenesService {
   sceneView(id: string): Container | undefined;
   view(ref: SceneRef): Container | undefined;
   readonly container: Container;
+  /**
+   * Settles once the boot document set is in: the runtime's `/api/scenes`
+   * GET has `replace`d (or a frame's `replace` landed first); REJECTS when
+   * the GET failed and nothing replaced. Already resolved here — the
+   * runtime half (`./runtime`) is what defers it.
+   */
+  ready: Promise<void>;
   resize(viewportWidth: number, viewportHeight: number): Fit;
   destroy(): void;
 }
@@ -451,6 +458,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
 
   const service: ScenesService = {
     container,
+    ready: Promise.resolve(),
     show: (id, opts) => enqueue(() => show(id, opts)),
     hide: (id) => enqueue(() => hide(id)),
     visible: () => [...visibleIds],

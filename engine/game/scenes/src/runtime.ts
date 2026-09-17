@@ -106,7 +106,11 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   ctx.provide('scenes', scenes);
 
   const fetchFn = config.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
-  void (async () => {
+  // `scenes.ready` is this GET: a reader that needs the boot set (`scene-edit`)
+  // awaits it instead of polling `docs()`. A frame's earlier `replace` counts
+  // as ready even when the GET then fails; nobody else awaiting it is fine
+  // too (the `catch` below keeps a rejection from surfacing as unhandled).
+  scenes.ready = (async () => {
     try {
       const res = await fetchFn('/api/scenes');
       if (!res.ok) throw new Error(`the host answered ${res.status}`);
@@ -115,9 +119,11 @@ export function apply(ctx: Context, config: ScenesConfig): void {
       if (!replaced && alive) scenes.replace(body.scenes);
     } catch (error) {
       if (!alive) return;
-      report(diagnostic('error', 'scenes', '/api/scenes',
-        `could not read the scene documents: ${error instanceof Error ? error.message : String(error)}`,
+      const message = `could not read the scene documents: ${error instanceof Error ? error.message : String(error)}`;
+      report(diagnostic('error', 'scenes', '/api/scenes', message,
         'the host serves this route; the game shows no scene until it answers'));
+      if (!replaced) throw new Error(message);
     }
   })();
+  scenes.ready.catch(() => {});
 }

@@ -19,7 +19,7 @@ const DOCS: SceneDoc[] = [
 
 type Frame = { type: string; id?: number; event?: string; payload?: unknown; ok?: boolean; result?: unknown };
 
-function boot(scene = 'a', docs = DOCS) {
+function boot(scene = 'a', docs = DOCS, docsReady?: Promise<void>) {
   const ctx = new Context();
   const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
   ctx.provide('renderer', { app });
@@ -28,6 +28,7 @@ function boot(scene = 'a', docs = DOCS) {
   ctx.provide('nodeTypes', nodeTypes);
   const scenes = createScenes({ root: app.stage, design: { width: 960, height: 576 }, nodeTypes, loader, ctx });
   scenes.replace(docs);
+  if (docsReady) scenes.ready = docsReady;
   ctx.provide('scenes', scenes);
   const posted: Frame[] = [];
   let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
@@ -87,6 +88,10 @@ describe('scene-edit plugin', () => {
     const n = events().length;
     expect((await call('select', { node: 'hi' })).ok).toBe(true);
     expect(events()).toHaveLength(n); // unchanged: nothing re-emitted
+    await call('select', { node: 'nested' }); // no top-level view: gizmo hides, id kept, nothing echoed
+    expect(events()).toHaveLength(n);
+    expect(gizmoShown()).toBe(false);
+    expect(edit().snapshot().selected).toBe('nested');
     await call('select', { node: 'lo' });
     expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: 'lo' } });
     expect(gizmoShown()).toBe(true);
@@ -122,6 +127,9 @@ describe('scene-edit plugin', () => {
     key('ArrowRight');
     expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 } } });
     key('ArrowDown', { shiftKey: true });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 } } });
+    key('ArrowLeft', { metaKey: true }); // a browser chord, not a nudge
+    key('ArrowLeft', { ctrlKey: true });
     expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 } } });
     const input = document.body.appendChild(document.createElement('input'));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
@@ -164,20 +172,27 @@ describe('scene-edit plugin', () => {
     expect(grid.getBounds().width).toBeGreaterThan(0);
     await call('grid', { on: false, step: 32 });
     expect(grid.getBounds().width).toBe(0);
+    await call('grid', { on: true, step: -1 }); // a bad step falls back to 16 rather than looping forever
+    expect(grid.getBounds().width).toBeGreaterThan(0);
 
     const bad = boot('zzz');
     await vi.waitFor(() => expect(bad.events().at(-1)?.event).toBe('error'));
     expect(bad.gizmoLayer()).toBeUndefined();
   });
 
-  it('waits for the documents when they land after apply (the /api/scenes race)', async () => {
-    const { scenes, events, frame, ready } = boot('a', []);
+  it('waits for scenes.ready before deciding; a failed boot GET is an error event', async () => {
+    let settle!: () => void;
+    const { scenes, events, ready } = boot('a', [], new Promise<void>((r) => { settle = r; }));
     await new Promise((r) => setTimeout(r, 0));
     expect(events()).toEqual([]);
     scenes.replace(DOCS);
-    frame();
+    settle();
     await ready();
     expect(scenes.visible()).toEqual(['a']);
+
+    const failed = boot('a', [], Promise.reject(new Error('could not read the scene documents: down')));
+    await vi.waitFor(() => expect(failed.events().at(-1)).toEqual({ event: 'error', payload: { message: 'could not read the scene documents: down' } }));
+    expect(failed.gizmoLayer()).toBeUndefined();
   });
 
   it('disposing the fiber tears everything down', async () => {

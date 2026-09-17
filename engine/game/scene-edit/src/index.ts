@@ -72,18 +72,15 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
   scenes.resize(app.screen.width, app.screen.height);
 
-  // The documents may land after apply (`scenes`' boot GET, or the IDE's own
-  // `replace`): decide the first time there are any — now, or on a frame.
-  const start = () => {
-    if (scenes.docs().has(scene)) return boot();
-    emit('error', { message: `scene "${scene}" is not declared` });
-  };
-  if (scenes.docs().size > 0) start();
-  else {
-    const wait = () => { if (scenes.docs().size > 0) { app.ticker.remove(wait); if (alive) start(); } };
-    app.ticker.add(wait);
-    ctx.effect(() => () => app.ticker.remove(wait), 'scene-edit:wait');
-  }
+  // The documents land after apply (`scenes`' boot GET, or the IDE's own `replace`): decide once they have.
+  void scenes.ready.then(
+    () => {
+      if (!alive) return;
+      if (scenes.docs().has(scene)) boot();
+      else emit('error', { message: `scene "${scene}" is not declared` });
+    },
+    (e: unknown) => { if (alive) emit('error', { message: e instanceof Error ? e.message : String(e) }); },
+  );
 
   function boot(): void {
     const root = scenes.container;
@@ -101,12 +98,12 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     let gridOn = false;
     let gridStep = 16;
     const grid = (on: boolean, step: number) => {
-      gridOn = on; gridStep = step;
+      gridOn = on; gridStep = Math.max(1, step || 16);
       gridGfx.clear();
       if (!on) return;
       const d = design();
-      for (let x = 0; x <= d.width; x += step) gridGfx.moveTo(x, 0).lineTo(x, d.height);
-      for (let y = 0; y <= d.height; y += step) gridGfx.moveTo(0, y).lineTo(d.width, y);
+      for (let x = 0; x <= d.width; x += gridStep) gridGfx.moveTo(x, 0).lineTo(x, d.height);
+      for (let y = 0; y <= d.height; y += gridStep) gridGfx.moveTo(0, y).lineTo(d.width, y);
       gridGfx.stroke({ width: 1, color: 0xffffff, alpha: 0.15, pixelLine: true });
     };
     ctx.effect(() => () => { root.removeChild(gridGfx); gridGfx.destroy(); }, 'scene-edit:grid');
@@ -135,10 +132,10 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     const select = (node: string | null) => {
       target = node === null ? null : targetOf(node);
       gizmo.attach(target);
-      const now = target?.node ?? null;
-      if (now === selected) return;
-      selected = now;
-      emit('selected', { node: selected });
+      if (node === selected) return;
+      selected = node;
+      // A node with no top-level view (nested, or not mounted) is the IDE's pick, not the canvas': kept, not echoed.
+      if (node === null || target) emit('selected', { node });
     };
     const pickAndSelect = (x: number, y: number) => select(pickAt(views(), { x, y }));
 
@@ -163,7 +160,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     ctx.effect(() => () => { app.stage.off('pointerdown', onDown); Object.assign(app.stage, was); }, 'scene-edit:pick');
 
     const onKey = (e: KeyboardEvent) => {
-      if (!selected || isField(e.target)) return;
+      if (!selected || e.metaKey || e.ctrlKey || isField(e.target)) return;
       const n = e.shiftKey ? 10 : 1;
       switch (e.key) {
         case 'ArrowLeft': gizmo.nudge(-n, 0); break;
@@ -207,7 +204,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     });
 
     wire.handle('select', (p) => { select((p as { node?: string | null })?.node ?? null); return {}; });
-    wire.handle('grid', (p) => { const { on, step } = p as { on?: boolean; step?: number }; grid(!!on, step || 16); return {}; });
+    wire.handle('grid', (p) => { const { on, step } = p as { on?: boolean; step?: number }; grid(!!on, step ?? 16); return {}; });
     wire.handle('snapshot', () => snapshot());
 
     const api: SceneEdit = { snapshot, select, grid, pickAndSelect, emitted: () => [...emitted] };

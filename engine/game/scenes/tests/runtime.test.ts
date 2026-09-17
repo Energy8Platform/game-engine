@@ -65,4 +65,28 @@ describe('scenes row', () => {
     expect(app.stage.children).toEqual([]);
     expect(foreign.destroyed).toBe(false);
   });
+
+  it('ready resolves after the GET has replaced', async () => {
+    const { ctx, fiber } = boot();
+    await fiber;
+    await ctx.get('scenes')!.ready;
+    expect(ctx.get('scenes')!.docs().has('a')).toBe(true);
+  });
+
+  it('ready rejects on a failed GET when nothing replaced', async () => {
+    const { ctx, fiber } = boot(vi.fn(async () => { throw new Error('down'); }) as unknown as typeof fetch);
+    await fiber;
+    await expect(ctx.get('scenes')!.ready).rejects.toThrow('down');
+  });
+
+  it('ready resolves when a frame replaced first, even if the GET then fails', async () => {
+    let rejectFetch!: (e: Error) => void;
+    const gatedFetch = vi.fn(() => new Promise((_, reject) => { rejectFetch = reject; })) as unknown as typeof fetch;
+    const { ctx, fiber } = boot(gatedFetch);
+    await fiber;
+    ctx.get('scenes')!.replace([{ id: 'x', nodes: [] }]);
+    rejectFetch(new Error('down'));
+    await expect(ctx.get('scenes')!.ready).resolves.toBeUndefined();
+    expect(ctx.get('scenes')!.docs().has('x')).toBe(true);
+  });
 });
