@@ -24,7 +24,7 @@
     "@energy8engine/contracts": "*",
     "@energy8engine/diagnostics": "*",
     "@energy8engine/play-loop": "*",
-    "@energy8engine/stage": "*",
+    "@energy8engine/scenes": "*",
     "@energy8platform/game-engine": "^0.41.0",
     "cordis": "4.0.0-rc.8",
     "pixi.js": "^8.20.1",

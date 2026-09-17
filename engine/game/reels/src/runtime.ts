@@ -41,9 +41,6 @@
 import type { Context } from 'cordis';
 import { createReelsBoard, type ReelsBoard } from './index';
 import type { CreateReelSystemOptions, SymbolResolver } from '@energy8platform/game-engine/slot';
-import type { Stage } from '@energy8engine/stage';
-import { diagnostic } from '@energy8engine/contracts';
-import type { DiagnosticsService } from '@energy8engine/diagnostics';
 
 /** What this row needs from whoever supplies the game's art. */
 export interface AssetsService {
@@ -54,7 +51,6 @@ export interface AssetsService {
 declare module 'cordis' {
   interface Context {
     board: ReelsBoard;
-    stage: Stage;
     assets: AssetsService;
   }
 }
@@ -78,21 +74,4 @@ export function apply(
   const board = createReelsBoard({ ...config, resolve } as CreateReelSystemOptions);
   ctx.effect(() => () => board.destroy(), 'reels:board');
   ctx.provide('board', board);
-
-  ctx.inject(['stage'], (stageCtx) => {
-    const wanted = config.layer ?? 'reels';
-    const target = stageCtx.stage.layer?.(wanted);
-    if (!target) {
-      (stageCtx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(
-        diagnostic(
-          'warning',
-          'reels',
-          wanted,
-          `stage has no layer "${wanted}" — the board is mounted on the stage root`,
-          'declare the layer under stage1.config.layers, or point reels1.config.layer at one that exists',
-        ),
-      );
-    }
-    (target ?? stageCtx.stage.container).addChild(board.view);
-  });
 }

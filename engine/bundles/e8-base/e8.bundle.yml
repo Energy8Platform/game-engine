@@ -43,8 +43,8 @@ rows:
     name: '@energy8engine/boot'
   - id: renderer1
     name: '@energy8engine/renderer-pixi'
-  - id: stage1
-    name: '@energy8engine/stage'
+  - id: scenes1
+    name: '@energy8engine/scenes'
   - id: reels1
     name: '@energy8engine/reels'
   - id: mechanics1
