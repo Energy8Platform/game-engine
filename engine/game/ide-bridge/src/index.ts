@@ -791,16 +791,36 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // re-apply threw is reported by `gameRows` itself, onto the same
   // diagnostics this socket already forwards. Read leniently, so a game
   // built on a runtime without `gameRows` ignores the frame, not throws.
+  //
+  // The IDE's Scenes screen preview (`scene-preview`) rides the same
+  // listener rather than a separate one: both frames are the host telling
+  // this ONE running game to do something right now, and both are read
+  // leniently against a service that may not be on this `ctx` at all — a
+  // game with no `stage` row (or an older runtime) simply has nothing to
+  // do with a `scene-preview` frame, the same way one with no `gameRows`
+  // has nothing to do with a `game-composition` one.
   socket.addEventListener('message', (event) => {
-    let message: Extract<ServerMessage, { type: 'game-composition' }>;
+    let message: Extract<ServerMessage, { type: 'game-composition' } | { type: 'scene-preview' }>;
     try {
       const parsed: unknown = JSON.parse(event.data);
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-      if ((parsed as { type?: unknown }).type !== 'game-composition') return;
-      message = parsed as Extract<ServerMessage, { type: 'game-composition' }>;
+      const type = (parsed as { type?: unknown }).type;
+      if (type !== 'game-composition' && type !== 'scene-preview') return;
+      message = parsed as Extract<
+        ServerMessage,
+        { type: 'game-composition' } | { type: 'scene-preview' }
+      >;
     } catch {
       return;
     }
+
+    if (message.type === 'scene-preview') {
+      const stage = ctx.reflect.get('stage', false) as
+        { enter?(scene: string): Promise<void> } | undefined;
+      if (stage?.enter) void stage.enter(message.scene);
+      return;
+    }
+
     if (message.reload) return;
     const gameRows = ctx.reflect.get('gameRows', false) as GameRowsUpdater | undefined;
     if (!gameRows) return;
@@ -810,6 +830,72 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       void gameRows.update(id, row.config);
     }
   });
+
+  /**
+   * The mirror of `attachDiagnosticsForwarding`, inlined rather than
+   * extracted: that function is its own exported unit because it is tested
+   * standalone against a plain fake socket (see its own doc); this one is
+   * a few lines that read `transitions` off this SAME `ctx` the rest of
+   * `apply` already closes over, and has nothing to gain from a second
+   * exported surface.
+   *
+   * States the running game's `transitions` registry, as ids
+   * (`GameTransitionsMessage`), as soon as there is an open socket and a
+   * registry to read, and again on every `transitions.subscribe`
+   * notification — see `attachDiagnosticsForwarding`'s own doc for why
+   * "state it now, not only on the next change" matters for a socket that
+   * may already be open, or may not be, by the time this runs.
+   *
+   * Read leniently (`ctx.reflect.get('transitions', false)`), like
+   * `mechanics`/`diagnostics`/`gameRows` above: a composition with no
+   * `stage` row (and so no `transitions` registry) sends nothing here,
+   * never throws.
+   */
+  const WEBSOCKET_OPEN = 1;
+  const currentTransitions = () =>
+    ctx.reflect.get('transitions', false) as
+      { ids(): string[]; subscribe(listener: () => void): () => void } | undefined;
+
+  const forwardTransitions = () => {
+    const transitions = currentTransitions();
+    if (!transitions) return;
+    if (socket.readyState !== WEBSOCKET_OPEN) return;
+    try {
+      const message: ClientMessage = { type: 'game-transitions', ids: transitions.ids() };
+      socket.send(JSON.stringify(message));
+    } catch {
+      // See `attachDiagnosticsForwarding`'s own doc: nowhere safe to report
+      // a send failure that would not loop straight back through this same
+      // path.
+    }
+  };
+
+  let unsubscribeTransitions: (() => void) | undefined;
+  const subscribeTransitions = () => {
+    unsubscribeTransitions?.();
+    unsubscribeTransitions = currentTransitions()?.subscribe(forwardTransitions);
+  };
+
+  socket.addEventListener('open', forwardTransitions);
+  subscribeTransitions();
+  forwardTransitions();
+
+  // Re-arms the subscription (and re-states the list) whenever `transitions`
+  // is provided again — a hot `stage1` re-apply disposes the registry this
+  // subscribed to and provides a fresh one, the same story `mechanics`'s own
+  // `ctx.inject` above tells. `fresh === readFromTransitions` skips both the
+  // initial, asynchronous fire (cordis runs this callback on a later tick,
+  // by which point the subscribe above has already run) and any fire that
+  // is not actually a new registry.
+  let readFromTransitions = currentTransitions();
+  ctx.inject(['transitions'], () => {
+    const fresh = currentTransitions();
+    if (!fresh || fresh === readFromTransitions) return;
+    readFromTransitions = fresh;
+    subscribeTransitions();
+    forwardTransitions();
+  });
+  ctx.effect(() => () => unsubscribeTransitions?.(), 'ide-bridge-transitions-forwarding');
 
   ctx.effect(() => () => socket.close(), 'ide-bridge-socket');
 }
