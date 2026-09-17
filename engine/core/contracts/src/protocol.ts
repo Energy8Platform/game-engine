@@ -288,6 +288,53 @@ export interface GameTransitionsMessage {
   ids: string[];
 }
 
+/** One node of a scene document — see spec §3. `children` mount into the node's view. */
+export interface SceneNode {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  children?: SceneNode[];
+}
+
+/** `scenes/<id>.scene.yml`, parsed. List order is draw order, first at the back. */
+export interface SceneDoc {
+  id: string;
+  nodes: SceneNode[];
+}
+
+/** A node type the running game registered: its id and its props schema as schemastery JSON. */
+export interface NodeTypeInfo {
+  type: string;
+  schema: unknown;
+}
+
+/** The whole document set, replaced whole — host to every `/ide` socket on any change. */
+export interface ScenesMessage {
+  type: 'scenes';
+  scenes: SceneDoc[];
+  diagnostics: Diagnostic[];
+}
+
+/** The game's node-type registry, both ways (up from the game, relayed down), like `game-transitions`. */
+export interface NodeTypesMessage {
+  type: 'node-types';
+  types: NodeTypeInfo[];
+}
+
+/** "Highlight this node" — the IDE selected it; `node: null` clears. Not retained. */
+export interface SceneSelectMessage {
+  type: 'scene-select';
+  scene: string;
+  node: string | null;
+}
+
+/** What `GET /api/scenes` answers on the root and the preview alike. */
+export interface ScenesResponse {
+  scenes: SceneDoc[];
+  diagnostics: Diagnostic[];
+  nodeTypes: NodeTypeInfo[];
+}
+
 /**
  * What `GET /api/composition` answers (`runtime-assets.ts`, on the root
  * and the preview alike): the GAME's rows, the host's own diagnostics
@@ -313,8 +360,14 @@ export type ServerMessage =
   | GameCompositionMessage
   | ScenePreviewMessage
   | GameTransitionsMessage
+  | ScenesMessage
+  | NodeTypesMessage
+  | SceneSelectMessage
   | { type: 'workspace'; workspace: WorkspaceState };
 
 /** Browser to host. */
 export type ClientMessage =
-  { type: 'update'; id: string; config: unknown } | GameDiagnosticsMessage | GameTransitionsMessage;
+  | { type: 'update'; id: string; config: unknown }
+  | GameDiagnosticsMessage
+  | GameTransitionsMessage
+  | NodeTypesMessage;
