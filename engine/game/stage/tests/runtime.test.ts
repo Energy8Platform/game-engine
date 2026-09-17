@@ -139,7 +139,11 @@ describe('stage runtime half', () => {
       },
     });
     await ctx.plugin(fakeRenderer(new Container()));
-    await ctx.plugin(runtime, { design: { width: 1, height: 1 } });
+    // One scene declared, so entering another is something to say.
+    await ctx.plugin(runtime, {
+      design: { width: 1, height: 1 },
+      scenes: { base_game: { layers: ['reels'] } },
+    });
     await ctx.stage.enter('nope');
     expect(reported).toHaveLength(1);
     await ctx.fiber.dispose();

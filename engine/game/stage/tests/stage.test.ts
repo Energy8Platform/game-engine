@@ -133,7 +133,7 @@ describe('createStage — layers and scenes', () => {
       root: new Container(),
       design,
       layers,
-      scenes: {},
+      scenes: { base_game: { layers: ['reels'] } },
       report: (d) => reported.push(d),
     });
     await stage.enter('bonus');
@@ -142,6 +142,23 @@ describe('createStage — layers and scenes', () => {
     expect(stage.layers().every((l) => l.container.visible)).toBe(true);
     expect(reported.map((d) => d.where)).toEqual(['bonus', 'bonus2']);
     expect(reported[0]).toMatchObject({ severity: 'warning', plugin: 'stage' });
+  });
+
+  it('a stage declaring no scenes at all enters any scene silently — every layer shown, nothing to cross-check', async () => {
+    for (const scenes of [{}, undefined]) {
+      const reported: Diagnostic[] = [];
+      const stage = createStage({
+        root: new Container(),
+        design,
+        layers,
+        scenes,
+        report: (d) => reported.push(d),
+      });
+      await stage.enter('unbound-stage');
+      expect(stage.current()).toBe('unbound-stage');
+      expect(stage.layers().every((l) => l.container.visible)).toBe(true);
+      expect(reported).toEqual([]);
+    }
   });
 
   it('uses the scene’s transition, else the stage default, else cut; unknown → cut + warning; a failing run → error, visibility still applied', async () => {

@@ -41,6 +41,14 @@ describe('checkScenes', () => {
     expect(checkScenes({ layers: 'bg', scenes: 'x' }, [])).toEqual([]);
     expect(checkScenes({ layers: [null], scenes: { a: null } }, ['a'])).toEqual([]);
   });
+  it('a row declaring no scenes at all has nothing to cross-check: no "stage has no scene"', () => {
+    expect(checkScenes(cfg({ scenes: {} }), ['base_game', 'free_spins'])).toEqual([]);
+    expect(checkScenes({ layers: [{ id: 'bg' }] }, ['base_game'])).toEqual([]);
+    // The other rules still apply on such a row.
+    expect(checkScenes({ layers: [{ id: 'a' }, { id: 'a' }] }, ['base_game'])).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'a' }),
+    ]);
+  });
   it('a config with no scenes and no layers (an older stage row) says nothing', () => {
     expect(checkScenes({ design: { width: 1, height: 1 } }, ['base_game'])).toEqual([]);
   });

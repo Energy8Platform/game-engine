@@ -220,7 +220,12 @@ export function createStage(options: CreateStageOptions): Stage {
     async enter(scene) {
       if (scene === current) return;
       const spec = options.scenes?.[scene];
-      if (!spec && !warned.has(scene)) {
+      // Warned only when the row declares scenes at all: a stage that
+      // declares none shows every layer in every scene by design, and
+      // there is nothing to cross-check the name against — the same rule
+      // the host's `checkScenes` applies to "stage has no scene".
+      const declared = Object.keys(options.scenes ?? {}).length > 0;
+      if (!spec && declared && !warned.has(scene)) {
         warned.add(scene);
         report(
           diagnostic(

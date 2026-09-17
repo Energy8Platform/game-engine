@@ -23,7 +23,13 @@
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type DiagnosticsResponse } from '@energy8engine/contracts';
 
-/** Every scene is a stage, every stage a scene, every scene's layers declared, layer ids unique. Silent for a config with neither `layers` nor `scenes` (an older stage row). */
+/**
+ * Every scene is a stage, every stage a scene, every scene's layers
+ * declared, layer ids unique. Silent for a config with neither `layers`
+ * nor `scenes` (an older stage row); and "stage has no scene" is only
+ * said once at least one scene IS declared — a row with none has opted
+ * out of scenes, and there is nothing to cross-check its stages against.
+ */
 export function checkScenes(stageConfig: unknown, stageNames: string[]): Diagnostic[] {
   const cfg = (stageConfig ?? {}) as { layers?: unknown; scenes?: unknown };
   if (!Array.isArray(cfg.layers) && !cfg.scenes) return [];
@@ -76,7 +82,7 @@ export function checkScenes(stageConfig: unknown, stageNames: string[]): Diagnos
       );
     }
   }
-  for (const stage of stageNames) {
+  for (const stage of Object.keys(scenes).length ? stageNames : []) {
     if (!(stage in scenes)) {
       out.push(
         diagnostic(
