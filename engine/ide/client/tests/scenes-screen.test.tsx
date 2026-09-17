@@ -48,6 +48,8 @@ interface HarnessOptions {
   stages?: string[];
   transitions?: string[];
   previewDiagnostics?: Diagnostic[];
+  /** Render the document the `scenes` plugin registered — on the plugin's own scoped ctx — instead of `ScenesScreen` on the root ctx. */
+  viaPlugin?: boolean;
 }
 
 async function harness({
@@ -56,6 +58,7 @@ async function harness({
   stages = ['base_game', 'free_spins'],
   transitions = ['cut', 'fade'],
   previewDiagnostics = [],
+  viaPlugin = false,
 }: HarnessOptions = {}) {
   const puts: { url: string; body: { config: Record<string, unknown> } }[] = [];
   const posts: { url: string; body: unknown }[] = [];
@@ -91,7 +94,13 @@ async function harness({
     importModule: async () => ({}),
     fetchFn,
   });
-  render(<ScenesScreen ctx={ctx} />);
+  if (viaPlugin) {
+    const doc = ctx.slots.list('shell.document').find((entry) => entry.key === 'scenes');
+    if (!doc) throw new Error('the scenes plugin registered no document');
+    render(<doc.component />);
+  } else {
+    render(<ScenesScreen ctx={ctx} />);
+  }
   return { ctx, puts, posts, socket };
 }
 
@@ -294,6 +303,26 @@ describe('ScenesScreen', () => {
     await waitFor(() => expect(scenes).toHaveTextContent(message));
     fireEvent.click(screen.getByTestId('scene-base_game'));
     expect(scenes).not.toHaveTextContent(message);
+  });
+
+  it('the document the plugin registers renders on the plugin ctx — every service it reads is injected', async () => {
+    // What the browser does: `scenes.tsx`'s document closes over its OWN
+    // scoped ctx, and cordis refuses `ctx.<service>` there unless the
+    // plugin's `inject` names it — `ScenesScreen` on the root ctx (every
+    // other test here) would never notice a missing entry.
+    const { socket } = await harness({ viaPlugin: true });
+    expect(await screen.findByTestId('scene-base_game')).toBeTruthy();
+    act(() =>
+      socket.receive({
+        type: 'game-diagnostics',
+        source: 'host',
+        dropped: 0,
+        diagnostics: [
+          { severity: 'warning', plugin: 'scenes', where: 'base_game', message: 'via plugin' },
+        ],
+      }),
+    );
+    expect(await screen.findByText('via plugin')).toBeTruthy();
   });
 
   it('Show in preview POSTs the scene', async () => {

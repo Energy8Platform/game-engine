@@ -5,10 +5,11 @@ import { ScenesScreen } from '../screens/ScenesScreen';
  * The Scenes screen as a contribution — the same two registrations under
  * one key that `engine/examples/first-slot/plugins/screen-demo` makes: a
  * button on the activity bar and the document it opens. Registered as
- * effects so disposing this fiber takes the tab back.
+ * effects so disposing this fiber takes the tab back. `inject` names every
+ * service the document reads through this ctx — cordis refuses the rest.
  */
 export const name = 'scenes';
-export const inject = ['slots', 'gameComposition'];
+export const inject = ['slots', 'gameComposition', 'gameDiagnostics'];
 
 export function apply(ctx: Context) {
   ctx.effect(
