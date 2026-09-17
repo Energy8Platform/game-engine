@@ -10,7 +10,7 @@ import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
-import { addNode, moveNode, nextId, removeNode } from '../src/shell/SceneDocument';
+import { addNode, moveNode, nextId, removeNode, shiftNode } from '../src/shell/SceneDocument';
 
 /**
  * The scene tab, rendered through the plugin's OWN viewer registration
@@ -64,7 +64,9 @@ afterEach(async () => {
   for (const ctx of built.splice(0)) await ctx.fiber.dispose();
 });
 
-async function harness(extra: Record<string, Route> = {}) {
+const PREVIEW_URL = 'http://127.0.0.1:5681';
+
+async function harness(extra: Record<string, Route> = {}, previewUrl: string | null = PREVIEW_URL) {
   const socket = new FakeSocket();
   const calls: { method: string; url: string; body: any }[] = [];
   const routes: Record<string, Route> = {
@@ -97,6 +99,34 @@ async function harness(extra: Record<string, Route> = {}) {
   await ctx.plugin(slots);
   await ctx.plugin(shell);
   await ctx.plugin(viewers);
+  // The canvas reads two services the tab never did before: where the game
+  // is served, and the design size the `scenes1` row declares. Minimal
+  // fakes of each plugin's own shape, provided the way `viewers.test` does.
+  const nothing = () => () => {};
+  // One object, as the real service holds: `useSyncExternalStore` reads it on every render.
+  const workspace = { projects: [], templates: [], active: 'first', previewUrl, diagnostics: [] };
+  ctx.provide('workspace', {
+    state: () => workspace,
+    subscribe: nothing,
+    open: async () => [],
+    create: async () => [],
+  });
+  ctx.provide('gameComposition', {
+    rows: [
+      {
+        id: 'scenes1',
+        name: '@energy8engine/scenes',
+        config: { design: { width: 640, height: 360 } },
+        from: 'patch',
+        runtimeUrl: null,
+      },
+    ],
+    diagnostics: [],
+    reloads: 0,
+    transitions: [],
+    subscribe: nothing,
+    update: async () => ({ reload: false, diagnostics: [] }),
+  });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([BASE, BONUS]));
   const puts = () => calls.filter((c) => c.method === 'PUT').map((c) => c.body as SceneDoc);
@@ -107,6 +137,36 @@ function renderTab(ctx: Context, path = PATH) {
   const def = ctx.viewers.pick(path);
   if (!def) throw new Error(`no viewer for ${path}`);
   return render(<def.component ctx={ctx} path={path} />);
+}
+
+/**
+ * The canvas iframe, its `load` fired (which is when the tab attaches the
+ * RPC to it) and `contentWindow.postMessage` stubbed so requests can be
+ * read back. jsdom hands out a `contentWindow` once the iframe is in the
+ * document, and never loads the `src` itself.
+ */
+function canvas() {
+  const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
+  const win = iframe.contentWindow as Window & { postMessage: ReturnType<typeof vi.fn> };
+  win.postMessage = vi.fn();
+  fireEvent.load(iframe);
+  const posted = () => win.postMessage.mock.calls.map((c) => c[0]);
+  const reqs = (method: string) =>
+    posted()
+      .filter((m) => m.type === 'e8:ide:req' && m.method === method)
+      .map((m) => m.params);
+  return { iframe, posted, reqs };
+}
+
+/** A frame FROM the iframe: the message event the browser would deliver to the tab's window. */
+function frame(iframe: HTMLIFrameElement, event: string, payload: unknown) {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      data: { type: 'e8:ide:evt', event, payload },
+      origin: PREVIEW_URL,
+      source: iframe.contentWindow,
+    }),
+  );
 }
 
 function transfer() {
@@ -172,6 +232,32 @@ describe('SceneDocument helpers', () => {
     expect(moveNode(BASE, 'bg', { before: 'logo' })).toBe(BASE);
     expect(moveNode(BASE, 'bg', { before: 'bg' })).toBe(BASE);
     expect(moveNode(BASE, 'nope', { before: 'bg' })).toBe(BASE);
+  });
+
+  it('shiftNode swaps a node with its next or previous sibling; the ends and unknown ids are no-ops', () => {
+    expect(shiftNode(BASE, 'reels-1', 1).nodes.map((n) => n.id)).toEqual([
+      'bg',
+      'title',
+      'reels-1',
+    ]);
+    expect(shiftNode(BASE, 'reels-1', -1).nodes.map((n) => n.id)).toEqual([
+      'reels-1',
+      'bg',
+      'title',
+    ]);
+    expect(shiftNode(BASE, 'title', 1)).toBe(BASE);
+    expect(shiftNode(BASE, 'bg', -1)).toBe(BASE);
+    expect(shiftNode(BASE, 'logo', 1)).toBe(BASE);
+    expect(shiftNode(BASE, 'nope', 1)).toBe(BASE);
+    const two: SceneDoc = {
+      ...BASE,
+      nodes: [{ ...BASE.nodes[0], children: [BASE.nodes[0].children![0], BASE.nodes[1]] }],
+    };
+    expect(shiftNode(two, 'logo', 1).nodes[0].children?.map((n) => n.id)).toEqual([
+      'reels-1',
+      'logo',
+    ]);
+    expect(BASE.nodes.map((n) => n.id)).toEqual(['bg', 'reels-1', 'title']);
   });
 });
 
@@ -350,24 +436,156 @@ describe('SceneDocument', () => {
     expect(screen.getByTestId('node-title')).toBeTruthy();
   });
 
-  it('previews the scene when its tab becomes the active one — once per activation', async () => {
-    const { ctx, calls } = await harness();
-    const previews = () => calls.filter((c) => c.url === '/api/scenes/preview');
-    ctx.shell.open({ key: 'f:other.txt', title: 'other', component: () => null, closable: true });
-    ctx.shell.open({ key: KEY, title: 'base_game', component: () => null, closable: true });
-    expect(ctx.shell.active()?.key).toBe(KEY);
+  it('draws the canvas iframe at the design size, addressed to the editor page', async () => {
+    const { ctx } = await harness();
     renderTab(ctx);
-    // Already active on mount: one preview.
-    expect(previews()).toEqual([
-      { method: 'POST', url: '/api/scenes/preview', body: { scene: 'base_game' } },
-    ]);
+    expect(screen.getByTestId('canvas-toolbar')).toBeTruthy();
+    expect(screen.getByTestId('canvas-tree')).toContainElement(screen.getByTestId('node-bg'));
+    const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
+    expect(screen.getByTestId('canvas-stage')).toContainElement(iframe);
+    expect(iframe.getAttribute('src')).toBe(`${PREVIEW_URL}/editor.html?scene=base_game`);
+    expect(iframe.getAttribute('width')).toBe('640');
+    expect(iframe.getAttribute('height')).toBe('360');
+    expect(iframe.style.transform).toBe('scale(1)');
+    expect(screen.getByTestId('canvas-zoom')).toHaveTextContent('100%');
+    expect(screen.queryByTestId('canvas-unavailable')).toBeNull();
+  });
 
-    ctx.shell.activate('f:other.txt');
-    ctx.shell.markDirty('f:other.txt', true); // a shell notify that is not an activation
-    expect(previews()).toHaveLength(1);
-    ctx.shell.activate(KEY);
-    expect(previews()).toHaveLength(2);
-    ctx.shell.markDirty(KEY, true);
-    expect(previews()).toHaveLength(2);
+  it('with no preview to point at, says so instead of an iframe', async () => {
+    const { ctx } = await harness({}, null);
+    renderTab(ctx);
+    expect(screen.getByTestId('canvas-unavailable')).toBeTruthy();
+    expect(screen.queryByTitle('scene canvas')).toBeNull();
+    expect(screen.getByTestId('node-bg')).toBeTruthy();
+  });
+
+  it('no longer previews the scene on activation', async () => {
+    const { ctx, calls } = await harness();
+    ctx.shell.open({ key: KEY, title: 'base_game', component: () => null, closable: true });
+    renderTab(ctx);
+    expect(calls.filter((c) => c.url === '/api/scenes/preview')).toEqual([]);
+  });
+
+  it('zoom −/+ scale the frame; Fit goes back to the fit; the tree pane collapses', async () => {
+    const { ctx } = await harness();
+    renderTab(ctx);
+    const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
+    await userEvent.click(screen.getByTestId('canvas-zoom-out'));
+    expect(screen.getByTestId('canvas-zoom')).toHaveTextContent('80%');
+    expect(iframe.style.transform).toBe('scale(0.8)');
+    await userEvent.click(screen.getByTestId('canvas-fit'));
+    expect(screen.getByTestId('canvas-zoom')).toHaveTextContent('100%');
+
+    const root = screen.getByTestId('scene-doc-base_game');
+    expect(root.classList.contains('e8-canvas-tree-collapsed')).toBe(false);
+    await userEvent.click(screen.getByTestId('canvas-tree-toggle'));
+    expect(root.classList.contains('e8-canvas-tree-collapsed')).toBe(true);
+  });
+
+  it('a pick in the canvas selects the node once; the same pick again is not re-told', async () => {
+    const { ctx, calls } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    const selects = () => calls.filter((c) => c.url === '/api/scenes/select');
+    frame(iframe, 'selected', { node: 'logo' });
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: 'logo' });
+    expect(selects()).toHaveLength(1);
+    frame(iframe, 'selected', { node: 'logo' });
+    expect(selects()).toHaveLength(1);
+    frame(iframe, 'selected', { node: null });
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
+    expect(selects()).toHaveLength(2);
+  });
+
+  it('an edit from the canvas merges the props into the node', async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'edit', { node: 'logo', props: { x: 12, y: 34 } });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[0].children?.[0]).toEqual({
+      id: 'logo',
+      type: 'image',
+      props: { src: 'logo.png', x: 12, y: 34 },
+    });
+    expect(puts()[0].nodes.map((n) => n.id)).toEqual(['bg', 'reels-1', 'title']);
+  });
+
+  it('a remove from the canvas clears the selection first and drops the node', async () => {
+    const { ctx, calls, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    ctx.scenes.select({ scene: 'base_game', node: 'logo' });
+    frame(iframe, 'remove', { node: 'bg' });
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
+    expect(calls.filter((c) => c.url === '/api/scenes/select').at(-1)?.body).toEqual({
+      scene: 'base_game',
+      node: null,
+    });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.map((n) => n.id)).toEqual(['reels-1', 'title']);
+  });
+
+  it('a zorder from the canvas swaps the node with its sibling', async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'zorder', { node: 'reels-1', delta: 1 });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.map((n) => n.id)).toEqual(['bg', 'title', 'reels-1']);
+    frame(iframe, 'zorder', { node: 'bg', delta: -1 });
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('an error from the canvas shows inline', async () => {
+    const { ctx } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'error', { message: 'scene "nope" is not registered' });
+    expect(await screen.findByTestId('scene-doc-error')).toHaveTextContent('not registered');
+  });
+
+  it('the selection is mirrored into the canvas; ready re-sends it with the grid', async () => {
+    const { ctx } = await harness();
+    renderTab(ctx);
+    const { iframe, reqs } = canvas();
+    await userEvent.click(screen.getByTestId('node-logo'));
+    await waitFor(() => expect(reqs('select').at(-1)).toEqual({ node: 'logo' }));
+
+    ctx.scenes.select({ scene: 'bonus', node: null });
+    await waitFor(() => expect(reqs('select').at(-1)).toEqual({ node: null }));
+
+    ctx.scenes.select({ scene: 'base_game', node: 'title' });
+    await waitFor(() => expect(reqs('select').at(-1)).toEqual({ node: 'title' }));
+    const before = reqs('select').length;
+    frame(iframe, 'ready', { scene: 'base_game' });
+    expect(reqs('select')).toHaveLength(before + 1);
+    expect(reqs('select').at(-1)).toEqual({ node: 'title' });
+    expect(reqs('grid').at(-1)).toEqual({ on: false, step: 16 });
+  });
+
+  it('grid controls are told to the canvas', async () => {
+    const { ctx } = await harness();
+    renderTab(ctx);
+    const { reqs } = canvas();
+    await userEvent.click(screen.getByTestId('canvas-grid'));
+    await waitFor(() => expect(reqs('grid').at(-1)).toEqual({ on: true, step: 16 }));
+    await userEvent.selectOptions(screen.getByTestId('canvas-grid-step'), '8');
+    await waitFor(() => expect(reqs('grid').at(-1)).toEqual({ on: true, step: 8 }));
+  });
+
+  it('a frame from somewhere else is ignored', async () => {
+    const { ctx, calls } = await harness();
+    renderTab(ctx);
+    canvas();
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'e8:ide:evt', event: 'selected', payload: { node: 'logo' } },
+        origin: 'http://evil.example',
+        source: window,
+      }),
+    );
+    expect(ctx.scenes.selected()).toBeNull();
+    expect(calls.filter((c) => c.url === '/api/scenes/select')).toEqual([]);
   });
 });

@@ -100,6 +100,9 @@ async function harness(extra: Record<string, Route> = {}) {
   await ctx.plugin(slots);
   await ctx.plugin(shell);
   await ctx.plugin(viewers);
+  // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these two.
+  ctx.provide('workspace', { state: () => null, subscribe: () => () => {} });
+  ctx.provide('gameComposition', { rows: null, reloads: 0, subscribe: () => () => {} });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([BASE, BONUS]));
   const puts = () => calls.filter((c) => c.method === 'PUT').map((c) => c.body as SceneDoc);

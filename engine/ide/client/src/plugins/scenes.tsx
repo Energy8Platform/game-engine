@@ -38,9 +38,10 @@ import { PropertiesSidebar } from '../shell/PropertiesSidebar';
  * open for it: a selection made from the sidebar with no tab is left
  * alone.
  *
- * The sidebar, the viewer (`scenes/<id>.scene.yml` as a tab) and the
- * inspector (`shell.sideRight`, shown while something is selected and
- * hidden when the selection clears) register here too.
+ * The sidebar, the viewer (`scenes/<id>.scene.yml` as a tab — the canvas,
+ * `SceneDocument`) and the inspector (`shell.sideRight`, shown while
+ * something is selected and hidden when the selection clears) register
+ * here too.
  */
 declare module 'cordis' {
   interface Context {
@@ -79,7 +80,9 @@ export interface ScenesConfig extends ConnectionConfig {
 }
 
 export const name = 'scenes';
-export const inject = ['slots', 'connection', 'shell', 'viewers'];
+// `workspace` and `gameComposition` are the canvas' (`SceneDocument`): where
+// the editor page is served, and the design size the `scenes1` row declares.
+export const inject = ['slots', 'connection', 'shell', 'viewers', 'workspace', 'gameComposition'];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
   return diagnostic(

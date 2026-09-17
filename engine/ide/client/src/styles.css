@@ -693,7 +693,8 @@ label {
   scrollbar-width: thin;
   padding: 16px;
 }
-.e8-doc-pane:has(> .e8-code-editor) {
+.e8-doc-pane:has(> .e8-code-editor),
+.e8-doc-pane:has(> .e8-canvas) {
   padding: 0;
   overflow: hidden;
 }
@@ -990,6 +991,93 @@ label {
 }
 .e8-explorer-diagnostic[data-severity='warning'] {
   color: var(--e8-warning);
+}
+
+/* Scene canvas: the toolbar across the top, the node tree (the Explorer's
+   idiom, 220 px, collapsed to nothing by the toolbar's first button) on
+   the left, the stage — the editor page in an iframe sized to the design
+   and scaled with a transform — filling the rest. The frame wrapper takes
+   the SCALED size so the stage's centring and scrolling see what the eye
+   sees; the transform itself does not affect layout. A refusal or the
+   canvas' own error is one row between the toolbar and the panes. */
+.e8-canvas {
+  display: grid;
+  grid-template:
+    'toolbar toolbar' auto
+    'error error' auto
+    'tree stage' minmax(0, 1fr) / 220px minmax(0, 1fr);
+  height: 100%;
+  background: var(--e8-surface);
+}
+.e8-canvas.e8-canvas-tree-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+.e8-canvas-toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--e8-title-h);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--e8-border);
+  font-size: var(--e8-size-label);
+  color: var(--e8-fg);
+}
+.e8-canvas-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.e8-canvas-toolbar button:not(.e8-explorer-action) {
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--e8-size-label);
+}
+.e8-canvas-toolbar select {
+  height: 22px;
+  padding: 0 4px;
+  font-size: var(--e8-size-label);
+}
+.e8-canvas-toolbar .e8-explorer-action[aria-pressed='true'] {
+  color: var(--e8-fg);
+  background: var(--e8-selected);
+}
+.e8-canvas-zoom {
+  min-width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--e8-fg-muted);
+}
+.e8-canvas-error {
+  grid-area: error;
+  margin: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--e8-border);
+}
+.e8-canvas-tree {
+  grid-area: tree;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  border-right: 1px solid var(--e8-border);
+}
+.e8-canvas-tree-collapsed .e8-canvas-tree {
+  overflow: hidden;
+  border-right: 0;
+}
+.e8-canvas-stage {
+  grid-area: stage;
+  overflow: auto;
+  scrollbar-width: thin;
+  display: grid;
+  place-items: center;
+  background: var(--e8-shell-bg);
+}
+.e8-canvas-frame iframe {
+  display: block;
+  border: 0;
+  transform-origin: top left;
+  background: var(--e8-editor-bg);
 }
 
 /* Composition: one row per composition entry; the game's own rows beneath as a plain hairline list — a claim about the running game, not an editor. */
