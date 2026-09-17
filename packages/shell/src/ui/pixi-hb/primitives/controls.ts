@@ -50,7 +50,7 @@ export function section(_host: PixiComponentContext, title?: string): FlexBox {
 }
 
 /** Space Grotesk section heading (1.8em of the game-info scale). */
-export function heading(title: string, size = GI_EM * 1.8): Text {
+export function heading(title: string, size = giEm() * 1.8): Text {
   return makeText(title, { size, weight: '700', heading: true, color: HB.fg, upper: true, letterSpacing: size * 0.04, align: 'center' });
 }
 
@@ -74,8 +74,16 @@ export function card(opts: { fill?: string; border?: string; padding?: number; g
   });
 }
 
-/** Game-info type scale: body 1em, section titles 1.8em, the frame title 2em. */
-export const GI_EM = 14;
+/** Game-info type scale: body 1em, section titles 1.8em, the frame title 2em. 14px on a desktop
+ *  frame, shrinking on a popout so twelve screens of rules don't become forty. Set by the game-info
+ *  builder for the frame it is laying out (module state — the section builders are plain functions). */
+let giEmValue = 14;
+export function giEm(): number {
+  return giEmValue;
+}
+export function setGiEm(screenW: number, screenH: number): void {
+  giEmValue = Math.max(10, Math.min(14, Math.min(screenW, screenH) / 28));
+}
 
 /** A full-width glass row — `.ge-ov-row`. `button` adds hover (glass-hover bg + accent label). */
 export class GlassRow extends Container implements Sizable {

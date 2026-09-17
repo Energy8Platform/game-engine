@@ -123,7 +123,8 @@ export class BuyBonusPage extends Container implements ShellLayer {
     const left = (r.width - ScrollBox.GUTTER - contentW) / 2;
     const cols = contentW >= TWO_UP_MIN_W ? 2 : 1;
     const cardW = (contentW - CARD_GAP * (cols - 1)) / cols;
-    const cardH = clamp(150, listH * (cols === 2 ? 0.6 : 0.55), 240);
+    // never taller than the viewport — a short popout shows a whole card, not a slice of one
+    const cardH = clamp(Math.min(150, listH), listH * (cols === 2 ? 0.6 : 0.55), 240);
     this.ctas = [];
     this.slots.forEach((_, i) => {
       const card = this.buildCard(i, cardW, cardH, em);

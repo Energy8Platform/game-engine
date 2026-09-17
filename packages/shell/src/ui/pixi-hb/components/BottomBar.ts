@@ -26,7 +26,7 @@ const ZONE_GAP = 14;
 const ROW_GAP = 12; // bonus ↔ panel ↔ hero cluster gaps
 const MID_GAP = 24;
 const BAR_REF_W = 900;
-const BAR_MIN_SCALE = 0.5;
+const BAR_MIN_SCALE = 0.35; // Stake popout S (400×225) needs ~0.37 for the widest bar
 const WIDE_PAD_BOTTOM = 8;
 export const WIDE_BAR_H = WIDE_PAD_BOTTOM + SPIN; // ≈92
 
