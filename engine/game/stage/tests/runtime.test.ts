@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Container } from 'pixi.js';
 import { Context } from 'cordis';
+import type { Diagnostic } from '@energy8engine/contracts';
 import * as runtime from '../src/runtime';
 
 /**
@@ -66,6 +67,66 @@ describe('stage runtime half', () => {
     expect(() => runtime.apply(ctx, { design: { width: 1920, height: 1080 } })).toThrow();
     expect(ctx.reflect.get('stage', false)).toBeUndefined();
 
+    await ctx.fiber.dispose();
+  });
+
+  it('provides transitions with cut and fade registered, and a stage built from the config', async () => {
+    const ctx = new Context();
+    await ctx.plugin(fakeRenderer(new Container()));
+    await ctx.plugin(runtime, {
+      design: { width: 1, height: 1 },
+      layers: [
+        { id: 'a', z: 1 },
+        { id: 'b', z: 0 },
+      ],
+      scenes: { s: { layers: ['a'] } },
+    });
+    expect(ctx.transitions.ids().sort()).toEqual(['cut', 'fade']);
+    expect(ctx.stage.layers().map((l) => l.id)).toEqual(['b', 'a']);
+    await ctx.stage.enter('s');
+    expect(ctx.stage.layer('b')!.visible).toBe(false);
+    await ctx.fiber.dispose();
+  });
+
+  it('re-applies on fiber.update: a new stage with the new layers, a child mounted in the old layer survives', async () => {
+    const ctx = new Context();
+    const root = new Container();
+    await ctx.plugin(fakeRenderer(root));
+    const fiber = await ctx.plugin(runtime, {
+      design: { width: 1, height: 1 },
+      layers: [{ id: 'reels', z: 0 }],
+    });
+    const before = ctx.stage;
+    const view = new Container();
+    before.layer('reels')!.addChild(view);
+    fiber.update({
+      design: { width: 1, height: 1 },
+      layers: [
+        { id: 'bg', z: 0 },
+        { id: 'reels', z: 1 },
+      ],
+    });
+    await fiber.await();
+    expect(ctx.stage).not.toBe(before);
+    expect(ctx.stage.layers().map((l) => l.id)).toEqual(['bg', 'reels']);
+    expect(view.destroyed).toBe(false);
+    expect(root.children).toEqual([ctx.stage.container]);
+    await ctx.fiber.dispose();
+  });
+
+  it('reports through ctx.diagnostics when present', async () => {
+    const ctx = new Context();
+    const reported: Diagnostic[] = [];
+    await ctx.plugin({
+      name: 'diagnostics',
+      apply(c: Context) {
+        c.provide('diagnostics', { report: (d: Diagnostic) => reported.push(d) });
+      },
+    });
+    await ctx.plugin(fakeRenderer(new Container()));
+    await ctx.plugin(runtime, { design: { width: 1, height: 1 } });
+    await ctx.stage.enter('nope');
+    expect(reported).toHaveLength(1);
     await ctx.fiber.dispose();
   });
 });

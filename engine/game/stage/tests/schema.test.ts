@@ -14,6 +14,21 @@ describe('@energy8engine/stage/schema', () => {
     expect(() => Config({ design: { width: 480, height: 288 } })).not.toThrow();
   });
 
+  it('fills in one reels layer, no scenes, a cut, 300 ms', () => {
+    const config = Config({ design: { width: 480, height: 288 } });
+    expect(config.layers).toEqual([{ id: 'reels', z: 0 }]);
+    expect(config.scenes).toEqual({});
+    expect(config.transition).toBe('cut');
+    expect(config.transitionMs).toBe(300);
+  });
+
+  it('accepts a scene naming layers, rejects a layer with no id', () => {
+    expect(() =>
+      Config({ design: { width: 1, height: 1 }, scenes: { base_game: { layers: ['reels'] } } }),
+    ).not.toThrow();
+    expect(() => Config({ design: { width: 1, height: 1 }, layers: [{}] } as never)).toThrow();
+  });
+
   it('rejects a wrong type', () => {
     expect(() => Config({ design: { width: 'wide' } } as never)).toThrow();
   });

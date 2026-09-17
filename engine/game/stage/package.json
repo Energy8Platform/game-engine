@@ -14,13 +14,16 @@
       "entry": "./src/runtime.ts",
       "schema": "./src/schema.ts"
     },
-    "hot": false
+    "hot": true
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@energy8engine/contracts": "*",
+    "@energy8engine/diagnostics": "*",
+    "@energy8engine/registry": "*",
     "@energy8engine/renderer-pixi": "*",
     "cordis": "4.0.0-rc.8",
     "pixi.js": "^8.20.1",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Container } from 'pixi.js';
-import { createStage, fitStage } from '../src/index';
+import type { Diagnostic } from '@energy8engine/contracts';
+import { createStage, createTransitions, cut, fitStage } from '../src/index';
 
 describe('fitStage: contain', () => {
   it('scales by height and letterboxes left/right when the viewport is wider than the design aspect', () => {
@@ -80,5 +81,143 @@ describe('createStage', () => {
     stage.destroy();
 
     expect(root.children).not.toContain(stage.container);
+  });
+});
+
+describe('createStage — layers and scenes', () => {
+  const layers = [
+    { id: 'ui', z: 20 },
+    { id: 'bg', z: 0 },
+    { id: 'reels', z: 10 },
+  ];
+  const design = { width: 1, height: 1 };
+
+  it('creates one child container per layer, ordered by z, ties by declaration order', () => {
+    const root = new Container();
+    const stage = createStage({ root, design, layers: [...layers, { id: 'fx', z: 10 }] });
+    expect(stage.layers().map((l) => l.id)).toEqual(['bg', 'reels', 'fx', 'ui']);
+    expect(stage.container.children).toEqual(stage.layers().map((l) => l.container));
+    expect(stage.layer('reels')).toBe(stage.layers()[1].container);
+    expect(stage.layer('nope')).toBeUndefined();
+  });
+
+  it('defaults to one layer named reels', () => {
+    const stage = createStage({ root: new Container(), design });
+    expect(stage.layers().map((l) => l.id)).toEqual(['reels']);
+  });
+
+  it('enter shows the scene’s layers and hides the rest; current() follows; the same scene again is a no-op', async () => {
+    const stage = createStage({
+      root: new Container(),
+      design,
+      layers,
+      scenes: { base_game: { layers: ['bg', 'reels'] }, free_spins: { layers: ['bg', 'ui'] } },
+    });
+    expect(stage.current()).toBeNull();
+    await stage.enter('base_game');
+    expect(stage.current()).toBe('base_game');
+    expect(stage.layer('bg')!.visible).toBe(true);
+    expect(stage.layer('reels')!.visible).toBe(true);
+    expect(stage.layer('ui')!.visible).toBe(false);
+    await stage.enter('free_spins');
+    expect(stage.layer('reels')!.visible).toBe(false);
+    expect(stage.layer('ui')!.visible).toBe(true);
+    const before = stage.layer('ui')!.visible;
+    await stage.enter('free_spins');
+    expect(stage.layer('ui')!.visible).toBe(before);
+  });
+
+  it('an undeclared scene shows every layer and warns once', async () => {
+    const reported: Diagnostic[] = [];
+    const stage = createStage({
+      root: new Container(),
+      design,
+      layers,
+      scenes: {},
+      report: (d) => reported.push(d),
+    });
+    await stage.enter('bonus');
+    await stage.enter('bonus2');
+    await stage.enter('bonus');
+    expect(stage.layers().every((l) => l.container.visible)).toBe(true);
+    expect(reported.map((d) => d.where)).toEqual(['bonus', 'bonus2']);
+    expect(reported[0]).toMatchObject({ severity: 'warning', plugin: 'stage' });
+  });
+
+  it('uses the scene’s transition, else the stage default, else cut; unknown → cut + warning; a failing run → error, visibility still applied', async () => {
+    const reported: Diagnostic[] = [];
+    const calls: string[] = [];
+    const transitions = createTransitions();
+    transitions.register({
+      id: 'wipe',
+      run: async () => {
+        calls.push('wipe');
+      },
+    });
+    transitions.register({
+      id: 'boom',
+      run: async () => {
+        throw new Error('no gpu');
+      },
+    });
+    transitions.register(cut);
+    const stage = createStage({
+      root: new Container(),
+      design,
+      layers,
+      scenes: {
+        a: { layers: ['bg'], transition: 'wipe' },
+        b: { layers: ['ui'] },
+        c: { layers: ['reels'], transition: 'ghost' },
+        d: { layers: ['bg'], transition: 'boom' },
+      },
+      transition: 'wipe',
+      transitions,
+      report: (d) => reported.push(d),
+    });
+    await stage.enter('a');
+    await stage.enter('b');
+    expect(calls).toEqual(['wipe', 'wipe']);
+    await stage.enter('c');
+    expect(reported.at(-1)).toMatchObject({ severity: 'warning', where: 'ghost' });
+    expect(stage.layer('reels')!.visible).toBe(true);
+    await stage.enter('d');
+    expect(reported.at(-1)).toMatchObject({ severity: 'error', where: 'boom' });
+    expect(stage.layer('bg')!.visible).toBe(true);
+    expect(stage.layer('reels')!.visible).toBe(false);
+  });
+
+  it('a from layer is hidden only after the transition, a to layer shown before it', async () => {
+    const seen: Array<{ from: boolean[]; to: boolean[] }> = [];
+    const transitions = createTransitions();
+    transitions.register({
+      id: 'spy',
+      run: async ({ from, to }) => {
+        seen.push({ from: from.map((c) => c.visible), to: to.map((c) => c.visible) });
+      },
+    });
+    const stage = createStage({
+      root: new Container(),
+      design,
+      layers,
+      scenes: { a: { layers: ['bg'] }, b: { layers: ['ui'] } },
+      transition: 'spy',
+      transitions,
+    });
+    await stage.enter('a');
+    await stage.enter('b');
+    expect(seen[1]).toEqual({ from: [true], to: [true] });
+    expect(stage.layer('bg')!.visible).toBe(false);
+  });
+
+  it('destroy detaches what rows mounted into layers instead of destroying it', () => {
+    const root = new Container();
+    const stage = createStage({ root, design, layers });
+    const view = new Container();
+    stage.layer('reels')!.addChild(view);
+    stage.destroy();
+    expect(view.destroyed).toBe(false);
+    expect(view.parent).toBeNull();
+    expect(root.children).toEqual([]);
   });
 });
