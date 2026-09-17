@@ -7,6 +7,7 @@ import {
   type GameCompositionMessage,
   type GameCompositionResponse,
   type GameCompositionRow,
+  type GameTransitionsMessage,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig, WebSocketLike } from './connection';
 
@@ -26,8 +27,9 @@ import type { ConnectionConfig, WebSocketLike } from './connection';
  * pattern: a plain service with `subscribe(listener)`, plus a hook that
  * bridges it into React.
  *
- * **Fetched once, at boot; then every `game-composition` frame.** The
- * boot GET is the snapshot; the frame the host broadcasts on every `/ide`
+ * **Fetched once, at boot; then every `game-composition` frame (and
+ * every `game-transitions` one, see below).** The boot GET is the
+ * snapshot; the frame the host broadcasts on every `/ide`
  * socket after a `PUT /api/composition/rows/:id` (its own, or another
  * tab's) is the newer fact and replaces `rows`. The frame also carries the
  * host's `reload` verdict — `reloads` counts the `true` ones, and
@@ -87,7 +89,12 @@ export interface GameCompositionState {
    * `game-composition` frame carries rows and leaves these standing.
    */
   stages: string[];
-  /** The transition ids the running game reported (`GameCompositionResponse.transitions`); same source and lifetime as `stages`. */
+  /**
+   * The transition ids the running game reported: the boot GET's
+   * `GameCompositionResponse.transitions`, then every `game-transitions`
+   * frame the host relays (the game boots after the GET, so the frame is
+   * what usually fills this). A `game-composition` frame leaves it standing.
+   */
   transitions: string[];
 }
 
@@ -144,6 +151,14 @@ function isFrame(parsed: unknown): parsed is GameCompositionMessage {
     !Array.isArray(parsed) &&
     (parsed as { type?: unknown }).type === 'game-composition' &&
     Array.isArray((parsed as { rows?: unknown }).rows)
+  );
+}
+
+function isTransitionsFrame(parsed: unknown): parsed is GameTransitionsMessage {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const { type, ids } = parsed as { type?: unknown; ids?: unknown };
+  return (
+    type === 'game-transitions' && Array.isArray(ids) && ids.every((id) => typeof id === 'string')
   );
 }
 
@@ -272,6 +287,14 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
     try {
       parsed = JSON.parse(event.data);
     } catch {
+      return;
+    }
+    // The game's transition list, relayed by the host as the game reports
+    // it (and in the greeting): the game boots after this plugin's GET, so
+    // the GET's `transitions` is empty on the default path.
+    if (isTransitionsFrame(parsed)) {
+      service.transitions = parsed.ids;
+      notify();
       return;
     }
     // Same guard as `workspace`: `null`, an array or a primitive all pass

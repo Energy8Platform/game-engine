@@ -277,6 +277,11 @@ export interface ScenePreviewMessage {
  * scene's `transition` as a pick rather than a free string. Replaces the
  * host's last list whole; the host mirrors it on `GET /api/composition`
  * (`GameCompositionResponse.transitions`).
+ *
+ * Travels BOTH ways, the same shape: up from the game's socket, and down
+ * again from the host to every other `/ide` socket as it arrives — and to
+ * a socket connecting later, in its greeting — so an IDE open before the
+ * game booted still gets the list without a reload.
  */
 export interface GameTransitionsMessage {
   type: 'game-transitions';
@@ -307,6 +312,7 @@ export type ServerMessage =
   | GameGoneMessage
   | GameCompositionMessage
   | ScenePreviewMessage
+  | GameTransitionsMessage
   | { type: 'workspace'; workspace: WorkspaceState };
 
 /** Browser to host. */

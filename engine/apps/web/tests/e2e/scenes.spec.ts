@@ -31,10 +31,16 @@ import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 const IDE_URL = 'http://127.0.0.1:5680/';
 const PREVIEW = 'iframe[title="game preview"]';
 
-/** The game up once on its own URL, then the IDE on its composition document (as `hot-fork.spec.ts`). */
-async function openComposition(page: Page, host: DevHost): Promise<void> {
-  await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+/**
+ * The game up once on its own URL, then the IDE on its composition document
+ * (as `hot-fork.spec.ts`). `settle: false` skips that first visit: the IDE
+ * boots the game itself, the way a person opening the IDE does.
+ */
+async function openComposition(page: Page, host: DevHost, settle = true): Promise<void> {
+  if (settle) {
+    await page.goto(host.gameUrl);
+    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  }
   await page.goto(`${IDE_URL}#/doc/composition`);
 }
 
@@ -77,8 +83,8 @@ async function reapplied(frame: Frame): Promise<void> {
 }
 
 /** Boots to `ready`, stamps the iframe, spins once (the stage in `base_game`), and lands on the Scenes document. */
-async function openScenes(page: Page, host: DevHost): Promise<Frame> {
-  await openComposition(page, host);
+async function openScenes(page: Page, host: DevHost, settle = true): Promise<Frame> {
+  await openComposition(page, host, settle);
   const frame = await gameFrame(page);
   await expect.poll(() => status(frame), { timeout: 20_000 }).toBe('ready');
   await page.locator(PREVIEW).evaluate((el) => {
@@ -170,21 +176,9 @@ test('a scene the script has no stage for is warned about, takes a transition, a
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
-    // The IDE reads the game's transitions once, at boot: make sure the
-    // game on its own URL has reported them before the IDE is opened.
-    await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
-    await expect
-      .poll(
-        async () => {
-          const res = await fetch(`${host.url}/api/composition`);
-          return ((await res.json()) as { transitions?: string[] }).transitions ?? [];
-        },
-        { timeout: 10_000 },
-      )
-      .toContain('fade');
-
-    const frame = await openScenes(page, host);
+    // No settling visit: the game must boot AFTER the IDE's boot GET, so
+    // the transitions below can only have come over the socket.
+    const frame = await openScenes(page, host, false);
 
     await expect(page.locator('#e8-scene-add-stages option[value="free_spins"]')).toHaveCount(0);
     await addScene(page, 'free_spins');
@@ -194,6 +188,12 @@ test('a scene the script has no stage for is warned about, takes a transition, a
     await reapplied(frame);
 
     await spin(page, frame);
+    // The game's transitions reached the pick list over the socket, no reload.
+    await expect
+      .poll(() => page.getByTestId('scene-transition').locator('option').allTextContents(), {
+        timeout: 10_000,
+      })
+      .toEqual(['stage default', 'cut', 'fade']);
     await page.getByTestId('scene-transition').selectOption('fade');
     await expect(page.getByTestId('scene-transition')).toHaveValue('fade', { timeout: 10_000 });
     await expect.poll(() => patch(dir), { timeout: 10_000 }).toContain('transition: fade');

@@ -89,7 +89,8 @@ export interface IdeRpcService {
    * replaces it whole, and a game leaving keeps it (the IDE's pick list
    * should not go blank while the preview reloads). Empty until a game
    * has spoken; reset when the project leaves, with the rest of what was
-   * retained about it.
+   * retained about it. Each frame is also relayed to every other socket,
+   * and the list greets a late client (see the message handler below).
    */
   transitions(): string[];
   /**
@@ -401,9 +402,16 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       if (message.type === 'game-transitions') {
         // The game's registry, mirrored — see `IdeRpcService.transitions`.
         // Anything but a list of strings is a malformed frame, ignored
-        // like any other; the last good list stands.
+        // like any other; the last good list stands. Relayed to every
+        // OTHER socket as it lands (the game already has its own list):
+        // the IDE that booted the preview is up before the game speaks,
+        // and its boot `GET /api/composition` found the list still empty.
         if (Array.isArray(message.ids) && message.ids.every((id) => typeof id === 'string')) {
           lastTransitions = [...message.ids];
+          const relayed: ServerMessage = { type: 'game-transitions', ids: [...lastTransitions] };
+          for (const other of clients) {
+            if (other !== socket) send(other, relayed);
+          }
         }
         return;
       }
@@ -496,6 +504,12 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
           game: frame.game,
         });
       }
+    }
+    // The last known transition list, same reasoning: a client connecting
+    // after the game reported it must not offer an empty pick list. Skipped
+    // while no game has spoken — an empty frame would say "none", not "not yet".
+    if (lastTransitions.length) {
+      send(socket, { type: 'game-transitions', ids: [...lastTransitions] });
     }
   }
   service.attach(ctx.server, { origins: config.origins });

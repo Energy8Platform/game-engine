@@ -1345,6 +1345,36 @@ describe('ide rpc — the game reports its transitions', () => {
     expect(host.ctx.ideRpc.transitions()).toEqual(['cut']); // last known
   });
 
+  it('relays the list to every other socket as it lands, and greets a later root client with it', async () => {
+    const game = await previewSocket({ accept: ['game-diagnostics', 'game-transitions'] });
+    const gameInbox = createInbox(game);
+    game.send(JSON.stringify({ type: 'game-transitions', ids: ['cut', 'fade'] }));
+    expect(await inbox.waitFor((m) => m.type === 'game-transitions')).toEqual({
+      type: 'game-transitions',
+      ids: ['cut', 'fade'],
+    });
+
+    // A root client that connects after the fact is told in its greeting.
+    const late = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const lateInbox = createInbox(late);
+    await new Promise((resolve) => late.once('open', resolve));
+    expect(await lateInbox.waitFor((m) => m.type === 'game-transitions')).toEqual({
+      type: 'game-transitions',
+      ids: ['cut', 'fade'],
+    });
+    late.close();
+
+    // Never echoed back to the game that sent it.
+    game.send(JSON.stringify({ type: 'game-diagnostics', diagnostics: [], dropped: 0 }));
+    await inbox.waitFor((m) => m.type === 'game-diagnostics');
+    const echoed = await Promise.race([
+      gameInbox.waitFor((m) => m.type === 'game-transitions').then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    expect(echoed).toBe(false);
+    game.close();
+  });
+
   it('is dropped on a socket whose attachment does not accept it', async () => {
     const game = await previewSocket({ accept: ['game-diagnostics'] });
     game.send(JSON.stringify({ type: 'game-transitions', ids: ['cut'] }));

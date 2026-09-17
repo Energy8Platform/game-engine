@@ -391,6 +391,23 @@ describe('game composition feeder — stages and transitions', () => {
     expect(ctx.gameComposition.transitions).toEqual(['cut', 'fade']);
   });
 
+  it('a game-transitions frame replaces the list and notifies — the game booted after the GET', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [], transitions: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    const listener = vi.fn();
+    ctx.gameComposition.subscribe(listener);
+
+    push(JSON.stringify({ type: 'game-transitions', ids: ['cut', 'fade'] }));
+    expect(ctx.gameComposition.transitions).toEqual(['cut', 'fade']);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // Not a list of strings: ignored, the last list stands.
+    push(JSON.stringify({ type: 'game-transitions', ids: 'cut' }));
+    push(JSON.stringify({ type: 'game-transitions', ids: [1] }));
+    expect(ctx.gameComposition.transitions).toEqual(['cut', 'fade']);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it('missing fields read as empty lists', async () => {
     const { ctx } = await harness(answer({ rows: ROWS, diagnostics: [] }));
     await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
