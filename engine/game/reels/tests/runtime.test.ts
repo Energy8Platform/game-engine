@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Container } from 'pixi.js';
 import { Context } from 'cordis';
+import { createNodeTypes } from '@energy8engine/scenes';
 import type { SymbolResolver } from '@energy8platform/game-engine/slot';
 import * as runtime from '../src/runtime';
 
@@ -9,9 +10,9 @@ import * as runtime from '../src/runtime';
  * where the symbol resolver comes from (a row's YAML config cannot carry
  * a function, so it comes off `ctx` as an `assets` service).
  *
- * Mounting the board's view is Task 4's concern now (the board no longer
- * mounts into a `stage` — that row and its `layer()` API are gone with
- * `@energy8engine/stage`).
+ * Mounting the board's view is Task 4's concern now: the board reaches the
+ * screen through a `reels` node type registered with `@energy8engine/scenes`,
+ * not a `stage` layer.
  */
 const resolve: SymbolResolver = vi.fn((id: string) => {
   const c = new Container() as unknown as { __symbol: string };
@@ -52,14 +53,51 @@ describe('reels runtime half', () => {
     await ctx.fiber.dispose();
   });
 
-  it('never mounts, and never throws, when stage does not appear at all', async () => {
+  it('never registers, and never throws, when nodeTypes does not appear at all', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
     await ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } });
 
     expect(ctx.board).toBeDefined();
-    expect(ctx.reflect.get('stage', false)).toBeUndefined();
+    expect(ctx.reflect.get('nodeTypes', false)).toBeUndefined();
 
     await ctx.fiber.dispose();
+  });
+});
+
+describe('the reels node type', () => {
+  it('registers `reels` once nodeTypes appears, regardless of order; mount hands out the board view; unmount detaches', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3 } } });
+    const nodeTypes = createNodeTypes();
+    ctx.provide('nodeTypes', nodeTypes);
+    await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
+    const type = nodeTypes.get('reels')!;
+    const parent = new Container();
+    parent.addChild(ctx.get('board')!.view);
+    const view = type.mount({ row: 'reels1' }, ctx);
+    expect(view).toBe(ctx.get('board')!.view);
+    expect(view.parent).toBeNull();
+    const holder = new Container();
+    holder.addChild(view);
+    type.unmount!(view);
+    expect(view.parent).toBeNull();
+    expect(view.destroyed).toBe(false);
+  });
+
+  it('a hot re-apply registers again (a new board) and the disposer takes the old registration back', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    const nodeTypes = createNodeTypes();
+    ctx.provide('nodeTypes', nodeTypes);
+    const fiber = ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3 } } });
+    await fiber;
+    await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
+    const first = nodeTypes.get('reels')!;
+    await fiber.update({ config: { grid: { cols: 3, rows: 3 } } });
+    await vi.waitFor(() => expect(nodeTypes.get('reels')).not.toBe(first));
+    await fiber.dispose();
+    expect(nodeTypes.get('reels')).toBeUndefined();
   });
 });

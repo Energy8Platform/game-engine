@@ -30,17 +30,22 @@
  * is worse than that — it would make a game with no art supplier hang
  * silently on a board that never builds instead of saying so.
  *
- * Deliberately **not** `inject: ['renderer']`/`['stage']`: the board's
+ * Deliberately **not** `inject: ['renderer']`/`['nodeTypes']`: the board's
  * construction needs no live renderer (measured headless — see
- * task-10-report.md), only mounting its view into the stage does, and
- * that half is ordered through `ctx.inject`, not a static dependency, so
- * it runs whenever `stage` appears and simply never runs when it does
- * not. A board nobody can see is still a board a headless play-through
- * can drive.
+ * task-10-report.md), and reaching the screen at all is a `scenes`
+ * document's decision, not this row's. So the board only ever registers a
+ * `reels` node type (`@energy8engine/scenes`'s `NodeTypesService`) whose
+ * `mount` hands out `board.view`; that registration is ordered through
+ * `ctx.inject`, not a static dependency, so it runs whenever `nodeTypes`
+ * appears (and again on a hot re-apply, since `apply` runs fresh with a
+ * new `board`) and simply never runs when it does not. A board nobody can
+ * see is still a board a headless play-through can drive.
  */
 import type { Context } from 'cordis';
+import Schema from 'schemastery';
 import { createReelsBoard, type ReelsBoard } from './index';
 import type { CreateReelSystemOptions, SymbolResolver } from '@energy8platform/game-engine/slot';
+import type {} from '@energy8engine/scenes/runtime';
 
 /** What this row needs from whoever supplies the game's art. */
 export interface AssetsService {
@@ -57,11 +62,8 @@ declare module 'cordis' {
 
 export const name = 'reels';
 
-/** `config` is `CreateReelSystemOptions` minus `resolve` — `{ config: { grid }, ... }` — see the module doc on where `resolve` comes from. `layer` names the stage layer to mount the board into; `'reels'` when absent. */
-export function apply(
-  ctx: Context,
-  config: Partial<CreateReelSystemOptions> & { layer?: string },
-): void {
+/** `config` is `CreateReelSystemOptions` minus `resolve` — `{ config: { grid }, ... }` — see the module doc on where `resolve` comes from. */
+export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): void {
   const assets = ctx.reflect.get('assets', false) as AssetsService | undefined;
   const resolve = config?.resolve ?? assets?.resolve;
   if (typeof resolve !== 'function') {
@@ -74,4 +76,27 @@ export function apply(
   const board = createReelsBoard({ ...config, resolve } as CreateReelSystemOptions);
   ctx.effect(() => () => board.destroy(), 'reels:board');
   ctx.provide('board', board);
+
+  // The board reaches the screen only through a `reels` scene node
+  // (`@energy8engine/scenes`): registered whenever `nodeTypes` is on the
+  // context, again on a hot re-apply (a new board), taken back on dispose.
+  ctx.inject(['nodeTypes'], (typesCtx) => {
+    typesCtx.effect(
+      () =>
+        typesCtx.nodeTypes.register({
+          type: 'reels',
+          schema: Schema.object({
+            row: Schema.string().default('reels1').description('the reels row this node shows'),
+          }),
+          mount: () => {
+            board.view.parent?.removeChild(board.view);
+            return board.view;
+          },
+          unmount: (view) => {
+            view.parent?.removeChild(view);
+          },
+        }),
+      'reels:node-type',
+    );
+  });
 }
