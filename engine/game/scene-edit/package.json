@@ -1,0 +1,27 @@
+{
+  "name": "@energy8engine/scene-edit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@energy8engine/contracts": "*",
+    "@energy8engine/scenes": "*",
+    "@energy8engine/renderer-pixi": "*",
+    "cordis": "4.0.0-rc.8",
+    "pixi.js": "^8.20.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "license": "MIT"
+}
