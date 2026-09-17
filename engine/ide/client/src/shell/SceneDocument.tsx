@@ -33,7 +33,8 @@ import { CanvasToolbar, clampZoom, type GridState } from './CanvasToolbar';
  * events become the same `ctx.scenes` (and, for a dropped asset,
  * `ctx.assetNodeTypes`/`ctx.files`) calls the tree makes, and the
  * selection and the grid are mirrored back to it (`select`/`grid`
- * requests; re-sent on `ready`).
+ * requests; re-sent on `ready`), as is every change to the document set
+ * (`replace` — the canvas has no other way to learn of an edit).
  * Selection stays one fact — `ctx.scenes.selected()` — so a pick the
  * service already holds is not re-told. The iframe is remounted on the
  * same rule `PreviewWall` uses: a host `reload` verdict, or another
@@ -377,6 +378,10 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
   const mirrored = selected?.scene === id ? selected.node : null;
   useEffect(() => tell('select', { node: mirrored }), [mirrored]);
   useEffect(() => tell('grid', grid), [grid]);
+  // The canvas composes no `ide-bridge` (see `scene-edit`), so every change
+  // to the set — this tab's own edits answered, Properties, the host's
+  // frame — is told to it as a `replace`; it remounts what differs.
+  useEffect(() => tell('replace', { docs }), [docs]);
 
   // The fit follows the stage's box until the user zooms by hand — a
   // ResizeObserver, as the old bar had (jsdom has none: the fit stays 1).

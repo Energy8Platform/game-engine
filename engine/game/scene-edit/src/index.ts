@@ -6,6 +6,7 @@
  * file — the parent is the one writer.
  */
 import type { Context } from 'cordis';
+import type { SceneDoc } from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
 import { COMMON } from '@energy8engine/scenes';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
@@ -71,6 +72,12 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   let alive = true;
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
   scenes.resize(app.screen.width, app.screen.height);
+  // The IDE's documents, on every change: this page composes no `ide-bridge`
+  // (its `scene-preview` handler would switch the scene shown here), so the
+  // parent is the one source of edits after the boot GET. Handled before
+  // `ready`: a `replace` that beats the GET is the fresher fact (the runtime
+  // then drops the GET's own answer).
+  wire.handle('replace', (p) => { scenes.replace((p as { docs?: SceneDoc[] })?.docs ?? []); return {}; });
 
   // The documents land after apply (`scenes`' boot GET, or the IDE's own `replace`): decide once they have.
   void scenes.ready.then(

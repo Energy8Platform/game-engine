@@ -570,6 +570,32 @@ describe('SceneDocument', () => {
     expect(reqs('grid').at(-1)).toEqual({ on: false, step: 16 });
   });
 
+  it('every change to the document set is told to the canvas as replace', async () => {
+    const { ctx, socket } = await harness();
+    renderTab(ctx);
+    const { iframe, reqs } = canvas();
+    // This tab's own edit, answered by the host: the set with the new order.
+    frame(iframe, 'zorder', { node: 'reels-1', delta: 1 });
+    await waitFor(() =>
+      expect(
+        (reqs('replace').at(-1) as { docs: SceneDoc[] }).docs[0].nodes.map((n) => n.id),
+      ).toEqual(['bg', 'title', 'reels-1']),
+    );
+    // Another writer's, over the host's frame.
+    socket.receive({
+      type: 'scenes',
+      scenes: [BASE, BONUS, { id: 'intro', nodes: [] }],
+      diagnostics: [],
+    });
+    await waitFor(() =>
+      expect((reqs('replace').at(-1) as { docs: SceneDoc[] }).docs.map((d) => d.id)).toEqual([
+        'base_game',
+        'bonus',
+        'intro',
+      ]),
+    );
+  });
+
   it('grid controls are told to the canvas', async () => {
     const { ctx } = await harness();
     renderTab(ctx);

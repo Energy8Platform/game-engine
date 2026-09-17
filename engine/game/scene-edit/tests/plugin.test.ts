@@ -112,6 +112,24 @@ describe('scene-edit plugin', () => {
     expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: null } });
   });
 
+  it('a replace request from the IDE swaps the document set — before ready too', async () => {
+    let settle!: () => void;
+    const { scenes, call, ready } = boot('a', [], new Promise<void>((r) => { settle = r; }));
+    await new Promise((r) => setTimeout(r, 0)); // the fiber applies asynchronously
+    // The IDE's set lands ahead of the boot GET: it is what the page shows.
+    const res = await call('replace', { docs: DOCS });
+    expect(res.ok).toBe(true);
+    expect([...scenes.docs().keys()]).toEqual(['a', 'b']);
+    settle();
+    await ready();
+    // And after: a reorder remounts, so the topmost node under a point changes.
+    const reordered = { id: 'a', nodes: [DOCS[0].nodes[1], DOCS[0].nodes[0]] };
+    await call('replace', { docs: [reordered, DOCS[1]] });
+    expect(scenes.docs().get('a')).toEqual(reordered);
+    const snap = (await call('snapshot')).result as { bounds: Record<string, unknown> };
+    expect(Object.keys(snap.bounds)).toEqual(['hi', 'lo']);
+  });
+
   it('Delete emits remove; ] emits zorder +1; arrows emit one edit; Escape clears', async () => {
     const { edit, events, ready, key, gizmoShown } = boot();
     await ready();

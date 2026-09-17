@@ -38,46 +38,48 @@ test.afterEach(async () => {
 
 const row = (page: Page, path: string) => page.getByTestId(`explorer-${path}`);
 
+// `docs`, not `assets`: the example ships `assets/logo.png` since slice 18, so a
+// "new" `assets` folder would be the existing one (and its delete would count 2).
 test('new folder, new file in it, rename, delete the folder — the disk agrees at every step', async ({
   page,
 }) => {
   await page.getByTestId('explorer-new-folder').click();
-  await page.getByTestId('explorer-input').fill('assets');
+  await page.getByTestId('explorer-input').fill('docs');
   await page.keyboard.press('Enter');
-  await expect(row(page, 'assets')).toBeVisible();
-  expect(existsSync(join(dir, 'assets'))).toBe(true);
+  await expect(row(page, 'docs')).toBeVisible();
+  expect(existsSync(join(dir, 'docs'))).toBe(true);
 
-  await row(page, 'assets').click({ button: 'right' });
+  await row(page, 'docs').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'New file' }).click();
   await page.getByTestId('explorer-input').fill('readme.txt');
   await page.keyboard.press('Enter');
-  await expect(row(page, 'assets/readme.txt')).toBeVisible();
-  expect(existsSync(join(dir, 'assets', 'readme.txt'))).toBe(true);
+  await expect(row(page, 'docs/readme.txt')).toBeVisible();
+  expect(existsSync(join(dir, 'docs', 'readme.txt'))).toBe(true);
 
-  await row(page, 'assets/readme.txt').click({ button: 'right' });
+  await row(page, 'docs/readme.txt').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Rename' }).click();
   await page.getByTestId('explorer-input').fill('notes.txt');
   await page.keyboard.press('Enter');
-  await expect(row(page, 'assets/notes.txt')).toBeVisible();
-  expect(existsSync(join(dir, 'assets', 'notes.txt'))).toBe(true);
-  expect(existsSync(join(dir, 'assets', 'readme.txt'))).toBe(false);
+  await expect(row(page, 'docs/notes.txt')).toBeVisible();
+  expect(existsSync(join(dir, 'docs', 'notes.txt'))).toBe(true);
+  expect(existsSync(join(dir, 'docs', 'readme.txt'))).toBe(false);
 
-  await row(page, 'assets').click({ button: 'right' });
+  await row(page, 'docs').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete' }).click();
-  await expect(page.getByText('delete folder "assets" and 1 entries?')).toBeVisible();
+  await expect(page.getByText('delete folder "docs" and 1 entries?')).toBeVisible();
   await page.getByTestId('confirm-yes').click();
-  await expect(row(page, 'assets')).toHaveCount(0);
-  expect(existsSync(join(dir, 'assets'))).toBe(false);
+  await expect(row(page, 'docs')).toHaveCount(0);
+  expect(existsSync(join(dir, 'docs'))).toBe(false);
 });
 
 test('dragging a file onto a folder moves it on disk', async ({ page }) => {
   await page.getByTestId('explorer-new-folder').click();
-  await page.getByTestId('explorer-input').fill('assets');
+  await page.getByTestId('explorer-input').fill('docs');
   await page.keyboard.press('Enter');
-  await expect(row(page, 'assets')).toBeVisible();
-  await row(page, 'game/spec.json').dragTo(row(page, 'assets'));
-  await expect(row(page, 'assets/spec.json')).toBeVisible();
-  expect(existsSync(join(dir, 'assets', 'spec.json'))).toBe(true);
+  await expect(row(page, 'docs')).toBeVisible();
+  await row(page, 'game/spec.json').dragTo(row(page, 'docs'));
+  await expect(row(page, 'docs/spec.json')).toBeVisible();
+  expect(existsSync(join(dir, 'docs', 'spec.json'))).toBe(true);
   expect(existsSync(join(dir, 'game', 'spec.json'))).toBe(false);
 });
 
