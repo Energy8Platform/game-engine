@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { Container } from 'pixi.js';
 import type { Diagnostic } from '@energy8engine/contracts';
-import { createStage, createTransitions, cut, fitStage, type LayerView } from '../src/index';
+import {
+  createStage,
+  createTransitions,
+  cut,
+  fade,
+  fitStage,
+  type LayerView,
+  type TickerLike,
+} from '../src/index';
+
+/** A ticker the test drives by hand — `transitions.test.ts` has the same. */
+function fakeTicker(): TickerLike & { tick(ms: number): void } {
+  const fns = new Set<(t: { deltaMS: number }) => void>();
+  return {
+    add: (fn) => fns.add(fn),
+    remove: (fn) => fns.delete(fn),
+    tick: (ms) => [...fns].forEach((fn) => fn({ deltaMS: ms })),
+  };
+}
 
 describe('fitStage: contain', () => {
   it('scales by height and letterboxes left/right when the viewport is wider than the design aspect', () => {
@@ -225,6 +243,42 @@ describe('createStage — layers and scenes', () => {
     await stage.enter('b');
     expect(seen[1]).toEqual({ from: [true], to: [true] });
     expect(stage.layer('bg')!.visible).toBe(false);
+  });
+
+  it('a layer in both scenes stays put under fade: only the arriving layer fades in, only the leaving one out', async () => {
+    const ticker = fakeTicker();
+    const transitions = createTransitions();
+    transitions.register(fade);
+    const stage = createStage({
+      root: new Container(),
+      design,
+      layers,
+      scenes: { a: { layers: ['bg', 'reels'] }, b: { layers: ['bg', 'ui'] } },
+      transition: 'fade',
+      transitionMs: 200,
+      transitions,
+      ticker,
+    });
+    const bg = stage.layer('bg')!;
+    const reels = stage.layer('reels')!;
+    const ui = stage.layer('ui')!;
+    const first = stage.enter('a');
+    ticker.tick(200);
+    await first;
+    expect(bg.alpha).toBe(1);
+
+    const second = stage.enter('b');
+    expect(bg.alpha).toBe(1);
+    ticker.tick(100);
+    expect(bg.alpha).toBe(1);
+    expect(ui.alpha).toBeCloseTo(0.5);
+    expect(reels.alpha).toBeCloseTo(0.5);
+    ticker.tick(100);
+    await second;
+    expect(bg.alpha).toBe(1);
+    expect(bg.visible).toBe(true);
+    expect(ui.visible).toBe(true);
+    expect(reels.visible).toBe(false);
   });
 
   it('destroy detaches what rows mounted on the root container too — a root mount stays legal', () => {

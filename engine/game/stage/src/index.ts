@@ -171,7 +171,12 @@ export interface Stage {
   layer(id: string): Container | undefined;
   /** By z ascending, ties by declaration order — the draw order. */
   layers(): readonly LayerView[];
-  /** Shows the scene's layers, hides the rest, through its transition. The same scene again is a no-op. */
+  /**
+   * Shows the scene's layers, hides the rest, through its transition. A
+   * layer the old and the new scene share is neither `from` nor `to` —
+   * only arriving layers fade in, only leaving ones fade out. The same
+   * scene again is a no-op.
+   */
   enter(scene: string): Promise<void>;
   current(): string | null;
   /** Re-fits `container` to a new viewport size; returns the fit it applied. */
@@ -237,8 +242,11 @@ export function createStage(options: CreateStageOptions): Stage {
           ),
         );
       }
-      const to = spec ? views.filter((v) => spec.layers.includes(v.id)) : views;
-      const from = views.filter((v) => v.container.visible && !to.includes(v));
+      const shown = spec ? views.filter((v) => spec.layers.includes(v.id)) : views;
+      // A layer both scenes share is neither leaving nor arriving: it
+      // stays as it is, so a fade never blinks it.
+      const to = shown.filter((v) => !v.container.visible);
+      const from = views.filter((v) => v.container.visible && !shown.includes(v));
       const wanted = spec?.transition ?? options.transition ?? 'cut';
       let transition = transitions.get(wanted);
       if (!transition) {
@@ -278,7 +286,7 @@ export function createStage(options: CreateStageOptions): Stage {
         );
       }
       for (const v of views) {
-        if (!to.includes(v)) v.container.visible = false;
+        if (!shown.includes(v)) v.container.visible = false;
         v.container.alpha = 1;
       }
     },
