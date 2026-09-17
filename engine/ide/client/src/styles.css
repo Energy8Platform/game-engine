@@ -968,6 +968,24 @@ label {
 .e8-dict-arrow {
   color: var(--e8-fg-muted);
 }
+/* An array item, or a dict-of-objects entry: the nested fields side by
+   side with the row's tools at the end. */
+.e8-array-row {
+  display: flex;
+  gap: var(--e8-gap);
+  align-items: flex-start;
+  padding: 4px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  margin-bottom: var(--e8-gap);
+}
+.e8-array-row .e8-field {
+  flex: 1;
+}
+.e8-array-tools {
+  display: flex;
+  gap: 2px;
+}
 
 /* Preview wall: controls in one row, tiles wrapping beneath. */
 .e8-preview-wall-controls {

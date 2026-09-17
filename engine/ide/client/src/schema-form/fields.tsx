@@ -24,7 +24,7 @@ export interface SchemaNode {
   value?: unknown;
   list?: SchemaNode[];
   dict?: Record<string, SchemaNode>;
-  /** A `dict` node's value schema. */
+  /** A `dict` node's value schema, or an `array` node's item schema. */
   inner?: SchemaNode;
   meta?: {
     default?: unknown;
@@ -101,12 +101,12 @@ export function ObjectFields({
             commit={commit}
           />
         );
-        // A nested object or a dict is a group of its own fields, so its
-        // name goes on a `<legend>` rather than a `<label for>` — there is
-        // no single control for the label to point at.
+        // A nested object, a dict or an array is a group of its own fields,
+        // so its name goes on a `<legend>` rather than a `<label for>` —
+        // there is no single control for the label to point at.
         return (
           <div className="e8-field" key={key}>
-            {nested || child.type === 'dict' ? (
+            {nested || child.type === 'dict' || child.type === 'array' ? (
               <fieldset className="e8-field-group" id={id}>
                 <legend>{label(child, key)}</legend>
                 {control}
@@ -148,6 +148,16 @@ export function Field({ id, node, value, onChange, commit }: FieldProps) {
     return <DictField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
   }
 
+  if (node.type === 'array' && node.inner) {
+    return <ArrayField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
+  }
+
+  if (node.type === 'dict' && node.inner) {
+    return (
+      <DictObjectField id={id} node={node} value={value} onChange={onChange} commit={commit} />
+    );
+  }
+
   const options = constants(node);
   if (options) {
     return (
@@ -184,8 +194,8 @@ export function Field({ id, node, value, onChange, commit }: FieldProps) {
     return <StringField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
   }
 
-  // Any field kind this form has no editor for (`any`, an array, a dict
-  // of non-strings, a non-string union, …). Rendering it editable would let a keystroke silently replace
+  // Any field kind this form has no editor for (`any`, a non-string union,
+  // …). Rendering it editable would let a keystroke silently replace
   // a structured value with a plain string — read-only-and-labelled is the
   // honest gap; a later task can upgrade it to a real editor.
   return <UnsupportedField id={id} node={node} value={current} />;
@@ -333,8 +343,7 @@ function StringField({ id, node, value, onChange, commit }: FieldProps) {
  * — a key typed one character at a time must not commit each prefix as a
  * key of its own — and leaving the dict (focus moves outside it) commits
  * the rows the user touched, minus those whose key is still empty. Only
- * string values, per Slice 0's scope; a dict of anything else stays
- * `UnsupportedField`.
+ * string values; a dict of anything else is `DictObjectField` below.
  *
  * The same focused rule as `useDraft`: while focus is inside the dict, an
  * external `value` change (another tab's frame) leaves the rows alone.
@@ -453,6 +462,231 @@ function DictField({ id, node, value, onChange }: FieldProps) {
         title="add"
         onClick={() =>
           setRows((prev) => [...prev, { key: '', value: '', origin: null, dirty: false }])
+        }
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+/**
+ * What a fresh item of `node` starts as: for an object, its children's
+ * declared defaults (a required child with none stays absent — the user
+ * fills it in); for a primitive, its own default, else an empty string.
+ */
+function defaults(node: SchemaNode): unknown {
+  if (node.type === 'object' && node.dict) {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(node.dict)) {
+      if (child?.meta?.default !== undefined) out[key] = child.meta.default;
+    }
+    return out;
+  }
+  return node.meta?.default ?? '';
+}
+
+/**
+ * An array (`stage1`'s `layers: array(object{id,z})`, a scene's `layers:
+ * array(string)`): one row per item, each a nested `Field` of the item
+ * schema — so an object item shows its children's labels — with up/down/
+ * remove, and `add` after the rows. Structural changes commit at once with
+ * the whole array; an edit inside a row goes through the inner field,
+ * which already buffers under `commit: 'blur'` and keeps its draft across
+ * an external change while focused. No local state: the rows ARE `value`.
+ */
+function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
+  const items = (value ?? node.meta?.default ?? []) as unknown[];
+  const inner = node.inner!;
+  const swap = (a: number, b: number) => {
+    const next = [...items];
+    [next[a], next[b]] = [next[b], next[a]];
+    onChange(next);
+  };
+  return (
+    <div className="e8-array" data-testid={`array-${id}`}>
+      {items.map((item, i) => (
+        <div className="e8-array-row" data-testid={`array-row-${id}-${i}`} key={i}>
+          <Field
+            id={`${id}-${i}`}
+            node={inner}
+            value={item}
+            onChange={(next) => onChange(items.map((it, j) => (j === i ? next : it)))}
+            commit={commit}
+          />
+          <span className="e8-array-tools">
+            <button
+              type="button"
+              aria-label="up"
+              title="up"
+              disabled={i === 0}
+              onClick={() => swap(i, i - 1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              aria-label="down"
+              title="down"
+              disabled={i === items.length - 1}
+              onClick={() => swap(i, i + 1)}
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              aria-label="remove"
+              title="remove"
+              onClick={() => onChange(items.filter((_, j) => j !== i))}
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      ))}
+      <button
+        type="button"
+        aria-label="add"
+        title="add"
+        onClick={() => onChange([...items, defaults(inner)])}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A dict whose values are not plain strings (`stage1`'s `scenes:
+ * dict(object{…})`): a `key` input plus a nested `Field` of the value
+ * schema per entry. Only the KEY is buffered here — typed one character at
+ * a time, it must not commit each prefix as an entry of its own — and it
+ * lands when its input blurs, renaming the entry (the old key dropped).
+ * Value edits go straight through as the whole dict with that entry
+ * replaced; the inner fields buffer themselves under `commit: 'blur'`.
+ * `add` appends a row with an empty key and an empty value that is not an
+ * entry until the key is non-empty on blur; `remove` commits at once.
+ *
+ * Same focused rule as `DictField`: while focus is inside, an external
+ * `value` change leaves the rows alone; leaving re-syncs to the latest
+ * baseline (the last commit, or the latest prop), keeping pending rows.
+ */
+interface DictObjectRow {
+  key: string;
+  value: unknown;
+  origin: string | null;
+  /** The key was edited since the last sync. */
+  dirty: boolean;
+}
+
+function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
+  const current = (value ?? node.meta?.default ?? {}) as Record<string, unknown>;
+  const inner = node.inner!;
+  const toRows = (source: Record<string, unknown>): DictObjectRow[] =>
+    Object.entries(source).map(([key, entry]) => ({
+      key,
+      value: entry,
+      origin: key,
+      dirty: false,
+    }));
+  const pending = (from: DictObjectRow[]) =>
+    from.filter((row) => row.origin === null && row.key === '');
+  const [rows, setRows] = useState(() => toRows(current));
+  const container = useRef<HTMLDivElement>(null);
+  const focused = useRef(false);
+  const baseline = useRef(current);
+
+  useEffect(() => {
+    baseline.current = current;
+    if (focused.current) return;
+    setRows(toRows(current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const commitRows = (next: Record<string, unknown>) => {
+    baseline.current = next;
+    onChange(next);
+  };
+  const patch = (index: number, changes: Partial<DictObjectRow>) =>
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...changes } : row)));
+  const editValue = (index: number, next: unknown) => {
+    patch(index, { value: next });
+    const row = rows[index];
+    if (row.origin !== null) commitRows({ ...current, [row.origin]: next });
+  };
+  const leaveKey = (index: number) => {
+    const row = rows[index];
+    if (!row.dirty) return;
+    const next = { ...current };
+    if (row.origin !== null) delete next[row.origin];
+    if (row.key !== '') next[row.key] = row.value;
+    if (JSON.stringify(next) !== JSON.stringify(current)) commitRows(next);
+    setRows([...toRows(next), ...pending(rows)]);
+  };
+  const leave = (e: FocusEvent<HTMLDivElement>) => {
+    if (e.relatedTarget instanceof Node && container.current?.contains(e.relatedTarget)) return;
+    focused.current = false;
+    setRows((prev) => [...toRows(baseline.current), ...pending(prev)]);
+  };
+
+  return (
+    <div
+      className="e8-dict"
+      ref={container}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={leave}
+    >
+      {rows.map((row, index) => (
+        <div className="e8-array-row" key={index}>
+          <input
+            type="text"
+            data-dict="key"
+            aria-label="key"
+            value={row.key}
+            onChange={(e: ChangeEvent<HTMLInputElement>) =>
+              patch(index, { key: e.target.value, dirty: true })
+            }
+            onBlur={() => leaveKey(index)}
+          />
+          <Field
+            id={`${id}-${index}`}
+            node={inner}
+            value={row.value}
+            onChange={(next) => editValue(index, next)}
+            commit={commit}
+          />
+          <button
+            type="button"
+            aria-label="remove"
+            title="remove"
+            onClick={() => {
+              setRows(rows.filter((_, i) => i !== index));
+              if (row.origin === null) return; // never committed — nothing to remove
+              const next = { ...current };
+              delete next[row.origin];
+              commitRows(next);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        aria-label="add"
+        title="add"
+        onClick={() =>
+          setRows((prev) => [
+            ...prev,
+            {
+              key: '',
+              value: inner.type === 'object' ? {} : defaults(inner),
+              origin: null,
+              dirty: false,
+            },
+          ])
         }
       >
         +

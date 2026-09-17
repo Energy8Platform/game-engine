@@ -1,8 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import Schema from 'schemastery';
 import { describe, expect, it, vi } from 'vitest';
 import { SchemaForm } from '../src/index';
+import type { CommitMode } from '../src/schema-form/fields';
 
 const schema = JSON.parse(
   JSON.stringify(
@@ -70,6 +72,37 @@ function DictForm({
       }}
     />
   );
+}
+
+/**
+ * A controlled form over a real schemastery schema, returning the spy: the
+ * value feeds back so a structural commit (reorder, remove) is what the
+ * next click sees.
+ */
+function renderForm(
+  schema: Schema,
+  initial: Record<string, unknown>,
+  opts: { commit?: CommitMode } = {},
+) {
+  const onChange = vi.fn();
+  const json = JSON.parse(JSON.stringify(schema.toJSON()));
+  function Form() {
+    const [value, setValue] = useState(initial);
+    return (
+      <SchemaForm
+        rowId="row"
+        schema={json}
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          onChange(next);
+        }}
+        commit={opts.commit}
+      />
+    );
+  }
+  render(<Form />);
+  return onChange;
 }
 
 /** A dict entry whose uid isn't in `refs` — the shape a truncated or
@@ -682,5 +715,85 @@ describe('SchemaForm', () => {
     fireEvent.change(keys[1], { target: { value: 'main' } });
     fireEvent.blur(keys[1]);
     expect(onChange).toHaveBeenCalledWith({ stages: { main: 'ways' } });
+  });
+});
+
+// Task 5: `stage1`'s `layers: array(object{id,z})` and `scenes:
+// dict(object{layers: array(string), transition})` — the two shapes the
+// scenes-and-layers row edits.
+describe('SchemaForm — arrays of objects', () => {
+  const schema = Schema.object({
+    layers: Schema.array(
+      Schema.object({ id: Schema.string().required(), z: Schema.number().default(0) }),
+    ).default([]),
+  });
+  it('renders one row per item with the item’s fields', () => {
+    renderForm(schema, {
+      layers: [
+        { id: 'bg', z: 0 },
+        { id: 'reels', z: 10 },
+      ],
+    });
+    expect(screen.getAllByTestId(/^array-row-/)).toHaveLength(2);
+    expect((screen.getAllByLabelText('id')[1] as HTMLInputElement).value).toBe('reels');
+  });
+  it('add appends an item from the inner defaults and commits at once', async () => {
+    const onChange = renderForm(schema, { layers: [] });
+    await userEvent.click(screen.getByRole('button', { name: 'add' }));
+    expect(onChange).toHaveBeenLastCalledWith({ layers: [{ z: 0 }] });
+  });
+  it('remove and up/down commit the reordered array', async () => {
+    const onChange = renderForm(schema, {
+      layers: [
+        { id: 'a', z: 0 },
+        { id: 'b', z: 1 },
+      ],
+    });
+    await userEvent.click(screen.getAllByRole('button', { name: 'up' })[1]);
+    expect(onChange).toHaveBeenLastCalledWith({
+      layers: [
+        { id: 'b', z: 1 },
+        { id: 'a', z: 0 },
+      ],
+    });
+    await userEvent.click(screen.getAllByRole('button', { name: 'remove' })[0]);
+    expect(onChange).toHaveBeenLastCalledWith({ layers: [{ id: 'a', z: 0 }] });
+  });
+  it('editing a field inside a row commits on blur under commit: blur, with the row replaced in place', async () => {
+    const onChange = renderForm(schema, { layers: [{ id: 'a', z: 0 }] }, { commit: 'blur' });
+    const z = screen.getByLabelText('z');
+    await userEvent.clear(z);
+    await userEvent.type(z, '5');
+    expect(onChange).not.toHaveBeenCalled();
+    await userEvent.tab();
+    expect(onChange).toHaveBeenLastCalledWith({ layers: [{ id: 'a', z: 5 }] });
+  });
+});
+
+describe('SchemaForm — dicts of objects', () => {
+  const schema = Schema.object({
+    scenes: Schema.dict(
+      Schema.object({
+        layers: Schema.array(Schema.string()).default([]),
+        transition: Schema.string(),
+      }),
+    ).default({}),
+  });
+  // The entry's own `layers` array has an `add` too, ahead of the dict's in
+  // DOM order — the dict's add sits after its rows, so it is the last one.
+  it('renders a key input and a nested form per entry; add creates an entry once the key is typed and left', async () => {
+    const onChange = renderForm(schema, { scenes: { base_game: { layers: ['bg'] } } });
+    expect(screen.getByLabelText('key')).toHaveValue('base_game');
+    await userEvent.click(screen.getAllByRole('button', { name: 'add' }).at(-1)!);
+    await userEvent.type(screen.getAllByLabelText('key')[1], 'free_spins');
+    await userEvent.tab();
+    expect(onChange).toHaveBeenLastCalledWith({
+      scenes: { base_game: { layers: ['bg'] }, free_spins: {} },
+    });
+  });
+  it('an array of strings inside renders as a comma-free list of string inputs with add/remove', async () => {
+    const onChange = renderForm(schema, { scenes: { base_game: { layers: ['bg'] } } });
+    await userEvent.click(screen.getAllByRole('button', { name: 'add' })[0]);
+    expect(onChange).toHaveBeenLastCalledWith({ scenes: { base_game: { layers: ['bg', ''] } } });
   });
 });
