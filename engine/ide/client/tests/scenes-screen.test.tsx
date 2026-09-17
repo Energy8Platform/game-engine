@@ -160,6 +160,22 @@ describe('ScenesScreen', () => {
     expect(puts[1].body.config.layers).toEqual(STAGE_CONFIG.layers);
   });
 
+  it('down on a z-tie swaps array positions, since the runtime breaks ties by index', async () => {
+    const tied = [
+      { id: 'bg', z: 0 },
+      { id: 'reels', z: 0 },
+    ];
+    const { puts } = await harness({ rows: [stageRow({ ...STAGE_CONFIG, layers: tied })] });
+    fireEvent.click(
+      within(await screen.findByTestId('layer-bg')).getByRole('button', { name: 'down' }),
+    );
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0].body.config.layers).toEqual([
+      { id: 'reels', z: 0 },
+      { id: 'bg', z: 0 },
+    ]);
+  });
+
   it('choosing a transition writes it; the stage default clears it', async () => {
     const { puts } = await harness();
     const select = await screen.findByTestId('scene-transition');

@@ -47,7 +47,9 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
   const { rows, diagnostics, stages, transitions } = useGameComposition(ctx);
   const [picked, setPicked] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [previewDiagnostics, setPreviewDiagnostics] = useState<Diagnostic[]>([]);
+  // Pinned to the scene it was asked for: a frame that drops the picked
+  // scene moves `selected` on, and the old answer must not follow it.
+  const [preview, setPreview] = useState<{ scene: string; diagnostics: Diagnostic[] } | null>(null);
 
   if (rows === null) {
     return (
@@ -71,13 +73,14 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
   const layers: Layer[] = Array.isArray(config.layers) ? config.layers : [];
   const scenes: Record<string, SceneConfig> = config.scenes ?? {};
   const sceneIds = Object.keys(scenes);
-  const selected = picked !== null && picked in scenes ? picked : (sceneIds[0] ?? null);
+  const selected =
+    picked !== null && Object.hasOwn(scenes, picked) ? picked : (sceneIds[0] ?? null);
   const scene = selected === null ? null : scenes[selected];
   const shown = new Set(scene?.layers ?? []);
   const byZ = layers
     .map((layer, index) => ({ layer, index }))
     .sort((a, b) => a.layer.z - b.layer.z);
-  const unused = stages.filter((stage) => !(stage in scenes));
+  const unused = stages.filter((stage) => !Object.hasOwn(scenes, stage));
 
   const put = (next: StageConfig) => void ctx.gameComposition.update(stageRow.id, next);
 
@@ -98,6 +101,10 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
           ? { ...layer, z: a.layer.z }
           : layer,
     );
+    // The runtime breaks a z-tie by array index (the schema default is 0,
+    // so every form-added layer ties): swapping equal z values alone would
+    // write the same config back.
+    if (a.layer.z === b.layer.z) [next[a.index], next[b.index]] = [next[b.index], next[a.index]];
     put({ ...config, layers: next });
   };
 
@@ -112,7 +119,7 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
 
   const add = () => {
     const id = draft.trim();
-    if (!id || id in scenes) return;
+    if (!id || Object.hasOwn(scenes, id)) return;
     put({ ...config, scenes: { ...scenes, [id]: { layers: layers.map((l) => l.id) } } });
     setPicked(id);
     setDraft('');
@@ -120,12 +127,12 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
 
   const show = async () => {
     if (selected === null) return;
-    setPreviewDiagnostics(await ctx.gameComposition.previewScene(selected));
+    setPreview({ scene: selected, diagnostics: await ctx.gameComposition.previewScene(selected) });
   };
 
   const sceneDiagnostics = [
     ...diagnostics.filter((d) => d.plugin === 'scenes' && d.where === selected),
-    ...previewDiagnostics,
+    ...(preview?.scene === selected ? preview.diagnostics : []),
   ];
 
   return (
@@ -136,10 +143,7 @@ export function ScenesScreen({ ctx }: { ctx: Context }) {
             key={id}
             className={`e8-explorer-entry${id === selected ? ' e8-scenes-selected' : ''}`}
             data-testid={`scene-${id}`}
-            onClick={() => {
-              setPicked(id);
-              setPreviewDiagnostics([]);
-            }}
+            onClick={() => setPicked(id)}
           >
             <span className="e8-explorer-name">{id}</span>
           </li>
