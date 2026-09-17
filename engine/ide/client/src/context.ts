@@ -11,6 +11,7 @@ import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
 import * as gameComposition from './plugins/game-composition';
 import type { GameCompositionConfig } from './plugins/game-composition';
+import * as assetNodeTypes from './plugins/asset-node-types';
 import * as scenes from './plugins/scenes';
 import type { ScenesConfig } from './plugins/scenes';
 import * as gameDiagnostics from './plugins/diagnostics';
@@ -64,6 +65,9 @@ export async function createIdeClient(
   await ctx.plugin(workspace, config);
   await ctx.plugin(modules, config);
   await ctx.plugin(gameComposition, config);
+  // A pure contribution registry, like `viewers` — composed right before
+  // `scenes`, whose canvas drop handler (a later task) is its first reader.
+  await ctx.plugin(assetNodeTypes);
   // The scene documents: reads `connection` (frames) and `shell` (tabs),
   // and the same `fetchFn`/`origin` `gameComposition` takes.
   await ctx.plugin(scenes, config);

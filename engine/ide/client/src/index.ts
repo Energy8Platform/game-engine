@@ -12,6 +12,7 @@ export * from './plugins/connection';
 export { useSlot, type SlotMeta, type SlotEntry, type SlotsService } from './plugins/slots';
 export { type LanguageDef, type LanguagesService } from './plugins/languages';
 export { type ViewerDef, type ViewerProps, type ViewersService } from './plugins/viewers';
+export { type AssetNodeType, type AssetNodeTypesService } from './plugins/asset-node-types';
 export { IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS } from './plugins/viewers-media';
 export {
   useShell,
