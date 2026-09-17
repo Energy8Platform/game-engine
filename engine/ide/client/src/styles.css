@@ -37,6 +37,7 @@
   --e8-radius-sm: 4px;
   --e8-activity-w: 56px;
   --e8-sidebar-w: 260px;
+  --e8-side-right-w: 280px;
   --e8-panel-h: 200px;
   --e8-status-h: 22px;
   --e8-title-h: 32px;
@@ -206,12 +207,13 @@ label {
   height: 100vh;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr);
+  grid-template-columns:
+    var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr) var(--e8-side-right-w);
   grid-template-rows: minmax(0, 1fr) auto var(--e8-status-h);
   grid-template-areas:
-    'activity sidebar editors'
-    'activity sidebar panel'
-    'status status status';
+    'activity sidebar editors right'
+    'activity sidebar panel right'
+    'status status status status';
   padding: var(--e8-gap) var(--e8-gap) 0;
   background: var(--e8-shell-bg);
   color: var(--e8-fg);
@@ -329,7 +331,8 @@ label {
    gap is a margin inside the column, so the column grows by it — the card
    stays `--e8-activity-w` wide, expanded or not. */
 .e8-shell.e8-sidebar-collapsed {
-  grid-template-columns: calc(var(--e8-activity-w) + var(--e8-gap)) 0 minmax(0, 1fr);
+  grid-template-columns:
+    calc(var(--e8-activity-w) + var(--e8-gap)) 0 minmax(0, 1fr) var(--e8-side-right-w);
 }
 .e8-shell.e8-sidebar-collapsed .e8-sidebar {
   display: none;
@@ -338,6 +341,30 @@ label {
   border-right: 1px solid var(--e8-border);
   border-radius: var(--e8-radius-lg);
   margin-right: var(--e8-gap);
+}
+
+.e8-side-right {
+  grid-area: right;
+  overflow: auto;
+  border-left: 1px solid var(--e8-border);
+  background: var(--e8-surface);
+}
+/* Same collapse rule as the left sidebar: nothing shown, or a shown key
+   nobody (any longer) registers, and the column is 0 rather than
+   `--e8-side-right-w` of empty chrome. */
+.e8-shell.e8-side-right-collapsed {
+  grid-template-columns: var(--e8-activity-w) var(--e8-sidebar-w) minmax(0, 1fr) 0;
+}
+.e8-shell.e8-side-right-collapsed .e8-side-right {
+  display: none;
+}
+/* Both collapsed at once: `.e8-sidebar-collapsed` above sets every column
+   on its own (it has to — no other rule owns the left two), so a rule
+   that only touched the right column here would lose that one's zeroed
+   left column the moment both classes land on the same element. One
+   combined rule keeps both zeroed regardless of which was written last. */
+.e8-shell.e8-sidebar-collapsed.e8-side-right-collapsed {
+  grid-template-columns: calc(var(--e8-activity-w) + var(--e8-gap)) 0 minmax(0, 1fr) 0;
 }
 
 /* Explorer: a view header with the title and three actions (new file, new

@@ -69,6 +69,17 @@ export interface ConnectionService {
    * ignore the return value.
    */
   report(diagnostic: Diagnostic): () => void;
+  /**
+   * Hears every well-formed frame the socket receives — BEFORE the type
+   * filter below narrows to `snapshot`/`diagnostics` — so a plugin that
+   * cares about a frame type this service itself ignores (`scenes`,
+   * `game-composition`, …) does not need its own socket. A listener that
+   * throws does not break the socket for its neighbours or for the
+   * service's own handling of the frame: the throw becomes a diagnostic
+   * through `report()` instead, `plugin: 'connection'`, `where: 'onFrame'`.
+   * Returns a disposer.
+   */
+  onFrame(listener: (frame: ServerMessage) => void): () => void;
 }
 
 export interface ConnectionConfig {
@@ -91,6 +102,7 @@ function diagnosticsEqual(a: Diagnostic, b: Diagnostic): boolean {
 
 export function apply(ctx: Context, config: ConnectionConfig) {
   const listeners = new Set<() => void>();
+  const frameListeners = new Set<(frame: ServerMessage) => void>();
   const socket = (config.socketFactory ?? ((url) => new WebSocket(url) as WebSocketLike))(
     config.url,
   );
@@ -206,6 +218,10 @@ export function apply(ctx: Context, config: ConnectionConfig) {
         for (const listener of listeners) listener();
       };
     },
+    onFrame(listener) {
+      frameListeners.add(listener);
+      return () => frameListeners.delete(listener);
+    },
   };
 
   socket.addEventListener('message', (event: { data: string }) => {
@@ -225,6 +241,28 @@ export function apply(ctx: Context, config: ConnectionConfig) {
       // turning one bad frame from the host into an unhandled exception
       // inside a socket event handler nothing here can catch.
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      // Every registered `onFrame` listener hears this frame, regardless of
+      // whether the type filter just below is about to ignore it — see
+      // `onFrame`'s own doc comment. A throwing listener must not stop a
+      // sibling listener from hearing the same frame, nor break this
+      // service's own snapshot/diagnostics handling right after: caught
+      // per-listener and turned into data through `report()` instead of an
+      // unhandled exception inside a socket event handler nothing here
+      // could catch.
+      for (const frameListener of frameListeners) {
+        try {
+          frameListener(parsed as ServerMessage);
+        } catch (error) {
+          service.report(
+            diagnostic(
+              'error',
+              'connection',
+              'onFrame',
+              `a frame listener threw: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+        }
+      }
       if (
         (parsed as { type?: unknown }).type !== 'snapshot' &&
         (parsed as { type?: unknown }).type !== 'diagnostics'

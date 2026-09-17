@@ -1124,3 +1124,39 @@ describe('Shell', () => {
     expect(screen.getByTestId('panel')).toHaveTextContent('PANEL');
   });
 });
+
+describe('right sidebar', () => {
+  it('is collapsed with nothing registered', () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
+  });
+
+  it('shows a registered contribution on showSideRight, hides on hideSideRight', () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+    ctx.slots.register({ name: 'shell.sideRight', key: 'props', title: 'Properties' }, () => (
+      <p>props here</p>
+    ));
+    act(() => ctx.shell.showSideRight('props'));
+    expect(screen.getByTestId('side-right-props')).toHaveTextContent('props here');
+    expect(screen.getByTestId('shell').className).not.toContain('e8-side-right-collapsed');
+    act(() => ctx.shell.hideSideRight());
+    expect(screen.queryByTestId('side-right-props')).toBeNull();
+  });
+
+  it('a retracted contribution collapses the region even while its key is shown', () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+    const off = ctx.slots.register(
+      { name: 'shell.sideRight', key: 'props', title: 'Properties' },
+      () => <p>x</p>,
+    );
+    act(() => ctx.shell.showSideRight('props'));
+    act(() => off());
+    expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
+  });
+});

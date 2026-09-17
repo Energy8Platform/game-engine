@@ -309,6 +309,24 @@ describe('connection', () => {
     });
   });
 
+  it('onFrame hears every well-formed frame, including types the service itself ignores', async () => {
+    const socket = new FakeSocket();
+    const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+    socket.open();
+    const heard: string[] = [];
+    const off = ctx.connection.onFrame((f) => heard.push(f.type));
+
+    socket.receive({ type: 'scenes', scenes: [], diagnostics: [] });
+    socket.receive('not json' as unknown as ServerMessage);
+    socket.receive({ type: 'snapshot', snapshot: SNAPSHOT });
+
+    expect(heard).toEqual(['scenes', 'snapshot']);
+
+    off();
+    socket.receive({ type: 'scenes', scenes: [], diagnostics: [] });
+    expect(heard).toHaveLength(2);
+  });
+
   it('ignores a well-formed but unrecognised frame instead of throwing', async () => {
     const socket = new FakeSocket();
     const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });

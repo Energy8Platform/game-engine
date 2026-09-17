@@ -62,6 +62,7 @@ export interface ShellService {
     document: 'shell.document';
     panel: 'shell.panel';
     status: 'shell.status';
+    sideRight: 'shell.sideRight';
   };
 
   /** Opens an instance tab — a file from Explorer. Same key twice activates. */
@@ -110,6 +111,13 @@ export interface ShellService {
   panelCollapsed(): boolean;
   togglePanel(): void;
 
+  /** The `shell.sideRight` key currently shown, or `undefined` — collapsed. */
+  sideRight(): string | undefined;
+  /** Shows the right sidebar's `shell.sideRight` contribution registered under `key`. */
+  showSideRight(key: string): void;
+  /** Collapses the right sidebar. */
+  hideSideRight(): void;
+
   /**
    * Called by the app once every registration effect has run. Until then
    * the hash is not checked, so a deep link to a contributed document does
@@ -138,6 +146,7 @@ const SLOT_NAMES: ShellService['slots'] = {
   document: 'shell.document',
   panel: 'shell.panel',
   status: 'shell.status',
+  sideRight: 'shell.sideRight',
 };
 
 const HASH_PREFIX = '#/doc/';
@@ -157,6 +166,7 @@ export function apply(ctx: Context) {
   const documents = new Map<string, OpenDocument>();
   const listeners = new Set<() => void>();
   let sidebarKey: string | undefined;
+  let sideRightKey: string | undefined;
   let panelCollapsed = false;
   let ready = false;
   let pending: string | undefined;
@@ -485,6 +495,20 @@ export function apply(ctx: Context) {
       notify();
     },
 
+    sideRight() {
+      return sideRightKey;
+    },
+
+    showSideRight(key) {
+      sideRightKey = key;
+      notify();
+    },
+
+    hideSideRight() {
+      sideRightKey = undefined;
+      notify();
+    },
+
     ready() {
       // Idempotent: the app calls this once every registration effect has
       // run, but a second call must not re-report the same deep link.
@@ -534,6 +558,7 @@ export function useShell(ctx: Context): {
   pending: string | undefined;
   sidebar: string | undefined;
   panelCollapsed: boolean;
+  sideRight: string | undefined;
 } {
   const read = () => ({
     documents: ctx.shell.documents(),
@@ -541,6 +566,7 @@ export function useShell(ctx: Context): {
     pending: ctx.shell.pending(),
     sidebar: ctx.shell.sidebar(),
     panelCollapsed: ctx.shell.panelCollapsed(),
+    sideRight: ctx.shell.sideRight(),
   });
   const [state, setState] = useState(read);
   useEffect(() => {

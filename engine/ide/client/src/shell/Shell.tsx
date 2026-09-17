@@ -292,7 +292,7 @@ function DocumentTab({
  * to show, even though no slot named it.
  */
 export function Shell({ ctx }: { ctx: Context }) {
-  const { documents, active, pending, sidebar, panelCollapsed } = useShell(ctx);
+  const { documents, active, pending, sidebar, panelCollapsed, sideRight } = useShell(ctx);
   const [pendingClose, setPendingClose] = useState<string | undefined>(undefined);
   const sidebarSize = useResize(SIZE_KEYS.sidebar, 'x', 1);
   // Dragging the panel's top edge UP makes it taller, hence the sign.
@@ -385,6 +385,12 @@ export function Shell({ ctx }: { ctx: Context }) {
 
   const activeSidebarEntry =
     sidebar === undefined ? undefined : sidebarEntries.find((e) => e.key === sidebar);
+  const sideRightEntry =
+    sideRight === undefined
+      ? undefined
+      : ctx.slots
+          .list<SlotMeta & SidebarMeta>(ctx.shell.slots.sideRight)
+          .find((e) => e.key === sideRight);
   const pendingDoc =
     pendingClose === undefined ? undefined : documents.find((d) => d.key === pendingClose);
 
@@ -398,8 +404,15 @@ export function Shell({ ctx }: { ctx: Context }) {
   return (
     <div
       // No sidebar chosen means its column is 0 wide (DESIGN.md §2), not
-      // 260px of empty chrome.
-      className={sidebar === undefined ? 'e8-shell e8-sidebar-collapsed' : 'e8-shell'}
+      // 260px of empty chrome. The right sidebar collapses the same way —
+      // nothing shown, or a shown key nobody (any longer) registers.
+      className={[
+        'e8-shell',
+        sidebar === undefined ? 'e8-sidebar-collapsed' : '',
+        sideRightEntry === undefined ? 'e8-side-right-collapsed' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       data-testid="shell"
       style={sizes}
     >
@@ -496,6 +509,14 @@ export function Shell({ ctx }: { ctx: Context }) {
           </div>
         ) : null}
       </div>
+
+      <aside className="e8-side-right" data-testid="side-right">
+        {sideRightEntry ? (
+          <div data-testid={`side-right-${sideRight}`}>
+            <sideRightEntry.component ctx={ctx} />
+          </div>
+        ) : null}
+      </aside>
 
       <div className="e8-panel" data-testid="panel">
         <div className="e8-resize e8-resize-y" data-testid="resize-panel" {...panelSize.handlers} />
