@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@energy8engine/contracts": "*",
+    "@energy8engine/diagnostics": "*",
     "@energy8engine/play-loop": "*",
     "@energy8engine/stage": "*",
     "@energy8platform/game-engine": "^0.41.0",

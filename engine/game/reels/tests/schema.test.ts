@@ -18,6 +18,11 @@ describe('@energy8engine/reels/schema', () => {
     expect(() => Config({ config: { grid: { cols: 'five' } } } as never)).toThrow();
   });
 
+  it('defaults layer to reels, and accepts a named one', () => {
+    expect(Config({ config: { grid: { cols: 5, rows: 3 } } }).layer).toBe('reels');
+    expect(Config({ config: { grid: { cols: 5, rows: 3 } }, layer: 'ui' }).layer).toBe('ui');
+  });
+
   it('survives toJSON → new Schema, with the restart meta where the form reads it', () => {
     const node = new Schema(Config.toJSON()) as Schema;
     expect(node.dict!.config.dict!.grid.dict!.cols.meta.extra?.applies).toBe(undefined);

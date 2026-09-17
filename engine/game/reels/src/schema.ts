@@ -23,4 +23,5 @@ export const Config = Schema.object({
     }),
   }).description('reel grid'),
   board: Schema.any().description('initial board, board[col][row]; empty cells by default'),
+  layer: Schema.string().default('reels').description('stage layer to mount the board into'),
 });
