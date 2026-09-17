@@ -1,160 +1,406 @@
 /**
- * Scenes against the script (spec: scenes and layers, host half). The
- * `stage1` row's `scenes` are keyed by spin stage, so the two files that
- * name stages — `e8.patch.yml` and `game/script.spin` — can drift apart,
- * and nothing in either would notice: a scene with no stage is never
- * entered, a stage with no scene shows every layer. `checkScenes` says so,
- * reported through `ideRpc.reportGameDiagnostics('scenes', …)` — the
- * host's own list, replaced whole each time, so a fixed row is taken back
- * by the next check rather than left standing.
+ * The scene documents, host half (spec: scene editor §6). One file per
+ * scene, `scenes/<id>.scene.yml`, read through `files` and kept parsed
+ * here; `checkScenes` is everything the host can say about the set
+ * without running the game (a parse failure, an id off its file name, a
+ * duplicate node, a dangling or circular `scene` reference, an image
+ * whose file is not in the tree, props the type's schema refuses, an
+ * unknown type — the last two only once the game has reported its
+ * `node-types`, since the schemas travel in that frame). Reported through
+ * `ideRpc.reportGameDiagnostics('scenes', …)`, replaced whole each time.
  *
- * Re-checked on the two things that move either side: a row write
- * (`game-composition/written`, after `runtime-assets.ts`'s PUT has
- * re-read `project` and `spinSchema`) and a `.spin` write or removal
- * through `files.ts` (`files/written`/`files/removed` — `spinSchema` is
- * re-read here first; nothing else re-reads it on a save). Neither
- * service emits on its own.
+ * Re-read on ANY `files/written`/`files/removed` (an image may have
+ * appeared, not only a document), on `game/node-types`, and on a game row
+ * write (`game-composition/written` — the `reels1` warning depends on the
+ * rows). Every re-read broadcasts the set as a `scenes` frame to every
+ * `/ide` socket, root and preview alike; the boot read does not (nobody
+ * is connected yet, and both sides fetch `GET /api/scenes` on boot).
  *
- * `POST /api/scenes/preview { scene }` is the Scenes screen's "show me":
- * the frame goes to every `/ide` socket (`broadcastScenePreview`), and the
+ * `POST /api/scenes/preview { scene }` is the sidebar's "show me": the
+ * frame goes to every `/ide` socket (`broadcastScenePreview`), and the
  * answer carries a warning when no preview is up to receive it — the
  * frame still goes, harmlessly, to whoever is listening.
  */
+import { basename } from 'node:path';
 import type { Context } from 'cordis';
-import { diagnostic, type Diagnostic, type DiagnosticsResponse } from '@energy8engine/contracts';
+import type { Server } from '@cordisjs/plugin-server';
+import yaml from 'js-yaml';
+import Schema from 'schemastery';
+import {
+  diagnostic,
+  type Diagnostic,
+  type DiagnosticsResponse,
+  type NodeTypeInfo,
+  type SceneDoc,
+  type SceneNode,
+  type ScenesResponse,
+} from '@energy8engine/contracts';
+import type { FilesService } from './files';
 
+declare module 'cordis' {
+  interface Context {
+    scenesHost: ScenesHostService;
+  }
+}
+
+export interface ScenesHostService {
+  /** Registers `GET /api/scenes` on another server — the preview's, so the game reads the set same-origin. */
+  attachGameRoutes(server: Server): void;
+  /** The last read set, as `GET /api/scenes` answers it. */
+  state(): ScenesResponse;
+}
+
+export const name = 'scenes';
+export const inject = ['server', 'ideRpc', 'project', 'files'];
+
+const SCENE_FILE = /^scenes\/([a-z0-9_]+)\.scene\.yml$/;
+const ID = /^[a-z0-9_]+$/;
 /**
- * Every scene is a stage, every stage a scene, every scene's layers
- * declared (the schema's default `reels` when the row declares none),
- * layer ids unique. Silent for a config with neither `layers`
- * nor `scenes` (an older stage row); and "stage has no scene" is only
- * said once at least one scene IS declared — a row with none has opted
- * out of scenes, and there is nothing to cross-check its stages against.
+ * The props every node accepts, applied by the runtime — a type's own
+ * schema never lists them, so they are set aside before the schema sees
+ * the props. Mirrors `@energy8engine/scenes/common-schema` (`COMMON`);
+ * not imported, so the host stays free of the runtime package.
  */
-export function checkScenes(stageConfig: unknown, stageNames: string[]): Diagnostic[] {
-  const cfg = (stageConfig ?? {}) as { layers?: unknown; scenes?: unknown };
-  if (!Array.isArray(cfg.layers) && !cfg.scenes) return [];
+const COMMON_PROPS = ['x', 'y', 'scale', 'rotation', 'alpha', 'visible', 'anchor'];
+
+export interface ParsedDoc {
+  /** Project-relative, `scenes/<id>.scene.yml`. */
+  file: string;
+  doc: SceneDoc;
+}
+
+const sceneId = (file: string): string => basename(file, '.scene.yml');
+
+/** Every node in draw order, children after their parent. */
+function* walk(nodes: SceneNode[]): Generator<SceneNode> {
+  for (const n of nodes) {
+    yield n;
+    if (n.children) yield* walk(n.children);
+  }
+}
+
+export function checkScenes(
+  docs: ParsedDoc[],
+  nodeTypes: NodeTypeInfo[],
+  hasFile: (path: string) => boolean,
+  hasReelsRow: boolean,
+): Diagnostic[] {
   const out: Diagnostic[] = [];
-  // A hand-typed `layers: bg` or `scenes: x` is not this check's subject
-  // (the row's own schema refuses it on a PUT): read as empty, never thrown
-  // on. No `layers` key at all is the schema default — one layer, `reels`
-  // (mirrors `@energy8engine/stage`'s schema); an explicit `[]` stays empty.
-  const ids = Array.isArray(cfg.layers)
-    ? cfg.layers.map((l) => String((l as { id?: unknown } | null)?.id ?? ''))
-    : cfg.layers === undefined
-      ? ['reels']
-      : [];
-  for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) {
+  const err = (where: string, message: string, fix?: string) =>
+    out.push(diagnostic('error', 'scenes', where, message, fix));
+  const ids = new Set(docs.map((d) => sceneId(d.file)));
+  const schemas = new Map(nodeTypes.map((t) => [t.type, t.schema]));
+  // scene → the scenes its `scene` nodes name (known ones only).
+  const refs = new Map<string, Set<string>>();
+  let reelsNode = false;
+
+  for (const { file, doc } of docs) {
+    const scene = sceneId(file);
+    if (doc.id !== scene) {
+      out.push(
+        diagnostic(
+          'warning',
+          'scenes',
+          scene,
+          `"${file}" says id "${doc.id}"; the file name wins, so it is "${scene}"`,
+          `set id: ${scene}`,
+        ),
+      );
+    }
+    const seen = new Set<string>();
+    const targets = new Set<string>();
+    refs.set(scene, targets);
+    for (const node of walk(doc.nodes)) {
+      const where = `${scene}/${node.id}`;
+      if (seen.has(node.id))
+        err(where, `node "${node.id}" is declared twice`, 'give each node one id');
+      seen.add(node.id);
+      if (node.type === 'reels') reelsNode = true;
+      const schema = schemas.get(node.type);
+      if (nodeTypes.length && schema === undefined) {
+        err(
+          where,
+          `node type "${node.type}" is not one the game registered`,
+          'use a registered type',
+        );
+      } else if (schema !== undefined) {
+        const own = Object.fromEntries(
+          Object.entries(node.props).filter(([k]) => !COMMON_PROPS.includes(k)),
+        );
+        try {
+          new Schema(schema as Schema)(own);
+        } catch (error) {
+          err(
+            where,
+            `props: ${error instanceof Error ? error.message : String(error)}`,
+            'fix the value',
+          );
+        }
+      }
+      if (node.type === 'image' && typeof node.props.src === 'string' && !hasFile(node.props.src)) {
+        err(
+          where,
+          `image "${node.props.src}" is not in the project`,
+          'add the file, or point at one that is there',
+        );
+      }
+      if (node.type === 'scene' && typeof node.props.scene === 'string') {
+        if (ids.has(node.props.scene)) targets.add(node.props.scene);
+        else
+          err(
+            where,
+            `scene "${node.props.scene}" does not exist`,
+            'create it, or name one that exists',
+          );
+      }
+    }
+  }
+
+  // ponytail: a DFS per `scene` node — O(n²) over a handful of documents.
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean =>
+    from === to ||
+    [...(refs.get(from) ?? [])].some(
+      (next) => !seen.has(next) && reaches(next, to, seen.add(next)),
+    );
+  for (const { file, doc } of docs) {
+    const scene = sceneId(file);
+    for (const node of walk(doc.nodes)) {
+      if (
+        node.type === 'scene' &&
+        typeof node.props.scene === 'string' &&
+        refs.get(scene)?.has(node.props.scene) &&
+        reaches(node.props.scene, scene)
+      ) {
+        err(
+          `${scene}/${node.id}`,
+          `scene "${node.props.scene}" leads back to "${scene}"`,
+          'a scene cannot contain itself',
+        );
+      }
+    }
+  }
+
+  if (hasReelsRow && !reelsNode) {
     out.push(
       diagnostic(
-        'error',
+        'warning',
         'scenes',
-        id,
-        `layer "${id}" is declared twice`,
-        'give each layer one id',
+        'reels1',
+        'a reels row is composed, but no scene has a `reels` node — the board is never shown',
+        'add a `reels` node to a scene',
       ),
     );
-  }
-  const known = new Set(ids);
-  const scenes = (
-    typeof cfg.scenes === 'object' && cfg.scenes !== null && !Array.isArray(cfg.scenes)
-      ? cfg.scenes
-      : {}
-  ) as Record<string, { layers?: unknown } | null>;
-  for (const [scene, spec] of Object.entries(scenes)) {
-    const layers = Array.isArray(spec?.layers) ? spec.layers : [];
-    const missing = layers.map(String).filter((l) => !known.has(l));
-    if (missing.length) {
-      out.push(
-        diagnostic(
-          'error',
-          'scenes',
-          scene,
-          `scene "${scene}" names ${missing.map((m) => `"${m}"`).join(', ')}, which stage1.config.layers does not declare`,
-          'declare the layer, or drop it from the scene',
-        ),
-      );
-    }
-    if (!stageNames.includes(scene)) {
-      out.push(
-        diagnostic(
-          'warning',
-          'scenes',
-          scene,
-          `scene "${scene}" has no stage of that name in the script`,
-          'name scenes after `enum … tag stage` members',
-        ),
-      );
-    }
-  }
-  for (const stage of Object.keys(scenes).length ? stageNames : []) {
-    if (!(stage in scenes)) {
-      out.push(
-        diagnostic(
-          'warning',
-          'scenes',
-          stage,
-          `stage "${stage}" has no scene — every layer will be shown in it`,
-          'add a scene of that name',
-        ),
-      );
-    }
   }
   return out;
 }
 
-export const name = 'scenes';
-export const inject = ['server', 'ideRpc', 'project', 'spinSchema'];
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** `{ id, nodes[] }` with every node `{ id, type, props?, children? }`, or the reason it is not. */
+export function parseDoc(value: unknown): { doc?: SceneDoc; reason?: string } {
+  if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.nodes)) {
+    return { reason: 'a scene document is { id: string, nodes: [...] }' };
+  }
+  const nodes = parseNodes(value.nodes);
+  return typeof nodes === 'string' ? { reason: nodes } : { doc: { id: value.id, nodes } };
+}
+
+function parseNodes(list: unknown[]): SceneNode[] | string {
+  const out: SceneNode[] = [];
+  for (const v of list) {
+    if (!isRecord(v) || typeof v.id !== 'string' || typeof v.type !== 'string') {
+      return 'a node is { id: string, type: string, props?: {...}, children?: [...] }';
+    }
+    if (v.props !== undefined && !isRecord(v.props)) return `node "${v.id}": props is not a map`;
+    const node: SceneNode = { id: v.id, type: v.type, props: v.props ?? {} };
+    if (v.children !== undefined) {
+      if (!Array.isArray(v.children)) return `node "${v.id}": children is not a list`;
+      const children = parseNodes(v.children);
+      if (typeof children === 'string') return children;
+      node.children = children;
+    }
+    out.push(node);
+  }
+  return out;
+}
+
+async function readAll(
+  files: FilesService,
+  paths: string[],
+): Promise<{ docs: ParsedDoc[]; diagnostics: Diagnostic[] }> {
+  const docs: ParsedDoc[] = [];
+  const diagnostics: Diagnostic[] = [];
+  for (const file of paths.filter((p) => SCENE_FILE.test(p))) {
+    const { bytes } = await files.read(file);
+    let reason: string | undefined;
+    if (bytes) {
+      try {
+        const parsed = parseDoc(yaml.load(Buffer.from(bytes).toString('utf8')));
+        if (parsed.doc) docs.push({ file, doc: parsed.doc });
+        reason = parsed.reason;
+      } catch (error) {
+        reason = error instanceof Error ? error.message : String(error);
+      }
+    } else reason = 'cannot read the file';
+    if (reason) {
+      diagnostics.push(
+        diagnostic(
+          'error',
+          'scenes',
+          sceneId(file),
+          `"${file}" is skipped: ${reason}`,
+          'fix the file',
+        ),
+      );
+    }
+  }
+  return { docs, diagnostics };
+}
 
 export function apply(ctx: Context): void {
-  // Reported only once there is, or was, something to say: an empty
-  // report from a speaker that never spoke would tell a client "nothing
-  // to report" where it had "no game connected yet" (see `rpc.ts`).
-  let spoken = false;
-  const recheck = () => {
-    const rows = ctx.project.composition.rows;
-    const row =
-      rows.find((r) => r.name === '@energy8engine/stage') ?? rows.find((r) => r.id === 'stage1');
-    const stages = Object.keys(ctx.spinSchema.schema?.stages ?? {});
-    const found = row ? checkScenes(row.config, stages) : [];
-    if (found.length || spoken) ctx.ideRpc.reportGameDiagnostics('scenes', found);
-    spoken = found.length > 0;
-  };
-  recheck();
-  ctx.on('game-composition/written', recheck);
-  const onSpin = ({ path }: { path: string }) => {
-    // `reload` never throws; the catch covers `recheck` racing a dispose.
-    if (path.endsWith('.spin'))
-      void ctx.spinSchema
-        .reload()
-        .then(recheck)
-        .catch(() => {});
-  };
-  ctx.on('files/written', onSpin);
-  ctx.on('files/removed', onSpin);
+  let state: ScenesResponse = { scenes: [], diagnostics: [], nodeTypes: [] };
+  // The last list handed to `ideRpc`, by value; `''` before anything was
+  // said. A report is a frame to every client, so an unchanged list is not
+  // repeated (a `.spin` save must not re-send the same standing warning),
+  // and an empty one is only said once something was said (an empty frame
+  // says "nothing wrong", which a client with no game yet must not hear
+  // from a speaker that never spoke).
+  let reported = '';
 
-  ctx.server.post('/api/scenes/preview', async (req, res) => {
-    let body: unknown;
+  const refresh = async (broadcast: boolean): Promise<void> => {
+    const paths = new Set((await ctx.files.tree()).entries.map((e) => e.path));
+    const { docs, diagnostics } = await readAll(ctx.files, [...paths]);
+    const hasReelsRow = ctx.project.composition.rows.some(
+      (r) => r.name === '@energy8engine/reels' || r.id === 'reels1',
+    );
+    const nodeTypes = ctx.ideRpc.nodeTypes();
+    const found = [
+      ...diagnostics,
+      ...checkScenes(docs, nodeTypes, (p) => paths.has(p), hasReelsRow),
+    ];
+    // The file name wins for lookup — the mismatch is already a warning above.
+    const scenes = docs.map((d) => ({ ...d.doc, id: sceneId(d.file) }));
+    state = { scenes, diagnostics: found, nodeTypes };
+    const key = found.length ? JSON.stringify(found) : '';
+    if (key !== reported) ctx.ideRpc.reportGameDiagnostics('scenes', found);
+    reported = key;
+    if (broadcast) ctx.ideRpc.broadcastScenes({ scenes, diagnostics: found });
+  };
+  void refresh(false);
+  // Every listener is `void refresh(true)`; `refresh` itself never throws
+  // (`tree`/`read` do not), and the catch covers a refresh racing a dispose.
+  const again = () => void refresh(true).catch(() => {});
+  ctx.on('files/written', again);
+  ctx.on('files/removed', again);
+  ctx.on('game/node-types', again);
+  ctx.on('game-composition/written', again);
+
+  type Handler = Parameters<Server['get']>[1];
+  type Req = Parameters<Handler>[0];
+  type Res = Parameters<Handler>[1];
+  const refuse = (res: Res, status: number, where: string, message: string, fix?: string) => {
+    res.status = status;
+    const refusal: DiagnosticsResponse = {
+      diagnostics: [diagnostic('error', 'scenes', where, message, fix)],
+    };
+    res.json(refusal);
+  };
+  const bodyOf = async (req: Req): Promise<unknown> => {
     try {
-      body = await req.json();
+      return await req.json();
     } catch {
-      body = undefined;
+      return undefined;
     }
-    const scene = (body as { scene?: unknown } | null | undefined)?.scene;
+  };
+  /** Files' own refusal, in the shape and status `files.ts` would have given it. */
+  const relay = (res: Res, diagnostics: Diagnostic[]): boolean => {
+    if (!diagnostics.length) return false;
+    res.status = diagnostics[0].code === 'not-found' ? 404 : 400;
+    res.json({ diagnostics } satisfies DiagnosticsResponse);
+    return true;
+  };
+  const file = (id: string) => `scenes/${id}.scene.yml`;
+
+  const get: Handler = async (_req, res) => {
+    res.json(state);
+  };
+
+  const put = async (req: Req, res: Res) => {
+    const { id } = req.params;
+    if (!ID.test(id)) return refuse(res, 400, id, `"${id}" is not a scene id`, 'use [a-z0-9_]+');
+    const { doc, reason } = parseDoc(await bodyOf(req));
+    if (!doc) return refuse(res, 400, id, `PUT ${req.path}: ${reason}`);
+    if (doc.id !== id) {
+      return refuse(
+        res,
+        400,
+        id,
+        `the body says id "${doc.id}", the route "${id}"`,
+        `set id: ${id}`,
+      );
+    }
+    const bytes = Buffer.from(yaml.dump({ id, nodes: doc.nodes }, { noRefs: true }));
+    if (relay(res, (await ctx.files.write(file(id), bytes)).diagnostics)) return;
+    await refresh(false);
+    res.json(state);
+  };
+
+  const post = async (req: Req, res: Res) => {
+    const id = (await bodyOf(req)) as { id?: unknown } | null | undefined;
+    if (!isRecord(id) || typeof id.id !== 'string' || !ID.test(id.id)) {
+      return refuse(
+        res,
+        400,
+        req.path,
+        `POST ${req.path} needs {"id": string} matching [a-z0-9_]+`,
+      );
+    }
+    const path = file(id.id);
+    if ((await ctx.files.read(path)).bytes) {
+      return refuse(res, 400, id.id, `"${path}" already exists`, 'pick another id');
+    }
+    const write = await ctx.files.write(path, Buffer.from(`id: ${id.id}\nnodes: []\n`));
+    if (relay(res, write.diagnostics)) return;
+    await refresh(false);
+    res.json(state);
+  };
+
+  const del = async (req: Req, res: Res) => {
+    const { id } = req.params;
+    if (!ID.test(id)) return refuse(res, 404, id, `"${id}" is not a scene id`);
+    if (relay(res, (await ctx.files.remove(file(id))).diagnostics)) return;
+    await refresh(false);
+    res.json(state);
+  };
+
+  const select = async (req: Req, res: Res) => {
+    const body = await bodyOf(req);
+    if (
+      !isRecord(body) ||
+      typeof body.scene !== 'string' ||
+      (body.node !== null && typeof body.node !== 'string')
+    ) {
+      return refuse(
+        res,
+        400,
+        req.path,
+        `POST ${req.path} needs {"scene": string, "node": string | null}`,
+      );
+    }
+    ctx.ideRpc.broadcastSceneSelect({ scene: body.scene, node: body.node });
+    res.json({ diagnostics: [] } satisfies DiagnosticsResponse);
+  };
+
+  const preview = async (req: Req, res: Res) => {
+    const scene = ((await bodyOf(req)) as { scene?: unknown } | null | undefined)?.scene;
     if (typeof scene !== 'string' || scene === '') {
-      res.status = 400;
-      const refusal: DiagnosticsResponse = {
-        diagnostics: [
-          diagnostic(
-            'error',
-            'scenes',
-            req.path,
-            `POST ${req.path} needs a JSON body shaped {"scene": string}`,
-          ),
-        ],
-      };
-      res.json(refusal);
-      return;
+      return refuse(
+        res,
+        400,
+        req.path,
+        `POST ${req.path} needs a JSON body shaped {"scene": string}`,
+      );
     }
     ctx.ideRpc.broadcastScenePreview({ scene });
     const response: DiagnosticsResponse = {
@@ -171,5 +417,18 @@ export function apply(ctx: Context): void {
           ],
     };
     res.json(response);
+  };
+
+  ctx.server.get('/api/scenes', get);
+  ctx.server.post('/api/scenes', post);
+  // The literal routes before `:id` — measured in `scenes.test.ts`
+  // (`POST /api/scenes/select` must not be a `:id`).
+  ctx.server.post('/api/scenes/preview', preview);
+  ctx.server.post('/api/scenes/select', select);
+  ctx.server.put('/api/scenes/:id', put);
+  ctx.server.delete('/api/scenes/:id', del);
+  ctx.provide('scenesHost', {
+    attachGameRoutes: (server) => server.get('/api/scenes', get),
+    state: () => state,
   });
 }

@@ -1,0 +1,6 @@
+# No `bundles/` dir here on purpose: `e8-base` resolves to the repo's own
+# `engine/bundles/e8-base` (the fallback `plugins/project.ts` documents),
+# so this fixture composes the REAL eight rows and their real packages —
+# the shape `runtime-assets.test.ts`'s schema/hot assertions are about.
+bundles:
+  - e8-base

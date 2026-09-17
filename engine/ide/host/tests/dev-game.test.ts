@@ -283,6 +283,11 @@ describe('dev-game — /@fs/ containment does not cost legitimate multi-file plu
     const helperRes = await fetch(`${preview(host.ctx)}${helperUrl}`);
     expect(helperRes.status).toBe(200);
     expect(await helperRes.text()).toContain('HELPER_LOADED');
+
+    // `scenes.ts`'s set is on the preview too (`scenesHost.attachGameRoutes`).
+    const scenes = await fetch(`${preview(host.ctx)}/api/scenes`);
+    expect(scenes.status).toBe(200);
+    expect(await scenes.json()).toMatchObject({ scenes: [], nodeTypes: [] });
   });
 });
 
@@ -793,6 +798,14 @@ describe('dev-game — restart on a script.spin write', () => {
       recursive: true,
       filter: (src) => !src.includes('node_modules') && !src.endsWith('tsconfig.json'),
     });
+    // A scene with the board in it, so the host's `scenes` speaker has
+    // nothing to say about this copy and every host frame below is the
+    // session's alone (`first-slot` itself gets its scenes in a later slice).
+    mkdirSync(join(dir, 'scenes'));
+    writeFileSync(
+      join(dir, 'scenes', 'base_game.scene.yml'),
+      'id: base_game\nnodes:\n  - id: board\n    type: reels\n    props: {}\n',
+    );
     restartTestDirs.push(dir);
     return dir;
   }
