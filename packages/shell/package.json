@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/shell",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "Energy8 branded game shell \u2014 one logic core, pluggable html/pixi renderers behind a stable contract.",
   "type": "module",
   "main": "./dist/index.cjs.js",
