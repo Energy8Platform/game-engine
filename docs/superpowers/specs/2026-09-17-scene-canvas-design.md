@@ -206,7 +206,9 @@ as the Explorer does), then the same as a path.
 - `assets/logo.png` (a real 64×64 PNG, the Energy8 mark or a placeholder)
   and `scenes/base_game.scene.yml` gains
   `{ id: logo, type: image, props: { src: assets/logo.png, x: 240, y: 40, anchor: 0.5 } }`
-  before `board` — the first real image in the example (closes slice-17
+  after `board` (the board's view covers the whole design, and a press
+  picks the topmost node — drawn first, the logo could never be picked
+  with the pointer) — the first real image in the example (closes slice-17
   debt 2: the pixi `Assets` adapter is exercised by the game and the e2e).
 - `package.json` (both): `@energy8engine/scene-edit` as a dependency.
 - `README.md`: one paragraph on the canvas.

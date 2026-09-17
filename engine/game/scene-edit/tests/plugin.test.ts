@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
-import { Container, Graphics, Texture } from 'pixi.js';
+import { Container, Graphics, Texture, type FederatedPointerEvent } from 'pixi.js';
 import Schema from 'schemastery';
 import type { SceneDoc } from '@energy8engine/contracts';
 import { container, createNodeTypes, createScenes, image, type AssetLoader, type NodeType } from '@energy8engine/scenes';
@@ -110,6 +110,67 @@ describe('scene-edit plugin', () => {
     scenes.replace([{ id: 'a', nodes: [] }, DOCS[1]]);
     frame();
     expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: null } });
+  });
+
+  // The IDE answers every edit with a `replace` of the set — the round trip
+  // that used to remount the node under the NEXT gesture, or snap it back
+  // under key repeat. Pointer gestures are driven as pixi delivers them: a
+  // `pointerdown` on the gizmo's body (`layer.children[1]`), then the
+  // layer's `globalpointermove` / `pointerup`.
+  const ev = (x: number, y: number) => ({ global: { x, y }, stopPropagation() {}, shiftKey: false, altKey: false }) as unknown as FederatedPointerEvent;
+  const withHi = (props: Record<string, number>): SceneDoc[] => [
+    { id: 'a', nodes: [DOCS[0].nodes[0], { id: 'hi', type: 'box', props }] },
+    DOCS[1],
+  ];
+
+  it('an edit is applied locally (rounded) before it is told; the IDE echo between two drags does not cut the second', async () => {
+    const { edit, scenes, events, ready, frame, gizmoLayer, call } = boot();
+    await ready();
+    edit().pickAndSelect(65, 65); // hi, at design (120,120)
+    const layer = gizmoLayer()!;
+    const body = layer.children[1];
+    // +20 screen px is +40 design at scale 0.5 — arriving as a float, written rounded.
+    body.emit('pointerdown', ev(70, 70));
+    layer.emit('globalpointermove', ev(89.999999, 70));
+    layer.emit('pointerup', ev(89.999999, 70));
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 160, y: 120 } } });
+    expect(scenes.docs().get('a')!.nodes[1].props).toEqual({ x: 160, y: 120 });
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(160);
+    // The second drag starts on the fresh view; the IDE's echo of the first lands mid-way.
+    body.emit('pointerdown', ev(90, 70));
+    layer.emit('globalpointermove', ev(110, 70));
+    const view = scenes.view({ scene: 'a', node: 'hi' });
+    await call('replace', { docs: withHi({ x: 160, y: 120 }) });
+    frame();
+    expect(scenes.view({ scene: 'a', node: 'hi' })).toBe(view); // JSON-equal: no remount
+    layer.emit('pointerup', ev(110, 70));
+    expect(events().filter((e) => e.event === 'edit')).toHaveLength(2);
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 200, y: 120 } } });
+  });
+
+  it('a stale echo of an earlier nudge does not snap the node back under key repeat; a refused write does', async () => {
+    const { edit, scenes, events, ready, frame, key, call } = boot();
+    await ready();
+    edit().pickAndSelect(65, 65);
+    key('ArrowRight');
+    key('ArrowRight');
+    await call('replace', { docs: withHi({ x: 121, y: 120 }) }); // the first nudge's answer, the second's still out
+    frame();
+    key('ArrowRight');
+    const xs = () => events().filter((e) => e.event === 'edit').map((e) => (e.payload as { props: { x: number } }).props.x);
+    expect(xs()).toEqual([121, 122, 123]);
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(123);
+    // The last nudge's answer: acknowledged, nothing remounts.
+    const view = scenes.view({ scene: 'a', node: 'hi' });
+    await call('replace', { docs: withHi({ x: 123, y: 120 }) });
+    frame();
+    expect(scenes.view({ scene: 'a', node: 'hi' })).toBe(view);
+    // A refusal: the IDE tells the set as it stands, and the canvas takes it as is.
+    key('ArrowRight');
+    await call('replace', { docs: DOCS });
+    frame();
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(120);
+    expect(edit().snapshot().selected).toBe('hi');
   });
 
   it('a replace request from the IDE swaps the document set — before ready too', async () => {

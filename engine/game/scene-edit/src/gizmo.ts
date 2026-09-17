@@ -36,7 +36,10 @@ export interface GizmoOptions {
 }
 
 export interface Gizmo {
-  /** Draws frame+handles from `view.getBounds()`; null hides. */
+  /**
+   * Draws frame+handles from `view.getBounds()`; null hides. The same node again (its view
+   * remounted, as a `replace` does) keeps a gesture in flight on the new view.
+   */
   attach(target: GizmoTarget | null): void;
   /** Re-read bounds (call every frame while attached). */
   refresh(): void;
@@ -195,8 +198,9 @@ export function createGizmo(o: GizmoOptions): Gizmo {
 
   return {
     attach(t) {
+      // The same node again (its view remounted under a gesture) keeps the gesture; another, or none, ends it.
+      if (t?.node !== target?.node) drag = null;
       target = t;
-      drag = null;
       redraw();
     },
     refresh: redraw,

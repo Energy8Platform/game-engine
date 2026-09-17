@@ -123,22 +123,8 @@ test('click selects, drag moves: the file gets the new x', async ({ page }) => {
   const at = await mapper(page.locator(CANVAS));
   const centre = at(240, 40);
 
-  // A press picks the TOPMOST node under it — and in `first-slot` that is
-  // the board (a 504×300 view at (−48,−48): the whole design), drawn after
-  // the logo. So the board goes back a step first (`[`), and only then is
-  // the logo the top node at its own centre.
-  await page.mouse.click(centre.x, centre.y);
-  await expect.poll(() => snapshot(frame).then((s) => s.selected)).toBe('board');
-  await expect(page.getByTestId('side-right-scenes').getByTestId('prop-id')).toHaveValue('board');
-  await page.keyboard.press('[');
-  await expect
-    .poll(sceneFile, { timeout: 10_000 })
-    .toMatch(/id: board[\s\S]*id: logo[\s\S]*id: big_win/);
-  // The IDE tells the canvas the new set (`replace`); the view order follows.
-  await expect
-    .poll(() => snapshot(frame).then((s) => Object.keys(s.bounds)), { timeout: 10_000 })
-    .toEqual(['board', 'logo', 'big_win']);
-
+  // A press picks the TOPMOST node under it — the logo, drawn after the
+  // board (a 504×300 view at (−48,−48): the whole design) in `first-slot`.
   await page.mouse.click(centre.x, centre.y);
   await expect
     .poll(() => snapshot(frame).then((s) => s.selected), { timeout: 10_000 })
@@ -147,23 +133,22 @@ test('click selects, drag moves: the file gets the new x', async ({ page }) => {
 
   await drag(page, centre, at(280, 40));
   // The pointer's travel comes back through the zoom as a float (measured:
-  // `279.99998474121094`), so the value is parsed, not matched as text.
+  // `279.99998474121094`); the canvas rounds what it writes to 2 decimals.
   const x = () =>
     Number(
       /id: logo\n\s+type: image\n\s+props:\n\s+src: assets\/logo\.png\n\s+x: ([\d.]+)/.exec(
         sceneFile(),
       )?.[1],
     );
-  await expect.poll(x, { timeout: 10_000 }).toBeCloseTo(280, 3);
-  await expect.poll(() => snapshot(frame).then((s) => s.bounds.logo.x)).toBeCloseTo(248, 3);
+  await expect.poll(x, { timeout: 10_000 }).toBe(280);
+  await expect.poll(() => snapshot(frame).then((s) => s.bounds.logo.x)).toBe(248);
 });
 
 test('a corner drag scales, ] moves it forward', async ({ page }) => {
   await openSceneTab(page);
   const frame = await readyCanvas(page);
   const at = await mapper(page.locator(CANVAS));
-  // Picked from the tree (the board covers the logo — see above); the
-  // canvas mirrors the selection and the gizmo sits above every node.
+  // Picked from the tree; the canvas mirrors the selection and the gizmo sits above every node.
   await page.getByTestId('canvas-tree').getByTestId('node-logo').click();
   await expect.poll(() => snapshot(frame).then((s) => s.selected)).toBe('logo');
 
@@ -184,7 +169,7 @@ test('a corner drag scales, ] moves it forward', async ({ page }) => {
   await page.keyboard.press(']');
   await expect
     .poll(sceneFile, { timeout: 10_000 })
-    .toMatch(/id: board[\s\S]*id: logo[\s\S]*id: big_win/);
+    .toMatch(/id: board[\s\S]*id: big_win[\s\S]*id: logo/);
   expect(
     await frame.evaluate(() =>
       (window as any).__e8edit.emitted().map((e: { event: string }) => e.event),

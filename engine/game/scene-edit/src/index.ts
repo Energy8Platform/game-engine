@@ -72,12 +72,35 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   let alive = true;
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
   scenes.resize(app.screen.width, app.screen.height);
+
+  // Every canvas edit is applied HERE first (`scenes.replace` with the node's
+  // props merged), then told to the IDE, whose answer comes back as a
+  // `replace` of the same set — JSON-equal, so nothing remounts under a
+  // gesture in flight. Until it does, the edit is `pending`: the IDE's echo
+  // of an OLDER edit (key repeat outruns the round trip) must not snap the
+  // node back, so an incoming set acknowledges the latest pending edit it
+  // reflects and the ones after it are laid over it again. A set that
+  // reflects none (a refused write, another writer) is taken as is.
+  const pending: { node: string; props: Record<string, number> }[] = [];
+  const patch = (docs: SceneDoc[], node: string, props: Record<string, number>): SceneDoc[] =>
+    docs.map((d) => d.id !== scene ? d : { ...d, nodes: d.nodes.map((n) => (n.id === node ? { ...n, props: { ...n.props, ...props } } : n)) });
+  const reflects = (docs: SceneDoc[], e: { node: string; props: Record<string, number> }): boolean => {
+    const n = docs.find((d) => d.id === scene)?.nodes.find((x) => x.id === e.node);
+    return !!n && Object.entries(e.props).every(([k, v]) => n.props[k] === v);
+  };
   // The IDE's documents, on every change: this page composes no `ide-bridge`
   // (its `scene-preview` handler would switch the scene shown here), so the
   // parent is the one source of edits after the boot GET. Handled before
   // `ready`: a `replace` that beats the GET is the fresher fact (the runtime
   // then drops the GET's own answer).
-  wire.handle('replace', (p) => { scenes.replace((p as { docs?: SceneDoc[] })?.docs ?? []); return {}; });
+  wire.handle('replace', (p) => {
+    let docs = (p as { docs?: SceneDoc[] })?.docs ?? [];
+    const acked = pending.map((e) => reflects(docs, e)).lastIndexOf(true);
+    pending.splice(0, acked >= 0 ? acked + 1 : pending.length);
+    for (const e of pending) docs = patch(docs, e.node, e.props);
+    scenes.replace(docs);
+    return {};
+  });
 
   // The documents land after apply (`scenes`' boot GET, or the IDE's own `replace`): decide once they have.
   void scenes.ready.then(
@@ -126,7 +149,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       // `getGlobalTransform`, not `worldTransform`: the latter is only refreshed by a render pass.
       designPerPixel: () => 1 / root.getGlobalTransform().a,
       snap: (p, alt) => (alt ? p : snapPoint(p, { on: gridOn, step: gridStep, design: design() })),
-      onEdit: (node, props) => emit('edit', { node, props }),
+      onEdit: applyEdit,
       onBodyClick: (x, y) => pickAndSelect(x, y),
     });
     ctx.effect(() => () => { gizmo.destroy(); app.stage.removeChild(layer); layer.destroy(); }, 'scene-edit:gizmo');
@@ -146,15 +169,24 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     };
     const pickAndSelect = (x: number, y: number) => select(pickAt(views(), { x, y }));
 
+    /** Rounded as the file should read (the IDE rounds the same), applied here, then told. */
+    function applyEdit(node: string, props: Partial<GizmoTarget['props']>): void {
+      const rounded: Record<string, number> = {};
+      for (const [k, v] of Object.entries(props) as [string, number][]) rounded[k] = Math.round(v * (k === 'rotation' ? 1e4 : 100)) / (k === 'rotation' ? 1e4 : 100);
+      if (pending.push({ node, props: rounded }) > 100) pending.shift();
+      scenes.replace(patch([...scenes.docs().values()], node, rounded));
+      retarget();
+      emit('edit', { node, props: rounded });
+    }
+
     // A `replace` remounts: the selected node's view is a new object — follow it, or drop a node that is gone.
-    const frame = () => {
-      if (target) {
-        const view = scenes.view({ scene, node: target.node });
-        if (!view) select(null);
-        else if (view !== target.view) gizmo.attach((target = { ...target, view }));
-      }
-      gizmo.refresh();
+    const retarget = () => {
+      if (!target) return;
+      const view = scenes.view({ scene, node: target.node });
+      if (!view) select(null);
+      else if (view !== target.view) gizmo.attach((target = { ...target, view }));
     };
+    const frame = () => { retarget(); gizmo.refresh(); };
     app.ticker.add(frame);
     ctx.effect(() => () => app.ticker.remove(frame), 'scene-edit:frame');
 

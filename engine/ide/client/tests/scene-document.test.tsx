@@ -517,6 +517,44 @@ describe('SceneDocument', () => {
     expect(puts()[0].nodes.map((n) => n.id)).toEqual(['bg', 'reels-1', 'title']);
   });
 
+  it('what the canvas measures is rounded before it is written: x/y/scale to 2 decimals, rotation to 4', async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'edit', {
+      node: 'logo',
+      props: { x: 279.99998474121094, y: 40, scale: 1.4999, rotation: 0.78539816 },
+    });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[0].children?.[0].props).toEqual({
+      src: 'logo.png',
+      x: 280,
+      y: 40,
+      scale: 1.5,
+      rotation: 0.7854,
+    });
+  });
+
+  it('a refused edit tells the canvas the set as it stands, so it snaps back', async () => {
+    const { ctx } = await harness({
+      'PUT /api/scenes/base_game': () => ({
+        status: 400,
+        body: {
+          diagnostics: [
+            { severity: 'error', plugin: 'scenes', where: 'base_game', message: 'nope' },
+          ],
+        },
+      }),
+    });
+    renderTab(ctx);
+    const { iframe, reqs } = canvas();
+    const before = reqs('replace').length;
+    frame(iframe, 'edit', { node: 'logo', props: { x: 12, y: 34 } });
+    expect(await screen.findByTestId('scene-doc-error')).toHaveTextContent('nope');
+    await waitFor(() => expect(reqs('replace')).toHaveLength(before + 1));
+    expect(reqs('replace').at(-1)).toEqual({ docs: [BASE, BONUS] });
+  });
+
   it('a remove from the canvas clears the selection first and drops the node', async () => {
     const { ctx, calls, puts } = await harness();
     renderTab(ctx);
@@ -564,10 +602,14 @@ describe('SceneDocument', () => {
     ctx.scenes.select({ scene: 'base_game', node: 'title' });
     await waitFor(() => expect(reqs('select').at(-1)).toEqual({ node: 'title' }));
     const before = reqs('select').length;
+    const replaces = reqs('replace').length;
     frame(iframe, 'ready', { scene: 'base_game' });
     expect(reqs('select')).toHaveLength(before + 1);
     expect(reqs('select').at(-1)).toEqual({ node: 'title' });
     expect(reqs('grid').at(-1)).toEqual({ on: false, step: 16 });
+    // And the set: a `replace` posted before the canvas listened is lost.
+    expect(reqs('replace')).toHaveLength(replaces + 1);
+    expect(reqs('replace').at(-1)).toEqual({ docs: [BASE, BONUS] });
   });
 
   it('every change to the document set is told to the canvas as replace', async () => {

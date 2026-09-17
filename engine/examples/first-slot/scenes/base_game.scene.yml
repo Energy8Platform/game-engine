@@ -1,11 +1,11 @@
 id: base_game
 nodes:
-  - id: logo
-    type: image
-    props: { src: assets/logo.png, x: 240, y: 40, anchor: 0.5 }
   - id: board
     type: reels
     props: { row: reels1 }
+  - id: logo
+    type: image
+    props: { src: assets/logo.png, x: 240, y: 40, anchor: 0.5 }
   - id: big_win
     type: scene
     props: { scene: big_win, visible: false }

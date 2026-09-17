@@ -172,7 +172,7 @@ test('clicking a scene shows it in the preview; showing big_win flips its node v
   await expect(page.getByTestId('scene-base_game')).toHaveClass(/e8-explorer-selected/);
   // The scene with no node picked: its id and node count on the right.
   await expect(page.getByTestId('prop-scene-id')).toHaveText('base_game');
-  // `logo`, `board`, `big_win` — the example gained its first image in slice 18.
+  // `board`, `logo`, `big_win` — the example gained its first image in slice 18.
   await expect(page.getByTestId('prop-node-count')).toHaveText('3');
   expect(await nodeVisible(frame, 'base_game', 'big_win')).toBe(false);
 

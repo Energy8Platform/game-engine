@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
 import { createGizmo } from '../src/gizmo';
 function target(x = 100, y = 100) {
   const view = new Container(); view.addChild(new Graphics().rect(-20, -20, 40, 40).fill(0xffffff)); view.position.set(x, y);
@@ -60,6 +60,24 @@ describe('gizmo', () => {
     gizmo.attach(target());
     gizmo.drag('body', { x: 100, y: 100 }, { x: 120, y: 100 }, { alt: true });
     expect(snap).toHaveBeenCalledWith(expect.anything(), true);
+  });
+  it('attach with the same node mid-gesture moves the gesture onto the new view; another node ends it', () => {
+    const { gizmo, layer, onEdit } = boot(); const t = target(); gizmo.attach(t);
+    const body = layer.children[1];
+    const ev = (x: number, y: number) => ({ global: { x, y }, stopPropagation() {}, shiftKey: false, altKey: false }) as unknown as FederatedPointerEvent;
+    body.emit('pointerdown', ev(100, 100));
+    const remounted = target(); gizmo.attach(remounted);   // the same node, a new view (a `replace` remounted it)
+    layer.emit('globalpointermove', ev(120, 100));
+    layer.emit('pointerup', ev(120, 100));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith('n', { x: 120, y: 100 });
+    expect(remounted.view.position.x).toBe(120);
+    expect(t.view.position.x).toBe(100);
+    body.emit('pointerdown', ev(120, 100));
+    gizmo.attach({ ...target(), node: 'other' });
+    layer.emit('globalpointermove', ev(140, 100));
+    layer.emit('pointerup', ev(140, 100));
+    expect(onEdit).toHaveBeenCalledTimes(1);
   });
   it('attach(null) hides; the frame follows the view on refresh', () => {
     const { gizmo, layer } = boot(); const t = target(); gizmo.attach(t);

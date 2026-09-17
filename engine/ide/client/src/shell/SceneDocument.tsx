@@ -181,6 +181,15 @@ function patchNode(doc: SceneDoc, id: string, props: Record<string, unknown>): S
   };
 }
 
+/** What the canvas measures is a float (`279.99998474121094`); the file reads `280`. */
+const DECIMALS: Record<string, number> = { x: 100, y: 100, scale: 100, rotation: 10_000 };
+function roundProps(props: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...props };
+  for (const [key, by] of Object.entries(DECIMALS))
+    if (typeof out[key] === 'number') out[key] = Math.round((out[key] as number) * by) / by;
+  return out;
+}
+
 const FALLBACK_DESIGN = { width: 480, height: 288 };
 /** Room the fit leaves around the frame, as the old bar did. */
 const FIT_PAD = 24;
@@ -254,9 +263,14 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
     return sel?.scene === id ? sel.node : null;
   };
 
+  // A refusal leaves `docs` as it was, so no `replace` follows on its own —
+  // the canvas, which applied its own edit already, is told the set again to snap back.
   const commit = (next: SceneDoc | undefined) => {
     if (!next || next === liveDoc()) return;
-    void ctx.scenes.update(next).then((refused) => setError(refused[0]?.message ?? null));
+    void ctx.scenes.update(next).then((refused) => {
+      setError(refused[0]?.message ?? null);
+      if (refused.length > 0) tell('replace', { docs: ctx.scenes.docs() });
+    });
   };
 
   // The game is highlighting the selection; a node going with this
@@ -330,6 +344,8 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
   useEffect(() => {
     rpcRef.current = rpc;
     rpc.on('ready', () => {
+      // The set too: a `replace` posted before the canvas listened is lost.
+      tell('replace', { docs: ctx.scenes.docs() });
       tell('select', { node: liveNode() });
       tell('grid', gridRef.current);
     });
@@ -340,7 +356,7 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
     rpc.on('edit', (payload) => {
       const { node, props } = payload as { node: string; props: Record<string, unknown> };
       const current = liveDoc();
-      commit(current && patchNode(current, node, props));
+      commit(current && patchNode(current, node, roundProps(props)));
     });
     rpc.on('remove', (payload) => remove((payload as { node: string }).node));
     rpc.on('zorder', (payload) => {
@@ -572,6 +588,7 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
         </ul>
       </div>
 
+      {/* The focus is for the margin around the frame only: a press inside the iframe focuses it by itself and never reaches here. */}
       <div
         className="e8-canvas-stage"
         data-testid="canvas-stage"
