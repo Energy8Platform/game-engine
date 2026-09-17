@@ -172,8 +172,10 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
     void ctx.scenes.update(next).then((refused) => setError(refused[0]?.message ?? null));
   };
 
+  // The chosen type, or the first on offer when the game's list no longer has it.
+  const type = nodeTypes.some((t) => t.type === addType) ? addType : nodeTypes[0]?.type;
+
   const add = () => {
-    const type = addType || nodeTypes[0]?.type;
     if (!type) return;
     const picked =
       selected?.scene === id && selected.node ? find(doc.nodes, selected.node) : undefined;
@@ -232,7 +234,7 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
           <select
             data-testid="node-add-type"
             aria-label="node type"
-            value={addType || nodeTypes[0]?.type || ''}
+            value={type ?? ''}
             onChange={(e) => setAddType(e.target.value)}
           >
             {nodeTypes.map((t) => (
@@ -302,6 +304,10 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
                 title="remove"
                 onClick={(event) => {
                   event.stopPropagation();
+                  // The game is highlighting the selection; a node going with
+                  // this subtree is told as `node: null` before the doc changes.
+                  if (selected?.scene === id && selected.node && find([node], selected.node))
+                    ctx.scenes.select({ scene: id, node: null });
                   commit(removeNode(doc, node.id));
                 }}
               >

@@ -100,7 +100,7 @@ async function harness(extra: Record<string, Route> = {}) {
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([BASE, BONUS]));
   const puts = () => calls.filter((c) => c.method === 'PUT').map((c) => c.body as SceneDoc);
-  return { ctx, calls, puts };
+  return { ctx, socket, calls, puts };
 }
 
 function renderTab(ctx: Context, path = PATH) {
@@ -262,6 +262,46 @@ describe('SceneDocument', () => {
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes.map((n) => n.id)).toEqual(['reels-1', 'title']);
     await waitFor(() => expect(screen.queryByTestId('node-logo')).toBeNull());
+  });
+
+  it('removing the selected node, or its container, clears the selection first', async () => {
+    const { ctx, calls, puts } = await harness();
+    renderTab(ctx);
+    const selects = () => calls.filter((c) => c.url === '/api/scenes/select').map((c) => c.body);
+
+    ctx.scenes.select({ scene: 'base_game', node: 'title' });
+    await userEvent.click(screen.getByTestId('node-remove-title'));
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
+    expect(selects().at(-1)).toEqual({ scene: 'base_game', node: null });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+
+    // A descendant of the removed node is gone with it.
+    ctx.scenes.select({ scene: 'base_game', node: 'logo' });
+    await userEvent.click(screen.getByTestId('node-remove-bg'));
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
+    expect(selects().at(-1)).toEqual({ scene: 'base_game', node: null });
+    await waitFor(() => expect(puts()).toHaveLength(2));
+
+    // A selection elsewhere is left alone.
+    ctx.scenes.select({ scene: 'base_game', node: 'reels-1' });
+    const before = selects().length;
+    await userEvent.click(screen.getByTestId('node-remove-reels-1'));
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
+    expect(selects()).toHaveLength(before + 1);
+  });
+
+  it('a chosen type the game no longer offers falls back to the first remaining one', async () => {
+    const { ctx, socket, puts } = await harness();
+    renderTab(ctx);
+    await userEvent.click(screen.getByTestId('node-add'));
+    await userEvent.selectOptions(screen.getByTestId('node-add-type'), 'container');
+    socket.receive({ type: 'node-types', types: TYPES.filter((t) => t.type !== 'container') });
+    await waitFor(() =>
+      expect((screen.getByTestId('node-add-type') as HTMLSelectElement).value).toBe('image'),
+    );
+    await userEvent.click(screen.getByTestId('node-add-ok'));
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.at(-1)).toEqual({ id: 'image-1', type: 'image', props: { src: '' } });
   });
 
   it('a drop before a sibling reorders; a drop onto a container nests', async () => {
