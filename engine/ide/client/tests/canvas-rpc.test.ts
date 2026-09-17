@@ -131,6 +131,31 @@ describe('canvas-rpc', () => {
     }
   });
 
+  it('a frame delivered before attach is ignored (no target to spoof yet)', () => {
+    const win = fakeWindow();
+    const target = fakeTarget();
+    const rpc = createCanvasRpc(win);
+    // deliberately not calling rpc.attach(...)
+
+    const handler = vi.fn();
+    rpc.on('ping', handler);
+    win.deliver({ type: 'e8:ide:evt', event: 'ping', payload: {} }, '*', target.contentWindow);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('attach a second time rejects pending calls against the old target', async () => {
+    const win = fakeWindow();
+    const oldTarget = fakeTarget();
+    const newTarget = fakeTarget();
+    const rpc = createCanvasRpc(win);
+    rpc.attach(oldTarget, '*');
+
+    const p = rpc.call('stale');
+    rpc.attach(newTarget, '*');
+
+    await expect(p).rejects.toThrow('canvas was replaced');
+  });
+
   it('dispose removes the listener and rejects every pending call', async () => {
     const win = fakeWindow();
     const target = fakeTarget();

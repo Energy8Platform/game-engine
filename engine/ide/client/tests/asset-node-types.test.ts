@@ -42,6 +42,41 @@ describe('assetNodeTypes', () => {
     expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['image']);
   });
 
+  it('registering the same def object twice for one id: disposal is by slot, not by value — a repeat call to an already-fired disposer must not evict the other slot', async () => {
+    const ctx = await boot();
+    const def = {
+      extensions: ['foo'],
+      node: (src: string, { x, y }: { x: number; y: number }) => ({ type: 'foo', props: { src, x, y } }),
+    };
+    ctx.assetNodeTypes.register('dup', def);
+    const offSecond = ctx.assetNodeTypes.register('dup', def);
+    offSecond();
+    offSecond(); // already fired — a value-based (indexOf) disposer would wrongly find and evict the first slot here
+    expect(ctx.assetNodeTypes.pick('a.foo')).toBe(def);
+    expect(ctx.assetNodeTypes.list().filter((r) => r.id === 'dup')).toHaveLength(1);
+  });
+
+  it('pick finds no extension in a path with no dot', async () => {
+    const ctx = await boot();
+    expect(ctx.assetNodeTypes.pick('README')).toBeUndefined();
+  });
+
+  it('pick finds no extension in a dotfile', async () => {
+    const ctx = await boot();
+    expect(ctx.assetNodeTypes.pick('assets/.hidden')).toBeUndefined();
+  });
+
+  it('pick compares against extensions lower-cased too', async () => {
+    const ctx = await boot();
+    const off = ctx.assetNodeTypes.register('shout', {
+      extensions: ['GIF'],
+      node: (src, { x, y }) => ({ type: 'shout', props: { src, x, y } }),
+    });
+    expect(ctx.assetNodeTypes.pick('a.gif')?.node).toBeInstanceOf(Function);
+    expect(ctx.assetNodeTypes.pick('a.GIF')?.node).toBeInstanceOf(Function);
+    off();
+  });
+
   it('a later register with an existing id wins (last-wins), and its disposer restores the built-in', async () => {
     const ctx = await boot();
     const custom = {

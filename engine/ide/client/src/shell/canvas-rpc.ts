@@ -40,7 +40,10 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
   let origin = '*';
 
   const onMessage = (e: MessageEvent): void => {
-    if (contentWindow && (e.source as unknown) !== contentWindow) return;
+    // Unconditional: before attach() contentWindow is null, and a real
+    // postMessage's e.source is never null, so every frame is rejected —
+    // there is no window yet to legitimately claim as the source.
+    if ((e.source as unknown) !== contentWindow) return;
     if (origin !== '*' && e.origin !== origin) return;
     const data = e.data as {
       type?: string;
@@ -65,6 +68,12 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
 
   return {
     attach(target, attachOrigin) {
+      // A second attach (a new preview iframe) orphans anything still
+      // waiting on the old one — reject now rather than let it time out.
+      for (const [id, p] of pending) {
+        pending.delete(id);
+        p.reject(new Error('canvas was replaced'));
+      }
       contentWindow = target.contentWindow;
       origin = attachOrigin;
     },

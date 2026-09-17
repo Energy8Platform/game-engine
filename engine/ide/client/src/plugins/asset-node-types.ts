@@ -23,17 +23,30 @@ declare module 'cordis' {
 
 export const name = 'assetNodeTypes';
 
+/** Just the basename's extension, lower-cased; `undefined` for no dot or a dotfile ("no real extension"). */
+function extOf(path: string): string | undefined {
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0) return undefined; // no dot, or dot is the basename's first char (".hidden")
+  return base.slice(dot + 1).toLowerCase();
+}
+
+/** A fresh wrapper per registration, so a disposer removes the SLOT it created — never a same-value stranger's. */
+interface Slot {
+  def: AssetNodeType;
+}
+
 export function apply(ctx: Context) {
   // `@energy8engine/registry`'s createRegistry disposer removes only what it
   // added — a same-id replace has nothing to fall back to when disposed. A
   // small per-id stack gets both last-wins *and* restore-on-dispose: push on
   // register, splice out on dispose, current = top of stack.
-  const stacks = new Map<string, AssetNodeType[]>();
+  const stacks = new Map<string, Slot[]>();
   const order: string[] = [];
 
   const current = (id: string): AssetNodeType | undefined => {
     const stack = stacks.get(id);
-    return stack?.[stack.length - 1];
+    return stack?.[stack.length - 1]?.def;
   };
 
   const service: AssetNodeTypesService = {
@@ -44,18 +57,22 @@ export function apply(ctx: Context) {
         stacks.set(id, stack);
         order.push(id);
       }
-      stack.push(def);
+      const slot: Slot = { def };
+      stack.push(slot);
       return () => {
-        const i = stack!.indexOf(def);
+        // Identity, not value: two registrations can share the same `def`
+        // (or an equal-by-value one), and indexOf(def) would find whichever
+        // comes first — including an already-disposed slot's spot.
+        const i = stack!.indexOf(slot);
         if (i !== -1) stack!.splice(i, 1);
       };
     },
     pick(path) {
-      const ext = path.split('.').pop()?.toLowerCase();
+      const ext = extOf(path);
       if (!ext) return undefined;
       for (const id of order) {
         const def = current(id);
-        if (def?.extensions.includes(ext)) return def;
+        if (def?.extensions.some((e) => e.toLowerCase() === ext)) return def;
       }
       return undefined;
     },
