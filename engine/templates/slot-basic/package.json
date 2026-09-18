@@ -9,6 +9,8 @@
     "@energy8engine/flow": "*",
     "@energy8engine/game-runtime": "*",
     "@energy8engine/ide-bridge": "*",
+    "@energy8engine/node-media": "*",
+    "@energy8engine/node-spine": "*",
     "@energy8engine/play-loop": "*",
     "@energy8engine/reels": "*",
     "@energy8engine/scene-edit": "*",

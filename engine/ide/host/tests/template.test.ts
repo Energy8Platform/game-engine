@@ -42,6 +42,8 @@ describe('engine/templates/slot-basic', () => {
       'scenes/big_win.scene.yml',
       'editor.html',
       'assets/logo.png',
+      'assets/coin.json',
+      'assets/coin.png',
     ]) {
       expect(readFileSync(join(TEMPLATE, rel))).toEqual(readFileSync(join(EXAMPLE, rel)));
     }

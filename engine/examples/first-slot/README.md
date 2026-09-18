@@ -78,4 +78,6 @@ selection gizmo over whichever scene the tab names (`?scene=` in the URL)
 and reports pointer moves back to the IDE over `postMessage` — the IDE
 remains the only writer of `scenes/*.scene.yml`. `assets/logo.png` is this
 project's first shipped raster asset, referenced from the new `logo` node at
-the top of `scenes/base_game.scene.yml`.
+the top of `scenes/base_game.scene.yml`; the `coin` node right after it is a
+`spritesheet` (`assets/coin.json` + `assets/coin.png`, four frames of a
+spinning disc), the `media1` row's node type.

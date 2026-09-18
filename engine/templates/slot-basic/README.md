@@ -72,4 +72,6 @@ composition through `createGame` but applies `@energy8engine/scene-edit`
 instead of the `Spin` button and the `#controls` chrome, so a scene renders with
 a pickable gizmo and no `Spin` button. `scenes/base_game.scene.yml` now opens
 with a `logo` node (`assets/logo.png`, a small filled-circle placeholder) so
-there is a real image on the board to select, not just the reel grid.
+there is a real image on the board to select, not just the reel grid; next to
+it, a `coin` node (`spritesheet`, `assets/coin.json` + `assets/coin.png`)
+animates through four frames of a spinning disc, from the `media1` row.
