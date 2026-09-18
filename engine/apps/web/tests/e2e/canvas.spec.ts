@@ -166,10 +166,11 @@ test('a corner drag scales, ] moves it forward', async ({ page }) => {
   await expect.poll(() => snapshot(frame).then((s) => Math.round(s.bounds.logo.w))).toBe(96);
 
   // The press on the handle focused the iframe, so the key lands in the editor page.
+  // One step forward: past `coin` (the node after it since Task 6 of the media slice).
   await page.keyboard.press(']');
   await expect
     .poll(sceneFile, { timeout: 10_000 })
-    .toMatch(/id: board[\s\S]*id: big_win[\s\S]*id: logo/);
+    .toMatch(/id: board[\s\S]*id: coin[\s\S]*id: logo[\s\S]*id: big_win/);
   expect(
     await frame.evaluate(() =>
       (window as any).__e8edit.emitted().map((e: { event: string }) => e.event),

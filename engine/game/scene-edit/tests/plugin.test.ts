@@ -10,11 +10,14 @@ import * as plugin from '../src/index';
 const loader: AssetLoader = { load: async () => {}, unload: async () => {}, get: () => Texture.EMPTY };
 /** A 40×40 filled square — `container` is empty and picks nothing. */
 const box: NodeType = { type: 'box', schema: Schema.object({}), mount: () => new Graphics().rect(0, 0, 40, 40).fill(0xffffff) };
+/** `AnimatedSprite`-shaped (a numeric `currentFrame`), and the gif wrapper's shape: a plain container whose child is. */
+const anim: NodeType = { type: 'anim', schema: Schema.object({}), mount: () => Object.assign(new Container(), { currentFrame: 3 }) };
+const wrapped: NodeType = { type: 'wrapped', schema: Schema.object({}), mount: () => { const c = new Container(); c.addChild(Object.assign(new Container(), { currentFrame: 5 })); return c; } };
 
 // Design 960×576 on a 480×288 screen: scale 0.5, no letterbox. `lo` covers design 100..140, `hi` 120..160.
 const DOCS: SceneDoc[] = [
   { id: 'a', nodes: [{ id: 'lo', type: 'box', props: { x: 100, y: 100 } }, { id: 'hi', type: 'box', props: { x: 120, y: 120 } }] },
-  { id: 'b', nodes: [{ id: 'only', type: 'box', props: {} }] },
+  { id: 'b', nodes: [{ id: 'only', type: 'box', props: {} }, { id: 'spin', type: 'anim', props: {} }, { id: 'pic', type: 'wrapped', props: {} }] },
 ];
 
 type Frame = { type: string; id?: number; event?: string; payload?: unknown; ok?: boolean; result?: unknown };
@@ -24,7 +27,7 @@ function boot(scene = 'a', docs = DOCS, docsReady?: Promise<void>) {
   const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
   ctx.provide('renderer', { app });
   const nodeTypes = createNodeTypes();
-  for (const t of [container, image, box]) nodeTypes.register(t);
+  for (const t of [container, image, box, anim, wrapped]) nodeTypes.register(t);
   ctx.provide('nodeTypes', nodeTypes);
   const scenes = createScenes({ root: app.stage, design: { width: 960, height: 576 }, nodeTypes, loader, ctx });
   scenes.replace(docs);
@@ -239,6 +242,15 @@ describe('scene-edit plugin', () => {
     const n = events().length;
     drop({ getData: () => '', files: [] });
     expect(events()).toHaveLength(n);
+  });
+
+  it('frameOf reads currentFrame off the view or its child; null for a still or unknown node', async () => {
+    const { edit, ready } = boot('b');
+    await ready();
+    expect(edit().frameOf('spin')).toBe(3);
+    expect(edit().frameOf('pic')).toBe(5);
+    expect(edit().frameOf('only')).toBeNull();
+    expect(edit().frameOf('nope')).toBeNull();
   });
 
   it('grid on/off redraws; an unknown scene emits error and no gizmo', async () => {

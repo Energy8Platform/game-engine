@@ -175,8 +175,8 @@ test('clicking a scene shows it in the preview; showing big_win flips its node v
   expect(await scenesVisible(frame)).toEqual(['base_game']);
   // The scene with no node picked: its id and node count on the right.
   await expect(page.getByTestId('prop-scene-id')).toHaveText('base_game');
-  // `board`, `logo`, `big_win` — the example gained its first image in slice 18.
-  await expect(page.getByTestId('prop-node-count')).toHaveText('3');
+  // `board`, `logo`, `coin`, `big_win` — the example gained its image in slice 18, its spritesheet in the media slice.
+  await expect(page.getByTestId('prop-node-count')).toHaveText('4');
   expect(await nodeVisible(frame, 'base_game', 'big_win')).toBe(false);
 
   // `big_win` is nested into `base_game`, so showing it is that node

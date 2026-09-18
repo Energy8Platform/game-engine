@@ -46,6 +46,8 @@ export interface SceneEdit {
   pickAndSelect(x: number, y: number): void;
   /** The last 100 events sent to the IDE. */
   emitted(): { event: string; payload?: unknown }[];
+  /** The node's view's `currentFrame` (an `AnimatedSprite`, or the gif wrapper's child); `null` for a still or unknown node. */
+  frameOf(node: string): number | null;
 }
 
 const isField = (t: EventTarget | null): boolean =>
@@ -242,11 +244,17 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       })),
     });
 
+    const frameOf = (node: string): number | null => {
+      const view = scenes.view({ scene, node });
+      const animated = [view, view?.children[0]].find((v) => typeof (v as { currentFrame?: unknown } | undefined)?.currentFrame === 'number');
+      return animated ? (animated as unknown as { currentFrame: number }).currentFrame : null;
+    };
+
     wire.handle('select', (p) => { select((p as { node?: string | null })?.node ?? null); return {}; });
     wire.handle('grid', (p) => { const { on, step } = p as { on?: boolean; step?: number }; grid(!!on, step ?? 16); return {}; });
     wire.handle('snapshot', () => snapshot());
 
-    const api: SceneEdit = { snapshot, select, grid, pickAndSelect, emitted: () => [...emitted] };
+    const api: SceneEdit = { snapshot, select, grid, pickAndSelect, emitted: () => [...emitted], frameOf };
     const w = window as unknown as { __e8edit?: SceneEdit };
     w.__e8edit = api;
     ctx.effect(() => () => { if (w.__e8edit === api) delete w.__e8edit; }, 'scene-edit:hook');
