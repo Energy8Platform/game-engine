@@ -45,6 +45,11 @@ rows:
     name: '@energy8engine/renderer-pixi'
   - id: scenes1
     name: '@energy8engine/scenes'
+  # Animated pictures as scene nodes (`spritesheet`, `video`, `gif`).
+  # `inject: ['nodeTypes']`, so it sits right after `scenes1`, which provides
+  # that service; the row itself has no config.
+  - id: media1
+    name: '@energy8engine/node-media'
   - id: reels1
     name: '@energy8engine/reels'
   - id: mechanics1
