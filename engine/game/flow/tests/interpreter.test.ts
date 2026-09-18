@@ -367,9 +367,13 @@ describe('createFlow', () => {
         [{ from: 'idle', to: 's' }],
       ),
     );
-    // Each event: idle enter, idle leave, s enter, s leave = 4 entries.
-    for (let i = 0; i < 150; i++) f.events.emit('e');
-    await vi.waitFor(() => expect(heard).toHaveLength(600));
+    // Each event: idle enter, idle leave, s enter, s leave = 4 entries. One at a
+    // a time: a fire while the previous run is live is dropped (`busy: ignore`).
+    for (let i = 0; i < 150; i++) {
+      f.events.emit('e');
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(heard).toHaveLength(600);
     expect(f.flow.trace()).toHaveLength(500);
     expect(f.flow.trace()[0]).toEqual(heard[100]);
     expect(f.flow.trace().at(-1)).toMatchObject({ run: 150, node: 's', out: 'next' });
@@ -416,5 +420,137 @@ describe('createFlow', () => {
     expect(seen).toMatchObject({ cfg: { bet: 2 }, bet: 2 });
     expect(got).toHaveBeenCalledWith(2);
     expect(f.flow.ready).toBeInstanceOf(Promise);
+  });
+
+  it('wait { event } has no 30 s limit: 60 s pass, it still waits, then the event resolves it', async () => {
+    vi.useFakeTimers();
+    const f = harness();
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'w', kind: 'wait', props: { event: 'continue' } },
+          { id: 'end', kind: 'set', props: { name: 'x', value: 1 } },
+        ],
+        [
+          { from: 'start', to: 'w' },
+          { from: 'w', to: 'end' },
+        ],
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.exits()).toEqual(['start.next']);
+    expect(f.report).not.toHaveBeenCalled();
+    f.events.emit('continue');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.exits()).toEqual(['start.next', 'w.next', 'end.next']);
+  });
+
+  const spinDoc = (busy?: 'ignore' | 'queue') =>
+    doc(
+      [
+        { id: 'idle', kind: 'on', props: busy ? { event: 'ui.spin', busy } : { event: 'ui.spin' } },
+        { id: 'spin', kind: 'spin' },
+      ],
+      [{ from: 'idle', to: 'spin' }],
+    );
+
+  /** A fetch that hangs until the test releases it. */
+  function gated() {
+    const release: (() => void)[] = [];
+    const fetchFn = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          release.push(() => resolve({ ok: true, status: 200, json: async () => okBody }));
+        }),
+    ) as unknown as typeof fetch;
+    return { fetchFn, release };
+  }
+
+  it('on { busy: ignore } (the default) drops a fire while a run is live; busy() says so', async () => {
+    const { fetchFn, release } = gated();
+    const f = harness({ fetchFn });
+    f.flow.replace(spinDoc());
+    expect(f.flow.busy()).toBe(false);
+    f.events.emit('ui.spin');
+    expect(f.flow.busy()).toBe(true);
+    f.events.emit('ui.spin');
+    f.events.emit('ui.spin');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    release[0]();
+    await settled(f, ['idle.next', 'spin.result']);
+    expect(f.flow.busy()).toBe(false);
+    expect(f.flow.trace().filter((e) => e.node === 'idle' && e.out === null)).toHaveLength(1);
+    f.events.emit('ui.spin');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('on { busy: queue } fires once after the live runs drain; further fires coalesce', async () => {
+    const { fetchFn, release } = gated();
+    const f = harness({ fetchFn });
+    f.flow.replace(spinDoc('queue'));
+    f.events.emit('ui.spin', 1);
+    f.events.emit('ui.spin', 2);
+    f.events.emit('ui.spin', 3);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    release[0]();
+    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+    expect(f.flow.trace().filter((e) => e.node === 'idle' && e.out === 'next').map((e) => e.run)).toEqual([1, 2]);
+    release[1]();
+    await settled(f, ['idle.next', 'spin.result', 'idle.next', 'spin.result']);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(f.flow.busy()).toBe(false);
+  });
+
+  it('a run returning a port not in outs, and a trigger without arm, are diagnostics', async () => {
+    const f = harness({}, [
+      { kind: 'odd', schema: BUILTIN_KINDS[0].schema, outs: ['next'], run: async () => ({ out: 'sideways' }) },
+      { kind: 'inert', schema: BUILTIN_KINDS[0].schema, outs: ['next'], trigger: true },
+    ]);
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'o', kind: 'odd' },
+          { id: 'after', kind: 'set', props: { name: 'x', value: 1 } },
+          { id: 't', kind: 'inert' },
+        ],
+        [
+          { from: 'start', to: 'o' },
+          { from: 'o', to: 'after' },
+        ],
+      ),
+    );
+    expect(f.report).toHaveBeenCalledWith(
+      expect.objectContaining({ plugin: 'flow', where: 't', message: expect.stringContaining('arm') }),
+    );
+    await vi.waitFor(() =>
+      expect(f.report).toHaveBeenCalledWith(
+        expect.objectContaining({ plugin: 'flow', where: 'o', message: 'kind "odd" returned unknown port "sideways"' }),
+      ),
+    );
+    expect(f.exits()).toEqual(['start.next']);
+    expect(f.flow.trace().filter((e) => e.node === 'after')).toEqual([]);
+  });
+
+  it('a throwing onTrace listener does not end the branch; a fire after stop() is skipped', async () => {
+    const f = harness();
+    f.flow.onTrace(() => {
+      throw new Error('listener bug');
+    });
+    const d = doc(
+      [
+        { id: 'start', kind: 'boot' },
+        { id: 's', kind: 'set', props: { name: 'x', value: 1 } },
+      ],
+      [{ from: 'start', to: 's' }],
+    );
+    f.flow.replace(d);
+    await settled(f, ['start.next', 's.next']);
+    expect(f.report).not.toHaveBeenCalled();
+    f.flow.replace(d);
+    f.flow.stop(); // before boot's microtask
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.flow.trace()).toEqual([]);
   });
 });

@@ -31,6 +31,8 @@ export interface FlowService {
   /** The last 500 entries since the last `replace`. */
   trace(): readonly FlowTraceEntry[];
   onTrace(fn: (e: FlowTraceEntry) => void): () => void;
+  /** Whether any run of the current document still has a live branch. */
+  busy(): boolean;
   /** Resolved here; the runtime row swaps in its boot fetch. */
   ready: Promise<void>;
   /** Aborts every in-flight branch and disarms the triggers; the doc and the trace stay. */
@@ -45,8 +47,16 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   const now = o.now ?? Date.now;
   const timeoutMs = o.timeoutMs ?? 30_000;
 
+  /** Everything `stop()` throws away: the abort signal, the live-branch count, whoever waits for idle. */
+  interface Epoch {
+    controller: AbortController;
+    live: number;
+    idlers: (() => void)[];
+  }
+  const fresh = (): Epoch => ({ controller: new AbortController(), live: 0, idlers: [] });
+
   let current: FlowDoc | null = null;
-  let controller = new AbortController();
+  let epoch = fresh();
   let disposers: (() => void)[] = [];
   let runNo = 0;
   const trace: FlowTraceEntry[] = [];
@@ -56,7 +66,13 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     const entry = { run, node, out, at: now() };
     trace.push(entry);
     if (trace.length > TRACE_LIMIT) trace.shift();
-    listeners.forEach((fn) => fn(entry));
+    for (const fn of listeners) {
+      try {
+        fn(entry);
+      } catch {
+        // a listener's bug is not the branch's
+      }
+    }
   };
   const fail = (node: FlowNode, message: string, severity: Diagnostic['severity'] = 'error') =>
     report(diagnostic(severity, 'flow', node.id, message));
@@ -64,7 +80,7 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   interface Run {
     no: number;
     vars: Record<string, unknown>;
-    signal: AbortSignal;
+    epoch: Epoch;
     /** `merge` arrivals this run, by node: the edges that have landed since its last pass. */
     arrived: Map<string, Set<FlowEdge>>;
   }
@@ -72,12 +88,24 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   const runCtx = (run: Run, node: FlowNode): RunCtx => ({
     vars: run.vars,
     ctx: o.ctx,
-    signal: run.signal,
+    signal: run.epoch.controller.signal,
     fetchFn,
     report: (message, severity) => fail(node, message, severity),
+    busy: () => run.epoch.live > 0,
+    idle: () => (run.epoch.live > 0 ? new Promise((resolve) => run.epoch.idlers.push(resolve)) : Promise.resolve()),
   });
 
   const branch = async (doc: FlowDoc, run: Run, node: FlowNode, via: FlowEdge): Promise<void> => {
+    run.epoch.live++;
+    try {
+      await step(doc, run, node, via);
+    } finally {
+      if (--run.epoch.live === 0) run.epoch.idlers.splice(0).forEach((fn) => fn());
+    }
+  };
+
+  const step = async (doc: FlowDoc, run: Run, node: FlowNode, via: FlowEdge): Promise<void> => {
+    const { signal } = run.epoch.controller;
     record(run.no, node.id, null);
     const kind = kinds.get(node.kind);
     if (!kind) return fail(node, `unknown kind '${node.kind}'`);
@@ -94,16 +122,24 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
-      const result = await Promise.race([
-        kind.run(props, runCtx(run, node)),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`node "${node.id}" (${node.kind}) did not finish in ${timeoutMs / 1000} s`)), timeoutMs);
-        }),
-      ]);
-      if (run.signal.aborted) return;
+      const pending = kind.run(props, runCtx(run, node));
+      const result =
+        kind.timeout === false
+          ? await pending
+          : await Promise.race([
+              pending,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error(`node "${node.id}" (${node.kind}) did not finish in ${timeoutMs / 1000} s`)),
+                  timeoutMs,
+                );
+              }),
+            ]);
+      if (signal.aborted) return;
+      if (!kind.outs.includes(result.out)) return fail(node, `kind "${kind.kind}" returned unknown port "${result.out}"`);
       leave(doc, run, node, kind, result.out, result.vars);
     } catch (e) {
-      if (run.signal.aborted) return;
+      if (signal.aborted) return;
       fail(node, e instanceof Error ? e.message : String(e));
     } finally {
       clearTimeout(timer);
@@ -126,20 +162,24 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     }
   };
 
-  const start = (doc: FlowDoc, trigger: FlowNode, kind: FlowNodeKind, vars: Record<string, unknown> | undefined) => {
-    const run: Run = { no: ++runNo, vars: {}, signal: controller.signal, arrived: new Map() };
-    record(run.no, trigger.id, null);
-    leave(doc, run, trigger, kind, kind.outs[0], vars);
-  };
-
   const arm = (doc: FlowDoc) => {
+    const armed = epoch;
     for (const node of doc.nodes) {
       const kind = kinds.get(node.kind);
-      if (!kind?.trigger || !kind.arm) continue;
-      const armed: Run = { no: 0, vars: {}, signal: controller.signal, arrived: new Map() };
+      if (!kind?.trigger) continue;
+      if (!kind.arm) {
+        fail(node, `trigger kind "${kind.kind}" has no arm`);
+        continue;
+      }
+      const start = (vars: Record<string, unknown> | undefined) => {
+        if (armed.controller.signal.aborted) return; // fired after stop()
+        const run: Run = { no: ++runNo, vars: {}, epoch: armed, arrived: new Map() };
+        record(run.no, node.id, null);
+        leave(doc, run, node, kind, kind.outs[0], vars);
+      };
       try {
         const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
-        disposers.push(kind.arm(props, (vars) => start(doc, node, kind, vars), runCtx(armed, node)));
+        disposers.push(kind.arm(props, start, runCtx({ no: 0, vars: {}, epoch: armed, arrived: new Map() }, node)));
       } catch (e) {
         fail(node, e instanceof Error ? e.message : String(e));
       }
@@ -147,8 +187,8 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   };
 
   const stop = () => {
-    controller.abort();
-    controller = new AbortController();
+    epoch.controller.abort();
+    epoch = fresh();
     disposers.forEach((off) => off());
     disposers = [];
   };
@@ -170,6 +210,7 @@ export function createFlow(o: CreateFlowOptions): FlowService {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    busy: () => epoch.live > 0,
     ready: Promise.resolve(),
     stop,
   };

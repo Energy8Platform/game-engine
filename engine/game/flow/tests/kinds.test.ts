@@ -9,7 +9,15 @@ function runCtx(provide: Record<string, unknown> = {}, vars: Record<string, unkn
   const ctx = new Context();
   for (const [name, value] of Object.entries(provide)) ctx.provide(name, value);
   const controller = new AbortController();
-  const rc: RunCtx = { vars, ctx, signal: controller.signal, fetchFn: vi.fn() as unknown as typeof fetch, report: vi.fn() };
+  const rc: RunCtx = {
+    vars,
+    ctx,
+    signal: controller.signal,
+    fetchFn: vi.fn() as unknown as typeof fetch,
+    report: vi.fn(),
+    busy: () => false,
+    idle: async () => {},
+  };
   return { rc, controller };
 }
 
@@ -88,16 +96,14 @@ describe('built-in kinds', () => {
     }
   });
 
-  it('boot fires once on the next microtask, not when its signal is already aborted', async () => {
+  it('boot fires once on the next microtask; wait opts out of the run timeout', async () => {
     const fire = vi.fn();
-    const { rc, controller } = runCtx();
+    const { rc } = runCtx();
     kind('boot').arm!({}, fire, rc);
     expect(fire).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(fire).toHaveBeenCalledTimes(1);
-    controller.abort();
-    kind('boot').arm!({}, fire, rc);
-    await Promise.resolve();
-    expect(fire).toHaveBeenCalledTimes(1);
+    expect(kind('wait').timeout).toBe(false);
+    expect(BUILTIN_KINDS.filter((k) => k.timeout === false).map((k) => k.kind)).toEqual(['wait']);
   });
 });

@@ -35,6 +35,10 @@ export interface RunCtx {
   fetchFn: typeof fetch;
   /** A diagnostic on this node that does NOT end the branch (a bad `if` expression, say). */
   report(message: string, severity?: Severity): void;
+  /** Whether any run of this document still has a live branch. */
+  busy(): boolean;
+  /** Resolves once no run has a live branch (at once when already idle). */
+  idle(): Promise<void>;
 }
 
 export interface FlowNodeKind<P = Record<string, unknown>> {
@@ -44,6 +48,8 @@ export interface FlowNodeKind<P = Record<string, unknown>> {
   outs: readonly string[];
   /** A trigger starts a run: the interpreter calls `arm` once per doc and never `run`. */
   trigger?: boolean;
+  /** `false` opts `run` out of the interpreter's 30 s limit (a `wait` for a human, say). */
+  timeout?: false;
   arm?(props: P, fire: (vars?: Record<string, unknown>) => void, ctx: RunCtx): () => void;
   run?(props: P, ctx: RunCtx): Promise<{ out: string; vars?: Record<string, unknown> }>;
 }
@@ -99,20 +105,40 @@ const boot: FlowNodeKind = {
   schema: none,
   outs: ['next'],
   trigger: true,
-  arm(_p, fire, { signal }) {
-    queueMicrotask(() => {
-      if (!signal.aborted) fire();
-    });
+  arm(_p, fire) {
+    queueMicrotask(fire);
     return () => {};
   },
 };
 
-const on: FlowNodeKind<{ event: string }> = {
+const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
   kind: 'on',
-  schema: Schema.object({ event: Schema.string().required().description('event name') }),
+  schema: Schema.object({
+    event: Schema.string().required().description('event name'),
+    busy: Schema.union(['ignore', 'queue'])
+      .default('ignore')
+      .description('a fire while a run is live: drop it, or fire once after the runs drain'),
+  }),
   outs: ['next'],
   trigger: true,
-  arm: (p, fire, { ctx }) => service<EventsService>(ctx, 'events').on(p.event, (event) => fire({ event })),
+  arm(p, fire, { ctx, busy, idle }) {
+    let queued: Record<string, unknown> | undefined;
+    // Fires the queued payload once the runs drain; a run that slipped in
+    // between `idle` resolving and this running means one more wait.
+    const drain = (): void =>
+      void idle().then(() => {
+        if (busy()) return drain();
+        const vars = queued;
+        queued = undefined;
+        fire(vars);
+      });
+    return service<EventsService>(ctx, 'events').on(p.event, (event) => {
+      if (!busy()) return fire({ event });
+      if (p.busy !== 'queue') return;
+      if (queued === undefined) drain();
+      queued = { event }; // coalesce: the latest payload wins
+    });
+  },
 };
 
 const spin: FlowNodeKind = {
@@ -183,6 +209,7 @@ const wait: FlowNodeKind<{ ms?: number; event?: string }> = {
     event: Schema.string().description('event name'),
   }),
   outs: ['next'],
+  timeout: false,
   run(p, { ctx, signal }) {
     return new Promise((resolve, reject) => {
       if (signal.aborted) return reject(signal.reason);
