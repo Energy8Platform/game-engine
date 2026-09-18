@@ -244,11 +244,14 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   installErrorBoundary(preview);
   // What the page fetches same-origin besides this plugin's own routes.
   // The socket is send-restricted: a game reports, it does not edit e8.yml.
-  ctx.ideRpc.attach(preview, { accept: ['game-diagnostics', 'game-transitions', 'node-types'] });
+  ctx.ideRpc.attach(preview, {
+    accept: ['game-diagnostics', 'game-transitions', 'node-types', 'flow-kinds', 'flow-trace'],
+  });
   ctx.runtimeAssets.attachGameRoutes(preview);
   // Lenient: `scenes` applies before `dev-game` (project-scope.ts), but a
   // host composed without it still previews.
   ctx.get('scenesHost')?.attachGameRoutes(preview);
+  ctx.get('flowHost')?.attachGameRoutes(preview);
 
   // Resolved once, here, rather than read as `config.gamesDir` at every use
   // below. A trailing slash is an easy way to spell the same directory

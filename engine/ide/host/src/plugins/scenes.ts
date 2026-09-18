@@ -56,7 +56,8 @@ export interface ScenesHostService {
 export const name = 'scenes';
 export const inject = ['server', 'ideRpc', 'project', 'files'];
 
-const SCENE_FILE = /^scenes\/([a-z0-9_]+)\.scene\.yml$/;
+/** A scene document's path; group 1 is the id (the file name wins — see `checkScenes`). Also `flow.ts`'s. */
+export const SCENE_FILE = /^scenes\/([a-z0-9_]+)\.scene\.yml$/;
 const ID = /^[a-z0-9_]+$/;
 /**
  * The props every node accepts, applied by the runtime — a type's own

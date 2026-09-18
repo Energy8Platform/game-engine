@@ -1448,6 +1448,88 @@ describe('ide rpc — the game reports its node types', () => {
   });
 });
 
+describe('ide rpc — the game reports its flow kinds and trace', () => {
+  const kinds = [{ kind: 'boot', outs: ['next'], trigger: true, schema: {} }];
+
+  it('mirrors flow-kinds like node-types: relayed, retained, greets a late socket, cleared on project switch', async () => {
+    expect(host.ctx.ideRpc.flowKinds()).toEqual([]);
+    const b = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const bInbox = createInbox(b);
+    await new Promise((resolve) => b.once('open', resolve));
+    const heard: unknown[] = [];
+    host.ctx.on('game/flow-kinds', (k) => heard.push(k));
+
+    socket.send(JSON.stringify({ type: 'flow-kinds', kinds }));
+    expect(await bInbox.waitFor((m) => m.type === 'flow-kinds')).toEqual({
+      type: 'flow-kinds',
+      kinds,
+    });
+    expect(host.ctx.ideRpc.flowKinds()).toEqual(kinds);
+    expect(heard).toEqual([kinds]);
+    // Not a list of `{ kind: string }`: ignored, the last list stands.
+    socket.send(JSON.stringify({ type: 'flow-kinds', kinds: [{ outs: [] }] }));
+    socket.send(JSON.stringify({ type: 'flow-kinds', kinds: 'boot' }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(host.ctx.ideRpc.flowKinds()).toEqual(kinds);
+
+    const c = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const cInbox = createInbox(c);
+    await new Promise((resolve) => c.once('open', resolve));
+    expect(await cInbox.waitFor((m) => m.type === 'flow-kinds')).toEqual({
+      type: 'flow-kinds',
+      kinds,
+    });
+
+    host.ctx.emit('workspace/changed', { ...host.ctx.workspace.state(), active: null });
+    await expect.poll(() => host.ctx.ideRpc.flowKinds()).toEqual([]);
+    for (const box of [bInbox, cInbox]) {
+      expect(await box.waitFor((m) => m.type === 'flow-kinds')).toEqual({
+        type: 'flow-kinds',
+        kinds: [],
+      });
+    }
+    b.close();
+    c.close();
+  });
+
+  it('relays flow-trace to every OTHER socket, never echoes it, and does not greet a late socket with it', async () => {
+    const b = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const bInbox = createInbox(b);
+    await new Promise((resolve) => b.once('open', resolve));
+    const entries = [{ run: 1, node: 'start', out: 'next', at: 5 }];
+    socket.send(JSON.stringify({ type: 'flow-trace', entries }));
+    expect(await bInbox.waitFor((m) => m.type === 'flow-trace')).toEqual({
+      type: 'flow-trace',
+      entries,
+    });
+
+    // A later socket is not told: a trace is a live feed, not state.
+    const c = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const cInbox = createInbox(c);
+    await new Promise((resolve) => c.once('open', resolve));
+    // The greeting's retained frames follow `snapshot` in the same tick, so
+    // a frame broadcast after `snapshot` was seen comes after any greeting.
+    await cInbox.waitFor((m) => m.type === 'snapshot');
+    host.ctx.ideRpc.broadcastSceneSelect({ scene: 'a', node: null });
+    const first = await cInbox.waitFor((m) => m.type === 'flow-trace' || m.type === 'scene-select');
+    expect(first.type).toBe('scene-select');
+    // Never echoed back to the sender.
+    const echoed = await Promise.race([
+      inbox.waitFor((m) => m.type === 'flow-trace').then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    expect(echoed).toBe(false);
+    b.close();
+    c.close();
+  });
+
+  it('broadcastFlow reaches every socket', async () => {
+    const frame = { doc: null, diagnostics: [] };
+    host.ctx.ideRpc.broadcastFlow(frame);
+    expect(await inbox.waitFor((m) => m.type === 'flow')).toEqual({ type: 'flow', ...frame });
+  });
+});
+
 describe('ide rpc — broadcastScenes and broadcastSceneSelect', () => {
   it('reach every socket', async () => {
     host.ctx.ideRpc.broadcastScenes({ scenes: [{ id: 'a', nodes: [] }], diagnostics: [] });

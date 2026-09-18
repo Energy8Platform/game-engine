@@ -1,0 +1,13 @@
+version: 1
+nodes:
+  - { id: start, kind: boot,    ui: { x: 40,  y: 80 } }
+  - { id: base,  kind: show,    props: { scene: base_game }, ui: { x: 220, y: 80 } }
+  - { id: idle,  kind: on,      props: { event: ui.spin },   ui: { x: 400, y: 80 } }
+  - { id: spin,  kind: spin,    ui: { x: 580, y: 80 } }
+  - { id: draw,  kind: present, ui: { x: 760, y: 80 } }
+edges:
+  - { from: start, to: base }
+  - { from: base,  to: idle }
+  - { from: idle,  to: spin }
+  - { from: spin,  to: draw }
+  - { from: draw,  to: idle }

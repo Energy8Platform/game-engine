@@ -6,6 +6,8 @@ import {
   diagnostic,
   type ClientMessage,
   type Diagnostic,
+  type FlowKindInfo,
+  type FlowMessage,
   type GameCompositionMessage,
   type GameDiagnosticsSource,
   type NodeTypeInfo,
@@ -25,6 +27,8 @@ declare module 'cordis' {
   interface Events {
     /** Fired whenever a fresh `node-types` list lands from a socket — see `IdeRpcService.nodeTypes`. */
     'game/node-types'(types: NodeTypeInfo[]): void;
+    /** Fired whenever a fresh `flow-kinds` list lands from a socket — see `IdeRpcService.flowKinds`. */
+    'game/flow-kinds'(kinds: FlowKindInfo[]): void;
   }
 }
 
@@ -108,8 +112,12 @@ export interface IdeRpcService {
    * game has spoken; reset when the project leaves.
    */
   nodeTypes(): NodeTypeInfo[];
+  /** The flow node kinds the running game last registered (`flow-kinds`) — mirrored exactly as `nodeTypes()` is. */
+  flowKinds(): FlowKindInfo[];
   /** "Here are the scenes" — sent to every socket, root and preview alike. Not retained. */
   broadcastScenes(frame: Omit<ScenesMessage, 'type'>): void;
+  /** "Here is the flow document" — sent to every socket, root and preview alike. Not retained. */
+  broadcastFlow(frame: Omit<FlowMessage, 'type'>): void;
   /** "Highlight this node" — sent to every socket, root and preview alike. Not retained. */
   broadcastSceneSelect(frame: Omit<SceneSelectMessage, 'type'>): void;
   /**
@@ -274,6 +282,8 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
   let lastTransitions: string[] = [];
   /** See `IdeRpcService.nodeTypes`. */
   let lastNodeTypes: NodeTypeInfo[] = [];
+  /** See `IdeRpcService.flowKinds`. */
+  let lastFlowKinds: FlowKindInfo[] = [];
 
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
@@ -361,8 +371,12 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     },
     transitions: () => [...lastTransitions],
     nodeTypes: () => [...lastNodeTypes],
+    flowKinds: () => [...lastFlowKinds],
     broadcastScenes(frame) {
       for (const socket of clients) send(socket, { type: 'scenes', ...frame });
+    },
+    broadcastFlow(frame) {
+      for (const socket of clients) send(socket, { type: 'flow', ...frame });
     },
     broadcastSceneSelect(frame) {
       for (const socket of clients) send(socket, { type: 'scene-select', ...frame });
@@ -422,7 +436,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
           type !== 'update' &&
           type !== 'game-diagnostics' &&
           type !== 'game-transitions' &&
-          type !== 'node-types'
+          type !== 'node-types' &&
+          type !== 'flow-kinds' &&
+          type !== 'flow-trace'
         ) {
           return;
         }
@@ -467,6 +483,38 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
             if (other !== socket) send(other, relayed);
           }
           ctx.emit('game/node-types', [...lastNodeTypes]);
+        }
+        return;
+      }
+
+      if (message.type === 'flow-kinds') {
+        // The game's flow-kind registry, mirrored exactly as `node-types`
+        // above: a list of objects each carrying a string `kind`, else
+        // ignored; relayed to every OTHER socket; announced via `ctx.emit`
+        // for the `flow` plugin.
+        if (
+          Array.isArray(message.kinds) &&
+          message.kinds.every((k) => k && typeof k.kind === 'string')
+        ) {
+          lastFlowKinds = [...message.kinds];
+          const relayed: ServerMessage = { type: 'flow-kinds', kinds: [...lastFlowKinds] };
+          for (const other of clients) {
+            if (other !== socket) send(other, relayed);
+          }
+          ctx.emit('game/flow-kinds', [...lastFlowKinds]);
+        }
+        return;
+      }
+
+      if (message.type === 'flow-trace') {
+        // A live feed, not state: relayed to every OTHER socket as it lands
+        // and never retained — a late client is not greeted with a trace
+        // of runs it did not watch.
+        if (Array.isArray(message.entries)) {
+          const relayed: ServerMessage = { type: 'flow-trace', entries: message.entries };
+          for (const other of clients) {
+            if (other !== socket) send(other, relayed);
+          }
         }
         return;
       }
@@ -570,6 +618,10 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     if (lastNodeTypes.length) {
       send(socket, { type: 'node-types', types: [...lastNodeTypes] });
     }
+    // The last known flow-kind list, same reasoning again.
+    if (lastFlowKinds.length) {
+      send(socket, { type: 'flow-kinds', kinds: [...lastFlowKinds] });
+    }
   }
   service.attach(ctx.server, { origins: config.origins });
 
@@ -618,13 +670,18 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       lastHostDiagnostics = null;
       lastTransitions = [];
       lastNodeTypes = [];
+      lastFlowKinds = [];
       // Unlike the diagnostics/game-gone frames above (sent only when
-      // something was actually retained), these two always go: a client
+      // something was actually retained), these three always go: a client
       // that connected before anything had ever been reported still holds
       // whatever pick list / node palette it built from an earlier
-      // project's `game-transitions`/`node-types` frame, and has no other
+      // project's `game-transitions`/`node-types`/`flow-kinds` frame, and has no other
       // way to learn the game behind it is gone. Closes slice-16 debt 2.
-      gone.push({ type: 'game-transitions', ids: [] }, { type: 'node-types', types: [] });
+      gone.push(
+        { type: 'game-transitions', ids: [] },
+        { type: 'node-types', types: [] },
+        { type: 'flow-kinds', kinds: [] },
+      );
       for (const socket of clients) for (const message of gone) send(socket, message);
     }
     lastActive = state.active;

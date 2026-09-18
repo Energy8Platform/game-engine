@@ -19,6 +19,7 @@
     "@cordisjs/plugin-server": "1.7.0",
     "@energy8engine/contracts": "*",
     "@energy8engine/diagnostics": "*",
+    "@energy8engine/flow": "*",
     "@energy8engine/project": "*",
     "@energy8engine/scenes": "*",
     "@energy8engine/session-dev": "*",

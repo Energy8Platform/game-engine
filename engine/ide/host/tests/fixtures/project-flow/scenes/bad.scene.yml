@@ -1,0 +1,14 @@
+id: other
+nodes:
+  - id: a
+    type: container
+    props: {}
+  - id: a
+    type: spine
+    props: {}
+  - id: b
+    type: scene
+    props: { scene: nowhere }
+  - id: c
+    type: image
+    props: { src: missing.png }

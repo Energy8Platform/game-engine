@@ -408,7 +408,7 @@ export interface FlowTraceMessage {
   entries: FlowTraceEntry[];
 }
 
-/** What `GET /api/flows` answers on the root and the preview alike. */
+/** What `GET /api/flow` answers on the root and the preview alike. */
 export interface FlowResponse {
   doc: FlowDoc | null;
   diagnostics: Diagnostic[];
