@@ -7,11 +7,21 @@ is the delta on top of it.
 ## `scenes/`
 
 Scene documents live here, one file per scene: `scenes/base_game.scene.yml`
-and `scenes/big_win.scene.yml`. `main.ts` shows the scene named after the
-spin's stage when one is declared (the temporary rule until the flow editor
-drives the game) — `base_game`'s board is a `reels` node, and `big_win` is a
+and `scenes/big_win.scene.yml`. `flow.yml`'s `show` node puts `base_game` on
+screen at boot — `base_game`'s board is a `reels` node, and `big_win` is a
 nested scene it can show. `scenes1`'s row (below) sets the design resolution
 these documents are laid out against.
+
+## `flow.yml`
+
+The flow document, and the only thing that drives the game: `boot → show
+base_game → on ui.spin → spin → present → back to on`. `e8-base`'s `flow1`
+row (`@energy8engine/flow`) reads it from the host (`GET /api/flow`),
+interprets it, and traces every node it enters and leaves; `src/main.ts`
+holds no spin loop any more — its `Spin` button only emits `ui.spin` into
+the bus that row provides, and `#status` is read back off the trace. The
+IDE's Flow document edits this file (`PUT /api/flow`); node kinds come from
+the game's own registry (`ctx.flowNodes`), so a project plugin can add one.
 
 ## `e8.patch.yml`
 
@@ -55,7 +65,7 @@ rather than as row config:
 
 The page the IDE opens in a scene tab, not the game — it boots the same
 composition through `createGame` but applies `@energy8engine/scene-edit`
-instead of the spin loop and the `#controls` chrome, so a scene renders with
+instead of the `Spin` button and the `#controls` chrome, so a scene renders with
 a pickable gizmo and no `Spin` button. `scenes/base_game.scene.yml` now opens
 with a `logo` node (`assets/logo.png`, a small filled-circle placeholder) so
 there is a real image on the board to select, not just the reel grid.

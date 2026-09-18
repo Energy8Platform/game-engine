@@ -39,8 +39,10 @@
  * row has applied, landing the result straight in `game.diagnostics` — the
  * same list this page already reads for everything else.
  *
- * What is left of it is the three services `need()` (further down) reads
- * and records in the same call — `mechanics`, `play`, and `board`.
+ * What is left of it is the two services `need()` (further down) reads
+ * and records in the same call — `mechanics` and `board`. (`play` was the
+ * third, until the spin loop left this file for `flow.yml` — see the flow
+ * section below; nothing on this page reads it any more.)
  * `requires` is a field of a package.json, and a PAGE has none the
  * composition ever reads, so a service only this file touches is nobody
  * else's to check. Leaving it unchecked was measured, not assumed: with
@@ -52,8 +54,8 @@
  * design exists to prevent, reached by an edit the composition considers
  * legal. So the check is narrowed to what only this page knows, not
  * restored wholesale — and narrowed a second way now too: `need()` is the
- * only way this file reaches any of the three, enforced in the type
- * system (see `PageCtx` below), so a fourth one cannot start being read
+ * only way this file reaches either of the two, enforced in the type
+ * system (see `PageCtx` below), so a third one cannot start being read
  * here without being declared here first.
  *
  * **`<pre id="log">` is a reader, not a destination.** Everything this page
@@ -78,20 +80,15 @@ import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/sl
 import { createGame } from '@energy8engine/game-runtime';
 import * as ideBridge from '@energy8engine/ide-bridge';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
-import {
-  diagnostic,
-  type Diagnostic,
-  type PresentationStep,
-  type SpinResult,
-} from '@energy8engine/contracts';
-// Type-only, and fully erased: these two modules are what DECLARE the
-// `ctx.board` and `ctx.play` services this page reads off the composed
-// context. Importing their types is not importing them — nothing here
-// pulls `reels` or `play-loop` into the bundle, and neither package is
-// composed by this file. It is the page saying, in the type system, which
-// capabilities it expects the project's composition to have provided.
+import { diagnostic, type Diagnostic, type FlowTraceEntry } from '@energy8engine/contracts';
+import type { EventsService, FlowService } from '@energy8engine/flow';
+// Type-only, and fully erased: this module is what DECLARES the
+// `ctx.board` service this page reads off the composed context. Importing
+// its types is not importing it — nothing here pulls `reels` into the
+// bundle, and the package is not composed by this file. It is the page
+// saying, in the type system, which capabilities it expects the project's
+// composition to have provided.
 import type {} from '@energy8engine/reels/runtime';
-import type {} from '@energy8engine/play-loop/runtime';
 // Same device again, for `ctx.spinLog` — the durable record of spins the
 // `spinlog1` row provides. This page reads it only through
 // `reflect.get(..., false)`, and a game with no log is a working game —
@@ -138,11 +135,11 @@ const game = await createGame({
  * not one.
  *
  * Named once, here, rather than left to be re-typed at every read: a
- * fourth call to `need()` (below) naming a service outside this union is
+ * third call to `need()` (below) naming a service outside this union is
  * a compile error, so widening what the page needs starts at this line,
  * not at the read that would otherwise sneak one in uncounted.
  */
-type PageNeedService = 'mechanics' | 'play' | 'board';
+type PageNeedService = 'mechanics' | 'board';
 
 interface PageNeedDescriptor {
   service: PageNeedService;
@@ -177,16 +174,16 @@ function need(descriptor: PageNeedDescriptor): unknown {
 }
 
 /**
- * `game.ctx`, viewed with exactly the three services above removed — so
- * `ctx.mechanics` (or `.play`, or `.board`), typed straight off `ctx`
+ * `game.ctx`, viewed with exactly the two services above removed — so
+ * `ctx.mechanics` (or `.board`), typed straight off `ctx`
  * anywhere below this line, does not compile. `game.ctx` itself keeps its
  * full type: `ideBridge.apply(game.ctx, {})` further down needs the real
  * `Context`, and TypeScript has no way to narrow a value that still
  * exists, fully typed, under its own name — so this is the file's own
  * decision to route every other read through the narrower view, not a
- * wall the language builds unasked. What that decision buys: the three
- * consts right below (`play`, and the `currentMechanics()`/`currentBoard()`
- * reads — see why those two are reads, not captures) are the only way this file
+ * wall the language builds unasked. What that decision buys: the two
+ * reads right below (`currentMechanics()`/`currentBoard()` — see why those
+ * are reads, not captures) are the only way this file
  * reaches those services from here down, because `need()` and
  * `game.ctx.reflect` are the only things still holding a reference wide
  * enough to read them.
@@ -208,8 +205,6 @@ const ctx: PageCtx = game.ctx;
 // `npm run typecheck --workspace e8-example-first-slot`.
 // @ts-expect-error `mechanics` is a page need — read it through `currentMechanics()` below, never off `ctx` directly
 void ctx.mechanics;
-// @ts-expect-error `play` is a page need — read it through the `play` const below, never off `ctx` directly
-void ctx.play;
 // @ts-expect-error `board` is a page need — read it through `currentBoard()` below, never off `ctx` directly
 void ctx.board;
 
@@ -231,42 +226,32 @@ need({
 const currentMechanics = () =>
   game.ctx.reflect.get('mechanics', false) as typeof game.ctx.mechanics | undefined;
 
-const play = need({
-  service: 'play',
-  row: 'playloop1',
-  pkg: '@energy8engine/play-loop',
-  what: 'a play loop to run a presentation plan through',
-}) as typeof game.ctx.play | undefined;
-
 /**
- * `board` rejoins the page's own needs instead of staying an inference.
- * It was left out once on the reasoning that `@energy8engine/play-loop`'s
- * own `requires: ["board"]` already covers it — true for the ROW's half
- * of the story, but the PAGE's own read, in `presentStage` below
- * (`play.execute(plan, board)`), was safe only because `play` happens to
- * be evaluated first in that same expression, not because anything here
- * said so. A play loop that stopped requiring a board — a legal future
- * edit to that one OTHER row — would have turned this read back into an
- * unexplained throw with nothing here to catch it first. Recording it
- * here does not replace `playloop1`'s own check; it means this page no
- * longer depends on that other row's phrasing to explain itself.
+ * `board` stays a page need, in the page's own words, though the read
+ * that first put it here — `presentStage`'s `play.execute(plan, board)` —
+ * left with the spin loop. `@energy8engine/play-loop`'s own `requires:
+ * ["board"]` covers the ROW's half of the story, at boot; the flow's
+ * `present` node covers the run-time half, per spin ("no board to run it
+ * on"). What neither says is what THIS PAGE is: a board with a Spin
+ * button over it, whose test harness (`__e8.gridSize()`/`symbols()`, at
+ * the bottom) reads that board directly. A composition with no `reels1`
+ * is a page over nothing, and the failure screen says so here in the
+ * page's terms — naming the row — rather than only in the play loop's.
  */
 need({
   service: 'board',
   row: 'reels1',
   pkg: '@energy8engine/reels',
-  what: 'a board for the play loop to run its presentation against',
+  what: 'a board to draw the game on and to read the result back from',
 });
 
 /**
- * `board` is read at SPIN time, not captured here the way `mechanics` and
- * `play` are: `reels1` is a HOT row. An edit to it in the IDE re-applies
- * the row's fiber in place — the board this page would have captured is
- * destroyed and a new one provided — so a capture would leave the play
- * loop running against a dead board after the first live edit. `need()`
- * above still records the boot-time answer, for its diagnostic; this is
- * the live one. `undefined` when nothing provides it, and `play.execute`
- * says so itself ("no board to run it on").
+ * `board` is read per use, never captured: `reels1` is a HOT row. An edit
+ * to it in the IDE re-applies the row's fiber in place — the board this
+ * page would have captured is destroyed and a new one provided — so a
+ * capture would be a dead board after the first live edit. `need()` above
+ * still records the boot-time answer, for its diagnostic; this is the live
+ * one. `undefined` when nothing provides it.
  */
 const currentBoard = () =>
   game.ctx.reflect.get('board', false) as typeof game.ctx.board | undefined;
@@ -466,276 +451,136 @@ mechanicSelect.addEventListener('change', () => {
 });
 
 /**
- * Presents `data` through the stage's currently bound mechanic and runs
- * the resulting plan on the real board — the one code path both a real
- * spin (below) and the test-only replay instrumentation (`window.__e8`,
- * further down) go through, so a Playwright test observing the latter is
- * observing exactly what a real spin would have produced, not a shortcut
- * built just for the test.
+ * **The flow drives the game (slice 19).** Everything a click used to do
+ * here — `POST /api/spin`, `presentStage` (check-then-present through the
+ * bound mechanic, `play.execute` on the live board), the temporary "show
+ * the scene named after the stage" rule, and `play.record` — is now this
+ * project's `flow.yml`, read by the `flow1` row `e8-base` composes: `boot
+ * → show base_game → on ui.spin → spin → present → back to on`. The
+ * `spin` and `present` node kinds (`@energy8engine/flow`'s `kinds.ts`)
+ * are the two functions that were deleted from this file, one to one.
+ * What this page still says is "the button was pressed", by emitting into
+ * the bus `flow1` provides — and what it still shows is what the flow's
+ * trace says happened.
  *
- * `ctx.mechanics.present`, `ctx.play.execute` and `ctx.board` are all
- * services rows provided (`mechanics1`, `playloop1`, `reels1`) — this file
- * imports none of those packages.
+ * **NOT `ctx.events`.** That name is cordis's OWN lifecycle emitter — a
+ * plain own property every `Context` is born with, which the service
+ * Proxy returns before it ever looks at what a row provided — so
+ * `ctx.events.emit('ui.spin')` would emit into cordis and nothing would
+ * spin. `reflect.get('events', false)` is the only way to the flow bus
+ * (see `@energy8engine/flow`'s `runtime.ts` for why the name is kept).
  *
- * **Check-then-present is one call, and this page no longer performs it
- * itself.** It used to `check`, bail on failure, then call
- * `mechanic.present(data)` directly — the last unguarded third-party call
- * in the system: a plugin mechanic whose `present` threw took the page
- * down with it rather than producing a diagnostic. The order was also a
- * convention this page happened to follow, which the next game would have
- * had to rediscover. Both now belong to `mechanics.present`, which never
- * throws and cannot be called out of order.
+ * Both read leniently, and per use: a composition without `flow1` is a
+ * legal edit, and the page says so in `#status` instead of throwing on the
+ * first click; and `flow1` is a HOT row, like `mechanics1` and `reels1`
+ * above — a re-apply disposes the bus and the interpreter a capture would
+ * hold and provides fresh ones. The one thing that cannot be read per use,
+ * the `#status` trace listener, is re-armed on re-provide the way
+ * `ide-bridge` re-arms its own (`ctx.inject(['flow'], …)`).
  *
- * Returns the full plan, not just each step's `kind` — a step's content
- * (which board `spinTo`/`refill` name, which cells `remove` names) is
- * exactly what a person watching the board actually sees, and a kind-only
- * sequence cannot tell a correctly-refilled board apart from one with a
- * permanent hole in it. `null` when the stage could not be presented at
- * all, which an empty array cannot say: a mechanic emitting no steps is a
- * legal, successful presentation.
+ * **The `<select>` no longer follows the presentation.** It used to be
+ * re-synced from `mechanics.forStage(stage)` inside `presentStage`, so a
+ * rebind from the IDE's composition screen showed up here on the next
+ * spin. The stage is now `vars.result.stage` inside a `present` node's
+ * run, which the trace does not carry; the control shows what a person
+ * picked in it, seeded once from the composition above, and a rebind from
+ * the IDE is what `__e8.bound()` and the board itself report.
  */
-async function presentStage(
-  stage: string,
-  data: Record<string, unknown>,
-): Promise<PresentationStep[] | null> {
-  // Keep the control honest about what actually rendered. The binding has
-  // two writers besides this page's `<select>`: `e8.patch.yml`, which sets
-  // it, and `@energy8engine/ide-bridge`, which rebinds it live whenever a
-  // human writes a value into that row from the IDE's composition screen.
-  // Neither of them touches this element, so without this line the dropdown
-  // would keep showing whatever it showed last while the board drew
-  // something else.
-  //
-  // A mechanic id the dropdown has no `<option>` for leaves it alone rather
-  // than blanking it: `base_game` is free text in the IDE now, so an id
-  // this page never heard of is reachable and is not this control's to
-  // display. It is reported instead — `ide-bridge` writes it into
-  // `ctx.diagnostics`, and so does `present` below.
-  //
-  // Read before presenting, and tolerant of `null`: a stage bound to
-  // nothing is exactly a case `present` reports, and this control has
-  // nothing to say about it.
-  const mechanics = currentMechanics()!;
-  // Scenes (slice 17, the temporary rule until the flow editor drives the
-  // game): show the scene named after this spin stage when one exists.
-  // Read leniently — a composition without a scenes row presents as before.
-  const scenes = ctx.reflect.get('scenes', false) as
-    { show?(id: string): Promise<void>; docs?(): ReadonlyMap<string, unknown> } | undefined;
-  if (scenes?.show && scenes.docs?.().has(stage)) await scenes.show(stage);
-  const bound = mechanics.forStage(stage);
-  if (bound && [...mechanicSelect.options].some((option) => option.value === bound.id)) {
-    mechanicSelect.value = bound.id;
-  }
+const currentEvents = () =>
+  ctx.reflect.get('events', false) as unknown as EventsService | undefined;
+const currentFlow = () => ctx.reflect.get('flow', false) as FlowService | undefined;
 
-  // Neither of the two calls below is followed by a log line any more, and
-  // that is the point of the whole change: `mechanics.present` and
-  // `play.execute` are both cordis-aware service methods that ALREADY wrote
-  // what they returned into `ctx.diagnostics` (see task-2-3-report.md).
-  // Re-printing the returned arrays here — as this page did, as
-  // `JSON.stringify(...)` under a sentence of its own invention — was the
-  // same event told twice, in a format only this page used, in a place only
-  // this page could see. The `<pre>` shows them now because the service
-  // does, and it shows the message the producer actually wrote.
-  const { plan, diagnostics: presentProblems } = mechanics.present(stage, data);
-  if (presentProblems.length > 0) {
-    statusEl.textContent = 'presentation failed — see log';
-    // `null`, not `[]`. An empty plan is a legal thing for a mechanic to
-    // emit, so a caller cannot tell the two apart from the array alone —
-    // and the spin handler below used to write "done" over the status this
-    // line just set, announcing success on a stage that never presented.
-    return null;
-  }
+/** The kind of the node a trace entry names, off the document the flow is running; `undefined` between documents. */
+const kindOf = (node: string) =>
+  currentFlow()
+    ?.doc()
+    ?.nodes.find((n) => n.id === node)?.kind;
 
-  // Same rule for a plan that did not RUN as for one that could not be
-  // made: `execute` never throws, and a step that failed is a diagnostic
-  // it already wrote — a spin against a board `reels1` had just torn down
-  // (a hot re-apply mid-flight) refuses this way, and was read as `done`
-  // here before this line.
-  if ((await play!.execute(plan, currentBoard())).length > 0) {
-    statusEl.textContent = 'presentation failed — see log';
-    return null;
-  }
-  return plan;
+if (!currentEvents() || !currentFlow()) {
+  statusEl.textContent = 'no flow row — the spin button does nothing';
 }
 
-let lastSpin: { stage: string; data: Record<string, unknown> } | null = null;
-
-/**
- * What this page asks the math for. It has no bet control, so the body is
- * empty and `dev-game` falls back to the composition's own bet level — but
- * it is sent, and it is what the log records, so the request in the record
- * is the request that was made rather than a guess at it.
- */
-function spinRequest(): Record<string, unknown> {
-  return {};
-}
-
-/**
- * Writes one spin into the composition's durable log: what was asked, what
- * came back, and the plan it was actually presented with.
- *
- * Called at each SPIN, never inside `presentStage`. `presentStage` is also
- * the replay path — `__e8.present` re-runs one captured result under a
- * different mechanic — and three replays of one spin are one line in this
- * log, not three. That is §7's distinction and the reason the log is kept
- * apart from the live events of the presentation: the result is the fact,
- * the plan is an interpretation of it.
- *
- * Through the `play` handle `need()` captured above, optionally chained
- * rather than read fresh: a composition with no `playloop1` row is a
- * legal edit, and it must not turn into a `TypeError` here — least of all
- * on the line whose job is keeping a record when things are going wrong.
- * Nothing anywhere declares `play` a row's `requires`, because no row
- * READS `ctx.play` — only this page does, which is why `play` is one of
- * the services `need()` records above. What is genuinely left over after
- * that is narrower than this comment used to claim: not the whole
- * `playloop1` row, but a page's own reads, which `e8.runtime.requires`
- * has no way to carry because that field belongs to a package.json and a
- * page has none the composition reads.
- * The row that provides the durable log (`spinlog1`) is not a `requires`
- * anywhere, on purpose: a game that keeps no record is a working game, and
- * `play.record` is a no-op without one.
- */
-function recordSpin(request: unknown, result: SpinResult, plan: PresentationStep[]): void {
-  play?.record({ request, result, plan });
-}
-
-/**
- * What to say when a click threw.
- *
- * The exception's own text is evidence, not an explanation. With
- * `mechanics1` out of the composition, this page's log used to gain
- * `error: Cannot read properties of undefined (reading 'forStage')` and
- * nothing else — true, and by itself unhelpful: it names an internal of a
- * service that is not there rather than the row a person has to put back.
- *
- * This function used to repair that itself, reaching back into a
- * page-local list to work out which row a click had tripped over. It does
- * not any more, and it does not need to: a row that requires a service
- * says so through `E8RuntimeHalf.requires`, this page says the same about
- * the services only it reads — recorded where each is read, by `need()`,
- * above — and both were written into the same log — and onto the screen —
- * before the first click ever happened. So this only reports the raw
- * failure; the reader who needs the "why" has it already, sitting higher
- * in the same log.
- *
- * A `Diagnostic`, not a string painted into this page's own element: it
- * belongs in the same list everything else does, and reaches the IDE for
- * free by being there. `first-slot`/`spin` is the address: namespace 2 of
- * `Diagnostic.plugin` (this page is a running game, not a composition
- * row), and `spin` is where inside it.
- */
-function spinFailure(error: unknown): Diagnostic {
-  const raw = error instanceof Error ? error.message : String(error);
-  return diagnostic('error', 'first-slot', 'spin', `error: ${raw}`);
-}
-
-spinBtn.addEventListener('click', async () => {
-  spinBtn.disabled = true;
+// No `disabled` while a spin is in flight: the `on` node drops a fire while
+// a run is live (`busy: ignore`, its default), which is the same click
+// swallowed one layer down — and a button this page disabled would stay
+// so for good under a document with no `present` node to re-enable it on.
+spinBtn.addEventListener('click', () => {
+  const events = currentEvents();
+  if (!events) return;
   statusEl.textContent = 'spinning…';
-  try {
-    const request = spinRequest();
-    const res = await fetch('/api/spin', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    // `dev-game`'s route responds with the bare `SpinResult` (contracts'
-    // normative envelope for this crossing) on 2xx, or `{ diagnostics }`
-    // on a non-2xx — see dev-game.ts's own route handler.
-    const body: SpinResult | { diagnostics: Diagnostic[] } = await res.json();
+  events.emit('ui.spin');
+});
 
-    if (!res.ok) {
-      // These diagnostics are `session-dev`'s, produced on the HOST side of
-      // `/api/spin` (`dev-game.ts`'s route) — a different PROCESS from this
-      // page's own `game.ctx`. This page used to relay them into
-      // `ctx.diagnostics`, because for a while it was the only thing that
-      // could: the host had no way of its own to speak about a running
-      // game. It has one now — `dev-game`'s route broadcasts the same
-      // diagnostics as a `game-diagnostics` frame over `/ide` (see that
-      // route, and `rpc.ts`'s `reportGameDiagnostics`) — so relaying
-      // them here made ONE failure travel twice for this project and only
-      // this project: once straight from the host, and once round through
-      // this page, `ctx.diagnostics` and `ide-bridge`. The host's is the
-      // one that works for every game, including one whose page never
-      // wired a relay, so it is the one that stays.
-      //
-      // What this page keeps is the part it is genuinely the only witness
-      // to: that the click it was handling did not produce a spin.
+// `#status` after a click, from the trace rather than from a return value
+// this page no longer has: `done`/`presentation failed — see log` are the
+// two `present` ports, and a `spin` that left by `failed` is the host's
+// non-2xx, which `dev-game`'s route has already broadcast to the IDE.
+const watchStatus = (flow: FlowService) =>
+  flow.onTrace((entry) => {
+    const kind = kindOf(entry.node);
+    if (kind === 'present' && entry.out === 'next') statusEl.textContent = 'done';
+    else if (kind === 'present' && entry.out === 'failed')
+      statusEl.textContent = 'presentation failed — see log';
+    else if (kind === 'spin' && entry.out === 'failed')
       statusEl.textContent = 'spin failed — the host reported it to the IDE';
-      return;
-    }
-
-    // The `win N (total M), stage "S"` line this used to print into `#log`
-    // went with the rest of them. It was the one thing there that was not a
-    // diagnostic at all, and a log that IS the diagnostics list has no row
-    // shape for "nothing went wrong, here is the money" — dressing one up
-    // as an `info` diagnostic would push every spin of every game into the
-    // IDE's failure panel. What the spin paid is on the board, `#status`
-    // still reaches `done`, and the durable record is `spinlog1`'s
-    // (`recordSpin` below; `__e8.spins()` for a test).
-    const result = body as SpinResult;
-    lastSpin = { stage: result.stage, data: result.data };
-    const steps = await presentStage(result.stage, result.data);
-    recordSpin(request, result, steps ?? []);
-    // Only when the stage actually presented. `presentStage` has already
-    // said what went wrong and set the status to match; writing "done" over
-    // it announced a spin that never reached the board.
-    if (steps) statusEl.textContent = 'done';
-  } catch (error) {
-    reportAll(diagnosticsLog, [spinFailure(error)]);
-    statusEl.textContent = 'error — see log';
-  } finally {
-    spinBtn.disabled = false;
-  }
+  });
+let watched = currentFlow();
+if (watched) watchStatus(watched);
+ctx.inject(['flow'], () => {
+  const fresh = currentFlow();
+  if (fresh && fresh !== watched) watchStatus((watched = fresh));
 });
 
 /**
  * Test-only instrumentation for the SDD plan's Task 12, step 5. Playwright
- * has no other honest way to observe "the SAME spin result presents
- * differently under a different mechanic" than asking the game what it
- * actually ran — checking `e8.yml` or the `/ide` websocket traffic would
- * only prove a config value changed, not that the board did anything
- * different (see the task brief: "a test that checks e8.yml instead of the
- * screen would be checking the wrong end of the pipe"). Nothing on this
- * page's own UI calls `window.__e8`; a production game bundle never
- * imports this file's test harness, either.
+ * has no other honest way to observe what the game actually ran than
+ * asking it — checking `e8.yml` or the `/ide` websocket traffic would only
+ * prove a config value changed, not that the board did anything (see the
+ * task brief: "a test that checks e8.yml instead of the screen would be
+ * checking the wrong end of the pipe"). Nothing on this page's own UI
+ * calls `window.__e8`; a production game bundle never imports this file's
+ * test harness, either.
+ *
+ * `present(stage, data)` — the replay of one captured result under another
+ * mechanic — is gone with `presentStage`: there is no page-side path that
+ * presents any more, only the flow's. A test that wants "the same result
+ * under a different mechanic" rebinds and spins again.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
   /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `need()` found unmet, which is the whole of what the boot screen and `#log` were given. */
   diagnostics,
-  /** Hits `/api/spin` for real and presents the result under whichever mechanic is currently bound. Returns the raw result and the full plan the mechanic actually emitted (step kind AND content — see `presentStage`'s doc). */
-  async spin(): Promise<{ result: SpinResult; steps: PresentationStep[] }> {
-    const request = spinRequest();
-    const res = await fetch('/api/spin', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
+  /**
+   * Exactly what the button does — `events.emit('ui.spin')` — and then the
+   * port the flow's `present` node left by (`next` or `failed`), or
+   * `failed` from its `spin` node when the host refused. Rejects after 20 s
+   * with nothing having left: no `on ui.spin` in the document, no
+   * `present` after `spin`, or the fire dropped because a run was still
+   * live (`on`'s `busy: ignore`).
+   */
+  spin(): Promise<{ out: string }> {
+    const events = currentEvents();
+    const flow = currentFlow();
+    if (!events || !flow) return Promise.reject(new Error('no flow row in this composition'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        off();
+        reject(new Error('no present node left the flow within 20 s of ui.spin — see the trace'));
+      }, 20_000);
+      const off = flow.onTrace((entry) => {
+        const kind = kindOf(entry.node);
+        const left =
+          kind === 'present' ? entry.out !== null : kind === 'spin' && entry.out === 'failed';
+        if (!left) return;
+        clearTimeout(timer);
+        off();
+        resolve({ out: entry.out! });
+      });
+      events.emit('ui.spin');
     });
-    const body: SpinResult | { diagnostics: unknown[] } = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `spin failed: ${JSON.stringify((body as { diagnostics: unknown[] }).diagnostics)}`,
-      );
-    }
-    const result = body as SpinResult;
-    lastSpin = { stage: result.stage, data: result.data };
-    // `?? []` keeps this harness's own contract an array. A failed
-    // presentation is reported on the page (see `presentStage`); what a
-    // test observing this needs is "which steps ran", and none did.
-    const steps = (await presentStage(result.stage, result.data)) ?? [];
-    // Recorded here too, and for the same reason the button records: this
-    // is a real spin, indistinguishable from a click. A harness that
-    // skipped it would make the log say something different from what the
-    // game does.
-    recordSpin(request, result, steps);
-    return { result, steps };
   },
-  /** Re-presents arbitrary (or the last captured) stage data under whichever mechanic is currently bound — the same `data`, a possibly different mechanic. */
-  async present(stage?: string, data?: Record<string, unknown>): Promise<PresentationStep[]> {
-    const target = stage && data ? { stage, data } : lastSpin;
-    if (!target) throw new Error('no spin to present yet');
-    return (await presentStage(target.stage, target.data)) ?? [];
+  /** The interpreter's trace of the current/last run (`FlowTraceEntry`s, capped at 500); `[]` with no flow row. */
+  flowTrace(): readonly FlowTraceEntry[] {
+    return currentFlow()?.trace() ?? [];
   },
   /**
    * What the durable log holds — the spins that actually happened, not the
@@ -794,11 +639,14 @@ spinBtn.addEventListener('click', async () => {
   },
   /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
   scenesVisible(): string[] {
-    return (ctx.reflect.get('scenes', false) as { visible?(): string[] } | undefined)?.visible?.() ?? [];
+    return (
+      (ctx.reflect.get('scenes', false) as { visible?(): string[] } | undefined)?.visible?.() ?? []
+    );
   },
   /** Whether a node of a mounted top-level scene is visible; `null` when there is no such node. */
   nodeVisible(scene: string, node: string): boolean | null {
-    const s = ctx.reflect.get('scenes', false) as { view?(ref: { scene: string; node: string }): { visible: boolean } | undefined } | undefined;
+    const s = ctx.reflect.get('scenes', false) as
+      { view?(ref: { scene: string; node: string }): { visible: boolean } | undefined } | undefined;
     const v = s?.view?.({ scene, node });
     return v ? v.visible : null;
   },

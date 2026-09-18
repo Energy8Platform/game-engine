@@ -3,6 +3,17 @@
 The reference project for the `e8-base` bundle: `e8.profile.yml` stacks that
 one bundle, and `e8.patch.yml` is the delta on top of it.
 
+## `flow.yml`
+
+The flow document, and the only thing that drives the game: `boot → show
+base_game → on ui.spin → spin → present → back to on`. `e8-base`'s `flow1`
+row (`@energy8engine/flow`) reads it from the host (`GET /api/flow`),
+interprets it, and traces every node it enters and leaves; `src/main.ts`
+holds no spin loop any more — its `Spin` button only emits `ui.spin` into
+the bus that row provides, and `#status` is read back off the trace. The
+IDE's Flow document edits this file (`PUT /api/flow`); node kinds come from
+the game's own registry (`ctx.flowNodes`), so a project plugin can add one.
+
 ## `e8.patch.yml`
 
 The patch carries everything `src/main.ts` used to pass as a JS object
@@ -58,7 +69,7 @@ rather than as row config:
 
 A second browser entry, next to `index.html`: the IDE loads this one, not
 `index.html`, inside a scene tab. It runs the same composed game but swaps
-the spin-loop page for `@energy8engine/scene-edit`, which draws the
+the `Spin` page for `@energy8engine/scene-edit`, which draws the
 selection gizmo over whichever scene the tab names (`?scene=` in the URL)
 and reports pointer moves back to the IDE over `postMessage` — the IDE
 remains the only writer of `scenes/*.scene.yml`. `assets/logo.png` is this

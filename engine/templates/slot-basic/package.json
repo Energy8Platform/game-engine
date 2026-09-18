@@ -6,6 +6,7 @@
   "dependencies": {
     "@energy8engine/contracts": "*",
     "@energy8engine/diagnostics": "*",
+    "@energy8engine/flow": "*",
     "@energy8engine/game-runtime": "*",
     "@energy8engine/ide-bridge": "*",
     "@energy8engine/play-loop": "*",
