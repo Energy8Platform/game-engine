@@ -38,6 +38,7 @@ export {
   type ScenesService,
   type ScenesConfig,
 } from './plugins/scenes';
+export { useFlow, type FlowClientService, type FlowConfig } from './plugins/flow';
 export {
   useGameDiagnostics,
   type GameDiagnosticsEntry,

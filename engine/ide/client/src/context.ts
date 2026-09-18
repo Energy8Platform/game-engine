@@ -14,6 +14,8 @@ import type { GameCompositionConfig } from './plugins/game-composition';
 import * as assetNodeTypes from './plugins/asset-node-types';
 import * as scenes from './plugins/scenes';
 import type { ScenesConfig } from './plugins/scenes';
+import * as flow from './plugins/flow';
+import type { FlowConfig } from './plugins/flow';
 import * as gameDiagnostics from './plugins/diagnostics';
 import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
@@ -38,6 +40,7 @@ export async function createIdeClient(
     ModulesConfig &
     GameCompositionConfig &
     ScenesConfig &
+    FlowConfig &
     FilesConfig &
     CheckConfig,
 ): Promise<Context> {
@@ -71,6 +74,11 @@ export async function createIdeClient(
   // The scene documents: reads `connection` (frames) and `shell` (tabs),
   // and the same `fetchFn`/`origin` `gameComposition` takes.
   await ctx.plugin(scenes, config);
+  // The flow document: same shape as `scenes` above (`connection` frames,
+  // `shell` for its activity/document slots) minus the canvas deps —
+  // there is no iframe to drop assets onto or read a design size from.
+  // Injects `scenes` too, unused before Task 9's mutual deselect.
+  await ctx.plugin(flow, config);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
   // own doc) — no new field for this signature to carry, just another
   // plugin reading the same `url`/`socketFactory` this function's caller

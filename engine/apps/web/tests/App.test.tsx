@@ -107,7 +107,7 @@ beforeEach(() => {
 });
 
 describe('App', () => {
-  it('registers projects, explorer, composition and preview in the activity bar, in that order, and the scenes plugin after them', async () => {
+  it('registers projects, explorer, composition and preview in the activity bar, in that order, and the scenes/flow plugins after them', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     expect(ctx.slots.list('shell.activity').map((e) => e.key)).toEqual(
@@ -121,6 +121,7 @@ describe('App', () => {
       'activity-composition',
       'activity-preview',
       'activity-scenes',
+      'activity-flow',
     ]);
   });
 
@@ -133,13 +134,16 @@ describe('App', () => {
     expect(await screen.findByText('Projects')).toBeTruthy();
   });
 
-  it('registers composition and preview as the only documents, neither closable', async () => {
+  it('registers composition, preview and flow as documents, none closable', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     const docs = ctx.slots.list<{ name: string; key: string; closable?: boolean }>(
       'shell.document',
     );
+    // `flow` composes ahead of `App`'s own effects (inside `createIdeClient`,
+    // before `App` ever renders), so it lands first in registration order.
     expect(docs.map((d) => [d.key, d.closable])).toEqual([
+      ['flow', false],
       ['composition', false],
       ['preview', false],
     ]);
