@@ -42,6 +42,12 @@ import { PropertiesSidebar } from '../shell/PropertiesSidebar';
  * `SceneDocument`) and the inspector (`shell.sideRight`, shown while
  * something is selected and hidden when the selection clears) register
  * here too.
+ *
+ * Every node type the game reports with `accept` becomes one
+ * `ctx.assetNodeTypes` registration (`derived:<type>`: its extensions,
+ * its `sibling`, a node with the path in `accept.prop` at the drop
+ * point), replaced whole on the next report. A project plugin that
+ * registers its own afterwards outranks them — `pick` scans newest first.
  */
 declare module 'cordis' {
   interface Context {
@@ -138,10 +144,32 @@ export function apply(ctx: Context, config: ScenesConfig) {
     diagnostics = next;
     docsLive = true;
   }
+  let derived: (() => void)[] = [];
   function applyTypes(types: NodeTypeInfo[]) {
     nodeTypes = types;
     typesLive = true;
+    for (const off of derived) off();
+    derived = types.flatMap(({ type, accept }) =>
+      accept
+        ? [
+            ctx.assetNodeTypes.register(`derived:${type}`, {
+              extensions: accept.extensions,
+              sibling: accept.sibling,
+              node: (path, { x, y }) => ({
+                type,
+                props: { [accept.prop]: path, x, y, anchor: 0.5 },
+              }),
+            }),
+          ]
+        : [],
+    );
   }
+  ctx.effect(
+    () => () => {
+      for (const off of derived) off();
+    },
+    'scenes:derived-asset-types',
+  );
 
   /**
    * The one request shape every route shares. A 2xx whose body carries a

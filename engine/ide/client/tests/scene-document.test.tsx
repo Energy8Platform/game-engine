@@ -56,9 +56,23 @@ const BASE: SceneDoc = {
 const BONUS: SceneDoc = { id: 'bonus', nodes: [] };
 const TYPES = [
   { type: 'container', schema: Schema.object({}).toJSON() },
-  { type: 'image', schema: Schema.object({ src: Schema.string().required() }).toJSON() },
+  {
+    type: 'image',
+    schema: Schema.object({ src: Schema.string().required() }).toJSON(),
+    accept: { extensions: ['png', 'jpg', 'jpeg', 'webp'], prop: 'src' },
+  },
   { type: 'reels', schema: Schema.object({ rows: Schema.number().default(3) }).toJSON() },
   { type: 'scene', schema: Schema.object({}).toJSON() },
+  {
+    type: 'spritesheet',
+    schema: Schema.object({ sheet: Schema.string().required() }).toJSON(),
+    accept: { extensions: ['json'], prop: 'sheet' },
+  },
+  {
+    type: 'spine',
+    schema: Schema.object({ skeleton: Schema.string().required() }).toJSON(),
+    accept: { extensions: ['skel', 'json'], prop: 'skeleton', sibling: 'atlas' },
+  },
 ];
 
 const built: Context[] = [];
@@ -306,12 +320,7 @@ describe('SceneDocument', () => {
 
     await userEvent.click(screen.getByTestId('node-add'));
     const select = screen.getByTestId('node-add-type') as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual([
-      'container',
-      'image',
-      'reels',
-      'scene',
-    ]);
+    expect([...select.options].map((o) => o.value)).toEqual(TYPES.map((t) => t.type));
     await userEvent.selectOptions(select, 'container');
     await userEvent.click(screen.getByTestId('node-add-ok'));
     await waitFor(() => expect(puts()).toHaveLength(1));
@@ -680,6 +689,46 @@ describe('SceneDocument', () => {
         node: 'image-1',
       }),
     );
+  });
+
+  it('a drop of a .json with no .atlas beside it is a spritesheet node, at the drop point rounded to whole pixels', async () => {
+    const { ctx, puts } = await harness({
+      'GET /api/files': () => ({
+        body: { entries: [{ path: 'assets/coin.json', kind: 'file', size: 3 }], diagnostics: [] },
+      }),
+    });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'drop', { path: 'assets/coin.json', x: 10.4, y: 19.6 });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.at(-1)).toEqual({
+      id: 'spritesheet-1',
+      type: 'spritesheet',
+      props: { sheet: 'assets/coin.json', x: 10, y: 20, anchor: 0.5 },
+    });
+  });
+
+  it('a drop of a .json with its .atlas beside it is a spine node', async () => {
+    const { ctx, puts } = await harness({
+      'GET /api/files': () => ({
+        body: {
+          entries: [
+            { path: 'assets/coin.json', kind: 'file', size: 3 },
+            { path: 'assets/coin.atlas', kind: 'file', size: 3 },
+          ],
+          diagnostics: [],
+        },
+      }),
+    });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'drop', { path: 'assets/coin.json', x: 1, y: 2 });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.at(-1)).toEqual({
+      id: 'spine-1',
+      type: 'spine',
+      props: { skeleton: 'assets/coin.json', x: 1, y: 2, anchor: 0.5 },
+    });
   });
 
   it('a drop of an asset with no registered node type warns instead of adding a node', async () => {

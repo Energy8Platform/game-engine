@@ -91,8 +91,10 @@ export function renameNode(doc: FlowDoc, id: string, newId: string): FlowDoc {
   };
 }
 
+/** Whole pixels: a drag ends on a fraction, and the file should not carry it. */
 export function moveNode(doc: FlowDoc, id: string, at: { x: number; y: number }): FlowDoc {
-  return { ...doc, nodes: doc.nodes.map((n) => (n.id === id ? { ...n, ui: at } : n)) };
+  const ui = { x: Math.round(at.x), y: Math.round(at.y) };
+  return { ...doc, nodes: doc.nodes.map((n) => (n.id === id ? { ...n, ui } : n)) };
 }
 
 /**

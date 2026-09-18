@@ -7,6 +7,7 @@ import * as connection from '../src/plugins/connection';
 import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as flow from '../src/plugins/flow';
+import * as files from '../src/plugins/files';
 import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
 
 /**
@@ -16,8 +17,10 @@ import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
  * plugins it injects — plus a stub `scenes` that holds a selection and
  * a doc list (what the mutual deselect and the `scene` picker read;
  * composing the real plugin here would drag in its own
- * `workspace`/`gameComposition`/`assetNodeTypes`/`files` chain for
- * nothing else this plugin reads).
+ * `workspace`/`gameComposition`/`assetNodeTypes` chain for nothing else
+ * this plugin reads) and the real `files` (the inspector's `asset`
+ * picker reads the tree; `GET /api/files` answers empty unless a test
+ * routes it).
  */
 export class FakeSocket implements WebSocketLike {
   listeners: Record<string, ((event: any) => void)[]> = {};
@@ -111,7 +114,11 @@ export async function harness(routes: Record<string, Route>, sceneIds: readonly 
     const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method, url, body });
-    const route = routes[`${method} ${url}`];
+    const route =
+      routes[`${method} ${url}`] ??
+      (url === '/api/files' && method === 'GET'
+        ? () => ({ body: { entries: [], diagnostics: [] } })
+        : undefined);
     if (!route) throw new Error(`unexpected fetch: ${method} ${url}`);
     const answer = await route(body);
     return new Response(JSON.stringify(answer.body), {
@@ -125,6 +132,7 @@ export async function harness(routes: Record<string, Route>, sceneIds: readonly 
   await ctx.plugin(slots);
   await ctx.plugin(shell);
   ctx.provide('scenes', scenesStub(sceneIds));
+  await ctx.plugin(files, { fetchFn });
   await ctx.plugin(flow, { url: 'ws://x/ide', fetchFn });
   return { ctx, socket, calls, fetchFn };
 }

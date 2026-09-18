@@ -1,16 +1,37 @@
 import type { Context } from 'cordis';
+import type { FileEntry } from '@energy8engine/contracts';
 
-/** One way to turn a dropped asset file into a scene node. */
+/**
+ * One way to turn a dropped asset file into a scene node. Nothing is
+ * built in: `scenes` derives one per node type the running game reports
+ * with `accept` (ids `derived:<type>`); a project plugin registers its
+ * own on top.
+ */
 export interface AssetNodeType {
   extensions: string[];
-  node(path: string, at: { x: number; y: number }): { type: string; props: Record<string, unknown> };
+  /**
+   * An extension a file beside the dropped one must have (`atlas`: a
+   * spine skeleton's `.atlas` next to its `.json`) — what tells two
+   * registrations sharing an extension apart. Checked only when `pick`
+   * is given the tree.
+   */
+  sibling?: string;
+  node(
+    path: string,
+    at: { x: number; y: number },
+  ): { type: string; props: Record<string, unknown> };
 }
 
 export interface AssetNodeTypesService {
   /** Same id again replaces (last-wins); the returned disposer restores whatever it replaced. */
   register(id: string, def: AssetNodeType): () => void;
-  /** The current registration (by id) whose extensions include `path`'s, case-insensitively. */
-  pick(path: string): AssetNodeType | undefined;
+  /**
+   * The registration for `path`'s extension (case-insensitive), the latest
+   * registered first. With `tree`: one whose `sibling` file is in the tree
+   * beside the path wins over one with no `sibling`; one whose sibling is
+   * missing is passed over. Without `tree` the sibling rule is ignored.
+   */
+  pick(path: string, tree?: readonly FileEntry[]): AssetNodeType | undefined;
   /** In registration order (by id, not affected by a same-id replace). */
   list(): readonly { id: string; def: AssetNodeType }[];
 }
@@ -67,14 +88,21 @@ export function apply(ctx: Context) {
         if (i !== -1) stack!.splice(i, 1);
       };
     },
-    pick(path) {
+    pick(path, tree) {
       const ext = extOf(path);
       if (!ext) return undefined;
-      for (const id of order) {
-        const def = current(id);
-        if (def?.extensions.some((e) => e.toLowerCase() === ext)) return def;
-      }
-      return undefined;
+      const candidates = [...service.list()]
+        .reverse()
+        .map((r) => r.def)
+        .filter((def) => def.extensions.some((e) => e.toLowerCase() === ext));
+      if (!tree) return candidates[0];
+      const stem = path.slice(0, -ext.length);
+      const beside = (sibling: string) =>
+        tree.some((e) => e.kind === 'file' && e.path === stem + sibling);
+      return (
+        candidates.find((def) => def.sibling !== undefined && beside(def.sibling)) ??
+        candidates.find((def) => def.sibling === undefined)
+      );
     },
     list() {
       const result: { id: string; def: AssetNodeType }[] = [];
@@ -87,9 +115,4 @@ export function apply(ctx: Context) {
   };
 
   ctx.provide('assetNodeTypes', service);
-
-  service.register('image', {
-    extensions: ['png', 'jpg', 'jpeg', 'webp'],
-    node: (src, { x, y }) => ({ type: 'image', props: { src, x, y, anchor: 0.5 } }),
-  });
 }

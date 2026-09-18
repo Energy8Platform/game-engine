@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Context } from 'cordis';
+import type { FileEntry } from '@energy8engine/contracts';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
+
+const file = (path: string): FileEntry => ({ path, kind: 'file' });
+const node =
+  (type: string, prop: string) =>
+  (src: string, { x, y }: { x: number; y: number }) => ({ type, props: { [prop]: src, x, y } });
 
 async function boot() {
   const ctx = new Context();
@@ -8,46 +14,108 @@ async function boot() {
   return ctx;
 }
 
+/** What `scenes` derives from a game's report: spritesheet (json), spine (skel/json + `.atlas` beside), video (mp4). */
+async function media() {
+  const ctx = await boot();
+  ctx.assetNodeTypes.register('derived:spritesheet', {
+    extensions: ['json'],
+    node: node('spritesheet', 'sheet'),
+  });
+  ctx.assetNodeTypes.register('derived:spine', {
+    extensions: ['skel', 'json'],
+    sibling: 'atlas',
+    node: node('spine', 'skeleton'),
+  });
+  ctx.assetNodeTypes.register('derived:video', { extensions: ['mp4'], node: node('video', 'src') });
+  return ctx;
+}
+
+const typeOf = (ctx: Context, path: string, tree?: FileEntry[]) =>
+  ctx.assetNodeTypes.pick(path, tree)?.node(path, { x: 0, y: 0 }).type;
+
 describe('assetNodeTypes', () => {
-  it('picks the built-in image type case-insensitively by extension', async () => {
+  it('has no built-in: a fresh service picks nothing and lists nothing', async () => {
     const ctx = await boot();
-    expect(ctx.assetNodeTypes.pick('assets/a.PNG')?.node).toBeInstanceOf(Function);
-    expect(ctx.assetNodeTypes.pick('assets/a.jpg')).toBeDefined();
-    expect(ctx.assetNodeTypes.pick('assets/a.jpeg')).toBeDefined();
-    expect(ctx.assetNodeTypes.pick('assets/a.webp')).toBeDefined();
+    expect(ctx.assetNodeTypes.pick('assets/a.png')).toBeUndefined();
+    expect(ctx.assetNodeTypes.list()).toEqual([]);
   });
 
-  it('returns undefined for an unregistered extension', async () => {
+  it('picks by extension case-insensitively, against extensions lower-cased too', async () => {
     const ctx = await boot();
-    expect(ctx.assetNodeTypes.pick('clip.mp4')).toBeUndefined();
-  });
-
-  it('node() builds an image node at the drop point', async () => {
-    const ctx = await boot();
-    const def = ctx.assetNodeTypes.pick('a/logo.png')!;
-    expect(def.node('a/logo.png', { x: 10, y: 20 })).toEqual({
-      type: 'image',
-      props: { src: 'a/logo.png', x: 10, y: 20, anchor: 0.5 },
+    ctx.assetNodeTypes.register('image', {
+      extensions: ['png', 'JPG'],
+      node: node('image', 'src'),
     });
+    expect(typeOf(ctx, 'assets/a.PNG')).toBe('image');
+    expect(typeOf(ctx, 'assets/a.jpg')).toBe('image');
+    expect(ctx.assetNodeTypes.pick('assets/a.webp')).toBeUndefined();
+  });
+
+  it('with a tree: a .json with its .atlas beside is the sibling registration; alone, the sibling-less one', async () => {
+    const ctx = await media();
+    const tree = [file('assets/a.json'), file('assets/a.atlas'), file('assets/b.json')];
+    expect(typeOf(ctx, 'assets/a.json', tree)).toBe('spine');
+    expect(typeOf(ctx, 'assets/b.json', tree)).toBe('spritesheet');
+    expect(typeOf(ctx, 'assets/c.mp4', tree)).toBe('video');
+  });
+
+  it('with a tree: the sibling is looked up by the stem of the path as written, case kept', async () => {
+    const ctx = await media();
+    expect(typeOf(ctx, 'assets/A.JSON', [file('assets/A.atlas')])).toBe('spine');
+    expect(typeOf(ctx, 'assets/A.JSON', [file('assets/a.atlas')])).toBe('spritesheet');
+  });
+
+  it('with a tree: a directory named like the sibling does not count, and a .skel with no atlas is nothing', async () => {
+    const ctx = await media();
+    expect(typeOf(ctx, 'assets/a.json', [{ path: 'assets/a.atlas', kind: 'dir' }])).toBe(
+      'spritesheet',
+    );
+    expect(ctx.assetNodeTypes.pick('assets/a.skel', [])).toBeUndefined();
+  });
+
+  it('without a tree the sibling rule is ignored: the last registered for the extension wins', async () => {
+    const ctx = await media();
+    expect(typeOf(ctx, 'assets/b.json')).toBe('spine');
+    expect(typeOf(ctx, 'assets/a.skel')).toBe('spine');
+  });
+
+  it('a registration made after the derived ones wins its extension among the sibling-less', async () => {
+    const ctx = await media();
+    const off = ctx.assetNodeTypes.register('mine', {
+      extensions: ['json', 'mp4'],
+      node: node('mine', 'file'),
+    });
+    expect(typeOf(ctx, 'b.json', [file('b.json')])).toBe('mine');
+    expect(typeOf(ctx, 'c.mp4', [file('c.mp4')])).toBe('mine');
+    // A sibling match is the more specific claim and still wins.
+    expect(typeOf(ctx, 'a.json', [file('a.json'), file('a.atlas')])).toBe('spine');
+    off();
+    expect(typeOf(ctx, 'b.json', [file('b.json')])).toBe('spritesheet');
   });
 
   it('list() returns registrations in registration order', async () => {
-    const ctx = await boot();
+    const ctx = await media();
     const off = ctx.assetNodeTypes.register('sound', {
       extensions: ['mp3'],
-      node: (src, { x, y }) => ({ type: 'sound', props: { src, x, y } }),
+      node: node('sound', 'src'),
     });
-    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['image', 'sound']);
+    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual([
+      'derived:spritesheet',
+      'derived:spine',
+      'derived:video',
+      'sound',
+    ]);
     off();
-    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['image']);
+    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual([
+      'derived:spritesheet',
+      'derived:spine',
+      'derived:video',
+    ]);
   });
 
   it('registering the same def object twice for one id: disposal is by slot, not by value — a repeat call to an already-fired disposer must not evict the other slot', async () => {
     const ctx = await boot();
-    const def = {
-      extensions: ['foo'],
-      node: (src: string, { x, y }: { x: number; y: number }) => ({ type: 'foo', props: { src, x, y } }),
-    };
+    const def = { extensions: ['foo'], node: node('foo', 'src') };
     ctx.assetNodeTypes.register('dup', def);
     const offSecond = ctx.assetNodeTypes.register('dup', def);
     offSecond();
@@ -56,48 +124,22 @@ describe('assetNodeTypes', () => {
     expect(ctx.assetNodeTypes.list().filter((r) => r.id === 'dup')).toHaveLength(1);
   });
 
-  it('pick finds no extension in a path with no dot', async () => {
-    const ctx = await boot();
+  it('pick finds no extension in a path with no dot, nor in a dotfile', async () => {
+    const ctx = await media();
     expect(ctx.assetNodeTypes.pick('README')).toBeUndefined();
+    expect(ctx.assetNodeTypes.pick('assets/.json')).toBeUndefined();
   });
 
-  it('pick finds no extension in a dotfile', async () => {
-    const ctx = await boot();
-    expect(ctx.assetNodeTypes.pick('assets/.hidden')).toBeUndefined();
-  });
-
-  it('pick compares against extensions lower-cased too', async () => {
-    const ctx = await boot();
-    const off = ctx.assetNodeTypes.register('shout', {
-      extensions: ['GIF'],
-      node: (src, { x, y }) => ({ type: 'shout', props: { src, x, y } }),
+  it('a later register with an existing id wins (last-wins), and its disposer restores the earlier one', async () => {
+    const ctx = await media();
+    const off = ctx.assetNodeTypes.register('derived:video', {
+      extensions: ['mp4', 'gif'],
+      node: node('custom-video', 'src'),
     });
-    expect(ctx.assetNodeTypes.pick('a.gif')?.node).toBeInstanceOf(Function);
-    expect(ctx.assetNodeTypes.pick('a.GIF')?.node).toBeInstanceOf(Function);
+    expect(typeOf(ctx, 'a.gif')).toBe('custom-video');
+    expect(typeOf(ctx, 'a.mp4')).toBe('custom-video');
     off();
-  });
-
-  it('a later register with an existing id wins (last-wins), and its disposer restores the built-in', async () => {
-    const ctx = await boot();
-    const custom = {
-      extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'],
-      node: (src: string, { x, y }: { x: number; y: number }) => ({
-        type: 'custom-image',
-        props: { src, x, y },
-      }),
-    };
-    const off = ctx.assetNodeTypes.register('image', custom);
-    expect(ctx.assetNodeTypes.pick('a.gif')?.node('a.gif', { x: 0, y: 0 })).toEqual({
-      type: 'custom-image',
-      props: { src: 'a.gif', x: 0, y: 0 },
-    });
-
-    off();
-    // restored to the built-in
     expect(ctx.assetNodeTypes.pick('a.gif')).toBeUndefined();
-    expect(ctx.assetNodeTypes.pick('a.png')?.node('a.png', { x: 1, y: 2 })).toEqual({
-      type: 'image',
-      props: { src: 'a.png', x: 1, y: 2, anchor: 0.5 },
-    });
+    expect(typeOf(ctx, 'a.mp4')).toBe('video');
   });
 });

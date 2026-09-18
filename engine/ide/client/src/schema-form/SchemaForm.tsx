@@ -27,9 +27,11 @@ export interface SchemaFormProps {
   /**
    * By `meta.pick` name (`.extra('pick', 'scene')` on a string field), the
    * ids to offer: such a field renders as a `<select>` of them instead of a
-   * text input. A `pick` with no picker here stays a text input.
+   * text input. `asset` is called with the field's `meta.asset` extensions
+   * (`.extra('asset', ['png'])`) and answers the project's file paths. A
+   * field with no picker here stays a text input.
    */
-  pickers?: Record<string, () => string[]>;
+  pickers?: Record<string, (arg?: unknown) => string[]>;
 }
 
 /**

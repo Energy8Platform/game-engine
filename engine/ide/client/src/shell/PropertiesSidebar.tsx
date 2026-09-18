@@ -1,8 +1,9 @@
-import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
-import type { NodeTypeInfo, SceneDoc, SceneNode } from '@energy8engine/contracts';
+import type { FileEntry, NodeTypeInfo, SceneDoc, SceneNode } from '@energy8engine/contracts';
 import { COMMON } from '@energy8engine/scenes/common-schema';
+import { extOf } from '../plugins/asset-node-types';
 import { useScenes } from '../plugins/scenes';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { map, walk } from './SceneDocument';
@@ -14,7 +15,43 @@ import { map, walk } from './SceneDocument';
  * merged with the type's own schema. A scene with no node: its id, the
  * node count and the images it draws, through nested scenes. Holds no
  * draft of the document: every edit is one `ctx.scenes.update(next)`.
+ *
+ * A string field with `meta.asset` (`.extra('asset', ['png'])`) is a
+ * select of the project's files with those extensions — `useAssetPicker`,
+ * shared with `FlowProperties`.
  */
+
+/**
+ * `SchemaForm.pickers.asset`: the project's file paths by extension, from
+ * a tree read on mount and again whenever the scene set changes (a File
+ * dropped on the canvas lands as a write, then a scene update; a
+ * selection alone is not a change). Whoever else adds a file (the
+ * Explorer) is seen on the next mount.
+ */
+export function useAssetPicker(ctx: Context): (exts?: unknown) => string[] {
+  const [entries, setEntries] = useState<readonly FileEntry[]>([]);
+  useEffect(() => {
+    let live = true;
+    const load = () => void ctx.files.tree().then((t) => live && setEntries(t.entries));
+    load();
+    let docs = ctx.scenes.docs();
+    const off = ctx.scenes.subscribe(() => {
+      if (ctx.scenes.docs() === docs) return;
+      docs = ctx.scenes.docs();
+      load();
+    });
+    return () => {
+      live = false;
+      off();
+    };
+  }, [ctx]);
+  return (exts) => {
+    const want = Array.isArray(exts) ? exts.map(String) : [];
+    return entries
+      .filter((e) => e.kind === 'file' && want.includes(extOf(e.path) ?? ''))
+      .map((e) => e.path);
+  };
+}
 
 const COMMON_JSON = JSON.parse(JSON.stringify(COMMON)) as unknown;
 
@@ -108,6 +145,7 @@ function NodeProperties({
   // The host's refusal of the last props edit — cleared by the next one that lands.
   const [error, setError] = useState<string | null>(null);
   const schema = useMemo(() => mergedSchema(info), [info]);
+  const asset = useAssetPicker(ctx);
 
   const rename = () => {
     const next = draft.trim();
@@ -162,6 +200,7 @@ function NodeProperties({
           value={node.props}
           onChange={onChange}
           commit="blur"
+          pickers={{ asset }}
         />
       </div>
     </>

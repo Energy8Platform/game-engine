@@ -303,16 +303,22 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
     setError(warn.message);
   };
 
-  /** A dropped asset already in the project: a node where it landed, then selected. */
+  /**
+   * A dropped asset already in the project: a node where it landed (whole
+   * pixels — the canvas measures floats), then selected. The tree is read
+   * so `pick` can see what sits beside the file (a `.json` with an
+   * `.atlas` is a skeleton, alone it is a spritesheet).
+   */
   const dropAsset = async (path: string, x: number, y: number) => {
+    const { entries } = await ctx.files.tree();
     const current = liveDoc();
     if (!current) return;
-    const def = ctx.assetNodeTypes.pick(path);
+    const def = ctx.assetNodeTypes.pick(path, entries);
     if (!def) {
       noNodeType(path);
       return;
     }
-    const { type, props } = def.node(path, { x, y });
+    const { type, props } = def.node(path, { x: Math.round(x), y: Math.round(y) });
     const newId = nextId(current, type);
     const refused = await ctx.scenes.update(addNode(current, type, props, null));
     setError(refused[0]?.message ?? null);

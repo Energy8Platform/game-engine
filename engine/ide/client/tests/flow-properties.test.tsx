@@ -35,6 +35,16 @@ const KINDS: FlowKindInfo[] = FIVE_KINDS.map((k) => {
     };
   return k;
 });
+/** A kind with an `asset` field: the IDE offers the project's files of those extensions. */
+const SOUND: FlowKindInfo = {
+  kind: 'sound',
+  outs: ['next'],
+  trigger: false,
+  schema: json(
+    Schema.object({ src: Schema.string().extra('asset', ['mp3']).description('sound file') }),
+  ),
+};
+KINDS.push(SOUND);
 const ready = (doc: FlowDoc = FIVE) => boot({ doc, diagnostics: [], kinds: KINDS });
 const accept = (body: unknown) => ({ body: { doc: body, diagnostics: [], kinds: KINDS } });
 const SCENES = ['base_game', 'bonus'];
@@ -119,6 +129,38 @@ describe('FlowProperties', () => {
     fireEvent.blur(ms);
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes.at(-1)).toEqual({ id: 'wait-1', kind: 'wait', props: { ms: 500 } });
+  });
+
+  it("an `asset` field is a select of the project's files with those extensions", async () => {
+    const doc: FlowDoc = { ...FIVE, nodes: [...FIVE.nodes, { id: 'sound-1', kind: 'sound' }] };
+    const { ctx, puts } = await booted(
+      {
+        'GET /api/files': () => ({
+          body: {
+            entries: [
+              { path: 'assets/win.mp3', kind: 'file', size: 1 },
+              { path: 'assets/a.png', kind: 'file', size: 1 },
+            ],
+            diagnostics: [],
+          },
+        }),
+      },
+      doc,
+    );
+    act(() => ctx.flow.select('sound-1'));
+    renderSide(ctx);
+    const src = screen.getByLabelText('sound file') as HTMLSelectElement;
+    expect(src.tagName).toBe('SELECT');
+    await waitFor(() =>
+      expect([...src.options].map((o) => o.value)).toEqual(['', 'assets/win.mp3']),
+    );
+    fireEvent.change(src, { target: { value: 'assets/win.mp3' } });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.at(-1)).toEqual({
+      id: 'sound-1',
+      kind: 'sound',
+      props: { src: 'assets/win.mp3' },
+    });
   });
 
   it('rename: PUTs the node under the new id with its edges rewritten, and re-selects it', async () => {

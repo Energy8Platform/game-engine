@@ -175,6 +175,55 @@ describe('SchemaForm — pick', () => {
   });
 });
 
+/** An image's `src`: a string the IDE renders as a picker of the project's files with those extensions. */
+const assetSchema = JSON.parse(
+  JSON.stringify(
+    Schema.object({
+      src: Schema.string().required().extra('asset', ['png', 'jpg']).description('image path'),
+    }).toJSON(),
+  ),
+);
+
+describe('SchemaForm — asset', () => {
+  it('a string field with meta.asset renders as a select of the asset picker’s paths for those extensions (plus the current value and an empty option) and commits on change', () => {
+    const onChange = vi.fn();
+    const asset = vi.fn((exts: unknown) =>
+      (exts as string[]).includes('png') ? ['assets/a.png', 'assets/b.jpg'] : [],
+    );
+    render(
+      <SchemaForm
+        rowId="row"
+        schema={assetSchema}
+        value={{ src: 'gone.png' }}
+        onChange={onChange}
+        commit="blur"
+        pickers={{ asset }}
+      />,
+    );
+    expect(asset).toHaveBeenCalledWith(['png', 'jpg']);
+    const select = screen.getByLabelText('image path') as HTMLSelectElement;
+    expect(select.tagName).toBe('SELECT');
+    expect([...select.options].map((o) => o.value)).toEqual([
+      '',
+      'assets/a.png',
+      'assets/b.jpg',
+      'gone.png',
+    ]);
+    expect(select.value).toBe('gone.png');
+    fireEvent.change(select, { target: { value: 'assets/b.jpg' } });
+    expect(onChange).toHaveBeenCalledWith({ src: 'assets/b.jpg' });
+  });
+
+  it('without an asset picker, the field stays a text input', () => {
+    render(
+      <SchemaForm rowId="row" schema={assetSchema} value={{ src: 'x.png' }} onChange={() => {}} />,
+    );
+    const input = screen.getByLabelText('image path') as HTMLInputElement;
+    expect(input.tagName).toBe('INPUT');
+    expect(input.value).toBe('x.png');
+  });
+});
+
 describe('SchemaForm', () => {
   it('labels each field with its description', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{}} onChange={() => {}} />);

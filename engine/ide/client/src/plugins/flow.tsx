@@ -69,7 +69,8 @@ export interface FlowConfig extends ConnectionConfig {
 }
 
 export const name = 'flow';
-export const inject = ['slots', 'connection', 'shell', 'scenes'];
+// `files` is the inspector's (`FlowProperties`): an `asset` field offers the project's files.
+export const inject = ['slots', 'connection', 'shell', 'scenes', 'files'];
 
 /** Entries kept in the trace, most-recent run only. */
 const TRACE_CAP = 500;

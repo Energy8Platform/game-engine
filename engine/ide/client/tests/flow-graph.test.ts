@@ -120,6 +120,11 @@ describe('flow-graph reducers', () => {
     });
     expect(FIVE.nodes.find((n) => n.id === 'spin')?.ui).toEqual({ x: 580, y: 80 });
   });
+
+  it('moveNode rounds the position: a drag ends on a fraction, the file reads whole pixels', () => {
+    const next = moveNode(FIVE, 'spin', { x: 5.4, y: 6.5 });
+    expect(next.nodes.find((n) => n.id === 'spin')?.ui).toEqual({ x: 5, y: 7 });
+  });
 });
 
 describe('toReactFlow', () => {

@@ -77,16 +77,17 @@ export async function createIdeClient(
   // The flow document: same shape as `scenes` above (`connection` frames,
   // `shell` for its activity/document slots) minus the canvas deps —
   // there is no iframe to drop assets onto or read a design size from.
-  // Injects `scenes` too, unused before Task 9's mutual deselect.
+  // Injects `scenes` (the mutual deselect, the `scene` picker) and
+  // `files` (the inspector's `asset` picker).
   await ctx.plugin(flow, config);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
   // own doc) — no new field for this signature to carry, just another
   // plugin reading the same `url`/`socketFactory` this function's caller
   // already supplies.
   await ctx.plugin(gameDiagnostics, config);
-  // A plain fetch wrapper like `gameComposition`, not something anything
-  // else here depends on — composed last for no reason but that this is
-  // where it was added.
+  // A plain fetch wrapper like `gameComposition`. `scenes` and `flow`
+  // inject it (cordis holds them until it is provided), so its place here
+  // is history, not order.
   await ctx.plugin(files, config);
   // Same kind of plain fetch wrapper as `files`, nothing here depends on
   // it either — the editor two tasks from now is the first consumer.

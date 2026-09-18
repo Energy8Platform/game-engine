@@ -25,6 +25,8 @@ declare global {
     interface Meta {
       /** `.extra('pick', 'scene')`: render this string field as a picker of the named thing's ids — see `SchemaForm.pickers`. */
       pick?: string;
+      /** `.extra('asset', ['png'])`: a project-relative file path with one of these extensions — offered from `pickers.asset(extensions)`. */
+      asset?: string[];
     }
   }
 }
@@ -46,11 +48,13 @@ export interface SchemaNode {
     extra?: { applies?: 'restart' };
     /** A string field to render as a `<select>` of the named picker's ids — see `SchemaForm.pickers`. */
     pick?: string;
+    /** A string field holding an asset path: a `<select>` of `pickers.asset(extensions)`. */
+    asset?: string[];
   };
 }
 
 /** `SchemaForm.pickers`, reaching `StringField` however deep the field sits (arrays, dicts). */
-export const Pickers = createContext<Record<string, () => string[]>>({});
+export const Pickers = createContext<Record<string, (arg?: unknown) => string[]>>({});
 
 export interface FieldProps {
   id: string;
@@ -344,12 +348,17 @@ function NumberField({ id, node, value, onChange, commit }: FieldProps) {
 function StringField({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
   const current = value ?? node.meta?.default;
   const pickers = useContext(Pickers);
-  const pick = node.meta?.pick === undefined ? undefined : pickers[node.meta.pick];
-  if (pick) {
+  const { pick, asset } = node.meta ?? {};
+  const ids =
+    pick !== undefined && pickers[pick]
+      ? pickers[pick]()
+      : asset && pickers.asset
+        ? pickers.asset(asset)
+        : undefined;
+  if (ids) {
     // The current value stays offered even when it is no longer among the
-    // ids (a deleted scene): the select must show what the document says.
+    // ids (a deleted scene, a file no longer there): the select must show what the document says.
     const text = current === undefined ? '' : String(current);
-    const ids = pick();
     const options = ['', ...ids, ...(text && !ids.includes(text) ? [text] : [])];
     return (
       <select

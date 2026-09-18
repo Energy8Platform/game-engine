@@ -220,4 +220,49 @@ describe('scenes service', () => {
       body: { scene: 'a', node: null },
     });
   });
+
+  it('derives an asset node type per reported type with `accept`; the next report replaces them', async () => {
+    const image = { type: 'image', schema: {}, accept: { extensions: ['png'], prop: 'src' } };
+    const spine = {
+      type: 'spine',
+      schema: {},
+      accept: { extensions: ['skel', 'json'], prop: 'skeleton', sibling: 'atlas' },
+    };
+    const { ctx, socket } = await harness({
+      'GET /api/scenes': boot({ scenes: [A], diagnostics: [], nodeTypes: [image] }),
+    });
+    await vi.waitFor(() =>
+      expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['derived:image']),
+    );
+    expect(ctx.assetNodeTypes.pick('a.png')?.node('a.png', { x: 1, y: 2 })).toEqual({
+      type: 'image',
+      props: { src: 'a.png', x: 1, y: 2, anchor: 0.5 },
+    });
+
+    socket.receive({
+      type: 'node-types',
+      types: [{ type: 'container', schema: {} }, image, spine],
+    });
+    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['derived:image', 'derived:spine']);
+    const picked = ctx.assetNodeTypes.pick('a.json', [{ path: 'a.atlas', kind: 'file' }]);
+    expect(picked?.sibling).toBe('atlas');
+    expect(picked?.node('a.json', { x: 0, y: 0 })).toEqual({
+      type: 'spine',
+      props: { skeleton: 'a.json', x: 0, y: 0, anchor: 0.5 },
+    });
+
+    socket.receive({
+      type: 'node-types',
+      types: [{ type: 'video', schema: {}, accept: { extensions: ['mp4'], prop: 'src' } }],
+    });
+    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['derived:video']);
+    expect(ctx.assetNodeTypes.pick('a.png')).toBeUndefined();
+
+    // A project's own registration made after the report outranks the derived one.
+    ctx.assetNodeTypes.register('mine', {
+      extensions: ['mp4'],
+      node: (src, at) => ({ type: 'clip', props: { src, ...at } }),
+    });
+    expect(ctx.assetNodeTypes.pick('a.mp4')?.node('a.mp4', { x: 0, y: 0 }).type).toBe('clip');
+  });
 });

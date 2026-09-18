@@ -82,6 +82,7 @@ async function harness(extra: Record<string, Route> = {}) {
     }),
     'POST /api/scenes/select': () => ({ body: { diagnostics: [] } }),
     'POST /api/scenes/preview': () => ({ body: { diagnostics: [] } }),
+    'GET /api/files': () => ({ body: { entries: [], diagnostics: [] } }),
     ...extra,
   };
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -226,6 +227,61 @@ describe('PropertiesSidebar', () => {
     );
     expect(items).toEqual(['logo.png', 'title.png', 'bonus.png']);
     expect(screen.queryByTestId('prop-id')).toBeNull();
+  });
+
+  it("an `asset` field is a select of the project's files with those extensions, refetched when the scene set changes", async () => {
+    let entries = [
+      { path: 'assets/a.png', kind: 'file', size: 1 },
+      { path: 'assets/b.jpg', kind: 'file', size: 1 },
+      { path: 'assets/c.mp4', kind: 'file', size: 1 },
+      { path: 'assets', kind: 'dir' },
+    ];
+    const withAsset = TYPES.map((t) =>
+      t.type === 'image'
+        ? {
+            ...t,
+            schema: Schema.object({
+              src: Schema.string().required().extra('asset', ['png', 'jpg']).description('image'),
+            }).toJSON(),
+          }
+        : t,
+    );
+    const { ctx, puts, calls } = await harness({
+      'GET /api/scenes': () => ({
+        body: { scenes: [BASE, BONUS], diagnostics: [], nodeTypes: withAsset },
+      }),
+      'PUT /api/scenes/base_game': (body) => ({
+        body: { scenes: [body as SceneDoc, BONUS], diagnostics: [], nodeTypes: withAsset },
+      }),
+      'GET /api/files': () => ({ body: { entries, diagnostics: [] } }),
+    });
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
+    renderSide(ctx);
+    const src = screen.getByLabelText('image') as HTMLSelectElement;
+    expect(src.tagName).toBe('SELECT');
+    await waitFor(() =>
+      expect([...src.options].map((o) => o.value)).toEqual([
+        '',
+        'assets/a.png',
+        'assets/b.jpg',
+        'logo.png',
+      ]),
+    );
+    const treeReads = () => calls.filter((c) => c.url === '/api/files').length;
+    const before = treeReads();
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
+    expect(treeReads()).toBe(before); // a selection is not a change to the set
+
+    // The write answers a new set: the tree is read again (a dropped File lands as a write first).
+    entries = [...entries, { path: 'assets/new.png', kind: 'file', size: 1 }];
+    fireEvent.change(src, { target: { value: 'assets/b.jpg' } });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[0].children?.[0]).toEqual({
+      id: 'logo',
+      type: 'image',
+      props: { src: 'assets/b.jpg', x: 10 },
+    });
+    await waitFor(() => expect([...src.options].map((o) => o.value)).toContain('assets/new.png'));
   });
 
   it('a selected node that is no longer in the document renders nothing but keeps the root', async () => {
