@@ -7,14 +7,15 @@
  * the project holds. Reported through
  * `ideRpc.reportGameDiagnostics('flow', …)`, replaced whole each time.
  *
- * Scene ids come from the TREE (`scenes/<id>.scene.yml` — the file name
- * is the id, `scenes.ts`'s own rule), not from `scenesHost.state()`: both
- * plugins re-read on the same `files/written`, and `scenes` needs one
- * more tick per document before its state moves, so reading it here
- * would check a `show` against the ids from BEFORE the write (measured
- * against `files.ts`: `tree`/`read` are sync under a promise, the order
- * is deterministic and wrong). A scene whose document does not parse
- * still counts as existing here; `scenes` already reports that file.
+ * Scene ids are read from the TREE (`scenes/<id>.scene.yml` — the file
+ * name is the id, `scenes.ts`'s own rule), each file parsed with scenes'
+ * own `parseDoc`, not taken from `scenesHost.state()`: both plugins
+ * re-read on the same `files/written`, and `scenes` needs one more tick
+ * per document before its state moves, so reading it here would check a
+ * `show` against the ids from BEFORE the write (measured against
+ * `files.ts`: `tree`/`read` are sync under a promise, the order is
+ * deterministic and wrong). A file that does not parse is not a scene —
+ * a `show` of it is an error here, and `scenes` reports the file itself.
  *
  * Re-read on `files/written`/`files/removed` of `flow.yml` or anything
  * under `scenes/`, and on `game/flow-kinds`. Every read broadcasts the
@@ -34,7 +35,7 @@ import {
   type FlowResponse,
 } from '@energy8engine/contracts';
 import { validateFlow } from '@energy8engine/flow';
-import { SCENE_FILE } from './scenes';
+import { SCENE_FILE, parseDoc as parseScene } from './scenes';
 
 declare module 'cordis' {
   interface Context {
@@ -110,13 +111,26 @@ export function apply(ctx: Context): void {
   // The last list handed to `ideRpc`, by value — see `scenes.ts` for the rule.
   let reported = '';
 
+  /** The ids of the scene documents that parse — see the header for why this reads the files itself. */
+  const sceneIds = async (): Promise<string[]> => {
+    const ids: string[] = [];
+    for (const { path } of (await ctx.files.tree()).entries) {
+      const id = SCENE_FILE.exec(path)?.[1];
+      if (id === undefined) continue;
+      const { bytes } = await ctx.files.read(path);
+      try {
+        if (bytes && parseScene(yaml.load(Buffer.from(bytes).toString('utf8'))).doc) ids.push(id);
+      } catch {
+        // not YAML: not a scene
+      }
+    }
+    return ids;
+  };
+
   /** `validateFlow` over a parsed document, against what the host knows right now. */
   const check = async (doc: FlowDoc): Promise<Diagnostic[]> => {
     const kinds = ctx.ideRpc.flowKinds();
-    const sceneIds = (await ctx.files.tree()).entries
-      .map((e) => SCENE_FILE.exec(e.path)?.[1])
-      .filter((id): id is string => id !== undefined);
-    return validateFlow(doc, kinds.length ? kinds : null, sceneIds);
+    return validateFlow(doc, kinds.length ? kinds : null, await sceneIds());
   };
 
   const refresh = async (broadcast: boolean): Promise<void> => {

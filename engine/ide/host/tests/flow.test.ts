@@ -223,6 +223,53 @@ describe('/api/flow', () => {
     close();
   });
 
+  it('a scene file that does not parse is not a scene: a `show` of it is an error', async () => {
+    host = await createIdeHost({ root: flowWorkspace(), port: 0 });
+    const { frames, close } = await listen(host);
+    for (const [name, text] of [
+      ['ghost', 'id: ghost\nnodes: 7\n'],
+      ['husk', ': : not yaml ['],
+    ] as const) {
+      const res = await send(host.url, `/api/files/scenes/${name}.scene.yml`, 'PUT', {
+        base64: Buffer.from(text).toString('base64'),
+      });
+      expect(res.status).toBe(200);
+    }
+    // The write under scenes/ re-checked; the loop is still clean (it shows base_game).
+    await expect.poll(() => flowFrames(frames).length).toBeGreaterThanOrEqual(2);
+    expect(flowFrames(frames).at(-1)?.diagnostics).toEqual([]);
+    for (const scene of ['ghost', 'husk']) {
+      const bad = await put(host.url, {
+        version: 1,
+        nodes: [
+          { id: 'start', kind: 'boot' },
+          { id: 'b', kind: 'show', props: { scene } },
+        ],
+        edges: [{ from: 'start', to: 'b' }],
+      });
+      expect(bad.status).toBe(400);
+      expect((await bad.json()).diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          plugin: 'flow',
+          where: 'b',
+          message: expect.stringContaining(scene),
+        }),
+      ]);
+    }
+    // A parseable one is a scene, whatever the scenes checks say about it (`bad` says id: other).
+    const ok = await put(host.url, {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'b', kind: 'show', props: { scene: 'bad' } },
+      ],
+      edges: [{ from: 'start', to: 'b' }],
+    });
+    expect(ok.status).toBe(200);
+    close();
+  });
+
   it('serves GET /api/flow on the preview server too', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
     const fiber = host.ctx.isolate('server').plugin(Server, { host: '127.0.0.1', port: 0 });

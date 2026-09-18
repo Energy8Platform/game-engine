@@ -101,7 +101,7 @@ export interface IdeRpcService {
    * should not go blank while the preview reloads). Empty until a game
    * has spoken; reset when the project leaves, with the rest of what was
    * retained about it. Each frame is also relayed to every other socket,
-   * and the list greets a late client (see the message handler below).
+   * and the list greets a late client (see `mirror` in `apply`).
    */
   transitions(): string[];
   /**
@@ -278,16 +278,69 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
    */
   let lastHostDiagnostics: RetainedFrame | null = null;
 
-  /** See `IdeRpcService.transitions`. */
-  let lastTransitions: string[] = [];
-  /** See `IdeRpcService.nodeTypes`. */
-  let lastNodeTypes: NodeTypeInfo[] = [];
-  /** See `IdeRpcService.flowKinds`. */
-  let lastFlowKinds: FlowKindInfo[] = [];
-
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
   };
+
+  /**
+   * A registry the running game reports and the host mirrors — see
+   * `IdeRpcService.transitions` for the shape all three share: the LAST
+   * KNOWN list, replaced whole by a later frame (anything but a list of
+   * `item`s is malformed, ignored, and the last good list stands), relayed
+   * to every OTHER socket as it lands (the game already has its own list;
+   * the IDE that booted the preview is up before the game speaks), the
+   * greeting of a late client when non-empty (an empty frame would say
+   * "none", not "not yet"), and reset when the project leaves — `clear`
+   * hands back the empty frame that tells every connected client so.
+   * `event` is the in-process announcement for a listener with no socket
+   * to read the relay off of (the scenes and flow plugins).
+   */
+  function mirror<T>(spec: {
+    frame: (list: T[]) => ServerMessage;
+    item: (value: unknown) => boolean;
+    event?: (list: T[]) => void;
+  }) {
+    let last: T[] = [];
+    return {
+      list: () => [...last],
+      receive(value: unknown, from: WebSocket) {
+        if (!Array.isArray(value) || !value.every(spec.item)) return;
+        last = [...(value as T[])];
+        const relayed = spec.frame([...last]);
+        for (const other of clients) {
+          if (other !== from) send(other, relayed);
+        }
+        spec.event?.([...last]);
+      },
+      greet: (socket: WebSocket) => {
+        if (last.length) send(socket, spec.frame([...last]));
+      },
+      clear(): ServerMessage {
+        last = [];
+        return spec.frame([]);
+      },
+    };
+  }
+  const has = (value: unknown, key: string) =>
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Record<string, unknown>)[key] === 'string';
+  const transitions = mirror<string>({
+    frame: (ids) => ({ type: 'game-transitions', ids }),
+    item: (v) => typeof v === 'string',
+  });
+  const nodeTypes = mirror<NodeTypeInfo>({
+    frame: (types) => ({ type: 'node-types', types }),
+    item: (v) => has(v, 'type'),
+    event: (types) => ctx.emit('game/node-types', types),
+  });
+  const flowKinds = mirror<FlowKindInfo>({
+    frame: (kinds) => ({ type: 'flow-kinds', kinds }),
+    item: (v) => has(v, 'kind'),
+    event: (kinds) => ctx.emit('game/flow-kinds', kinds),
+  });
+  /** In wire order: the greeting sends them, and the departure clears them, in this order. */
+  const mirrors = [transitions, nodeTypes, flowKinds];
 
   /** The active project's composition, or `null` between projects. Read at call time — the root has none. */
   const compositionOf = () => ctx.get('composition') ?? null;
@@ -369,9 +422,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     broadcastScenePreview(frame) {
       for (const socket of clients) send(socket, { type: 'scene-preview', ...frame });
     },
-    transitions: () => [...lastTransitions],
-    nodeTypes: () => [...lastNodeTypes],
-    flowKinds: () => [...lastFlowKinds],
+    transitions: transitions.list,
+    nodeTypes: nodeTypes.list,
+    flowKinds: flowKinds.list,
     broadcastScenes(frame) {
       for (const socket of clients) send(socket, { type: 'scenes', ...frame });
     },
@@ -448,63 +501,10 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
         return; // malformed frames are ignored; the browser is ours
       }
 
-      if (message.type === 'game-transitions') {
-        // The game's registry, mirrored — see `IdeRpcService.transitions`.
-        // Anything but a list of strings is a malformed frame, ignored
-        // like any other; the last good list stands. Relayed to every
-        // OTHER socket as it lands (the game already has its own list):
-        // the IDE that booted the preview is up before the game speaks,
-        // and its boot `GET /api/composition` found the list still empty.
-        if (Array.isArray(message.ids) && message.ids.every((id) => typeof id === 'string')) {
-          lastTransitions = [...message.ids];
-          const relayed: ServerMessage = { type: 'game-transitions', ids: [...lastTransitions] };
-          for (const other of clients) {
-            if (other !== socket) send(other, relayed);
-          }
-        }
-        return;
-      }
-
-      if (message.type === 'node-types') {
-        // The game's node-type registry, mirrored — see
-        // `IdeRpcService.nodeTypes`. Anything but a list of objects each
-        // carrying a string `type` is a malformed frame, ignored like any
-        // other; the last good list stands. Relayed to every OTHER socket
-        // as it lands, and announced via `ctx.emit` for a same-process
-        // listener (e.g. a future scenes editor) that has no socket to
-        // read the relay off of.
-        if (
-          Array.isArray(message.types) &&
-          message.types.every((t) => t && typeof t.type === 'string')
-        ) {
-          lastNodeTypes = [...message.types];
-          const relayed: ServerMessage = { type: 'node-types', types: [...lastNodeTypes] };
-          for (const other of clients) {
-            if (other !== socket) send(other, relayed);
-          }
-          ctx.emit('game/node-types', [...lastNodeTypes]);
-        }
-        return;
-      }
-
-      if (message.type === 'flow-kinds') {
-        // The game's flow-kind registry, mirrored exactly as `node-types`
-        // above: a list of objects each carrying a string `kind`, else
-        // ignored; relayed to every OTHER socket; announced via `ctx.emit`
-        // for the `flow` plugin.
-        if (
-          Array.isArray(message.kinds) &&
-          message.kinds.every((k) => k && typeof k.kind === 'string')
-        ) {
-          lastFlowKinds = [...message.kinds];
-          const relayed: ServerMessage = { type: 'flow-kinds', kinds: [...lastFlowKinds] };
-          for (const other of clients) {
-            if (other !== socket) send(other, relayed);
-          }
-          ctx.emit('game/flow-kinds', [...lastFlowKinds]);
-        }
-        return;
-      }
+      // The game's registries, mirrored — see `mirror` above.
+      if (message.type === 'game-transitions') return transitions.receive(message.ids, socket);
+      if (message.type === 'node-types') return nodeTypes.receive(message.types, socket);
+      if (message.type === 'flow-kinds') return flowKinds.receive(message.kinds, socket);
 
       if (message.type === 'flow-trace') {
         // A live feed, not state: relayed to every OTHER socket as it lands
@@ -608,20 +608,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
         });
       }
     }
-    // The last known transition list, same reasoning: a client connecting
-    // after the game reported it must not offer an empty pick list. Skipped
-    // while no game has spoken — an empty frame would say "none", not "not yet".
-    if (lastTransitions.length) {
-      send(socket, { type: 'game-transitions', ids: [...lastTransitions] });
-    }
-    // The last known node-type list, same reasoning as `lastTransitions` above.
-    if (lastNodeTypes.length) {
-      send(socket, { type: 'node-types', types: [...lastNodeTypes] });
-    }
-    // The last known flow-kind list, same reasoning again.
-    if (lastFlowKinds.length) {
-      send(socket, { type: 'flow-kinds', kinds: [...lastFlowKinds] });
-    }
+    // The last known registries, same reasoning: a client connecting after
+    // the game reported them must not offer an empty pick list — see `mirror`.
+    for (const m of mirrors) m.greet(socket);
   }
   service.attach(ctx.server, { origins: config.origins });
 
@@ -668,20 +657,14 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       gameSocket.clear();
       groups.clear();
       lastHostDiagnostics = null;
-      lastTransitions = [];
-      lastNodeTypes = [];
-      lastFlowKinds = [];
       // Unlike the diagnostics/game-gone frames above (sent only when
-      // something was actually retained), these three always go: a client
-      // that connected before anything had ever been reported still holds
-      // whatever pick list / node palette it built from an earlier
-      // project's `game-transitions`/`node-types`/`flow-kinds` frame, and has no other
-      // way to learn the game behind it is gone. Closes slice-16 debt 2.
-      gone.push(
-        { type: 'game-transitions', ids: [] },
-        { type: 'node-types', types: [] },
-        { type: 'flow-kinds', kinds: [] },
-      );
+      // something was actually retained), the registries' empty frames
+      // always go: a client that connected before anything had ever been
+      // reported still holds whatever pick list / node palette it built
+      // from an earlier project's `game-transitions`/`node-types`/
+      // `flow-kinds` frame, and has no other way to learn the game behind
+      // it is gone. Closes slice-16 debt 2.
+      for (const m of mirrors) gone.push(m.clear());
       for (const socket of clients) for (const message of gone) send(socket, message);
     }
     lastActive = state.active;
