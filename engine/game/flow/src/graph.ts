@@ -7,9 +7,14 @@ export interface KindShape {
   trigger?: boolean;
 }
 
-/** Edges leaving `from` on port `out`. A missing `out` on the edge defaults to `'next'`. */
-export function outEdges(doc: FlowDoc, from: string, out: string): FlowEdge[] {
-  return doc.edges.filter((e) => e.from === from && (e.out ?? 'next') === out);
+/**
+ * Edges leaving `from` on port `out`. An edge with no explicit `out` falls
+ * back to `defaultOut` — the caller (the interpreter, in Task 3) passes the
+ * source node's kind's first port (`kind.outs[0]`), since that's the port a
+ * document is allowed to leave implicit on an edge.
+ */
+export function outEdges(doc: FlowDoc, from: string, out: string, defaultOut: string): FlowEdge[] {
+  return doc.edges.filter((e) => e.from === from && (e.out ?? defaultOut) === out);
 }
 
 /** Every edge landing on `to`, regardless of port. */
@@ -18,13 +23,28 @@ export function inEdges(doc: FlowDoc, to: string): FlowEdge[] {
 }
 
 /**
- * Finds cycles in the `from → to` graph via one DFS forest (a fresh DFS
- * root at every not-yet-visited node, so disconnected components are all
- * covered) — O(n + e), well inside the brief's O(n·e) budget for these
- * tiny graphs. Each cycle is reported once, as the list of node ids from
- * where the back-edge closes the loop back to itself, deduped by its
- * sorted id set (so the same cycle found from two different roots only
- * counts once).
+ * Enumerates elementary cycles in the `from → to` graph: for every node as
+ * a candidate root, DFS explores every SIMPLE path leading out of it (a
+ * node already on the current path, other than the root, is never
+ * revisited — that's what "simple" means here), and each edge that lands
+ * back on the root closes a cycle, recorded as the path at that point.
+ *
+ * A single shared "visited" set across the whole forest is NOT enough:
+ * once a node is marked fully explored from one branch, a DIFFERENT
+ * branch that reaches it is refused a re-descent, so a second, merely
+ * RECONVERGING cycle through that node is silently dropped. Concretely,
+ * `a→b, a→c, b→d, c→d, d→a` has two distinct cycles through `d` — one via
+ * `b`, one via `c` — and a global-visited walk that meets `d` through `b`
+ * first would never explore `d`'s outgoing `d→a` edge again from `c`, so
+ * the `a,c,d` cycle would go unreported even though it closes a real
+ * loop. Restarting the search from every root, and only pruning nodes
+ * already on THAT root's current path (not a global set), finds both.
+ *
+ * Cycles are deduped by their sorted id set, since the same cycle is
+ * rediscovered — rotated — once per node that sits on it (each becomes a
+ * root in turn). Re-walking every simple path from every root is
+ * exponential in the worst case, but the brief calls for exactly this
+ * approach: the flow graphs it runs against are tiny.
  */
 function findCycles(nodes: readonly FlowNode[], edges: readonly FlowEdge[]): string[][] {
   const adjacency = new Map<string, string[]>();
@@ -33,35 +53,35 @@ function findCycles(nodes: readonly FlowNode[], edges: readonly FlowEdge[]): str
     if (adjacency.has(edge.from)) adjacency.get(edge.from)!.push(edge.to);
   }
 
-  const visited = new Set<string>();
-  const stack: string[] = [];
-  const onStack = new Set<string>();
   const seenCycles = new Set<string>();
   const cycles: string[][] = [];
 
-  function visit(id: string): void {
-    visited.add(id);
-    stack.push(id);
-    onStack.add(id);
-    for (const next of adjacency.get(id) ?? []) {
-      if (onStack.has(next)) {
-        const cycle = stack.slice(stack.indexOf(next));
-        const key = [...cycle].sort().join(',');
-        if (!seenCycles.has(key)) {
-          seenCycles.add(key);
-          cycles.push(cycle);
+  for (const root of nodes) {
+    const path: string[] = [root.id];
+    const onPath = new Set<string>([root.id]);
+
+    const walk = (id: string): void => {
+      for (const next of adjacency.get(id) ?? []) {
+        if (next === root.id) {
+          const key = [...path].sort().join(',');
+          if (!seenCycles.has(key)) {
+            seenCycles.add(key);
+            cycles.push([...path]);
+          }
+          continue;
         }
-      } else if (!visited.has(next)) {
-        visit(next);
+        if (onPath.has(next)) continue; // would revisit a non-root node: not a simple path
+        path.push(next);
+        onPath.add(next);
+        walk(next);
+        path.pop();
+        onPath.delete(next);
       }
-    }
-    stack.pop();
-    onStack.delete(id);
+    };
+
+    walk(root.id);
   }
 
-  for (const node of nodes) {
-    if (!visited.has(node.id)) visit(node.id);
-  }
   return cycles;
 }
 

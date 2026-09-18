@@ -4,6 +4,16 @@
  * (`result.stage`), string/number/`true`/`false`/`null` literals, and
  * parens. No side effects, no function calls — reading is all it does,
  * so eager (non-short-circuit) evaluation of `&&`/`||` is safe.
+ *
+ * `not` sits ABOVE `comparison` in that chain, i.e. `!` binds LOOSER than
+ * a comparison operator, not tighter as it does in most C-like languages:
+ * `!a == b` parses as `!(a == b)`, not `(!a) == b`. Chain `!!x` if you
+ * need `!` to apply to a bare value before a comparison runs.
+ *
+ * String literals have no escapes at all — no `\'`, no `\"`, no `\\`. To
+ * put a quote character inside a string, write the literal with the
+ * OTHER quote style (`"it's"` rather than `'it\'s'`, which would just end
+ * the string at the unescaped `'`).
  */
 
 type Tok =
@@ -139,7 +149,7 @@ class Parser {
     if (t?.type === 'op' && COMPARE_OPS.includes(t.value)) {
       this.next();
       const right = this.parsePrimary();
-      return compare(t.value, left, right);
+      return compare(t.value, left, right, t.pos);
     }
     return left;
   }
@@ -164,7 +174,7 @@ class Parser {
   }
 }
 
-function compare(op: string, a: unknown, b: unknown): boolean {
+function compare(op: string, a: unknown, b: unknown, pos: number): boolean {
   switch (op) {
     // Numeric-vs-numeric and generic equality both land on `===`: JS
     // already compares same-typed numbers numerically, so there is no
@@ -182,7 +192,7 @@ function compare(op: string, a: unknown, b: unknown): boolean {
     case '>=':
       return Number(a) >= Number(b);
     default:
-      throw new SyntaxError(`unknown operator '${op}'`);
+      throw new SyntaxError(`unknown operator '${op}' at position ${pos}`);
   }
 }
 
