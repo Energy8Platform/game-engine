@@ -50,6 +50,10 @@ rows:
   # that service; the row itself has no config.
   - id: media1
     name: '@energy8engine/node-media'
+  # Spine skeletons as scene nodes (`spine`) — same shape as `media1`, its
+  # own row so a project without Spine can drop the runtime.
+  - id: spine1
+    name: '@energy8engine/node-spine'
   - id: reels1
     name: '@energy8engine/reels'
   - id: mechanics1

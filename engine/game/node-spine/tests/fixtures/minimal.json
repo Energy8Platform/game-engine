@@ -1,0 +1,13 @@
+{
+  "skeleton": { "spine": "4.2.11", "hash": "minimal", "width": 1, "height": 1 },
+  "bones": [{ "name": "root" }],
+  "slots": [{ "name": "s", "bone": "root", "attachment": "a" }],
+  "skins": [
+    { "name": "default", "attachments": { "s": { "a": { "type": "region", "width": 1, "height": 1 } } } },
+    { "name": "alt", "attachments": { "s": { "a": { "type": "region", "width": 1, "height": 1 } } } }
+  ],
+  "animations": {
+    "idle": { "bones": { "root": { "rotate": [{ "angle": 0 }, { "time": 1, "angle": 90 }] } } },
+    "wave": { "bones": { "root": { "rotate": [{ "angle": 0 }, { "time": 0.5, "angle": -45 }] } } }
+  }
+}
