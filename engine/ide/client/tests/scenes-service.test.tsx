@@ -258,11 +258,22 @@ describe('scenes service', () => {
     expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['derived:video']);
     expect(ctx.assetNodeTypes.pick('a.png')).toBeUndefined();
 
-    // A project's own registration made after the report outranks the derived one.
+    // A project's own registration outranks the derived one — made after the report...
     ctx.assetNodeTypes.register('mine', {
       extensions: ['mp4'],
       node: (src, at) => ({ type: 'clip', props: { src, ...at } }),
     });
     expect(ctx.assetNodeTypes.pick('a.mp4')?.node('a.mp4', { x: 0, y: 0 }).type).toBe('clip');
+    // ...or before it, and it survives the next report re-deriving the same type.
+    ctx.assetNodeTypes.register('early', {
+      extensions: ['gif'],
+      node: (src, at) => ({ type: 'still', props: { src, ...at } }),
+    });
+    socket.receive({
+      type: 'node-types',
+      types: [{ type: 'gif', schema: {}, accept: { extensions: ['gif'], prop: 'src' } }],
+    });
+    expect(ctx.assetNodeTypes.list().map((r) => r.id)).toEqual(['mine', 'early', 'derived:gif']);
+    expect(ctx.assetNodeTypes.pick('a.gif')?.node('a.gif', { x: 0, y: 0 }).type).toBe('still');
   });
 });

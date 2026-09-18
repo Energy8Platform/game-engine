@@ -26,10 +26,12 @@ export interface AssetNodeTypesService {
   /** Same id again replaces (last-wins); the returned disposer restores whatever it replaced. */
   register(id: string, def: AssetNodeType): () => void;
   /**
-   * The registration for `path`'s extension (case-insensitive), the latest
-   * registered first. With `tree`: one whose `sibling` file is in the tree
-   * beside the path wins over one with no `sibling`; one whose sibling is
-   * missing is passed over. Without `tree` the sibling rule is ignored.
+   * The registration for `path`'s extension (case-insensitive): the latest
+   * registered first, `derived:*` ids after every other whenever they
+   * arrived (a project's own registration outranks the game's report).
+   * With `tree`: one whose `sibling` file is in the tree beside the path
+   * wins over one with no `sibling`, which wins over one whose sibling is
+   * missing. Without `tree` the sibling rule is ignored.
    */
   pick(path: string, tree?: readonly FileEntry[]): AssetNodeType | undefined;
   /** In registration order (by id, not affected by a same-id replace). */
@@ -91,8 +93,10 @@ export function apply(ctx: Context) {
     pick(path, tree) {
       const ext = extOf(path);
       if (!ext) return undefined;
+      const derived = (id: string) => (id.startsWith('derived:') ? 1 : 0);
       const candidates = [...service.list()]
         .reverse()
+        .sort((a, b) => derived(a.id) - derived(b.id)) // stable: newest first within each rank
         .map((r) => r.def)
         .filter((def) => def.extensions.some((e) => e.toLowerCase() === ext));
       if (!tree) return candidates[0];
@@ -101,7 +105,8 @@ export function apply(ctx: Context) {
         tree.some((e) => e.kind === 'file' && e.path === stem + sibling);
       return (
         candidates.find((def) => def.sibling !== undefined && beside(def.sibling)) ??
-        candidates.find((def) => def.sibling === undefined)
+        candidates.find((def) => def.sibling === undefined) ??
+        candidates[0]
       );
     },
     list() {

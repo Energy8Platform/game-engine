@@ -181,8 +181,8 @@ function patchNode(doc: SceneDoc, id: string, props: Record<string, unknown>): S
   };
 }
 
-/** What the canvas measures is a float (`279.99998474121094`); the file reads `280`. */
-const DECIMALS: Record<string, number> = { x: 100, y: 100, scale: 100, rotation: 10_000 };
+/** What the canvas measures is a float (`279.99998474121094`); the file reads `280` — positions whole, scale to 0.01, rotation to 0.0001. */
+const DECIMALS: Record<string, number> = { x: 1, y: 1, scale: 100, rotation: 10_000 };
 function roundProps(props: Record<string, unknown>): Record<string, unknown> {
   const out = { ...props };
   for (const [key, by] of Object.entries(DECIMALS))
@@ -310,10 +310,12 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
    * `.atlas` is a skeleton, alone it is a spritesheet).
    */
   const dropAsset = async (path: string, x: number, y: number) => {
-    const { entries } = await ctx.files.tree();
+    const tree = await ctx.files.tree();
+    for (const diag of tree.diagnostics) ctx.connection.report(diag);
     const current = liveDoc();
     if (!current) return;
-    const def = ctx.assetNodeTypes.pick(path, entries);
+    // A tree that could not be read whole says nothing about what is beside the file.
+    const def = ctx.assetNodeTypes.pick(path, tree.diagnostics.length ? undefined : tree.entries);
     if (!def) {
       noNodeType(path);
       return;

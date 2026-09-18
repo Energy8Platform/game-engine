@@ -308,7 +308,7 @@ export interface NodeTypeAccept {
   extensions: string[];
   /** The prop `accept`ing the path. */
   prop: string;
-  /** A second prop to fill from the same drop (a spritesheet's JSON beside its PNG, say). */
+  /** The sibling file's extension: `<stem>.<sibling>` must exist beside the path (a spine skeleton's `atlas`). */
   sibling?: string;
 }
 

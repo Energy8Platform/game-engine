@@ -145,10 +145,13 @@ export function apply(ctx: Context, config: ScenesConfig) {
     docsLive = true;
   }
   let derived: (() => void)[] = [];
+  // The boot GET can answer after this plugin is gone — nothing to register then.
+  let disposed = false;
   function applyTypes(types: NodeTypeInfo[]) {
     nodeTypes = types;
     typesLive = true;
     for (const off of derived) off();
+    if (disposed) return;
     derived = types.flatMap(({ type, accept }) =>
       accept
         ? [
@@ -166,7 +169,9 @@ export function apply(ctx: Context, config: ScenesConfig) {
   }
   ctx.effect(
     () => () => {
+      disposed = true;
       for (const off of derived) off();
+      derived = [];
     },
     'scenes:derived-asset-types',
   );

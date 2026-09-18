@@ -526,13 +526,13 @@ describe('SceneDocument', () => {
     expect(puts()[0].nodes.map((n) => n.id)).toEqual(['bg', 'reels-1', 'title']);
   });
 
-  it('what the canvas measures is rounded before it is written: x/y/scale to 2 decimals, rotation to 4', async () => {
+  it('what the canvas measures is rounded before it is written: x/y to whole pixels, scale to 2 decimals, rotation to 4', async () => {
     const { ctx, puts } = await harness();
     renderTab(ctx);
     const { iframe } = canvas();
     frame(iframe, 'edit', {
       node: 'logo',
-      props: { x: 279.99998474121094, y: 40, scale: 1.4999, rotation: 0.78539816 },
+      props: { x: 279.6, y: 40.4, scale: 1.4999, rotation: 0.78539816 },
     });
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes[0].children?.[0].props).toEqual({
@@ -729,6 +729,19 @@ describe('SceneDocument', () => {
       type: 'spine',
       props: { skeleton: 'assets/coin.json', x: 1, y: 2, anchor: 0.5 },
     });
+  });
+
+  it('a tree that could not be read is reported and the drop still lands, by extension alone', async () => {
+    const unread = { severity: 'error', plugin: 'files', where: '/api/files', message: 'no tree' };
+    const { ctx, puts } = await harness({
+      'GET /api/files': () => ({ status: 500, body: { entries: [], diagnostics: [unread] } }),
+    });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'drop', { path: 'assets/logo.png', x: 1, y: 2 });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes.at(-1)?.type).toBe('image');
+    expect(ctx.connection.diagnostics.some((d) => d.message === 'no tree')).toBe(true);
   });
 
   it('a drop of an asset with no registered node type warns instead of adding a node', async () => {

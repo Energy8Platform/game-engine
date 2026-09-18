@@ -65,18 +65,32 @@ describe('assetNodeTypes', () => {
     expect(typeOf(ctx, 'assets/A.JSON', [file('assets/a.atlas')])).toBe('spritesheet');
   });
 
-  it('with a tree: a directory named like the sibling does not count, and a .skel with no atlas is nothing', async () => {
+  it('with a tree: a directory named like the sibling does not count; a .skel with no atlas is still spine (the host reports the missing atlas)', async () => {
     const ctx = await media();
     expect(typeOf(ctx, 'assets/a.json', [{ path: 'assets/a.atlas', kind: 'dir' }])).toBe(
       'spritesheet',
     );
-    expect(ctx.assetNodeTypes.pick('assets/a.skel', [])).toBeUndefined();
+    expect(typeOf(ctx, 'assets/a.skel', [])).toBe('spine');
   });
 
   it('without a tree the sibling rule is ignored: the last registered for the extension wins', async () => {
     const ctx = await media();
     expect(typeOf(ctx, 'assets/b.json')).toBe('spine');
     expect(typeOf(ctx, 'assets/a.skel')).toBe('spine');
+  });
+
+  it('a registration made BEFORE the derived ones wins too: derived:* rank last whenever they arrive', async () => {
+    const ctx = await boot();
+    ctx.assetNodeTypes.register('mine', { extensions: ['json'], node: node('mine', 'file') });
+    ctx.assetNodeTypes.register('derived:spritesheet', {
+      extensions: ['json'],
+      node: node('spritesheet', 'sheet'),
+    });
+    expect(typeOf(ctx, 'b.json')).toBe('mine');
+    expect(typeOf(ctx, 'b.json', [file('b.json')])).toBe('mine');
+    // Two of the project's own: the later one wins, as before.
+    ctx.assetNodeTypes.register('later', { extensions: ['json'], node: node('later', 'file') });
+    expect(typeOf(ctx, 'b.json')).toBe('later');
   });
 
   it('a registration made after the derived ones wins its extension among the sibling-less', async () => {
