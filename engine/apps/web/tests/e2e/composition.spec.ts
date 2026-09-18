@@ -300,10 +300,9 @@ test('removing the reels row from the patch takes the board off the screen', asy
     // The board is DRAWN: four quadrants of the canvas, four different
     // pictures. This is the 5x3 grid of reel cells a person sees — after
     // ONE spin, not before: the board is a node of the `base_game` scene
-    // now (`scenes/base_game.scene.yml`), and nothing shows a scene at
-    // boot; the spin's own stage shows it (the scene editor spec's
-    // temporary rule, until the flow editor drives the game). Before
-    // that spin the canvas is one flat colour and measures nothing.
+    // (`scenes/base_game.scene.yml`), which `flow.yml`'s `show` node puts
+    // up at boot with its cells still empty; the spin is what fills them.
+    // Before it the canvas is one flat colour and measures nothing.
     await page.locator('#spin').click();
     await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
     const withBoard = await canvasQuadrants(page);
@@ -456,13 +455,14 @@ test('a misspelled package name on a row says so, naming the row and the package
  * mechanism that held; it was the fixture.
  *
  * What holds it now is the page: `first-slot`'s `need()` records the
- * services `main.ts` itself reads off `ctx` — `mechanics`, `play` and
- * `board` — and reports and draws them the same way `createGame` does for
- * a row's. So the row named here is `mechanics1`, as the thing that
- * normally provides the service; the message is careful not to claim it
- * was removed, because the same absence is reachable with the row
- * present and failing (see the misspelled-package test above, which
- * pins that wording).
+ * services `main.ts` itself reads off `ctx` — `mechanics` and `board`
+ * (`play` left the page with the spin loop: the flow's `present` node is
+ * what reads it now) — and reports and draws them the same way
+ * `createGame` does for a row's. So the row named here is `mechanics1`,
+ * as the thing that normally provides the service; the message is careful
+ * not to claim it was removed, because the same absence is reachable with
+ * the row present and failing (see the misspelled-package test above,
+ * which pins that wording).
  */
 test('removing the mechanics row says so instead of booting to ready', async ({ page }) => {
   const dir = projectCopy();
@@ -487,21 +487,21 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
       'the screen must name the row that normally provides the registry',
     ).toContainText('mechanics1');
 
-    // And a click on Spin still throws — `presentStage`'s
-    // `game.ctx.mechanics.forStage(stage)` is unguarded on purpose (see
-    // `main.ts`) — but the reason is not repeated from scratch: the boot
-    // diagnostic naming `mechanics1` is still sitting in the same bounded
-    // log, above the raw throw, exactly where it landed before the click.
+    // And a click on Spin still fails — the flow's `present` node asks
+    // for the registry and there is none — but the reason is not repeated
+    // from scratch: the boot diagnostic naming `mechanics1` is still
+    // sitting in the same bounded log, above the node's own report,
+    // exactly where it landed before the click.
     await page.locator('#spin').click();
     const log = page.locator('#log');
     await expect(log).toContainText('mechanics1', { timeout: 20_000 });
     await expect(log, 'the diagnostic names the missing service, not just the throw').toContainText(
       'nothing in the composition provided "mechanics"',
     );
-    // The raw text still travels too: it is what tells "failed for the
-    // reason we predicted" apart from "failed for another reason while a
-    // row happened to be missing".
-    await expect(log).toContainText('forStage');
+    // The node's own words travel too (`plugin: 'flow'`, `where: draw`):
+    // they are what tells "failed for the reason we predicted" apart from
+    // "failed for another reason while a row happened to be missing".
+    await expect(log).toContainText("flow (draw): no 'mechanics' service in this composition");
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -509,22 +509,24 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
 });
 
 /**
- * The other service only the page reads: `ctx.play`, which `presentStage`
- * hands a plan and a board. Nothing declares it a row's `requires`,
- * because no ROW reads it, so before this page recorded its own needs this
- * edit booted to `ready` and the first click gave `Cannot read properties
- * of undefined (reading 'execute')` — the same shape as the `mechanics`
- * case above, one service along.
- *
- * `removeRowId` rather than a wholesale patch, and deliberately: this
- * composition keeps `reelstep1`, so the row that needs what `playloop1`
- * ALSO provided — `ctx.steps`, the registry its step handler registers
- * into — is still here to speak for itself. Both producers are asserted,
- * because they say different things: the page can only speak for what IT
- * reads, and a game whose page never called `execute` would have nothing
- * but the row's word.
+ * `ctx.play` — the service the flow's `present` node hands a plan and a
+ * board (`play.execute(plan, board)`, in `@energy8engine/flow`'s
+ * `kinds.ts`). It used to be the page's own read, recorded by `need()`,
+ * and this edit used to be caught on the failure screen by the page's
+ * word; the spin loop left `main.ts` with the flow editor and took that
+ * read with it, so nothing on the page speaks for `play` any more. Two
+ * things still do, and both are asserted because they say different
+ * things: at boot, the row that needs what `playloop1` ALSO provided —
+ * `ctx.steps`, the registry `reelstep1`'s step handler registers into —
+ * names itself (`removeRowId` rather than a wholesale patch, so that row
+ * is still here); and on the first click, the `present` node names the
+ * service it could not find, in the game's own log, where before this
+ * page recorded its needs the click gave `Cannot read properties of
+ * undefined (reading 'execute')`.
  */
-test('removing the play loop row says so before the first click', async ({ page }) => {
+test('removing the play loop row says so at boot, and the first click names the missing service', async ({
+  page,
+}) => {
   const dir = projectCopy({ removeRowId: 'playloop1' });
   const host = await startDevHost(dir);
   try {
@@ -539,12 +541,16 @@ test('removing the play loop row says so before the first click', async ({ page 
     await expect(mount).toContainText('This game could not start');
     await expect(
       mount,
-      'the page names the row that normally provides the service it reads',
-    ).toContainText('playloop1');
-    await expect(
-      mount,
-      'and the row whose step handler had nowhere to register names itself',
+      'the row whose step handler had nowhere to register names itself',
     ).toContainText('the "reelstep1" row requires "steps"');
+
+    // The spin still runs — the button is not in the mount — and its
+    // `present` says which service the presentation needed.
+    await page.locator('#spin').click();
+    await expect(page.locator('#log')).toContainText(
+      "flow (draw): no 'play' service in this composition",
+      { timeout: 20_000 },
+    );
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

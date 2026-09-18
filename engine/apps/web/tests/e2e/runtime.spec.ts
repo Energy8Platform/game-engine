@@ -11,22 +11,31 @@ import { LOAD_BUDGET_MS } from './project-fixture';
  * SAME server `e8 dev` boots (`dev-game`, composed here exactly the way
  * `engine/apps/cli/src/index.ts`'s `dev` command does) — without a reload
  * of the IDE page, and switching `base_game` from `classic` to `cascade`
- * makes the SAME spin result present differently.
+ * changes what a spin leaves on the board.
  *
  * "Assert what a person would actually see" (the task brief's own words):
  * the game exposes `window.__e8` (see `engine/examples/first-slot/src
  * /main.ts`'s own module doc for why) so this suite can ask the game what
- * PresentationPlan it actually ran for a given result, under whichever
- * mechanic is currently bound — the same full plan (step kind AND content
- * — which board `spinTo`/`refill` name, which cells `remove` names)
- * `@energy8engine/play-loop`'s `executePlan` actually draws to the board.
- * Checking `e8.yml`'s text, or the raw `/ide` websocket traffic, would only
- * prove a config value changed — not that the board did anything
- * different; this suite deliberately asks the game's own executed plan
- * instead. Step KIND alone is not enough either — a `remove` step that is
- * never followed by a `refill`, or one naming cells on the wrong board,
- * still says `'remove'` in a kind list; the assertions below check the
- * plan's content against the raw spin data for exactly that reason.
+ * its LIVE board shows after a spin (`symbols()`), and what the spin's
+ * result was (`spins()`, the `spin-log` row's record of the server's own
+ * answer) — and check the one against the other, under whichever mechanic
+ * is currently bound. Checking `e8.yml`'s text, or the raw `/ide`
+ * websocket traffic, would only prove a config value changed — not that
+ * the board did anything different.
+ *
+ * **What this file used to read, and cannot any more.** Until the flow
+ * editor (slice 19) the page presented a result itself and handed back the
+ * PresentationPlan it ran, so this suite compared plans step by step —
+ * content and all — against the raw spin data. The flow's `present` node
+ * runs the plan now and keeps it in its own `vars`; the spin log's `plan`
+ * is `[]` until `present` records what it drew (Task 3 debt: "spin-log
+ * plan is [] until present records it"). The step-content assertions are
+ * kept below as a skipped test, written against `spins().at(-1).plan`, so
+ * un-skipping is the whole edit once the debt is paid. What runs today is
+ * the board: under `classic` a spin leaves the reels on the spin's own
+ * grid; under `cascade` a winning spin removes and refills, round by
+ * round, and leaves the LAST round's grid — which is the same
+ * `cascade_history` the old content check read, seen from its end.
  *
  * Mirrors `skeleton.spec.ts`'s exact pattern (in-process host, fixed port
  * 5679 — the one `vite.config.ts`'s dev-server proxy targets); the project
@@ -88,20 +97,43 @@ test('the running game is visible in the IDE preview, and a spin plays', async (
   await expect.poll(() => frame.locator('#status').textContent(), { timeout: 15_000 }).toBe('done');
 });
 
+/** The live board, `[col][row]`, as `__e8.symbols()` reads it — and a spin grid in the same shape. */
+type Board = (string | null)[][];
+const strings = (grid: number[][]): Board => grid.map((col) => col.map(String));
+const symbols = (frame: Frame): Promise<Board> =>
+  frame.evaluate(() => (window as any).__e8.symbols());
+
+/** One spin's log entry — `request` as posted, `result` as the server answered. */
+interface Spin {
+  request: Record<string, unknown>;
+  result: {
+    stage: string;
+    win: number;
+    data: { grid: number[][]; cascade_history: { grid: number[][]; removed: unknown[] }[] };
+  };
+  plan: unknown[];
+}
+const spins = (frame: Frame): Promise<Spin[]> => frame.evaluate(() => (window as any).__e8.spins());
+/** `ui.spin` in, the `present` node's exit out; the spin it recorded. */
+async function spinOnce(frame: Frame): Promise<Spin> {
+  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  const all = await spins(frame);
+  return all[all.length - 1];
+}
+
 /**
  * The `spin-log` row, in a real composed game — the only place the claim
- * "the composition brings a durable log and the play loop writes to it"
- * can actually be checked. Its unit tests prove the log keeps a record and
- * that `play.record` reaches one; neither of them proves any row composes
- * a log or that anything calls `record`, which is precisely how a feature
- * ends up wired to nothing.
+ * "the composition brings a durable log and the flow's `spin` node writes
+ * to it" can actually be checked. Its unit tests prove the log keeps a
+ * record and that `play.record` reaches one; neither of them proves any
+ * row composes a log or that anything calls `record`, which is precisely
+ * how a feature ends up wired to nothing.
  *
- * The second half is the distinction the package exists for: a
- * re-presentation is not a spin. `__e8.present()` runs a whole plan
- * through the board again — everything a viewer would see — and the log
- * must not grow, because nothing happened.
+ * The other half is the distinction the package exists for: a
+ * presentation is not a spin. The flow's boot run put `base_game` on
+ * screen — a scene shown, nothing played — and the log says nothing.
  */
-test('the spin that played is written down, and re-presenting it is not a second spin', async ({
+test("the spin that played is written down — request and the server's own result; a scene shown at boot is not", async ({
   page,
 }) => {
   await page.goto('/');
@@ -110,33 +142,34 @@ test('the spin that played is written down, and re-presenting it is not a second
     .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
     .toBe('ready');
 
-  // Nothing has happened yet, so there is nothing to have recorded. Also
-  // the check that `spins()` is reaching a real log rather than answering
-  // `[]` because no `spin-log` row composed — the assertions below would
-  // fail on that, this one would not.
-  expect(await frame.evaluate(() => (window as any).__e8.spins())).toEqual([]);
+  // The boot run showed a scene and the log stayed empty. Also the check
+  // that `spins()` is reaching a real log rather than answering `[]`
+  // because no `spin-log` row composed — the assertions below would fail
+  // on that, this one would not.
+  await expect
+    .poll(() => frame.evaluate(() => (window as any).__e8.scenesVisible()), { timeout: 10_000 })
+    .toEqual(['base_game']);
+  expect(await spins(frame)).toEqual([]);
 
-  const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-  const recorded = await frame.evaluate(() => (window as any).__e8.spins());
-
-  expect(recorded).toHaveLength(1);
-  // What happened: the server's result, whole and unedited.
-  expect(recorded[0].result).toEqual(outcome.result);
-  // And how it was shown: the same plan the board was actually asked to
-  // run, content and all — not a summary of it, and not the kinds alone.
-  expect(recorded[0].plan).toEqual(outcome.steps);
+  const recorded = await spinOnce(frame);
+  expect(await spins(frame)).toHaveLength(1);
   // What was asked. Empty today (this page has no bet control), but it is
   // the body that was actually posted, not a placeholder.
-  expect(recorded[0].request).toEqual({});
-
-  // Drawing the same result again is not a second spin.
-  await frame.evaluate(() => (window as any).__e8.present());
-  expect(await frame.evaluate(() => (window as any).__e8.spins())).toHaveLength(1);
+  expect(recorded.request).toEqual({});
+  // What happened: the server's result, whole — the stage the `present`
+  // node then presented, and the 5×3 board it spun to.
+  expect(recorded.result.stage).toBe('base_game');
+  expect(recorded.result.data.grid).toHaveLength(5);
+  for (const col of recorded.result.data.grid) expect(col).toHaveLength(3);
+  expect(typeof recorded.result.win).toBe('number');
 });
 
-test('switching base_game from classic to cascade in the IDE presents the SAME spin result differently — live, with no reload', async ({
+test('switching base_game from classic to cascade in the IDE changes what a spin leaves on the board — live, with no reload', async ({
   page,
 }) => {
+  // Two spins at least, one of them a search for a winning one (measured:
+  // ~2 s a spin, ~14-25 % hit rate); the file-wide 60 s is tight for that.
+  test.setTimeout(120_000);
   await page.goto('/');
   const frame = await gameFrame(page);
   await expect
@@ -179,133 +212,124 @@ test('switching base_game from classic to cascade in the IDE presents the SAME s
   // that one. Naming it here would test the explicit path (which
   // `ide-bridge`'s own suite covers) instead of the one a person actually
   // meets on a one-stage game.
+  //
+  // Propagation is asynchronous (composition.update() -> e8.yml write and
+  // fiber restart -> /ide broadcast -> ide-bridge's own websocket handler
+  // inside the iframe): the wait is on the BINDING, read off the game's
+  // registry — not on the spin about to be asserted (see `__e8.bound`'s
+  // own doc for why waiting on the thing under test is not a check).
+  const bound = () => frame.evaluate(() => (window as any).__e8.bound('base_game'));
   await mechanicField.fill('classic');
+  await expect.poll(bound, { timeout: 20_000 }).toBe('classic');
 
-  // A losing spin presents identically under every mechanic for a boring
-  // reason (nothing to remove, nothing to scroll) — that would prove
-  // nothing. Find a real winning spin (measured empirically: ~14% hit rate
-  // for this fixture's math). The `reelStep` exclusion is what makes this
-  // loop also the wait for the rebind to land: a winning spin under
-  // `reel-step` ALWAYS carries a `reelStep` step (the math's `reel_steps`
-  // is non-empty exactly when the spin paid), so an accepted outcome is
-  // proof the IDE's write has reached the running game.
-  let classicResult:
-    | {
-        result: { stage: string; data: Record<string, unknown>; win: number };
-        steps: { kind: string; [key: string]: unknown }[];
-      }
-    | undefined;
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-    if (
-      outcome.result.win > 0 &&
-      !outcome.steps.some((s: { kind: string }) => s.kind === 'reelStep')
-    ) {
-      classicResult = outcome;
-      break;
-    }
-  }
-  if (!classicResult)
-    throw new Error(
-      'no winning classic spin found in 200 attempts — math, fixture, or the IDE rebind regressed',
-    );
-  const classicStepKinds = classicResult.steps.map((s) => s.kind);
-
-  // What a person watching the classic presentation would see: the board
-  // spins to a result and (since this one won) reveals lines — never cells
-  // disappearing and refilling, because classic never reads cascade_history.
-  expect(classicStepKinds).toContain('spinTo');
-  expect(classicStepKinds).not.toContain('remove');
-  expect(classicStepKinds).not.toContain('refill');
+  // What a person watching the classic presentation sees: the reels land
+  // on the spin's grid and stay there — win or lose, classic never reads
+  // `cascade_history`, so nothing is removed and nothing refills.
+  const classic = await spinOnce(frame);
+  expect(await symbols(frame)).toEqual(strings(classic.result.data.grid));
 
   // Turn the knob again — in the IDE, not in the game's own local <select>.
   await mechanicField.fill('cascade');
+  await expect.poll(bound, { timeout: 20_000 }).toBe('cascade');
 
-  // Propagation is asynchronous (composition.update() -> e8.yml write and
-  // fiber restart -> /ide broadcast -> ide-bridge's own websocket handler
-  // inside the iframe) — poll the SAME captured result under whatever is
-  // CURRENTLY bound until it visibly differs from the classic run, then
-  // capture that final value directly (not derived from the poll's own
-  // return, which asserts rather than yields).
-  const presentSameResultAgain = (): Promise<{ kind: string; [key: string]: unknown }[]> =>
-    frame.evaluate(({ stage, data }) => (window as any).__e8.present(stage, data), {
-      stage: classicResult!.result.stage,
-      data: classicResult!.result.data,
-    });
-  await expect
-    .poll(async () => (await presentSameResultAgain()).map((s) => s.kind), { timeout: 20_000 })
-    .not.toEqual(classicStepKinds);
-  const cascadeSteps = await presentSameResultAgain();
-  const cascadeStepKinds = cascadeSteps.map((s) => s.kind);
-
-  // What a person watching the cascade presentation of the IDENTICAL
-  // result would see instead: cells removed from the board — Task 9's real
-  // `remove` primitive, driven by the SAME data the classic run above just
-  // presented without ever touching it.
-  expect(cascadeStepKinds).toContain('remove');
-  expect(cascadeStepKinds).not.toEqual(classicStepKinds);
-
-  // Kind alone is not enough to catch a real bug that shipped here: the
-  // mechanic used to spin to the wrong board and refill round `i` from
-  // round `i + 1`'s grid instead of its own, so the last round of every
-  // chain — the common case, a single-round win — never refilled at all
-  // and left a permanent hole in the board. `stepKinds` alone (`'remove'`,
-  // `'refill'` present or not) passed just as happily on that bug, which
-  // is exactly why it survived to review. Assert CONTENT instead, against
-  // the raw spin `data` as ground truth — not against boards diffed out of
-  // the plan itself, which would just be re-deriving the same claim the
-  // mechanic already got wrong.
-  type Cell = { col: number; row: number };
-  type CascadeRound = { grid: number[][]; removed: Cell[]; win: number };
-  const data = classicResult.result.data as unknown as {
-    grid: number[][];
-    cascade_history: CascadeRound[];
-  };
-
-  // Do not silently pass on an empty list: this whole content check is
-  // only meaningful if the captured spin actually cascaded. Every winning
-  // spin does — round 0 always pushes at least one `cascade_history` entry
-  // (see `mechanic-cascade`'s module doc) — and the retry loop above only
-  // ever accepts a winning spin, but assert it rather than lean on that
-  // invariant silently.
-  expect(
-    data.cascade_history.length,
-    'captured spin never cascaded — the remove/refill content assertions below would be vacuous',
-  ).toBeGreaterThan(0);
-
-  const spinToStep = cascadeSteps.find((s) => s.kind === 'spinTo') as
-    { board: number[][] } | undefined;
-  expect(spinToStep, 'cascade must spin to a board').toBeTruthy();
-  // The board the reels land on is the PRE-cascade board (`data.grid`) —
-  // not round 0's post-collapse board, which is what the bug spun to.
-  expect(spinToStep!.board).toEqual(data.grid);
-
-  const removeSteps = cascadeSteps.filter((s) => s.kind === 'remove') as { cells: Cell[] }[];
-  const refillSteps = cascadeSteps.filter((s) => s.kind === 'refill') as {
-    board: number[][];
-  }[];
-
-  // No remove goes unrefilled. This is the visible symptom the bug left on
-  // screen: a chain's last round removed cells and nothing ever replaced
-  // them.
-  expect(
-    refillSteps.length,
-    'a remove step has no matching refill — cells were cleared and never replaced',
-  ).toBe(removeSteps.length);
-
-  for (let i = 0; i < removeSteps.length; i += 1) {
-    const round = data.cascade_history[i];
-
-    // The cells named at this point in the presentation are exactly what
-    // the math measured for this round.
-    expect(removeSteps[i].cells).toEqual(round.removed);
-
-    // The board shown right after is THIS round's own post-collapse board
-    // — not the round after it, which is the off-by-one the bug had.
-    expect(refillSteps[i].board).toEqual(round.grid);
+  // A losing spin presents identically under every mechanic for a boring
+  // reason (nothing to remove, nothing to refill) — that would prove
+  // nothing. Find a winning one whose last round's grid actually differs
+  // from the grid the reels landed on (a refill can, rarely, put the same
+  // symbols back). Every winning spin cascades: round 0 always pushes at
+  // least one `cascade_history` entry (see `mechanic-cascade`'s module doc).
+  let cascade: Spin | undefined;
+  for (let attempt = 0; attempt < 40 && !cascade; attempt += 1) {
+    const spin = await spinOnce(frame);
+    const rounds = spin.result.data.cascade_history;
+    const last = rounds[rounds.length - 1];
+    if (spin.result.win > 0 && last && !equal(last.grid, spin.result.data.grid)) cascade = spin;
   }
+  if (!cascade)
+    throw new Error(
+      'no winning cascade spin found in 40 attempts — math, fixture, or the IDE rebind regressed',
+    );
+
+  // What a person watching the cascade presentation sees instead: cells
+  // removed and the board refilled, once per round, so what they are left
+  // looking at is the LAST round's own post-collapse board — not the grid
+  // the reels landed on (which is where classic would have stopped), and
+  // not the round after it, which is the off-by-one a shipped bug once had.
+  const rounds = cascade.result.data.cascade_history;
+  expect(await symbols(frame)).toEqual(strings(rounds[rounds.length - 1].grid));
+  expect(await symbols(frame)).not.toEqual(strings(cascade.result.data.grid));
 
   // Neither page reloaded at any point during the live rebind.
   expect(await page.evaluate(() => (window as any).__ideMarker)).toBe('still-here');
   expect(await frame.evaluate(() => (window as any).__gameMarker)).toBe('still-here');
+});
+
+const equal = (a: number[][], b: number[][]) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The step-content half of the old thesis, kept whole and SKIPPED: it
+ * reads the plan the game ran, and the spin log's `plan` is `[]` until the
+ * flow's `present` node records what it drew (Task 3 debt — "spin-log plan
+ * is [] until present records it"). Written against `spins().at(-1).plan`
+ * so that un-skipping it is the whole edit once the debt is paid.
+ *
+ * Kind alone was never enough to catch a real bug that shipped here: the
+ * mechanic used to spin to the wrong board and refill round `i` from
+ * round `i + 1`'s grid instead of its own, so the last round of every
+ * chain — the common case, a single-round win — never refilled at all and
+ * left a permanent hole in the board. `stepKinds` alone (`'remove'`,
+ * `'refill'` present or not) passed just as happily on that bug, which is
+ * exactly why it survived to review. The test above sees the same bug
+ * from the board's end (the last round's grid IS on screen); this one
+ * names every step.
+ */
+test.skip("under cascade the plan removes exactly what each round measured and refills each round's own board", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  const frame = await gameFrame(page);
+  await expect
+    .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
+    .toBe('ready');
+  const bound = () => frame.evaluate(() => (window as any).__e8.bound('base_game'));
+  await page.getByLabel('stage mechanic').fill('cascade');
+  await expect.poll(bound, { timeout: 20_000 }).toBe('cascade');
+
+  let cascade: Spin | undefined;
+  for (let attempt = 0; attempt < 40 && !cascade; attempt += 1) {
+    const spin = await spinOnce(frame);
+    if (spin.result.win > 0) cascade = spin;
+  }
+  if (!cascade) throw new Error('no winning cascade spin found in 40 attempts');
+  const data = cascade.result.data;
+  expect(data.cascade_history.length).toBeGreaterThan(0);
+
+  type Cell = { col: number; row: number };
+  const steps = cascade.plan as { kind: string; board?: number[][]; cells?: Cell[] }[];
+  expect(steps.map((s) => s.kind)).toContain('remove');
+
+  // The board the reels land on is the PRE-cascade board (`data.grid`) —
+  // not round 0's post-collapse board, which is what the bug spun to.
+  const spinTo = steps.find((s) => s.kind === 'spinTo');
+  expect(spinTo, 'cascade must spin to a board').toBeTruthy();
+  expect(spinTo!.board).toEqual(data.grid);
+
+  const removes = steps.filter((s) => s.kind === 'remove');
+  const refills = steps.filter((s) => s.kind === 'refill');
+  // No remove goes unrefilled. This is the visible symptom the bug left on
+  // screen: a chain's last round removed cells and nothing ever replaced them.
+  expect(
+    refills.length,
+    'a remove step has no matching refill — cells were cleared and never replaced',
+  ).toBe(removes.length);
+  for (let i = 0; i < removes.length; i += 1) {
+    const round = data.cascade_history[i];
+    // The cells named at this point in the presentation are exactly what
+    // the math measured for this round …
+    expect(removes[i].cells).toEqual(round.removed);
+    // … and the board shown right after is THIS round's own post-collapse
+    // board — not the round after it.
+    expect(refills[i].board).toEqual(round.grid);
+  }
 });

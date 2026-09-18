@@ -25,13 +25,14 @@ describe('FlowDocument canvas', () => {
     expect(screen.getByTestId('flow-node-spin')).toHaveTextContent('spin');
     expect(screen.getByTestId('flow-port-spin-result')).toBeTruthy();
     expect(screen.getByTestId('flow-port-spin-failed')).toBeTruthy();
-    // A trigger has no input.
-    expect(
-      screen.getByTestId('flow-node-start').querySelector('.react-flow__handle.target'),
-    ).toBeNull();
-    expect(
-      screen.getByTestId('flow-node-spin').querySelector('.react-flow__handle.target'),
-    ).toBeTruthy();
+    // Every node has an input, a trigger too: `draw → idle` (the loop back
+    // to `on`) is a doc edge, and React Flow draws none into a node
+    // without a target handle — measured as error 008 for two of the five
+    // fixture edges when triggers had none.
+    for (const id of ['start', 'idle', 'spin'])
+      expect(
+        screen.getByTestId(`flow-node-${id}`).querySelector('.react-flow__handle.target'),
+      ).toBeTruthy();
     const palette = screen.getByTestId('flow-palette');
     expect(palette.querySelectorAll('button')).toHaveLength(FIVE_KINDS.length);
     expect(screen.getByTestId('flow-add-wait')).toHaveTextContent('wait');

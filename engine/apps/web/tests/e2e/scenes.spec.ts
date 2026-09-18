@@ -3,9 +3,9 @@
  * the Scenes SIDEBAR lists `scenes/*.scene.yml`, adds one (a file the
  * Explorer then shows) and opens one as a tab; the tab adds a node whose
  * properties appear on the RIGHT and land in the file; clicking a scene
- * pushes it into the running game without a spin; and a spin still shows
- * the scene named after its stage (the temporary rule in `first-slot`'s
- * `main.ts`, until the flow editor drives the game).
+ * pushes it into the running game without a spin; and a spin still
+ * presents — through `flow.yml` now (`on ui.spin → spin → present`), on
+ * the `base_game` its `show` node put up at boot.
  *
  * Same iframe, same readers as `hot-fork.spec.ts`: the composition
  * document's `Preview` (`iframe[title="game preview"]`) and the game's own
@@ -164,12 +164,15 @@ test('clicking a scene shows it in the preview; showing big_win flips its node v
 }) => {
   await openComposition(page);
   const frame = await readyFrame(page);
-  expect(await scenesVisible(frame)).toEqual([]);
+  // `base_game` is up from boot — the flow's `show` node — so the click
+  // below finds it there already; what the click proves is the selection
+  // and the Properties, and `big_win` below is the preview path itself.
+  await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toEqual(['base_game']);
   await showScenes(page);
 
   await page.getByTestId('scene-base_game').click();
-  await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toEqual(['base_game']);
   await expect(page.getByTestId('scene-base_game')).toHaveClass(/e8-explorer-selected/);
+  expect(await scenesVisible(frame)).toEqual(['base_game']);
   // The scene with no node picked: its id and node count on the right.
   await expect(page.getByTestId('prop-scene-id')).toHaveText('base_game');
   // `board`, `logo`, `big_win` — the example gained its first image in slice 18.
@@ -185,13 +188,15 @@ test('clicking a scene shows it in the preview; showing big_win flips its node v
   expect(await scenesVisible(frame)).toEqual(['base_game']);
 });
 
-test('a spin still presents under the temporary rule', async ({ page }) => {
+test('a spin still presents, through the flow, on the scene shown at boot', async ({ page }) => {
   await openComposition(page);
   const frame = await readyFrame(page);
-  expect(await scenesVisible(frame)).toEqual([]);
+  await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toEqual(['base_game']);
 
-  await frame.evaluate(() => (window as any).__e8.spin().then(() => null));
-  await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toContain('base_game');
+  // `ui.spin` in, the `present` node's exit out; the scene list is unchanged
+  // — presenting draws on the board `base_game` already holds.
+  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  expect(await scenesVisible(frame)).toEqual(['base_game']);
   expect(await frame.evaluate(() => (window as any).__e8.spins().length)).toBe(1);
-  await expect(frame.locator('#status')).not.toHaveText('');
+  await expect(frame.locator('#status')).toHaveText('done');
 });

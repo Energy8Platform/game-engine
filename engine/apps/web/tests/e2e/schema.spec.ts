@@ -87,10 +87,10 @@ async function expectSpinRuns(page: Page, errors: string[]): Promise<void> {
   expect(errors, 'a spin should raise nothing on the page').toEqual([]);
   // The board is DRAWN — four quadrants, four different pictures. Measured
   // here, after the spin, rather than in `expectPlayable`: the board is a
-  // node of the `base_game` scene (`scenes/base_game.scene.yml`), nothing
-  // shows a scene at boot, and the spin's own stage is what shows it (the
-  // scene editor spec's temporary rule). Before that the canvas is one
-  // flat colour and measures nothing.
+  // node of the `base_game` scene (`scenes/base_game.scene.yml`), which
+  // `flow.yml`'s `show` node puts up at boot with its cells still empty;
+  // the spin is what fills them. Before that the canvas is one flat
+  // colour and measures nothing.
   const quadrants = await canvasQuadrants(page);
   expect(new Set(quadrants).size, 'the board should be drawn on the canvas').toBeGreaterThan(1);
 }

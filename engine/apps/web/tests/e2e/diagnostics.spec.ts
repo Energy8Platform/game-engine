@@ -194,7 +194,10 @@ test('a host-side failure does not erase what the game already reported', async 
   page,
   context,
 }) => {
-  const project = projectCopy();
+  // The game reports two things of its own at boot: two `present` nodes
+  // the flow reaches with no result to present (see `faultNodes`), through
+  // the same interpreter path a click's `present` goes through.
+  const project = projectCopy({ faultNodes: ['first-unbound', 'second-unbound'] });
   // Makes `POST /api/spin` fail in the HOST process — the math is asked for
   // a game it does not have — so the host speaks on the same wire the game
   // does. The game itself boots and runs perfectly: the id is only consulted
@@ -208,13 +211,7 @@ test('a host-side failure does not erase what the game already reported', async 
     const game = await context.newPage();
     await game.goto(host.gameUrl);
     await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
-
-    // The game reports two things of its own, through the same
-    // `mechanics.present` path a click goes through — two stages nothing in
-    // this composition binds.
-    await game.evaluate(() => (window as any).__e8.present('first-unbound', {}));
-    await game.evaluate(() => (window as any).__e8.present('second-unbound', {}));
-    await expect(game.locator('#log')).toContainText('first-unbound');
+    await expect(game.locator('#log')).toContainText('first-unbound', { timeout: 10_000 });
     await expect(game.locator('#log')).toContainText('second-unbound');
 
     // …and THEN the host reports one of its own, on the same wire.
@@ -251,7 +248,9 @@ test('a host-side failure does not erase what the game already reported', async 
  * to stop mirroring and leave `boot` with nothing to paint.
  */
 test('a project failure appears once, on the project side', async ({ page, context }) => {
-  const project = projectCopy({ patchRowId: 'session' });
+  // Plus something of the game's own — a `present` node the flow reaches
+  // with nothing to present (see `faultNodes`) — so the bridge actually forwards.
+  const project = projectCopy({ patchRowId: 'session', faultNodes: ['unbound-stage'] });
   const host = await startDevHost(project);
   try {
     const game = await context.newPage();
@@ -264,10 +263,7 @@ test('a project failure appears once, on the project side', async ({ page, conte
       game.locator('#log'),
       "the game's own list must still carry what the host said about the project",
     ).toContainText('which no bundle placed');
-
-    // Something of the game's own, so the bridge actually forwards.
-    await game.evaluate(() => (window as any).__e8.present('unbound-stage', {}));
-    await expect(game.locator('#log')).toContainText('unbound-stage');
+    await expect(game.locator('#log')).toContainText('unbound-stage', { timeout: 10_000 });
 
     await page.goto(IDE_URL);
     const rows = page.getByTestId(/^diag-/);

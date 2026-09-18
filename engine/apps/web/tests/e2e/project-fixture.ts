@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dump, load } from 'js-yaml';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -143,6 +144,24 @@ export interface ProjectCopyOptions {
    * rows can simply be on.
    */
   duplicateScreenId?: boolean;
+
+  /**
+   * Add a `present` node under each of these ids to `flow.yml`, every one
+   * reached straight from `start` — so at boot, with no `spin` before it,
+   * each finds `vars.result` missing and fails: one diagnostic of the
+   * GAME's own (`plugin: 'flow'`, `where: <id>`), raised on demand under a
+   * text of the test's choosing, and nothing else changes — the fixture's
+   * own loop still spins from `idle`.
+   *
+   * It exists for `diagnostics.spec.ts` and `screens.spec.ts`, which used
+   * to raise the same kind of thing through `window.__e8.present('<a stage
+   * nothing binds>', {})` — a page-side path the flow editor took out of
+   * `main.ts` (the flow's `present` node is the only one left, and it
+   * presents the spin's own result). A node the flow runs is the honest
+   * replacement: the report goes through the running game's `ctx.
+   * diagnostics` and `ide-bridge`, exactly as a third-party node's would.
+   */
+  faultNodes?: string[];
 }
 
 export function projectCopy(options: ProjectCopyOptions = {}): string {
@@ -173,6 +192,20 @@ export function projectCopy(options: ProjectCopyOptions = {}): string {
   }
   if (options.duplicateScreenId) {
     appendFileSync(join(dir, 'e8.yml'), '\n- id: screendemo2\n  name: screen-demo\n  config: {}\n');
+  }
+  if (options.faultNodes?.length) {
+    // Parsed and dumped rather than appended: `nodes:` comes before
+    // `edges:` in the file, and both lists grow.
+    const flowFile = join(dir, 'flow.yml');
+    const flow = load(readFileSync(flowFile, 'utf8')) as {
+      nodes: { id: string; kind: string }[];
+      edges: { from: string; to: string }[];
+    };
+    for (const id of options.faultNodes) {
+      flow.nodes.push({ id, kind: 'present' });
+      flow.edges.push({ from: 'start', to: id });
+    }
+    writeFileSync(flowFile, dump(flow, { noRefs: true }));
   }
   return dir;
 }

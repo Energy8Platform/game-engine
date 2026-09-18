@@ -100,13 +100,14 @@
  * remaining, narrower reason is exercised.
  *
  * Every project here is a private `projectCopy()`, removed in a `finally`
- * — see `./project-fixture`. None of the five needed a new fixture option:
- * nothing here mutates the project on disk. Cases 1-3 and 5 read the
- * SHIPPED screens (`composition`/`preview`, both registered directly in
- * `App.tsx` — nothing a fixture flag could add or remove), and case 4
- * raises its two diagnostics at runtime, through the same
- * `window.__e8.present(<stage nothing binds>, {})` device
- * `diagnostics.spec.ts` already uses for a single game.
+ * — see `./project-fixture`. Cases 1-3 and 5 read the SHIPPED screens
+ * (`composition`/`preview`, both registered directly in `App.tsx` —
+ * nothing a fixture flag could add or remove), and case 4 raises its
+ * diagnostic in each tile at boot, through the same `faultNodes` device
+ * `diagnostics.spec.ts` uses for a single game (a `present` node the flow
+ * reaches with nothing to present — what used to be
+ * `window.__e8.present(<stage nothing binds>, {})` before the flow drove
+ * the game).
  *
  * Every test visits the game (or a tile) and waits for it to settle before
  * touching the IDE at all — the same reason `declared.spec.ts` and
@@ -235,7 +236,9 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
   page,
   context,
 }) => {
-  const dir = projectCopy();
+  // One document, so both tiles report the SAME text — telling the two
+  // rows apart is then entirely the tile tag's job, which is the point.
+  const dir = projectCopy({ faultNodes: ['wall-fault'] });
   const host = await startDevHost(dir);
   try {
     await page.goto(host.gameUrl);
@@ -252,13 +255,13 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
     ]);
 
     // Same trigger `diagnostics.spec.ts`'s "a host-side failure does not
-    // erase what the game already reported" test uses: a stage nothing in
-    // this composition binds, run through the real `mechanics.present`
-    // path via `window.__e8` — a third-party mechanic's own failure would
-    // reach the same place, this is just the cheapest honest way to raise
-    // one on demand, in each tile, independently.
-    await desktop.evaluate(() => (window as any).__e8.present('wall-desktop-fault', {}));
-    await laptop.evaluate(() => (window as any).__e8.present('wall-laptop-fault', {}));
+    // erase what the game already reported" test uses: a `present` node
+    // the flow reaches at boot with nothing to present, run through the
+    // real interpreter — a third-party node's own failure would reach the
+    // same place, this is just the cheapest honest way to raise one, in
+    // each tile, independently. Each tile's own log has it.
+    await expect(desktop.locator('#log')).toContainText('wall-fault', { timeout: 10_000 });
+    await expect(laptop.locator('#log')).toContainText('wall-fault', { timeout: 10_000 });
 
     // The panel is chrome now (Task 7): both faults show up right here, on
     // `page` itself, without ever leaving `#/preview` — where the earlier
@@ -266,8 +269,9 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
     // (see the file header). This is the reason the second page below is
     // no longer a VIEWING workaround; it is checked here, live, first.
     const panel = page.getByTestId('diagnostics-panel');
-    await expect(panel).toContainText('wall-desktop-fault', { timeout: 20_000 });
-    await expect(panel).toContainText('wall-laptop-fault');
+    await expect(panel).toContainText('wall-fault', { timeout: 20_000 });
+    await expect(panel).toContainText('game "Desktop"', { timeout: 20_000 });
+    await expect(panel).toContainText('game "Laptop"', { timeout: 20_000 });
 
     // A second, independent page — kept on purpose, and not for the reason
     // it used to be here for. Connecting fresh, AFTER both tiles already
@@ -283,8 +287,9 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
     const panelPage = await context.newPage();
     await panelPage.goto(IDE_URL);
     const replayPanel = panelPage.getByTestId('diagnostics-panel');
-    await expect(replayPanel).toContainText('wall-desktop-fault', { timeout: 20_000 });
-    await expect(replayPanel).toContainText('wall-laptop-fault');
+    await expect(replayPanel).toContainText('wall-fault', { timeout: 20_000 });
+    await expect(replayPanel).toContainText('game "Desktop"', { timeout: 20_000 });
+    await expect(replayPanel).toContainText('game "Laptop"', { timeout: 20_000 });
 
     // Not just "both messages appear somewhere" — each on ITS OWN row,
     // carrying ITS OWN tile's identity. Two tiles silently sharing one
@@ -295,13 +300,13 @@ test('two tiles reporting trouble both appear, attributed to their tiles', async
     // apart. Either failure mode is exactly what this comparison catches —
     // checked on the replayed copy, which is the one a person who opens
     // the editor late (the common case) would actually see.
-    const rowTexts = await panelPage.getByTestId(/^diag-/).allTextContents();
-    const desktopRow = rowTexts.find((text) => text.includes('wall-desktop-fault'));
-    const laptopRow = rowTexts.find((text) => text.includes('wall-laptop-fault'));
+    const faultRows = (await panelPage.getByTestId(/^diag-/).allTextContents()).filter((text) =>
+      text.includes('wall-fault'),
+    );
+    const desktopRow = faultRows.find((text) => text.includes('game "Desktop"'));
+    const laptopRow = faultRows.find((text) => text.includes('game "Laptop"'));
     expect(desktopRow, "the Desktop tile's own trouble must have its own row").toBeDefined();
     expect(laptopRow, "the Laptop tile's own trouble must have its own row").toBeDefined();
-    expect(desktopRow).toContain('game "Desktop"');
-    expect(laptopRow).toContain('game "Laptop"');
     expect(desktopRow).not.toBe(laptopRow);
   } finally {
     await host.stop();
