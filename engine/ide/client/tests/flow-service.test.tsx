@@ -142,6 +142,23 @@ describe('flow service', () => {
     expect(ctx.flow.doc()).toEqual(DOC);
   });
 
+  it("a flow-kinds frame that arrives before the boot GET resolves wins over the GET's own kinds", async () => {
+    let resolveGet!: (answer: Answer) => void;
+    const pending = new Promise<Answer>((resolve) => {
+      resolveGet = resolve;
+    });
+    const { ctx, socket } = await harness({ 'GET /api/flow': () => pending });
+
+    socket.receive({ type: 'flow-kinds', kinds: KINDS });
+    expect(ctx.flow.kinds()).toEqual(KINDS);
+
+    const otherKinds: FlowKindInfo[] = [{ kind: 'wait', outs: [], trigger: false, schema: {} }];
+    resolveGet({ body: { doc: DOC, diagnostics: [], kinds: otherKinds } });
+    // The GET's `doc` is newer than nothing and does land; its `kinds` do not.
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+    expect(ctx.flow.kinds()).toEqual(KINDS);
+  });
+
   it('registers the activity that opens the flow document', async () => {
     const { ctx } = await harness({ 'GET /api/flow': boot() });
     expect(ctx.slots.list('shell.activity')).toEqual([
@@ -219,6 +236,23 @@ describe('flow service', () => {
     expect(ctx.flow.trace()[0]).toEqual(entry(2, 'n1', 11));
   });
 
+  it('one flow-trace frame carrying two runs keeps only the newer run\'s entries', async () => {
+    const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+
+    const entry = (run: number, node: string, at: number): FlowTraceEntry => ({
+      run,
+      node,
+      out: null,
+      at,
+    });
+    socket.receive({
+      type: 'flow-trace',
+      entries: [entry(1, 'start', 0), entry(1, 'a', 1), entry(2, 'start', 2), entry(2, 'b', 3)],
+    });
+    expect(ctx.flow.trace()).toEqual([entry(2, 'start', 2), entry(2, 'b', 3)]);
+  });
+
   it('select is state only — no request, and does not renotify an unchanged selection', async () => {
     const { ctx, calls } = await harness({ 'GET /api/flow': boot() });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
@@ -254,6 +288,17 @@ describe('flow service', () => {
     await vi.waitFor(() =>
       expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: DOC }),
     );
+  });
+
+  it('FlowDocument renders flow-broken (no create button) for an existing-but-unparseable flow.yml', async () => {
+    const { ctx } = await harness({
+      'GET /api/flow': boot({ doc: null, diagnostics: [refusal], kinds: [] }),
+    });
+    renderDocument(ctx);
+    expect(await screen.findByTestId('flow-broken')).toHaveTextContent(refusal.message);
+    expect(screen.queryByTestId('flow-empty')).toBeNull();
+    expect(screen.queryByTestId('flow-create')).toBeNull();
+    expect(screen.queryByTestId('flow-canvas')).toBeNull();
   });
 
   it('FlowDocument renders the canvas placeholder and diagnostics once a flow.yml exists', async () => {
