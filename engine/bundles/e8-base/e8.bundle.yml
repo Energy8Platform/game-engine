@@ -51,6 +51,13 @@ rows:
     name: '@energy8engine/game-runtime'
   - id: playloop1
     name: '@energy8engine/play-loop'
+  # The flow document that drives the play loop end to end (boot → spin →
+  # present → …), edited in the IDE's flow editor. `inject: []` (see
+  # `@energy8engine/flow`'s `src/runtime.ts`), so its position here is not
+  # load-bearing the way `scenes1`/`playloop1`'s is — it reaches
+  # `scenes`/`mechanics`/`play`/`board` leniently, per node, at run time.
+  - id: flow1
+    name: '@energy8engine/flow'
   # The durable record of what happened, as opposed to the live events of
   # what is shown (§7 of the spec). Baseline rather than per-project
   # because of the note that spec attaches to it: a log added later is a

@@ -1802,3 +1802,289 @@ describe('ide-bridge — forwards node-types', () => {
     expect(nodeTypeFrames(socket)).toEqual([]);
   });
 });
+
+/**
+ * The flow editor's own frames: `flow` in (the host telling this game which
+ * document to run), `flow-kinds` out (the mirror of `node-types`, for the
+ * `flowNodes` registry `@energy8engine/flow`'s `flow1` row provides), and
+ * `flow-trace` out (batched, unlike every other forward in this file — see
+ * `forwardRegistry`'s own doc for why it is not built on that helper).
+ */
+describe('ide-bridge — flow frames from the host', () => {
+  /** `onTrace` is a stub, not under test here — every `FlowService` fake needs one for `apply`'s own flow-trace subscription (see the `forwards flow-trace` describe block below for that half). */
+  function fakeFlow(overrides: { replace?: ReturnType<typeof vi.fn>; stop?: ReturnType<typeof vi.fn> } = {}) {
+    return { onTrace: () => () => {}, ...overrides };
+  }
+
+  function bridged(flow?: { replace?: ReturnType<typeof vi.fn>; stop?: ReturnType<typeof vi.fn> }) {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    if (flow) ctx.provide('flow' as never, fakeFlow(flow) as never);
+    const socket = fakeSocket();
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    return socket;
+  }
+
+  it('a `flow` frame with an object doc replaces it', () => {
+    const flow = { replace: vi.fn(), stop: vi.fn() };
+    const socket = bridged(flow);
+
+    socket.emit({ type: 'flow', doc: { version: 1, nodes: [], edges: [] }, diagnostics: [] });
+
+    expect(flow.replace).toHaveBeenCalledWith({ version: 1, nodes: [], edges: [] });
+    expect(flow.stop).not.toHaveBeenCalled();
+  });
+
+  it('a `flow` frame with a null doc stops the run instead of replacing', () => {
+    const flow = { replace: vi.fn(), stop: vi.fn() };
+    const socket = bridged(flow);
+
+    socket.emit({ type: 'flow', doc: null, diagnostics: [] });
+
+    expect(flow.stop).toHaveBeenCalled();
+    expect(flow.replace).not.toHaveBeenCalled();
+  });
+
+  it('without flow composed, a flow frame is ignored', () => {
+    const socket = bridged();
+
+    expect(() =>
+      socket.emit({ type: 'flow', doc: { version: 1, nodes: [], edges: [] }, diagnostics: [] }),
+    ).not.toThrow();
+    expect(() => socket.emit({ type: 'flow', doc: null, diagnostics: [] })).not.toThrow();
+  });
+});
+
+/**
+ * `flow-kinds` is the mirror of `node-types`, for the running game's flow
+ * node-kind registry: each kind's id, its output ports, whether it's a
+ * trigger, and its props schema, so the flow editor can render a node's
+ * fields and offer its kind as a pick (`protocol.ts`'s `FlowKindsMessage`).
+ * Same shape as `node-types`/`game-transitions` — see `forwardRegistry`'s
+ * own doc — read leniently: a composition with no `flow` row sends nothing
+ * here, never throws.
+ */
+describe('ide-bridge — forwards flow-kinds', () => {
+  /** Same shape as `forwards game-transitions`' own `fakeOpenableSocket`. */
+  function fakeOpenableSocket() {
+    const sent: string[] = [];
+    const openListeners: ((event: { data: string }) => void)[] = [];
+    const socket = {
+      readyState: 0, // CONNECTING
+      send(frame: string) {
+        sent.push(frame);
+      },
+      sent,
+      addEventListener(type: string, listener: (event: { data: string }) => void) {
+        if (type === 'open') openListeners.push(listener);
+      },
+      close() {},
+      open() {
+        socket.readyState = 1;
+        for (const listener of openListeners) listener({ data: '' });
+      },
+    };
+    return socket;
+  }
+  const flowKindFrames = (socket: { sent: string[] }) =>
+    socket.sent.map((raw) => JSON.parse(raw)).filter((m) => m.type === 'flow-kinds');
+
+  it('sends flow-kinds on open, and again when the registry changes', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const listeners = new Set<() => void>();
+    let kinds: { kind: string; outs: string[]; trigger?: boolean; schema: unknown }[] = [
+      { kind: 'boot', outs: ['next'], trigger: true, schema: { a: 1 } },
+    ];
+    ctx.provide(
+      'flowNodes' as never,
+      {
+        list: () => [...kinds],
+        subscribe: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+      } as never,
+    );
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    expect(socket.sent, 'nothing can be said on a socket that is not open yet').toEqual([]);
+
+    socket.open();
+    expect(flowKindFrames(socket)).toEqual([
+      { type: 'flow-kinds', kinds: [{ kind: 'boot', outs: ['next'], trigger: true, schema: { a: 1 } }] },
+    ]);
+
+    kinds = [...kinds, { kind: 'on', outs: ['next'], trigger: true, schema: {} }];
+    listeners.forEach((fn) => fn());
+    expect(flowKindFrames(socket).at(-1)).toEqual({
+      type: 'flow-kinds',
+      kinds: [
+        { kind: 'boot', outs: ['next'], trigger: true, schema: { a: 1 } },
+        { kind: 'on', outs: ['next'], trigger: true, schema: {} },
+      ],
+    });
+  });
+
+  it('a kind with no `trigger` field forwards `trigger: false`, not undefined', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    ctx.provide(
+      'flowNodes' as never,
+      {
+        list: () => [{ kind: 'set', outs: ['next'], schema: {} }],
+        subscribe: () => () => {},
+      } as never,
+    );
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    socket.open();
+
+    expect(flowKindFrames(socket)).toEqual([
+      { type: 'flow-kinds', kinds: [{ kind: 'set', outs: ['next'], trigger: false, schema: {} }] },
+    ]);
+  });
+
+  it('sends nothing when there is no flowNodes registry, and does not throw', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeOpenableSocket();
+
+    expect(() =>
+      ideBridge.apply(ctx!, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never }),
+    ).not.toThrow();
+    expect(() => socket.open()).not.toThrow();
+    expect(flowKindFrames(socket)).toEqual([]);
+  });
+});
+
+/**
+ * `flow-trace` forwards the running interpreter's node-by-node trace
+ * (`FlowService.onTrace`), batched per animation frame rather than sent one
+ * frame per entry — the interpreter can produce several trace entries in
+ * one tick (a trigger firing straight into a `merge`, say), and a reader
+ * wants "what happened just now", not a socket write per node. `node`
+ * environment has no `requestAnimationFrame`, so this module's own
+ * fallback (`setTimeout(fn, 0)`) is what these tests actually exercise —
+ * see `forwardRegistry`'s own doc, just above `apply`, for why this block
+ * is not built on that helper.
+ */
+describe('ide-bridge — forwards flow-trace (batched)', () => {
+  /** Same shape as `forwards game-transitions`' own `fakeOpenableSocket`. */
+  function fakeOpenableSocket() {
+    const sent: string[] = [];
+    const openListeners: ((event: { data: string }) => void)[] = [];
+    const socket = {
+      readyState: 0, // CONNECTING
+      send(frame: string) {
+        sent.push(frame);
+      },
+      sent,
+      addEventListener(type: string, listener: (event: { data: string }) => void) {
+        if (type === 'open') openListeners.push(listener);
+      },
+      close() {},
+      open() {
+        socket.readyState = 1;
+        for (const listener of openListeners) listener({ data: '' });
+      },
+    };
+    return socket;
+  }
+  const traceFrames = (socket: { sent: string[] }) =>
+    socket.sent.map((raw) => JSON.parse(raw)).filter((m) => m.type === 'flow-trace');
+  const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function fakeTraceFlow() {
+    const listeners = new Set<(e: unknown) => void>();
+    return {
+      onTrace: (fn: (e: unknown) => void) => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+      fire(e: unknown) {
+        listeners.forEach((fn) => fn(e));
+      },
+    };
+  }
+
+  it('two entries fired in one tick land in a single flow-trace frame', async () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const flow = fakeTraceFlow();
+    ctx.provide('flow' as never, flow as never);
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    socket.open();
+
+    const e1 = { run: 1, node: 'a', out: null, at: 1 };
+    const e2 = { run: 1, node: 'a', out: 'next', at: 2 };
+    flow.fire(e1);
+    flow.fire(e2);
+
+    expect(traceFrames(socket), 'not flushed yet — batched to the next tick').toEqual([]);
+    await nextTick();
+    expect(traceFrames(socket)).toEqual([{ type: 'flow-trace', entries: [e1, e2] }]);
+  });
+
+  it('drops entries flushed while the socket is closed, and does not resend them later', async () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const flow = fakeTraceFlow();
+    ctx.provide('flow' as never, flow as never);
+    const socket = fakeOpenableSocket(); // never opened
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    flow.fire({ run: 1, node: 'a', out: null, at: 1 });
+    await nextTick();
+
+    expect(traceFrames(socket)).toEqual([]);
+    socket.open();
+    await nextTick();
+    expect(traceFrames(socket), 'the dropped entry is gone, not replayed on open').toEqual([]);
+  });
+
+  it('re-arms the subscription once flow is (re-)provided, even after apply already ran', async () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    socket.open();
+
+    const flow = fakeTraceFlow();
+    ctx.provide('flow' as never, flow as never);
+    // cordis runs a sibling `ctx.inject(['flow'])` asynchronously.
+    await nextTick();
+
+    flow.fire({ run: 1, node: 'a', out: null, at: 1 });
+    await nextTick();
+    expect(traceFrames(socket)).toEqual([
+      { type: 'flow-trace', entries: [{ run: 1, node: 'a', out: null, at: 1 }] },
+    ]);
+  });
+
+  it('sends nothing when there is no flow service, and does not throw', async () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const socket = fakeOpenableSocket();
+
+    expect(() =>
+      ideBridge.apply(ctx!, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never }),
+    ).not.toThrow();
+    expect(() => socket.open()).not.toThrow();
+    await nextTick();
+    expect(traceFrames(socket)).toEqual([]);
+  });
+});

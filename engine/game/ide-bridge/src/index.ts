@@ -66,6 +66,8 @@ import {
   diagnostic,
   type ClientMessage,
   type Diagnostic,
+  type FlowKindInfo,
+  type FlowTraceEntry,
   type ServerMessage,
 } from '@energy8engine/contracts';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
@@ -353,7 +355,6 @@ export function attachDiagnosticsForwarding(
   log: DiagnosticsService,
   identity: DiagnosticsForwardingIdentity = {},
 ): () => void {
-  const WEBSOCKET_OPEN = 1;
   /**
    * Set by the disposer. `WebSocketLike` declares no `removeEventListener`
    * — it is the small slice of a socket this module needs, and widening it
@@ -457,6 +458,75 @@ export function attachDiagnosticsForwarding(
     disposed = true;
     unsubscribe();
   };
+}
+
+const WEBSOCKET_OPEN = 1;
+
+/**
+ * The shape shared by every registry this module states on the socket as
+ * its own report back to the host: `transitions` (`game-transitions`),
+ * `nodeTypes` (`node-types`) and, as of this row, `flowNodes`
+ * (`flow-kinds`). All three used to be their own copy-pasted ~30 lines —
+ * `currentX`/`forwardX`/`subscribeX`, a `ctx.inject(['x'], …)` re-arm, the
+ * same shape three times over with only the service name and the frame it
+ * builds changing. A third copy was the wrong side of the choice
+ * (task-4-brief.md gave both options); this is the one fold.
+ *
+ * States the registry as soon as there is an open socket and something to
+ * read, again on every `svc.subscribe` notification, and again once the
+ * SERVICE is (re-)provided — a hot row re-apply disposes the registry this
+ * was subscribed to and provides a fresh one, and without the re-arm the
+ * subscription would still be live on an object nothing will ever notify
+ * again. See `attachDiagnosticsForwarding`'s own doc for why "state it
+ * now, not only on the next change" matters for a socket that may already
+ * be open, or may not be, by the time this runs.
+ *
+ * Read leniently (`ctx.reflect.get(serviceName, false)`), like every other
+ * lookup in this module: a composition with no row providing `serviceName`
+ * sends nothing here, never throws. Returns the disposer — the caller
+ * wraps it in its own `ctx.effect`, same as this module's other teardowns.
+ */
+function forwardRegistry<T extends { subscribe(listener: () => void): () => void }>(
+  ctx: Context,
+  serviceName: string,
+  socket: Pick<WebSocketLike, 'readyState' | 'send' | 'addEventListener'>,
+  toFrame: (svc: T) => ClientMessage,
+): () => void {
+  const current = () => ctx.reflect.get(serviceName, false) as T | undefined;
+
+  const forward = () => {
+    const svc = current();
+    if (!svc) return;
+    if (socket.readyState !== WEBSOCKET_OPEN) return;
+    try {
+      socket.send(JSON.stringify(toFrame(svc)));
+    } catch {
+      // See `attachDiagnosticsForwarding`'s own doc: nowhere safe to report
+      // a send failure that would not loop straight back through this same
+      // path.
+    }
+  };
+
+  let unsubscribe: (() => void) | undefined;
+  const subscribe = () => {
+    unsubscribe?.();
+    unsubscribe = current()?.subscribe(forward);
+  };
+
+  socket.addEventListener('open', forward);
+  subscribe();
+  forward();
+
+  let readFrom = current();
+  ctx.inject([serviceName], () => {
+    const fresh = current();
+    if (!fresh || fresh === readFrom) return;
+    readFrom = fresh;
+    subscribe();
+    forward();
+  });
+
+  return () => unsubscribe?.();
 }
 
 export function apply(ctx: Context, config: IdeBridgeConfig): void {
@@ -792,13 +862,14 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // diagnostics this socket already forwards. Read leniently, so a game
   // built on a runtime without `gameRows` ignores the frame, not throws.
   //
-  // The IDE's Scenes screen (`scenes`/`scene-select`/`scene-preview`) rides
-  // the same listener rather than three separate ones: every one of these
-  // frames is the host telling this ONE running game to do something right
-  // now, and all are read leniently against a service that may not be on
-  // this `ctx` at all — a game with no `scenes` row (or an older runtime)
-  // simply has nothing to do with them, the same way one with no
-  // `gameRows` has nothing to do with a `game-composition` frame.
+  // The IDE's Scenes screen (`scenes`/`scene-select`/`scene-preview`) and,
+  // as of this row, its Flow screen (`flow`) ride the same listener rather
+  // than separate ones: every one of these frames is the host telling this
+  // ONE running game to do something right now, and all are read leniently
+  // against a service that may not be on this `ctx` at all — a game with no
+  // `scenes`/`flow` row (or an older runtime) simply has nothing to do with
+  // them, the same way one with no `gameRows` has nothing to do with a
+  // `game-composition` frame.
   socket.addEventListener('message', (event) => {
     let message: Extract<
       ServerMessage,
@@ -806,6 +877,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       | { type: 'scene-preview' }
       | { type: 'scenes' }
       | { type: 'scene-select' }
+      | { type: 'flow' }
     >;
     try {
       const parsed: unknown = JSON.parse(event.data);
@@ -815,7 +887,8 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
         type !== 'game-composition' &&
         type !== 'scene-preview' &&
         type !== 'scenes' &&
-        type !== 'scene-select'
+        type !== 'scene-select' &&
+        type !== 'flow'
       )
         return;
       message = parsed as Extract<
@@ -824,6 +897,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
         | { type: 'scene-preview' }
         | { type: 'scenes' }
         | { type: 'scene-select' }
+        | { type: 'flow' }
       >;
     } catch {
       return;
@@ -851,6 +925,14 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
         );
       return;
     }
+    if (message.type === 'flow') {
+      const flow = ctx.reflect.get('flow', false) as
+        | { replace?(doc: unknown): void; stop?(): void }
+        | undefined;
+      if (message.doc === null) flow?.stop?.();
+      else flow?.replace?.(message.doc);
+      return;
+    }
 
     if (message.reload) return;
     const gameRows = ctx.reflect.get('gameRows', false) as GameRowsUpdater | undefined;
@@ -862,37 +944,104 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     }
   });
 
-  /**
-   * The mirror of `attachDiagnosticsForwarding`, inlined rather than
-   * extracted: that function is its own exported unit because it is tested
-   * standalone against a plain fake socket (see its own doc); this one is
-   * a few lines that read `transitions` off this SAME `ctx` the rest of
-   * `apply` already closes over, and has nothing to gain from a second
-   * exported surface.
-   *
-   * States the running game's `transitions` registry, as ids
-   * (`GameTransitionsMessage`), as soon as there is an open socket and a
-   * registry to read, and again on every `transitions.subscribe`
-   * notification — see `attachDiagnosticsForwarding`'s own doc for why
-   * "state it now, not only on the next change" matters for a socket that
-   * may already be open, or may not be, by the time this runs.
-   *
-   * Read leniently (`ctx.reflect.get('transitions', false)`), like
-   * `mechanics`/`diagnostics`/`gameRows` above: a composition with no
-   * `stage` row (and so no `transitions` registry) sends nothing here,
-   * never throws.
-   */
-  const WEBSOCKET_OPEN = 1;
-  const currentTransitions = () =>
-    ctx.reflect.get('transitions', false) as
-      { ids(): string[]; subscribe(listener: () => void): () => void } | undefined;
+  // The running game's `transitions` registry, as ids (`GameTransitionsMessage`)
+  // — read leniently (`ctx.reflect.get('transitions', false)`): a
+  // composition with no `stage` row sends nothing here, never throws. See
+  // `forwardRegistry`'s own doc for the shape shared with `nodeTypes` and
+  // `flowNodes` below.
+  ctx.effect(
+    () =>
+      forwardRegistry<{ ids(): string[]; subscribe(listener: () => void): () => void }>(
+        ctx,
+        'transitions',
+        socket,
+        (transitions) => ({ type: 'game-transitions', ids: transitions.ids() }),
+      ),
+    'ide-bridge-transitions-forwarding',
+  );
 
-  const forwardTransitions = () => {
-    const transitions = currentTransitions();
-    if (!transitions) return;
+  // The running game's node-type registry: its ids and each type's own
+  // props schema, so the IDE's Scenes screen can render a node's fields and
+  // offer its type as a pick (`NodeTypesMessage`). Read leniently
+  // (`ctx.reflect.get('nodeTypes', false)`): a composition with no `scenes`
+  // row sends nothing here, never throws.
+  //
+  // `JSON.parse(JSON.stringify(t.schema))`: a schemastery `Schema` is not
+  // itself JSON — `JSON.stringify` calls its own `toJSON()`, producing the
+  // same deduped `{ uid, refs }` shape `CompositionRow.schema` already
+  // sends. A reader rebuilds it with `new Schema(json)` before reading
+  // `.type`/`.dict`/`.meta`.
+  ctx.effect(
+    () =>
+      forwardRegistry<{
+        list(): { type: string; schema: unknown }[];
+        subscribe(listener: () => void): () => void;
+      }>(ctx, 'nodeTypes', socket, (nodeTypes) => ({
+        type: 'node-types',
+        types: nodeTypes.list().map((t) => ({ type: t.type, schema: JSON.parse(JSON.stringify(t.schema)) })),
+      })),
+    'ide-bridge-node-types-forwarding',
+  );
+
+  // The running game's flow node-kind registry (`ctx.flowNodes` —
+  // `@energy8engine/flow`'s `flow1` row): every kind's id, its output
+  // ports, whether it's a trigger, and its props schema, so the flow
+  // editor can offer a node's kind as a pick and render its fields
+  // (`FlowKindsMessage`). Same shape, same reasons as `nodeTypes` just
+  // above — read leniently (`ctx.reflect.get('flowNodes', false)`): a
+  // composition with no `flow` row sends nothing here, never throws.
+  ctx.effect(
+    () =>
+      forwardRegistry<{
+        list(): { kind: string; outs: readonly string[]; trigger?: boolean; schema: unknown }[];
+        subscribe(listener: () => void): () => void;
+      }>(ctx, 'flowNodes', socket, (flowNodes) => ({
+        type: 'flow-kinds',
+        kinds: flowNodes.list().map(
+          (k): FlowKindInfo => ({
+            kind: k.kind,
+            outs: [...k.outs],
+            trigger: !!k.trigger,
+            schema: JSON.parse(JSON.stringify(k.schema)),
+          }),
+        ),
+      })),
+    'ide-bridge-flow-kinds-forwarding',
+  );
+
+  // The running game's flow TRACE — every node a run entered or left,
+  // batched per animation frame rather than sent one `flow-trace` message
+  // per entry: the interpreter can produce several in the same tick (a
+  // `boot` trigger firing straight into a `merge`, say), and a reader
+  // wants "what happened this frame", not a socket write per node. Not
+  // `forwardRegistry`'s shape — there is no "current list" to read back
+  // and no registry to re-subscribe to on change, only a stream
+  // (`flow.onTrace`) to buffer and flush.
+  //
+  // `requestAnimationFrame` when it exists (a real browser tab); `setTimeout(fn, 0)`
+  // in a test environment or a worker with no `window`. Either way: at most
+  // one flush pending at a time (`scheduled`), so N entries arriving in one
+  // tick become one frame, not N.
+  //
+  // Re-armed on re-provide of `flow`, like every registry above: a hot
+  // `flow1` re-apply disposes the `FlowService` this was subscribed to
+  // (see `flow/src/runtime.ts`'s `ctx.effect(() => () => flow.stop(), …)`)
+  // and provides a fresh one, whose trace this module has not yet heard.
+  const schedule =
+    typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (fn: () => void) => setTimeout(fn, 0);
+
+  let buffer: FlowTraceEntry[] = [];
+  let scheduled = false;
+  const flushTrace = () => {
+    scheduled = false;
+    if (buffer.length === 0) return;
+    const entries = buffer;
+    buffer = [];
     if (socket.readyState !== WEBSOCKET_OPEN) return;
     try {
-      const message: ClientMessage = { type: 'game-transitions', ids: transitions.ids() };
+      const message: ClientMessage = { type: 'flow-trace', entries };
       socket.send(JSON.stringify(message));
     } catch {
       // See `attachDiagnosticsForwarding`'s own doc: nowhere safe to report
@@ -901,97 +1050,32 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     }
   };
 
-  let unsubscribeTransitions: (() => void) | undefined;
-  const subscribeTransitions = () => {
-    unsubscribeTransitions?.();
-    unsubscribeTransitions = currentTransitions()?.subscribe(forwardTransitions);
-  };
-
-  socket.addEventListener('open', forwardTransitions);
-  subscribeTransitions();
-  forwardTransitions();
-
-  // Re-arms the subscription (and re-states the list) whenever `transitions`
-  // is provided again — a hot `scenes1` re-apply disposes the registry this
-  // subscribed to and provides a fresh one, the same story `mechanics`'s own
-  // `ctx.inject` above tells. `fresh === readFromTransitions` skips both the
-  // initial, asynchronous fire (cordis runs this callback on a later tick,
-  // by which point the subscribe above has already run) and any fire that
-  // is not actually a new registry.
-  let readFromTransitions = currentTransitions();
-  ctx.inject(['transitions'], () => {
-    const fresh = currentTransitions();
-    if (!fresh || fresh === readFromTransitions) return;
-    readFromTransitions = fresh;
-    subscribeTransitions();
-    forwardTransitions();
-  });
-  ctx.effect(() => () => unsubscribeTransitions?.(), 'ide-bridge-transitions-forwarding');
-
-  /**
-   * The mirror of the transitions-forwarding block above, for the running
-   * game's node-type registry: its ids and each type's own props schema,
-   * so the IDE's Scenes screen can render a node's fields and offer its
-   * type as a pick (`NodeTypesMessage`). Same shape, same reasons — see
-   * `currentTransitions`/`forwardTransitions`/`subscribeTransitions`'s own
-   * doc just above for "state it now, not only on the next change" and for
-   * why the `ctx.inject(['nodeTypes'])` re-arm is needed at all.
-   *
-   * `JSON.parse(JSON.stringify(t.schema))`: a schemastery `Schema` is not
-   * itself JSON — `JSON.stringify` calls its own `toJSON()`, producing the
-   * same deduped `{ uid, refs }` shape `CompositionRow.schema` already
-   * sends. A reader rebuilds it with `new Schema(json)` before reading
-   * `.type`/`.dict`/`.meta`.
-   *
-   * Read leniently (`ctx.reflect.get('nodeTypes', false)`): a composition
-   * with no `scenes` row sends nothing here, never throws.
-   */
-  const currentNodeTypes = () =>
-    ctx.reflect.get('nodeTypes', false) as
-      | {
-          list(): { type: string; schema: unknown }[];
-          subscribe(listener: () => void): () => void;
-        }
+  const currentFlow = () =>
+    ctx.reflect.get('flow', false) as
+      | { onTrace(fn: (e: FlowTraceEntry) => void): () => void }
       | undefined;
 
-  const forwardNodeTypes = () => {
-    const nodeTypes = currentNodeTypes();
-    if (!nodeTypes) return;
-    if (socket.readyState !== WEBSOCKET_OPEN) return;
-    try {
-      const message: ClientMessage = {
-        type: 'node-types',
-        types: nodeTypes
-          .list()
-          .map((t) => ({ type: t.type, schema: JSON.parse(JSON.stringify(t.schema)) })),
-      };
-      socket.send(JSON.stringify(message));
-    } catch {
-      // See `attachDiagnosticsForwarding`'s own doc: nowhere safe to report
-      // a send failure that would not loop straight back through this same
-      // path.
-    }
+  let unsubscribeTrace: (() => void) | undefined;
+  const subscribeTrace = () => {
+    unsubscribeTrace?.();
+    unsubscribeTrace = currentFlow()?.onTrace((e) => {
+      buffer.push(e);
+      if (scheduled) return;
+      scheduled = true;
+      schedule(flushTrace);
+    });
   };
 
-  let unsubscribeNodeTypes: (() => void) | undefined;
-  const subscribeNodeTypes = () => {
-    unsubscribeNodeTypes?.();
-    unsubscribeNodeTypes = currentNodeTypes()?.subscribe(forwardNodeTypes);
-  };
+  subscribeTrace();
 
-  socket.addEventListener('open', forwardNodeTypes);
-  subscribeNodeTypes();
-  forwardNodeTypes();
-
-  let readFromNodeTypes = currentNodeTypes();
-  ctx.inject(['nodeTypes'], () => {
-    const fresh = currentNodeTypes();
-    if (!fresh || fresh === readFromNodeTypes) return;
-    readFromNodeTypes = fresh;
-    subscribeNodeTypes();
-    forwardNodeTypes();
+  let readFromFlow = currentFlow();
+  ctx.inject(['flow'], () => {
+    const fresh = currentFlow();
+    if (!fresh || fresh === readFromFlow) return;
+    readFromFlow = fresh;
+    subscribeTrace();
   });
-  ctx.effect(() => () => unsubscribeNodeTypes?.(), 'ide-bridge-node-types-forwarding');
+  ctx.effect(() => () => unsubscribeTrace?.(), 'ide-bridge-flow-trace-forwarding');
 
   ctx.effect(() => () => socket.close(), 'ide-bridge-socket');
 }
