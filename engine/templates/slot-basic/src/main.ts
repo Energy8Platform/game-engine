@@ -212,7 +212,7 @@ need({
   service: 'mechanics',
   row: 'mechanics1',
   pkg: '@energy8engine/game-runtime',
-  what: 'a mechanic registry to turn a spin result into a presentation',
+  what: 'a mechanic registry for the mechanic <select> to read and rebind base_game through',
 });
 
 /**
@@ -475,8 +475,9 @@ mechanicSelect.addEventListener('change', () => {
  * first click; and `flow1` is a HOT row, like `mechanics1` and `reels1`
  * above — a re-apply disposes the bus and the interpreter a capture would
  * hold and provides fresh ones. The one thing that cannot be read per use,
- * the `#status` trace listener, is re-armed on re-provide the way
- * `ide-bridge` re-arms its own (`ctx.inject(['flow'], …)`).
+ * the `#status` trace listener, is an effect of a `ctx.inject(['flow'])`
+ * fiber: cordis re-runs it per provide and disposes the old listener with
+ * the old fiber.
  *
  * **The `<select>` no longer follows the presentation.** It used to be
  * re-synced from `mechanics.forStage(stage)` inside `presentStage`, so a
@@ -515,21 +516,20 @@ spinBtn.addEventListener('click', () => {
 // this page no longer has: `done`/`presentation failed — see log` are the
 // two `present` ports, and a `spin` that left by `failed` is the host's
 // non-2xx, which `dev-game`'s route has already broadcast to the IDE.
-const watchStatus = (flow: FlowService) =>
-  flow.onTrace((entry) => {
-    const kind = kindOf(entry.node);
-    if (kind === 'present' && entry.out === 'next') statusEl.textContent = 'done';
-    else if (kind === 'present' && entry.out === 'failed')
-      statusEl.textContent = 'presentation failed — see log';
-    else if (kind === 'spin' && entry.out === 'failed')
-      statusEl.textContent = 'spin failed — the host reported it to the IDE';
-  });
-let watched = currentFlow();
-if (watched) watchStatus(watched);
-ctx.inject(['flow'], () => {
-  const fresh = currentFlow();
-  if (fresh && fresh !== watched) watchStatus((watched = fresh));
-});
+ctx.inject(['flow'], (c) =>
+  c.effect(
+    () =>
+      currentFlow()!.onTrace((entry) => {
+        const kind = kindOf(entry.node);
+        if (kind === 'present' && entry.out === 'next') statusEl.textContent = 'done';
+        else if (kind === 'present' && entry.out === 'failed')
+          statusEl.textContent = 'presentation failed — see log';
+        else if (kind === 'spin' && entry.out === 'failed')
+          statusEl.textContent = 'spin failed — the host reported it to the IDE';
+      }),
+    'first-slot:status',
+  ),
+);
 
 /**
  * Test-only instrumentation for the SDD plan's Task 12, step 5. Playwright
@@ -552,20 +552,34 @@ ctx.inject(['flow'], () => {
   /**
    * Exactly what the button does — `events.emit('ui.spin')` — and then the
    * port the flow's `present` node left by (`next` or `failed`), or
-   * `failed` from its `spin` node when the host refused. Rejects after 20 s
-   * with nothing having left: no `on ui.spin` in the document, no
-   * `present` after `spin`, or the fire dropped because a run was still
-   * live (`on`'s `busy: ignore`).
+   * `failed` from its `spin` node when the host refused. One 20 s budget
+   * for the whole thing; a rejection names which half ran out.
+   *
+   * Unlike the button, it first waits for the flow to be able to hear it:
+   * `flow.ready` (the document is armed — `#status` reads `ready` before
+   * the boot GET has answered) and then `!flow.busy()`, because `on` drops
+   * a fire while a run is live (`busy: ignore`) — the boot run still on
+   * its way to `on`, or the previous spin's last branches unwinding, which
+   * they still are on the microtask a resolve of this promise lands on. A
+   * button pressed then is simply swallowed; a test awaiting a spin that
+   * never started would sit out the full 20 s instead.
    */
-  spin(): Promise<{ out: string }> {
+  async spin(): Promise<{ out: string }> {
     const events = currentEvents();
     const flow = currentFlow();
-    if (!events || !flow) return Promise.reject(new Error('no flow row in this composition'));
+    if (!events || !flow) throw new Error('no flow row in this composition');
+    const deadline = Date.now() + 20_000;
+    await flow.ready;
+    while (flow.busy()) {
+      if (Date.now() >= deadline)
+        throw new Error('the flow stayed busy for 20 s — ui.spin was not emitted');
+      await new Promise((tick) => setTimeout(tick, 10));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         off();
         reject(new Error('no present node left the flow within 20 s of ui.spin — see the trace'));
-      }, 20_000);
+      }, deadline - Date.now());
       const off = flow.onTrace((entry) => {
         const kind = kindOf(entry.node);
         const left =
