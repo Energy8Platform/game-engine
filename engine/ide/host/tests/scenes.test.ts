@@ -17,9 +17,23 @@ import { checkScenes } from '../src/plugins/scenes';
 const json = (s: Schema): unknown => JSON.parse(JSON.stringify(s));
 const types: NodeTypeInfo[] = [
   { type: 'container', schema: json(Schema.object({})) },
-  { type: 'image', schema: json(Schema.object({ src: Schema.string().required() })) },
+  {
+    type: 'image',
+    schema: json(Schema.object({ src: Schema.string().required() })),
+    assetProps: ['src'],
+  },
   { type: 'scene', schema: json(Schema.object({ scene: Schema.string().required() })) },
   { type: 'reels', schema: json(Schema.object({ row: Schema.string().default('reels1') })) },
+  {
+    type: 'spritesheet',
+    schema: json(Schema.object({ sheet: Schema.string().required() })),
+    assetProps: ['sheet'],
+  },
+  {
+    type: 'spine',
+    schema: json(Schema.object({ skeleton: Schema.string().required(), atlas: Schema.string() })),
+    assetProps: ['skeleton', 'atlas'],
+  },
 ];
 const doc = (id: string, nodes: SceneNode[], file = `scenes/${id}.scene.yml`) => ({
   file,
@@ -51,7 +65,7 @@ describe('checkScenes', () => {
           'other',
           [
             { id: 'a', type: 'container', props: {} },
-            { id: 'a', type: 'spine', props: {} },
+            { id: 'a', type: 'bogus', props: {} },
             { id: 'b', type: 'scene', props: { scene: 'nowhere' } },
             { id: 'c', type: 'image', props: { src: 'missing.png' } },
             { id: 'd', type: 'image', props: {} },
@@ -89,7 +103,11 @@ describe('checkScenes', () => {
       false,
     );
     expect(out).toEqual([
-      expect.objectContaining({ severity: 'error', where: 'a/n', message: expect.stringContaining('x') }),
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/n',
+        message: expect.stringContaining('x'),
+      }),
     ]);
   });
   it('an empty image src (a fresh image) is one error, worded for it', () => {
@@ -102,6 +120,74 @@ describe('checkScenes', () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ severity: 'error', where: 'a/i' });
     expect(out[0].message).toContain('src');
+  });
+  it('a spritesheet with no sheet prop at all is `<type> has no <prop>`, naming spritesheet.sheet', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 's', type: 'spritesheet', props: {} }])],
+      types,
+      () => false,
+      false,
+    );
+    // The schema also refuses the missing `sheet` (a `props:` error, same as
+    // any other required field); the asset check names it besides.
+    expect(out).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/s',
+        message: 'spritesheet has no sheet',
+      }),
+    );
+  });
+  it("an empty spritesheet sheet is the same `<type> has no <prop>` message, with no schema error (required() lets '' through)", () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 's', type: 'spritesheet', props: { sheet: '' } }])],
+      types,
+      () => false,
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/s',
+        message: 'spritesheet has no sheet',
+      }),
+    ]);
+  });
+  it('spine with an empty atlas checks the skeleton stem + .atlas', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'p', type: 'spine', props: { skeleton: 'assets/hero.skel', atlas: '' } }])],
+      types,
+      (p) => p === 'assets/hero.skel',
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/p',
+        message: 'spine.atlas "assets/hero.atlas" is not in the project',
+      }),
+    ]);
+  });
+  it('a type with no assetProps checks nothing, even with a path-shaped prop', () => {
+    const local: NodeTypeInfo[] = [
+      { type: 'thing', schema: json(Schema.object({ src: Schema.string() })) },
+    ];
+    const out = checkScenes(
+      [doc('a', [{ id: 't', type: 'thing', props: { src: 'not-a-real-file.png' } }])],
+      local,
+      () => false,
+      false,
+    );
+    expect(out).toEqual([]);
+  });
+  it('an asset that resolves against the project is not an error', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 's', type: 'spritesheet', props: { sheet: 'assets/coin.json' } }])],
+      types,
+      (p) => p === 'assets/coin.json',
+      false,
+    );
+    expect(out).toEqual([]);
   });
   it('more than one reels node across the documents is a warning: the board can be on screen once', () => {
     const out = checkScenes(
@@ -202,8 +288,11 @@ describe('/api/scenes', () => {
     );
     expect(body.diagnostics).toContainEqual(expect.objectContaining({ where: 'bad/a' }));
     expect(body.diagnostics).toContainEqual(expect.objectContaining({ where: 'bad/b' }));
-    expect(body.diagnostics).toContainEqual(expect.objectContaining({ where: 'bad/c' }));
-    // No game has spoken: `spine` is not yet unknown, and no `reels1` warning (base_game has a reels node).
+    // No game has spoken: `spine` is not yet unknown, `image`'s missing
+    // `src` (bad/c) is not yet checked either — `assetProps` travels on
+    // the reported `NodeTypeInfo`, same gate as the props schema — and no
+    // `reels1` warning (base_game has a reels node).
+    expect(body.diagnostics).not.toContainEqual(expect.objectContaining({ where: 'bad/c' }));
     expect(body.diagnostics).not.toContainEqual(expect.objectContaining({ where: 'reels1' }));
     expect(body.nodeTypes).toEqual([]);
     // A project without a scenes/ dir has an empty set — and, with a reels
@@ -363,6 +452,11 @@ describe('/api/scenes', () => {
     expect(body.diagnostics).toContainEqual(
       expect.objectContaining({ severity: 'error', where: 'bad/a' }),
     );
+    // `image`'s missing `src` (bad/c) is checked too, now that `image`'s
+    // `assetProps` is known.
+    expect(body.diagnostics).toContainEqual(
+      expect.objectContaining({ severity: 'error', where: 'bad/c' }),
+    );
     close();
   });
 });
@@ -386,7 +480,8 @@ describe('scenes across a project switch', () => {
     }
     host = await createIdeHost({ root, port: 0 });
     const { frames, close } = await listen(host);
-    const ids = (f: ServerMessage) => (f.type === 'scenes' ? f.scenes.map((s) => s.id).sort() : null);
+    const ids = (f: ServerMessage) =>
+      f.type === 'scenes' ? f.scenes.map((s) => s.id).sort() : null;
     expect(await host.ctx.workspace.open('one')).toEqual([]);
     await expect
       .poll(() => frames.some((f) => JSON.stringify(ids(f)) === '["bad","base_game","big_win"]'))

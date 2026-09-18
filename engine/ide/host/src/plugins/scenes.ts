@@ -92,7 +92,7 @@ export function checkScenes(
   const err = (where: string, message: string, fix?: string) =>
     out.push(diagnostic('error', 'scenes', where, message, fix));
   const ids = new Set(docs.map((d) => sceneId(d.file)));
-  const schemas = new Map(nodeTypes.map((t) => [t.type, t.schema]));
+  const infos = new Map(nodeTypes.map((t) => [t.type, t]));
   // scene → the scenes its `scene` nodes name (known ones only).
   const refs = new Map<string, Set<string>>();
   const reelsNodes: string[] = [];
@@ -119,7 +119,7 @@ export function checkScenes(
         err(where, `node "${node.id}" is declared twice`, 'give each node one id');
       seen.add(node.id);
       if (node.type === 'reels') reelsNodes.push(where);
-      const schema = schemas.get(node.type);
+      const schema = infos.get(node.type)?.schema;
       if (nodeTypes.length && schema === undefined) {
         err(
           where,
@@ -142,15 +142,34 @@ export function checkScenes(
           );
         }
       }
-      // `required()` lets `''` through (a fresh image): one message, worded for it.
-      if (node.type === 'image' && typeof node.props.src === 'string' && !hasFile(node.props.src)) {
-        err(
-          where,
-          node.props.src === ''
-            ? 'image has no src'
-            : `image "${node.props.src}" is not in the project`,
-          'pick a file under the project',
-        );
+      // Every prop the type's `assetProps` names holds a project-relative
+      // path (the `image.src` special case, generalised): `required()`
+      // lets `''` through the schema check above (a fresh node), so an
+      // empty or missing value is its own message. A type the host does
+      // not know yet (no `NodeTypeInfo` — the game hasn't reported, or the
+      // type is unregistered) checks nothing; the unknown-type error above
+      // already covers a registered set missing it.
+      for (const prop of infos.get(node.type)?.assetProps ?? []) {
+        let v = node.props?.[prop];
+        // `spine`'s atlas defaults to its skeleton's path with `.atlas`
+        // when left empty — same rule as `spine.ts`'s `atlasOf`.
+        if (
+          node.type === 'spine' &&
+          prop === 'atlas' &&
+          !v &&
+          typeof node.props.skeleton === 'string'
+        ) {
+          v = node.props.skeleton.replace(/\.(skel|json)$/, '.atlas');
+        }
+        if (typeof v !== 'string' || v === '') {
+          err(where, `${node.type} has no ${prop}`, 'pick a file under the project');
+        } else if (!hasFile(v)) {
+          err(
+            where,
+            `${node.type}.${prop} "${v}" is not in the project`,
+            'pick a file under the project',
+          );
+        }
       }
       if (node.type === 'scene' && typeof node.props.scene === 'string') {
         if (ids.has(node.props.scene)) targets.add(node.props.scene);
