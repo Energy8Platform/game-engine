@@ -3,7 +3,7 @@ globalThis.requestAnimationFrame = ((fn: (t: number) => void) =>
 globalThis.cancelAnimationFrame = clearTimeout as unknown as typeof cancelAnimationFrame;
 
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Container, Texture } from 'pixi.js';
 import { Spine, SpineTexture, TextureAtlas } from '@esotericsoftware/spine-pixi-v8';
 import type { Context } from 'cordis';
@@ -19,8 +19,17 @@ const loaded = () => {
   return (path: string) => (path.endsWith('.atlas') ? atlas : json);
 };
 
-const ctxWith = (get: (path: string) => unknown) =>
-  ({ reflect: { get: () => ({ get }) } }) as unknown as Context;
+const ctxWith = (get: (path: string) => unknown, report?: (d: unknown) => void) =>
+  ({
+    reflect: {
+      get: (name: string) =>
+        name === 'assetLoader'
+          ? { get }
+          : name === 'diagnostics' && report
+            ? { report }
+            : undefined,
+    },
+  }) as unknown as Context;
 const none = { reflect: { get: () => undefined } } as unknown as Context;
 const props = (over: Record<string, unknown> = {}) =>
   spine.schema({ skeleton: 'assets/hero.json', ...over } as never);
@@ -56,7 +65,7 @@ describe('spine', () => {
     expect(s.state.tracks[0]!.animation!.name).toBe('idle');
     expect(s.state.tracks[0]!.loop).toBe(true);
     expect(s.state.timeScale).toBe(1);
-    expect(s.skeleton.skin).toBeNull();
+    expect(s.skeleton.skin!.name).toBe('default');
     spine.unmount!(view);
     expect(s.destroyed).toBe(true);
     expect(view.destroyed).toBe(true);
@@ -79,7 +88,17 @@ describe('spine', () => {
     const view = spine.mount(props({ animation: 'nope', skin: 'nope' }), ctxWith(loaded()));
     const s = child(view);
     expect(s.state.tracks[0]!.animation!.name).toBe('idle');
-    expect(s.skeleton.skin).toBeNull();
+    expect(s.skeleton.skin!.name).toBe('default');
+    spine.unmount!(view);
+  });
+
+  it('a skin that turns unknown reverts to the default, not the previous one', () => {
+    const ctx = ctxWith(loaded());
+    const view = spine.mount(props({ skin: 'alt' }), ctx);
+    const s = child(view);
+    expect(s.skeleton.skin!.name).toBe('alt');
+    spine.update!(view, props({ skin: 'nope' }), ctx);
+    expect(s.skeleton.skin!.name).toBe('default');
     spine.unmount!(view);
   });
 
@@ -100,18 +119,33 @@ describe('spine', () => {
     spine.unmount!(view);
   });
 
-  it('a JSON that is no skeleton, or a skeleton that does not parse, keeps the placeholder', () => {
+  it('a JSON that is no skeleton, or one that does not parse, keeps the placeholder and reports once', () => {
     const get = loaded();
-    for (const bad of [
-      { frames: {} },
-      { bones: [{ name: 'root' }], slots: [{ name: 's', bone: 'nope' }] },
-    ]) {
-      const ctx = ctxWith((p) => (p.endsWith('.json') ? bad : get(p)));
+    for (const [bad, why] of [
+      [{ not: 'a skeleton' }, 'no "bones"'],
+      [
+        { bones: [{ name: 'root' }], slots: [{ name: 's', bone: 'nope' }] },
+        "Couldn't find bone nope",
+      ],
+    ] as const) {
+      const report = vi.fn();
+      const ctx = ctxWith((p) => (p.endsWith('.json') ? bad : get(p)), report);
       const view = spine.mount(props(), ctx);
       expect(view.children).toHaveLength(0);
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(report.mock.calls[0]![0]).toMatchObject({
+        severity: 'error',
+        plugin: 'spine',
+        where: 'assets/hero.json',
+        message: expect.stringContaining(`spine skeleton "assets/hero.json" did not parse: ${why}`),
+      });
       expect(() => spine.update!(view, props(), ctx)).not.toThrow();
       expect(view.children).toHaveLength(0);
+      expect(report).toHaveBeenCalledTimes(1);
       view.destroy();
+      // Without a diagnostics service it still just keeps the placeholder.
+      const mute = ctxWith((p) => (p.endsWith('.json') ? bad : get(p)));
+      expect(() => spine.update!(spine.mount(props(), mute), props(), mute)).not.toThrow();
     }
   });
 
@@ -134,14 +168,24 @@ describe('spine', () => {
     spine.unmount!(view);
   });
 
-  it('after an unload the Spine goes; the next load builds it again', () => {
+  it('after an unload of either half the Spine goes; the next load builds it again', () => {
     const view = spine.mount(props(), ctxWith(loaded()));
     const s = child(view);
     spine.update!(view, props(), none);
     expect(view.children).toHaveLength(0);
     expect(s.destroyed).toBe(true);
-    spine.update!(view, props(), ctxWith(loaded()));
-    expect(child(view)).toBeInstanceOf(Spine);
+    const get = loaded();
+    spine.update!(view, props(), ctxWith(get));
+    const again = child(view);
+    expect(again).toBeInstanceOf(Spine);
+    // The atlas alone gone: its textures went with it.
+    spine.update!(
+      view,
+      props(),
+      ctxWith((p) => (p.endsWith('.atlas') ? undefined : get(p))),
+    );
+    expect(view.children).toHaveLength(0);
+    expect(again.destroyed).toBe(true);
     spine.unmount!(view);
   });
 });
