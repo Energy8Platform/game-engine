@@ -1,46 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Context } from 'cordis';
-import type {
-  Diagnostic,
-  FlowDoc,
-  FlowKindInfo,
-  FlowTraceEntry,
-  ServerMessage,
-} from '@energy8engine/contracts';
-import type { WebSocketLike } from '../src/plugins/connection';
-import * as connection from '../src/plugins/connection';
-import * as slots from '../src/plugins/slots';
-import * as shell from '../src/plugins/shell';
-import * as flow from '../src/plugins/flow';
-import type { ScenesService } from '../src/plugins/scenes';
+import { describe, expect, it, vi } from 'vitest';
+import type { Diagnostic, FlowDoc, FlowKindInfo, FlowTraceEntry } from '@energy8engine/contracts';
+import { harness, renderDocument, type Answer } from './flow-harness';
 
-/**
- * The `flow` service booted on a real `Context` with the real
- * `connection` (fake socket), `slots` and `shell` — the plugins it
- * injects — plus a stub `scenes` (unused today, injected for Task 9's
- * mutual deselect: composing the real plugin here would drag in its own
- * `workspace`/`gameComposition`/`assetNodeTypes`/`files` chain for
- * nothing this plugin reads).
- */
-class FakeSocket implements WebSocketLike {
-  listeners: Record<string, ((event: any) => void)[]> = {};
-  readyState = 1;
-  addEventListener(type: string, listener: (event: any) => void) {
-    (this.listeners[type] ??= []).push(listener);
-  }
-  send() {}
-  close() {}
-  receive(message: ServerMessage) {
-    for (const listener of this.listeners.message ?? [])
-      listener({ data: JSON.stringify(message) });
-  }
-}
-
-type Answer = { status?: number; body: unknown };
-type Route = (body: unknown) => Answer | Promise<Answer>;
-
+/** The service's own tests; the harness is shared with `flow-document.test.tsx`. */
 const DOC: FlowDoc = {
   version: 1,
   nodes: [{ id: 'start', kind: 'boot', ui: { x: 40, y: 80 } }],
@@ -54,59 +18,9 @@ const refusal: Diagnostic = {
   message: 'bad node',
 };
 
-const scenesStub: ScenesService = {
-  docs: () => [],
-  diagnostics: () => [],
-  nodeTypes: () => [],
-  selected: () => null,
-  select: () => {},
-  create: async () => [],
-  remove: async () => [],
-  update: async () => [],
-  preview: async () => [],
-  open: () => {},
-  subscribe: () => () => {},
-};
-
-const built: Context[] = [];
-afterEach(async () => {
-  for (const ctx of built.splice(0)) await ctx.fiber.dispose();
-});
-
-async function harness(routes: Record<string, Route>) {
-  const socket = new FakeSocket();
-  const calls: { method: string; url: string; body: unknown }[] = [];
-  const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
-    const method = init?.method ?? 'GET';
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, url, body });
-    const route = routes[`${method} ${url}`];
-    if (!route) throw new Error(`unexpected fetch: ${method} ${url}`);
-    const answer = await route(body);
-    return new Response(JSON.stringify(answer.body), {
-      status: answer.status ?? 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  }) as unknown as typeof fetch;
-  const ctx = new Context();
-  built.push(ctx);
-  await ctx.plugin(connection, { url: 'ws://x/ide', socketFactory: () => socket });
-  await ctx.plugin(slots);
-  await ctx.plugin(shell);
-  ctx.provide('scenes', scenesStub);
-  await ctx.plugin(flow, { url: 'ws://x/ide', fetchFn });
-  return { ctx, socket, calls, fetchFn };
-}
-
 const boot =
-  (body: unknown = { doc: DOC, diagnostics: [], kinds: [] }): Route =>
+  (body: unknown = { doc: DOC, diagnostics: [], kinds: [] }) =>
   () => ({ body });
-
-function renderDocument(ctx: Context) {
-  const entry = ctx.slots.list('shell.document').find((e) => e.key === 'flow');
-  if (!entry) throw new Error('flow did not register a shell.document entry');
-  render(<entry.component ctx={ctx} />);
-}
 
 describe('flow service', () => {
   it('boots from GET /api/flow, updates on `flow` and `flow-kinds` frames', async () => {

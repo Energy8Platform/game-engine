@@ -694,7 +694,8 @@ label {
   padding: 16px;
 }
 .e8-doc-pane:has(> .e8-code-editor),
-.e8-doc-pane:has(> .e8-canvas) {
+.e8-doc-pane:has(> .e8-canvas),
+.e8-doc-pane:has(> .e8-flow-doc) {
   padding: 0;
   overflow: hidden;
 }
@@ -1312,4 +1313,100 @@ label {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Flow canvas: the palette (one `.e8-explorer-entry` button per kind) down
+   the left, React Flow filling the rest, the doc's diagnostics under it.
+   A node is a small card; the last run paints it — an accent border for
+   every node the run entered, an accent outline (shadows are `none`
+   throughout, see styles.test.ts) on the node the run is at. React Flow's
+   own surfaces read our tokens through its `--xy-*` hooks. */
+.e8-flow-doc {
+  height: 100%;
+}
+.e8-flow {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  height: 100%;
+}
+.e8-flow-palette {
+  border-right: 1px solid var(--e8-border);
+  overflow: auto;
+}
+.e8-flow-add {
+  width: calc(100% - 2 * var(--e8-gap));
+  border: 0;
+  background: transparent;
+  color: var(--e8-fg);
+  font: inherit;
+  text-align: left;
+  padding-left: 8px;
+  cursor: grab;
+}
+.e8-flow-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.e8-flow-main .e8-canvas-error {
+  flex: 0 0 auto;
+}
+.e8-flow-canvas {
+  flex: 1 1 auto;
+  min-height: 400px;
+  --xy-background-color: var(--e8-surface);
+  --xy-edge-stroke: var(--e8-fg-muted);
+  --xy-edge-stroke-selected: var(--e8-accent);
+  --xy-connectionline-stroke: var(--e8-accent);
+  --xy-handle-background-color: var(--e8-fg-muted);
+  --xy-handle-border-color: var(--e8-surface);
+  --xy-node-boxshadow-selected: none;
+  --xy-node-boxshadow-hover: none;
+}
+.e8-flow-main .e8-explorer-tree {
+  flex: 0 0 auto;
+  max-height: 120px;
+  overflow: auto;
+  border-top: 1px solid var(--e8-border);
+}
+.e8-flow-node {
+  position: relative;
+  min-width: 96px;
+  padding: 6px 10px;
+  background: var(--e8-surface);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  color: var(--e8-fg);
+  font-size: var(--e8-size-small);
+}
+.react-flow__node.selected .e8-flow-node {
+  border-color: var(--e8-accent);
+  background: var(--e8-hover);
+}
+.e8-flow-ran {
+  border-color: var(--e8-accent);
+}
+.e8-flow-active {
+  outline: 2px solid var(--e8-accent);
+  outline-offset: 1px;
+}
+.e8-flow-node-kind {
+  font-weight: 600;
+}
+.e8-flow-node-id {
+  color: var(--e8-fg-muted);
+}
+.e8-flow-node-outs {
+  margin-top: 4px;
+  text-align: right;
+  color: var(--e8-fg-muted);
+  font-size: 9px;
+  line-height: 14px;
+}
+/* Each port row reaches the card's edge so its handle (absolute, at the
+   row's right middle) sits on the border next to its label. */
+.e8-flow-node-out {
+  position: relative;
+  margin-right: -10px;
+  padding-right: 10px;
 }
