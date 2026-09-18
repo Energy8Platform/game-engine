@@ -127,8 +127,13 @@ describe('flow service', () => {
       out: null,
       at,
     });
-    socket.receive({ type: 'flow-trace', entries: [entry(1, 'start', 0), entry(1, 'a', 1)] });
+    socket.receive({ type: 'flow-trace', entries: [entry(1, 'start', 0)] });
+    const first = ctx.flow.trace();
+    socket.receive({ type: 'flow-trace', entries: [entry(1, 'a', 1)] });
     expect(ctx.flow.trace()).toEqual([entry(1, 'start', 0), entry(1, 'a', 1)]);
+    // A later frame of the same run is a new array — what a React effect keyed on it sees.
+    expect(ctx.flow.trace()).not.toBe(first);
+    expect(first).toEqual([entry(1, 'start', 0)]);
 
     // A higher run number drops the older run's entries first.
     socket.receive({ type: 'flow-trace', entries: [entry(2, 'start', 2)] });

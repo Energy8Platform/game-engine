@@ -110,17 +110,20 @@ export function apply(ctx: Context, config: FlowConfig) {
     kinds = next;
     kindsLive = true;
   }
+  // A fresh array per frame: subscribers key their work on `trace()`'s
+  // identity, and an in-place push would look like nothing changed.
   function appendTrace(entries: readonly FlowTraceEntry[]) {
+    let next = trace.slice();
     for (const entry of entries) {
       if (traceRun === null || entry.run > traceRun) {
-        trace = [];
+        next = [];
         traceRun = entry.run;
       } else if (entry.run < traceRun) {
         continue;
       }
-      trace.push(entry);
+      next.push(entry);
     }
-    if (trace.length > TRACE_CAP) trace = trace.slice(trace.length - TRACE_CAP);
+    trace = next.length > TRACE_CAP ? next.slice(next.length - TRACE_CAP) : next;
   }
 
   const service: FlowClientService = {

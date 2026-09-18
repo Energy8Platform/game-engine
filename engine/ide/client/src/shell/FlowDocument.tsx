@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type DragEvent } from 'react';
 import type { Context } from 'cordis';
 import {
   applyEdgeChanges,
@@ -50,7 +50,17 @@ import {
  * change — keeping a node's measurement, and its dragged position while
  * that move is still waiting for its debounced PUT. Structure (connect,
  * delete, add) writes at once; positions coalesce for 250 ms into one
- * `moveNode` per moved node. A refusal shows inline as `flow-error`.
+ * `moveNode` per moved node.
+ *
+ * Every write is a REDUCER over the doc, not a doc: `commit` runs them one
+ * after another through a single promise chain, each over `ctx.flow.doc()`
+ * as it is when its turn comes — so a node added while a move's PUT is
+ * still in flight reduces the MOVED doc, not the one the handler was
+ * rendered with, and neither write overwrites the other. A refusal shows
+ * inline as `flow-error` and makes the canvas re-project from the doc:
+ * React Flow has already applied a delete (or a drag) locally by the time
+ * the host says no, and the doc, unchanged, would not have re-run the
+ * projection by itself.
  */
 const NEW_FLOW: FlowDoc = {
   version: 1,
@@ -93,9 +103,10 @@ interface CanvasProps {
   kinds: readonly FlowKindInfo[];
   trace: readonly FlowTraceEntry[];
   selected: string | null;
-  /** `ctx.flow.update`, with the refusal (if any) shown by the document. */
-  commit: (next: FlowDoc) => Promise<unknown>;
+  /** Queues one write; resolves `true` once the host took it. The document shows a refusal. */
+  commit: (reduce: Reduce) => Promise<boolean>;
 }
+type Reduce = (doc: FlowDoc) => FlowDoc;
 
 /** Inside `ReactFlowProvider` so `useReactFlow` (the drop's coordinates) is in reach. */
 function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
@@ -107,6 +118,16 @@ function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
   // round-trip does not snap the node back to where the doc still has it.
   const pending = useRef(new Map<string, { x: number; y: number }>());
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  // Bumped on a refusal: the projection below re-runs and the local
+  // nodes/edges are rebuilt from the doc the host still has.
+  const [refusals, refused] = useReducer((n: number) => n + 1, 0);
+  const write = useCallback(
+    (reduce: Reduce) =>
+      commit(reduce).then((ok) => {
+        if (!ok) refused();
+      }),
+    [commit],
+  );
 
   useEffect(() => {
     const projected = toReactFlow(doc, kinds, trace, selected);
@@ -126,7 +147,7 @@ function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
       const picked = new Set(prev.filter((e) => e.selected).map((e) => e.id));
       return projected.edges.map((e) => (picked.has(e.id) ? { ...e, selected: true } : e));
     });
-  }, [doc, kinds, trace, selected]);
+  }, [doc, kinds, trace, selected, refusals]);
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -142,17 +163,16 @@ function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
       if (!moved) return;
       clearTimeout(timer.current);
       timer.current = setTimeout(() => {
-        const current = ctx.flow.doc();
         const moves = [...pending.current];
-        if (!current) return;
-        void commit(moves.reduce((d, [id, at]) => moveNode(d, id, at), current)).then(() => {
+        void commit((d) => moves.reduce((acc, [id, at]) => moveNode(acc, id, at), d)).then((ok) => {
           // A drag that started meanwhile has a newer entry; that one stays.
           for (const [id, at] of moves)
             if (pending.current.get(id) === at) pending.current.delete(id);
+          if (!ok) refused();
         });
       }, MOVE_DEBOUNCE_MS);
     },
-    [ctx, commit],
+    [commit],
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange<E8Edge>[]) => setEdges((prev) => applyEdgeChanges(changes, prev)),
@@ -164,22 +184,18 @@ function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
       if (!out) return;
       if (edges.some((e) => e.source === source && e.sourceHandle === out && e.target === target))
         return;
-      void commit(connect(doc, source, out, target));
+      void write((d) => connect(d, source, out, target));
     },
-    [doc, nodes, edges, commit],
+    [nodes, edges, write],
   );
   const onDelete = useCallback(
     ({ nodes: gone, edges: cut }: { nodes: E8Node[]; edges: E8Edge[] }) => {
       const ids = gone.map((n) => n.id);
+      const edges = cut.flatMap((e) => (e.data ? [e.data.edge] : []));
       if (selected !== null && ids.includes(selected)) ctx.flow.select(null);
-      void commit(
-        removeEdges(
-          removeNodes(doc, ids),
-          cut.flatMap((e) => (e.data ? [e.data.edge] : [])),
-        ),
-      );
+      void write((d) => removeEdges(removeNodes(d, ids), edges));
     },
-    [ctx, doc, selected, commit],
+    [ctx, selected, write],
   );
   const onDrop = useCallback(
     (event: DragEvent) => {
@@ -187,11 +203,10 @@ function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
       const info = kinds.find((k) => k.kind === kind);
       if (!info) return;
       event.preventDefault();
-      void commit(
-        addNode(doc, kind, info, screenToFlowPosition({ x: event.clientX, y: event.clientY })),
-      );
+      const at = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      void write((d) => addNode(d, kind, info, at));
     },
-    [doc, kinds, commit, screenToFlowPosition],
+    [kinds, write, screenToFlowPosition],
   );
 
   return (
@@ -225,8 +240,23 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
   const { doc, diagnostics, kinds, trace, selected } = useFlow(ctx);
   const [error, setError] = useState<Diagnostic | null>(null);
   const broken = doc === null ? diagnostics.find((d) => d.where === 'flow.yml') : undefined;
+  // The write queue: one PUT at a time, each reducing the doc as it stands then.
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
   const commit = useCallback(
-    async (next: FlowDoc) => setError((await ctx.flow.update(next))[0] ?? null),
+    (reduce: Reduce) => {
+      const run = chain.current.then(async () => {
+        const current = ctx.flow.doc();
+        if (!current) return false;
+        const next = reduce(current);
+        if (next === current) return true;
+        const answer = await ctx.flow.update(next);
+        setError(answer[0] ?? null);
+        return answer.length === 0;
+      });
+      // A reducer that throws must not jam the queue for every write after it.
+      chain.current = run.catch(() => {});
+      return run;
+    },
     [ctx],
   );
 
@@ -267,10 +297,12 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
                   e.dataTransfer.setData(KIND_MIME, info.kind);
                   e.dataTransfer.effectAllowed = 'move';
                 }}
-                onClick={() => {
-                  const n = doc.nodes.length;
-                  void commit(addNode(doc, info.kind, info, { x: 80 + 40 * n, y: 80 + 40 * n }));
-                }}
+                onClick={() =>
+                  void commit((d) => {
+                    const n = d.nodes.length;
+                    return addNode(d, info.kind, info, { x: 80 + 40 * n, y: 80 + 40 * n });
+                  })
+                }
               >
                 {info.kind}
               </button>

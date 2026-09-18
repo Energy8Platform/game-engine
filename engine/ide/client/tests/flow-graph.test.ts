@@ -112,6 +112,7 @@ describe('toReactFlow', () => {
     const doc: FlowDoc = {
       ...FIVE,
       nodes: [...FIVE.nodes, { id: 'wait-1', kind: 'wait' }, { id: 'x', kind: 'mystery' }],
+      edges: [...FIVE.edges, { from: 'x', to: 'spin' }, { from: 'draw', out: 'failed', to: 'x' }],
     };
     const { nodes, edges } = toReactFlow(doc, FIVE_KINDS, [], 'spin');
     expect(nodes[3]).toEqual({
@@ -131,8 +132,11 @@ describe('toReactFlow', () => {
     expect(nodes[0].data).toMatchObject({ trigger: true, outs: ['next'] });
     expect(nodes[0].selected).toBe(false);
     expect(nodes[5].position).toEqual({ x: 80 + 40 * 5, y: 80 + 40 * 5 });
-    // An unregistered kind has no ports yet.
+    // An unregistered kind has no ports yet — and so no outgoing edge to draw; incoming ones stay.
     expect(nodes[6].data).toMatchObject({ outs: [], trigger: false });
+    expect(edges.map((e) => e.id)).not.toContain('x:undefined:spin');
+    expect(edges.at(-1)).toMatchObject({ id: 'draw:failed:x', source: 'draw', target: 'x' });
+    expect(edges).toHaveLength(6);
     expect(edges[3]).toEqual({
       id: 'spin:result:draw',
       source: 'spin',
@@ -160,17 +164,5 @@ describe('toReactFlow', () => {
       [false, false],
     ]);
     expect(edges.map((e) => e.animated)).toEqual([true, true, false, false, false]);
-  });
-
-  it('a stale older run in the trace is ignored', () => {
-    const trace = [
-      entry('spin', null, 0, 1),
-      entry('spin', 'result', 1, 1),
-      entry('draw', null, 2, 1),
-      entry('start', null, 3, 2),
-    ];
-    const { nodes, edges } = toReactFlow(FIVE, FIVE_KINDS, trace, null);
-    expect(nodes.filter((n) => n.data.ran).map((n) => n.id)).toEqual(['start']);
-    expect(edges.every((e) => !e.animated)).toBe(true);
   });
 });

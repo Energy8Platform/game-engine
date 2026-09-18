@@ -87,10 +87,12 @@ export function moveNode(doc: FlowDoc, id: string, at: { x: number; y: number })
 
 /**
  * The doc as React Flow sees it. A node without `ui` sits on a diagonal
- * by index; an unregistered kind (the game not running yet) has no ports.
- * The trace paints the latest run only: `ran` = entered, `active` = the
- * last entry, an edge `animated` when the run left `from` by that port
- * and entered `to`.
+ * by index. An unregistered kind (the game not running yet) has no ports,
+ * so its outgoing edges are left out — React Flow logs an error for every
+ * edge whose source handle it cannot find. The trace (the service keeps
+ * the newest run only) paints on: `ran` = entered, `active` = the last
+ * entry, an edge `animated` when the run left `from` by that port and
+ * entered `to`.
  */
 export function toReactFlow(
   doc: FlowDoc,
@@ -99,12 +101,10 @@ export function toReactFlow(
   selected: string | null,
 ): { nodes: E8Node[]; edges: E8Edge[] } {
   const info = new Map(kinds.map((k) => [k.kind, k]));
-  const outsOf = new Map(doc.nodes.map((n) => [n.id, info.get(n.kind)?.outs ?? []]));
-  const latest = trace.reduce((run, e) => Math.max(run, e.run), -Infinity);
-  const run = trace.filter((e) => e.run === latest);
-  const ran = new Set(run.map((e) => e.node));
-  const left = new Set(run.filter((e) => e.out !== null).map((e) => `${e.node}:${e.out}`));
-  const active = run.at(-1)?.node;
+  const outsOf = new Map(doc.nodes.map((n) => [n.id, info.get(n.kind)?.outs]));
+  const ran = new Set(trace.map((e) => e.node));
+  const left = new Set(trace.filter((e) => e.out !== null).map((e) => `${e.node}:${e.out}`));
+  const active = trace.at(-1)?.node;
 
   const nodes = doc.nodes.map((n, i): E8Node => ({
     id: n.id,
@@ -120,16 +120,20 @@ export function toReactFlow(
     },
     selected: n.id === selected,
   }));
-  const edges = doc.edges.map((e): E8Edge => {
-    const out = e.out ?? outsOf.get(e.from)?.[0];
-    return {
-      id: `${e.from}:${out}:${e.to}`,
-      source: e.from,
-      sourceHandle: out,
-      target: e.to,
-      animated: left.has(`${e.from}:${out}`) && ran.has(e.to),
-      data: { edge: e },
-    };
+  const edges = doc.edges.flatMap((e): E8Edge[] => {
+    const outs = outsOf.get(e.from);
+    if (!outs) return [];
+    const out = e.out ?? outs[0];
+    return [
+      {
+        id: `${e.from}:${out}:${e.to}`,
+        source: e.from,
+        sourceHandle: out,
+        target: e.to,
+        animated: left.has(`${e.from}:${out}`) && ran.has(e.to),
+        data: { edge: e },
+      },
+    ];
   });
   return { nodes, edges };
 }
