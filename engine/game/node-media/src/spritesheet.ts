@@ -6,7 +6,7 @@
  * swaps the real frames in — the same shape `image` uses.
  */
 import type { Context } from 'cordis';
-import { AnimatedSprite, Texture, type Spritesheet } from 'pixi.js';
+import { AnimatedSprite, Spritesheet, Texture } from 'pixi.js';
 import Schema from 'schemastery';
 import type { AssetLoader, NodeType } from '@energy8engine/scenes';
 
@@ -24,8 +24,9 @@ const EMPTY = [Texture.EMPTY];
 function framesOf(ctx: Context, props: SpritesheetProps): Texture[] {
   const sheet = (ctx.reflect.get('assetLoader', false) as AssetLoader | undefined)?.get(
     props.sheet,
-  ) as unknown as Spritesheet | undefined;
-  if (!sheet) return EMPTY;
+  ) as unknown;
+  // The picker offers every `.json`: one that is not a spritesheet keeps the placeholder.
+  if (!(sheet instanceof Spritesheet)) return EMPTY;
   const named = sheet.animations[props.animation || Object.keys(sheet.animations)[0]];
   const frames =
     named ??
@@ -64,8 +65,10 @@ export const spritesheet: NodeType<SpritesheetProps> = {
     if (swapped) s.textures = frames;
     s.animationSpeed = props.fps / 60;
     s.loop = props.loop;
+    // Props are fixed per view (an edit remounts), so only a frame swap starts playback —
+    // a finished one-shot (`loop: false`) must stay on its last frame across later refreshes.
     const play = props.playing && frames !== EMPTY;
-    if (play && (swapped || !s.playing)) s.gotoAndPlay(0);
+    if (play && swapped) s.gotoAndPlay(0);
     else if (!play && s.playing) s.stop();
   },
   // Not one of the runtime's own types, so it does not destroy the view: stop the ticker here.

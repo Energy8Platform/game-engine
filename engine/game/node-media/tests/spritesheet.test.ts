@@ -12,7 +12,7 @@ let sheet: Spritesheet;
 let noAnimations: Spritesheet;
 beforeAll(async () => {
   sheet = new Spritesheet(Texture.WHITE, {
-    frames: { a: frame(0), b: frame(8) },
+    frames: { a: frame(0), b: frame(8), c: frame(0) },
     meta: { scale: 1 },
     animations: { spin: ['a', 'b'] },
   });
@@ -66,7 +66,7 @@ describe('spritesheet', () => {
       props({ animation: 'nope' }),
       ctxWith(() => sheet),
     ) as AnimatedSprite;
-    expect(nope.textures).toEqual([sheet.textures.a, sheet.textures.b]);
+    expect(nope.textures).toEqual([sheet.textures.a, sheet.textures.b, sheet.textures.c]);
     const all = spritesheet.mount(
       props(),
       ctxWith(() => noAnimations),
@@ -92,6 +92,29 @@ describe('spritesheet', () => {
     );
     expect(s.textures).toEqual([sheet.textures.a, sheet.textures.b]);
     expect(s.playing).toBe(true);
+    s.destroy();
+  });
+
+  it('a JSON that is not a spritesheet keeps the placeholder rather than throwing', () => {
+    const notASheet = ctxWith(() => ({ some: 'data' }));
+    const view = spritesheet.mount(props(), notASheet) as AnimatedSprite;
+    expect(view.texture).toBe(Texture.EMPTY);
+    expect(() => spritesheet.update!(view, props(), notASheet)).not.toThrow();
+    expect(view.texture).toBe(Texture.EMPTY);
+    expect(view.playing).toBe(false);
+    view.destroy();
+  });
+
+  it('a finished one-shot stays on its last frame across later refreshes', () => {
+    const ctx = ctxWith(() => sheet);
+    const s = spritesheet.mount(props({ loop: false }), ctx) as AnimatedSprite;
+    expect(s.playing).toBe(true);
+    s.update({ deltaTime: 60 } as never);
+    expect(s.playing).toBe(false);
+    expect(s.currentFrame).toBe(1);
+    spritesheet.update!(s, props({ loop: false }), ctx);
+    expect(s.playing).toBe(false);
+    expect(s.currentFrame).toBe(1);
     s.destroy();
   });
 

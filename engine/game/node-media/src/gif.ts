@@ -4,6 +4,8 @@
  * its source and cannot swap it, so the view is a `Container` and the
  * sprite its only child — (re)built by `update` when the source appears or
  * changes.
+ *
+ * ponytail: the wrapper has no `anchor`, so the common `anchor` prop does not reach the sprite — forward it in `update` when a gif needs one.
  */
 import { Container } from 'pixi.js';
 // Importing `pixi.js/gif` (its `init` entry) also registers the `.gif` asset parser `Assets.load` needs.
