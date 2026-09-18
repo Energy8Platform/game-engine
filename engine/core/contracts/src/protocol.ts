@@ -351,6 +351,70 @@ export interface GameCompositionResponse {
   transitions: string[];
 }
 
+/** One node of a flow document. */
+export interface FlowNode {
+  id: string;
+  kind: string;
+  props?: Record<string, unknown>;
+  ui?: { x: number; y: number };
+}
+
+/** One edge in a flow document, connecting two nodes. */
+export interface FlowEdge {
+  from: string;
+  out?: string;
+  to: string;
+}
+
+/** `flows/<id>.flow.yml`, parsed. */
+export interface FlowDoc {
+  version: 1;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+}
+
+/** A flow node kind the running game registered: its id, output labels, trigger status, and schema. */
+export interface FlowKindInfo {
+  kind: string;
+  outs: string[];
+  trigger: boolean;
+  schema: unknown;
+}
+
+/** One entry in a flow trace, recording a node's execution. */
+export interface FlowTraceEntry {
+  run: number;
+  node: string;
+  out: string | null;
+  at: number;
+}
+
+/** The flow document, sent by the host on any change. */
+export interface FlowMessage {
+  type: 'flow';
+  doc: FlowDoc | null;
+  diagnostics: Diagnostic[];
+}
+
+/** The flow node kind registry, both ways (up from the game, relayed down). */
+export interface FlowKindsMessage {
+  type: 'flow-kinds';
+  kinds: FlowKindInfo[];
+}
+
+/** Flow trace entries, both ways (up from the game, relayed down). */
+export interface FlowTraceMessage {
+  type: 'flow-trace';
+  entries: FlowTraceEntry[];
+}
+
+/** What `GET /api/flows` answers on the root and the preview alike. */
+export interface FlowResponse {
+  doc: FlowDoc | null;
+  diagnostics: Diagnostic[];
+  kinds: FlowKindInfo[];
+}
+
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: Snapshot }
@@ -363,11 +427,16 @@ export type ServerMessage =
   | ScenesMessage
   | NodeTypesMessage
   | SceneSelectMessage
-  | { type: 'workspace'; workspace: WorkspaceState };
+  | { type: 'workspace'; workspace: WorkspaceState }
+  | FlowMessage
+  | FlowKindsMessage
+  | FlowTraceMessage;
 
 /** Browser to host. */
 export type ClientMessage =
   | { type: 'update'; id: string; config: unknown }
   | GameDiagnosticsMessage
   | GameTransitionsMessage
-  | NodeTypesMessage;
+  | NodeTypesMessage
+  | FlowKindsMessage
+  | FlowTraceMessage;
