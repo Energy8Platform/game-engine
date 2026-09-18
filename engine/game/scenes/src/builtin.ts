@@ -25,11 +25,18 @@ export const container: NodeType = {
 const textureOf = (ctx: Context, src: string): Texture | undefined =>
   (ctx.reflect.get('assetLoader', false) as AssetLoader | undefined)?.get(src);
 
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'];
+
 export const image: NodeType<{ src: string }> = {
   type: 'image',
   schema: Schema.object({
-    src: Schema.string().required().description('image path, project-relative'),
+    src: Schema.string()
+      .required()
+      .extra('asset', IMAGE_EXTENSIONS)
+      .description('image path, project-relative'),
   }),
+  accept: { extensions: IMAGE_EXTENSIONS, prop: 'src' },
+  assetProps: ['src'],
   mount(props, ctx) {
     const texture = textureOf(ctx, props.src);
     // No texture yet (not loaded, or failed): an empty sprite keeps the

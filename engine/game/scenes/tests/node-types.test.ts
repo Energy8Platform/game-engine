@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Container } from 'pixi.js';
 import Schema from 'schemastery';
 import { applyCommon, createNodeTypes, type NodeType } from '../src/node-types';
+import { image } from '../src/builtin';
 
 const t = (type: string): NodeType => ({
   type,
@@ -23,6 +24,19 @@ describe('createNodeTypes', () => {
     offA();
     expect(reg.get('image')).toBe(b);
     expect(reg.list().map((x) => x.type)).toEqual(['image']);
+  });
+});
+
+describe('image', () => {
+  it('declares its asset contract: which extensions, which prop, and the prop carries the `asset` schema meta', () => {
+    expect(image.accept).toEqual({ extensions: ['png', 'jpg', 'jpeg', 'webp'], prop: 'src' });
+    expect(image.assetProps).toEqual(['src']);
+    expect((image.schema.dict!.src.meta as { asset?: string[] }).asset).toEqual([
+      'png',
+      'jpg',
+      'jpeg',
+      'webp',
+    ]);
   });
 });
 

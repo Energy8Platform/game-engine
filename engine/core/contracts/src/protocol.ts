@@ -302,10 +302,24 @@ export interface SceneDoc {
   nodes: SceneNode[];
 }
 
+/** Which files a node type takes, and which single prop the dropped/picked path lands in. */
+export interface NodeTypeAccept {
+  /** Extensions without the dot, lowercase (`'png'`, not `'.png'`). */
+  extensions: string[];
+  /** The prop `accept`ing the path. */
+  prop: string;
+  /** A second prop to fill from the same drop (a spritesheet's JSON beside its PNG, say). */
+  sibling?: string;
+}
+
 /** A node type the running game registered: its id and its props schema as schemastery JSON. */
 export interface NodeTypeInfo {
   type: string;
   schema: unknown;
+  /** The IDE's drop/pick target for this type, when it takes a file. */
+  accept?: NodeTypeAccept;
+  /** Every prop (may be more than `accept.prop`) that holds a project-relative asset path. */
+  assetProps?: string[];
 }
 
 /** The whole document set, replaced whole — host to every `/ide` socket on any change. */

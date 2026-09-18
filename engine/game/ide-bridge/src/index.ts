@@ -68,6 +68,7 @@ import {
   type Diagnostic,
   type FlowKindInfo,
   type FlowTraceEntry,
+  type NodeTypeAccept,
   type ServerMessage,
 } from '@energy8engine/contracts';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
@@ -972,11 +973,16 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   ctx.effect(
     () =>
       forwardRegistry<{
-        list(): { type: string; schema: unknown }[];
+        list(): { type: string; schema: unknown; accept?: NodeTypeAccept; assetProps?: string[] }[];
         subscribe(listener: () => void): () => void;
       }>(ctx, 'nodeTypes', socket, (nodeTypes) => ({
         type: 'node-types',
-        types: nodeTypes.list().map((t) => ({ type: t.type, schema: JSON.parse(JSON.stringify(t.schema)) })),
+        types: nodeTypes.list().map((t) => ({
+          type: t.type,
+          schema: JSON.parse(JSON.stringify(t.schema)),
+          ...(t.accept ? { accept: t.accept } : {}),
+          ...(t.assetProps ? { assetProps: t.assetProps } : {}),
+        })),
       })),
     'ide-bridge-node-types-forwarding',
   );

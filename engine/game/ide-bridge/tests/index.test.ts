@@ -1755,6 +1755,42 @@ describe('ide-bridge — forwards node-types', () => {
     });
   });
 
+  it('forwards a type with an asset contract with its `accept`/`assetProps`, and omits both from a type with neither', () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const accept = { extensions: ['png', 'jpg', 'jpeg', 'webp'], prop: 'src' };
+    const listeners = new Set<() => void>();
+    const types = [
+      { type: 'container', schema: {} },
+      { type: 'image', schema: { src: 'string' }, accept, assetProps: ['src'] },
+    ];
+    ctx.provide(
+      'nodeTypes' as never,
+      {
+        list: () => [...types],
+        subscribe: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+      } as never,
+    );
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    socket.open();
+
+    expect(nodeTypeFrames(socket)).toEqual([
+      {
+        type: 'node-types',
+        types: [
+          { type: 'container', schema: {} },
+          { type: 'image', schema: { src: 'string' }, accept, assetProps: ['src'] },
+        ],
+      },
+    ]);
+  });
+
   it('starts forwarding once nodeTypes is provided, even after apply already ran', async () => {
     ctx = new Context();
     const { bind, forStage, bindings } = fakeMechanics();

@@ -6,10 +6,21 @@
 import type { Context } from 'cordis';
 import type { Container } from 'pixi.js';
 import type Schema from 'schemastery';
+import type { NodeTypeAccept } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
 import { COMMON } from './common-schema';
 
 export { COMMON };
+export type { NodeTypeAccept };
+
+declare global {
+  namespace Schemastery {
+    interface Meta<T> {
+      /** IDE hint: this string field holds a project-relative asset path with one of these extensions. */
+      asset?: string[];
+    }
+  }
+}
 
 export interface NodeType<P = Record<string, unknown>> {
   type: string;
@@ -22,6 +33,10 @@ export interface NodeType<P = Record<string, unknown>> {
   unmount?(view: Container): void;
   /** Project-relative paths this node needs loaded before it shows. */
   assets?(props: P): string[];
+  /** Which files this type takes, and which single prop holds the path — the IDE's drop/pick target. */
+  accept?: NodeTypeAccept;
+  /** Every prop (may be more than `accept.prop`) that holds a project-relative asset path. */
+  assetProps?: string[];
 }
 
 export interface NodeTypesService {
