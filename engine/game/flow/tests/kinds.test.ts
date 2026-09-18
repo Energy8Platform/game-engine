@@ -69,6 +69,28 @@ describe('built-in kinds', () => {
     expect(scenes.hide).toHaveBeenCalledWith('a');
   });
 
+  it('show/hide wait for scenes.ready before touching the scenes (the boot race with GET /api/scenes)', async () => {
+    let resolveReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const scenes = { ready, show: vi.fn(async () => {}), hide: vi.fn(async () => {}) };
+    const { rc } = runCtx({ scenes });
+    const shown = kind('show').run!({ scene: 'a' }, rc);
+    const hidden = kind('hide').run!({ scene: 'a' }, rc);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(scenes.show).not.toHaveBeenCalled();
+    expect(scenes.hide).not.toHaveBeenCalled();
+    resolveReady();
+    expect(await shown).toEqual({ out: 'next' });
+    expect(await hidden).toEqual({ out: 'next' });
+    expect(scenes.show).toHaveBeenCalledWith('a', { transition: undefined });
+    expect(scenes.hide).toHaveBeenCalledWith('a');
+    // A rejected `ready` (the GET failed) does not block: the show itself answers.
+    const down = { ready: Promise.reject(new Error('down')), show: vi.fn(async () => {}) };
+    expect(await kind('show').run!({ scene: 'a' }, runCtx({ scenes: down }).rc)).toEqual({ out: 'next' });
+  });
+
   it('show without a scenes service throws (the interpreter reports it)', async () => {
     const { rc } = runCtx();
     await expect(kind('show').run!({ scene: 'a' }, rc)).rejects.toThrow(/scenes/);
@@ -100,12 +122,33 @@ describe('built-in kinds', () => {
     const events = createEvents();
     const { rc } = runCtx({ events });
     await expect(kind('wait').run!({}, rc)).rejects.toThrow("'wait' needs an 'event' or 'ms'");
+    // `''` — what the form's empty option commits — is absent, not an event named ''.
+    await expect(kind('wait').run!({ event: '' }, rc)).rejects.toThrow("'wait' needs an 'event' or 'ms'");
     const fire = vi.fn();
     const off = kind('on').arm!({ busy: 'ignore' }, fire, rc);
     expect(rc.report).toHaveBeenCalledWith("'on' needs an 'event'");
     events.emit('undefined');
     expect(fire).not.toHaveBeenCalled();
     expect(() => off()).not.toThrow();
+    kind('on').arm!({ event: '', busy: 'ignore' }, fire, rc);
+    expect(rc.report).toHaveBeenCalledTimes(2);
+    events.emit('');
+    expect(fire).not.toHaveBeenCalled();
+  });
+
+  it('wait { event: "", ms } waits the ms and subscribes to no event', async () => {
+    vi.useFakeTimers();
+    try {
+      const events = createEvents();
+      const on = vi.spyOn(events, 'on');
+      const { rc } = runCtx({ events });
+      const pending = kind('wait').run!({ event: '', ms: 10 }, rc);
+      expect(on).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await pending).toEqual({ out: 'next' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('boot fires once on the next microtask; wait opts out of the run timeout', async () => {

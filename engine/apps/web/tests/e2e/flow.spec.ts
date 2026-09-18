@@ -98,13 +98,15 @@ test('the Flow document shows the five nodes of flow.yml, with their ports', asy
   }
   await expect(page.getByTestId('flow-canvas').locator('.react-flow__node')).toHaveCount(5);
   // Ports are the running game's own kinds, relayed by the host: `spin`
-  // leaves by `result` or `failed`. Every node takes an edge in, a trigger
-  // too — `draw → idle` is the loop, and React Flow draws no edge into a
-  // node without a target handle (measured: two of the five edges missing,
-  // error 008 in the console, when triggers had none).
+  // leaves by `result` or `failed`. Every node but `boot` takes an edge in,
+  // `on` too — `draw → idle` is the loop, and React Flow draws no edge into
+  // a node without a target handle (measured: two of the five edges missing,
+  // error 008 in the console, when triggers had none). `boot` fires by
+  // itself; an edge into it does nothing, so none can be drawn.
   await expect(page.getByTestId('flow-port-spin-result')).toBeVisible();
   await expect(page.getByTestId('flow-port-spin-failed')).toBeVisible();
-  for (const id of ['start', 'idle', 'draw']) {
+  await expect(page.getByTestId('flow-node-start').locator('.react-flow__handle.target')).toHaveCount(0);
+  for (const id of ['idle', 'draw']) {
     await expect(
       page.getByTestId(`flow-node-${id}`).locator('.react-flow__handle.target'),
     ).toHaveCount(1);

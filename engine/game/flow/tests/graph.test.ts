@@ -73,6 +73,31 @@ describe('validateFlow', () => {
     );
   });
 
+  it("an edge into `boot` is a warning at from→to; `event: ''` on a wait/on is as absent as no event", () => {
+    const out = validateFlow(
+      doc(
+        [
+          { id: 'a', kind: 'boot' },
+          { id: 'w', kind: 'wait', props: { event: '' } },
+          { id: 'o', kind: 'on', props: { event: '' } },
+          { id: 'ok', kind: 'wait', props: { event: '', ms: 5 } },
+        ],
+        [
+          { from: 'a', to: 'w' },
+          { from: 'w', to: 'a' },
+          { from: 'o', to: 'ok' },
+        ],
+      ),
+      kinds,
+      null,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({ severity: 'warning', where: 'w→a', message: "an edge into 'boot' does nothing" }),
+      expect.objectContaining({ severity: 'warning', where: 'w', message: "'wait' needs an 'event' or 'ms'" }),
+      expect.objectContaining({ severity: 'warning', where: 'o', message: "'on' needs an 'event' or 'ms'" }),
+    ]);
+  });
+
   it('a cycle with no on/wait is an error naming the cycle', () => {
     const out = validateFlow(
       doc(

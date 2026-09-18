@@ -76,8 +76,8 @@ function E8NodeView({ data }: NodeProps<E8Node>) {
     .join(' ');
   return (
     <div className={cls} data-testid={`flow-node-${data.id}`}>
-      {/* Every node, triggers too: a branch entering `on` ends there (the fixture's own `draw → idle`), and React Flow draws no edge into a node without a target handle. */}
-      <Handle type="target" position={Position.Left} id="in" />
+      {/* Every node but `boot`: a branch entering `on` ends there (the fixture's own `draw → idle`), and React Flow draws no edge into a node without a target handle. `boot` fires by itself — an edge into it does nothing, so none can be drawn. */}
+      {data.kind !== 'boot' && <Handle type="target" position={Position.Left} id="in" />}
       <div className="e8-flow-node-kind">{data.kind}</div>
       <div className="e8-flow-node-id">{data.id}</div>
       <div className="e8-flow-node-outs">

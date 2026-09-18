@@ -132,7 +132,10 @@ export function validateFlow(
     const where = `${edge.from}→${edge.to}`;
     const fromNode = nodesById.get(edge.from);
     if (!fromNode) out.push(diagnostic('error', 'flow', where, `edge from a missing node '${edge.from}'`));
-    if (!nodesById.has(edge.to)) out.push(diagnostic('error', 'flow', where, `edge to a missing node '${edge.to}'`));
+    const toNode = nodesById.get(edge.to);
+    if (!toNode) out.push(diagnostic('error', 'flow', where, `edge to a missing node '${edge.to}'`));
+    // A branch reaching a trigger ends there; `boot` fires once, by itself, so nothing ever follows this edge.
+    if (toNode?.kind === 'boot') out.push(diagnostic('warning', 'flow', where, `an edge into 'boot' does nothing`));
     if (fromNode && edge.out !== undefined && kindByName) {
       const shape = kindByName.get(fromNode.kind);
       if (shape && !shape.outs.includes(edge.out)) {
@@ -162,7 +165,8 @@ export function validateFlow(
     // A warning, not an error: a node fresh from the palette has neither yet,
     // and the write must land for the form to fill it in. The runtime guards
     // itself (`wait.run` throws, `on.arm` reports) when it is reached like this.
-    if (node.props?.event === undefined && node.props?.ms === undefined) {
+    // `''` is what the form's empty option commits: absent, like `undefined`.
+    if (!node.props?.event && node.props?.ms === undefined) {
       out.push(diagnostic('warning', 'flow', node.id, `'${node.kind}' needs an 'event' or 'ms'`));
     }
   }

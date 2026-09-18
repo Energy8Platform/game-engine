@@ -3,8 +3,8 @@
  * project root, `flow.yml`, read through `files` and kept parsed here;
  * the checks are `validateFlow` from `@energy8engine/flow` (pixi-free —
  * the package has no renderer dependency), fed the kinds the game last
- * registered (`ideRpc.flowKinds()`, `null` until it has) and the scene ids
- * the project holds. Reported through
+ * registered (`ideRpc.flowKinds()`; the package's own `BUILTIN_KINDS`
+ * until it has) and the scene ids the project holds. Reported through
  * `ideRpc.reportGameDiagnostics('flow', …)`, replaced whole each time.
  *
  * Scene ids are read from the TREE (`scenes/<id>.scene.yml` — the file
@@ -31,10 +31,11 @@ import {
   type DiagnosticsResponse,
   type FlowDoc,
   type FlowEdge,
+  type FlowKindInfo,
   type FlowNode,
   type FlowResponse,
 } from '@energy8engine/contracts';
-import { validateFlow } from '@energy8engine/flow';
+import { BUILTIN_KINDS, validateFlow } from '@energy8engine/flow';
 import { SCENE_FILE, parseDoc as parseScene } from './scenes';
 
 declare module 'cordis' {
@@ -103,6 +104,14 @@ export function parseDoc(value: unknown): { doc?: FlowDoc; reason?: string } {
   return { doc: { version: 1, nodes, edges } };
 }
 
+/** The eleven built-ins, as the game would report them — what the checks and the editor use until a game speaks (a project plugin may add kinds; only a running game knows those). */
+const BUILTIN_KIND_INFO: FlowKindInfo[] = BUILTIN_KINDS.map((k) => ({
+  kind: k.kind,
+  outs: [...k.outs],
+  trigger: !!k.trigger,
+  schema: JSON.parse(JSON.stringify(k.schema)) as unknown,
+}));
+
 const fileError = (reason: string): Diagnostic =>
   diagnostic('error', 'flow', FILE, `"${FILE}" is skipped: ${reason}`, 'fix the file');
 
@@ -127,11 +136,14 @@ export function apply(ctx: Context): void {
     return ids;
   };
 
-  /** `validateFlow` over a parsed document, against what the host knows right now. */
-  const check = async (doc: FlowDoc): Promise<Diagnostic[]> => {
-    const kinds = ctx.ideRpc.flowKinds();
-    return validateFlow(doc, kinds.length ? kinds : null, await sceneIds());
+  /** The running game's kinds, or the built-ins until it has spoken. */
+  const kinds = (): FlowKindInfo[] => {
+    const reported = ctx.ideRpc.flowKinds();
+    return reported.length ? reported : BUILTIN_KIND_INFO;
   };
+
+  /** `validateFlow` over a parsed document, against what the host knows right now. */
+  const check = async (doc: FlowDoc): Promise<Diagnostic[]> => validateFlow(doc, kinds(), await sceneIds());
 
   const refresh = async (broadcast: boolean): Promise<void> => {
     const { bytes } = await ctx.files.read(FILE);
@@ -148,7 +160,7 @@ export function apply(ctx: Context): void {
       }
     }
     if (doc) found.push(...(await check(doc)));
-    state = { doc, diagnostics: found, kinds: ctx.ideRpc.flowKinds() };
+    state = { doc, diagnostics: found, kinds: kinds() };
     const key = found.length ? JSON.stringify(found) : '';
     if (key !== reported) ctx.ideRpc.reportGameDiagnostics('flow', found);
     reported = key;

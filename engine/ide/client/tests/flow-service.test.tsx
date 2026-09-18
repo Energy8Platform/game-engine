@@ -117,7 +117,7 @@ describe('flow service', () => {
     expect(ctx.connection.diagnostics).toEqual(answer);
   });
 
-  it('flow-trace entries append, cap at 500, and a newer run drops the older run\'s entries', async () => {
+  it('flow-trace entries append, cap at 500, and a different run drops the previous run\'s entries', async () => {
     const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
 
@@ -139,9 +139,12 @@ describe('flow service', () => {
     socket.receive({ type: 'flow-trace', entries: [entry(2, 'start', 2)] });
     expect(ctx.flow.trace()).toEqual([entry(2, 'start', 2)]);
 
-    // A lower run number than the newest seen is stale and dropped.
-    socket.receive({ type: 'flow-trace', entries: [entry(1, 'late', 3)] });
-    expect(ctx.flow.trace()).toEqual([entry(2, 'start', 2)]);
+    // A LOWER run number is a new run too, not a stale one: the interpreter's
+    // counter restarts at 1 on every `replace` (a node drag, a reload).
+    socket.receive({ type: 'flow-trace', entries: [entry(1, 'again', 3)] });
+    expect(ctx.flow.trace()).toEqual([entry(1, 'again', 3)]);
+    socket.receive({ type: 'flow-trace', entries: [entry(2, 'start', 4)] });
+    expect(ctx.flow.trace()).toEqual([entry(2, 'start', 4)]);
 
     // Capped at 500: pushing past the cap drops the oldest of this run.
     const many = Array.from({ length: 500 }, (_, i) => entry(2, `n${i}`, i + 10));
@@ -155,7 +158,24 @@ describe('flow service', () => {
     expect(ctx.flow.trace()[0]).toEqual(entry(2, 'n1', 11));
   });
 
-  it('one flow-trace frame carrying two runs keeps only the newer run\'s entries', async () => {
+  it('run 3, then run 1 (the counter reset by a replace): the trace holds run 1\'s entries', async () => {
+    const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+
+    const entry = (run: number, node: string, at: number): FlowTraceEntry => ({
+      run,
+      node,
+      out: null,
+      at,
+    });
+    socket.receive({ type: 'flow-trace', entries: [entry(3, 'idle', 0), entry(3, 'spin', 1)] });
+    expect(ctx.flow.trace()).toEqual([entry(3, 'idle', 0), entry(3, 'spin', 1)]);
+    socket.receive({ type: 'flow-trace', entries: [entry(1, 'start', 2)] });
+    socket.receive({ type: 'flow-trace', entries: [entry(1, 'base', 3)] });
+    expect(ctx.flow.trace()).toEqual([entry(1, 'start', 2), entry(1, 'base', 3)]);
+  });
+
+  it('one flow-trace frame carrying two runs keeps only the later run\'s entries', async () => {
     const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
 

@@ -27,9 +27,12 @@ import { FlowProperties } from '../shell/FlowProperties';
  *
  * `flow-trace` entries are the game's own run log, relayed down: they
  * APPEND rather than replace, capped at 500 so a long play session does
- * not grow the array without bound. A new run (a `run` higher than any
- * seen yet) drops every entry of the older run first — the trace is
- * "this run's steps", not a history across runs.
+ * not grow the array without bound. An entry of a DIFFERENT run than the
+ * one being traced drops the older run's entries first — the trace is
+ * "this run's steps", not a history across runs. Different, not higher:
+ * the interpreter's counter restarts at 1 on every `replace` (a node
+ * drag, a preview reload), and runs never interleave (`on` refuses or
+ * queues while a run is live).
  *
  * `select` is state only: unlike `scenes`, there is no iframe canvas to
  * tell — the canvas reads `selected()` straight off this service.
@@ -119,11 +122,9 @@ export function apply(ctx: Context, config: FlowConfig) {
   function appendTrace(entries: readonly FlowTraceEntry[]) {
     let next = trace.slice();
     for (const entry of entries) {
-      if (traceRun === null || entry.run > traceRun) {
+      if (entry.run !== traceRun) {
         next = [];
         traceRun = entry.run;
-      } else if (entry.run < traceRun) {
-        continue;
       }
       next.push(entry);
     }

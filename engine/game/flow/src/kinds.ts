@@ -29,6 +29,7 @@ declare global {
 export interface RunCtx {
   /** One object per run, shared by every concurrent branch of it (last writer wins). */
   vars: Record<string, unknown>;
+  /** The game's context. The flow bus is `ctx.get('events')` / `ctx.reflect.get('events', false)` — NOT `ctx.events`, which is cordis's own emitter. */
   ctx: Context;
   /** Aborted by `stop()`/`replace()`; a `run` that waits must give up on it. */
   signal: AbortSignal;
@@ -149,7 +150,7 @@ const spin: FlowNodeKind = {
   kind: 'spin',
   schema: none,
   outs: ['result', 'failed'],
-  async run(_p, { ctx, fetchFn }) {
+  async run(_p, { fetchFn }) {
     try {
       const res = await fetchFn('/api/spin', {
         method: 'POST',
@@ -158,8 +159,6 @@ const spin: FlowNodeKind = {
       });
       if (!res.ok) throw new Error(`POST /api/spin → ${res.status}`);
       const result: unknown = await res.json();
-      // ponytail: the log's `plan` stays [] here — `present` runs later and keeps its plan in vars.plan only.
-      (ctx.reflect.get('play', false) as PlayService | undefined)?.record({ request: {}, result, plan: [] });
       return { out: 'result', vars: { result } };
     } catch (e) {
       return { out: 'failed', vars: { error: e instanceof Error ? e.message : String(e) } };
@@ -175,12 +174,20 @@ const present: FlowNodeKind = {
     const result = vars.result as { stage: string; data: Record<string, unknown> } | undefined;
     if (!result) throw new Error('vars.result is missing — run `spin` first');
     const { plan, diagnostics } = service<MechanicsLike>(ctx, 'mechanics').present(result.stage, result.data);
-    const problems = diagnostics.length
-      ? diagnostics
-      : await service<PlayService>(ctx, 'play').execute(plan, ctx.reflect.get('board', false));
+    const play = service<PlayService>(ctx, 'play');
+    const problems = diagnostics.length ? diagnostics : await play.execute(plan, ctx.reflect.get('board', false));
+    // The spin log: what was drawn — `[]` when the presentation failed.
+    play.record({ request: {}, result, plan: problems.length ? [] : plan });
     if (problems.length) return { out: 'failed', vars: { plan, error: problems.map((d) => d.message).join('; ') } };
     return { out: 'next', vars: { plan } };
   },
+};
+
+/** `scenes` once its own boot GET has landed: a `show` at boot would otherwise race the documents and answer `notDeclared`. */
+const scenesReady = async (ctx: Context): Promise<ScenesService> => {
+  const scenes = service<ScenesService>(ctx, 'scenes');
+  await scenes.ready?.catch(() => {});
+  return scenes;
 };
 
 const show: FlowNodeKind<{ scene: string; transition?: string }> = {
@@ -191,7 +198,8 @@ const show: FlowNodeKind<{ scene: string; transition?: string }> = {
   }),
   outs: ['next'],
   async run(p, { ctx }) {
-    await service<ScenesService>(ctx, 'scenes').show(p.scene, { transition: p.transition });
+    const scenes = await scenesReady(ctx);
+    await scenes.show(p.scene, { transition: p.transition });
     return { out: 'next' };
   },
 };
@@ -201,7 +209,8 @@ const hide: FlowNodeKind<{ scene: string }> = {
   schema: Schema.object({ scene: Schema.string().required().extra('pick', 'scene').description('scene id') }),
   outs: ['next'],
   async run(p, { ctx }) {
-    await service<ScenesService>(ctx, 'scenes').hide(p.scene);
+    const scenes = await scenesReady(ctx);
+    await scenes.hide(p.scene);
     return { out: 'next' };
   },
 };
@@ -216,7 +225,8 @@ const wait: FlowNodeKind<{ ms?: number; event?: string }> = {
   timeout: false,
   run(p, { ctx, signal }) {
     return new Promise((resolve, reject) => {
-      if (p.event === undefined && p.ms === undefined) return reject(new Error("'wait' needs an 'event' or 'ms'"));
+      // `''` is what the form's empty option commits: absent, like `undefined`.
+      if (!p.event && p.ms === undefined) return reject(new Error("'wait' needs an 'event' or 'ms'"));
       if (signal.aborted) return reject(signal.reason);
       const offs: (() => void)[] = [];
       const settle = (fn: () => void) => () => {
@@ -226,7 +236,7 @@ const wait: FlowNodeKind<{ ms?: number; event?: string }> = {
       const done = settle(() => resolve({ out: 'next' }));
       const abort = settle(() => reject(signal.reason));
       // Events first: a missing service throws before any timer is set.
-      if (p.event !== undefined) offs.push(service<EventsService>(ctx, 'events').on(p.event, done));
+      if (p.event) offs.push(service<EventsService>(ctx, 'events').on(p.event, done));
       if (p.ms !== undefined) {
         const t = setTimeout(done, p.ms);
         offs.push(() => clearTimeout(t));

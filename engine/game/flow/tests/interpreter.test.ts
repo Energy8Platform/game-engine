@@ -67,7 +67,7 @@ describe('createFlow', () => {
     expect(f.report).not.toHaveBeenCalled();
   });
 
-  it('spin puts result in vars and records; a 500 leaves by failed with vars.error', async () => {
+  it('spin puts result in vars and records nothing; a 500 leaves by failed with vars.error', async () => {
     const f = harness();
     let seen: Record<string, unknown> = {};
     f.kinds.register({
@@ -100,16 +100,17 @@ describe('createFlow', () => {
       body: '{}',
     });
     expect(seen.result).toEqual(okBody);
-    expect(f.play.record).toHaveBeenCalledWith({ request: {}, result: okBody, plan: [] });
 
     f.fetchFn.mockResolvedValueOnce({ ok: false, status: 500, json: async () => okBody });
+    f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.failed', 'bad.next']);
     expect(seen.error).toMatch(/500/);
-    expect(f.play.record).toHaveBeenCalledTimes(1);
+    // The log is `present`'s: a spin that never got drawn is not in it.
+    expect(f.play.record).not.toHaveBeenCalled();
   });
 
-  it('present calls mechanics.present + play.execute; diagnostics leave by failed', async () => {
+  it('present calls mechanics.present + play.execute and records the plan; diagnostics leave by failed and record []', async () => {
     const f = harness();
     const d = doc(
       [
@@ -126,15 +127,21 @@ describe('createFlow', () => {
     await settled(f, ['start.next', 'spin.result', 'draw.next']);
     expect(f.mechanics.present).toHaveBeenCalledWith('base_game', {});
     expect(f.play.execute).toHaveBeenCalledWith([{ kind: 'x' }], f.board);
+    expect(f.play.record).toHaveBeenCalledWith({ request: {}, result: okBody, plan: [{ kind: 'x' }] });
 
     f.mechanics.present.mockReturnValueOnce({ plan: [], diagnostics: [{ message: 'no mechanic' }] });
+    f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'draw.failed']);
     expect(f.play.execute).toHaveBeenCalledTimes(1);
+    expect(f.play.record).toHaveBeenLastCalledWith({ request: {}, result: okBody, plan: [] });
 
     f.play.execute.mockResolvedValueOnce([{ message: 'step blew up' }]);
+    f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'draw.failed']);
+    expect(f.play.record).toHaveBeenCalledTimes(3);
+    expect(f.play.record).toHaveBeenLastCalledWith({ request: {}, result: okBody, plan: [] });
   });
 
   it('if takes true/false; a bad expression is a diagnostic and false', async () => {
@@ -573,9 +580,86 @@ describe('createFlow', () => {
     f.flow.replace(d);
     await settled(f, ['start.next', 's.next']);
     expect(f.report).not.toHaveBeenCalled();
+    f.flow.stop();
     f.flow.replace(d);
     f.flow.stop(); // before boot's microtask
     await new Promise((r) => setTimeout(r, 5));
     expect(f.flow.trace()).toEqual([]);
+  });
+
+  it('replace with the same doc (only `ui` moved) neither stops nor re-boots; doc() carries the new positions', async () => {
+    const f = harness();
+    const d = (x: number) =>
+      doc(
+        [
+          { id: 'start', kind: 'boot', ui: { x, y: 0 } },
+          { id: 'w', kind: 'wait', props: { event: 'go' }, ui: { x: x + 100, y: 0 } },
+          { id: 's', kind: 'set', props: { name: 'x', value: 1 } },
+        ],
+        [
+          { from: 'start', to: 'w' },
+          { from: 'w', to: 's' },
+        ],
+      );
+    f.flow.replace(d(0));
+    await vi.waitFor(() => expect(f.flow.trace().at(-1)).toMatchObject({ node: 'w', out: null }));
+    // A drag: same nodes and edges, new `ui` (and key order).
+    const moved = d(40);
+    moved.nodes = moved.nodes.map((n) => ({ ...n, kind: n.kind, id: n.id }));
+    f.flow.replace(moved);
+    expect(f.flow.doc()).toBe(moved);
+    await new Promise((r) => setTimeout(r, 5));
+    // No second boot: the trace is still run 1 parked at `w`, and the wait is still live.
+    expect(f.flow.trace().filter((e) => e.node === 'start')).toHaveLength(2);
+    expect(f.flow.busy()).toBe(true);
+    f.events.emit('go');
+    await settled(f, ['start.next', 'w.next', 's.next']);
+    expect(f.flow.trace().every((e) => e.run === 1)).toBe(true);
+
+    // A changed edge restarts.
+    const rewired = d(40);
+    rewired.edges = [{ from: 'start', to: 's' }];
+    f.flow.replace(rewired);
+    await settled(f, ['start.next', 's.next']);
+    expect(f.report).toHaveBeenCalledTimes(1); // the restart validated: `w` is now an orphan
+  });
+
+  it('replace with the same doc after an erroring replace validates and reports again; after stop() it re-arms', async () => {
+    const f = harness();
+    const bad = doc([{ id: 'start', kind: 'boot' }], [{ from: 'start', to: 'nowhere' }]);
+    f.flow.replace(bad);
+    expect(f.report).toHaveBeenCalledTimes(1);
+    f.flow.replace({ ...bad });
+    expect(f.report).toHaveBeenCalledTimes(2);
+
+    const ok = doc([{ id: 'start', kind: 'boot' }], []);
+    f.flow.replace(ok);
+    await settled(f, ['start.next']);
+    f.flow.stop();
+    f.flow.replace({ ...ok });
+    await settled(f, ['start.next']);
+    expect(f.flow.trace()).toHaveLength(2); // a fresh run, not run 1's entries kept
+  });
+
+  it('replace(null) stops the run and clears doc()', async () => {
+    const f = harness();
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'w', kind: 'wait', props: { event: 'go' } },
+        ],
+        [{ from: 'start', to: 'w' }],
+      ),
+    );
+    await vi.waitFor(() => expect(f.flow.trace().at(-1)).toMatchObject({ node: 'w', out: null }));
+    f.flow.replace(null);
+    expect(f.flow.doc()).toBeNull();
+    expect(f.flow.trace()).toEqual([]);
+    expect(f.flow.busy()).toBe(false);
+    f.events.emit('go');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.flow.trace()).toEqual([]);
+    expect(f.report).not.toHaveBeenCalled();
   });
 });

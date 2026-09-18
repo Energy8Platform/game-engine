@@ -40,11 +40,9 @@
  * `refill` naming the wrong board). The whole-plan check — every step
  * against the raw spin `data`: the board the reels land on, the cells each
  * round pays, how far each reel scrolls, the board it settles to, what each
- * reveal is worth — is kept below as a SKIPPED test: it reads the plan the
- * game ran, and the spin log's `plan` is `[]` until the flow's `present`
- * node records what it drew (Task 3 debt — "spin-log plan is [] until
- * present records it"). Written against `spins().at(-1).plan` so
- * un-skipping is the whole edit. The board check above it is what runs.
+ * reveal is worth — is the second test below: it reads the plan the game
+ * ran, off the spin log (`spins().at(-1).plan`), which the flow's `present`
+ * node records once it has drawn it.
  */
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -232,14 +230,13 @@ test('a winning spin under each of three bindings leaves the board where that me
 });
 
 /**
- * The whole-plan check, kept and SKIPPED — see the file header: the spin
- * log's `plan` is `[]` until the flow's `present` node records what it
- * drew (Task 3 debt — "spin-log plan is [] until present records it").
- * Each binding gets a winning spin of its own; every plan is asserted
- * whole, step by step, against that spin's `data` as ground truth. `data`
- * is the server's own answer, not something re-derived from the plan.
+ * The whole-plan check — see the file header. The spin log's `plan` is what
+ * the flow's `present` node recorded (`spins().at(-1).plan`). Each binding
+ * gets a winning spin of its own; every plan is asserted whole, step by
+ * step, against that spin's `data` as ground truth. `data` is the server's
+ * own answer, not something re-derived from the plan.
  */
-test.skip("the plan under each binding, step by step, against the spin's own data", async ({
+test("the plan under each binding, step by step, against the spin's own data", async ({
   page,
 }) => {
   test.setTimeout(150_000);

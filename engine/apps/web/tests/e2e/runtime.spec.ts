@@ -267,11 +267,9 @@ test('switching base_game from classic to cascade in the IDE changes what a spin
 const equal = (a: number[][], b: number[][]) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * The step-content half of the old thesis, kept whole and SKIPPED: it
- * reads the plan the game ran, and the spin log's `plan` is `[]` until the
- * flow's `present` node records what it drew (Task 3 debt — "spin-log plan
- * is [] until present records it"). Written against `spins().at(-1).plan`
- * so that un-skipping it is the whole edit once the debt is paid.
+ * The step-content half of the old thesis: it reads the plan the game ran
+ * off the spin log (`spins().at(-1).plan`), which the flow's `present` node
+ * records once it has drawn it.
  *
  * Kind alone was never enough to catch a real bug that shipped here: the
  * mechanic used to spin to the wrong board and refill round `i` from
@@ -283,7 +281,7 @@ const equal = (a: number[][], b: number[][]) => JSON.stringify(a) === JSON.strin
  * from the board's end (the last round's grid IS on screen); this one
  * names every step.
  */
-test.skip("under cascade the plan removes exactly what each round measured and refills each round's own board", async ({
+test("under cascade the plan removes exactly what each round measured and refills each round's own board", async ({
   page,
 }) => {
   test.setTimeout(120_000);

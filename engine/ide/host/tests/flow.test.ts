@@ -6,6 +6,7 @@ import yaml from 'js-yaml';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FlowDoc, FlowKindInfo, FlowResponse, ServerMessage } from '@energy8engine/contracts';
+import { BUILTIN_KINDS } from '@energy8engine/flow';
 import { createIdeHost, type IdeHost } from '../src/index';
 
 /** A fixture copied to a temp dir with the repo's packages linked in — see `scenes.test.ts`. */
@@ -64,6 +65,11 @@ const KINDS: FlowKindInfo[] = [
   kind('set'),
 ];
 
+/** What the host answers as `kinds` before any game has spoken: the eleven built-ins, by name. */
+const BUILTIN_NAMES = BUILTIN_KINDS.map((k) => k.kind);
+const builtins = () =>
+  expect.arrayContaining(BUILTIN_NAMES.map((kind) => expect.objectContaining({ kind })));
+
 let host: IdeHost | undefined;
 afterEach(async () => {
   await host?.stop();
@@ -84,12 +90,50 @@ const flowFrames = (frames: ServerMessage[]) =>
   frames.filter((f): f is Extract<ServerMessage, { type: 'flow' }> => f.type === 'flow');
 
 describe('/api/flow', () => {
-  it('GET answers the parsed document, clean, with no kinds until the game speaks; no flow.yml is doc: null', async () => {
+  it('GET answers the parsed document, clean, with the eleven built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
-    expect(await get(host.url)).toEqual({ doc: LOOP, diagnostics: [], kinds: [] });
+    const body = await get(host.url);
+    expect(body).toEqual({ doc: LOOP, diagnostics: [], kinds: builtins() });
+    expect(body.kinds).toHaveLength(11);
+    // As the game would report them: outs, trigger, and a JSON schema the editor can rebuild.
+    expect(body.kinds.find((k) => k.kind === 'spin')).toEqual({
+      kind: 'spin',
+      outs: ['result', 'failed'],
+      trigger: false,
+      schema: expect.objectContaining({ uid: expect.any(Number) }),
+    });
+    expect(body.kinds.find((k) => k.kind === 'on')?.trigger).toBe(true);
     await host.stop();
     host = await createIdeHost({ root: workspace('project-scenes'), port: 0 });
-    expect(await get(host.url)).toEqual({ doc: null, diagnostics: [], kinds: [] });
+    expect(await get(host.url)).toEqual({ doc: null, diagnostics: [], kinds: builtins() });
+  });
+
+  it('the built-in kinds check a document before any game speaks: an unknown kind is an error, an orphan a warning', async () => {
+    host = await createIdeHost({ root: flowWorkspace(), port: 0 });
+    const bad = await put(host.url, {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'x', kind: 'mystery' },
+      ],
+      edges: [{ from: 'start', to: 'x' }],
+    });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).diagnostics).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'x', message: "unknown kind 'mystery'" }),
+    ]);
+    const ok = await put(host.url, {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'lonely', kind: 'set', props: { name: 'x', value: 1 } },
+      ],
+      edges: [],
+    });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as FlowResponse).diagnostics).toEqual([
+      expect.objectContaining({ severity: 'warning', where: 'lonely' }),
+    ]);
   });
 
   it('PUT writes YAML, answers the refreshed state and broadcasts `flow`', async () => {
@@ -103,7 +147,7 @@ describe('/api/flow', () => {
     };
     const res = await put(host.url, doc);
     expect(res.status).toBe(200);
-    expect((await res.json()) as FlowResponse).toEqual({ doc, diagnostics: [], kinds: [] });
+    expect((await res.json()) as FlowResponse).toEqual({ doc, diagnostics: [], kinds: builtins() });
     expect(yaml.load(readFileSync(join(root, 'flow.yml'), 'utf8'))).toEqual(doc);
     await expect.poll(() => flowFrames(frames).some((f) => f.doc?.nodes.length === 1)).toBe(true);
     expect(flowFrames(frames).at(-1)).toEqual({ type: 'flow', doc, diagnostics: [] });
@@ -193,7 +237,7 @@ describe('/api/flow', () => {
           message: "'wait' needs an 'event' or 'ms'",
         }),
       ],
-      kinds: [],
+      kinds: builtins(),
     });
     expect(yaml.load(readFileSync(join(root, 'flow.yml'), 'utf8'))).toEqual(doc);
   });
@@ -305,7 +349,7 @@ describe('/api/flow', () => {
     expect(await get(`http://127.0.0.1:${fiber.ctx.server.port}`)).toEqual({
       doc: LOOP,
       diagnostics: [],
-      kinds: [],
+      kinds: builtins(),
     });
   });
 });

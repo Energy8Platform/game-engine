@@ -1836,14 +1836,14 @@ describe('ide-bridge — flow frames from the host', () => {
     expect(flow.stop).not.toHaveBeenCalled();
   });
 
-  it('a `flow` frame with a null doc stops the run instead of replacing', () => {
+  it('a `flow` frame with a null doc is `replace(null)` — the interpreter stops and clears its doc', () => {
     const flow = { replace: vi.fn(), stop: vi.fn() };
     const socket = bridged(flow);
 
     socket.emit({ type: 'flow', doc: null, diagnostics: [] });
 
-    expect(flow.stop).toHaveBeenCalled();
-    expect(flow.replace).not.toHaveBeenCalled();
+    expect(flow.replace).toHaveBeenCalledWith(null);
+    expect(flow.stop).not.toHaveBeenCalled();
   });
 
   it('without flow composed, a flow frame is ignored', () => {
@@ -2051,6 +2051,28 @@ describe('ide-bridge — forwards flow-trace (batched)', () => {
     socket.open();
     await nextTick();
     expect(traceFrames(socket), 'the dropped entry is gone, not replayed on open').toEqual([]);
+  });
+
+  it('a socket opening after the boot run is sent the interpreter\'s backlog (`flow.trace()`) as one frame', async () => {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    const flow = fakeTraceFlow();
+    const boot = [
+      { run: 1, node: 'start', out: null, at: 1 },
+      { run: 1, node: 'start', out: 'next', at: 2 },
+    ];
+    const traced = { ...flow, trace: () => boot };
+    ctx.provide('flow' as never, traced as never);
+    const socket = fakeOpenableSocket();
+
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    // Fired before the socket is open: dropped by the flush, but in the backlog.
+    traced.fire(boot[1]);
+    socket.open();
+    await nextTick();
+
+    expect(traceFrames(socket)).toEqual([{ type: 'flow-trace', entries: boot }]);
   });
 
   it('re-arms the subscription once flow is (re-)provided, even after apply already ran', async () => {

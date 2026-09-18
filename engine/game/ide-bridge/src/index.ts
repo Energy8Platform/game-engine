@@ -926,11 +926,9 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       return;
     }
     if (message.type === 'flow') {
-      const flow = ctx.reflect.get('flow', false) as
-        | { replace?(doc: unknown): void; stop?(): void }
-        | undefined;
-      if (message.doc === null) flow?.stop?.();
-      else flow?.replace?.(message.doc);
+      // `doc: null` too — `replace(null)` stops the run and clears `doc()`.
+      const flow = ctx.reflect.get('flow', false) as { replace?(doc: unknown): void } | undefined;
+      flow?.replace?.(message.doc);
       return;
     }
 
@@ -1052,7 +1050,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
 
   const currentFlow = () =>
     ctx.reflect.get('flow', false) as
-      | { onTrace(fn: (e: FlowTraceEntry) => void): () => void }
+      | { onTrace(fn: (e: FlowTraceEntry) => void): () => void; trace?(): readonly FlowTraceEntry[] }
       | undefined;
 
   let unsubscribeTrace: (() => void) | undefined;
@@ -1067,6 +1065,22 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   };
 
   subscribeTrace();
+
+  // The boot run traces before this socket is open, and `flushTrace` drops
+  // on a closed socket: on `open`, the interpreter's own backlog
+  // (`flow.trace()`, the run so far) goes out as one frame. It holds
+  // whatever is still buffered, so the buffer is cleared rather than sent twice.
+  socket.addEventListener('open', () => {
+    const backlog = currentFlow()?.trace?.() ?? [];
+    if (backlog.length === 0) return;
+    buffer = [];
+    try {
+      const message: ClientMessage = { type: 'flow-trace', entries: [...backlog] };
+      socket.send(JSON.stringify(message));
+    } catch {
+      // as `flushTrace`
+    }
+  });
 
   let readFromFlow = currentFlow();
   ctx.inject(['flow'], () => {

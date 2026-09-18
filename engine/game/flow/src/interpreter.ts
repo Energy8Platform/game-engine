@@ -25,8 +25,14 @@ export interface CreateFlowOptions {
 }
 
 export interface FlowService {
-  /** Validates, stops the current run, arms the triggers. Errors report and start nothing; the doc is kept either way. */
-  replace(doc: FlowDoc): void;
+  /**
+   * Validates, stops the current run, arms the triggers. Errors report and
+   * start nothing; the doc is kept either way. A doc equal to the armed one
+   * except for `ui` only updates `doc()` — nothing stops or restarts (the
+   * host re-broadcasts the document on every node drag). `null` stops and
+   * clears the doc.
+   */
+  replace(doc: FlowDoc | null): void;
   doc(): FlowDoc | null;
   /** The last 500 entries since the last `replace`. */
   trace(): readonly FlowTraceEntry[];
@@ -40,6 +46,21 @@ export interface FlowService {
 }
 
 const TRACE_LIMIT = 500;
+
+/** `v` with every object's keys sorted, so two docs that differ only in key order stringify the same. */
+const stable = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(stable)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, stable((v as Record<string, unknown>)[k])]),
+        )
+      : v;
+/** What a run depends on: the nodes without their `ui`, and the edges. */
+const shape = (doc: FlowDoc) =>
+  JSON.stringify(stable({ nodes: doc.nodes.map(({ ui: _ui, ...n }) => n), edges: doc.edges }));
 
 export function createFlow(o: CreateFlowOptions): FlowService {
   const { kinds, report } = o;
@@ -56,6 +77,8 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   const fresh = (): Epoch => ({ controller: new AbortController(), live: 0, idlers: [] });
 
   let current: FlowDoc | null = null;
+  /** The last `replace` armed its triggers without an error, and no `stop()` came since. */
+  let armed = false;
   let epoch = fresh();
   let disposers: (() => void)[] = [];
   let runNo = 0;
@@ -163,7 +186,7 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   };
 
   const arm = (doc: FlowDoc) => {
-    const armed = epoch;
+    const own = epoch;
     for (const node of doc.nodes) {
       const kind = kinds.get(node.kind);
       if (!kind?.trigger) continue;
@@ -172,14 +195,14 @@ export function createFlow(o: CreateFlowOptions): FlowService {
         continue;
       }
       const start = (vars: Record<string, unknown> | undefined) => {
-        if (armed.controller.signal.aborted) return; // fired after stop()
-        const run: Run = { no: ++runNo, vars: {}, epoch: armed, arrived: new Map() };
+        if (own.controller.signal.aborted) return; // fired after stop()
+        const run: Run = { no: ++runNo, vars: {}, epoch: own, arrived: new Map() };
         record(run.no, node.id, null);
         leave(doc, run, node, kind, kind.outs[0], vars);
       };
       try {
         const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
-        disposers.push(kind.arm(props, start, runCtx({ no: 0, vars: {}, epoch: armed, arrived: new Map() }, node)));
+        disposers.push(kind.arm(props, start, runCtx({ no: 0, vars: {}, epoch: own, arrived: new Map() }, node)));
       } catch (e) {
         fail(node, e instanceof Error ? e.message : String(e));
       }
@@ -187,6 +210,7 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   };
 
   const stop = () => {
+    armed = false;
     epoch.controller.abort();
     epoch = fresh();
     disposers.forEach((off) => off());
@@ -195,14 +219,20 @@ export function createFlow(o: CreateFlowOptions): FlowService {
 
   return {
     replace(doc) {
+      if (doc && armed && current && shape(doc) === shape(current)) {
+        current = doc;
+        return;
+      }
       stop();
       current = doc;
       trace.length = 0;
       runNo = 0;
+      if (!doc) return;
       const problems = validateFlow(doc, kinds.list(), null);
       for (const d of problems) report(d);
       if (problems.some((d) => d.severity === 'error')) return;
       arm(doc);
+      armed = true;
     },
     doc: () => current,
     trace: () => trace,

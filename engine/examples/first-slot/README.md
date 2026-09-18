@@ -13,6 +13,10 @@ holds no spin loop any more — its `Spin` button only emits `ui.spin` into
 the bus that row provides, and `#status` is read back off the trace. The
 IDE's Flow document edits this file (`PUT /api/flow`); node kinds come from
 the game's own registry (`ctx.flowNodes`), so a project plugin can add one.
+The bus is `ctx.get('events')` (`ctx.reflect.get('events', false)` from a
+plugin) — not `ctx.events`, which is cordis's own emitter and hears nothing
+the flow emits. Fan-in: an edge into any node but `merge` runs it once per
+arrival; `merge` waits for every incoming edge and passes once.
 
 ## `e8.patch.yml`
 
