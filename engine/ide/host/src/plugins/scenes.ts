@@ -119,7 +119,8 @@ export function checkScenes(
         err(where, `node "${node.id}" is declared twice`, 'give each node one id');
       seen.add(node.id);
       if (node.type === 'reels') reelsNodes.push(where);
-      const schema = infos.get(node.type)?.schema;
+      const info = infos.get(node.type);
+      const schema = info?.schema;
       if (nodeTypes.length && schema === undefined) {
         err(
           where,
@@ -149,17 +150,18 @@ export function checkScenes(
       // not know yet (no `NodeTypeInfo` — the game hasn't reported, or the
       // type is unregistered) checks nothing; the unknown-type error above
       // already covers a registered set missing it.
-      for (const prop of infos.get(node.type)?.assetProps ?? []) {
+      for (const prop of info?.assetProps ?? []) {
         let v = node.props?.[prop];
-        // `spine`'s atlas defaults to its skeleton's path with `.atlas`
-        // when left empty — same rule as `spine.ts`'s `atlasOf`.
+        // A type's sibling prop (`spine`'s atlas) defaults to its main
+        // asset's stem with the sibling's extension when left empty —
+        // same rule as `spine.ts`'s `atlasOf`, generalised to any type
+        // that declares `accept.sibling`.
         if (
-          node.type === 'spine' &&
-          prop === 'atlas' &&
+          info?.accept?.sibling === prop &&
           !v &&
-          typeof node.props.skeleton === 'string'
+          typeof node.props[info.accept.prop] === 'string'
         ) {
-          v = node.props.skeleton.replace(/\.(skel|json)$/, '.atlas');
+          v = (node.props[info.accept.prop] as string).replace(/\.[^./]+$/, `.${prop}`);
         }
         if (typeof v !== 'string' || v === '') {
           err(where, `${node.type} has no ${prop}`, 'pick a file under the project');

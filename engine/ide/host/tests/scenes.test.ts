@@ -32,6 +32,7 @@ const types: NodeTypeInfo[] = [
   {
     type: 'spine',
     schema: json(Schema.object({ skeleton: Schema.string().required(), atlas: Schema.string() })),
+    accept: { extensions: ['skel', 'json'], prop: 'skeleton', sibling: 'atlas' },
     assetProps: ['skeleton', 'atlas'],
   },
 ];

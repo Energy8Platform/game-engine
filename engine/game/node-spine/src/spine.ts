@@ -11,8 +11,6 @@
  * ponytail: `SkeletonData` is parsed per node, not cached like `Spine.from`'s `Cache` key — add a cache when many nodes share one big skeleton.
  */
 import { Container } from 'pixi.js';
-import { diagnostic } from '@energy8engine/contracts';
-import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import {
   AtlasAttachmentLoader,
   SkeletonBinary,
@@ -70,9 +68,6 @@ export function applyProps(s: Spine, props: SpineProps): void {
   s.state.timeScale = props.speed;
 }
 
-/** Placeholders whose skeleton failed to parse, so the error is reported once and not on every refresh. */
-const reported = new WeakSet<Container>();
-
 export const spine: NodeType<SpineProps> = {
   type: 'spine',
   schema: Schema.object({
@@ -98,26 +93,10 @@ export const spine: NodeType<SpineProps> = {
   },
   update(view, props, ctx) {
     const loader = ctx.reflect.get('assetLoader', false) as AssetLoader | undefined;
-    let s = view.children[0] as Spine | undefined;
+    let s = view.children.find((c) => c instanceof Spine) as Spine | undefined;
     if (!s) {
-      let data: SkeletonData | undefined;
-      try {
-        data = resolveSkeleton(loader, props);
-      } catch (e) {
-        // A throw here would abort every other node's refresh; report it once per view (a refresh runs after every load) and keep the placeholder.
-        if (!reported.has(view)) {
-          reported.add(view);
-          (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(
-            diagnostic(
-              'error',
-              'spine',
-              props.skeleton,
-              `spine skeleton "${props.skeleton}" did not parse: ${e instanceof Error ? e.message : String(e)}`,
-            ),
-          );
-        }
-        return;
-      }
+      // Lets a malformed skeleton throw: the scenes runtime's `refresh()` catches and reports it once per node.
+      const data = resolveSkeleton(loader, props);
       if (!data) return;
       s = view.addChild(new Spine({ skeletonData: data }));
     } else if (!loader?.get(props.skeleton) || !loader?.get(atlasOf(props))) {

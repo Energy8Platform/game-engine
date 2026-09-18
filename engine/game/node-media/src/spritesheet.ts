@@ -28,11 +28,12 @@ function framesOf(ctx: Context, props: SpritesheetProps): Texture[] {
   // The picker offers every `.json`: one that is not a spritesheet keeps the placeholder.
   if (!(sheet instanceof Spritesheet)) return EMPTY;
   const named = sheet.animations[props.animation || Object.keys(sheet.animations)[0]];
-  const frames =
+  const frames = (
     named ??
     Object.keys(sheet.textures)
       .sort()
-      .map((k) => sheet.textures[k]);
+      .map((k) => sheet.textures[k])
+  ).filter((t): t is Texture => t instanceof Texture); // a frame name missing from the atlas: drop it, not throw
   return frames.length > 0 ? frames : EMPTY;
 }
 

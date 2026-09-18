@@ -44,6 +44,19 @@ describe('gif', () => {
     expect(src.frames).toHaveLength(1);
   });
 
+  it('a foreign child mounted under the wrapper (a hand-edited YAML child) survives update, is not treated as the GifSprite', () => {
+    const view = gif.mount(props(), none);
+    const foreign = view.addChild(new Container());
+    foreign.label = 'foreign';
+    const src = source();
+    gif.update!(view, props(), ctxWith(() => src));
+    expect(view.children).toContain(foreign);
+    expect(foreign.destroyed).toBe(false);
+    const sprite = view.children.find((c) => c instanceof GifSprite) as GifSprite | undefined;
+    expect(sprite).toBeInstanceOf(GifSprite);
+    expect(sprite!.source).toBe(src);
+  });
+
   it('with no source mounts an empty container; update builds the sprite once the source lands', () => {
     const view = gif.mount(props(), none);
     expect(view.children).toHaveLength(0);

@@ -333,6 +333,59 @@ describe('show / hide', () => {
     expect(sprite.texture).toBe(Texture.EMPTY);
   });
 
+  it('a throwing update is reported once per node; siblings still refresh and the scene still shows', async () => {
+    const tex = Texture.WHITE;
+    const have = new Set<string>();
+    const lazy: AssetLoader = {
+      load: vi.fn(async (urls: string[]) => urls.forEach((u) => have.add(u))),
+      unload: vi.fn(async (urls: string[]) => urls.forEach((u) => have.delete(u))),
+      get: (u) => (have.has(u) ? tex : undefined),
+    };
+    const report = vi.fn<(d: Diagnostic) => void>();
+    const nodeTypes = createNodeTypes();
+    nodeTypes.register(image);
+    nodeTypes.register({
+      type: 'boom',
+      schema: Schema.object({}),
+      mount: () => new Container(),
+      update: () => {
+        throw new Error('kaboom');
+      },
+    });
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 1, height: 1 },
+      nodeTypes,
+      loader: lazy,
+      ctx: new Context(),
+      report,
+    });
+    scenes.replace([
+      {
+        id: 'a',
+        nodes: [
+          { id: 'b', type: 'boom', props: {} },
+          { id: 'i', type: 'image', props: { src: 'w.png' } },
+        ],
+      },
+    ]);
+    const sprite = byId(scenes, 'a', 'i') as Sprite;
+    await scenes.show('a');
+    expect(scenes.visible()).toEqual(['a']);
+    expect(sprite.texture).toBe(tex); // the sibling still got refreshed
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/b',
+        message: expect.stringContaining('failed to refresh'),
+      }),
+    );
+    await scenes.hide('a'); // unloads w.png, refreshing again
+    await scenes.show('a'); // reloads it, refreshing again
+    expect(report).toHaveBeenCalledTimes(1); // still just the one diagnostic
+  });
+
   it('showing a nested scene flips its node visible inside the visible parent', async () => {
     const { scenes } = boot([
       { id: 'big', nodes: [] },

@@ -20,7 +20,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@energy8engine/contracts": "*",
     "@energy8engine/scenes": "*",
     "cordis": "4.0.0-rc.8",
     "pixi.js": "^8.20.1",

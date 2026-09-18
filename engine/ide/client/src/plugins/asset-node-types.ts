@@ -99,10 +99,9 @@ export function apply(ctx: Context) {
         .sort((a, b) => derived(a.id) - derived(b.id)) // stable: newest first within each rank
         .map((r) => r.def)
         .filter((def) => def.extensions.some((e) => e.toLowerCase() === ext));
-      if (!tree) return candidates[0];
       const stem = path.slice(0, -ext.length);
       const beside = (sibling: string) =>
-        tree.some((e) => e.kind === 'file' && e.path === stem + sibling);
+        !!tree && tree.some((e) => e.kind === 'file' && e.path === stem + sibling);
       return (
         candidates.find((def) => def.sibling !== undefined && beside(def.sibling)) ??
         candidates.find((def) => def.sibling === undefined) ??

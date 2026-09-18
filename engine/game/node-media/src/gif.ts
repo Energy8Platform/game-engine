@@ -40,7 +40,7 @@ export const gif: NodeType<GifProps> = {
           props.src,
         ) as unknown)
       : undefined;
-    let sprite = view.children[0] as GifSprite | undefined;
+    let sprite = view.children.find((c) => c instanceof GifSprite) as GifSprite | undefined;
     if (!(source instanceof GifSource)) {
       sprite?.destroy(false);
       return;
@@ -54,7 +54,7 @@ export const gif: NodeType<GifProps> = {
   },
   // `destroy(false)` keeps the source: it is the assets cache's, shared by every node on the same file.
   unmount(view) {
-    (view.children[0] as GifSprite | undefined)?.destroy(false);
+    (view.children.find((c) => c instanceof GifSprite) as GifSprite | undefined)?.destroy(false);
     view.destroy();
   },
 };

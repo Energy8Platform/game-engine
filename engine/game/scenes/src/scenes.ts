@@ -82,6 +82,10 @@ interface Entry {
   /** The node's own props, through the type's schema. */
   props: Record<string, unknown>;
   type: NodeType;
+  /** `<scene>/<node id>` — where a throwing `update` is reported. */
+  where: string;
+  /** `refresh()` already reported this entry once; suppresses repeats until the next remount rebuilds it. */
+  failed?: boolean;
 }
 
 interface Mount {
@@ -187,7 +191,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     }
     view.label = node.id;
     parent.addChild(view);
-    const entry: Entry = { view, node, props, type };
+    const entry: Entry = { view, node, props, type, where };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
     for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen);
@@ -285,10 +289,28 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     return out;
   };
 
-  /** Lets every mounted node re-read what it depends on (a texture after a load or an unload). */
+  /**
+   * Lets every mounted node re-read what it depends on (a texture after a
+   * load or an unload). A throwing `update` (a media type filling itself
+   * in once its asset lands) must not stop the loop: every sibling still
+   * needs its own refresh, and the scene must still show. Reported once
+   * per entry — `failed` is cleared only by a remount, which rebuilds the
+   * entry from scratch.
+   */
   function refresh(): void {
     for (const m of mounted.values())
-      for (const e of m.all) e.type.update?.(e.view, e.props, mountCtx([]));
+      for (const e of m.all) {
+        try {
+          e.type.update?.(e.view, e.props, mountCtx([]));
+        } catch (err) {
+          if (e.failed) continue;
+          e.failed = true;
+          error(
+            e.where,
+            `${e.node.type} "${e.node.id}" failed to refresh: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
   }
 
   function assetsOf(id: string, seen = new Set<string>()): string[] {

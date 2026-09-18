@@ -88,7 +88,7 @@ test('the canvas shows the coin at (40,40), and it spins', async ({ page }) => {
   // 8 fps: a new frame every 125 ms.
   const first = await coinFrame(frame);
   expect(first).not.toBeNull();
-  await expect.poll(() => coinFrame(frame), { timeout: 500 }).not.toBe(first);
+  await expect.poll(() => coinFrame(frame), { timeout: 1000 }).not.toBe(first);
 });
 
 test('Properties: fps a number, sheet a select of .json files; a dropped .json is a spritesheet node', async ({

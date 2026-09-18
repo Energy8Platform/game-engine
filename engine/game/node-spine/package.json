@@ -20,8 +20,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@energy8engine/contracts": "*",
-    "@energy8engine/diagnostics": "*",
     "@energy8engine/scenes": "*",
     "@esotericsoftware/spine-pixi-v8": "4.2.120",
     "cordis": "4.0.0-rc.8",

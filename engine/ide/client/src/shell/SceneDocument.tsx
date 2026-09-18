@@ -297,7 +297,7 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       'scenes',
       path,
       ext ? `no node type for .${ext}` : `no node type for "${path}"`,
-      'register one with ctx.assetNodeTypes',
+      'the game has not reported its node types yet (is the preview running?)',
     );
     ctx.connection.report(warn);
     setError(warn.message);

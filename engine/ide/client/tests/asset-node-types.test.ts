@@ -73,9 +73,11 @@ describe('assetNodeTypes', () => {
     expect(typeOf(ctx, 'assets/a.skel', [])).toBe('spine');
   });
 
-  it('without a tree the sibling rule is ignored: the last registered for the extension wins', async () => {
+  it('without a tree a sibling match can never be confirmed, so the sibling-less registration wins by default', async () => {
     const ctx = await media();
-    expect(typeOf(ctx, 'assets/b.json')).toBe('spine');
+    // spine claims .json too, but needs its .atlas beside — unconfirmable with no tree: spritesheet (no sibling) wins.
+    expect(typeOf(ctx, 'assets/b.json')).toBe('spritesheet');
+    // .skel has only one registration (spine), sibling or not: it still wins for lack of another candidate.
     expect(typeOf(ctx, 'assets/a.skel')).toBe('spine');
   });
 

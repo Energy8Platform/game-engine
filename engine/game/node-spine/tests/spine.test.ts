@@ -3,7 +3,7 @@ globalThis.requestAnimationFrame = ((fn: (t: number) => void) =>
 globalThis.cancelAnimationFrame = clearTimeout as unknown as typeof cancelAnimationFrame;
 
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Container, Texture } from 'pixi.js';
 import { Spine, SpineTexture, TextureAtlas } from '@esotericsoftware/spine-pixi-v8';
 import type { Context } from 'cordis';
@@ -19,17 +19,8 @@ const loaded = () => {
   return (path: string) => (path.endsWith('.atlas') ? atlas : json);
 };
 
-const ctxWith = (get: (path: string) => unknown, report?: (d: unknown) => void) =>
-  ({
-    reflect: {
-      get: (name: string) =>
-        name === 'assetLoader'
-          ? { get }
-          : name === 'diagnostics' && report
-            ? { report }
-            : undefined,
-    },
-  }) as unknown as Context;
+const ctxWith = (get: (path: string) => unknown) =>
+  ({ reflect: { get: (name: string) => (name === 'assetLoader' ? { get } : undefined) } }) as unknown as Context;
 const none = { reflect: { get: () => undefined } } as unknown as Context;
 const props = (over: Record<string, unknown> = {}) =>
   spine.schema({ skeleton: 'assets/hero.json', ...over } as never);
@@ -119,7 +110,7 @@ describe('spine', () => {
     spine.unmount!(view);
   });
 
-  it('a JSON that is no skeleton, or one that does not parse, keeps the placeholder and reports once', () => {
+  it('malformed skeleton throws from update with a message naming the problem, not caught by the type', () => {
     const get = loaded();
     for (const [bad, why] of [
       [{ not: 'a skeleton' }, 'no "bones"'],
@@ -128,25 +119,27 @@ describe('spine', () => {
         "Couldn't find bone nope",
       ],
     ] as const) {
-      const report = vi.fn();
-      const ctx = ctxWith((p) => (p.endsWith('.json') ? bad : get(p)), report);
-      const view = spine.mount(props(), ctx);
+      // Mounts empty (nothing loaded yet); `update` is what fills it in once both assets land —
+      // and now what throws, since the scenes runtime's `refresh()` is what catches and reports it.
+      const view = spine.mount(props(), none);
+      const ctx = ctxWith((p) => (p.endsWith('.json') ? bad : get(p)));
+      expect(() => spine.update!(view, props(), ctx)).toThrow(why);
       expect(view.children).toHaveLength(0);
-      expect(report).toHaveBeenCalledTimes(1);
-      expect(report.mock.calls[0]![0]).toMatchObject({
-        severity: 'error',
-        plugin: 'spine',
-        where: 'assets/hero.json',
-        message: expect.stringContaining(`spine skeleton "assets/hero.json" did not parse: ${why}`),
-      });
-      expect(() => spine.update!(view, props(), ctx)).not.toThrow();
-      expect(view.children).toHaveLength(0);
-      expect(report).toHaveBeenCalledTimes(1);
       view.destroy();
-      // Without a diagnostics service it still just keeps the placeholder.
-      const mute = ctxWith((p) => (p.endsWith('.json') ? bad : get(p)));
-      expect(() => spine.update!(spine.mount(props(), mute), props(), mute)).not.toThrow();
     }
+  });
+
+  it('a foreign child mounted under the wrapper (a hand-edited YAML child) survives update, is not treated as the Spine', () => {
+    const view = spine.mount(props(), none);
+    const foreign = view.addChild(new Container());
+    foreign.label = 'foreign';
+    spine.update!(view, props(), ctxWith(loaded()));
+    expect(view.children).toContain(foreign);
+    expect(foreign.destroyed).toBe(false);
+    const s = view.children.find((c) => c instanceof Spine);
+    expect(s).toBeInstanceOf(Spine);
+    expect(s).not.toBe(foreign);
+    spine.unmount!(view);
   });
 
   it('update changes animation, loop, skin and speed in place, and keeps the same Spine', () => {

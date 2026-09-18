@@ -95,6 +95,27 @@ describe('spritesheet', () => {
     s.destroy();
   });
 
+  it('an animation naming a frame missing from the sheet keeps the frames that exist, not throw', async () => {
+    const bad = new Spritesheet(Texture.WHITE, {
+      frames: { a: frame(0), b: frame(8) },
+      meta: { scale: 1 },
+      animations: { spin: ['a', 'missing', 'b'] },
+    });
+    await bad.parse();
+    expect(() =>
+      spritesheet.mount(
+        props({ animation: 'spin' }),
+        ctxWith(() => bad),
+      ),
+    ).not.toThrow();
+    const view = spritesheet.mount(
+      props({ animation: 'spin' }),
+      ctxWith(() => bad),
+    ) as AnimatedSprite;
+    expect(view.textures).toEqual([bad.textures.a, bad.textures.b]);
+    view.destroy();
+  });
+
   it('a JSON that is not a spritesheet keeps the placeholder rather than throwing', () => {
     const notASheet = ctxWith(() => ({ some: 'data' }));
     const view = spritesheet.mount(props(), notASheet) as AnimatedSprite;
