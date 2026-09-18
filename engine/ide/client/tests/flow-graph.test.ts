@@ -8,6 +8,7 @@ import {
   nextId,
   removeEdges,
   removeNodes,
+  renameNode,
   toReactFlow,
 } from '../src/shell/flow-graph';
 import { FIVE, FIVE_KINDS } from './flow-harness';
@@ -94,6 +95,20 @@ describe('flow-graph reducers', () => {
       { from: 'draw', to: 'idle' },
     ]);
     expect(removeEdges(doc, [{ from: 'spin', out: 'result', to: 'draw' }]).edges).toHaveLength(6);
+  });
+
+  it('renameNode renames the node and rewrites every edge naming it', () => {
+    const next = renameNode(FIVE, 'idle', 'ready');
+    expect(next.nodes.map((n) => n.id)).toEqual(['start', 'base', 'ready', 'spin', 'draw']);
+    expect(next.nodes[2]).toEqual({ ...FIVE.nodes[2], id: 'ready' });
+    expect(next.edges).toEqual([
+      { from: 'start', to: 'base' },
+      { from: 'base', to: 'ready' },
+      { from: 'ready', to: 'spin' },
+      { from: 'spin', to: 'draw' },
+      { from: 'draw', to: 'ready' },
+    ]);
+    expect(FIVE.edges[1]).toEqual({ from: 'base', to: 'idle' });
   });
 
   it('moveNode sets ui', () => {

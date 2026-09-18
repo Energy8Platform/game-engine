@@ -159,8 +159,11 @@ export function validateFlow(
 
   for (const node of doc.nodes) {
     if (node.kind !== 'on' && node.kind !== 'wait') continue;
+    // A warning, not an error: a node fresh from the palette has neither yet,
+    // and the write must land for the form to fill it in. The runtime guards
+    // itself (`wait.run` throws, `on.arm` reports) when it is reached like this.
     if (node.props?.event === undefined && node.props?.ms === undefined) {
-      out.push(diagnostic('error', 'flow', node.id, `'${node.kind}' needs an 'event' or 'ms'`));
+      out.push(diagnostic('warning', 'flow', node.id, `'${node.kind}' needs an 'event' or 'ms'`));
     }
   }
 

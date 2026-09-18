@@ -81,6 +81,16 @@ export function removeEdges(doc: FlowDoc, edges: readonly FlowEdge[]): FlowDoc {
   return { ...doc, edges: doc.edges.filter((e) => !edges.some((g) => sameEdge(e, g))) };
 }
 
+/** The node under `newId`, every edge naming it rewritten to follow. */
+export function renameNode(doc: FlowDoc, id: string, newId: string): FlowDoc {
+  const re = (x: string) => (x === id ? newId : x);
+  return {
+    ...doc,
+    nodes: doc.nodes.map((n) => (n.id === id ? { ...n, id: newId } : n)),
+    edges: doc.edges.map((e) => ({ ...e, from: re(e.from), to: re(e.to) })),
+  };
+}
+
 export function moveNode(doc: FlowDoc, id: string, at: { x: number; y: number }): FlowDoc {
   return { ...doc, nodes: doc.nodes.map((n) => (n.id === id ? { ...n, ui: at } : n)) };
 }

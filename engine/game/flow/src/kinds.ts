@@ -121,7 +121,11 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
   }),
   outs: ['next'],
   trigger: true,
-  arm(p, fire, { ctx, busy, idle }) {
+  arm(p, fire, { ctx, busy, idle, report }) {
+    if (!p.event) {
+      report("'on' needs an 'event'");
+      return () => {};
+    }
     let queued: Record<string, unknown> | undefined;
     // Fires the queued payload once the runs drain; a run that slipped in
     // between `idle` resolving and this running means one more wait.
@@ -212,6 +216,7 @@ const wait: FlowNodeKind<{ ms?: number; event?: string }> = {
   timeout: false,
   run(p, { ctx, signal }) {
     return new Promise((resolve, reject) => {
+      if (p.event === undefined && p.ms === undefined) return reject(new Error("'wait' needs an 'event' or 'ms'"));
       if (signal.aborted) return reject(signal.reason);
       const offs: (() => void)[] = [];
       const settle = (fn: () => void) => () => {

@@ -1,5 +1,5 @@
 import Schema from 'schemastery';
-import { ObjectFields, type CommitMode, type SchemaNode } from './fields';
+import { ObjectFields, Pickers, type CommitMode, type SchemaNode } from './fields';
 
 export interface SchemaFormProps {
   /**
@@ -24,6 +24,12 @@ export interface SchemaFormProps {
   onChange: (next: Record<string, unknown>) => void;
   /** When number/string fields hand their value up — see `CommitMode`. Default `'change'`. */
   commit?: CommitMode;
+  /**
+   * By `meta.pick` name (`.extra('pick', 'scene')` on a string field), the
+   * ids to offer: such a field renders as a `<select>` of them instead of a
+   * text input. A `pick` with no picker here stays a text input.
+   */
+  pickers?: Record<string, () => string[]>;
 }
 
 /**
@@ -41,19 +47,30 @@ function rebuild(schema: unknown): SchemaNode | null {
   }
 }
 
-export function SchemaForm({ rowId, schema, value, onChange, commit = 'change' }: SchemaFormProps) {
+const NO_PICKERS: Record<string, () => string[]> = {};
+
+export function SchemaForm({
+  rowId,
+  schema,
+  value,
+  onChange,
+  commit = 'change',
+  pickers = NO_PICKERS,
+}: SchemaFormProps) {
   const node = rebuild(schema);
   if (!node?.dict) return null;
 
   return (
     <div className="e8-schema-form">
-      <ObjectFields
-        idPrefix={`field-${rowId}`}
-        node={node}
-        value={value}
-        onChange={onChange}
-        commit={commit}
-      />
+      <Pickers.Provider value={pickers}>
+        <ObjectFields
+          idPrefix={`field-${rowId}`}
+          node={node}
+          value={value}
+          onChange={onChange}
+          commit={commit}
+        />
+      </Pickers.Provider>
     </div>
   );
 }

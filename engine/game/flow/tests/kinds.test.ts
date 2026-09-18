@@ -96,6 +96,18 @@ describe('built-in kinds', () => {
     }
   });
 
+  it('wait with neither event nor ms rejects instead of hanging; on without an event reports and arms nothing', async () => {
+    const events = createEvents();
+    const { rc } = runCtx({ events });
+    await expect(kind('wait').run!({}, rc)).rejects.toThrow("'wait' needs an 'event' or 'ms'");
+    const fire = vi.fn();
+    const off = kind('on').arm!({ busy: 'ignore' }, fire, rc);
+    expect(rc.report).toHaveBeenCalledWith("'on' needs an 'event'");
+    events.emit('undefined');
+    expect(fire).not.toHaveBeenCalled();
+    expect(() => off()).not.toThrow();
+  });
+
   it('boot fires once on the next microtask; wait opts out of the run timeout', async () => {
     const fire = vi.fn();
     const { rc } = runCtx();

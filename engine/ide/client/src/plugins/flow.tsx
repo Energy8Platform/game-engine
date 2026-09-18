@@ -10,6 +10,7 @@ import {
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
 import { FlowDocument } from '../shell/FlowDocument';
+import { FlowProperties } from '../shell/FlowProperties';
 
 /**
  * The flow document, client half — shaped after `scenes.tsx`: a plain
@@ -31,10 +32,13 @@ import { FlowDocument } from '../shell/FlowDocument';
  * "this run's steps", not a history across runs.
  *
  * `select` is state only: unlike `scenes`, there is no iframe canvas to
- * tell — Task 8's canvas reads `selected()` straight off this service.
+ * tell — the canvas reads `selected()` straight off this service.
  *
- * `inject`s `scenes` for Task 9's mutual deselect (picking a node in one
- * canvas clears the other's selection); unused here.
+ * The two inspectors share the right sidebar, so the selections are
+ * mutually exclusive: selecting a flow node clears `scenes`' selection,
+ * and a `scenes` selection landing while a flow node is selected clears
+ * this one. Each side only ever clears the OTHER, and only when its own
+ * selection is non-null, so the two never ping-pong.
  */
 declare module 'cordis' {
   interface Context {
@@ -136,6 +140,7 @@ export function apply(ctx: Context, config: FlowConfig) {
       if (id === selected) return;
       selected = id;
       notify();
+      if (id !== null) ctx.scenes.select(null);
     },
     async update(next) {
       let res: Response;
@@ -217,6 +222,35 @@ export function apply(ctx: Context, config: FlowConfig) {
         FlowDocument,
       ),
     'flow:document',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.register(
+        { name: 'shell.sideRight', key: 'flow', title: 'Properties' },
+        function FlowPropertiesView() {
+          return <FlowProperties ctx={ctx} />;
+        },
+      ),
+    'flow:side-right',
+  );
+
+  ctx.effect(
+    () =>
+      service.subscribe(() => {
+        const shown = ctx.shell.sideRight() === 'flow';
+        if (selected !== null && !shown) ctx.shell.showSideRight('flow');
+        else if (selected === null && shown) ctx.shell.hideSideRight();
+      }),
+    'flow:side-right-shown',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.scenes.subscribe(() => {
+        if (selected !== null && ctx.scenes.selected() !== null) service.select(null);
+      }),
+    'flow:scenes-deselect',
   );
 
   ctx.provide('flow', service);

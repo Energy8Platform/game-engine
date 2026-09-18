@@ -171,6 +171,33 @@ describe('/api/flow', () => {
     close();
   });
 
+  it('PUT with a bare `wait` (no event, no ms — fresh from the palette) is written and answers the warning', async () => {
+    const root = flowWorkspace();
+    host = await createIdeHost({ root, port: 0 });
+    const doc: FlowDoc = {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'wait-1', kind: 'wait', ui: { x: 280, y: 280 } },
+      ],
+      edges: [{ from: 'start', to: 'wait-1' }],
+    };
+    const res = await put(host.url, doc);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as FlowResponse).toEqual({
+      doc,
+      diagnostics: [
+        expect.objectContaining({
+          severity: 'warning',
+          where: 'wait-1',
+          message: "'wait' needs an 'event' or 'ms'",
+        }),
+      ],
+      kinds: [],
+    });
+    expect(yaml.load(readFileSync(join(root, 'flow.yml'), 'utf8'))).toEqual(doc);
+  });
+
   it('a write through /api/files of flow.yml re-reads and broadcasts; an unparsable one is one error at flow.yml', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
     const { frames, close } = await listen(host);

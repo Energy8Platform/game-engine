@@ -244,6 +244,31 @@ describe('createFlow', () => {
     expect(f.report).not.toHaveBeenCalled();
   });
 
+  it('a bare wait is a warning at replace, then an error on the node when the branch reaches it; a bare on is an error at arm', async () => {
+    const f = harness();
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'w', kind: 'wait' },
+          { id: 'idle', kind: 'on' },
+        ],
+        [{ from: 'start', to: 'w' }],
+      ),
+    );
+    expect(f.report).toHaveBeenCalledWith(expect.objectContaining({ severity: 'warning', where: 'w' }));
+    expect(f.report).toHaveBeenCalledWith(expect.objectContaining({ severity: 'warning', where: 'idle' }));
+    // The doc still runs: boot fires, the branch enters `w` and ends there.
+    await settled(f, ['start.next']);
+    await vi.waitFor(() =>
+      expect(f.report).toHaveBeenCalledWith(
+        expect.objectContaining({ severity: 'error', where: 'w', message: "'wait' needs an 'event' or 'ms'" }),
+      ),
+    );
+    expect(f.report).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', where: 'idle' }));
+    expect(f.flow.trace().at(-1)).toMatchObject({ node: 'w', out: null });
+  });
+
   it('a throwing run and a 30 s run (fake timers) report a diagnostic naming the node; the branch ends', async () => {
     vi.useFakeTimers();
     const boom: FlowNodeKind = {

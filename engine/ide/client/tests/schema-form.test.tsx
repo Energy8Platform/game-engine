@@ -135,6 +135,46 @@ const danglingRefSchema = (() => {
   return raw;
 })();
 
+/** A flow `show`'s `scene`: a string the IDE renders as a picker of scene ids. */
+const pickSchema = JSON.parse(
+  JSON.stringify(
+    Schema.object({
+      scene: Schema.string().required().extra('pick', 'scene').description('scene id'),
+    }).toJSON(),
+  ),
+);
+
+describe('SchemaForm — pick', () => {
+  it('a string field with meta.pick renders as a select of the picker’s ids (plus the current value and an empty option) and commits on change', () => {
+    const onChange = vi.fn();
+    render(
+      <SchemaForm
+        rowId="row"
+        schema={pickSchema}
+        value={{ scene: 'gone' }}
+        onChange={onChange}
+        commit="blur"
+        pickers={{ scene: () => ['base_game', 'bonus'] }}
+      />,
+    );
+    const select = screen.getByLabelText('scene id') as HTMLSelectElement;
+    expect(select.tagName).toBe('SELECT');
+    expect([...select.options].map((o) => o.value)).toEqual(['', 'base_game', 'bonus', 'gone']);
+    expect(select.value).toBe('gone');
+    fireEvent.change(select, { target: { value: 'bonus' } });
+    expect(onChange).toHaveBeenCalledWith({ scene: 'bonus' });
+  });
+
+  it('without a picker for it, the field stays a text input', () => {
+    render(
+      <SchemaForm rowId="row" schema={pickSchema} value={{ scene: 'x' }} onChange={() => {}} />,
+    );
+    const input = screen.getByLabelText('scene id') as HTMLInputElement;
+    expect(input.tagName).toBe('INPUT');
+    expect(input.value).toBe('x');
+  });
+});
+
 describe('SchemaForm', () => {
   it('labels each field with its description', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{}} onChange={() => {}} />);

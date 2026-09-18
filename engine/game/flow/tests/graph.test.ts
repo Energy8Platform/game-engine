@@ -66,7 +66,8 @@ describe('validateFlow', () => {
         expect.objectContaining({ severity: 'error', where: 'ifnode→badscene' }),
         expect.objectContaining({ severity: 'error', where: 'a', message: expect.stringContaining('boot') }),
         expect.objectContaining({ severity: 'warning', where: 'orphan' }),
-        expect.objectContaining({ severity: 'error', where: 'w' }),
+        // A palette-fresh `wait`/`on` has neither yet: a warning, so the write lands and the form fills it in.
+        expect.objectContaining({ severity: 'warning', where: 'w', message: "'wait' needs an 'event' or 'ms'" }),
         expect.objectContaining({ severity: 'error', where: 'badscene' }),
       ]),
     );

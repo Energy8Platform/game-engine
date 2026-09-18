@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -18,6 +20,15 @@ import {
  */
 export type CommitMode = 'change' | 'blur';
 
+declare global {
+  namespace Schemastery {
+    interface Meta {
+      /** `.extra('pick', 'scene')`: render this string field as a picker of the named thing's ids — see `SchemaForm.pickers`. */
+      pick?: string;
+    }
+  }
+}
+
 /** The parts of a rebuilt schemastery schema the form reads. */
 export interface SchemaNode {
   type: string;
@@ -33,8 +44,13 @@ export interface SchemaNode {
     max?: number;
     step?: number;
     extra?: { applies?: 'restart' };
+    /** A string field to render as a `<select>` of the named picker's ids — see `SchemaForm.pickers`. */
+    pick?: string;
   };
 }
+
+/** `SchemaForm.pickers`, reaching `StringField` however deep the field sits (arrays, dicts). */
+export const Pickers = createContext<Record<string, () => string[]>>({});
 
 export interface FieldProps {
   id: string;
@@ -326,6 +342,34 @@ function NumberField({ id, node, value, onChange, commit }: FieldProps) {
 }
 
 function StringField({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
+  const current = value ?? node.meta?.default;
+  const pickers = useContext(Pickers);
+  const pick = node.meta?.pick === undefined ? undefined : pickers[node.meta.pick];
+  if (pick) {
+    // The current value stays offered even when it is no longer among the
+    // ids (a deleted scene): the select must show what the document says.
+    const text = current === undefined ? '' : String(current);
+    const ids = pick();
+    const options = ['', ...ids, ...(text && !ids.includes(text) ? [text] : [])];
+    return (
+      <select
+        id={id}
+        aria-label={ariaLabel}
+        value={text}
+        onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return <TextField {...{ id, node, value, onChange, commit, ariaLabel }} />;
+}
+
+function TextField({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
   const current = value ?? node.meta?.default;
   const draft = useDraft<string>({
     dep: value,

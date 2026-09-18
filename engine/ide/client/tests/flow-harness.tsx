@@ -7,16 +7,17 @@ import * as connection from '../src/plugins/connection';
 import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as flow from '../src/plugins/flow';
-import type { ScenesService } from '../src/plugins/scenes';
+import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
 
 /**
  * The one flow test harness, shared by `flow-service.test.tsx` and
  * `flow-document.test.tsx`: the `flow` service booted on a real `Context`
  * with the real `connection` (fake socket), `slots` and `shell` — the
- * plugins it injects — plus a stub `scenes` (unused today, injected for
- * Task 9's mutual deselect: composing the real plugin here would drag in
- * its own `workspace`/`gameComposition`/`assetNodeTypes`/`files` chain
- * for nothing this plugin reads).
+ * plugins it injects — plus a stub `scenes` that holds a selection and
+ * a doc list (what the mutual deselect and the `scene` picker read;
+ * composing the real plugin here would drag in its own
+ * `workspace`/`gameComposition`/`assetNodeTypes`/`files` chain for
+ * nothing else this plugin reads).
  */
 export class FakeSocket implements WebSocketLike {
   listeners: Record<string, ((event: any) => void)[]> = {};
@@ -74,26 +75,36 @@ export const FIVE_KINDS: FlowKindInfo[] = [
   kind('wait', ['next']),
 ];
 
-const scenesStub: ScenesService = {
-  docs: () => [],
-  diagnostics: () => [],
-  nodeTypes: () => [],
-  selected: () => null,
-  select: () => {},
-  create: async () => [],
-  remove: async () => [],
-  update: async () => [],
-  preview: async () => [],
-  open: () => {},
-  subscribe: () => () => {},
-};
+function scenesStub(ids: readonly string[]): ScenesService {
+  let selected: SceneSelection | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    docs: () => ids.map((id) => ({ id, nodes: [] })),
+    diagnostics: () => [],
+    nodeTypes: () => [],
+    selected: () => selected,
+    select(sel) {
+      selected = sel;
+      for (const fn of listeners) fn();
+    },
+    create: async () => [],
+    remove: async () => [],
+    update: async () => [],
+    preview: async () => [],
+    open: () => {},
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+  };
+}
 
 const built: Context[] = [];
 afterEach(async () => {
   for (const ctx of built.splice(0)) await ctx.fiber.dispose();
 });
 
-export async function harness(routes: Record<string, Route>) {
+export async function harness(routes: Record<string, Route>, sceneIds: readonly string[] = []) {
   const socket = new FakeSocket();
   const calls: { method: string; url: string; body: unknown }[] = [];
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -113,7 +124,7 @@ export async function harness(routes: Record<string, Route>) {
   await ctx.plugin(connection, { url: 'ws://x/ide', socketFactory: () => socket });
   await ctx.plugin(slots);
   await ctx.plugin(shell);
-  ctx.provide('scenes', scenesStub);
+  ctx.provide('scenes', scenesStub(sceneIds));
   await ctx.plugin(flow, { url: 'ws://x/ide', fetchFn });
   return { ctx, socket, calls, fetchFn };
 }
