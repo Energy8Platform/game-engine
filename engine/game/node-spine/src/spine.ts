@@ -108,4 +108,15 @@ export const spine: NodeType<SpineProps> = {
   },
   // Not one of the runtime's own types, so it does not destroy the view; `Spine.destroy` leaves the ticker.
   unmount: (view) => view.destroy({ children: true }),
+  once(view, props) {
+    const s = view.children.find((c) => c instanceof Spine) as Spine | undefined;
+    if (!s) return Promise.resolve();
+    const data = s.skeleton.data;
+    const animation =
+      (props.animation && data.findAnimation(props.animation)) || data.animations[0];
+    return new Promise<void>((resolve) => {
+      const entry = s.state.setAnimation(0, animation.name, false);
+      entry.listener = { complete: () => resolve() };
+    });
+  },
 };

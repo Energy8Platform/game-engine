@@ -8,6 +8,10 @@ import type {
   ScenesMessage,
   ScenesResponse,
   ServerMessage,
+  SymbolDef,
+  SymbolsDoc,
+  SymbolsMessage,
+  SymbolsResponse,
 } from '../src';
 
 /** Compile-time shapes: a value of each type assigns; the unions carry the new members. */
@@ -36,5 +40,35 @@ describe('scene contracts', () => {
     expect(up.type).toBe('node-types');
     expect(response.nodeTypes[0].accept).toEqual(accept);
     expect(response.nodeTypes[0].assetProps).toEqual(['src']);
+  });
+});
+
+describe('symbols contracts', () => {
+  it('SymbolDef/SymbolsDoc shapes assign, and SymbolsMessage is a ServerMessage', () => {
+    const def: SymbolDef = {
+      id: 'wild',
+      name: 'Wild',
+      fit: 'contain',
+      static: { type: 'image', props: { src: 'assets/wild.png' } },
+      idle: { type: 'spritesheet', props: { sheet: 'assets/wild.json' } },
+      win: { type: 'spine', props: { skeleton: 'assets/wild-win.json' } },
+    };
+    const doc: SymbolsDoc = { version: 1, symbols: [def] };
+    const response: SymbolsResponse = {
+      doc,
+      known: [{ id: 'wild', name: 'Wild' }],
+      diagnostics: [],
+    };
+    const frames: ServerMessage[] = [
+      { type: 'symbols', doc, diagnostics: [] } satisfies SymbolsMessage,
+    ];
+    expect(frames.map((f) => f.type)).toEqual(['symbols']);
+    expect(response.doc?.symbols[0].id).toBe('wild');
+    // a symbol with only the required `static` view is a legal SymbolDef
+    const minimal: SymbolDef = { id: 'ten', static: { type: 'image', props: {} } };
+    expect(minimal.idle).toBeUndefined();
+    // doc: null (nothing curated yet, or a curation error) is legal on both the message and the response
+    const empty: SymbolsMessage = { type: 'symbols', doc: null, diagnostics: [] };
+    expect(empty.doc).toBeNull();
   });
 });

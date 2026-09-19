@@ -91,3 +91,42 @@ describe('createReelsBoard — after destroy()', () => {
     expect(problems[0].message).toContain('board destroyed');
   });
 });
+
+describe('createReelsBoard: repaint / cellSize (real createReelSystem)', () => {
+  it('cellSize reflects the grid config, defaulting to 96 square', () => {
+    const withDefault = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    expect(withDefault.cellSize).toEqual({ width: 96, height: 96 });
+    withDefault.destroy();
+
+    const withCustom = createReelsBoard({
+      resolve,
+      config: { grid: { cols: 1, rows: 1, cellSize: 64 } },
+    });
+    expect(withCustom.cellSize).toEqual({ width: 64, height: 64 });
+    withCustom.destroy();
+  });
+
+  it('repaint re-resolves the board in place — same data, a fresh view', async () => {
+    const calls: string[] = [];
+    const spy: SymbolResolver = vi.fn((id: string) => {
+      calls.push(id);
+      const c = new Container() as unknown as { __symbol: string };
+      c.__symbol = id;
+      return c as any;
+    });
+    const board = createReelsBoard({ resolve: spy, config: { grid: { cols: 1, rows: 1 } } });
+    await board.refill({ kind: 'refill', board: [[7]] });
+    const before = calls.length;
+
+    board.repaint();
+
+    expect(calls.length).toBeGreaterThan(before);
+    board.destroy();
+  });
+
+  it('repaint is a no-op after destroy — does not throw', () => {
+    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    board.destroy();
+    expect(() => board.repaint()).not.toThrow();
+  });
+});

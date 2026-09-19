@@ -97,6 +97,8 @@ export interface LegacyReelSystem {
   readonly board: CellData[][];
   spin(target: CellData[][]): Promise<void>;
   setBoard(target: CellData[][]): void;
+  /** Read by `cellSize` below; the real `ReelSystem` always has it, the fake this package's tests use may not. */
+  readonly config?: { grid: { cellSize: number } };
 }
 
 /** Symbol ids in the step vocabulary are numbers; the legacy resolver is keyed by string. */
@@ -105,10 +107,14 @@ function toCellBoard(board: Board): CellData[][] {
 }
 
 /**
- * Builds `BoardApi` over an already-constructed legacy reel system — or,
- * in a test, a fake satisfying `LegacyReelSystem`.
+ * Builds `BoardApi` plus `repaint`/`cellSize` (declared on `ReelsBoard`
+ * below, not on `BoardApi` itself — `Omit` just borrows its two extra
+ * members here) over an already-constructed legacy reel system — or, in a
+ * test, a fake satisfying `LegacyReelSystem`.
  */
-export function boardFromReelSystem(reelSystem: LegacyReelSystem): BoardApi {
+export function boardFromReelSystem(
+  reelSystem: LegacyReelSystem,
+): Omit<ReelsBoard, 'view' | 'grid' | 'destroy'> {
   return {
     async spinTo(step: SpinToStep) {
       await reelSystem.spin(toCellBoard(step.board));
@@ -148,6 +154,17 @@ export function boardFromReelSystem(reelSystem: LegacyReelSystem): BoardApi {
     async refill(step: RefillStep) {
       reelSystem.setBoard(toCellBoard(step.board));
     },
+
+    // Forces a redraw without changing any symbol — a config edit (e.g. a frame style) that
+    // `setBoard` alone would pick up on the NEXT spin/refill, made visible right away.
+    repaint() {
+      reelSystem.setBoard(reelSystem.board);
+    },
+
+    get cellSize() {
+      const size = reelSystem.config?.grid.cellSize ?? 96;
+      return { width: size, height: size };
+    },
   };
 }
 
@@ -156,6 +173,10 @@ export interface ReelsBoard extends BoardApi {
   readonly view: Container;
   /** The grid this board drives — same object `revealWins`/`remove` reach via `getCell`. */
   readonly grid: GridLike;
+  /** Re-`setBoard`s the current board to force every cell to redraw; a no-op after `destroy()`. */
+  repaint(): void;
+  /** One cell's footprint — square, from the reel config's `grid.cellSize` (96 when absent). */
+  readonly cellSize: { width: number; height: number };
   destroy(): void;
 }
 
@@ -191,6 +212,14 @@ export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
     refill: guarded(api.refill),
     view: reelSystem.view,
     grid: reelSystem.grid,
+    // Unlike the four BoardApi methods above, a stale repaint is nothing to refuse over —
+    // there is no spin result it could misreport — so this is a no-op, not a throw.
+    repaint() {
+      if (!destroyed) api.repaint();
+    },
+    get cellSize() {
+      return api.cellSize;
+    },
     destroy() {
       destroyed = true;
       reelSystem.destroy();

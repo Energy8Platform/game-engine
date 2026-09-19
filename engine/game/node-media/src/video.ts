@@ -25,6 +25,16 @@ const elementOf = (tex: Texture): VideoEl | undefined => {
     : undefined;
 };
 
+/** The fuller element `once` drives — same resource, a few more members. */
+type OnceEl = Pick<HTMLVideoElement, 'loop' | 'currentTime' | 'play' | 'addEventListener'>;
+
+const onceElementOf = (tex: Texture): OnceEl | undefined => {
+  const el = (tex.source as { resource?: unknown }).resource as Partial<OnceEl> | undefined;
+  return el && typeof el.play === 'function' && typeof el.addEventListener === 'function'
+    ? (el as OnceEl)
+    : undefined;
+};
+
 const VIDEO_EXTENSIONS = ['mp4', 'webm'];
 
 export const video: NodeType<VideoProps> = {
@@ -64,5 +74,23 @@ export const video: NodeType<VideoProps> = {
     const s = view as Sprite;
     elementOf(s.texture)?.pause();
     s.destroy();
+  },
+  once(view, props) {
+    const s = view as Sprite;
+    const el = onceElementOf(s.texture);
+    if (!el) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      el.loop = false;
+      el.currentTime = 0;
+      void el.play();
+      el.addEventListener(
+        'ended',
+        () => {
+          el.loop = props.loop;
+          resolve();
+        },
+        { once: true },
+      );
+    });
   },
 };

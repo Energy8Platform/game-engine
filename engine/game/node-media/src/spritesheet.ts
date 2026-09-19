@@ -74,4 +74,19 @@ export const spritesheet: NodeType<SpritesheetProps> = {
   },
   // Not one of the runtime's own types, so it does not destroy the view: stop the ticker here.
   unmount: (view) => view.destroy(),
+  // A view still on the placeholder (`mount` beat the load) has nothing to play: resolve at once
+  // rather than wait for a swap that `once`'s own caller has no way to trigger.
+  once(view, props) {
+    const s = view as AnimatedSprite;
+    if (!(s instanceof AnimatedSprite) || s.textures.length <= 1) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      s.loop = false;
+      s.onComplete = () => {
+        s.onComplete = undefined;
+        s.loop = props.loop;
+        resolve();
+      };
+      s.gotoAndPlay(0);
+    });
+  },
 };

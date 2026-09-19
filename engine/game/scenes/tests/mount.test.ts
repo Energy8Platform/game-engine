@@ -239,6 +239,32 @@ describe('mounting', () => {
     expect(byId(scenes, 'a', 'n')).not.toBe(before);
   });
 
+  it('view finds a node nested under a container, not just top-level ones', () => {
+    const { scenes } = boot([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'grp',
+            type: 'container',
+            props: {},
+            children: [
+              {
+                id: 'inner',
+                type: 'container',
+                props: {},
+                children: [{ id: 'deep', type: 'image', props: { src: 'k.png' } }],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(byId(scenes, 'a', 'inner')!.parent).toBe(byId(scenes, 'a', 'grp'));
+    expect(byId(scenes, 'a', 'deep')!.parent).toBe(byId(scenes, 'a', 'inner'));
+    expect(byId(scenes, 'a', 'nope')).toBeUndefined();
+  });
+
   it('a view the type did not build survives an unmount: `unmount` detaches, the runtime never destroys', () => {
     const foreign = new Container();
     const { scenes, nodeTypes } = boot();

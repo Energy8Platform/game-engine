@@ -63,6 +63,7 @@ export interface ScenesService {
   /** Mounts `id`'s tree into a fresh container for a `scene` node; `null` on a cycle or a missing id. Internal to `scene` nodes. */
   mountDoc(id: string, chain: string[]): Container | null;
   sceneView(id: string): Container | undefined;
+  /** A node's view by id, top-level or nested under a `container`/another node — the top-level map first (the common case, O(1)), `all` otherwise. */
   view(ref: SceneRef): Container | undefined;
   readonly container: Container;
   /**
@@ -519,7 +520,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       return view;
     },
     sceneView: (id) => mounted.get(id)?.view,
-    view: (ref) => mounted.get(ref.scene)?.nodes.get(ref.node)?.view,
+    view(ref) {
+      const m = mounted.get(ref.scene);
+      return m?.nodes.get(ref.node)?.view ?? m?.all.find((e) => e.node.id === ref.node)?.view;
+    },
     resize(viewportWidth, viewportHeight) {
       const fit = fitStage(
         { width: viewportWidth, height: viewportHeight },

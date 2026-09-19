@@ -88,4 +88,23 @@ describe('gif', () => {
     expect(s.destroyed).toBe(true);
     gif.unmount!(view);
   });
+
+  it('once resolves at once when the wrapper has no GifSprite yet (source still loading)', async () => {
+    const view = gif.mount(props(), none);
+    await expect(gif.once!(view, props(), none)).resolves.toBeUndefined();
+  });
+
+  it('once plays without looping and resolves (restoring loop) when the GifSprite completes', async () => {
+    const src = source();
+    const view = gif.mount(props({ loop: true }), ctxWith(() => src));
+    const s = view.children[0] as GifSprite;
+    const p = gif.once!(view, props({ loop: true }), none);
+    expect(s.loop).toBe(false);
+    expect(s.currentFrame).toBe(0);
+    s.onComplete!();
+    await expect(p).resolves.toBeUndefined();
+    expect(s.loop).toBe(true);
+    expect(s.onComplete).toBeUndefined();
+    gif.unmount!(view);
+  });
 });

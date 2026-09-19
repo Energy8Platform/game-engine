@@ -181,4 +181,36 @@ describe('spine', () => {
     expect(again.destroyed).toBe(true);
     spine.unmount!(view);
   });
+
+  it('once resolves at once when nothing is loaded yet (no Spine child)', async () => {
+    const view = spine.mount(props(), none);
+    await expect(spine.once!(view, props(), none)).resolves.toBeUndefined();
+  });
+
+  it('once plays the named animation without looping and resolves when it completes', async () => {
+    const view = spine.mount(props(), ctxWith(loaded()));
+    const s = child(view);
+    const p = spine.once!(view, props({ animation: 'wave' }), none);
+    const entry = s.state.tracks[0]!;
+    expect(entry.animation!.name).toBe('wave');
+    expect(entry.loop).toBe(false);
+    let settled = false;
+    p.then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false); // not yet — only the track's own completion resolves it
+    entry.listener!.complete!(entry);
+    await expect(p).resolves.toBeUndefined();
+    spine.unmount!(view);
+  });
+
+  it('once falls back to the first animation when none is named or the named one is unknown', async () => {
+    const view = spine.mount(props(), ctxWith(loaded()));
+    const s = child(view);
+    const p = spine.once!(view, props({ animation: 'nope' }), none);
+    const entry = s.state.tracks[0]!;
+    expect(entry.animation!.name).toBe('idle');
+    entry.listener!.complete!(entry);
+    await expect(p).resolves.toBeUndefined();
+    spine.unmount!(view);
+  });
 });

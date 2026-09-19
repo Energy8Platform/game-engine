@@ -4,8 +4,17 @@ import type { Context } from 'cordis';
 import { video } from '../src/video';
 
 const fakeVideo = () => {
-  const el = { play: vi.fn(() => Promise.resolve()), pause: vi.fn(), loop: false, muted: false };
-  return { el, tex: { source: { resource: el } } as unknown as Texture };
+  const listeners = new Map<string, () => void>();
+  const el = {
+    play: vi.fn(() => Promise.resolve()),
+    pause: vi.fn(),
+    loop: false,
+    muted: false,
+    currentTime: 0,
+    addEventListener: vi.fn((type: string, fn: () => void) => listeners.set(type, fn)),
+  };
+  const fireEnded = () => listeners.get('ended')?.();
+  return { el, fireEnded, tex: { source: { resource: el } } as unknown as Texture };
 };
 const ctxWith = (get: (path: string) => unknown) =>
   ({ reflect: { get: () => ({ get }) } }) as unknown as Context;
@@ -63,5 +72,26 @@ describe('video', () => {
     video.unmount!(view);
     expect(el.pause).toHaveBeenCalledTimes(1);
     expect(view.destroyed).toBe(true);
+  });
+
+  it('once resolves at once when nothing is loaded (no video element yet)', async () => {
+    const view = video.mount(props(), none);
+    await expect(video.once!(view, props(), none)).resolves.toBeUndefined();
+  });
+
+  it('once plays without looping from the start and resolves (restoring loop) on "ended"', async () => {
+    const { el, fireEnded, tex } = fakeVideo();
+    el.currentTime = 5;
+    const view = video.mount(
+      props({ loop: true }),
+      ctxWith(() => tex),
+    );
+    const p = video.once!(view, props({ loop: true }), none);
+    expect(el.loop).toBe(false);
+    expect(el.currentTime).toBe(0);
+    expect(el.play).toHaveBeenCalled();
+    fireEnded();
+    await expect(p).resolves.toBeUndefined();
+    expect(el.loop).toBe(true);
   });
 });

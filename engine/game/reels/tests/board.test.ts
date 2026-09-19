@@ -239,3 +239,30 @@ describe('boardFromReelSystem: revealWins', () => {
     expect(settled).toBe(true);
   });
 });
+
+describe('boardFromReelSystem: repaint / cellSize', () => {
+  it('repaint re-sets the current board — a setBoard call with the board unchanged', async () => {
+    const initial = [[{ symbol: 'a' }], [{ symbol: 'b' }]];
+    const { reelSystem, setBoard } = fakeReelSystem(initial);
+    const board = boardFromReelSystem(reelSystem);
+
+    board.repaint();
+
+    expect(setBoard).toHaveBeenCalledTimes(1);
+    expect(setBoard).toHaveBeenCalledWith(initial);
+  });
+
+  it('cellSize reads grid.cellSize off the fake, square', () => {
+    const { reelSystem } = fakeReelSystem();
+    const board = boardFromReelSystem({ ...reelSystem, config: { grid: { cellSize: 64 } } });
+
+    expect(board.cellSize).toEqual({ width: 64, height: 64 });
+  });
+
+  it('cellSize falls back to 96 when the fake has no config', () => {
+    const { reelSystem } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    expect(board.cellSize).toEqual({ width: 96, height: 96 });
+  });
+});

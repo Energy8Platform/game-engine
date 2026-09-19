@@ -29,6 +29,8 @@ export interface NodeType<P = Record<string, unknown>> {
   mount(props: P, ctx: Context): Container;
   /** Re-syncs the view from `ctx`/the loader (after a load or an unload); `props` may be unchanged. */
   update?(view: Container, props: P, ctx: Context): void;
+  /** Plays the view's media once and resolves when it finishes; a view not yet filled in (asset still loading) resolves at once — the runtime never remounts to retry. */
+  once?(view: Container, props: P, ctx: Context): Promise<void>;
   /** The runtime never destroys a view it did not build; `unmount` is the type's chance to detach its own. */
   unmount?(view: Container): void;
   /** Project-relative paths this node needs loaded before it shows. */

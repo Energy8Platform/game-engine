@@ -169,4 +169,25 @@ describe('spritesheet', () => {
     expect(view.playing).toBe(true);
     view.destroy();
   });
+
+  it('once resolves at once on a view still on the placeholder (single-texture)', async () => {
+    const view = spritesheet.mount(props(), none) as AnimatedSprite;
+    await expect(spritesheet.once!(view, props(), none)).resolves.toBeUndefined();
+    view.destroy();
+  });
+
+  it('once plays without looping and resolves (restoring loop) when the animation completes', async () => {
+    const view = spritesheet.mount(
+      props({ animation: 'spin', loop: true }),
+      ctxWith(() => sheet),
+    ) as AnimatedSprite;
+    const p = spritesheet.once!(view, props({ animation: 'spin', loop: true }), none);
+    expect(view.loop).toBe(false);
+    expect(view.playing).toBe(true);
+    view.onComplete!();
+    await expect(p).resolves.toBeUndefined();
+    expect(view.loop).toBe(true);
+    expect(view.onComplete).toBeUndefined();
+    view.destroy();
+  });
 });

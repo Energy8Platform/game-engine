@@ -57,4 +57,18 @@ export const gif: NodeType<GifProps> = {
     (view.children.find((c) => c instanceof GifSprite) as GifSprite | undefined)?.destroy(false);
     view.destroy();
   },
+  once(view, props) {
+    const sprite = view.children.find((c) => c instanceof GifSprite) as GifSprite | undefined;
+    if (!sprite) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      sprite.loop = false;
+      sprite.onComplete = () => {
+        sprite.onComplete = undefined;
+        sprite.loop = props.loop;
+        resolve();
+      };
+      sprite.currentFrame = 0;
+      sprite.play();
+    });
+  },
 };

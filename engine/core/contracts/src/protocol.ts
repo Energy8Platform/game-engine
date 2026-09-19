@@ -429,6 +429,45 @@ export interface FlowResponse {
   kinds: FlowKindInfo[];
 }
 
+/** One entry of a symbol's view tree — mirrors `SceneNode` but has no id/children: a symbol's own `NodeType` tree is fixed shape (`static`/`idle`/`win`), not user-nested. */
+export interface SymbolNode {
+  type: string;
+  props: Record<string, unknown>;
+}
+
+/** Which of a symbol's up to three views is showing. */
+export type SymbolState = 'static' | 'idle' | 'win';
+
+/** One symbol's definition: its id (what a reel's board carries) and a node per state it supports. `static` is required — a symbol always has a resting view; `idle`/`win` fall back to it when absent. */
+export interface SymbolDef {
+  id: string;
+  name?: string;
+  fit?: 'contain' | 'none';
+  static: SymbolNode;
+  idle?: SymbolNode;
+  win?: SymbolNode;
+}
+
+/** `symbols.yml`, parsed. */
+export interface SymbolsDoc {
+  version: 1;
+  symbols: SymbolDef[];
+}
+
+/** The symbols document, sent by the host on any change — same shape as `FlowMessage`. */
+export interface SymbolsMessage {
+  type: 'symbols';
+  doc: SymbolsDoc | null;
+  diagnostics: Diagnostic[];
+}
+
+/** What `GET /api/symbols` answers on the root and the preview alike. `known` is the reel board's registered symbol ids/names — the IDE's pick target for `SymbolDef.id`. */
+export interface SymbolsResponse {
+  doc: SymbolsDoc | null;
+  known: { id: string; name: string }[];
+  diagnostics: Diagnostic[];
+}
+
 /** Host to browser. Slice 0 sends whole snapshots: they are small, and diffing is a later problem. */
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: Snapshot }
@@ -444,7 +483,8 @@ export type ServerMessage =
   | { type: 'workspace'; workspace: WorkspaceState }
   | FlowMessage
   | FlowKindsMessage
-  | FlowTraceMessage;
+  | FlowTraceMessage
+  | SymbolsMessage;
 
 /** Browser to host. */
 export type ClientMessage =
