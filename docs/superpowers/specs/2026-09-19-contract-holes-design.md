@@ -87,8 +87,9 @@ nothing moves there.
 
 `COMMON` gains: `width`, `height` (number, optional — when set, applied
 AFTER `scale` as `view.width = …`/`view.height = …`, so one axis can be
-stretched), `tint` (`'#rrggbb'` string, default `'#ffffff'`; applied where
-`view.tint` exists), `anchorX`, `anchorY` (number, optional; default to
+stretched), `tint` (a colour string pixi's `Color` parses — `'#rrggbb'` in the
+IDE; optional: unset leaves the view's own tint alone, so a node type's
+`mount` may set one), `anchorX`, `anchorY` (number, optional; default to
 `anchor`), `mask` (boolean, default `false`: the view becomes its parent's
 `mask` — the runtime sets `parent.mask = view` after `addChild` and clears
 it on unmount; applies to `image` and `shape`, ignored elsewhere with no
