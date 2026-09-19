@@ -108,9 +108,16 @@ describe('/api/flow', () => {
     expect(await get(host.url)).toEqual({ doc: null, diagnostics: [], kinds: builtins() });
   });
 
-  it('the built-in kinds check a document before any game speaks: an unknown kind is an error, an orphan a warning', async () => {
+  it('before any game speaks an unknown kind is not reported; once it has, kind checks apply — the orphan warning included', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
-    const bad = await put(host.url, {
+    const { socket, close } = await listen(host);
+    // No game has EVER reported `flow-kinds` here: `check`'s own `lastKinds`
+    // is still `null`, and `validateFlow(doc, null, …)` skips every
+    // kind-dependent check (unknown kind, bad port, the orphan check below)
+    // entirely — a project the host is merely holding open must not paint
+    // a `sound`/`tween` node (or a genuine typo) red before anything
+    // running has said it is wrong.
+    const notYetChecked = await put(host.url, {
       version: 1,
       nodes: [
         { id: 'start', kind: 'boot' },
@@ -118,10 +125,14 @@ describe('/api/flow', () => {
       ],
       edges: [{ from: 'start', to: 'x' }],
     });
-    expect(bad.status).toBe(400);
-    expect((await bad.json()).diagnostics).toEqual([
-      expect.objectContaining({ severity: 'error', where: 'x', message: "unknown kind 'mystery'" }),
-    ]);
+    expect(notYetChecked.status).toBe(200);
+    expect(((await notYetChecked.json()) as FlowResponse).diagnostics).toEqual([]);
+
+    // The game reports once: kind checks are on from here — the orphan
+    // check is kind-dependent too (a trigger kind is exempt from it), so
+    // it only ever fires once kinds are known, same as "unknown kind".
+    socket.send(JSON.stringify({ type: 'flow-kinds', kinds: KINDS }));
+    await expect.poll(() => host!.ctx.ideRpc.flowKinds()).toEqual(KINDS);
     const ok = await put(host.url, {
       version: 1,
       nodes: [
@@ -134,6 +145,31 @@ describe('/api/flow', () => {
     expect(((await ok.json()) as FlowResponse).diagnostics).toEqual([
       expect.objectContaining({ severity: 'warning', where: 'lonely' }),
     ]);
+    close();
+  });
+
+  it('an empty flow-kinds report (a preview reload clearing the mirror) does not un-teach the host: kind checks keep using the last real list', async () => {
+    host = await createIdeHost({ root: flowWorkspace(), port: 0 });
+    const { socket, close } = await listen(host);
+    socket.send(JSON.stringify({ type: 'flow-kinds', kinds: KINDS }));
+    await expect.poll(() => host!.ctx.ideRpc.flowKinds()).toEqual(KINDS);
+
+    socket.send(JSON.stringify({ type: 'flow-kinds', kinds: [] }));
+    await expect.poll(() => host!.ctx.ideRpc.flowKinds()).toEqual([]);
+
+    const bad = await put(host.url, {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'x', kind: 'mystery' },
+      ],
+      edges: [{ from: 'start', to: 'x' }],
+    });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).diagnostics).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'x', message: "unknown kind 'mystery'" }),
+    ]);
+    close();
   });
 
   it('PUT writes YAML, answers the refreshed state and broadcasts `flow`', async () => {

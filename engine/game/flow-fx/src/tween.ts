@@ -34,14 +34,6 @@ const EASINGS = Object.keys(Easing).filter(
   (k) => typeof Easing[k as keyof typeof Easing] === 'function',
 );
 
-/** Resolves once `signal` aborts, rejecting with its reason — never resolves otherwise. */
-function aborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-  });
-}
-
 export interface TweenDeps {
   to?: typeof Tween.to;
   kill?: typeof Tween.killTweensOf;
@@ -53,9 +45,12 @@ export function createTween(deps: TweenDeps = {}): FlowNodeKind<TweenProps> {
   return {
     kind: 'tween',
     schema: Schema.object({
-      target: Schema.string().required().description('<scene>/<node> to animate'),
-      ms: Schema.number().required().description('duration, milliseconds'),
-      easing: Schema.union(EASINGS).default('linear'),
+      target: Schema.string()
+        .required()
+        .extra('pick', 'node')
+        .description('<scene>/<node> to animate'),
+      ms: Schema.number().default(300).description('duration, milliseconds'),
+      easing: Schema.union(EASINGS).default('easeOutQuad'),
       wait: Schema.boolean()
         .default(true)
         .description('wait for the tween to finish before leaving by `next`'),
@@ -92,11 +87,26 @@ export function createTween(deps: TweenDeps = {}): FlowNodeKind<TweenProps> {
       }
       const done = to(view, props, p.ms, Easing[p.easing as keyof typeof Easing]);
       if (p.wait === false) return { out: 'next' };
+      // The abort listener is torn down on every path out of the race —
+      // left registered, a tween that finishes on its own (the common
+      // case) would leak one listener on `signal` per run.
+      let onAbort: (() => void) | undefined;
       try {
-        await Promise.race([done, aborted(signal)]);
+        await Promise.race([
+          done,
+          new Promise<never>((_, reject) => {
+            if (signal.aborted) return reject(signal.reason);
+            onAbort = () => reject(signal.reason);
+            signal.addEventListener('abort', onAbort, { once: true });
+          }),
+        ]);
       } catch (e) {
+        // `killTweensOf` resolves the real tween's own promise too, so the
+        // race this is inside settles either way.
         kill(view);
         throw e;
+      } finally {
+        if (onAbort) signal.removeEventListener('abort', onAbort);
       }
       return { out: 'next' };
     },

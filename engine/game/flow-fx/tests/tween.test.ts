@@ -21,17 +21,19 @@ function runCtx(provide: Record<string, unknown> = {}) {
 }
 
 describe('createTween', () => {
-  it('one out, `target`/`ms` required, `easing` one of the real Easing keys, `wait` defaults true', () => {
+  it('one out, `target` required (with an IDE node picker), `ms` defaults 300, `easing` defaults easeOutQuad, `wait` defaults true', () => {
     const kind = createTween();
     expect(kind.outs).toEqual(['next']);
-    const parsed = kind.schema({ target: 'a/b', ms: 200 } as never) as {
+    const parsed = kind.schema({ target: 'a/b' } as never) as {
+      ms: number;
       wait: boolean;
       easing: string;
     };
+    expect(parsed.ms).toBe(300);
     expect(parsed.wait).toBe(true);
-    expect(parsed.easing).toBe('linear');
-    expect(() => kind.schema({ ms: 200 } as never)).toThrow();
-    expect(() => kind.schema({ target: 'a/b' } as never)).toThrow();
+    expect(parsed.easing).toBe('easeOutQuad');
+    expect(() => kind.schema({ ms: 200 } as never)).toThrow(); // `target` is still required
+    expect((kind.schema.dict!.target.meta as { pick?: string }).pick).toBe('node');
   });
 
   it('a target not on stage reports and leaves by next, without touching `to`', async () => {
@@ -103,6 +105,16 @@ describe('createTween', () => {
     controller.abort(reason);
     await expect(pending).rejects.toBe(reason);
     expect(kill).toHaveBeenCalledWith(view);
+  });
+
+  it('removes its abort listener once the tween finishes on its own — no leak on the normal path', async () => {
+    const to = vi.fn(() => Promise.resolve());
+    const kind = createTween({ to, kill: vi.fn() });
+    const scenes = { view: vi.fn(() => ({})) };
+    const { rc, controller } = runCtx({ scenes });
+    const removeSpy = vi.spyOn(controller.signal, 'removeEventListener');
+    await kind.run!({ target: 'a/b', ms: 50, easing: 'linear', wait: true, x: 1 }, rc);
+    expect(removeSpy).toHaveBeenCalledWith('abort', expect.any(Function));
   });
 
   it('with no deps, defaults to the legacy Tween.to / Tween.killTweensOf', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
+import { Sound } from '@pixi/sound';
 import type { RunCtx } from '@energy8engine/flow';
 import { createSound, type SoundLike } from '../src/sound';
 
@@ -137,7 +138,7 @@ describe('createSound', () => {
     expect(rc.report).toHaveBeenCalledWith('sound a.wav: 404');
   });
 
-  it('abort while waiting stops the instance and reports it — caught by the same try/catch as any other play failure, so the run does not throw', async () => {
+  it('abort while waiting stops the instance and RETHROWS the abort reason — same contract as `tween`, so the interpreter suppresses it (a `report` would bypass that and paint a diagnostic on a node that was only ever stopped on purpose)', async () => {
     const instance = { stop: vi.fn() };
     const sound: SoundLike = {
       play: vi.fn(() => Promise.resolve(instance)),
@@ -151,10 +152,76 @@ describe('createSound', () => {
       { src: 'a.wav', action: 'play', loop: false, volume: 1, wait: true },
       rc,
     );
-    controller.abort(new Error('stopped'));
-    expect(await pending).toEqual({ out: 'next' });
-    expect(rc.report).toHaveBeenCalledWith('sound a.wav: stopped');
+    const reason = new Error('stopped');
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(rc.report).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(instance.stop).toHaveBeenCalled());
+  });
+
+  it('wait: false play that rejects (a 404, a decode failure) is still reported, after `next` already answered', async () => {
+    const sound: SoundLike = {
+      play: vi.fn(() => Promise.reject(new Error('404'))),
+      stop: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const from = vi.fn(() => sound);
+    const kind = createSound({ from });
+    const { rc } = runCtx();
+    const result = await kind.run!(
+      { src: 'a.wav', action: 'play', loop: false, volume: 1, wait: false },
+      rc,
+    );
+    expect(result).toEqual({ out: 'next' });
+    await vi.waitFor(() => expect(rc.report).toHaveBeenCalledWith('sound a.wav: 404'));
+  });
+
+  it('wait: true play that rejects (a 404, a decode failure) is caught and reported — the node does not hang to the timeout', async () => {
+    const sound: SoundLike = {
+      play: vi.fn(() => Promise.reject(new Error('404'))),
+      stop: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const from = vi.fn(() => sound);
+    const kind = createSound({ from });
+    const { rc } = runCtx();
+    const result = await kind.run!(
+      { src: 'a.wav', action: 'play', loop: false, volume: 1, wait: true },
+      rc,
+    );
+    expect(result).toEqual({ out: 'next' });
+    expect(rc.report).toHaveBeenCalledWith('sound a.wav: 404');
+  });
+
+  it('wait: true with loop: true never completes — reported as a warning, falls back to fire-and-forget', async () => {
+    const { sound } = fakeSound();
+    const from = vi.fn(() => sound);
+    const kind = createSound({ from });
+    const { rc } = runCtx();
+    const result = await kind.run!(
+      { src: 'a.wav', action: 'play', loop: true, volume: 1, wait: true },
+      rc,
+    );
+    expect(result).toEqual({ out: 'next' });
+    expect(rc.report).toHaveBeenCalledWith(
+      'a looping sound never completes; wait ignored',
+      'warning',
+    );
+    // The fire-and-forget shape: no `complete` callback (there is no `await` waiting for it).
+    expect(sound.play).toHaveBeenCalledWith({ loop: true, volume: 1 });
+  });
+
+  it('the default `from` calls `Sound.from` without `preload` — preload plus an immediate play() would load and play twice', async () => {
+    const fake = { play: vi.fn(), stop: vi.fn(), destroy: vi.fn() };
+    const spy = vi.spyOn(Sound, 'from').mockReturnValue(fake as never);
+    try {
+      const kind = createSound();
+      const { rc } = runCtx();
+      await kind.run!({ src: 'x.wav', action: 'play', loop: false, volume: 1, wait: false }, rc);
+      expect(spy).toHaveBeenCalledWith({ url: '/x.wav' });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('dispose() destroys every cached sound and clears the cache', async () => {

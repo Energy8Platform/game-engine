@@ -2,10 +2,21 @@
  * The flow document, host half (spec: flow editor §6). One file at the
  * project root, `flow.yml`, read through `files` and kept parsed here;
  * the checks are `validateFlow` from `@energy8engine/flow` (pixi-free —
- * the package has no renderer dependency), fed the kinds the game last
- * registered (`ideRpc.flowKinds()`; the package's own `BUILTIN_KINDS`
- * until it has) and the scene ids the project holds. Reported through
- * `ideRpc.reportGameDiagnostics('flow', …)`, replaced whole each time.
+ * the package has no renderer dependency), fed the scene ids the project
+ * holds and — for the KIND checks specifically — `lastKinds`: the last
+ * NON-EMPTY list a game reported (`ideRpc.flowKinds()`), or `null` before
+ * any game ever has. `validateFlow`'s own `null` skips every kind-
+ * dependent check entirely, on purpose: a project the host is merely
+ * holding open (nothing running, `dev-game` not even booted, a headless
+ * `ide-host`-only test) must not paint every non-built-in node red just
+ * because no one has told this process what `@energy8engine/flow-fx`
+ * (or any other row) actually registers — only a RUNNING game knows
+ * that. `state.kinds` (the palette) is a different question and keeps
+ * its own built-ins fallback (`kinds()`, below) — a project with nothing
+ * running still gets a palette of the built-ins to drag from; it just
+ * isn't told a `sound`/`tween` node is wrong before anything has said
+ * otherwise. Reported through `ideRpc.reportGameDiagnostics('flow', …)`,
+ * replaced whole each time.
  *
  * Scene ids are read from the TREE (`scenes/<id>.scene.yml` — the file
  * name is the id, `scenes.ts`'s own rule), each file parsed with scenes'
@@ -136,14 +147,27 @@ export function apply(ctx: Context): void {
     return ids;
   };
 
-  /** The running game's kinds, or the built-ins until it has spoken. */
+  /** The running game's kinds, or the built-ins until it has spoken — the PALETTE's list. */
   const kinds = (): FlowKindInfo[] => {
     const reported = ctx.ideRpc.flowKinds();
     return reported.length ? reported : BUILTIN_KIND_INFO;
   };
 
-  /** `validateFlow` over a parsed document, against what the host knows right now. */
-  const check = async (doc: FlowDoc): Promise<Diagnostic[]> => validateFlow(doc, kinds(), await sceneIds());
+  /**
+   * The last NON-EMPTY kind list a game reported — the CHECK's own list,
+   * `null` until one has. An empty `ideRpc.flowKinds()` (the mirror
+   * clears on a preview reload) does NOT reset this: the last real list
+   * still stands until a new one replaces it, so a reloading preview
+   * does not flash every node red for the gap.
+   */
+  let lastKinds: FlowKindInfo[] | null = null;
+
+  /** `validateFlow` over a parsed document — kind checks skip entirely (`null`) until a game has reported at least once. */
+  const check = async (doc: FlowDoc): Promise<Diagnostic[]> => {
+    const reported = ctx.ideRpc.flowKinds();
+    if (reported.length) lastKinds = reported;
+    return validateFlow(doc, lastKinds, await sceneIds());
+  };
 
   const refresh = async (broadcast: boolean): Promise<void> => {
     const { bytes } = await ctx.files.read(FILE);

@@ -43,8 +43,10 @@ export interface SoundKind extends FlowNodeKind<SoundProps> {
 }
 
 export function createSound(deps: SoundDeps = {}): SoundKind {
-  const from =
-    deps.from ?? ((url: string) => Sound.from({ url, preload: true }) as unknown as SoundLike);
+  // No `preload`: `Sound.from({ url, preload: true })` starts loading on its
+  // own, and this node's own `play()` right after starts it AGAIN — loaded
+  // and played twice. `play()` alone both loads (if needed) and plays.
+  const from = deps.from ?? ((url: string) => Sound.from({ url }) as unknown as SoundLike);
   const cache = new Map<string, SoundLike>();
   return {
     kind: 'sound',
@@ -73,11 +75,28 @@ export function createSound(deps: SoundDeps = {}): SoundKind {
       try {
         const s = cache.get(src) ?? from('/' + src);
         cache.set(src, s);
-        if (!p.wait) {
-          void s.play({ loop: p.loop, volume: p.volume });
+        // A looping sound never fires `complete` — `wait` would hang the
+        // node to the interpreter's own 30 s timeout for nothing useful.
+        let wait = p.wait;
+        if (wait && p.loop) {
+          report('a looping sound never completes; wait ignored', 'warning');
+          wait = false;
+        }
+        if (!wait) {
+          // Fire-and-forget, but `play()` can still reject (a 404, a decode
+          // failure) before anything has loaded — `void` alone would drop
+          // that as an unhandled rejection. `report` still works after
+          // `run` has already returned `next`.
+          Promise.resolve(s.play({ loop: p.loop, volume: p.volume })).catch((e: unknown) => {
+            report(`sound ${src}: ${e instanceof Error ? e.message : String(e)}`);
+          });
           return { out: 'next' };
         }
         await new Promise<void>((resolve, reject) => {
+          // Declared (as a harmless no-op) before `s.play(...)` runs: a fake
+          // `play` that calls `complete` SYNCHRONOUSLY would otherwise read
+          // `onAbort` before its real assignment below — a TDZ throw.
+          let onAbort: () => void = () => {};
           const instance = s.play({
             loop: p.loop,
             volume: p.volume,
@@ -86,15 +105,27 @@ export function createSound(deps: SoundDeps = {}): SoundKind {
               resolve();
             },
           });
-          const onAbort = () => {
+          onAbort = () => {
             void Promise.resolve(instance).then((i) =>
               (i as { stop?: () => void } | undefined)?.stop?.(),
             );
             reject(signal.reason);
           };
+          // `play()` returns `IMediaInstance | Promise<IMediaInstance>` — a
+          // rejecting instance promise (load failure) neither completes nor
+          // aborts on its own, and the node would otherwise hang silently
+          // to the interpreter's timeout; forward that rejection here.
+          Promise.resolve(instance).then(undefined, reject);
           signal.addEventListener('abort', onAbort, { once: true });
         });
       } catch (e) {
+        // An abort mid-wait is the interpreter's own contract (`stop()` /
+        // `replace()`) — it already suppresses a rejection once `signal` is
+        // aborted (`interpreter.ts`'s `step`), same as `tween`'s. Reporting
+        // it here too would paint a red diagnostic on a node that was only
+        // ever stopped on purpose; any OTHER failure (404, decode) still
+        // needs to be said out loud.
+        if (signal.aborted) throw e;
         report(`sound ${src}: ${e instanceof Error ? e.message : String(e)}`);
       }
       return { out: 'next' };
