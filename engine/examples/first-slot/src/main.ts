@@ -657,13 +657,36 @@ ctx.inject(['flow'], (c) =>
     const v = s?.view?.({ scene, node });
     return v ? v.visible : null;
   },
-  /** A mounted top-level scene node's `x`/`y`/`alpha`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
-  nodeProps(scene: string, node: string): { x: number; y: number; alpha: number } | null {
+  /** A mounted top-level scene node's `x`/`y`/`alpha`/`width`/`height`/`tint`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
+  nodeProps(
+    scene: string,
+    node: string,
+  ): { x: number; y: number; alpha: number; width: number; height: number; tint: number } | null {
     const s = ctx.reflect.get('scenes', false) as
-      | { view?(ref: { scene: string; node: string }): { x: number; y: number; alpha: number } | undefined }
+      | {
+          view?(ref: { scene: string; node: string }):
+            | { x: number; y: number; alpha: number; width: number; height: number; tint: number }
+            | undefined;
+        }
       | undefined;
     const v = s?.view?.({ scene, node });
-    return v ? { x: v.x, y: v.y, alpha: v.alpha } : null;
+    return v
+      ? { x: v.x, y: v.y, alpha: v.alpha, width: v.width, height: v.height, tint: v.tint }
+      : null;
+  },
+  /**
+   * The live stage's uniform scale — `scenes.container.scale.x`, the
+   * factor `resize()`'s `fitStage` last set it to (spec: a viewport wider
+   * than tall against a `contain`-fit design still scales x and y alike).
+   * `null` with no `scenes` row, or before it has ever laid out. Read
+   * leniently, like every other hook here: a missing `container`/`scale`
+   * (an older `scenes` row) answers `null`, not a throw.
+   */
+  stageScale(): number | null {
+    return (
+      (ctx.reflect.get('scenes', false) as { container?: { scale: { x: number } } })?.container
+        ?.scale.x ?? null
+    );
   },
 };
 
