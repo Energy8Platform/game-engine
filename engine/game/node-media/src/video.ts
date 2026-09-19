@@ -26,7 +26,10 @@ const elementOf = (tex: Texture): VideoEl | undefined => {
 };
 
 /** The fuller element `once` drives — same resource, a few more members. */
-type OnceEl = Pick<HTMLVideoElement, 'loop' | 'currentTime' | 'play' | 'addEventListener'>;
+type OnceEl = Pick<
+  HTMLVideoElement,
+  'loop' | 'currentTime' | 'play' | 'addEventListener' | 'removeEventListener'
+>;
 
 const onceElementOf = (tex: Texture): OnceEl | undefined => {
   const el = (tex.source as { resource?: unknown }).resource as Partial<OnceEl> | undefined;
@@ -80,17 +83,22 @@ export const video: NodeType<VideoProps> = {
     const el = onceElementOf(s.texture);
     if (!el) return Promise.resolve();
     return new Promise<void>((resolve) => {
+      let settled = false;
+      // Idempotent, and reachable two ways: the video ending, or the cell tearing the view
+      // (this node's own `Sprite`) down mid-play — `unmount` destroys it, not the element.
+      const done = (viaDestroy: boolean) => {
+        if (settled) return;
+        settled = true;
+        el.removeEventListener('ended', onEnded);
+        if (!viaDestroy) el.loop = props.loop;
+        resolve();
+      };
+      const onEnded = () => done(false);
       el.loop = false;
       el.currentTime = 0;
       void el.play();
-      el.addEventListener(
-        'ended',
-        () => {
-          el.loop = props.loop;
-          resolve();
-        },
-        { once: true },
-      );
+      el.addEventListener('ended', onEnded, { once: true });
+      s.once('destroyed', () => done(true));
     });
   },
 };

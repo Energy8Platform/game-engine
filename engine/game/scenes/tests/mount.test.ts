@@ -265,6 +265,32 @@ describe('mounting', () => {
     expect(byId(scenes, 'a', 'nope')).toBeUndefined();
   });
 
+  it("view does not leak a node from an embedded scene's own doc into the host scene's lookup", async () => {
+    const { scenes } = boot([
+      { id: 'b', nodes: [{ id: 'x', type: 'container', props: {} }] },
+      {
+        id: 'a',
+        nodes: [
+          { id: 'embed', type: 'scene', props: { scene: 'b' } },
+          {
+            id: 'grp',
+            type: 'container',
+            props: {},
+            children: [{ id: 'inA', type: 'container', props: {} }],
+          },
+        ],
+      },
+    ]);
+    await scenes.show('a');
+    // `b/x` mounted into `a`'s Mount.all (via the `scene` node's own mountDoc) — but it is not
+    // a node of `a`; a bare id match used to resolve it anyway.
+    expect(byId(scenes, 'a', 'x')).toBeUndefined();
+    // `b` itself still finds its own node, scoped correctly.
+    expect(byId(scenes, 'b', 'x')).toBeDefined();
+    // a genuinely nested node of `a` (under `container`) still resolves.
+    expect(byId(scenes, 'a', 'inA')).toBeDefined();
+  });
+
   it('a view the type did not build survives an unmount: `unmount` detaches, the runtime never destroys', () => {
     const foreign = new Container();
     const { scenes, nodeTypes } = boot();

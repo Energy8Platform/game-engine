@@ -190,4 +190,15 @@ describe('spritesheet', () => {
     expect(view.onComplete).toBeUndefined();
     view.destroy();
   });
+
+  it('once resolves when the view is destroyed mid-play, without restoring loop', async () => {
+    const view = spritesheet.mount(
+      props({ animation: 'spin', loop: true }),
+      ctxWith(() => sheet),
+    ) as AnimatedSprite;
+    const p = spritesheet.once!(view, props({ animation: 'spin', loop: true }), none);
+    view.destroy();
+    await expect(p).resolves.toBeUndefined();
+    expect(view.loop).toBe(false); // not restored — the destroy path skips it
+  });
 });

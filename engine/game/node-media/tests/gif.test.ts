@@ -107,4 +107,14 @@ describe('gif', () => {
     expect(s.onComplete).toBeUndefined();
     gif.unmount!(view);
   });
+
+  it('once resolves when the wrapper is destroyed mid-play, without restoring loop', async () => {
+    const src = source();
+    const view = gif.mount(props({ loop: true }), ctxWith(() => src));
+    const s = view.children[0] as GifSprite;
+    const p = gif.once!(view, props({ loop: true }), none);
+    expect(s.loop).toBe(false);
+    gif.unmount!(view); // destroys the sprite, then the wrapper — the wrapper fires 'destroyed'
+    await expect(p).resolves.toBeUndefined();
+  });
 });

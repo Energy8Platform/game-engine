@@ -12,6 +12,7 @@ const fakeVideo = () => {
     muted: false,
     currentTime: 0,
     addEventListener: vi.fn((type: string, fn: () => void) => listeners.set(type, fn)),
+    removeEventListener: vi.fn((type: string) => listeners.delete(type)),
   };
   const fireEnded = () => listeners.get('ended')?.();
   return { el, fireEnded, tex: { source: { resource: el } } as unknown as Texture };
@@ -93,5 +94,19 @@ describe('video', () => {
     fireEnded();
     await expect(p).resolves.toBeUndefined();
     expect(el.loop).toBe(true);
+  });
+
+  it('once resolves when the view is destroyed mid-play, without restoring loop', async () => {
+    const { el, tex } = fakeVideo();
+    const view = video.mount(
+      props({ loop: true }),
+      ctxWith(() => tex),
+    );
+    const p = video.once!(view, props({ loop: true }), none);
+    expect(el.loop).toBe(false);
+    view.destroy();
+    await expect(p).resolves.toBeUndefined();
+    expect(el.loop).toBe(false); // not restored — the destroy path skips it
+    expect(el.removeEventListener).toHaveBeenCalledWith('ended', expect.any(Function));
   });
 });

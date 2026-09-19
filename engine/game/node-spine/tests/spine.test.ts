@@ -213,4 +213,11 @@ describe('spine', () => {
     await expect(p).resolves.toBeUndefined();
     spine.unmount!(view);
   });
+
+  it('once resolves when the wrapper is destroyed mid-play', async () => {
+    const view = spine.mount(props(), ctxWith(loaded()));
+    const p = spine.once!(view, props({ animation: 'wave' }), none);
+    spine.unmount!(view); // destroys the wrapper (and the Spine with it)
+    await expect(p).resolves.toBeUndefined();
+  });
 });

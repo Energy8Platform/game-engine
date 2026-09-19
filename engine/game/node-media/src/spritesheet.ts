@@ -80,12 +80,19 @@ export const spritesheet: NodeType<SpritesheetProps> = {
     const s = view as AnimatedSprite;
     if (!(s instanceof AnimatedSprite) || s.textures.length <= 1) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      s.loop = false;
-      s.onComplete = () => {
+      let settled = false;
+      // Idempotent, and reachable two ways: the animation finishing, or the cell tearing the
+      // view down mid-play (a symbol's `playWin` awaits this — it must not hang on a destroy).
+      const done = (viaDestroy: boolean) => {
+        if (settled) return;
+        settled = true;
         s.onComplete = undefined;
-        s.loop = props.loop;
+        if (!viaDestroy) s.loop = props.loop;
         resolve();
       };
+      s.loop = false;
+      s.onComplete = () => done(false);
+      s.once('destroyed', () => done(true));
       s.gotoAndPlay(0);
     });
   },

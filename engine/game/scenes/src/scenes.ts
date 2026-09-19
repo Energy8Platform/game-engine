@@ -522,7 +522,14 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     sceneView: (id) => mounted.get(id)?.view,
     view(ref) {
       const m = mounted.get(ref.scene);
-      return m?.nodes.get(ref.node)?.view ?? m?.all.find((e) => e.node.id === ref.node)?.view;
+      // `all` also carries an embedded `scene` node's OWN nested doc (`mountDoc` files its
+      // entries into the same top-level `Mount` — see `building` above), so a bare id search
+      // would find scene `b`'s `x` while looking up `a`'s. `where` is `<scene>/<node>` already:
+      // scope the fallback to entries actually declared in `ref.scene`.
+      return (
+        m?.nodes.get(ref.node)?.view ??
+        m?.all.find((e) => e.node.id === ref.node && e.where.startsWith(`${ref.scene}/`))?.view
+      );
     },
     resize(viewportWidth, viewportHeight) {
       const fit = fitStage(

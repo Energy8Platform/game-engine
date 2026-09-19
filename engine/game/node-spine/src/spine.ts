@@ -115,8 +115,18 @@ export const spine: NodeType<SpineProps> = {
     const animation =
       (props.animation && data.findAnimation(props.animation)) || data.animations[0];
     return new Promise<void>((resolve) => {
+      let settled = false;
       const entry = s.state.setAnimation(0, animation.name, false);
-      entry.listener = { complete: () => resolve() };
+      // Idempotent, and reachable two ways: the track completing, or the wrapper (this node's
+      // view) tearing down mid-play — `unmount` destroys it (and the Spine with it).
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        entry.listener = null;
+        resolve();
+      };
+      entry.listener = { complete: () => done() };
+      view.once('destroyed', done);
     });
   },
 };

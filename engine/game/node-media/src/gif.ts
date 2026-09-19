@@ -61,12 +61,19 @@ export const gif: NodeType<GifProps> = {
     const sprite = view.children.find((c) => c instanceof GifSprite) as GifSprite | undefined;
     if (!sprite) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      sprite.loop = false;
-      sprite.onComplete = () => {
+      let settled = false;
+      // Idempotent, and reachable two ways: the animation finishing, or the wrapper (this
+      // node's view) tearing down mid-play — `unmount` destroys it, not just the sprite.
+      const done = (viaDestroy: boolean) => {
+        if (settled) return;
+        settled = true;
         sprite.onComplete = undefined;
-        sprite.loop = props.loop;
+        if (!viaDestroy) sprite.loop = props.loop;
         resolve();
       };
+      sprite.loop = false;
+      sprite.onComplete = () => done(false);
+      view.once('destroyed', () => done(true));
       sprite.currentFrame = 0;
       sprite.play();
     });
