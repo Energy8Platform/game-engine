@@ -224,6 +224,33 @@ describe('mounting', () => {
     expect(host.destroyed).toBe(false);
   });
 
+  it("a type owning `width` with a non-number schema still mounts, and can still be the mask", () => {
+    // The common pass is handed the STRIPPED props, and `mask` is read off
+    // that same dict: validating `width: 'thick'` as a common number would
+    // throw and take the node (and its children) down with it.
+    const { scenes, nodeTypes, report } = boot();
+    nodeTypes.register({
+      type: 'gauge',
+      schema: Schema.object({ width: Schema.union(['thin', 'thick']).default('thin') }),
+      mount: () => new Container(),
+    });
+    scenes.replace([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'host',
+            type: 'container',
+            props: {},
+            children: [{ id: 'g', type: 'gauge', props: { width: 'thick', mask: true } }],
+          },
+        ],
+      },
+    ]);
+    expect(report).not.toHaveBeenCalled();
+    expect(byId(scenes, 'a', 'host')!.mask).toBe(byId(scenes, 'a', 'g'));
+  });
+
   it('a second sibling asking to mask the same parent is a diagnostic, not a silent overwrite', () => {
     const { scenes, report } = boot([
       {

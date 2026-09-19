@@ -23,7 +23,7 @@ import {
 } from '@energy8engine/contracts';
 import { fitStage, type Fit, type Size } from './fit';
 import { createTransitions, cut, type TickerLike, type TransitionsService } from './transitions';
-import { applyCommon, COMMON, type NodeType, type NodeTypesService } from './node-types';
+import { applyCommon, type NodeType, type NodeTypesService } from './node-types';
 import type { AssetLoader } from './builtin';
 
 export interface CreateScenesOptions {
@@ -175,6 +175,11 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       building?.missing.push({ where, type: node.type });
       return;
     }
+    const failed = (e: unknown) =>
+      error(
+        where,
+        `${node.type} "${node.id}" failed to mount: ${e instanceof Error ? e.message : String(e)}`,
+      );
     let view: Container;
     let props: Record<string, unknown>;
     let masks = false;
@@ -183,15 +188,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       view = type.mount(props, mountCtx([...chain, sceneId]));
       // Inside the try: a common prop off its type (`x: 'abc'`) is this
       // node's failure, not the whole set's.
-      applyCommon(view, node.props, type);
-      // `mask` is a COMMON prop, so it is read off the common schema like
-      // every other one — a type's own schema output need not carry it.
-      masks = COMMON(node.props as never).mask;
+      // `mask` is a COMMON prop, read off the dict the pass itself applied
+      // — the same one, STRIPPED of the `width`/`height` the type owns, so
+      // a type whose own `width` is not a number never fails here.
+      masks = applyCommon(view, node.props, type).mask === true;
     } catch (e) {
-      error(
-        where,
-        `${node.type} "${node.id}" failed to mount: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      failed(e);
       return;
     }
     view.label = node.id;
@@ -218,8 +220,16 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     // carrying `width`/`height` gets the pass again now that there is
     // something to measure. Idempotent for a `Sprite`/`Graphics`, whose
     // bounds never depended on a child.
-    if (node.props?.width !== undefined || node.props?.height !== undefined)
-      applyCommon(view, node.props, type);
+    if (node.props?.width !== undefined || node.props?.height !== undefined) {
+      // Same guard as the first pass: a throw down here is this node's
+      // diagnostic, not the whole set's. It is already on screen, so the
+      // node stays — only its size went unapplied.
+      try {
+        applyCommon(view, node.props, type);
+      } catch (e) {
+        failed(e);
+      }
+    }
   }
 
   /** The skipped nodes of a mount that is on screen: each one an error, now that a person can see the gap. */

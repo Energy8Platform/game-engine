@@ -96,12 +96,16 @@ function commonOf(props: Record<string, unknown>, type?: NodeType<any>): Record<
  * `type` is the node's own type when the caller has one: its schema says
  * which of `width`/`height` are the TYPE's (`commonOf`), and those the
  * common pass skips.
+ *
+ * Returns the common dict it applied — `mask` is the runtime's to act on,
+ * and reading it here is reading the values that actually validated,
+ * stripping included.
  */
 export function applyCommon(
   view: Container,
   props: Record<string, unknown>,
   type?: NodeType<any>,
-): void {
+): Record<string, number | string | boolean | undefined> {
   const c = COMMON(commonOf(props, type) as never) as Record<
     string,
     number | string | boolean | undefined
@@ -121,4 +125,5 @@ export function applyCommon(
   const anchored = view as unknown as { anchor?: { set(x: number, y: number): void } };
   if (anchored.anchor && typeof anchored.anchor.set === 'function')
     anchored.anchor.set((c.anchorX ?? c.anchor) as number, (c.anchorY ?? c.anchor) as number);
+  return c;
 }
