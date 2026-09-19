@@ -200,16 +200,21 @@ describe('project-scope: the game', () => {
       expect(state.previewUrl).toBeNull();
       expect((await fetch(`${url(c)}/api/files`)).status).toBe(200);
       const frames = await greeting(c);
+      // `arrayContaining`, not an exact array: `first-slot`'s `game/spec.json`
+      // declares six symbols and this project copy has no `symbols.yml`, so
+      // the `symbols` speaker's own "has no entry" warnings ride the same
+      // host frame — irrelevant to what THIS test is about (the busy-port
+      // diagnostic, still present, still `dev-game`'s).
       expect(frames.filter((m) => m.type === 'game-diagnostics')).toEqual([
         expect.objectContaining({
           source: 'host',
-          diagnostics: [
+          diagnostics: expect.arrayContaining([
             expect.objectContaining({
               plugin: 'dev-game',
               where: `preview port ${previewPort}`,
               fix: 'free the port, or set PREVIEW_PORT',
             }),
-          ],
+          ]),
         }),
       ]);
     } finally {

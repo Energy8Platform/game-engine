@@ -82,6 +82,70 @@ function* walk(nodes: SceneNode[]): Generator<SceneNode> {
   }
 }
 
+/**
+ * What the host can say about ONE node without running the game — shared
+ * by `checkScenes` (a scene document's nodes) and `symbols.ts` (a symbol
+ * def's `static`/`idle`/`win` states, which are `SymbolNode`s: a `SceneNode`
+ * without `id`/`children`, same `{ type, props }` shape this only reads).
+ * `checkScenes` keeps what this does NOT cover — duplicate ids, `reels`
+ * bookkeeping, `scene` reference resolution — none of which apply to a
+ * symbol state.
+ *
+ * `reported` is `nodeTypes.length > 0` at the call site: an unknown type is
+ * only an error once the game has actually spoken (same gate `checkScenes`
+ * always applied inline).
+ */
+export function checkNode(
+  plugin: string,
+  where: string,
+  node: { type: string; props: Record<string, unknown> },
+  info: NodeTypeInfo | undefined,
+  reported: boolean,
+  hasFile: (path: string) => boolean,
+): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const err = (message: string, fix?: string) =>
+    out.push(diagnostic('error', plugin, where, message, fix));
+  const schema = info?.schema;
+  if (reported && schema === undefined) {
+    err(`node type "${node.type}" is not one the game registered`, 'use a registered type');
+  } else if (schema !== undefined) {
+    const own: Record<string, unknown> = {};
+    const common: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node.props))
+      (COMMON_PROPS.includes(k) ? common : own)[k] = v;
+    try {
+      COMMON(common as never);
+      new Schema(schema as Schema)(own);
+    } catch (error) {
+      err(`props: ${error instanceof Error ? error.message : String(error)}`, 'fix the value');
+    }
+  }
+  // Every prop the type's `assetProps` names holds a project-relative
+  // path (the `image.src` special case, generalised): `required()`
+  // lets `''` through the schema check above (a fresh node), so an
+  // empty or missing value is its own message. A type the host does
+  // not know yet (no `NodeTypeInfo` — the game hasn't reported, or the
+  // type is unregistered) checks nothing; the unknown-type error above
+  // already covers a registered set missing it.
+  for (const prop of info?.assetProps ?? []) {
+    let v = node.props?.[prop];
+    // A type's sibling prop (`spine`'s atlas) defaults to its main
+    // asset's stem with the sibling's extension when left empty —
+    // same rule as `spine.ts`'s `atlasOf`, generalised to any type
+    // that declares `accept.sibling`.
+    if (info?.accept?.sibling === prop && !v && typeof node.props[info.accept.prop] === 'string') {
+      v = (node.props[info.accept.prop] as string).replace(/\.[^./]+$/, `.${prop}`);
+    }
+    if (typeof v !== 'string' || v === '') {
+      err(`${node.type} has no ${prop}`, 'pick a file under the project');
+    } else if (!hasFile(v)) {
+      err(`${node.type}.${prop} "${v}" is not in the project`, 'pick a file under the project');
+    }
+  }
+  return out;
+}
+
 export function checkScenes(
   docs: ParsedDoc[],
   nodeTypes: NodeTypeInfo[],
@@ -119,60 +183,9 @@ export function checkScenes(
         err(where, `node "${node.id}" is declared twice`, 'give each node one id');
       seen.add(node.id);
       if (node.type === 'reels') reelsNodes.push(where);
-      const info = infos.get(node.type);
-      const schema = info?.schema;
-      if (nodeTypes.length && schema === undefined) {
-        err(
-          where,
-          `node type "${node.type}" is not one the game registered`,
-          'use a registered type',
-        );
-      } else if (schema !== undefined) {
-        const own: Record<string, unknown> = {};
-        const common: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(node.props))
-          (COMMON_PROPS.includes(k) ? common : own)[k] = v;
-        try {
-          COMMON(common as never);
-          new Schema(schema as Schema)(own);
-        } catch (error) {
-          err(
-            where,
-            `props: ${error instanceof Error ? error.message : String(error)}`,
-            'fix the value',
-          );
-        }
-      }
-      // Every prop the type's `assetProps` names holds a project-relative
-      // path (the `image.src` special case, generalised): `required()`
-      // lets `''` through the schema check above (a fresh node), so an
-      // empty or missing value is its own message. A type the host does
-      // not know yet (no `NodeTypeInfo` — the game hasn't reported, or the
-      // type is unregistered) checks nothing; the unknown-type error above
-      // already covers a registered set missing it.
-      for (const prop of info?.assetProps ?? []) {
-        let v = node.props?.[prop];
-        // A type's sibling prop (`spine`'s atlas) defaults to its main
-        // asset's stem with the sibling's extension when left empty —
-        // same rule as `spine.ts`'s `atlasOf`, generalised to any type
-        // that declares `accept.sibling`.
-        if (
-          info?.accept?.sibling === prop &&
-          !v &&
-          typeof node.props[info.accept.prop] === 'string'
-        ) {
-          v = (node.props[info.accept.prop] as string).replace(/\.[^./]+$/, `.${prop}`);
-        }
-        if (typeof v !== 'string' || v === '') {
-          err(where, `${node.type} has no ${prop}`, 'pick a file under the project');
-        } else if (!hasFile(v)) {
-          err(
-            where,
-            `${node.type}.${prop} "${v}" is not in the project`,
-            'pick a file under the project',
-          );
-        }
-      }
+      out.push(
+        ...checkNode('scenes', where, node, infos.get(node.type), nodeTypes.length > 0, hasFile),
+      );
       if (node.type === 'scene' && typeof node.props.scene === 'string') {
         if (ids.has(node.props.scene)) targets.add(node.props.scene);
         else

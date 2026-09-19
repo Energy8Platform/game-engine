@@ -1,0 +1,8 @@
+{
+  "id": "project-flow-demo",
+  "betLevels": [1],
+  "symbols": [
+    { "id": "1", "name": "Cherry" },
+    { "id": "2", "name": "Bell" }
+  ]
+}

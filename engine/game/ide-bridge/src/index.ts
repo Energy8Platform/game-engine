@@ -863,13 +863,14 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // diagnostics this socket already forwards. Read leniently, so a game
   // built on a runtime without `gameRows` ignores the frame, not throws.
   //
-  // The IDE's Scenes screen (`scenes`/`scene-select`/`scene-preview`) and,
-  // as of this row, its Flow screen (`flow`) ride the same listener rather
-  // than separate ones: every one of these frames is the host telling this
-  // ONE running game to do something right now, and all are read leniently
-  // against a service that may not be on this `ctx` at all — a game with no
-  // `scenes`/`flow` row (or an older runtime) simply has nothing to do with
-  // them, the same way one with no `gameRows` has nothing to do with a
+  // The IDE's Scenes screen (`scenes`/`scene-select`/`scene-preview`),
+  // its Flow screen (`flow`) and, as of this row, its Symbols screen
+  // (`symbols`) ride the same listener rather than separate ones: every one
+  // of these frames is the host telling this ONE running game to do
+  // something right now, and all are read leniently against a service that
+  // may not be on this `ctx` at all — a game with no `scenes`/`flow`/
+  // `symbols` row (or an older runtime) simply has nothing to do with them,
+  // the same way one with no `gameRows` has nothing to do with a
   // `game-composition` frame.
   socket.addEventListener('message', (event) => {
     let message: Extract<
@@ -879,6 +880,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       | { type: 'scenes' }
       | { type: 'scene-select' }
       | { type: 'flow' }
+      | { type: 'symbols' }
     >;
     try {
       const parsed: unknown = JSON.parse(event.data);
@@ -889,7 +891,8 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
         type !== 'scene-preview' &&
         type !== 'scenes' &&
         type !== 'scene-select' &&
-        type !== 'flow'
+        type !== 'flow' &&
+        type !== 'symbols'
       )
         return;
       message = parsed as Extract<
@@ -899,6 +902,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
         | { type: 'scenes' }
         | { type: 'scene-select' }
         | { type: 'flow' }
+        | { type: 'symbols' }
       >;
     } catch {
       return;
@@ -930,6 +934,13 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
       // `doc: null` too — `replace(null)` stops the run and clears `doc()`.
       const flow = ctx.reflect.get('flow', false) as { replace?(doc: unknown): void } | undefined;
       flow?.replace?.(message.doc);
+      return;
+    }
+    if (message.type === 'symbols') {
+      // `doc: null` too — `replace(null)` clears the doc; live views fall back to the box.
+      const symbols = ctx.reflect.get('symbols', false) as
+        { replace?(doc: unknown): void } | undefined;
+      symbols?.replace?.(message.doc);
       return;
     }
 
@@ -1001,14 +1012,12 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
         subscribe(listener: () => void): () => void;
       }>(ctx, 'flowNodes', socket, (flowNodes) => ({
         type: 'flow-kinds',
-        kinds: flowNodes.list().map(
-          (k): FlowKindInfo => ({
-            kind: k.kind,
-            outs: [...k.outs],
-            trigger: !!k.trigger,
-            schema: JSON.parse(JSON.stringify(k.schema)),
-          }),
-        ),
+        kinds: flowNodes.list().map((k): FlowKindInfo => ({
+          kind: k.kind,
+          outs: [...k.outs],
+          trigger: !!k.trigger,
+          schema: JSON.parse(JSON.stringify(k.schema)),
+        })),
       })),
     'ide-bridge-flow-kinds-forwarding',
   );
@@ -1056,7 +1065,10 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
 
   const currentFlow = () =>
     ctx.reflect.get('flow', false) as
-      | { onTrace(fn: (e: FlowTraceEntry) => void): () => void; trace?(): readonly FlowTraceEntry[] }
+      | {
+          onTrace(fn: (e: FlowTraceEntry) => void): () => void;
+          trace?(): readonly FlowTraceEntry[];
+        }
       | undefined;
 
   let unsubscribeTrace: (() => void) | undefined;

@@ -16,6 +16,7 @@ import {
   type SceneSelectMessage,
   type ServerMessage,
   type Snapshot,
+  type SymbolsMessage,
   type WorkspaceState,
 } from '@energy8engine/contracts';
 import { createDiagnostics, type DiagnosticsService } from '@energy8engine/diagnostics';
@@ -118,6 +119,8 @@ export interface IdeRpcService {
   broadcastScenes(frame: Omit<ScenesMessage, 'type'>): void;
   /** "Here is the flow document" — sent to every socket, root and preview alike. Not retained. */
   broadcastFlow(frame: Omit<FlowMessage, 'type'>): void;
+  /** "Here is the symbols document" — sent to every socket, root and preview alike. Not retained. */
+  broadcastSymbols(frame: Omit<SymbolsMessage, 'type'>): void;
   /** "Highlight this node" — sent to every socket, root and preview alike. Not retained. */
   broadcastSceneSelect(frame: Omit<SceneSelectMessage, 'type'>): void;
   /**
@@ -430,6 +433,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     },
     broadcastFlow(frame) {
       for (const socket of clients) send(socket, { type: 'flow', ...frame });
+    },
+    broadcastSymbols(frame) {
+      for (const socket of clients) send(socket, { type: 'symbols', ...frame });
     },
     broadcastSceneSelect(frame) {
       for (const socket of clients) send(socket, { type: 'scene-select', ...frame });

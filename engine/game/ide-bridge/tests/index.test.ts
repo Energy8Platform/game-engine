@@ -1594,9 +1594,7 @@ describe('ide-bridge — scenes frames from the host', () => {
     expect(() =>
       socket.emit({ type: 'scenes', scenes: [{ id: 'a', nodes: [] }], diagnostics: [] }),
     ).not.toThrow();
-    expect(() =>
-      socket.emit({ type: 'scene-select', scene: 'a', node: null }),
-    ).not.toThrow();
+    expect(() => socket.emit({ type: 'scene-select', scene: 'a', node: null })).not.toThrow();
     expect(() => socket.emit({ type: 'scene-preview', scene: 'free_spins' })).not.toThrow();
   });
 });
@@ -1848,7 +1846,9 @@ describe('ide-bridge — forwards node-types', () => {
  */
 describe('ide-bridge — flow frames from the host', () => {
   /** `onTrace` is a stub, not under test here — every `FlowService` fake needs one for `apply`'s own flow-trace subscription (see the `forwards flow-trace` describe block below for that half). */
-  function fakeFlow(overrides: { replace?: ReturnType<typeof vi.fn>; stop?: ReturnType<typeof vi.fn> } = {}) {
+  function fakeFlow(
+    overrides: { replace?: ReturnType<typeof vi.fn>; stop?: ReturnType<typeof vi.fn> } = {},
+  ) {
     return { onTrace: () => () => {}, ...overrides };
   }
 
@@ -1889,6 +1889,50 @@ describe('ide-bridge — flow frames from the host', () => {
       socket.emit({ type: 'flow', doc: { version: 1, nodes: [], edges: [] }, diagnostics: [] }),
     ).not.toThrow();
     expect(() => socket.emit({ type: 'flow', doc: null, diagnostics: [] })).not.toThrow();
+  });
+});
+
+/**
+ * `symbols`' own frame — the exact twin of the `flow` case above: the host
+ * telling this running game which document to run, read leniently against
+ * `ctx.symbols` (`@energy8engine/symbols`'s runtime, `replace(doc | null)`).
+ */
+describe('ide-bridge — symbols frames from the host', () => {
+  function bridgedSymbols(symbols?: { replace?: ReturnType<typeof vi.fn> }) {
+    ctx = new Context();
+    const { bind, forStage, bindings } = fakeMechanics();
+    ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
+    if (symbols) ctx.provide('symbols' as never, symbols as never);
+    const socket = fakeSocket();
+    ideBridge.apply(ctx, { bridgeUrl: 'ws://x/ide', socketFactory: () => socket as never });
+    return socket;
+  }
+
+  it('a `symbols` frame with an object doc replaces it', () => {
+    const symbols = { replace: vi.fn() };
+    const socket = bridgedSymbols(symbols);
+
+    socket.emit({ type: 'symbols', doc: { version: 1, symbols: [] }, diagnostics: [] });
+
+    expect(symbols.replace).toHaveBeenCalledWith({ version: 1, symbols: [] });
+  });
+
+  it('a `symbols` frame with a null doc is `replace(null)` — live views fall back to the box', () => {
+    const symbols = { replace: vi.fn() };
+    const socket = bridgedSymbols(symbols);
+
+    socket.emit({ type: 'symbols', doc: null, diagnostics: [] });
+
+    expect(symbols.replace).toHaveBeenCalledWith(null);
+  });
+
+  it('without symbols composed, a symbols frame is ignored', () => {
+    const socket = bridgedSymbols();
+
+    expect(() =>
+      socket.emit({ type: 'symbols', doc: { version: 1, symbols: [] }, diagnostics: [] }),
+    ).not.toThrow();
+    expect(() => socket.emit({ type: 'symbols', doc: null, diagnostics: [] })).not.toThrow();
   });
 });
 
@@ -1951,7 +1995,10 @@ describe('ide-bridge — forwards flow-kinds', () => {
 
     socket.open();
     expect(flowKindFrames(socket)).toEqual([
-      { type: 'flow-kinds', kinds: [{ kind: 'boot', outs: ['next'], trigger: true, schema: { a: 1 } }] },
+      {
+        type: 'flow-kinds',
+        kinds: [{ kind: 'boot', outs: ['next'], trigger: true, schema: { a: 1 } }],
+      },
     ]);
 
     kinds = [...kinds, { kind: 'on', outs: ['next'], trigger: true, schema: {} }];
@@ -2089,7 +2136,7 @@ describe('ide-bridge — forwards flow-trace (batched)', () => {
     expect(traceFrames(socket), 'the dropped entry is gone, not replayed on open').toEqual([]);
   });
 
-  it('a socket opening after the boot run is sent the interpreter\'s backlog (`flow.trace()`) as one frame', async () => {
+  it("a socket opening after the boot run is sent the interpreter's backlog (`flow.trace()`) as one frame", async () => {
     ctx = new Context();
     const { bind, forStage, bindings } = fakeMechanics();
     ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
