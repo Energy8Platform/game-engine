@@ -95,6 +95,32 @@ describe('createSymbolHandle', () => {
     expect(w.scale.x).toBeCloseTo(0.5);
   });
 
+  it('a common `x` on the state moves the art inside the cell (+x·s), and `scale` shrinks it under contain', () => {
+    const { deps } = setup();
+    const nudged = createSymbolHandle('1', deps);
+    nudged.apply({
+      id: '1',
+      static: { type: 'image', props: { src: 'assets/symbols/1.png', x: 20 } },
+    });
+    nudged.resize(SIZE);
+    // 32×16 art at s = 3 (96 / 32): the centre lands at +20·3 = 60, the width stays 96.
+    const b = nudged.view.getLocalBounds();
+    expect(b.x + b.width / 2).toBeCloseTo(60);
+    expect(b.y + b.height / 2).toBeCloseTo(0);
+    expect(b.width).toBeCloseTo(96);
+
+    const shrunk = createSymbolHandle('1', deps);
+    shrunk.apply({
+      id: '1',
+      static: { type: 'image', props: { src: 'assets/symbols/1.png', scale: 0.5 } },
+    });
+    shrunk.resize(SIZE);
+    const c = shrunk.view.getLocalBounds();
+    expect(c.width).toBeCloseTo(48);
+    expect(c.x + c.width / 2).toBeCloseTo(0);
+    expect(c.y + c.height / 2).toBeCloseTo(0);
+  });
+
   it('fit: none only centres', () => {
     const { deps } = setup();
     const h = createSymbolHandle('1', deps);

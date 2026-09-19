@@ -41,7 +41,7 @@ export interface SymbolHandle {
   readonly view: SymbolView;
   /** Remounts the wrappers unless `def` is JSON-equal to the current one; `undefined` → the fallback box. */
   apply(def: SymbolDef | undefined): void;
-  /** `type.update` on every mounted wrapper, then fit — after an asset load. */
+  /** `type.update` on the rest wrapper, then fit — after an asset load. */
   refresh(): void;
   resize(size: { width: number; height: number }): void;
   /** Unmounts the wrappers, destroys the view, calls `onDestroy` — what the view's own `destroy()` does too. */
@@ -84,12 +84,20 @@ export function createSymbolHandle(
     );
   };
 
+  // The CHILD's local bounds, not the wrapper's: the wrapper's would already carry the
+  // child's own `x`/`y`/`scale` (`applyCommon`), and pivoting to their centre subtracts the
+  // nudge back out and cancels the scale under `contain`. Fitting the unscaled art and
+  // pivoting to its scaled centre leaves those props free to move/shrink it inside the cell.
   function fit(w: Wrapper): void {
-    const b = w.container.getLocalBounds();
+    if (!w.child) return;
+    const b = w.child.getLocalBounds();
     if (!b.width || !b.height) return;
     const s = def?.fit === 'none' ? 1 : Math.min(size.width / b.width, size.height / b.height);
     w.container.scale.set(s);
-    w.container.pivot.set(b.x + b.width / 2, b.y + b.height / 2);
+    w.container.pivot.set(
+      (b.x + b.width / 2) * w.child.scale.x,
+      (b.y + b.height / 2) * w.child.scale.y,
+    );
     w.container.position.set(0, 0);
   }
 
@@ -185,9 +193,11 @@ export function createSymbolHandle(
       if (def.win && !opts.only) view.playWin = playWin;
       else delete view.playWin;
     },
+    // `rest` only: a `win` wrapper is either mounted from loaded assets or a placeholder whose
+    // `once` resolved at once — and `spritesheet.update` resetting `loop` on a win in flight
+    // would leave the awaited `once` never completing.
     refresh() {
       if (rest) update(rest);
-      if (win) update(win);
     },
     resize(next) {
       size = next;
