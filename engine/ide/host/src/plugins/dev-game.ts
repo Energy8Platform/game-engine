@@ -446,8 +446,33 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       port: preview.port,
       // See point 5 above — the coexistence with plugin-server's own
       // WS-upgrade dispatcher is racy and was measured to fail; disabled
-      // rather than relied on.
-      hmr: false,
+      // rather than relied on. `hmr: false` on its own still lets vite's
+      // OWN `clientInjectionsPlugin` (node_modules/vite/dist/node/chunks/
+      // dep-Dm0c1Wj2.js:41158, `port ||= 24678`) bake that port into the
+      // served page whenever `middlewareMode` is true — REGARDLESS of
+      // `hmr`'s value — so a second `e8 dev` on the machine, holding
+      // 24678 for real, turns a locally-harmless refusal into a wrong
+      // response the page logs. Naming `port` here moves the baked value
+      // off that machine-wide default.
+      hmr: { port: 5691 },
+      // `ws: false` is what stops THIS instance from ever answering that
+      // port (or racing plugin-server's dispatcher per point 5) — checked
+      // against vite's own `createWebSocketServer` (same chunk, lines
+      // 32368-32369): `if (config.server.ws === false) return <no-op
+      // stub>` runs before any `hmr`/port/`.listen()` logic, so nothing
+      // is ever bound here for a client's attempt to land on.
+      //
+      // Does not fully silence the client's OWN attempt, though: vite's
+      // `devHtmlHook` (same chunk, ~line 37561) injects `/@vite/client`
+      // into every dev-mode HTML response unconditionally — no config
+      // gates it — so the page always tries an hmr handshake and always
+      // logs a console error when it fails, clean local ECONNREFUSED
+      // included (measured: reproduces identically with no other process
+      // anywhere near this port). That residual is pre-existing on the
+      // unmodified file too (measured by reverting this hunk alone) —
+      // not something `hmr`/`ws` server options can close; a full fix
+      // would mean stripping vite's own injected client script.
+      ws: false,
     },
     optimizeDeps: {
       // `'**/*.html'` is vite's own default for this field, restated
