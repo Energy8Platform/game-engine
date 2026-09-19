@@ -39,10 +39,12 @@ export interface SceneEditConfig {
 
 export interface Bounds { x: number; y: number; w: number; h: number }
 export interface Snapshot { scene: string; selected: string | null; bounds: Record<string, Bounds> }
+/** What symbol mode's `snapshot` answers instead — no nodes, one preview. */
+export interface SymbolSnapshot { symbol: string | null; state: SymbolState | null; w: number; h: number }
 
-/** `window.__e8edit` on the editor page — test hooks, like `__e8` on the game page. */
+/** `window.__e8edit` on the editor page — test hooks, like `__e8` on the game page. Symbol mode exposes only `emitted`/`snapshot`/`frameOf` (no node to `select`, no `grid`, nothing to `pickAndSelect`). */
 export interface SceneEdit {
-  snapshot(): Snapshot;
+  snapshot(): Snapshot | SymbolSnapshot;
   select(node: string | null): void;
   grid(on: boolean, step: number): void;
   /** Screen coords — what a `pointerdown` on the stage does. */
@@ -176,7 +178,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       if (current) showSymbol(current.id, current.state);
       return {};
     });
-    wire.handle('snapshot', () => {
+    const snapshot = (): SymbolSnapshot => {
       let w = 0;
       let h = 0;
       if (view) {
@@ -187,7 +189,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         h = br.y - tl.y;
       }
       return { symbol: current?.id ?? null, state: current?.state ?? null, w, h };
-    });
+    };
+    wire.handle('snapshot', () => snapshot());
 
     /** Walks the current preview view's descendants for the first numeric `currentFrame` — same idea as `boot()`'s `frameOf`, just not limited to one level. */
     const frameOf = (_node: string): number | null => {
@@ -201,8 +204,11 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       }
       return null;
     };
-    const winHook = window as unknown as { __e8edit?: Pick<SceneEdit, 'frameOf'> };
-    winHook.__e8edit = { frameOf };
+    // Same test-hook slot scene mode uses, `emitted`/`snapshot`/`frameOf` only — no node
+    // to `select`, no `grid`, nothing to `pickAndSelect`. The browser e2e reads
+    // `emitted()` for `ready` and `snapshot()` for the bounds, same as the scene canvas.
+    const winHook = window as unknown as { __e8edit?: Pick<SceneEdit, 'emitted' | 'snapshot' | 'frameOf'> };
+    winHook.__e8edit = { emitted: () => [...emitted], snapshot, frameOf };
     ctx.effect(() => () => { if (winHook.__e8edit?.frameOf === frameOf) delete winHook.__e8edit; }, 'scene-edit:hook');
 
     void symbols.ready.catch(() => {}).then(() => { if (alive) emit('ready', { symbol: id }); });

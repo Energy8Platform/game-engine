@@ -58,7 +58,14 @@ function boot(scene = 'a', docs = DOCS, docsReady?: Promise<void>) {
   return { ctx, app, scenes, fiber, posted, events, call, ready, frame, gizmoLayer, gizmoShown, key, dropTarget, edit };
 }
 
-/** A minimal `SymbolsService` fake: `preview` answers a fresh 40×40-bounded view for id "coin", `null` for anything else. */
+/**
+ * A minimal `SymbolsService` fake. `preview` answers, for id "coin": a
+ * 40×40-bounded `Graphics` view for `state: 'static'` (known bounds, no
+ * `currentFrame` anywhere — the "still" fixture), or for `state: 'idle'` a
+ * wrapper → wrapper → `{ currentFrame: 3 }` view two levels deep (`frameOf`'s
+ * BFS has to actually walk, not just check the view and its first child).
+ * `null` for any other id (the "unknown symbol" path).
+ */
 function fakeSymbols() {
   const previewCalls: { id: string; state: string }[] = [];
   const views: Container[] = [];
@@ -69,7 +76,13 @@ function fakeSymbols() {
       previewCalls.push({ id, state });
       if (id !== 'coin') return null;
       const c = new Container();
-      c.addChild(new Graphics().rect(0, 0, 40, 40).fill(0xffffff));
+      if (state === 'idle') {
+        const wrapper = new Container();
+        wrapper.addChild(Object.assign(new Container(), { currentFrame: 3 }));
+        c.addChild(wrapper);
+      } else {
+        c.addChild(new Graphics().rect(0, 0, 40, 40).fill(0xffffff));
+      }
       views.push(c);
       return c;
     }),
@@ -103,7 +116,8 @@ function bootSymbol(symbols?: unknown) {
     return posted.find((m) => m.type === 'e8:ide:res' && m.id === reqId)!;
   };
   const ready = () => vi.waitFor(() => expect(events().some((e) => e.event === 'ready')).toBe(true));
-  return { ctx, fiber, events, call, ready };
+  const edit = () => (window as unknown as { __e8edit: Pick<plugin.SceneEdit, 'emitted' | 'snapshot' | 'frameOf'> }).__e8edit;
+  return { ctx, fiber, events, call, ready, edit };
 }
 
 describe('symbol mode', () => {
@@ -183,6 +197,26 @@ describe('symbol mode', () => {
     const { events } = bootSymbol(undefined);
     await vi.waitFor(() => expect(events().some((e) => e.event === 'error')).toBe(true));
   });
+
+  it("__e8edit.frameOf('symbol') walks the preview view's descendants; null for a still view", async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready, edit } = bootSymbol(symbols);
+    await ready();
+    await call('symbol', { id: 'coin', state: 'idle' }); // wrapper -> wrapper -> { currentFrame: 3 }
+    expect(edit().frameOf('symbol')).toBe(3);
+    await call('symbol', { id: 'coin', state: 'static' }); // Graphics only, no currentFrame anywhere
+    expect(edit().frameOf('symbol')).toBeNull();
+  });
+
+  it('__e8edit exposes emitted (ready included) and snapshot matching the wire', async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready, edit } = bootSymbol(symbols);
+    await ready();
+    await call('symbol', { id: 'coin', state: 'static' });
+    expect(edit().emitted().some((e) => e.event === 'ready')).toBe(true);
+    const wireSnap = (await call('snapshot')).result;
+    expect(edit().snapshot()).toEqual(wireSnap);
+  });
 });
 
 describe('scene-edit plugin', () => {
@@ -208,7 +242,7 @@ describe('scene-edit plugin', () => {
     edit().pickAndSelect(200, 200);
     expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: null } });
     expect(gizmoShown()).toBe(false);
-    expect(edit().snapshot().selected).toBe(null);
+    expect((edit().snapshot() as plugin.Snapshot).selected).toBe(null);
   });
 
   it('select over the wire moves the gizmo without re-emitting selected', async () => {
@@ -221,7 +255,7 @@ describe('scene-edit plugin', () => {
     await call('select', { node: 'nested' }); // no top-level view: gizmo hides, id kept, nothing echoed
     expect(events()).toHaveLength(n);
     expect(gizmoShown()).toBe(false);
-    expect(edit().snapshot().selected).toBe('nested');
+    expect((edit().snapshot() as plugin.Snapshot).selected).toBe('nested');
     await call('select', { node: 'lo' });
     expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: 'lo' } });
     expect(gizmoShown()).toBe(true);
@@ -300,7 +334,7 @@ describe('scene-edit plugin', () => {
     await call('replace', { docs: DOCS });
     frame();
     expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(120);
-    expect(edit().snapshot().selected).toBe('hi');
+    expect((edit().snapshot() as plugin.Snapshot).selected).toBe('hi');
   });
 
   it('a replace request from the IDE swaps the document set — before ready too', async () => {
