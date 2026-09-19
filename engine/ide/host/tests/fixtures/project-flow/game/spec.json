@@ -2,5 +2,6 @@
   "symbols": [
     { "id": "1", "name": "Cherry" },
     { "id": "2", "name": "Bell" }
-  ]
+  ],
+  "actions": { "spin": {} }
 }

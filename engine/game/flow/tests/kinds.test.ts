@@ -104,6 +104,70 @@ describe('built-in kinds', () => {
     expect(await kind('spin').run!({}, rc)).toEqual({ out: 'failed', vars: { error: 'offline' } });
   });
 
+  it('spin: no action/betLevel posts `{}`, same as before — `vars.request` mirrors the empty body', async () => {
+    const { rc } = runCtx();
+    const bodies: string[] = [];
+    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(init!.body as string);
+      return { ok: true, json: async () => ({ stage: 'base_game' }) };
+    }) as unknown as typeof fetch;
+    expect(await kind('spin').run!({}, rc)).toEqual({
+      out: 'result',
+      vars: { result: { stage: 'base_game' }, request: {} },
+    });
+    expect(bodies).toEqual(['{}']);
+  });
+
+  it('spin: a literal action/betLevel go in the POST body, and come back as `vars.request`', async () => {
+    const { rc } = runCtx();
+    const bodies: unknown[] = [];
+    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(init!.body as string));
+      return { ok: true, json: async () => ({ stage: 'base_game' }) };
+    }) as unknown as typeof fetch;
+    const out = await kind('spin').run!({ action: 'buy', betLevel: 5 }, rc);
+    expect(bodies).toEqual([{ action: 'buy', betLevel: 5 }]);
+    expect(out).toEqual({
+      out: 'result',
+      vars: { result: { stage: 'base_game' }, request: { action: 'buy', betLevel: 5 } },
+    });
+  });
+
+  it('spin: `$path` action/betLevel read vars; an unset betLevel stays out of the body', async () => {
+    const { rc } = runCtx({}, { chosen: { action: 'gamble' }, bet: 2 });
+    const bodies: unknown[] = [];
+    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(init!.body as string));
+      return { ok: true, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    const out = await kind('spin').run!({ action: '$chosen.action', betLevel: '$bet' }, rc);
+    expect(bodies).toEqual([{ action: 'gamble', betLevel: 2 }]);
+    expect(out).toEqual({ out: 'result', vars: { result: {}, request: { action: 'gamble', betLevel: 2 } } });
+
+    // Only `action` is `$path`; `betLevel` is never set — omitted, not `null`.
+    const out2 = await kind('spin').run!({ action: '$chosen.action' }, rc);
+    expect(bodies.at(-1)).toEqual({ action: 'gamble' });
+    expect(out2).toEqual({ out: 'result', vars: { result: {}, request: { action: 'gamble' } } });
+  });
+
+  it("present: records the spin log with spin's own request — `{}` when spin carried none", async () => {
+    const mechanics = { present: vi.fn(() => ({ plan: [], diagnostics: [] })) };
+    const play = { execute: vi.fn(async () => []), record: vi.fn() };
+    const result = { stage: 'base_game', data: {} };
+
+    const { rc: withRequest } = runCtx({ mechanics, play }, { result, request: { action: 'buy', betLevel: 5 } });
+    await kind('present').run!({}, withRequest);
+    expect(play.record).toHaveBeenCalledWith({
+      request: { action: 'buy', betLevel: 5 },
+      result,
+      plan: [],
+    });
+
+    const { rc: withoutRequest } = runCtx({ mechanics, play }, { result });
+    await kind('present').run!({}, withoutRequest);
+    expect(play.record).toHaveBeenLastCalledWith({ request: {}, result, plan: [] });
+  });
+
   it('wait on a signal already aborted rejects at once; abort mid-wait rejects and clears the timer', async () => {
     vi.useFakeTimers();
     try {

@@ -290,6 +290,33 @@ describe('/api/flow', () => {
     expect(yaml.load(readFileSync(join(root, 'flow.yml'), 'utf8'))).toEqual(doc);
   });
 
+  it("a spin naming an action the fixture's game/spec.json doesn't declare is a warning, not an error", async () => {
+    const root = flowWorkspace();
+    host = await createIdeHost({ root, port: 0 });
+    const doc: FlowDoc = {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'spin', kind: 'spin', props: { action: 'buy' }, ui: { x: 280, y: 280 } },
+      ],
+      edges: [{ from: 'start', to: 'spin' }],
+    };
+    const res = await put(host.url, doc);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as FlowResponse).toEqual({
+      doc,
+      diagnostics: [
+        expect.objectContaining({
+          severity: 'warning',
+          plugin: 'flow',
+          where: 'spin',
+          message: 'action "buy" is not in game/spec.json',
+        }),
+      ],
+      kinds: builtins(),
+    });
+  });
+
   it('a write through /api/files of flow.yml re-reads and broadcasts; an unparsable one is one error at flow.yml', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
     const { frames, close } = await listen(host);

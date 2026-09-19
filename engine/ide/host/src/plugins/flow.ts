@@ -28,10 +28,12 @@
  * deterministic and wrong). A file that does not parse is not a scene —
  * a `show` of it is an error here, and `scenes` reports the file itself.
  *
- * Re-read on `files/written`/`files/removed` of `flow.yml` or anything
- * under `scenes/`, and on `game/flow-kinds`. Every read broadcasts the
- * document as a `flow` frame to every `/ide` socket, the boot read too —
- * see `scenes.ts` for why (root sockets outlive a project switch).
+ * Re-read on `files/written`/`files/removed` of `flow.yml`, `game/spec.json`
+ * (the `spin` action-name check's own source, same shape as `symbols.ts`'s
+ * `known`) or anything under `scenes/`, and on `game/flow-kinds`. Every
+ * read broadcasts the document as a `flow` frame to every `/ide` socket,
+ * the boot read too — see `scenes.ts` for why (root sockets outlive a
+ * project switch).
  */
 import type { Context } from 'cordis';
 import type { Server } from '@cordisjs/plugin-server';
@@ -162,11 +164,24 @@ export function apply(ctx: Context): void {
    */
   let lastKinds: FlowKindInfo[] | null = null;
 
+  /** `game/spec.json`'s own `actions` keys — `null` when the file is absent, unparsable, or has no `actions`. */
+  const actions = async (): Promise<string[] | null> => {
+    try {
+      const { bytes } = await ctx.files.read('game/spec.json');
+      if (!bytes) return null;
+      const spec = JSON.parse(Buffer.from(bytes).toString('utf8')) as { actions?: unknown };
+      if (!isRecord(spec.actions)) return null;
+      return Object.keys(spec.actions);
+    } catch {
+      return null;
+    }
+  };
+
   /** `validateFlow` over a parsed document — kind checks skip entirely (`null`) until a game has reported at least once. */
   const check = async (doc: FlowDoc): Promise<Diagnostic[]> => {
     const reported = ctx.ideRpc.flowKinds();
     if (reported.length) lastKinds = reported;
-    return validateFlow(doc, lastKinds, await sceneIds());
+    return validateFlow(doc, lastKinds, await sceneIds(), await actions());
   };
 
   const refresh = async (broadcast: boolean): Promise<void> => {
@@ -192,7 +207,7 @@ export function apply(ctx: Context): void {
   };
   const again = () => void refresh(true).catch(() => {});
   const onFile = ({ path }: { path: string }) => {
-    if (path === FILE || path.startsWith('scenes/')) again();
+    if (path === FILE || path === 'game/spec.json' || path.startsWith('scenes/')) again();
   };
   again();
   ctx.on('files/written', onFile);

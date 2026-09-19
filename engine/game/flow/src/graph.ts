@@ -101,12 +101,18 @@ function rotateToSmallest(cycle: readonly string[]): string[] {
  * port, orphan trigger check) are skipped. `sceneIds: null` similarly
  * skips the `show`/`hide` scene check. The cycle check needs neither: it
  * only cares whether a cycle's node KINDS (raw strings) include `on` or
- * `wait`, which every node already carries on itself.
+ * `wait`, which every node already carries on itself. `actions: null`
+ * similarly skips the `spin` action check — a literal `action` prop the
+ * game's `game/spec.json` doesn't declare is a warning, not an error (the
+ * game may still accept it; the spec is descriptive metadata, see
+ * `kinds.ts`'s `spin`), and a `$path` action is never checked, since its
+ * value isn't known until the flow runs.
  */
 export function validateFlow(
   doc: FlowDoc,
   kinds: readonly KindShape[] | null,
   sceneIds: readonly string[] | null,
+  actions: readonly string[] | null = null,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const kindByName = kinds ? new Map(kinds.map((k) => [k.kind, k])) : null;
@@ -178,6 +184,18 @@ export function validateFlow(
       const scene = node.props?.scene;
       if (typeof scene === 'string' && !sceneSet.has(scene)) {
         out.push(diagnostic('error', 'flow', node.id, `unknown scene '${scene}'`));
+      }
+    }
+  }
+
+  if (actions) {
+    const actionSet = new Set(actions);
+    for (const node of doc.nodes) {
+      if (node.kind !== 'spin') continue;
+      const action = node.props?.action;
+      // Only a LITERAL action names a specific game action; `$path` isn't known until the flow runs.
+      if (typeof action === 'string' && !action.startsWith('$') && !actionSet.has(action)) {
+        out.push(diagnostic('warning', 'flow', node.id, `action "${action}" is not in game/spec.json`));
       }
     }
   }

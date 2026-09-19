@@ -15,7 +15,7 @@ import { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ServerMessage } from '@energy8engine/contracts';
+import type { ServerMessage, SpinResult } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as devGame from '../src/plugins/dev-game';
 import * as files from '../src/plugins/files';
@@ -507,6 +507,46 @@ describe('dev-game — the spin route', () => {
     expect(Array.isArray(result.nextActions)).toBe(true);
     expect(result.data).toMatchObject({ stage: 'base_game' });
     expect(Array.isArray(result.data.grid)).toBe(true);
+  });
+
+  it("forwards a POSTed action/betLevel to session.play, over the plugin's own config defaults — a buy mode or bet ladder the flow names", async () => {
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      action: 'spin',
+      betLevel: 1.0,
+      port: 0,
+      previewPort: 0,
+    });
+    const spinResult: SpinResult = {
+      win: 0,
+      totalWin: 0,
+      bet: 5,
+      stage: 'base_game',
+      data: { stage: 'base_game' },
+      vars: {},
+      nextActions: ['spin'],
+      roundComplete: true,
+      spinsRemaining: 0,
+      spinsPlayed: 1,
+      scriptSha256: '',
+      roundId: 'test',
+    };
+    const play = vi.spyOn(ctx!.session, 'play').mockResolvedValue({ result: spinResult, diagnostics: [] });
+
+    const res = await fetch(`${preview(ctx!)}/api/spin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'buy', betLevel: 5 }),
+    });
+    expect(res.status).toBe(200);
+    expect(play).toHaveBeenLastCalledWith({ gameId: 'first-slot', action: 'buy', betLevel: 5 });
+
+    // An empty body falls back to the plugin's own config, unchanged.
+    expect((await fetch(`${preview(ctx!)}/api/spin`, { method: 'POST' })).status).toBe(200);
+    expect(play).toHaveBeenLastCalledWith({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
   });
 
   it('reports a spin against a session that never started as diagnostics, not a crash', async () => {

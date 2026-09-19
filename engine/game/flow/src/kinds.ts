@@ -146,20 +146,28 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
   },
 };
 
-const spin: FlowNodeKind = {
+const spin: FlowNodeKind<{ action?: unknown; betLevel?: unknown }> = {
   kind: 'spin',
-  schema: none,
+  schema: Schema.object({
+    action: Schema.any().description('literal action name, or `$path` to read a var'),
+    betLevel: Schema.any().description('literal bet level, or `$path` to read a var'),
+  }),
   outs: ['result', 'failed'],
-  async run(_p, { fetchFn }) {
+  async run(p, { vars, fetchFn }) {
+    const request: Record<string, unknown> = {};
+    const action = resolve(p.action, vars);
+    if (action !== undefined) request.action = action;
+    const betLevel = resolve(p.betLevel, vars);
+    if (betLevel !== undefined) request.betLevel = betLevel;
     try {
       const res = await fetchFn('/api/spin', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(request),
       });
       if (!res.ok) throw new Error(`POST /api/spin → ${res.status}`);
       const result: unknown = await res.json();
-      return { out: 'result', vars: { result } };
+      return { out: 'result', vars: { result, request } };
     } catch (e) {
       return { out: 'failed', vars: { error: e instanceof Error ? e.message : String(e) } };
     }
@@ -177,7 +185,11 @@ const present: FlowNodeKind = {
     const play = service<PlayService>(ctx, 'play');
     const problems = diagnostics.length ? diagnostics : await play.execute(plan, ctx.reflect.get('board', false));
     // The spin log: what was drawn — `[]` when the presentation failed.
-    play.record({ request: {}, result, plan: problems.length ? [] : plan });
+    play.record({
+      request: (vars.request as Record<string, unknown>) ?? {},
+      result,
+      plan: problems.length ? [] : plan,
+    });
     if (problems.length) return { out: 'failed', vars: { plan, error: problems.map((d) => d.message).join('; ') } };
     return { out: 'next', vars: { plan } };
   },

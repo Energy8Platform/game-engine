@@ -124,6 +124,33 @@ describe('validateFlow', () => {
     );
   });
 
+  it('a spin action literal not in `actions` is a warning; a `$path` action is never checked; `actions: null` (the default) skips the check entirely', () => {
+    const spinDoc = doc(
+      [
+        { id: 'a', kind: 'boot' },
+        { id: 's1', kind: 'spin', props: { action: 'buy' } }, // literal, not declared
+        { id: 's2', kind: 'spin', props: { action: '$chosen' } }, // $path: never checked
+        { id: 's3', kind: 'spin', props: { action: 'spin' } }, // literal, declared
+      ],
+      [
+        { from: 'a', to: 's1' },
+        { from: 's1', to: 's2' },
+        { from: 's2', to: 's3' },
+      ],
+    );
+    expect(validateFlow(spinDoc, kinds, null, ['spin'])).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        plugin: 'flow',
+        where: 's1',
+        message: 'action "buy" is not in game/spec.json',
+      }),
+    ]);
+    // No 4th argument: same as passing `null` — the check is skipped, not "nothing declared".
+    expect(validateFlow(spinDoc, kinds, null)).toEqual([]);
+    expect(validateFlow(spinDoc, kinds, null, null)).toEqual([]);
+  });
+
   it('kinds null skips kind checks; sceneIds null skips scene checks', () => {
     const out = validateFlow(
       doc(

@@ -462,16 +462,16 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   }, 'dev-game:vite');
 
   preview.post('/api/spin', async (req, res) => {
-    let body: { betLevel?: number } = {};
+    let body: { action?: string; betLevel?: number } = {};
     try {
-      body = (await req.json()) as { betLevel?: number };
+      body = (await req.json()) as { action?: string; betLevel?: number };
     } catch {
-      // An empty or absent body is fine — falls back to config.betLevel.
+      // An empty or absent body is fine — falls back to config.action/betLevel.
     }
 
     const { result, diagnostics } = await ctx.session.play({
       gameId: config.gameId,
-      action: config.action ?? 'spin',
+      action: body.action ?? config.action ?? 'spin',
       betLevel: body.betLevel ?? config.betLevel,
     });
 
