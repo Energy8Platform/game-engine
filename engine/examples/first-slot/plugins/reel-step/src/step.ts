@@ -45,6 +45,7 @@ import {
   type SymbolResolver,
   type WinConfig,
 } from '@energy8platform/game-engine/slot';
+import { cellData } from '@energy8engine/contracts';
 import type { Board, PresentationStep } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import type { ReelStepStep } from './mechanic';
@@ -64,9 +65,9 @@ interface ReelStepBoard {
   refill(step: { kind: 'refill'; board: Board }): Promise<void>;
 }
 
-/** Symbol ids are numbers in the step vocabulary; the legacy resolver is keyed by string. */
+/** Each `Board` cell — a number, a name, or a record — through the shared `cellData()` mapping. */
 function toCellBoard(board: Board): CellData[][] {
-  return board.map((col) => col.map((symbolId) => ({ symbol: String(symbolId) })));
+  return board.map((col) => col.map((cell) => cellData(cell) as CellData));
 }
 
 /** A `ReelGrid` is recognised by what this handler actually calls on it, not by `instanceof`. */

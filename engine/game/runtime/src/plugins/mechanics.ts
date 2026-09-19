@@ -428,15 +428,17 @@ function unwrapOptional(type: FieldType): FieldType {
  * match on, and forcing them through one signature would only make both
  * harder to read.
  *
- * `grid` requires two levels of list/array nesting with a numeric leaf
- * (`[[int]]` or `[[float]]`, the shape `spin-parser` derives for a
- * `grid: [[int]]` field) — a plain `list` doesn't qualify, neither does a
- * `list` of anything that isn't itself a list/array, and neither does a
- * correctly-nested `list` whose innermost element isn't `int`/`float`
- * (`grid: [[str]]`, say). That last leg mirrors `isGrid` above, the
- * VALUE-level equivalent of this check: `isGrid` requires every leaf cell
- * to satisfy `isFiniteNumber`, so a schema that let a non-numeric leaf
- * through here would pass the pre-flight check in this file and then
+ * `grid` requires two levels of list/array nesting with a leaf of `int`,
+ * `float`, `str` or `record` (`[[int]]`, `[[str]]`, …, the shape
+ * `spin-parser` derives for a `grid: [[T]]` field) — a plain `list` doesn't
+ * qualify, neither does a `list` of anything that isn't itself a
+ * list/array, and neither does a correctly-nested `list` whose innermost
+ * element is some other kind (`bool`, say). That last leg mirrors `isGrid`
+ * above (`@energy8engine/contracts`' `mechanic.ts`), the VALUE-level
+ * equivalent of this check, leaf kind for leaf kind: a board's symbol id is
+ * a number or a name, and a cell may also be a record carrying one, so a
+ * schema that let a leaf kind through here that `isGrid` would reject at
+ * runtime would pass the pre-flight check in this file and then
  * permanently fail `checkShape`'s post-spin one on the very first sample —
  * a gap between the two checks with no game that could ever close it.
  */
@@ -452,7 +454,9 @@ function matchesFieldKind(kind: FieldKind, type: FieldType): boolean {
       const inner = unwrapOptional(declared.of);
       if (inner.kind !== 'list' && inner.kind !== 'array') return false;
       const leaf = unwrapOptional(inner.of);
-      return leaf.kind === 'int' || leaf.kind === 'float';
+      return (
+        leaf.kind === 'int' || leaf.kind === 'float' || leaf.kind === 'str' || leaf.kind === 'record'
+      );
     }
   }
 }

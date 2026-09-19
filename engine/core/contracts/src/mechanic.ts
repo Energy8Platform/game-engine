@@ -1,5 +1,5 @@
 import { type Diagnostic, diagnostic } from './diagnostic';
-import type { KnownPresentationStep, PresentationPlan } from './presentation';
+import type { Board, KnownPresentationStep, PresentationPlan } from './presentation';
 
 /**
  * A stage field's shape, not its meaning. Kept to exactly the three kinds
@@ -130,10 +130,31 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function isGrid(value: unknown): value is number[][] {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * One `Board` leaf, mirrored from `presentation.ts`'s own (private) leaf
+ * check rather than imported from it — see `matchesFieldKind`'s doc for why
+ * the value-level and type-level checks stay two separate, hand-kept-in-
+ * sync functions instead of one shared one. A leaf is a finite number, a
+ * symbol name, or a record whose `symbol` is a finite number, a name, or
+ * `null`.
+ */
+function isBoardLeaf(value: unknown): boolean {
+  return (
+    isFiniteNumber(value) ||
+    typeof value === 'string' ||
+    (isRecord(value) &&
+      (value.symbol === null || isFiniteNumber(value.symbol) || typeof value.symbol === 'string'))
+  );
+}
+
+function isGrid(value: unknown): value is Board {
   return (
     Array.isArray(value) &&
-    value.every((row) => Array.isArray(row) && row.every((cell) => isFiniteNumber(cell)))
+    value.every((row) => Array.isArray(row) && row.every(isBoardLeaf))
   );
 }
 

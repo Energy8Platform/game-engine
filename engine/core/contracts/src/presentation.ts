@@ -26,8 +26,25 @@
  *     is only one round's share of it.
  */
 
-/** A full grid snapshot, `board[col][row]` holding a symbol id. */
-export type Board = number[][];
+/**
+ * A cell as the math says it: a symbol id (a number, or a name like
+ * `'ROCK'` — a real game's math emits names, not just ids), or a record
+ * carrying that id plus whatever else the game keeps per cell (a
+ * multiplier, a sticky counter, …). `symbol: null` is an empty cell.
+ * Everything beyond `symbol` is untyped here on purpose — this package has
+ * no way to know what a given game's cells carry, and `cellData` below
+ * passes it through rather than naming it.
+ */
+export interface BoardCell {
+  symbol: string | number | null;
+  [extra: string]: unknown;
+}
+
+/**
+ * A full grid snapshot, `board[col][row]` holding a symbol id (number or
+ * name) or a per-cell record.
+ */
+export type Board = (number | string | BoardCell)[][];
 
 /** A grid position, addressed the same way `cascade_history.removed` already is. */
 export interface Cell {
@@ -39,10 +56,11 @@ export interface Cell {
  * One winning line as the player reads it, not how it was scored. Field
  * names match the math engine's measured result shape (`symbol`, `count`,
  * `win`, `positions`) on purpose, so nothing has to translate between them.
+ * `symbol` is a number or a name, exactly as a `Board` cell's is.
  */
 export interface RevealedLine {
   line: number;
-  symbol: number;
+  symbol: number | string;
   count: number;
   win: number;
   /** The cells that light up for this line. */
@@ -183,10 +201,24 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+/** A `BoardCell.symbol` value on its own: a finite number, a string, or `null`. */
+function isSymbolId(value: unknown): value is string | number | null {
+  return value === null || typeof value === 'string' || isFiniteNumber(value);
+}
+
+function isBoardCell(value: unknown): value is BoardCell {
+  return isRecord(value) && isSymbolId(value.symbol);
+}
+
+/** One `Board` leaf: a finite number, a string (a symbol name), or a `BoardCell` record. */
+function isBoardLeaf(value: unknown): value is number | string | BoardCell {
+  return isFiniteNumber(value) || typeof value === 'string' || isBoardCell(value);
+}
+
 function isBoard(value: unknown): value is Board {
   return (
     Array.isArray(value) &&
-    value.every((col) => Array.isArray(col) && col.every((cell) => isFiniteNumber(cell)))
+    value.every((col) => Array.isArray(col) && col.every(isBoardLeaf))
   );
 }
 
@@ -198,12 +230,28 @@ function isRevealedLine(value: unknown): value is RevealedLine {
   return (
     isRecord(value) &&
     isFiniteNumber(value.line) &&
-    isFiniteNumber(value.symbol) &&
+    (isFiniteNumber(value.symbol) || typeof value.symbol === 'string') &&
     isFiniteNumber(value.count) &&
     isFiniteNumber(value.win) &&
     Array.isArray(value.positions) &&
     value.positions.every(isCell)
   );
+}
+
+/**
+ * The legacy cell shape `SymbolCell.setData` (`@energy8platform/game-engine`)
+ * takes: `symbol` normalized to a string (`String(n)` for a number, `null`
+ * stays `null`), whatever else a `BoardCell` carried spread through
+ * untyped — a project's own extra fields (a multiplier, a sticky counter)
+ * are this function's to pass along, not to know the shape of. Every
+ * consumer that turns a `Board` cell into the legacy shape (`@energy8engine/
+ * reels`' `toCellBoard`, a project plugin's own) goes through this one
+ * function, so "how a cell becomes `CellData`" has exactly one definition.
+ */
+export function cellData(cell: number | string | BoardCell): { symbol: string | null } & Record<string, unknown> {
+  if (typeof cell === 'number' || typeof cell === 'string') return { symbol: String(cell) };
+  const { symbol, ...extra } = cell;
+  return { symbol: symbol === null ? null : String(symbol), ...extra };
 }
 
 /**

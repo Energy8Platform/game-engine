@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPresentationStep } from '../src/index';
+import { cellData, isPresentationStep } from '../src/index';
 
 describe('presentation steps', () => {
   it('accepts every step the two Slice-0 mechanics need', () => {
@@ -74,7 +74,10 @@ describe('presentation steps', () => {
 
   it('rejects a refill step with no board or a malformed one', () => {
     expect(isPresentationStep({ kind: 'refill' })).toBe(false);
-    expect(isPresentationStep({ kind: 'refill', board: [[1, 'x', 3]] })).toBe(false);
+    // A bare string leaf is now a legal symbol NAME (not malformed — see
+    // the widened-board tests below), so a genuinely bad leaf here is one
+    // that is neither a number, a name, nor a `{ symbol }` record.
+    expect(isPresentationStep({ kind: 'refill', board: [[1, true, 3]] })).toBe(false);
   });
 
   // `setMultiplier` and `wait` were two of the six known kinds and are
@@ -90,5 +93,71 @@ describe('presentation steps', () => {
     for (const value of [null, undefined, 42, 'spinTo', []]) {
       expect(isPresentationStep(value)).toBe(false);
     }
+  });
+
+  // A real game's math emits symbol NAMES, not just numeric ids, and
+  // sometimes a per-cell record carrying extras (a multiplier, a sticky
+  // counter). `Board`'s leaves widened to match — a `spinTo`/`refill` must
+  // still validate.
+  it('accepts a spinTo/refill board whose cells are symbol names', () => {
+    expect(isPresentationStep({ kind: 'spinTo', board: [['ROCK', 'PAPER', 'SCISSORS']] })).toBe(
+      true,
+    );
+    expect(isPresentationStep({ kind: 'refill', board: [['ROCK']] })).toBe(true);
+  });
+
+  it('accepts a board whose cells are per-cell records', () => {
+    expect(
+      isPresentationStep({
+        kind: 'spinTo',
+        board: [[{ symbol: 'ORB', multiplier: 5 }, { symbol: 1 }, { symbol: null }]],
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts a mix of numbers, names and records on the same board', () => {
+    expect(
+      isPresentationStep({
+        kind: 'refill',
+        board: [[1, 'ROCK', { symbol: 'ORB', bonus: 2 }]],
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a board whose record cell has a non-symbol-shaped `symbol`', () => {
+    expect(isPresentationStep({ kind: 'spinTo', board: [[{ symbol: {} }]] })).toBe(false);
+    expect(isPresentationStep({ kind: 'spinTo', board: [[{ symbol: [1] }]] })).toBe(false);
+  });
+
+  it('accepts a revealWins line whose symbol is a name, not just a number', () => {
+    expect(
+      isPresentationStep({
+        kind: 'revealWins',
+        total: 2,
+        lines: [{ line: 0, symbol: 'ROCK', count: 3, win: 2, positions: [{ col: 0, row: 0 }] }],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('cellData', () => {
+  it('a bare number becomes a stringified symbol', () => {
+    expect(cellData(7)).toEqual({ symbol: '7' });
+  });
+
+  it('a bare name passes through as the symbol', () => {
+    expect(cellData('ROCK')).toEqual({ symbol: 'ROCK' });
+  });
+
+  it('a record: symbol normalized to a string, extras spread through', () => {
+    expect(cellData({ symbol: 'ORB', multiplier: 5 })).toEqual({ symbol: 'ORB', multiplier: 5 });
+    expect(cellData({ symbol: 3, bonus: 2 })).toEqual({ symbol: '3', bonus: 2 });
+  });
+
+  it('a record with a null symbol stays null, extras still spread', () => {
+    expect(cellData({ symbol: null, sticky: { remaining: 2 } })).toEqual({
+      symbol: null,
+      sticky: { remaining: 2 },
+    });
   });
 });

@@ -50,8 +50,10 @@ import { addSymbol, EMPTY, nodeForDrop, removeSymbol, setState, STATES } from '.
  *
  * A drop from the Explorer (`text/x-e8-path`) onto a chip sets that
  * state, onto a row its `static`, onto the empty area below the list a
- * new symbol named by the file's stem — when the stem is a `known` id or
- * a number; anything else is refused in the status line. The node comes
+ * new symbol named by the file's stem — any non-empty stem is a legal new
+ * id (a math emits names as symbol ids too, so a name is first-class
+ * here); an empty stem, or a stem already in the doc, is refused in the
+ * status line. The node comes
  * from `ctx.assetNodeTypes.pick` (the tree read so a sibling rule can
  * see what sits beside the file): its type, the prop it put the path in,
  * and — for `win` on a type whose schema has `loop` — `loop: false`.
@@ -248,11 +250,12 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
 
   const dropNew = async (path: string) => {
     const stem = stemOf(path);
-    const k = known.find((k) => k.id === stem);
-    if (!k && !/^\d+$/.test(stem)) return setStatus('drop onto a symbol');
+    if (!stem) return setStatus('drop onto a symbol');
     if (has(stem)) return setStatus(`"${stem}" is already a symbol`);
     const node = await pickNode(path, 'static');
-    if (node) void commit((d) => setState(addSymbol(d, stem, k?.name), stem, 'static', node));
+    if (!node) return;
+    const k = known.find((k) => k.id === stem);
+    void commit((d) => setState(addSymbol(d, stem, k?.name), stem, 'static', node));
   };
 
   const isPath = (e: DragEvent<HTMLElement>) =>

@@ -187,7 +187,7 @@ describe('SymbolsDocument', () => {
     expect(screen.queryByTestId('symbols-status')).toBeNull();
   });
 
-  it('a drop onto the empty area adds a symbol from the file stem when it is known or numeric, else asks for a symbol', async () => {
+  it('a drop onto the empty area adds a symbol from the file stem — known, numeric or any other name', async () => {
     const { ctx, docs } = await booted({}, { version: 1, symbols: [TWO.symbols[0]] });
     renderDocument(ctx);
     const area = await screen.findByTestId('symbols-drop-new');
@@ -204,17 +204,21 @@ describe('SymbolsDocument', () => {
       id: '9',
       static: { type: 'image', props: { src: 'assets/9.png' } },
     });
-    fireEvent.drop(area, transfer('assets/logo.png'));
-    await waitFor(() =>
-      expect(screen.getByTestId('symbols-status')).toHaveTextContent('drop onto a symbol'),
-    );
-    expect(docs()).toHaveLength(2);
+    // A stem that is neither `known` nor numeric is now a legal new id too
+    // — a real game's math emits symbol NAMES, and the drop-new rule
+    // stopped requiring the id to already exist somewhere.
+    fireEvent.drop(area, transfer('assets/ROCK.png'));
+    await waitFor(() => expect(docs()).toHaveLength(3));
+    expect(docs()[2].symbols.at(-1)).toEqual({
+      id: 'ROCK',
+      static: { type: 'image', props: { src: 'assets/ROCK.png' } },
+    });
     // An id the doc already has: nothing to add, the drop lands on nothing.
     fireEvent.drop(area, transfer('assets/1.png'));
     await waitFor(() =>
       expect(screen.getByTestId('symbols-status')).toHaveTextContent('"1" is already a symbol'),
     );
-    expect(docs()).toHaveLength(2);
+    expect(docs()).toHaveLength(3);
   });
 
   it('a drop of a file with no node type is refused in the status line and reported', async () => {

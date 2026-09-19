@@ -45,3 +45,27 @@ describe('checkShape — the `list` kind', () => {
     expect(checkShape(req, { lines: [] }, 'classic', 'base_game')).toEqual([]);
   });
 });
+
+describe("checkShape — the `grid` kind's widened leaves", () => {
+  // A real game's math emits symbol NAMES, not just numeric ids, and
+  // sometimes a per-cell record. `isGrid` (the value-level check `grid`
+  // runs through) widened to accept both — mirrored by `matchesFieldKind`
+  // in `@energy8engine/game-runtime`'s pre-flight check.
+  it('accepts a grid whose cells are symbol names', () => {
+    const req = { fields: { grid: 'grid' } } as const;
+    expect(checkShape(req, { grid: [['ROCK', 'PAPER']] }, 'classic', 'base_game')).toEqual([]);
+  });
+
+  it('accepts a grid whose cells are per-cell records', () => {
+    const req = { fields: { grid: 'grid' } } as const;
+    expect(
+      checkShape(req, { grid: [[{ symbol: 'ORB', multiplier: 5 }]] }, 'classic', 'base_game'),
+    ).toEqual([]);
+  });
+
+  it('still rejects a grid whose leaf is not a legal symbol id at all', () => {
+    const req = { fields: { grid: 'grid' } } as const;
+    const [d] = checkShape(req, { grid: [[{}]] }, 'classic', 'base_game');
+    expect(d.message).toContain('grid');
+  });
+});

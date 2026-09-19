@@ -80,6 +80,31 @@ describe('boardFromReelSystem: spinTo', () => {
     // no repaint was asked for: the op's own settle re-sets nothing
     expect(setBoard).not.toHaveBeenCalled();
   });
+
+  // A real game's math emits symbol NAMES ('ROCK'), not just numeric ids —
+  // the step vocabulary's `Board` widened to carry them, and `toCellBoard`
+  // now goes through `@energy8engine/contracts`' `cellData()` instead of a
+  // bare `String(id)`.
+  it('resolves a name board straight through — no numeric conversion for a symbol name', async () => {
+    const { reelSystem, spin } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.spinTo({ kind: 'spinTo', board: [['ROCK', 'PAPER']] });
+
+    expect(spin).toHaveBeenCalledWith([[{ symbol: 'ROCK' }, { symbol: 'PAPER' }]]);
+  });
+
+  it('a record cell: symbol normalized, extras (multiplier, bonus, …) reach setData/spin untouched', async () => {
+    const { reelSystem, spin } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.spinTo({
+      kind: 'spinTo',
+      board: [[{ symbol: 'ORB', multiplier: 5 }, { symbol: 2, bonus: 1 }]],
+    });
+
+    expect(spin).toHaveBeenCalledWith([[{ symbol: 'ORB', multiplier: 5 }, { symbol: '2', bonus: 1 }]]);
+  });
 });
 
 describe('boardFromReelSystem: refill', () => {
@@ -158,6 +183,24 @@ describe('boardFromReelSystem: remove', () => {
 
     expect(getCell).not.toHaveBeenCalled();
     expect(setBoard).not.toHaveBeenCalled();
+  });
+
+  it("keeps a surviving cell's extras (multiplier, bonus, …) through the re-sync snapshot", async () => {
+    const withExtras = () => [
+      [{ symbol: 'a', multiplier: 3 }, { symbol: 'b', bonus: 1 }],
+      [{ symbol: 'c', sticky: { remaining: 2 } }, { symbol: 'd' }],
+    ];
+    const { reelSystem, setBoard } = fakeReelSystem(withExtras());
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.remove({ kind: 'remove', cells: [{ col: 0, row: 1 }] });
+
+    // the removed cell is nulled with nothing else — same as before this
+    // task; every OTHER cell's extras survive the snapshot spread untouched.
+    expect(setBoard).toHaveBeenCalledWith([
+      [{ symbol: 'a', multiplier: 3 }, { symbol: null }],
+      [{ symbol: 'c', sticky: { remaining: 2 } }, { symbol: 'd' }],
+    ]);
   });
 });
 

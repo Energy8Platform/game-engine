@@ -503,19 +503,50 @@ describe('checkAgainstSchema', () => {
     expect(d.message).toContain('base_game');
   });
 
-  it('a grid whose leaf is not numeric does not satisfy "grid" — mirrors isGrid\'s numeric-leaf rule', () => {
+  // A real game's math emits symbol NAMES, not just numeric ids — the step
+  // vocabulary's `Board` widened to carry them (see `@energy8engine/
+  // contracts`' `presentation.ts`), and this pre-flight check widened with
+  // it: a `[[str]]` grid type is exactly the shape `spin-parser` derives
+  // for a math file that declares `grid: [[str]]`, and it must pass now,
+  // or a real name-carrying board fails at composition time even though
+  // `isGrid` (the post-spin, value-level check) accepts it at runtime.
+  it('a `[[str]]` grid type passes "grid" — symbol names are first-class now', () => {
     const SCHEMA_STRING_GRID = schemaWithStages({
       base_game: {
-        // Correctly nested two levels deep, but the leaf is `str`, not
-        // `int`/`float` — `isGrid` (the post-spin, value-level check in
-        // contracts/mechanic.ts) would reject this at runtime; the
-        // pre-flight check must reject it too, or a schema like this
-        // passes here and then permanently fails on the first real spin.
         grid: { kind: 'list', of: { kind: 'list', of: { kind: 'str' } } },
         cascade_history: { kind: 'list', of: { kind: 'record', name: 'CascadeStep' } },
       },
     });
-    const diagnostics = checkAgainstSchema(SCHEMA_STRING_GRID, { base_game: cascadeMechanic });
+    expect(checkAgainstSchema(SCHEMA_STRING_GRID, { base_game: cascadeMechanic })).toEqual([]);
+  });
+
+  it('a `[[record]]` grid type also passes "grid" — a per-cell record is a legal leaf too', () => {
+    const SCHEMA_RECORD_GRID = schemaWithStages({
+      base_game: {
+        grid: {
+          kind: 'list',
+          of: { kind: 'list', of: { kind: 'record', name: 'BoardCell' } },
+        },
+        cascade_history: { kind: 'list', of: { kind: 'record', name: 'CascadeStep' } },
+      },
+    });
+    expect(checkAgainstSchema(SCHEMA_RECORD_GRID, { base_game: cascadeMechanic })).toEqual([]);
+  });
+
+  it('a grid whose leaf kind is still unsupported (e.g. bool) does not satisfy "grid" — mirrors isGrid\'s widened-but-still-closed leaf rule', () => {
+    const SCHEMA_BOOL_GRID = schemaWithStages({
+      base_game: {
+        // Correctly nested two levels deep, but the leaf is `bool` — not
+        // `int`/`float`/`str`/`record` — `isGrid` (the post-spin,
+        // value-level check in contracts/mechanic.ts) would reject this at
+        // runtime; the pre-flight check must reject it too, or a schema
+        // like this passes here and then permanently fails on the first
+        // real spin.
+        grid: { kind: 'list', of: { kind: 'list', of: { kind: 'bool' } } },
+        cascade_history: { kind: 'list', of: { kind: 'record', name: 'CascadeStep' } },
+      },
+    });
+    const diagnostics = checkAgainstSchema(SCHEMA_BOOL_GRID, { base_game: cascadeMechanic });
     expect(diagnostics).toHaveLength(1);
     const [d] = diagnostics;
     expect(d.message).toContain('grid');

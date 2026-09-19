@@ -51,9 +51,12 @@
  * `@energy8engine/contracts`.
  *
  * One more measured decision baked in here: the step vocabulary's `Board`
- * is `number[][]` (symbol ids as numbers), but the legacy `SymbolResolver`
- * is keyed by `string`. Converted with `String(id)` — the only generic,
- * lossless mapping available without a game-specific symbol legend.
+ * carries a symbol id (a number or a name) or a per-cell record, but the
+ * legacy `SymbolResolver` is keyed by `string` and the legacy `CellData` is
+ * a flat `{ symbol, ...extras }`. Converted through `cellData()`
+ * (`@energy8engine/contracts`) — the one function every consumer of a
+ * `Board` cell goes through, so this file, a project's own plugin, and any
+ * future one agree on the mapping.
  */
 import { createReelSystem } from '@energy8platform/game-engine/slot';
 import type {
@@ -62,6 +65,7 @@ import type {
   ReelSystem,
 } from '@energy8platform/game-engine/slot';
 import type { Container } from 'pixi.js';
+import { cellData } from '@energy8engine/contracts';
 import type {
   Board,
   RefillStep,
@@ -101,9 +105,9 @@ export interface LegacyReelSystem {
   readonly config?: { grid: { cellSize: number } };
 }
 
-/** Symbol ids in the step vocabulary are numbers; the legacy resolver is keyed by string. */
+/** Each `Board` cell — a number, a name, or a record — through the shared `cellData()` mapping. */
 function toCellBoard(board: Board): CellData[][] {
-  return board.map((col) => col.map((symbolId) => ({ symbol: String(symbolId) })));
+  return board.map((col) => col.map((cell) => cellData(cell) as CellData));
 }
 
 /**
