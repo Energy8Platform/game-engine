@@ -192,7 +192,10 @@ export function validateFlow(
     const actionSet = new Set(actions);
     for (const node of doc.nodes) {
       if (node.kind !== 'spin') continue;
-      const action = node.props?.action;
+      // `?? 'spin'`: the default the kind's schema fills in — a bare `spin`
+      // node asks for the `spin` action, and warns when the game declares no
+      // such action, exactly as a written-out `action: spin` does.
+      const action = node.props?.action ?? 'spin';
       // Only a LITERAL action names a specific game action; `$path` isn't known until the flow runs.
       if (typeof action === 'string' && !action.startsWith('$') && !actionSet.has(action)) {
         out.push(diagnostic('warning', 'flow', node.id, `action "${action}" is not in game/spec.json`));

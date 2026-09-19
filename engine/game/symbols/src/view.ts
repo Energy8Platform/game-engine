@@ -125,7 +125,7 @@ export function createSymbolHandle(
       try {
         w.props = type.schema(node.props) as Record<string, unknown>;
         w.child = type.mount(w.props, deps.ctx);
-        applyCommon(w.child, node.props);
+        applyCommon(w.child, node.props, type);
         w.container.addChild(w.child);
       } catch (e) {
         w.child = undefined;

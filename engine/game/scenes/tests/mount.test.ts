@@ -167,6 +167,33 @@ describe('mounting', () => {
     expect(scenes.visible()).toEqual(['a']);
   });
 
+  it('a container sized by `width` scales to its children, whose own `width` stays geometry', () => {
+    // `applyCommon` at mount time reads a container's bounds as 0 (no children
+    // yet) and silently leaves `scale` at 1 — the pass after the children is
+    // what makes a sized container (and a gizmo resize of one) stick.
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'box',
+            type: 'container',
+            props: { width: 300 },
+            children: [{ id: 'art', type: 'shape', props: { width: 100, height: 100 } }],
+          },
+        ],
+      },
+    ]);
+    expect(byId(scenes, 'a', 'box')!.scale.x).toBe(3);
+    // `shape` declares `width`/`height` itself: 100 is the rectangle drawn,
+    // NOT a rescale of it on top.
+    const art = byId(scenes, 'a', 'art')!;
+    expect(art.scale.x).toBe(1);
+    expect(art.getLocalBounds().width).toBe(100);
+  });
+
   it('`mask: true` masks the node\'s parent, and the unmount clears it', () => {
     // The parent is a FOREIGN view (the runtime detaches it, never destroys
     // it): the one case where a stale `mask` would outlive the masking node.
@@ -195,6 +222,34 @@ describe('mounting', () => {
     scenes.replace([{ id: 'a', nodes: [] }]);
     expect(host.mask).toBeFalsy();   // pixi's getter reads back `undefined`, not `null`
     expect(host.destroyed).toBe(false);
+  });
+
+  it('a second sibling asking to mask the same parent is a diagnostic, not a silent overwrite', () => {
+    const { scenes, report } = boot([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'host',
+            type: 'container',
+            props: {},
+            children: [
+              { id: 'cut', type: 'container', props: { mask: true } },
+              { id: 'also', type: 'container', props: { mask: true } },
+            ],
+          },
+        ],
+      },
+    ]);
+    // The first one keeps it.
+    expect(byId(scenes, 'a', 'host')!.mask).toBe(byId(scenes, 'a', 'cut'));
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/also',
+        message: '"cut" is already the mask of host',
+      }),
+    );
   });
 
   it('a duplicate node id: the later node is skipped with an error', () => {

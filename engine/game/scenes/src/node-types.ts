@@ -72,14 +72,40 @@ export function createNodeTypes(): NodeTypesService {
 }
 
 /**
+ * `props` minus the `width`/`height` the TYPE declares itself: one YAML
+ * key must not both redraw the geometry and rescale the view, so where a
+ * type owns the name (`shape`, where the pair IS the rectangle), the
+ * common pass leaves that axis alone.
+ */
+function commonOf(props: Record<string, unknown>, type?: NodeType<any>): Record<string, unknown> {
+  const dict = (type?.schema as unknown as { dict?: Record<string, unknown> } | undefined)?.dict;
+  if (!dict || (!dict.width && !dict.height)) return props;
+  const out = { ...props };
+  if (dict.width) delete out.width;
+  if (dict.height) delete out.height;
+  return out;
+}
+
+/**
  * Applies `COMMON` (defaults filled in) to a view. The optional props are
  * applied only when actually set: `width`/`height` AFTER `scale`, because
  * each overrides that axis' scale from the view's own local bounds;
  * `tint` only where the view has one; `anchorX`/`anchorY` per axis over
  * `anchor`, only where the view has an anchor at all.
+ *
+ * `type` is the node's own type when the caller has one: its schema says
+ * which of `width`/`height` are the TYPE's (`commonOf`), and those the
+ * common pass skips.
  */
-export function applyCommon(view: Container, props: Record<string, unknown>): void {
-  const c = COMMON(props as never) as Record<string, number | string | boolean | undefined>;
+export function applyCommon(
+  view: Container,
+  props: Record<string, unknown>,
+  type?: NodeType<any>,
+): void {
+  const c = COMMON(commonOf(props, type) as never) as Record<
+    string,
+    number | string | boolean | undefined
+  >;
   view.position.set(c.x as number, c.y as number);
   view.scale.set(c.scale as number);
   if (typeof c.width === 'number') view.width = c.width;

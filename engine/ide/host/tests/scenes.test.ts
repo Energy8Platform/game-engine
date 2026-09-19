@@ -194,6 +194,26 @@ describe('checkScenes', () => {
       }),
     ]);
   });
+  it("a type's own `width` is checked by ITS schema, not by COMMON", () => {
+    const own: NodeTypeInfo[] = [
+      ...types,
+      { type: 'shape', schema: json(Schema.object({ width: Schema.number().default(100) })) },
+      // A `width` COMMON itself would refuse: it proves which schema saw the value.
+      { type: 'gauge', schema: json(Schema.object({ width: Schema.union(['thin', 'thick']) })) },
+    ];
+    const check = (nodes: SceneNode[]) => checkScenes([doc('base', nodes)], own, () => true, false);
+    expect(
+      check([
+        { id: 's', type: 'shape', props: { width: 40, x: 1 } },
+        { id: 'g', type: 'gauge', props: { width: 'thick' } },
+      ]),
+    ).toEqual([]);
+    // Still refused — by the type's schema now.
+    expect(check([{ id: 'g', type: 'gauge', props: { width: 'huge' } }])).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'base/g' }),
+    ]);
+  });
+
   it('a type with no assetProps checks nothing, even with a path-shaped prop', () => {
     const local: NodeTypeInfo[] = [
       { type: 'thing', schema: json(Schema.object({ src: Schema.string() })) },

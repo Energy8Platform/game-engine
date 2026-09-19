@@ -112,11 +112,18 @@ export function checkNode(
   } else if (schema !== undefined) {
     const own: Record<string, unknown> = {};
     const common: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(node.props))
-      (COMMON_PROPS.includes(k) ? common : own)[k] = v;
     try {
+      // Rehydrated first: the props travel as schemastery JSON (`{ uid, refs }`),
+      // so only the `Schema` has a readable `dict`. The TYPE's own prop wins the
+      // name — `shape` declares `width`/`height` itself (the geometry), so those
+      // go to its schema, not to `COMMON`; the runtime splits them the same way
+      // (`applyCommon`'s `commonOf`).
+      const ownSchema = new Schema(schema as Schema);
+      const dict = (ownSchema as unknown as { dict?: Record<string, unknown> }).dict ?? {};
+      for (const [k, v] of Object.entries(node.props))
+        (COMMON_PROPS.includes(k) && !(k in dict) ? common : own)[k] = v;
       COMMON(common as never);
-      new Schema(schema as Schema)(own);
+      ownSchema(own);
     } catch (error) {
       err(`props: ${error instanceof Error ? error.message : String(error)}`, 'fix the value');
     }

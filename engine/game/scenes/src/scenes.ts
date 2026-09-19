@@ -23,7 +23,7 @@ import {
 } from '@energy8engine/contracts';
 import { fitStage, type Fit, type Size } from './fit';
 import { createTransitions, cut, type TickerLike, type TransitionsService } from './transitions';
-import { applyCommon, type NodeType, type NodeTypesService } from './node-types';
+import { applyCommon, COMMON, type NodeType, type NodeTypesService } from './node-types';
 import type { AssetLoader } from './builtin';
 
 export interface CreateScenesOptions {
@@ -177,12 +177,16 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     }
     let view: Container;
     let props: Record<string, unknown>;
+    let masks = false;
     try {
       props = type.schema(node.props) as Record<string, unknown>;
       view = type.mount(props, mountCtx([...chain, sceneId]));
       // Inside the try: a common prop off its type (`x: 'abc'`) is this
       // node's failure, not the whole set's.
-      applyCommon(view, node.props);
+      applyCommon(view, node.props, type);
+      // `mask` is a COMMON prop, so it is read off the common schema like
+      // every other one — a type's own schema output need not carry it.
+      masks = COMMON(node.props as never).mask;
     } catch (e) {
       error(
         where,
@@ -194,11 +198,28 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     parent.addChild(view);
     // After `addChild`: pixi wants the mask in the same tree it masks.
     // The node still draws its own children — only its PARENT is clipped.
-    if (props.mask) parent.mask = view;
+    // A parent has ONE mask: the first sibling asking for it keeps it, and
+    // the next one is a diagnostic rather than a silent overwrite.
+    if (masks) {
+      if (parent.mask)
+        error(
+          where,
+          `"${(parent.mask as unknown as Container).label}" is already the mask of ${parent.label}`,
+          'one `mask: true` per parent',
+        );
+      else parent.mask = view;
+    }
     const entry: Entry = { view, node, props, type, where };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
     for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen);
+    // A `container`'s local bounds ARE its children's: the pass above ran
+    // before they mounted, read 0, and left `scale` at 1 — so a node
+    // carrying `width`/`height` gets the pass again now that there is
+    // something to measure. Idempotent for a `Sprite`/`Graphics`, whose
+    // bounds never depended on a child.
+    if (node.props?.width !== undefined || node.props?.height !== undefined)
+      applyCommon(view, node.props, type);
   }
 
   /** The skipped nodes of a mount that is on screen: each one an error, now that a person can see the gap. */
@@ -413,7 +434,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   /** A nested host keeps its own common props (alpha above all) once a transition is over. */
   const settleHosts = (hosts: Entry[], visible: boolean) => {
     for (const e of hosts) {
-      applyCommon(e.view, e.node.props);
+      applyCommon(e.view, e.node.props, e.type);
       e.view.visible = visible;
     }
   };

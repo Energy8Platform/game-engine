@@ -151,6 +151,24 @@ describe('validateFlow', () => {
     expect(validateFlow(spinDoc, kinds, null, null)).toEqual([]);
   });
 
+  it("a `spin` with no `action` is checked against the kind's default, `spin`", () => {
+    const d = doc(
+      [
+        { id: 'a', kind: 'boot' },
+        { id: 's', kind: 'spin' },
+      ],
+      [{ from: 'a', to: 's' }],
+    );
+    expect(validateFlow(d, kinds, null, ['buy', 'free_spin'])).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        where: 's',
+        message: 'action "spin" is not in game/spec.json',
+      }),
+    ]);
+    expect(validateFlow(d, kinds, null, ['spin'])).toEqual([]);
+  });
+
   it('kinds null skips kind checks; sceneIds null skips scene checks', () => {
     const out = validateFlow(
       doc(

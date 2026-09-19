@@ -62,6 +62,7 @@ describe('viewers-media', () => {
   it('registers image, audio and video, matched by extension, case-insensitively', async () => {
     const { ctx } = await boot(true);
     expect(ctx.viewers.pick('a/logo.PNG')?.id).toBe('image');
+    expect(ctx.viewers.pick('a/hero.avif')?.id).toBe('image');
     expect(ctx.viewers.pick('a/win.mp3')?.id).toBe('audio');
     expect(ctx.viewers.pick('a/intro.webm')?.id).toBe('video');
     expect(ctx.viewers.pick('a/script.spin')).toBeUndefined();

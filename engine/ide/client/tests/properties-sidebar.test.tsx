@@ -11,6 +11,7 @@ import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as files from '../src/plugins/files';
+import { mergedSchema } from '../src/shell/PropertiesSidebar';
 
 /**
  * The Properties sidebar, rendered through the plugin's OWN
@@ -359,5 +360,26 @@ describe('PropertiesSidebar', () => {
     expect(screen.getByTestId('properties')).toBeTruthy();
     expect(screen.queryByTestId('prop-id')).toBeNull();
     expect(screen.queryByTestId('prop-scene-id')).toBeNull();
+  });
+});
+
+describe('mergedSchema', () => {
+  it("a type declaring `width` itself owns the form's one `width` field", () => {
+    // One dict key, so one field — and it is the TYPE's, not COMMON's: a
+    // `shape`'s `width` is the rectangle it draws, and its description (and
+    // default) is what the form must show.
+    const merged = mergedSchema({
+      type: 'shape',
+      schema: Schema.object({
+        width: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
+      }).toJSON(),
+    });
+    const dict = (new Schema(merged as never) as unknown as { dict: Record<string, Schema> }).dict;
+    expect(dict.width.meta).toMatchObject({
+      default: 100,
+      description: 'design px (rect/roundRect/ellipse)',
+    });
+    // The common props a type does NOT declare are untouched.
+    expect(dict.x.meta.description).toBe('x, design px');
   });
 });

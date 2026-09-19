@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, Sprite } from 'pixi.js';
 import Schema from 'schemastery';
 import { applyCommon, createNodeTypes, type NodeType } from '../src/node-types';
-import { image } from '../src/builtin';
+import { container, image, shape } from '../src/builtin';
 
 const t = (type: string): NodeType => ({
   type,
@@ -89,5 +89,13 @@ describe('applyCommon', () => {
     const withAnchor = Object.assign(new Container(), { anchor: { set: vi.fn() } });
     applyCommon(withAnchor as unknown as Container, { anchor: 0.5, anchorY: 1 });
     expect(withAnchor.anchor.set).toHaveBeenCalledWith(0.5, 1);
+  });
+
+  it('`width`/`height` the TYPE declares are its own geometry — the common pass skips them', () => {
+    const circle = new Graphics().circle(0, 0, 10).fill('#ffffff'); // 20 wide
+    applyCommon(circle, { width: 40, scale: 3 }, shape);
+    expect(circle.scale.x).toBe(3); // `shape.width` drew the art; nothing rescales it
+    applyCommon(circle, { width: 40, scale: 3 }, container); // a type with no `width` of its own
+    expect(circle.scale.x).toBe(2); // 40 / 20
   });
 });

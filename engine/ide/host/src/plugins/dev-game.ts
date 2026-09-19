@@ -154,7 +154,11 @@ export interface DevGameConfig {
   gamesDir: string;
   /** `game_id` from the `.spin`'s `game "..." { }` declaration. */
   gameId: string;
-  /** Entry action name for a spin request (see the `.spin`'s `action spin { }`). Defaults to `'spin'`. */
+  /**
+   * Entry action name for a spin request (see the `.spin`'s `action spin { }`). Defaults to `'spin'`.
+   * Unreachable in practice now that the flow always posts an `action` of its own — kept as the
+   * fallback for a body without one (a hand-made `POST /api/spin`).
+   */
   action?: string;
   /** Default bet level, used when `POST /api/spin`'s body doesn't specify one. */
   betLevel: number;
