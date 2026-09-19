@@ -446,34 +446,61 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       port: preview.port,
       // See point 5 above — the coexistence with plugin-server's own
       // WS-upgrade dispatcher is racy and was measured to fail; disabled
-      // rather than relied on. `hmr: false` on its own still lets vite's
-      // OWN `clientInjectionsPlugin` (node_modules/vite/dist/node/chunks/
-      // dep-Dm0c1Wj2.js:41158, `port ||= 24678`) bake that port into the
-      // served page whenever `middlewareMode` is true — REGARDLESS of
-      // `hmr`'s value — so a second `e8 dev` on the machine, holding
-      // 24678 for real, turns a locally-harmless refusal into a wrong
-      // response the page logs. Naming `port` here moves the baked value
-      // off that machine-wide default.
-      hmr: { port: 5691 },
-      // `ws: false` is what stops THIS instance from ever answering that
-      // port (or racing plugin-server's dispatcher per point 5) — checked
-      // against vite's own `createWebSocketServer` (same chunk, lines
-      // 32368-32369): `if (config.server.ws === false) return <no-op
-      // stub>` runs before any `hmr`/port/`.listen()` logic, so nothing
-      // is ever bound here for a client's attempt to land on.
-      //
-      // Does not fully silence the client's OWN attempt, though: vite's
-      // `devHtmlHook` (same chunk, ~line 37561) injects `/@vite/client`
-      // into every dev-mode HTML response unconditionally — no config
-      // gates it — so the page always tries an hmr handshake and always
-      // logs a console error when it fails, clean local ECONNREFUSED
-      // included (measured: reproduces identically with no other process
-      // anywhere near this port). That residual is pre-existing on the
-      // unmodified file too (measured by reverting this hunk alone) —
-      // not something `hmr`/`ws` server options can close; a full fix
-      // would mean stripping vite's own injected client script.
+      // rather than relied on.
+      hmr: false,
+      // `hmr: false` on its own still leaves vite's standalone ping-socket
+      // listener bound to 24678 in `middlewareMode` (createWebSocketServer's
+      // fallback branch, node_modules/vite/dist/node/chunks/
+      // dep-Dm0c1Wj2.js — `wsServer` ends up `null` here since there is no
+      // owning http server, so it opens its own on `hmr.port || 24678` and
+      // `.listen()`s). Two instances of THIS plugin (this repo's own tests,
+      // a second `e8 dev` elsewhere on the machine) then fight over that one
+      // port. `ws: false` short-circuits `createWebSocketServer` before any
+      // of that (same file, lines 32368-32369: `if (config.server.ws ===
+      // false) return <no-op stub>`) — verified nothing is ever bound here.
       ws: false,
     },
+    // The served page's own `/@vite/client` script still tries an hmr
+    // handshake on load regardless of the `ws`/`hmr` server options above
+    // (those are server-side; the client script is injected unconditionally
+    // by vite's own HTML transform) — harmless on its own (a clean refusal,
+    // swallowed silently) UNLESS something else on the machine happens to
+    // be listening on the port it targets, in which case the handshake
+    // gets a real, wrong response and the page logs it. Stripped instead of
+    // worked around: `e8 dev` has no live-reload (point 5 above), so there
+    // is nothing this script does for this page that matters, and the game
+    // fixture pulls in no `.css` (grep confirms: none of `first-slot`'s
+    // `src`/`plugins`/`game` import one) — the one other thing `/@vite/
+    // client` is for. `order: 'post'` runs after vite's own html transform
+    // already injected the tag, so the removal always has something to
+    // remove.
+    //
+    // NOT sufficient on its own, measured: `@energy8engine/loader`'s
+    // `composeFromProject` calls `import(/* @vite-ignore */ url)` on a
+    // COMPUTED specifier (loading each composed row's own `runtime.ts` —
+    // this is how every row's runtime half gets pulled in, 13 of them in
+    // this one fixture) — vite's import-analysis rewrites any dynamic
+    // import whose specifier is not a string literal to
+    // `__vite__injectQuery(url, 'import')` and, independently of the HTML
+    // tag above or of `hasHMR`, prepends `import { injectQuery as
+    // __vite__injectQuery } from "/@vite/client"` to that module
+    // (dep-Dm0c1Wj2.js's `needQueryInjectHelper` branch). That import pulls
+    // in the WHOLE client module — ES modules have no partial execution —
+    // so its top-level websocket-connect code still runs and still logs on
+    // failure, tag stripped or not. Left in (removing it is still a net
+    // improvement against the HTML-parser-initiated fetch) — see the
+    // report for why this residual is not closed and needs a call this
+    // file's own edit did not make unilaterally.
+    plugins: [
+      {
+        name: 'e8:no-vite-client',
+        transformIndexHtml: {
+          order: 'post',
+          handler: (html) =>
+            html.replace(/\s*<script type="module" src="\/@vite\/client"><\/script>/, ''),
+        },
+      },
+    ],
     optimizeDeps: {
       // `'**/*.html'` is vite's own default for this field, restated
       // because naming any entry replaces the default rather than adding
