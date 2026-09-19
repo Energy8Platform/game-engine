@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic, SymbolsDoc } from '@energy8engine/contracts';
 import { EMPTY } from '../src/shell/symbols-doc';
 import {
@@ -7,11 +7,41 @@ import {
   boot,
   harness,
   KNOWN,
+  PREVIEW_URL,
   renderDocument,
   transfer,
   TWO,
   type Answer,
 } from './symbols-harness';
+
+/**
+ * The canvas iframe, with `contentWindow.postMessage` stubbed so requests
+ * can be read back — same trick as `scene-document.test.tsx`'s `canvas()`:
+ * the tab attaches the RPC from the iframe's ref callback, so by the time
+ * `renderDocument` returns it is already attached.
+ */
+function canvas() {
+  const iframe = screen.getByTitle('symbol canvas') as HTMLIFrameElement;
+  const win = iframe.contentWindow as Window & { postMessage: ReturnType<typeof vi.fn> };
+  win.postMessage = vi.fn();
+  const posted = () => win.postMessage.mock.calls.map((c) => c[0]);
+  const reqs = (method: string) =>
+    posted()
+      .filter((m) => m.type === 'e8:ide:req' && m.method === method)
+      .map((m) => m.params);
+  return { iframe, posted, reqs };
+}
+
+/** A frame FROM the iframe: the message event the browser would deliver to the tab's window. */
+function frame(iframe: HTMLIFrameElement, event: string, payload: unknown) {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      data: { type: 'e8:ide:evt', event, payload },
+      origin: PREVIEW_URL,
+      source: iframe.contentWindow,
+    }),
+  );
+}
 
 /**
  * The Symbols document, rendered through the plugin's `shell.document`
@@ -31,7 +61,7 @@ async function booted(routes: Parameters<typeof harness>[0] = {}, doc: SymbolsDo
 }
 
 describe('SymbolsDocument', () => {
-  it('draws a row per symbol with its name and state chips, ghosts for known ids not in the doc, and the canvas placeholder', async () => {
+  it('draws a row per symbol with its name and state chips, ghosts for known ids not in the doc, and the live canvas', async () => {
     const { ctx } = await booted({}, { version: 1, symbols: [TWO.symbols[0]] });
     renderDocument(ctx);
     expect(await screen.findByTestId('symbols-doc')).toBeTruthy();
@@ -43,7 +73,8 @@ describe('SymbolsDocument', () => {
     expect(screen.queryByTestId('symbol-row-2')).toBeNull();
     expect(screen.getByTestId('symbol-ghost-2')).toHaveTextContent('lemon');
     expect(screen.queryByTestId('symbol-ghost-1')).toBeNull();
-    expect(screen.getByTestId('symbols-canvas')).toHaveTextContent('select a symbol');
+    const iframe = screen.getByTitle('symbol canvas') as HTMLIFrameElement;
+    expect(iframe.src).toBe(`${PREVIEW_URL}/editor.html?symbol=`);
     expect(screen.queryByTestId('symbols-status')).toBeNull();
   });
 
@@ -293,5 +324,79 @@ describe('SymbolsDocument', () => {
     release({ body: { doc: withTwo, known: KNOWN, diagnostics: [] } });
     await waitFor(() => expect(docs()).toHaveLength(2));
     expect(docs()[1].symbols.map((s) => s.id)).toEqual(['1', '2', '7']);
+  });
+
+  describe('the live canvas', () => {
+    it('on ready, resends the current doc then the current selection, in that order', async () => {
+      const { ctx } = await booted();
+      act(() => ctx.symbols.select({ id: '1', state: 'win' }));
+      renderDocument(ctx);
+      const { iframe, posted } = canvas();
+      const before = posted().length;
+      frame(iframe, 'ready', {});
+      const added = posted().slice(before);
+      expect(added.map((m) => m.method)).toEqual(['replaceSymbols', 'symbol']);
+      expect(added[0].params).toEqual({ doc: ctx.symbols.doc() });
+      expect(added[1].params).toEqual({ id: '1', state: 'win' });
+    });
+
+    it('ready sends neither call when there is no doc and nothing selected', async () => {
+      const { ctx } = await booted({}, null);
+      renderDocument(ctx);
+      const { iframe, reqs } = canvas();
+      frame(iframe, 'ready', {});
+      expect(reqs('replaceSymbols')).toHaveLength(0);
+      expect(reqs('symbol')).toHaveLength(0);
+    });
+
+    it('a chip click posts symbol to the canvas', async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { reqs } = canvas();
+      fireEvent.click(screen.getByTestId('symbol-chip-1-win'));
+      expect(ctx.symbols.selected()).toEqual({ id: '1', state: 'win' });
+      await waitFor(() => expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' }));
+    });
+
+    it('a symbols frame posts replaceSymbols to the canvas', async () => {
+      const { ctx, socket } = await booted();
+      renderDocument(ctx);
+      const { reqs } = canvas();
+      act(() => socket.receive({ type: 'symbols', doc: TWO, diagnostics: [] }));
+      await waitFor(() => expect(reqs('replaceSymbols').at(-1)).toEqual({ doc: TWO }));
+    });
+
+    it('the Replay button re-sends the current selection', async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { reqs } = canvas();
+      fireEvent.click(screen.getByTestId('symbol-chip-1-win'));
+      await waitFor(() => expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' }));
+      const before = reqs('symbol').length;
+      fireEvent.click(screen.getByTestId('symbol-replay'));
+      expect(reqs('symbol')).toHaveLength(before + 1);
+      expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' });
+    });
+
+    it("the canvas' own error event shows in the status line", async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { iframe } = canvas();
+      frame(iframe, 'error', { message: 'no "symbols" service' });
+      expect(await screen.findByTestId('symbols-status')).toHaveTextContent('no "symbols" service');
+    });
+
+    it('shows "canvas unavailable" when there is no project open, and renders no iframe', async () => {
+      const { ctx } = await harness(
+        { 'GET /api/symbols': boot(), 'PUT /api/symbols': accept },
+        { previewUrl: null },
+      );
+      await waitFor(() => expect(ctx.symbols.known()).toEqual(KNOWN));
+      renderDocument(ctx);
+      expect(await screen.findByTestId('canvas-unavailable')).toHaveTextContent(
+        'canvas unavailable: no project open',
+      );
+      expect(screen.queryByTitle('symbol canvas')).toBeNull();
+    });
   });
 });

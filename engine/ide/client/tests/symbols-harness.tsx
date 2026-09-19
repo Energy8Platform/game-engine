@@ -71,6 +71,9 @@ export const KNOWN = [
   { id: '2', name: 'lemon' },
 ];
 
+/** Where the game is served — same shape `scene-document.test.tsx` uses. */
+export const PREVIEW_URL = 'http://127.0.0.1:5682';
+
 export const TWO: SymbolsDoc = {
   version: 1,
   symbols: [
@@ -121,7 +124,12 @@ afterEach(async () => {
 
 export async function harness(
   routes: Record<string, Route>,
-  opts: { scenes?: readonly SceneDoc[]; types?: readonly NodeTypeInfo[] } = {},
+  opts: {
+    scenes?: readonly SceneDoc[];
+    types?: readonly NodeTypeInfo[];
+    /** Defaults to `PREVIEW_URL`; pass `null` for the "no project open" case. */
+    previewUrl?: string | null;
+  } = {},
 ) {
   const socket = new FakeSocket();
   const calls: { method: string; url: string; body: unknown }[] = [];
@@ -158,6 +166,26 @@ export async function harness(
         node: (path, { x, y }) => ({ type, props: { [accept.prop]: path, x, y, anchor: 0.5 } }),
       });
   await ctx.plugin(flow, { url: 'ws://x/ide', fetchFn });
+  // The document's canvas reads two services it never did before this
+  // task: where the game is served, and the design size the `scenes1`
+  // composition row declares. Minimal fakes, `scene-document.test.tsx`'s shape.
+  const nothing = () => () => {};
+  const previewUrl = opts.previewUrl === undefined ? PREVIEW_URL : opts.previewUrl;
+  const workspace = { projects: [], templates: [], active: 'first', previewUrl, diagnostics: [] };
+  ctx.provide('workspace', {
+    state: () => workspace,
+    subscribe: nothing,
+    open: async () => [],
+    create: async () => [],
+  });
+  ctx.provide('gameComposition', {
+    rows: [],
+    diagnostics: [],
+    reloads: 0,
+    transitions: [],
+    subscribe: nothing,
+    update: async () => ({ reload: false, diagnostics: [] }),
+  });
   await ctx.plugin(symbols, { url: 'ws://x/ide', fetchFn });
   const puts = () =>
     calls.filter((c) => c.method === 'PUT' && c.url === '/api/symbols').map((c) => c.body);

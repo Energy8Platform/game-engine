@@ -1,4 +1,11 @@
-import { useCallback, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+} from 'react';
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import {
@@ -11,7 +18,11 @@ import {
 } from '@energy8engine/contracts';
 import { extOf } from '../plugins/asset-node-types';
 import { useSymbols } from '../plugins/symbols';
+import { useWorkspace } from '../plugins/workspace';
+import { useGameComposition } from '../plugins/game-composition';
 import { activateOnKey } from './activate';
+import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
+import { clampZoom } from './CanvasToolbar';
 import { ExplorerMenu } from './ExplorerMenu';
 import { addSymbol, EMPTY, nodeForDrop, removeSymbol, setState, STATES } from './symbols-doc';
 
@@ -19,9 +30,18 @@ import { addSymbol, EMPTY, nodeForDrop, removeSymbol, setState, STATES } from '.
  * The Symbols document: the list down the left (one row per symbol — its
  * id, name and three state chips showing the state's type or `+`; then
  * the `known` ids not yet in the doc as ghost rows with Add; then an add
- * input for a free id), the canvas in the centre (a placeholder until the
- * canvas task fills it) and a status line — the last refusal, or the
- * doc's first diagnostic.
+ * input for a free id), the live canvas in the centre (`editor.html?symbol=`
+ * in `@energy8engine/scene-edit`'s symbol mode, talked to through
+ * `canvas-rpc` exactly as `SceneDocument` talks to the scene canvas) and a
+ * status line — the last refusal, the doc's first diagnostic, or the
+ * canvas' own `error`.
+ *
+ * The canvas is keyed on the project/reload, NOT on the selection: a
+ * selection change is a `symbol` RPC call, not a remount. On `ready` the
+ * parent resends the current doc (`replaceSymbols`, skipped when there is
+ * none) and the current selection (`symbol`, skipped when nothing is
+ * selected — the canvas keeps whatever it last showed); the same two
+ * calls follow every later doc/selection change.
  *
  * Every write is a REDUCER over the doc through one promise chain (the
  * Flow document's `commit`): each reduces `ctx.symbols.doc()` as it
@@ -39,6 +59,10 @@ import { addSymbol, EMPTY, nodeForDrop, removeSymbol, setState, STATES } from '.
 type Reduce = (doc: SymbolsDoc) => SymbolsDoc;
 const DROP_TYPE = 'text/x-e8-path';
 const SEVERITY = { error: 2, warning: 1, info: 0 } as const;
+// ponytail: fit-scale constants duplicated from SceneDocument rather than a
+// shared module — one more consumer of ~20 lines isn't worth extracting yet.
+const FALLBACK_DESIGN = { width: 480, height: 288 };
+const FIT_PAD = 24;
 
 /** The worst severity among the diagnostics under `where` (itself or a path below it), or `undefined`. */
 function worst(diagnostics: readonly Diagnostic[], where: string): string | undefined {
@@ -76,6 +100,82 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   const [draft, setDraft] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; def: SymbolDef } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const workspace = useWorkspace(ctx);
+  const { rows, reloads } = useGameComposition(ctx);
+  const previewUrl = workspace?.previewUrl ?? null;
+  const design =
+    (rows?.find((r) => r.id === 'scenes1' || r.name === '@energy8engine/scenes')?.config.design as
+      { width: number; height: number } | undefined) ?? FALLBACK_DESIGN;
+
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(1);
+  // Created synchronously, same reasoning as `SceneDocument`'s: the
+  // iframe's ref callback fires during commit, before the mount effect
+  // below runs, and needs an rpc to attach to already.
+  const [rpc] = useState<CanvasRpc>(() => createCanvasRpc());
+  const rpcRef = useRef<CanvasRpc | null>(rpc);
+  /** A request the canvas may not be there to answer — nothing to do about it here. */
+  const tell = (method: string, params: unknown) => {
+    void rpcRef.current?.call(method, params).catch(() => {});
+  };
+
+  useEffect(() => {
+    rpcRef.current = rpc;
+    rpc.on('ready', () => {
+      // The parent is the source of truth: resend the doc and the
+      // selection the canvas missed while it was still loading.
+      const currentDoc = ctx.symbols.doc();
+      if (currentDoc !== null) tell('replaceSymbols', { doc: currentDoc });
+      const sel = ctx.symbols.selected();
+      if (sel !== null) tell('symbol', sel);
+    });
+    rpc.on('error', (payload) => setStatus((payload as { message: string }).message));
+    return () => {
+      rpc.dispose();
+      rpcRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx, rpc]);
+
+  // Every later doc change is a `replaceSymbols`; every later selection
+  // change (that isn't a deselect) is a `symbol` — the canvas keeps
+  // showing its last preview when the selection clears.
+  useEffect(() => {
+    if (doc !== null) tell('replaceSymbols', { doc });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc]);
+  useEffect(() => {
+    if (selected !== null) tell('symbol', selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  /** The iframe's own ref, not its `load` event — `contentWindow` exists as soon as it's inserted. */
+  const attachIframe = useCallback(
+    (el: HTMLIFrameElement | null) => {
+      if (el && previewUrl) rpc.attach(el, new URL(previewUrl).origin);
+    },
+    [rpc, previewUrl],
+  );
+
+  // The fit follows the stage's box (jsdom has no ResizeObserver: fit stays 1).
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const box = stage.getBoundingClientRect();
+      if (box.width < 50 || box.height < 50) return;
+      setFit(
+        clampZoom(
+          Math.min((box.width - FIT_PAD) / design.width, (box.height - FIT_PAD) / design.height),
+        ),
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    measure();
+    return () => observer.disconnect();
+  }, [design.width, design.height, previewUrl]);
 
   // The write queue: one PUT at a time, each reducing the doc as it stands then.
   const chain = useRef<Promise<unknown>>(Promise.resolve());
@@ -298,7 +398,41 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
         />
       </div>
       <div className="e8-symbols-canvas" data-testid="symbols-canvas">
-        <p className="e8-empty">select a symbol</p>
+        {workspace === null ? (
+          <p className="e8-empty">loading…</p>
+        ) : previewUrl === null ? (
+          <p className="e8-empty" data-testid="canvas-unavailable">
+            canvas unavailable: no project open
+          </p>
+        ) : (
+          <>
+            <div className="e8-canvas-stage" ref={stageRef}>
+              <div
+                className="e8-canvas-frame"
+                style={{ width: design.width * fit, height: design.height * fit }}
+              >
+                <iframe
+                  key={`${reloads}:${workspace.active}:${previewUrl}`}
+                  ref={attachIframe}
+                  title="symbol canvas"
+                  src={`${previewUrl}/editor.html?symbol=${encodeURIComponent(selected?.id ?? '')}`}
+                  width={design.width}
+                  height={design.height}
+                  style={{ transform: `scale(${fit})` }}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              className="e8-explorer-action e8-symbols-replay"
+              data-testid="symbol-replay"
+              title="replay"
+              onClick={() => selected !== null && tell('symbol', selected)}
+            >
+              Replay
+            </button>
+          </>
+        )}
       </div>
       {line !== null ? (
         <p className="e8-explorer-diagnostic e8-symbols-status" data-testid="symbols-status">
