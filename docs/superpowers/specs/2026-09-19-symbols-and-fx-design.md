@@ -178,10 +178,14 @@ scope). Both on the guarded board; `repaint` after `destroy` is a no-op.
   name: string }[], diagnostics }` — `known` from `game/spec.json`'s
   `symbols` (`[]` when absent). `doc: null` when the file is missing (not
   an error: a project without symbols draws boxes).
-- `PUT /api/symbols` `{ doc }` → validates, writes `symbols.yml`, answers
-  the same `{ doc, known, diagnostics }` as GET (the flow route's shape, so
-  the client refreshes `known` on every write); refused (400 +
-  `{ diagnostics }`) on an error-level check.
+- `PUT /api/symbols` `{ doc }` → parses, writes `symbols.yml`, checks,
+  answers the same `{ doc, known, diagnostics }` as GET (the flow route's
+  shape, so the client refreshes `known` on every write). Refused (400 +
+  `{ diagnostics }`) ONLY when the body is not a symbols document — every
+  check diagnostic (a state with no file yet, an unknown type, a duplicate
+  id) is written and reported, the scenes rule: §5.2's Add/Create/Clear
+  produce `src: ''` states the user fills in next, and a refusal would make
+  every create path dead while a game is connected.
 - **Checks** (`plugin: symbols`, `where: symbols/<id>[/<state>]`):
   `version` is `1`; `id` non-empty string, unique; `static` present;
   every state's `type` is a reported node type (gated on the game's
