@@ -118,11 +118,14 @@ export const spine: NodeType<SpineProps> = {
       let settled = false;
       const entry = s.state.setAnimation(0, animation.name, false);
       // Idempotent, and reachable two ways: the track completing, or the wrapper (this node's
-      // view) tearing down mid-play — `unmount` destroys it (and the Spine with it).
+      // view) tearing down mid-play — `unmount` destroys it (and the Spine with it). The
+      // 'destroyed' listener is `off`'d on the normal path too — left registered, a repeat
+      // `once()` on the same still-live wrapper would stack another one on every call.
       const done = () => {
         if (settled) return;
         settled = true;
         entry.listener = null;
+        view.off('destroyed', done);
         resolve();
       };
       entry.listener = { complete: () => done() };

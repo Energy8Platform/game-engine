@@ -105,6 +105,7 @@ describe('gif', () => {
     await expect(p).resolves.toBeUndefined();
     expect(s.loop).toBe(true);
     expect(s.onComplete).toBeUndefined();
+    expect(view.listenerCount('destroyed')).toBe(0); // not left stacking on a repeat once()
     gif.unmount!(view);
   });
 

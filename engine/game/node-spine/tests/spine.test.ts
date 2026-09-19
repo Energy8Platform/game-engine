@@ -200,6 +200,7 @@ describe('spine', () => {
     expect(settled).toBe(false); // not yet — only the track's own completion resolves it
     entry.listener!.complete!(entry);
     await expect(p).resolves.toBeUndefined();
+    expect(view.listenerCount('destroyed')).toBe(0); // not left stacking on a repeat once()
     spine.unmount!(view);
   });
 

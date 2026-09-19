@@ -83,16 +83,20 @@ export const spritesheet: NodeType<SpritesheetProps> = {
       let settled = false;
       // Idempotent, and reachable two ways: the animation finishing, or the cell tearing the
       // view down mid-play (a symbol's `playWin` awaits this — it must not hang on a destroy).
+      // The 'destroyed' listener is `off`'d on the normal path too — left registered, a repeat
+      // `once()` on the same still-live view would stack another one on every call.
       const done = (viaDestroy: boolean) => {
         if (settled) return;
         settled = true;
         s.onComplete = undefined;
+        s.off('destroyed', onDestroyed);
         if (!viaDestroy) s.loop = props.loop;
         resolve();
       };
+      const onDestroyed = () => done(true);
       s.loop = false;
       s.onComplete = () => done(false);
-      s.once('destroyed', () => done(true));
+      s.once('destroyed', onDestroyed);
       s.gotoAndPlay(0);
     });
   },

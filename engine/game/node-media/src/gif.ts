@@ -63,17 +63,21 @@ export const gif: NodeType<GifProps> = {
     return new Promise<void>((resolve) => {
       let settled = false;
       // Idempotent, and reachable two ways: the animation finishing, or the wrapper (this
-      // node's view) tearing down mid-play — `unmount` destroys it, not just the sprite.
+      // node's view) tearing down mid-play — `unmount` destroys it, not just the sprite. The
+      // 'destroyed' listener is `off`'d on the normal path too — left registered, a repeat
+      // `once()` on the same still-live wrapper would stack another one on every call.
       const done = (viaDestroy: boolean) => {
         if (settled) return;
         settled = true;
         sprite.onComplete = undefined;
+        view.off('destroyed', onDestroyed);
         if (!viaDestroy) sprite.loop = props.loop;
         resolve();
       };
+      const onDestroyed = () => done(true);
       sprite.loop = false;
       sprite.onComplete = () => done(false);
-      view.once('destroyed', () => done(true));
+      view.once('destroyed', onDestroyed);
       sprite.currentFrame = 0;
       sprite.play();
     });

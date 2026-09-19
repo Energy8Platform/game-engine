@@ -85,20 +85,24 @@ export const video: NodeType<VideoProps> = {
     return new Promise<void>((resolve) => {
       let settled = false;
       // Idempotent, and reachable two ways: the video ending, or the cell tearing the view
-      // (this node's own `Sprite`) down mid-play — `unmount` destroys it, not the element.
+      // (this node's own `Sprite`) down mid-play — `unmount` destroys it, not the element. Both
+      // listeners are cleared on the normal path too — left registered, a repeat `once()` on
+      // the same still-live view/element would stack another one of each on every call.
       const done = (viaDestroy: boolean) => {
         if (settled) return;
         settled = true;
         el.removeEventListener('ended', onEnded);
+        s.off('destroyed', onDestroyed);
         if (!viaDestroy) el.loop = props.loop;
         resolve();
       };
       const onEnded = () => done(false);
+      const onDestroyed = () => done(true);
       el.loop = false;
       el.currentTime = 0;
       void el.play();
       el.addEventListener('ended', onEnded, { once: true });
-      s.once('destroyed', () => done(true));
+      s.once('destroyed', onDestroyed);
     });
   },
 };

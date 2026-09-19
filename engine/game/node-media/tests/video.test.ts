@@ -94,6 +94,7 @@ describe('video', () => {
     fireEnded();
     await expect(p).resolves.toBeUndefined();
     expect(el.loop).toBe(true);
+    expect(view.listenerCount('destroyed')).toBe(0); // not left stacking on a repeat once()
   });
 
   it('once resolves when the view is destroyed mid-play, without restoring loop', async () => {

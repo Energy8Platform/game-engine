@@ -188,6 +188,7 @@ describe('spritesheet', () => {
     await expect(p).resolves.toBeUndefined();
     expect(view.loop).toBe(true);
     expect(view.onComplete).toBeUndefined();
+    expect(view.listenerCount('destroyed')).toBe(0); // not left stacking on a repeat once()
     view.destroy();
   });
 
