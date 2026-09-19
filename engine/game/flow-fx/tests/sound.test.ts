@@ -159,6 +159,20 @@ describe('createSound', () => {
     await vi.waitFor(() => expect(instance.stop).toHaveBeenCalled());
   });
 
+  it('wait: true on an already-aborted signal rejects with its reason at once — nothing plays, nothing is reported', async () => {
+    const { sound } = fakeSound();
+    const from = vi.fn(() => sound);
+    const kind = createSound({ from });
+    const { rc, controller } = runCtx();
+    const reason = new Error('stopped');
+    controller.abort(reason);
+    await expect(
+      kind.run!({ src: 'a.wav', action: 'play', loop: false, volume: 1, wait: true }, rc),
+    ).rejects.toBe(reason);
+    expect(sound.play).not.toHaveBeenCalled();
+    expect(rc.report).not.toHaveBeenCalled();
+  });
+
   it('wait: false play that rejects (a 404, a decode failure) is still reported, after `next` already answered', async () => {
     const sound: SoundLike = {
       play: vi.fn(() => Promise.reject(new Error('404'))),

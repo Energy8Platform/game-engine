@@ -396,6 +396,35 @@ describe('createFlow', () => {
     expect(f.flow.trace().every((e) => e.run === 1)).toBe(true);
   });
 
+  it('a doc refused for a non-kind reason (a cycle) is not re-validated on an unrelated registration', async () => {
+    const f = harness();
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'a', kind: 'set', props: { name: 'a', value: 1 } },
+          { id: 'b', kind: 'set', props: { name: 'b', value: 1 } },
+        ],
+        [
+          { from: 'start', to: 'a' },
+          { from: 'a', to: 'b' },
+          { from: 'b', to: 'a' },
+        ],
+      ),
+    );
+    const reports = f.report.mock.calls.length;
+    expect(reports).toBeGreaterThan(0);
+    f.kinds.register({
+      kind: 'unrelated',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      run: async () => ({ out: 'next' }),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.report).toHaveBeenCalledTimes(reports);
+    expect(f.exits()).toEqual([]);
+  });
+
   it('replace with a cycle-without-wait reports and starts nothing; a warning-only doc runs', async () => {
     const f = harness();
     const bad = doc(

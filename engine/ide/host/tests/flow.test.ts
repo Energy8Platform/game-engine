@@ -133,6 +133,18 @@ describe('/api/flow', () => {
     // it only ever fires once kinds are known, same as "unknown kind".
     socket.send(JSON.stringify({ type: 'flow-kinds', kinds: KINDS }));
     await expect.poll(() => host!.ctx.ideRpc.flowKinds()).toEqual(KINDS);
+    const nowChecked = await put(host.url, {
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'x', kind: 'mystery' },
+      ],
+      edges: [{ from: 'start', to: 'x' }],
+    });
+    expect(nowChecked.status).toBe(400);
+    expect((await nowChecked.json()).diagnostics).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'x', message: "unknown kind 'mystery'" }),
+    ]);
     const ok = await put(host.url, {
       version: 1,
       nodes: [

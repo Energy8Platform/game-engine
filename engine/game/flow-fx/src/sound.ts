@@ -102,6 +102,8 @@ export function createSound(deps: SoundDeps = {}): SoundKind {
         let onAbort: (() => void) | undefined;
         try {
           await new Promise<void>((resolve, reject) => {
+            // Already stopped before this node's turn (as `tween` checks): nothing to play.
+            if (signal.aborted) return reject(signal.reason);
             const instance = s.play({
               loop: p.loop,
               volume: p.volume,

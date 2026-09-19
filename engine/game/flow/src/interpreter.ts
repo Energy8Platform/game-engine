@@ -217,6 +217,8 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     disposers = [];
   };
 
+  /** The last refusal named a kind nothing had registered — the one refusal a later registration can lift. */
+  let missingKind = false;
   const doReplace = (doc: FlowDoc | null): void => {
     if (doc && armed && current && shape(doc) === shape(current)) {
       current = doc;
@@ -229,6 +231,7 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     if (!doc) return;
     const problems = validateFlow(doc, kinds.list(), null);
     for (const d of problems) report(d);
+    missingKind = problems.some((d) => d.message.startsWith('unknown kind'));
     if (problems.some((d) => d.severity === 'error')) return;
     arm(doc);
     armed = true;
@@ -242,10 +245,12 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   // first "unknown kind" diagnostic is never taken back; this only stops
   // the doc from staying stuck. Re-running `doReplace` on every registry
   // change catches it up the moment the missing kind lands. Guarded by
-  // `current && !armed`: `current` null means nothing was ever handed to
-  // `replace` (nothing to catch up), and `armed` true means a LIVE run is
-  // in progress — an unrelated kind registering elsewhere must not stop
-  // and restart it. Subscribed here, once, for the service's whole life,
+  // `current && !armed && missingKind`: `current` null means nothing was
+  // ever handed to `replace` (nothing to catch up), `armed` true means a
+  // LIVE run is in progress — an unrelated kind registering elsewhere must
+  // not stop and restart it — and a doc refused for some OTHER reason (a
+  // cycle, a bad edge) would only be re-reported, never armed, so it is
+  // left alone. Subscribed here, once, for the service's whole life,
   // via `o.ctx.effect` rather than inside `stop`/`doReplace`: those run on
   // every ordinary doc swap, but this subscription has to outlive all of
   // them and only die with the row itself — `o.ctx` is the exact fiber
@@ -254,7 +259,7 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   o.ctx.effect(
     () =>
       kinds.subscribe(() => {
-        if (current && !armed) doReplace(current);
+        if (current && !armed && missingKind) doReplace(current);
       }),
     'flow:kinds-watch',
   );
