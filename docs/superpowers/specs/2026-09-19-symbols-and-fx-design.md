@@ -291,15 +291,21 @@ Easing[easing])` from
 returns at once; `signal` abort → `Tween.killTweensOf(view)`. `outs:
 ['next']`.
 
-**`sound`** — `src` (`string` required, `.extra('asset', ['mp3', 'ogg',
-'wav', 'm4a'])`), `action` (`union(['play', 'stop'])` default `play`),
+**`sound`** — `src` (`string`, `.extra('asset', ['mp3', 'ogg', 'wav',
+'m4a'])`; empty → `report('sound has no src')` and `next`, so a
+palette-fresh node does not end the run), `action` (`union(['play', 'stop'])` default `play`),
 `loop` (`boolean` default `false`), `volume` (`number` default `1`),
 `wait` (`boolean` default `false`). `run`: `@pixi/sound`'s `Sound.from({
-url: '/' + src, preload: true })` cached per `src` in the row (disposed on
-row dispose); `play` → `sound.play({ loop, volume })`, `wait: true` awaits
+url: '/' + src })` cached per `src` in the row (disposed on row dispose;
+no `preload` — `play()` loads once and plays once, where `preload` +
+an immediate `play()` load and play twice); `play` → `sound.play({ loop, volume })`, `wait: true` awaits
 the instance's `end`; `stop` → `sound.stop()`. A load/play failure (no
 `AudioContext`, autoplay refused, 404) → `report(...)` and `next` — a
-silent game is not a stopped game. `signal` abort while waiting → stop
+silent game is not a stopped game; on the `wait: false` path the
+rejection is still caught and reported after `next`. `wait: true` with
+`loop: true` never completes: reported as a warning and treated as
+`wait: false`. An abort while waiting stops the instance and rethrows
+`signal.reason` (the interpreter's contract; never reported). `signal` abort while waiting → stop
 the instance. `outs: ['next']`.
 
 Both reach services leniently (`ctx.reflect.get`), like the built-ins.
