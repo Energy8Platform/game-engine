@@ -3,10 +3,11 @@
  * a project's own composition (spec §4). Shows one scene, picks and
  * transforms its top-level nodes with the gizmo, draws a grid, and talks
  * to the IDE over the `e8:ide:*` postMessage wire. It never writes a
- * file — the parent is the one writer.
+ * file — the parent is the one writer. With `config.symbol` set it shows
+ * one `symbols.yml` state instead — no scene, no gizmo/grid/keyboard/drop.
  */
 import type { Context } from 'cordis';
-import type { SceneDoc } from '@energy8engine/contracts';
+import type { SceneDoc, SymbolsDoc, SymbolState } from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
 import { COMMON } from '@energy8engine/scenes';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
@@ -32,6 +33,8 @@ export interface SceneEditConfig {
   listen?: WireOptions['listen'];
   /** Tests: where `dragover`/`drop` are listened for; the renderer's canvas otherwise. */
   dropTarget?: HTMLElement;
+  /** Symbol mode: show this `symbols.yml` id's state instead of `scene` (Task 5 passes `params.get('symbol')`). `scene`, the gizmo, the grid, the keyboard and the drop handler are all skipped when set. */
+  symbol?: string;
 }
 
 export interface Bounds { x: number; y: number; w: number; h: number }
@@ -75,6 +78,12 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
   scenes.resize(app.screen.width, app.screen.height);
 
+  // Symbol mode: one symbols.yml state on the canvas, nothing scene-shaped armed.
+  if (config.symbol) {
+    bootSymbol(config.symbol);
+    return;
+  }
+
   // Every canvas edit is applied HERE first (`scenes.replace` with the node's
   // props merged), then told to the IDE, whose answer comes back as a
   // `replace` of the same set — JSON-equal, so nothing remounts under a
@@ -113,6 +122,91 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     },
     (e: unknown) => { if (alive) emit('error', { message: e instanceof Error ? e.message : String(e) }); },
   );
+
+  /**
+   * `config.symbol` set: no scene document, no gizmo/grid/keyboard/drop — just one
+   * `symbols.yml` state, fitted to `ctx.board?.cellSize` (96×96 when there is no
+   * reel board), centred under `scenes.container`'s fit like a scene node would be.
+   */
+  function bootSymbol(id: string): void {
+    const root = scenes.container;
+    type SymbolsLike = {
+      replace(doc: SymbolsDoc | null): void;
+      ready: Promise<void>;
+      preview(symId: string, state: SymbolState, size: { width: number; height: number }): Container | null;
+    };
+    const symbols = ctx.reflect.get('symbols', false) as SymbolsLike | undefined;
+    if (!symbols) { emit('error', { message: 'no "symbols" service' }); return; }
+
+    const cellSize = (ctx.reflect.get('board', false) as { cellSize?: { width: number; height: number } } | undefined)
+      ?.cellSize ?? { width: 96, height: 96 };
+    /** Same trick as `boot()`'s `design()`: the screen centre, read back in design-local coords. */
+    const design = () => { const c = root.toLocal({ x: app.screen.width / 2, y: app.screen.height / 2 }); return { width: c.x * 2, height: c.y * 2 }; };
+
+    const previewBox = new Container();
+    previewBox.label = 'symbol-preview';
+    const d = design();
+    previewBox.position.set(d.width / 2, d.height / 2);
+    const outline = new Graphics()
+      .roundRect(-cellSize.width / 2, -cellSize.height / 2, cellSize.width, cellSize.height, 8)
+      .stroke({ width: 2, color: 0x3a4152 });
+    outline.label = 'symbol-outline';
+    previewBox.addChild(outline);
+    root.addChild(previewBox);
+    ctx.effect(() => () => { root.removeChild(previewBox); previewBox.destroy({ children: true }); }, 'scene-edit:symbol-preview');
+
+    let current: { id: string; state: SymbolState } | null = null;
+    let view: Container | null = null;
+
+    /** Swaps the shown state: destroys the old view (drops it from the runtime's live set), previews the new one. */
+    const showSymbol = (symId: string, state: SymbolState): boolean => {
+      if (view) { view.destroy({ children: true }); view = null; }
+      current = { id: symId, state };
+      view = symbols.preview(symId, state, cellSize);
+      if (view) previewBox.addChild(view);
+      return view !== null;
+    };
+
+    wire.handle('symbol', (p) => {
+      const { id: symId, state } = p as { id: string; state: SymbolState };
+      return { shown: showSymbol(symId, state) };
+    });
+    wire.handle('replaceSymbols', (p) => {
+      symbols.replace((p as { doc: SymbolsDoc | null }).doc);
+      if (current) showSymbol(current.id, current.state);
+      return {};
+    });
+    wire.handle('snapshot', () => {
+      let w = 0;
+      let h = 0;
+      if (view) {
+        const b = view.getBounds();
+        const tl = root.toLocal({ x: b.minX, y: b.minY });
+        const br = root.toLocal({ x: b.maxX, y: b.maxY });
+        w = br.x - tl.x;
+        h = br.y - tl.y;
+      }
+      return { symbol: current?.id ?? null, state: current?.state ?? null, w, h };
+    });
+
+    /** Walks the current preview view's descendants for the first numeric `currentFrame` — same idea as `boot()`'s `frameOf`, just not limited to one level. */
+    const frameOf = (_node: string): number | null => {
+      if (!view) return null;
+      const stack: Container[] = [view];
+      while (stack.length) {
+        const n = stack.shift()!;
+        const cf = (n as unknown as { currentFrame?: unknown }).currentFrame;
+        if (typeof cf === 'number') return cf;
+        stack.push(...n.children);
+      }
+      return null;
+    };
+    const winHook = window as unknown as { __e8edit?: Pick<SceneEdit, 'frameOf'> };
+    winHook.__e8edit = { frameOf };
+    ctx.effect(() => () => { if (winHook.__e8edit?.frameOf === frameOf) delete winHook.__e8edit; }, 'scene-edit:hook');
+
+    void symbols.ready.catch(() => {}).then(() => { if (alive) emit('ready', { symbol: id }); });
+  }
 
   function boot(): void {
     const root = scenes.container;

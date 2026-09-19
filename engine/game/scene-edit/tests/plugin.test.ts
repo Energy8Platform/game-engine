@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import { Container, Graphics, Texture, type FederatedPointerEvent } from 'pixi.js';
 import Schema from 'schemastery';
-import type { SceneDoc } from '@energy8engine/contracts';
+import type { SceneDoc, SymbolsDoc } from '@energy8engine/contracts';
 import { container, createNodeTypes, createScenes, image, type AssetLoader, type NodeType } from '@energy8engine/scenes';
 import * as plugin from '../src/index';
 
@@ -57,6 +57,133 @@ function boot(scene = 'a', docs = DOCS, docsReady?: Promise<void>) {
   const edit = () => (window as unknown as { __e8edit: plugin.SceneEdit }).__e8edit;
   return { ctx, app, scenes, fiber, posted, events, call, ready, frame, gizmoLayer, gizmoShown, key, dropTarget, edit };
 }
+
+/** A minimal `SymbolsService` fake: `preview` answers a fresh 40×40-bounded view for id "coin", `null` for anything else. */
+function fakeSymbols() {
+  const previewCalls: { id: string; state: string }[] = [];
+  const views: Container[] = [];
+  const symbols = {
+    replace: vi.fn(),
+    ready: Promise.resolve(),
+    preview: vi.fn((id: string, state: string) => {
+      previewCalls.push({ id, state });
+      if (id !== 'coin') return null;
+      const c = new Container();
+      c.addChild(new Graphics().rect(0, 0, 40, 40).fill(0xffffff));
+      views.push(c);
+      return c;
+    }),
+  };
+  return { symbols, previewCalls, views };
+}
+
+/** Same fake-wire harness as `boot()`, wired for `symbol: 'coin'` instead of a scene. `symbols` is `ctx.provide`d only when given — omit it to test the no-service path. */
+function bootSymbol(symbols?: unknown) {
+  const ctx = new Context();
+  const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
+  ctx.provide('renderer', { app });
+  const nodeTypes = createNodeTypes();
+  ctx.provide('nodeTypes', nodeTypes);
+  const scenes = createScenes({ root: app.stage, design: { width: 960, height: 576 }, nodeTypes, loader, ctx });
+  ctx.provide('scenes', scenes);
+  if (symbols !== undefined) ctx.provide('symbols', symbols);
+  const posted: Frame[] = [];
+  let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
+  let id = 0;
+  const fiber = ctx.plugin(plugin, {
+    scene: 'a', symbol: 'coin', parentOrigin: 'http://ide',
+    post: (msg: unknown) => posted.push(msg as Frame),
+    listen: (fn) => { listener = fn; return () => { listener = undefined; }; },
+  });
+  const events = () => posted.filter((m) => m.type === 'e8:ide:evt').map(({ event, payload }) => ({ event, payload }));
+  const call = async (method: string, params: unknown = {}) => {
+    const reqId = ++id;
+    listener?.({ data: { type: 'e8:ide:req', id: reqId, method, params }, origin: 'http://ide' });
+    await vi.waitFor(() => expect(posted.some((m) => m.type === 'e8:ide:res' && m.id === reqId)).toBe(true));
+    return posted.find((m) => m.type === 'e8:ide:res' && m.id === reqId)!;
+  };
+  const ready = () => vi.waitFor(() => expect(events().some((e) => e.event === 'ready')).toBe(true));
+  return { ctx, fiber, events, call, ready };
+}
+
+describe('symbol mode', () => {
+  it('emits ready (with the symbol id) once symbols.ready settles', async () => {
+    const { symbols } = fakeSymbols();
+    const { events, ready } = bootSymbol(symbols);
+    await ready();
+    expect(events()[0]).toEqual({ event: 'ready', payload: { symbol: 'coin' } });
+  });
+
+  it('symbol previews a state and answers shown; snapshot reports the view bounds in design space', async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    const res = await call('symbol', { id: 'coin', state: 'static' });
+    expect(res.result).toEqual({ shown: true });
+    const snap = await call('snapshot');
+    expect(snap.result).toEqual({ symbol: 'coin', state: 'static', w: 40, h: 40 });
+  });
+
+  it('an unknown id answers shown: false and snapshot reports no bounds', async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    const res = await call('symbol', { id: 'nope', state: 'static' });
+    expect(res.result).toEqual({ shown: false });
+    const snap = await call('snapshot');
+    expect(snap.result).toEqual({ symbol: 'nope', state: 'static', w: 0, h: 0 });
+  });
+
+  it('a second symbol call destroys the previous view before previewing the new one', async () => {
+    const { symbols, views } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    await call('symbol', { id: 'coin', state: 'static' });
+    const first = views[0]!;
+    expect(first.destroyed).toBe(false);
+    await call('symbol', { id: 'coin', state: 'idle' });
+    expect(first.destroyed).toBe(true);
+    expect(views).toHaveLength(2);
+  });
+
+  it('replaceSymbols replaces the doc then re-previews the current symbol', async () => {
+    const { symbols, previewCalls } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    await call('symbol', { id: 'coin', state: 'static' });
+    const doc: SymbolsDoc = { version: 1, symbols: [] };
+    const res = await call('replaceSymbols', { doc });
+    expect(res.result).toEqual({});
+    expect(symbols.replace).toHaveBeenCalledWith(doc);
+    expect(previewCalls.at(-1)).toEqual({ id: 'coin', state: 'static' });
+  });
+
+  it('replaceSymbols with nothing shown yet does not preview', async () => {
+    const { symbols, previewCalls } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    await call('replaceSymbols', { doc: null });
+    expect(symbols.replace).toHaveBeenCalledWith(null);
+    expect(previewCalls).toHaveLength(0);
+  });
+
+  it('select and grid are unregistered — the wire answers unknown method', async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    const select = await call('select', { node: 'x' });
+    expect(select.ok).toBe(false);
+    expect(String((select as { error?: unknown }).error)).toContain('unknown method "select"');
+    const grid = await call('grid', { on: true, step: 8 });
+    expect(grid.ok).toBe(false);
+    expect(String((grid as { error?: unknown }).error)).toContain('unknown method "grid"');
+  });
+
+  it('no symbols service on ctx emits error', async () => {
+    const { events } = bootSymbol(undefined);
+    await vi.waitFor(() => expect(events().some((e) => e.event === 'error')).toBe(true));
+  });
+});
 
 describe('scene-edit plugin', () => {
   it('shows the scene, emits ready, and answers snapshot with per-node bounds in design space', async () => {
