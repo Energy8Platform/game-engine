@@ -345,6 +345,20 @@ describe('/api/symbols', () => {
     expect(await get(host.url)).toMatchObject({ doc: null });
   });
 
+  it('PUT of a bare document (no `{ doc }` envelope) names the missing envelope, not the document', async () => {
+    host = await createIdeHost({ root: symbolsWorkspace(), port: 0 });
+    const res = await send(host.url, '/api/symbols', 'PUT', { version: 1, symbols: [] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        plugin: 'symbols',
+        where: 'symbols.yml',
+        message: expect.stringContaining('needs { doc: {...} }, not a bare document'),
+      }),
+    ]);
+  });
+
   it('PUT refuses a document the checks find errors in — a symbol with no static state', async () => {
     host = await createIdeHost({ root: symbolsWorkspace(), port: 0 });
     const bad = await put(host.url, { version: 1, symbols: [{ id: '1', name: 'Cherry' }] });

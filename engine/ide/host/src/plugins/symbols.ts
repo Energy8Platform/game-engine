@@ -266,6 +266,14 @@ export function apply(ctx: Context): void {
     } catch {
       body = undefined;
     }
+    // A bare document (no `{ doc }` envelope) parses fine as a document on
+    // its own — `body.doc` is simply absent, same as any other body with no
+    // `doc` key — so the generic "not a symbols document" reason below
+    // would describe the shape the caller actually sent and mislead them
+    // into "fixing" a document that was never wrong. Named specifically.
+    if (isRecord(body) && body.doc === undefined && parseDoc(body).doc) {
+      return refuse(res, [fileError('PUT /api/symbols needs { doc: {...} }, not a bare document')]);
+    }
     const parsedBody = isRecord(body) ? body.doc : undefined;
     const { doc, reason } = parseDoc(parsedBody);
     if (!doc) return refuse(res, [fileError(`PUT ${req.path}: ${reason}`)]);
