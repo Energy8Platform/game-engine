@@ -44,6 +44,11 @@ export default defineConfig({
     // The host's cross-origin allowlist names this port; a silent move to
     // 5681+ would leave every write from the dev IDE refused with a 403.
     strictPort: true,
+    // Vite's default HMR websocket port (24678) is shared machine-wide, not
+    // per-project — a second vite anywhere on the box (another `e8 dev`)
+    // holds it first and this one's HMR client fails silently. 5690 sits
+    // alongside this app's other fixed ports (5679-5682) instead.
+    hmr: { port: 5690 },
     proxy: {
       '/api': HOST,
       '/plugin-client': HOST,

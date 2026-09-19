@@ -23,9 +23,6 @@ import { EXAMPLES, projectCopy, startDevHost, startHost, workspaceCopy } from '.
 /** The IDE app — vite on 5680, proxying to the host on 5679. */
 const IDE_URL = 'http://127.0.0.1:5680/';
 
-/** What `engine/examples/` holds when no test is mid-flight. */
-const SHIPPED_EXAMPLES = ['first-slot', 'probe-plugin', 'workspace'];
-
 function examplesOnDisk(): string[] {
   return readdirSync(EXAMPLES)
     .filter((name) => name !== '.DS_Store')
@@ -35,6 +32,10 @@ function examplesOnDisk(): string[] {
 test('Create over two projects: the third is born, opened, and spins; then refused twice', async ({
   page,
 }) => {
+  // A snapshot, not a hard list: what matters is that this test leaves no
+  // junk behind, not the exact contents of a machine's `examples/` (a
+  // developer's own untracked example dir is none of this test's business).
+  const before = examplesOnDisk();
   const root = workspaceCopy(2);
   const host = await startHost(root);
   try {
@@ -94,10 +95,12 @@ test('Create over two projects: the third is born, opened, and spins; then refus
     await host.stop();
     rmSync(root, { recursive: true, force: true });
   }
-  expect(examplesOnDisk()).toEqual(SHIPPED_EXAMPLES);
+  expect(examplesOnDisk()).toEqual(before);
 });
 
 test('under e8 dev (a single project) there is no form', async ({ page }) => {
+  // Same snapshot approach — see the other test's comment.
+  const before = examplesOnDisk();
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
@@ -114,5 +117,5 @@ test('under e8 dev (a single project) there is no form', async ({ page }) => {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
   }
-  expect(examplesOnDisk()).toEqual(SHIPPED_EXAMPLES);
+  expect(examplesOnDisk()).toEqual(before);
 });

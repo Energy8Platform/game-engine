@@ -153,9 +153,10 @@ test("the spin that played is written down — request and the server's own resu
 
   const recorded = await spinOnce(frame);
   expect(await spins(frame)).toHaveLength(1);
-  // What was asked. Empty today (this page has no bet control), but it is
-  // the body that was actually posted, not a placeholder.
-  expect(recorded.request).toEqual({});
+  // What was asked. Not empty any more: the flow's `spin` node now posts
+  // `{ action: 'spin' }` (the schema's own default), and `present` records
+  // that same body — not a placeholder.
+  expect(recorded.request).toEqual({ action: 'spin' });
   // What happened: the server's result, whole — the stage the `present`
   // node then presented, and the 5×3 board it spun to.
   expect(recorded.result.stage).toBe('base_game');

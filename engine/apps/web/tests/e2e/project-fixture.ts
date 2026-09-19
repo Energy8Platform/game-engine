@@ -358,19 +358,29 @@ export async function startHost(
 }
 
 /**
- * The pids of every `e8-server` alive right now — counted by
- * `workspace.spec.ts` across a switch, and killed by `debts.spec.ts` to
- * stage a death. `pgrep` runs WITHOUT a shell and on the binary's own argv
- * shape (`--games-dir` follows the name): a bare `e8-server` pattern also
- * matched the shell that launched Playwright whenever ITS command line
- * mentioned the word (measured: two extra pids).
+ * The pids of every `e8-server` THIS TEST PROCESS started, alive right now
+ * — counted by `workspace.spec.ts` across a switch, and killed by
+ * `debts.spec.ts` to stage a death. `pgrep` runs WITHOUT a shell and on the
+ * binary's own argv shape (`--games-dir` follows the name): a bare
+ * `e8-server` pattern also matched the shell that launched Playwright
+ * whenever ITS command line mentioned the word (measured: two extra pids).
+ *
+ * `-P <process.pid>` narrows to direct children of THIS process: `startHost`
+ * /`startDevHost` call `createIdeHost` in-process (their own doc), which
+ * calls down to `session-dev`'s `spawn()` with no intermediary — so every
+ * `e8-server` this suite starts is a direct child of the Playwright worker
+ * running it. A developer's own `e8 dev` elsewhere on the machine spawns its
+ * `e8-server` as a child of ITS OWN process, never this one's, so it never
+ * matches here regardless of how many are running.
  */
 export function serverPids(): number[] {
   try {
     // POSIX ERE — macOS pgrep has no `\S`/`\d`.
-    return execFileSync('pgrep', ['-f', 'e8-server[^ ]* --port [0-9]+ --games-dir '], {
-      encoding: 'utf8',
-    })
+    return execFileSync(
+      'pgrep',
+      ['-P', String(process.pid), '-f', 'e8-server[^ ]* --port [0-9]+ --games-dir '],
+      { encoding: 'utf8' },
+    )
       .split('\n')
       .filter(Boolean)
       .map(Number);
