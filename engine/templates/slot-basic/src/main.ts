@@ -525,6 +525,18 @@ ctx.inject(['flow'], (c) =>
   /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `need()` found unmet, which is the whole of what the boot screen and `#log` were given. */
   diagnostics,
   /**
+   * The SAME diagnostics service `<pre id="log">` renders, read fresh —
+   * unlike `diagnostics` above, a plain array snapshotted once at
+   * boot-script-evaluation time (before the `scenes` row's own boot GET, or
+   * anything a spin does, has had a chance to report anything). A test
+   * that wants to know what a LATER event reported — a scene that mounted
+   * after boot, a spin's own diagnostics — needs this one; `diagnostics`
+   * only ever answers what boot itself already knew.
+   */
+  liveDiagnostics(): readonly Diagnostic[] {
+    return (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.list() ?? [];
+  },
+  /**
    * Exactly what the button does — `events.emit('ui.spin')` — and then the
    * port the flow's `present` node left by (`next` or `failed`), or
    * `failed` from its `spin` node when the host refused. One 20 s budget
@@ -656,6 +668,23 @@ ctx.inject(['flow'], (c) =>
       { view?(ref: { scene: string; node: string }): { visible: boolean } | undefined } | undefined;
     const v = s?.view?.({ scene, node });
     return v ? v.visible : null;
+  },
+  /**
+   * Whether a mounted top-level scene node is CLIPPING something — `view.
+   * mask != null`, off the same `scenes.view` every other node hook reads.
+   * `nodeVisible` alone cannot prove a `mask: true` child actually mounted
+   * and took hold: a node's own `visible` stays `true` whether or not a
+   * child failed to mount (`mountNode` catches per-child, and a masking
+   * child is mounted like any other), so it is `true` either way. This
+   * reads the one thing that is actually different when the mask took —
+   * `null` when there is no such node.
+   */
+  nodeMasked(scene: string, node: string): boolean | null {
+    const s = ctx.reflect.get('scenes', false) as
+      | { view?(ref: { scene: string; node: string }): { mask: unknown } | undefined }
+      | undefined;
+    const v = s?.view?.({ scene, node });
+    return v ? v.mask != null : null;
   },
   /** A mounted top-level scene node's `x`/`y`/`alpha`/`width`/`height`/`tint`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
   nodeProps(

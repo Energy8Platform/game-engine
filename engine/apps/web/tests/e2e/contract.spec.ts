@@ -20,8 +20,14 @@
  *     masked by a `shape` child (`mask: true`, Task 3/4) with an `image`
  *     sibling, live in a real renderer — the one thing Task 3's own
  *     review flagged as "cannot verify" (a headless unit test builds the
- *     tree; nothing had pixi actually draw it) — asserting the masked
- *     node stays visible and boot raised no `[error]` diagnostic.
+ *     tree; nothing had pixi actually draw it) — asserting `view.mask` is
+ *     actually SET (`nodeVisible` alone cannot tell "the mask took" from
+ *     "the masking child never mounted" — a mount failure is caught per
+ *     child, so the parent reads visible either way) and that the LIVE
+ *     diagnostics service — not the frozen boot-time snapshot every other
+ *     `__e8.diagnostics` read in this suite uses, which cannot see
+ *     anything reported after boot-script evaluation — carries no `scenes`
+ *     error once the mask is confirmed up.
  *
  * Same fixture and idioms as `fx.spec.ts`/`scenes.spec.ts`: a private
  * `projectCopy()`, its files edited BEFORE `startDevHost` (the running
@@ -188,14 +194,26 @@ nodes:
     true,
   );
 
-  // The mask smoke: `clip` stays visible with its mask applied (pixi
-  // rendered a `Graphics` mask without throwing), and boot raised nothing
-  // at `error` severity — the two things a headless unit test cannot show.
-  expect(await frame.evaluate(() => (window as any).__e8.nodeVisible('base_game', 'clip'))).toBe(
-    true,
-  );
-  const diagnostics = (await frame.evaluate(() => (window as any).__e8.diagnostics)) as {
+  // The mask smoke: `clip`'s view actually has a `mask` set (not just
+  // "visible" — a `nodeVisible` reading of `true` proves nothing here,
+  // since a masking CHILD that failed to mount would still leave `clip`
+  // itself visible: `mountNode` catches per-child, so `nodeVisible`
+  // cannot distinguish "the mask took" from "the child never mounted").
+  // Polled: the child mounts asynchronously after `clip` itself does.
+  await expect
+    .poll(() => frame.evaluate(() => (window as any).__e8.nodeMasked('base_game', 'clip')), {
+      timeout: 10_000,
+    })
+    .toBe(true);
+
+  // `diagnostics` (the frozen, boot-script-time snapshot) cannot see
+  // anything `scenes` reports while mounting `clip`/`hole` after that
+  // snapshot was taken — `liveDiagnostics()` re-reads the service now,
+  // once the mask above is confirmed to have taken: pixi actually drew a
+  // `Graphics` mask without the `scenes` row reporting a failure over it.
+  const diagnostics = (await frame.evaluate(() => (window as any).__e8.liveDiagnostics())) as {
     severity: string;
+    plugin: string;
   }[];
-  expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(diagnostics.filter((d) => d.severity === 'error' && d.plugin === 'scenes')).toEqual([]);
 });
