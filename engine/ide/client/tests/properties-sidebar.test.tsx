@@ -161,6 +161,31 @@ describe('PropertiesSidebar', () => {
     expect(puts()[0].nodes.slice(1)).toEqual(BASE.nodes.slice(1));
   });
 
+  it('the common form carries every prop the runtime applies; a new one PUTs', async () => {
+    const { ctx, puts } = await harness();
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
+    renderSide(ctx);
+    for (const label of [
+      'width, design px',
+      'height, design px',
+      '#rrggbb, where the view has a tint',
+      'overrides anchor on x',
+      'overrides anchor on y',
+      'masks the parent with this node',
+    ])
+      expect(screen.getByLabelText(label)).toBeTruthy();
+
+    const width = screen.getByLabelText('width, design px');
+    fireEvent.change(width, { target: { value: '64' } });
+    fireEvent.blur(width);
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[0].children?.[0]).toEqual({
+      id: 'logo',
+      type: 'image',
+      props: { src: 'logo.png', x: 10, width: 64 },
+    });
+  });
+
   it('rename: a duplicate or empty id is refused inline, no write', async () => {
     const { ctx, puts } = await harness();
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));

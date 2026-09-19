@@ -25,7 +25,7 @@ export const container: NodeType = {
 const textureOf = (ctx: Context, src: string): Texture | undefined =>
   (ctx.reflect.get('assetLoader', false) as AssetLoader | undefined)?.get(src);
 
-const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'];
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'avif'];
 
 export const image: NodeType<{ src: string }> = {
   type: 'image',

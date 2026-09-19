@@ -167,6 +167,36 @@ describe('mounting', () => {
     expect(scenes.visible()).toEqual(['a']);
   });
 
+  it('`mask: true` masks the node\'s parent, and the unmount clears it', () => {
+    // The parent is a FOREIGN view (the runtime detaches it, never destroys
+    // it): the one case where a stale `mask` would outlive the masking node.
+    const { scenes, nodeTypes } = boot();
+    const host = new Container();
+    nodeTypes.register({
+      type: 'foreign',
+      schema: Schema.object({}),
+      mount: () => host,
+      unmount: (v) => v.parent?.removeChild(v),
+    });
+    scenes.replace([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'host',
+            type: 'foreign',
+            props: {},
+            children: [{ id: 'cut', type: 'container', props: { mask: true } }],
+          },
+        ],
+      },
+    ]);
+    expect(host.mask).toBe(byId(scenes, 'a', 'cut'));
+    scenes.replace([{ id: 'a', nodes: [] }]);
+    expect(host.mask).toBeFalsy();   // pixi's getter reads back `undefined`, not `null`
+    expect(host.destroyed).toBe(false);
+  });
+
   it('a duplicate node id: the later node is skipped with an error', () => {
     const { scenes, report } = boot([
       {

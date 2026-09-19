@@ -67,7 +67,15 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   transitions.register(fade);
   ctx.provide('transitions', transitions);
   ctx.provide('assetLoader', pixiLoader);
-  const app = ctx.renderer.app as { stage: Container; ticker?: TickerLike };
+  const app = ctx.renderer.app as {
+    stage: Container;
+    ticker?: TickerLike;
+    screen?: { width: number; height: number };
+    renderer?: {
+      on(event: 'resize', fn: (width: number, height: number) => void): unknown;
+      off(event: 'resize', fn: (width: number, height: number) => void): unknown;
+    };
+  };
   const scenes = createScenes({
     root: app.stage,
     design: config.design,
@@ -104,6 +112,21 @@ export function apply(ctx: Context, config: ScenesConfig): void {
     'scenes:root',
   );
   ctx.provide('scenes', scenes);
+
+  // Fitting the design into the renderer is the ROW's job: on the editor
+  // page `scene-edit` also calls `resize`, but the GAME page has nobody
+  // else to, and an unfitted `container` draws the design at 1:1 in the
+  // corner. Optional chaining throughout — a headless composition's
+  // `renderer` (and a test's fake app) has neither `screen` nor an
+  // event-emitting `renderer`, and that is a game with nothing to fit.
+  const fit = (width = app.screen?.width, height = app.screen?.height) => {
+    if (width && height) scenes.resize(width, height);
+  };
+  fit();
+  ctx.effect(() => {
+    app.renderer?.on('resize', fit);
+    return () => void app.renderer?.off('resize', fit);
+  }, 'scenes:fit');
 
   const fetchFn = config.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   // `scenes.ready` is this GET: a reader that needs the boot set (`scene-edit`)

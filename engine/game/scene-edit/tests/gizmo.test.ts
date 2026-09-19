@@ -26,6 +26,20 @@ describe('gizmo', () => {
     gizmo.drag('se', { x: 120, y: 120 }, { x: 140, y: 140 }, { shift: true });   // centre (100,100): 20√2→40√2 → 2
     expect(onEdit).toHaveBeenLastCalledWith('n', { scale: 2 });
   });
+  it('a corner drag on a node that carries `width` resizes it instead of scaling', () => {
+    const { gizmo, onEdit } = boot();
+    const view = new Container();
+    view.addChild(new Graphics().rect(-20, -20, 40, 40).fill(0xffffff));
+    view.position.set(100, 100);
+    view.width = 100;   // what `applyCommon` did for `props.width`
+    gizmo.attach({ node: 'n', view, props: { x: 100, y: 100, scale: 1, rotation: 0, width: 100 } });
+    // box (50,80)-(150,120); nw anchor (50,80): (100,40) → (150,60) = 1.5
+    gizmo.drag('se', { x: 150, y: 120 }, { x: 200, y: 140 });
+    expect(view.width).toBeCloseTo(150, 5);
+    expect(view.scale.y).toBe(1);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenLastCalledWith('n', { width: expect.closeTo(150, 5) });
+  });
   it('the rotate handle emits rotation', () => {
     const { gizmo, onEdit } = boot(); const t = target(); gizmo.attach(t);
     gizmo.drag('rotate', { x: 100, y: 60 }, { x: 140, y: 100 });   // 12 o'clock → 3 o'clock = +π/2

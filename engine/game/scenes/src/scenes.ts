@@ -192,6 +192,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     }
     view.label = node.id;
     parent.addChild(view);
+    // After `addChild`: pixi wants the mask in the same tree it masks.
+    // The node still draws its own children — only its PARENT is clipped.
+    if (props.mask) parent.mask = view;
     const entry: Entry = { view, node, props, type, where };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
@@ -242,6 +245,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     const m = mounted.get(id);
     if (!m) return;
     for (const e of [...m.all].reverse()) {
+      // A FOREIGN parent survives this unmount (the runtime only detaches
+      // what it did not build): drop its `mask` before the masking view
+      // goes, or it keeps clipping against a destroyed one.
+      if (e.view.parent?.mask === e.view) e.view.parent.mask = null;
       e.type.unmount?.(e.view);
       e.view.parent?.removeChild(e.view);
       if (OWN.has(e.type.type)) e.view.destroy({ children: false });

@@ -66,6 +66,35 @@ describe('scenes row', () => {
     expect(foreign.destroyed).toBe(false);
   });
 
+  it('fits the design into the renderer at boot and again on every resize', async () => {
+    // The GAME page has nobody else to call `resize` (the editor page's
+    // `scene-edit` does its own): the row fits itself.
+    const ctx = new Context();
+    const listeners = new Set<(w: number, h: number) => void>();
+    const screen = { width: 640, height: 360 };
+    const app = {
+      stage: new Container(),
+      ticker: null,
+      screen,
+      renderer: {
+        on: (_e: string, fn: (w: number, h: number) => void) => void listeners.add(fn),
+        off: (_e: string, fn: (w: number, h: number) => void) => void listeners.delete(fn),
+      },
+    };
+    ctx.provide('renderer', { app });
+    const fiber = ctx.plugin(runtime, {
+      design: { width: 480, height: 270 },
+      fetchFn: fetchOk({ scenes: [], diagnostics: [], nodeTypes: [] }),
+    });
+    await fiber;
+    const root = ctx.get('scenes')!.container;
+    expect(root.scale.x).toBeCloseTo(4 / 3, 10);
+    listeners.forEach((fn) => fn(320, 180));
+    expect(root.scale.x).toBeCloseTo(2 / 3, 10);
+    await fiber.dispose();
+    expect(listeners.size).toBe(0);
+  });
+
   it('ready resolves after the GET has replaced', async () => {
     const { ctx, fiber } = boot();
     await fiber;

@@ -9,6 +9,7 @@ export const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   '.jpeg',
   '.gif',
   '.webp',
+  '.avif',
   '.ico',
 ]);
 export const AUDIO_EXTENSIONS: ReadonlySet<string> = new Set(['.mp3', '.wav', '.ogg', '.m4a']);

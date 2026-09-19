@@ -12,8 +12,13 @@ export type HandleId = 'nw' | 'ne' | 'se' | 'sw' | 'rotate' | 'body';
 export interface GizmoTarget {
   node: string;
   view: Container;
-  /** Typed carrier only — a gesture's base is read from the VIEW at pointer-down. */
-  props: { x: number; y: number; scale: number; rotation: number };
+  /**
+   * Values are a typed carrier only — a gesture's base is read from the
+   * VIEW at pointer-down. `width`/`height` are the exception in one way:
+   * whether the node CARRIES them is read from here, because that is what
+   * decides whether a corner drag edits them or `scale`.
+   */
+  props: { x: number; y: number; scale: number; rotation: number; width?: number; height?: number };
 }
 
 export interface GizmoOptions {
@@ -109,7 +114,11 @@ export function createGizmo(o: GizmoOptions): Gizmo {
     | { handle: HandleId; start: Point; anchor: Point; startAngle: number; mods: Mods; moved: boolean; base: GizmoTarget['props'] }
     | null = null;
   const gfx = [frame, body, ...handleGfx.values()];
-  const baseOf = (view: Container): GizmoTarget['props'] => ({ x: view.position.x, y: view.position.y, scale: view.scale.x, rotation: view.rotation });
+  const baseOf = (t: GizmoTarget): GizmoTarget['props'] => ({
+    x: t.view.position.x, y: t.view.position.y, scale: t.view.scale.x, rotation: t.view.rotation,
+    ...(t.props.width !== undefined ? { width: t.view.width } : {}),
+    ...(t.props.height !== undefined ? { height: t.view.height } : {}),
+  });
 
   const boxOf = (t: GizmoTarget): Box => {
     const b = t.view.getBounds();
@@ -129,7 +138,7 @@ export function createGizmo(o: GizmoOptions): Gizmo {
       startAngle: Math.atan2(at.y - center.y, at.x - center.x),
       mods: { shift: !!mods.shift, alt: !!mods.alt },
       moved: false,
-      base: baseOf(target.view),
+      base: baseOf(target),
     };
   };
 
@@ -149,14 +158,22 @@ export function createGizmo(o: GizmoOptions): Gizmo {
     } else {
       const before = Math.hypot(drag.start.x - drag.anchor.x, drag.start.y - drag.anchor.y) || 1;
       const after = Math.hypot(at.x - drag.anchor.x, at.y - drag.anchor.y);
-      view.scale.set(props.scale * Math.max(0.01, after / before));
+      const f = Math.max(0.01, after / before);
+      // A node sized in design px is resized, not scaled — otherwise the
+      // preview would move under the cursor and the pointer-up edit would
+      // write a `scale` the next `applyCommon` throws away for `width`.
+      if (props.width === undefined && props.height === undefined) view.scale.set(props.scale * f);
+      else {
+        if (props.width !== undefined) view.width = props.width * f;
+        if (props.height !== undefined) view.height = props.height * f;
+      }
     }
     redraw();
   };
 
   const onUp = (at: Point): void => {
     if (!drag || !target) { drag = null; return; }
-    const { handle, moved } = drag;
+    const { handle, moved, base } = drag;
     drag = null;
     if (!moved) {
       // Body press that never moved = a selection click, not a move.
@@ -166,7 +183,11 @@ export function createGizmo(o: GizmoOptions): Gizmo {
     const { node, view } = target;
     if (handle === 'body') o.onEdit(node, { x: view.position.x, y: view.position.y });
     else if (handle === 'rotate') o.onEdit(node, { rotation: view.rotation });
-    else o.onEdit(node, { scale: view.scale.x });
+    else if (base.width === undefined && base.height === undefined) o.onEdit(node, { scale: view.scale.x });
+    else o.onEdit(node, {
+      ...(base.width !== undefined ? { width: view.width } : {}),
+      ...(base.height !== undefined ? { height: view.height } : {}),
+    });
   };
   const onPointerMove = (e: FederatedPointerEvent): void => onMove(e.global);
   const onPointerUp = (e: FederatedPointerEvent): void => onUp(e.global);

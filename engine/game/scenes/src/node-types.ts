@@ -4,7 +4,7 @@
  * built-in; subscribers hear every change and remount what used it.
  */
 import type { Context } from 'cordis';
-import type { Container } from 'pixi.js';
+import { Color, type Container } from 'pixi.js';
 import type Schema from 'schemastery';
 import type { NodeTypeAccept } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
@@ -71,15 +71,28 @@ export function createNodeTypes(): NodeTypesService {
   };
 }
 
-/** Applies `COMMON` (defaults filled in) to a view; `anchor` only where the view has one. */
+/**
+ * Applies `COMMON` (defaults filled in) to a view. The optional props are
+ * applied only when actually set: `width`/`height` AFTER `scale`, because
+ * each overrides that axis' scale from the view's own local bounds;
+ * `tint` only where the view has one; `anchorX`/`anchorY` per axis over
+ * `anchor`, only where the view has an anchor at all.
+ */
 export function applyCommon(view: Container, props: Record<string, unknown>): void {
-  const c = COMMON(props as never) as Record<string, number | boolean>;
+  const c = COMMON(props as never) as Record<string, number | string | boolean | undefined>;
   view.position.set(c.x as number, c.y as number);
   view.scale.set(c.scale as number);
+  if (typeof c.width === 'number') view.width = c.width;
+  if (typeof c.height === 'number') view.height = c.height;
   view.rotation = c.rotation as number;
   view.alpha = c.alpha as number;
   view.visible = c.visible as boolean;
-  const anchored = view as unknown as { anchor?: { set(v: number): void } };
+  // `Color`, not a hand-rolled `parseInt`: it takes `#rgb` and the named
+  // colours too, and THROWS on a value that is neither — which `mountNode`
+  // already turns into this node's own diagnostic, same as `x: 'abc'`.
+  if (typeof c.tint === 'string' && 'tint' in view)
+    (view as unknown as { tint: number }).tint = new Color(c.tint).toNumber();
+  const anchored = view as unknown as { anchor?: { set(x: number, y: number): void } };
   if (anchored.anchor && typeof anchored.anchor.set === 'function')
-    anchored.anchor.set(c.anchor as number);
+    anchored.anchor.set((c.anchorX ?? c.anchor) as number, (c.anchorY ?? c.anchor) as number);
 }

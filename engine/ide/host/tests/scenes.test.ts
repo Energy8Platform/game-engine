@@ -96,6 +96,31 @@ describe('checkScenes', () => {
     // The props failure names the field.
     expect(out.find((d) => d.where === 'bad/d')?.message).toContain('src');
   });
+  it('the common props the runtime applies all pass the check', () => {
+    expect(
+      checkScenes(
+        [
+          doc('a', [
+            {
+              id: 'n',
+              type: 'container',
+              props: {
+                width: 100,
+                height: 50,
+                tint: '#ff8000',
+                anchorX: 0.5,
+                anchorY: 1,
+                mask: true,
+              },
+            },
+          ]),
+        ],
+        types,
+        () => true,
+        false,
+      ),
+    ).toEqual([]);
+  });
   it('a common prop off its type is a props error naming the node and the field', () => {
     const out = checkScenes(
       [doc('a', [{ id: 'n', type: 'container', props: { x: 'abc' } }])],
