@@ -115,12 +115,31 @@ function toCellBoard(board: Board): CellData[][] {
 export function boardFromReelSystem(
   reelSystem: LegacyReelSystem,
 ): Omit<ReelsBoard, 'view' | 'grid' | 'destroy'> {
+  // `ReelSystem.spin` sets its `board` only once the spin resolves, while the engine seats the
+  // landing symbols before that: a `repaint()` in that window would `setBoard(oldBoard)` and
+  // put the previous spin's art back. Deferred until the last op in flight settles, run once.
+  let inFlight = 0;
+  let pendingRepaint = false;
+  const repaint = () => reelSystem.setBoard(reelSystem.board);
+  const tracked =
+    <S>(run: (step: S) => Promise<void>) =>
+    async (step: S) => {
+      inFlight++;
+      try {
+        await run(step);
+      } finally {
+        if (--inFlight === 0 && pendingRepaint) {
+          pendingRepaint = false;
+          repaint();
+        }
+      }
+    };
   return {
-    async spinTo(step: SpinToStep) {
+    spinTo: tracked(async (step: SpinToStep) => {
       await reelSystem.spin(toCellBoard(step.board));
-    },
+    }),
 
-    async revealWins(step: RevealWinsStep) {
+    revealWins: tracked(async (step: RevealWinsStep) => {
       const cells = step.lines.flatMap((line) => line.positions);
       await Promise.all(
         cells.map(({ col, row }) => {
@@ -129,9 +148,9 @@ export function boardFromReelSystem(
           return cell.playWin();
         }),
       );
-    },
+    }),
 
-    async remove(step: RemoveStep) {
+    remove: tracked(async (step: RemoveStep) => {
       if (step.cells.length === 0) return;
       for (const { col, row } of step.cells) {
         const cell = reelSystem.grid.getCell(col, row);
@@ -149,16 +168,18 @@ export function boardFromReelSystem(
         if (snapshot[col]?.[row]) snapshot[col][row] = { symbol: null };
       }
       reelSystem.setBoard(snapshot);
-    },
+    }),
 
-    async refill(step: RefillStep) {
+    refill: tracked(async (step: RefillStep) => {
       reelSystem.setBoard(toCellBoard(step.board));
-    },
+    }),
 
     // Forces a redraw without changing any symbol — a config edit (e.g. a frame style) that
-    // `setBoard` alone would pick up on the NEXT spin/refill, made visible right away.
+    // `setBoard` alone would pick up on the NEXT spin/refill, made visible right away — or,
+    // with an op in flight, as soon as it lands.
     repaint() {
-      reelSystem.setBoard(reelSystem.board);
+      if (inFlight > 0) pendingRepaint = true;
+      else repaint();
     },
 
     get cellSize() {
@@ -173,7 +194,7 @@ export interface ReelsBoard extends BoardApi {
   readonly view: Container;
   /** The grid this board drives — same object `revealWins`/`remove` reach via `getCell`. */
   readonly grid: GridLike;
-  /** Re-`setBoard`s the current board to force every cell to redraw; a no-op after `destroy()`. */
+  /** Re-`setBoard`s the current board to force every cell to redraw — after any op in flight lands; a no-op after `destroy()`. */
   repaint(): void;
   /** One cell's footprint — square, from the reel config's `grid.cellSize` (96 when absent). */
   readonly cellSize: { width: number; height: number };

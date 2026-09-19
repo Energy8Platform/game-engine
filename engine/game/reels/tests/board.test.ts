@@ -61,7 +61,7 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
 
 describe('boardFromReelSystem: spinTo', () => {
   it('calls the measured reelSystem.spin with the board converted to CellData[][] (String(id) symbols)', async () => {
-    const { reelSystem, spin } = fakeReelSystem();
+    const { reelSystem, spin, setBoard } = fakeReelSystem();
     const board = boardFromReelSystem(reelSystem);
 
     await board.spinTo({
@@ -77,6 +77,8 @@ describe('boardFromReelSystem: spinTo', () => {
       [{ symbol: '1' }, { symbol: '2' }],
       [{ symbol: '3' }, { symbol: '4' }],
     ]);
+    // no repaint was asked for: the op's own settle re-sets nothing
+    expect(setBoard).not.toHaveBeenCalled();
   });
 });
 
@@ -250,6 +252,33 @@ describe('boardFromReelSystem: repaint / cellSize', () => {
 
     expect(setBoard).toHaveBeenCalledTimes(1);
     expect(setBoard).toHaveBeenCalledWith(initial);
+  });
+
+  it('repaint during a spin is deferred: no setBoard while it is in flight, exactly one once it lands', async () => {
+    const { reelSystem, spin, setBoard } = fakeReelSystem([[{ symbol: 'a' }]]);
+    let land!: () => void;
+    spin.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const board = boardFromReelSystem(reelSystem);
+
+    const spinning = board.spinTo({ kind: 'spinTo', board: [[2]] });
+    board.repaint();
+    board.repaint();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(setBoard).not.toHaveBeenCalled();
+
+    land();
+    await spinning;
+    expect(setBoard).toHaveBeenCalledTimes(1);
+    expect(setBoard).toHaveBeenCalledWith(reelSystem.board);
+
+    // idle again: immediate, and nothing left pending
+    board.repaint();
+    expect(setBoard).toHaveBeenCalledTimes(2);
   });
 
   it('cellSize reads grid.cellSize off the fake, square', () => {
