@@ -142,10 +142,15 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   /**
    * `config.symbol` set: no scene document, no gizmo/grid/keyboard/drop — just one
    * `symbols.yml` state, fitted to `ctx.board?.cellSize` (96×96 when there is no
-   * reel board), centred under `scenes.container`'s fit like a scene node would be.
+   * reel board), centred on the screen at the scenes root's design→screen scale.
+   * The composed game (`flow1`'s `boot → show base_game`) still mounts under
+   * `scenes.container` — `board.cellSize` and the symbols live set need it —
+   * but is hidden; the preview sits on `app.stage` above it, so its own bounds
+   * are measurable and `snapshot` still reads them back in design units.
    */
   function bootSymbol(id: string): void {
     const root = scenes.container;
+    root.visible = false;
     type SymbolsLike = {
       replace(doc: SymbolsDoc | null): void;
       ready: Promise<void>;
@@ -156,20 +161,18 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
 
     const cellSize = (ctx.reflect.get('board', false) as { cellSize?: { width: number; height: number } } | undefined)
       ?.cellSize ?? { width: 96, height: 96 };
-    /** Same trick as `boot()`'s `design()`: the screen centre, read back in design-local coords. */
-    const design = () => { const c = root.toLocal({ x: app.screen.width / 2, y: app.screen.height / 2 }); return { width: c.x * 2, height: c.y * 2 }; };
-
     const previewBox = new Container();
     previewBox.label = 'symbol-preview';
-    const d = design();
-    previewBox.position.set(d.width / 2, d.height / 2);
+    previewBox.position.set(app.screen.width / 2, app.screen.height / 2);
+    // `getGlobalTransform`, not `worldTransform`: the latter is only refreshed by a render pass.
+    previewBox.scale.set(root.getGlobalTransform().a);
     const outline = new Graphics()
       .roundRect(-cellSize.width / 2, -cellSize.height / 2, cellSize.width, cellSize.height, 8)
       .stroke({ width: 2, color: 0x3a4152 });
     outline.label = 'symbol-outline';
     previewBox.addChild(outline);
-    root.addChild(previewBox);
-    ctx.effect(() => () => { root.removeChild(previewBox); previewBox.destroy({ children: true }); }, 'scene-edit:symbol-preview');
+    app.stage.addChild(previewBox);
+    ctx.effect(() => () => { app.stage.removeChild(previewBox); previewBox.destroy({ children: true }); root.visible = true; }, 'scene-edit:symbol-preview');
 
     let current: { id: string; state: SymbolState } | null = null;
     let view: Container | null = null;

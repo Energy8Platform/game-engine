@@ -117,7 +117,7 @@ function bootSymbol(symbols?: unknown, symbol = 'coin') {
   };
   const ready = () => vi.waitFor(() => expect(events().some((e) => e.event === 'ready')).toBe(true));
   const edit = () => (window as unknown as { __e8edit: Pick<plugin.SceneEdit, 'emitted' | 'snapshot' | 'frameOf'> }).__e8edit;
-  return { ctx, fiber, events, call, ready, edit };
+  return { ctx, app, scenes, fiber, events, call, ready, edit };
 }
 
 describe('symbol mode', () => {
@@ -126,6 +126,20 @@ describe('symbol mode', () => {
     const { events, ready } = bootSymbol(symbols);
     await ready();
     expect(events()[0]).toEqual({ event: 'ready', payload: { symbol: 'coin' } });
+  });
+
+  it('hides the composed game under the preview: scenes.container is invisible, the preview sits on app.stage at the design→screen scale', async () => {
+    const { symbols } = fakeSymbols();
+    const { app, scenes, ready, fiber } = bootSymbol(symbols);
+    await ready();
+    expect(scenes.container.visible).toBe(false);
+    const preview = app.stage.getChildByLabel('symbol-preview')!;
+    expect(preview.parent).toBe(app.stage);
+    expect(preview.position).toMatchObject({ x: 240, y: 144 });
+    expect(preview.scale.x).toBe(0.5);
+    await fiber.dispose();
+    expect(scenes.container.visible).toBe(true);
+    expect(app.stage.getChildByLabel('symbol-preview')).toBeNull();
   });
 
   it('symbol previews a state and answers shown; snapshot reports the view bounds in design space', async () => {
