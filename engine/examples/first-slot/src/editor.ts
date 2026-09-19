@@ -13,6 +13,9 @@ const params = new URLSearchParams(location.search);
 const parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
 await game.ctx.plugin(sceneEdit, {
   scene: params.get('scene') ?? '',
-  symbol: params.get('symbol') ?? '',
+  // `undefined` (the key left out) means scene mode; `has` vs `get` matters
+  // here because `?symbol=` (no chip picked yet) must still enter symbol
+  // mode with `''`, not fall through to scene mode with `scene: ''`.
+  symbol: params.has('symbol') ? params.get('symbol')! : undefined,
   parentOrigin,
 });

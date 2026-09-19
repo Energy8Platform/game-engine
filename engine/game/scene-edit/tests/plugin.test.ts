@@ -90,8 +90,8 @@ function fakeSymbols() {
   return { symbols, previewCalls, views };
 }
 
-/** Same fake-wire harness as `boot()`, wired for `symbol: 'coin'` instead of a scene. `symbols` is `ctx.provide`d only when given — omit it to test the no-service path. */
-function bootSymbol(symbols?: unknown) {
+/** Same fake-wire harness as `boot()`, wired for `symbol: 'coin'` (or `symbol` when given) instead of a scene. `symbols` is `ctx.provide`d only when given — omit it to test the no-service path. */
+function bootSymbol(symbols?: unknown, symbol = 'coin') {
   const ctx = new Context();
   const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
   ctx.provide('renderer', { app });
@@ -104,7 +104,7 @@ function bootSymbol(symbols?: unknown) {
   let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
   let id = 0;
   const fiber = ctx.plugin(plugin, {
-    scene: 'a', symbol: 'coin', parentOrigin: 'http://ide',
+    scene: 'a', symbol, parentOrigin: 'http://ide',
     post: (msg: unknown) => posted.push(msg as Frame),
     listen: (fn) => { listener = fn; return () => { listener = undefined; }; },
   });
@@ -191,6 +191,18 @@ describe('symbol mode', () => {
     const grid = await call('grid', { on: true, step: 8 });
     expect(grid.ok).toBe(false);
     expect(String((grid as { error?: unknown }).error)).toContain('unknown method "grid"');
+  });
+
+  it("symbol: '' still boots symbol mode (outline only, no initial preview); a select request answers unknown method; ready carries ''", async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready, events } = bootSymbol(symbols, '');
+    await ready();
+    expect(events()[0]).toEqual({ event: 'ready', payload: { symbol: '' } });
+    const select = await call('select', { node: 'x' });
+    expect(select.ok).toBe(false);
+    expect(String((select as { error?: unknown }).error)).toContain('unknown method "select"');
+    const snap = await call('snapshot');
+    expect(snap.result).toEqual({ symbol: null, state: null, w: 0, h: 0 });
   });
 
   it('no symbols service on ctx emits error', async () => {

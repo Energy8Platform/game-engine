@@ -3,8 +3,9 @@
  * a project's own composition (spec §4). Shows one scene, picks and
  * transforms its top-level nodes with the gizmo, draws a grid, and talks
  * to the IDE over the `e8:ide:*` postMessage wire. It never writes a
- * file — the parent is the one writer. With `config.symbol` set it shows
- * one `symbols.yml` state instead — no scene, no gizmo/grid/keyboard/drop.
+ * file — the parent is the one writer. With `config.symbol !== undefined`
+ * (an id, or `''` for none picked yet) it shows one `symbols.yml` state
+ * instead — no scene, no gizmo/grid/keyboard/drop.
  */
 import type { Context } from 'cordis';
 import type { SceneDoc, SymbolsDoc, SymbolState } from '@energy8engine/contracts';
@@ -33,7 +34,15 @@ export interface SceneEditConfig {
   listen?: WireOptions['listen'];
   /** Tests: where `dragover`/`drop` are listened for; the renderer's canvas otherwise. */
   dropTarget?: HTMLElement;
-  /** Symbol mode: show this `symbols.yml` id's state instead of `scene` (Task 5 passes `params.get('symbol')`). `scene`, the gizmo, the grid, the keyboard and the drop handler are all skipped when set. */
+  /**
+   * Symbol mode: show this `symbols.yml` id's state instead of `scene`.
+   * `scene`, the gizmo, the grid, the keyboard and the drop handler are all
+   * skipped whenever this is anything other than `undefined` — `''`
+   * included, which means "symbol mode, nothing picked yet" (the Symbols
+   * document's canvas before any chip is selected) and boots to the
+   * outline only, waiting for the first `symbol` call. `undefined` (the
+   * key left out entirely) is the only value that means scene mode.
+   */
   symbol?: string;
 }
 
@@ -80,8 +89,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
   scenes.resize(app.screen.width, app.screen.height);
 
-  // Symbol mode: one symbols.yml state on the canvas, nothing scene-shaped armed.
-  if (config.symbol) {
+  // Symbol mode: one symbols.yml state on the canvas, nothing scene-shaped
+  // armed. Gated on `!== undefined`, not truthiness: `''` is a real symbol
+  // mode request — the Symbols document before any chip is selected embeds
+  // `selected?.id ?? ''`, so `editor.html?symbol=` must still boot symbol
+  // mode (outline only, waiting for the first `symbol` call), not fall
+  // through to scene mode with `scene: ''`.
+  if (config.symbol !== undefined) {
     bootSymbol(config.symbol);
     return;
   }

@@ -71,19 +71,34 @@ rows:
     name: '@energy8engine/game-runtime'
   - id: playloop1
     name: '@energy8engine/play-loop'
+  # `tween`/`sound` flow node kinds — moving a scene node through the
+  # legacy `Tween`, playing a file through `@pixi/sound`. `inject:
+  # ['flowNodes']`, so this row stays PENDING until `flow1` (below) provides
+  # that service — list order does not decide when it applies, cordis's
+  # inject wait does. It is listed BEFORE `flow1` on purpose anyway: rows
+  # apply in order, one `await importModule(...)` at a time (`@energy8engine/
+  # loader`'s `composeFromProject`), so listing it first means ITS module —
+  # heavier than `flow1`'s (it pulls in pixi + `@pixi/sound`) — finishes
+  # importing before `flow1`'s import even starts, and so well before
+  # `flow1`'s apply fires the `/api/flow` boot GET. Once `flow1` provides
+  # `flowNodes`, cordis wakes this already-imported, already-pending row at
+  # once, registering `tween`/`sound` before that GET's response can land.
+  # Listed the other way around (as it used to be), a slow import of THIS
+  # row could still be in flight when the GET resolves, and `flow1`'s
+  # `replace()` would validate against a registry missing `tween`/`sound` —
+  # the race task 9's browser proof caught (`unknown kind 'sound'`). See
+  # `@energy8engine/flow`'s `interpreter.ts` `createFlow` for the other half
+  # of the fix: a doc that loses that race is not stuck forever either.
+  - id: fx1
+    name: '@energy8engine/flow-fx'
   # The flow document that drives the play loop end to end (boot → spin →
   # present → …), edited in the IDE's flow editor. `inject: []` (see
   # `@energy8engine/flow`'s `src/runtime.ts`), so its position here is not
   # load-bearing the way `scenes1`/`playloop1`'s is — it reaches
   # `scenes`/`mechanics`/`play`/`board` leniently, per node, at run time.
+  # Listed AFTER `fx1` on purpose now — see that row's comment above.
   - id: flow1
     name: '@energy8engine/flow'
-  # `tween`/`sound` flow node kinds — moving a scene node through the
-  # legacy `Tween`, playing a file through `@pixi/sound`. `inject:
-  # ['flowNodes']`, so it sits right after `flow1`, which provides that
-  # service; the row itself has no config.
-  - id: fx1
-    name: '@energy8engine/flow-fx'
   # The durable record of what happened, as opposed to the live events of
   # what is shown (§7 of the spec). Baseline rather than per-project
   # because of the note that spec attaches to it: a log added later is a

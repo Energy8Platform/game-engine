@@ -217,23 +217,50 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     disposers = [];
   };
 
-  return {
-    replace(doc) {
-      if (doc && armed && current && shape(doc) === shape(current)) {
-        current = doc;
-        return;
-      }
-      stop();
+  const doReplace = (doc: FlowDoc | null): void => {
+    if (doc && armed && current && shape(doc) === shape(current)) {
       current = doc;
-      trace.length = 0;
-      runNo = 0;
-      if (!doc) return;
-      const problems = validateFlow(doc, kinds.list(), null);
-      for (const d of problems) report(d);
-      if (problems.some((d) => d.severity === 'error')) return;
-      arm(doc);
-      armed = true;
-    },
+      return;
+    }
+    stop();
+    current = doc;
+    trace.length = 0;
+    runNo = 0;
+    if (!doc) return;
+    const problems = validateFlow(doc, kinds.list(), null);
+    for (const d of problems) report(d);
+    if (problems.some((d) => d.severity === 'error')) return;
+    arm(doc);
+    armed = true;
+  };
+
+  // A doc that names a kind nothing has registered yet (a project row after
+  // `flow1` — `fx1`'s `tween`/`sound`, say — still importing when the boot
+  // GET wins the race `runtime.ts`/`e8.bundle.yml` describe) is reported
+  // once by `doReplace` above and stays unarmed. `report` has no retraction
+  // (`DiagnosticsService` only ever appends — see its doc comment), so that
+  // first "unknown kind" diagnostic is never taken back; this only stops
+  // the doc from staying stuck. Re-running `doReplace` on every registry
+  // change catches it up the moment the missing kind lands. Guarded by
+  // `current && !armed`: `current` null means nothing was ever handed to
+  // `replace` (nothing to catch up), and `armed` true means a LIVE run is
+  // in progress — an unrelated kind registering elsewhere must not stop
+  // and restart it. Subscribed here, once, for the service's whole life,
+  // via `o.ctx.effect` rather than inside `stop`/`doReplace`: those run on
+  // every ordinary doc swap, but this subscription has to outlive all of
+  // them and only die with the row itself — `o.ctx` is the exact fiber
+  // scope `runtime.ts`'s own `flow:run` effect (`flow.stop()` on dispose)
+  // is torn down on, so both go together.
+  o.ctx.effect(
+    () =>
+      kinds.subscribe(() => {
+        if (current && !armed) doReplace(current);
+      }),
+    'flow:kinds-watch',
+  );
+
+  return {
+    replace: doReplace,
     doc: () => current,
     trace: () => trace,
     onTrace(fn) {

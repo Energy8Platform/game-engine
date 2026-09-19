@@ -353,6 +353,49 @@ describe('createFlow', () => {
     expect(f.flow.trace().filter((e) => e.node === 'y')).toEqual([]);
   });
 
+  it('a kind missing at replace() never arms; registering it later arms and fires; an unrelated registration does not restart', async () => {
+    // The task-9 bundle race: `flow1` validates against `flowNodes` before
+    // `fx1` (or any late row) has registered the kind a doc actually uses.
+    const f = harness();
+    const d = doc(
+      [
+        { id: 'start', kind: 'boot' },
+        { id: 'x', kind: 'sound' },
+      ],
+      [{ from: 'start', to: 'x' }],
+    );
+    f.flow.replace(d);
+    expect(f.report).toHaveBeenCalledTimes(1);
+    expect(f.report).toHaveBeenCalledWith(
+      expect.objectContaining({ plugin: 'flow', where: 'x', message: expect.stringContaining("unknown kind 'sound'") }),
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    // Never armed: boot's trigger never fired, so nothing is in the trace.
+    expect(f.exits()).toEqual([]);
+
+    f.kinds.register({
+      kind: 'sound',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      run: async () => ({ out: 'next' }),
+    });
+    await settled(f, ['start.next', 'x.next']);
+    // The earlier diagnostic is not retracted, but the now-valid doc has
+    // nothing left to report either — still just the one call.
+    expect(f.report).toHaveBeenCalledTimes(1);
+
+    const traceLength = f.flow.trace().length;
+    f.kinds.register({
+      kind: 'unrelated',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      run: async () => ({ out: 'next' }),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.flow.trace()).toHaveLength(traceLength);
+    expect(f.flow.trace().every((e) => e.run === 1)).toBe(true);
+  });
+
   it('replace with a cycle-without-wait reports and starts nothing; a warning-only doc runs', async () => {
     const f = harness();
     const bad = doc(
