@@ -526,19 +526,30 @@ describe('SceneDocument', () => {
     expect(puts()[0].nodes.map((n) => n.id)).toEqual(['bg', 'reels-1', 'title']);
   });
 
-  it('what the canvas measures is rounded before it is written: x/y to whole pixels, scale to 2 decimals, rotation to 4', async () => {
+  it('what the canvas measures is rounded before it is written: x/y/width/height to whole pixels, scale to 2 decimals, rotation to 4', async () => {
     const { ctx, puts } = await harness();
     renderTab(ctx);
     const { iframe } = canvas();
     frame(iframe, 'edit', {
       node: 'logo',
-      props: { x: 279.6, y: 40.4, scale: 1.4999, rotation: 0.78539816 },
+      // `width`/`height` are design px like `x`/`y`: a gizmo resize must not
+      // persist the `149.98` pixi's bounding box measured.
+      props: {
+        x: 279.6,
+        y: 40.4,
+        width: 149.98,
+        height: 60.001,
+        scale: 1.4999,
+        rotation: 0.78539816,
+      },
     });
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes[0].children?.[0].props).toEqual({
       src: 'logo.png',
       x: 280,
       y: 40,
+      width: 150,
+      height: 60,
       scale: 1.5,
       rotation: 0.7854,
     });

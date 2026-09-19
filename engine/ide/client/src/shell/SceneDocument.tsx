@@ -181,8 +181,15 @@ function patchNode(doc: SceneDoc, id: string, props: Record<string, unknown>): S
   };
 }
 
-/** What the canvas measures is a float (`279.99998474121094`); the file reads `280` — positions whole, scale to 0.01, rotation to 0.0001. */
-const DECIMALS: Record<string, number> = { x: 1, y: 1, scale: 100, rotation: 10_000 };
+/** What the canvas measures is a float (`279.99998474121094`); the file reads `280` — positions AND sizes whole (both are design px), scale to 0.01, rotation to 0.0001. */
+const DECIMALS: Record<string, number> = {
+  x: 1,
+  y: 1,
+  width: 1,
+  height: 1,
+  scale: 100,
+  rotation: 10_000,
+};
 function roundProps(props: Record<string, unknown>): Record<string, unknown> {
   const out = { ...props };
   for (const [key, by] of Object.entries(DECIMALS))
