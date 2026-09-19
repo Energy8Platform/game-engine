@@ -16,6 +16,8 @@ import * as scenes from './plugins/scenes';
 import type { ScenesConfig } from './plugins/scenes';
 import * as flow from './plugins/flow';
 import type { FlowConfig } from './plugins/flow';
+import * as symbols from './plugins/symbols';
+import type { SymbolsConfig } from './plugins/symbols';
 import * as gameDiagnostics from './plugins/diagnostics';
 import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
@@ -41,6 +43,7 @@ export async function createIdeClient(
     GameCompositionConfig &
     ScenesConfig &
     FlowConfig &
+    SymbolsConfig &
     FilesConfig &
     CheckConfig,
 ): Promise<Context> {
@@ -80,6 +83,10 @@ export async function createIdeClient(
   // Injects `scenes` (the mutual deselect, the `scene` picker) and
   // `files` (the inspector's `asset` picker).
   await ctx.plugin(flow, config);
+  // The symbols document: `flow` again with `symbols` in place of `flow`.
+  // Injects `scenes` and `flow` (the three-way deselect, the node types
+  // and pickers), `files` and `assetNodeTypes` (the document's drop).
+  await ctx.plugin(symbols, config);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
   // own doc) — no new field for this signature to carry, just another
   // plugin reading the same `url`/`socketFactory` this function's caller

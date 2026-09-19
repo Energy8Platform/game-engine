@@ -17,8 +17,9 @@ import { map, walk } from './SceneDocument';
  * draft of the document: every edit is one `ctx.scenes.update(next)`.
  *
  * A string field with `meta.asset` (`.extra('asset', ['png'])`) is a
- * select of the project's files with those extensions — `useAssetPicker`,
- * shared with `FlowProperties`.
+ * select of the project's files with those extensions — `useAssetPicker`;
+ * one with `pick: 'node'` a select of every scene's nodes —
+ * `useNodePicker`. Both shared with `FlowProperties`/`SymbolsProperties`.
  */
 
 /**
@@ -53,10 +54,20 @@ export function useAssetPicker(ctx: Context): (exts?: unknown) => string[] {
   };
 }
 
+/**
+ * `SchemaForm.pickers.node`: every `<scene>/<node>` of every scene doc,
+ * nested nodes included — what a `pick: 'node'` field (a tween's target)
+ * offers. Shared with `FlowProperties` and `SymbolsProperties`.
+ */
+export function useNodePicker(ctx: Context): () => string[] {
+  const { docs } = useScenes(ctx);
+  return () => docs.flatMap((d) => [...walk(d.nodes)].map(({ node }) => `${d.id}/${node.id}`));
+}
+
 const COMMON_JSON = JSON.parse(JSON.stringify(COMMON)) as unknown;
 
 /** `Schema.object({ ...COMMON.dict, ...own.dict })`, as JSON `SchemaForm` rebuilds; `null` when the type's schema is malformed. */
-function mergedSchema(info: NodeTypeInfo | undefined): unknown {
+export function mergedSchema(info: NodeTypeInfo | undefined): unknown {
   try {
     const common = new Schema(COMMON_JSON as never) as unknown as { dict: object };
     const own = new Schema((info?.schema ?? {}) as never) as unknown as { dict?: object };
@@ -146,6 +157,7 @@ function NodeProperties({
   const [error, setError] = useState<string | null>(null);
   const schema = useMemo(() => mergedSchema(info), [info]);
   const asset = useAssetPicker(ctx);
+  const nodePicker = useNodePicker(ctx);
 
   const rename = () => {
     const next = draft.trim();
@@ -200,7 +212,7 @@ function NodeProperties({
           value={node.props}
           onChange={onChange}
           commit="blur"
-          pickers={{ asset }}
+          pickers={{ asset, node: nodePicker }}
         />
       </div>
     </>

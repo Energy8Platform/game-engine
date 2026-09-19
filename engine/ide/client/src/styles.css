@@ -1410,3 +1410,90 @@ label {
   margin-right: -10px;
   padding-right: 10px;
 }
+
+/* Symbols document: the list (the Explorer's rows — id, name, then one
+   chip per state, a `+` on an empty one, the picked one on the accent;
+   the ghosts muted; the add input; the drop area filling what is left of
+   the column) down the left, the canvas filling the rest, the status
+   line under both. A diagnostic paints the row or chip with its colour
+   in the margin, as the tree's own rows do. */
+.e8-doc-pane:has(> .e8-symbols-doc) {
+  padding: 0;
+  overflow: hidden;
+}
+.e8-symbols-doc {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+}
+.e8-symbols-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--e8-border);
+  overflow: auto;
+}
+.e8-symbols-drop-new {
+  flex: 1 1 auto;
+  min-height: 48px;
+  margin: 0 var(--e8-gap);
+  border-radius: var(--e8-radius-sm);
+}
+.e8-symbol-id {
+  flex: 0 0 auto;
+  min-width: 18px;
+  padding-left: 8px;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-small);
+}
+.e8-symbol-row .e8-explorer-name {
+  flex: 1 1 auto;
+}
+.e8-symbol-ghost .e8-explorer-name,
+.e8-symbol-ghost .e8-symbol-id {
+  color: var(--e8-fg-muted);
+}
+.e8-symbol-chip,
+.e8-symbol-add {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
+  color: var(--e8-fg);
+  font: inherit;
+  font-size: var(--e8-size-small);
+  line-height: 16px;
+}
+.e8-symbol-chip-empty {
+  color: var(--e8-fg-muted);
+  border-style: dashed;
+}
+.e8-symbol-chip-selected,
+.e8-symbol-chip-selected:hover {
+  border-color: var(--e8-accent);
+  background: var(--e8-accent);
+  color: var(--e8-on-accent);
+}
+[data-diagnostic='error'].e8-symbol-row,
+[data-diagnostic='error'].e8-symbol-chip {
+  border-left: 2px solid var(--e8-error);
+}
+[data-diagnostic='warning'].e8-symbol-row,
+[data-diagnostic='warning'].e8-symbol-chip {
+  border-left: 2px solid var(--e8-warning);
+}
+.e8-symbols-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.e8-symbols-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 4px 12px;
+  border-top: 1px solid var(--e8-border);
+}

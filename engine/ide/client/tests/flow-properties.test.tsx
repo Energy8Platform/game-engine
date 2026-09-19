@@ -45,6 +45,16 @@ const SOUND: FlowKindInfo = {
   ),
 };
 KINDS.push(SOUND);
+/** A kind with a `node` pick: every `<scene>/<node>` of every scene, nested ones too. */
+const TWEEN: FlowKindInfo = {
+  kind: 'tween',
+  outs: ['next'],
+  trigger: false,
+  schema: json(
+    Schema.object({ target: Schema.string().extra('pick', 'node').description('target node') }),
+  ),
+};
+KINDS.push(TWEEN);
 const ready = (doc: FlowDoc = FIVE) => boot({ doc, diagnostics: [], kinds: KINDS });
 const accept = (body: unknown) => ({ body: { doc: body, diagnostics: [], kinds: KINDS } });
 const SCENES = ['base_game', 'bonus'];
@@ -160,6 +170,42 @@ describe('FlowProperties', () => {
       id: 'sound-1',
       kind: 'sound',
       props: { src: 'assets/win.mp3' },
+    });
+  });
+
+  it("a `pick: 'node'` field is a select of every scene's nodes as <scene>/<node>, nested included", async () => {
+    const doc: FlowDoc = { ...FIVE, nodes: [...FIVE.nodes, { id: 'tween-1', kind: 'tween' }] };
+    const h = await harness({ 'GET /api/flow': ready(doc), 'PUT /api/flow': accept }, [
+      {
+        id: 'base_game',
+        nodes: [
+          {
+            id: 'bg',
+            type: 'container',
+            props: {},
+            children: [{ id: 'logo', type: 'image', props: {} }],
+          },
+        ],
+      },
+      { id: 'bonus', nodes: [{ id: 'b', type: 'image', props: {} }] },
+    ]);
+    await waitFor(() => expect(h.ctx.flow.doc()).toEqual(doc));
+    act(() => h.ctx.flow.select('tween-1'));
+    renderSide(h.ctx);
+    const target = screen.getByLabelText('target node') as HTMLSelectElement;
+    expect(target.tagName).toBe('SELECT');
+    expect([...target.options].map((o) => o.value)).toEqual([
+      '',
+      'base_game/bg',
+      'base_game/logo',
+      'bonus/b',
+    ]);
+    fireEvent.change(target, { target: { value: 'base_game/logo' } });
+    await waitFor(() => expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(1));
+    expect((h.calls.at(-1)!.body as FlowDoc).nodes.at(-1)).toEqual({
+      id: 'tween-1',
+      kind: 'tween',
+      props: { target: 'base_game/logo' },
     });
   });
 

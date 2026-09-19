@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 import { Context } from 'cordis';
-import type { FlowDoc, FlowKindInfo, ServerMessage } from '@energy8engine/contracts';
+import type { FlowDoc, FlowKindInfo, SceneDoc, ServerMessage } from '@energy8engine/contracts';
 import type { WebSocketLike } from '../src/plugins/connection';
 import * as connection from '../src/plugins/connection';
 import * as slots from '../src/plugins/slots';
@@ -78,11 +78,13 @@ export const FIVE_KINDS: FlowKindInfo[] = [
   kind('wait', ['next']),
 ];
 
-function scenesStub(ids: readonly string[]): ScenesService {
+/** An id is a scene with no nodes; a `SceneDoc` is taken as is (the `node` picker walks its tree). */
+function scenesStub(scenes: readonly (string | SceneDoc)[]): ScenesService {
   let selected: SceneSelection | null = null;
   const listeners = new Set<() => void>();
+  const docs = scenes.map((s) => (typeof s === 'string' ? { id: s, nodes: [] } : s));
   return {
-    docs: () => ids.map((id) => ({ id, nodes: [] })),
+    docs: () => docs,
     diagnostics: () => [],
     nodeTypes: () => [],
     selected: () => selected,
@@ -107,7 +109,10 @@ afterEach(async () => {
   for (const ctx of built.splice(0)) await ctx.fiber.dispose();
 });
 
-export async function harness(routes: Record<string, Route>, sceneIds: readonly string[] = []) {
+export async function harness(
+  routes: Record<string, Route>,
+  sceneIds: readonly (string | SceneDoc)[] = [],
+) {
   const socket = new FakeSocket();
   const calls: { method: string; url: string; body: unknown }[] = [];
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {

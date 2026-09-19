@@ -284,6 +284,49 @@ describe('PropertiesSidebar', () => {
     await waitFor(() => expect([...src.options].map((o) => o.value)).toContain('assets/new.png'));
   });
 
+  it("a `pick: 'node'` field is a select of every scene's nodes as <scene>/<node>, nested included", async () => {
+    const withNode = TYPES.map((t) =>
+      t.type === 'image'
+        ? {
+            ...t,
+            schema: Schema.object({
+              src: Schema.string().required(),
+              follow: Schema.string().extra('pick', 'node').description('node to follow'),
+            }).toJSON(),
+          }
+        : t,
+    );
+    const { ctx, puts } = await harness({
+      'GET /api/scenes': () => ({
+        body: { scenes: [BASE, BONUS], diagnostics: [], nodeTypes: withNode },
+      }),
+      'PUT /api/scenes/base_game': (body) => ({
+        body: { scenes: [body as SceneDoc, BONUS], diagnostics: [], nodeTypes: withNode },
+      }),
+    });
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
+    renderSide(ctx);
+    const follow = screen.getByLabelText('node to follow') as HTMLSelectElement;
+    expect(follow.tagName).toBe('SELECT');
+    expect([...follow.options].map((o) => o.value)).toEqual([
+      '',
+      'base_game/bg',
+      'base_game/logo',
+      'base_game/title',
+      'base_game/nested',
+      'bonus/b',
+      'bonus/again',
+      'bonus/back',
+    ]);
+    fireEvent.change(follow, { target: { value: 'bonus/b' } });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[1]).toEqual({
+      id: 'title',
+      type: 'image',
+      props: { src: 'title.png', follow: 'bonus/b' },
+    });
+  });
+
   it('a selected node that is no longer in the document renders nothing but keeps the root', async () => {
     const { ctx } = await harness();
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'gone' }));

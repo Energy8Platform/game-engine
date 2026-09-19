@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react';
 export interface MenuItem {
   label: string;
   onPick(): void;
+  /** For a test to find the item by; rendered as `data-testid` when given. */
+  testId?: string;
 }
 
 /** A context menu at a fixed point. Closes on Escape, on a mousedown outside itself, and after any item. */
@@ -40,6 +42,7 @@ export function ExplorerMenu({
           type="button"
           role="menuitem"
           className="e8-menu-item"
+          data-testid={item.testId}
           onClick={() => {
             onClose();
             item.onPick();

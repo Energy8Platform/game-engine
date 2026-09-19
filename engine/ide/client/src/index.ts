@@ -40,6 +40,12 @@ export {
 } from './plugins/scenes';
 export { useFlow, type FlowClientService, type FlowConfig } from './plugins/flow';
 export {
+  useSymbols,
+  type SymbolsClientService,
+  type SymbolSelection,
+  type SymbolsConfig,
+} from './plugins/symbols';
+export {
   useGameDiagnostics,
   type GameDiagnosticsEntry,
   type GameDiagnosticsGroup,

@@ -4,7 +4,7 @@ import type { FlowDoc, FlowKindInfo, FlowNode } from '@energy8engine/contracts';
 import { useFlow } from '../plugins/flow';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { renameNode } from './flow-graph';
-import { useAssetPicker } from './PropertiesSidebar';
+import { useAssetPicker, useNodePicker } from './PropertiesSidebar';
 
 /**
  * The right-hand inspector over `ctx.flow.selected()` — `PropertiesSidebar`
@@ -12,7 +12,8 @@ import { useAssetPicker } from './PropertiesSidebar';
  * edges follow; a duplicate or empty id is refused inline), its kind, then
  * a `SchemaForm` over the kind's schema. A `scene` field (`meta.pick ===
  * 'scene'`) picks from `ctx.scenes.docs()`; an `asset` field from the
- * project's files (`useAssetPicker`). Holds no draft of the document:
+ * project's files (`useAssetPicker`); a `node` field from every scene's
+ * nodes (`useNodePicker`). Holds no draft of the document:
  * every edit is one `ctx.flow.update(next)`.
  */
 export function FlowProperties({ ctx }: { ctx: Context }) {
@@ -49,6 +50,7 @@ function NodeProperties({
   // The host's refusal of the last props edit — cleared by the next one that lands.
   const [error, setError] = useState<string | null>(null);
   const asset = useAssetPicker(ctx);
+  const nodePicker = useNodePicker(ctx);
 
   const rename = () => {
     const next = draft.trim();
@@ -106,7 +108,7 @@ function NodeProperties({
             value={node.props ?? {}}
             onChange={onChange}
             commit="blur"
-            pickers={{ scene: () => ctx.scenes.docs().map((d) => d.id), asset }}
+            pickers={{ scene: () => ctx.scenes.docs().map((d) => d.id), asset, node: nodePicker }}
           />
         </div>
       ) : null}
