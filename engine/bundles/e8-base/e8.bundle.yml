@@ -78,6 +78,12 @@ rows:
   # `scenes`/`mechanics`/`play`/`board` leniently, per node, at run time.
   - id: flow1
     name: '@energy8engine/flow'
+  # `tween`/`sound` flow node kinds — moving a scene node through the
+  # legacy `Tween`, playing a file through `@pixi/sound`. `inject:
+  # ['flowNodes']`, so it sits right after `flow1`, which provides that
+  # service; the row itself has no config.
+  - id: fx1
+    name: '@energy8engine/flow-fx'
   # The durable record of what happened, as opposed to the live events of
   # what is shown (§7 of the spec). Baseline rather than per-project
   # because of the note that spec attaches to it: a log added later is a

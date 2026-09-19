@@ -880,6 +880,26 @@ describe('dev-game — restart on a script.spin write', () => {
    * tests above compose no `rpc`, which is exactly the socket these two
    * are about.
    */
+  /**
+   * `first-slot`'s `flow.yml` (copied in by `writableProjectWithManifest`)
+   * has a `click` node of kind `sound` — `fx1`'s row (`@energy8engine/
+   * flow-fx`), not one of `flow.ts`'s built-ins. None of these tests runs
+   * a live game, so `flow.ts`'s own boot-time check (`validateFlow`
+   * against `BUILTIN_KIND_INFO` — see that plugin's module doc) never
+   * hears otherwise, and reports this node once, for good, the moment the
+   * project boots: exactly the shape `graph.ts`'s `unknown kind` check
+   * produces. It rides in `ideRpc`'s single 'host' frame alongside
+   * whatever `session` says (see `rpc.ts`'s `groups`/`lastHostDiagnostics`
+   * — one merged frame per speaker, `flow`'s never retracted here), so it
+   * is every test below's constant companion, not something to filter out.
+   */
+  const FLOW_UNKNOWN_SOUND = {
+    severity: 'error' as const,
+    plugin: 'flow',
+    where: 'click',
+    message: "unknown kind 'sound'",
+  };
+
   async function hostOverProject(projectDir: string, binPath?: string) {
     // `createIdeHost` needs an e8.yml; `first-slot`'s own is copied with
     // the rest of the project, not only `game/`. Its `game/spec.json` is
@@ -906,6 +926,14 @@ describe('dev-game — restart on a script.spin write', () => {
         (m): m is Extract<ServerMessage, { type: 'game-diagnostics' }> =>
           m.type === 'game-diagnostics' && m.source === 'host',
       );
+    // `flow.ts` reports `FLOW_UNKNOWN_SOUND` synchronously during
+    // `createIdeHost`, well before this socket connects — the connecting
+    // client is greeted with it (`rpc.ts`'s `retainedFrames('host')`) as
+    // its very first 'host' frame. Waited out HERE, once, so every
+    // caller's own baseline (`hostFrames().length` right after this
+    // returns) is the stable "just the greeting", not a race against its
+    // arrival.
+    await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(0);
     return { socket, hostFrames };
   }
 
@@ -929,9 +957,13 @@ describe('dev-game — restart on a script.spin write', () => {
       const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
       expect(await putScript(projectDir, `${original}\nrecord {\n`)).toBe(200);
 
-      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBeGreaterThan(0);
-      const [frame] = hostFrames();
+      // `hostOverProject` already waited out the boot greeting (one
+      // frame, `FLOW_UNKNOWN_SOUND` alone) — the break adds at least one
+      // more, `session`'s, merged alongside it.
+      await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBeGreaterThan(1);
+      const frame = hostFrames().at(-1)!;
       expect(frame.diagnostics).toEqual([
+        FLOW_UNKNOWN_SOUND,
         expect.objectContaining({
           severity: 'error',
           plugin: 'session',
@@ -1009,10 +1041,14 @@ describe('dev-game — restart on a script.spin write', () => {
               ?.diagnostics.map((d) => d.message),
           { timeout: 15_000 },
         )
-        .toEqual([expect.stringMatching(/failed to restart/)]);
+        .toEqual(["unknown kind 'sound'", expect.stringMatching(/failed to restart/)]);
 
+      // `session`'s row is taken back; `flow`'s (this fixture's `click`
+      // node) never was — nothing here fixes `flow.yml`.
       expect(await putScript(projectDir, original)).toBe(200);
-      await expect.poll(() => hostFrames().at(-1)?.diagnostics, { timeout: 15_000 }).toEqual([]);
+      await expect
+        .poll(() => hostFrames().at(-1)?.diagnostics, { timeout: 15_000 })
+        .toEqual([FLOW_UNKNOWN_SOUND]);
     } finally {
       socket.close();
     }
@@ -1049,7 +1085,7 @@ describe('dev-game — restart on a script.spin write', () => {
         hostFrames()
           .at(-1)!
           .diagnostics.map((d) => d.message),
-      ).toEqual([expect.stringMatching(/failed to restart/)]);
+      ).toEqual(["unknown kind 'sound'", expect.stringMatching(/failed to restart/)]);
       const afterBreak = hostFrames().length;
 
       // The spin fails with the session's own startup diagnostic. One
@@ -1060,13 +1096,14 @@ describe('dev-game — restart on a script.spin write', () => {
         hostFrames()
           .at(-1)!
           .diagnostics.map((d) => d.message),
-      ).toEqual([expect.stringMatching(/failed to restart/)]);
+      ).toEqual(["unknown kind 'sound'", expect.stringMatching(/failed to restart/)]);
 
       // The fix: `session`'s retract, then `spin`'s — two frames, and the
-      // host list is empty without a spin having said so.
+      // host list is back down to just `flow`'s row — a spin never says
+      // otherwise, and nothing here fixes `flow.yml`.
       expect(await putScript(projectDir, original)).toBe(200);
       await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBe(afterBreak + 3);
-      expect(hostFrames().at(-1)?.diagnostics).toEqual([]);
+      expect(hostFrames().at(-1)?.diagnostics).toEqual([FLOW_UNKNOWN_SOUND]);
     } finally {
       socket.close();
     }
@@ -1080,12 +1117,16 @@ describe('dev-game — restart on a script.spin write', () => {
     const { socket, hostFrames } = await hostOverProject(projectDir);
     try {
       process.kill(host!.ctx.session.pid!, 'SIGKILL');
-      await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(0);
+      // `hostOverProject`'s own wait already accounts for the greeting
+      // (length 1); `> 1` here waits for the kill's own frame rather than
+      // resolving at once on the greeting alone. `flow`'s row has no
+      // `code` — `undefined` in the same slot.
+      await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(1);
       expect(
         hostFrames()
           .at(-1)!
           .diagnostics.map((d) => d.code),
-      ).toEqual(['exited']);
+      ).toEqual([undefined, 'exited']);
       const afterDeath = hostFrames().length;
 
       const res = await fetch(`${preview(host!.ctx)}/api/spin`, { method: 'POST' });
@@ -1097,12 +1138,12 @@ describe('dev-game — restart on a script.spin write', () => {
         hostFrames()
           .at(-1)!
           .diagnostics.map((d) => d.code),
-      ).toEqual(['exited']);
+      ).toEqual([undefined, 'exited']);
 
       const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
       expect(await putScript(projectDir, `${original}\n-- edited by mouse\n`)).toBe(200);
       await expect.poll(() => hostFrames().length, { timeout: 15_000 }).toBe(afterDeath + 3);
-      expect(hostFrames().at(-1)?.diagnostics).toEqual([]);
+      expect(hostFrames().at(-1)?.diagnostics).toEqual([FLOW_UNKNOWN_SOUND]);
     } finally {
       socket.close();
     }
@@ -1168,8 +1209,12 @@ describe('dev-game — restart on a script.spin write', () => {
     const { socket, hostFrames } = await hostOverProject(projectDir);
     try {
       process.kill(host!.ctx.session.pid!, 'SIGKILL');
-      await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(0);
+      // `> 1`, not `> 0` — `hostOverProject` already leaves `hostFrames()`
+      // at length 1 (the boot greeting alone); this waits for the kill's
+      // own frame on top of it.
+      await expect.poll(() => hostFrames().length, { timeout: 10_000 }).toBeGreaterThan(1);
       expect(hostFrames().at(-1)!.diagnostics).toEqual([
+        FLOW_UNKNOWN_SOUND,
         expect.objectContaining({
           severity: 'error',
           plugin: 'session',
@@ -1180,7 +1225,9 @@ describe('dev-game — restart on a script.spin write', () => {
 
       const original = readFileSync(join(projectDir, 'game', 'script.spin'), 'utf8');
       expect(await putScript(projectDir, `${original}\n-- edited by mouse\n`)).toBe(200);
-      await expect.poll(() => hostFrames().at(-1)?.diagnostics, { timeout: 15_000 }).toEqual([]);
+      await expect
+        .poll(() => hostFrames().at(-1)?.diagnostics, { timeout: 15_000 })
+        .toEqual([FLOW_UNKNOWN_SOUND]);
       expect(host!.ctx.session.pid).not.toBeNull();
     } finally {
       socket.close();

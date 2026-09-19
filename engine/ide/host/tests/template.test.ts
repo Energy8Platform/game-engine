@@ -44,6 +44,7 @@ describe('engine/templates/slot-basic', () => {
       'assets/logo.png',
       'assets/coin.json',
       'assets/coin.png',
+      'assets/spin.wav',
       'symbols.yml',
       'assets/symbols/1.png',
       'assets/symbols/2.png',

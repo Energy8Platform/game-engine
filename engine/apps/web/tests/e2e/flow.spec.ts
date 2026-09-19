@@ -1,11 +1,11 @@
 /**
  * The flow editor, proven in a real browser (flow editor spec, Task 10):
- * the Flow document draws `flow.yml`'s five nodes; the palette adds a
+ * the Flow document draws `flow.yml`'s six nodes; the palette adds a
  * node, a drag between two handles adds an edge, `Delete` on a selected
  * node takes it and its edges out — each landing in the file; and the
  * Preview's game is DRIVEN by that document: `base_game` is on screen
- * from boot (the `show` node), a spin goes `on ui.spin → spin → present`
- * with no loop in `main.ts`, and the run paints the canvas.
+ * from boot (the `show` node), a spin goes `on ui.spin → click → spin →
+ * present` with no loop in `main.ts`, and the run paints the canvas.
  *
  * Same fixture and readers as `scenes.spec.ts`: a private `projectCopy()`
  * served by `startDevHost`, the composition document's `Preview`
@@ -61,7 +61,7 @@ async function openComposition(page: Page): Promise<void> {
   await page.goto(`${IDE_URL}#/doc/composition`);
 }
 
-/** The Flow document in front, its five nodes drawn with ports. */
+/** The Flow document in front, its six nodes drawn with ports. */
 async function openFlow(page: Page): Promise<void> {
   await page.getByTestId('activity-flow').click();
   await expect(page.getByTestId('flow-screen')).toBeVisible();
@@ -90,13 +90,13 @@ const centre = (box: { x: number; y: number; width: number; height: number }) =>
   y: box.y + box.height / 2,
 });
 
-test('the Flow document shows the five nodes of flow.yml, with their ports', async ({ page }) => {
+test('the Flow document shows the six nodes of flow.yml, with their ports', async ({ page }) => {
   await openComposition(page);
   await openFlow(page);
-  for (const id of ['start', 'base', 'idle', 'spin', 'draw']) {
+  for (const id of ['start', 'base', 'idle', 'click', 'spin', 'draw']) {
     await expect(page.getByTestId(`flow-node-${id}`)).toBeVisible();
   }
-  await expect(page.getByTestId('flow-canvas').locator('.react-flow__node')).toHaveCount(5);
+  await expect(page.getByTestId('flow-canvas').locator('.react-flow__node')).toHaveCount(6);
   // Ports are the running game's own kinds, relayed by the host: `spin`
   // leaves by `result` or `failed`. Every node but `boot` takes an edge in,
   // `on` too — `draw → idle` is the loop, and React Flow draws no edge into
@@ -105,13 +105,15 @@ test('the Flow document shows the five nodes of flow.yml, with their ports', asy
   // itself; an edge into it does nothing, so none can be drawn.
   await expect(page.getByTestId('flow-port-spin-result')).toBeVisible();
   await expect(page.getByTestId('flow-port-spin-failed')).toBeVisible();
-  await expect(page.getByTestId('flow-node-start').locator('.react-flow__handle.target')).toHaveCount(0);
+  await expect(
+    page.getByTestId('flow-node-start').locator('.react-flow__handle.target'),
+  ).toHaveCount(0);
   for (const id of ['idle', 'draw']) {
     await expect(
       page.getByTestId(`flow-node-${id}`).locator('.react-flow__handle.target'),
     ).toHaveCount(1);
   }
-  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(5);
+  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(6);
   await expect(page.getByTestId('flow-palette').getByTestId('flow-add-wait')).toBeVisible();
 });
 
@@ -146,9 +148,9 @@ test('the palette adds wait-1 and a drag connects draw → wait-1, both landing 
   await expect
     .poll(() => flowFile().edges, { timeout: 10_000 })
     .toContainEqual({ from: 'draw', out: 'next', to: 'wait-1' });
-  // The five the fixture had are still there — the write appended.
-  expect(flowFile().edges).toHaveLength(6);
-  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(6);
+  // The six the fixture had are still there — the write appended.
+  expect(flowFile().edges).toHaveLength(7);
+  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(7);
 });
 
 test('Delete on a selected node removes it and its edges from flow.yml', async ({ page }) => {
@@ -166,12 +168,13 @@ test('Delete on a selected node removes it and its edges from flow.yml', async (
   await expect(page.getByTestId('flow-node-draw')).toHaveCount(0, { timeout: 10_000 });
   await expect
     .poll(() => flowFile().nodes.map((n) => n.id))
-    .toEqual(['start', 'base', 'idle', 'spin']);
-  // `spin → draw` and `draw → idle` went with it; the other three stayed.
+    .toEqual(['start', 'base', 'idle', 'click', 'spin']);
+  // `spin → draw` and `draw → idle` went with it; the other four stayed.
   expect(flowFile().edges).toEqual([
     { from: 'start', to: 'base' },
     { from: 'base', to: 'idle' },
-    { from: 'idle', to: 'spin' },
+    { from: 'idle', to: 'click' },
+    { from: 'click', to: 'spin' },
   ]);
   // Nothing selected any more: the Properties are gone.
   await expect(page.getByTestId('prop-id')).toHaveCount(0);
@@ -205,6 +208,8 @@ test('the Preview boots with base_game shown, spins through the flow, and the ru
   expect(trace.filter((e) => e.run === last).map((e) => `${e.node}:${e.out}`)).toEqual([
     'idle:null',
     'idle:next',
+    'click:null',
+    'click:next',
     'spin:null',
     'spin:result',
     'draw:null',

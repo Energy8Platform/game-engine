@@ -6,17 +6,21 @@ one bundle, and `e8.patch.yml` is the delta on top of it.
 ## `flow.yml`
 
 The flow document, and the only thing that drives the game: `boot → show
-base_game → on ui.spin → spin → present → back to on`. `e8-base`'s `flow1`
-row (`@energy8engine/flow`) reads it from the host (`GET /api/flow`),
-interprets it, and traces every node it enters and leaves; `src/main.ts`
-holds no spin loop any more — its `Spin` button only emits `ui.spin` into
-the bus that row provides, and `#status` is read back off the trace. The
-IDE's Flow document edits this file (`PUT /api/flow`); node kinds come from
-the game's own registry (`ctx.flowNodes`), so a project plugin can add one.
-The bus is `ctx.get('events')` (`ctx.reflect.get('events', false)` from a
-plugin) — not `ctx.events`, which is cordis's own emitter and hears nothing
-the flow emits. Fan-in: an edge into any node but `merge` runs it once per
-arrival; `merge` waits for every incoming edge and passes once.
+base_game → on ui.spin → click → spin → present → back to on`. `e8-base`'s
+`flow1` row (`@energy8engine/flow`) reads it from the host (`GET
+/api/flow`), interprets it, and traces every node it enters and leaves;
+`src/main.ts` holds no spin loop any more — its `Spin` button only emits
+`ui.spin` into the bus that row provides, and `#status` is read back off
+the trace. The IDE's Flow document edits this file (`PUT /api/flow`); node
+kinds come from the game's own registry (`ctx.flowNodes`), so a project
+plugin can add one. The bus is `ctx.get('events')` (`ctx.reflect.get('events',
+false)` from a plugin) — not `ctx.events`, which is cordis's own emitter and
+hears nothing the flow emits. Fan-in: an edge into any node but `merge` runs
+it once per arrival; `merge` waits for every incoming edge and passes once.
+`click` (kind `sound`, `assets/spin.wav`) is `e8-base`'s `fx1` row
+(`@energy8engine/flow-fx`) — the same row's `tween` kind moves a scene node
+through the legacy `Tween`, unused by this flow but there for a project's
+own nodes.
 
 ## `symbols.yml`
 

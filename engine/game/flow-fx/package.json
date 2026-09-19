@@ -1,0 +1,37 @@
+{
+  "name": "@energy8engine/flow-fx",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "e8": {
+    "runtime": {
+      "entry": "./src/runtime.ts",
+      "schema": "./src/schema.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@energy8engine/flow": "*",
+    "@energy8engine/scenes": "*",
+    "@energy8platform/game-engine": "^0.41.0",
+    "@pixi/sound": "^6.0.1",
+    "cordis": "4.0.0-rc.8",
+    "schemastery": "3.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "jsdom": "^25.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "license": "MIT"
+}
