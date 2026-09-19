@@ -63,7 +63,10 @@ file stem as a new id (a string id is first-class now); the host's
 ## 4. `spin { action, betLevel }` (R2)
 
 `spin`'s schema: `action: Schema.string().default('spin')` (a `$path`
-reads a var), `betLevel: Schema.number()` (optional, `$path` too). `run`
+reads a var), `betLevel: Schema.string()` (optional — a numeric literal
+like `'5'` or a `$path`; the IDE's number field cannot hold a `$path`, so
+the prop is a string and `run` converts a literal with `Number()`, a
+non-numeric literal → `report` and the key omitted). `run`
 resolves both through `vars` and POSTs `{ action, betLevel }` (undefined
 keys omitted). `dev-game.ts`'s route reads `body.action ?? config.action
 ?? 'spin'` and `body.betLevel ?? config.betLevel`. `validateFlow` gains an
