@@ -161,7 +161,7 @@ function useResize(key: string, axis: 'x' | 'y', direction: 1 | -1) {
 
 /**
  * The activity icons this shell ships, by `ActivityMeta.icon` name — the
- * six the shipped contributions use, drawn inline so no icon package is
+ * seven the shipped contributions use, drawn inline so no icon package is
  * pulled in for a handful of shapes. A name not listed here draws its first
  * letter, so a plugin with no icon of its own still gets a button a
  * person can tell apart. `default` is for a plugin that wants a generic
@@ -176,6 +176,7 @@ const ICON_PATHS: Record<string, string> = {
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   'git-branch':
     'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 6c0 4-12 4-12 9',
+  'symbol-misc': 'M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM4 7.5l8 4.5 8-4.5M12 12v9',
   default:
     'M4 5a1 1 0 0 1 1-1h5v6H4V5zM14 4h5a1 1 0 0 1 1 1v5h-6V4zM4 14h6v6H5a1 1 0 0 1-1-1v-5zM14 14h6v5a1 1 0 0 1-1 1h-5v-6z',
 };

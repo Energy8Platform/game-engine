@@ -89,6 +89,34 @@ describe('SymbolsDocument', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(screen.getByTestId('symbols-status')).toHaveTextContent('"1" is already a symbol');
     expect(docs()).toHaveLength(1);
+    expect(input.value).toBe('1'); // kept, to be edited into a free id
+  });
+
+  it('a PUT answered 200 with error diagnostics applies the doc AND shows the first one in the status, the row marked', async () => {
+    const noSrc: Diagnostic = {
+      severity: 'error',
+      plugin: 'symbols',
+      where: 'symbols/2/static',
+      message: 'image has no src',
+    };
+    const { ctx, docs } = await booted(
+      {
+        'PUT /api/symbols': (body) => ({
+          body: { doc: (body as { doc: SymbolsDoc }).doc, known: KNOWN, diagnostics: [noSrc] },
+        }),
+      },
+      { version: 1, symbols: [TWO.symbols[0]] },
+    );
+    renderDocument(ctx);
+    fireEvent.click(await screen.findByTestId('symbol-add-2'));
+    await waitFor(() => expect(docs()).toHaveLength(1));
+    // The Add landed: the host wrote the `src: ''` static and said what is missing.
+    expect(await screen.findByTestId('symbol-row-2')).toHaveAttribute('data-diagnostic', 'error');
+    expect(screen.getByTestId('symbol-chip-2-static')).toHaveAttribute('data-diagnostic', 'error');
+    expect(screen.getByTestId('symbols-status')).toHaveTextContent(
+      'symbols/2/static — image has no src',
+    );
+    expect(ctx.symbols.doc()?.symbols.map((s) => s.id)).toEqual(['1', '2']);
   });
 
   it('with no symbols.yml yet, the list is empty, every known id is a ghost, and the first add writes from EMPTY', async () => {

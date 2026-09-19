@@ -74,8 +74,8 @@ const parseSymbolNode = (
  * `static` is NOT required to parse — `SymbolDef.static` says it always is,
  * but that is `checkSymbols`'s rule to enforce (spec §4: "`static` present"
  * is a CHECK, not a shape refusal — a fresh def with none of the three
- * states yet is still a legal document, refused only once written back
- * without ever having gained one). The cast below is the same shape of lie
+ * states yet is still a legal document, written and reported as missing
+ * one). The cast below is the same shape of lie
  * `parseDoc` in `flow.ts` never has to tell (`FlowNode`'s required fields
  * are both always present here too) — kept local and named so it is not
  * mistaken for a guarantee.
@@ -277,10 +277,11 @@ export function apply(ctx: Context): void {
     const parsedBody = isRecord(body) ? body.doc : undefined;
     const { doc, reason } = parseDoc(parsedBody);
     if (!doc) return refuse(res, [fileError(`PUT ${req.path}: ${reason}`)]);
-    const paths = new Set((await ctx.files.tree()).entries.map((e) => e.path));
-    const found = checkSymbols(doc, ctx.ideRpc.nodeTypes(), (p) => paths.has(p), await known());
-    // Errors refuse the write; warnings are written and come back in the answer.
-    if (found.some((d) => d.severity === 'error')) return refuse(res, found);
+    // Only a non-document is refused. Every check diagnostic — a state with
+    // no file yet (`src: ''`, what the IDE's Add/Create/Clear produce), an
+    // unknown type, a duplicate id — is written, reported and answered: the
+    // scenes rule, so the user sees what to fill in next rather than a
+    // create path that is dead while a game is connected.
     const write = await ctx.files.write(FILE, Buffer.from(yaml.dump(doc, { noRefs: true })));
     if (write.diagnostics.length) return refuse(res, write.diagnostics);
     await refresh(false);

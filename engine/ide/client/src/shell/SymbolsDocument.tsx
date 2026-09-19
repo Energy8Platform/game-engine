@@ -97,9 +97,14 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   );
 
   const has = (id: string) => (ctx.symbols.doc() ?? EMPTY).symbols.some((s) => s.id === id);
+  /** `false` when the id is already there — the status says so and the caller keeps what it typed. */
   const add = (id: string, name?: string) => {
-    if (has(id)) return setStatus(`"${id}" is already a symbol`);
+    if (has(id)) {
+      setStatus(`"${id}" is already a symbol`);
+      return false;
+    }
     void commit((d) => addSymbol(d, id, name));
+    return true;
   };
 
   const remove = (id: string) => {
@@ -278,9 +283,7 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
             onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
               if (e.key !== 'Enter') return;
               const id = draft.trim();
-              if (!id) return;
-              add(id);
-              setDraft('');
+              if (id && add(id)) setDraft('');
             }}
           />
         </div>

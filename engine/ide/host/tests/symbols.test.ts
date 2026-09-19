@@ -359,19 +359,50 @@ describe('/api/symbols', () => {
     ]);
   });
 
-  it('PUT refuses a document the checks find errors in — a symbol with no static state', async () => {
-    host = await createIdeHost({ root: symbolsWorkspace(), port: 0 });
-    const bad = await put(host.url, { version: 1, symbols: [{ id: '1', name: 'Cherry' }] });
-    expect(bad.status).toBe(400);
-    expect((await bad.json()).diagnostics).toContainEqual(
+  it('PUT writes a document the checks find errors in, answering 200 with the errors; they are broadcast too', async () => {
+    const root = symbolsWorkspace();
+    host = await createIdeHost({ root, port: 0 });
+    const { frames, socket, close } = await listen(host);
+    socket.send(JSON.stringify({ type: 'node-types', types: TYPES }));
+    await expect.poll(() => host!.ctx.ideRpc.nodeTypes().length).toBe(TYPES.length);
+    // What the IDE's Add produces: a static with no file yet, next to a symbol with no static at all.
+    const doc: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        { id: '1', name: 'Cherry', static: { type: 'image', props: { src: '' } } },
+        { id: '2', name: 'Bell' } as SymbolDef,
+      ],
+    };
+    const res = await put(host.url, doc);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SymbolsResponse;
+    expect(body.doc).toEqual(doc);
+    expect(body.known).toEqual(KNOWN);
+    expect(body.diagnostics).toEqual([
       expect.objectContaining({
         severity: 'error',
         plugin: 'symbols',
-        where: 'symbols/1',
-        message: 'symbol "1" has no static state',
+        where: 'symbols/1/static',
+        message: 'image has no src',
       }),
-    );
-    expect((await get(host.url)).doc).toBeNull();
+      expect.objectContaining({
+        severity: 'error',
+        plugin: 'symbols',
+        where: 'symbols/2',
+        message: 'symbol "2" has no static state',
+      }),
+    ]);
+    expect(yaml.load(readFileSync(join(root, 'symbols.yml'), 'utf8'))).toEqual(doc);
+    expect((await get(host.url)).doc).toEqual(doc);
+    await expect
+      .poll(() => symbolsFrames(frames).some((f) => f.doc?.symbols.length === 2))
+      .toBe(true);
+    expect(symbolsFrames(frames).at(-1)).toEqual({
+      type: 'symbols',
+      doc,
+      diagnostics: body.diagnostics,
+    });
+    close();
   });
 
   it('a write through /api/files of symbols.yml re-reads and broadcasts; an unparsable one is one error at symbols.yml', async () => {
