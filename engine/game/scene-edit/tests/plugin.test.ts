@@ -219,9 +219,10 @@ describe('symbol mode', () => {
     expect(snap.result).toEqual({ symbol: null, state: null, w: 0, h: 0 });
   });
 
-  it('no symbols service on ctx emits error', async () => {
-    const { events } = bootSymbol(undefined);
+  it('no symbols service on ctx emits error and leaves the composed game visible', async () => {
+    const { events, scenes } = bootSymbol(undefined);
     await vi.waitFor(() => expect(events().some((e) => e.event === 'error')).toBe(true));
+    expect(scenes.container.visible).toBe(true);
   });
 
   it("__e8edit.frameOf('symbol') walks the preview view's descendants; null for a still view", async () => {

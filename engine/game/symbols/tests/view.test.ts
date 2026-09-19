@@ -121,6 +121,37 @@ describe('createSymbolHandle', () => {
     expect(c.y + c.height / 2).toBeCloseTo(0);
   });
 
+  it('a common `rotation` turns the art about the cell centre; with `x` too the nudge still lands at +x·s', () => {
+    const { deps } = setup();
+    const centre = (h: ReturnType<typeof createSymbolHandle>) => {
+      const b = h.view.getLocalBounds();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height };
+    };
+    const turned = createSymbolHandle('1', deps);
+    turned.apply({
+      id: '1',
+      static: { type: 'image', props: { src: 'assets/symbols/1.png', rotation: Math.PI / 2 } },
+    });
+    turned.resize(SIZE);
+    // 32×16 turned a quarter: 16 wide, 32 tall, at s = 3 → 48×96, still centred.
+    expect(centre(turned).x).toBeCloseTo(0);
+    expect(centre(turned).y).toBeCloseTo(0);
+    expect(centre(turned).w).toBeCloseTo(48);
+    expect(centre(turned).h).toBeCloseTo(96);
+
+    const both = createSymbolHandle('1', deps);
+    both.apply({
+      id: '1',
+      static: {
+        type: 'image',
+        props: { src: 'assets/symbols/1.png', rotation: Math.PI / 2, x: 20 },
+      },
+    });
+    both.resize(SIZE);
+    expect(centre(both).x).toBeCloseTo(60);
+    expect(centre(both).y).toBeCloseTo(0);
+  });
+
   it('fit: none only centres', () => {
     const { deps } = setup();
     const h = createSymbolHandle('1', deps);

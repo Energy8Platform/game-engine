@@ -91,10 +91,10 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
 
   // Symbol mode: one symbols.yml state on the canvas, nothing scene-shaped
   // armed. Gated on `!== undefined`, not truthiness: `''` is a real symbol
-  // mode request — the Symbols document before any chip is selected embeds
-  // `selected?.id ?? ''`, so `editor.html?symbol=` must still boot symbol
-  // mode (outline only, waiting for the first `symbol` call), not fall
-  // through to scene mode with `scene: ''`.
+  // mode request — the Symbols document's canvas is always
+  // `editor.html?symbol=` (the selection arrives as a `symbol` call), so it
+  // must boot symbol mode (outline only, waiting for that first call), not
+  // fall through to scene mode with `scene: ''`.
   if (config.symbol !== undefined) {
     bootSymbol(config.symbol);
     return;
@@ -150,7 +150,6 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
    */
   function bootSymbol(id: string): void {
     const root = scenes.container;
-    root.visible = false;
     type SymbolsLike = {
       replace(doc: SymbolsDoc | null): void;
       ready: Promise<void>;
@@ -158,6 +157,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     };
     const symbols = ctx.reflect.get('symbols', false) as SymbolsLike | undefined;
     if (!symbols) { emit('error', { message: 'no "symbols" service' }); return; }
+    root.visible = false;
 
     const cellSize = (ctx.reflect.get('board', false) as { cellSize?: { width: number; height: number } } | undefined)
       ?.cellSize ?? { width: 96, height: 96 };

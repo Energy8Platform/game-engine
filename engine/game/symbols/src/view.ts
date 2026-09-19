@@ -85,19 +85,22 @@ export function createSymbolHandle(
   };
 
   // The CHILD's local bounds, not the wrapper's: the wrapper's would already carry the
-  // child's own `x`/`y`/`scale` (`applyCommon`), and pivoting to their centre subtracts the
-  // nudge back out and cancels the scale under `contain`. Fitting the unscaled art and
-  // pivoting to its scaled centre leaves those props free to move/shrink it inside the cell.
+  // child's own `x`/`y`/`scale`/`rotation` (`applyCommon`), and pivoting to their centre
+  // subtracts the nudge back out and cancels the scale under `contain`. Fitting the unscaled
+  // art and pivoting to its centre mapped through the child's LINEAR transform (scale and
+  // rotation, not the translation) leaves those props free to move/shrink/turn it in the cell.
   function fit(w: Wrapper): void {
     if (!w.child) return;
-    const b = w.child.getLocalBounds();
-    if (!b.width || !b.height) return;
-    const s = def?.fit === 'none' ? 1 : Math.min(size.width / b.width, size.height / b.height);
+    const bounds = w.child.getLocalBounds();
+    if (!bounds.width || !bounds.height) return;
+    const s =
+      def?.fit === 'none' ? 1 : Math.min(size.width / bounds.width, size.height / bounds.height);
     w.container.scale.set(s);
-    w.container.pivot.set(
-      (b.x + b.width / 2) * w.child.scale.x,
-      (b.y + b.height / 2) * w.child.scale.y,
-    );
+    w.child.updateLocalTransform();
+    const { a, b, c, d } = w.child.localTransform;
+    const mx = bounds.x + bounds.width / 2;
+    const my = bounds.y + bounds.height / 2;
+    w.container.pivot.set(a * mx + c * my, b * mx + d * my);
     w.container.position.set(0, 0);
   }
 
