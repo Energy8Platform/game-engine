@@ -22,7 +22,7 @@ import { Assets, type Container } from 'pixi.js';
 import { diagnostic, type Diagnostic, type ScenesResponse } from '@energy8engine/contracts';
 import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import type { PixiRenderer } from '@energy8engine/renderer-pixi';
-import { container, image, scene, type AssetLoader } from './builtin';
+import { container, image, scene, shape, type AssetLoader } from './builtin';
 import { createNodeTypes, type NodeTypesService } from './node-types';
 import { createScenes, type ScenesService } from './scenes';
 import { createTransitions, cut, fade, type TickerLike, type TransitionsService } from './transitions';
@@ -60,7 +60,7 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   const report = (d: Diagnostic) =>
     (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(d);
   const nodeTypes = createNodeTypes();
-  for (const t of [container, image, scene]) nodeTypes.register(t);
+  for (const t of [container, image, scene, shape]) nodeTypes.register(t);
   ctx.provide('nodeTypes', nodeTypes);
   const transitions = createTransitions(report);
   transitions.register(cut);

@@ -17,7 +17,7 @@ describe('scenes row', () => {
   it('provides nodeTypes, transitions, assetLoader, scenes; fetches /api/scenes and mounts', async () => {
     const { ctx, app, fiber } = boot();
     await fiber;
-    expect(ctx.get('nodeTypes')!.list().map((t) => t.type).sort()).toEqual(['container', 'image', 'scene']);
+    expect(ctx.get('nodeTypes')!.list().map((t) => t.type).sort()).toEqual(['container', 'image', 'scene', 'shape']);
     expect(ctx.get('transitions')!.ids()).toEqual(['cut', 'fade']);
     await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('a')).toBe(true));
     expect(app.stage.children).toContain(ctx.get('scenes')!.container);

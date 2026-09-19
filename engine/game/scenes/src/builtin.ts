@@ -1,11 +1,14 @@
 /**
- * The three node types every project has: `container` (a group),
- * `image` (a sprite from a project-relative path) and `scene` (another
- * document, nested). Views these build are the runtime's to destroy;
- * any other type's view is only detached on unmount.
+ * The four node types every project has: `container` (a group), `image`
+ * (a sprite from a project-relative path), `scene` (another document,
+ * nested) and `shape` (a `Graphics` primitive — also the intended mask:
+ * `mask: true` on a `shape` clips its parent, applied generically by the
+ * runtime for any node type). Views these build are the runtime's to
+ * destroy (`OWN` in `./scenes`); any other type's view is only detached on
+ * unmount.
  */
 import type { Context } from 'cordis';
-import { Container, Sprite, Texture } from 'pixi.js';
+import { Color, Container, Graphics, Sprite, Texture } from 'pixi.js';
 import Schema from 'schemastery';
 import type { NodeType } from './node-types';
 
@@ -62,5 +65,57 @@ export const scene: NodeType<{ scene: string }> = {
     if (!view)
       throw new Error(`scene "${props.scene}" cannot be nested here (missing, or a cycle)`);
     return view;
+  },
+};
+
+export interface ShapeProps {
+  kind: 'rect' | 'roundRect' | 'circle' | 'ellipse';
+  width: number;
+  height: number;
+  /** Corner radius (`roundRect`) or radius (`circle`); `ellipse` uses `width`/`height` instead. */
+  radius: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+}
+
+/** A `Graphics` rect/roundRect/circle/ellipse, local-origin at (0,0) — the runtime's `mask: true` primitive. */
+export const shape: NodeType<ShapeProps> = {
+  type: 'shape',
+  schema: Schema.object({
+    kind: Schema.union(['rect', 'roundRect', 'circle', 'ellipse']).default('rect'),
+    width: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
+    height: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
+    radius: Schema.number().default(0).description('corner radius (roundRect) or radius (circle)'),
+    fill: Schema.string().default('#ffffff').description('#rrggbb, or empty for no fill'),
+    stroke: Schema.string().default('').description('#rrggbb, or empty for no stroke'),
+    strokeWidth: Schema.number().default(0).description('stroke width, px'),
+  }) as Schema<ShapeProps>,
+  mount(props, ctx) {
+    const view = new Graphics();
+    shape.update!(view, props, ctx);
+    return view;
+  },
+  update(view, props) {
+    const g = view as Graphics;
+    g.clear();
+    switch (props.kind) {
+      case 'roundRect':
+        g.roundRect(0, 0, props.width, props.height, props.radius);
+        break;
+      case 'circle':
+        g.circle(0, 0, props.radius);
+        break;
+      case 'ellipse':
+        g.ellipse(0, 0, props.width / 2, props.height / 2);
+        break;
+      default:
+        g.rect(0, 0, props.width, props.height);
+    }
+    // `Color`, not the raw string: THROWS on a value that is neither `#rrggbb` nor a named
+    // colour, which `mountNode`/`refresh` already turn into this node's own diagnostic.
+    if (props.fill) g.fill({ color: new Color(props.fill).toNumber(), alpha: 1 });
+    if (props.stroke && props.strokeWidth > 0)
+      g.stroke({ color: new Color(props.stroke).toNumber(), width: props.strokeWidth });
   },
 };

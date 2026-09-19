@@ -110,7 +110,7 @@ interface Mount {
 }
 
 /** Views this package builds itself, so destroys itself. */
-const OWN = new Set(['container', 'image', 'scene']);
+const OWN = new Set(['container', 'image', 'scene', 'shape']);
 
 export function createScenes(options: CreateScenesOptions): ScenesService {
   const { nodeTypes, loader, report = () => {} } = options;
