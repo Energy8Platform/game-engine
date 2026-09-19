@@ -32,6 +32,19 @@ describe('strip', () => {
     expect(strip.assets!(strip.schema({ src: '' } as never))).toEqual([]);
   });
 
+  // `cols`/`rows` are `Schema.natural()` (step 1, min 0): a negative or fractional value is
+  // REFUSED at the schema boundary (the same trust boundary `x: 'abc'` already relies on) —
+  // it never reaches `framesOf`, which used to compute a negative frame count and hand pixi's
+  // `AnimatedSprite` an empty `textures` array (pixi itself throws on that). `0` is a valid
+  // natural number and reaches `framesOf` fine: `cols*rows` is `0`, so `framesOf` returns the
+  // empty placeholder rather than slicing anything — no clamp needed for that case.
+  it('cols/rows are naturals: a negative or fractional value is refused by the schema', () => {
+    expect(() => props({ cols: -2 })).toThrow();
+    expect(() => props({ rows: -1 })).toThrow();
+    expect(() => props({ cols: 1.5 })).toThrow();
+    expect(props({ cols: 0 })).toMatchObject({ cols: 0 });
+  });
+
   it('a 64×16 strip with cols: 4 gives four 16×16 frames with the right frame.x', () => {
     const base = textureSized(64, 16);
     const view = strip.mount(props({ cols: 4 }), ctxWith(() => base)) as AnimatedSprite;

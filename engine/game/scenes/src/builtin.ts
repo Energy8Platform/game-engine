@@ -75,6 +75,7 @@ export interface ShapeProps {
   /** Corner radius (`roundRect`) or radius (`circle`); `ellipse` uses `width`/`height` instead. */
   radius: number;
   fill: string;
+  fillAlpha: number;
   stroke: string;
   strokeWidth: number;
 }
@@ -86,8 +87,9 @@ export const shape: NodeType<ShapeProps> = {
     kind: Schema.union(['rect', 'roundRect', 'circle', 'ellipse']).default('rect'),
     width: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
     height: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
-    radius: Schema.number().default(0).description('corner radius (roundRect) or radius (circle)'),
+    radius: Schema.number().default(8).description('corner radius (roundRect) or radius (circle)'),
     fill: Schema.string().default('#ffffff').description('#rrggbb, or empty for no fill'),
+    fillAlpha: Schema.number().default(1).description('fill opacity'),
     stroke: Schema.string().default('').description('#rrggbb, or empty for no stroke'),
     strokeWidth: Schema.number().default(0).description('stroke width, px'),
   }) as Schema<ShapeProps>,
@@ -114,7 +116,7 @@ export const shape: NodeType<ShapeProps> = {
     }
     // `Color`, not the raw string: THROWS on a value that is neither `#rrggbb` nor a named
     // colour, which `mountNode`/`refresh` already turn into this node's own diagnostic.
-    if (props.fill) g.fill({ color: new Color(props.fill).toNumber(), alpha: 1 });
+    if (props.fill) g.fill({ color: new Color(props.fill).toNumber(), alpha: props.fillAlpha });
     if (props.stroke && props.strokeWidth > 0)
       g.stroke({ color: new Color(props.stroke).toNumber(), width: props.strokeWidth });
   },

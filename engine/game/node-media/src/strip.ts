@@ -90,8 +90,8 @@ export const strip: NodeType<StripProps> = {
       .required()
       .extra('asset', STRIP_EXTENSIONS)
       .description('grid-strip image, project-relative'),
-    cols: Schema.number().default(1).description('columns in the grid'),
-    rows: Schema.number().default(1).description('rows in the grid'),
+    cols: Schema.natural().default(1).description('columns in the grid'),
+    rows: Schema.natural().default(1).description('rows in the grid'),
     frames: Schema.number().default(0).description('frames to use, row-major (0: every cell)'),
     fps: Schema.number().default(12).description('frames per second'),
     loop: Schema.boolean().default(true),

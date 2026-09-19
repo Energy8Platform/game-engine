@@ -13,8 +13,9 @@ describe('shape', () => {
       kind: 'rect',
       width: 100,
       height: 100,
-      radius: 0,
+      radius: 8,
       fill: '#ffffff',
+      fillAlpha: 1,
       stroke: '',
       strokeWidth: 0,
     });
@@ -66,6 +67,16 @@ describe('shape', () => {
     expect(view.getLocalBounds()).toMatchObject({ minX: 0, minY: 0, maxX: 40, maxY: 20 });
     shape.update!(view, props({ width: 80, height: 40 }), null as never);
     expect(view.getLocalBounds()).toMatchObject({ minX: 0, minY: 0, maxX: 80, maxY: 40 });
+    view.destroy();
+  });
+
+  it('fillAlpha reaches the fill style and survives a redraw', () => {
+    const view = shape.mount(props({ width: 40, height: 20, fillAlpha: 0.5 }), null as never) as Graphics;
+    expect(view.fillStyle.alpha).toBe(0.5);
+    expect(() =>
+      shape.update!(view, props({ width: 80, height: 40, fillAlpha: 0.5 }), null as never),
+    ).not.toThrow();
+    expect(view.fillStyle.alpha).toBe(0.5);
     view.destroy();
   });
 

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Container, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { Diagnostic, SceneDoc } from '@energy8engine/contracts';
 import { createNodeTypes } from '../src/node-types';
-import { container, image, scene, type AssetLoader } from '../src/builtin';
+import { container, image, scene, shape, type AssetLoader } from '../src/builtin';
 import { createScenes, type ScenesService } from '../src/scenes';
 import { createTransitions, fade, type TickerLike } from '../src/transitions';
 
@@ -337,6 +337,16 @@ describe('mounting', () => {
     expect(unmount).toHaveBeenCalledWith(foreign);
     expect(foreign.destroyed).toBe(false);
     expect(foreign.parent).toBeNull();
+  });
+
+  it('a `shape` view is one the runtime built itself: unmount destroys it, the mirror of the foreign case above', () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([{ id: 'a', nodes: [{ id: 's', type: 'shape', props: {} }] }]);
+    const view = byId(scenes, 'a', 's') as Graphics;
+    expect(view).toBeInstanceOf(Graphics);
+    scenes.replace([]);
+    expect(view.destroyed).toBe(true);
   });
 });
 
