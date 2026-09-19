@@ -92,32 +92,37 @@ export function createSound(deps: SoundDeps = {}): SoundKind {
           });
           return { out: 'next' };
         }
-        await new Promise<void>((resolve, reject) => {
-          // Declared (as a harmless no-op) before `s.play(...)` runs: a fake
-          // `play` that calls `complete` SYNCHRONOUSLY would otherwise read
-          // `onAbort` before its real assignment below — a TDZ throw.
-          let onAbort: () => void = () => {};
-          const instance = s.play({
-            loop: p.loop,
-            volume: p.volume,
-            complete: () => {
-              signal.removeEventListener('abort', onAbort);
-              resolve();
-            },
+        // `onAbort` lives outside the executor and is torn down in ONE place
+        // (the `finally` below) regardless of which of the three ways the
+        // await settles — `complete`, the abort itself, or the instance
+        // promise's own rejection forwarded below. Left to each branch to
+        // remove it individually, the rejection path had no removal at all:
+        // `signal` is the interpreter's shared epoch signal, so every failed
+        // `wait: true` play leaked one listener on it for the rest of the run.
+        let onAbort: (() => void) | undefined;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const instance = s.play({
+              loop: p.loop,
+              volume: p.volume,
+              complete: () => resolve(),
+            });
+            onAbort = () => {
+              void Promise.resolve(instance).then((i) =>
+                (i as { stop?: () => void } | undefined)?.stop?.(),
+              );
+              reject(signal.reason);
+            };
+            // `play()` returns `IMediaInstance | Promise<IMediaInstance>` — a
+            // rejecting instance promise (load failure) neither completes nor
+            // aborts on its own, and the node would otherwise hang silently
+            // to the interpreter's timeout; forward that rejection here.
+            Promise.resolve(instance).then(undefined, reject);
+            signal.addEventListener('abort', onAbort, { once: true });
           });
-          onAbort = () => {
-            void Promise.resolve(instance).then((i) =>
-              (i as { stop?: () => void } | undefined)?.stop?.(),
-            );
-            reject(signal.reason);
-          };
-          // `play()` returns `IMediaInstance | Promise<IMediaInstance>` — a
-          // rejecting instance promise (load failure) neither completes nor
-          // aborts on its own, and the node would otherwise hang silently
-          // to the interpreter's timeout; forward that rejection here.
-          Promise.resolve(instance).then(undefined, reject);
-          signal.addEventListener('abort', onAbort, { once: true });
-        });
+        } finally {
+          if (onAbort) signal.removeEventListener('abort', onAbort);
+        }
       } catch (e) {
         // An abort mid-wait is the interpreter's own contract (`stop()` /
         // `replace()`) — it already suppresses a rejection once `signal` is

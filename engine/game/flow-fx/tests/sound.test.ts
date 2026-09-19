@@ -176,7 +176,7 @@ describe('createSound', () => {
     await vi.waitFor(() => expect(rc.report).toHaveBeenCalledWith('sound a.wav: 404'));
   });
 
-  it('wait: true play that rejects (a 404, a decode failure) is caught and reported — the node does not hang to the timeout', async () => {
+  it("wait: true play that rejects (a 404, a decode failure) is caught and reported — the node does not hang to the timeout, and removes its abort listener (no leak on `signal`, the interpreter's shared epoch signal)", async () => {
     const sound: SoundLike = {
       play: vi.fn(() => Promise.reject(new Error('404'))),
       stop: vi.fn(),
@@ -184,13 +184,15 @@ describe('createSound', () => {
     };
     const from = vi.fn(() => sound);
     const kind = createSound({ from });
-    const { rc } = runCtx();
+    const { rc, controller } = runCtx();
+    const removeSpy = vi.spyOn(controller.signal, 'removeEventListener');
     const result = await kind.run!(
       { src: 'a.wav', action: 'play', loop: false, volume: 1, wait: true },
       rc,
     );
     expect(result).toEqual({ out: 'next' });
     expect(rc.report).toHaveBeenCalledWith('sound a.wav: 404');
+    expect(removeSpy).toHaveBeenCalledWith('abort', expect.any(Function));
   });
 
   it('wait: true with loop: true never completes — reported as a warning, falls back to fire-and-forget', async () => {
