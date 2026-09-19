@@ -94,10 +94,12 @@ describe('createFlow', () => {
     );
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'ok.next']);
+    // `spin`'s schema default fills `action: 'spin'` for a bare node
+    // (`interpreter.ts` calls `kind.schema(node.props ?? {})` before `run`).
     expect(f.fetchFn).toHaveBeenCalledWith('/api/spin', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: '{}',
+      body: '{"action":"spin"}',
     });
     expect(seen.result).toEqual(okBody);
 
@@ -127,21 +129,25 @@ describe('createFlow', () => {
     await settled(f, ['start.next', 'spin.result', 'draw.next']);
     expect(f.mechanics.present).toHaveBeenCalledWith('base_game', {});
     expect(f.play.execute).toHaveBeenCalledWith([{ kind: 'x' }], f.board);
-    expect(f.play.record).toHaveBeenCalledWith({ request: {}, result: okBody, plan: [{ kind: 'x' }] });
+    expect(f.play.record).toHaveBeenCalledWith({
+      request: { action: 'spin' },
+      result: okBody,
+      plan: [{ kind: 'x' }],
+    });
 
     f.mechanics.present.mockReturnValueOnce({ plan: [], diagnostics: [{ message: 'no mechanic' }] });
     f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'draw.failed']);
     expect(f.play.execute).toHaveBeenCalledTimes(1);
-    expect(f.play.record).toHaveBeenLastCalledWith({ request: {}, result: okBody, plan: [] });
+    expect(f.play.record).toHaveBeenLastCalledWith({ request: { action: 'spin' }, result: okBody, plan: [] });
 
     f.play.execute.mockResolvedValueOnce([{ message: 'step blew up' }]);
     f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'draw.failed']);
     expect(f.play.record).toHaveBeenCalledTimes(3);
-    expect(f.play.record).toHaveBeenLastCalledWith({ request: {}, result: okBody, plan: [] });
+    expect(f.play.record).toHaveBeenLastCalledWith({ request: { action: 'spin' }, result: okBody, plan: [] });
   });
 
   it('if takes true/false; a bad expression is a diagnostic and false', async () => {

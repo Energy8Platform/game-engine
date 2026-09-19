@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { FlowDoc, FlowKindInfo } from '@energy8engine/contracts';
+import { BUILTIN_KINDS } from '@energy8engine/flow';
 import { boot, FIVE, FIVE_KINDS, harness } from './flow-harness';
 
 /**
@@ -58,6 +59,22 @@ KINDS.push(TWEEN);
 const ready = (doc: FlowDoc = FIVE) => boot({ doc, diagnostics: [], kinds: KINDS });
 const accept = (body: unknown) => ({ body: { doc: body, diagnostics: [], kinds: KINDS } });
 const SCENES = ['base_game', 'bonus'];
+
+/**
+ * `KINDS` above stubs `spin` with an empty `{}` schema (`FIVE_KINDS`'s
+ * default) — fine for every other test here, which never opens `spin`'s
+ * own form. This one swaps in the REAL `spin` kind's schema from
+ * `@energy8engine/flow`, JSON round-tripped the way `ide-bridge` actually
+ * reports it (`JSON.parse(JSON.stringify(k.schema))`, see its
+ * `flow-kinds` forwarding) rather than a hand-authored stand-in — proof
+ * that a real spin node renders editable `action`/`betLevel` fields, not
+ * `SchemaForm`'s read-only `UnsupportedField` fallback a `Schema.any()`
+ * prop used to hit.
+ */
+const REAL_SPIN_SCHEMA = json(BUILTIN_KINDS.find((k) => k.kind === 'spin')!.schema);
+const KINDS_REAL_SPIN: FlowKindInfo[] = KINDS.map((k) =>
+  k.kind === 'spin' ? { ...k, schema: REAL_SPIN_SCHEMA } : k,
+);
 
 function renderSide(ctx: Context) {
   const entry = ctx.slots.list('shell.sideRight').find((e) => e.key === 'flow');
@@ -139,6 +156,41 @@ describe('FlowProperties', () => {
     fireEvent.blur(ms);
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes.at(-1)).toEqual({ id: 'wait-1', kind: 'wait', props: { ms: 500 } });
+  });
+
+  it("the real spin kind's schema: `action` is an editable text input defaulting to 'spin'; `betLevel` an editable text input", async () => {
+    const h = await harness({
+      'GET /api/flow': () => ({ body: { doc: FIVE, diagnostics: [], kinds: KINDS_REAL_SPIN } }),
+      'PUT /api/flow': (body) => ({ body: { doc: body, diagnostics: [], kinds: KINDS_REAL_SPIN } }),
+    });
+    await waitFor(() => expect(h.ctx.flow.doc()).toEqual(FIVE));
+    act(() => h.ctx.flow.select('spin'));
+    renderSide(h.ctx);
+
+    const action = screen.getByLabelText('action name, or `$path` to read a var') as HTMLInputElement;
+    expect(action.tagName).toBe('INPUT');
+    expect(action.type).toBe('text');
+    expect(action.readOnly).toBe(false);
+    expect(action.value).toBe('spin'); // the bare node's props carry no `action` — the schema default shows
+
+    const betLevel = screen.getByLabelText(
+      'bet level (a number), or `$path` to read a var',
+    ) as HTMLInputElement;
+    expect(betLevel.tagName).toBe('INPUT');
+    expect(betLevel.type).toBe('text');
+    expect(betLevel.readOnly).toBe(false);
+    expect(betLevel.value).toBe('');
+
+    // Editable, and PUTs: not `UnsupportedField`'s read-only stand-in.
+    fireEvent.change(action, { target: { value: 'buy' } });
+    fireEvent.blur(action);
+    await waitFor(() => expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(1));
+    expect((h.calls.at(-1)!.body as FlowDoc).nodes.find((n) => n.id === 'spin')).toEqual({
+      id: 'spin',
+      kind: 'spin',
+      props: { action: 'buy' },
+      ui: { x: 580, y: 80 },
+    });
   });
 
   it("an `asset` field is a select of the project's files with those extensions", async () => {

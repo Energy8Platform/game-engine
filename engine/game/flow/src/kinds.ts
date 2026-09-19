@@ -146,19 +146,32 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
   },
 };
 
-const spin: FlowNodeKind<{ action?: unknown; betLevel?: unknown }> = {
+const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
   kind: 'spin',
   schema: Schema.object({
-    action: Schema.any().description('literal action name, or `$path` to read a var'),
-    betLevel: Schema.any().description('literal bet level, or `$path` to read a var'),
+    action: Schema.string().default('spin').description('action name, or `$path` to read a var'),
+    // A string, not a number: the IDE's number field cannot hold a `$path` —
+    // `run` below converts a literal with `Number()`.
+    betLevel: Schema.string().description('bet level (a number), or `$path` to read a var'),
   }),
   outs: ['result', 'failed'],
-  async run(p, { vars, fetchFn }) {
+  async run(p, { vars, fetchFn, report }) {
     const request: Record<string, unknown> = {};
     const action = resolve(p.action, vars);
     if (action !== undefined) request.action = action;
-    const betLevel = resolve(p.betLevel, vars);
-    if (betLevel !== undefined) request.betLevel = betLevel;
+    const betLevelRaw = resolve(p.betLevel, vars);
+    if (betLevelRaw !== undefined) {
+      if (typeof betLevelRaw === 'number') {
+        request.betLevel = betLevelRaw;
+      } else {
+        const betLevel = Number(betLevelRaw);
+        if (typeof betLevelRaw !== 'string' || betLevelRaw.trim() === '' || Number.isNaN(betLevel)) {
+          report(`betLevel "${betLevelRaw}" is not a number`);
+        } else {
+          request.betLevel = betLevel;
+        }
+      }
+    }
     try {
       const res = await fetchFn('/api/spin', {
         method: 'POST',

@@ -96,41 +96,69 @@ describe('built-in kinds', () => {
     await expect(kind('show').run!({ scene: 'a' }, rc)).rejects.toThrow(/scenes/);
   });
 
+  /**
+   * The interpreter fills schema defaults before calling `run`
+   * (`kind.schema(node.props ?? {})`, see `interpreter.ts`'s `step`/`arm`)
+   * — every test below goes through the schema too, so `action`'s
+   * `default('spin')` is exercised the same way a real run exercises it,
+   * not bypassed by handing `run` raw, unfilled props.
+   */
+  const spinProps = (props: Record<string, unknown> = {}) =>
+    kind('spin').schema(props) as { action: string; betLevel?: string };
+
   it('spin: a thrown fetch leaves by failed with the message', async () => {
     const { rc } = runCtx();
     rc.fetchFn = vi.fn(async () => {
       throw new Error('offline');
     }) as unknown as typeof fetch;
-    expect(await kind('spin').run!({}, rc)).toEqual({ out: 'failed', vars: { error: 'offline' } });
+    expect(await kind('spin').run!(spinProps(), rc)).toEqual({ out: 'failed', vars: { error: 'offline' } });
   });
 
-  it('spin: no action/betLevel posts `{}`, same as before — `vars.request` mirrors the empty body', async () => {
-    const { rc } = runCtx();
-    const bodies: string[] = [];
-    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      bodies.push(init!.body as string);
-      return { ok: true, json: async () => ({ stage: 'base_game' }) };
-    }) as unknown as typeof fetch;
-    expect(await kind('spin').run!({}, rc)).toEqual({
-      out: 'result',
-      vars: { result: { stage: 'base_game' }, request: {} },
-    });
-    expect(bodies).toEqual(['{}']);
-  });
-
-  it('spin: a literal action/betLevel go in the POST body, and come back as `vars.request`', async () => {
+  it("spin: a bare node defaults `action` to 'spin' via the schema; no `betLevel` omits the key", async () => {
     const { rc } = runCtx();
     const bodies: unknown[] = [];
     rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
       bodies.push(JSON.parse(init!.body as string));
       return { ok: true, json: async () => ({ stage: 'base_game' }) };
     }) as unknown as typeof fetch;
-    const out = await kind('spin').run!({ action: 'buy', betLevel: 5 }, rc);
+    expect(await kind('spin').run!(spinProps(), rc)).toEqual({
+      out: 'result',
+      vars: { result: { stage: 'base_game' }, request: { action: 'spin' } },
+    });
+    expect(bodies).toEqual([{ action: 'spin' }]);
+  });
+
+  it('spin: a literal action/betLevel go in the POST body (betLevel converted to a number), and come back as `vars.request`', async () => {
+    const { rc } = runCtx();
+    const bodies: unknown[] = [];
+    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(init!.body as string));
+      return { ok: true, json: async () => ({ stage: 'base_game' }) };
+    }) as unknown as typeof fetch;
+    const out = await kind('spin').run!(spinProps({ action: 'buy', betLevel: '5' }), rc);
     expect(bodies).toEqual([{ action: 'buy', betLevel: 5 }]);
     expect(out).toEqual({
       out: 'result',
       vars: { result: { stage: 'base_game' }, request: { action: 'buy', betLevel: 5 } },
     });
+  });
+
+  it('spin: a non-numeric literal betLevel reports and is omitted from the body', async () => {
+    const { rc } = runCtx();
+    const bodies: unknown[] = [];
+    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(init!.body as string));
+      return { ok: true, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    const out = await kind('spin').run!(spinProps({ betLevel: 'abc' }), rc);
+    expect(rc.report).toHaveBeenCalledWith('betLevel "abc" is not a number');
+    expect(bodies).toEqual([{ action: 'spin' }]);
+    expect(out).toEqual({ out: 'result', vars: { result: {}, request: { action: 'spin' } } });
+
+    // An empty string is "not a number" too, not `Number('') === 0`.
+    await kind('spin').run!(spinProps({ betLevel: '' }), rc);
+    expect(rc.report).toHaveBeenLastCalledWith('betLevel "" is not a number');
+    expect(bodies.at(-1)).toEqual({ action: 'spin' });
   });
 
   it('spin: `$path` action/betLevel read vars; an unset betLevel stays out of the body', async () => {
@@ -140,12 +168,12 @@ describe('built-in kinds', () => {
       bodies.push(JSON.parse(init!.body as string));
       return { ok: true, json: async () => ({}) };
     }) as unknown as typeof fetch;
-    const out = await kind('spin').run!({ action: '$chosen.action', betLevel: '$bet' }, rc);
+    const out = await kind('spin').run!(spinProps({ action: '$chosen.action', betLevel: '$bet' }), rc);
     expect(bodies).toEqual([{ action: 'gamble', betLevel: 2 }]);
     expect(out).toEqual({ out: 'result', vars: { result: {}, request: { action: 'gamble', betLevel: 2 } } });
 
     // Only `action` is `$path`; `betLevel` is never set — omitted, not `null`.
-    const out2 = await kind('spin').run!({ action: '$chosen.action' }, rc);
+    const out2 = await kind('spin').run!(spinProps({ action: '$chosen.action' }), rc);
     expect(bodies.at(-1)).toEqual({ action: 'gamble' });
     expect(out2).toEqual({ out: 'result', vars: { result: {}, request: { action: 'gamble' } } });
   });

@@ -23,6 +23,7 @@
     "react": "^18.2.0"
   },
   "devDependencies": {
+    "@energy8engine/flow": "*",
     "@energy8engine/scenes": "*",
     "@energy8platform/harness": "^0.3.1",
     "@testing-library/jest-dom": "^7.0.1",
