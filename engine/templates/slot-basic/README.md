@@ -27,6 +27,18 @@ plugin) — not `ctx.events`, which is cordis's own emitter and hears nothing
 the flow emits. Fan-in: an edge into any node but `merge` runs it once per
 arrival; `merge` waits for every incoming edge and passes once.
 
+## `symbols.yml`
+
+The symbol art, one entry per id: a `static` node (`image`, onto
+`assets/symbols/<id>.png` — six placeholder shapes) and, on `1`, a `win`
+node (`spritesheet`, onto `assets/coin.json`, `loop: false`) that plays once
+on a win. `e8-base`'s `symbols1` row (`@energy8engine/symbols`) reads it
+from the host (`GET /api/symbols`) and is what actually supplies `reels1`'s
+`resolve` — see the patch section below for what that replaced. The IDE's
+Symbols document (`PUT /api/symbols`) is the editor for this file; ids come
+from `game/spec.json`'s own `symbols` list, and a mismatch between the two
+is a warning there.
+
 ## `e8.patch.yml`
 
 The patch carries everything `src/main.ts` used to pass as a JS object
@@ -41,21 +53,22 @@ bundle never placed, and it lands last.
 screen, `PUT /api/composition/rows/:id`). It is dumped from data, so comments
 in it do not survive — which is why this prose lives here and not there.
 
-### Two things have NO home in the patch, on purpose
+### One thing has NO home in the patch, on purpose
 
-A function and a live DOM element. Both reach their rows as **services** the
-page provides before the first row applies (`createGame({ provide })`),
-rather than as row config:
+A live DOM element. It reaches its row as a **service** the page provides
+before the first row applies (`createGame({ provide })`), rather than as row
+config:
 
-- `reels.resolve` (a `SymbolResolver` function — the coloured-square
-  placeholder art): YAML cannot carry a function. `reels1`'s row configures
-  everything else `createReelSystem` needs and reads the resolver off the
-  `assets` service (see `@energy8engine/reels`'s `src/runtime.ts`). `main.ts`
-  supplies it today; an `assets` row could supply it tomorrow with no change
-  to `reels1`.
 - `mount` (the live `#mount` DOM element): a page-level handle, not
   composition data. Provided as the `mount` service: `renderer1` attaches its
   canvas to it, and `createGame` draws the failure screen on it.
+
+`reels.resolve` (the `SymbolResolver` function `reels1` reads off `ctx`) used
+to be the other one, `main.ts` supplying it the same way — a function is
+exactly as YAML-proof as a DOM element. It isn't any more: `symbols1` reads
+`symbols.yml` and supplies `assets`/`resolve` itself (see
+`@energy8engine/symbols`'s `src/runtime.ts`), so `main.ts` today only ever
+provides `mount`.
 
 ### Row notes
 

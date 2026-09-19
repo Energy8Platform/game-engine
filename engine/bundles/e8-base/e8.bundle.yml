@@ -54,6 +54,17 @@ rows:
   # own row so a project without Spine can drop the runtime.
   - id: spine1
     name: '@energy8engine/node-spine'
+  # `symbols.yml` turned into the reel board's art: `assets.resolve` (the
+  # `SymbolResolver` `reels1` reads off `ctx` AT ITS OWN APPLY TIME, with no
+  # `inject` gating there — so THIS row must sit before `reels1` in the
+  # list, not merely after `scenes1`/`media1`/`spine1`, whose node types it
+  # mounts through) and the `symbols` service the Symbols document's canvas
+  # previews through. `inject: []`, like `flow1`: `nodeTypes`/`assetLoader`/
+  # `board` are all read leniently, at the moment each is actually needed,
+  # so nothing else about this row's position is load-bearing the way
+  # "before `reels1`" is.
+  - id: symbols1
+    name: '@energy8engine/symbols'
   - id: reels1
     name: '@energy8engine/reels'
   - id: mechanics1

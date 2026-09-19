@@ -16,6 +16,7 @@
     "@energy8engine/scene-edit": "*",
     "@energy8engine/scenes": "*",
     "@energy8engine/spin-log": "*",
+    "@energy8engine/symbols": "*",
     "@energy8platform/game-engine": "^0.41.0",
     "pixi.js": "^8.20.1"
   }

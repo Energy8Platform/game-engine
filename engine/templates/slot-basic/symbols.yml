@@ -1,0 +1,21 @@
+version: 1
+symbols:
+  - id: '1'
+    name: sym-1
+    static: { type: image, props: { src: assets/symbols/1.png } }
+    win: { type: spritesheet, props: { sheet: assets/coin.json, loop: false } }
+  - id: '2'
+    name: sym-2
+    static: { type: image, props: { src: assets/symbols/2.png } }
+  - id: '3'
+    name: sym-3
+    static: { type: image, props: { src: assets/symbols/3.png } }
+  - id: '4'
+    name: sym-4
+    static: { type: image, props: { src: assets/symbols/4.png } }
+  - id: '5'
+    name: sym-5
+    static: { type: image, props: { src: assets/symbols/5.png } }
+  - id: '6'
+    name: sym-6
+    static: { type: image, props: { src: assets/symbols/6.png } }

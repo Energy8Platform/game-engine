@@ -14,15 +14,17 @@
  * to a `.yml` file, and adding a plugin is a row — neither is a change to
  * this file or to the engine.
  *
- * What is left is exactly what a project file cannot hold:
- *  - `resolve`, a function: the placeholder art below. It travels as the
- *    `assets` service, which `reels1`'s runtime half reads off `ctx` (see
- *    `@energy8engine/reels`'s `src/runtime.ts`). A real game replaces this
- *    with its own art and changes nothing else.
- *  - `mount`, a live DOM element: this page's own `#mount`. It travels the
- *    same way — `createGame` provides it as the `mount` service, the
- *    renderer row attaches its canvas to it, and `createGame` draws the
- *    failure screen on it when something went wrong.
+ * What is left is exactly what a project file cannot hold: `mount`, a live
+ * DOM element — this page's own `#mount`. It travels as the `mount`
+ * service; `createGame` provides it, the renderer row attaches its canvas
+ * to it, and `createGame` draws the failure screen on it when something
+ * went wrong.
+ *
+ * The art is no longer this file's problem, either. It lives in this
+ * project's own `symbols.yml`, and the `symbols1` row (`e8-base`, ahead of
+ * `reels1`) reads it and supplies the `assets` service `reels1` reads off
+ * `ctx` the same way `mount` arrives here — so a real game never touches
+ * this file for its art, only `symbols.yml`.
  *
  * Everything the game then does — the registry, the board, executing a
  * presentation plan — is reached through `game.ctx`, off services rows
@@ -75,8 +77,6 @@
  * phase (see its own module doc); a real game's bundle simply never
  * imports it.
  */
-import { Container, Graphics, Text } from 'pixi.js';
-import type { SymbolResolver, SymbolView } from '@energy8platform/game-engine/slot';
 import { createGame } from '@energy8engine/game-runtime';
 import * as ideBridge from '@energy8engine/ide-bridge';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
@@ -95,38 +95,13 @@ import type {} from '@energy8engine/reels/runtime';
 // nothing declares `spinLog` a requirement anywhere, on purpose.
 import type {} from '@energy8engine/spin-log/runtime';
 
-/** Matches `e8.patch.yml`'s `reels1` grid — this file only uses it to size the placeholder art. */
-const CELL = 96;
-const COLORS = [0xef4444, 0xf59e0b, 0xeab308, 0x22c55e, 0x38bdf8, 0xa78bfa];
-
-/** Colored square + symbol id — a stand-in for real art (see energy8-slots:generating-assets for that). */
-const resolve: SymbolResolver = (symbolId: string): SymbolView => {
-  const view = new Container() as SymbolView;
-  const n = Number(symbolId);
-  const color = COLORS[(((n - 1) % COLORS.length) + COLORS.length) % COLORS.length];
-  const box = new Graphics().rect(4, 4, CELL - 8, CELL - 8).fill(color);
-  view.addChild(box);
-  const label = new Text({
-    text: symbolId,
-    style: { fill: 0x10121a, fontSize: 36, fontWeight: 'bold' },
-  });
-  label.anchor.set(0.5);
-  label.position.set(CELL / 2, CELL / 2);
-  view.addChild(label);
-  return view;
-};
-
 const mount = document.getElementById('mount')!;
 const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
 const spinBtn = document.getElementById('spin') as HTMLButtonElement;
 const mechanicSelect = document.getElementById('mechanic') as HTMLSelectElement;
 
-const game = await createGame({
-  mount,
-  // The one value with no home in a `.yml` row: a function.
-  provide: { assets: { resolve } },
-});
+const game = await createGame({ mount });
 
 /**
  * The services this PAGE reads off `ctx` and cannot work without — not
@@ -651,6 +626,24 @@ ctx.inject(['flow'], (c) =>
       Array.from({ length: grid.rows }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null),
     );
   },
+  /**
+   * What the cell at `(col, row)` actually drew — the constructor name of
+   * the deepest first descendant of its `SymbolView` (`Sprite` for a
+   * `symbols.yml` `image` state, `AnimatedSprite` for a `spritesheet` win,
+   * `Graphics` for the no-`symbols.yml`/unknown-id fallback box). Walks
+   * `children[0]` down from the cell's `view`, the same wrapper-of-wrapper
+   * shape `symbols1`'s `createSymbolHandle` builds it in (a state wrapper
+   * `Container`, then whatever the node type actually mounted) — so a test
+   * can tell "the art from symbols.yml is on screen" from "the coloured
+   * box is" without asserting on pixel colour. `null` with no
+   * grid/cell/view (an empty cell has none).
+   */
+  cellArt(col: number, row: number): string | null {
+    let node = liveGrid()?.getCell(col, row)?.view;
+    if (!node) return null;
+    while (node.children && node.children.length > 0) node = node.children[0];
+    return node.constructor.name;
+  },
   /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
   scenesVisible(): string[] {
     return (
@@ -664,18 +657,35 @@ ctx.inject(['flow'], (c) =>
     const v = s?.view?.({ scene, node });
     return v ? v.visible : null;
   },
+  /** A mounted top-level scene node's `x`/`y`/`alpha`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
+  nodeProps(scene: string, node: string): { x: number; y: number; alpha: number } | null {
+    const s = ctx.reflect.get('scenes', false) as
+      | { view?(ref: { scene: string; node: string }): { x: number; y: number; alpha: number } | undefined }
+      | undefined;
+    const v = s?.view?.({ scene, node });
+    return v ? { x: v.x, y: v.y, alpha: v.alpha } : null;
+  },
 };
+
+/** Any pixi display object, for `cellArt`'s walk down to its deepest first descendant. */
+interface ViewNode {
+  readonly children?: readonly ViewNode[];
+  readonly constructor: { readonly name: string };
+}
 
 /**
  * The live board's grid, as the `ReelGrid` it really is (`cols`/`rows`
- * getters, `getCell(col, row).data`); `GridLike` names only `getCell`,
- * hence the cast. `undefined` when nothing provides a board.
+ * getters, `getCell(col, row).data`/`.view`); `GridLike` names only
+ * `getCell`, hence the cast. `undefined` when nothing provides a board.
  */
 function liveGrid():
   | {
       cols: number;
       rows: number;
-      getCell(col: number, row: number): { data: { symbol: string | null } } | undefined;
+      getCell(
+        col: number,
+        row: number,
+      ): { data: { symbol: string | null }; view: ViewNode | null } | undefined;
     }
   | undefined {
   return currentBoard()?.grid as unknown as ReturnType<typeof liveGrid>;
