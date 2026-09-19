@@ -140,11 +140,15 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
 
   // Every later doc change is a `replaceSymbols`; every later selection
   // change (that isn't a deselect) is a `symbol` — the canvas keeps
-  // showing its last preview when the selection clears.
+  // showing its last preview when the selection clears. Keyed on the
+  // doc's SHAPE, not its identity: one write lands twice (the PUT answer's
+  // doc, then the host's `symbols` frame — equal, distinct objects), and
+  // the canvas remounts every live view per `replaceSymbols`.
+  const docKey = doc === null ? null : JSON.stringify(doc);
   useEffect(() => {
     if (doc !== null) tell('replaceSymbols', { doc });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc]);
+  }, [docKey]);
   useEffect(() => {
     if (selected !== null) tell('symbol', selected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -415,7 +419,9 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
                   key={`${reloads}:${workspace.active}:${previewUrl}`}
                   ref={attachIframe}
                   title="symbol canvas"
-                  src={`${previewUrl}/editor.html?symbol=${encodeURIComponent(selected?.id ?? '')}`}
+                  // Constant: `?symbol=` boots symbol mode with nothing picked; the
+                  // selection travels as a `symbol` call, never as a navigation.
+                  src={`${previewUrl}/editor.html?symbol=`}
                   width={design.width}
                   height={design.height}
                   style={{ transform: `scale(${fit})` }}

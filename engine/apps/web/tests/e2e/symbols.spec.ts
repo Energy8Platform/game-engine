@@ -109,13 +109,10 @@ test('a drop of coin.json onto a chip sets its state, and the symbol canvas prev
   // way, with no click either.
   await expect(page.getByTestId('explorer-assets/coin.json')).toBeVisible({ timeout: 20_000 });
 
-  // Select the chip: `SymbolsDocument`'s canvas `src` carries the selected
-  // id, so this is what turns the iframe into `editor.html?symbol=2` and
-  // boots the real symbol-mode canvas — with nothing selected it boots in
-  // (broken) scene mode instead (empty `?symbol=`), never setting
-  // `window.__e8edit`.
-  await page.getByTestId('symbol-chip-2-win').click();
+  // The canvas boots symbol mode on its own (`editor.html?symbol=`); a chip
+  // click is a `symbol` call into it, never a navigation.
   const canvas = await readyCanvas(page, SYMBOL_CANVAS);
+  await page.getByTestId('symbol-chip-2-win').click();
 
   await page.getByTestId('symbol-chip-2-win').evaluate((el) => {
     const dt = new DataTransfer();
@@ -129,19 +126,23 @@ test('a drop of coin.json onto a chip sets its state, and the symbol canvas prev
       /id: '2'[\s\S]*?win:\n\s+type: spritesheet\n\s+props:\n\s+sheet: assets\/coin\.json\n\s+loop: false/,
     );
 
-  await expect
-    .poll(() => canvas.evaluate(() => (window as any).__e8edit.snapshot()))
-    .toMatchObject({ symbol: '2', state: 'win' });
-  const snap = (await canvas.evaluate(() => (window as any).__e8edit.snapshot())) as {
-    w: number;
-  };
-  expect(snap.w).toBeGreaterThan(0);
+  // The selection was `{2, win}` since the click; the bounds come once the
+  // written doc has round-tripped (`symbols` frame → `replaceSymbols` → re-preview).
+  const snapshot = () =>
+    canvas.evaluate(
+      () => (window as any).__e8edit.snapshot() as { symbol: string; state: string; w: number },
+    );
+  await expect.poll(snapshot).toMatchObject({ symbol: '2', state: 'win' });
+  await expect.poll(async () => (await snapshot()).w).toBeGreaterThan(0);
 
+  // A one-shot (`loop: false`, 333 ms) may already sit on its last frame:
+  // Replay re-previews it from frame 0, then it moves on. Tight polling
+  // for the 0 — the first frame lasts ~80 ms at 12 fps.
   const frameOfSymbol = () =>
     canvas.evaluate(() => (window as any).__e8edit.frameOf('symbol') as number | null);
-  const first = await frameOfSymbol();
-  expect(first).not.toBeNull();
-  await expect.poll(frameOfSymbol, { timeout: 1000 }).not.toBe(first);
+  await page.getByTestId('symbol-replay').click();
+  await expect.poll(frameOfSymbol, { intervals: [10], timeout: 5000 }).toBe(0);
+  await expect.poll(frameOfSymbol, { timeout: 5000 }).not.toBe(0);
 });
 
 test('the Preview draws a symbol sprite after a spin, and Properties shows src as a select of project images', async ({

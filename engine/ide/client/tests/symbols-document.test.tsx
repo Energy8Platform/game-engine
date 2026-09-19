@@ -358,12 +358,46 @@ describe('SymbolsDocument', () => {
       await waitFor(() => expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' }));
     });
 
-    it('a symbols frame posts replaceSymbols to the canvas', async () => {
+    it('a second chip click posts symbol to the SAME iframe — the selection never navigates it', async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { iframe, reqs } = canvas();
+      fireEvent.click(screen.getByTestId('symbol-chip-1-win'));
+      await waitFor(() => expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' }));
+      fireEvent.click(screen.getByTestId('symbol-chip-2-static'));
+      await waitFor(() => expect(reqs('symbol').at(-1)).toEqual({ id: '2', state: 'static' }));
+      expect(screen.getByTitle('symbol canvas')).toBe(iframe);
+      expect(iframe.src).toBe(`${PREVIEW_URL}/editor.html?symbol=`);
+    });
+
+    it('a symbols frame with a changed doc posts replaceSymbols to the canvas', async () => {
       const { ctx, socket } = await booted();
       renderDocument(ctx);
       const { reqs } = canvas();
-      act(() => socket.receive({ type: 'symbols', doc: TWO, diagnostics: [] }));
-      await waitFor(() => expect(reqs('replaceSymbols').at(-1)).toEqual({ doc: TWO }));
+      const one: SymbolsDoc = { version: 1, symbols: [TWO.symbols[0]] };
+      act(() => socket.receive({ type: 'symbols', doc: one, diagnostics: [] }));
+      await waitFor(() => expect(reqs('replaceSymbols').at(-1)).toEqual({ doc: one }));
+    });
+
+    it('one write is one replaceSymbols: the frame carrying the doc the PUT already answered posts nothing more', async () => {
+      const { ctx, socket, docs } = await booted({}, { version: 1, symbols: [TWO.symbols[0]] });
+      renderDocument(ctx);
+      const { reqs } = canvas();
+      const before = reqs('replaceSymbols').length;
+      fireEvent.click(await screen.findByTestId('symbol-add-2'));
+      await waitFor(() => expect(docs()).toHaveLength(1));
+      await waitFor(() => expect(reqs('replaceSymbols')).toHaveLength(before + 1));
+      const written = ctx.symbols.doc()!;
+      act(() =>
+        socket.receive({
+          type: 'symbols',
+          doc: JSON.parse(JSON.stringify(written)),
+          diagnostics: [],
+        }),
+      );
+      expect(ctx.symbols.doc()).not.toBe(written); // a distinct object, same shape
+      await new Promise((r) => setTimeout(r, 10));
+      expect(reqs('replaceSymbols')).toHaveLength(before + 1);
     });
 
     it('the Replay button re-sends the current selection', async () => {
