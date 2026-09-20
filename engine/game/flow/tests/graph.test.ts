@@ -122,7 +122,29 @@ describe('validateFlow', () => {
     expect(out.filter((d) => d.message.includes('cycle without a wait'))).toEqual([]);
   });
 
-  it('a cycle with no on/wait/step is an error naming the cycle', () => {
+  it('a cycle through `spin` alone is silent too — the autoplay loop (busy → spin → … → more → busy) awaits the play', () => {
+    const out = validateFlow(
+      doc(
+        [
+          { id: 'a', kind: 'boot' },
+          { id: 'busy', kind: 'prop', props: { target: 's/n', prop: 'x', value: '1' } },
+          { id: 'go', kind: 'spin' },
+          { id: 'more', kind: 'if', props: { when: 'x' } },
+        ],
+        [
+          { from: 'a', to: 'busy' },
+          { from: 'busy', to: 'go' },
+          { from: 'go', to: 'more' },
+          { from: 'more', out: 'true', to: 'busy' },
+        ],
+      ),
+      kinds,
+      ['s'],
+    );
+    expect(out.filter((d) => d.message.includes('cycle without a wait'))).toEqual([]);
+  });
+
+  it('a cycle through none of on/wait/spin/step is an error naming the cycle', () => {
     const out = validateFlow(
       doc(
         [

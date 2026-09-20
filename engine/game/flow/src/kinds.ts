@@ -694,9 +694,11 @@ const shell: FlowNodeKind<ShellProps> = {
 
 /**
  * "The result was shown" — `SessionService.ack`, a provider's credit hook
- * (`session-sdk`'s `playAck`; `session-host` has none). No session, no
- * hook, or no `vars.result` to ack is a warning and `next` — the flow
- * carries on either way; a hook that throws is an error on the node.
+ * (`session-sdk`'s `playAck`). No session, or no `vars.result` to ack, is
+ * a warning and `next`; a provider WITHOUT the hook (`session-host`, by
+ * design) is silence — the hook is optional, and a flow authored once
+ * runs against either provider without a warning per spin. A hook that
+ * throws is an error on the node; the flow carries on either way.
  */
 const ack: FlowNodeKind = {
   kind: 'ack',
@@ -705,12 +707,12 @@ const ack: FlowNodeKind = {
   async run(_p, { ctx, vars, report }) {
     const session = ctx.reflect.get('session', false) as SessionService | undefined;
     const result = vars.result as SpinResult | undefined;
-    if (!session?.ack || !result) {
+    if (!session || !result) {
       report('nothing to ack', 'warning');
       return { out: 'next' };
     }
     try {
-      session.ack(result);
+      session.ack?.(result);
     } catch (e) {
       report(e instanceof Error ? e.message : String(e));
     }

@@ -100,8 +100,9 @@ function rotateToSmallest(cycle: readonly string[]): string[] {
  * yet (e.g. no game connected) — kind-dependent checks (unknown kind, bad
  * port, orphan trigger check) are skipped. `sceneIds: null` similarly
  * skips the `show`/`hide` scene check. The cycle check needs neither: it
- * only cares whether a cycle's node KINDS (raw strings) include `on` or
- * `wait`, which every node already carries on itself. `actions: null`
+ * only cares whether a cycle's node KINDS (raw strings) include one of
+ * `on`/`wait`/`spin`/`step`, which every node already carries on itself.
+ * `actions: null`
  * similarly skips the `spin` action check — a literal `action` prop the
  * game's `game/spec.json` doesn't declare is a warning, not an error (the
  * game may still accept it; the spec is descriptive metadata, see
@@ -219,14 +220,16 @@ export function validateFlow(
   }
 
   for (const cycle of findCycles(doc.nodes, doc.edges)) {
-    // `step` yields too: its `run` awaits a POST before the edge out of it
-    // ever fires, the same real yield `wait`'s timer/event or `on`'s next
-    // event gives — so a cycle running only through synchronous nodes plus
-    // `step` (draw → done → step → draw, say, stepping a round to
-    // completion) is not the CPU-spinning hang this check exists to catch.
+    // `spin` and `step` yield too: their `run` awaits the session's play
+    // before the edge out of them ever fires, the same real yield `wait`'s
+    // timer/event or `on`'s next event gives — so a cycle running only
+    // through synchronous nodes plus one of them (draw → done → step →
+    // draw, stepping a round to completion; busy → spin → … → more → busy,
+    // the autoplay loop) is not the CPU-spinning hang this check exists to
+    // catch.
     const hasWait = cycle.some((id) => {
       const kind = nodesById.get(id)?.kind;
-      return kind === 'on' || kind === 'wait' || kind === 'step';
+      return kind === 'on' || kind === 'wait' || kind === 'spin' || kind === 'step';
     });
     if (hasWait) continue;
     const rotated = rotateToSmallest(cycle);

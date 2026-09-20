@@ -762,20 +762,22 @@ describe('built-in kinds', () => {
       expect(kind('ack').schema({})).toEqual({});
     });
 
-    it("no session, a session without `ack`, or no vars.result: a warning 'nothing to ack', and next", async () => {
+    it("no session, or no vars.result: a warning 'nothing to ack', and next", async () => {
       const { rc: none } = runCtx({}, { result: {} });
       expect(await kind('ack').run!({}, none)).toEqual({ out: 'next' });
       expect(none.report).toHaveBeenCalledWith('nothing to ack', 'warning');
-
-      const { rc: noHook } = runCtx({ session: fakeSession() }, { result: {} });
-      expect(await kind('ack').run!({}, noHook)).toEqual({ out: 'next' });
-      expect(noHook.report).toHaveBeenCalledWith('nothing to ack', 'warning');
 
       const session = { ...fakeSession(), ack: vi.fn() };
       const { rc: noResult } = runCtx({ session });
       expect(await kind('ack').run!({}, noResult)).toEqual({ out: 'next' });
       expect(noResult.report).toHaveBeenCalledWith('nothing to ack', 'warning');
       expect(session.ack).not.toHaveBeenCalled();
+    });
+
+    it('a session without the (optional) hook — `session-host` — is silence: no report, next', async () => {
+      const { rc } = runCtx({ session: fakeSession() }, { result: {} });
+      expect(await kind('ack').run!({}, rc)).toEqual({ out: 'next' });
+      expect(rc.report).not.toHaveBeenCalled();
     });
 
     it('an ack that throws is an error on the node, and still next', async () => {
