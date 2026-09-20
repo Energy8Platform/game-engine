@@ -141,12 +141,18 @@ spinning disc), the `media1` row's node type. A `win` node right after
 project — the page as one chunk and every row's runtime half, keyed by row
 id, in a `game` chunk beside it: the `virtual:e8-rows` map `src/main.ts`
 hands `createGame` as `importModule`), the four documents the rows fetch at
-boot frozen as `dist/api/{composition,flow,scenes,symbols}` (byte-identical
-to what the dev host answers — an edit to a `.yml` needs a rebuild), and
-`assets/` copied whole. `--target platform` bakes `import.meta.env.E8_TARGET`, which is how the
-`session` seam picks `@energy8engine/session-sdk` over the dev host's
-`session-host`. A built page hides the `#controls` toolbar and `#log` and
-never imports `ide-bridge` (both are behind `import.meta.env.DEV`); the
-`window.__e8` hooks stay. Nothing serves `dist/` — any static server does;
-without `--target platform`, proxy `/api/session` and `/api/spin` to a
-running `e8 dev` host. `dist/` is in `.gitignore`.
+boot frozen under `dist/api/` — `flow`, `scenes` and `symbols` byte-identical
+to what the dev host answers, `composition` with each row's `runtimeUrl`
+rewritten to its row id and `clientUrl` to `null` — so an edit to a `.yml`
+needs a rebuild, and `assets/` copied whole. `--out` (default `dist`) is
+emptied first, so it is never the project or a folder containing it (that is
+refused). `--target platform` bakes `import.meta.env.E8_TARGET`, which is
+how the `session` seam picks `@energy8engine/session-sdk` over the dev host's
+`session-host`. `--base` moves the page's own assets only: the rows fetch
+`/api/*` at the origin root whatever the base, so a base other than `/` is a
+warning — serve `dist/api` at the root, or proxy it. A built page hides the
+`#controls` toolbar and `#log` and never imports `ide-bridge` (both are
+behind `import.meta.env.DEV`); the `window.__e8` hooks stay. Nothing serves
+`dist/` — any static server does; without `--target platform`, proxy
+`/api/session` and `/api/spin` to a running `e8 dev` host. `dist/` is in
+`.gitignore`.

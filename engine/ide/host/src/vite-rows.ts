@@ -24,16 +24,17 @@
 import type { Plugin } from 'vite';
 
 const ID = 'virtual:e8-rows';
-const RESOLVED = '\0' + ID;
+/** The module's resolved id — what rollup hands `manualChunks` (`compute/build.ts` keeps it in the entry chunk). */
+export const ROWS_ID = '\0' + ID;
 
 export function viteRows(map: ReadonlyMap<string, string>): Plugin {
   return {
     name: 'e8:rows',
     resolveId(id) {
-      return id === ID ? RESOLVED : undefined;
+      return id === ID ? ROWS_ID : undefined;
     },
     load(id) {
-      if (id !== RESOLVED) return undefined;
+      if (id !== ROWS_ID) return undefined;
       const entries = [...map]
         .map(([rowId, entry]) => `${JSON.stringify(rowId)}: () => import(${JSON.stringify(entry)})`)
         .join(', ');

@@ -88,8 +88,9 @@
  *    map (`@energy8engine/ide-host`'s `vite-rows.ts`) so vite bundles
  *    every half, and its frozen `dist/api/composition` names
  *    the row ID as each row's `runtimeUrl`; `importModule` below looks the
- *    id up first and falls through to a plain `import(url)` — which is
- *    the whole path under `e8 dev`, where the map is `{}`.
+ *    id up first (as an own key) and falls through to a plain
+ *    `import(url)` — which is the whole path under `e8 dev`, where the map
+ *    is `{}`.
  *  - `import.meta.env.E8_TARGET` — `createGame`'s `buildTarget`, baked in
  *    by `e8 build --target <name>` (the `session` seam picks
  *    `@energy8engine/session-sdk` under `platform`); unset under `e8 dev`,
@@ -143,7 +144,13 @@ if (!import.meta.env.DEV) {
 const game = await createGame({
   mount,
   buildTarget: import.meta.env.E8_TARGET || undefined,
-  loader: { importModule: (url) => rows[url]?.() ?? import(/* @vite-ignore */ url) },
+  // `Object.hasOwn`, not `rows[url]?.()`: a row id is any string an author
+  // typed, and `constructor` or `toString` would otherwise reach
+  // `Object.prototype` and call something that is not a row.
+  loader: {
+    importModule: (url) =>
+      Object.hasOwn(rows, url) ? rows[url]() : import(/* @vite-ignore */ url),
+  },
 });
 
 /**

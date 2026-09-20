@@ -9,7 +9,15 @@
  * its packages from its own directory and vite bundles them from the repo
  * (see engine/apps/web/tests/e2e/project-fixture.ts).
  */
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GameCompositionRow } from '@energy8engine/contracts';
@@ -22,15 +30,23 @@ let cwd: string;
 let out: string;
 let result: BuildResult;
 
+/** A private copy of `first-slot`, beside it (see the module doc). Every one is removed in `afterAll`. */
+const copies: string[] = [];
+function copyOfFirstSlot(): string {
+  const dir = mkdtempSync(join(resolve(FIRST_SLOT, '..'), 'e8-compose-build-'));
+  cpSync(FIRST_SLOT, dir, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
+  copies.push(dir);
+  return dir;
+}
+
 beforeAll(async () => {
-  cwd = mkdtempSync(join(resolve(FIRST_SLOT, '..'), 'e8-compose-build-'));
-  cpSync(FIRST_SLOT, cwd, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
+  cwd = copyOfFirstSlot();
   out = join(cwd, 'dist');
   result = await build({ cwd, out });
 }, 120_000);
 
 afterAll(() => {
-  if (cwd) rmSync(cwd, { recursive: true, force: true });
+  for (const dir of copies) rmSync(dir, { recursive: true, force: true });
 });
 
 /** Every emitted `.js` under `dist/assets/`, concatenated. */
@@ -99,7 +115,17 @@ describe('build', () => {
     }
   }, 30_000);
 
-  it('a default build bakes no target and no ide-bridge; --target platform bakes "platform"', async () => {
+  it('the page is its own chunk and everything else the game chunk — the layout the TLA needs', () => {
+    // The entry is the page (`src/main.ts`); the rows map and its targets
+    // are in the other chunk, imported from the entry, never the reverse —
+    // see `build.ts`'s `manualChunks` for the cycle this rules out.
+    const names = readdirSync(join(out, 'assets')).filter((name) => name.endsWith('.js'));
+    expect(names.map((name) => name.replace(/-[^-]+\.js$/, '')).sort()).toEqual(['game', 'index']);
+    const game = readFileSync(join(out, 'assets', names.find((n) => n.startsWith('game-'))!), 'utf8');
+    expect(game).not.toMatch(/from"\.\/index-/);
+  });
+
+  it('a default build bakes no target and no ide-bridge; --target platform (and --base) bake in, base warns', async () => {
     const js = emittedJs(out);
     expect(js).toContain('buildTarget:void 0');
     expect(js).not.toContain('buildTarget:"platform"');
@@ -107,13 +133,56 @@ describe('build', () => {
     // import and all. Its `name`/diagnostic strings are the only code-level
     // `ide-bridge` in the browser graph (every other mention is a comment).
     expect(js).not.toContain('ide-bridge');
+    expect(result.diagnostics.filter((d) => d.where === '--base')).toEqual([]);
 
     const platformOut = join(cwd, 'dist-platform');
-    const platform = await build({ cwd, out: platformOut, target: 'platform' });
+    const platform = await build({ cwd, out: platformOut, target: 'platform', base: '/game/' });
     expect(platform.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    // `--base` moves the page's assets; the rows' `/api/*` stay at the root — said as a warning.
+    expect(platform.diagnostics.filter((d) => d.where === '--base')).toMatchObject([
+      { severity: 'warning', plugin: 'build', message: expect.stringContaining('/api/*') },
+    ]);
     expect(existsSync(join(platformOut, 'index.html'))).toBe(true);
+    expect(readFileSync(join(platformOut, 'index.html'), 'utf8')).toContain('src="/game/assets/');
     expect(emittedJs(platformOut)).toContain('buildTarget:"platform"');
   }, 120_000);
+
+  /**
+   * `emptyOutDir` empties `--out` once the bundle succeeds, so an `--out`
+   * that is the project, or contains it, is refused before the host even
+   * boots — measured before this check: `--out .` left the copy with
+   * `api assets index.html` and nothing else.
+   */
+  it('--out that is the project, or contains it, is refused before anything runs', async () => {
+    for (const bad of ['.', '..']) {
+      const r = await build({ cwd, out: bad });
+      expect(r.files, bad).toEqual([]);
+      expect(r.diagnostics, bad).toMatchObject([
+        {
+          severity: 'error',
+          plugin: 'build',
+          where: resolve(cwd, bad),
+          message: expect.stringContaining('contains the project'),
+        },
+      ]);
+      expect(existsSync(join(cwd, 'e8.yml')), bad).toBe(true);
+      expect(existsSync(join(cwd, 'src', 'main.ts')), bad).toBe(true);
+    }
+    expect(existsSync(FIRST_SLOT)).toBe(true);
+  });
+
+  it('a bundle that fails leaves no half-built dist: the vite diagnostic, no api/, no index.html', async () => {
+    const broken = copyOfFirstSlot();
+    const html = join(broken, 'index.html');
+    writeFileSync(html, readFileSync(html, 'utf8').replace('/src/main.ts', '/src/missing.ts'));
+    const r = await build({ cwd: broken });
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toMatchObject([
+      { plugin: 'build', where: 'vite' },
+    ]);
+    expect(existsSync(join(broken, 'dist', 'api'))).toBe(false);
+    expect(existsSync(join(broken, 'dist', 'index.html'))).toBe(false);
+    expect(r.files).toEqual([]);
+  }, 60_000);
 
   it('a folder that is not a project is one error diagnostic, no dist', async () => {
     const empty = mkdtempSync(join(resolve(FIRST_SLOT, '..'), 'e8-compose-build-empty-'));

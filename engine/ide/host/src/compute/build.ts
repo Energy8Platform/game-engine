@@ -27,11 +27,27 @@
  * root has), so the bytes are the page's bytes.
  *
  * Nothing serves `dist/` — any static server does. `dist/api/*` are frozen
- * at build time; an edit to a `.yml` needs a rebuild (spec §10).
+ * at build time; an edit to a `.yml` needs a rebuild (spec §10). `--base`
+ * moves the page's own assets only: the rows fetch `/api/*` at the origin
+ * root whatever the base, so a base other than `/` is a warning here —
+ * serve `dist/api` at the root, or proxy it.
+ *
+ * `logLevel: 'silent'` keeps vite off stdout (the CLI's contract is one
+ * JSON document there) — and it swallows rollup's own warnings with the
+ * rest: a chunk over the size limit, a circular import. A failed build
+ * still surfaces, as the `vite` diagnostic; a warning does not.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
-import { build as viteBuild } from 'vite';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { build as viteBuild, normalizePath } from 'vite';
 import {
   diagnostic,
   type Diagnostic,
@@ -39,7 +55,7 @@ import {
 } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../index';
 import { runtimeEntryMap } from '../plugins/runtime-assets';
-import { viteRows } from '../vite-rows';
+import { ROWS_ID, viteRows } from '../vite-rows';
 
 export interface BuildInput {
   /** Project directory — the host's `root`, as with `e8 dev`. */
@@ -64,7 +80,13 @@ export interface BuildResult {
 const DOCUMENTS = ['flow', 'scenes', 'symbols'] as const;
 
 export async function build(input: BuildInput): Promise<BuildResult> {
-  const cwd = resolve(input.cwd);
+  // Real-pathed, because vite's module ids are: `manualChunks` below
+  // compares them against this directory, and a root reached through a
+  // symlink (or spelled with a different case) would otherwise put the
+  // page itself into the `game` chunk — the TLA cycle that layout exists
+  // to avoid. A directory that is not on disk keeps its lexical form; the
+  // host says "not a project" about it a few lines down.
+  const cwd = realpath(resolve(input.cwd));
   const out = resolve(cwd, input.out ?? 'dist');
   const diagnostics: Diagnostic[] = [];
   const failed = (step: string, error: unknown) =>
@@ -72,6 +94,39 @@ export async function build(input: BuildInput): Promise<BuildResult> {
       diagnostic('error', 'build', step, error instanceof Error ? error.message : String(error)),
     );
   const result = (): BuildResult => ({ out, files: existsSync(out) ? filesUnder(out) : [], diagnostics });
+
+  // Before anything else: vite's `emptyOutDir` empties `out` the moment
+  // the bundle succeeds, so an `--out` that IS the project, or contains it
+  // (`.`, `..`, an ancestor), would delete the project — measured: `--out
+  // .` left `api assets index.html` and nothing else. `relative(out, cwd)`
+  // is `''` for the project itself and a plain child path for an ancestor;
+  // `dist` (inside the project) comes back as `..` and passes.
+  const rel = relative(out, cwd);
+  if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+    return {
+      out,
+      files: [],
+      diagnostics: [
+        diagnostic(
+          'error',
+          'build',
+          out,
+          '--out contains the project itself; the output directory is emptied first',
+        ),
+      ],
+    };
+  }
+  const base = input.base ?? '/';
+  if (base !== '/') {
+    diagnostics.push(
+      diagnostic(
+        'warning',
+        'build',
+        '--base',
+        'the rows fetch /api/* at the origin root — serve dist/api there or proxy it',
+      ),
+    );
+  }
 
   let host: IdeHost;
   try {
@@ -140,10 +195,13 @@ export async function build(input: BuildInput): Promise<BuildResult> {
   // build. Set for the build's duration and put back after.
   const nodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
+  // Vite's ids are posix and real-pathed; so is this prefix (`cwd` above).
+  const src = normalizePath(join(cwd, 'src')) + '/';
+  let built = false;
   try {
     await viteBuild({
       root: cwd,
-      base: input.base ?? '/',
+      base,
       logLevel: 'silent',
       configFile: false,
       define: { 'import.meta.env.E8_TARGET': JSON.stringify(input.target ?? '') },
@@ -169,14 +227,15 @@ export async function build(input: BuildInput): Promise<BuildResult> {
       // entry itself (vite's proxy for `index.html` — `import "/src/
       // main.ts"`; assigning THAT to a manual chunk makes the manual chunk
       // the entry and everything one file again, measured), the page's own
-      // `src/` modules and vite's `\0`-prefixed helpers (the
-      // `virtual:e8-rows` map among them); every other module — rows,
-      // engine packages, node_modules, the project's own `plugins/` — is
-      // the `game` chunk, a plain module the entry imports statically and
-      // the row map imports dynamically, which never imports the entry
-      // back. Per-row code-splitting is lost, and buys nothing: every row
-      // applies at boot; only a seam's losing candidate is code nobody
-      // runs.
+      // `src/` modules and the `virtual:e8-rows` map the page imports;
+      // every other module — rows, engine packages, node_modules, the
+      // project's own `plugins/`, vite's own `\0` helpers — is the `game`
+      // chunk, a plain module the entry imports statically and the row map
+      // imports dynamically, which never imports the entry back. The
+      // helpers go with the rest on purpose: one that both chunks needed,
+      // forced into the entry, would be `game → entry` again. Per-row
+      // code-splitting is lost, and buys nothing: every row applies at
+      // boot; only a seam's losing candidate is code nobody runs.
       build: {
         outDir: out,
         emptyOutDir: true,
@@ -184,21 +243,23 @@ export async function build(input: BuildInput): Promise<BuildResult> {
         rollupOptions: {
           output: {
             manualChunks: (id, { getModuleInfo }) =>
-              getModuleInfo(id)?.isEntry ||
-              id.startsWith(join(cwd, 'src') + sep) ||
-              id.startsWith('\0')
+              getModuleInfo(id)?.isEntry || id === ROWS_ID || id.startsWith(src)
                 ? undefined
                 : 'game',
           },
         },
       },
     });
+    built = true;
   } catch (error) {
     failed('vite', error);
   } finally {
     if (nodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = nodeEnv;
   }
+  // A bundle that failed leaves what vite left — never a `dist/` that has
+  // everything but the page and looks mostly built.
+  if (!built) return result();
 
   // After vite: `emptyOutDir` would have taken these with it.
   const write = (rel: string, body: string) => {
@@ -230,6 +291,15 @@ export async function build(input: BuildInput): Promise<BuildResult> {
     }
   }
   return result();
+}
+
+/** `realpathSync`, or the path as given when it is not on disk. */
+function realpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /** Every file under `dir`, relative to it, posix-separated, sorted. */

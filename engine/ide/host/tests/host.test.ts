@@ -98,6 +98,44 @@ describe('createIdeHost', () => {
     host = undefined;
     await expect(fetch(`${url}/api/health`)).rejects.toThrow();
   });
+
+  /**
+   * `previewPort: null` — what `e8 build` boots: the project opens and the
+   * root answers its routes, but no game server comes up at all — no
+   * preview, no vite, no `e8-server` — and every row's `runtimeUrl` is
+   * `null`, the loader's word for "nothing serves it". On a real project
+   * (a copy of `first-slot`, beside it, where its rows resolve — see
+   * cli-smoke.test.ts) WITH a `game/spec.json`: a number here boots
+   * dev-game off that spec (project-scope.test.ts pins it), so an option
+   * that were ignored — `?? 5681` would — shows up as `devGameRoot` and a
+   * `previewUrl`. No contrast boot with a number in this test, on purpose:
+   * dev-game's vite writes its optimizer cache into the copy AFTER
+   * `stop()` resolves, which outlives the `rmSync` below (measured).
+   */
+  it('previewPort: null opens the project with no game server — no preview, no session, runtimeUrl null on every row', async () => {
+    const example = join(__dirname, '..', '..', '..', 'examples', 'first-slot');
+    const root = mkdtempSync(join(example, '..', 'e8-compose-null-'));
+    cpSync(example, root, { recursive: true, filter: (src) => !src.endsWith('/node_modules') });
+    try {
+      expect(existsSync(join(root, 'game', 'spec.json'))).toBe(true);
+      host = await createIdeHost({ root, port: 0, previewPort: null });
+      const state = host.ctx.workspace.state();
+      expect(state.active).not.toBeNull();
+      expect(state.previewUrl).toBeNull();
+      expect(host.ctx.get('devGameRoot')).toBeUndefined();
+      expect(host.ctx.get('session')).toBeUndefined(); // no e8-server was spawned
+      const rows = (await (await fetch(`${host.url}/api/composition`)).json()).rows as {
+        id: string;
+        runtimeUrl: string | null;
+      }[];
+      expect(rows.map((row) => row.id)).toContain('boot1');
+      expect(rows.every((row) => row.runtimeUrl === null)).toBe(true);
+      await host.stop();
+      host = undefined;
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('createIdeHost — boot diagnostics', () => {
