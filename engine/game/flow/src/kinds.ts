@@ -1,5 +1,5 @@
 /**
- * The flow node-kind registry (`ctx.flowNodes`) and the twelve built-in
+ * The flow node-kind registry (`ctx.flowNodes`) and the thirteen built-in
  * kinds. Last-wins like the scene node-type registry, so a project plugin
  * (or a hot re-apply) can replace a built-in; subscribers hear every change.
  *
@@ -12,7 +12,7 @@ import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { Diagnostic, PresentationStep, Severity } from '@energy8engine/contracts';
 import type { PlayService } from '@energy8engine/play-loop/runtime';
-import type { ScenesService } from '@energy8engine/scenes';
+import type { SceneRef, ScenesService } from '@energy8engine/scenes';
 import { createRegistry } from '@energy8engine/registry';
 import type { EventsService } from './events';
 import { evaluate, readPath } from './expr';
@@ -382,6 +382,76 @@ const emit: FlowNodeKind<{ event: string; payload?: unknown }> = {
   },
 };
 
+/**
+ * Splits a `target` prop (`<scene>/<node>`, already resolved off `$path`
+ * where it was one) into a `SceneRef` on the first `/`. No `/` at all puts
+ * the whole string in `node` with an empty `scene` — `setProps` then just
+ * fails to find it mounted and reports, same as any other bad ref; no
+ * separate malformed-target diagnostic is worth its own message.
+ */
+function parseTarget(target: string): SceneRef {
+  const i = target.indexOf('/');
+  return i < 0
+    ? { scene: '', node: target }
+    : { scene: target.slice(0, i), node: target.slice(i + 1) };
+}
+
+/**
+ * Sets one prop on a mounted scene node. `target`/`value` are each a
+ * literal or `$path` (`resolve`); a literal `value` is coerced by the
+ * node's OWN schema type (`scenes.nodeSchema`) — `'number'` via `Number()`
+ * (NaN reports and does nothing further), `'boolean'` by `=== 'true'`,
+ * anything else left as the string. `setProps` already reports its own
+ * diagnostic (to the scenes plugin) for a missing node or a refused value
+ * — this only needs to add the flow node's own diagnostic and move on;
+ * nothing here ever fails the branch.
+ */
+const prop: FlowNodeKind<{ target: string; prop: string; value?: string }> = {
+  kind: 'prop',
+  schema: Schema.object({
+    target: Schema.string()
+      .required()
+      .extra('pick', 'node')
+      .description('`<scene>/<node>` (a literal), or `$path` to read a var'),
+    prop: Schema.string().required().description('prop name'),
+    value: Schema.string().description(
+      "literal, coerced by the prop's schema type (number/boolean/string), or `$path` to read a var",
+    ),
+  }),
+  outs: ['next'],
+  async run(p, { ctx, vars, report }) {
+    const scenes = ctx.reflect.get('scenes', false) as ScenesService | undefined;
+    if (!scenes) {
+      report(`no 'scenes' service in this composition`);
+      return { out: 'next' };
+    }
+    const ref = parseTarget(String(resolve(p.target, vars) ?? ''));
+
+    let value: unknown;
+    if (typeof p.value === 'string' && p.value.startsWith('$')) {
+      value = resolve(p.value, vars);
+    } else {
+      const type = scenes.nodeSchema(ref)?.dict?.[p.prop]?.type;
+      if (type === 'number') {
+        value = Number(p.value);
+        if (Number.isNaN(value)) {
+          report(`value "${p.value}" is not a number for '${p.prop}'`);
+          return { out: 'next' };
+        }
+      } else if (type === 'boolean') {
+        value = p.value === 'true';
+      } else {
+        value = p.value;
+      }
+    }
+
+    if (!scenes.setProps(ref, { [p.prop]: value })) {
+      report(`could not set '${p.prop}' on "${ref.scene}/${ref.node}"`);
+    }
+    return { out: 'next' };
+  },
+};
+
 /** Special-cased by the interpreter: passes once every incoming edge has arrived this run. */
 const merge: FlowNodeKind = { kind: 'merge', schema: none, outs: ['next'] };
 
@@ -397,5 +467,6 @@ export const BUILTIN_KINDS: FlowNodeKind<any>[] = [
   ifKind,
   set,
   emit,
+  prop,
   merge,
 ];

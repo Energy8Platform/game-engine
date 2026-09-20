@@ -47,9 +47,10 @@ import {
   type FlowKindInfo,
   type FlowNode,
   type FlowResponse,
+  type SceneDoc,
 } from '@energy8engine/contracts';
 import { BUILTIN_KINDS, validateFlow } from '@energy8engine/flow';
-import { SCENE_FILE, parseDoc as parseScene } from './scenes';
+import { SCENE_FILE, parseDoc as parseScene, walk } from './scenes';
 
 declare module 'cordis' {
   interface Context {
@@ -117,7 +118,7 @@ export function parseDoc(value: unknown): { doc?: FlowDoc; reason?: string } {
   return { doc: { version: 1, nodes, edges } };
 }
 
-/** The twelve built-ins, as the game would report them — what the checks and the editor use until a game speaks (a project plugin may add kinds; only a running game knows those). */
+/** The thirteen built-ins, as the game would report them — what the checks and the editor use until a game speaks (a project plugin may add kinds; only a running game knows those). */
 const BUILTIN_KIND_INFO: FlowKindInfo[] = BUILTIN_KINDS.map((k) => ({
   kind: k.kind,
   outs: [...k.outs],
@@ -133,20 +134,28 @@ export function apply(ctx: Context): void {
   // The last list handed to `ideRpc`, by value — see `scenes.ts` for the rule.
   let reported = '';
 
-  /** The ids of the scene documents that parse — see the header for why this reads the files itself. */
-  const sceneIds = async (): Promise<string[]> => {
-    const ids: string[] = [];
+  /**
+   * Every scene document that parses, with its id — what `check`'s own
+   * `sceneIds` (the `show`/`hide` check) and `nodeIds` (the `prop.target`
+   * check, `<scene>/<node>` per node, nested ones included via `walk`)
+   * both read off, one tree read and one parse per file rather than one
+   * each. See the header for why this reads the files itself.
+   */
+  const parsedScenes = async (): Promise<{ id: string; doc: SceneDoc }[]> => {
+    const out: { id: string; doc: SceneDoc }[] = [];
     for (const { path } of (await ctx.files.tree()).entries) {
       const id = SCENE_FILE.exec(path)?.[1];
       if (id === undefined) continue;
       const { bytes } = await ctx.files.read(path);
       try {
-        if (bytes && parseScene(yaml.load(Buffer.from(bytes).toString('utf8'))).doc) ids.push(id);
+        if (!bytes) continue;
+        const { doc } = parseScene(yaml.load(Buffer.from(bytes).toString('utf8')));
+        if (doc) out.push({ id, doc });
       } catch {
         // not YAML: not a scene
       }
     }
-    return ids;
+    return out;
   };
 
   /** The running game's kinds, or the built-ins until it has spoken — the PALETTE's list. */
@@ -181,7 +190,14 @@ export function apply(ctx: Context): void {
   const check = async (doc: FlowDoc): Promise<Diagnostic[]> => {
     const reported = ctx.ideRpc.flowKinds();
     if (reported.length) lastKinds = reported;
-    return validateFlow(doc, lastKinds, await sceneIds(), await actions());
+    const scenes = await parsedScenes();
+    return validateFlow(
+      doc,
+      lastKinds,
+      scenes.map((s) => s.id),
+      await actions(),
+      scenes.flatMap(({ id, doc: d }) => [...walk(d.nodes)].map((n) => `${id}/${n.id}`)),
+    );
   };
 
   const refresh = async (broadcast: boolean): Promise<void> => {

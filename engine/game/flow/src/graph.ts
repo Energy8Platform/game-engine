@@ -106,13 +106,17 @@ function rotateToSmallest(cycle: readonly string[]): string[] {
  * game's `game/spec.json` doesn't declare is a warning, not an error (the
  * game may still accept it; the spec is descriptive metadata, see
  * `kinds.ts`'s `spin`), and a `$path` action is never checked, since its
- * value isn't known until the flow runs.
+ * value isn't known until the flow runs. `nodeIds: null` similarly skips
+ * the `prop` target check — every `<scene>/<node>` of every scene, same
+ * shape a literal `prop.target` names; a `$path` target is never checked,
+ * for the same reason a `$path` action isn't.
  */
 export function validateFlow(
   doc: FlowDoc,
   kinds: readonly KindShape[] | null,
   sceneIds: readonly string[] | null,
   actions: readonly string[] | null = null,
+  nodeIds: readonly string[] | null = null,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const kindByName = kinds ? new Map(kinds.map((k) => [k.kind, k])) : null;
@@ -199,6 +203,17 @@ export function validateFlow(
       // Only a LITERAL action names a specific game action; `$path` isn't known until the flow runs.
       if (typeof action === 'string' && !action.startsWith('$') && !actionSet.has(action)) {
         out.push(diagnostic('warning', 'flow', node.id, `action "${action}" is not in game/spec.json`));
+      }
+    }
+  }
+
+  if (nodeIds) {
+    const nodeSet = new Set(nodeIds);
+    for (const node of doc.nodes) {
+      if (node.kind !== 'prop') continue;
+      const target = node.props?.target;
+      if (typeof target === 'string' && !target.startsWith('$') && !nodeSet.has(target)) {
+        out.push(diagnostic('warning', 'flow', node.id, `node "${target}" is not in any scene`));
       }
     }
   }

@@ -74,8 +74,8 @@ export interface ParsedDoc {
 
 const sceneId = (file: string): string => basename(file, '.scene.yml');
 
-/** Every node in draw order, children after their parent. */
-function* walk(nodes: SceneNode[]): Generator<SceneNode> {
+/** Every node in draw order, children after their parent. Also `flow.ts`'s (`prop.target`'s node list). */
+export function* walk(nodes: SceneNode[]): Generator<SceneNode> {
   for (const n of nodes) {
     yield n;
     if (n.children) yield* walk(n.children);

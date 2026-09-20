@@ -28,6 +28,7 @@ describe('flow row', () => {
       'merge',
       'on',
       'present',
+      'prop',
       'set',
       'show',
       'spin',

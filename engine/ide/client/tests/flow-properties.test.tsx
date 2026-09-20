@@ -76,6 +76,19 @@ const KINDS_REAL_SPIN: FlowKindInfo[] = KINDS.map((k) =>
   k.kind === 'spin' ? { ...k, schema: REAL_SPIN_SCHEMA } : k,
 );
 
+/**
+ * Same idea, for `prop` — which `KINDS` (built off `FIVE_KINDS`) carries no
+ * stand-in for at all, so this appends it rather than swapping one in:
+ * proof that `target` (`.extra('pick', 'node')`) renders as the node
+ * select and `value` (a plain `Schema.string()`, not `Schema.any()`) an
+ * editable text input, not `SchemaForm`'s read-only `UnsupportedField`.
+ */
+const REAL_PROP_SCHEMA = json(BUILTIN_KINDS.find((k) => k.kind === 'prop')!.schema);
+const KINDS_REAL_PROP: FlowKindInfo[] = [
+  ...KINDS,
+  { kind: 'prop', outs: ['next'], trigger: false, schema: REAL_PROP_SCHEMA },
+];
+
 function renderSide(ctx: Context) {
   const entry = ctx.slots.list('shell.sideRight').find((e) => e.key === 'flow');
   if (!entry) throw new Error('no shell.sideRight registration for "flow"');
@@ -190,6 +203,67 @@ describe('FlowProperties', () => {
       kind: 'spin',
       props: { action: 'buy' },
       ui: { x: 580, y: 80 },
+    });
+  });
+
+  it("the real prop kind's schema: `target` is a node select, `value` an editable text input", async () => {
+    const doc: FlowDoc = { ...FIVE, nodes: [...FIVE.nodes, { id: 'prop-1', kind: 'prop' }] };
+    const h = await harness(
+      {
+        'GET /api/flow': () => ({ body: { doc, diagnostics: [], kinds: KINDS_REAL_PROP } }),
+        'PUT /api/flow': (body) => ({
+          body: { doc: body, diagnostics: [], kinds: KINDS_REAL_PROP },
+        }),
+      },
+      [
+        {
+          id: 'base_game',
+          nodes: [
+            {
+              id: 'bg',
+              type: 'container',
+              props: {},
+              children: [{ id: 'logo', type: 'image', props: {} }],
+            },
+          ],
+        },
+        { id: 'bonus', nodes: [{ id: 'b', type: 'image', props: {} }] },
+      ],
+    );
+    await waitFor(() => expect(h.ctx.flow.doc()).toEqual(doc));
+    act(() => h.ctx.flow.select('prop-1'));
+    renderSide(h.ctx);
+
+    const target = screen.getByLabelText(
+      '`<scene>/<node>` (a literal), or `$path` to read a var',
+    ) as HTMLSelectElement;
+    expect(target.tagName).toBe('SELECT');
+    expect([...target.options].map((o) => o.value)).toEqual([
+      '',
+      'base_game/bg',
+      'base_game/logo',
+      'bonus/b',
+    ]);
+
+    const propName = screen.getByLabelText('prop name') as HTMLInputElement;
+    expect(propName.tagName).toBe('INPUT');
+    expect(propName.type).toBe('text');
+    expect(propName.readOnly).toBe(false);
+
+    const value = screen.getByLabelText(
+      "literal, coerced by the prop's schema type (number/boolean/string), or `$path` to read a var",
+    ) as HTMLInputElement;
+    expect(value.tagName).toBe('INPUT');
+    expect(value.type).toBe('text');
+    expect(value.readOnly).toBe(false);
+
+    // Editable, and PUTs: not `UnsupportedField`'s read-only stand-in.
+    fireEvent.change(target, { target: { value: 'base_game/logo' } });
+    await waitFor(() => expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(1));
+    expect((h.calls.at(-1)!.body as FlowDoc).nodes.at(-1)).toEqual({
+      id: 'prop-1',
+      kind: 'prop',
+      props: { target: 'base_game/logo' },
     });
   });
 

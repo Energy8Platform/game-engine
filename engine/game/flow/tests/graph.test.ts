@@ -10,6 +10,7 @@ const kinds: KindShape[] = [
   { kind: 'wait', outs: ['next'] },
   { kind: 'spin', outs: ['result', 'failed'] },
   { kind: 'step', outs: ['result', 'failed'] },
+  { kind: 'prop', outs: ['next'] },
 ];
 
 const doc = (nodes: FlowDoc['nodes'], edges: FlowDoc['edges']): FlowDoc => ({ version: 1, nodes, edges });
@@ -190,6 +191,31 @@ describe('validateFlow', () => {
       }),
     ]);
     expect(validateFlow(d, kinds, null, ['spin'])).toEqual([]);
+  });
+
+  it('a literal `prop.target` absent from `nodeIds` warns; a `$path` target, and `nodeIds: null`, do not', () => {
+    const withTarget = (target: string): FlowDoc =>
+      doc(
+        [
+          { id: 'a', kind: 'boot' },
+          { id: 'p', kind: 'prop', props: { target, prop: 'x', value: '1' } },
+        ],
+        [{ from: 'a', to: 'p' }],
+      );
+    expect(validateFlow(withTarget('scene/missing'), kinds, null, null, ['scene/node'])).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        plugin: 'flow',
+        where: 'p',
+        message: 'node "scene/missing" is not in any scene',
+      }),
+    ]);
+    expect(validateFlow(withTarget('scene/node'), kinds, null, null, ['scene/node'])).toEqual([]);
+    // `$path` is never checked — its value isn't known until the flow runs.
+    expect(validateFlow(withTarget('$chosen'), kinds, null, null, ['scene/node'])).toEqual([]);
+    // No 5th argument, and an explicit `null`, both skip the check entirely.
+    expect(validateFlow(withTarget('scene/missing'), kinds, null, null)).toEqual([]);
+    expect(validateFlow(withTarget('scene/missing'), kinds, null, null, null)).toEqual([]);
   });
 
   it('kinds null skips kind checks; sceneIds null skips scene checks', () => {

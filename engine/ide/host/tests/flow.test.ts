@@ -65,7 +65,7 @@ const KINDS: FlowKindInfo[] = [
   kind('set'),
 ];
 
-/** What the host answers as `kinds` before any game has spoken: the twelve built-ins, by name. */
+/** What the host answers as `kinds` before any game has spoken: the thirteen built-ins, by name. */
 const BUILTIN_NAMES = BUILTIN_KINDS.map((k) => k.kind);
 const builtins = () =>
   expect.arrayContaining(BUILTIN_NAMES.map((kind) => expect.objectContaining({ kind })));
@@ -90,11 +90,11 @@ const flowFrames = (frames: ServerMessage[]) =>
   frames.filter((f): f is Extract<ServerMessage, { type: 'flow' }> => f.type === 'flow');
 
 describe('/api/flow', () => {
-  it('GET answers the parsed document, clean, with the twelve built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
+  it('GET answers the parsed document, clean, with the thirteen built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
     const body = await get(host.url);
     expect(body).toEqual({ doc: LOOP, diagnostics: [], kinds: builtins() });
-    expect(body.kinds).toHaveLength(12);
+    expect(body.kinds).toHaveLength(13);
     // As the game would report them: outs, trigger, and a JSON schema the editor can rebuild.
     expect(body.kinds.find((k) => k.kind === 'spin')).toEqual({
       kind: 'spin',
@@ -367,6 +367,38 @@ describe('/api/flow', () => {
       }),
     ]);
     close();
+  });
+
+  it('a `prop` node targeting a node no scene has warns; a real node and a `$path` target do not', async () => {
+    const root = flowWorkspace();
+    host = await createIdeHost({ root, port: 0 });
+    const withTarget = (target: string): FlowDoc => ({
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'boot' },
+        { id: 'p', kind: 'prop', props: { target, prop: 'x', value: '1' } },
+      ],
+      edges: [{ from: 'start', to: 'p' }],
+    });
+
+    const bad = await put(host.url, withTarget('base_game/missing'));
+    expect(bad.status).toBe(200); // a warning, not an error — the write still lands
+    expect(((await bad.json()) as FlowResponse).diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        plugin: 'flow',
+        where: 'p',
+        message: 'node "base_game/missing" is not in any scene',
+      }),
+    ]);
+
+    // `bg` is a real (top-level) node of the fixture's `base_game.scene.yml`.
+    const ok = await put(host.url, withTarget('base_game/bg'));
+    expect(((await ok.json()) as FlowResponse).diagnostics).toEqual([]);
+
+    // A `$path` target is never checked, same as a `$path` `spin` action.
+    const viaVar = await put(host.url, withTarget('$chosen'));
+    expect(((await viaVar.json()) as FlowResponse).diagnostics).toEqual([]);
   });
 
   it('a scene file that does not parse is not a scene: a `show` of it is an error', async () => {

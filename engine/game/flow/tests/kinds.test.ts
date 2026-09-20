@@ -39,7 +39,7 @@ describe('createFlowNodes', () => {
     expect(heard).toHaveBeenCalledTimes(4);
   });
 
-  it('ships the twelve built-ins with their ports', () => {
+  it('ships the thirteen built-ins with their ports', () => {
     expect(Object.fromEntries(BUILTIN_KINDS.map((k) => [k.kind, [...k.outs]]))).toEqual({
       boot: ['next'],
       on: ['next'],
@@ -52,6 +52,7 @@ describe('createFlowNodes', () => {
       if: ['true', 'false'],
       set: ['next'],
       emit: ['next'],
+      prop: ['next'],
       merge: ['next'],
     });
     expect(BUILTIN_KINDS.filter((k) => k.trigger).map((k) => k.kind)).toEqual(['boot', 'on']);
@@ -257,6 +258,73 @@ describe('built-in kinds', () => {
     const { rc: withoutRequest } = runCtx({ mechanics, play }, { result });
     await kind('present').run!({}, withoutRequest);
     expect(play.record).toHaveBeenLastCalledWith({ request: {}, result, plan: [] });
+  });
+
+  describe('prop', () => {
+    /** A fake `ScenesService.nodeSchema` — only `.dict[prop].type` is read, so a plain object stands in for a real `Schema`. */
+    const nodeSchema = (dict: Record<string, { type: string }>) => vi.fn(() => ({ dict }));
+
+    it('no `scenes` service in the composition: reports and leaves by next, without throwing', async () => {
+      const { rc } = runCtx();
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'x', value: '1' }, rc)).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith("no 'scenes' service in this composition");
+    });
+
+    it('a literal target splits on the first "/"; a literal value is coerced by the node schema type', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = {
+        setProps,
+        nodeSchema: nodeSchema({ x: { type: 'number' }, on: { type: 'boolean' }, label: { type: 'string' } }),
+      };
+      const { rc } = runCtx({ scenes });
+
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'x', value: '5' }, rc)).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { x: 5 });
+
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'on', value: 'true' }, rc)).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { on: true });
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'on', value: 'nope' }, rc)).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { on: false });
+
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'label', value: 'hi' }, rc)).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { label: 'hi' });
+      expect(rc.report).not.toHaveBeenCalled();
+    });
+
+    it('a non-numeric literal value for a number prop reports and never reaches setProps', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes });
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'x', value: 'abc' }, rc)).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith(`value "abc" is not a number for 'x'`);
+      expect(setProps).not.toHaveBeenCalled();
+    });
+
+    it('`$path` target/value read vars — the value skips schema coercion entirely', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes }, { ref: 'a/b', amount: 'not-a-number' });
+      expect(await kind('prop').run!({ target: '$ref', prop: 'x', value: '$amount' }, rc)).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenCalledWith({ scene: 'a', node: 'b' }, { x: 'not-a-number' });
+      expect(rc.report).not.toHaveBeenCalled();
+    });
+
+    it('a missing node: `setProps` false reports (setProps already reported its own diagnostic elsewhere) and still leaves by next', async () => {
+      const setProps = vi.fn(() => false);
+      const scenes = { setProps, nodeSchema: vi.fn(() => undefined) };
+      const { rc } = runCtx({ scenes });
+      expect(await kind('prop').run!({ target: 'a/nope', prop: 'x', value: '1' }, rc)).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith(`could not set 'x' on "a/nope"`);
+    });
+
+    it('a refused value: `setProps` false reports and still leaves by next', async () => {
+      const setProps = vi.fn(() => false);
+      const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes });
+      expect(await kind('prop').run!({ target: 'a/b', prop: 'x', value: '5' }, rc)).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenCalledWith({ scene: 'a', node: 'b' }, { x: 5 });
+      expect(rc.report).toHaveBeenCalledWith(`could not set 'x' on "a/b"`);
+    });
   });
 
   it('wait on a signal already aborted rejects at once; abort mid-wait rejects and clears the timer', async () => {
