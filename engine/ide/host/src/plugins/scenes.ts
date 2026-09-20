@@ -109,6 +109,11 @@ export function checkNode(
   const err = (message: string, fix?: string) =>
     out.push(diagnostic('error', plugin, where, message, fix));
   const schema = info?.schema;
+  // Populated below when there's a schema to rehydrate; read again by the
+  // `assetProps` loop past the end of this branch, so a REQUIRED asset prop
+  // (`image.src`) still needs a value and an OPTIONAL one (`text.font`) does
+  // not — one rehydration, both readers.
+  let dict: Record<string, { type?: string; meta?: { required?: boolean } } | undefined> = {};
   if (reported && schema === undefined) {
     err(`node type "${node.type}" is not one the game registered`, 'use a registered type');
   } else if (schema !== undefined) {
@@ -121,9 +126,12 @@ export function checkNode(
       // go to its schema, not to `COMMON`; the runtime splits them the same way
       // (`applyCommon`'s `commonOf`).
       const ownSchema = new Schema(schema as Schema);
-      const dict =
-        (ownSchema as unknown as { dict?: Record<string, { type?: string } | undefined> }).dict ??
-        {};
+      dict =
+        (
+          ownSchema as unknown as {
+            dict?: Record<string, { type?: string; meta?: { required?: boolean } } | undefined>;
+          }
+        ).dict ?? {};
       for (const [k, v] of Object.entries(node.props)) {
         const target = COMMON_PROPS.includes(k) && !(k in dict) ? common : own;
         // A symbol state's `$cell.<field>` binding stands for a value of whatever
@@ -153,10 +161,13 @@ export function checkNode(
   // Every prop the type's `assetProps` names holds a project-relative
   // path (the `image.src` special case, generalised): `required()`
   // lets `''` through the schema check above (a fresh node), so an
-  // empty or missing value is its own message. A type the host does
-  // not know yet (no `NodeTypeInfo` — the game hasn't reported, or the
-  // type is unregistered) checks nothing; the unknown-type error above
-  // already covers a registered set missing it.
+  // empty REQUIRED value is its own message. An OPTIONAL asset prop
+  // (`text.font`, `.default('')`) is legitimate empty — the runtime's
+  // `assets()` skips it the same way (`props.font ? [props.font] : []`)
+  // — so it is only checked once it names something. A type the host
+  // does not know yet (no `NodeTypeInfo` — the game hasn't reported, or
+  // the type is unregistered) checks nothing; the unknown-type error
+  // above already covers a registered set missing it.
   for (const prop of info?.assetProps ?? []) {
     let v = node.props?.[prop];
     // A type's sibling prop (`spine`'s atlas) defaults to its main
@@ -167,7 +178,9 @@ export function checkNode(
       v = (node.props[info.accept.prop] as string).replace(/\.[^./]+$/, `.${prop}`);
     }
     if (typeof v !== 'string' || v === '') {
-      err(`${node.type} has no ${prop}`, 'pick a file under the project');
+      if (dict[prop]?.meta?.required === true) {
+        err(`${node.type} has no ${prop}`, 'pick a file under the project');
+      }
     } else if (!hasFile(v)) {
       err(`${node.type}.${prop} "${v}" is not in the project`, 'pick a file under the project');
     }

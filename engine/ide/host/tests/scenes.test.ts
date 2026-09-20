@@ -32,8 +32,13 @@ const types: NodeTypeInfo[] = [
   {
     type: 'text',
     schema: json(
-      Schema.object({ text: Schema.string().default(''), size: Schema.number().default(24) }),
+      Schema.object({
+        text: Schema.string().default(''),
+        size: Schema.number().default(24),
+        font: Schema.string().default(''),
+      }),
     ),
+    assetProps: ['font'],
   },
   {
     type: 'spine',
@@ -216,6 +221,33 @@ describe('checkScenes', () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ severity: 'error', where: 'a/i' });
     expect(out[0].message).toContain('src');
+  });
+  // Slice 24: `text.font` is an OPTIONAL asset prop (bitmap font; empty
+  // means a web `Text`, same as the runtime's own `assets()` skip) — unlike
+  // `image.src` (`required()`), an empty `font` is not an error.
+  it('an empty text font (a web font, not a bitmap one) is not an error', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 't', type: 'text', props: { font: '' } }])],
+      types,
+      () => false,
+      false,
+    );
+    expect(out).toEqual([]);
+  });
+  it('a text font naming a file not in the project is still reported', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 't', type: 'text', props: { font: 'assets/x.fnt' } }])],
+      types,
+      () => false,
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/t',
+        message: 'text.font "assets/x.fnt" is not in the project',
+      }),
+    ]);
   });
   it('a spritesheet with no sheet prop at all is `<type> has no <prop>`, naming spritesheet.sheet', () => {
     const out = checkScenes(
