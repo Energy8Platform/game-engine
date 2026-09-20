@@ -420,6 +420,52 @@ describe('createGame — choosing one provider per seam', () => {
     expect(applied).toEqual(['boot1', 'renderer1', 'reels1', 'playloop1']);
     expect(game.diagnostics).toEqual([]);
   });
+
+  it('`without` drops every candidate of a named seam before a winner is picked — no diagnostic', async () => {
+    // `shell1` and `session1` each declare a `default: true` seam of their
+    // own (`helpers.ts`'s `SEAM_BY_PREFIX`) — either alone would win its
+    // seam outright, so if `shell1` still composed, this test could not
+    // tell "`without` worked" from "`shell1` lost some OTHER way".
+    // `renderer1` is here only so the REQUIRED seam has a winner too —
+    // otherwise the ordinary "no provider" diagnostic for `renderer` would
+    // muddy the `toEqual([])` below, which is about `without`, not that.
+    const applied: string[] = [];
+
+    game = await createGame({
+      without: ['ui.shell'],
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1'), row('shell1'), row('session1')],
+          diagnostics: [],
+        }),
+        importModule: recordingHalf(applied),
+      },
+    });
+
+    expect(applied).toEqual(['renderer1', 'session1']);
+    expect(game.diagnostics).toEqual([]);
+  });
+
+  it('`without` naming a REQUIRED seam still produces the ordinary "no provider" diagnostic', async () => {
+    // `renderer` is required even when nothing is allowed to provide it —
+    // `without` withholds candidates, it does not relax the requirement.
+    // This is deliberately NOT special-cased in the implementation: the
+    // loop that decides seam winners draws `renderer` from `REQUIRED_SEAMS`
+    // regardless of `without`, so this behaviour falls out on its own.
+    game = await createGame({
+      without: ['renderer'],
+      loader: {
+        fetchFn: fakeFetch({ rows: [row('renderer1')], diagnostics: [] }),
+        importModule: recordingHalf([]),
+      },
+    });
+
+    expect(
+      game.diagnostics.some(
+        (d) => d.plugin === 'renderer' && /no registered providers/.test(d.message),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('createGame — the failure screen', () => {

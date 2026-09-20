@@ -23,6 +23,8 @@ import type { E8SeamDeclaration, GameCompositionRow, SpinSchema } from '@energy8
 const SEAM_BY_PREFIX: Record<string, E8SeamDeclaration> = {
   renderer: { name: 'renderer', matcher: { default: true } },
   session: { name: 'session', matcher: { default: true } },
+  // Mirrors `@energy8engine/shell-pixi`'s own `e8.seam` (design doc §4).
+  shell: { name: 'ui.shell', matcher: { default: true } },
 };
 
 /**

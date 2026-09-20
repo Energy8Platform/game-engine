@@ -172,6 +172,20 @@ export interface GameConfig {
    * pins it.
    */
   session?: SessionConfig;
+  /**
+   * Seam names to leave unprovided — every candidate declaring one of
+   * these seams is dropped before a winner is picked, and no diagnostic is
+   * raised for it: the caller asked. The editor page composes with
+   * `without: ['ui.shell']` (§4 of the design doc), so the scene editor
+   * never mounts the Pixi shell even though the same composition's `shell1`
+   * row is right there. A name matching no candidate is a silent no-op. A
+   * seam listed in `REQUIRED_SEAMS` is the one exception: it is still
+   * visited below regardless of `without` (that loop draws its seam set
+   * from `REQUIRED_SEAMS` too, not only from the surviving candidates), so
+   * `without: ['renderer']` still produces the ordinary "no provider"
+   * diagnostic rather than silently blanking the screen.
+   */
+  without?: string[];
 }
 
 export interface GameApp {
@@ -473,8 +487,21 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
 
       const planDiagnostics: Diagnostic[] = [];
       const winner = new Map<string, string | null>();
-      for (const seam of new Set([...REQUIRED_SEAMS, ...candidates.map((c) => c.seam)])) {
-        const selection = selectProvider(seam, candidates, env);
+
+      // `config.without` — see that field's own doc. Recorded as `null`
+      // directly, before `selectProvider` runs at all: a seam nobody was
+      // allowed to enter has no decision to explain, so this costs no
+      // diagnostic, unlike every other way a seam can end up unprovided.
+      // The candidates themselves are dropped from `eligible` so the loop
+      // below never even considers them — a `without`-ed seam that still
+      // had two ambiguous candidates must stay silent, not merely picked
+      // as `null` after also complaining about the ambiguity.
+      const withoutSeams = new Set(config.without ?? []);
+      for (const seam of withoutSeams) winner.set(seam, null);
+      const eligible = candidates.filter((c) => !withoutSeams.has(c.seam));
+
+      for (const seam of new Set([...REQUIRED_SEAMS, ...eligible.map((c) => c.seam)])) {
+        const selection = selectProvider(seam, eligible, env);
         planDiagnostics.push(...selection.diagnostics);
         winner.set(seam, selection.provider);
       }

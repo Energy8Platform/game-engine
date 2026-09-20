@@ -191,4 +191,25 @@ export interface SpinResult {
   /** the round id this response belongs to. While `roundComplete` is
    *  `false`, pass it back as `SpinRequest.roundId` to step the round. */
   roundId: string;
+  /**
+   * Currency units after this play — not part of the measured wire shape
+   * above (a `session` provider fills it in, not e8-server's
+   * `RoundResponse` itself; see `session.ts`'s `SessionService`). Absent
+   * when the backend has no wallet of its own to report.
+   */
+  balance?: number;
+  /**
+   * `win × bet`, in currency units — the shell shows money, this type's
+   * own `win` speaks in multipliers (see "the mechanic renders, the math
+   * pays" above). Always present on a provider's result; optional only so
+   * a fixture that never calls `withAmounts` (`session.ts`) still
+   * typechecks.
+   */
+  winAmount?: number;
+  /**
+   * `totalWin × bet`, in currency units. Always present on a provider's
+   * result; optional only so a fixture that never calls `withAmounts`
+   * still typechecks.
+   */
+  totalWinAmount?: number;
 }
