@@ -474,9 +474,12 @@ if (bound) mechanicSelect.value = bound;
  * or not this branch ran, and vite drops the dead branch — import and all
  * — when `DEV` is baked to `false` by `e8 build`.
  */
+// Not awaited: a top-level `await` here parks everything below it — the
+// `__e8` harness included — behind a cold-cache module fetch, while
+// `#status` already reads `ready` above. The bridge attaches when it lands;
+// nothing on this page reads it synchronously.
 if (import.meta.env.DEV) {
-  const ideBridge = await import('@energy8engine/ide-bridge');
-  ideBridge.apply(game.ctx, {});
+  void import('@energy8engine/ide-bridge').then((ideBridge) => ideBridge.apply(game.ctx, {}));
 }
 
 mechanicSelect.addEventListener('change', () => {
