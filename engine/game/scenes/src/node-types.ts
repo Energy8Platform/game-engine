@@ -8,9 +8,9 @@ import { Color, type Container } from 'pixi.js';
 import type Schema from 'schemastery';
 import type { NodeTypeAccept } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
-import { COMMON } from './common-schema';
+import { COLOUR, COMMON } from './common-schema';
 
-export { COMMON };
+export { COLOUR, COMMON };
 export type { NodeTypeAccept };
 
 declare global {
@@ -86,6 +86,35 @@ function commonOf(props: Record<string, unknown>, type?: NodeType<any>): Record<
   return out;
 }
 
+export type Common = Record<string, number | string | boolean | undefined>;
+
+/**
+ * `COMMON` over the props the type does not own (`commonOf`), with `tint`
+ * already parsed to a number.
+ *
+ * EVERYTHING that can throw lives here, ahead of any mutation, so a caller
+ * deciding whether to accept a change (`scenes.setProps`) can validate
+ * first and leave the view untouched on a refusal. `applyCommon` below is
+ * then pure assignment.
+ */
+export function commonProps(
+  props: Record<string, unknown>,
+  type?: NodeType<any>,
+): { common: Common; tint?: number } {
+  const common = COMMON(commonOf(props, type) as never) as Common;
+  // `Color`, not a hand-rolled `parseInt`: it takes `#rgb` and the named
+  // colours too. `COLOUR` in the schema already refused a typo — this is
+  // the same judgment, run for the value rather than for the verdict.
+  // An EMPTY tint is "none", the way an empty `fill` is on a `shape`.
+  return {
+    common,
+    tint:
+      typeof common.tint === 'string' && common.tint
+        ? new Color(common.tint).toNumber()
+        : undefined,
+  };
+}
+
 /**
  * Applies `COMMON` (defaults filled in) to a view. The optional props are
  * applied only when actually set: `width`/`height` AFTER `scale`, because
@@ -105,11 +134,10 @@ export function applyCommon(
   view: Container,
   props: Record<string, unknown>,
   type?: NodeType<any>,
-): Record<string, number | string | boolean | undefined> {
-  const c = COMMON(commonOf(props, type) as never) as Record<
-    string,
-    number | string | boolean | undefined
-  >;
+): Common {
+  // Validated (and the colour parsed) BEFORE the first assignment: a
+  // throw halfway through would otherwise leave the view half-moved.
+  const { common: c, tint } = commonProps(props, type);
   view.position.set(c.x as number, c.y as number);
   view.scale.set(c.scale as number);
   if (typeof c.width === 'number') view.width = c.width;
@@ -117,11 +145,7 @@ export function applyCommon(
   view.rotation = c.rotation as number;
   view.alpha = c.alpha as number;
   view.visible = c.visible as boolean;
-  // `Color`, not a hand-rolled `parseInt`: it takes `#rgb` and the named
-  // colours too, and THROWS on a value that is neither — which `mountNode`
-  // already turns into this node's own diagnostic, same as `x: 'abc'`.
-  if (typeof c.tint === 'string' && 'tint' in view)
-    (view as unknown as { tint: number }).tint = new Color(c.tint).toNumber();
+  if (tint !== undefined && 'tint' in view) (view as unknown as { tint: number }).tint = tint;
   const anchored = view as unknown as { anchor?: { set(x: number, y: number): void } };
   if (anchored.anchor && typeof anchored.anchor.set === 'function')
     anchored.anchor.set((c.anchorX ?? c.anchor) as number, (c.anchorY ?? c.anchor) as number);

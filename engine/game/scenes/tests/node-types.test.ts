@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Color, Container, Graphics, Sprite } from 'pixi.js';
 import Schema from 'schemastery';
-import { applyCommon, createNodeTypes, type NodeType } from '../src/node-types';
+import { COLOUR, COMMON, applyCommon, createNodeTypes, type NodeType } from '../src/node-types';
 import { container, image, shape } from '../src/builtin';
 
 const t = (type: string): NodeType => ({
@@ -83,6 +83,62 @@ describe('applyCommon', () => {
     const noTint = { position: { set: vi.fn() }, scale: { set: vi.fn() } } as unknown as Container;
     applyCommon(noTint, { tint: '#ff8000' });
     expect('tint' in noTint).toBe(false);
+  });
+
+  it('a colour the runtime cannot read is refused by the SCHEMA, before any view is touched', () => {
+    // The schema is what the IDE host runs without a game: a typo is a
+    // diagnostic on the document, not a half-applied view at run time.
+    expect(() => COMMON({ tint: 'not-a-colour' } as never)).toThrow();
+    expect(() => COMMON({ tint: 'rebeccapurple' } as never)).not.toThrow();
+    const s = new Sprite();
+    s.tint = 0x00ff00;
+    s.position.set(5, 5);
+    expect(() => applyCommon(s, { x: 40, tint: 'not-a-colour' })).toThrow();
+    expect(s.tint).toBe(0x00ff00); // …and nothing moved on the way to the throw
+    expect(s.x).toBe(5);
+  });
+
+  it('COLOUR and pixi `Color` agree on what a colour is', () => {
+    // The schema check and the runtime apply must never disagree: one
+    // refusing what the other takes is either a document the IDE rejects
+    // for nothing, or a value that slips through to throw mid-apply.
+    const cases = [
+      '#abc',
+      '#abcd',
+      '#abcdef',
+      '#abcdef12',
+      '#abcde',
+      '#abcdefa',
+      '#FFF',
+      'rgb(1,2,3)',
+      'rgba(1,2,3,0.5)',
+      'rgb(1 2 3 / 50%)',
+      'hsl(1,2%,3%)',
+      'hsla(1,2%,3%,.5)',
+      'hwb(1 2% 3%)',
+      'lab(1 2 3)',
+      'cmyk(1,2,3,4)',
+      'red',
+      'RED',
+      'rebeccapurple',
+      'transparent',
+      'nope',
+      'not-a-colour',
+      'rgb(',
+    ];
+    for (const v of cases) {
+      let parses = true;
+      try {
+        new Color(v).toNumber();
+      } catch {
+        parses = false;
+      }
+      expect([v, COLOUR.test(v)]).toEqual([v, parses]);
+    }
+    // The one deliberate difference: empty is "none/unset" here, and the
+    // callers skip it rather than handing it to `Color` (which throws).
+    expect(COLOUR.test('')).toBe(true);
+    expect(() => new Color('')).toThrow();
   });
 
   it('anchorX / anchorY override `anchor` per axis', () => {

@@ -136,6 +136,33 @@ describe('checkScenes', () => {
       }),
     ]);
   });
+  it('a colour prop the runtime could not read is a props error too, with no game running', () => {
+    // The host runs the SAME `COMMON` the runtime applies, so a typo in a
+    // colour is caught statically instead of half-applying at run time.
+    expect(
+      checkScenes(
+        [doc('a', [{ id: 'n', type: 'container', props: { tint: 'nope' } }])],
+        types,
+        () => true,
+        false,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/n',
+        message: expect.stringContaining('tint'),
+      }),
+    ]);
+    // A colour pixi DOES read — a CSS name, not just `#rrggbb` — is clean.
+    expect(
+      checkScenes(
+        [doc('a', [{ id: 'n', type: 'container', props: { tint: 'rebeccapurple' } }])],
+        types,
+        () => true,
+        false,
+      ),
+    ).toEqual([]);
+  });
   it('an empty image src (a fresh image) is one error, worded for it', () => {
     const out = checkScenes(
       [doc('a', [{ id: 'i', type: 'image', props: { src: '' } }])],

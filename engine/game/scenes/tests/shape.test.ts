@@ -80,9 +80,19 @@ describe('shape', () => {
     view.destroy();
   });
 
-  it('an invalid colour throws, same as the common `tint` prop, for the runtime to catch and report', () => {
-    const view = shape.mount(props(), null as never) as Graphics;
-    expect(() => shape.update!(view, props({ fill: 'not-a-colour' }), null as never)).toThrow();
+  it('an invalid colour is refused by the SCHEMA, so nothing ever redraws with it', () => {
+    // Same answer as the common `tint` prop, one step earlier than it used
+    // to be: the check no longer waits for `update` to trip over `Color`,
+    // so a refused colour cannot leave a half-drawn shape behind.
+    expect(() => props({ fill: 'not-a-colour' })).toThrow();
+    expect(() => props({ stroke: 'not-a-colour' })).toThrow();
+    expect(() => props({ fill: 'rebeccapurple' })).not.toThrow();
+    // And if one slips past the schema anyway, `update` is all-or-nothing:
+    // the old geometry stands rather than being cleared and left empty.
+    const view = shape.mount(props({ width: 40, height: 20 }), null as never) as Graphics;
+    const bad = { ...props({ width: 80, height: 40 }), fill: 'not-a-colour' };
+    expect(() => shape.update!(view, bad as never, null as never)).toThrow();
+    expect(view.getLocalBounds()).toMatchObject({ maxX: 40, maxY: 20 });
     view.destroy();
   });
 });

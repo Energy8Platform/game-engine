@@ -24,7 +24,13 @@ import {
 } from '@energy8engine/contracts';
 import { fitStage, type Fit, type Size } from './fit';
 import { createTransitions, cut, type TickerLike, type TransitionsService } from './transitions';
-import { COMMON, applyCommon, type NodeType, type NodeTypesService } from './node-types';
+import {
+  COMMON,
+  applyCommon,
+  commonProps,
+  type NodeType,
+  type NodeTypesService,
+} from './node-types';
 import type { AssetLoader } from './builtin';
 
 export interface CreateScenesOptions {
@@ -137,6 +143,17 @@ interface Mount {
 const OWN = new Set(['container', 'image', 'scene', 'shape', 'text']);
 
 const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Which prop a refusal is about. Schemastery says `$.tint expect …`, so
+ * the key is in the message — but only name it when the PATCH is where it
+ * came from; a value carried in from the document is not the patch's to
+ * blame, and then every key the caller sent is the honest answer.
+ */
+const offending = (e: unknown, patch: Record<string, unknown>): string => {
+  const named = /^\$\.([^\s.[]+)/.exec(why(e))?.[1];
+  return `prop ${named && named in patch ? named : Object.keys(patch).join(', ')}`;
+};
 
 export function createScenes(options: CreateScenesOptions): ScenesService {
   const { nodeTypes, loader, report = () => {} } = options;
@@ -613,23 +630,31 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
         return false;
       }
-      const names = `prop ${Object.keys(patch).join(', ')}`;
       // Everything is validated (and applied) from the MERGE, never from
       // the patch alone: a type's schema fills its defaults from a whole
       // dict, and the common pass needs the node's own `x`/`alpha` too.
       const merged = { ...rawOf(e), ...patch };
       let props: Record<string, unknown>;
       try {
+        // BOTH passes run before ANYTHING is applied — this is the whole
+        // atomicity argument. `type.update` mutates the view (a `shape`
+        // redraws at the new width), so a common prop the runtime would
+        // reject (`x: 'abc'`, a colour `Color` refuses) has to be caught
+        // here and not one step later, or a refused patch lands in halves.
         props = e.type.schema(merged as never) as Record<string, unknown>;
+        commonProps(merged, e.type);
       } catch (err) {
-        error(e.where, `${names}: ${why(err)}`, 'fix the value');
+        error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
         return false;
       }
       try {
         e.type.update?.(e.view, props, mountCtx([]));
         applyCommon(e.view, merged, e.type);
       } catch (err) {
-        error(e.where, `${names}: ${why(err)}`, 'fix the value');
+        // Not a validation failure any more (both passes said yes): a type
+        // whose `update` throws for a reason of its own. Reported the same
+        // way, but the view may have moved — nothing more this can do.
+        error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
         return false;
       }
       // Only a patch that actually landed is remembered — a refused one

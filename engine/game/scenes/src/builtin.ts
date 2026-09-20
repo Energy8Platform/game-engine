@@ -11,6 +11,7 @@
 import type { Context } from 'cordis';
 import { BitmapText, Color, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import Schema from 'schemastery';
+import { COLOUR } from './common-schema';
 import type { NodeType } from './node-types';
 
 /** What `image` reads to build a sprite — `pixi.js`' `Assets` in the runtime, a fake in tests. */
@@ -89,9 +90,15 @@ export const shape: NodeType<ShapeProps> = {
     width: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
     height: Schema.number().default(100).description('design px (rect/roundRect/ellipse)'),
     radius: Schema.number().default(8).description('corner radius (roundRect) or radius (circle)'),
-    fill: Schema.string().default('#ffffff').description('#rrggbb, or empty for no fill'),
+    fill: Schema.string()
+      .pattern(COLOUR)
+      .default('#ffffff')
+      .description('#rrggbb, or empty for no fill'),
     fillAlpha: Schema.number().default(1).description('fill opacity'),
-    stroke: Schema.string().default('').description('#rrggbb, or empty for no stroke'),
+    stroke: Schema.string()
+      .pattern(COLOUR)
+      .default('')
+      .description('#rrggbb, or empty for no stroke'),
     strokeWidth: Schema.number().default(0).description('stroke width, px'),
   }) as Schema<ShapeProps>,
   mount(props, ctx) {
@@ -101,6 +108,13 @@ export const shape: NodeType<ShapeProps> = {
   },
   update(view, props) {
     const g = view as Graphics;
+    // Parsed BEFORE `clear()`: a colour `Color` refuses must leave the
+    // shape as it was, not wipe it. `COLOUR` in the schema already turns
+    // a typo into a refusal one step earlier; this keeps the apply itself
+    // all-or-nothing for anything that slips past it.
+    const fill = props.fill ? new Color(props.fill).toNumber() : undefined;
+    const stroke =
+      props.stroke && props.strokeWidth > 0 ? new Color(props.stroke).toNumber() : undefined;
     g.clear();
     switch (props.kind) {
       case 'roundRect':
@@ -115,11 +129,8 @@ export const shape: NodeType<ShapeProps> = {
       default:
         g.rect(0, 0, props.width, props.height);
     }
-    // `Color`, not the raw string: THROWS on a value that is neither `#rrggbb` nor a named
-    // colour, which `mountNode`/`refresh` already turn into this node's own diagnostic.
-    if (props.fill) g.fill({ color: new Color(props.fill).toNumber(), alpha: props.fillAlpha });
-    if (props.stroke && props.strokeWidth > 0)
-      g.stroke({ color: new Color(props.stroke).toNumber(), width: props.strokeWidth });
+    if (fill !== undefined) g.fill({ color: fill, alpha: props.fillAlpha });
+    if (stroke !== undefined) g.stroke({ color: stroke, width: props.strokeWidth });
   },
 };
 
@@ -160,9 +171,9 @@ const styleOf = (props: TextProps, fontFamily: string) => ({
   fontSize: props.size,
   fontWeight: props.weight,
   align: props.align,
-  // `Color`, not the raw string: THROWS on a value that is neither
-  // `#rrggbb` nor a named colour — this node's own diagnostic, the same
-  // way `shape`'s fill and the common `tint` fail.
+  // `COLOUR` in the schema refused a typo already; `Color` here is the
+  // same judgment run for the VALUE. An empty fill is a cleared IDE field,
+  // not an error — white, pixi's own default for text.
   fill: new Color(props.fill || '#ffffff').toNumber(),
   ...(props.stroke && props.strokeWidth > 0
     ? { stroke: { color: new Color(props.stroke).toNumber(), width: props.strokeWidth } }
@@ -178,10 +189,13 @@ export const text: NodeType<TextProps> = {
     text: Schema.string().default('').description('what it says'),
     size: Schema.number().default(24).description('font size, design px'),
     family: Schema.string().default('sans-serif').description('font family, when `font` is empty'),
-    fill: Schema.string().default('#ffffff').description('#rrggbb'),
+    fill: Schema.string().pattern(COLOUR).default('#ffffff').description('#rrggbb'),
     weight: Schema.union(['normal', 'bold']).default('normal'),
     align: Schema.union(['left', 'center', 'right']).default('left'),
-    stroke: Schema.string().default('').description('#rrggbb, or empty for no outline'),
+    stroke: Schema.string()
+      .pattern(COLOUR)
+      .default('')
+      .description('#rrggbb, or empty for no outline'),
     strokeWidth: Schema.number().default(0).description('outline width, px'),
     wrap: Schema.number().default(0).description('word-wrap width, design px; 0 = no wrap'),
     font: Schema.string()
@@ -199,11 +213,15 @@ export const text: NodeType<TextProps> = {
     return props.font ? new BitmapText(options) : new Text(options);
   },
   update(view, props, ctx) {
+    // The style is built BEFORE the first assignment: `styleOf` parses
+    // colours, and a throw between `text` and `style` would leave the node
+    // saying the new thing in the old style.
+    const style = styleOf(props, faceOf(ctx, props));
     // `Text` and `BitmapText` both extend `AbstractText`: same `text`, same
     // `style` setter, which REPLACES the style rather than merging into it.
     const t = view as Text;
     t.text = props.text;
-    t.style = styleOf(props, faceOf(ctx, props));
+    t.style = style;
   },
   assets: (props) => (props.font ? [props.font] : []),
 };

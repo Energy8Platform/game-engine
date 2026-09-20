@@ -111,12 +111,14 @@ describe('text', () => {
     view.destroy();
   });
 
-  it("an invalid colour throws, for the runtime to report as this node's own diagnostic", () => {
-    expect(() => text.mount(props({ fill: 'not-a-colour' }), null as never)).toThrow();
-    const view = text.mount(props(), null as never) as Text;
-    expect(() =>
-      text.update!(view, props({ stroke: 'not-a-colour', strokeWidth: 2 }), null as never),
-    ).toThrow();
+  it('an invalid colour is refused by the SCHEMA, and `update` is all-or-nothing if one gets past it', () => {
+    expect(() => props({ fill: 'not-a-colour' })).toThrow();
+    expect(() => props({ stroke: 'not-a-colour' })).toThrow();
+    const view = text.mount(props({ text: 'OLD' }), null as never) as Text;
+    const bad = { ...props({ text: 'NEW' }), stroke: 'not-a-colour', strokeWidth: 2 };
+    expect(() => text.update!(view, bad as never, null as never)).toThrow();
+    // The style is built before the first assignment: the old text stands.
+    expect(view.text).toBe('OLD');
     view.destroy();
   });
 

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Container, Graphics, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { Diagnostic, SceneDoc } from '@energy8engine/contracts';
 import { createNodeTypes } from '../src/node-types';
-import { container, image, scene, shape, type AssetLoader } from '../src/builtin';
+import { container, image, scene, shape, text, type AssetLoader } from '../src/builtin';
 import { createScenes, type ScenesService } from '../src/scenes';
 import { createTransitions, fade, type TickerLike } from '../src/transitions';
 
@@ -911,5 +911,53 @@ describe('nodeSchema', () => {
     expect(dict.tint.type).toBe('string');
     expect(scenes.nodeSchema({ scene: 'a', node: 'nope' })).toBeUndefined();
     expect(scenes.nodeSchema({ scene: 'zzz', node: 'g' })).toBeUndefined();
+  });
+});
+
+describe('live props are all-or-nothing', () => {
+  /** A patch is one change: half of it landing is worse than none of it, because nothing says which half. */
+  it('a mixed patch whose COMMON half is bad applies neither half', () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 's', type: 'shape', props: { width: 40, height: 20 } }] },
+    ]);
+    const view = byId(scenes, 'a', 's') as Graphics;
+    // `width` is the TYPE's, `x` is the runtime's: the type pass alone
+    // would say yes, redraw at 999, and only then trip over `x`.
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { width: 999, x: 'abc' })).toBe(false);
+    expect(view.getLocalBounds()).toMatchObject({ maxX: 40, maxY: 20 });
+    expect(view.x).toBe(0);
+  });
+
+  it('a mixed patch whose COLOUR half is bad applies neither half', () => {
+    const { scenes } = boot([
+      { id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'k.png' } }] },
+    ]);
+    const view = byId(scenes, 'a', 'i') as Sprite;
+    expect(scenes.setProps({ scene: 'a', node: 'i' }, { x: 12, tint: 'not-a-colour' })).toBe(false);
+    expect(view.x).toBe(0);
+  });
+
+  it("a `text` patch with a bad fill leaves the old text as well as the old colour", () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(text);
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 't', type: 'text', props: { text: 'OLD', fill: '#ffffff' } }] },
+    ]);
+    const view = byId(scenes, 'a', 't') as Text;
+    expect(scenes.setProps({ scene: 'a', node: 't' }, { text: 'NEW', fill: 'bad' })).toBe(false);
+    expect(view.text).toBe('OLD');
+    expect(view.style.fill).toBe(0xffffff);
+  });
+
+  it('the diagnostic names the one prop at fault when the message identifies it', () => {
+    const { scenes, report } = boot([
+      { id: 'a', nodes: [{ id: 'n', type: 'container', props: {} }] },
+    ]);
+    scenes.setProps({ scene: 'a', node: 'n' }, { alpha: 0.5, x: 'abc' });
+    expect(report).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('prop x:') }),
+    );
   });
 });
