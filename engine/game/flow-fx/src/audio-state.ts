@@ -27,11 +27,21 @@ export interface LiveInstance {
 const rafClock: Clock = {
   now: () => performance.now(),
   tick(fn) {
+    // The latch is load-bearing: `fn` itself can cancel this loop (a ramp that
+    // lands calls `cancelRamp` -> the disposer below from INSIDE the tick), and
+    // `cancelAnimationFrame` aimed at the frame currently executing is a no-op.
+    // Without it the reschedule below re-arms a loop nothing can stop again —
+    // one leaked rAF chain per completed fade, surviving `dispose()`.
+    let stopped = false;
     let raf = requestAnimationFrame(function loop() {
+      if (stopped) return;
       fn();
-      raf = requestAnimationFrame(loop);
+      if (!stopped) raf = requestAnimationFrame(loop);
     });
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+    };
   },
 };
 
@@ -72,7 +82,7 @@ export interface AudioState {
   ramp(instance: LiveInstance, from: number, to: number, ms: number, onDone?: () => void): () => void;
   /** Sets a category's volume, ramping every live instance in it to `base × volume` over `fade` ms; a later play reads the new value via `categoryVolume`. */
   setCategory(category: string, volume: number, fade: number): void;
-  /** Cancels every in-flight ramp (row teardown) without firing their `onDone`. */
+  /** Cancels every in-flight ramp and forgets every tracked instance (row teardown), without firing any `onDone`. */
   dispose(): void;
 }
 
@@ -146,6 +156,13 @@ export function createAudioState(deps: AudioStateDeps = {}): AudioState {
     },
     dispose() {
       for (const instance of [...ramps.keys()]) cancelRamp(instance, false);
+      // Drops the row's last reference to every instance it was tracking, so a
+      // `setCategory` after teardown reaches nothing. The per-instance
+      // 'end'/'stop' listeners stay attached — `remove` on a cleared set is a
+      // `Set.delete` that finds nothing plus an idempotent `cancelRamp`, and
+      // detaching them would need an `off` this interface deliberately doesn't
+      // declare (`LiveInstance` is `on`-only).
+      live.clear();
     },
   };
 }
