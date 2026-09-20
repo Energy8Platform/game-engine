@@ -270,7 +270,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      */
     const design = () => {
       const v = scenes.fit()?.viewport;
-      if (v) return { width: v.left + v.right, height: v.top + v.bottom };
+      // Rounded: `479.99999999999994` would lose the grid's last line.
+      if (v) return { width: Math.round(v.left + v.right), height: Math.round(v.top + v.bottom) };
       const c = root.toLocal({ x: app.screen.width / 2, y: app.screen.height / 2 });
       return { width: c.x * 2, height: c.y * 2 };
     };
@@ -339,12 +340,20 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       safeBand.stroke({ width: 1, color: 0xffb84d, alpha: 0.35, pixelLine: true });
     };
     let drawnFit: Fit | null = null;
-    /** The fit is a new object per `resize`: on the frame that sees one, the grid and the frames follow it. */
+    let told: Orientation = scenes.orientation();
+    /**
+     * The fit is a new object per `resize`: on the frame that sees one, the
+     * grid and the frames follow it — and a flipped orientation is told to
+     * the IDE (`orientation` event; `ready` carries the first). The page is
+     * the one source of which layer an edit goes to: the IDE never
+     * computes it from its preset.
+     */
     const refit = () => {
       if (scenes.fit() === drawnFit) return;
       drawnFit = scenes.fit();
       grid(gridOn, gridStep);
       drawFrames();
+      if (scenes.orientation() !== told) emit('orientation', { orientation: (told = scenes.orientation()) });
     };
     refit();
 
@@ -479,6 +488,6 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     w.__e8edit = api;
     ctx.effect(() => () => { if (w.__e8edit === api) delete w.__e8edit; }, 'scene-edit:hook');
 
-    void scenes.show(scene).then(() => { if (alive) emit('ready', { scene }); });
+    void scenes.show(scene).then(() => { if (alive) emit('ready', { scene, orientation: scenes.orientation() }); });
   }
 }

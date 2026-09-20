@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
@@ -20,6 +20,7 @@ import {
   nextId,
   patchVariant,
   removeNode,
+  renameVariant,
   shiftNode,
 } from '../src/shell/SceneDocument';
 
@@ -243,6 +244,26 @@ describe('SceneDocument helpers', () => {
 
     expect(removeNode(BASE, 'bg').nodes.map((n) => n.id)).toEqual(['reels-1', 'title']);
     expect(removeNode(BASE, 'logo').nodes[0].children).toEqual([]);
+  });
+
+  it('an override follows its node: removeNode drops it, moveNode under a parent drops it, a root moved before a root keeps it, renameVariant carries it', () => {
+    const WITH: SceneDoc = {
+      ...BASE,
+      portrait: { nodes: { title: { x: 1 }, bg: { visible: false } } },
+    };
+    expect(removeNode(WITH, 'title').portrait).toEqual({ nodes: { bg: { visible: false } } });
+    expect(removeNode(removeNode(WITH, 'title'), 'bg').portrait).toBeUndefined();
+    expect(moveNode(WITH, 'title', { into: 'bg' }).portrait).toEqual({
+      nodes: { bg: { visible: false } },
+    });
+    expect(moveNode(WITH, 'title', { before: 'logo' }).portrait).toEqual({
+      nodes: { bg: { visible: false } },
+    });
+    expect(moveNode(WITH, 'title', { before: 'bg' }).portrait).toEqual(WITH.portrait);
+    expect(renameVariant(WITH, 'title', 'headline').portrait).toEqual({
+      nodes: { bg: { visible: false }, headline: { x: 1 } },
+    });
+    expect(renameVariant(WITH, 'reels-1', 'reels')).toBe(WITH);
   });
 
   it('moveNode reorders, nests, and refuses into itself or its own descendant', () => {
@@ -515,7 +536,6 @@ describe('SceneDocument', () => {
     expect(iframe.getAttribute('src')).toBe(
       `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=${SAFE_BOTTOM.mobile}`,
     );
-    expect(ctx.scenes.variant()).toBe('portrait');
     const frame = iframe.parentElement as HTMLElement;
     expect(frame.style.width).toBe('390px');
     expect(frame.style.height).toBe('844px');
@@ -525,7 +545,6 @@ describe('SceneDocument', () => {
     expect(iframe.getAttribute('src')).toBe(
       `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=${SAFE_BOTTOM.wide}`,
     );
-    expect(ctx.scenes.variant()).toBeNull();
     // The same iframe throughout: a preset is a resize, not a remount.
     expect(screen.getByTitle('scene canvas')).toBe(iframe);
     await userEvent.selectOptions(select, 'design');
@@ -535,6 +554,42 @@ describe('SceneDocument', () => {
     );
     // The pair the bar's constants add up to (BottomBar.ts:42 and :55).
     expect(SAFE_BOTTOM).toEqual({ wide: 92, mobile: 142 });
+  });
+
+  it("the page says which orientation it edits: ready and orientation events set the scene's variant, never the preset; two tabs keep their own; unmount deletes", async () => {
+    const { ctx } = await harness({
+      'PUT /api/scenes/bonus': (body) => ({
+        body: { scenes: [BASE, body as SceneDoc], diagnostics: [], nodeTypes: TYPES },
+      }),
+    });
+    const a = renderTab(ctx);
+    const b = renderTab(ctx, 'scenes/bonus.scene.yml');
+    const [ia, ib] = screen.getAllByTitle('scene canvas') as HTMLIFrameElement[];
+    // A portrait preset alone says nothing: the page has not spoken.
+    await userEvent.selectOptions(
+      within(a.container).getByTestId('canvas-viewport'),
+      'phone-portrait',
+    );
+    expect(ctx.scenes.variant('base_game')).toBeNull();
+    frame(ia, 'ready', { scene: 'base_game', orientation: 'portrait' });
+    expect(ctx.scenes.variant('base_game')).toBe('portrait');
+    expect(ctx.scenes.variant('bonus')).toBeNull();
+    frame(ib, 'ready', { scene: 'bonus', orientation: 'landscape' });
+    expect(ctx.scenes.variant('bonus')).toBeNull();
+    expect(ctx.scenes.variant('base_game')).toBe('portrait');
+    // A flip on B does not touch A; back again clears B's.
+    frame(ib, 'orientation', { orientation: 'portrait' });
+    expect(ctx.scenes.variant('bonus')).toBe('portrait');
+    expect(ctx.scenes.variant('base_game')).toBe('portrait');
+    frame(ib, 'orientation', { orientation: 'landscape' });
+    expect(ctx.scenes.variant('bonus')).toBeNull();
+    // An unmount deletes its own entry only.
+    frame(ib, 'orientation', { orientation: 'portrait' });
+    b.unmount();
+    expect(ctx.scenes.variant('bonus')).toBeNull();
+    expect(ctx.scenes.variant('base_game')).toBe('portrait');
+    a.unmount();
+    expect(ctx.scenes.variant('base_game')).toBeNull();
   });
 
   it('with no preview to point at, says so instead of an iframe', async () => {

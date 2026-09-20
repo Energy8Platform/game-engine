@@ -85,7 +85,7 @@ describe('CanvasToolbar', () => {
     cleanup();
     mount({ viewport: { width: 500, height: 500 } });
     expect((screen.getByTestId('canvas-viewport') as HTMLSelectElement).value).toBe('custom');
-    expect(screen.getByTestId('canvas-viewport-size')).toBeTruthy();
+    expect((screen.getByTestId('canvas-viewport-size') as HTMLInputElement).value).toBe('500×500');
   });
 
   it('custom… reveals a W×H field: Enter or blur with a size reports it (x, × or * between), a bad value keeps the last', async () => {

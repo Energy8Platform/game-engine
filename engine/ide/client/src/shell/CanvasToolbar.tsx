@@ -75,8 +75,11 @@ export function CanvasToolbar({
   onViewport,
 }: CanvasToolbarProps) {
   const [custom, setCustom] = useState(false);
-  const [draft, setDraft] = useState('');
   const preset = VIEWPORT_PRESETS.find((p) => same(p.size, viewport));
+  // A viewport that is no listed preset is a custom one already: the field starts on it.
+  const [draft, setDraft] = useState(() =>
+    viewport && !preset ? `${viewport.width}×${viewport.height}` : '',
+  );
   const chosen = custom || !preset ? 'custom' : preset.id;
   const commitCustom = () => {
     const size = parseViewport(draft);

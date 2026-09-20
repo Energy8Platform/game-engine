@@ -79,12 +79,15 @@ export interface ScenesService {
   /** Opens `scenes/<id>.scene.yml` as a tab through the shell's file opener. */
   open(id: string): void;
   /**
-   * The canvas' edit target, as its viewport preset decides (`SceneDocument`
-   * publishes it): `'portrait'` while the preset's safe rect is taller than
-   * wide, so the inspector writes `portrait.nodes[<id>]` too; `null` otherwise.
+   * The edit target of `scene`'s canvas, as its PAGE reports it (`ready`
+   * carries the first orientation, an `orientation` event every flip; the
+   * tab publishes them here, keyed by its scene, and deletes its entry on
+   * unmount): `'portrait'` while that canvas' safe rect is taller than
+   * wide, so the inspector writes `portrait.nodes[<id>]` too; `null` for
+   * a scene with no canvas up, or a landscape one.
    */
-  variant(): SceneVariant;
-  setVariant(variant: SceneVariant): void;
+  variant(scene: string): SceneVariant;
+  setVariant(scene: string, variant: SceneVariant): void;
   subscribe(listener: () => void): () => void;
 }
 
@@ -137,7 +140,7 @@ export function apply(ctx: Context, config: ScenesConfig) {
   let diagnostics: Diagnostic[] = [];
   let nodeTypes: NodeTypeInfo[] = [];
   let selected: SceneSelection | null = null;
-  let variant: SceneVariant = null;
+  const variants = new Map<string, SceneVariant>();
   // Whether a frame or a write's answer has filled each half — the boot
   // GET does not overwrite what is newer than it.
   let docsLive = false;
@@ -245,10 +248,11 @@ export function apply(ctx: Context, config: ScenesConfig) {
     update: (doc) => send('PUT', `/api/scenes/${encodeURIComponent(doc.id)}`, doc),
     preview: (id) => send('POST', '/api/scenes/preview', { scene: id }),
     open: (id) => ctx.shell.openPath(`scenes/${id}.scene.yml`),
-    variant: () => variant,
-    setVariant(next) {
-      if (next === variant) return;
-      variant = next;
+    variant: (scene) => variants.get(scene) ?? null,
+    setVariant(scene, next) {
+      if ((variants.get(scene) ?? null) === next) return;
+      if (next === null) variants.delete(scene);
+      else variants.set(scene, next);
       notify();
     },
     subscribe(listener) {
@@ -353,20 +357,18 @@ export function apply(ctx: Context, config: ScenesConfig) {
   ctx.provide('scenes', service);
 }
 
-/** Subscribe a component to the scene set, its diagnostics, the node types, the selection and the edit variant. */
+/** Subscribe a component to the scene set, its diagnostics, the node types and the selection. A variant change re-renders too (`ctx.scenes.variant(scene)` is read live). */
 export function useScenes(ctx: Context): {
   docs: readonly SceneDoc[];
   diagnostics: readonly Diagnostic[];
   nodeTypes: readonly NodeTypeInfo[];
   selected: SceneSelection | null;
-  variant: SceneVariant;
 } {
   const read = () => ({
     docs: ctx.scenes.docs(),
     diagnostics: ctx.scenes.diagnostics(),
     nodeTypes: ctx.scenes.nodeTypes(),
     selected: ctx.scenes.selected(),
-    variant: ctx.scenes.variant(),
   });
   const [state, setState] = useState(read);
   useEffect(() => {

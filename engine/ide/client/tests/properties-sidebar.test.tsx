@@ -110,7 +110,7 @@ async function harness(extra: Record<string, Route> = {}) {
   await ctx.plugin(assetNodeTypes);
   await ctx.plugin(files, { fetchFn });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
-  await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([BASE, BONUS]));
+  await vi.waitFor(() => expect(ctx.scenes.docs()).toHaveLength(2));
   const puts = () => calls.filter((c) => c.method === 'PUT').map((c) => c.body as SceneDoc);
   const selects = () =>
     calls.filter((c) => c.url === '/api/scenes/select').map((c) => c.body as unknown);
@@ -355,7 +355,7 @@ describe('PropertiesSidebar', () => {
 
   it("under variant: 'portrait' a root's edit writes the override only — the changed key into portrait.nodes[id], the node untouched — and the form shows the override merged over the node", async () => {
     const { ctx, puts } = await harness();
-    act(() => ctx.scenes.setVariant('portrait'));
+    act(() => ctx.scenes.setVariant('base_game', 'portrait'));
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
     renderSide(ctx);
     expect(screen.getByTestId('prop-variant')).toHaveTextContent('portrait');
@@ -377,11 +377,49 @@ describe('PropertiesSidebar', () => {
     await waitFor(() => expect(puts()).toHaveLength(2));
     expect(puts()[1].portrait).toEqual({ nodes: { title: { x: 25, alpha: 0.5 } } });
     expect(puts()[1].nodes[1].props).toEqual({ src: 'title.png' });
+    // A change that moved nothing (the same value again) writes nothing — no empty entry, no PUT.
+    const again = screen.getByLabelText('alpha');
+    fireEvent.change(again, { target: { value: '0.5' } });
+    fireEvent.blur(again);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(puts()).toHaveLength(2);
+  });
+
+  it("the variant is the selected SCENE's: another scene's canvas being portrait does not turn this form", async () => {
+    const { ctx, puts } = await harness();
+    act(() => ctx.scenes.setVariant('bonus', 'portrait'));
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
+    renderSide(ctx);
+    expect(screen.queryByTestId('prop-variant')).toBeNull();
+    const x = screen.getByLabelText('x, design px');
+    fireEvent.change(x, { target: { value: '25' } });
+    fireEvent.blur(x);
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].portrait).toBeUndefined();
+    expect(puts()[0].nodes[1].props).toEqual({ src: 'title.png', x: 25 });
+  });
+
+  it('rename carries the portrait override to the new id', async () => {
+    const WITH: SceneDoc = { ...BASE, portrait: { nodes: { title: { x: 7 } } } };
+    const { ctx, puts } = await harness({
+      'GET /api/scenes': () => ({
+        body: { scenes: [WITH, BONUS], diagnostics: [], nodeTypes: TYPES },
+      }),
+    });
+    await vi.waitFor(() => expect(ctx.scenes.docs()[0]).toEqual(WITH));
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
+    renderSide(ctx);
+    const input = screen.getByTestId('prop-id') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'headline' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[1].id).toBe('headline');
+    expect(puts()[0].portrait).toEqual({ nodes: { headline: { x: 7 } } });
   });
 
   it("under variant: 'portrait' a NESTED node still edits itself (no override for it), and no badge shows", async () => {
     const { ctx, puts } = await harness();
-    act(() => ctx.scenes.setVariant('portrait'));
+    act(() => ctx.scenes.setVariant('base_game', 'portrait'));
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
     renderSide(ctx);
     expect(screen.queryByTestId('prop-variant')).toBeNull();
@@ -425,7 +463,7 @@ describe('PropertiesSidebar', () => {
     });
     await waitFor(() => expect(puts()).toHaveLength(2));
     await waitFor(() => expect(screen.getByLabelText('x, design px')).toBeTruthy());
-    act(() => ctx.scenes.setVariant('portrait'));
+    act(() => ctx.scenes.setVariant('base_game', 'portrait'));
     fireEvent.change(screen.getByLabelText(/anchors x\/y to this point/), {
       target: { value: 'top' },
     });

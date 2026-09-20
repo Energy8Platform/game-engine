@@ -6,7 +6,7 @@ import { COMMON } from '@energy8engine/scenes/common-schema';
 import { extOf } from '../plugins/asset-node-types';
 import { useScenes } from '../plugins/scenes';
 import { SchemaForm } from '../schema-form/SchemaForm';
-import { map, patchVariant, walk } from './SceneDocument';
+import { map, patchVariant, renameVariant, walk } from './SceneDocument';
 
 /**
  * The right-hand inspector over `ctx.scenes.selected()`. A node: its id
@@ -17,7 +17,7 @@ import { map, patchVariant, walk } from './SceneDocument';
  * draft of the document: every edit is one `ctx.scenes.update(next)`.
  *
  * The write goes where the canvas' does (spec §7): while
- * `ctx.scenes.variant()` is `'portrait'` and the node is a root, the form
+ * `ctx.scenes.variant(scene)` is `'portrait'` and the node is a root, the form
  * shows `portrait.nodes[<id>]` merged over the node's own props and a
  * change writes only the keys that moved into that block
  * (`patchVariant`); otherwise the node's props, as before. A node whose
@@ -118,8 +118,9 @@ function assetsOf(docs: readonly SceneDoc[], id: string, seen = new Set<string>(
 }
 
 export function PropertiesSidebar({ ctx }: { ctx: Context }) {
-  const { docs, nodeTypes, selected, variant } = useScenes(ctx);
+  const { docs, nodeTypes, selected } = useScenes(ctx);
   const doc = selected ? docs.find((d) => d.id === selected.scene) : undefined;
+  const variant = selected ? ctx.scenes.variant(selected.scene) : null;
   const node =
     doc && selected?.node
       ? [...walk(doc.nodes)].find(({ node }) => node.id === selected.node)?.node
@@ -198,21 +199,31 @@ function NodeProperties({
       return setIdError(`"${next}" is already a node in this scene`);
     setIdError(null);
     void ctx.scenes
-      .update({ ...doc, nodes: patch(doc.nodes, node.id, (n) => ({ ...n, id: next })) })
+      .update(
+        renameVariant(
+          { ...doc, nodes: patch(doc.nodes, node.id, (n) => ({ ...n, id: next })) },
+          node.id,
+          next,
+        ),
+      )
       .then((refused) => {
         if (refused.length) setIdError(refused[0].message);
         else ctx.scenes.select({ scene: doc.id, node: next });
       });
   };
 
-  const onChange = (props: Record<string, unknown>) =>
+  const onChange = (props: Record<string, unknown>) => {
+    const delta = override ? changed(value, props) : null;
+    // A change that moved nothing must not create an (empty) override entry.
+    if (delta && !Object.keys(delta).length) return;
     void ctx.scenes
       .update(
-        override
-          ? patchVariant(doc, node.id, changed(value, props))
+        delta
+          ? patchVariant(doc, node.id, delta)
           : { ...doc, nodes: patch(doc.nodes, node.id, (n) => ({ ...n, props })) },
       )
       .then((refused) => setError(refused[0]?.message ?? null));
+  };
 
   return (
     <>

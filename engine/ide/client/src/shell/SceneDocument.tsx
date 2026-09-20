@@ -41,12 +41,17 @@ import { CanvasToolbar, clampZoom, type GridState, type Viewport } from './Canva
  * same rule `PreviewWall` uses: a host `reload` verdict, or another
  * project on the same address.
  *
- * The viewport preset is also the EDIT TARGET (spec §7): while its safe
- * rect is portrait, a canvas edit (`variant: 'portrait'` on the event)
- * lands in `portrait.nodes[<id>]` through `patchVariant`, never in the
- * node's own props, and the same fact is published as
- * `ctx.scenes.setVariant` for the Properties form. The tree marks a node
- * with an override `◐`; that mark is the "clear portrait override" button.
+ * The viewport preset decides the EDIT TARGET (spec §7), but the PAGE says
+ * which: its `ready` carries the orientation its safe rect came out as,
+ * and an `orientation` event follows every flip — published here as
+ * `ctx.scenes.setVariant(id, …)` for the Properties form (deleted on
+ * unmount), never computed from the preset. While it is `'portrait'`, a
+ * canvas edit (`variant: 'portrait'` on the event) lands in
+ * `portrait.nodes[<id>]` through `patchVariant`, never in the node's own
+ * props. The tree marks a node with an override `◐`; that mark is the
+ * "clear portrait override" button. An override follows its node:
+ * `removeNode` drops it, `moveNode` under a parent drops it (only a root
+ * can carry one), a rename carries it over.
  *
  * The pure helpers below are what the tests pin: `nextId`, `addNode`,
  * `removeNode`, `moveNode`, `shiftNode`, `patchVariant`, `clearVariant`.
@@ -120,9 +125,9 @@ function without(nodes: readonly SceneNode[], id: string): SceneNode[] {
   );
 }
 
-/** Drops the node and its subtree. */
+/** Drops the node and its subtree — and its portrait override, which would otherwise outlive it as a host warning with no row to clear it from. */
 export function removeNode(doc: SceneDoc, id: string): SceneDoc {
-  return find(doc.nodes, id) ? { ...doc, nodes: without(doc.nodes, id) } : doc;
+  return find(doc.nodes, id) ? clearVariant({ ...doc, nodes: without(doc.nodes, id) }, id) : doc;
 }
 
 /**
@@ -139,14 +144,18 @@ export function moveNode(
   const targetId = 'before' in target ? target.before : target.into;
   if (!moving || !find(doc.nodes, targetId) || find([moving], targetId)) return doc;
   const rest = without(doc.nodes, id);
-  if ('into' in target) return { ...doc, nodes: appendTo(rest, target.into, moving) };
-  return {
-    ...doc,
-    nodes: map(rest, (node, children) => [
-      ...(node.id === target.before ? [moving] : []),
-      node.children ? { ...node, children } : node,
-    ]),
-  };
+  const moved: SceneDoc =
+    'into' in target
+      ? { ...doc, nodes: appendTo(rest, target.into, moving) }
+      : {
+          ...doc,
+          nodes: map(rest, (node, children) => [
+            ...(node.id === target.before ? [moving] : []),
+            node.children ? { ...node, children } : node,
+          ]),
+        };
+  // Nested now: the runtime applies no override to it, so none is kept.
+  return moved.nodes.some((n) => n.id === id) ? moved : clearVariant(moved, id);
 }
 
 function shiftIn(nodes: readonly SceneNode[], id: string, delta: 1 | -1): SceneNode[] | null {
@@ -203,6 +212,14 @@ export function clearVariant(doc: SceneDoc, id: string): SceneDoc {
   const { [id]: _gone, ...rest } = doc.portrait.nodes;
   const { portrait: _block, ...bare } = doc;
   return Object.keys(rest).length ? { ...bare, portrait: { nodes: rest } } : bare;
+}
+
+/** `portrait.nodes[from]` carried over to `to` (a root's rename); nothing to carry is the same doc. */
+export function renameVariant(doc: SceneDoc, from: string, to: string): SceneDoc {
+  const entry = doc.portrait?.nodes?.[from];
+  if (!entry) return doc;
+  const { [from]: _gone, ...rest } = doc.portrait!.nodes;
+  return { ...doc, portrait: { nodes: { ...rest, [to]: entry } } };
 }
 
 /**
@@ -286,8 +303,6 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
   const vh = viewport?.height ?? design.height;
   // The design box has no bar; a preset gets the shell's, per its layout.
   const safeBottom = viewport ? SAFE_BOTTOM[vh > vw ? 'mobile' : 'wide'] : 0;
-  // The scenes runtime's own rule: the SAFE rect (the viewport minus the band) taller than wide.
-  const variant = vh - safeBottom > vw ? 'portrait' : null;
   // `null` = fit automatically (recomputed as the stage resizes); a number = the user's zoom.
   const [zoom, setZoom] = useState<number | null>(null);
   const [fit, setFit] = useState(1);
@@ -402,12 +417,20 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
 
   useEffect(() => {
     rpcRef.current = rpc;
-    rpc.on('ready', () => {
+    // Held, not re-read at cleanup: a tab can unmount after its context was disposed (the tests do).
+    const { scenes } = ctx;
+    const orient = (payload: unknown) => {
+      const o = (payload as { orientation?: string } | undefined)?.orientation;
+      scenes.setVariant(id, o === 'portrait' ? 'portrait' : null);
+    };
+    rpc.on('ready', (payload) => {
+      orient(payload);
       // The set too: a `replace` posted before the canvas listened is lost.
       tell('replace', { docs: ctx.scenes.docs() });
       tell('select', { node: liveNode() });
       tell('grid', gridRef.current);
     });
+    rpc.on('orientation', orient);
     rpc.on('selected', (payload) => {
       const node = (payload as { node: string | null }).node;
       if (liveNode() !== node) ctx.scenes.select({ scene: id, node });
@@ -438,6 +461,7 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
     return () => {
       rpc.dispose();
       rpcRef.current = null;
+      scenes.setVariant(id, null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, id, rpc]);
@@ -453,15 +477,6 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
 
   const mirrored = selected?.scene === id ? selected.node : null;
   useEffect(() => tell('select', { node: mirrored }), [mirrored]);
-  // The inspector writes where the canvas does; a closed tab leaves no
-  // variant behind. The service is held, not re-read: a tab can unmount
-  // after its context was disposed (the tests do), and there is no
-  // `ctx.scenes` then.
-  useEffect(() => {
-    const { scenes } = ctx;
-    scenes.setVariant(variant);
-    return () => scenes.setVariant(null);
-  }, [ctx, variant]);
   useEffect(() => tell('grid', grid), [grid]);
   // The canvas composes no `ide-bridge` (see `scene-edit`), so every change
   // to the set — this tab's own edits answered, Properties, the host's

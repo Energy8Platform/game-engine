@@ -37,7 +37,14 @@ export interface Postable {
 }
 
 export interface CanvasRpc {
-  /** `target.contentWindow` is where requests post to; `origin` gates both directions ('*' in tests). */
+  /**
+   * `target.contentWindow` is where requests post to and what a frame's
+   * `source` must be; `origin` gates both directions ('*' in tests). The
+   * TARGET is held and its `contentWindow` read on every use: a browser
+   * keeps one WindowProxy across a navigation (a `src` change — the
+   * viewport preset's `safeBottom`), jsdom does not, and the element is
+   * the stable handle either way.
+   */
   attach(target: { contentWindow: Postable | null }, origin: string): void;
   call<T = unknown>(method: string, params?: unknown): Promise<T>;
   on(event: string, handler: (payload: unknown) => void): () => void;
@@ -48,14 +55,12 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
   let seq = 0;
   const pending = new Map<number, Pending>();
   const evtHandlers = new Map<string, Set<(payload: unknown) => void>>();
-  let contentWindow: Postable | null = null;
+  let target: { contentWindow: Postable | null } | null = null;
   let origin = '*';
 
   const onMessage = (e: MessageEvent): void => {
-    // Unconditional: before attach() contentWindow is null, and a real
-    // postMessage's e.source is never null, so every frame is rejected —
-    // there is no window yet to legitimately claim as the source.
-    if ((e.source as unknown) !== contentWindow) return;
+    // Before attach() there is no window to legitimately claim as the source: every frame is rejected.
+    if (!target || (e.source as unknown) !== target.contentWindow) return;
     if (origin !== '*' && e.origin !== origin) return;
     const data = e.data as {
       type?: string;
@@ -79,20 +84,20 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
   win.addEventListener('message', onMessage);
 
   return {
-    attach(target, attachOrigin) {
+    attach(next, attachOrigin) {
       // A second attach (a new preview iframe) orphans anything still
       // waiting on the old one — reject now rather than let it time out.
       for (const [id, p] of pending) {
         pending.delete(id);
         p.reject(new Error('canvas was replaced'));
       }
-      contentWindow = target.contentWindow;
+      target = next;
       origin = attachOrigin;
     },
 
     call<T = unknown>(method: string, params?: unknown): Promise<T> {
-      const target = contentWindow;
-      if (!target) return Promise.reject(new Error('canvas not attached'));
+      const win = target?.contentWindow;
+      if (!win) return Promise.reject(new Error('canvas not attached'));
       const id = ++seq;
       return new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -111,7 +116,7 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
             reject(e);
           },
         });
-        target.postMessage({ type: 'e8:ide:req', id, method, params }, origin);
+        win.postMessage({ type: 'e8:ide:req', id, method, params }, origin);
       });
     },
 

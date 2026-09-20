@@ -260,7 +260,7 @@ describe('scene-edit plugin', () => {
     const { scenes, events, call, ready } = boot();
     await ready();
     expect(scenes.visible()).toEqual(['a']);
-    expect(events()[0]).toEqual({ event: 'ready', payload: { scene: 'a' } });
+    expect(events()[0]).toEqual({ event: 'ready', payload: { scene: 'a', orientation: 'landscape' } });
     const res = await call('snapshot');
     expect(res.ok).toBe(true);
     expect(res.result).toEqual({ scene: 'a', selected: null, bounds: { lo: { x: 100, y: 100, w: 40, h: 40 }, hi: { x: 120, y: 120, w: 40, h: 40 } } });
@@ -537,6 +537,12 @@ describe('scene-edit plugin', () => {
     frame();
     expect(edit().orientation()).toBe('portrait');
     expect(edit().fit()).toBe(scenes.fit());
+    // The flip is told once — the IDE follows the page, not its own preset.
+    expect(events().at(-1)).toEqual({ event: 'orientation', payload: { orientation: 'portrait' } });
+    scenes.resize(300, 480); // another portrait fit: no flip, nothing told
+    frame();
+    expect(events().at(-1)?.event).toBe('orientation');
+    expect(events().filter((e) => e.event === 'orientation')).toHaveLength(1);
     key('ArrowRight');
     expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: 'portrait' } });
     const a = scenes.docs().get('a')!;
@@ -553,6 +559,7 @@ describe('scene-edit plugin', () => {
     app.screen.width = 480; app.screen.height = 288;
     scenes.resize(480, 288);
     frame();
+    expect(events().at(-1)).toEqual({ event: 'orientation', payload: { orientation: 'landscape' } });
     expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(120);
     key('ArrowRight');
     expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
