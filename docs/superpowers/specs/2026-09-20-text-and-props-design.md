@@ -120,10 +120,13 @@ The scenes runtime (`@energy8engine/scenes` `runtime.ts`) sets
 step with `resize`), and on `pointerdown` emits `ui.tap` with `{ x, y }` in
 DESIGN units on the flow bus (`ctx.reflect.get('events', false)?.emit`) —
 lenient: no flow row, no emit. `scene-edit`'s own `pointerdown` handling
-stays (it stops propagation for gizmo hits already; a tap on empty canvas
-in the editor also emits — harmless, the editor page runs no `wait`). A
-flow waits with `wait { event: ui.tap }`; `on { event: ui.tap }` is a
-trigger.
+stays (it stops propagation for gizmo hits already), but the runtime's emit
+is SUPPRESSED on the editor page: that page composes the project's whole
+bundle, flow row included, so a click to select a node would otherwise
+advance a `wait { event: ui.tap }`. `scene-edit` provides `sceneEdit` at
+apply and the runtime's `onDown` reads it at click time (so row order does
+not matter). A flow waits with `wait { event: ui.tap }`; `on { event:
+ui.tap }` is a trigger.
 
 ## 7. IDE
 

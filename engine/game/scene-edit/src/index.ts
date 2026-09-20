@@ -68,6 +68,11 @@ const isField = (t: EventTarget | null): boolean =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
 
 export function apply(ctx: Context, config: SceneEditConfig): void {
+  // "an editor canvas is on this page" — the scenes runtime reads it to
+  // suppress its own `ui.tap` emit (see that row's `onDown`). The editor
+  // page composes the project's whole bundle, flow row included, so a
+  // click to select a node must not advance a `wait { event: ui.tap }`.
+  ctx.provide('sceneEdit', true);
   const { scene } = config;
   const { scenes } = ctx;
   const app = ctx.renderer.app;

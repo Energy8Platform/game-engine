@@ -160,6 +160,20 @@ describe('ui.tap', () => {
     await fiber.dispose();
   });
 
+  it('the editor page (a `sceneEdit` service) swallows the tap — a click there selects a node', async () => {
+    const { ctx, stage } = withStage({ width: 200, height: 100 });
+    const emit = vi.fn();
+    ctx.provide('events', { emit, on: () => () => {} });
+    // What `@energy8engine/scene-edit` provides at apply; read at CLICK
+    // time, so it counts whether that row composed before this one or after.
+    ctx.provide('sceneEdit', true);
+    const fiber = plug(ctx, { width: 100, height: 50 });
+    await fiber;
+    stage.emit('pointerdown', { global: { x: 100, y: 50 } } as never);
+    expect(emit).not.toHaveBeenCalled();
+    await fiber.dispose();
+  });
+
   it('a headless app whose stage is no emitter still composes', async () => {
     const ctx = new Context();
     ctx.provide('renderer', { app: { stage: Object.assign(new Container(), { on: undefined, off: undefined }) } });

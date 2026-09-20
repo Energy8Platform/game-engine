@@ -137,9 +137,13 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   // and a project with no flow row simply has nobody listening.
   //
   // `scene-edit` sets these same two stage fields for its own picking and
-  // adds its own `pointerdown`: both handlers fire, which is what the
-  // editor page wants (it runs no flow, so the extra emit goes nowhere),
-  // and its dispose restores whatever it found here.
+  // adds its own `pointerdown`: both handlers fire, and its dispose
+  // restores whatever it found here. But the editor page composes the
+  // project's WHOLE bundle, flow row included, so the extra emit would
+  // land on a real bus — a `wait { event: ui.tap }` would advance every
+  // time the designer clicks to select a node. `scene-edit` provides
+  // `sceneEdit`, read HERE at click time (row order irrelevant): on that
+  // page the tap is the editor's alone.
   //
   // `app.screen` is the renderer's own `Rectangle`, RESIZED IN PLACE, so
   // the hit area stays in step with the viewport without re-assigning.
@@ -147,6 +151,7 @@ export function apply(ctx: Context, config: ScenesConfig): void {
     app.stage.eventMode = 'static';
     if (app.screen) app.stage.hitArea = app.screen as unknown as Container['hitArea'];
     const onDown = (e: { global: { x: number; y: number } }) => {
+      if (ctx.reflect.get('sceneEdit', false)) return;
       const p = scenes.container.toLocal(e.global);
       (
         ctx.reflect.get('events', false) as

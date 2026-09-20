@@ -247,6 +247,14 @@ describe('symbol mode', () => {
 });
 
 describe('scene-edit plugin', () => {
+  it('provides `sceneEdit` — what the scenes runtime reads to swallow its own ui.tap here', async () => {
+    const { ctx, fiber } = boot();
+    await fiber;
+    expect(ctx.reflect.get('sceneEdit', false)).toBe(true);
+    await fiber.dispose();
+    expect(ctx.reflect.get('sceneEdit', false)).toBeUndefined();
+  });
+
   it('shows the scene, emits ready, and answers snapshot with per-node bounds in design space', async () => {
     const { scenes, events, call, ready } = boot();
     await ready();
