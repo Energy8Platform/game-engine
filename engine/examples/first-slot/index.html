@@ -18,6 +18,11 @@
         gap: 0.75rem;
         padding: 0.75rem 1rem;
       }
+      /* A built page (`e8 build`) sets `hidden` on the toolbar; the
+         `display: flex` above would otherwise outrank the attribute. */
+      #controls[hidden] {
+        display: none;
+      }
       #mount {
         line-height: 0;
       }

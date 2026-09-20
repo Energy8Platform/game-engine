@@ -72,14 +72,37 @@
  * websocket `engine/ide/client/src/plugins/connection.ts` speaks, listens
  * for the composition row a project's `e8.yml` gives it (see this
  * project's own `e8.yml`), and rebinds `base_game` live, with no reload of
- * this page or the IDE around it. Nothing about this import makes
- * `first-slot` a production game — `ide-bridge` is a plugin of the editor
- * phase (see its own module doc); a real game's bundle simply never
- * imports it.
+ * this page or the IDE around it. Nothing about it makes `first-slot` a
+ * production game — `ide-bridge` is a plugin of the editor phase (see its
+ * own module doc), and it is reached only under `import.meta.env.DEV`,
+ * by a dynamic import, so a built page never carries it.
+ *
+ * **One file, two lives: `e8 dev` and `e8 build`.** This same entry is
+ * what vite serves under the dev host and what `e8 build` bundles into a
+ * static `dist/` (spec §6), and three things below exist for the second:
+ *
+ *  - `virtual:e8-rows` — the composition's runtime halves as a map of row
+ *    id → `() => import(...)`. A composed page never names its rows;
+ *    `createGame` fetches `/api/composition` and `import()`s each row's
+ *    `runtimeUrl`, a string a bundler cannot follow. `e8 build` fills the
+ *    map (`@energy8engine/ide-host`'s `vite-rows.ts`) so vite bundles
+ *    every half, and its frozen `dist/api/composition` names
+ *    the row ID as each row's `runtimeUrl`; `importModule` below looks the
+ *    id up first and falls through to a plain `import(url)` — which is
+ *    the whole path under `e8 dev`, where the map is `{}`.
+ *  - `import.meta.env.E8_TARGET` — `createGame`'s `buildTarget`, baked in
+ *    by `e8 build --target <name>` (the `session` seam picks
+ *    `@energy8engine/session-sdk` under `platform`); unset under `e8 dev`,
+ *    so the default candidate wins there.
+ *  - `import.meta.env.DEV` — the dev toolbar (`#controls`, `#log`) and
+ *    `ide-bridge` are the editor's, not the game's: a built page hides the
+ *    two elements and never imports the bridge. What a built page KEEPS is
+ *    everything else — the flow, the shell, and the `window.__e8` hooks at
+ *    the bottom, which are how `build.spec.ts` proves the bundle plays.
  */
 import { createGame } from '@energy8engine/game-runtime';
-import * as ideBridge from '@energy8engine/ide-bridge';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
+import { rows } from 'virtual:e8-rows';
 import {
   diagnostic,
   type Diagnostic,
@@ -101,13 +124,27 @@ import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/spin-log/runtime';
 
 const mount = document.getElementById('mount')!;
+const controlsEl = document.getElementById('controls')!;
 const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
 const spinBtn = document.getElementById('spin') as HTMLButtonElement;
 const turboCheckbox = document.getElementById('turbo') as HTMLInputElement;
 const mechanicSelect = document.getElementById('mechanic') as HTMLSelectElement;
 
-const game = await createGame({ mount });
+// A built page (see the module doc): the toolbar and the log are the
+// editor's. Hidden before the first frame rather than after boot, so
+// nothing flashes; their handlers below still attach — `__e8` presses the
+// same `pressSpin` the button does.
+if (!import.meta.env.DEV) {
+  controlsEl.hidden = true;
+  logEl.hidden = true;
+}
+
+const game = await createGame({
+  mount,
+  buildTarget: import.meta.env.E8_TARGET || undefined,
+  loader: { importModule: (url) => rows[url]?.() ?? import(/* @vite-ignore */ url) },
+});
 
 /**
  * The services this PAGE reads off `ctx` and cannot work without — not
@@ -424,8 +461,16 @@ if (bound) mechanicSelect.value = bound;
  * `ctx.diagnostics` — the same list the `<pre>` above renders. Passing a
  * callback that wrote the same event into the same element a second way
  * would put this page back in the business of keeping its own record.
+ *
+ * Under `import.meta.env.DEV` only, and by a dynamic import: a static
+ * `import * as ideBridge` would sit in a built page's module graph whether
+ * or not this branch ran, and vite drops the dead branch — import and all
+ * — when `DEV` is baked to `false` by `e8 build`.
  */
-ideBridge.apply(game.ctx, {});
+if (import.meta.env.DEV) {
+  const ideBridge = await import('@energy8engine/ide-bridge');
+  ideBridge.apply(game.ctx, {});
+}
 
 mechanicSelect.addEventListener('change', () => {
   currentMechanics()!.bind('base_game', mechanicSelect.value);
@@ -590,8 +635,9 @@ ctx.inject(['flow'], (c) =>
  * prove a config value changed, not that the board did anything (see the
  * task brief: "a test that checks e8.yml instead of the screen would be
  * checking the wrong end of the pipe"). Nothing on this page's own UI
- * calls `window.__e8`; a production game bundle never imports this file's
- * test harness, either.
+ * calls `window.__e8`. A page `e8 build` bundles keeps these hooks — they
+ * are how `build.spec.ts` drives the static `dist/` — and a real game's
+ * own entry, which is not this file, simply never installs them.
  *
  * `present(stage, data)` — the replay of one captured result under another
  * mechanic — is gone with `presentStage`: there is no page-side path that

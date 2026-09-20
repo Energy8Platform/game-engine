@@ -34,8 +34,8 @@ import type { ProjectScopeHandle } from './workspace';
 
 export interface ProjectScopeConfig {
   cwd: string;
-  /** The game preview's port (spec §6) — `dev-game` boots the game's own server there. */
-  previewPort: number;
+  /** The game preview's port (spec §6) — `dev-game` boots the game's own server there; `null` skips `dev-game` entirely (see `IdeHostOptions.previewPort`). */
+  previewPort: number | null;
 }
 
 export const name = 'project-scope';
@@ -72,7 +72,7 @@ export async function apply(ctx: Context, config: ProjectScopeConfig): Promise<v
   const game = await readGameConfig(cwd);
   if (game.diagnostics.length) {
     ctx.ideRpc.reportGameDiagnostics('dev-game', game.diagnostics);
-  } else if (game.config) {
+  } else if (game.config && config.previewPort !== null) {
     await ctx.plugin(devGame, { ...game.config, port: 0, previewPort: config.previewPort });
   }
 }
@@ -81,7 +81,7 @@ export async function apply(ctx: Context, config: ProjectScopeConfig): Promise<v
 export function bootProjectScope(
   root: Context,
   cwd: string,
-  previewPort: number,
+  previewPort: number | null,
 ): Promise<ProjectScopeHandle> {
   const fiber = root.plugin({ name, inject, apply }, { cwd, previewPort });
   // `ctx.plugin()` hands back a Fiber that is thenable (cordis rc.8 wraps

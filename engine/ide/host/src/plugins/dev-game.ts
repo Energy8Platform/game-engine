@@ -110,6 +110,7 @@ import * as session from '@energy8engine/session-dev';
 import { diagnostic, type SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { installErrorBoundary } from '../error-boundary';
+import { viteRows } from '../vite-rows';
 import { runtimeEntryPaths } from './runtime-assets';
 import { assemble, specSources } from './spec';
 
@@ -642,6 +643,11 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
           }
         },
       },
+      // `virtual:e8-rows`, answered `{}`: the page imports it whether it is
+      // served or built (`src/main.ts`'s `importModule` falls through to
+      // the `runtimeUrl` this host handed out when the map has no entry),
+      // and only `e8 build` (`compute/build.ts`) fills the map.
+      viteRows(new Map()),
     ],
     optimizeDeps: {
       // `'**/*.html'` is vite's own default for this field, restated

@@ -27,8 +27,13 @@ export interface IdeHostOptions {
   /** 0 picks a free port — used by tests. */
   port?: number;
   host?: string;
-  /** The game preview's port (spec §6); 0 picks a free one. Defaults to 5681. */
-  previewPort?: number;
+  /**
+   * The game preview's port (spec §6); 0 picks a free one. Defaults to
+   * 5681. `null` boots no game server at all — no preview, no vite, no
+   * `e8-server` — for a caller that only reads the project's routes off
+   * the root (`e8 build`); `workspace.state().previewUrl` is then `null`.
+   */
+  previewPort?: number | null;
   /**
    * Where the built IDE shell is served from (spec §7). Tests pass a temp
    * dir; the CLI leaves it unset and `ide-static` falls back to `IDE_DIST`,
@@ -114,7 +119,8 @@ export async function createIdeHost(options: IdeHostOptions): Promise<IdeHost> {
     });
 
     await ctx.plugin(rpc, { origins: ideOrigins });
-    const previewPort = options.previewPort ?? 5681;
+    // `=== undefined`, not `??`: `null` is a value here (no game server).
+    const previewPort = options.previewPort === undefined ? 5681 : options.previewPort;
     await ctx.plugin(workspace, {
       root: options.root,
       scope: (c, cwd) => bootProjectScope(c, cwd, previewPort),

@@ -7,7 +7,7 @@
  * engine/ide/host/tests/cli-smoke.test.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { check, shot, spin } from '@energy8engine/ide-host/compute';
+import { build, check, shot, spin } from '@energy8engine/ide-host/compute';
 import { run, USAGE, type Io } from '../src/run';
 
 /** Collectors; stdout flushes on a later tick, the way a pipe does, and says when it has. */
@@ -42,6 +42,7 @@ describe('run', () => {
   it('a command that throws is still one JSON document: a compute error naming the command, exit 1', async () => {
     const o = io();
     const code = await run(['spin', '--n', '3'], o, {
+      build,
       check,
       shot,
       async spin() {
@@ -61,7 +62,7 @@ describe('run', () => {
 
   it('a non-Error throw is stringified the same way', async () => {
     const o = io();
-    expect(await run(['check'], o, { spin, shot, check: () => Promise.reject('no') })).toBe(1);
+    expect(await run(['check'], o, { build, spin, shot, check: () => Promise.reject('no') })).toBe(1);
     expect(JSON.parse(o.out).diagnostics).toEqual([
       { severity: 'error', plugin: 'compute', where: 'e8 check', message: 'no' },
     ]);
@@ -85,6 +86,7 @@ describe('run', () => {
     const o = io();
     let ran = false;
     const code = await run(['check', '--bogus'], o, {
+      build,
       spin,
       shot,
       async check() {
@@ -99,11 +101,32 @@ describe('run', () => {
     const quiet = io();
     expect(
       await run(['check', '--quiet'], quiet, {
+        build,
         spin,
         shot,
         check: async () => ({ file: '', diagnostics: [] }),
       }),
     ).toBe(0);
+  });
+
+  it('`e8 build` is a one-shot command: a bad flag is refused, `--target platform` reaches build()', async () => {
+    const refused = io();
+    let ran = false;
+    const fake = async (input: { cwd: string; target?: string; base?: string; out?: string }) => {
+      ran = true;
+      return { out: input.out ?? 'dist', files: [], diagnostics: [], input };
+    };
+    expect(await run(['build', '--bogus'], refused, { check, spin, shot, build: fake })).toBe(1);
+    expect(ran).toBe(false);
+    expect(JSON.parse(refused.out).diagnostics).toMatchObject([{ where: '--bogus' }]);
+
+    const o = io();
+    expect(await run(['build', '--target', 'platform'], o, { check, spin, shot, build: fake })).toBe(
+      0,
+    );
+    expect(ran).toBe(true);
+    expect(JSON.parse(o.out).input).toEqual({ cwd: '/nowhere', target: 'platform' });
+    expect(USAGE).toContain('e8 build [--target <name>] [--base <path>] [--out <dir>]');
   });
 
   it('an unknown command is the usage on stderr, exit 1', async () => {

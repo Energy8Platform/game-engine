@@ -127,3 +127,20 @@ it, a `coin` node (`spritesheet`, `assets/coin.json` + `assets/coin.png`)
 animates through four frames of a spinning disc, from the `media1` row. A
 `win` node after `coin` is a `text` node, empty until the flow's `show_win`
 node (kind `prop`) writes `$result.win` into it after every spin.
+
+## `e8 build`
+
+`e8 build [--target <name>] [--base <path>] [--out <dir>]` writes a static
+`dist/` of this game: `index.html` and the bundle (`vite build` over this
+project — the page as one chunk and every row's runtime half, keyed by row
+id, in a `game` chunk beside it: the `virtual:e8-rows` map `src/main.ts`
+hands `createGame` as `importModule`), the four documents the rows fetch at
+boot frozen as `dist/api/{composition,flow,scenes,symbols}` (byte-identical
+to what the dev host answers — an edit to a `.yml` needs a rebuild), and
+`assets/` copied whole. `--target platform` bakes `import.meta.env.E8_TARGET`, which is how the
+`session` seam picks `@energy8engine/session-sdk` over the dev host's
+`session-host`. A built page hides the `#controls` toolbar and `#log` and
+never imports `ide-bridge` (both are behind `import.meta.env.DEV`); the
+`window.__e8` hooks stay. Nothing serves `dist/` — any static server does;
+without `--target platform`, proxy `/api/session` and `/api/spin` to a
+running `e8 dev` host. `dist/` is in `.gitignore`.

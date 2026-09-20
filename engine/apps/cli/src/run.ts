@@ -2,10 +2,10 @@
  * The `e8` command line, as a function: `run(argv, io)` → exit code. The
  * binary calls it with `process`; a test calls it with collectors and a
  * command that throws — the one way to prove the promise below without a
- * throw path a real command has (every failure `check`/`spin`/`shot`
- * know is already a diagnostic).
+ * throw path a real command has (every failure `check`/`spin`/`shot`/
+ * `build` know is already a diagnostic).
  *
- * The promise: `check`, `spin` and `shot` ALWAYS print one JSON document
+ * The promise: `check`, `spin`, `shot` and `build` ALWAYS print one JSON document
  * on stdout — a throw anywhere in a command becomes a `compute` error
  * diagnostic in that document and exit 1, never an empty stdout with a
  * stack trace on stderr that an agent would have to parse. The document
@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Diagnostic } from '@energy8engine/contracts';
 import { IDE_BUILD_HINT, IDE_DIST_DEFAULT, createIdeHost } from '@energy8engine/ide-host';
-import { check, shot, spin } from '@energy8engine/ide-host/compute';
+import { build, check, shot, spin } from '@energy8engine/ide-host/compute';
 
 /** What `run` needs of `process` — and what a test hands it instead. */
 export interface Io {
@@ -36,15 +36,16 @@ export interface Io {
   env: Record<string, string | undefined>;
 }
 
-/** The three one-shot commands; injectable so a test can make one throw. */
+/** The four one-shot commands; injectable so a test can make one throw. */
 export interface Commands {
   check: typeof check;
   spin: typeof spin;
   shot: typeof shot;
+  build: typeof build;
 }
 
 export const USAGE = [
-  'help is text; check, spin and shot each print one JSON document on stdout',
+  'help is text; check, spin, shot and build each print one JSON document on stdout',
   '',
   'usage: e8 [ide|dev]',
   "       e8 check [file] [--quiet]               parse a .spin (default: the project's own math)",
@@ -52,9 +53,11 @@ export const USAGE = [
   '                                             play N spins through e8-server',
   '       e8 shot [--out p] [--viewport WxH] [--spin] [--ide] [--budget ms] [--quiet]',
   '                                             screenshot the running game (or the IDE)',
+  '       e8 build [--target <name>] [--base <path>] [--out <dir>] [--quiet]',
+  '                                             a static dist/ of the composed game',
   '       e8 <command> --help                    this text, exit 0',
   '',
-  'check, spin and shot print one JSON document on stdout, progress on stderr',
+  'check, spin, shot and build print one JSON document on stdout, progress on stderr',
   '(--quiet silences it), and exit 1 when a diagnostic is an error.',
   '',
   'output:',
@@ -69,6 +72,12 @@ export const USAGE = [
   '  shot   { path, width, height, loadMs, diagnostics }',
   '         width/height: the viewport (the PNG is the whole page); loadMs: navigation →',
   '         #status non-empty, null when that missed --budget',
+  '  build  { out, files, diagnostics }',
+  '         out: the absolute dist/ (--out, default dist); files: every file in it, relative;',
+  '         --target bakes import.meta.env.E8_TARGET (the session seam: platform → session-sdk);',
+  '         --base is where dist/ will be served from (default /); dist/api/* are frozen copies',
+  '         of /api/{composition,flow,scenes,symbols} — serve dist/ statically and proxy',
+  '         /api/session + /api/spin to a running host (or ship --target platform)',
   '  every diagnostic: { severity, plugin, where, message, fix?, at? }',
   '',
   'browser: npx playwright install chromium (once)',
@@ -80,16 +89,19 @@ export const USAGE = [
   '  IDE_ORIGINS   comma-separated extra origins allowed to write to the IDE API',
 ].join('\n');
 
-const KNOWN: Record<'check' | 'spin' | 'shot', string[]> = {
+type OneShot = 'check' | 'spin' | 'shot' | 'build';
+
+const KNOWN: Record<OneShot, string[]> = {
   check: ['quiet'],
   spin: ['n', 'bet', 'seed', 'action', 'quiet'],
   shot: ['out', 'viewport', 'spin', 'ide', 'budget', 'quiet'],
+  build: ['target', 'base', 'out', 'quiet'],
 };
 
 export async function run(
   argv: string[],
   io: Io,
-  commands: Commands = { check, spin, shot },
+  commands: Commands = { check, spin, shot, build },
 ): Promise<number | null> {
   const [command = 'ide', ...rest] = argv;
 
@@ -97,7 +109,7 @@ export async function run(
     io.stdout.write(USAGE + '\n');
     return 0;
   }
-  if (command === 'check' || command === 'spin' || command === 'shot') {
+  if (command === 'check' || command === 'spin' || command === 'shot' || command === 'build') {
     const result = await oneShot(command, rest, io, commands);
     await new Promise<void>((resolve) =>
       io.stdout.write(JSON.stringify(result, null, 2) + '\n', () => resolve()),
@@ -157,9 +169,9 @@ export async function run(
   return null;
 }
 
-/** `check`/`spin`/`shot`: refused flags, then the command — and any throw — as one document. */
+/** `check`/`spin`/`shot`/`build`: refused flags, then the command — and any throw — as one document. */
 async function oneShot(
-  command: 'check' | 'spin' | 'shot',
+  command: OneShot,
   args: string[],
   io: Io,
   commands: Commands,
@@ -205,6 +217,13 @@ async function oneShot(
           spin: flags.spin !== undefined,
           ide: flags.ide !== undefined,
           budgetMs: num(flags.budget),
+        });
+      case 'build':
+        return await commands.build({
+          cwd: io.cwd(),
+          target: flags.target,
+          base: flags.base,
+          out: flags.out,
         });
       case 'spin':
         return await commands.spin({

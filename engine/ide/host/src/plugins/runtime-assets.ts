@@ -709,19 +709,22 @@ export function restartKeys(schema: unknown): Set<string> {
 }
 
 /**
- * The real, contained runtime-entry paths of a composition's rows — the
- * files a browser will dynamically `import()` once `/api/composition` has
- * told it their URLs.
+ * The real, contained runtime-entry path of each of a composition's rows,
+ * by row id — the files a browser will dynamically `import()` once
+ * `/api/composition` has told it their URLs.
  *
- * It exists for `dev-game`, which needs them BEFORE it creates its vite
- * instance, and needs them for a reason that has nothing to do with
- * serving: vite's dependency optimizer only crawls what it can reach
- * statically from the project's own html, and a row's runtime half is
- * reachable only through a dynamic import made minutes later. Discovering
- * a new bare dependency at that point makes vite re-optimize and change
- * the `?v=` stamp on every optimized module — so the page ends up running
- * two generations of the same dependency at once. See `dev-game.ts`, which
- * documents what that cost and how it was measured.
+ * Two readers. `runtimeEntryPaths` below flattens it for `dev-game`, which
+ * needs the paths BEFORE it creates its vite instance, and needs them for a
+ * reason that has nothing to do with serving: vite's dependency optimizer
+ * only crawls what it can reach statically from the project's own html,
+ * and a row's runtime half is reachable only through a dynamic import made
+ * minutes later. Discovering a new bare dependency at that point makes
+ * vite re-optimize and change the `?v=` stamp on every optimized module —
+ * so the page ends up running two generations of the same dependency at
+ * once. See `dev-game.ts`, which documents what that cost and how it was
+ * measured. `compute/build.ts` reads the map itself: `e8 build` bundles
+ * every entry under its row id (`vite-rows.ts`), and the frozen
+ * `dist/api/composition` names that id as the row's `runtimeUrl`.
  *
  * Rows that resolve to nothing, declare no runtime half, or whose entry is
  * missing or escapes its package are simply left out: this function
@@ -729,8 +732,8 @@ export function restartKeys(schema: unknown): Set<string> {
  * health. `/api/composition` above is where a row's problems are named,
  * and it re-derives them from disk at request time.
  */
-export function runtimeEntryPaths(cwd: string, rows: readonly ResolvedRow[]): string[] {
-  const paths: string[] = [];
+export function runtimeEntryMap(cwd: string, rows: readonly ResolvedRow[]): Map<string, string> {
+  const map = new Map<string, string>();
   for (const row of rows) {
     const pkg = readPackageJson(cwd, row.name);
     if (!pkg) continue;
@@ -746,11 +749,16 @@ export function runtimeEntryPaths(cwd: string, rows: readonly ResolvedRow[]): st
       if (realEntryPath !== realPackageRoot && !realEntryPath.startsWith(realPackageRoot + sep)) {
         continue;
       }
-      paths.push(realEntryPath);
+      map.set(row.id, realEntryPath);
     } catch {
       // Not on disk. `/api/composition` says so; this one just has
       // nothing to warm.
     }
   }
-  return paths;
+  return map;
+}
+
+/** `runtimeEntryMap`'s paths alone, in row order — `dev-game`'s optimizer crawl list. */
+export function runtimeEntryPaths(cwd: string, rows: readonly ResolvedRow[]): string[] {
+  return [...runtimeEntryMap(cwd, rows).values()];
 }

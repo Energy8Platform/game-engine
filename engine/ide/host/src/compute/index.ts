@@ -1,3 +1,4 @@
+export { build, type BuildInput, type BuildResult } from './build';
 export { check, type CheckInput, type CheckResult } from './check';
 export {
   MAX_STEPS_PER_ROUND,

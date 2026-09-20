@@ -128,6 +128,18 @@ const SESSION_SEAM = 'session';
  * has to compete for the seam rather than assume it.
  */
 const LOCAL_SESSION_PROVIDER = 'session-dev';
+/**
+ * Its module, as a VARIABLE rather than a literal at the `import()` below:
+ * a dynamic import keeps a literal specifier out of the browser's way at
+ * evaluation time (see `GameConfig.session`), but a bundler still follows
+ * a literal — `vite build` over a game page (`e8 build`) traced this into
+ * `node:fs`/`node:child_process` and refused the whole build, measured in
+ * task-7-report.md of the shell/session/build slice. Rollup cannot follow
+ * an identifier, so the bundle carries the bare specifier and nothing
+ * behind it; the branch that reaches it is a Node caller's (`compose.test.ts`
+ * spawns the real e8-server through it), never a page's.
+ */
+const LOCAL_SESSION_MODULE = '@energy8engine/session-dev';
 
 export interface GameConfig {
   /**
@@ -508,8 +520,12 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
 
       if (winner.get(SESSION_SEAM) === LOCAL_SESSION_PROVIDER) {
         try {
-          // Dynamic on purpose — see `GameConfig.session`.
-          const session = await import('@energy8engine/session-dev');
+          // Dynamic on purpose, and by a variable — see `GameConfig.session`
+          // and `LOCAL_SESSION_MODULE`. Typed through the static `import
+          // type`, so the seam's config stays checked.
+          const session = (await import(
+            /* @vite-ignore */ LOCAL_SESSION_MODULE
+          )) as typeof import('@energy8engine/session-dev');
           await ctx.plugin(session, config.session!);
           // `session-dev` already computed the SPECIFIC reason it could
           // not start (naming the binary, pointing at binPath/
