@@ -86,12 +86,27 @@ export function apply(ctx: Context, config: ScenesConfig): void {
       off(event: 'resize', fn: (width: number, height: number) => void): unknown;
     };
   };
-  const portrait = config.portrait;
+  // Exactly one of the portrait width/height is nothing to fit into —
+  // `renderer-pixi`'s precedent: say so, and strip it so the fit reads the
+  // block as absent (the landscape design rotated). The schema hands `{}`
+  // over when the row sets neither, which is the same "absent".
+  const portrait = config.portrait ?? {};
+  const half = (portrait.width === undefined) !== (portrait.height === undefined);
+  if (half)
+    report(
+      diagnostic(
+        'warning',
+        'scenes',
+        'scenes1',
+        'portrait needs both width and height — using the landscape design rotated',
+        'set both or neither',
+      ),
+    );
   const scenes = createScenes({
     root: app.stage,
     design: config.design,
     portrait:
-      portrait?.width && portrait.height
+      !half && portrait.width !== undefined && portrait.height !== undefined
         ? { width: portrait.width, height: portrait.height }
         : undefined,
     mode: config.mode,

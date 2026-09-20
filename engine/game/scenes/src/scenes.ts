@@ -13,9 +13,12 @@
  * A `pin` (COMMON) applies to a document's OWN top-level mount; an
  * embedded copy is laid out by its host — the safe rect is in the outer
  * root's coordinates, which a `scene` node's subtree does not share. The
- * `portrait` variant (spec §6) is the same story: a document's top-level
- * entries take `portrait.nodes[id]` while the safe rect is taller than
- * wide (`applyVariant`), an embedded copy keeps its host's layout.
+ * `portrait` variant (spec §6) is NOT: a document's ROOTS take
+ * `portrait.nodes[id]` while the safe rect is taller than wide
+ * (`applyVariant`) in the document's own mount AND in every embedded
+ * copy — the copy is what is on screen when a host shows it (`big_win`
+ * is only ever shown through `base_game`'s `scene` node). A `pin` in that
+ * override stays inert on the copy, as any pin of an embedded root.
  *
  * Like `stage` before it, this is unit-testable end to end: `Container`,
  * `Sprite` and `Graphics` all build headlessly in plain Node.
@@ -149,10 +152,15 @@ interface Entry {
    * bookkeeping — and nothing holds a destroyed entry alive.
    */
   live?: Record<string, unknown>;
+  /** The document this node is declared in (`where`'s left half) and the host chain it was mounted under (`[]` for the document's own mount) — what a per-node remount needs. */
+  scene: string;
+  chain: string[];
+  /** A root of its DOCUMENT — of the own top-level mount (`top`) or of an embedded copy — the entries a `portrait` override addresses. */
+  root: boolean;
   /**
    * The document's `portrait.nodes[id]` while it is APPLIED to this entry
    * (portrait, and the override validated); a layer under `live`, so a
-   * `setProps` patch still wins. Top-level entries only, like `pin`.
+   * `setProps` patch still wins. `root` entries only.
    */
   variant?: Record<string, unknown>;
   /** `refresh()` already reported this entry once; suppresses repeats until the next remount rebuilds it. */
@@ -228,7 +236,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   /** The values of the props the TYPE declares, as a comparable string — the schema passes common keys through, so `props` alone would say a moved node changed. */
   const ownOf = (type: NodeType, props: Record<string, unknown>): string =>
     JSON.stringify(Object.keys(type.schema.dict ?? {}).map((k) => props[k]));
-  /** The document's override for a top-level node, while portrait; `undefined` otherwise. */
+  /** The document's override for one of its roots, while portrait; `undefined` otherwise. */
   const overrideOf = (sceneId: string, id: string): Record<string, unknown> | undefined =>
     orientation === 'portrait' ? docs.get(sceneId)?.portrait?.nodes?.[id] : undefined;
   const container = new Container();
@@ -278,7 +286,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     seen: Set<string>,
     /** A root of the outermost document; `false` for children (the recursive call below) and for an embedded copy (`mountDoc`). */
     top = true,
-  ): void {
+    /** A root of ITS document — `top`, or a root `mountDoc` mounts; `false` for children. */
+    root = top,
+  ): Entry | undefined {
     const where = `${sceneId}/${node.id}`;
     if (seen.has(node.id)) {
       error(
@@ -300,12 +310,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         where,
         `${node.type} "${node.id}" failed to mount: ${e instanceof Error ? e.message : String(e)}`,
       );
-    // A top-level node mounted while portrait takes its override now (a
-    // document shown after the flip is right from the start). Refused, it
-    // is the OVERRIDE's diagnostic and the node mounts with its document
-    // props — the same verdict `applyVariant` gives a flip. `node.props`
-    // itself is never written: `replace()`'s diff reads it.
-    let variant = top ? overrideOf(sceneId, node.id) : undefined;
+    // A root mounted while portrait takes its override now (a document
+    // shown after the flip is right from the start). Refused, it is the
+    // OVERRIDE's diagnostic and the node mounts with its document props —
+    // the same verdict `applyVariant` gives a flip. `node.props` itself is
+    // never written: `replace()`'s diff reads it.
+    let variant = root ? overrideOf(sceneId, node.id) : undefined;
     const merged = variant && tryVariant(where, type, node.props, variant);
     if (variant && !merged) variant = undefined;
     const raw = merged ? merged.raw : node.props;
@@ -345,7 +355,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
       else parent.mask = view;
     }
-    const entry: Entry = { view, node, props, type, where, top, variant };
+    const entry: Entry = { view, node, props, type, where, scene: sceneId, chain, top, root, variant };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
     for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen, false);
@@ -364,6 +374,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         failed(e);
       }
     }
+    return entry;
   }
 
   /** The skipped nodes of a mount that is on screen: each one an error, now that a person can see the gap. */
@@ -440,19 +451,31 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   }
 
   /**
-   * ONE top-level node mounted again in place, for a type without
-   * `update` whose own props the variant changed: its subtree (children,
-   * an embedded copy — every entry whose view sits under it) is unmounted
-   * the way `unmountTop` does, `mountNode` rebuilds it from the document
-   * (reading the current orientation's override itself) and the new view
-   * goes back at the old child index — `remount`'s `wasAt` precedent, one
-   * level down. The entry is replaced in `nodes`/`all`; a live patch on
+   * ONE root mounted again in place, for a type without `update` whose
+   * own props the variant changed. The FRESH subtree is mounted first,
+   * from the document, in the entry's own context (`scene`/`chain`/`top`
+   * — `mountNode` reads the current orientation's override itself) and
+   * moved to the old child index — `remount`'s `wasAt` precedent, one
+   * level down; only once it landed is the old subtree (children, an
+   * embedded copy — every entry whose view sits under it) unmounted the
+   * way `unmountTop` does. A throwing `mount` (an override `scene: 'nope'`)
+   * is `mountNode`'s diagnostic and the old entry stays as it was, its
+   * variant unset. The entry is replaced in `nodes`/`all`; a live patch on
    * the subtree goes with the old one, as with any remount.
    */
-  function remountNode(m: Mount, sceneId: string, e: Entry): void {
+  function remountNode(m: Mount, e: Entry): void {
     const parent = e.view.parent;
     if (!parent) return;
     const at = parent.getChildIndex(e.view);
+    building = m;
+    let fresh: Entry | undefined;
+    try {
+      fresh = mountNode(e.node, parent, e.scene, e.chain, new Set(), e.top, true);
+    } finally {
+      building = null;
+    }
+    if (!fresh) return;
+    parent.setChildIndex(fresh.view, at);
     const under = (v: Container): boolean => {
       for (let p = v.parent; p; p = p.parent) if (p === e.view) return true;
       return false;
@@ -460,20 +483,13 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     const gone = new Set(m.all.filter((x) => x === e || under(x.view)));
     for (const x of [...gone].reverse()) unmountEntry(x);
     m.all = m.all.filter((x) => !gone.has(x));
-    m.nodes.delete(e.node.id);
-    building = m;
-    try {
-      mountNode(e.node, parent, sceneId, [], new Set());
-    } finally {
-      building = null;
-    }
-    const fresh = m.nodes.get(e.node.id);
-    if (fresh) parent.setChildIndex(fresh.view, at);
+    // ponytail: the fresh subtree may list a skipped node the old one listed too — dedupe by `where`; an entry the OTHER orientation's subtree alone had stays (it names a real skipped node of that layout).
+    m.missing = m.missing.filter((x, i, a) => a.findIndex((y) => y.where === x.where) === i);
   }
 
   /**
-   * The orientation flipped: every top-level entry with a `portrait`
-   * override takes it (or, on the way back, drops the one it holds) — the
+   * The orientation flipped: every `root` entry with a `portrait` override
+   * takes it (or, on the way back, drops the one it holds) — the
    * `setProps` machinery with the variant as a layer UNDER the live
    * patches. Per entry: validate (schema + common pass) — a refusal is a
    * diagnostic and the entry keeps what it has — then `update` + the
@@ -481,23 +497,30 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    * its own props did not change (a `container`, a `scene` host moved or
    * hidden — its children keep their live patches), a remount otherwise.
    * An entry with neither an override nor a held variant is not touched.
+   *
+   * Known debt: a `text` whose override adds or removes `font` keeps its
+   * class — `update` cannot swap `Text`↔`BitmapText` (the same limit
+   * `setProps` has), so it renders with the fallback family until a
+   * `replace` remounts it.
    */
   function applyVariant(): void {
-    for (const [id, m] of mounted)
-      for (const e of [...m.nodes.values()]) {
-        const next = overrideOf(id, e.node.id);
+    for (const m of mounted.values())
+      for (const e of m.all.filter((x) => x.root)) {
+        // A host remounted earlier in this pass took its old copy's roots with it.
+        if (!m.all.includes(e)) continue;
+        const next = overrideOf(e.scene, e.node.id);
         if (!next && !e.variant) continue;
         // On the way back there is no override to blame: the live patch is what is left.
         const blame = next ?? e.live ?? {};
         const merged = tryVariant(e.where, e.type, e.node.props, { ...next, ...e.live }, blame);
         if (!merged) continue;
         if (!e.type.update && ownOf(e.type, merged.props) !== ownOf(e.type, e.props)) {
-          remountNode(m, id, e);
+          remountNode(m, e);
           continue;
         }
         try {
           e.type.update?.(e.view, merged.props, mountCtx([]));
-          applyCommon(e.view, merged.raw, e.type, lastFit);
+          applyCommon(e.view, merged.raw, e.type, e.top ? lastFit : null);
         } catch (err) {
           error(e.where, `portrait ${offending(err, blame)}: ${why(err)}`, 'fix the override');
           continue;
@@ -536,16 +559,24 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       });
   }
 
-  /** Scene ids a document's tree references, one level deep. */
+  /** The scene a root's portrait override points a `scene` node at, when it does. */
+  const overrideScene = (doc: SceneDoc, n: SceneNode): string | undefined => {
+    const s = n.type === 'scene' ? doc.portrait?.nodes?.[n.id]?.scene : undefined;
+    return typeof s === 'string' ? s : undefined;
+  };
+
+  /** Scene ids a document's tree references, one level deep — a root's portrait `scene` override included, whatever the orientation. */
   const refsOf = (doc: SceneDoc): Set<string> => {
     const out = new Set<string>();
-    const walk = (nodes: SceneNode[]) => {
+    const walk = (nodes: SceneNode[], roots = false) => {
       for (const n of nodes) {
         if (n.type === 'scene' && typeof n.props.scene === 'string') out.add(n.props.scene);
+        const o = roots && overrideScene(doc, n);
+        if (o) out.add(o);
         walk(n.children ?? []);
       }
     };
-    walk(doc.nodes);
+    walk(doc.nodes, true);
     return out;
   };
 
@@ -588,6 +619,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         if (o) for (const p of type?.assets?.({ ...n.props, ...o }) ?? []) out.add(p);
         if (n.type === 'scene' && typeof n.props.scene === 'string')
           for (const p of assetsOf(n.props.scene, seen)) out.add(p);
+        const swapped = overrides && overrideScene(doc, n);
+        if (swapped) for (const p of assetsOf(swapped, seen)) out.add(p);
         walk(n.children ?? []);
       }
     };
@@ -825,8 +858,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       const view = new Container();
       view.label = id;
       const seen = new Set<string>();
-      // An embedded copy: its host lays it out, so no node in it is `top`.
-      for (const node of doc.nodes) mountNode(node, view, id, chain, seen, false);
+      // An embedded copy: its host lays it out, so no node in it is `top` — but its roots are the document's, and take its variant.
+      for (const node of doc.nodes) mountNode(node, view, id, chain, seen, false, true);
       return view;
     },
     sceneView: (id) => mounted.get(id)?.view,

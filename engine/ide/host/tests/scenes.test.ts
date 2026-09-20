@@ -493,6 +493,40 @@ describe('checkScenes', () => {
       },
     ]);
   });
+  it('a portrait override pointing a `scene` node elsewhere is checked like the node\'s own target: missing, and a cycle', () => {
+    const out = checkScenes(
+      [
+        doc('a', [{ id: 'x', type: 'scene', props: { scene: 'b' } }], undefined, {
+          nodes: { x: { scene: 'nope' } },
+        }),
+        doc('b', [{ id: 'y', type: 'scene', props: { scene: 'c' } }], undefined, {
+          nodes: { y: { scene: 'a' } },
+        }),
+        doc('c', []),
+      ],
+      types,
+      () => true,
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/x (portrait)',
+        message: 'scene "nope" does not exist',
+      }),
+      // The cycle a → b (own) → a (portrait) is reported at both ends, each at the edge it names.
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/x',
+        message: 'scene "b" leads back to "a"',
+      }),
+      expect.objectContaining({
+        severity: 'error',
+        where: 'b/y (portrait)',
+        message: 'scene "a" leads back to "b"',
+      }),
+    ]);
+  });
 });
 
 /** A fixture copied to a temp dir with the repo's packages linked in — see `runtime-assets.test.ts`'s `e8BaseWorkspace`. */

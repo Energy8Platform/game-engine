@@ -218,6 +218,22 @@ export function checkScenes(
   // scene → the scenes its `scene` nodes name (known ones only).
   const refs = new Map<string, Set<string>>();
   const reelsNodes: string[] = [];
+  /**
+   * A `scene` node's targets, each with where it is named: its own, and
+   * the one its portrait override swaps in (a root's only — the block
+   * addresses roots) at `<where> (portrait)`. Both go through the same
+   * exists and cycle checks: the override is an edge of the graph the
+   * runtime's `refsOf`/`assetsOf` follow.
+   */
+  const targetsOf = (doc: SceneDoc, node: SceneNode, scene: string): [string, string][] => {
+    if (node.type !== 'scene') return [];
+    const where = `${scene}/${node.id}`;
+    const out: [string, string][] = [];
+    if (typeof node.props.scene === 'string') out.push([node.props.scene, where]);
+    const o = doc.nodes.includes(node) ? doc.portrait?.nodes?.[node.id]?.scene : undefined;
+    if (typeof o === 'string') out.push([o, `${where} (portrait)`]);
+    return out;
+  };
 
   for (const { file, doc } of docs) {
     const scene = sceneId(file);
@@ -254,14 +270,9 @@ export function checkScenes(
           !doc.nodes.includes(node),
         ),
       );
-      if (node.type === 'scene' && typeof node.props.scene === 'string') {
-        if (ids.has(node.props.scene)) targets.add(node.props.scene);
-        else
-          err(
-            where,
-            `scene "${node.props.scene}" does not exist`,
-            'create it, or name one that exists',
-          );
+      for (const [target, at] of targetsOf(doc, node, scene)) {
+        if (ids.has(target)) targets.add(target);
+        else err(at, `scene "${target}" does not exist`, 'create it, or name one that exists');
       }
     }
     // The portrait block (spec §6): roots only, and each override checked
@@ -304,20 +315,10 @@ export function checkScenes(
     );
   for (const { file, doc } of docs) {
     const scene = sceneId(file);
-    for (const node of walk(doc.nodes)) {
-      if (
-        node.type === 'scene' &&
-        typeof node.props.scene === 'string' &&
-        refs.get(scene)?.has(node.props.scene) &&
-        reaches(node.props.scene, scene)
-      ) {
-        err(
-          `${scene}/${node.id}`,
-          `scene "${node.props.scene}" leads back to "${scene}"`,
-          'a scene cannot contain itself',
-        );
-      }
-    }
+    for (const node of walk(doc.nodes))
+      for (const [target, at] of targetsOf(doc, node, scene))
+        if (refs.get(scene)?.has(target) && reaches(target, scene))
+          err(at, `scene "${target}" leads back to "${scene}"`, 'a scene cannot contain itself');
   }
 
   if (reelsNodes.length > 1) {

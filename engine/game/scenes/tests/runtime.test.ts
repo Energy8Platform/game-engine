@@ -210,6 +210,23 @@ describe('scenes row', () => {
     await fiber2.dispose();
   });
 
+  it('exactly one of portrait width/height is a warning, and the rotated landscape design is used', async () => {
+    const { ctx } = withScreen(288, 480);
+    const report = vi.fn();
+    ctx.provide('diagnostics', { report });
+    const fiber = ctx.plugin(runtime, { design, portrait: { width: 144 }, fetchFn: empty() });
+    await fiber;
+    expect(report).toHaveBeenCalledWith({
+      severity: 'warning',
+      plugin: 'scenes',
+      where: 'scenes1',
+      message: 'portrait needs both width and height — using the landscape design rotated',
+      fix: 'set both or neither',
+    });
+    expect(ctx.get('scenes')!.container.scale.x).toBeCloseTo(1, 10);
+    await fiber.dispose();
+  });
+
   it('ready resolves after the GET has replaced', async () => {
     const { ctx, fiber } = boot();
     await fiber;

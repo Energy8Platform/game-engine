@@ -320,6 +320,124 @@ describe('the portrait variant', () => {
     expect((view('logo') as Text).text).toBe('hi');
   });
 
+  it('an embedded copy turns too: a document\'s roots take its own override inside a host (big_win through base_game)', async () => {
+    const { report, scenes, view } = boot([
+      {
+        id: 'a',
+        nodes: [
+          { id: 'host', type: 'scene', props: { scene: 'b', visible: false } },
+          { id: 'coin', type: 'container', props: {} },
+        ],
+        portrait: { nodes: { coin: { visible: false } } },
+      },
+      {
+        id: 'b',
+        nodes: [
+          { id: 'title', type: 'text', props: { text: 'big win', x: 10 } },
+          { id: 'wrap', type: 'container', props: {}, children: [{ id: 'kid', type: 'container', props: { x: 1 } }] },
+        ],
+        // `pin` on an embedded root is inert (the host lays the copy out); `x` still lands.
+        portrait: { nodes: { title: { visible: false, pin: 'top', x: 20 }, kid: { x: 9 } } },
+      },
+    ]);
+    scenes.resize(...LANDSCAPE);
+    await scenes.show('a');
+    await scenes.show('b');
+    const copy = view('host').children.find((c) => c.label === 'title')!;
+    const own = scenes.view({ scene: 'b', node: 'title' })!;
+    const copyKid = view('host').children.find((c) => c.label === 'wrap')!.children[0]!;
+    expect([copy.visible, own.visible]).toEqual([true, true]);
+    scenes.resize(...PORTRAIT);
+    expect(copy.visible).toBe(false);
+    expect(copy.x).toBe(20);
+    expect(own.visible).toBe(false);
+    // The own top-level mount pins (top of the 288×480 rect is x = 144); the copy does not.
+    expect(own.x).toBeCloseTo(144 + 20, 10);
+    expect(view('coin').visible).toBe(false);
+    // A nested id is not a root: unknown, and the child untouched.
+    expect(copyKid.x).toBe(1);
+    expect(view('host').visible).toBe(true);
+    scenes.resize(...LANDSCAPE);
+    expect([copy.visible, own.visible, view('coin').visible]).toEqual([true, true, true]);
+    expect(copy.x).toBe(10);
+    expect(report.mock.calls.map(([d]) => d.where)).toEqual(['b/kid']);
+  });
+
+  it('a remount whose mount throws (an override `scene: "nope"`) keeps the old subtree, one diagnostic, and the flip back is a no-op', () => {
+    const { report, scenes, view } = boot([
+      {
+        id: 'a',
+        nodes: [
+          { id: 'bg', type: 'container', props: {} },
+          { id: 'swap', type: 'scene', props: { scene: 'b' } },
+          { id: 'fg', type: 'container', props: {} },
+        ],
+        portrait: { nodes: { swap: { scene: 'nope' } } },
+      },
+      { id: 'b', nodes: [{ id: 'n1', type: 'container', props: {} }] },
+    ]);
+    const root = scenes.sceneView('a')!;
+    const old = view('swap');
+    scenes.resize(...PORTRAIT);
+    expect(view('swap')).toBe(old);
+    expect(old.children[0]!.label).toBe('n1');
+    expect(root.children.map((c) => c.label)).toEqual(['bg', 'swap', 'fg']);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', where: 'a/swap', message: expect.stringContaining('"nope"') }),
+    );
+    scenes.resize(...LANDSCAPE);
+    expect(view('swap')).toBe(old);
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it('a `scene` override\'s target is in the graph: assets() lists it, and editing it while portrait refreshes the copy', async () => {
+    const { scenes, view } = boot([
+      {
+        id: 'a',
+        nodes: [{ id: 'swap', type: 'scene', props: { scene: 'b' } }],
+        portrait: { nodes: { swap: { scene: 'c' } } },
+      },
+      { id: 'b', nodes: [{ id: 'n1', type: 'image', props: { src: 'b.png' } }] },
+      { id: 'c', nodes: [{ id: 'n2', type: 'image', props: { src: 'c.png' } }] },
+    ]);
+    expect(scenes.assetsOf('a')).toEqual(['b.png', 'c.png']);
+    scenes.resize(...PORTRAIT);
+    expect(view('swap').children.map((c) => c.label)).toEqual(['n2']);
+    scenes.replace([
+      scenes.docs().get('a')!,
+      scenes.docs().get('b')!,
+      {
+        id: 'c',
+        nodes: [
+          { id: 'n2', type: 'image', props: { src: 'c.png' } },
+          { id: 'n3', type: 'container', props: {} },
+        ],
+      },
+    ]);
+    expect(view('swap').children.map((c) => c.label)).toEqual(['n2', 'n3']);
+  });
+
+  it('a per-node remount does not list a skipped node twice', async () => {
+    const { report, scenes } = boot([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'f',
+            type: 'fake',
+            props: { kind: 'a' },
+            children: [{ id: 'g', type: 'nope', props: {} }],
+          },
+        ],
+        portrait: { nodes: { f: { kind: 'b' } } },
+      },
+    ]);
+    scenes.resize(...PORTRAIT);
+    await scenes.show('a');
+    expect(report.mock.calls.filter(([d]) => d.where === 'a/g')).toHaveLength(1);
+  });
+
   it('a refused override on a fresh portrait mount fails the override, not the node', () => {
     const { report, scenes, view } = boot();
     scenes.resize(...PORTRAIT);
