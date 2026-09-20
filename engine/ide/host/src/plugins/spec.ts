@@ -23,51 +23,59 @@
  * games dir, byte for byte what it always was.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { diagnostic, type Diagnostic } from '@energy8engine/contracts';
 import {
   buildSpinScript,
   defineGame,
   type GameSpec,
-  type SymbolSpec,
 } from '@energy8platform/platform-core/game-spec';
 
 /** Project-relative, and the `where` of everything this module reports. */
 const SPEC_JSON = 'game/spec.json';
 const LOGIC_SPIN = 'game/script.spin';
-/** Where `prelude ⧺ logic` lands. Project-relative; `files.ts` protects `.e8`. */
-export const ASSEMBLED_SPIN = '.e8/game/script.spin';
+/** Where `prelude ⧺ logic` lands. Project-relative; `files.ts` skips and protects `.e8`. */
+const ASSEMBLED_DIR = '.e8/game';
 
 export interface Assembled {
   /** e8-server's `--games-dir` — the folder holding the `.spin` it should load. */
   gamesDir: string;
   /** Absolute path of the `.spin` a reader should read. */
   spinFile: string;
-  /**
-   * Generated lines sitting above the author's line 1 in `spinFile` — `0`
-   * unless this is a `GameSpec` project. Subtract it from a diagnostic's
-   * line to name the line the author can actually edit.
-   */
-  preludeLines: number;
   diagnostics: Diagnostic[];
 }
 
 /**
  * Is this `spec.json` a `GameSpec` (assemble it) or the older descriptive
- * metadata (leave it alone)? The three marks are the ones the two shapes
- * disagree on: a `GameSpec` declares `type: 'slot'`, and its `symbols` are
- * `SymbolSpec`s — string ids carrying a `pay` row — where the descriptive
- * shape's are `{ id: number, name, weight }`.
+ * metadata (leave it alone)? `type` is the mark: a `GameSpec` declares
+ * `type: 'slot'`, and no descriptive `spec.json` in this repo carries a
+ * `type` field at all. `symbols` being an array is the one shape check
+ * worth keeping — everything downstream iterates it.
+ *
+ * Deliberately NOT `symbols[0].pay`: the first symbol of a real game is
+ * often a wild or a scatter, which pays nothing and carries no `pay` row.
  */
 export function isGameSpec(value: unknown): value is GameSpec {
   const spec = value as Partial<GameSpec> | null | undefined;
-  return (
-    !!spec &&
-    spec.type === 'slot' &&
-    Array.isArray(spec.symbols) &&
-    (spec.symbols as SymbolSpec[])[0]?.pay !== undefined
-  );
+  return !!spec && spec.type === 'slot' && Array.isArray(spec.symbols);
 }
+
+/**
+ * Numbers `toSpinPrelude` interpolates straight into the generated text.
+ * `validateSpec` lets a MISSING one through — its guards are comparisons
+ * (`spec.maxWin <= 0`), and `undefined <= 0` is `false` — and the prelude
+ * then emits `max_win: undefined` or `cells: NaN`, turning a mistake in
+ * `spec.json` into a compile error about a file nobody wrote. Measured
+ * against `derive.ts`'s `toSpinPrelude`: these three are all of them (a
+ * missing `pay` entry falls back to `0`, a missing `value` emits nothing,
+ * and every other field either throws inside `validateSpec` — caught
+ * below — or never reaches the prelude).
+ */
+const PRELUDE_NUMBERS: Array<[string, (spec: GameSpec) => unknown]> = [
+  ['maxWin', (spec) => spec.maxWin],
+  ['grid.cols', (spec) => spec.grid?.cols],
+  ['grid.rows', (spec) => spec.grid?.rows],
+];
 
 /**
  * The two files whose save has to re-run `assemble` before anything else
@@ -75,7 +83,7 @@ export function isGameSpec(value: unknown): value is GameSpec {
  * generated FROM, and the logic it is prepended TO. Absolute.
  */
 export function specSources(root: string): string[] {
-  return [join(root, SPEC_JSON), join(root, LOGIC_SPIN)];
+  return [resolve(root, SPEC_JSON), resolve(root, LOGIC_SPIN)];
 }
 
 /**
@@ -96,12 +104,11 @@ export function specSources(root: string): string[] {
  */
 export async function assemble(root: string): Promise<Assembled> {
   const gamesDir = join(root, 'game');
-  const plain: Assembled = {
-    gamesDir,
-    spinFile: join(root, LOGIC_SPIN),
-    preludeLines: 0,
-    diagnostics: [],
-  };
+  const plain: Assembled = { gamesDir, spinFile: join(root, LOGIC_SPIN), diagnostics: [] };
+  const refuse = (where: string, text: string, fix: string): Assembled => ({
+    ...plain,
+    diagnostics: [diagnostic('error', 'spec', where, text, fix)],
+  });
 
   let spec: unknown;
   try {
@@ -113,56 +120,51 @@ export async function assemble(root: string): Promise<Assembled> {
   }
   if (!isGameSpec(spec)) return plain;
 
+  const missing = PRELUDE_NUMBERS.filter(([, read]) => typeof read(spec) !== 'number').map(
+    ([name]) => name,
+  );
+  if (missing.length) {
+    return refuse(
+      SPEC_JSON,
+      `${SPEC_JSON} is a GameSpec missing a number the generated prelude needs: ${missing.join(', ')}`,
+      `give ${missing.join(' and ')} a number in ${SPEC_JSON}`,
+    );
+  }
+
   let model: ReturnType<typeof defineGame>;
   try {
     model = defineGame(spec);
   } catch (error) {
-    return {
-      ...plain,
-      diagnostics: [
-        diagnostic(
-          'error',
-          'spec',
-          SPEC_JSON,
-          `${SPEC_JSON} is a GameSpec that cannot be used: ${message(error)}`,
-          `fix ${SPEC_JSON}; the game keeps the math it last assembled`,
-        ),
-      ],
-    };
+    return refuse(
+      SPEC_JSON,
+      `${SPEC_JSON} is a GameSpec that cannot be used: ${message(error)}`,
+      `fix ${SPEC_JSON}; the game keeps the math it last assembled`,
+    );
   }
 
   let logic: string;
   try {
     logic = await readFile(plain.spinFile, 'utf8');
   } catch (error) {
-    return {
-      ...plain,
-      diagnostics: [
-        diagnostic(
-          'error',
-          'spec',
-          LOGIC_SPIN,
-          `cannot read ${LOGIC_SPIN}: ${message(error)}`,
-          `write the game's math into ${LOGIC_SPIN}; ${SPEC_JSON} generates only the SPEC/SYM/PAY_* prelude above it`,
-        ),
-      ],
-    };
+    return refuse(
+      LOGIC_SPIN,
+      `cannot read ${LOGIC_SPIN}: ${message(error)}`,
+      `write the game's math into ${LOGIC_SPIN}; ${SPEC_JSON} generates only the SPEC/SYM/PAY_* prelude above it`,
+    );
   }
 
-  const out = join(root, '.e8', 'game');
-  await mkdir(out, { recursive: true });
+  const out = join(root, ASSEMBLED_DIR);
   const spinFile = join(out, 'script.spin');
-  await writeFile(spinFile, buildSpinScript(model, logic), 'utf8');
-  return {
-    gamesDir: out,
-    spinFile,
-    // `buildSpinScript` is `spinPrelude + '\n' + logic` and `spinPrelude`
-    // ends in a newline, so the author's line 1 is line
-    // `split('\n').length + 1` of the assembly — i.e. exactly this many
-    // generated lines above it.
-    preludeLines: model.spinPrelude.split('\n').length,
-    diagnostics: [],
-  };
+  const next = buildSpinScript(model, logic);
+  // Only when it actually differs. Every reader assembles for itself, so
+  // the same bytes get produced several times per boot and on every
+  // refresh; rewriting them would churn mtimes under anything watching
+  // `.e8/` and make a no-op look like an edit.
+  if ((await readFile(spinFile, 'utf8').catch(() => null)) !== next) {
+    await mkdir(out, { recursive: true });
+    await writeFile(spinFile, next, 'utf8');
+  }
+  return { gamesDir: out, spinFile, diagnostics: [] };
 }
 
 function message(error: unknown): string {

@@ -206,8 +206,12 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
   // A `GameSpec` project plays the assembly, not the logic-only
   // `game/script.spin` the compiler would refuse — see `plugins/spec.ts`.
   // Every other project's games dir is `join(cwd, 'game')`, as before.
+  // A spec that could not produce a prelude ends the run here: there is no
+  // assembly to play, and spawning e8-server over the authored logic would
+  // answer with the compiler's confusion instead of the real cause.
   const assembled = await assemble(input.cwd);
   diagnostics.push(...assembled.diagnostics);
+  if (assembled.diagnostics.some((d) => d.severity === 'error')) return report();
 
   const ctx = new Context();
   try {

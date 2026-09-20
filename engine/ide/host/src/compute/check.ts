@@ -32,8 +32,13 @@ export interface CheckResult {
 
 export async function check(input: CheckInput): Promise<CheckResult> {
   // `assemble` only runs for the default file: an explicit path is checked
-  // exactly as given, and never writes anything.
-  const file = input.file ?? (await assemble(input.cwd ?? process.cwd())).spinFile;
+  // exactly as given, and never writes anything. Its own diagnostics lead
+  // the list — a `game/spec.json` that could not produce a prelude is the
+  // first thing wrong with this project, and it is the reason the file
+  // below is the authored logic rather than the assembly.
+  const assembled = input.file === undefined ? await assemble(input.cwd ?? process.cwd()) : null;
+  const file = input.file ?? assembled!.spinFile;
+  const fromSpec = assembled?.diagnostics ?? [];
   let source: string;
   try {
     source = await readFile(file, 'utf8');
@@ -41,6 +46,7 @@ export async function check(input: CheckInput): Promise<CheckResult> {
     return {
       file,
       diagnostics: [
+        ...fromSpec,
         diagnostic(
           'error',
           'compute',
@@ -50,5 +56,6 @@ export async function check(input: CheckInput): Promise<CheckResult> {
       ],
     };
   }
-  return { file, ...checkSource(source, file) };
+  const checked = checkSource(source, file);
+  return { file, ...checked, diagnostics: [...fromSpec, ...checked.diagnostics] };
 }

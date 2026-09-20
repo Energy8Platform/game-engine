@@ -3,6 +3,15 @@
  * declares — what the math promises about its own shape, read once at
  * boot rather than inferred from the data of a spin that already ran.
  *
+ * The AUTHORED file, deliberately, even for a project whose
+ * `game/spec.json` is a `GameSpec` and whose runnable math is the
+ * assembled `.e8/game/script.spin` (`./spec.ts`). Everything the prelude
+ * contributes is `const` declarations, and `parseSpinSchema` reads
+ * records, enums, the `game` block and actions and skips every `const` —
+ * so the assembly would parse to the very same schema, at the cost of a
+ * disk write per refresh and diagnostics whose line numbers name a file
+ * the author cannot open (spec §6).
+ *
  * Same shape and same rule as `./project.ts`'s `ProjectService`: a live
  * getter pair plus `reload()`, and nothing here ever throws. A missing or
  * unparseable `.spin` is the most likely first-run mistake there is (no
@@ -71,7 +80,6 @@ import {
   type SpinSchema,
 } from '@energy8engine/contracts';
 import { parseSpinSchema } from '@energy8engine/spin-parser';
-import { ASSEMBLED_SPIN, assemble } from './spec';
 
 declare module 'cordis' {
   interface Context {
@@ -171,29 +179,13 @@ export async function apply(ctx: Context, config: SpinSchemaConfig): Promise<voi
   });
 }
 
-/**
- * The `.spin` this plugin reads is the one a compiler would accept, not
- * necessarily the one the author types: for a project whose
- * `game/spec.json` is a `GameSpec`, `assemble` prepends the generated
- * `SPEC`/`SYM`/`PAY_*` prelude and the result lands in
- * `.e8/game/script.spin` (see `./spec.ts`). Describing the file that
- * cannot compile would be describing a game that does not exist.
- *
- * `where` therefore names the file that WAS read. What does not travel
- * with it is the prelude's line count: a mistake in the author's math is
- * `preludeLines` further down in the assembly than it is in the file the
- * author can open, so every located diagnostic is moved back up and says
- * so in its own message. Nothing is moved that sits inside the prelude
- * itself — there is no authored line to point at for those.
- */
 async function readSpinSchema(
   cwd: string,
 ): Promise<{ schema: SpinSchema | null; diagnostics: Diagnostic[] }> {
-  const { spinFile, preludeLines } = await assemble(cwd);
-  const where = preludeLines > 0 ? ASSEMBLED_SPIN : SPIN_FILENAME;
+  const filename = join(cwd, SPIN_FILENAME);
   let content: string;
   try {
-    content = await readFile(spinFile, 'utf8');
+    content = await readFile(filename, 'utf8');
   } catch (error) {
     return {
       schema: null,
@@ -201,38 +193,16 @@ async function readSpinSchema(
         diagnostic(
           'warning',
           'schema',
-          where,
-          `cannot read ${where}: ${error instanceof Error ? error.message : String(error)}`,
-          `create ${join(cwd, SPIN_FILENAME)} with the game's math declarations (game/action/record/enum)`,
+          SPIN_FILENAME,
+          `cannot read ${SPIN_FILENAME}: ${error instanceof Error ? error.message : String(error)}`,
+          `create ${filename} with the game's math declarations (game/action/record/enum)`,
         ),
       ],
     };
   }
 
-  const { schema, diagnostics } = checkSource(content, where);
-  return {
-    schema: schema ?? null,
-    diagnostics: diagnostics.map((d) => atAuthoredLine(d, preludeLines)),
-  };
-}
-
-/**
- * A diagnostic read from the assembly, re-pointed at the line the author
- * can edit. `spin-parser` spells the line twice — in `at.line` and in
- * `where` (`line 123`, its own convention) — so both move, and the message
- * gains the one fact that is not derivable from either: which file that
- * number counts in.
- */
-function atAuthoredLine(d: Diagnostic, preludeLines: number): Diagnostic {
-  const line = d.at?.line;
-  if (preludeLines === 0 || line === undefined || line <= preludeLines) return d;
-  const authored = line - preludeLines;
-  return {
-    ...d,
-    at: { ...d.at!, line: authored },
-    where: d.where === `line ${line}` ? `line ${authored}` : d.where,
-    message: `${d.message} (${SPIN_FILENAME} line ${authored}; game/spec.json's generated prelude is the ${preludeLines} lines above it)`,
-  };
+  const { schema, diagnostics } = checkSource(content);
+  return { schema: schema ?? null, diagnostics };
 }
 
 /**

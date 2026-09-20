@@ -107,10 +107,14 @@ export const inject = ['server'];
 /**
  * Directory names a project tree never shows. Not tidiness — a tree that
  * is mostly other people's packages, or git's own bookkeeping, is not a
- * useful answer to "what does this project contain", so both are skipped
- * wherever they occur, not only at the root.
+ * useful answer to "what does this project contain", so all three are
+ * skipped wherever they occur, not only at the root. `.e8` is the host's
+ * own scratch (the assembled `prelude ⧺ logic` .spin, `e8 shot`'s PNGs):
+ * already unwritable through this service — see `PROTECTED_DIRS` — and
+ * listing a generated file the editor refuses to open is worse than not
+ * listing it.
  */
-const SKIPPED_DIRS = new Set(['node_modules', '.git']);
+const SKIPPED_DIRS = new Set(['node_modules', '.git', '.e8']);
 
 /**
  * Directory names no read, write, mkdir, create or remove may reach
