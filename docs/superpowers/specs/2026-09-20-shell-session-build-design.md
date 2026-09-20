@@ -89,9 +89,15 @@ Seam `session` (the mechanism exists: `E8SeamDeclaration` in the manifest,
   spec's `bet_levels` when absent —, `config.stake?.defaultBetLevel ?? betLevels[0]`
   clamped to the ladder, `lang`, `device`); `play` → `PlayParams { action,
   bet: betLevel, roundId, params }` → `PlayResultData` normalised: `bet = req.betLevel`,
-  `win = data.win ?? totalWin / bet`, `totalWin = session?.totalWin ?? totalWin`,
+  `win = data.win ?? totalWin / bet`, `totalWin = (session?.totalWin ?? totalWin) / bet`
+  (the platform's `totalWin` is money; the contract's is a multiplier),
   `stage = data.stage ?? action`, `data`, `vars = data.vars ?? {}`,
-  `nextActions`, `roundComplete = session ? !!session.completed : nextActions.length === 0`,
+  `nextActions`, `roundComplete = session ? session.completed === true : true`
+  (a completed round on every host still carries the NEXT round's entry
+  actions — `nextActions` is informational; no session ⇒ a single-action
+  round; the convention `host/slotPlay.ts` measured), `bet = session?.betAmount ?? request bet`
+  (Stake and Artube echo the round's bet; a `step` of an open round plays
+  at that bet, not the default),
   `spinsRemaining/spinsPlayed` from `session` (0 when none), `balance = balanceAfter`,
   `roundId`; `ack` → `playAck(raw)`. `BALANCE_UPDATE` events update
   `init.balance` in place. Unit-tested over the SDK's `devMode` memory
