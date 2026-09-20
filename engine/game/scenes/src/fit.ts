@@ -24,6 +24,12 @@ export interface Fit {
 
 export const ZERO_INSETS: Readonly<SafeArea> = Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 });
 
+/** The viewport minus `insets`, in pixels, never smaller than 1×1 — what the fit is into, and what orientation is measured on. */
+export const safeSize = (viewport: Size, insets: SafeArea = ZERO_INSETS): Size => ({
+  width: Math.max(1, viewport.width - insets.left - insets.right),
+  height: Math.max(1, viewport.height - insets.top - insets.bottom),
+});
+
 /**
  * `'contain'` (default) fits the whole design inside the viewport,
  * letterboxed; `'cover'` fills the viewport, cropping the design.
@@ -38,10 +44,7 @@ export function fitStage(
   mode: 'contain' | 'cover' = 'contain',
   insets: SafeArea = ZERO_INSETS,
 ): Fit {
-  const safe = {
-    width: Math.max(1, viewport.width - insets.left - insets.right),
-    height: Math.max(1, viewport.height - insets.top - insets.bottom),
-  };
+  const safe = safeSize(viewport, insets);
   const scaleX = safe.width / design.width;
   const scaleY = safe.height / design.height;
   const scale = mode === 'cover' ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);

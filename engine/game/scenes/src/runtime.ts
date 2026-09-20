@@ -44,6 +44,8 @@ declare module 'cordis' {
 
 export interface ScenesConfig {
   design: { width: number; height: number };
+  /** The design in portrait; the schema fills `{}` when unset, which reads as absent (the landscape design rotated). */
+  portrait?: Partial<{ width: number; height: number }>;
   mode?: 'contain' | 'cover';
   transition?: string;
   transitionMs?: number;
@@ -84,9 +86,14 @@ export function apply(ctx: Context, config: ScenesConfig): void {
       off(event: 'resize', fn: (width: number, height: number) => void): unknown;
     };
   };
+  const portrait = config.portrait;
   const scenes = createScenes({
     root: app.stage,
     design: config.design,
+    portrait:
+      portrait?.width && portrait.height
+        ? { width: portrait.width, height: portrait.height }
+        : undefined,
     mode: config.mode,
     transition: config.transition,
     transitionMs: config.transitionMs,

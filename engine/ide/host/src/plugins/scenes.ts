@@ -264,6 +264,36 @@ export function checkScenes(
           );
       }
     }
+    // The portrait block (spec §6): roots only, and each override checked
+    // as the node it lays over — MERGED with the node's props, since the
+    // rules read the whole dict (an image override that leaves `src` alone
+    // must not read as "image has no src"). A node broken on its own is
+    // reported again here; the `(portrait)` tag tells the two apart.
+    for (const [id, override] of Object.entries(doc.portrait?.nodes ?? {})) {
+      const node = doc.nodes.find((n) => n.id === id);
+      if (!node) {
+        out.push(
+          diagnostic(
+            'warning',
+            'scenes',
+            `${scene}/${id}`,
+            `portrait override for unknown node "${id}"`,
+            'name a top-level node of this scene',
+          ),
+        );
+        continue;
+      }
+      out.push(
+        ...checkNode(
+          'scenes',
+          `${scene}/${id} (portrait)`,
+          { type: node.type, props: { ...node.props, ...override } },
+          infos.get(node.type),
+          nodeTypes.length > 0,
+          hasFile,
+        ),
+      );
+    }
   }
 
   // ponytail: a DFS per `scene` node — O(n²) over a handful of documents.
@@ -318,13 +348,22 @@ export function checkScenes(
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** `{ id, nodes[] }` with every node `{ id, type, props?, children? }`, or the reason it is not. */
+/** `{ id, nodes[], portrait? }` with every node `{ id, type, props?, children? }`, or the reason it is not. */
 export function parseDoc(value: unknown): { doc?: SceneDoc; reason?: string } {
   if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.nodes)) {
     return { reason: 'a scene document is { id: string, nodes: [...] }' };
   }
   const nodes = parseNodes(value.nodes);
-  return typeof nodes === 'string' ? { reason: nodes } : { doc: { id: value.id, nodes } };
+  if (typeof nodes === 'string') return { reason: nodes };
+  const doc: SceneDoc = { id: value.id, nodes };
+  if (value.portrait !== undefined) {
+    const p = value.portrait;
+    if (!isRecord(p) || !isRecord(p.nodes) || !Object.values(p.nodes).every(isRecord)) {
+      return { reason: 'portrait is { nodes: { <node id>: { ...props } } }' };
+    }
+    doc.portrait = { nodes: p.nodes as Record<string, Record<string, unknown>> };
+  }
+  return { doc };
 }
 
 function parseNodes(list: unknown[]): SceneNode[] | string {
@@ -464,7 +503,9 @@ export function apply(ctx: Context): void {
         `set id: ${id}`,
       );
     }
-    const bytes = Buffer.from(yaml.dump({ id, nodes: doc.nodes }, { noRefs: true }));
+    const bytes = Buffer.from(
+      yaml.dump({ id, nodes: doc.nodes, ...(doc.portrait && { portrait: doc.portrait }) }, { noRefs: true }),
+    );
     if (relay(res, (await ctx.files.write(file(id), bytes)).diagnostics)) return;
     await refresh(false);
     res.json(state);

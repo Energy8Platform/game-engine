@@ -41,6 +41,22 @@ describe('scene contracts', () => {
     expect(response.nodeTypes[0].accept).toEqual(accept);
     expect(response.nodeTypes[0].assetProps).toEqual(['src']);
   });
+
+  it('a document may carry a `portrait` block: top-level ids to prop overrides, which round-trips as data', () => {
+    const doc: SceneDoc = {
+      id: 'base_game',
+      nodes: [
+        { id: 'logo', type: 'image', props: { src: 'assets/logo.png', pin: 'top-left' } },
+        { id: 'coin', type: 'image', props: { src: 'assets/coin.png' } },
+      ],
+      portrait: { nodes: { logo: { x: 0, y: 40, pin: 'top' }, coin: { visible: false } } },
+    };
+    expect(JSON.parse(JSON.stringify(doc))).toEqual(doc);
+    expect(doc.portrait?.nodes.coin.visible).toBe(false);
+    // The block is optional: a document without one is the same type.
+    const plain: SceneDoc = { id: 'intro', nodes: [] };
+    expect(plain.portrait).toBeUndefined();
+  });
 });
 
 describe('symbols contracts', () => {

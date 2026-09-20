@@ -184,6 +184,32 @@ describe('scenes row', () => {
     expect(resize).not.toHaveBeenCalled();
   });
 
+  it('a portrait viewport fits the rotated design by default, `portrait` when configured; orientation() says which', async () => {
+    const { ctx, listeners } = withScreen(288, 480);
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    const scenes = ctx.get('scenes')!;
+    // 480×288 rotated is 288×480: the viewport exactly, scale 1.
+    expect(scenes.container.scale.x).toBeCloseTo(1, 10);
+    expect(scenes.orientation()).toBe('portrait');
+    listeners.forEach((fn) => fn(480, 288));
+    await Promise.resolve();
+    expect(scenes.orientation()).toBe('landscape');
+    expect(scenes.container.scale.x).toBeCloseTo(1, 10);
+    await fiber.dispose();
+
+    const own = withScreen(288, 480);
+    const fiber2 = own.ctx.plugin(runtime, {
+      design,
+      portrait: { width: 144, height: 240 },
+      fetchFn: empty(),
+    });
+    await fiber2;
+    expect(own.ctx.get('scenes')!.container.scale.x).toBeCloseTo(2, 10);
+    expect(own.ctx.get('scenes')!.orientation()).toBe('portrait');
+    await fiber2.dispose();
+  });
+
   it('ready resolves after the GET has replaced', async () => {
     const { ctx, fiber } = boot();
     await fiber;

@@ -12,7 +12,10 @@
  *
  * A `pin` (COMMON) applies to a document's OWN top-level mount; an
  * embedded copy is laid out by its host — the safe rect is in the outer
- * root's coordinates, which a `scene` node's subtree does not share.
+ * root's coordinates, which a `scene` node's subtree does not share. The
+ * `portrait` variant (spec §6) is the same story: a document's top-level
+ * entries take `portrait.nodes[id]` while the safe rect is taller than
+ * wide (`applyVariant`), an embedded copy keeps its host's layout.
  *
  * Like `stage` before it, this is unit-testable end to end: `Container`,
  * `Sprite` and `Graphics` all build headlessly in plain Node.
@@ -27,7 +30,7 @@ import {
   type SceneDoc,
   type SceneNode,
 } from '@energy8engine/contracts';
-import { fitStage, type Fit, type Size } from './fit';
+import { fitStage, safeSize, type Fit, type Size } from './fit';
 import { createTransitions, cut, type TickerLike, type TransitionsService } from './transitions';
 import {
   COMMON,
@@ -43,6 +46,8 @@ export interface CreateScenesOptions {
   /** Parent to mount the runtime's container into — typically a renderer's `app.stage`. */
   root: Container;
   design: Size;
+  /** The design in portrait (a taller-than-wide safe rect); absent = `design` rotated. */
+  portrait?: Size;
   mode?: 'contain' | 'cover';
   /** Default transition id; `cut` when absent. */
   transition?: string;
@@ -108,18 +113,24 @@ export interface ScenesService {
   /**
    * Fits the design into the viewport minus `insets` (a shell's bar; see
    * `fitStage`) and re-places every top-level node with a `pin` against
-   * the new safe rect. Nothing else re-applies.
+   * the new safe rect. When the safe rect's orientation flips, every
+   * top-level entry with a `portrait` override takes (or drops) it —
+   * `applyVariant`; nothing else re-applies.
    */
   resize(viewportWidth: number, viewportHeight: number, insets?: SafeArea): Fit;
   /** The last `resize`'s fit; `null` before the first — pinned nodes sit at their bare x/y until then. */
   fit(): Fit | null;
+  /** The last `resize`'s verdict on the safe rect (`portrait` = taller than wide); `landscape` before the first. */
+  orientation(): Orientation;
   destroy(): void;
 }
+
+export type Orientation = 'landscape' | 'portrait';
 
 interface Entry {
   view: Container;
   node: SceneNode;
-  /** The node's own props, through the type's schema. */
+  /** The node's own props, through the type's schema — of the LAYERED dict (`rawOf`), not the document's alone. */
   props: Record<string, unknown>;
   type: NodeType;
   /** `<scene>/<node id>` — where a throwing `update` is reported. */
@@ -138,6 +149,12 @@ interface Entry {
    * bookkeeping — and nothing holds a destroyed entry alive.
    */
   live?: Record<string, unknown>;
+  /**
+   * The document's `portrait.nodes[id]` while it is APPLIED to this entry
+   * (portrait, and the override validated); a layer under `live`, so a
+   * `setProps` patch still wins. Top-level entries only, like `pin`.
+   */
+  variant?: Record<string, unknown>;
   /** `refresh()` already reported this entry once; suppresses repeats until the next remount rebuilds it. */
   failed?: boolean;
 }
@@ -186,6 +203,34 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     report(diagnostic('warning', 'scenes', where, message, fix));
   const nestedPin = (where: string, id: string) =>
     warn(where, `pin on a nested node "${id}" is ignored`, 'pin only top-level nodes');
+  /**
+   * `base ⊕ patch` through the type's schema AND the common pass — the two
+   * verdicts `setProps` asks before it touches a view — or `null` with a
+   * `portrait …` diagnostic that blames `blame` (the override, normally).
+   */
+  const tryVariant = (
+    where: string,
+    type: NodeType,
+    base: Record<string, unknown>,
+    patch: Record<string, unknown>,
+    blame = patch,
+  ): { raw: Record<string, unknown>; props: Record<string, unknown> } | null => {
+    const raw = { ...base, ...patch };
+    try {
+      const props = type.schema(raw as never) as Record<string, unknown>;
+      commonProps(raw, type);
+      return { raw, props };
+    } catch (err) {
+      error(where, `portrait ${offending(err, blame)}: ${why(err)}`, 'fix the override');
+      return null;
+    }
+  };
+  /** The values of the props the TYPE declares, as a comparable string — the schema passes common keys through, so `props` alone would say a moved node changed. */
+  const ownOf = (type: NodeType, props: Record<string, unknown>): string =>
+    JSON.stringify(Object.keys(type.schema.dict ?? {}).map((k) => props[k]));
+  /** The document's override for a top-level node, while portrait; `undefined` otherwise. */
+  const overrideOf = (sceneId: string, id: string): Record<string, unknown> | undefined =>
+    orientation === 'portrait' ? docs.get(sceneId)?.portrait?.nodes?.[id] : undefined;
   const container = new Container();
   container.label = 'scenes';
   options.root.addChild(container);
@@ -205,6 +250,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   let building: Mount | null = null;
   /** The last `resize`; what a top-level node's `pin` is placed against. */
   let lastFit: Fit | null = null;
+  let orientation: Orientation = 'landscape';
   let queue: Promise<void> = Promise.resolve();
 
   const mountCtx = (chain: string[]): Context =>
@@ -254,18 +300,27 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         where,
         `${node.type} "${node.id}" failed to mount: ${e instanceof Error ? e.message : String(e)}`,
       );
+    // A top-level node mounted while portrait takes its override now (a
+    // document shown after the flip is right from the start). Refused, it
+    // is the OVERRIDE's diagnostic and the node mounts with its document
+    // props — the same verdict `applyVariant` gives a flip. `node.props`
+    // itself is never written: `replace()`'s diff reads it.
+    let variant = top ? overrideOf(sceneId, node.id) : undefined;
+    const merged = variant && tryVariant(where, type, node.props, variant);
+    if (variant && !merged) variant = undefined;
+    const raw = merged ? merged.raw : node.props;
     let view: Container;
     let props: Record<string, unknown>;
     let masks = false;
     try {
-      props = type.schema(node.props) as Record<string, unknown>;
+      props = merged ? merged.props : (type.schema(node.props) as Record<string, unknown>);
       view = type.mount(props, mountCtx([...chain, sceneId]));
       // Inside the try: a common prop off its type (`x: 'abc'`) is this
       // node's failure, not the whole set's.
       // `mask` is a COMMON prop, read off the dict the pass itself applied
       // — the same one, STRIPPED of the `width`/`height` the type owns, so
       // a type whose own `width` is not a number never fails here.
-      masks = applyCommon(view, node.props, type, top ? lastFit : null).mask === true;
+      masks = applyCommon(view, raw, type, top ? lastFit : null).mask === true;
     } catch (e) {
       failed(e);
       return;
@@ -290,7 +345,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
       else parent.mask = view;
     }
-    const entry: Entry = { view, node, props, type, where, top };
+    const entry: Entry = { view, node, props, type, where, top, variant };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
     for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen, false);
@@ -299,12 +354,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     // carrying `width`/`height` gets the pass again now that there is
     // something to measure. Idempotent for a `Sprite`/`Graphics`, whose
     // bounds never depended on a child.
-    if (node.props?.width !== undefined || node.props?.height !== undefined) {
+    if (raw?.width !== undefined || raw?.height !== undefined) {
       // Same guard as the first pass: a throw down here is this node's
       // diagnostic, not the whole set's. It is already on screen, so the
       // node stays — only its size went unapplied.
       try {
-        applyCommon(view, node.props, type, top ? lastFit : null);
+        applyCommon(view, raw, type, top ? lastFit : null);
       } catch (e) {
         failed(e);
       }
@@ -335,37 +390,124 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     const view = new Container();
     view.label = id;
     const m: Mount = { view, nodes: new Map(), all: [], types: new Map(), missing: [] };
+    const doc = docs.get(id)!;
     building = m;
     try {
       const seen = new Set<string>();
-      for (const node of docs.get(id)!.nodes) mountNode(node, view, id, [], seen);
+      for (const node of doc.nodes) mountNode(node, view, id, [], seen);
     } finally {
       building = null;
     }
+    // Once per mount, whatever the orientation: the block names roots only.
+    for (const key of Object.keys(doc.portrait?.nodes ?? {}))
+      if (!doc.nodes.some((n) => n.id === key))
+        warn(
+          `${id}/${key}`,
+          `portrait override for unknown node "${key}"`,
+          'name a top-level node of this scene',
+        );
     mounted.set(id, m);
-    for (const e of m.all)
-      if (e.type.type === 'scene' && shownNested.has(e.props.scene as string))
-        e.view.visible = true;
+    showHosts(m);
     if (!visibleIds.includes(id)) return;
     const gap = vanished?.get(id);
     reportMissing(gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m);
   }
 
+  /** A nested scene `show()`n stays shown across a (re)mount of its host: the common pass put the document's `visible` back. */
+  const showHosts = (m: Mount) => {
+    for (const e of m.all)
+      if (e.type.type === 'scene' && shownNested.has(e.props.scene as string))
+        e.view.visible = true;
+  };
+
+  function unmountEntry(e: Entry): void {
+    // A FOREIGN parent survives this unmount (the runtime only detaches
+    // what it did not build): drop its `mask` before the masking view
+    // goes, or it keeps clipping against a destroyed one.
+    if (e.view.parent?.mask === e.view) e.view.parent.mask = null;
+    e.type.unmount?.(e.view);
+    e.view.parent?.removeChild(e.view);
+    if (OWN.has(e.type.type)) e.view.destroy({ children: false });
+  }
+
   function unmountTop(id: string): void {
     const m = mounted.get(id);
     if (!m) return;
-    for (const e of [...m.all].reverse()) {
-      // A FOREIGN parent survives this unmount (the runtime only detaches
-      // what it did not build): drop its `mask` before the masking view
-      // goes, or it keeps clipping against a destroyed one.
-      if (e.view.parent?.mask === e.view) e.view.parent.mask = null;
-      e.type.unmount?.(e.view);
-      e.view.parent?.removeChild(e.view);
-      if (OWN.has(e.type.type)) e.view.destroy({ children: false });
-    }
+    for (const e of [...m.all].reverse()) unmountEntry(e);
     m.view.parent?.removeChild(m.view);
     m.view.destroy({ children: false });
     mounted.delete(id);
+  }
+
+  /**
+   * ONE top-level node mounted again in place, for a type without
+   * `update` whose own props the variant changed: its subtree (children,
+   * an embedded copy — every entry whose view sits under it) is unmounted
+   * the way `unmountTop` does, `mountNode` rebuilds it from the document
+   * (reading the current orientation's override itself) and the new view
+   * goes back at the old child index — `remount`'s `wasAt` precedent, one
+   * level down. The entry is replaced in `nodes`/`all`; a live patch on
+   * the subtree goes with the old one, as with any remount.
+   */
+  function remountNode(m: Mount, sceneId: string, e: Entry): void {
+    const parent = e.view.parent;
+    if (!parent) return;
+    const at = parent.getChildIndex(e.view);
+    const under = (v: Container): boolean => {
+      for (let p = v.parent; p; p = p.parent) if (p === e.view) return true;
+      return false;
+    };
+    const gone = new Set(m.all.filter((x) => x === e || under(x.view)));
+    for (const x of [...gone].reverse()) unmountEntry(x);
+    m.all = m.all.filter((x) => !gone.has(x));
+    m.nodes.delete(e.node.id);
+    building = m;
+    try {
+      mountNode(e.node, parent, sceneId, [], new Set());
+    } finally {
+      building = null;
+    }
+    const fresh = m.nodes.get(e.node.id);
+    if (fresh) parent.setChildIndex(fresh.view, at);
+  }
+
+  /**
+   * The orientation flipped: every top-level entry with a `portrait`
+   * override takes it (or, on the way back, drops the one it holds) — the
+   * `setProps` machinery with the variant as a layer UNDER the live
+   * patches. Per entry: validate (schema + common pass) — a refusal is a
+   * diagnostic and the entry keeps what it has — then `update` + the
+   * common pass; a type without `update` gets the common pass alone when
+   * its own props did not change (a `container`, a `scene` host moved or
+   * hidden — its children keep their live patches), a remount otherwise.
+   * An entry with neither an override nor a held variant is not touched.
+   */
+  function applyVariant(): void {
+    for (const [id, m] of mounted)
+      for (const e of [...m.nodes.values()]) {
+        const next = overrideOf(id, e.node.id);
+        if (!next && !e.variant) continue;
+        // On the way back there is no override to blame: the live patch is what is left.
+        const blame = next ?? e.live ?? {};
+        const merged = tryVariant(e.where, e.type, e.node.props, { ...next, ...e.live }, blame);
+        if (!merged) continue;
+        if (!e.type.update && ownOf(e.type, merged.props) !== ownOf(e.type, e.props)) {
+          remountNode(m, id, e);
+          continue;
+        }
+        try {
+          e.type.update?.(e.view, merged.props, mountCtx([]));
+          applyCommon(e.view, merged.raw, e.type, lastFit);
+        } catch (err) {
+          error(e.where, `portrait ${offending(err, blame)}: ${why(err)}`, 'fix the override');
+          continue;
+        }
+        e.props = merged.props;
+        e.variant = next;
+        e.failed = false;
+      }
+    // The common pass (and a remount) put the document's `visible` back on a host: a nested scene `show()`n stays shown.
+    for (const m of mounted.values()) showHosts(m);
   }
 
   /** Unmounts and mounts `ids` again; a visible one stays visible. */
@@ -436,15 +578,20 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     if (!doc || seen.has(id)) return [];
     seen.add(id);
     const out = new Set<string>();
-    const walk = (nodes: SceneNode[]) => {
+    // Both layers: a root's portrait override may name another `src`, and
+    // it is loaded whatever the orientation (a flip must not wait on a load).
+    const walk = (nodes: SceneNode[], overrides?: Record<string, Record<string, unknown>>) => {
       for (const n of nodes) {
-        for (const p of nodeTypes.get(n.type)?.assets?.(n.props) ?? []) out.add(p);
+        const type = nodeTypes.get(n.type);
+        for (const p of type?.assets?.(n.props) ?? []) out.add(p);
+        const o = overrides?.[n.id];
+        if (o) for (const p of type?.assets?.({ ...n.props, ...o }) ?? []) out.add(p);
         if (n.type === 'scene' && typeof n.props.scene === 'string')
           for (const p of assetsOf(n.props.scene, seen)) out.add(p);
         walk(n.children ?? []);
       }
     };
-    walk(doc.nodes);
+    walk(doc.nodes, doc.portrait?.nodes);
     return [...out];
   }
 
@@ -475,9 +622,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     return [...mounted.values()].flatMap((m) => m.all.filter((e) => e.where === where));
   };
 
-  /** A node's document props with its live `setProps` patch on top — what the common pass reads. */
+  /** A node's document props, its applied portrait override over them, its live `setProps` patch on top — what the common pass reads. */
   const rawOf = (e: Entry): Record<string, unknown> =>
-    e.live ? { ...e.node.props, ...e.live } : e.node.props;
+    e.variant || e.live ? { ...e.node.props, ...e.variant, ...e.live } : e.node.props;
 
   /** Entries in visible top-level scenes whose `scene` node points at `id`. */
   const nestingEntries = (id: string): Entry[] =>
@@ -752,20 +899,29 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       return Schema.object({ ...COMMON.dict, ...(e.type.schema.dict ?? {}) });
     },
     resize(viewportWidth, viewportHeight, insets) {
-      const fit = fitStage(
-        { width: viewportWidth, height: viewportHeight },
-        options.design,
-        options.mode,
-        insets,
-      );
+      // Orientation is the SAFE rect's, in pixels, decided BEFORE the fit
+      // — the fit's design depends on it, so it cannot come from the fit.
+      const viewport = { width: viewportWidth, height: viewportHeight };
+      const safe = safeSize(viewport, insets);
+      const next: Orientation = safe.height > safe.width ? 'portrait' : 'landscape';
+      const design =
+        next === 'portrait'
+          ? (options.portrait ?? { width: options.design.height, height: options.design.width })
+          : options.design;
+      const fit = fitStage(viewport, design, options.mode, insets);
       container.scale.set(fit.scale);
       container.position.set(fit.x, fit.y);
       lastFit = fit;
+      if (next !== orientation) {
+        orientation = next;
+        applyVariant();
+      }
       placePinned();
       redraw();
       return fit;
     },
     fit: () => lastFit,
+    orientation: () => orientation,
     destroy() {
       offTypes();
       for (const id of [...mounted.keys()]) unmountTop(id);

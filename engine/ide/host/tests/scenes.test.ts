@@ -7,6 +7,7 @@ import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import type {
   NodeTypeInfo,
+  SceneDoc,
   SceneNode,
   ScenesResponse,
   ServerMessage,
@@ -47,9 +48,14 @@ const types: NodeTypeInfo[] = [
     assetProps: ['skeleton', 'atlas'],
   },
 ];
-const doc = (id: string, nodes: SceneNode[], file = `scenes/${id}.scene.yml`) => ({
+const doc = (
+  id: string,
+  nodes: SceneNode[],
+  file = `scenes/${id}.scene.yml`,
+  portrait?: SceneDoc['portrait'],
+) => ({
   file,
-  doc: { id, nodes },
+  doc: { id, nodes, ...(portrait && { portrait }) },
 });
 
 describe('checkScenes', () => {
@@ -420,6 +426,73 @@ describe('checkScenes', () => {
       expect.objectContaining({ severity: 'error', where: 'a/typo', message: expect.stringContaining('pin') }),
     ]);
   });
+  it('a `portrait` block: an unknown (or nested) id is a warning; each override is checked as the node, at `<where> (portrait)`', () => {
+    const out = checkScenes(
+      [
+        doc(
+          'a',
+          [
+            { id: 'bg', type: 'image', props: { src: 'assets/bg.png' } },
+            { id: 'logo', type: 'image', props: { src: 'assets/logo.png' } },
+            { id: 'tag', type: 'text', props: { text: 'hi' } },
+            {
+              id: 'wrap',
+              type: 'container',
+              props: {},
+              children: [{ id: 'kid', type: 'container', props: {} }],
+            },
+          ],
+          undefined,
+          {
+            nodes: {
+              // Fine: leaves `src` alone, moves the node.
+              bg: { x: 0, y: 40, pin: 'top' },
+              // A portrait src not in the project, and a common prop off its type.
+              logo: { src: 'assets/none.png', x: 'abc' },
+              // A cell binding is refused on a scene node, portrait or not.
+              tag: { text: '$cell.multiplier' },
+              ghost: { x: 1 },
+              kid: { x: 2 },
+            },
+          },
+        ),
+      ],
+      types,
+      (p) => p === 'assets/bg.png' || p === 'assets/logo.png',
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/logo (portrait)',
+        message: expect.stringContaining('$.x'),
+      }),
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/logo (portrait)',
+        message: 'image.src "assets/none.png" is not in the project',
+      }),
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/tag (portrait)',
+        message: expect.stringContaining('$cell.'),
+      }),
+      {
+        severity: 'warning',
+        plugin: 'scenes',
+        where: 'a/ghost',
+        message: 'portrait override for unknown node "ghost"',
+        fix: 'name a top-level node of this scene',
+      },
+      {
+        severity: 'warning',
+        plugin: 'scenes',
+        where: 'a/kid',
+        message: 'portrait override for unknown node "kid"',
+        fix: 'name a top-level node of this scene',
+      },
+    ]);
+  });
 });
 
 /** A fixture copied to a temp dir with the repo's packages linked in — see `runtime-assets.test.ts`'s `e8BaseWorkspace`. */
@@ -522,6 +595,27 @@ describe('/api/scenes', () => {
       400,
     );
     close();
+  });
+
+  it('PUT keeps a `portrait` block through the YAML; GET reads it back; a malformed one is refused', async () => {
+    const root = scenesWorkspace();
+    host = await createIdeHost({ root, port: 0 });
+    const nodes = [{ id: 'logo', type: 'container', props: { x: 5 } }];
+    const portrait = { nodes: { logo: { x: 0, y: 40, pin: 'top' } } };
+    const res = await send(host.url, '/api/scenes/base_game', 'PUT', { id: 'base_game', nodes, portrait });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ScenesResponse;
+    expect(body.scenes.find((s) => s.id === 'base_game')).toEqual({ id: 'base_game', nodes, portrait });
+    expect(readFileSync(join(root, 'scenes', 'base_game.scene.yml'), 'utf8')).toContain('portrait:');
+    const got = (await (await fetch(`${host.url}/api/scenes`)).json()) as ScenesResponse;
+    expect(got.scenes.find((s) => s.id === 'base_game')).toEqual({ id: 'base_game', nodes, portrait });
+    // Without the block the file has no `portrait:` key at all.
+    await send(host.url, '/api/scenes/base_game', 'PUT', { id: 'base_game', nodes });
+    expect(readFileSync(join(root, 'scenes', 'base_game.scene.yml'), 'utf8')).not.toContain('portrait');
+    for (const portrait of [[], { nodes: [] }, { nodes: { logo: 'x' } }, 'top']) {
+      const bad = await send(host.url, '/api/scenes/base_game', 'PUT', { id: 'base_game', nodes, portrait });
+      expect(bad.status).toBe(400);
+    }
   });
 
   it('POST creates scenes/<id>.scene.yml with nodes: []; refuses an existing id or a bad one', async () => {

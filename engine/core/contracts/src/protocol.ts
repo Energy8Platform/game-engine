@@ -300,6 +300,14 @@ export interface SceneNode {
 export interface SceneDoc {
   id: string;
   nodes: SceneNode[];
+  /**
+   * The portrait variant (spec §6): per TOP-LEVEL node id, the props the
+   * runtime lays over the node's own while the safe rect is taller than
+   * wide — any prop, the type's own or a common one (`x`, `pin`,
+   * `visible`, …). A nested node cannot be overridden; an id that is not a
+   * root of `nodes` is a warning.
+   */
+  portrait?: { nodes: Record<string, Record<string, unknown>> };
 }
 
 /** Which files a node type takes, and which single prop the dropped/picked path lands in. */
