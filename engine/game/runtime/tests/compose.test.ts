@@ -398,6 +398,46 @@ describe('createGame — choosing one provider per seam', () => {
     expect(game.diagnostics).toEqual([]);
   });
 
+  it("e8-base's two session rows, buildTarget 'platform': sessionsdk1 composes, sessionhost1 never applies", async () => {
+    // The real bundle's pair (`e8.bundle.yml`), as fixture rows whose seam
+    // declarations mirror each package's `e8.seam` (`helpers.ts`).
+    // `renderer1` only keeps the required seam satisfied, so an empty
+    // diagnostics list means "nothing went wrong" rather than "one
+    // unrelated seam complaint".
+    const applied: string[] = [];
+
+    game = await createGame({
+      buildTarget: 'platform',
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1'), row('sessionhost1'), row('sessionsdk1')],
+          diagnostics: [],
+        }),
+        importModule: recordingHalf(applied),
+      },
+    });
+
+    expect(applied).toEqual(['renderer1', 'sessionsdk1']);
+    expect(game.diagnostics).toEqual([]);
+  });
+
+  it("e8-base's two session rows, no buildTarget: sessionhost1 composes, sessionsdk1 never applies", async () => {
+    const applied: string[] = [];
+
+    game = await createGame({
+      loader: {
+        fetchFn: fakeFetch({
+          rows: [row('renderer1'), row('sessionhost1'), row('sessionsdk1')],
+          diagnostics: [],
+        }),
+        importModule: recordingHalf(applied),
+      },
+    });
+
+    expect(applied).toEqual(['renderer1', 'sessionhost1']);
+    expect(game.diagnostics).toEqual([]);
+  });
+
   it('a row that declares no seam always composes — most rows are candidates for nothing', async () => {
     const applied: string[] = [];
 
@@ -669,10 +709,13 @@ describe('createGame — the diagnostics service', () => {
 
   /**
    * The `session` seam (spec §3): `sessionhost1` is listed right after
-   * `renderer1`, same fixture-free pin as the test above — read the real
-   * file, not a copy of it.
+   * `renderer1`, `sessionsdk1` right after it, both ahead of `scenes1` —
+   * same fixture-free pin as the test above: read the real file, not a
+   * copy of it. Adjacent on purpose: the winner takes the losing
+   * candidate's slot (see `createGame`), so where the pair sits is where
+   * the session goes, whichever one wins.
    */
-  it('e8-base places session-host after the renderer, ahead of scenes', () => {
+  it('e8-base places session-host then session-sdk after the renderer, ahead of scenes', () => {
     const text = readFileSync(
       join(__dirname, '..', '..', '..', 'bundles', 'e8-base', 'e8.bundle.yml'),
       'utf8',
@@ -680,7 +723,8 @@ describe('createGame — the diagnostics service', () => {
     const ids = [...text.matchAll(/^\s*-\s*id:\s*(\S+)/gm)].map((m) => m[1]);
 
     expect(ids.indexOf('sessionhost1')).toBeGreaterThan(ids.indexOf('renderer1'));
-    expect(ids.indexOf('sessionhost1')).toBeLessThan(ids.indexOf('scenes1'));
+    expect(ids.indexOf('sessionsdk1')).toBe(ids.indexOf('sessionhost1') + 1);
+    expect(ids.indexOf('sessionsdk1')).toBeLessThan(ids.indexOf('scenes1'));
   });
 
   /** `diagnostics1` resolves to the real runtime half; anything else is a bare no-op row, unless named otherwise below. */
