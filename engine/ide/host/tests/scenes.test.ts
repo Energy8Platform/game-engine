@@ -383,6 +383,35 @@ describe('checkScenes', () => {
     );
     expect(out.map((d) => d.where).sort()).toEqual(['a/wrap', 'a/wrap']);
   });
+  it('`pin` on a nested node is a warning; on a top-level node it passes; an unknown pin is a props error', () => {
+    const out = checkScenes(
+      [
+        doc('a', [
+          { id: 'top', type: 'container', props: { pin: 'bottom' } },
+          {
+            id: 'wrap',
+            type: 'container',
+            props: {},
+            children: [{ id: 'kid', type: 'container', props: { pin: 'bottom', x: 5 } }],
+          },
+          { id: 'bad', type: 'container', props: { pin: 'middle' } },
+        ]),
+      ],
+      types,
+      () => true,
+      false,
+    );
+    expect(out).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'scenes',
+        where: 'a/kid',
+        message: 'pin on a nested node "kid" is ignored',
+        fix: 'pin only top-level nodes',
+      },
+      expect.objectContaining({ severity: 'error', where: 'a/bad', message: expect.stringContaining('pin') }),
+    ]);
+  });
 });
 
 /** A fixture copied to a temp dir with the repo's packages linked in — see `runtime-assets.test.ts`'s `e8BaseWorkspace`. */

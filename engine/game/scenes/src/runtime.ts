@@ -19,7 +19,12 @@
  */
 import type { Context } from 'cordis';
 import { Assets, type Container } from 'pixi.js';
-import { diagnostic, type Diagnostic, type ScenesResponse } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type Diagnostic,
+  type SafeArea,
+  type ScenesResponse,
+} from '@energy8engine/contracts';
 import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import type { PixiRenderer } from '@energy8engine/renderer-pixi';
 import { container, image, scene, shape, text, type AssetLoader } from './builtin';
@@ -122,14 +127,25 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   // corner. Optional chaining throughout — a headless composition's
   // `renderer` (and a test's fake app) has neither `screen` nor an
   // event-emitting `renderer`, and that is a game with nothing to fit.
+  //
+  // The fit is into the viewport MINUS the safe area: an explicit
+  // `safeArea` service (the editor page's preset band, a notch) wins over
+  // the shell's own. Read at EVERY call, never cached — the shell's bar
+  // height is measured and moves with its layout, so each `resize` must
+  // see the current value. `inject(['shell'])` re-fits when the shell row
+  // provides after this one, so row order does not matter.
+  const insets = (): SafeArea | undefined =>
+    (ctx.reflect.get('safeArea', false) as SafeArea | undefined) ??
+    (ctx.reflect.get('shell', false) as { safeArea?: SafeArea } | undefined)?.safeArea;
   const fit = (width = app.screen?.width, height = app.screen?.height) => {
-    if (width && height) scenes.resize(width, height);
+    if (width && height) scenes.resize(width, height, insets());
   };
   fit();
   ctx.effect(() => {
     app.renderer?.on('resize', fit);
     return () => void app.renderer?.off('resize', fit);
   }, 'scenes:fit');
+  ctx.inject(['shell'], () => fit());
 
   // A tap anywhere on the canvas, in DESIGN units, on the flow bus — what
   // a `wait { event: ui.tap }` holds an intro card for. Lenient by design:

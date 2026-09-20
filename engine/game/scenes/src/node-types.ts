@@ -8,10 +8,12 @@ import { Color, type Container } from 'pixi.js';
 import type Schema from 'schemastery';
 import type { NodeTypeAccept } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
-import { COLOUR, COMMON } from './common-schema';
+import { COLOUR, COMMON, PINS } from './common-schema';
+import type { Fit } from './fit';
 
-export { COLOUR, COMMON, cellField, emptyProp, isCellBinding } from './common-schema';
+export { COLOUR, COMMON, PINS, cellField, emptyProp, isCellBinding } from './common-schema';
 export type { NodeTypeAccept };
+export type { Pin } from './common-schema';
 
 declare global {
   namespace Schemastery {
@@ -115,6 +117,14 @@ export function commonProps(
   };
 }
 
+/** The point of the safe rect a `pin` names: its corners, edge midpoints, or centre. */
+export function pinPoint(pin: string, v: Fit['viewport']): { x: number; y: number } {
+  return {
+    x: pin.endsWith('left') ? v.left : pin.endsWith('right') ? v.right : (v.left + v.right) / 2,
+    y: pin.startsWith('top') ? v.top : pin.startsWith('bottom') ? v.bottom : (v.top + v.bottom) / 2,
+  };
+}
+
 /**
  * Applies `COMMON` (defaults filled in) to a view. The optional props are
  * applied only when actually set: `width`/`height` AFTER `scale`, because
@@ -126,6 +136,12 @@ export function commonProps(
  * which of `width`/`height` are the TYPE's (`commonOf`), and those the
  * common pass skips.
  *
+ * `fit` is the scenes runtime's last `resize`, for a TOP-LEVEL node: with
+ * one, a non-empty `pin` makes `x`/`y` offsets from that point of the
+ * safe rect (`pinPoint`). Without one — before the first resize, a
+ * nested node, a symbol's state — placement is absolute and `pin` is
+ * inert; the caller is the one that knows which it is.
+ *
  * Returns the common dict it applied — `mask` is the runtime's to act on,
  * and reading it here is reading the values that actually validated,
  * stripping included.
@@ -134,11 +150,13 @@ export function applyCommon(
   view: Container,
   props: Record<string, unknown>,
   type?: NodeType<any>,
+  fit?: Fit | null,
 ): Common {
   // Validated (and the colour parsed) BEFORE the first assignment: a
   // throw halfway through would otherwise leave the view half-moved.
   const { common: c, tint } = commonProps(props, type);
-  view.position.set(c.x as number, c.y as number);
+  const at = fit && c.pin ? pinPoint(c.pin as string, fit.viewport) : { x: 0, y: 0 };
+  view.position.set(at.x + (c.x as number), at.y + (c.y as number));
   view.scale.set(c.scale as number);
   if (typeof c.width === 'number') view.width = c.width;
   if (typeof c.height === 'number') view.height = c.height;

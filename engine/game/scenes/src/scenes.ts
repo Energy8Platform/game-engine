@@ -19,6 +19,7 @@ import Schema from 'schemastery';
 import {
   diagnostic,
   type Diagnostic,
+  type SafeArea,
   type SceneDoc,
   type SceneNode,
 } from '@energy8engine/contracts';
@@ -99,7 +100,14 @@ export interface ScenesService {
    * runtime half (`./runtime`) is what defers it.
    */
   ready: Promise<void>;
-  resize(viewportWidth: number, viewportHeight: number): Fit;
+  /**
+   * Fits the design into the viewport minus `insets` (a shell's bar; see
+   * `fitStage`) and re-places every top-level node with a `pin` against
+   * the new safe rect. Nothing else re-applies.
+   */
+  resize(viewportWidth: number, viewportHeight: number, insets?: SafeArea): Fit;
+  /** The last `resize`'s fit; `null` before the first — pinned nodes sit at their bare x/y until then. */
+  fit(): Fit | null;
   destroy(): void;
 }
 
@@ -111,6 +119,12 @@ interface Entry {
   type: NodeType;
   /** `<scene>/<node id>` — where a throwing `update` is reported. */
   where: string;
+  /**
+   * Mounted straight under its document's root container (`mountTop`'s or
+   * `mountDoc`'s), not under another node — the only place a `pin` means
+   * anything, since the safe rect is in the root's coordinates.
+   */
+  top: boolean;
   /**
    * What `setProps` patched on top of the node's document props, for this
    * mount only. It lives on the ENTRY rather than in a side map keyed by
@@ -162,6 +176,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   const { nodeTypes, loader, report = () => {} } = options;
   const error = (where: string, message: string, fix?: string) =>
     report(diagnostic('error', 'scenes', where, message, fix));
+  const warn = (where: string, message: string, fix?: string) =>
+    report(diagnostic('warning', 'scenes', where, message, fix));
+  const nestedPin = (where: string, id: string) =>
+    warn(where, `pin on a nested node "${id}" is ignored`, 'pin only top-level nodes');
   const container = new Container();
   container.label = 'scenes';
   options.root.addChild(container);
@@ -179,6 +197,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   const loaded = new Set<string>();
   /** The top-level mount under construction — nested `mountDoc` calls file their entries here. */
   let building: Mount | null = null;
+  /** The last `resize`; what a top-level node's `pin` is placed against. */
+  let lastFit: Fit | null = null;
   let queue: Promise<void> = Promise.resolve();
 
   const mountCtx = (chain: string[]): Context =>
@@ -204,6 +224,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     sceneId: string,
     chain: string[],
     seen: Set<string>,
+    /** `parent` is the document's root container — `false` for a node's children (the one recursive call below). */
+    top = true,
   ): void {
     const where = `${sceneId}/${node.id}`;
     if (seen.has(node.id)) {
@@ -237,11 +259,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // `mask` is a COMMON prop, read off the dict the pass itself applied
       // — the same one, STRIPPED of the `width`/`height` the type owns, so
       // a type whose own `width` is not a number never fails here.
-      masks = applyCommon(view, node.props, type).mask === true;
+      masks = applyCommon(view, node.props, type, top ? lastFit : null).mask === true;
     } catch (e) {
       failed(e);
       return;
     }
+    if (!top && node.props?.pin) nestedPin(where, node.id);
     view.label = node.id;
     parent.addChild(view);
     // After `addChild`: pixi wants the mask in the same tree it masks.
@@ -257,10 +280,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
       else parent.mask = view;
     }
-    const entry: Entry = { view, node, props, type, where };
+    const entry: Entry = { view, node, props, type, where, top };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
-    for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen);
+    for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen, false);
     // A `container`'s local bounds ARE its children's: the pass above ran
     // before they mounted, read 0, and left `scale` at 1 — so a node
     // carrying `width`/`height` gets the pass again now that there is
@@ -271,7 +294,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // diagnostic, not the whole set's. It is already on screen, so the
       // node stays — only its size went unapplied.
       try {
-        applyCommon(view, node.props, type);
+        applyCommon(view, node.props, type, top ? lastFit : null);
       } catch (e) {
         failed(e);
       }
@@ -521,10 +544,19 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   /** A nested host keeps its own common props (alpha above all) once a transition is over. */
   const settleHosts = (hosts: Entry[], visible: boolean) => {
     for (const e of hosts) {
-      applyCommon(e.view, rawOf(e), e.type);
+      applyCommon(e.view, rawOf(e), e.type, e.top ? lastFit : null);
       e.view.visible = visible;
     }
   };
+
+  /** Every top-level entry with a `pin`, placed again against `lastFit` — the one thing a resize re-applies. */
+  function placePinned(): void {
+    for (const m of mounted.values())
+      for (const e of m.all) {
+        const raw = rawOf(e);
+        if (e.top && raw.pin) applyCommon(e.view, raw, e.type, lastFit);
+      }
+  }
 
   async function show(id: string, opts?: { transition?: string }): Promise<void> {
     if (!docs.has(id)) return notDeclared(id);
@@ -671,7 +703,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       for (const { e, merged, props } of plan) {
         try {
           e.type.update?.(e.view, props, mountCtx([]));
-          applyCommon(e.view, merged, e.type);
+          applyCommon(e.view, merged, e.type, e.top ? lastFit : null);
+          if (!e.top && patch.pin) nestedPin(e.where, e.node.id);
         } catch (err) {
           // Not a validation failure any more (both passes said yes): a type
           // whose `update` throws for a reason of its own. Reported the same
@@ -699,16 +732,21 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       if (!e) return undefined;
       return Schema.object({ ...COMMON.dict, ...(e.type.schema.dict ?? {}) });
     },
-    resize(viewportWidth, viewportHeight) {
+    resize(viewportWidth, viewportHeight, insets) {
       const fit = fitStage(
         { width: viewportWidth, height: viewportHeight },
         options.design,
         options.mode,
+        insets,
       );
       container.scale.set(fit.scale);
       container.position.set(fit.x, fit.y);
+      lastFit = fit;
+      placePinned();
+      redraw();
       return fit;
     },
+    fit: () => lastFit,
     destroy() {
       offTypes();
       for (const id of [...mounted.keys()]) unmountTop(id);

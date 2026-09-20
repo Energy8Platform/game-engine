@@ -82,6 +82,24 @@ export const cellField = (binding: string): string => binding.slice(CELL.length)
 export const emptyProp = (type?: string): string | number | boolean =>
   type === 'number' ? 0 : type === 'boolean' ? false : '';
 
+/**
+ * The nine points of the safe rect a node can `pin` to. Lives here (not
+ * in `node-types`, where `pinPoint` reads it) because the schema below
+ * needs the list and this module must stay pixi-free.
+ */
+export const PINS = [
+  'top-left',
+  'top',
+  'top-right',
+  'left',
+  'center',
+  'right',
+  'bottom-left',
+  'bottom',
+  'bottom-right',
+] as const;
+export type Pin = (typeof PINS)[number];
+
 export const COMMON = Schema.object({
   x: Schema.number().default(0).description('x, design px'),
   y: Schema.number().default(0).description('y, design px'),
@@ -96,4 +114,10 @@ export const COMMON = Schema.object({
   anchorX: Schema.number().description('overrides anchor on x'),
   anchorY: Schema.number().description('overrides anchor on y'),
   mask: Schema.boolean().default(false).description('masks the parent with this node'),
+  // A union of literals, not a transform: it survives the JSON round-trip
+  // to the IDE (see `COLOUR` above) and the Properties form draws it as a
+  // select.
+  pin: Schema.union(['', ...PINS])
+    .default('')
+    .description("anchors x/y to this point of the safe rect (x/y become offsets); '' = absolute"),
 });

@@ -8,3 +8,4 @@ export * from './session';
 export * from './spin';
 export * from './spin-schema';
 export * from './project';
+export * from './layout';

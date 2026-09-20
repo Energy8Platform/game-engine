@@ -104,10 +104,25 @@ export function checkNode(
   hasFile: (path: string) => boolean,
   /** `$cell.<field>` props are accepted — only a `symbols.yml` state has a cell to read them from. */
   cellBindings = false,
+  /** The node is a child of another (below the scene root), where the runtime ignores a `pin`. */
+  nested = false,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const err = (message: string, fix?: string) =>
     out.push(diagnostic('error', plugin, where, message, fix));
+  // The same warning the scenes runtime raises at mount (`scenes.ts`'s
+  // `nestedPin`): a pin measures from the safe rect in the ROOT's
+  // coordinates, which a child does not share.
+  if (nested && node.props?.pin)
+    out.push(
+      diagnostic(
+        'warning',
+        plugin,
+        where,
+        `pin on a nested node "${where.slice(where.lastIndexOf('/') + 1)}" is ignored`,
+        'pin only top-level nodes',
+      ),
+    );
   const schema = info?.schema;
   // Populated below when there's a schema to rehydrate; read again by the
   // `assetProps` loop past the end of this branch, so a REQUIRED asset prop
@@ -226,7 +241,17 @@ export function checkScenes(
       seen.add(node.id);
       if (node.type === 'reels') reelsNodes.push(where);
       out.push(
-        ...checkNode('scenes', where, node, infos.get(node.type), nodeTypes.length > 0, hasFile),
+        ...checkNode(
+          'scenes',
+          where,
+          node,
+          infos.get(node.type),
+          nodeTypes.length > 0,
+          hasFile,
+          false,
+          // `walk` flattens the tree; the root list itself says which nodes are top-level.
+          !doc.nodes.includes(node),
+        ),
       );
       if (node.type === 'scene' && typeof node.props.scene === 'string') {
         if (ids.has(node.props.scene)) targets.add(node.props.scene);

@@ -95,6 +95,65 @@ describe('scenes row', () => {
     expect(listeners.size).toBe(0);
   });
 
+  /** A renderer with a screen and a resize emitter, as the fit tests need. */
+  const withScreen = (width: number, height: number) => {
+    const ctx = new Context();
+    const listeners = new Set<(w: number, h: number) => void>();
+    const app = {
+      stage: new Container(),
+      ticker: null,
+      screen: { width, height },
+      renderer: {
+        on: (_e: string, fn: (w: number, h: number) => void) => void listeners.add(fn),
+        off: (_e: string, fn: (w: number, h: number) => void) => void listeners.delete(fn),
+      },
+    };
+    ctx.provide('renderer', { app });
+    return { ctx, app, listeners };
+  };
+  const design = { width: 480, height: 288 };
+  const empty = () => fetchOk({ scenes: [], diagnostics: [], nodeTypes: [] });
+
+  it('fits into the viewport minus the shell\'s safe area, re-read on every resize', async () => {
+    const { ctx, listeners } = withScreen(480, 288);
+    const safeArea = { top: 0, right: 0, bottom: 100, left: 0 };
+    ctx.provide('shell', { safeArea });
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    const root = ctx.get('scenes')!.container;
+    expect(root.scale.x).toBeCloseTo(188 / 288, 10);
+    // The bar's height is measured: a layout change moves it, and the next resize reads the new value.
+    safeArea.bottom = 50;
+    listeners.forEach((fn) => fn(480, 288));
+    expect(root.scale.x).toBeCloseTo(238 / 288, 10);
+    await fiber.dispose();
+  });
+
+  it('a `safeArea` service wins over the shell\'s', async () => {
+    const { ctx } = withScreen(480, 288);
+    ctx.provide('shell', { safeArea: { top: 0, right: 0, bottom: 100, left: 0 } });
+    ctx.provide('safeArea', { top: 0, right: 0, bottom: 20, left: 0 });
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    expect(ctx.get('scenes')!.container.scale.x).toBeCloseTo(268 / 288, 10);
+    await fiber.dispose();
+  });
+
+  it('the fit re-runs when `shell` is provided AFTER the scenes row', async () => {
+    const { ctx } = withScreen(480, 288);
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    const scenes = ctx.get('scenes')!;
+    expect(scenes.container.scale.x).toBeCloseTo(1, 10);
+    const resize = vi.spyOn(scenes, 'resize');
+    const safeArea = { top: 0, right: 0, bottom: 100, left: 0 };
+    ctx.provide('shell', { safeArea });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(resize).toHaveBeenCalledWith(480, 288, safeArea);
+    expect(scenes.container.scale.x).toBeCloseTo(188 / 288, 10);
+    await fiber.dispose();
+  });
+
   it('ready resolves after the GET has replaced', async () => {
     const { ctx, fiber } = boot();
     await fiber;
