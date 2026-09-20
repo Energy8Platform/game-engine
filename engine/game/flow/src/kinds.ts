@@ -108,6 +108,15 @@ const asNumber = (v: unknown): number =>
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** `v` for a diagnostic: JSON where JSON can (`"Bonus"`, `null`, `{…}`), `String()` where it cannot (`undefined`, a cyclic object). */
+const quote = (v: unknown): string => {
+  try {
+    return JSON.stringify(v) ?? String(v);
+  } catch {
+    return String(v);
+  }
+};
+
 const none = Schema.object({});
 
 interface MechanicsLike {
@@ -224,11 +233,11 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
   outs: ['result', 'failed'],
   async run(p, { ctx, vars, report }) {
     const action = resolve(p.action, vars);
-    if (action == null || action === '') {
+    if (typeof action !== 'string' || action === '') {
       report(`'spin' has no action to send (resolved from '${p.action}')`);
       return { out: 'failed', vars: { error: "'spin' has no action" } };
     }
-    const request: PlayRequest = { action: action as string };
+    const request: PlayRequest = { action };
     applyBetLevel(p.betLevel, vars, request, report);
     return playThrough(ctx, request, report);
   },
@@ -267,11 +276,11 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
       return { out: 'failed', vars: { error: "'step' has no roundId" } };
     }
     const action = resolve(p.action, vars);
-    if (action == null || action === '') {
+    if (typeof action !== 'string' || action === '') {
       report(`'step' has no action to send (resolved from '${p.action}')`);
       return { out: 'failed', vars: { error: "'step' has no action" } };
     }
-    const request: PlayRequest = { action: action as string, roundId: roundId as string };
+    const request: PlayRequest = { action, roundId: roundId as string };
     return playThrough(ctx, request, report);
   },
 };
@@ -608,8 +617,9 @@ const shell: FlowNodeKind<ShellProps> = {
     /** The prop's value, resolved; `undefined` for an untouched (`''`) prop. */
     const value = (prop: keyof ShellProps): unknown =>
       p[prop] === '' ? undefined : resolve(p[prop], vars);
-    const bad = (prop: keyof ShellProps, what: string) =>
-      report(`shell: ${prop} "${p[prop]}" is not ${what}`);
+    /** A refused value, as resolved AND as written — `null (from "$result.balance")` tells a missing var from a wrong one. */
+    const bad = (prop: keyof ShellProps, v: unknown, what: string) =>
+      report(`shell: ${prop} ${quote(v)} (from "${p[prop]}") is not ${what}`);
     /** One setter throwing is reported; the props after it still apply. */
     const apply = (prop: keyof ShellProps, set: () => void) => {
       try {
@@ -622,13 +632,13 @@ const shell: FlowNodeKind<ShellProps> = {
       const v = value(prop);
       if (v === undefined) return;
       const n = asNumber(v);
-      if (Number.isNaN(n)) bad(prop, 'a number');
+      if (Number.isNaN(n)) bad(prop, v, 'a number');
       else apply(prop, () => set(n));
     };
     const flag = (prop: keyof ShellProps, set: (b: boolean) => void) => {
       const v = value(prop);
       if (v === undefined) return;
-      if (v !== true && v !== false && v !== 'true' && v !== 'false') bad(prop, 'a boolean');
+      if (v !== true && v !== false && v !== 'true' && v !== 'false') bad(prop, v, 'a boolean');
       else apply(prop, () => set(v === true || v === 'true'));
     };
 
@@ -638,7 +648,7 @@ const shell: FlowNodeKind<ShellProps> = {
     const mode = value('mode');
     if (mode !== undefined) {
       if (typeof mode === 'string' && SHELL_MODES.includes(mode)) apply('mode', () => shell.setMode(mode));
-      else bad('mode', `a mode (${SHELL_MODES.join('|')})`);
+      else bad('mode', mode, `a mode (${SHELL_MODES.join('|')})`);
     }
     flag('busy', (b) => shell.setBusy(b));
     num('turbo', (n) => shell.setTurbo(n));
@@ -651,7 +661,7 @@ const shell: FlowNodeKind<ShellProps> = {
       } else if (!Number.isNaN(n)) {
         apply('freeSpins', () => shell.setFreeSpins({ total: n, totalWin: 0 }));
       } else {
-        bad('freeSpins', 'a number or a free-spins object');
+        bad('freeSpins', freeSpins, 'a number or a free-spins object');
       }
     }
     const bonus = value('bonus');
@@ -659,7 +669,7 @@ const shell: FlowNodeKind<ShellProps> = {
       if (isObject(bonus)) {
         apply('bonus', () => shell.setBonus(bonus as { label: string; value: string; totalWin: number }));
       } else {
-        bad('bonus', 'a bonus object');
+        bad('bonus', bonus, 'a bonus object');
       }
     }
     const autoplay = value('autoplay');
@@ -675,7 +685,7 @@ const shell: FlowNodeKind<ShellProps> = {
       apply('autoplay', () => shell.setAutoplay({ active: false, remaining: 0 }));
     } else if (autoplay !== undefined) {
       const n = asNumber(autoplay);
-      if (Number.isNaN(n)) bad('autoplay', "a number, 'tick' or 'stop'");
+      if (Number.isNaN(n)) bad('autoplay', autoplay, "a number, 'tick' or 'stop'");
       else apply('autoplay', () => shell.setAutoplay({ active: n > 0, remaining: n }));
     }
     return { out: 'next' };

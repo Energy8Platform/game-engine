@@ -190,6 +190,22 @@ describe('built-in kinds', () => {
     expect(session.play).toHaveBeenCalledTimes(2);
   });
 
+  it('spin: a `$path` action that resolves to a non-string (a number, an object) is refused the same way — never on the wire', async () => {
+    const session = fakeSession();
+    const { rc } = runCtx({ session }, { n: 5, chosen: { action: 'gamble' } });
+    expect(await kind('spin').run!(spinProps({ action: '$n' }), rc)).toEqual({
+      out: 'failed',
+      vars: { error: "'spin' has no action" },
+    });
+    expect(rc.report).toHaveBeenLastCalledWith("'spin' has no action to send (resolved from '$n')");
+    expect(await kind('spin').run!(spinProps({ action: '$chosen' }), rc)).toEqual({
+      out: 'failed',
+      vars: { error: "'spin' has no action" },
+    });
+    expect(rc.report).toHaveBeenLastCalledWith("'spin' has no action to send (resolved from '$chosen')");
+    expect(session.play).not.toHaveBeenCalled();
+  });
+
   it("spin: a play without a result leaves by failed with the diagnostics joined, each re-reported with its severity; none at all is 'no result'", async () => {
     const session = fakeSession({
       diagnostics: [
@@ -259,6 +275,14 @@ describe('built-in kinds', () => {
     expect(rc2.report).toHaveBeenCalledTimes(1);
     expect(session.play).not.toHaveBeenCalled();
     expect(out2).toEqual({ out: 'failed', vars: { error: "'step' has no action" } });
+  });
+
+  it('step: a `$path` action that resolves to a non-string is refused, same as spin — no play is made', async () => {
+    const session = fakeSession();
+    const { rc } = runCtx({ session }, { result: { roundId: 'r-1', nextActions: [{ id: 'free_spin' }] } });
+    expect(await kind('step').run!(stepProps(), rc)).toEqual({ out: 'failed', vars: { error: "'step' has no action" } });
+    expect(rc.report).toHaveBeenCalledWith("'step' has no action to send (resolved from '$result.nextActions.0')");
+    expect(session.play).not.toHaveBeenCalled();
   });
 
   it('step: no session row reports and leaves by failed, same as spin', async () => {
@@ -604,15 +628,16 @@ describe('built-in kinds', () => {
       expect(rc.report).not.toHaveBeenCalled();
     });
 
-    it('a NaN (literal or resolved) reports `shell: <prop> "<raw>" is not a number`, skips that prop, and the rest still apply', async () => {
+    it('a NaN (literal or resolved) reports `shell: <prop> <resolved> (from "<raw>") is not a number`, skips that prop, and the rest still apply', async () => {
       const shell = fakeShell();
       const { rc } = runCtx({ shell }, { nope: 'abc' });
       expect(await kind('shell').run!(shellProps({ balance: 'abc', win: '$nope', bet: '2', turbo: '$missing' }), rc)).toEqual({
         out: 'next',
       });
-      expect(rc.report).toHaveBeenCalledWith('shell: balance "abc" is not a number');
-      expect(rc.report).toHaveBeenCalledWith('shell: win "$nope" is not a number');
-      expect(rc.report).toHaveBeenCalledWith('shell: turbo "$missing" is not a number');
+      expect(rc.report).toHaveBeenCalledWith('shell: balance "abc" (from "abc") is not a number');
+      expect(rc.report).toHaveBeenCalledWith('shell: win "abc" (from "$nope") is not a number');
+      // A missing var reads as `null` — told apart from a var holding the wrong thing.
+      expect(rc.report).toHaveBeenCalledWith('shell: turbo null (from "$missing") is not a number');
       expect(setters(shell)).toEqual(['setBet']);
       expect(shell.setBet).toHaveBeenCalledWith(2);
     });
@@ -636,9 +661,9 @@ describe('built-in kinds', () => {
 
       const { rc: rc3 } = runCtx({ shell }, { m: 'nope', b: 1 });
       await kind('shell').run!({ ...shellProps(), mode: '$m', busy: '$b', buyBonusEnabled: '$missing' } as never, rc3);
-      expect(rc3.report).toHaveBeenCalledWith('shell: mode "$m" is not a mode (base|bonus|freeSpins|replay)');
-      expect(rc3.report).toHaveBeenCalledWith('shell: busy "$b" is not a boolean');
-      expect(rc3.report).toHaveBeenCalledWith('shell: buyBonusEnabled "$missing" is not a boolean');
+      expect(rc3.report).toHaveBeenCalledWith('shell: mode "nope" (from "$m") is not a mode (base|bonus|freeSpins|replay)');
+      expect(rc3.report).toHaveBeenCalledWith('shell: busy 1 (from "$b") is not a boolean');
+      expect(rc3.report).toHaveBeenCalledWith('shell: buyBonusEnabled null (from "$missing") is not a boolean');
       expect(shell.setMode).toHaveBeenCalledTimes(2);
       expect(shell.setBusy).toHaveBeenCalledTimes(2);
       expect(shell.setBuyBonusEnabled).toHaveBeenCalledTimes(2);
@@ -657,7 +682,7 @@ describe('built-in kinds', () => {
       expect(shell.setFreeSpins).toHaveBeenLastCalledWith({ total: 3, totalWin: 0 });
       expect(rc.report).not.toHaveBeenCalled();
       await kind('shell').run!(shellProps({ freeSpins: '$bad' }), rc);
-      expect(rc.report).toHaveBeenCalledWith('shell: freeSpins "$bad" is not a number or a free-spins object');
+      expect(rc.report).toHaveBeenCalledWith('shell: freeSpins "abc" (from "$bad") is not a number or a free-spins object');
       expect(shell.setFreeSpins).toHaveBeenCalledTimes(3);
     });
 
@@ -668,7 +693,7 @@ describe('built-in kinds', () => {
       await kind('shell').run!(shellProps({ bonus: '$b' }), rc);
       expect(shell.setBonus).toHaveBeenCalledWith(b);
       await kind('shell').run!(shellProps({ bonus: 'x' }), rc);
-      expect(rc.report).toHaveBeenCalledWith('shell: bonus "x" is not a bonus object');
+      expect(rc.report).toHaveBeenCalledWith('shell: bonus "x" (from "x") is not a bonus object');
       expect(shell.setBonus).toHaveBeenCalledTimes(1);
     });
 
@@ -700,19 +725,28 @@ describe('built-in kinds', () => {
       expect(rc2.report).not.toHaveBeenCalled();
 
       await kind('shell').run!(shellProps({ autoplay: 'abc' }), rc2);
-      expect(rc2.report).toHaveBeenCalledWith("shell: autoplay \"abc\" is not a number, 'tick' or 'stop'");
+      expect(rc2.report).toHaveBeenCalledWith("shell: autoplay \"abc\" (from \"abc\") is not a number, 'tick' or 'stop'");
       expect(forever.setAutoplay).not.toHaveBeenCalled();
     });
 
     it('a setter that throws is reported, and the props after it still apply', async () => {
       const shell = fakeShell();
-      shell.setBalance.mockImplementation(() => {
+      shell.setWin.mockImplementation(() => {
         throw new Error('boom');
       });
       const { rc } = runCtx({ shell });
-      expect(await kind('shell').run!(shellProps({ balance: '1', bet: '2' }), rc)).toEqual({ out: 'next' });
-      expect(rc.report).toHaveBeenCalledWith(expect.stringContaining('boom'));
+      expect(
+        await kind('shell').run!(shellProps({ balance: '1', win: '5', bet: '2', turbo: '3', autoplay: '4' }), rc),
+      ).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledTimes(1);
+      expect(rc.report).toHaveBeenCalledWith('shell: win: boom');
+      expect(shell.setBalance).toHaveBeenCalledWith(1);
+      // Everything after the throw, in schema order, still landed.
       expect(shell.setBet).toHaveBeenCalledWith(2);
+      expect(shell.setTurbo).toHaveBeenCalledWith(3);
+      expect(shell.setAutoplay).toHaveBeenCalledWith({ active: true, remaining: 4 });
+      const order = [shell.setWin, shell.setBet, shell.setTurbo, shell.setAutoplay].map((f) => f.mock.invocationCallOrder[0]);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
     });
   });
 
