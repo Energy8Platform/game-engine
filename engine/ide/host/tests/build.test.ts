@@ -16,9 +16,11 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GameCompositionRow } from '@energy8engine/contracts';
 import { createIdeHost } from '../src/index';
@@ -170,6 +172,34 @@ describe('build', () => {
     }
     expect(existsSync(FIRST_SLOT)).toBe(true);
   });
+
+  /**
+   * The same guard through a symlink: `out` is real-pathed before the
+   * check, so a link AT the project is the project (refused), and a
+   * `dist/` that does not exist yet under that link resolves through the
+   * link to the physical `<cwd>/…` (allowed, and written there).
+   */
+  it('--out through a symlink to the project is refused; --out inside it through the link is allowed and lands in the project', async () => {
+    const link = join(resolve(FIRST_SLOT, '..'), `e8-compose-link-${basename(cwd)}`);
+    symlinkSync(cwd, link);
+    try {
+      const refused = await build({ cwd, out: link });
+      expect(refused.files).toEqual([]);
+      expect(refused.diagnostics).toMatchObject([
+        { severity: 'error', plugin: 'build', where: cwd, message: expect.stringContaining('contains the project') },
+      ]);
+      expect(existsSync(join(cwd, 'e8.yml'))).toBe(true);
+      expect(existsSync(join(cwd, 'src', 'main.ts'))).toBe(true);
+
+      const inside = await build({ cwd, out: join(link, 'dist-link') });
+      expect(inside.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+      expect(inside.out).toBe(join(cwd, 'dist-link'));
+      expect(existsSync(join(cwd, 'dist-link', 'index.html'))).toBe(true);
+      expect(existsSync(join(cwd, 'e8.yml'))).toBe(true);
+    } finally {
+      unlinkSync(link);
+    }
+  }, 120_000);
 
   it('a bundle that fails leaves no half-built dist: the vite diagnostic, no api/, no index.html', async () => {
     const broken = copyOfFirstSlot();

@@ -46,7 +46,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { build as viteBuild, normalizePath } from 'vite';
 import {
   diagnostic,
@@ -87,7 +87,12 @@ export async function build(input: BuildInput): Promise<BuildResult> {
   // to avoid. A directory that is not on disk keeps its lexical form; the
   // host says "not a project" about it a few lines down.
   const cwd = realpath(resolve(input.cwd));
-  const out = resolve(cwd, input.out ?? 'dist');
+  // Real-pathed too, or the guard below compares a symlink's spelling
+  // against the physical project: `--out /link/proj` with `/link/proj →
+  // <cwd>` read as a sibling (`relative` gave `../real-proj`) and vite's
+  // `emptyDir` followed the link into the real project. A `dist/` that
+  // does not exist yet resolves through its deepest existing ancestor.
+  const out = realpath(resolve(cwd, input.out ?? 'dist'));
   const diagnostics: Diagnostic[] = [];
   const failed = (step: string, error: unknown) =>
     diagnostics.push(
@@ -293,10 +298,25 @@ export async function build(input: BuildInput): Promise<BuildResult> {
   return result();
 }
 
-/** `realpathSync`, or the path as given when it is not on disk. */
+/**
+ * The physical path of `path` — `realpathSync`, or, for a path that is not
+ * on disk yet, its deepest EXISTING ancestor real-pathed with the rest
+ * re-appended (a `dist/` still to be created under a symlinked project
+ * names the project's physical directory). The path as given only when
+ * nothing along it exists, or the real-path itself fails: `build()` never
+ * throws, and the host says "not a project" about such a `cwd` anyway.
+ */
 function realpath(path: string): string {
+  const rest: string[] = [];
+  let dir = path;
+  while (!existsSync(dir)) {
+    const parent = dirname(dir);
+    if (parent === dir) return path;
+    rest.unshift(basename(dir));
+    dir = parent;
+  }
   try {
-    return realpathSync(path);
+    return join(realpathSync(dir), ...rest);
   } catch {
     return path;
   }
