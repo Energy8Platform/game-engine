@@ -22,7 +22,11 @@ import { check } from './check';
 export interface SpinInput {
   /** Project directory; `game/` lives here. */
   cwd: string;
-  /** Spins to play (default 100). */
+  /**
+   * Rounds to play (default 100). Each round is `StartRound` then
+   * `Step(roundId, nextActions[0])` until `roundComplete` (or the
+   * per-round step cap — see `summarise`).
+   */
   n?: number;
   /** Bet level (default: the spec's first `betLevels` entry). */
   bet?: number;
@@ -37,19 +41,21 @@ export interface SpinInput {
 
 export interface SpinReport {
   spins: number;
+  /** Total `Step` calls across every round (the opening response is not a `Step`). */
+  steps: number;
   bet: number;
-  /** Mean win multiplier — `win` is already a multiple of the bet. */
+  /** Mean win multiplier over each round's FINAL `totalWin` — already a multiple of the bet. */
   rtp: number;
   hitRate: number;
   maxWin: number;
   avgWin: number;
+  /** Tallies every response played (the opening one and every `Step`), not just finals. */
   stages: Record<string, number>;
   wins: { p50: number; p90: number; p99: number };
   /**
-   * Rounds whose first response was not `roundComplete` — a bonus entry,
-   * a cascade the server steps on request. `spin` plays one response per
-   * round and never steps, so `rtp` and `wins` cover those first responses
-   * only; a count above 0 also carries a `warning` in `diagnostics`.
+   * Rounds still not `roundComplete` after `MAX_STEPS_PER_ROUND` `Step`
+   * calls — should be 0 in practice; each one also carries a `warning` in
+   * `diagnostics` naming the round.
    */
   incompleteRounds: number;
   seed: string;
@@ -64,34 +70,44 @@ export function percentiles(values: number[]): SpinReport['wins'] {
   return { p50: at(50), p90: at(90), p99: at(99) };
 }
 
+/** `spin`'s loop steps a round at most this many times before giving up on `roundComplete`. */
+export const MAX_STEPS_PER_ROUND = 500;
+
 /**
- * The numbers of a report from the responses played — the part of `spin`
- * that is pure, so it can be tested with results no fixture produces
- * (`first-slot` completes every round on its first response). Its
- * `diagnostics` hold at most the incomplete-rounds warning; `spin`
+ * The numbers of a report from the rounds played — the part of `spin` that
+ * is pure, so it can be tested with round shapes no fixture produces (a
+ * round stuck past the step cap, without a binary). Each entry in `rounds`
+ * is one round's full response sequence in play order: the opening
+ * response, then every `Step` response — `spin`'s loop stops appending once
+ * `roundComplete` is `true` or `MAX_STEPS_PER_ROUND` is reached, so a
+ * round's LAST entry still not `roundComplete` means the cap was hit.
+ * `win` numbers are each round's FINAL `totalWin` (a mid-round `Step`'s
+ * `totalWin` is only the running total); `stages` tallies every response,
+ * not just finals. `diagnostics` holds one entry per capped round; `spin`
  * prepends its own (session, input).
  */
-export function summarise(results: SpinResult[]): Omit<SpinReport, 'bet' | 'seed'> {
-  const wins = results.map((r) => r.win);
+export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'seed'> {
+  const finals = rounds.map((r) => r[r.length - 1]);
+  const wins = finals.map((r) => r.totalWin);
   const sum = wins.reduce((a, b) => a + b, 0);
   const stages: Record<string, number> = {};
-  for (const r of results) stages[r.stage] = (stages[r.stage] ?? 0) + 1;
-  const incomplete = results.filter((r) => !r.roundComplete);
-  const diagnostics: Diagnostic[] = [];
-  if (incomplete.length) {
-    const next = [...new Set(incomplete.flatMap((r) => r.nextActions))].sort().join(', ');
-    diagnostics.push(
-      diagnostic(
-        'warning',
-        'compute',
-        'roundComplete',
-        `${incomplete.length} of ${results.length} rounds did not complete on the first response (nextActions: ${next}); rtp covers first responses only`,
-        'a later e8 spin will step rounds to completion',
-      ),
-    );
+  let steps = 0;
+  for (const round of rounds) {
+    steps += round.length - 1;
+    for (const r of round) stages[r.stage] = (stages[r.stage] ?? 0) + 1;
   }
+  const incomplete = finals.filter((r) => !r.roundComplete);
+  const diagnostics: Diagnostic[] = incomplete.map((r) =>
+    diagnostic(
+      'warning',
+      'spin',
+      'roundComplete',
+      `round ${r.roundId} did not complete in ${MAX_STEPS_PER_ROUND} steps`,
+    ),
+  );
   return {
     spins: wins.length,
+    steps,
     rtp: wins.length ? sum / wins.length : 0,
     hitRate: wins.length ? wins.filter((w) => w > 0).length / wins.length : 0,
     maxWin: wins.length ? Math.max(...wins) : 0,
@@ -99,7 +115,7 @@ export function summarise(results: SpinResult[]): Omit<SpinReport, 'bet' | 'seed
     stages,
     wins: percentiles(wins),
     incompleteRounds: incomplete.length,
-    scriptSha256: results.at(-1)?.scriptSha256 ?? null,
+    scriptSha256: finals.at(-1)?.scriptSha256 ?? null,
     diagnostics,
   };
 }
@@ -107,12 +123,12 @@ export function summarise(results: SpinResult[]): Omit<SpinReport, 'bet' | 'seed
 export async function spin(input: SpinInput): Promise<SpinReport> {
   const n = input.n ?? 100;
   const seed = input.seed ?? randomBytes(8).toString('hex');
-  const results: SpinResult[] = [];
+  const rounds: SpinResult[][] = [];
   const diagnostics: Diagnostic[] = [];
   let bet = input.bet ?? 0;
 
   const report = (): SpinReport => {
-    const summary = summarise(results);
+    const summary = summarise(rounds);
     return { ...summary, bet, seed, diagnostics: [...diagnostics, ...summary.diagnostics] };
   };
 
@@ -146,12 +162,28 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
     }
     const req = { gameId: game.gameId, action: input.action ?? 'spin', betLevel: bet };
     for (let i = 1; i <= n; i++) {
-      const played = await ctx.session.play(req);
-      if (!played.result) {
-        diagnostics.push(...played.diagnostics);
+      const first = await ctx.session.play(req);
+      if (!first.result) {
+        diagnostics.push(...first.diagnostics);
         break;
       }
-      results.push(played.result);
+      const round: SpinResult[] = [first.result];
+      let failed = false;
+      // Step the round forward on its own reported `nextActions[0]` until it
+      // completes or hits the cap — see `summarise`'s doc for what a capped
+      // round's last entry looks like.
+      while (!round.at(-1)!.roundComplete && round.length <= MAX_STEPS_PER_ROUND) {
+        const last = round.at(-1)!;
+        const played = await ctx.session.play({ ...req, roundId: last.roundId, action: last.nextActions[0] });
+        if (!played.result) {
+          diagnostics.push(...played.diagnostics);
+          failed = true;
+          break;
+        }
+        round.push(played.result);
+      }
+      if (failed) break;
+      rounds.push(round);
       input.onProgress?.(i, n);
     }
     return report();

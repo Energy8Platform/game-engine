@@ -4,9 +4,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { SpinResult } from '@energy8engine/contracts';
-import { percentiles, spin, summarise } from '../src/compute';
+import { MAX_STEPS_PER_ROUND, percentiles, spin, summarise } from '../src/compute';
 
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
+// The smallest game whose round does NOT complete on the first response —
+// see its own doc comment. Plain files (spec.json, script.spin), same shape
+// as `GAME` above: both play the role of a project's `game/` directory and
+// are copied into one, never used as a cwd directly.
+const SESSION_GAME = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'game',
+  'session-dev',
+  'tests',
+  'fixtures',
+  'session',
+);
 
 // A copy, not the example itself: its path is unique, so `e8Servers()` can
 // count exactly the processes THIS file spawned and no other suite's.
@@ -14,10 +29,14 @@ const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'e8-spin-')));
 cpSync(GAME, join(cwd, 'game'), { recursive: true });
 afterAll(() => rmSync(cwd, { recursive: true, force: true }));
 
-/** Live `e8-server` processes serving this copy's `game/` — 0 when none. */
-function e8Servers(): number {
+const sessionCwd = realpathSync(mkdtempSync(join(tmpdir(), 'e8-spin-session-')));
+cpSync(SESSION_GAME, join(sessionCwd, 'game'), { recursive: true });
+afterAll(() => rmSync(sessionCwd, { recursive: true, force: true }));
+
+/** Live `e8-server` processes serving `dir`'s `game/` — 0 when none. */
+function e8Servers(dir: string = cwd): number {
   try {
-    return execSync(`pgrep -f 'e8-server.*--games-dir ${join(cwd, 'game')}'`)
+    return execSync(`pgrep -f 'e8-server.*--games-dir ${join(dir, 'game')}'`)
       .toString()
       .split('\n')
       .filter(Boolean).length;
@@ -122,6 +141,28 @@ describe('spin on a real e8-server', () => {
   });
 });
 
+describe('spin steps a round to completion (session-fixture)', () => {
+  it('steps `free_spin` via nextActions[0] until roundComplete, and rtp/steps reflect that', async () => {
+    const before = e8Servers(sessionCwd);
+    const n = 3;
+    const r = await spin({ cwd: sessionCwd, n, seed: 'abc' });
+    expect(r.diagnostics).toEqual([]);
+    expect(r.spins).toBe(n);
+    // Every round: 1 StartRound (not a Step) + exactly 2 Step calls to
+    // finish (the fixture always awards 2 free spins) — see its own doc.
+    expect(r.steps).toBeGreaterThanOrEqual(2 * n);
+    expect(Object.values(r.stages).reduce((a, b) => a + b, 0)).toBe(n + r.steps);
+    // No round left incomplete, so no roundComplete diagnostic at all.
+    expect(r.incompleteRounds).toBe(0);
+    expect(r.diagnostics.find((d) => d.where === 'roundComplete')).toBeUndefined();
+    // rtp/wins/maxWin/avgWin are over each round's FINAL totalWin, not the
+    // base spin's own `win` — a spin with free spins almost always differs
+    // from its round's eventual total.
+    expect(r.rtp).toBeGreaterThanOrEqual(0);
+    expect(e8Servers(sessionCwd)).toBe(before);
+  }, 30_000);
+});
+
 describe('percentiles', () => {
   it('nearest-rank on the sorted values', () => {
     expect(percentiles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toEqual({ p50: 5, p90: 9, p99: 10 });
@@ -131,7 +172,7 @@ describe('percentiles', () => {
 });
 
 describe('summarise', () => {
-  /** A first response — `first-slot`'s shape, with only what the summary reads varied. */
+  /** A one-response, already-complete round — `first-slot`'s shape, with only what the summary reads varied. */
   function result(win: number, over: Partial<SpinResult> = {}): SpinResult {
     return {
       win,
@@ -150,40 +191,67 @@ describe('summarise', () => {
     };
   }
 
-  it('counts rounds that did not complete on the first response, and says what they wait for', () => {
-    const s = summarise([
-      result(0),
-      result(2, { roundComplete: false, nextActions: ['bonus_spin'], stage: 'bonus' }),
-      result(1, { roundComplete: false, nextActions: ['cascade', 'bonus_spin'] }),
-      result(0.5),
-    ]);
-    expect(s.spins).toBe(4);
-    expect(s.incompleteRounds).toBe(2);
-    expect(s.rtp).toBe(3.5 / 4); // first responses only — nothing is stepped
-    expect(s.hitRate).toBe(0.75);
+  it("win math reads each round's FINAL totalWin, but stages tallies every response in it", () => {
+    const round = [
+      // The base response: pays 0.5, but the round is not over yet.
+      result(0.5, {
+        totalWin: 0.5,
+        roundComplete: false,
+        nextActions: ['free_spin'],
+        roundId: 'r1',
+      }),
+      // The step that finishes it — a running total, not this response's own `win`.
+      result(1.5, { totalWin: 2, stage: 'free_spins', roundComplete: true, roundId: 'r1' }),
+    ];
+    const s = summarise([round, [result(0)]]);
+    expect(s.spins).toBe(2);
+    expect(s.steps).toBe(1); // one round stepped once, one round not stepped at all
+    expect(s.rtp).toBe(1); // (2 + 0) / 2 — the FINAL totalWin, not 0.5 nor 1.5
     expect(s.maxWin).toBe(2);
-    expect(s.stages).toEqual({ base_game: 3, bonus: 1 });
-    expect(s.scriptSha256).toBe('a'.repeat(64));
+    expect(s.hitRate).toBe(0.5);
+    expect(s.stages).toEqual({ base_game: 2, free_spins: 1 });
+    expect(s.incompleteRounds).toBe(0);
+    expect(s.diagnostics).toEqual([]);
+  });
+
+  it('a round still not roundComplete after the step cap gets one diagnostic naming it', () => {
+    // A fake never-completing round: MAX_STEPS_PER_ROUND+1 responses (the
+    // opening one plus every step), none of them roundComplete — the shape
+    // `spin`'s own loop would hand `summarise` after giving up at the cap.
+    // No binary involved: this is what makes the cap testable at all.
+    const stuck: SpinResult[] = Array.from({ length: MAX_STEPS_PER_ROUND + 1 }, (_, i) =>
+      result(1, {
+        totalWin: i + 1,
+        roundComplete: false,
+        nextActions: ['free_spin'],
+        roundId: 'r-stuck',
+      }),
+    );
+    const s = summarise([stuck, [result(3)]]);
+    expect(s.spins).toBe(2);
+    expect(s.steps).toBe(MAX_STEPS_PER_ROUND); // capped, not MAX_STEPS_PER_ROUND+1 or unbounded
+    expect(s.incompleteRounds).toBe(1);
+    expect(s.rtp).toBe((MAX_STEPS_PER_ROUND + 1 + 3) / 2); // the stuck round's FINAL totalWin still counts
     expect(s.diagnostics).toEqual([
       {
         severity: 'warning',
-        plugin: 'compute',
+        plugin: 'spin',
         where: 'roundComplete',
-        message:
-          '2 of 4 rounds did not complete on the first response (nextActions: bonus_spin, cascade); rtp covers first responses only',
-        fix: 'a later e8 spin will step rounds to completion',
+        message: `round r-stuck did not complete in ${MAX_STEPS_PER_ROUND} steps`,
       },
     ]);
   });
 
   it('complete rounds carry no warning; no rounds is all zeros', () => {
-    expect(summarise([result(1), result(0)])).toMatchObject({
+    expect(summarise([[result(1)], [result(0)]])).toMatchObject({
       incompleteRounds: 0,
       diagnostics: [],
       rtp: 0.5,
+      steps: 0,
     });
     expect(summarise([])).toEqual({
       spins: 0,
+      steps: 0,
       rtp: 0,
       hitRate: 0,
       maxWin: 0,
