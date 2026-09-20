@@ -174,8 +174,10 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
  * build the same `{ out: 'result', vars: { result, request } }` /
  * `{ out: 'failed', vars: { error } }` shape, only the request differs.
  *
- * Lenient on the seam — a page composed `without: ['session']` (the
- * composition editor) has none. No session, a play without a result (the
+ * Lenient on the seam — a page composed `without: ['session', 'ui.shell']`
+ * (a composition editor; the shell must go with the session, since `shell1`
+ * injects it and would otherwise stay pending) has none. No session, a play
+ * without a result (the
  * provider's diagnostics are re-reported on the node, with their severity)
  * and a `play` that throws all leave by `failed` with the reason, rather
  * than ending the branch: the flow still reaches whatever it wired there
@@ -576,7 +578,8 @@ const SHELL_MODES = ['base', 'bonus', 'freeSpins', 'replay'];
  * reached it unvalidated. A value that cannot be set (NaN, a bad enum, a
  * setter that throws) is a diagnostic on the node and the OTHER props
  * still apply, in schema order — a readout that cannot be set does not
- * stop the round. No `shell` service at all (the composition editor) is a
+ * stop the round. No `shell` service at all (the scene editor, composed
+ * `without: ['ui.shell']`) is a
  * warning, and `next`.
  */
 const shell: FlowNodeKind<ShellProps> = {
@@ -587,7 +590,9 @@ const shell: FlowNodeKind<ShellProps> = {
       .description('balance readout, currency units (a number), or `$path` — e.g. `$result.balance`'),
     win: Schema.string()
       .default('')
-      .description('win readout, currency units (a number), or `$path` — e.g. `$result.winAmount`; counts up'),
+      .description(
+        'win readout, currency units (a number), or `$path` — e.g. `$result.winAmount`; counts up, 0 snaps (a clear)',
+      ),
     bet: Schema.string().default('').description('bet readout, currency units (a number), or `$path`'),
     mode: Schema.union(['', 'base', 'bonus', 'freeSpins', 'replay'])
       .default('')
@@ -643,7 +648,10 @@ const shell: FlowNodeKind<ShellProps> = {
     };
 
     num('balance', (n) => shell.setBalance(n));
-    num('win', (n) => shell.setWin(n, { animate: true }));
+    // `0` is a clear (`busy: true, win: 0` at spin start), never a win to
+    // count to — it snaps; a count-DOWN from the last win is what the
+    // shell's own `setWin` doc calls wrong-looking.
+    num('win', (n) => shell.setWin(n, { animate: n !== 0 }));
     num('bet', (n) => shell.setBet(n));
     const mode = value('mode');
     if (mode !== undefined) {

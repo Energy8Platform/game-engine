@@ -63,9 +63,11 @@ export interface PlayRequest {
 
 /**
  * The seam `session` resolves to. A page composed with none —
- * `createGame({ without: ['session'] })`, e.g. the composition editor —
- * has no `ctx.session` at all; the flow's `spin`/`step`/`ack` kinds read it
- * leniently and report rather than throw.
+ * `createGame({ without: ['session', 'ui.shell'] })`, e.g. a composition
+ * editor; the shell goes with it, since `shell1` injects `session` and
+ * would otherwise stay pending and fail the page — has no `ctx.session` at
+ * all; the flow's `spin`/`step`/`ack` kinds read it leniently and report
+ * rather than throw.
  */
 export interface SessionService {
   /** Resolved before this service is provided — see this type's own doc above. */

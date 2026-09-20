@@ -1,11 +1,12 @@
 /**
  * The flow editor, proven in a real browser (flow editor spec, Task 10):
- * the Flow document draws `flow.yml`'s twenty-one nodes; the palette adds a
+ * the Flow document draws `flow.yml`'s twenty-two nodes; the palette adds a
  * node, a drag between two handles adds an edge, `Delete` on a selected
  * node takes it and its edges out — each landing in the file; and the
  * Preview's game is DRIVEN by that document: `base_game` is on screen
- * from boot (the `show` node), a spin goes `on shell.spin → busy → click →
- * spin → present` with no loop in `main.ts`, and the run paints the
+ * from boot (the `show` node, then `reset` — the shell freed on every
+ * re-arm), a spin goes `on shell.spin → busy → click → spin → present`
+ * with no loop in `main.ts`, and the run paints the
  * canvas. `present` leaves through `show_win → win → bal → done` (`if
  * result.roundComplete`): `true` goes on to `ack → free → auto` (the
  * autoplay gate, `false` on a manual spin — the run ends there), `false`
@@ -71,7 +72,7 @@ async function openComposition(page: Page): Promise<void> {
   await page.goto(`${IDE_URL}#/doc/composition`);
 }
 
-/** The Flow document in front, its twenty-one nodes drawn with ports. */
+/** The Flow document in front, its twenty-two nodes drawn with ports. */
 async function openFlow(page: Page): Promise<void> {
   await page.getByTestId('activity-flow').click();
   await expect(page.getByTestId('flow-screen')).toBeVisible();
@@ -102,11 +103,11 @@ const centre = (box: { x: number; y: number; width: number; height: number }) =>
 
 /** `flow.yml`'s node ids, in file order — `flowFile().nodes` after a delete is this list minus one. */
 const NODE_IDS = [
-  'start', 'base', 'idle', 'autoin', 'busy', 'click', 'spin', 'draw', 'show_win', 'win', 'bal',
-  'done', 'step', 'halt', 'ack', 'free', 'auto', 'tick', 'more', 'pause', 'again',
+  'start', 'base', 'reset', 'idle', 'autoin', 'busy', 'click', 'spin', 'draw', 'show_win', 'win',
+  'bal', 'done', 'step', 'halt', 'ack', 'free', 'auto', 'tick', 'more', 'pause', 'again',
 ];
 
-test('the Flow document shows the twenty-one nodes of flow.yml, with their ports', async ({
+test('the Flow document shows the twenty-two nodes of flow.yml, with their ports', async ({
   page,
 }) => {
   await openComposition(page);
@@ -114,7 +115,7 @@ test('the Flow document shows the twenty-one nodes of flow.yml, with their ports
   for (const id of NODE_IDS) {
     await expect(page.getByTestId(`flow-node-${id}`)).toBeVisible();
   }
-  await expect(page.getByTestId('flow-canvas').locator('.react-flow__node')).toHaveCount(21);
+  await expect(page.getByTestId('flow-canvas').locator('.react-flow__node')).toHaveCount(22);
   // Ports are the running game's own kinds, relayed by the host: `spin`
   // leaves by `result` or `failed`. Every node but `boot` takes an edge in,
   // `on` too — `more → (true) pause → again → (true) busy` is the autoplay
@@ -134,7 +135,7 @@ test('the Flow document shows the twenty-one nodes of flow.yml, with their ports
       page.getByTestId(`flow-node-${id}`).locator('.react-flow__handle.target'),
     ).toHaveCount(1);
   }
-  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(25);
+  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(26);
   await expect(page.getByTestId('flow-palette').getByTestId('flow-add-wait')).toBeVisible();
 });
 
@@ -142,7 +143,7 @@ test('the palette adds wait-1 and a drag connects draw → wait-1, both landing 
   page,
 }) => {
   // A taller window than Playwright's default 1280×720: the palette drops
-  // the twenty-second node at (920, 920) — `80 + 40 × n` — and the canvas
+  // the twenty-third node at (960, 960) — `80 + 40 × n` — and the canvas
   // is ~400 px tall at 720 with the graph already fitted at React Flow's
   // 0.5 minimum zoom, so `wait-1`'s handle would land below it, where no
   // drag can reach (measured with nineteen nodes: handle y 557, canvas
@@ -176,9 +177,9 @@ test('the palette adds wait-1 and a drag connects draw → wait-1, both landing 
   await expect
     .poll(() => flowFile().edges, { timeout: 10_000 })
     .toContainEqual({ from: 'draw', out: 'next', to: 'wait-1' });
-  // The twenty-five the fixture had are still there — the write appended.
-  expect(flowFile().edges).toHaveLength(26);
-  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(26);
+  // The twenty-six the fixture had are still there — the write appended.
+  expect(flowFile().edges).toHaveLength(27);
+  await expect(page.getByTestId('flow-canvas').locator('.react-flow__edge')).toHaveCount(27);
 });
 
 test('Delete on a selected node removes it and its edges from flow.yml', async ({ page }) => {
@@ -199,11 +200,12 @@ test('Delete on a selected node removes it and its edges from flow.yml', async (
     .toEqual(NODE_IDS.filter((id) => id !== 'draw'));
   // `spin → draw`, `draw → show_win`, `draw → (failed) halt` and `step →
   // draw` went with it — every edge touching `draw`, on either end; the
-  // other twenty-one stayed, in file order, `show_win → win` (it never
+  // other twenty-two stayed, in file order, `show_win → win` (it never
   // touched `draw`) and `done`'s own two (`ack`/`step`) among them.
   expect(flowFile().edges).toEqual([
     { from: 'start', to: 'base' },
-    { from: 'base', to: 'idle' },
+    { from: 'base', to: 'reset' },
+    { from: 'reset', to: 'idle' },
     { from: 'idle', to: 'busy' },
     { from: 'autoin', to: 'busy' },
     { from: 'busy', to: 'click' },

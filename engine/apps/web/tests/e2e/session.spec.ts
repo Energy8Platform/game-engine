@@ -2,7 +2,7 @@
  * Sessions and the `step` flow kind, proven in a real browser (Task 5 of
  * "sessions and the spec prelude"): a round that does NOT complete on its
  * first response, driven end to end through `flow.yml`'s already-looped
- * twenty-one nodes (`flow.spec.ts` proves the loop's shape; this proves what
+ * twenty-two nodes (`flow.spec.ts` proves the loop's shape; this proves what
  * runs through it when a round actually needs it).
  *
  * `first-slot`'s own math completes every round on the first `spin`, so its

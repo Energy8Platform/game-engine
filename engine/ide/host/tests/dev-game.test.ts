@@ -608,6 +608,38 @@ describe('dev-game — the spin route', () => {
     });
   });
 
+  it('forwards POSTed `params` to session.play — session-dev sends them to the script as params_json', async () => {
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      action: 'spin',
+      betLevel: 1.0,
+      port: 0,
+      previewPort: 0,
+    });
+    const play = vi.spyOn(ctx!.session, 'play').mockResolvedValue({ diagnostics: [] });
+
+    const res = await fetch(`${preview(ctx!)}/api/spin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'pick', roundId: 'r-8', params: { choice: 2 } }),
+    });
+    expect(res.status).toBe(502); // no result from the fake — the params are the point
+    expect(play).toHaveBeenLastCalledWith({
+      gameId: 'first-slot',
+      action: 'pick',
+      betLevel: 1.0,
+      roundId: 'r-8',
+      params: { choice: 2 },
+    });
+    // Absent from the body, absent from the call — `toHaveBeenLastCalledWith`
+    // ignores an `undefined` key, so this pins that nothing is invented.
+    expect((await fetch(`${preview(ctx!)}/api/spin`, { method: 'POST' })).status).toBe(502);
+    expect(play.mock.lastCall![0].params).toBeUndefined();
+  });
+
   it('reports a spin against a session that never started as diagnostics, not a crash', async () => {
     await bare();
     await ctx!.plugin(devGame, {

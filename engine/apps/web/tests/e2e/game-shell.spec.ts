@@ -74,10 +74,19 @@ test.afterAll(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-/** The game's own page, booted to `ready` — `tempo.spec.ts`'s reader. */
+/**
+ * The game's own page, booted to `ready` — `tempo.spec.ts`'s reader — AND
+ * its hooks installed: since `e8 build` (2bc9d73c) `main.ts` imports
+ * `ide-bridge` dynamically after `#status` reads `ready` and before it
+ * sets `window.__e8`, so a cold first load answers `ready` with no hooks
+ * yet (measured: `__e8` undefined on this file's first evaluate).
+ */
 async function readyPage(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
   await expect.poll(() => page.locator('#status').textContent(), { timeout: 20_000 }).toBe('ready');
+  await expect
+    .poll(() => page.evaluate(() => typeof (window as any).__e8), { timeout: 20_000 })
+    .toBe('object');
 }
 
 const shellState = (page: Page): Promise<ShellState | null> =>

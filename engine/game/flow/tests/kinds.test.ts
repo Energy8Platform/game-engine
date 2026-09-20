@@ -628,6 +628,15 @@ describe('built-in kinds', () => {
       expect(rc.report).not.toHaveBeenCalled();
     });
 
+    it('`win: 0` snaps — a clear at spin start, not a count-down from the last win', async () => {
+      const shell = fakeShell();
+      const { rc } = runCtx({ shell });
+      expect(await kind('shell').run!(shellProps({ busy: 'true', win: '0' }), rc)).toEqual({ out: 'next' });
+      expect(shell.setWin).toHaveBeenCalledWith(0, { animate: false });
+      expect(shell.setBusy).toHaveBeenCalledWith(true);
+      expect(rc.report).not.toHaveBeenCalled();
+    });
+
     it('a NaN (literal or resolved) reports `shell: <prop> <resolved> (from "<raw>") is not a number`, skips that prop, and the rest still apply', async () => {
       const shell = fakeShell();
       const { rc } = runCtx({ shell }, { nope: 'abc' });

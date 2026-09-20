@@ -20,8 +20,8 @@
  * (the platform pushes one after every play, and on its own whenever the
  * wallet moves), and `init.balance` stays the handshake value. `ack` is
  * the platform's credit hook: `playAck(raw)` with the very
- * `PlayResultData` the SDK handed back, kept per `roundId` until the flow
- * says the result was shown.
+ * `PlayResultData` the SDK handed back — one `last` stash, replaced by
+ * the next play, handed over once the flow says the result was shown.
  *
  * **Why `play()` RETURNS diagnostics instead of reporting them** — the same
  * reason `session-host` gives: `playThrough` in `@energy8engine/flow`'s

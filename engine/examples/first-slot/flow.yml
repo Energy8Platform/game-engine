@@ -2,9 +2,10 @@ version: 1
 nodes:
   - { id: start,    kind: boot,    ui: { x: 40,   y: 80 } }
   - { id: base,     kind: show,    props: { scene: base_game }, ui: { x: 220,  y: 80 } }
+  - { id: reset,    kind: shell,   props: { busy: 'false', autoplay: stop }, ui: { x: 220,  y: 240 } }
   - { id: idle,     kind: on,      props: { event: shell.spin }, ui: { x: 400,  y: 80 } }
   - { id: autoin,   kind: on,      props: { event: shell.autoplayStart }, ui: { x: 400,  y: 240 } }
-  - { id: busy,     kind: shell,   props: { busy: 'true' }, ui: { x: 580,  y: 80 } }
+  - { id: busy,     kind: shell,   props: { busy: 'true', win: '0' }, ui: { x: 580,  y: 80 } }
   - { id: click,    kind: sound,   props: { src: assets/spin.wav }, ui: { x: 760,  y: 80 } }
   - { id: spin,     kind: spin,    props: { betLevel: '$shell.bet' }, ui: { x: 940,  y: 80 } }
   - { id: draw,     kind: present, props: { turbo: '$shell.turbo' }, ui: { x: 1120, y: 80 } }
@@ -13,7 +14,7 @@ nodes:
   - { id: bal,      kind: shell,   props: { balance: '$result.balance' }, ui: { x: 1660, y: 80 } }
   - { id: done,     kind: if,      props: { when: '$result.roundComplete' }, ui: { x: 1840, y: 80 } }
   - { id: step,     kind: step,    ui: { x: 1840, y: 240 } }
-  - { id: halt,     kind: shell,   props: { autoplay: stop }, ui: { x: 1480, y: 240 } }
+  - { id: halt,     kind: shell,   props: { autoplay: stop, balance: '$session.balance' }, ui: { x: 1480, y: 240 } }
   - { id: ack,      kind: ack,     ui: { x: 2020, y: 80 } }
   - { id: free,     kind: shell,   props: { busy: 'false' }, ui: { x: 2200, y: 80 } }
   - { id: auto,     kind: if,      props: { when: '$shell.autoplay.active' }, ui: { x: 2200, y: 240 } }
@@ -23,7 +24,8 @@ nodes:
   - { id: again,    kind: if,      props: { when: '$shell.autoplay.active' }, ui: { x: 1660, y: 400 } }
 edges:
   - { from: start,    to: base }
-  - { from: base,     to: idle }
+  - { from: base,     to: reset }
+  - { from: reset,    to: idle }
   - { from: idle,     to: busy }
   - { from: autoin,   to: busy }
   - { from: busy,     to: click }

@@ -6,10 +6,14 @@ one bundle, and `e8.patch.yml` is the delta on top of it.
 ## `flow.yml`
 
 The flow document, and the only thing that drives the game: `boot → show
-base_game → on shell.spin → shell { busy: true } → click → spin { betLevel:
-$shell.bet } → present { turbo: $shell.turbo } → show_win → shell { win } →
-shell { balance } → done → ack → shell { busy: false }` — the win and the
-balance land after the reels do, not before. `done` (`if
+base_game → shell { busy: false, autoplay: stop } → on shell.spin → shell {
+busy: true, win: 0 } → click → spin { betLevel: $shell.bet } → present {
+turbo: $shell.turbo } → show_win → shell { win } → shell { balance } → done →
+ack → shell { busy: false }` — WIN clears as the spin starts, and the win and
+the balance land after the reels do, not before. The boot run's `reset`
+node frees the bar on every re-arm: a flow edit in the IDE while a spin is
+live aborts the run before its own `shell { busy: false }`, and this is what
+puts Spin back. `done` (`if
 $result.roundComplete`) sends a complete round on to `ack` and the bar's
 release; an incomplete one (free spins, a retrigger) goes to `step`, which
 posts the open round's `roundId` and next `nextActions` entry and loops back
@@ -31,9 +35,11 @@ after `shell { busy: false }`, `if $shell.autoplay.active → shell { autoplay:
 tick } → if $shell.autoplay.remaining > 0 → wait 500 ms → if
 $shell.autoplay.active → back to shell { busy: true }` (the second gate is
 for a Stop pressed during the wait). A `spin`/`present`/`step` that fails
-leaves by `failed` into `shell { autoplay: stop }` and then that same `shell
-{ busy: false }`: a failure ends an autoplay rather than retrying against a
-dead host, and never leaves the bar disabled. The page's own `Spin` button
+leaves by `failed` into `shell { autoplay: stop, balance: $session.balance }`
+and then that same `shell { busy: false }`: a failure ends an autoplay
+rather than retrying against a dead host, shows the wallet as the session
+row now has it (a failed play is still charged), and never leaves the bar
+disabled. The page's own `Spin` button
 and `#turbo` checkbox (`index.html`) are a dev proxy for the bar's:
 `src/main.ts` presses the
 shell's Spin and sets its turbo level, and emits `ui.spin` as well, for a flow

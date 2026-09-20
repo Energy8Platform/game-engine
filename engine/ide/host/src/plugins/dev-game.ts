@@ -666,9 +666,14 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   }, 'dev-game:vite');
 
   preview.post('/api/spin', async (req, res) => {
-    let body: { action?: string; betLevel?: number; roundId?: string } = {};
+    let body: {
+      action?: string;
+      betLevel?: number;
+      roundId?: string;
+      params?: Record<string, unknown>;
+    } = {};
     try {
-      body = (await req.json()) as { action?: string; betLevel?: number; roundId?: string };
+      body = (await req.json()) as typeof body;
     } catch {
       // An empty or absent body is fine — falls back to config.action/betLevel.
     }
@@ -682,6 +687,11 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       // `roundId` of a result whose `roundComplete` was `false`, to step
       // that round; absent, session-dev starts a fresh round.
       roundId: body.roundId,
+      // Action params (a bonus pick, a buy option), as `session-host` posts
+      // them off `PlayRequest.params`: session-dev JSON-encodes them as the
+      // wire's `params_json` on both `StartRound` and `Step`, so they reach
+      // the script. No default either — nothing to invent here.
+      params: body.params,
     });
 
     // This route runs in the HOST process, not the browser, so nothing on
