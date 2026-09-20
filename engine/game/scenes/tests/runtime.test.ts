@@ -17,7 +17,7 @@ describe('scenes row', () => {
   it('provides nodeTypes, transitions, assetLoader, scenes; fetches /api/scenes and mounts', async () => {
     const { ctx, app, fiber } = boot();
     await fiber;
-    expect(ctx.get('nodeTypes')!.list().map((t) => t.type).sort()).toEqual(['container', 'image', 'scene', 'shape']);
+    expect(ctx.get('nodeTypes')!.list().map((t) => t.type).sort()).toEqual(['container', 'image', 'scene', 'shape', 'text']);
     expect(ctx.get('transitions')!.ids()).toEqual(['cut', 'fade']);
     await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('a')).toBe(true));
     expect(app.stage.children).toContain(ctx.get('scenes')!.container);
@@ -117,5 +117,54 @@ describe('scenes row', () => {
     rejectFetch(new Error('down'));
     await expect(ctx.get('scenes')!.ready).resolves.toBeUndefined();
     expect(ctx.get('scenes')!.docs().has('x')).toBe(true);
+  });
+});
+
+describe('ui.tap', () => {
+  /** The stage a real `Application` hands the row: a `Container` IS an emitter, so the test fires `pointerdown` by hand. */
+  const withStage = (screen: { width: number; height: number }) => {
+    const ctx = new Context();
+    const stage = new Container();
+    const app = { stage, ticker: null, screen };
+    ctx.provide('renderer', { app });
+    return { ctx, stage, app };
+  };
+
+  const plug = (ctx: Context, design: { width: number; height: number }) =>
+    ctx.plugin(runtime, { design, fetchFn: fetchOk({ scenes: [], diagnostics: [], nodeTypes: [] }) });
+
+  it('a stage pointerdown emits ui.tap on the flow bus, in DESIGN units', async () => {
+    const { ctx, stage, app } = withStage({ width: 200, height: 100 });
+    const emit = vi.fn();
+    // The flow bus, exactly as `@energy8engine/flow`'s row provides it.
+    ctx.provide('events', { emit, on: () => () => {} });
+    const fiber = plug(ctx, { width: 100, height: 50 });
+    await fiber;
+    expect(stage.eventMode).toBe('static');
+    expect(stage.hitArea).toBe(app.screen);
+    // The design is fitted 2× into the viewport: a tap at (100, 50) on
+    // screen is (50, 25) in the design the author laid the scene out in.
+    stage.emit('pointerdown', { global: { x: 100, y: 50 } } as never);
+    expect(emit).toHaveBeenCalledWith('ui.tap', { x: 50, y: 25 });
+    await fiber.dispose();
+    emit.mockClear();
+    stage.emit('pointerdown', { global: { x: 100, y: 50 } } as never);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('no flow row: the tap is a lenient no-op, never a throw', async () => {
+    const { ctx, stage } = withStage({ width: 200, height: 100 });
+    const fiber = plug(ctx, { width: 100, height: 50 });
+    await fiber;
+    expect(() => stage.emit('pointerdown', { global: { x: 1, y: 2 } } as never)).not.toThrow();
+    await fiber.dispose();
+  });
+
+  it('a headless app whose stage is no emitter still composes', async () => {
+    const ctx = new Context();
+    ctx.provide('renderer', { app: { stage: Object.assign(new Container(), { on: undefined, off: undefined }) } });
+    const fiber = plug(ctx, { width: 100, height: 50 });
+    await expect(fiber).resolves.toBeDefined();
+    await fiber.dispose();
   });
 });

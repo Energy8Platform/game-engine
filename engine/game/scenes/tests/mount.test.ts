@@ -759,3 +759,157 @@ describe('show / hide under change', () => {
     expect(scenes.visible()).toEqual(['a']);
   });
 });
+
+describe('live props', () => {
+  it('setProps patches a mounted node: the type re-validates, `update` re-applies, the DOCUMENT is untouched', () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 's', type: 'shape', props: { width: 40, height: 20 } }] },
+    ]);
+    const view = byId(scenes, 'a', 's') as Graphics;
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { width: 80 })).toBe(true);
+    // `height` still comes from the document — the patch is a MERGE.
+    expect(view.getLocalBounds()).toMatchObject({ maxX: 80, maxY: 20 });
+    expect(scenes.docs().get('a')!.nodes[0].props.width).toBe(40);
+    // A second patch merges over the first, not over the document alone.
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { height: 50 })).toBe(true);
+    expect(view.getLocalBounds()).toMatchObject({ maxX: 80, maxY: 50 });
+  });
+
+  it('a common key in the patch goes through the common pass', () => {
+    const { scenes } = boot([
+      { id: 'a', nodes: [{ id: 'n', type: 'container', props: { x: 1, alpha: 1 } }] },
+    ]);
+    const view = byId(scenes, 'a', 'n')!;
+    expect(scenes.setProps({ scene: 'a', node: 'n' }, { x: 12, alpha: 0.25 })).toBe(true);
+    expect(view.x).toBe(12);
+    expect(view.alpha).toBe(0.25);
+  });
+
+  it('a node nested under a container is patchable too', () => {
+    const { scenes } = boot([
+      {
+        id: 'a',
+        nodes: [
+          {
+            id: 'grp',
+            type: 'container',
+            props: {},
+            children: [{ id: 'deep', type: 'container', props: {} }],
+          },
+        ],
+      },
+    ]);
+    expect(scenes.setProps({ scene: 'a', node: 'deep' }, { x: 7 })).toBe(true);
+    expect(byId(scenes, 'a', 'deep')!.x).toBe(7);
+  });
+
+  it('an unknown node is `false` and a diagnostic, nothing else', () => {
+    const { scenes, report } = boot([{ id: 'a', nodes: [] }]);
+    expect(scenes.setProps({ scene: 'a', node: 'nope' }, { x: 1 })).toBe(false);
+    expect(scenes.setProps({ scene: 'zzz', node: 'n' }, { x: 1 })).toBe(false);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', where: 'a/nope' }),
+    );
+  });
+
+  it('a value the type refuses is `false` and a diagnostic naming the prop; the view is untouched', () => {
+    const { scenes, nodeTypes, report } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 's', type: 'shape', props: { width: 40, height: 20 } }] },
+    ]);
+    const view = byId(scenes, 'a', 's') as Graphics;
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { kind: 'blob' })).toBe(false);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/s',
+        message: expect.stringContaining('prop kind'),
+      }),
+    );
+    expect(view.getLocalBounds()).toMatchObject({ maxX: 40, maxY: 20 });
+    // A value only the APPLY refuses (a colour pixi cannot parse) is the same answer.
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { fill: 'not-a-colour' })).toBe(false);
+    // …and so is a common prop off its type.
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { x: 'abc' })).toBe(false);
+    expect(byId(scenes, 'a', 's')!.x).toBe(0);
+  });
+
+  it('a refused patch is not remembered: the next good one merges over the document, not over it', () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 's', type: 'shape', props: { width: 40, height: 20 } }] },
+    ]);
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { kind: 'blob' })).toBe(false);
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { width: 80 })).toBe(true);
+    expect(byId(scenes, 'a', 's')!.getLocalBounds()).toMatchObject({ maxX: 80, maxY: 20 });
+  });
+
+  it('refresh re-applies the MERGED props; an unrelated replace keeps the patch', () => {
+    const seen: number[] = [];
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register({
+      type: 'probe',
+      schema: Schema.object({ v: Schema.number().default(0) }),
+      mount: () => new Container(),
+      update: (_view, p) => void seen.push((p as { v: number }).v),
+    });
+    scenes.replace([{ id: 'a', nodes: [{ id: 'p', type: 'probe', props: { v: 1 } }] }]);
+    expect(scenes.setProps({ scene: 'a', node: 'p' }, { v: 7 })).toBe(true);
+    seen.length = 0;
+    // `b` is the only changed document: `a` is not remounted, and the
+    // remount's own `refresh()` runs over every mount.
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 'p', type: 'probe', props: { v: 1 } }] },
+      { id: 'b', nodes: [] },
+    ]);
+    expect(seen).toEqual([7]);
+  });
+
+  it('a remount drops the patch: the document props win again', () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(shape);
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 's', type: 'shape', props: { width: 40, height: 20 } }] },
+    ]);
+    expect(scenes.setProps({ scene: 'a', node: 's' }, { width: 80 })).toBe(true);
+    // A re-register of the type is a remount of every node using it.
+    nodeTypes.register({ ...shape });
+    expect(byId(scenes, 'a', 's')!.getLocalBounds()).toMatchObject({ maxX: 40, maxY: 20 });
+  });
+
+  it('a patched `scene` host keeps the patch across a transition, not just the document props', async () => {
+    const { scenes } = boot([
+      { id: 'big', nodes: [] },
+      { id: 'base', nodes: [{ id: 'bw', type: 'scene', props: { scene: 'big', alpha: 1 } }] },
+    ]);
+    await scenes.show('base');
+    expect(scenes.setProps({ scene: 'base', node: 'bw' }, { alpha: 0.5 })).toBe(true);
+    await scenes.show('big');
+    expect(byId(scenes, 'base', 'bw')!.alpha).toBe(0.5);
+  });
+});
+
+describe('nodeSchema', () => {
+  it('merges COMMON with the type\'s own dict, the type winning the name', () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register({
+      type: 'gauge',
+      schema: Schema.object({ width: Schema.union(['thin', 'thick']).default('thin') }),
+      mount: () => new Container(),
+    });
+    scenes.replace([{ id: 'a', nodes: [{ id: 'g', type: 'gauge', props: {} }] }]);
+    const dict = scenes.nodeSchema({ scene: 'a', node: 'g' })!.dict!;
+    // The TYPE's own `width` wins over COMMON's number — what a caller
+    // coercing a literal must see (the runtime strips it the same way).
+    expect(dict.width.type).toBe('union');
+    expect(dict.alpha.type).toBe('number');
+    expect(dict.visible.type).toBe('boolean');
+    expect(dict.tint.type).toBe('string');
+    expect(scenes.nodeSchema({ scene: 'a', node: 'nope' })).toBeUndefined();
+    expect(scenes.nodeSchema({ scene: 'zzz', node: 'g' })).toBeUndefined();
+  });
+});

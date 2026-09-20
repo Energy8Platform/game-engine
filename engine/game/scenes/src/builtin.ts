@@ -1,14 +1,15 @@
 /**
- * The four node types every project has: `container` (a group), `image`
+ * The five node types every project has: `container` (a group), `image`
  * (a sprite from a project-relative path), `scene` (another document,
- * nested) and `shape` (a `Graphics` primitive — also the intended mask:
+ * nested), `shape` (a `Graphics` primitive — also the intended mask:
  * `mask: true` on a `shape` clips its parent, applied generically by the
- * runtime for any node type). Views these build are the runtime's to
+ * runtime for any node type) and `text` (a `Text`, or a `BitmapText` when
+ * a bitmap font is named). Views these build are the runtime's to
  * destroy (`OWN` in `./scenes`); any other type's view is only detached on
  * unmount.
  */
 import type { Context } from 'cordis';
-import { Color, Container, Graphics, Sprite, Texture } from 'pixi.js';
+import { BitmapText, Color, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import Schema from 'schemastery';
 import type { NodeType } from './node-types';
 
@@ -120,4 +121,89 @@ export const shape: NodeType<ShapeProps> = {
     if (props.stroke && props.strokeWidth > 0)
       g.stroke({ color: new Color(props.stroke).toNumber(), width: props.strokeWidth });
   },
+};
+
+export interface TextProps {
+  text: string;
+  size: number;
+  family: string;
+  fill: string;
+  weight: 'normal' | 'bold';
+  align: 'left' | 'center' | 'right';
+  stroke: string;
+  strokeWidth: number;
+  /** `wordWrapWidth`, design px; 0 is no wrap at all. */
+  wrap: number;
+  /** A bitmap font, project-relative; empty means a web font from `family`. */
+  font: string;
+}
+
+const FONT_EXTENSIONS = ['fnt', 'xml'];
+
+/**
+ * The face name a `BitmapText` resolves `fontFamily` against. Loading
+ * `x.fnt` registers a `BitmapFont` under the name inside the FILE — the
+ * document's path is not it — so the loaded asset is what to ask. Not
+ * loaded yet (mount runs before `show` loads): the web `family` stands in
+ * until `update` runs again, the way `image` waits for its texture.
+ */
+const faceOf = (ctx: Context, props: TextProps): string => {
+  if (!props.font) return props.family;
+  const font = (ctx?.reflect.get('assetLoader', false) as AssetLoader | undefined)?.get(
+    props.font,
+  ) as unknown as { fontFamily?: string } | undefined;
+  return font?.fontFamily ?? props.family;
+};
+
+const styleOf = (props: TextProps, fontFamily: string) => ({
+  fontFamily,
+  fontSize: props.size,
+  fontWeight: props.weight,
+  align: props.align,
+  // `Color`, not the raw string: THROWS on a value that is neither
+  // `#rrggbb` nor a named colour — this node's own diagnostic, the same
+  // way `shape`'s fill and the common `tint` fail.
+  fill: new Color(props.fill || '#ffffff').toNumber(),
+  ...(props.stroke && props.strokeWidth > 0
+    ? { stroke: { color: new Color(props.stroke).toNumber(), width: props.strokeWidth } }
+    : {}),
+  wordWrap: props.wrap > 0,
+  wordWrapWidth: props.wrap,
+});
+
+/** A pixi `Text` — or a `BitmapText` when `font` names a bitmap font. Both have an `anchor`, so the common anchor props apply to either. */
+export const text: NodeType<TextProps> = {
+  type: 'text',
+  schema: Schema.object({
+    text: Schema.string().default('').description('what it says'),
+    size: Schema.number().default(24).description('font size, design px'),
+    family: Schema.string().default('sans-serif').description('font family, when `font` is empty'),
+    fill: Schema.string().default('#ffffff').description('#rrggbb'),
+    weight: Schema.union(['normal', 'bold']).default('normal'),
+    align: Schema.union(['left', 'center', 'right']).default('left'),
+    stroke: Schema.string().default('').description('#rrggbb, or empty for no outline'),
+    strokeWidth: Schema.number().default(0).description('outline width, px'),
+    wrap: Schema.number().default(0).description('word-wrap width, design px; 0 = no wrap'),
+    font: Schema.string()
+      .default('')
+      .extra('asset', FONT_EXTENSIONS)
+      .description('bitmap font, project-relative; empty for a web font'),
+  }) as Schema<TextProps>,
+  assetProps: ['font'],
+  mount(props, ctx) {
+    const options = { text: props.text, style: styleOf(props, faceOf(ctx, props)) };
+    // The branch is the DOCUMENT's (`font` named or not), never the
+    // loader's: it must hold before the font has landed, and a swap of
+    // class mid-life would need a remount, which an edited `font` gets
+    // anyway.
+    return props.font ? new BitmapText(options) : new Text(options);
+  },
+  update(view, props, ctx) {
+    // `Text` and `BitmapText` both extend `AbstractText`: same `text`, same
+    // `style` setter, which REPLACES the style rather than merging into it.
+    const t = view as Text;
+    t.text = props.text;
+    t.style = styleOf(props, faceOf(ctx, props));
+  },
+  assets: (props) => (props.font ? [props.font] : []),
 };

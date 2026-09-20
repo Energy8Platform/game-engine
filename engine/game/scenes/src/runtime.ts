@@ -22,7 +22,7 @@ import { Assets, type Container } from 'pixi.js';
 import { diagnostic, type Diagnostic, type ScenesResponse } from '@energy8engine/contracts';
 import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import type { PixiRenderer } from '@energy8engine/renderer-pixi';
-import { container, image, scene, shape, type AssetLoader } from './builtin';
+import { container, image, scene, shape, text, type AssetLoader } from './builtin';
 import { createNodeTypes, type NodeTypesService } from './node-types';
 import { createScenes, type ScenesService } from './scenes';
 import { createTransitions, cut, fade, type TickerLike, type TransitionsService } from './transitions';
@@ -60,7 +60,7 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   const report = (d: Diagnostic) =>
     (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(d);
   const nodeTypes = createNodeTypes();
-  for (const t of [container, image, scene, shape]) nodeTypes.register(t);
+  for (const t of [container, image, scene, shape, text]) nodeTypes.register(t);
   ctx.provide('nodeTypes', nodeTypes);
   const transitions = createTransitions(report);
   transitions.register(cut);
@@ -68,7 +68,10 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   ctx.provide('transitions', transitions);
   ctx.provide('assetLoader', pixiLoader);
   const app = ctx.renderer.app as {
-    stage: Container;
+    stage: Container & {
+      on?(event: 'pointerdown', fn: (e: { global: { x: number; y: number } }) => void): unknown;
+      off?(event: 'pointerdown', fn: (e: { global: { x: number; y: number } }) => void): unknown;
+    };
     ticker?: TickerLike;
     screen?: { width: number; height: number };
     renderer?: {
@@ -127,6 +130,35 @@ export function apply(ctx: Context, config: ScenesConfig): void {
     app.renderer?.on('resize', fit);
     return () => void app.renderer?.off('resize', fit);
   }, 'scenes:fit');
+
+  // A tap anywhere on the canvas, in DESIGN units, on the flow bus — what
+  // a `wait { event: ui.tap }` holds an intro card for. Lenient by design:
+  // `events` is the flow row's service (NOT `ctx.events`, cordis's own),
+  // and a project with no flow row simply has nobody listening.
+  //
+  // `scene-edit` sets these same two stage fields for its own picking and
+  // adds its own `pointerdown`: both handlers fire, which is what the
+  // editor page wants (it runs no flow, so the extra emit goes nowhere),
+  // and its dispose restores whatever it found here.
+  //
+  // `app.screen` is the renderer's own `Rectangle`, RESIZED IN PLACE, so
+  // the hit area stays in step with the viewport without re-assigning.
+  if (typeof app.stage.on === 'function') {
+    app.stage.eventMode = 'static';
+    if (app.screen) app.stage.hitArea = app.screen as unknown as Container['hitArea'];
+    const onDown = (e: { global: { x: number; y: number } }) => {
+      const p = scenes.container.toLocal(e.global);
+      (
+        ctx.reflect.get('events', false) as
+          | { emit(name: string, payload?: unknown): void }
+          | undefined
+      )?.emit('ui.tap', { x: p.x, y: p.y });
+    };
+    ctx.effect(() => {
+      app.stage.on!('pointerdown', onDown);
+      return () => void app.stage.off?.('pointerdown', onDown);
+    }, 'scenes:tap');
+  }
 
   const fetchFn = config.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   // `scenes.ready` is this GET: a reader that needs the boot set (`scene-edit`)

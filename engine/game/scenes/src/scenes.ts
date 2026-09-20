@@ -15,6 +15,7 @@
  */
 import type { Context } from 'cordis';
 import { Container, Graphics } from 'pixi.js';
+import Schema from 'schemastery';
 import {
   diagnostic,
   type Diagnostic,
@@ -23,7 +24,7 @@ import {
 } from '@energy8engine/contracts';
 import { fitStage, type Fit, type Size } from './fit';
 import { createTransitions, cut, type TickerLike, type TransitionsService } from './transitions';
-import { applyCommon, type NodeType, type NodeTypesService } from './node-types';
+import { COMMON, applyCommon, type NodeType, type NodeTypesService } from './node-types';
 import type { AssetLoader } from './builtin';
 
 export interface CreateScenesOptions {
@@ -65,6 +66,22 @@ export interface ScenesService {
   sceneView(id: string): Container | undefined;
   /** A node's view by id, top-level or nested under a `container`/another node — the top-level map first (the common case, O(1)), `all` otherwise. */
   view(ref: SceneRef): Container | undefined;
+  /**
+   * Patches a mounted node's props for THIS mount, not the document: the
+   * merge (document props + earlier patches + `patch`) goes back through
+   * the type's schema, `update` re-applies it and the common pass runs
+   * again. A remount — a document edit, a hot re-apply — drops it. `false`
+   * (with a diagnostic) for a node nothing mounted, and for a value the
+   * schema or the apply refuses, in which case the patch is not kept.
+   */
+  setProps(ref: SceneRef, patch: Record<string, unknown>): boolean;
+  /**
+   * A mounted node's full prop schema — `COMMON` with the type's own dict
+   * merged over it, so a type owning `width`/`height` wins the name the
+   * same way `applyCommon` lets it. What a caller coercing a literal reads:
+   * `nodeSchema(ref)?.dict?.[prop]?.type`.
+   */
+  nodeSchema(ref: SceneRef): Schema | undefined;
   readonly container: Container;
   /**
    * Settles once the boot document set is in: the runtime's `/api/scenes`
@@ -85,6 +102,13 @@ interface Entry {
   type: NodeType;
   /** `<scene>/<node id>` — where a throwing `update` is reported. */
   where: string;
+  /**
+   * What `setProps` patched on top of the node's document props, for this
+   * mount only. It lives on the ENTRY rather than in a side map keyed by
+   * one: a remount builds fresh entries, so the patch is gone with no
+   * bookkeeping — and nothing holds a destroyed entry alive.
+   */
+  live?: Record<string, unknown>;
   /** `refresh()` already reported this entry once; suppresses repeats until the next remount rebuilds it. */
   failed?: boolean;
 }
@@ -110,7 +134,9 @@ interface Mount {
 }
 
 /** Views this package builds itself, so destroys itself. */
-const OWN = new Set(['container', 'image', 'scene', 'shape']);
+const OWN = new Set(['container', 'image', 'scene', 'shape', 'text']);
+
+const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function createScenes(options: CreateScenesOptions): ScenesService {
   const { nodeTypes, loader, report = () => {} } = options;
@@ -369,6 +395,24 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     return [...out];
   }
 
+  /**
+   * A node's entry by ref. `all` also carries an embedded `scene` node's OWN nested doc
+   * (`mountDoc` files its entries into the same top-level `Mount` — see `building` above),
+   * so a bare id search would find scene `b`'s `x` while looking up `a`'s. `where` is
+   * `<scene>/<node>` already: scope the fallback to entries actually declared in `ref.scene`.
+   */
+  const entryOf = (ref: SceneRef): Entry | undefined => {
+    const m = mounted.get(ref.scene);
+    return (
+      m?.nodes.get(ref.node) ??
+      m?.all.find((e) => e.node.id === ref.node && e.where.startsWith(`${ref.scene}/`))
+    );
+  };
+
+  /** A node's document props with its live `setProps` patch on top — what the common pass reads. */
+  const rawOf = (e: Entry): Record<string, unknown> =>
+    e.live ? { ...e.node.props, ...e.live } : e.node.props;
+
   /** Entries in visible top-level scenes whose `scene` node points at `id`. */
   const nestingEntries = (id: string): Entry[] =>
     visibleIds.flatMap((v) =>
@@ -444,7 +488,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   /** A nested host keeps its own common props (alpha above all) once a transition is over. */
   const settleHosts = (hosts: Entry[], visible: boolean) => {
     for (const e of hosts) {
-      applyCommon(e.view, e.node.props, e.type);
+      applyCommon(e.view, rawOf(e), e.type);
       e.view.visible = visible;
     }
   };
@@ -558,16 +602,47 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       return view;
     },
     sceneView: (id) => mounted.get(id)?.view,
-    view(ref) {
-      const m = mounted.get(ref.scene);
-      // `all` also carries an embedded `scene` node's OWN nested doc (`mountDoc` files its
-      // entries into the same top-level `Mount` — see `building` above), so a bare id search
-      // would find scene `b`'s `x` while looking up `a`'s. `where` is `<scene>/<node>` already:
-      // scope the fallback to entries actually declared in `ref.scene`.
-      return (
-        m?.nodes.get(ref.node)?.view ??
-        m?.all.find((e) => e.node.id === ref.node && e.where.startsWith(`${ref.scene}/`))?.view
-      );
+    view: (ref) => entryOf(ref)?.view,
+    setProps(ref, patch) {
+      const e = entryOf(ref);
+      if (!e) {
+        error(
+          `${ref.scene}/${ref.node}`,
+          `node "${ref.node}" is not mounted in scene "${ref.scene}" — nothing to set`,
+          'check the scene and node ids',
+        );
+        return false;
+      }
+      const names = `prop ${Object.keys(patch).join(', ')}`;
+      // Everything is validated (and applied) from the MERGE, never from
+      // the patch alone: a type's schema fills its defaults from a whole
+      // dict, and the common pass needs the node's own `x`/`alpha` too.
+      const merged = { ...rawOf(e), ...patch };
+      let props: Record<string, unknown>;
+      try {
+        props = e.type.schema(merged as never) as Record<string, unknown>;
+      } catch (err) {
+        error(e.where, `${names}: ${why(err)}`, 'fix the value');
+        return false;
+      }
+      try {
+        e.type.update?.(e.view, props, mountCtx([]));
+        applyCommon(e.view, merged, e.type);
+      } catch (err) {
+        error(e.where, `${names}: ${why(err)}`, 'fix the value');
+        return false;
+      }
+      // Only a patch that actually landed is remembered — a refused one
+      // must not poison the next `refresh()` (or the next patch's merge).
+      e.live = { ...e.live, ...patch };
+      e.props = props;
+      e.failed = false;
+      return true;
+    },
+    nodeSchema(ref) {
+      const e = entryOf(ref);
+      if (!e) return undefined;
+      return Schema.object({ ...COMMON.dict, ...(e.type.schema.dict ?? {}) });
     },
     resize(viewportWidth, viewportHeight) {
       const fit = fitStage(
