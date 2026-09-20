@@ -1,0 +1,71 @@
+import { describe, expect, it } from 'vitest';
+import type { SessionInit } from '@energy8engine/contracts';
+import { Config } from '../src/schema';
+import { toShellConfig } from '../src/config';
+
+const INIT: SessionInit = {
+  balance: 1000,
+  currency: { code: 'EUR', symbol: '€', decimals: 2, position: 'right' },
+  betLevels: [1, 2, 5],
+  defaultBet: 2,
+};
+
+describe('toShellConfig — the session feeds the shell, the row config dresses it', () => {
+  it('an empty Config({}) plus init is a complete ShellConfig', () => {
+    expect(toShellConfig(Config({}), INIT)).toEqual({
+      availableBets: [1, 2, 5],
+      defaultBet: 2,
+      currentBet: 2,
+      balance: 1000,
+      win: 0,
+      mode: 'base',
+      currency: { symbol: '€', position: 'right', maxDecimals: 2 },
+      language: 'en',
+      version: '1.0.0',
+      features: { turbo: 1, autoplay: {}, buyBonus: false, hotkeys: undefined, spacebar: undefined },
+      gameInfo: { sections: [] },
+      menu: undefined,
+      theme: undefined,
+    });
+  });
+
+  it('language: the row config wins, then init, then en', () => {
+    expect(toShellConfig(Config({ language: 'de' }), { ...INIT, language: 'fr' }).language).toBe('de');
+    expect(toShellConfig(Config({}), { ...INIT, language: 'fr' }).language).toBe('fr');
+    expect(toShellConfig(Config({}), INIT).language).toBe('en');
+  });
+
+  it('features: turbo level, buyBonus list or false, autoplay object or null', () => {
+    const on = toShellConfig(
+      Config({ features: { turbo: 3, buyBonus: [{ id: 'b', title: 'Bonus', cost: 100 }], autoplay: { maxCount: 50 } } }),
+      INIT,
+    ).features;
+    expect(on.turbo).toBe(3);
+    expect(on.buyBonus).toEqual([{ id: 'b', title: 'Bonus', cost: 100 }]);
+    expect(on.autoplay).toEqual({ maxCount: 50 });
+
+    // `false` is how a YAML config switches a feature off (schemastery
+    // turns a `null` into the field's default, so `null` cannot say it).
+    const off = toShellConfig(Config({ features: { buyBonus: false, autoplay: false } }), INIT).features;
+    expect(off.buyBonus).toBe(false);
+    expect(off.autoplay).toBeNull();
+  });
+
+  it('gameInfo, menu, theme and version pass through; i18n and tiers are not ShellConfig fields', () => {
+    const cfg = Config({
+      version: '2.1.0',
+      gameInfo: { sections: [{ type: 'rules', text: 'x' }] },
+      menu: [{ id: 'sound' }],
+      theme: { accent: '#f00' },
+      i18n: { de: { Spin: 'Drehen' } },
+      tiers: [{ id: 'big', threshold: 20 }],
+    });
+    const shell = toShellConfig(cfg, INIT);
+    expect(shell.version).toBe('2.1.0');
+    expect(shell.gameInfo).toEqual({ sections: [{ type: 'rules', text: 'x' }] });
+    expect(shell.menu).toEqual([{ id: 'sound' }]);
+    expect(shell.theme).toEqual({ accent: '#f00' });
+    expect(shell).not.toHaveProperty('i18n');
+    expect(shell).not.toHaveProperty('tiers');
+  });
+});

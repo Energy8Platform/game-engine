@@ -727,6 +727,23 @@ describe('createGame — the diagnostics service', () => {
     expect(ids.indexOf('sessionsdk1')).toBeLessThan(ids.indexOf('scenes1'));
   });
 
+  /**
+   * The `ui.shell` seam (spec §4): `shell1` sits right after `playloop1`,
+   * ahead of `fx1` — same fixture-free pin. Its `inject: ['renderer',
+   * 'session']` is what actually gates it, so the pin is about the file
+   * staying as documented, not about when the row applies.
+   */
+  it('e8-base places the shell row right after the play loop, ahead of fx', () => {
+    const text = readFileSync(
+      join(__dirname, '..', '..', '..', 'bundles', 'e8-base', 'e8.bundle.yml'),
+      'utf8',
+    );
+    const ids = [...text.matchAll(/^\s*-\s*id:\s*(\S+)/gm)].map((m) => m[1]);
+
+    expect(ids.indexOf('shell1')).toBe(ids.indexOf('playloop1') + 1);
+    expect(ids.indexOf('shell1')).toBeLessThan(ids.indexOf('fx1'));
+  });
+
   /** `diagnostics1` resolves to the real runtime half; anything else is a bare no-op row, unless named otherwise below. */
   const importHalf = async (url: string) => {
     const id = url.split('/').pop()!;

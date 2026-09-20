@@ -8,7 +8,9 @@
 import { createGame } from '@energy8engine/game-runtime';
 import * as sceneEdit from '@energy8engine/scene-edit';
 
-const game = await createGame({ mount: document.getElementById('mount')! });
+// The editor page composes the WHOLE bundle, `shell1` included — and the
+// shell would draw its bar over the very canvas being edited. Not here.
+const game = await createGame({ mount: document.getElementById('mount')!, without: ['ui.shell'] });
 const params = new URLSearchParams(location.search);
 const parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
 await game.ctx.plugin(sceneEdit, {

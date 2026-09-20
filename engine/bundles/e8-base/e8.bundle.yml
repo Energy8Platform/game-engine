@@ -83,6 +83,13 @@ rows:
     name: '@energy8engine/game-runtime'
   - id: playloop1
     name: '@energy8engine/play-loop'
+  # The Pixi shell (bar, bet ladder, balance, win, turbo, autoplay, menu)
+  # as a row the flow drives and listens to — the `ui.shell` seam (spec
+  # §4). `inject: ['renderer', 'session']`, so it waits for both whatever
+  # its place here; a page that must not draw it composes with
+  # `createGame({ without: ['ui.shell'] })` (the scene editor does).
+  - id: shell1
+    name: '@energy8engine/shell-pixi'
   # `tween`/`sound` flow node kinds — moving a scene node through the
   # legacy `Tween`, playing a file through `@pixi/sound`. `inject:
   # ['flowNodes']`, so this row stays PENDING until `flow1` (below) provides
