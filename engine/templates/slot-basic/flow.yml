@@ -6,6 +6,7 @@ nodes:
   - { id: click, kind: sound,   props: { src: assets/spin.wav }, ui: { x: 580,  y: 80 } }
   - { id: spin,  kind: spin,    ui: { x: 760,  y: 80 } }
   - { id: draw,  kind: present, ui: { x: 940,  y: 80 } }
+  - { id: show_win, kind: prop, props: { target: base_game/win, prop: text, value: '$result.win' }, ui: { x: 940,  y: 240 } }
   - { id: done,  kind: if,      props: { when: '$result.roundComplete' }, ui: { x: 1120, y: 80 } }
   - { id: step,  kind: step,    ui: { x: 1120, y: 240 } }
 edges:
@@ -14,7 +15,8 @@ edges:
   - { from: idle,  to: click }
   - { from: click, to: spin }
   - { from: spin,  to: draw }
-  - { from: draw,  to: done }
+  - { from: draw,  to: show_win }
+  - { from: show_win, to: done }
   - { from: done,  to: idle, out: 'true' }
   - { from: done,  to: step, out: 'false' }
   - { from: step,  to: draw }

@@ -686,6 +686,22 @@ ctx.inject(['flow'], (c) =>
     const v = s?.view?.({ scene, node });
     return v ? v.mask != null : null;
   },
+  /**
+   * A mounted top-level scene node's `text` — what a `text` node's `Text`/
+   * `BitmapText` view holds (`AbstractText.text`, a plain string setter/
+   * getter both share), off the same `scenes.view` `nodeMasked`/`nodeProps`
+   * read from. `null` when there is no such node, or its view is some
+   * other node type with no `.text` string at all (a `Sprite`, a
+   * `Container`, …) — never the empty string, so a test can tell "not a
+   * text node" from "a text node that currently says nothing".
+   */
+  nodeText(scene: string, node: string): string | null {
+    const s = ctx.reflect.get('scenes', false) as
+      | { view?(ref: { scene: string; node: string }): { text?: unknown } | undefined }
+      | undefined;
+    const v = s?.view?.({ scene, node });
+    return v && typeof v.text === 'string' ? v.text : null;
+  },
   /** A mounted top-level scene node's `x`/`y`/`alpha`/`width`/`height`/`tint`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
   nodeProps(
     scene: string,

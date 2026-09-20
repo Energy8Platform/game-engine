@@ -455,6 +455,18 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
     let value: unknown;
     if (typeof p.value === 'string' && p.value.startsWith('$')) {
       value = resolve(p.value, vars);
+      // The var IS already typed, so a `$path` skips the literal branch's
+      // own Number()/boolean coercion below for everything EXCEPT a
+      // `string` target — `Schema.string()` throws outright on anything
+      // but a JS string, and `setProps` would refuse the whole patch (a
+      // `$result.win` float into a `text` node's `text` prop, the
+      // example's own `show_win` node, is exactly this case). Only a
+      // number/boolean is stringified; an object or `null` is left for
+      // `setProps` to refuse, same as before this branch existed.
+      const type = dict?.[p.prop]?.type;
+      if (type === 'string' && (typeof value === 'number' || typeof value === 'boolean')) {
+        value = String(value);
+      }
     } else {
       const type = dict?.[p.prop]?.type;
       if (type === 'number') {

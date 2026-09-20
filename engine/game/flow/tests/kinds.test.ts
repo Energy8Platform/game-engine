@@ -327,6 +327,17 @@ describe('built-in kinds', () => {
       expect(rc.report).not.toHaveBeenCalled();
     });
 
+    it('a `$path` value into a `string` prop is stringified — Schema.string() refuses a raw number/boolean outright', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = { setProps, nodeSchema: nodeSchema({ text: { type: 'string' } }) };
+      const { rc } = runCtx({ scenes }, { result: { win: 1.5 } });
+      expect(
+        await kind('prop').run!({ target: 'a/b', prop: 'text', value: '$result.win' }, rc),
+      ).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenCalledWith({ scene: 'a', node: 'b' }, { text: '1.5' });
+      expect(rc.report).not.toHaveBeenCalled();
+    });
+
     it('a missing node: `setProps` false reports (setProps already reported its own diagnostic elsewhere) and still leaves by next', async () => {
       const setProps = vi.fn(() => false);
       const scenes = { setProps, nodeSchema: vi.fn(() => undefined) };

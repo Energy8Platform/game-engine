@@ -9,6 +9,9 @@ nodes:
   - id: coin
     type: spritesheet
     props: { sheet: assets/coin.json, x: 40, y: 40, fps: 8, anchor: 0.5 }
+  - id: win
+    type: text
+    props: { text: '', size: 28, fill: '#ffd166', x: 240, y: 260, anchor: 0.5, align: center }
   - id: big_win
     type: scene
     props: { scene: big_win, visible: false }
