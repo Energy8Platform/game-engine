@@ -891,6 +891,28 @@ describe('live props', () => {
     await scenes.show('big');
     expect(byId(scenes, 'base', 'bw')!.alpha).toBe(0.5);
   });
+
+  it('patches EVERY copy of the node: the embedded one on screen, and the standalone mount', async () => {
+    const { scenes, nodeTypes } = boot();
+    nodeTypes.register(text);
+    scenes.replace([
+      { id: 'big_win', nodes: [{ id: 'banner', type: 'text', props: { text: 'x0' } }] },
+      {
+        id: 'base_game',
+        nodes: [{ id: 'bw', type: 'scene', props: { scene: 'big_win', visible: false } }],
+      },
+    ]);
+    await scenes.show('base_game');
+    // A host is visible, so this flips the EMBEDDED copy — `big_win`'s own
+    // top-level mount stays off screen, and it is the one `view()` answers.
+    await scenes.show('big_win');
+    expect(scenes.setProps({ scene: 'big_win', node: 'banner' }, { text: 'x99' })).toBe(true);
+    const onScreen = scenes.sceneView('base_game')!.getChildByLabel('banner', true) as Text;
+    const standalone = byId(scenes, 'big_win', 'banner') as Text;
+    expect(onScreen).not.toBe(standalone);
+    expect(onScreen.text).toBe('x99');
+    expect(standalone.text).toBe('x99');
+  });
 });
 
 describe('nodeSchema', () => {

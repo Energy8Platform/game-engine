@@ -73,12 +73,15 @@ export interface ScenesService {
   /** A node's view by id, top-level or nested under a `container`/another node — the top-level map first (the common case, O(1)), `all` otherwise. */
   view(ref: SceneRef): Container | undefined;
   /**
-   * Patches a mounted node's props for THIS mount, not the document: the
+   * Patches a mounted node's props for THE MOUNTS, not the document: the
    * merge (document props + earlier patches + `patch`) goes back through
    * the type's schema, `update` re-applies it and the common pass runs
-   * again. A remount — a document edit, a hot re-apply — drops it. `false`
-   * (with a diagnostic) for a node nothing mounted, and for a value the
-   * schema or the apply refuses, in which case the patch is not kept.
+   * again. Every copy of the node is patched — nesting is by copy, so a
+   * document another scene embeds is mounted more than once and only one
+   * of those copies is the one on screen. A remount — a document edit, a
+   * hot re-apply — drops it. `false` (with a diagnostic) for a node
+   * nothing mounted, and for a value the schema or the apply refuses, in
+   * which case the patch is not kept (by any copy).
    */
   setProps(ref: SceneRef, patch: Record<string, unknown>): boolean;
   /**
@@ -426,6 +429,19 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     );
   };
 
+  /**
+   * EVERY mounted copy of a node, not just the one `entryOf` answers:
+   * nesting is by copy, so a document that some visible scene embeds is
+   * mounted twice — its own (off-screen) top-level mount and the host's
+   * subtree. `show()` of it flips the EMBEDDED copy, so patching only
+   * `entryOf`'s would write to the copy nobody can see. `where` is
+   * `<scene>/<node>`, which is exactly the identity wanted.
+   */
+  const entriesOf = (ref: SceneRef): Entry[] => {
+    const where = `${ref.scene}/${ref.node}`;
+    return [...mounted.values()].flatMap((m) => m.all.filter((e) => e.where === where));
+  };
+
   /** A node's document props with its live `setProps` patch on top — what the common pass reads. */
   const rawOf = (e: Entry): Record<string, unknown> =>
     e.live ? { ...e.node.props, ...e.live } : e.node.props;
@@ -621,8 +637,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     sceneView: (id) => mounted.get(id)?.view,
     view: (ref) => entryOf(ref)?.view,
     setProps(ref, patch) {
-      const e = entryOf(ref);
-      if (!e) {
+      const entries = entriesOf(ref);
+      if (entries.length === 0) {
         error(
           `${ref.scene}/${ref.node}`,
           `node "${ref.node}" is not mounted in scene "${ref.scene}" — nothing to set`,
@@ -633,35 +649,42 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // Everything is validated (and applied) from the MERGE, never from
       // the patch alone: a type's schema fills its defaults from a whole
       // dict, and the common pass needs the node's own `x`/`alpha` too.
-      const merged = { ...rawOf(e), ...patch };
-      let props: Record<string, unknown>;
-      try {
-        // BOTH passes run before ANYTHING is applied — this is the whole
-        // atomicity argument. `type.update` mutates the view (a `shape`
-        // redraws at the new width), so a common prop the runtime would
-        // reject (`x: 'abc'`, a colour `Color` refuses) has to be caught
-        // here and not one step later, or a refused patch lands in halves.
-        props = e.type.schema(merged as never) as Record<string, unknown>;
-        commonProps(merged, e.type);
-      } catch (err) {
-        error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
-        return false;
+      // EVERY copy is validated before ANY of them is touched — this is
+      // the whole atomicity argument. `type.update` mutates the view (a
+      // `shape` redraws at the new width), so a common prop the runtime
+      // would reject (`x: 'abc'`, a colour `Color` refuses) has to be
+      // caught here and not one step later, or a refused patch lands in
+      // halves — across the copies as much as across the two passes.
+      const plan: { e: Entry; merged: Record<string, unknown>; props: Record<string, unknown> }[] =
+        [];
+      for (const e of entries) {
+        const merged = { ...rawOf(e), ...patch };
+        try {
+          const props = e.type.schema(merged as never) as Record<string, unknown>;
+          commonProps(merged, e.type);
+          plan.push({ e, merged, props });
+        } catch (err) {
+          error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
+          return false;
+        }
       }
-      try {
-        e.type.update?.(e.view, props, mountCtx([]));
-        applyCommon(e.view, merged, e.type);
-      } catch (err) {
-        // Not a validation failure any more (both passes said yes): a type
-        // whose `update` throws for a reason of its own. Reported the same
-        // way, but the view may have moved — nothing more this can do.
-        error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
-        return false;
+      for (const { e, merged, props } of plan) {
+        try {
+          e.type.update?.(e.view, props, mountCtx([]));
+          applyCommon(e.view, merged, e.type);
+        } catch (err) {
+          // Not a validation failure any more (both passes said yes): a type
+          // whose `update` throws for a reason of its own. Reported the same
+          // way, but the view may have moved — nothing more this can do.
+          error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
+          return false;
+        }
+        // Only a patch that actually landed is remembered — a refused one
+        // must not poison the next `refresh()` (or the next patch's merge).
+        e.live = { ...e.live, ...patch };
+        e.props = props;
+        e.failed = false;
       }
-      // Only a patch that actually landed is remembered — a refused one
-      // must not poison the next `refresh()` (or the next patch's merge).
-      e.live = { ...e.live, ...patch };
-      e.props = props;
-      e.failed = false;
       return true;
     },
     nodeSchema(ref) {
