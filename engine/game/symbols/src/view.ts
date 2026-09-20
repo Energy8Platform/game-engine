@@ -17,6 +17,12 @@
  * awaiting then resolves into a no-op (the wrapper it would restore is
  * not the current one).
  *
+ * A state's props may read the data of the cell the symbol landed in:
+ * `'$cell.<field>'` (an orb's `text: '$cell.multiplier'`). `bind(data)` —
+ * the reels board calls it on every seated cell — resolves those against
+ * that data and re-runs the type's `update`; until then each stands at its
+ * prop's empty, so no type and no schema ever sees the raw string.
+ *
  * Every call into a node type's `update`/`once`/`unmount` is guarded:
  * slice 20's lesson — a throwing type is one report per wrapper (until a
  * remount rebuilds it), never a board that fails to draw.
@@ -24,7 +30,15 @@
 import type { Context } from 'cordis';
 import { Container } from 'pixi.js';
 import type { SymbolDef, SymbolNode, SymbolState } from '@energy8engine/contracts';
-import { applyCommon, type NodeType, type NodeTypesService } from '@energy8engine/scenes';
+import {
+  applyCommon,
+  cellField,
+  COMMON,
+  emptyProp,
+  isCellBinding,
+  type NodeType,
+  type NodeTypesService,
+} from '@energy8engine/scenes';
 import type { SymbolView } from '@energy8platform/game-engine/slot';
 import { fallbackBox } from './fallback';
 
@@ -35,14 +49,19 @@ export interface ViewDeps {
   report(where: string, message: string): void;
 }
 
+/** The legacy view plus `bind`: what the reels board calls on every cell it has just seated. */
+export type BoundSymbolView = SymbolView & { bind(data: Record<string, unknown>): void };
+
 export interface SymbolHandle {
   readonly id: string;
   /** Centred `Container`; `playWin` present iff the def has `win` (and no `only`). */
-  readonly view: SymbolView;
+  readonly view: BoundSymbolView;
   /** Remounts the wrappers unless `def` is JSON-equal to the current one; `undefined` → the fallback box. */
   apply(def: SymbolDef | undefined): void;
   /** `type.update` on the rest wrapper, then fit — after an asset load. */
   refresh(): void;
+  /** Resolves every `$cell.<field>` prop against this cell's data; kept for a wrapper mounted later (a `win`). */
+  bind(data: Record<string, unknown>): void;
   resize(size: { width: number; height: number }): void;
   /** Unmounts the wrappers, destroys the view, calls `onDestroy` — what the view's own `destroy()` does too. */
   destroy(): void;
@@ -54,6 +73,10 @@ interface Wrapper {
   type?: NodeType;
   child?: Container;
   props?: Record<string, unknown>;
+  /** The state's props as written — re-resolved on every `bind`. */
+  raw?: Record<string, unknown>;
+  /** `raw` holds at least one `$cell.<field>` string; nothing else is worth re-resolving. */
+  bound?: boolean;
   /** Reported once; a remount rebuilds the wrapper and clears it. */
   failed?: boolean;
 }
@@ -61,14 +84,60 @@ interface Wrapper {
 const DEFAULT_SIZE = { width: 96, height: 96 };
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+const dictOf = (schema: unknown): Record<string, { type?: string } | undefined> =>
+  (schema as { dict?: Record<string, { type?: string }> }).dict ?? {};
+
+/** A bound prop's value: the cell's field coerced to the prop's schema type — the way a flow's `prop` coerces. */
+function boundValue(field: unknown, type?: string): unknown {
+  if (field === undefined || field === null) return emptyProp(type);
+  if (type === 'number') {
+    const n = Number(field);
+    return Number.isNaN(n) ? 0 : n;
+  }
+  if (type === 'boolean') return typeof field === 'string' ? field === 'true' : Boolean(field);
+  return type === 'string' ? String(field) : field;
+}
+
+/**
+ * The type's schema over a state's props, with every `$cell.<field>`
+ * string resolved against `data` (its own prop's type when the type
+ * declares it, `COMMON`'s otherwise — a `$cell.*` on `x` is a number too).
+ * The schema never sees a binding: that prop's EMPTY stands in for the
+ * validation, which is what makes a binding valid whatever the prop's type
+ * (the host's `checkNode` does the same), and the resolved value — never
+ * validated, like a flow's `$path` — is put back on top.
+ */
+function resolveProps(
+  type: NodeType,
+  raw: Record<string, unknown>,
+  data?: Record<string, unknown>,
+): Record<string, unknown> {
+  const own = dictOf(type.schema);
+  const common = dictOf(COMMON);
+  const input: Record<string, unknown> = {};
+  const bound: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isCellBinding(value)) {
+      input[key] = value;
+      continue;
+    }
+    const kind = (own[key] ?? common[key])?.type;
+    input[key] = emptyProp(kind);
+    bound[key] = data ? boundValue(data[cellField(value)], kind) : input[key];
+  }
+  return { ...(type.schema(input) as Record<string, unknown>), ...bound };
+}
+
 export function createSymbolHandle(
   id: string,
   deps: ViewDeps,
   opts: { only?: SymbolState; onDestroy?(): void } = {},
 ): SymbolHandle {
-  const view = new Container() as SymbolView;
+  const view = new Container() as BoundSymbolView;
   view.label = `symbol:${id}`;
   let size = DEFAULT_SIZE;
+  /** The last `bind` — replayed onto a wrapper mounted after it (a `win`). */
+  let cell: Record<string, unknown> | undefined;
   let def: SymbolDef | undefined;
   let json = '';
   let rest: Wrapper | null = null;
@@ -122,10 +191,12 @@ export function createSymbolHandle(
       deps.report(`symbols/${id}/${state}`, `unknown node type "${node.type}"`);
     } else {
       w.type = type;
+      w.raw = node.props;
+      w.bound = Object.values(node.props).some(isCellBinding);
       try {
-        w.props = type.schema(node.props) as Record<string, unknown>;
+        w.props = resolveProps(type, node.props, cell);
         w.child = type.mount(w.props, deps.ctx);
-        applyCommon(w.child, node.props, type);
+        applyCommon(w.child, w.props, type);
         w.container.addChild(w.child);
       } catch (e) {
         w.child = undefined;
@@ -202,6 +273,21 @@ export function createSymbolHandle(
     refresh() {
       if (rest) update(rest);
     },
+    // Every mounted wrapper, `win` included: a win state reads the same cell.
+    bind(data) {
+      cell = data;
+      for (const w of [rest, win]) {
+        if (!w?.bound || !w.type || !w.child) continue;
+        try {
+          w.props = resolveProps(w.type, w.raw!, data);
+          applyCommon(w.child, w.props, w.type);
+        } catch (e) {
+          fail(w, 'bind', e);
+          continue;
+        }
+        update(w);
+      }
+    },
     resize(next) {
       size = next;
       if (rest) fit(rest);
@@ -216,6 +302,7 @@ export function createSymbolHandle(
 
   view.resize = (s) => handle.resize(typeof s === 'number' ? { width: s, height: s } : s);
   view.showStatic = showStatic;
+  view.bind = (data) => handle.bind(data);
   // The cell destroys the view itself on every `setData`: the teardown hangs off pixi's own
   // `destroyed` event so both roads (`handle.destroy()`, `view.destroy()`) end the same way.
   view.once('destroyed', () => {

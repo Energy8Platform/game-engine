@@ -63,6 +63,25 @@ export const COLOUR = new RegExp(
   'i',
 );
 
+/**
+ * A prop bound to the data of the cell a symbol landed in —
+ * `'$cell.multiplier'`. No schema ever validates one (the flow's `$path`
+ * strings are not validated either): the symbols runtime resolves it on
+ * `bind`, and until then the prop stands at its type's empty, below. Here
+ * rather than in `symbols` so the host's static check (`checkNode`) and
+ * that runtime agree on the one rule.
+ */
+const CELL = '$cell.';
+export const isCellBinding = (value: unknown): value is string =>
+  typeof value === 'string' && value.startsWith(CELL);
+
+/** The cell field a binding reads: `'$cell.multiplier'` → `'multiplier'`. */
+export const cellField = (binding: string): string => binding.slice(CELL.length);
+
+/** What an unresolved binding stands in as, so neither a schema nor a type's `update` sees the raw string. */
+export const emptyProp = (type?: string): string | number | boolean =>
+  type === 'number' ? 0 : type === 'boolean' ? false : '';
+
 export const COMMON = Schema.object({
   x: Schema.number().default(0).description('x, design px'),
   y: Schema.number().default(0).description('y, design px'),

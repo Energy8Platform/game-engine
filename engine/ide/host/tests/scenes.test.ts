@@ -30,6 +30,12 @@ const types: NodeTypeInfo[] = [
     assetProps: ['sheet'],
   },
   {
+    type: 'text',
+    schema: json(
+      Schema.object({ text: Schema.string().default(''), size: Schema.number().default(24) }),
+    ),
+  },
+  {
     type: 'spine',
     schema: json(Schema.object({ skeleton: Schema.string().required(), atlas: Schema.string() })),
     accept: { extensions: ['skel', 'json'], prop: 'skeleton', sibling: 'atlas' },
@@ -163,6 +169,45 @@ describe('checkScenes', () => {
       ),
     ).toEqual([]);
   });
+  // Slice 24: a symbol state's prop may be bound to the cell's data
+  // (`'$cell.multiplier'`), resolved at bind time — so the string stands for a
+  // value of whatever type the prop declares, and no schema here may refuse it.
+  // Same rule the symbols runtime's own schema pass applies (`view.ts`).
+  it("a `$cell.<field>` binding passes any prop's schema — a number, a string, a common prop", () => {
+    expect(
+      checkScenes(
+        [
+          doc('a', [
+            {
+              id: 'n',
+              type: 'text',
+              props: { text: '$cell.symbol', size: '$cell.multiplier', x: '$cell.multiplier' },
+            },
+          ]),
+        ],
+        types,
+        () => true,
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it('only the `$cell.` prefix passes — any other string on a number prop is still refused', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'n', type: 'text', props: { size: '$cellular' } }])],
+      types,
+      () => true,
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/n',
+        message: expect.stringContaining('size'),
+      }),
+    ]);
+  });
+
   it('an empty image src (a fresh image) is one error, worded for it', () => {
     const out = checkScenes(
       [doc('a', [{ id: 'i', type: 'image', props: { src: '' } }])],

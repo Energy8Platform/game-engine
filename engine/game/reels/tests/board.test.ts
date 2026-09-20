@@ -23,6 +23,13 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
       playWin: vi.fn(async () => {
         calls.push(['playWin', col, row]);
       }),
+      // What a `SymbolCell` exposes: the mounted symbol view (`bind` is the
+      // symbols package's `$cell.<field>` resolution) and the data it last took,
+      // read straight off the board the way the real cell's getter does.
+      view: { bind: vi.fn() } as unknown as CellLike['view'],
+      get data() {
+        return board[col]?.[row] ?? { symbol: null };
+      },
     };
   }
 
@@ -41,7 +48,15 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
   });
 
   const reelSystem: LegacyReelSystem = {
-    grid: { getCell },
+    grid: {
+      getCell,
+      get cols() {
+        return board.length;
+      },
+      get rows() {
+        return board[0]?.length ?? 0;
+      },
+    },
     get board() {
       return board;
     },
@@ -56,6 +71,8 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
     setBoard,
     getCell,
     cellAt: (c: number, r: number) => cells.get(`${c}:${r}`),
+    bindAt: (c: number, r: number) =>
+      cells.get(`${c}:${r}`)?.view?.bind as ReturnType<typeof vi.fn>,
   };
 }
 
@@ -260,6 +277,8 @@ describe('boardFromReelSystem: revealWins', () => {
       setState: vi.fn(),
       setData: vi.fn(),
       playWin: vi.fn(() => gate),
+      view: null,
+      data: { symbol: null },
     }));
     const board = boardFromReelSystem(reelSystem);
 
@@ -336,5 +355,86 @@ describe('boardFromReelSystem: repaint / cellSize', () => {
     const board = boardFromReelSystem(reelSystem);
 
     expect(board.cellSize).toEqual({ width: 96, height: 96 });
+  });
+});
+
+/**
+ * Slice 24: a symbol state's props may read the cell's own data
+ * (`'$cell.multiplier'`). The board is what hands it over — after the op
+ * that seated the data, never during it.
+ */
+describe('boardFromReelSystem: $cell bindings', () => {
+  const twoByOne = () => [[{ symbol: 'a', multiplier: 2 }], [{ symbol: 'b' }]];
+
+  it('binds every cell to its own data once a spin has landed', async () => {
+    const { reelSystem, bindAt } = fakeReelSystem(twoByOne());
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.spinTo({ kind: 'spinTo', board: [['a'], ['b']] });
+
+    expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'a', multiplier: 2 });
+    expect(bindAt(1, 0)).toHaveBeenCalledWith({ symbol: 'b' });
+  });
+
+  it('binds every cell after a refill, against the board that refill just set', async () => {
+    const { reelSystem, bindAt } = fakeReelSystem([[{ symbol: 'x' }]]);
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.refill({ kind: 'refill', board: [[{ symbol: 'ORB', multiplier: 5 }]] });
+
+    expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'ORB', multiplier: 5 });
+  });
+
+  it('binds on a repaint — and a repaint deferred behind a spin binds only once it lands', async () => {
+    const { reelSystem, spin, getCell, bindAt } = fakeReelSystem(twoByOne());
+    let land!: () => void;
+    spin.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const board = boardFromReelSystem(reelSystem);
+
+    const spinning = board.spinTo({ kind: 'spinTo', board: [['a'], ['b']] });
+    board.repaint();
+    await new Promise((r) => setTimeout(r, 5));
+    // nothing was even looked up, let alone bound, while the spin is in flight
+    expect(getCell).not.toHaveBeenCalled();
+
+    land();
+    await spinning;
+    expect(bindAt(0, 0)).toHaveBeenLastCalledWith({ symbol: 'a', multiplier: 2 });
+
+    // idle: a repaint binds straight away
+    (bindAt(0, 0) as ReturnType<typeof vi.fn>).mockClear();
+    board.repaint();
+    expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'a', multiplier: 2 });
+  });
+
+  it('an empty cell (no view) and a view with no bind are skipped, not thrown over', async () => {
+    const { reelSystem, getCell } = fakeReelSystem([[{ symbol: null }], [{ symbol: 'b' }]]);
+    getCell.mockImplementation((col: number) =>
+      col === 0
+        ? ({
+            setState: vi.fn(),
+            setData: vi.fn(),
+            playWin: vi.fn(),
+            view: null,
+            data: { symbol: null },
+          } as unknown as CellLike)
+        : ({
+            setState: vi.fn(),
+            setData: vi.fn(),
+            playWin: vi.fn(),
+            view: {} as CellLike['view'],
+            data: { symbol: 'b' },
+          } as unknown as CellLike),
+    );
+    const board = boardFromReelSystem(reelSystem);
+
+    await expect(
+      board.refill({ kind: 'refill', board: [[{ symbol: null }], ['b']] }),
+    ).resolves.toBeUndefined();
   });
 });

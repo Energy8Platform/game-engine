@@ -10,7 +10,7 @@ import type { NodeTypeAccept } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
 import { COLOUR, COMMON } from './common-schema';
 
-export { COLOUR, COMMON };
+export { COLOUR, COMMON, cellField, emptyProp, isCellBinding } from './common-schema';
 export type { NodeTypeAccept };
 
 declare global {

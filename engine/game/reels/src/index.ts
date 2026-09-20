@@ -63,6 +63,7 @@ import type {
   CellData,
   CreateReelSystemOptions,
   ReelSystem,
+  SymbolView,
 } from '@energy8platform/game-engine/slot';
 import type { Container } from 'pixi.js';
 import { cellData } from '@energy8engine/contracts';
@@ -82,11 +83,17 @@ export interface CellLike {
   setState(state: { winning?: boolean; removed?: boolean; fresh?: boolean }): void;
   setData(data: CellData): void;
   playWin(): Promise<void>;
+  /** The mounted symbol's view, when there is one; `bind` is `@energy8engine/symbols`' `$cell.<field>` resolution. */
+  readonly view: (SymbolView & { bind?(data: CellData): void }) | null;
+  /** The data this cell last took — what `bind` resolves against. */
+  readonly data: CellData;
 }
 
-/** The slice of `ReelGrid` this board needs — cell lookup only. */
+/** The slice of `ReelGrid` this board needs — cell lookup, and the extent to walk for `bindAll`. */
 export interface GridLike {
   getCell(col: number, row: number): CellLike;
+  readonly cols: number;
+  readonly rows: number;
 }
 
 /**
@@ -124,7 +131,23 @@ export function boardFromReelSystem(
   // put the previous spin's art back. Deferred until the last op in flight settles, run once.
   let inFlight = 0;
   let pendingRepaint = false;
-  const repaint = () => reelSystem.setBoard(reelSystem.board);
+  // Every seated cell hands its own data to its view: a symbol state's `$cell.<field>` props
+  // (an orb's ×N) resolve here, AFTER the op that seated it — never during a spin, where the
+  // tape's symbols carry no data and the default look is what a spinning reel wants. A view
+  // without `bind` (any other `SymbolView`) and an empty cell are simply skipped.
+  const bindAll = () => {
+    const { grid } = reelSystem;
+    for (let col = 0; col < grid.cols; col++)
+      for (let row = 0; row < grid.rows; row++) {
+        // A ragged grid has no cell past a short reel's last row — `getCell` answers undefined.
+        const cell = grid.getCell(col, row) as CellLike | undefined;
+        cell?.view?.bind?.(cell.data);
+      }
+  };
+  const repaint = () => {
+    reelSystem.setBoard(reelSystem.board);
+    bindAll();
+  };
   const tracked =
     <S>(run: (step: S) => Promise<void>) =>
     async (step: S) => {
@@ -141,6 +164,7 @@ export function boardFromReelSystem(
   return {
     spinTo: tracked(async (step: SpinToStep) => {
       await reelSystem.spin(toCellBoard(step.board));
+      bindAll();
     }),
 
     revealWins: tracked(async (step: RevealWinsStep) => {
@@ -176,6 +200,7 @@ export function boardFromReelSystem(
 
     refill: tracked(async (step: RefillStep) => {
       reelSystem.setBoard(toCellBoard(step.board));
+      bindAll();
     }),
 
     // Forces a redraw without changing any symbol — a config edit (e.g. a frame style) that

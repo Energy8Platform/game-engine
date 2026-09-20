@@ -28,7 +28,7 @@ import type { Server } from '@cordisjs/plugin-server';
 import yaml from 'js-yaml';
 import Schema from 'schemastery';
 // pixi-free: `./common-schema` imports schemastery and nothing else.
-import { COMMON } from '@energy8engine/scenes/common-schema';
+import { COMMON, emptyProp, isCellBinding } from '@energy8engine/scenes/common-schema';
 import {
   diagnostic,
   type Diagnostic,
@@ -119,9 +119,18 @@ export function checkNode(
       // go to its schema, not to `COMMON`; the runtime splits them the same way
       // (`applyCommon`'s `commonOf`).
       const ownSchema = new Schema(schema as Schema);
-      const dict = (ownSchema as unknown as { dict?: Record<string, unknown> }).dict ?? {};
-      for (const [k, v] of Object.entries(node.props))
-        (COMMON_PROPS.includes(k) && !(k in dict) ? common : own)[k] = v;
+      const dict =
+        (ownSchema as unknown as { dict?: Record<string, { type?: string } | undefined> }).dict ??
+        {};
+      for (const [k, v] of Object.entries(node.props)) {
+        const target = COMMON_PROPS.includes(k) && !(k in dict) ? common : own;
+        // A symbol state's `$cell.<field>` binding stands for a value of whatever
+        // type the prop declares — resolved against the cell's data at run time, so
+        // no schema ever validates it (the flow's `$path` strings are not validated
+        // either). That prop's EMPTY is checked in its place, exactly as the symbols
+        // runtime does before the first `update` (`symbols/src/view.ts`).
+        target[k] = isCellBinding(v) ? emptyProp((dict[k] ?? COMMON.dict?.[k])?.type) : v;
+      }
       COMMON(common as never);
       ownSchema(own);
     } catch (error) {

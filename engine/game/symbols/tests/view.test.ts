@@ -2,6 +2,29 @@ globalThis.requestAnimationFrame = ((fn: (t: number) => void) =>
   setTimeout(() => fn(performance.now()), 16)) as unknown as typeof requestAnimationFrame;
 globalThis.cancelAnimationFrame = clearTimeout as unknown as typeof cancelAnimationFrame;
 
+/**
+ * `fit` measures every wrapper, and a pixi `Text`'s bounds go through
+ * `CanvasTextMetrics` — `document.createElement('canvas')` and a 2D
+ * context, neither of which plain Node has. This much of a canvas (10 px
+ * per character, whatever the size) is all a `text` state needs here: the
+ * assertions below are on what the type was told, never on the box.
+ */
+class FakeContext2D {}
+globalThis.CanvasRenderingContext2D = FakeContext2D as unknown as typeof CanvasRenderingContext2D;
+const context2d = Object.assign(new FakeContext2D(), {
+  font: '',
+  measureText: (s: string) => ({
+    width: s.length * 10,
+    actualBoundingBoxAscent: 8,
+    actualBoundingBoxDescent: 2,
+    actualBoundingBoxLeft: 0,
+    actualBoundingBoxRight: s.length * 10,
+  }),
+});
+globalThis.document = {
+  createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => context2d }),
+} as unknown as Document;
+
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import {
@@ -15,7 +38,7 @@ import {
   TextureSource,
 } from 'pixi.js';
 import type { SymbolDef } from '@energy8engine/contracts';
-import { createNodeTypes, image, type NodeType } from '@energy8engine/scenes';
+import { createNodeTypes, image, text, type NodeType } from '@energy8engine/scenes';
 import { spritesheet } from '@energy8engine/node-media';
 import Schema from 'schemastery';
 import { createSymbolHandle, type ViewDeps } from '../src/view';
@@ -48,6 +71,7 @@ function setup(
   const nodeTypes = createNodeTypes();
   nodeTypes.register(image);
   nodeTypes.register(spritesheet);
+  nodeTypes.register(text);
   const assets: Record<string, unknown> = { ...loaded };
   ctx.provide('assetLoader', {
     load: vi.fn(async () => {}),
@@ -334,5 +358,90 @@ describe('createSymbolHandle', () => {
     expect(onDestroy).toHaveBeenCalledTimes(2);
     cellSide.destroy();
     expect(onDestroy).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Slice 24: a state's props may hold `'$cell.<field>'`, resolved against
+ * the data of the cell the symbol landed in (`bind`, called by the reels
+ * board). `text` is the natural subject — the one type that puts the
+ * value on screen.
+ */
+describe('$cell bindings', () => {
+  const textOf = (h: { view: Container }, state = 'static') =>
+    wrapperOf(h.view, state)!.children[0] as Text;
+
+  it("stands at the prop's empty until bound, then says what the cell carries", () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: { type: 'text', props: { text: '$cell.multiplier' } } });
+    h.resize(SIZE);
+    // the raw `$cell.` string never reached the type: the empty string did
+    expect(textOf(h).text).toBe('');
+    h.view.bind({ symbol: 'orb', multiplier: 5 });
+    expect(textOf(h).text).toBe('5');
+  });
+
+  it('a number prop takes 0 for a field the cell does not carry, and the value when it does', () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: { type: 'text', props: { text: 'x', size: '$cell.size' } } });
+    expect(textOf(h).style.fontSize).toBe(0);
+    h.view.bind({ symbol: 'orb', multiplier: 5 });
+    expect(textOf(h).style.fontSize).toBe(0);
+    h.view.bind({ symbol: 'orb', size: 40 });
+    expect(textOf(h).style.fontSize).toBe(40);
+  });
+
+  it('binds again on every call — the second spin overwrites the first', () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: { type: 'text', props: { text: '$cell.multiplier' } } });
+    h.view.bind({ symbol: 'orb', multiplier: 5 });
+    h.view.bind({ symbol: 'orb', multiplier: 7 });
+    expect(textOf(h).text).toBe('7');
+    // a cell that lost the field falls back to the empty, not to the stale 7
+    h.view.bind({ symbol: 'orb' });
+    expect(textOf(h).text).toBe('');
+  });
+
+  it('a state with no binding is left alone — no re-update per bound cell', () => {
+    const { deps, nodeTypes } = setup();
+    const update = vi.fn(text.update!);
+    nodeTypes.register({ ...text, update });
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: { type: 'text', props: { text: 'fixed' } } });
+    update.mockClear();
+    h.view.bind({ symbol: '1', multiplier: 5 });
+    expect(update).not.toHaveBeenCalled();
+    expect(textOf(h).text).toBe('fixed');
+  });
+
+  it('a win mounted after the bind carries it too', async () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('orb', deps);
+    h.apply({
+      id: 'orb',
+      static: STATIC,
+      win: { type: 'text', props: { text: '$cell.multiplier' } },
+    });
+    h.view.bind({ symbol: 'orb', multiplier: 3 });
+    const playing = h.view.playWin!();
+    expect(textOf(h, 'win').text).toBe('3');
+    await playing;
+  });
+
+  it('a binding on a common prop moves the view, and an absent field leaves it at 0', () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('1', deps);
+    h.apply({
+      id: '1',
+      fit: 'none',
+      static: { type: 'image', props: { src: 'assets/symbols/1.png', x: '$cell.multiplier' } },
+    });
+    h.resize(SIZE);
+    expect(wrapperOf(h.view, 'static')!.children[0].x).toBe(0);
+    h.view.bind({ symbol: '1', multiplier: 12 });
+    expect(wrapperOf(h.view, 'static')!.children[0].x).toBe(12);
   });
 });
