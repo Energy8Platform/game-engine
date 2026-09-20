@@ -1,5 +1,5 @@
 /**
- * The flow node-kind registry (`ctx.flowNodes`) and the thirteen built-in
+ * The flow node-kind registry (`ctx.flowNodes`) and the fifteen built-in
  * kinds. Last-wins like the scene node-type registry, so a project plugin
  * (or a hot re-apply) can replace a built-in; subscribers hear every change.
  *
@@ -10,7 +10,14 @@
  */
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
-import type { Diagnostic, PresentationStep, Severity } from '@energy8engine/contracts';
+import type {
+  Diagnostic,
+  PlayRequest,
+  PresentationStep,
+  SessionService,
+  Severity,
+  SpinResult,
+} from '@energy8engine/contracts';
 import type { PlayService } from '@energy8engine/play-loop/runtime';
 import type { SceneRef, ScenesService } from '@energy8engine/scenes';
 import { createRegistry } from '@energy8engine/registry';
@@ -33,7 +40,6 @@ export interface RunCtx {
   ctx: Context;
   /** Aborted by `stop()`/`replace()`; a `run` that waits must give up on it. */
   signal: AbortSignal;
-  fetchFn: typeof fetch;
   /** A diagnostic on this node that does NOT end the branch (a bad `if` expression, say). */
   report(message: string, severity?: Severity): void;
   /** Whether any run of this document still has a live branch. */
@@ -95,6 +101,13 @@ const service = <T>(ctx: Context, name: string): T => {
 const resolve = (value: unknown, vars: Record<string, unknown>) =>
   typeof value === 'string' && value.startsWith('$') ? readPath(value, vars) : value;
 
+/** `v` as a number: a number as is, a non-blank numeric string via `Number()`, anything else `NaN`. */
+const asNumber = (v: unknown): number =>
+  typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 const none = Schema.object({});
 
 interface MechanicsLike {
@@ -147,27 +160,37 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
 };
 
 /**
- * POSTs a spin/step request body to `/api/spin` and turns the answer into
- * the `spin`/`step` kinds' own `run` result. Shared: both kinds build the
- * same `{ out: 'result', vars: { result, request } }` /
- * `{ out: 'failed', vars: { error } }` shape from the same endpoint, only
- * the request body they build differs.
+ * Plays one request through the composition's `session` seam and turns the
+ * answer into the `spin`/`step` kinds' own `run` result. Shared: both kinds
+ * build the same `{ out: 'result', vars: { result, request } }` /
+ * `{ out: 'failed', vars: { error } }` shape, only the request differs.
+ *
+ * Lenient on the seam — a page composed `without: ['session']` (the
+ * composition editor) has none. No session, a play without a result (the
+ * provider's diagnostics are re-reported on the node, with their severity)
+ * and a `play` that throws all leave by `failed` with the reason, rather
+ * than ending the branch: the flow still reaches whatever it wired there
+ * (a `shell { busy: false }` that re-enables Spin, say).
  */
-async function postSpin(
-  body: Record<string, unknown>,
-  fetchFn: typeof fetch,
+async function playThrough(
+  ctx: Context,
+  request: PlayRequest,
+  report: RunCtx['report'],
 ): Promise<{ out: string; vars?: Record<string, unknown> }> {
+  const session = ctx.reflect.get('session', false) as SessionService | undefined;
+  if (!session) {
+    report('no session row in this composition');
+    return { out: 'failed', vars: { error: 'no session' } };
+  }
   try {
-    const res = await fetchFn('/api/spin', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`POST /api/spin → ${res.status}`);
-    const result: unknown = await res.json();
-    return { out: 'result', vars: { result, request: body } };
+    const { result, diagnostics } = await session.play(request);
+    if (result) return { out: 'result', vars: { result, request } };
+    for (const d of diagnostics) report(d.message, d.severity);
+    return { out: 'failed', vars: { error: diagnostics.map((d) => d.message).join('; ') || 'no result' } };
   } catch (e) {
-    return { out: 'failed', vars: { error: e instanceof Error ? e.message : String(e) } };
+    const message = e instanceof Error ? e.message : String(e);
+    report(message);
+    return { out: 'failed', vars: { error: message } };
   }
 }
 
@@ -180,21 +203,14 @@ async function postSpin(
 function applyBetLevel(
   betLevelProp: string | undefined,
   vars: Record<string, unknown>,
-  request: Record<string, unknown>,
+  request: PlayRequest,
   report: (message: string, severity?: Severity) => void,
 ): void {
   const betLevelRaw = resolve(betLevelProp, vars);
   if (betLevelRaw === undefined) return;
-  if (typeof betLevelRaw === 'number') {
-    request.betLevel = betLevelRaw;
-    return;
-  }
-  const betLevel = Number(betLevelRaw);
-  if (typeof betLevelRaw !== 'string' || betLevelRaw.trim() === '' || Number.isNaN(betLevel)) {
-    report(`betLevel "${betLevelRaw}" is not a number`);
-  } else {
-    request.betLevel = betLevel;
-  }
+  const betLevel = asNumber(betLevelRaw);
+  if (Number.isNaN(betLevel)) report(`betLevel "${betLevelRaw}" is not a number`);
+  else request.betLevel = betLevel;
 }
 
 const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
@@ -206,12 +222,15 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
     betLevel: Schema.string().description('bet level (a number), or `$path` to read a var'),
   }),
   outs: ['result', 'failed'],
-  async run(p, { vars, fetchFn, report }) {
-    const request: Record<string, unknown> = {};
+  async run(p, { ctx, vars, report }) {
     const action = resolve(p.action, vars);
-    if (action !== undefined) request.action = action;
+    if (action == null || action === '') {
+      report(`'spin' has no action to send (resolved from '${p.action}')`);
+      return { out: 'failed', vars: { error: "'spin' has no action" } };
+    }
+    const request: PlayRequest = { action: action as string };
     applyBetLevel(p.betLevel, vars, request, report);
-    return postSpin(request, fetchFn);
+    return playThrough(ctx, request, report);
   },
 };
 
@@ -241,7 +260,7 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
       .description('next action name (a literal), or `$path` to read a var'),
   }),
   outs: ['result', 'failed'],
-  async run(p, { vars, fetchFn, report }) {
+  async run(p, { ctx, vars, report }) {
     const roundId = resolve(p.roundId, vars);
     if (roundId == null || roundId === '') {
       report(`'step' has no roundId to send (resolved from '${p.roundId}')`);
@@ -252,8 +271,8 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
       report(`'step' has no action to send (resolved from '${p.action}')`);
       return { out: 'failed', vars: { error: "'step' has no action" } };
     }
-    const request: Record<string, unknown> = { action, roundId };
-    return postSpin(request, fetchFn);
+    const request: PlayRequest = { action: action as string, roundId: roundId as string };
+    return playThrough(ctx, request, report);
   },
 };
 
@@ -262,7 +281,9 @@ const present: FlowNodeKind<{ turbo: string }> = {
   schema: Schema.object({
     turbo: Schema.string()
       .default('$turbo')
-      .description("literal 'true', or a `$path` to a var — hurries the board while this plan plays"),
+      .description(
+        "literal 'true', or a `$path` to a var (`true`, or a number > 0 — the shell's `$shell.turbo`) — hurries the board while this plan plays",
+      ),
   }),
   outs: ['next', 'failed'],
   async run(p, { ctx, vars }) {
@@ -271,7 +292,9 @@ const present: FlowNodeKind<{ turbo: string }> = {
     const { plan, diagnostics } = service<MechanicsLike>(ctx, 'mechanics').present(result.stage, result.data);
     const play = service<PlayService>(ctx, 'play');
     const turbo = resolve(p.turbo, vars);
-    const opts = { turbo: turbo === true || turbo === 'true' };
+    const opts = {
+      turbo: turbo === true || turbo === 'true' || (typeof turbo === 'number' && turbo > 0),
+    };
     const problems = diagnostics.length
       ? diagnostics
       : await play.execute(plan, ctx.reflect.get('board', false), undefined, opts);
@@ -500,6 +523,191 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
   },
 };
 
+/**
+ * The `Shell` handle (`@energy8engine/shell-pixi` provides it as `shell`),
+ * as much of it as the `shell` kind drives — declared structurally here so
+ * the flow does not depend on the shell package.
+ */
+interface ShellLike {
+  state: { autoplay: { active: boolean; remaining: number } };
+  setBalance(n: number): void;
+  setWin(n: number, opts?: { animate?: boolean }): void;
+  setBet(n: number): void;
+  setMode(mode: string): void;
+  setBusy(busy: boolean): void;
+  setTurbo(level: number): void;
+  setBuyBonusEnabled(enabled: boolean): void;
+  setFreeSpins(fs: { current?: number | null; total: number; totalWin: number }): void;
+  setBonus(b: { label: string; value: string; totalWin: number }): void;
+  setAutoplay(a: { active: boolean; remaining: number }): void;
+}
+
+type ShellFlag = '' | 'true' | 'false';
+interface ShellProps {
+  balance: string;
+  win: string;
+  bet: string;
+  mode: '' | 'base' | 'bonus' | 'freeSpins' | 'replay';
+  busy: ShellFlag;
+  turbo: string;
+  buyBonusEnabled: ShellFlag;
+  freeSpins: string;
+  bonus: string;
+  autoplay: string;
+}
+
+const SHELL_MODES = ['base', 'bonus', 'freeSpins', 'replay'];
+
+/**
+ * The flow's one door to the shell's readouts. Every prop is a string:
+ * `''` leaves that readout untouched, a `$path` resolves first, a literal
+ * is coerced by the setter's type. `mode`/`busy`/`buyBonusEnabled` are
+ * unions of their literals, so the IDE draws a dropdown and a typo is
+ * refused at the schema; `run` checks the same sets again for a value that
+ * reached it unvalidated. A value that cannot be set (NaN, a bad enum, a
+ * setter that throws) is a diagnostic on the node and the OTHER props
+ * still apply, in schema order — a readout that cannot be set does not
+ * stop the round. No `shell` service at all (the composition editor) is a
+ * warning, and `next`.
+ */
+const shell: FlowNodeKind<ShellProps> = {
+  kind: 'shell',
+  schema: Schema.object({
+    balance: Schema.string()
+      .default('')
+      .description('balance readout, currency units (a number), or `$path` — e.g. `$result.balance`'),
+    win: Schema.string()
+      .default('')
+      .description('win readout, currency units (a number), or `$path` — e.g. `$result.winAmount`; counts up'),
+    bet: Schema.string().default('').description('bet readout, currency units (a number), or `$path`'),
+    mode: Schema.union(['', 'base', 'bonus', 'freeSpins', 'replay'])
+      .default('')
+      .description('what the bar shows'),
+    busy: Schema.union(['', 'true', 'false']).default('').description('Spin disabled while a round plays'),
+    turbo: Schema.string().default('').description('turbo level (a number), or `$path`'),
+    buyBonusEnabled: Schema.union(['', 'true', 'false'])
+      .default('')
+      .description('whether Buy Bonus can be pressed'),
+    freeSpins: Schema.string()
+      .default('')
+      .description('spins total (a number), or `$path` to `{ current?, total, totalWin }`'),
+    bonus: Schema.string()
+      .default('')
+      .description('`$path` to `{ label, value, totalWin }` — a bonus readout in the bar hero'),
+    autoplay: Schema.string()
+      .default('')
+      .description("'tick' (one autoplay spin done), 'stop', or a count (a number, or `$path`)"),
+  }),
+  outs: ['next'],
+  async run(p, { ctx, vars, report }) {
+    const shell = ctx.reflect.get('shell', false) as ShellLike | undefined;
+    if (!shell) {
+      report('no shell row in this composition', 'warning');
+      return { out: 'next' };
+    }
+    /** The prop's value, resolved; `undefined` for an untouched (`''`) prop. */
+    const value = (prop: keyof ShellProps): unknown =>
+      p[prop] === '' ? undefined : resolve(p[prop], vars);
+    const bad = (prop: keyof ShellProps, what: string) =>
+      report(`shell: ${prop} "${p[prop]}" is not ${what}`);
+    /** One setter throwing is reported; the props after it still apply. */
+    const apply = (prop: keyof ShellProps, set: () => void) => {
+      try {
+        set();
+      } catch (e) {
+        report(`shell: ${prop}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+    const num = (prop: keyof ShellProps, set: (n: number) => void) => {
+      const v = value(prop);
+      if (v === undefined) return;
+      const n = asNumber(v);
+      if (Number.isNaN(n)) bad(prop, 'a number');
+      else apply(prop, () => set(n));
+    };
+    const flag = (prop: keyof ShellProps, set: (b: boolean) => void) => {
+      const v = value(prop);
+      if (v === undefined) return;
+      if (v !== true && v !== false && v !== 'true' && v !== 'false') bad(prop, 'a boolean');
+      else apply(prop, () => set(v === true || v === 'true'));
+    };
+
+    num('balance', (n) => shell.setBalance(n));
+    num('win', (n) => shell.setWin(n, { animate: true }));
+    num('bet', (n) => shell.setBet(n));
+    const mode = value('mode');
+    if (mode !== undefined) {
+      if (typeof mode === 'string' && SHELL_MODES.includes(mode)) apply('mode', () => shell.setMode(mode));
+      else bad('mode', `a mode (${SHELL_MODES.join('|')})`);
+    }
+    flag('busy', (b) => shell.setBusy(b));
+    num('turbo', (n) => shell.setTurbo(n));
+    flag('buyBonusEnabled', (b) => shell.setBuyBonusEnabled(b));
+    const freeSpins = value('freeSpins');
+    if (freeSpins !== undefined) {
+      const n = asNumber(freeSpins);
+      if (isObject(freeSpins)) {
+        apply('freeSpins', () => shell.setFreeSpins(freeSpins as { total: number; totalWin: number }));
+      } else if (!Number.isNaN(n)) {
+        apply('freeSpins', () => shell.setFreeSpins({ total: n, totalWin: 0 }));
+      } else {
+        bad('freeSpins', 'a number or a free-spins object');
+      }
+    }
+    const bonus = value('bonus');
+    if (bonus !== undefined) {
+      if (isObject(bonus)) {
+        apply('bonus', () => shell.setBonus(bonus as { label: string; value: string; totalWin: number }));
+      } else {
+        bad('bonus', 'a bonus object');
+      }
+    }
+    const autoplay = value('autoplay');
+    if (autoplay === 'tick') {
+      apply('autoplay', () => {
+        const a = shell.state.autoplay;
+        // An unbounded autoplay (`remaining: Infinity`) is not counted down.
+        if (!Number.isFinite(a.remaining)) return;
+        const remaining = Math.max(0, a.remaining - 1);
+        shell.setAutoplay({ active: remaining > 0, remaining });
+      });
+    } else if (autoplay === 'stop') {
+      apply('autoplay', () => shell.setAutoplay({ active: false, remaining: 0 }));
+    } else if (autoplay !== undefined) {
+      const n = asNumber(autoplay);
+      if (Number.isNaN(n)) bad('autoplay', "a number, 'tick' or 'stop'");
+      else apply('autoplay', () => shell.setAutoplay({ active: n > 0, remaining: n }));
+    }
+    return { out: 'next' };
+  },
+};
+
+/**
+ * "The result was shown" — `SessionService.ack`, a provider's credit hook
+ * (`session-sdk`'s `playAck`; `session-host` has none). No session, no
+ * hook, or no `vars.result` to ack is a warning and `next` — the flow
+ * carries on either way; a hook that throws is an error on the node.
+ */
+const ack: FlowNodeKind = {
+  kind: 'ack',
+  schema: none,
+  outs: ['next'],
+  async run(_p, { ctx, vars, report }) {
+    const session = ctx.reflect.get('session', false) as SessionService | undefined;
+    const result = vars.result as SpinResult | undefined;
+    if (!session?.ack || !result) {
+      report('nothing to ack', 'warning');
+      return { out: 'next' };
+    }
+    try {
+      session.ack(result);
+    } catch (e) {
+      report(e instanceof Error ? e.message : String(e));
+    }
+    return { out: 'next' };
+  },
+};
+
 /** Special-cased by the interpreter: passes once every incoming edge has arrived this run. */
 const merge: FlowNodeKind = { kind: 'merge', schema: none, outs: ['next'] };
 
@@ -516,5 +724,7 @@ export const BUILTIN_KINDS: FlowNodeKind<any>[] = [
   set,
   emit,
   prop,
+  shell,
+  ack,
   merge,
 ];

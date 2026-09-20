@@ -118,7 +118,7 @@ export function parseDoc(value: unknown): { doc?: FlowDoc; reason?: string } {
   return { doc: { version: 1, nodes, edges } };
 }
 
-/** The thirteen built-ins, as the game would report them — what the checks and the editor use until a game speaks (a project plugin may add kinds; only a running game knows those). */
+/** The fifteen built-ins, as the game would report them — what the checks and the editor use until a game speaks (a project plugin may add kinds; only a running game knows those). */
 const BUILTIN_KIND_INFO: FlowKindInfo[] = BUILTIN_KINDS.map((k) => ({
   kind: k.kind,
   outs: [...k.outs],

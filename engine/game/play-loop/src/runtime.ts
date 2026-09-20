@@ -39,11 +39,13 @@
  *
  * **Slice 25 adds a fourth thing: tempo.** `execute` carries `StepOpts`
  * through to the board, and `ctx.play.skip()` collapses whatever is
- * presenting — reachable from a page directly, and from the flow bus's
- * `ui.skip`, which this row subscribes to through `ctx.inject(['events'])`
- * (see `apply` for why that, and not a read at apply time). A skip is not a
- * flow node: it has to land WHILE the flow is busy, which is the one moment
- * a flow node cannot run.
+ * presenting — reachable from a page directly, and from the flow bus: the
+ * events named by `config.skipEvents` (`['ui.skip']` by default; the
+ * template lists `[ui.skip, ui.tap]`, so a tap on the canvas during a
+ * presentation skips it), which this row subscribes to through
+ * `ctx.inject(['events'])` (see `apply` for why that, and not a read at
+ * apply time). A skip is not a flow node: it has to land WHILE the flow is
+ * busy, which is the one moment a flow node cannot run.
  *
  * **The precedence rule is untouched.** `executePlan` gives the board first
  * refusal on every kind and reaches a registry only for kinds the board has
@@ -54,7 +56,7 @@
  * one is a default argument, not an override. A test, or a game running two
  * boards with different step sets, keeps that option.
  *
- * `config` is unused — `play-loop` has no settings, only capabilities.
+ * `config` is `./schema.ts`'s `Config`: `skipEvents` alone.
  *
  * **`e8.runtime.requires: ["board"]`** (this package's own `package.json`).
  * `apply` below never reads `ctx.board` itself — `execute`'s `board`
@@ -114,9 +116,9 @@ export interface PlayService {
    * abandon the round — `execute`'s promise resolves as usual, with the
    * same diagnostics, once the collapsed steps fall through.
    *
-   * Never throws: it is called from a UI handler (a second tap on Spin,
-   * `ui.skip` on the flow bus), and one board or handler refusing to be
-   * hurried must not cost the others theirs.
+   * Never throws: it is called from a UI handler (a second tap on Spin, a
+   * `skipEvents` event on the flow bus), and one board or handler refusing
+   * to be hurried must not cost the others theirs.
    */
   skip(): void;
   /**
@@ -159,8 +161,9 @@ interface FlowBus {
   on(name: string, fn: (payload: unknown) => void): () => void;
 }
 
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: { skipEvents?: string[] } = {}): void {
   const steps = createBoardStepRegistry();
+  const skipEvents = config.skipEvents ?? ['ui.skip'];
 
   // Provided as its own service, not only as a field on `play`, so a
   // plugin can `inject(['steps'])` — depend on exactly the capability it
@@ -219,7 +222,9 @@ export function apply(ctx: Context): void {
 
   // The flow bus is the only channel a skip can arrive on DURING a run: a
   // flow `on` node cannot fire while the flow is busy (`busy: ignore`),
-  // which is exactly when a skip means anything.
+  // which is exactly when a skip means anything. Which events skip is the
+  // row's `skipEvents` config — every one rides this same effect, so a
+  // re-provided bus re-arms them all and a disposed one lets them all go.
   //
   // `ctx.inject`, not a lenient read at apply time, and not this row's own
   // `inject` field — the same device `ide-bridge` uses for `mechanics`. Two
@@ -237,10 +242,11 @@ export function apply(ctx: Context): void {
   //    subscription captured once would have gone on holding a dead bus,
   //    silently, for the rest of the page's life.
   ctx.inject(['events'], (c) => {
-    c.effect(
-      () => (c.get('events') as unknown as FlowBus).on('ui.skip', () => skip()),
-      'play-loop:ui-skip',
-    );
+    c.effect(() => {
+      const bus = c.get('events') as unknown as FlowBus;
+      const offs = skipEvents.map((name) => bus.on(name, () => skip()));
+      return () => offs.forEach((off) => off());
+    }, 'play-loop:ui-skip');
   });
 
   ctx.provide('play', {

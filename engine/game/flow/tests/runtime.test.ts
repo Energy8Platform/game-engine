@@ -21,6 +21,7 @@ describe('flow row', () => {
     expect(ctx.get('events')).toBeDefined();
     expect(ctx.get('events')!.on).toBeTypeOf('function');
     expect(ctx.get('flowNodes')!.list().map((k) => k.kind).sort()).toEqual([
+      'ack',
       'boot',
       'emit',
       'hide',
@@ -30,6 +31,7 @@ describe('flow row', () => {
       'present',
       'prop',
       'set',
+      'shell',
       'show',
       'spin',
       'step',

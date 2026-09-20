@@ -18,7 +18,6 @@ export interface CreateFlowOptions {
   kinds: FlowNodesService;
   ctx: Context;
   report(d: Diagnostic): void;
-  fetchFn?: typeof fetch;
   now?: () => number;
   /** A `run` past this is reported and abandoned. */
   timeoutMs?: number;
@@ -43,6 +42,17 @@ export interface FlowService {
   ready: Promise<void>;
   /** Aborts every in-flight branch and disarms the triggers; the doc and the trace stay. */
   stop(): void;
+  /**
+   * A live root: `$name.…` in any node of any run reads `getter()` at the
+   * moment of the read (`shell1` provides `shell` → `$shell.bet`,
+   * `session-host`/`session-sdk` provide `session`). The getter sits on the
+   * prototype every run's `vars` is created from, so `readPath`/`evaluate`/
+   * `resolve` need no special case, a run's own `set name` shadows it for
+   * that run alone, and an own-keys serialisation of `vars` never carries
+   * it. Re-providing a name replaces the getter; the disposer takes back
+   * only its own (a later re-provide wins).
+   */
+  provideRoot(name: string, getter: () => unknown): () => void;
 }
 
 const TRACE_LIMIT = 500;
@@ -64,7 +74,6 @@ const shape = (doc: FlowDoc) =>
 
 export function createFlow(o: CreateFlowOptions): FlowService {
   const { kinds, report } = o;
-  const fetchFn = o.fetchFn ?? fetch;
   const now = o.now ?? Date.now;
   const timeoutMs = o.timeoutMs ?? 30_000;
 
@@ -100,6 +109,26 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   const fail = (node: FlowNode, message: string, severity: Diagnostic['severity'] = 'error') =>
     report(diagnostic(severity, 'flow', node.id, message));
 
+  /** The live roots, one non-enumerable accessor per name; every run's `vars` is `Object.create(view)`. */
+  const view: Record<string, unknown> = {};
+  const provideRoot = (name: string, getter: () => unknown) => {
+    Object.defineProperty(view, name, {
+      get: getter,
+      // Not getter-only: `Object.assign(run.vars, { [name]: v })` (a `set`
+      // node landing in `leave`) on an inherited accessor without a setter
+      // is a TypeError. Defining the own property on the receiver — the
+      // run's `vars`, never `view` — is exactly the shadowing a `set` means.
+      set(this: Record<string, unknown>, value: unknown) {
+        Object.defineProperty(this, name, { value, writable: true, enumerable: true, configurable: true });
+      },
+      configurable: true,
+      enumerable: false,
+    });
+    return () => {
+      if (Object.getOwnPropertyDescriptor(view, name)?.get === getter) delete view[name];
+    };
+  };
+
   interface Run {
     no: number;
     vars: Record<string, unknown>;
@@ -112,7 +141,6 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     vars: run.vars,
     ctx: o.ctx,
     signal: run.epoch.controller.signal,
-    fetchFn,
     report: (message, severity) => fail(node, message, severity),
     busy: () => run.epoch.live > 0,
     idle: () => (run.epoch.live > 0 ? new Promise((resolve) => run.epoch.idlers.push(resolve)) : Promise.resolve()),
@@ -196,13 +224,14 @@ export function createFlow(o: CreateFlowOptions): FlowService {
       }
       const start = (vars: Record<string, unknown> | undefined) => {
         if (own.controller.signal.aborted) return; // fired after stop()
-        const run: Run = { no: ++runNo, vars: {}, epoch: own, arrived: new Map() };
+        const run: Run = { no: ++runNo, vars: Object.create(view), epoch: own, arrived: new Map() };
         record(run.no, node.id, null);
         leave(doc, run, node, kind, kind.outs[0], vars);
       };
       try {
         const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
-        disposers.push(kind.arm(props, start, runCtx({ no: 0, vars: {}, epoch: own, arrived: new Map() }, node)));
+        const armRun: Run = { no: 0, vars: Object.create(view), epoch: own, arrived: new Map() };
+        disposers.push(kind.arm(props, start, runCtx(armRun, node)));
       } catch (e) {
         fail(node, e instanceof Error ? e.message : String(e));
       }
@@ -275,5 +304,6 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     busy: () => epoch.live > 0,
     ready: Promise.resolve(),
     stop,
+    provideRoot,
   };
 }

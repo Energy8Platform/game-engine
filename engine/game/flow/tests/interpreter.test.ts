@@ -7,6 +7,7 @@ import { createFlow, type CreateFlowOptions } from '../src/interpreter';
 
 const doc = (nodes: FlowDoc['nodes'], edges: FlowDoc['edges']): FlowDoc => ({ version: 1, nodes, edges });
 const okBody = { stage: 'base_game', data: {}, win: 0 };
+type Played = { result?: unknown; diagnostics: { severity: string; message: string }[] };
 
 function harness(opts: Partial<CreateFlowOptions> = {}, extraKinds: FlowNodeKind[] = []) {
   const ctx = new Context();
@@ -20,13 +21,15 @@ function harness(opts: Partial<CreateFlowOptions> = {}, extraKinds: FlowNodeKind
   ctx.provide('play', play);
   const board = { tag: 'board' };
   ctx.provide('board', board);
+  // The `session` seam, as `spin`/`step` reach it: `play` answers a result by default.
+  const session = { play: vi.fn(async (): Promise<Played> => ({ result: okBody, diagnostics: [] })) };
+  ctx.provide('session', session);
   const kinds = createFlowNodes();
   for (const k of [...BUILTIN_KINDS, ...extraKinds]) kinds.register(k);
   const report = vi.fn();
-  const fetchFn = vi.fn(async () => ({ ok: true, status: 200, json: async () => okBody }));
-  const flow = createFlow({ kinds, ctx, report, fetchFn: fetchFn as unknown as typeof fetch, ...opts });
+  const flow = createFlow({ kinds, ctx, report, ...opts });
   const exits = () => flow.trace().filter((e) => e.out !== null).map((e) => `${e.node}.${e.out}`);
-  return { ctx, events, scenes, mechanics, play, board, kinds, report, fetchFn, flow, exits };
+  return { ctx, events, scenes, mechanics, play, board, session, kinds, report, flow, exits };
 }
 
 /** A flow that has settled: no branch will trace anything more. */
@@ -67,7 +70,7 @@ describe('createFlow', () => {
     expect(f.report).not.toHaveBeenCalled();
   });
 
-  it('spin puts result in vars and records nothing; a 500 leaves by failed with vars.error', async () => {
+  it('spin puts result in vars and records nothing; a play without a result leaves by failed with vars.error', async () => {
     const f = harness();
     let seen: Record<string, unknown> = {};
     f.kinds.register({
@@ -96,18 +99,20 @@ describe('createFlow', () => {
     await settled(f, ['start.next', 'spin.result', 'ok.next']);
     // `spin`'s schema default fills `action: 'spin'` for a bare node
     // (`interpreter.ts` calls `kind.schema(node.props ?? {})` before `run`).
-    expect(f.fetchFn).toHaveBeenCalledWith('/api/spin', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{"action":"spin"}',
-    });
+    expect(f.session.play).toHaveBeenCalledWith({ action: 'spin' });
     expect(seen.result).toEqual(okBody);
 
-    f.fetchFn.mockResolvedValueOnce({ ok: false, status: 500, json: async () => okBody });
+    f.session.play.mockResolvedValueOnce({
+      diagnostics: [{ severity: 'error', message: 'POST /api/spin → 500' }],
+    });
     f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.failed', 'bad.next']);
     expect(seen.error).toMatch(/500/);
+    // The provider's own diagnostic is re-reported on the node, with its severity.
+    expect(f.report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', plugin: 'flow', where: 'spin', message: 'POST /api/spin → 500' }),
+    );
     // The log is `present`'s: a spin that never got drawn is not in it.
     expect(f.play.record).not.toHaveBeenCalled();
   });
@@ -567,50 +572,49 @@ describe('createFlow', () => {
       [{ from: 'idle', to: 'spin' }],
     );
 
-  /** A fetch that hangs until the test releases it. */
+  /** A harness whose `session.play` hangs until the test releases it. */
   function gated() {
+    const f = harness();
     const release: (() => void)[] = [];
-    const fetchFn = vi.fn(
+    f.session.play.mockImplementation(
       () =>
-        new Promise((resolve) => {
-          release.push(() => resolve({ ok: true, status: 200, json: async () => okBody }));
+        new Promise<Played>((resolve) => {
+          release.push(() => resolve({ result: okBody, diagnostics: [] }));
         }),
-    ) as unknown as typeof fetch;
-    return { fetchFn, release };
+    );
+    return { f, play: f.session.play, release };
   }
 
   it('on { busy: ignore } (the default) drops a fire while a run is live; busy() says so', async () => {
-    const { fetchFn, release } = gated();
-    const f = harness({ fetchFn });
+    const { f, play, release } = gated();
     f.flow.replace(spinDoc());
     expect(f.flow.busy()).toBe(false);
     f.events.emit('ui.spin');
     expect(f.flow.busy()).toBe(true);
     f.events.emit('ui.spin');
     f.events.emit('ui.spin');
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(1);
     release[0]();
     await settled(f, ['idle.next', 'spin.result']);
     expect(f.flow.busy()).toBe(false);
     expect(f.flow.trace().filter((e) => e.node === 'idle' && e.out === null)).toHaveLength(1);
     f.events.emit('ui.spin');
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(play).toHaveBeenCalledTimes(2);
   });
 
   it('on { busy: queue } fires once after the live runs drain; further fires coalesce', async () => {
-    const { fetchFn, release } = gated();
-    const f = harness({ fetchFn });
+    const { f, play, release } = gated();
     f.flow.replace(spinDoc('queue'));
     f.events.emit('ui.spin', 1);
     f.events.emit('ui.spin', 2);
     f.events.emit('ui.spin', 3);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(1);
     release[0]();
-    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(play).toHaveBeenCalledTimes(2));
     expect(f.flow.trace().filter((e) => e.node === 'idle' && e.out === 'next').map((e) => e.run)).toEqual([1, 2]);
     release[1]();
     await settled(f, ['idle.next', 'spin.result', 'idle.next', 'spin.result']);
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(play).toHaveBeenCalledTimes(2);
     expect(f.flow.busy()).toBe(false);
   });
 
@@ -741,5 +745,153 @@ describe('createFlow', () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(f.flow.trace()).toEqual([]);
     expect(f.report).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Slice 26 — live roots. `flow.provideRoot(name, getter)` installs a getter
+ * on the prototype every run's `vars` is created from, so `$name.…` in any
+ * node of any run reads the CURRENT value at the moment of the read
+ * (`shell1` registers `shell`, `session-host`/`session-sdk` register
+ * `session`). The getter lives on the prototype, not on the run: `set name`
+ * shadows it for that run alone, and a serialisation of `vars` (own keys)
+ * never carries it.
+ */
+describe('live roots', () => {
+  interface Seen {
+    vars: Record<string, unknown>;
+    shell: unknown;
+    json: string;
+    keys: string[];
+  }
+  /** A kind that snapshots the run's `vars` AS IT IS at that node — the object, what `shell` reads, and what own keys serialise. */
+  const peek = (seen: Seen[]): FlowNodeKind => ({
+    kind: 'peek',
+    schema: BUILTIN_KINDS[0].schema,
+    outs: ['next'],
+    run: async (_p, c) => {
+      seen.push({ vars: c.vars, shell: c.vars.shell, json: JSON.stringify(c.vars), keys: Object.keys(c.vars) });
+      return { out: 'next' };
+    },
+  });
+
+  it("`$shell.bet` reads the getter at the moment of the read — in `if`, in `set`, and in a trigger's arm-time ctx", async () => {
+    const seen: Seen[] = [];
+    let armed: Record<string, unknown> | undefined;
+    const probe: FlowNodeKind = {
+      kind: 'probe',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      trigger: true,
+      arm(_p, _fire, c) {
+        armed = c.vars;
+        return () => {};
+      },
+    };
+    const f = harness({}, [peek(seen), probe]);
+    const shell = { bet: 2 };
+    f.flow.provideRoot('shell', () => shell);
+    const d = doc(
+      [
+        { id: 'start', kind: 'boot' },
+        { id: 'q', kind: 'if', props: { when: 'shell.bet > 1' } },
+        { id: 'yes', kind: 'set', props: { name: 'bet', value: '$shell.bet' } },
+        { id: 'no', kind: 'set', props: { name: 'bet', value: 0 } },
+        { id: 'p', kind: 'peek' },
+        { id: 't', kind: 'probe' },
+      ],
+      [
+        { from: 'start', to: 'q' },
+        { from: 'q', out: 'true', to: 'yes' },
+        { from: 'q', out: 'false', to: 'no' },
+        { from: 'yes', to: 'p' },
+        { from: 'no', to: 'p' },
+      ],
+    );
+    f.flow.replace(d);
+    await settled(f, ['start.next', 'q.true', 'yes.next', 'p.next']);
+    expect(seen.at(-1)!.vars.bet).toBe(2);
+    expect(armed!.shell).toBe(shell);
+
+    // The shell's state moved; the next run reads it moved — no re-provide needed.
+    shell.bet = 0;
+    f.flow.stop();
+    f.flow.replace(d);
+    await settled(f, ['start.next', 'q.false', 'no.next', 'p.next']);
+    expect(seen.at(-1)!.vars.bet).toBe(0);
+    expect(f.report).not.toHaveBeenCalled();
+  });
+
+  it('`set shell` shadows the root for that run only; own-key serialisations and trace entries never carry a root', async () => {
+    const seen: Seen[] = [];
+    const f = harness({}, [peek(seen)]);
+    const shell = { bet: 2 };
+    f.flow.provideRoot('shell', () => shell);
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'p0', kind: 'peek' },
+          { id: 'shadow', kind: 'set', props: { name: 'shell', value: 1 } },
+          { id: 'p1', kind: 'peek' },
+          { id: 'idle', kind: 'on', props: { event: 'again' } },
+          { id: 'p2', kind: 'peek' },
+        ],
+        [
+          { from: 'start', to: 'p0' },
+          { from: 'p0', to: 'shadow' },
+          { from: 'shadow', to: 'p1' },
+          { from: 'p1', to: 'idle' },
+          { from: 'idle', to: 'p2' },
+        ],
+      ),
+    );
+    await settled(f, ['start.next', 'p0.next', 'shadow.next', 'p1.next']);
+    // Before the shadow: the root reads, and is not on the wire.
+    expect(seen[0].shell).toBe(shell);
+    expect(seen[0].json).toBe('{}');
+    expect(seen[0].keys).toEqual([]);
+    // After `set shell = 1`: this run's own value, which IS on the wire.
+    expect(seen[1].shell).toBe(1);
+    expect(seen[1].json).toBe('{"shell":1}');
+    expect(seen[1].keys).toEqual(['shell']);
+    expect(shell).toEqual({ bet: 2 }); // the root itself was not written through
+
+    f.events.emit('again');
+    await settled(f, ['start.next', 'p0.next', 'shadow.next', 'p1.next', 'idle.next', 'p2.next']);
+    // A fresh run: the root again, unshadowed.
+    expect(seen[2].shell).toBe(shell);
+    expect(seen[2].json).toBe('{}');
+
+    // Trace entries are `{ run, node, out, at }` — never a var, never a root.
+    for (const e of f.flow.trace()) expect(Object.keys(e).sort()).toEqual(['at', 'node', 'out', 'run']);
+    expect(JSON.stringify(f.flow.trace())).not.toContain('"shell"');
+    expect(f.report).not.toHaveBeenCalled();
+  });
+
+  it('re-providing a name replaces the getter; a disposer takes back only its own registration', async () => {
+    const seen: Seen[] = [];
+    const f = harness({}, [peek(seen)]);
+    const offA = f.flow.provideRoot('shell', () => 'a');
+    const offB = f.flow.provideRoot('shell', () => 'b');
+    const d = doc(
+      [
+        { id: 'start', kind: 'boot' },
+        { id: 'p', kind: 'peek' },
+      ],
+      [{ from: 'start', to: 'p' }],
+    );
+    const read = async () => {
+      f.flow.stop();
+      f.flow.replace(d);
+      await settled(f, ['start.next', 'p.next']);
+      return seen.at(-1)!.shell;
+    };
+    expect(await read()).toBe('b');
+    offA(); // stale — B's getter is the one installed, and stays
+    expect(await read()).toBe('b');
+    offB();
+    expect(await read()).toBeUndefined();
+    expect(() => offB()).not.toThrow(); // twice is fine
   });
 });

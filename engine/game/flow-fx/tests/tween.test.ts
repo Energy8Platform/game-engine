@@ -12,7 +12,6 @@ function runCtx(provide: Record<string, unknown> = {}) {
     vars: {},
     ctx,
     signal: controller.signal,
-    fetchFn: vi.fn() as unknown as typeof fetch,
     report: vi.fn(),
     busy: () => false,
     idle: async () => {},

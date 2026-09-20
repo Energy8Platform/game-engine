@@ -3,13 +3,14 @@
  * module doc for what the package underneath it is.
  *
  * **`inject: []` — deliberately, unlike `scenes`'s `['renderer']`.** A flow
- * document can touch `scenes`/`mechanics`/`play`/`board` (`./kinds.ts`'s
- * built-ins reach every one of them), but only inside a node's own `run`,
- * looked up leniently (`ctx.reflect.get(name, false)`) at the moment that
- * node fires — never at composition time. So this row has nothing it must
- * wait for: it composes first if a project lists it first, last if listed
- * last, and a flow that names a service nothing provided is a diagnostic on
- * the node that tried to use it, not a row stuck PENDING forever.
+ * document can touch `scenes`/`mechanics`/`play`/`board`/`session`/`shell`
+ * (`./kinds.ts`'s built-ins reach every one of them), but only inside a
+ * node's own `run`, looked up leniently (`ctx.reflect.get(name, false)`) at
+ * the moment that node fires — never at composition time. So this row has
+ * nothing it must wait for: it composes first if a project lists it first,
+ * last if listed last, and a flow that names a service nothing provided is
+ * a diagnostic on the node that tried to use it, not a row stuck PENDING
+ * forever.
  *
  * Like `scenes`, this row pulls its own document: on apply it GETs
  * `/api/flow` (the host route the plan's later host task adds) and calls
@@ -59,8 +60,10 @@ export function apply(ctx: Context, config: FlowConfig = {}): void {
   for (const k of BUILTIN_KINDS) flowNodes.register(k);
   ctx.provide('flowNodes', flowNodes);
 
+  // Only the boot GET below: a node's play goes through `ctx.session`
+  // (`kinds.ts`'s `playThrough`), so the interpreter takes no fetch.
   const fetchFn = config.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
-  const flow = createFlow({ kinds: flowNodes, ctx, report, fetchFn });
+  const flow = createFlow({ kinds: flowNodes, ctx, report });
 
   // Same race, same fix, as `scenes/runtime.ts`'s own `replaced`/`alive`
   // pair — see that module's doc for the full argument. `ide-bridge`'s own

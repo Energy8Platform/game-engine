@@ -65,7 +65,7 @@ const KINDS: FlowKindInfo[] = [
   kind('set'),
 ];
 
-/** What the host answers as `kinds` before any game has spoken: the thirteen built-ins, by name. */
+/** What the host answers as `kinds` before any game has spoken: the fifteen built-ins, by name. */
 const BUILTIN_NAMES = BUILTIN_KINDS.map((k) => k.kind);
 const builtins = () =>
   expect.arrayContaining(BUILTIN_NAMES.map((kind) => expect.objectContaining({ kind })));
@@ -90,11 +90,11 @@ const flowFrames = (frames: ServerMessage[]) =>
   frames.filter((f): f is Extract<ServerMessage, { type: 'flow' }> => f.type === 'flow');
 
 describe('/api/flow', () => {
-  it('GET answers the parsed document, clean, with the thirteen built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
+  it('GET answers the parsed document, clean, with the fifteen built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
     const body = await get(host.url);
     expect(body).toEqual({ doc: LOOP, diagnostics: [], kinds: builtins() });
-    expect(body.kinds).toHaveLength(13);
+    expect(body.kinds).toHaveLength(15);
     // As the game would report them: outs, trigger, and a JSON schema the editor can rebuild.
     expect(body.kinds.find((k) => k.kind === 'spin')).toEqual({
       kind: 'spin',

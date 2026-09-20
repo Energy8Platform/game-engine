@@ -16,6 +16,7 @@ import * as spinLog from '@energy8engine/spin-log/runtime';
 import * as diagnosticsRuntime from '@energy8engine/diagnostics/runtime';
 import type { BoardApi } from '../src/index';
 import * as runtime from '../src/runtime';
+import { Config } from '../src/schema';
 
 /** A board with exactly one of the four kinds — enough to tell "the board won" from "the registry won". */
 function fakeBoard() {
@@ -594,6 +595,56 @@ describe('play-loop runtime half: turbo and skip', () => {
     first.emit('ui.skip');
     expect(two.boardSkip).toHaveBeenCalledTimes(1);
     await two.end();
+
+    await ctx.fiber.dispose();
+  });
+
+  /**
+   * Slice 26 — `skipEvents`. Which bus events collapse the presentation is
+   * the row's config, not a constant: the template lists `[ui.skip, ui.tap]`
+   * so a tap on the canvas during a presentation skips it (the shell's own
+   * Spin is disabled while `busy`). All of them ride the same
+   * `ctx.inject(['events'])` effect, so a re-provided bus re-arms every one
+   * and a disposed bus lets every one go.
+   */
+  it('`skipEvents: [ui.skip, ui.tap]` subscribes both; a disposed bus lets both go', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime, { skipEvents: ['ui.skip', 'ui.tap'] });
+    const bus = fakeBus();
+    const row = await ctx.plugin(busPlugin(bus));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const run = liveRun(ctx);
+    bus.emit('ui.tap');
+    expect(run.boardSkip).toHaveBeenCalledTimes(1);
+    bus.emit('ui.skip');
+    expect(run.boardSkip).toHaveBeenCalledTimes(2);
+    await run.end();
+
+    await row.dispose();
+    const after = liveRun(ctx);
+    bus.emit('ui.tap');
+    bus.emit('ui.skip');
+    expect(after.boardSkip).not.toHaveBeenCalled();
+    await after.end();
+
+    await ctx.fiber.dispose();
+  });
+
+  it('the default is `ui.skip` alone — in the schema, and with no config at all', async () => {
+    expect(Config({})).toEqual({ skipEvents: ['ui.skip'] });
+
+    const ctx = new Context();
+    const bus = fakeBus();
+    ctx.provide('events', bus.service);
+    await ctx.plugin(runtime);
+
+    const run = liveRun(ctx);
+    bus.emit('ui.tap');
+    expect(run.boardSkip).not.toHaveBeenCalled();
+    bus.emit('ui.skip');
+    expect(run.boardSkip).toHaveBeenCalledTimes(1);
+    await run.end();
 
     await ctx.fiber.dispose();
   });
