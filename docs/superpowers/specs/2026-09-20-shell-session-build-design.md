@@ -50,7 +50,7 @@ platform` produces one that plays through the Energy8 SDK.
 // @energy8engine/contracts session.ts
 export interface SessionInit {
   balance: number;          // currency units
-  currency: string;         // ISO code; the shell row resolves symbol/decimals through platform-core's lookupCurrency
+  currency: { code: string; symbol: string; decimals: number; position: 'left' | 'right' };
   betLevels: number[];      // currency units, ascending
   defaultBet: number;       // one of betLevels
   language?: string;
@@ -76,13 +76,16 @@ Seam `session` (the mechanism exists: `E8SeamDeclaration` in the manifest,
 - `@energy8engine/session-host` — `seam { name: session, matcher: { default: true } }`.
   `init` from a new `GET /api/session` on the preview server (`betLevels`
   from the authored `.spin`'s `bet_levels`, `defaultBet` = the first,
-  `currency: 'USD'`, `balance: 1000`); `play` = today's `POST /api/spin`
+  `currency` USD/`$`/2/left, `balance: 1000`; a failed GET → a diagnostic
+  and `{ balance: 0, betLevels: [1], defaultBet: 1 }`, so the shell still
+  mounts); `play` = today's `POST /api/spin`
   body `{ action, betLevel, roundId }`; a dev wallet in the row: `balance −=
   betLevel` on every play, `+= winAmount` on every result, reported as
   `result.balance`; `ack` absent.
 - `@energy8engine/session-sdk` — `matcher { buildTarget: 'platform' }`.
   `createPlatformSession({ sdk })` from `@energy8platform/platform-core`;
-  `init` from `initData` (`balance`, `currency`, `config.betLevels` — the
+  `init` from `initData` (`balance`, `currency` from `config.currency`'s
+  meta — code alone → symbol = code, 2 decimals —, `config.betLevels` — the
   spec's `bet_levels` when absent —, `config.stake?.defaultBetLevel ?? betLevels[0]`
   clamped to the ladder, `lang`, `device`); `play` → `PlayParams { action,
   bet: betLevel, roundId, params }` → `PlayResultData` normalised: `bet = req.betLevel`,
@@ -108,8 +111,8 @@ absent either → report, `next`. `flow1`'s `fetchFn` stays for `/api/flow`.
 `@energy8engine/shell-pixi`, `seam { name: 'ui.shell', matcher: { default: true } }`,
 `inject: ['renderer', 'session']`. `apply`: `createPixiShell({ app: renderer.app,
 ...config, availableBets: init.betLevels, defaultBet: init.defaultBet,
-currentBet: init.defaultBet, balance: init.balance, currency:
-lookupCurrency(init.currency), language: config.language ?? init.language ?? 'en',
+currentBet: init.defaultBet, balance: init.balance, currency: init.currency
+(`symbol`/`position`/`maxDecimals`), language: config.language || init.language || 'en',
 win: 0, mode: 'base' })`; the shell's root is raised to the top of
 `app.stage` after apply and again when `scenes` is re-provided (a hot
 `scenes1` re-apply appends a new root); disposer → `removePixiShell()`.
@@ -186,8 +189,8 @@ diagnostics on stdout, exit 1 on an error). Steps:
    row changes: they fetch the same same-origin URLs from static files.
 3. `vite build` with `root` = the project, `base`, `outDir`, `define
    { 'import.meta.env.E8_TARGET': target }`, and the vite plugin
-   `e8Rows(rows)` from `@energy8engine/project/vite` (node-side, beside
-   `resolveComposition`), which serves
+   `viteRows(map)` from `@energy8engine/ide-host` (`src/vite-rows.ts`; the
+   host already owns vite), which serves
    `virtual:e8-rows` = `{ [rowId]: () => import('<pkg>/<e8.runtime.entry>') }`
    (static specifiers, so vite bundles and code-splits every runtime half).
    `dev-game`'s vite gets the same plugin answering `{}`.
@@ -197,11 +200,16 @@ diagnostics on stdout, exit 1 on an error). Steps:
 `main.ts` (the pinned pair): `import { rows } from 'virtual:e8-rows'`;
 `createGame({ mount, buildTarget: import.meta.env.E8_TARGET, loader:
 { importModule: (url) => rows[url]?.() ?? import(/* @vite-ignore */ url) } })`;
-`ide-bridge` composed and `#log` rendered only under `import.meta.env.DEV`;
-the `__e8` hooks stay (the harness). `src/env.d.ts` declares the virtual
-module and `E8_TARGET`. `index.html` loses `#spin` and `#mechanic` (the
-shell owns Spin; the mechanic select was a dev toy — the composition form
-is where a stage is bound); keeps `#mount` and `#log`.
+`ide-bridge` composed and the `#controls`/`#log` dev toolbar shown only
+under `import.meta.env.DEV` (a built page removes them); the `__e8` hooks
+stay (the harness). `src/env.d.ts` declares the virtual module and
+`E8_TARGET`. The toolbar's Spin becomes a proxy for the shell's: it calls
+`shell.actions.spin()` when a shell is provided AND emits `ui.spin` (a
+flow without a shell — every e2e fixture flow — keeps working; exactly one
+of the two has a listener); the `#turbo` checkbox sets the shell's turbo
+level as well as the `ui.spin` payload; `__e8.spin({ turbo })` does the
+same. Removing the toolbar instead would have cost ~90 e2e premises on
+`#status`/`#spin` for no product gain.
 
 Nothing serves `dist/` — any static server does (`npx serve dist`); the
 proof's server proxies `/api/session` and `/api/spin` to a running host.
