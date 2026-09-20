@@ -10,6 +10,10 @@
  * nodes only. `show(id)` of a document some visible scene nests just flips
  * that node visible; otherwise the document's own view joins `container`.
  *
+ * A `pin` (COMMON) applies to a document's OWN top-level mount; an
+ * embedded copy is laid out by its host — the safe rect is in the outer
+ * root's coordinates, which a `scene` node's subtree does not share.
+ *
  * Like `stage` before it, this is unit-testable end to end: `Container`,
  * `Sprite` and `Graphics` all build headlessly in plain Node.
  */
@@ -29,6 +33,7 @@ import {
   COMMON,
   applyCommon,
   commonProps,
+  place,
   type NodeType,
   type NodeTypesService,
 } from './node-types';
@@ -120,9 +125,10 @@ interface Entry {
   /** `<scene>/<node id>` — where a throwing `update` is reported. */
   where: string;
   /**
-   * Mounted straight under its document's root container (`mountTop`'s or
-   * `mountDoc`'s), not under another node — the only place a `pin` means
-   * anything, since the safe rect is in the root's coordinates.
+   * A root of the OUTERMOST document (`mountTop`'s own list) — the only
+   * place a `pin` means anything, since the safe rect is in that root's
+   * coordinates. A child, and every node of an embedded copy (`mountDoc`),
+   * is laid out by its parent/host: absolute placement.
    */
   top: boolean;
   /**
@@ -224,7 +230,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     sceneId: string,
     chain: string[],
     seen: Set<string>,
-    /** `parent` is the document's root container — `false` for a node's children (the one recursive call below). */
+    /** A root of the outermost document; `false` for children (the recursive call below) and for an embedded copy (`mountDoc`). */
     top = true,
   ): void {
     const where = `${sceneId}/${node.id}`;
@@ -264,7 +270,11 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       failed(e);
       return;
     }
-    if (!top && node.props?.pin) nestedPin(where, node.id);
+    // A pinned CHILD is a warning — once, in the document's own mount
+    // (`chain` empty): an embedded copy's children are the same nodes,
+    // reported there already, and an embedded ROOT is silent on purpose —
+    // the same document pins fine in its own top-level mount.
+    if (!top && chain.length === 0 && node.props?.pin) nestedPin(where, node.id);
     view.label = node.id;
     parent.addChild(view);
     // After `addChild`: pixi wants the mask in the same tree it masks.
@@ -549,12 +559,17 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     }
   };
 
-  /** Every top-level entry with a `pin`, placed again against `lastFit` — the one thing a resize re-applies. */
+  /**
+   * Every top-level entry with a `pin`, POSITIONED again against
+   * `lastFit` — the one thing a resize re-applies. Position only, never
+   * the whole common pass: that would put the document's `visible` back
+   * over a `show()`n host and its `alpha` over a running tween.
+   */
   function placePinned(): void {
     for (const m of mounted.values())
       for (const e of m.all) {
         const raw = rawOf(e);
-        if (e.top && raw.pin) applyCommon(e.view, raw, e.type, lastFit);
+        if (e.top && raw.pin) place(e.view, commonProps(raw, e.type).common, lastFit);
       }
   }
 
@@ -663,7 +678,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       const view = new Container();
       view.label = id;
       const seen = new Set<string>();
-      for (const node of doc.nodes) mountNode(node, view, id, chain, seen);
+      // An embedded copy: its host lays it out, so no node in it is `top`.
+      for (const node of doc.nodes) mountNode(node, view, id, chain, seen, false);
       return view;
     },
     sceneView: (id) => mounted.get(id)?.view,
@@ -700,11 +716,14 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
           return false;
         }
       }
+      // A pin patched onto a CHILD: one warning per call, judged from the
+      // document's own mount (`entryOf`), where `top` says whether the
+      // node is a root — every copy shares that, so not per copy.
+      if (patch.pin && entryOf(ref)?.top === false) nestedPin(`${ref.scene}/${ref.node}`, ref.node);
       for (const { e, merged, props } of plan) {
         try {
           e.type.update?.(e.view, props, mountCtx([]));
           applyCommon(e.view, merged, e.type, e.top ? lastFit : null);
-          if (!e.top && patch.pin) nestedPin(e.where, e.node.id);
         } catch (err) {
           // Not a validation failure any more (both passes said yes): a type
           // whose `update` throws for a reason of its own. Reported the same

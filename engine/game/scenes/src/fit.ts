@@ -22,7 +22,7 @@ export interface Fit {
   viewport: { left: number; top: number; right: number; bottom: number };
 }
 
-export const ZERO_INSETS: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+export const ZERO_INSETS: Readonly<SafeArea> = Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 });
 
 /**
  * `'contain'` (default) fits the whole design inside the viewport,

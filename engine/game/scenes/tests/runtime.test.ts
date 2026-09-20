@@ -90,6 +90,10 @@ describe('scenes row', () => {
     const root = ctx.get('scenes')!.container;
     expect(root.scale.x).toBeCloseTo(4 / 3, 10);
     listeners.forEach((fn) => fn(320, 180));
+    // One microtask later: the shell's own resize listener (registered
+    // after this row's) has re-laid its bar by then.
+    expect(root.scale.x).toBeCloseTo(4 / 3, 10);
+    await Promise.resolve();
     expect(root.scale.x).toBeCloseTo(2 / 3, 10);
     await fiber.dispose();
     expect(listeners.size).toBe(0);
@@ -125,8 +129,23 @@ describe('scenes row', () => {
     // The bar's height is measured: a layout change moves it, and the next resize reads the new value.
     safeArea.bottom = 50;
     listeners.forEach((fn) => fn(480, 288));
+    await Promise.resolve();
     expect(root.scale.x).toBeCloseTo(238 / 288, 10);
     await fiber.dispose();
+  });
+
+  it('a resize whose microtask lands after the dispose is a no-op', async () => {
+    const { ctx, listeners } = withScreen(480, 288);
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    const resize = vi.spyOn(ctx.get('scenes')!, 'resize');
+    // The listener as the renderer held it: an event already dispatched
+    // when the dispose lands still runs its deferred half.
+    const [onResize] = [...listeners];
+    await fiber.dispose();
+    onResize!(320, 180);
+    await Promise.resolve();
+    expect(resize).not.toHaveBeenCalled();
   });
 
   it('a `safeArea` service wins over the shell\'s', async () => {
@@ -152,6 +171,17 @@ describe('scenes row', () => {
     expect(resize).toHaveBeenCalledWith(480, 288, safeArea);
     expect(scenes.container.scale.x).toBeCloseTo(188 / 288, 10);
     await fiber.dispose();
+  });
+
+  it('the `shell` effect goes with the row: a shell provided after the dispose re-fits nothing', async () => {
+    const { ctx } = withScreen(480, 288);
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    const resize = vi.spyOn(ctx.get('scenes')!, 'resize');
+    await fiber.dispose();
+    ctx.provide('shell', { safeArea: { top: 0, right: 0, bottom: 100, left: 0 } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(resize).not.toHaveBeenCalled();
   });
 
   it('ready resolves after the GET has replaced', async () => {

@@ -134,16 +134,24 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   // height is measured and moves with its layout, so each `resize` must
   // see the current value. `inject(['shell'])` re-fits when the shell row
   // provides after this one, so row order does not matter.
+  //
+  // The resize listener defers one microtask: `scenes1` applies before
+  // `shell1`, so its listener is registered first and would otherwise run
+  // BEFORE the shell has re-laid its bar on the very resize that flips it
+  // wide↔mobile — reading the OLD bar height. After the microtask every
+  // listener of that resize has run, the shell's included.
   const insets = (): SafeArea | undefined =>
     (ctx.reflect.get('safeArea', false) as SafeArea | undefined) ??
     (ctx.reflect.get('shell', false) as { safeArea?: SafeArea } | undefined)?.safeArea;
   const fit = (width = app.screen?.width, height = app.screen?.height) => {
-    if (width && height) scenes.resize(width, height, insets());
+    // `alive`: the deferred call may land after a dispose tore `scenes` down.
+    if (alive && width && height) scenes.resize(width, height, insets());
   };
   fit();
+  const onResize = (width: number, height: number) => queueMicrotask(() => fit(width, height));
   ctx.effect(() => {
-    app.renderer?.on('resize', fit);
-    return () => void app.renderer?.off('resize', fit);
+    app.renderer?.on('resize', onResize);
+    return () => void app.renderer?.off('resize', onResize);
   }, 'scenes:fit');
   ctx.inject(['shell'], () => fit());
 

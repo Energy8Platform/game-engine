@@ -28,7 +28,7 @@ import type { Server } from '@cordisjs/plugin-server';
 import yaml from 'js-yaml';
 import Schema from 'schemastery';
 // pixi-free: `./common-schema` imports schemastery and nothing else.
-import { COMMON, emptyProp, isCellBinding } from '@energy8engine/scenes/common-schema';
+import { COMMON, PINS, emptyProp, isCellBinding } from '@energy8engine/scenes/common-schema';
 import {
   diagnostic,
   type Diagnostic,
@@ -112,8 +112,9 @@ export function checkNode(
     out.push(diagnostic('error', plugin, where, message, fix));
   // The same warning the scenes runtime raises at mount (`scenes.ts`'s
   // `nestedPin`): a pin measures from the safe rect in the ROOT's
-  // coordinates, which a child does not share.
-  if (nested && node.props?.pin)
+  // coordinates, which a child does not share. Only for a value that IS a
+  // pin — a typo is the schema's one error below, not two diagnostics.
+  if (nested && (PINS as readonly unknown[]).includes(node.props?.pin))
     out.push(
       diagnostic(
         'warning',

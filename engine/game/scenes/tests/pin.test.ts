@@ -3,7 +3,7 @@ import { Container, Texture } from 'pixi.js';
 import { Context } from 'cordis';
 import type { Diagnostic, SceneDoc } from '@energy8engine/contracts';
 import { createNodeTypes, PINS, pinPoint } from '../src/node-types';
-import { container, image, text, type AssetLoader } from '../src/builtin';
+import { container, image, scene, text, type AssetLoader } from '../src/builtin';
 import { createScenes } from '../src/scenes';
 
 const loader: AssetLoader = {
@@ -17,7 +17,7 @@ function boot(docs: SceneDoc[] = []) {
   const ctx = new Context();
   const report = vi.fn<(d: Diagnostic) => void>();
   const nodeTypes = createNodeTypes();
-  for (const t of [container, image, text]) nodeTypes.register(t);
+  for (const t of [container, image, scene, text]) nodeTypes.register(t);
   const scenes = createScenes({
     root: new Container(),
     design: { width: 480, height: 288 },
@@ -45,14 +45,35 @@ const BAR = { top: 0, right: 0, bottom: 100, left: 0 };
  *   left = −x/s = 240 − 640/s = −8880/155, right = left + 1280/s = 83280/155.
  */
 const RECTS = {
-  small: { w: 480, h: 288, left: -6000 / 47, right: 28560 / 47, top: 0, bottom: 288 },
-  big: { w: 1280, h: 720, left: -8880 / 155, right: 83280 / 155, top: 0, bottom: 288 },
+  small: { w: 480, h: 288, left: -6000 / 47, right: 28560 / 47 },
+  big: { w: 1280, h: 720, left: -8880 / 155, right: 83280 / 155 },
 };
 
-const expected = (pin: string, r: { left: number; right: number; top: number; bottom: number }) => ({
-  x: pin.endsWith('left') ? r.left : pin.endsWith('right') ? r.right : (r.left + r.right) / 2,
-  y: pin.startsWith('top') ? r.top : pin.startsWith('bottom') ? r.bottom : (r.top + r.bottom) / 2,
-});
+/** Expected `(x, y)` per pin, per rect — a literal table, not a mirror of `pinPoint`. */
+const EXPECTED: Record<keyof typeof RECTS, Record<string, [number, number]>> = {
+  small: {
+    'top-left': [-6000 / 47, 0],
+    top: [240, 0],
+    'top-right': [28560 / 47, 0],
+    left: [-6000 / 47, 144],
+    center: [240, 144],
+    right: [28560 / 47, 144],
+    'bottom-left': [-6000 / 47, 288],
+    bottom: [240, 288],
+    'bottom-right': [28560 / 47, 288],
+  },
+  big: {
+    'top-left': [-8880 / 155, 0],
+    top: [240, 0],
+    'top-right': [83280 / 155, 0],
+    left: [-8880 / 155, 144],
+    center: [240, 144],
+    right: [83280 / 155, 144],
+    'bottom-left': [-8880 / 155, 288],
+    bottom: [240, 288],
+    'bottom-right': [83280 / 155, 288],
+  },
+};
 
 describe('pinPoint', () => {
   it('names the nine points of a rect', () => {
@@ -90,16 +111,17 @@ describe('pin', () => {
     expect(scenes.fit()?.viewport.bottom).toBeCloseTo(288, 10);
   });
 
-  for (const [name, r] of Object.entries(RECTS)) {
+  for (const name of ['small', 'big'] as const) {
+    const r = RECTS[name];
     it(`each of the nine pins at ${r.w}×${r.h} with a 100 px bar lands on its point of the safe rect (${name})`, () => {
       const { scenes, view } = boot([nine()]);
       const fit = scenes.resize(r.w, r.h, BAR);
       expect(fit.viewport.left).toBeCloseTo(r.left, 10);
       expect(fit.viewport.right).toBeCloseTo(r.right, 10);
       for (const pin of PINS) {
-        const want = expected(pin, r);
-        expect(view(pin).x, `${pin}.x`).toBeCloseTo(want.x, 10);
-        expect(view(pin).y, `${pin}.y`).toBeCloseTo(want.y, 10);
+        const [x, y] = EXPECTED[name][pin];
+        expect(view(pin).x, `${pin}.x`).toBeCloseTo(x, 10);
+        expect(view(pin).y, `${pin}.y`).toBeCloseTo(y, 10);
       }
     });
   }
@@ -200,6 +222,50 @@ describe('pin', () => {
     scenes.replace([{ id: 'a', nodes: [{ id: 'n', type: 'container', props: { pin: 'bottom-right' } }] }]);
     expect(view('n').x).toBeCloseTo(83280 / 155, 10);
     expect(view('n').y).toBeCloseTo(288, 10);
+  });
+
+  it('a resize moves a pinned node and touches nothing else: a shown host stays shown, a tweened alpha stays', async () => {
+    const { scenes, view } = boot([
+      {
+        id: 'a',
+        nodes: [
+          { id: 'host', type: 'scene', props: { scene: 'b', pin: 'bottom', visible: false } },
+          { id: 'n', type: 'container', props: { pin: 'top' } },
+        ],
+      },
+      { id: 'b', nodes: [] },
+    ]);
+    scenes.resize(1280, 720, BAR);
+    await scenes.show('a');
+    await scenes.show('b');
+    expect(view('host').visible).toBe(true);
+    view('n').alpha = 0.3;
+    scenes.resize(480, 288, BAR);
+    expect(view('host').visible).toBe(true);
+    expect(view('host').y).toBeCloseTo(288, 10);
+    expect(view('n').alpha).toBe(0.3);
+    expect(view('n').x).toBeCloseTo(240, 10);
+  });
+
+  it('pins apply to a document\'s own top-level mount; an embedded copy is laid out by its host, silently', () => {
+    const { report, scenes, view } = boot([
+      { id: 'a', nodes: [{ id: 'host', type: 'scene', props: { scene: 'b', x: 100 } }] },
+      { id: 'b', nodes: [{ id: 'n', type: 'container', props: { pin: 'bottom', x: 0, y: -24 } }] },
+    ]);
+    scenes.resize(1280, 720, BAR);
+    const own = scenes.view({ scene: 'b', node: 'n' })!;
+    expect(own.x).toBeCloseTo(240, 10);
+    expect(own.y).toBeCloseTo(264, 10);
+    // The host's view IS the embedded document's container.
+    const copy = view('host').children[0]!;
+    expect(copy.label).toBe('n');
+    expect([copy.x, copy.y]).toEqual([0, -24]);
+    expect(report).not.toHaveBeenCalled();
+    // Patching the pin through the shared id warns for neither copy: the node IS a root of its document.
+    expect(scenes.setProps({ scene: 'b', node: 'n' }, { pin: 'top' })).toBe(true);
+    expect(report).not.toHaveBeenCalled();
+    expect(own.y).toBeCloseTo(-24, 10);
+    expect([copy.x, copy.y]).toEqual([0, -24]);
   });
 
   it('a pin the schema does not know fails the node, as any other bad common prop', () => {

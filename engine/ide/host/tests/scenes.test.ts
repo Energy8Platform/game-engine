@@ -395,6 +395,12 @@ describe('checkScenes', () => {
             children: [{ id: 'kid', type: 'container', props: { pin: 'bottom', x: 5 } }],
           },
           { id: 'bad', type: 'container', props: { pin: 'middle' } },
+          {
+            id: 'wrap2',
+            type: 'container',
+            props: {},
+            children: [{ id: 'typo', type: 'container', props: { pin: 'middle' } }],
+          },
         ]),
       ],
       types,
@@ -410,6 +416,8 @@ describe('checkScenes', () => {
         fix: 'pin only top-level nodes',
       },
       expect.objectContaining({ severity: 'error', where: 'a/bad', message: expect.stringContaining('pin') }),
+      // A nested typo is the schema's one error, not a warning on top of it.
+      expect.objectContaining({ severity: 'error', where: 'a/typo', message: expect.stringContaining('pin') }),
     ]);
   });
 });

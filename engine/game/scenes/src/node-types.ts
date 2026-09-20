@@ -8,12 +8,11 @@ import { Color, type Container } from 'pixi.js';
 import type Schema from 'schemastery';
 import type { NodeTypeAccept } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
-import { COLOUR, COMMON, PINS } from './common-schema';
+import { COLOUR, COMMON, PINS, type Pin } from './common-schema';
 import type { Fit } from './fit';
 
 export { COLOUR, COMMON, PINS, cellField, emptyProp, isCellBinding } from './common-schema';
-export type { NodeTypeAccept };
-export type { Pin } from './common-schema';
+export type { NodeTypeAccept, Pin };
 
 declare global {
   namespace Schemastery {
@@ -118,11 +117,23 @@ export function commonProps(
 }
 
 /** The point of the safe rect a `pin` names: its corners, edge midpoints, or centre. */
-export function pinPoint(pin: string, v: Fit['viewport']): { x: number; y: number } {
+export function pinPoint(pin: Pin, v: Fit['viewport']): { x: number; y: number } {
   return {
     x: pin.endsWith('left') ? v.left : pin.endsWith('right') ? v.right : (v.left + v.right) / 2,
     y: pin.startsWith('top') ? v.top : pin.startsWith('bottom') ? v.bottom : (v.top + v.bottom) / 2,
   };
+}
+
+/**
+ * The position rule of `applyCommon`, alone: `(x, y)` — from the pin's
+ * point of the safe rect when the node has a `pin` AND the caller has a
+ * `fit`. What a resize re-runs for a pinned node, and NOTHING else: the
+ * rest of the common pass would put back the document's `visible`/`alpha`
+ * over a `show()` or a running tween.
+ */
+export function place(view: Container, c: Common, fit?: Fit | null): void {
+  const at = fit && c.pin ? pinPoint(c.pin as Pin, fit.viewport) : { x: 0, y: 0 };
+  view.position.set(at.x + (c.x as number), at.y + (c.y as number));
 }
 
 /**
@@ -155,8 +166,7 @@ export function applyCommon(
   // Validated (and the colour parsed) BEFORE the first assignment: a
   // throw halfway through would otherwise leave the view half-moved.
   const { common: c, tint } = commonProps(props, type);
-  const at = fit && c.pin ? pinPoint(c.pin as string, fit.viewport) : { x: 0, y: 0 };
-  view.position.set(at.x + (c.x as number), at.y + (c.y as number));
+  place(view, c, fit);
   view.scale.set(c.scale as number);
   if (typeof c.width === 'number') view.width = c.width;
   if (typeof c.height === 'number') view.height = c.height;
