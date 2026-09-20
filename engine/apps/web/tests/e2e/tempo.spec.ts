@@ -12,6 +12,14 @@
  *  4. The flow palette lists `audio` (`flow-fx`'s third kind, alongside
  *     `tween`/`sound` — `fx.spec.ts`'s own case for those two).
  *
+ * Plus case 5, from the slice's final review: tumble AND skip in one run —
+ * the two halves of the fix wave that only meet in a browser. A skip
+ * latched during a multi-round chain has to collapse EVERY later round (it
+ * used to hurry one and play the rest in full), and the grid it leaves
+ * behind has to be the last round's `settled` (a skipped round never
+ * reaches `TumbleController`'s own `setGrid`, so the cells used to keep the
+ * pre-tumble board while `ctx.board` reported the settled one).
+ *
  * Same fixture and idioms as `flow.spec.ts`/`fx.spec.ts`: a private
  * `projectCopy()` served by `startDevHost`, and the game's own
  * `window.__e8` — here `spin(opts)`, `skip()`, `lastStepOpts()`,
@@ -38,7 +46,12 @@ const IDE_URL = 'http://127.0.0.1:5680/';
 interface PatchDoc {
   rows: {
     id: string;
-    config?: { stages?: Record<string, string>; tumble?: boolean };
+    config?: {
+      stages?: Record<string, string>;
+      tumble?: boolean;
+      /** `reels1`'s inner `ReelSystemConfig` — see `@energy8engine/reels`' own schema doc. */
+      config?: { cascade?: { enabled?: boolean } };
+    };
   }[];
 }
 
@@ -73,25 +86,27 @@ async function readyPage(page: Page): Promise<void> {
 }
 
 /**
- * Case 1. `mechanics1`'s own row config carries `tumble` (`engine/game/
- * runtime/src/schema.ts`'s `Config.tumble`, sibling to `stages`) —
- * `plugins/mechanics.ts` reads it once at apply time and threads it as
- * `{ tumble }` through every `mechanic.present(data, { tumble })` call
- * (`mechanics.ts:347`). `mechanic-cascade`'s own `plan()` is what actually
- * reads `options?.tumble` and swaps `remove` + `refill` for one `tumble`
- * step per round (`engine/game/mechanic-cascade/src/index.ts:119-140`) — so
- * the edit below sets it on `mechanics1`, NOT on any row of `mechanic-
- * cascade`'s own (there isn't one; that package is a plain library
- * `mechanics1` imports and registers, per Task 2's own report).
+ * The cascade-with-tumbles fixture cases 1 and 5 share. `mechanics1`'s own
+ * row config carries `tumble` (`engine/game/runtime/src/schema.ts`'s
+ * `Config.tumble`, sibling to `stages`) — `plugins/mechanics.ts` reads it
+ * once at apply time and threads it as `{ tumble }` through every
+ * `mechanic.present(data, { tumble })` call (`mechanics.ts:347`).
+ * `mechanic-cascade`'s own `plan()` is what actually reads
+ * `options?.tumble` and swaps `remove` + `refill` for one `tumble` step per
+ * round (`engine/game/mechanic-cascade/src/index.ts:119-140`) — so the edit
+ * below sets it on `mechanics1`, NOT on any row of `mechanic-cascade`'s own
+ * (there isn't one; that package is a plain library `mechanics1` imports
+ * and registers, per Task 2's own report).
  *
- * A `tumble` step only lands on a round that actually cleared something
- * (`round.win > 0 || round.removed.length > 0`), so a losing spin's plan
- * is `[spinTo]` alone — the same reason `reel-step.spec.ts`/`runtime.
- * spec.ts` spin in a loop rather than asserting on the first roll.
+ * `animated` also turns the legacy tumble ANIMATION on (`reels1`'s inner
+ * `cascade.enabled`, which `ReelSystemConfig`'s defaults leave `false` —
+ * keys past `grid` pass through that row's schema untouched). It matters
+ * for exactly one case: with it off, `TumbleController.step` short-circuits
+ * to `setGrid(settledGrid)` on its first line and returns, so a round is
+ * instant and there is nothing for a skip to interrupt. Case 5 needs a
+ * round that actually takes time.
  */
-test("mechanics1.config.tumble: true over base_game: cascade — a winning spin's plan carries a tumble step", async ({
-  page,
-}) => {
+function tumbleFixture(animated = false): void {
   const patchFile = join(dir, 'e8.patch.yml');
   const patch = load(readFileSync(patchFile, 'utf8')) as PatchDoc;
   const mechanics = patch.rows.find((r) => r.id === 'mechanics1')!;
@@ -100,7 +115,26 @@ test("mechanics1.config.tumble: true over base_game: cascade — a winning spin'
     stages: { ...mechanics.config?.stages, base_game: 'cascade' },
     tumble: true,
   };
+  if (animated) {
+    const reels = patch.rows.find((r) => r.id === 'reels1')!;
+    reels.config = {
+      ...reels.config,
+      config: { ...reels.config?.config, cascade: { enabled: true } },
+    };
+  }
   writeFileSync(patchFile, dump(patch, { noRefs: true }));
+}
+
+/**
+ * Case 1. A `tumble` step only lands on a round that actually cleared
+ * something (`round.win > 0 || round.removed.length > 0`), so a losing
+ * spin's plan is `[spinTo]` alone — the same reason `reel-step.spec.ts`/
+ * `runtime.spec.ts` spin in a loop rather than asserting on the first roll.
+ */
+test("mechanics1.config.tumble: true over base_game: cascade — a winning spin's plan carries a tumble step", async ({
+  page,
+}) => {
+  tumbleFixture();
 
   host = await startDevHost(dir);
   await readyPage(page);
@@ -218,6 +252,90 @@ test('skip, 100 ms into a spin, collapses the presentation — it resolves withi
 
   expect(outcome).toEqual({ out: 'next' });
   expect(elapsedMs).toBeLessThan(1000);
+});
+
+/**
+ * Case 5 (the fix wave). Case 1's fixture — `base_game: cascade` with
+ * `mechanics1.config.tumble: true` — so a winning spin's plan is a CHAIN of
+ * `tumble` steps, then the skip case 3 makes, mid-chain.
+ *
+ * Two things only this case can prove, and both were broken before the fix
+ * wave:
+ *
+ *  - **The skip latches.** `BoardApi.skip` is one-shot (the legacy
+ *    `TumbleController.step` clears its own `_killed` on entry), so a skip
+ *    during round 1 used to leave rounds 2..N playing at full speed — an
+ *    N-round chain still took N × the round time. `PlayService` now re-fans
+ *    the skip onto each later step as it starts, so the whole run lands
+ *    well inside 1.5 s of the skip (a 2-round chain alone runs ≥ 2 s).
+ *  - **The grid lands on `settled`.** A SKIPPED round returns from
+ *    `TumbleController.step` before its own `setGrid(settledGrid)`, so the
+ *    cells kept the pre-tumble symbols while `reelSystem.board` — and
+ *    `ctx.board` with it — reported the settled ones. `@energy8engine/
+ *    reels`' `tumble` re-seats `settled` itself now; `__e8.symbols()` is
+ *    the live grid's own cell data, so it is exactly that claim, read off
+ *    the screen rather than off the board's bookkeeping.
+ *
+ * The search is case 1's, with the skip folded into every attempt: spin,
+ * skip 150 ms in, and keep the first attempt whose recorded plan carried a
+ * `tumble` at all. **One round is enough to prove both claims**, because
+ * the skip lands during `spinTo` (a full spin takes ~1 s — case 3), so the
+ * `tumble` step STARTS after the skip: without the latch it would play its
+ * whole round, and with it the round is killed on entry — which is exactly
+ * the `_dead` path that skips `TumbleController`'s own `setGrid`.
+ *
+ * A chain of 2+ rounds would prove the latch over several rounds at once,
+ * but this math almost never produces one: measured over 300 spins on this
+ * fixture, 256 had no tumble round, 42 had one and 2 had two (0.67%) — too
+ * rare for a bounded search. (One of those two was observed resolving 12 ms
+ * after the skip, against the ≥ 2 s a played-out 2-round chain takes.) The
+ * step-by-step latch proof lives in `play-loop`'s own unit test instead.
+ *
+ * Measured both ways before it was kept: with the fix, the run lands ~28 ms
+ * after the skip and the grid matches `settled`; with `@energy8engine/
+ * reels`' re-seat removed and nothing else changed, this same case fails on
+ * the grid — the cells hold the pre-tumble board.
+ */
+test('a skip mid-tumble-chain collapses the rest of it and lands on the last settled grid', async ({
+  page,
+}) => {
+  tumbleFixture(true);
+
+  host = await startDevHost(dir);
+  await readyPage(page);
+
+  /** The live board, `[col][row]`, the way `reel-step.spec.ts` compares one. */
+  const strings = (grid: unknown[][]): unknown[][] => grid.map((col) => col.map(String));
+
+  let found: { plan: Step[]; elapsedMs: number } | undefined;
+  for (let attempt = 0; attempt < 40 && !found; attempt += 1) {
+    const spinning = page.evaluate(() => (window as any).__e8.spin());
+    await new Promise((r) => setTimeout(r, 150));
+    const skipAt = Date.now();
+    await page.evaluate(() => (window as any).__e8.skip());
+    const outcome = await spinning;
+    const elapsedMs = Date.now() - skipAt;
+    expect(outcome).toEqual({ out: 'next' });
+
+    const spins = (await page.evaluate(() => (window as any).__e8.spins())) as { plan: Step[] }[];
+    const plan = spins[spins.length - 1].plan;
+    if (plan.some((s) => s.kind === 'tumble')) found = { plan, elapsedMs };
+  }
+  if (!found) {
+    throw new Error('no spin with a tumble round in 40 attempts — math or fixture regressed');
+  }
+
+  // The whole run — the tumble rounds the skip collapsed included — inside
+  // 1.5 s of the skip. A played-out round takes longer than that on its own.
+  expect(
+    found.elapsedMs,
+    `${found.plan.filter((s) => s.kind === 'tumble').length} tumble rounds`,
+  ).toBeLessThan(1500);
+
+  const settled = (found.plan.filter((s) => s.kind === 'tumble').at(-1) as { settled: unknown[][] })
+    .settled;
+  const symbols = await page.evaluate(() => (window as any).__e8.symbols());
+  expect(symbols).toEqual(strings(settled));
 });
 
 /**

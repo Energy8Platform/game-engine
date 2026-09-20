@@ -78,9 +78,17 @@ skip(): void;   // collapses the current presentation: board.skip?.() — ReelSy
 ```
 
 `BoardApi` methods take `opts?: StepOpts`; the reels board passes `turbo`
-to `spin(target, { turbo })`, `cascade(steps, { turbo })` and halves the
-`revealWins` hold; `StepHandler` gains `skip?(): void`. `executePlan`
-forwards `opts` to the board and handlers.
+to `spin(target, { turbo })` and `cascade(steps, { turbo })`. `revealWins`
+runs at its legacy pace under turbo — amended from "halves the hold":
+the only time that step spends is `SymbolCell.playWin()`, whose tween
+length is `win` config and takes no per-call speed, so there is no hold to
+halve and inventing one would make the NON-turbo reveal slower (a debt in
+§9). `StepHandler` gains `skip?(): void`. `executePlan` forwards `opts` to
+the board and handlers, and takes an optional `hooks.onStepStarted`
+(called synchronously after each step is invoked) that `PlayService` uses
+for the skip latch: a skip latched during a run collapses every later step
+of that run as it starts, so an N-round tumble chain ends at the result
+rather than skipping one round and playing the rest in full.
 
 Flow: `present` gains `turbo` (`string` default `'$turbo'` — a literal
 `'true'`/`'false'` or a `$path`; absent var → `false`) and passes it to
@@ -157,7 +165,12 @@ config only if that row's schema carries it — `mechanic-cascade`'s
   `__e8.lastStepOpts()` is `{ turbo: true }` and the trace's `present`
   duration is below the unchecked run's (two spins, compare `at`
   deltas with a margin); (3) `__e8.spin()` then `__e8.skip()` 100 ms in →
-  `present` exits `next` within 1 s; (4) the flow palette lists `audio`.
+  `present` exits `next` within 1 s; (4) the flow palette lists `audio`;
+  (5, added by the fix wave) case 1's fixture plus `reels1`'s inner
+  `cascade.enabled: true` (a round that takes time) → `spin()` then
+  `skip()` 150 ms in → the run resolves within 1.5 s of the skip AND
+  `__e8.symbols()` equals the last `tumble` step's `settled` (a skipped
+  round never reaches `TumbleController`'s own `setGrid`).
 
 ## 9. Debts this opens
 
@@ -165,4 +178,8 @@ config only if that row's schema carries it — `mechanic-cascade`'s
 cells are new is not read); `tumble` ignores `drops` semantics beyond the
 legacy controller's; sound ramps are per instance, not per category bus;
 `turbo` halves only what the reels board animates (a project handler
-decides its own).
+decides its own), and `revealWins` not even that (§4); `ReelSystem.skip()`
+collapses a tumble to the settled grid but leaves the legacy
+`TumbleController.skip()`'s alpha/scale residue on the cells it was
+mid-`Tween.delay` over — the reels board re-seats `settled` after the
+cascade, which fixes the DATA, not that residue.
